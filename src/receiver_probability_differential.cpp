@@ -1,4 +1,5 @@
 #include "receiver_probability.hpp"
+#include "probability_random.hpp"
 #include "pattern_differential.hpp"
 #include "pattern_drift.hpp"
 #include "datapump/correlation_experiment.hpp"
@@ -192,12 +193,11 @@ ReceiverProbability differential_receiver_probability(const ReceiverProbabilityP
         std::max(std::abs(p.frequency_bin_min),std::abs(p.frequency_bin_max))*
             p.frequency_step_hz*p.differential_window_seconds>.05;
     std::mt19937_64 generator(0xa653719de920b47cULL);
-    std::normal_distribution<double> normal;
-    std::uniform_real_distribution<double> uniform(0,1);
+    ProbabilityNormal normal;
     std::vector<LocalDraw> observations(windows);
     std::vector<int> candidates;candidates.reserve(24);
     for(std::size_t trial=0;trial<p.requested_trials;++trial) {
-        const auto timing_offset=p.timing_uncertainty_chips*uniform(generator);
+        const auto timing_offset=p.timing_uncertainty_chips*probability_uniform(generator);
         auto timing_amplitude=1-timing_offset;
         if(p.pulse_shaping&&timing_offset>1e-9) {
             const auto angle=std::numbers::pi*timing_offset,beta=modem::pattern_pulse_rolloff;

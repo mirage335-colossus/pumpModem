@@ -25,17 +25,17 @@ on:
         description: 'x86-64 Linux runner'
         type: choice
         options: [ubuntu-24.04, ubuntu-latest-m, ubuntu-latest-l, ubuntu-latest-h]
-        default: ubuntu-24.04
+        default: ubuntu-latest-h
       arm_runner:
         description: 'Linux ARM64 runner for compilation and qualification'
         type: choice
         options: [ubuntu-24.04-arm-l, ubuntu-24.04-arm-h, ubuntu-24.04-arm]
-        default: ubuntu-24.04-arm-l
+        default: ubuntu-24.04-arm-h
       windows_runner:
         description: 'Windows x64 runner'
         type: choice
         options: [windows-2022, windows-latest-l, windows-latest-h]
-        default: windows-2022
+        default: windows-latest-h
       package_check:
         description: 'Read-only checks of source_release; none retains normal build/repackage behavior'
         type: choice
@@ -86,7 +86,7 @@ concurrency:
 jobs:
   package-check-prepare:
     if: github.event_name == 'workflow_dispatch' && inputs.package_check != 'none'
-    runs-on: ${{ inputs.linux_runner == 'ubuntu-latest-h' && 'ubuntu-latest-h' || 'ubuntu-latest-l' }}
+    runs-on: ${{ inputs.linux_runner == 'ubuntu-latest-l' && 'ubuntu-latest-l' || 'ubuntu-latest-h' }}
     timeout-minutes: 5
     outputs:
       inventory_sha256: ${{ steps.release.outputs.inventory_sha256 }}
@@ -114,8 +114,8 @@ jobs:
     with:
       release_tag: ${{ inputs.source_release }}
       inventory_sha256: ${{ needs.package-check-prepare.outputs.inventory_sha256 }}
-      linux_runner: ${{ inputs.linux_runner == 'ubuntu-latest-h' && 'ubuntu-latest-h' || 'ubuntu-latest-l' }}
-      arm_runner: ${{ inputs.arm_runner == 'ubuntu-24.04-arm-h' && 'ubuntu-24.04-arm-h' || 'ubuntu-24.04-arm-l' }}
+      linux_runner: ${{ inputs.linux_runner == 'ubuntu-latest-l' && 'ubuntu-latest-l' || 'ubuntu-latest-h' }}
+      arm_runner: ${{ inputs.arm_runner == 'ubuntu-24.04-arm-l' && 'ubuntu-24.04-arm-l' || 'ubuntu-24.04-arm-h' }}
 
   package-check-distro:
     if: inputs.package_check == 'all' || inputs.package_check == 'arch' || inputs.package_check == 'gentoo'
@@ -124,7 +124,7 @@ jobs:
     with:
       release_tag: ${{ inputs.source_release }}
       inventory_sha256: ${{ needs.package-check-prepare.outputs.inventory_sha256 }}
-      linux_runner: ${{ inputs.linux_runner == 'ubuntu-latest-h' && 'ubuntu-latest-h' || 'ubuntu-latest-l' }}
+      linux_runner: ${{ inputs.linux_runner == 'ubuntu-latest-l' && 'ubuntu-latest-l' || 'ubuntu-latest-h' }}
       distro: ${{ inputs.package_check }}
 
   repackage:
@@ -136,15 +136,15 @@ jobs:
       source_tag: ${{ inputs.source_release }}
       version: ${{ inputs.version }}
       publish: ${{ inputs.publish }}
-      # Repackaging uses larger L/H pools, including when the normal release
-      # selectors retain their standard-runner defaults.
-      linux_runner: ${{ inputs.linux_runner == 'ubuntu-latest-h' && 'ubuntu-latest-h' || 'ubuntu-latest-l' }}
-      arm_runner: ${{ inputs.arm_runner == 'ubuntu-24.04-arm-h' && 'ubuntu-24.04-arm-h' || 'ubuntu-24.04-arm-l' }}
+      # Package-manager checks use the larger H pool by default; an explicit
+      # L selection is retained without testing additional smaller runners.
+      linux_runner: ${{ inputs.linux_runner == 'ubuntu-latest-l' && 'ubuntu-latest-l' || 'ubuntu-latest-h' }}
+      arm_runner: ${{ inputs.arm_runner == 'ubuntu-24.04-arm-l' && 'ubuntu-24.04-arm-l' || 'ubuntu-24.04-arm-h' }}
     secrets: inherit
 
   helpers:
     if: ${{ !inputs.source_release && (!inputs.package_check || inputs.package_check == 'none') }}
-    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-l' }}
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -164,7 +164,7 @@ jobs:
   metadata:
     if: github.event_name == 'workflow_dispatch' && !inputs.source_release
     needs: helpers
-    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-l' }}
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
     timeout-minutes: 10
     permissions:
       contents: write
@@ -224,7 +224,7 @@ jobs:
   linux:
     name: Linux ${{ matrix.arch }} / ${{ matrix.backend }}
     needs: metadata
-    runs-on: ${{ matrix.arch == 'aarch64' && (inputs.arm_runner || 'ubuntu-24.04-arm-l') || inputs.linux_runner || 'ubuntu-24.04' }}
+    runs-on: ${{ matrix.arch == 'aarch64' && (inputs.arm_runner || 'ubuntu-24.04-arm-h') || inputs.linux_runner || 'ubuntu-latest-h' }}
     container: ${{ matrix.image }}
     timeout-minutes: 45
     permissions:
@@ -297,7 +297,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.metadata.outputs.windows_matrix) }}
-    runs-on: ${{ inputs.windows_runner || 'windows-2022' }}
+    runs-on: ${{ inputs.windows_runner || 'windows-latest-h' }}
     timeout-minutes: 45
     permissions:
       contents: write
@@ -336,7 +336,7 @@ jobs:
 
   publish:
     needs: [metadata, linux, windows]
-    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-l' }}
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
     timeout-minutes: 15
     permissions:
       contents: write

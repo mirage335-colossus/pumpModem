@@ -8,12 +8,27 @@ import Rev.Graphics.FrameBuffer;
 #include "../src/gui/backend_rev.cpp"
 
 namespace {
-int run_native_probes() {
+int run_native_probes(std::string_view selected={}) {
     // Native conformance is independent of the production workflow, matching
     // FLTK's test runner. CTest runs all shared smoke assertions separately on
     // the real datapump-gui executable through gui_workflow.
     Launch launch;launch.color=false;launch.simulation=true;launch.page=ui::pages().front().id;
     configure_theme(launch.color);std::vector<void*> windows;
+    if(selected=="--inline-document") {
+        RevApp probe(windows,launch);probe.verify_inline_document_editor();return 0;
+    }
+    if(selected=="--layout-lifecycle") {
+        auto controls=test::layout_lifecycle_controls();
+        RevApp probe(windows,launch,controls);probe.verify_layout_lifecycle(controls);return 0;
+    }
+    if(selected=="--estimate-colors") {
+        for(bool color:{false,true}) {
+            launch.color=color;configure_theme(color);
+            RevApp probe(windows,launch);probe.verify_estimate_warning_colors();
+        }
+        return 0;
+    }
+    if(!selected.empty())throw std::runtime_error("Unknown Rev adapter probe");
     {
         RevApp probe(windows,launch);probe.verify_fast_mode_visibility();probe.verify_developer_mode_visibility();
     }
@@ -47,7 +62,10 @@ int run_native_probes() {
     return 0;
 }
 }
-int main() {
-    try {return run_native_probes();}
+int main(int argc,char** argv) {
+    try {
+        if(argc>2)throw std::runtime_error("Expected one optional Rev adapter probe");
+        return run_native_probes(argc==2?argv[1]:"");
+    }
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

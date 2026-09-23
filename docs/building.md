@@ -56,7 +56,7 @@ both GUI backends. The runner supplies MSVC and the Windows SDK separately.
 The [toolchain selector](../tools/select-windows-toolchain.ps1) prefers an
 installed Visual Studio 2022, or uses Visual Studio 2026 with its installed
 v143 tools. The current larger Windows images have VS2026 and v143 14.44;
-the default `windows-2022` image retains VS2022. The selector sets the matching
+the optional `windows-2022` image retains VS2022. The selector sets the matching
 CMake generator and pins v143 instead of adopting VS2026's default toolset.
 VS2026 requires CMake 4.2 or newer. This host selection does not change the
 dependency recipe or rebuild the existing base.
@@ -95,6 +95,11 @@ Prefer a modest limit on memory-constrained hosts. Use `--stop-on-failure` with 
 failure; successful runs still execute the entire selected group.
 Native GUI tests must have a display, preferably an
 isolated Xvfb session; `./build.sh test native` builds and runs them explicitly.
+For the full sequence on a slower software-rendered desktop, pass
+`-- -DGUI_SMOKE_TIMEOUT=600` to use the same overall allowance as hosted
+certification. Individual reception and presentation assertions still apply.
+With Mesa software rendering, set `LIBGL_ALWAYS_SOFTWARE=1 LP_NUM_THREADS=2`,
+matching CI's renderer thread cap so drawing does not crowd out GUI polling.
 Run native workflow checks separately from other heavy test/build processes:
 their measured replay cadence is sensitive to CPU contention. Rev cadence
 misses are advisory warnings; correctness checks still fail normally.
@@ -182,10 +187,18 @@ it. Shared GUI changes also require native checks for affected backends under
 the existing [GUI maintenance rules](gui-architecture.md#verification-and-maintenance-guardrails).
 Python-dependent cases are registered only when Python is available. CI keeps
 its no-Python application build and explicit Python CLI checks.
-The differential receiver calibration declares its four internal workers to
-CTest. At the default two-job limit it runs alone; larger limits can schedule
-other cases in the remaining slots. Its numerical checks and timeout are
-unchanged. Avoid overlapping independent heavy build/test runs during timing
+The differential receiver calibration runs independent captures on available
+cores, capped at 16 workers. CTest records that count and runs this test alone,
+even when the overall test-job limit is larger. Every matrix case still uses
+the same 64 seeds; numerical checks, full captures and deadlines are unchanged.
+Each capture keeps one DSP worker and a 4 MiB receiver budget. Parallelism
+increases capture-buffer and sanitizer memory proportionally, so constrain
+memory-limited machines with `-DDATAPUMP_CALIBRATION_WORKERS=4` after `--` in
+the build wrapper; the default `0` selects available cores. The larger default-
+duration controls remain sequential. For an inexpensive scheduling check, run
+`test_differential_receiver_probability --check-worker-plan`; this validates
+all 1..16 seed partitions without running the calibration. A direct invocation
+also accepts `--workers 1..16`. Avoid overlapping independent heavy build/test runs during timing
 and display qualification.
 
 Direct CMake remains supported, including on Windows:
@@ -230,6 +243,26 @@ Do not rerun an expensive unchanged suite after recording a pass unless later
 changes or failures invalidate that evidence. Compile with available cores, but
 keep timing-sensitive test concurrency at its documented limits.
 
+For a pending-replay row assertion, build only `test_gui_controller` in an
+existing configured tree and run it with `--pending-replay-batch` first. This
+small fixture checks real reception reconciliation, explicit retirement chains
+and the smoke checker without running a modem replay. Follow a completed
+checker change with the affected `gui` and `native` groups. A retry against an
+unchanged published archive does not test a newer checker committed to source;
+retain and distinguish both results.
+
+Automatic `ci.yml` runs are bounded feedback: PRs and pushes to `main` run the
+small Linux/Windows Legacy diagnostic and offline build/SDK helper fixtures.
+Branch pushes do not launch a second copy of the PR checks, and documentation
+changes alone do not trigger them. Release and base workflows retain their
+path-specific helper checks. Automatic green checks do **not** mean the full
+application passed regression testing. Dispatch `ci.yml` with `devfast=false`
+when the candidate is ready; its native GUI, sanitizer, Windows, application
+and archive checks remain intact. `sdk.yml` is now manual so the additional
+SDK host-tool and copied Bookworm/Ubuntu matrix runs when relevant, without
+duplicating every push and PR. Ordinary consumers fail on a missing base recipe
+instead of silently building an SDK.
+
 For changes confined to Linux distribution packaging, start with
 `python3 tests/test_apt_release.py`, `python3 tests/test_distro_release.py`,
 `python3 tests/test_arch_release.py`, `python3 tests/test_gentoo_sync.py` and
@@ -247,11 +280,13 @@ checks are not a substitute for release certification. See
 [APT packaging and validation](releases.md#package-an-existing-release-without-rebuilding-it).
 
 Manual workflows expose `linux_runner` and `windows_runner` dropdowns for the
-organization's larger x86-64 runners. Native CI, portable release and
-certification also expose `arm_runner`: `ubuntu-24.04-arm-l` (the default),
-`ubuntu-24.04-arm-h`, or standard `ubuntu-24.04-arm`. The ARM64 L and H tiers
-provide 8 and 32 CPUs respectively. Automatic push/PR x86-64 jobs retain their
-standard runner defaults; the ARM64 selector does not affect x86-64 routing.
+organization's larger x86-64 runners. Defaults and automatic jobs now use
+`ubuntu-latest-h` and `windows-latest-h`; native CI, portable release and
+certification default `arm_runner` to `ubuntu-24.04-arm-h`. Explicit smaller
+choices remain available when desired, but checks do not repeat on those pools.
+The ARM64 L and H tiers provide 8 and 32 CPUs respectively. The ARM64 selector
+does not affect x86-64 routing. Package-manager checks remain on larger L/H
+pools and use H unless L is explicitly selected.
 Agents can pass these input names through `gh workflow run -f`.
 Use the [runner selection guide](releases.md#runner-selection-and-build-parallelism)
 to choose and verify access before a long run. `ci.yml` with `devfast=true` and
@@ -266,9 +301,9 @@ gh workflow run ci.yml --ref REF -f devfast=true \
   -f diagnostic=arm-runner-capacity -f arm_runner=ubuntu-24.04-arm-h
 ```
 
-Validate the new L and H pools directly, reusing earlier evidence instead of
-retesting smaller runners. Keep the applicable full regression and release
-certification sequence below after the focused checks.
+Reuse the earlier runner-capacity evidence instead of retesting smaller pools.
+Keep the applicable full regression and release certification sequence below
+after the focused checks.
 
 For a completed branch candidate, use the full workflow, and SDK qualification
 when the change touches its supported toolchains or portable packages:
@@ -292,7 +327,7 @@ for the separate publication/certification sequence and source-pinning rules.
 
 The manual `devfast` checkbox in native CI (`ci.yml`), SDK qualification
 (`sdk.yml`) and release certification (`certify.yml`) defaults to **false**.
-The default runs retain their full suites and calibration. With `devfast=true`,
+Default manual dispatches retain their full suites and calibration. With `devfast=true`,
 each workflow defaults to the same small Legacy diagnostic on Linux and
 Windows: compile the production Legacy controller/session and existing
 `gui_legacy_live` fixture and deterministic `gui_legacy_poll` cancellation/error
@@ -318,6 +353,33 @@ downloads the existing Windows base and compiles only the actual Rev GUI:
 gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=windows-rev
 ```
 
+For the adapter, Windows DSP and ARM64 CLI regressions found by full
+certification, use the bounded selection:
+
+```sh
+gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=certification
+```
+
+It builds only the existing Linux FLTK/Rev adapter tests, Windows FLTK adapter
+plus `pattern_code`/`fast_low_rate`, and the ARM64 CLI differential-estimate
+case. Linux x86-64 and Windows dependencies come from the exact reusable base;
+ARM64 uses the same Clang baseline as the Rev release. Tests retain their
+assertions and individual deadlines. No calibration, full smoke sequence,
+package publication or certification runs in this diagnostic. Once fixed,
+run the affected full checks and publish/certify new binaries when runtime
+changes must reach users.
+
+When Linux and ARM checks already passed and only the Windows fault is changing,
+reuse that evidence and retry the same three Windows regressions alone:
+
+```sh
+gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=windows-certification
+```
+
+This selects the reusable diagnostic's `scope=windows`; `certification` keeps
+`scope=all`. It still runs the complete Windows FLTK adapter, `pattern_code` and
+`fast_low_rate` checks, without rebuilding unchanged Linux or ARM targets.
+
 For a graphics-driver startup failure after publication, use the bounded
 environment diagnostic on the unchanged archive:
 
@@ -339,9 +401,24 @@ visible window and host Mesa/LLVM/C++ runtime mappings within 15 seconds.
 It does not run the full GUI smoke or calibration, upload artifacts, or publish
 a release. Follow a focused pass with applicable full validation.
 
-This path performs a bounded headless self-check; it creates no release or
-Actions artifact, and it does not qualify rendering, full regression coverage
-or published binaries. `diagnostic=legacy` remains the default. Choose the
+For a copied ARM64 Rev smoke failure on Debian Trixie, build only the affected
+package from the corrected branch and run its complete GUI smoke there:
+
+```sh
+gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=arm-rev-smoke
+```
+
+This mode retains the Ubuntu 22.04 build baseline, verifies archive/package
+hashes and the glibc 2.35 ceiling, then runs one full copied GUI smoke with its
+600-second allowance and the same Trixie display prerequisites as certification.
+It uses the H ARM64 runner by default and the pinned runtime dependency scanner;
+it does not rebuild an SDK, run calibration or a general matrix, upload artifacts,
+publish or certify a release. Rerunning an older release cannot test this new
+checker; this diagnostic rebuilds the selected branch's package explicitly.
+
+The `windows-rev` path performs a bounded headless self-check; it creates no
+release or Actions artifact and does not qualify rendering, full regression
+coverage or published binaries. `diagnostic=legacy` remains the default. Choose the
 selection that reproduces the current fault, then follow with applicable full
 checks and certification once the candidate is complete.
 
@@ -373,12 +450,12 @@ ctest --test-dir build/devfast -C Release --output-on-failure -R '^gui_legacy_(p
   --parallel 1 --repeat until-fail:3 --stop-on-failure --no-tests=error
 ```
 
-Manual `devfast` does not suppress workflows triggered by the preceding push.
+Manual `devfast` does not suppress lightweight checks triggered by a preceding
+PR update or push to `main`.
 For intermediate diagnosis commits, a temporary `[skip ci]` commit-message
 marker can [skip automatic push/PR runs](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/skip-workflow-runs)
-while still allowing manual dispatch. After the candidate is complete, either
-omit that marker from the final validation commit or explicitly dispatch the
-ordinary workflows with `devfast=false` (or unchecked), including applicable
+while still allowing manual dispatch. After the candidate is complete,
+explicitly dispatch the ordinary workflows with `devfast=false` (or unchecked), including applicable
 contract, GUI/native and packaging checks. Wait for those outcomes as described
 in [testing stages](#testing-stages). A focused pass is development feedback,
 not a substitute for those gates.

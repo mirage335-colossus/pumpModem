@@ -11,7 +11,7 @@ on:
         required: true
       linux_runner:
         type: string
-        default: ubuntu-latest-l
+        default: ubuntu-latest-h
       distro:
         description: Native package check to run (all, arch, or gentoo)
         type: string
@@ -23,7 +23,7 @@ permissions:
 jobs:
   install:
     name: ${{ matrix.distro }} release packages / x86-64 / both backends
-    runs-on: ${{ inputs.linux_runner == 'ubuntu-latest-h' && 'ubuntu-latest-h' || 'ubuntu-latest-l' }}
+    runs-on: ${{ inputs.linux_runner == 'ubuntu-latest-l' && 'ubuntu-latest-l' || 'ubuntu-latest-h' }}
     timeout-minutes: 20
     strategy:
       fail-fast: false

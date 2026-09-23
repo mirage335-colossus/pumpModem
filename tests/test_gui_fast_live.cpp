@@ -216,10 +216,45 @@ void continuous_console() {
         "QR brightness changes did not repaint independent levels while listening");
     controller.select(F::fast_qr_brightness,"dark");
     controller.activate(C::fast_transmit);
+    const auto observation_started=std::chrono::steady_clock::now();
+    std::vector<std::pair<double,std::string>> status_changes;
+    const auto observe_status=[&] {
+        const auto& status=controller.field(F::fast_status).text;
+        if(status_changes.empty()||status_changes.back().second!=status) {
+            if(status_changes.size()==32)status_changes.erase(status_changes.begin());
+            status_changes.emplace_back(std::chrono::duration<double>(
+                std::chrono::steady_clock::now()-observation_started).count(),status);
+        }
+    };
+    const auto failure_diagnostics=[&] {
+        std::cerr<<"Continuous Fast console: active="<<controller.active()
+            <<"; status="<<controller.field(F::fast_status).text
+            <<"; progress="<<controller.field(F::fast_progress).text
+            <<"; integrity="<<controller.field(F::fast_auth).text
+            <<"; correction="<<controller.field(F::fast_correction).text<<'\n';
+        {
+            std::lock_guard lock(fixture::mutex);
+            std::cerr<<"fixture delivered_samples="<<fixture::position<<"/"<<fixture::input.size()<<'\n';
+        }
+        for(const auto& [seconds,status]:status_changes)
+            std::cerr<<"status at "<<seconds<<" s: "<<status<<'\n';
+        for(const auto& row:controller.field(F::fast_history).records) {
+            std::cerr<<"history id="<<row.id<<"; activatable="<<row.activatable;
+            for(const auto& cell:row.cells)std::cerr<<"; "<<cell.text;
+            std::cerr<<'\n';
+        }
+    };
     const auto wait=[&](auto condition,const char* error) {
         const auto end=std::chrono::steady_clock::now()+45s;
-        while(!condition()) {
-            controller.poll();check(std::chrono::steady_clock::now()<end,error);std::this_thread::sleep_for(5ms);
+        try {
+            observe_status();
+            while(!condition()) {
+                controller.poll();observe_status();
+                check(std::chrono::steady_clock::now()<end,error);std::this_thread::sleep_for(5ms);
+            }
+        } catch(...) {
+            failure_diagnostics();
+            throw;
         }
     };
     wait([&] {return controller.active()&&controller.bitmap_title(ui::Bitmap::fast_waveform)=="Live RX waveform"&&

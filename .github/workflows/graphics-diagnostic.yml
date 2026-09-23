@@ -6,11 +6,11 @@ on:
       arm_runner:
         description: 'Linux ARM64 runner label'
         type: string
-        default: ubuntu-24.04-arm-l
+        default: ubuntu-24.04-arm-h
       windows_runner:
         description: 'Windows x64 runner label'
         type: string
-        default: windows-2022
+        default: windows-latest-h
       release_tag:
         type: string
         required: true
@@ -21,7 +21,7 @@ permissions:
 jobs:
   windows:
     name: Windows WGL bootstrap (not certification)
-    runs-on: ${{ inputs.windows_runner || 'windows-2022' }}
+    runs-on: ${{ inputs.windows_runner || 'windows-latest-h' }}
     defaults:
       run:
         shell: pwsh
@@ -36,7 +36,7 @@ jobs:
 
   linux:
     name: Published ARM64 Rev GLX on Ubuntu 24.04 (not certification)
-    runs-on: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-l' }}
+    runs-on: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-h' }}
     container: ubuntu:24.04
     timeout-minutes: 8
     env:

@@ -6,7 +6,7 @@ on:
       windows_runner:
         description: 'Windows x64 runner label'
         type: string
-        default: windows-2022
+        default: windows-latest-h
       source:
         description: 'auto reuses base; base requires reuse; rebuild compiles without overwriting an existing recipe'
         type: string
@@ -33,7 +33,7 @@ permissions:
 
 jobs:
   helpers:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest-h
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -44,7 +44,7 @@ jobs:
   dependencies:
     if: github.event_name == 'workflow_dispatch'
     needs: helpers
-    runs-on: ${{ inputs.windows_runner || 'windows-2022' }}
+    runs-on: ${{ inputs.windows_runner || 'windows-latest-h' }}
     defaults:
       run:
         shell: pwsh

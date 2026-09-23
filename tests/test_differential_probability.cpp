@@ -1,4 +1,5 @@
 #include "receiver_probability.hpp"
+#include "probability_random.hpp"
 #include "pattern_differential.hpp"
 #include "pattern_drift.hpp"
 #include "pattern_correlator_batch.hpp"
@@ -16,6 +17,22 @@
 using namespace datapump::simulation::detail;
 namespace {
 void check(bool value,const char* why) {if(!value)throw std::runtime_error(why);}
+void probability_draw_vectors() {
+    check(probability_uniform_word(0)==0&&probability_uniform_word(1ULL<<63)==.5&&
+          probability_uniform_word(std::numeric_limits<std::uint64_t>::max())==std::nextafter(1.,0.),
+          "probability uniform conversion changed its range or rounded to one");
+    // Captured before replacing the generic GNU distribution. The independent
+    // sampled receiver matrix below still uses its own channel noise and seeds.
+    constexpr std::array expected{-0.63676123588711619,0.84912371780517826,
+        0.36695160185254083,1.164459848229189,-0.70716482655077373,0.74563102731105058,
+        -1.3203732175918559,0.10833200975577444,-1.0546251406342306,0.60447854703001302,
+        0.11315011388657253,-0.49175334262503012};
+    std::mt19937_64 generator(0xa653719de920b47cULL);ProbabilityNormal normal;
+    for(const auto value:expected)
+        check(std::abs(normal(generator)-value)<2e-15,"probability Gaussian stream changed its calibrated draws");
+    check(probability_uniform(generator)==0.42303560682338553,
+          "probability Gaussian cache changed subsequent engine positions");
+}
 ReceiverProbabilityParameters parameters(unsigned windows=256) {
     ReceiverProbabilityParameters p;
     p.differential_windows=windows;p.differential_window_seconds=1;p.seconds=windows;
@@ -205,6 +222,6 @@ void sampled_shaped_statistics() {
 }
 }
 int main() {
-    try {coverage_and_noise();coherent_distribution_limit();weak_and_drifting();sampled_shaped_statistics();std::cout<<"differential probability tests passed\n";return 0;}
+    try {probability_draw_vectors();coverage_and_noise();coherent_distribution_limit();weak_and_drifting();sampled_shaped_statistics();std::cout<<"differential probability tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"differential probability tests failed: "<<error.what()<<'\n';return 1;}
 }

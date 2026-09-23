@@ -3,19 +3,23 @@ name: Focused ARM64 Rev portable runtime check
 on:
   workflow_call:
     inputs:
+      smoke:
+        description: 'Run the complete copied GUI smoke on Trixie instead of the short Ubuntu startup probe'
+        type: boolean
+        default: false
       arm_runner:
         description: 'Linux ARM64 runner label'
         type: string
-        default: ubuntu-24.04-arm-l
+        default: ubuntu-24.04-arm-h
 
 permissions:
   contents: read
 
 jobs:
   package:
-    name: ARM64 Rev baseline package and newer host graphics (not certification)
-    runs-on: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-l' }}
-    timeout-minutes: 15
+    name: ARM64 Rev package / ${{ inputs.smoke && 'full Trixie GUI smoke' || 'Ubuntu startup' }} (not certification)
+    runs-on: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-h' }}
+    timeout-minutes: ${{ inputs.smoke && 20 || 15 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -32,6 +36,7 @@ jobs:
             CC=clang-19 CXX=clang++-19 DATAPUMP_MAX_GLIBC=2.35 ./build.sh package --backend rev --build-dir build/arm-rev-package --jobs "$(nproc)"
           '
       - name: Verify the unchanged archive and visible GUI with the newer host driver
+        if: ${{ !inputs.smoke }}
         run: |
           docker run --rm -v "$PWD:/workspace" -w /workspace -e DEBIAN_FRONTEND=noninteractive -e LIBGL_ALWAYS_SOFTWARE=1 -e LP_NUM_THREADS=2 ubuntu:24.04 sh -ec '
             apt-get update
@@ -47,5 +52,38 @@ jobs:
             xvfb-run -a -s "-screen 0 2400x1800x24 -dpi 96" python3 tools/check-rev-graphics-startup.py "$package_root" "$PWD/build/arm-rev-graphics-startup.log"
             cmake -DPACKAGE_ROOT="$package_root" -DVERIFY_ONLY=ON -P tools/verify-native-package.cmake
           '
+      - name: Verify the same package and run its complete GUI smoke on Trixie
+        if: inputs.smoke
+        run: |
+          # Keep source and produced archives read-only in the compatibility
+          # container. Only its extracted copy and temporary runtime files vary.
+          docker run --rm -v "$PWD:/workspace:ro" -w /workspace -e DEBIAN_FRONTEND=noninteractive -e LIBGL_ALWAYS_SOFTWARE=1 -e LP_NUM_THREADS=2 debian:trixie-slim sh -ec '
+            apt-get update
+            apt-get install -y --no-install-recommends ca-certificates curl git gh python3 cmake binutils xvfb xauth fontconfig-config fonts-dejavu-core libxtst6 libgl1 libopengl0 libgl1-mesa-dri
+            export PATH=/workspace/build/ci-cmake/bin:$PATH
+            (cd build/arm-rev-package/releases && sha256sum --check SHA256SUMS.txt)
+            set -- build/arm-rev-package/releases/*.tar.gz
+            test "$#" -eq 1
+            sha256sum "$1"
+            scratch=$(mktemp -d /tmp/datapump-arm-rev-smoke.XXXXXX)
+            destination="$scratch/copied destination"
+            mkdir -p "$destination"
+            tar -xzf "$1" -C "$destination"
+            set -- "$destination"/DataPump-*
+            test "$#" -eq 1
+            package_root=$1
+            cmake -DPACKAGE_ROOT="$package_root" -DVERIFY_ONLY=ON -P tools/verify-native-package.cmake
+            cmake -DPACKAGE_ROOT="$package_root" -DMAX_GLIBC=2.35 -P tools/verify-linux-abi.cmake
+            xvfb-run -a -s "-screen 0 2400x1800x24 -dpi 96" cmake -DPACKAGE_ROOT="$package_root" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P tools/verify-native-package.cmake
+            cmake -DPACKAGE_ROOT="$package_root" -DVERIFY_ONLY=ON -P tools/verify-native-package.cmake
+            (cd build/arm-rev-package/releases && sha256sum --check SHA256SUMS.txt)
+          '
       - name: Record focused scope
-        run: echo 'ARM64 Rev packaging and visible startup with the Ubuntu 24.04 host driver passed. No full smoke, calibration or certification claim; no release assets changed.' >> "$GITHUB_STEP_SUMMARY"
+        env:
+          FULL_GUI_SMOKE: ${{ inputs.smoke }}
+        run: |
+          if [ "$FULL_GUI_SMOKE" = true ]; then
+            echo "ARM64 Rev package from $GITHUB_SHA passed full copied GUI smoke on Debian Trixie and the glibc 2.35 audit. No calibration, general matrix, SDK rebuild or release certification; no release assets changed." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'ARM64 Rev packaging and visible startup with the Ubuntu 24.04 host driver passed. No full smoke, calibration or certification claim; no release assets changed.' >> "$GITHUB_STEP_SUMMARY"
+          fi

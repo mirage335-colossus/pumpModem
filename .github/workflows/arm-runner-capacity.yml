@@ -5,7 +5,7 @@ on:
     inputs:
       arm_runner:
         type: string
-        default: ubuntu-24.04-arm-l
+        default: ubuntu-24.04-arm-h
 
 permissions:
   contents: read
@@ -13,7 +13,7 @@ permissions:
 jobs:
   arm:
     name: Runner and baseline compiler (${{ inputs.arm_runner }})
-    runs-on: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-l' }}
+    runs-on: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-h' }}
     container: ubuntu:22.04
     timeout-minutes: 5
     env:

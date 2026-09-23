@@ -24,6 +24,10 @@ captures have their own documented provenance. Keep all checks below intact.
   followed by an explicit full manual run or ordinary CI before completion.
   Wait for results; investigate failures with focused tests, then rerun the
   affected full checks. Do not count skipped, cancelled or queued jobs as passes.
+  Automatic CI is deliberately lightweight on PRs and pushes to main; full
+  native and SDK qualification require explicit manual dispatch after fixes.
+  Runner defaults use the organization's H pools; do not repeat checks on
+  smaller runners unless specifically requested.
 - Reuse the exact prepared Linux SDK and Windows dependency recipes from the
   durable `base` release where applicable in ordinary release, certification
   and full CI jobs.
@@ -42,6 +46,14 @@ captures have their own documented provenance. Keep all checks below intact.
   spend long diagnostic runs tuning this known presentation limitation unless
   requested. Data integrity, physical completion, pending identity and source/
   bitmap correctness remain mandatory; see [release warnings](docs/releases.md#rev-display-warnings).
+- The exact Windows Rev probe error `Required WGL ARB extensions not available`
+  is an explicitly accepted hosted-environment warning. Only the four OpenGL
+  source cases and published GUI smoke may be omitted under that classifier;
+  clipboard, compilation, headless GUI/CLI, modem, packaging and calibration
+  remain required. Reports must say `passed_with_warnings`, enumerate omitted
+  graphics coverage and retain a per-run warning log. Such a green workflow is
+  not full Windows Rev graphics qualification and must not promote Latest.
+  Other graphics errors, assertions, crashes and timeouts remain failures.
 
 See [testing stages](docs/building.md#testing-stages) and
 [release validation](docs/releases.md#diagnose-a-branch-before-full-validation).

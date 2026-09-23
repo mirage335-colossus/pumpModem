@@ -465,7 +465,11 @@
         clipped.children.push_back(input);document->apply(std::make_shared<const ui::DocumentNode>(clipped));
         for(unsigned frame=0;frame<3;++frame){document->update();native_frame();}
         if(allows_input(editor)||editor->targetFlags.focus)
-            throw std::runtime_error("Rev label-only document clip retained editable input or focus");
+            throw std::runtime_error("Rev label-only document clip retained editable input or focus: input="+
+                std::to_string(allows_input(editor))+" focus="+std::to_string(editor->targetFlags.focus)+
+                " disabled="+std::to_string(editor->targetFlags.disabled)+" hidden="+std::to_string(editor->resolved.hidden)+
+                " editor_y="+std::to_string(editor->rect.y)+" root_y="+std::to_string(host->element()->rect.y)+
+                " root_height="+std::to_string(host->element()->rect.h)+" document_height="+std::to_string(document->rect.h));
         settle();host=find_host();editor=host->bindings.front().editor;focus_control(editor);
         const auto stale_edit=editor->changed;const auto saved=application.field(ui::Field::planner_target).text;
         const auto previous_count=document_control_bindings.size();

@@ -55,7 +55,10 @@ inline void relabel_extension_controls(std::span<ui::Control> controls) {
 inline std::vector<ui::Control> layout_lifecycle_controls() {
     ui::Control text{ui::Kind::text,ui::Field::callsign};text.instance=51;
     ui::Control bitmap{ui::Kind::bitmap};bitmap.bitmap=ui::Bitmap::waveform;
-    bitmap.slot=ui::Slot::waveform;bitmap.instance=52;
+    // This exercises retained bitmap chrome, not the full console's bottom
+    // plot allocation. Its compact slot stays drawable on hosted 1024x768
+    // desktops, which are shorter than the application's normal minimum.
+    bitmap.slot=ui::Slot::qr;bitmap.instance=52;
     return {text,bitmap};
 }
 inline void layout_lifecycle_stage(std::span<ui::Control> controls,unsigned stage) {

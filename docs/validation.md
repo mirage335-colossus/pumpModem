@@ -4,6 +4,204 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## CI cleanup and Windows graphics coverage — 23 September 2026
+
+The Windows certification harness recognizes only exit 1 with the exact Rev
+message `[NativeWindow] Required WGL ARB extensions not available` as a hosted
+graphics warning. Compilation, clipboard, headless GUI/CLI, modem, calibration,
+and published-archive checks remain required. The four omitted OpenGL tests and
+published GUI smoke are listed in a per-run warning log and certificate. An
+otherwise successful run is green with `passed_with_warnings`; it does not
+qualify Windows Rev desktop graphics or promote the release to Latest. A user's
+machine with the same limitation cannot open the Rev GUI, so this is an
+environment limitation with a functional consequence, not merely poor cadence.
+
+Automatic CI now runs bounded diagnostics. Full native and SDK qualification
+remain explicit manual gates, and larger H runners are the defaults. The
+`ci.yml` / `devfast=true` / `diagnostic=certification` route reuses prepared
+dependencies and isolates the known adapter, Windows DSP, and ARM estimate
+failures. It does not produce a release certificate.
+
+Local build-helper checks pass **17/17 in 10.25 seconds**, including **71**
+certificate and **5** WGL-policy cases. The initial sandboxed GPG fixture could
+not start its disposable signing agent; the unchanged fixture passes outside
+that restriction. Actionlint and whitespace checks pass. Focused modem tests
+retain the original error tolerance, physical completion and decoded-message
+assertions. Portable test noise freezes the existing GNU fixture; it does not
+claim that all noise realizations decode successfully.
+
+The [focused hosted run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35920196103)
+uses candidate `92992e121641e63a24f12abd65fac37789dae2ef`. ARM64 probability
+vectors pass in **12.00 seconds** and the formerly timed-out CLI estimate passes
+in **2.066 seconds**, retaining its original 30-second limit. The estimate's
+seeded stream and modeled thresholds are preserved while avoiding repeated
+software long-double engine-range calculations. Windows `fast_low_rate` and
+`pattern_code` pass in **24.05** and **1.80 seconds**. Complete Linux SDK adapter
+checks pass for Rev (**129.44 seconds**) and FLTK (**67.87 seconds**). The earlier
+Rev label-only clipping failure does not reproduce in this run. Windows' focused
+color check passes, but its complete adapter suite fails later at
+`Layout lifecycle fixture lost native controls`; that failure remains fatal and
+is investigated separately from WGL. Full regression results follow the focused
+fixes.
+
+FLTK's fixture now identifies the actual `NativeWindow`, rather than assuming
+the first event-ordered FLTK window belongs to the application. A competing
+window regression passes locally in **0.42 seconds**, and the complete cached-
+SDK FLTK adapter suite passes. The live-profile fixture also grants bounded
+PCM delivery credits instead of flooding the asynchronous decoder at roughly
+20 times real time. Its previously failing fixed-interval case passes in
+**6.353 seconds** normally and **23.409 seconds** under ASan/UBSan. The focused
+short/long transmit-profile case passes in **4.895** and **35.702 seconds**,
+respectively. Queue limits, deadlines and reception assertions are unchanged;
+stage-specific diagnostics now identify any remaining general `live` timeout.
+
+Calibration uses available cores up to 16, with matching CTest processor
+accounting and exclusive scheduling. Cheap partition checks verify all 64
+seeds appear exactly once for every supported worker count; no capture or
+numerical acceptance criterion is removed. The complete Windows and Linux
+Release numerical runs below pass. Sanitizer real-time overruns remain
+failures; the WGL exception does not apply to them.
+
+The [Windows Rev diagnostic](https://github.com/mirage335-colossus/pumpModem/actions/runs/35920957351)
+is **green** on `f582d8eb2827c2cdff02d7e8df40adac55c0ce74`: the native event test,
+Rev compilation and headless self-check pass, and the actual missing-WGL
+message produces the intended warning. Dependency-base reuse takes about
+**14 seconds**, with no SDK rebuild. This diagnostic does not certify published
+archives.
+
+The first Windows fixture retry exposes a second independent assumption:
+the lifecycle fixture placed a bitmap in the full console's bottom plot area,
+which correctly has zero height in the hosted **1028×749** client area. The
+fixture now uses the bounded QR area and FLTK explicitly exercises the reported
+small size. All retained-control assertions remain. The affected FLTK and Rev
+probes pass locally in **0.38** and **0.29 seconds**. The application's normal
+minimum layout remains **1030×968**; this is a potentially significant usability
+limit for an actual undersized desktop, not a transport or data-integrity fault.
+The [corrected Windows-only run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35922024305)
+is **green** on `81858d2ffd7fecfbf3fcc23d121efcfb69a7b33f`: both targeted adapter
+probes and all **three** complete adapter/DSP tests pass (**99.20 seconds** for
+the CTest selection). Unchanged Linux and ARM diagnostics were not repeated.
+
+Two cached ASan/UBSan real-time checks still fail when run alone. New failure-only
+diagnostics show Fast RX receiving **156,000 samples in 3.225 seconds** while its
+last decoder telemetry reaches **105,600 samples**, followed by the production
+one-second FIFO overrun. No coding cycle or LDPC frame fails before that overrun.
+The GUI case records three such overruns followed by automatic listening retries;
+the retained row remains `INCOMPLETE`, nonactivatable and without exposed source
+content. This reproduces instrumented throughput failure, not demonstrated row
+identity corruption or a sanitizer memory/UB report. The unchanged assertions
+still fail (**4.83** and **49.28 seconds**); they are not covered by the WGL waiver.
+Release build results are separate evidence, and no conclusion about physical
+hardware performance follows from these hosted or simulated checks alone.
+
+[Experiment `v001_00-2026-09-23-1629CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-23-1629CDT)
+is published successfully by [run 35922653913](https://github.com/mirage335-colossus/pumpModem/actions/runs/35922653913),
+with all six freshly built application archives and **50** delivery assets,
+including signed Debian, Arch and Gentoo update channels. Source and packager
+are `81858d2ffd7fecfbf3fcc23d121efcfb69a7b33f`;
+inventory SHA-256 is
+`e57ecf5f0099a290e4180fb72e2a3b61e60b3729debbccddcee3316e8b3ffa43`.
+The separate full [certification run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35923981422)
+uses tooling `cf2553e8eeec21ed60cc40d12fa546b3404338bc`, `devfast=false`,
+unchanged prepared SDKs and H runners. All **nine** Debian/Ubuntu installation
+jobs and both Arch/Gentoo jobs pass, including Bookworm on x86-64 and ARM64.
+The [Windows Rev job](https://github.com/mirage335-colossus/pumpModem/actions/runs/35923981422/job/107394669632)
+is **green**: 38 GUI/clipboard tests, 29 non-calibration contract tests, two
+packaging tests, full calibration (**182.01 seconds**) and exact published
+archive checks pass. Only the enumerated native WGL-dependent checks are
+omitted, with the intended warning.
+Windows FLTK and both Linux backends on x86-64 and ARM64 also pass their
+complete source and published-archive certification jobs. Their source contract
+groups retain all 30 tests, including numerical calibration; the Linux contract
+groups finish in **690–849 seconds**. ARM64 Rev initially waits about 30 minutes
+for larger-runner capacity; this is queue time, not an SDK rebuild.
+
+The copied ARM64 Rev archive passes on Bookworm and Ubuntu 22.04, 24.04 and
+26.04, but its first Trixie check fails at smoke phase 21 (`Pending replay
+signal was not presented`). Earlier cadence messages are already warnings;
+this separate pending-row assertion remains fatal. A deterministic fixture
+using real `apply_receptions` proves a checker defect: a batch can explicitly
+retire an earlier pending ID, so that ID correctly has no retained row. The
+corrected smoke helper requires actual retirement and a visible pending
+replacement, including retirement chains. Missing active rows, stale or
+ambiguous replacement claims, eviction, cycles and completed replacements still
+fail. The production ingestion behavior and 64-ID retirement bound are unchanged;
+the only model addition is a read-only retirement query. Focused fixtures pass
+in **0.002 seconds**, and all **36** shared GUI tests pass in **107.64 seconds**.
+The original hosted log lacks identity detail, so this establishes a checker
+defect without proving the exact cause of that particular failure. New errors
+include batch/retained identities and revisions. This correction is newer than
+the immutable experiment above; an old-release retry cannot validate it.
+
+The first certification attempt records **19/20** copied-distribution checks
+passing and correctly reports overall failure for the Trixie assertion. Its
+[attempt-1 report](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-23-1629CDT/certification-35923981422-attempt-1.md)
+and warning log remain attached to the release. Only the failed Trixie job and
+its dependent report are retried; successful source, package-manager and
+distribution checks are retained.
+
+The single-job retry passes, and [attempt 2](https://github.com/mirage335-colossus/pumpModem/actions/runs/35923981422/attempts/2)
+is **green**, with certificate status `passed_with_warnings`. All five required
+job categories succeed, including all **20** copied-distribution checks. The
+[attempt-2 certificate](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-23-1629CDT/certification-35923981422-attempt-2.md)
+and [warning log](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-23-1629CDT/certification-35923981422-attempt-2-warning.log)
+bind the same source/inventory and explicitly omit only the five Windows Rev
+graphics checks. The downloaded warning hash matches its certificate. The
+experiment remains a prerelease and is not Latest; native Windows Rev graphics
+remain unqualified. The retry establishes an intermittent old-checker failure,
+not proof of its cause or validation of the newer checker.
+
+The [corrected-source ARM64/Trixie diagnostic](https://github.com/mirage335-colossus/pumpModem/actions/runs/35929767834)
+passes on `c04cff85e32b9f51bb5e6f3b395c8d84d1277ec7`. It builds only Rev in
+the Ubuntu 22.04 baseline (**4m37s**), then verifies the same archive's hashes,
+inventory, glibc 2.35 ceiling and complete GUI smoke on Trixie (**5m38s** for
+the verification/display setup step). Cadence misses remain warnings, including
+phase 21; pending-row and content assertions pass. It uses the ARM64 H runner,
+does not rebuild an SDK or change release assets, and is focused evidence for
+the new checker rather than certification of a new release.
+
+The local software-rendered Rev smoke reaches its existing **300-second**
+budget in phase 15, then the hosted **600-second** allowance in phase 21.
+Neither run reports a pending-row/content assertion failure, but both are
+timeouts and provide incomplete local full-smoke coverage. The successful
+larger-runner check above provides the complete new-source Rev smoke result;
+local time limits are not extended further. These local Rev runs use
+`LIBGL_ALWAYS_SOFTWARE=1` with `LP_NUM_THREADS` unset, unlike CI's cap of two;
+their timing is not a like-for-like comparison with the hosted display.
+The remaining four local Rev native adapter/platform/coordinate tests pass
+in **67.95 seconds** on the same isolated display.
+All three local FLTK native tests pass in **296.53 seconds**, including the
+complete shared smoke (**228.33 seconds**), adapter conformance (**68.13
+seconds**) and document conformance (**0.06 seconds**). The private Xvfb display
+is stopped after the sequential checks. Actionlint and whitespace checks pass
+for the final workflow/documentation state.
+
+Full [native regression](https://github.com/mirage335-colossus/pumpModem/actions/runs/35921401021)
+uses `4656214c0b448ef8fc8c278357340b86d19d6bd9`; subsequent source differences
+are test fixtures, failure diagnostics and documentation, not application
+behavior. Both full Linux GUI selections pass (**39 FLTK**, **42 Rev**), as do
+all **121 Windows tests in 1,225.03 seconds**, followed by GUI relocation and
+both native archive checks. Its complete receiver calibration passes in
+**178.42 seconds** with 16 workers and every original capture retained.
+Linux Release passes all **125 tests in 1,218.52 seconds**, followed by native
+desktop, CLI, relocation and both archive checks.
+Linux Debug with ASan/UBSan completes **120/122 tests in 3,155.76 seconds**;
+full numerical calibration passes in **1,066.64 seconds**. The only failures
+are `fast_session` (**4.22 seconds**, capture overrun) and `gui_fast_live`
+(**49.43 seconds**, incomplete reception), consistent with the isolated
+diagnosis above. No sanitizer memory/UB report appears. **Overall native CI
+remains failed**. Its dependent copied-Ubuntu jobs are skipped, not passed;
+the separate release certification checks published binaries independently.
+
+An older FLTK rendering diagnostic also remains: its default ABI clipping
+stack has ten entries, and local complete adapter logs emit one overflow /
+underflow pair. Inspected application push/pop calls are balanced and older
+logs contain the same pair. Nested native/offscreen drawing can exhaust that
+limit; the existing logs do not establish whether the triggering draw is
+test-only. All adapter assertions pass. This is a minor unresolved clipping
+diagnostic that could affect a drawn frame, not an observed transport or
+data-integrity failure.
+
 
 ## Arch/Gentoo signed update channels — 23 September 2026
 

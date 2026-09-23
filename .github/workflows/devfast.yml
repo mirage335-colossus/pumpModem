@@ -6,11 +6,11 @@ on:
       linux_runner:
         description: 'Linux x86_64 runner label'
         type: string
-        default: ubuntu-24.04
+        default: ubuntu-latest-h
       windows_runner:
         description: 'Windows x64 runner label'
         type: string
-        default: windows-2022
+        default: windows-latest-h
       repetitions:
         description: 'Consecutive focused passes required (1–20); stop at the first failure'
         type: number
@@ -26,8 +26,8 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - "${{ inputs.linux_runner || 'ubuntu-24.04' }}"
-          - "${{ inputs.windows_runner || 'windows-2022' }}"
+          - "${{ inputs.linux_runner || 'ubuntu-latest-h' }}"
+          - "${{ inputs.windows_runner || 'windows-latest-h' }}"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     env:

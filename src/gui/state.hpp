@@ -127,6 +127,7 @@ public:
     bool update(SignalLine line);
     // Merged row identities stay retired within the bounded display history.
     void erase(std::uint64_t id);
+    bool retired(std::uint64_t id) const noexcept;
     void clear() noexcept { lines_.clear(); retired_ids_.clear(); }
     const std::deque<SignalLine>& lines() const noexcept { return lines_; }
     std::optional<std::string> copy_id(std::size_t index) const;

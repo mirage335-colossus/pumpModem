@@ -18,6 +18,10 @@ import zipfile
 SPEC = importlib.util.spec_from_file_location('datapump_release', Path(__file__).with_name('release.py'))
 release = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(release)
+WINDOWS_SPEC = importlib.util.spec_from_file_location('datapump_windows_certification',
+    Path(__file__).with_name('windows-certification.py'))
+windows_certification = importlib.util.module_from_spec(WINDOWS_SPEC)
+WINDOWS_SPEC.loader.exec_module(windows_certification)
 gh = release.gh
 REQUIRED_JOBS = {'linux-tests', 'windows-tests', 'compatibility'}
 DISPLAY_WARNING_POLICY = ('Display cadence warnings do not fail certification; '
@@ -28,6 +32,16 @@ SCOPE = ('Hosted source contract, GUI and packaging tests, plus checks of the ex
          'the workflow logs. Physical audio devices, Raspberry '
          'Pi and Chromebook hardware, and Windows 10/11 client installations are '
          'not qualified by this report.')
+
+
+def validate_warnings(value, metadata):
+    if not isinstance(value, list) or len(value) > 1:
+        raise ValueError('Certification warnings must be a bounded list of known exceptions')
+    if value:
+        if ('windows-x86_64-rev' not in release.application_targets(metadata)
+                or value != [windows_certification.warning_record()]):
+            raise ValueError('Unknown or inconsistent certification warning/coverage exclusion')
+    return value
 
 
 def required_jobs(metadata):
@@ -285,6 +299,7 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
     with tempfile.TemporaryDirectory(prefix='datapump-certification-') as scratch:
         state = prepare(repository, tag, Path(scratch) / 'published', inventory_sha)
         metadata = state['metadata']
+        warnings = validate_warnings(results.get('warnings', []), metadata)
         required = required_jobs(metadata)
         jobs_passed = required <= jobs.keys() and all(value == 'success' for value in jobs.values())
         if results.get('source_sha') != metadata['source_sha']:
@@ -295,7 +310,10 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
                 or len(set(tested_targets)) != len(tested_targets) or not set(tested_targets) <= names.keys()):
             raise ValueError('Tested targets must be unique application identities from this release')
         passed = jobs_passed and set(tested_targets) == names.keys()
-        latest_eligible = passed and not metadata['experiment'] and metadata['schema'] >= 5
+        # A green hosted check with an explicit environmental warning is useful,
+        # but cannot attest to native graphics the runner never exercised.
+        latest_eligible = passed and not warnings and not metadata['experiment'] and metadata['schema'] >= 5
+        status = ('passed_with_warnings' if warnings else 'passed') if passed else 'failed'
         # GitHub normally supplies SHA-256 asset digests. Older hosts require
         # re-reading bytes before a report can describe the current assets.
         checked_names = (list(names.values()) + sorted(release.apt_assets(metadata) | release.distribution_assets(metadata))
@@ -306,7 +324,7 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
         run_url = state['published']['html_url'].rsplit('/releases/tag/', 1)[0] + '/actions/runs/' + str(run_id)
         asset_base = state['published']['html_url'].rsplit('/tag/', 1)[0] + '/download/' + quote(tag, safe='')
         evidence = {
-            'schema': metadata['schema'], 'status': 'passed' if passed else 'failed', 'repository': repository,
+            'schema': metadata['schema'], 'status': status, 'repository': repository,
             'tag': tag, 'source_sha': metadata['source_sha'], 'inventory_sha256': inventory_sha,
             'linux_baseline': metadata['linux_baseline'], 'experiment': metadata['experiment'],
             'run_id': str(run_id), 'run_attempt': str(run_attempt), 'run_url': run_url,
@@ -316,6 +334,11 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
             'assets': {name: state['inventory'][name] for name in names.values()},
             'latest_eligible': latest_eligible,
         }
+        if warnings:
+            evidence['warnings'] = warnings
+            evidence['coverage_exclusions'] = {
+                warning['target']: warning['omitted_checks'] for warning in warnings}
+            evidence['latest_blockers'] = ['Windows Rev native graphics remain unqualified']
         if metadata['schema'] >= 2:
             evidence.update(
                 gui_backends=metadata['gui_backends'], tested_targets=sorted(tested_targets),
@@ -335,15 +358,30 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
         if metadata['schema'] >= 4:
             evidence['distribution_assets'] = {name: state['inventory'][name] for name in sorted(release.distribution_assets(metadata))}
         stem = f'certification-{run_id}-attempt-{run_attempt}'
-        if any(stem + suffix in state['assets'] for suffix in ('.json', '.md')):
+        if any(stem + suffix in state['assets'] for suffix in ('.json', '.md', '-warning.log')):
             raise ValueError('Certification evidence already exists; never overwrite a prior run')
         json_path, markdown_path = Path(scratch) / (stem + '.json'), Path(scratch) / (stem + '.md')
+        warning_paths = []
+        warning_text = ''
+        if warnings:
+            warning_path = Path(scratch) / (stem + '-warning.log')
+            warning_text = '\n'.join(f'WARNING {item["code"]}: {item["message"]}\n'
+                f'Omitted checks for {item["target"]}: {", ".join(item["omitted_checks"])}\n'
+                f'Observed probe output: {item["probe"]["output"]}\n' for item in warnings)
+            warning_path.write_text(warning_text, encoding='utf-8')
+            warning_paths.append(str(warning_path))
+            evidence['warning_report_asset'] = warning_path.name
+            evidence['warning_report_sha256'] = release.digest(warning_path)
         release.write_json(json_path, evidence)
         coverage = evidence['required_coverage']
+        status_label = evidence['status'].replace('_', ' ')
         markdown_path.write_text(
-            f'# Release certification: {evidence["status"]}\n\n'
+            f'# Release certification: {status_label}\n\n'
             f'Release `{tag}`; source `{metadata["source_sha"]}`; '
             f'[workflow run {run_id}, attempt {run_attempt}]({run_url}/attempts/{run_attempt}).\n\n{SCOPE}\n\n'
+            + ('**Windows Rev graphics coverage unavailable.** A green workflow includes a scoped '
+               'environment warning; this release is not eligible for Latest until native graphics '
+               'can be qualified.\n\n' + warning_text + '\n' if warnings else '')
             + '\n'.join(f'- {job}: **{jobs.get(job, "missing")}**' for job in sorted(required | jobs.keys()))
             + ('\n\nRecorded application targets: ' + ', '.join(f'`{target}`' for target in tested_targets)
                + '. Missing targets: ' + (', '.join(f'`{target}`' for target in names if target not in tested_targets) or 'none')
@@ -372,18 +410,22 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
                + '\n' if metadata['schema'] >= 4 else ''),
             encoding='utf-8')
         # No --clobber, no binary upload, and no promotion before evidence upload.
-        gh(['release', 'upload', tag, '--repo', repository, str(json_path), str(markdown_path)])
+        gh(['release', 'upload', tag, '--repo', repository, str(json_path), str(markdown_path), *warning_paths])
         body = state['published'].get('body') or ''
         # Replace only the current status marker; keep all original prose and
         # immutable per-run report history, including earlier passed reports.
         body = body.replace(release.CERTIFICATION_PENDING,
-                            f'> **Certification {evidence["status"]}.** See the certification reports below.', 1)
-        body = re.sub(r'\*\*Certification (?:pending|passed|failed)\.\*\*',
-                      f'**Certification {evidence["status"]}.**', body, count=1)
+                            f'> **Certification {status_label}.** See the certification reports below.', 1)
+        body = re.sub(r'\*\*Certification (?:pending|passed|passed with warnings|passed_with_warnings|failed)\.\*\*',
+                      f'**Certification {status_label}.**', body, count=1)
         body += (f'\n\nCertification [run {run_id}, attempt {run_attempt}]({run_url}/attempts/{run_attempt}): '
-                 f'**{evidence["status"]}** '
+                 f'**{status_label}** '
                  f'([report]({asset_base}/{stem}.md), [JSON]({asset_base}/{stem}.json)). '
                  'This report applies only to the recorded source and asset hashes.\n')
+        if warnings:
+            body += (f'**Windows Rev native graphics remain unqualified on this runner.** '
+                     f'[Environment warning log]({asset_base}/{stem}-warning.log). '
+                     'Other required checks remain mandatory. This limited result does not promote Latest.\n')
         if metadata['schema'] < 5:
             body += ('This older release cannot become Latest because it lacks the signed APT repository '
                      'or signed Arch/Gentoo update channels required by current consumers.\n')
@@ -453,7 +495,7 @@ def main(argv=None):
         else:
             result = record(args.repo, args.tag, args.run_id, args.results_json, args.run_attempt)
         print(json.dumps(result, sort_keys=True))
-        if args.command == 'record' and result['status'] != 'passed':
+        if args.command == 'record' and result['status'] not in ('passed', 'passed_with_warnings'):
             return 1
     except (ValueError, KeyError, OSError, RuntimeError, subprocess.CalledProcessError, tarfile.TarError, zipfile.BadZipFile) as error:
         parser.exit(1, f'certification: {release.failure_message(error)}\n')

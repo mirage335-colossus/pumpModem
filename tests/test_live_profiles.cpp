@@ -258,12 +258,23 @@ struct Observations {
 
 void advance(live::Session& session, CaptureScript& capture, std::size_t target,
              Observations& observed, const Waveform& expected, std::size_t origin, bool before_absence) {
-    capture.released = target;
     const auto deadline = std::chrono::steady_clock::now() + 30s;
     std::optional<std::chrono::steady_clock::time_point> drained_at;
     while (std::chrono::steady_clock::now() < deadline) {
         auto snapshot = session.snapshot();
         observed.inspect(snapshot, expected, origin, before_absence);
+        // This functional arbitration fixture advances a controlled PCM clock;
+        // it is not the separate fast_session real-time throughput check. The
+        // old unconditional 20 ms / 1 ms producer could outrun instrumented
+        // decoding and discard a valid waveform. Keep only a short burst ahead
+        // and wait for the actual asynchronous queue to drain before granting
+        // more input. The production queue, its overrun assertion and every
+        // physical-symbol/end assertion stay unchanged.
+        const auto delivered = capture.delivered.load();
+        if (delivered < target && delivered >= capture.released.load() && snapshot.buffered_samples == 0) {
+            const auto burst = std::max<std::size_t>(8, capture.rate / 10);
+            capture.released = delivered + std::min(burst, target - delivered);
+        }
         if (capture.delivered >= target && snapshot.buffered_samples == 0) {
             if (!drained_at) drained_at = std::chrono::steady_clock::now();
             if (std::chrono::steady_clock::now() - *drained_at >= 250ms) return;
@@ -585,8 +596,12 @@ int main(int argc, char** argv) {
         const FixtureTimerResolution timer_resolution;
 #endif
         const std::string suite = argc > 1 ? argv[1] : "all";
-        check(suite == "all" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds",
+        check(suite == "all" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds" || suite == "interval_queue",
               "unknown profile test suite");
+        if (suite == "interval_queue") {
+            context = "RX 55,32 TX 32 fixed interval queue pacing";
+            run_case({55, 32}, 32, "hello fixed intervals", false);
+        }
         if (suite == "all" || suite == "long_seeds") {
             context = "sampled expanded FFT simulation across strong and weak noise seeds";
             sampled_long_fft_seeds();

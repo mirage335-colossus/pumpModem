@@ -1,68 +1,21 @@
 name: Application checks with the base SDK
 
 on:
-  push:
-    paths:
-      - '.github/workflows/sdk.yml'
-      - '.github/workflows/sdk-build.yml'
-      - 'third_party/build-support/source-sdk/**'
-      - 'third_party/rev/**'
-      - 'src/gui/*rev*'
-      - 'tools/build-sdk.py'
-      - 'tools/sdk-release.py'
-      - 'tools/install-release-cmake.sh'
-      - 'tools/release-cmake.sha256'
-      - 'tools/prepare_rev.py'
-      - 'tools/package-native.cmake'
-      - 'tools/gui-smoke-timeout.cmake'
-      - 'tools/stage-sdk-runtime.cmake'
-      - 'tools/verify-*.cmake'
-      - 'cmake/**'
-      - 'CMakeLists.txt'
-      - 'CMakePresets.json'
-      - 'build.sh'
-      - 'tests/*sdk*'
-      - 'tests/*rev*'
-      - 'tests/packag*'
-      - 'tests/packaging_fixture/**'
-      - 'tests/test_build_wrapper.py'
-  pull_request:
-    paths:
-      - '.github/workflows/sdk.yml'
-      - '.github/workflows/sdk-build.yml'
-      - 'third_party/build-support/source-sdk/**'
-      - 'third_party/rev/**'
-      - 'src/gui/*rev*'
-      - 'tools/build-sdk.py'
-      - 'tools/sdk-release.py'
-      - 'tools/install-release-cmake.sh'
-      - 'tools/release-cmake.sha256'
-      - 'tools/prepare_rev.py'
-      - 'tools/package-native.cmake'
-      - 'tools/gui-smoke-timeout.cmake'
-      - 'tools/stage-sdk-runtime.cmake'
-      - 'tools/verify-*.cmake'
-      - 'cmake/**'
-      - 'CMakeLists.txt'
-      - 'CMakePresets.json'
-      - 'build.sh'
-      - 'tests/*sdk*'
-      - 'tests/*rev*'
-      - 'tests/packag*'
-      - 'tests/packaging_fixture/**'
-      - 'tests/test_build_wrapper.py'
+  # SDK host-tool qualification remains a full maintenance gate. Do not repeat
+  # its application/contract matrix for every push and PR; ci.yml owns automatic
+  # feedback, and completed SDK/toolchain changes explicitly dispatch this run.
   workflow_dispatch:
     inputs:
       linux_runner:
         description: 'Linux x86_64 runner for compilation and qualification'
         type: choice
         options: [ubuntu-24.04, ubuntu-latest-m, ubuntu-latest-l, ubuntu-latest-h]
-        default: ubuntu-24.04
+        default: ubuntu-latest-h
       windows_runner:
         description: 'Windows x64 runner for compilation and qualification'
         type: choice
         options: [windows-2022, windows-latest-l, windows-latest-h]
-        default: windows-2022
+        default: windows-latest-h
       devfast:
         description: 'Run only focused Legacy diagnostics; skip SDK, application and portability qualification'
         type: boolean
@@ -80,13 +33,13 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.devfast
     uses: ./.github/workflows/devfast.yml
     with:
-      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
-      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
 
   application:
     if: ${{ !inputs.devfast }}
     name: App and tests with SDK, ${{ matrix.backend }} on ${{ matrix.name }}
-    runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
     container: ${{ matrix.image }}
     timeout-minutes: 120
     strategy:
@@ -203,7 +156,7 @@ jobs:
     if: ${{ !inputs.devfast }}
     name: Copied SDK-built ${{ matrix.backend }} on ${{ matrix.image }}
     needs: application
-    runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
     container: ${{ matrix.image }}
     timeout-minutes: 45
     strategy:

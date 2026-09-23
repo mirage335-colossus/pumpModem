@@ -1,4 +1,5 @@
 #include "receiver_probability.hpp"
+#include "probability_random.hpp"
 #include "pattern_drift.hpp"
 #include "datapump/correlation_experiment.hpp"
 #include "datapump/pattern_pulse.hpp"
@@ -24,7 +25,7 @@ const std::vector<Draw>& random_draws() {
     static const auto values=[] {
         std::vector<Draw> result(trials);
         std::mt19937_64 generator(0xe8472ac06b195d3fULL);
-        std::normal_distribution<double> normal;
+        ProbabilityNormal normal;
         for(auto& row:result)for(auto& value:row)value=normal(generator);
         return result;
     }();
