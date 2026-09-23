@@ -1,12 +1,11 @@
-name: Maintain Windows base dependencies
+name: Build Windows base dependencies
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
       source:
         description: 'auto reuses base; base requires reuse; rebuild compiles without overwriting an existing recipe'
-        type: choice
-        options: [auto, base, rebuild]
+        type: string
         default: auto
       publish:
         description: 'Preserve verified dependency binaries and source downloads in base'
@@ -24,10 +23,7 @@ on:
 permissions:
   contents: read
 
-# The Linux SDK and Windows dependencies share an immutable release shelf.
-concurrency:
-  group: sdk-base-publication
-  cancel-in-progress: false
+# sdk-base.yml serializes publication for the shared Linux/Windows shelf.
 
 jobs:
   helpers:
@@ -59,7 +55,9 @@ jobs:
         run: python tests/test_windows_base.py
       - name: Select the exact reusable recipe
         id: recipe
-        run: python tools/windows-base.py identity --github-output "$env:GITHUB_OUTPUT"
+        run: |
+          if ($env:SOURCE -notin @('auto', 'base', 'rebuild')) { throw 'Invalid Windows dependency source' }
+          python tools/windows-base.py identity --github-output "$env:GITHUB_OUTPUT"
       - name: Find and verify existing base assets
         id: reuse
         if: inputs.source != 'rebuild'

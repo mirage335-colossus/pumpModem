@@ -14,7 +14,7 @@ $linkerVersion = "$($linker.FileMajorPart).$($linker.FileMinorPart).$($linker.Fi
 $fetched = & python $helper fetch --repo $Repository --directory $Downloads
 if ($LASTEXITCODE -ne 0) { throw 'Windows base download or verification failed' }
 $info = $fetched | ConvertFrom-Json
-if (!$info.found) { throw 'Run Maintain Windows base dependencies for this recipe first; ordinary builds never rebuild dependencies implicitly.' }
+if (!$info.found) { throw 'Run Maintain base SDK with platform=windows for this recipe first; ordinary builds never rebuild dependencies implicitly.' }
 $installed = & python $helper install --directory $Downloads --destination $Destination --linker-version $linkerVersion
 if ($LASTEXITCODE -ne 0) { throw 'Windows base installation or compiler compatibility check failed' }
 $info = $installed | ConvertFrom-Json

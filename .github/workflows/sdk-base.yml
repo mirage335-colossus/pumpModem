@@ -3,6 +3,11 @@ name: Maintain base SDK
 on:
   workflow_dispatch:
     inputs:
+      platform:
+        description: 'Reusable Linux source SDK or Windows static application dependencies'
+        type: choice
+        options: [linux, windows]
+        default: linux
       source:
         description: 'auto reuses base; base verifies durable reuse; rebuild compiles from source'
         type: choice
@@ -21,6 +26,7 @@ on:
     paths:
       - '.github/workflows/sdk-base.yml'
       - '.github/workflows/sdk-build.yml'
+      - '.github/workflows/windows-base.yml'
       - 'tools/sdk-release.py'
       - 'tests/test_sdk_release.py'
 
@@ -43,10 +49,18 @@ jobs:
       - run: python3 tests/test_sdk_release.py
 
   sdk:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.platform != 'windows'
     needs: helper
     uses: ./.github/workflows/sdk-build.yml
     with:
       source: ${{ inputs.source }}
       jobs: ${{ inputs.jobs }}
       publish_base: ${{ inputs.publish }}
+
+  windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.platform == 'windows'
+    needs: helper
+    uses: ./.github/workflows/windows-base.yml
+    with:
+      source: ${{ inputs.source }}
+      publish: ${{ inputs.publish }}

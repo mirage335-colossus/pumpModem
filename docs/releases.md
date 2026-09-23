@@ -53,7 +53,7 @@ corresponding recipe:
 
 ```sh
 gh workflow run sdk-base.yml --ref main -f source=auto -f jobs=0 -f publish=true
-gh workflow run windows-base.yml --ref main -f source=auto -f publish=true
+gh workflow run sdk-base.yml --ref main -f platform=windows -f source=auto -f publish=true
 ```
 
 Build and publish an experimental application release:
@@ -240,8 +240,8 @@ These timings are observed hosted-runner results, not guarantees.
 
 ## Windows dependency base
 
-The [Windows maintenance workflow](../.github/workflows/windows-base.yml)
-preserves a relocatable, precompiled dependency bundle in the same `base`
+Select `platform=windows` in [Maintain base SDK](../.github/workflows/sdk-base.yml).
+Its [Windows build workflow](../.github/workflows/windows-base.yml) preserves a relocatable, precompiled dependency bundle in the same `base`
 release. Its [recipe](../third_party/build-support/windows-base.json) pins
 vcpkg and the shared union of static OpenSSL, GLEW and FreeType dependencies
 for both FLTK and Rev, including Debug and Release configurations. The runner
