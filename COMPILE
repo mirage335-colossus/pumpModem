@@ -1,4 +1,46 @@
+# Command reference: run the selected blocks from the repository root.
+# Prerequisites, profiles and portability: docs/building.md
 
-./build.sh
-./build.sh test contract
-./build.sh package
+# Native toolchain: choose the test coverage needed; groups overlap.
+./build.sh                 # Incremental FLTK GUI and CLI build
+./build.sh test contract   # Preservation-contract coverage
+./build.sh test fast       # Fast coding, modem and shared GUI coverage
+./build.sh test all        # All configured non-display tests, including slow calibration
+./build.sh sanitize        # ASan/UBSan contract tests in a separate native build
+./build.sh package         # Build and verify portable TGZ/ZIP archives
+
+# Source SDK: prepare once on x86_64 Linux with the Buildroot prerequisites.
+# Only fetch uses the network; build and sources use the verified local cache.
+# Preparation, upgrades and offline reconstruction:
+# third_party/build-support/README.md
+python3 tools/build-sdk.py fetch --jobs 2
+python3 tools/build-sdk.py build --jobs 2
+python3 tools/build-sdk.py sources
+
+# Install/relocate once. For a downloaded SDK, use its published ID and archive
+# path instead; keep its published SHA256SUMS beside the archive.
+datapump_sdk_id=$(python3 tools/build-sdk.py id)
+datapump_sdk_archive="$PWD/third_party/build-support/cache/source-sdk/releases/datapump-sdk-$datapump_sdk_id-linux-x86_64.tar.gz"
+datapump_sdk="$PWD/third_party/build-support/cache/sdk-$datapump_sdk_id"
+python3 tools/build-sdk.py install \
+  --archive "$datapump_sdk_archive" --destination "$datapump_sdk"
+python3 tools/build-sdk.py verify "$datapump_sdk"
+
+# Reuse an installed SDK by setting datapump_sdk to its absolute path and
+# skipping preparation/install above. Installation refuses an existing path.
+# SDK paths must have no spaces; unset conflicting compiler/search overrides.
+# An SDK upgrade or relocation requires fresh application build directories.
+
+# Default FLTK application and CLI, tests, and portable TGZ/ZIP archives.
+./build.sh --sdk "$datapump_sdk"
+./build.sh test build --sdk "$datapump_sdk"
+./build.sh test contract --sdk "$datapump_sdk"
+./build.sh package --sdk "$datapump_sdk"
+
+# Optional Rev backend, using the same SDK's compiler and dependencies.
+./build.sh --backend rev --sdk "$datapump_sdk"
+./build.sh package --backend rev --sdk "$datapump_sdk"
+
+# Bookworm build-host qualification only (not required for ordinary local use).
+# Target glibc is 2.36; SDK tools built on newer hosts can require newer glibc.
+# python3 tools/build-sdk.py verify "$datapump_sdk" --max-host-glibc 2.36
