@@ -6,11 +6,14 @@
 #include "../src/pattern_differential.hpp"
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <future>
 #include <iostream>
 #include <string>
+#include <string_view>
+#include <thread>
 
 using namespace datapump;
 namespace {
@@ -19,7 +22,34 @@ constexpr std::size_t workspace=8*1024*1024;
 // Live reserves half of a one-profile workspace for peer/transmit/plot state.
 constexpr std::size_t receiver_workspace=workspace/2;
 constexpr unsigned captures_per_case=64;
+constexpr unsigned maximum_workers=16;
 constexpr double local_seconds=1;
+
+unsigned bounded_workers(unsigned available) {
+    return std::clamp(available,1U,maximum_workers);
+}
+
+template<class Function>
+void for_worker_seeds(unsigned worker,unsigned workers,Function&& function) {
+    for(unsigned seed=worker;seed<captures_per_case;seed+=workers)function(seed);
+}
+
+void check_worker_plan() {
+    check(bounded_workers(0)==1&&bounded_workers(1)==1&&bounded_workers(4)==4&&
+          bounded_workers(16)==16&&bounded_workers(64)==16,
+          "calibration worker selection exceeded its available-core bounds");
+    for(unsigned workers=1;workers<=maximum_workers;++workers) {
+        std::array<unsigned,captures_per_case> visits{};
+        std::array<unsigned,captures_per_case> assigned{};
+        for(unsigned worker=0;worker<workers;++worker)
+            for_worker_seeds(worker,workers,[&](unsigned seed) {
+                ++visits[seed];assigned[seed]=worker;
+            });
+        for(unsigned seed=0;seed<captures_per_case;++seed)
+            check(visits[seed]==1&&assigned[seed]==seed%workers,
+                  "calibration worker partition changed, repeated or omitted a fixed seed");
+    }
+}
 
 struct Case {
     const char* name;
@@ -130,7 +160,7 @@ Received receive(const modem::Config& config,std::span<const float> samples,bool
     return result;
 }
 
-void check_matrix(std::span<const Case> cases,bool compare_previous) {
+void check_matrix(std::span<const Case> cases,bool compare_previous,unsigned workers) {
     double squared_error=0,maximum_error=0;
     unsigned improved=0,previous=0,modeled_cases=0;
     const auto begun=std::chrono::steady_clock::now();
@@ -162,12 +192,11 @@ void check_matrix(std::span<const Case> cases,bool compare_previous) {
         // Independent complete captures can run concurrently without sharing
         // receiver state or random streams. Each receiver still has one DSP
         // worker, and fixed seed positions keep counts/order reproducible.
-        constexpr unsigned workers=4;
-        std::array<std::future<std::pair<unsigned,unsigned>>,workers> tasks;
+        std::vector<std::future<std::pair<unsigned,unsigned>>> tasks(workers);
         for(unsigned worker=0;worker<workers;++worker)
             tasks[worker]=std::async(std::launch::async,[&,worker] {
                 unsigned recovered=0,baseline=0;
-                for(unsigned seed=worker;seed<captures_per_case;seed+=workers) {
+                for_worker_seeds(worker,workers,[&](unsigned seed) {
                     const auto bits=fixture.bits==1?Bytes{static_cast<std::uint8_t>(seed%2)}:Bytes{0,0,1};
                     const auto samples=capture(configured.modem,channel(fixture,configured.modem,seed),bits);
                     const auto observed=receive(configured.modem,samples,true,fixture.window_seconds);
@@ -177,7 +206,7 @@ void check_matrix(std::span<const Case> cases,bool compare_previous) {
                         const auto old=receive(configured.modem,samples,false);
                         baseline+=old.completions==1 && old.bits==bits;
                     }
-                }
+                });
                 return std::pair{recovered,baseline};
             });
         unsigned recovered=0,baseline=0;
@@ -215,7 +244,7 @@ void check_matrix(std::span<const Case> cases,bool compare_previous) {
         check(improved>=previous+8,"sampled differential matrix lost recovery beyond the earlier detector");
 }
 
-void sampled_matrix() {
+void sampled_matrix(unsigned workers) {
     // Predeclared holdout matrix. These use exactly the production waveform,
     // fractional-start channel and adaptive receiver; only the local receiver
     // duration is scaled to make repeated PCM captures practical. No sampled
@@ -238,10 +267,10 @@ void sampled_matrix() {
         Case{"public 001 diffusion",false,29,25,3},
         Case{"private 001 diffusion",true,32,25,3},
     };
-    check_matrix(cases,true);
+    check_matrix(cases,true,workers);
 }
 
-void sampled_shaped_matrix() {
+void sampled_shaped_matrix(unsigned workers) {
     // The carrier lies exactly at the shaped signal's lower supported edge.
     // Its default finite bank therefore contains the center carrier only;
     // ordinary workspace policy selects the same compact raw-PCM receiver.
@@ -254,7 +283,7 @@ void sampled_shaped_matrix() {
         Case{"shaped public differential transition",false,28,8.838834764831844,1,false,true,8},
         Case{"shaped private differential transition",true,28,8.838834764831844,1,false,true,8},
     };
-    check_matrix(cases,false);
+    check_matrix(cases,false,workers);
 }
 
 void null_controls() {
@@ -306,8 +335,30 @@ void default_window_capture() {
     }
 }
 }
-int main() {
-    try {sampled_matrix();sampled_shaped_matrix();null_controls();default_window_capture();
+int main(int argc,char** argv) {
+    try {
+        auto workers=bounded_workers(std::thread::hardware_concurrency());
+        bool plan_only=false,workers_set=false;
+        for(int arg=1;arg<argc;++arg) {
+            const std::string_view option=argv[arg];
+            if(option=="--check-worker-plan")plan_only=true;
+            else if(option=="--workers"&&!workers_set&&arg+1<argc) {
+                const std::string_view value=argv[++arg];
+                const auto parsed=std::from_chars(value.data(),value.data()+value.size(),workers);
+                check(parsed.ec==std::errc{}&&parsed.ptr==value.data()+value.size()&&
+                      workers>=1&&workers<=maximum_workers,
+                      "calibration --workers must be an integer from 1 to 16");
+                workers_set=true;
+            } else throw Error("Usage: test_differential_receiver_probability [--workers 1..16] [--check-worker-plan]");
+        }
+        check_worker_plan();
+        std::cout<<"Differential receiver calibration: "<<workers<<" independent capture workers, "
+                 <<captures_per_case<<" fixed seeds per matrix case"<<std::endl;
+        if(plan_only) {
+            std::cout<<"worker partitions 1..16 preserve all fixed seeds; no calibration run\n";
+            return 0;
+        }
+        sampled_matrix(workers);sampled_shaped_matrix(workers);null_controls();default_window_capture();
         std::cout<<"differential receiver probability tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"differential receiver probability tests failed: "<<error.what()<<'\n';return 1;}
 }

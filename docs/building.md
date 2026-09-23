@@ -182,10 +182,18 @@ it. Shared GUI changes also require native checks for affected backends under
 the existing [GUI maintenance rules](gui-architecture.md#verification-and-maintenance-guardrails).
 Python-dependent cases are registered only when Python is available. CI keeps
 its no-Python application build and explicit Python CLI checks.
-The differential receiver calibration declares its four internal workers to
-CTest. At the default two-job limit it runs alone; larger limits can schedule
-other cases in the remaining slots. Its numerical checks and timeout are
-unchanged. Avoid overlapping independent heavy build/test runs during timing
+The differential receiver calibration runs independent captures on available
+cores, capped at 16 workers. CTest records that count and runs this test alone,
+even when the overall test-job limit is larger. Every matrix case still uses
+the same 64 seeds; numerical checks, full captures and deadlines are unchanged.
+Each capture keeps one DSP worker and a 4 MiB receiver budget. Parallelism
+increases capture-buffer and sanitizer memory proportionally, so constrain
+memory-limited machines with `-DDATAPUMP_CALIBRATION_WORKERS=4` after `--` in
+the build wrapper; the default `0` selects available cores. The larger default-
+duration controls remain sequential. For an inexpensive scheduling check, run
+`test_differential_receiver_probability --check-worker-plan`; this validates
+all 1..16 seed partitions without running the calibration. A direct invocation
+also accepts `--workers 1..16`. Avoid overlapping independent heavy build/test runs during timing
 and display qualification.
 
 Direct CMake remains supported, including on Windows:
@@ -347,6 +355,17 @@ assertions and individual deadlines. No calibration, full smoke sequence,
 package publication or certification runs in this diagnostic. Once fixed,
 run the affected full checks and publish/certify new binaries when runtime
 changes must reach users.
+
+When Linux and ARM checks already passed and only the Windows fault is changing,
+reuse that evidence and retry the same three Windows regressions alone:
+
+```sh
+gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=windows-certification
+```
+
+This selects the reusable diagnostic's `scope=windows`; `certification` keeps
+`scope=all`. It still runs the complete Windows FLTK adapter, `pattern_code` and
+`fast_low_rate` checks, without rebuilding unchanged Linux or ARM targets.
 
 For a graphics-driver startup failure after publication, use the bounded
 environment diagnostic on the unchanged archive:

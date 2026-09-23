@@ -6,6 +6,8 @@
 #include <atomic>
 #include <cmath>
 #include <iostream>
+#include <sstream>
+#include <string_view>
 #include <thread>
 #include <tuple>
 using namespace datapump;
@@ -174,15 +176,26 @@ bool same_capture(const modem::TransmitTrace& a,const modem::TransmitTrace& b) {
     return fields(a)==fields(b);
 }
 template<class Predicate>
-live::Snapshot wait_for(live::Session& session,Predicate predicate) {
+live::Snapshot wait_for(live::Session& session,std::string_view stage,Predicate predicate) {
     const auto deadline=std::chrono::steady_clock::now()+40s;
+    live::Snapshot last;
     while(std::chrono::steady_clock::now()<deadline) {
-        auto snapshot=session.snapshot();
-        if(!snapshot.error.empty())throw Error(snapshot.error);
-        if(predicate(snapshot))return snapshot;
+        last=session.snapshot();
+        if(!last.error.empty())throw Error(std::string(stage)+": "+last.error);
+        if(predicate(last))return last;
         std::this_thread::sleep_for(1ms);
     }
-    throw Error("timed out waiting for a transmission capture");
+    std::ostringstream diagnostic;
+    diagnostic<<"timed out waiting for "<<stage<<": status="<<last.status
+        <<" transmission="<<last.transmission_id<<" active="<<last.transmitting
+        <<" finished="<<last.transmission_finished<<" replay="<<last.simulation_replay
+        <<" fraction="<<last.transmission_fraction<<" samples="<<last.samples_received
+        <<" buffered="<<last.buffered_samples<<" compute_seconds="<<last.simulation_compute_seconds
+        <<" receiving_tail="<<last.simulation_receiving_tail
+        <<" generated_bits="<<last.transmit_trace.generated_bits
+        <<" total_bits="<<last.transmit_trace.total_wire_bits
+        <<" recovery_bytes="<<last.recovery_working_bytes;
+    throw Error(diagnostic.str());
 }
 void separate_short_and_long_transmit_profiles() {
     std::atomic<std::int64_t> replay_milliseconds{0};
@@ -199,7 +212,7 @@ void separate_short_and_long_transmit_profiles() {
     session.start(value);
     std::uint64_t previous_samples=0,previous_transmission=0;
     const auto finish=[&](const transfer::Estimate& estimate,const Bytes& expected_bits,bool short_text) {
-        const auto computed=wait_for(session,[](const auto& snapshot) {
+        const auto computed=wait_for(session,"short/long transmit profile completion",[](const auto& snapshot) {
             return snapshot.transmission_finished && snapshot.simulation_replay;
         });
         check(computed.samples_received>previous_samples && computed.transmission_id>previous_transmission,
@@ -269,7 +282,7 @@ void background_recovery_lifecycle() {
         bit=static_cast<std::uint8_t>(generator&1U);
     }
     session.transmit_bits(bits);
-    const auto staged=wait_for(session,[](const auto& state){return state.transmission_finished&&state.simulation_replay;});
+    const auto staged=wait_for(session,"initial recovery simulation",[](const auto& state){return state.transmission_finished&&state.simulation_replay;});
     check(staged.received.empty()&&staged.recovery_working_bytes==0,
           "Recovery ran before simulation physical completion reached its presentation deadline");
     session.clear_recoveries();
@@ -278,7 +291,7 @@ void background_recovery_lifecycle() {
     check(cleared.signals.empty()&&cleared.received.empty()&&cleared.recovery_working_bytes==0&&!cleared.simulation_replay,
           "Cleared staged recovery restored a row, job or source at the replay deadline");
     session.transmit_bits(bits);
-    wait_for(session,[](const auto& state){return state.transmission_finished&&state.simulation_replay;});
+    wait_for(session,"restarted recovery simulation",[](const auto& state){return state.transmission_finished&&state.simulation_replay;});
     replay_milliseconds=6000;
     const auto ended=session.snapshot();
     const auto ready=std::find_if(ended.signals.begin(),ended.signals.end(),[](const auto& signal) {
@@ -288,7 +301,7 @@ void background_recovery_lifecycle() {
           "Physical completion did not immediately release a pending recovery in the original row");
     const auto id=ready->id,revision=ready->revision;
     session.cancel_recovery(id);
-    const auto stopped=wait_for(session,[&](const auto& state) {
+    const auto stopped=wait_for(session,"recovery cancellation",[&](const auto& state) {
         return std::any_of(state.signals.begin(),state.signals.end(),[&](const auto& signal) {
             return signal.id==id&&(signal.recovery_progress.state==RecoveryState::cancelled||
                                   signal.recovery_progress.state==RecoveryState::incomplete);
@@ -302,7 +315,7 @@ void background_recovery_lifecycle() {
     session.configure(value);
     check(!session.resume_recovery(id),"Reconfiguration retained an obsolete recovery generation");
     session.transmit_bits(Bytes{0,0,1});
-    wait_for(session,[](const auto& state){return state.transmission_finished&&state.simulation_replay;});
+    wait_for(session,"next reception after recovery cancellation",[](const auto& state){return state.transmission_finished&&state.simulation_replay;});
     replay_milliseconds=9000;
     const auto next=session.snapshot();
     check(std::none_of(next.signals.begin(),next.signals.end(),[&](const auto& signal) {
@@ -327,7 +340,7 @@ void background_recovery_lifecycle() {
           repaired.content.message.data==source.data,
           "Published-recovery fixture did not independently recover its source");
     session.configure(value);session.transmit_bits(damaged);
-    wait_for(session,[](const auto& state){return state.transmission_finished&&state.simulation_replay;});
+    wait_for(session,"published recovery simulation",[](const auto& state){return state.transmission_finished&&state.simulation_replay;});
     replay_milliseconds=12000;
     const auto completing=session.snapshot();
     check(std::any_of(completing.signals.begin(),completing.signals.end(),[](const auto& signal) {
@@ -337,7 +350,7 @@ void background_recovery_lifecycle() {
     // must also retract a result whose job has left the coordinator's deque.
     std::this_thread::sleep_for(1200ms);
     session.clear_recoveries();
-    wait_for(session,[](const auto& state) {
+    wait_for(session,"cleared recovery worker release",[](const auto& state) {
         check(state.signals.empty()&&state.received.empty(),
               "Cleared completed recovery restored queued content or its final row");
         return state.recovery_working_bytes==0;
@@ -386,7 +399,7 @@ void transmit_capture_tracks_generation_and_replay() {
               "live capture omitted or shifted actual encrypted marker and coded payload bits");
     };
     session.start(value);session.transmit(sent);
-    const auto first=wait_for(session,[&](const auto& snapshot) {
+    const auto first=wait_for(session,"initial transmission trace replay",[&](const auto& snapshot) {
         check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,"capture replay exceeded live workspace");
         return snapshot.transmission_finished && snapshot.simulation_replay;
     });
@@ -435,13 +448,13 @@ void transmit_capture_tracks_generation_and_replay() {
     value.transfer.modem.integration_seconds=4*60*60;
     value.transfer.modem.scramble=value.transfer.modem.dsss=false;value.transfer.key.reset();
     session.configure(value);session.transmit_bits(Bytes{0,0,1});
-    wait_for(session,[](const auto& snapshot) {return snapshot.transmit_trace.generated_bits>0;});
+    wait_for(session,"cancellable transmission trace prefix",[](const auto& snapshot) {return snapshot.transmit_trace.generated_bits>0;});
     session.cancel_transmit();const auto cancelled=session.snapshot();
     check(cancelled.transmission_cancelled && !cancelled.simulation_replay &&
           cancelled.transmit_trace.active && cancelled.transmit_trace.generated_bits==1 &&
           cancelled.transmit_trace.wire_bits==Bytes{0},
           "cancellation lost the exact partial transmission capture");
-    wait_for(session,[&](const auto& snapshot) {
+    wait_for(session,"cancelled transmission trace teardown",[&](const auto& snapshot) {
         check(same_capture(cancelled.transmit_trace,snapshot.transmit_trace) && !snapshot.simulation_replay,
               "cancelled generation published a late transmission capture");
         return snapshot.samples_received>cancelled.samples_received;
@@ -452,7 +465,7 @@ void transmit_capture_tracks_generation_and_replay() {
           (replacement.transmit_trace.raw && replacement.transmit_trace.total_wire_bits==2 &&
            (replacement.transmit_trace.wire_bits.empty() || replacement.transmit_trace.wire_bits==Bytes{1})),
           "new transmission retained the preceding cancelled capture");
-    const auto fresh=wait_for(session,[](const auto& snapshot) {return snapshot.transmit_trace.generated_bits>0;});
+    const auto fresh=wait_for(session,"fresh transmission trace prefix",[](const auto& snapshot) {return snapshot.transmit_trace.generated_bits>0;});
     check(fresh.transmission_id!=cancelled.transmission_id && fresh.transmit_trace.total_wire_bits==2 &&
           fresh.transmit_trace.generated_bits==1 && fresh.transmit_trace.wire_bits==Bytes{1},
           "replacement transmission exposed bits from a retired generation");
@@ -486,10 +499,10 @@ void continuous_noise_lifecycle() {
         rejected=false;
         try {session.transmit_bits(Bytes{0});} catch(const Error&) {rejected=true;}
         check(rejected,"message was silently queued behind continuous noise");
-        const auto first=wait_for(session,[](const auto& snapshot) {
+        const auto first=wait_for(session,"initial continuous-noise samples",[](const auto& snapshot) {
             return snapshot.transmission_seconds>=.15 && !snapshot.waveform.empty();
         });
-        const auto later=wait_for(session,[](const auto& snapshot) {
+        const auto later=wait_for(session,"later continuous-noise samples",[](const auto& snapshot) {
             return snapshot.transmission_seconds>=.4;
         });
         check(later.transmitting && later.transmitting_noise && !later.transmission_finished &&
@@ -509,14 +522,14 @@ void continuous_noise_lifecycle() {
               cancelled.transmission_cancelled && cancelled.transmission_finished && !cancelled.simulation_replay,
               "noise cancellation did not return to continuous reception");
         session.transmit_noise();
-        const auto restarted=wait_for(session,[&](const auto& snapshot) {
+        const auto restarted=wait_for(session,"restarted continuous-noise samples",[&](const auto& snapshot) {
             return snapshot.transmission_id!=serial && snapshot.transmission_seconds>=.1;
         });
         check(restarted.transmitting_noise && !restarted.transmit_trace.active,
               "restarted noise retained stale message state");
         session.cancel_transmit();
         session.transmit_bits(Bytes{0,0,1});
-        const auto message=wait_for(session,[](const auto& snapshot) {return snapshot.transmit_trace.active;});
+        const auto message=wait_for(session,"message trace after continuous noise",[](const auto& snapshot) {return snapshot.transmit_trace.active;});
         check(!message.transmitting_noise && message.transmit_trace.total_wire_bits==3 &&
               message.transmit_trace.data_masked==(mode==1),
               "noise changed the following raw message's framing or saved key selection");

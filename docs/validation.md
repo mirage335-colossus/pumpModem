@@ -4,6 +4,65 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## CI cleanup and Windows graphics coverage — 23 September 2026
+
+The Windows certification harness recognizes only exit 1 with the exact Rev
+message `[NativeWindow] Required WGL ARB extensions not available` as a hosted
+graphics warning. Compilation, clipboard, headless GUI/CLI, modem, calibration,
+and published-archive checks remain required. The four omitted OpenGL tests and
+published GUI smoke are listed in a per-run warning log and certificate. An
+otherwise successful run is green with `passed_with_warnings`; it does not
+qualify Windows Rev desktop graphics or promote the release to Latest. A user's
+machine with the same limitation cannot open the Rev GUI, so this is an
+environment limitation with a functional consequence, not merely poor cadence.
+
+Automatic CI now runs bounded diagnostics. Full native and SDK qualification
+remain explicit manual gates, and larger H runners are the defaults. The
+`ci.yml` / `devfast=true` / `diagnostic=certification` route reuses prepared
+dependencies and isolates the known adapter, Windows DSP, and ARM estimate
+failures. It does not produce a release certificate.
+
+Local build-helper checks pass **17/17 in 10.25 seconds**, including **71**
+certificate and **5** WGL-policy cases. The initial sandboxed GPG fixture could
+not start its disposable signing agent; the unchanged fixture passes outside
+that restriction. Actionlint and whitespace checks pass. Focused modem tests
+retain the original error tolerance, physical completion and decoded-message
+assertions. Portable test noise freezes the existing GNU fixture; it does not
+claim that all noise realizations decode successfully.
+
+The [focused hosted run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35920196103)
+uses candidate `92992e121641e63a24f12abd65fac37789dae2ef`. ARM64 probability
+vectors pass in **12.00 seconds** and the formerly timed-out CLI estimate passes
+in **2.066 seconds**, retaining its original 30-second limit. The estimate's
+seeded stream and modeled thresholds are preserved while avoiding repeated
+software long-double engine-range calculations. Windows `fast_low_rate` and
+`pattern_code` pass in **24.05** and **1.80 seconds**. Complete Linux SDK adapter
+checks pass for Rev (**129.44 seconds**) and FLTK (**67.87 seconds**). The earlier
+Rev label-only clipping failure does not reproduce in this run. Windows' focused
+color check passes, but its complete adapter suite fails later at
+`Layout lifecycle fixture lost native controls`; that failure remains fatal and
+is investigated separately from WGL. Full regression results follow the focused
+fixes.
+
+FLTK's fixture now identifies the actual `NativeWindow`, rather than assuming
+the first event-ordered FLTK window belongs to the application. A competing
+window regression passes locally in **0.42 seconds**, and the complete cached-
+SDK FLTK adapter suite passes. The live-profile fixture also grants bounded
+PCM delivery credits instead of flooding the asynchronous decoder at roughly
+20 times real time. Its previously failing fixed-interval case passes in
+**6.353 seconds** normally and **23.409 seconds** under ASan/UBSan. The focused
+short/long transmit-profile case passes in **4.895** and **35.702 seconds**,
+respectively. Queue limits, deadlines and reception assertions are unchanged;
+stage-specific diagnostics now identify any remaining general `live` timeout.
+
+Calibration uses available cores up to 16, with matching CTest processor
+accounting and exclusive scheduling. Cheap partition checks verify all 64
+seeds appear exactly once for every supported worker count; no capture or
+numerical acceptance criterion is removed. This scheduling change still needs
+the full numerical run below. Historical sanitizer real-time overruns and GUI
+pending-identity failures remain failures until current evidence establishes
+their outcome; the WGL exception does not apply to them.
+
 
 ## Arch/Gentoo signed update channels — 23 September 2026
 
