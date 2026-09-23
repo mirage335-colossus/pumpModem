@@ -13,6 +13,11 @@ target_link_libraries(datapump-gui PRIVATE middle)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   add_library(audio_fixture SHARED audio.cpp)
   set_target_properties(audio_fixture PROPERTIES OUTPUT_NAME asound VERSION 2.0.0 SOVERSION 2)
+  # This C ABI stub models ALSA without using the C++ runtime. Some compilers
+  # (including the SDK's GCC) otherwise add unused libstdc++/libgcc dependencies.
+  # Keep those out of this independent dlopen root; middle/helper still exercise
+  # shared-library collection through the executable's inherited RPATH.
+  target_link_options(audio_fixture PRIVATE "LINKER:--as-needed")
   # Debian's development link can point straight at the full version, without
   # passing through the SONAME needed by dlopen("libasound.so.2").
   add_custom_command(TARGET audio_fixture POST_BUILD
