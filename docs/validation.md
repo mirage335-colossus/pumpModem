@@ -26,8 +26,29 @@ helpers pass **74 release**, **67 certification**, **9 APT**, **8 recipe**,
 **8 Arch** and **11 Gentoo** tests. Two additional native pacman cases require
 the root Arch container and are skipped locally. Native Portage plugin
 discovery and construction also pass against the upstream Portage source.
-Workflow lint and all 29 documentation shell examples pass. Hosted native
-installation results are recorded below after the candidate run completes.
+Workflow lint and all 29 documentation shell examples pass. The [schema-5 publication run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35901986281)
+published [experiment `v001_00-2026-09-23-1322CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-23-1322CDT)
+with **50 assets**, packager `8b90225786d84775ef311c1552fdc1a9692ce768`,
+application source `88fb87bc491c5a0a487b68894ae6890239793e6b`, and inventory
+SHA-256 `b58aed15904aae6024cf59117602bf04100c54c575d518dc78f42f6f3313436f`.
+All six application archives were reused unchanged; publication took **82 seconds**.
+All nine Debian/Ubuntu jobs pass, covering the same Bookworm-onward matrix.
+
+The first Arch attempt exposed only fixture errors: `--noprogressbar` is invalid
+for `pacman -Q`, and libalpm may stop after the first missing package. The
+[corrected Arch-only run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35902631226)
+passes all **10** helper/native tests and installs both real release packages
+with required database/package signatures. `pacman -Qkk` reports zero altered
+files for both backends, exact private payload verification passes, and both
+CLI/headless GUI checks pass. The complete job took **96 seconds**.
+
+Gentoo's authenticated installer and native `emaint sync` passed in the initial
+run. Its host-dependency installation then exposed a bootstrap-directory error:
+creating `/etc/portage/gnupg` early made `getuto` skip initialization of Gentoo's
+own trust anchor. The bootstrap now uses the separate
+`/etc/portage/datapump-release-keyring.gpg` file. Signatures remain required;
+no application or release asset needed changing. The focused Gentoo retry is
+[run 35902837031](https://github.com/mirage335-colossus/pumpModem/actions/runs/35902837031).
 
 ## Arch/Gentoo recipes and shared Debian/Ubuntu packages — 23 September 2026
 

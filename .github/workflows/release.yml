@@ -78,7 +78,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: portable-release-${{ github.ref }}-${{ inputs.linux_baseline }}
+  # Read-only distribution diagnostics can run independently. Mutating release
+  # dispatches keep their shared lock so same-minute tags cannot race.
+  group: portable-release-${{ github.ref }}-${{ inputs.linux_baseline }}-${{ inputs.package_check != 'none' && inputs.package_check && format('{0}-{1}', inputs.package_check, inputs.source_release) || 'publish' }}
   cancel-in-progress: false
 
 jobs:

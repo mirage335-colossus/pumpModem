@@ -397,7 +397,7 @@ A failed refresh preserves the previous overlay. The signed ebuild Manifest
 then pins downloads to the immutable portable application archives.
 
 Accept the two testing keywords and preserved component licenses after reading
-`licenses/DataPump-Bundled`, then install your selected backend:
+`/var/db/repos/datapump-bin/licenses/DataPump-Bundled`, then install your selected backend:
 
 ```sh
 sudo mkdir -p /etc/portage/package.accept_keywords /etc/portage/package.license
