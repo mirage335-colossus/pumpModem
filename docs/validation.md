@@ -43,8 +43,43 @@ and asset inventories and stream downloads by asset ID, verifying server digests
 recorded hashes and sizes. Regression fixtures cover empty embedded inventories
 and multi-page asset responses. Its incomplete draft is retained for inspection.
 
-GitHub publication and subsequent certification results are recorded below when
-complete. The earlier artifact-only runs remain historical evidence of the
+The corrected [durable SDK reuse run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35845549918)
+passes on source `17199557113ea52b44e72ba40724f7a20c3a9dee`. Its SDK job takes
+**64 seconds**, skips every cold-build step, verifies the archived SDK after
+relocation with the glibc 2.36 host ceiling, and reports `published=false`,
+`reused=true`. Automatic cold-build parallelism resolves to **4 jobs** on this
+runner. Recipe `b8685ab239d7ac8650e6` remains unchanged. The durable `base` release
+contains the 244,502,346-byte compiled archive, 455,866,711-byte source archive
+and matching per-recipe checksum file; all three server digests match the
+qualified local seed. A fresh binary-only download also passes local validation.
+
+The corrected [publication run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35845553697)
+passes on that same exact source and publishes
+[`v001_00-2026-09-23-0453CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-23-0453CDT)
+as `experiment`, prerelease and never Latest. Total workflow elapsed time is
+**11m50s**. Both Linux builds, the Windows build, archive relocation/ABI checks,
+direct uploads and final inventory verification succeed before publication.
+GitHub reports **zero Actions artifacts** for both this publication and the
+successful base maintenance run. Independent local downloads verify all six assets: three app archives,
+metadata, notes and checksum inventory. The x86_64/ARM64/Windows downloads are
+15,724,956 / 14,506,413 / 6,502,297 bytes. The published x86_64 bundle contains
+both `libasound.so.2` and `libasound.so.2.0.0`.
+
+A local integration probe runs **two copies of this published Linux GUI**
+concurrently under a private Xvfb display. Both show “Listening for Fast modem
+training” and live receive plots at 48.0 kHz. Each uses the built-in ALSA file
+plugin over a null PCM, fed synthetic zero-valued mono PCM through a separate
+paced FIFO (960 frames every 20 ms). Both load the bundle's `libasound.so.2`;
+neither opens `/dev/snd`. Two mapped native windows have distinct process IDs.
+All probe children are stopped afterward. This establishes concurrent GUI and
+synthetic capture operation, not physical-device sharing. Local evidence is in
+`build/release-evidence-split/multi-instance-paced-probe/report.json` and
+`both-windows.png`.
+
+The separate [certification run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35846897564)
+starts only after publication, pins the release source and checksum inventory,
+and runs the unchanged source/GUI/calibration groups plus focused audio and
+copied-archive checks. Its final result is recorded below when complete. The earlier artifact-only runs remain historical evidence of the
 previous combined build/test/publication workflow.
 
 ## Manual portable release qualification — 23 September 2026 UTC

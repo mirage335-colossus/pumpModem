@@ -87,7 +87,8 @@ outcomes, source SHA and binary hashes in
 `certification-RUN_ID-attempt-ATTEMPT.json` and `.md`. Reports are added to the
 release, with links in its description. Missing, skipped, cancelled or failed
 required jobs cannot grant a pass. Repeated runs retain prior reports. An
-upload failure cannot promote a release. Drafts cannot be certified.
+upload failure cannot promote a release. Drafts cannot be certified. Older ad-hoc releases without this workflow's
+metadata, checksums and source-side certification tools are outside this path.
 
 For the Ubuntu 22.04 x86_64 baseline, set `linux_baseline=ubuntu-22.04`.
 Clear `experiment` for an ordinary release. `publish=false` still reserves a
