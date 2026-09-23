@@ -124,10 +124,21 @@ The separate optional SDK/Rev regression workflow retains small application
 artifacts for one day solely to test copies on other hosts. Those are not durable
 releases. Existing unrelated CI artifacts are unchanged.
 
-The earlier successful run spent **57 seconds** retrieving/verifying its SDK;
-the **46m59s** application job included the extensive tests. Separating those
-checks removes them from the publication path. A cold SDK build remains an
-occasional maintenance task, not work repeated for each application release.
+GitHub [limits each release asset to under 2 GiB](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases),
+while documenting no limit on aggregate release size or download bandwidth.
+The validated compiled SDK and source archives are approximately 233 MiB and
+435 MiB respectively. This design adds certification assets after publication,
+so it requires releases that allow later uploads; GitHub's optional
+[immutable releases](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository)
+prevent adding assets after publication. The helpers themselves never replace
+existing application binaries or per-run certification reports.
+
+The first successful split publication took **11m50s**, and the separate base
+maintenance job reused and verified its SDK in **64 seconds** without compiling
+it. The earlier **46m59s** application job included the extensive tests, which
+now run only in certification. A cold SDK build remains an occasional maintenance
+task, not work repeated for each application release. These timings are observed
+hosted-runner results, not guarantees.
 
 ## Choose the Linux baseline
 

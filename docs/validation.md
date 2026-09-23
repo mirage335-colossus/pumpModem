@@ -15,7 +15,7 @@ in the `base` release. The release, certification and SDK maintenance paths have
 no Actions artifact/cache dependency. Cold SDK compilation uses available CPUs
 through the existing SDK helper, leaving recipe `b8685ab239d7ac8650e6` unchanged.
 
-Local validation passes **43** release-helper, **27** SDK-storage and **22** certification tests and
+Local validation passes **43** release-helper, **27** SDK-storage and **23** certification tests and
 all **10/10** build suites. Packaging validation passes **3/3** suites, including
 a new sentinel proving that `dlopen("libasound.so.2")` resolves to the packaged
 library; the sentinel fails before the missing alias fix. Audio routing,
@@ -79,8 +79,31 @@ synthetic capture operation, not physical-device sharing. Local evidence is in
 The separate [certification run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35846897564)
 starts only after publication, pins the release source and checksum inventory,
 and runs the unchanged source/GUI/calibration groups plus focused audio and
-copied-archive checks. Its final result is recorded below when complete. The earlier artifact-only runs remain historical evidence of the
-previous combined build/test/publication workflow.
+copied-archive checks. All **10** published-Linux compatibility jobs pass.
+The Windows job builds successfully but `gui_legacy_live` fails after 14.89
+seconds with its existing generic timeout. Later Windows tests and its published
+archive qualification are consequently skipped; this attempt cannot grant a
+passing certification. The binaries remain available as an experimental release.
+
+That fixture and its controller/session sources are identical to the previously
+passing release. Eight local diagnostic trials with every fixture sleep rounded
+up to 16 ms still pass in approximately 5.1 seconds, so coarse timer resolution
+alone does not reproduce this failure. The test now names each wait stage and
+reports synchronized sample counters and controller state on timeout. Its
+assertions, sleeps and ten-second per-stage deadlines remain unchanged. This
+diagnostic-only change is for later source revisions; the published release and
+its source-pinned certification are not modified. The final local shared GUI
+selection passes **32/32** in **104.16 seconds** with `./build.sh test gui --cli`
+in the native audio-validation tree. An initial link failure came from stale
+cached static OpenSSL paths in that non-portable tree; clearing those library
+cache entries restores its configured shared-OpenSSL selection, with no source
+change. A certification-helper
+regression also exercises a failed first attempt followed by a successful retry,
+retaining both reports, their history and the same binary/source identities.
+Experimental retries remain prereleases and never Latest.
+
+The earlier artifact-only runs remain historical evidence of the previous
+combined build/test/publication workflow.
 
 ## Manual portable release qualification — 23 September 2026 UTC
 

@@ -257,6 +257,68 @@ class CertificationTests(unittest.TestCase):
         edit = next(i for i, args in enumerate(self.calls) if args[:2] == ['release', 'edit'])
         self.assertLess(upload, edit)
 
+    def test_failed_attempt_then_successful_retry_preserves_evidence_and_identity(self):
+        original_files = dict(self.files)
+        for experiment in (False, True):
+            with self.subTest(experiment=experiment):
+                self.files = dict(original_files)
+                self.metadata.update(experiment=experiment, title='experiment' if experiment else self.tag)
+                self.published.update(prerelease=experiment, name=self.metadata['title'],
+                                      body=certify.release.CERTIFICATION_PENDING + '\n\nOriginal release notes')
+                self.refresh_metadata()
+                original_assets = dict(self.files)
+                self.calls.clear()
+                self.uploads.clear()
+                self.edits.clear()
+
+                # Persist uploads and edits like GitHub, so the retry discovers
+                # the first attempt's real asset inventory and release body.
+                def persist(args, **options):
+                    result = self.gh(args, **options)
+                    if args[:2] == ['release', 'upload']:
+                        self.files.update(self.uploads)
+                        self.refresh_assets()
+                    elif args[:2] == ['release', 'edit']:
+                        self.published['body'] = self.edits[-1][1]
+                    return result
+
+                failed_jobs = dict.fromkeys(certify.REQUIRED_JOBS, 'success')
+                failed_jobs['windows-tests'] = 'failure'
+                with patch.object(certify, 'gh', side_effect=persist):
+                    failed = certify.record(self.repository, self.tag, '789',
+                                            self.results(jobs=failed_jobs), '1')
+                    first_reports = dict(self.uploads)
+                    passed = certify.record(self.repository, self.tag, '789', self.results(), '2')
+
+                self.assertEqual((failed['status'], passed['status']), ('failed', 'passed'))
+                for field in ('source_sha', 'inventory_sha256', 'assets'):
+                    self.assertEqual(failed[field], passed[field])
+                self.assertEqual(set(self.uploads), {
+                    f'certification-789-attempt-{attempt}.{extension}'
+                    for attempt in (1, 2) for extension in ('json', 'md')})
+                for name, data in {**original_assets, **first_reports}.items():
+                    self.assertEqual(self.files[name], data)
+                first_json = json.loads(self.files['certification-789-attempt-1.json'])
+                self.assertEqual(first_json['status'], 'failed')
+                self.assertEqual(first_json['jobs']['windows-tests'], 'failure')
+                body = self.published['body']
+                self.assertIn('**Certification passed.**', body)
+                self.assertIn('Original release notes', body)
+                self.assertIn('attempt 1', body)
+                self.assertIn('attempt 2', body)
+                self.assertIn('**failed**', body)
+                self.assertIn('**passed**', body)
+                self.assertIn('--latest=false', self.edits[0][0])
+                retry_flags = self.edits[1][0]
+                if experiment:
+                    self.assertIn('--latest=false', retry_flags)
+                    self.assertNotIn('--latest=true', retry_flags)
+                    self.assertIn('--prerelease', retry_flags)
+                    self.assertEqual(retry_flags[retry_flags.index('--title') + 1], 'experiment')
+                else:
+                    self.assertIn('--latest=true', retry_flags)
+                    self.assertIn('--prerelease=false', retry_flags)
+
     def test_status_replaces_pending_notice_and_preserves_prose_and_history(self):
         history = 'Certification run 100: **passed** ([report](https://example.test/old.md)).'
         self.published['body'] = certify.release.CERTIFICATION_PENDING + '\n\nOriginal details\n\n' + history
