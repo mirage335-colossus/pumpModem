@@ -323,11 +323,44 @@ what remains; do not describe the change as fully validated or the release as
 certified. See [release validation](releases.md#diagnose-a-branch-before-full-validation)
 for the separate publication/certification sequence and source-pinning rules.
 
+### Sanitizer throughput scope
+
+Native CI's manual `sanitizer_realtime` checkbox defaults to **false**. Only its
+instrumented Debug job omits `fast_session` and `gui_fast_live` by default. Both
+feed audio at wall-clock speed, so sanitizer overhead can exhaust the bounded
+capture queue before decoding catches up. This is not evidence of a hardware-only
+fault. The omission removes these scenarios' instrumented end-to-end coverage;
+the job notice and summary name it explicitly. No error is converted to success.
+
+Release jobs still require both tests, and all other sanitizer tests remain
+required. Calibration, source contract checks and release certification are
+unchanged. Include the two instrumented checks explicitly with:
+
+```sh
+gh workflow run ci.yml --ref REF -f devfast=false -f sanitizer_realtime=true
+```
+
+The checkbox has no effect with `devfast=true`. Local `./build.sh sanitize`
+selection is unchanged. To request just these two cases in an already configured
+`build/sanitize` tree, rebuild their executables first:
+
+```sh
+cmake --build build/sanitize --target test_fast_session test_gui_fast_live --parallel 2
+ctest --test-dir build/sanitize --output-on-failure --parallel 1 \
+  -R '^(fast_session|gui_fast_live)$' --no-tests=error
+```
+
+Failures remain fatal when requested. Keep the production FIFO, physical-end and
+pending-content assertions intact; do not classify unrelated sanitizer findings
+as performance warnings.
+
 ## Focused development diagnostics
 
 The manual `devfast` checkbox in native CI (`ci.yml`), SDK qualification
 (`sdk.yml`) and release certification (`certify.yml`) defaults to **false**.
-Default manual dispatches retain their full suites and calibration. With `devfast=true`,
+Default manual dispatches retain calibration and their normal regression
+selections, with the two instrumented real-time cases opt-in as described above.
+With `devfast=true`,
 each workflow defaults to the same small Legacy diagnostic on Linux and
 Windows: compile the production Legacy controller/session and existing
 `gui_legacy_live` fixture and deterministic `gui_legacy_poll` cancellation/error
