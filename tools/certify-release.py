@@ -158,7 +158,7 @@ def prepare(repository, tag, directory, expected_inventory=None):
         server_digest = assets[name].get('digest')
         if server_digest and server_digest != 'sha256:' + expected:
             raise ValueError(f'Published checksum differs from GitHub asset digest: {name}')
-    if metadata['tag'] != tag or tag_commit(repository, tag) != metadata['source_sha']:
+    if metadata['tag'] != tag or tag_commit(repository, tag) != release.tag_revision(metadata):
         raise ValueError('Release source commit or tag differs from its metadata')
     if metadata['experiment'] and (published.get('name') != 'experiment' or not published.get('prerelease')):
         raise ValueError('Experimental release lost its exact title or prerelease designation')
@@ -317,6 +317,10 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
                 } for target, name in names.items()})
         if metadata['schema'] == 3:
             evidence['apt_assets'] = {name: state['inventory'][name] for name in sorted(release.apt_assets(metadata))}
+            evidence['packager_sha'] = metadata['packager_sha']
+            evidence['tag_sha'] = release.tag_revision(metadata)
+            if 'repackaged_from' in metadata:
+                evidence['repackaged_from'] = metadata['repackaged_from']
         stem = f'certification-{run_id}-attempt-{run_attempt}'
         if any(stem + suffix in state['assets'] for suffix in ('.json', '.md')):
             raise ValueError('Certification evidence already exists; never overwrite a prior run')
@@ -431,7 +435,7 @@ def main(argv=None):
         if args.command == 'record' and result['status'] != 'passed':
             return 1
     except (ValueError, KeyError, OSError, RuntimeError, subprocess.CalledProcessError, tarfile.TarError, zipfile.BadZipFile) as error:
-        parser.exit(1, f'certification: {error}\n')
+        parser.exit(1, f'certification: {release.failure_message(error)}\n')
     return 0
 
 

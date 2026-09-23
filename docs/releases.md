@@ -131,13 +131,15 @@ ChromeOS Linux container or VelvetOS installation can use the matching Debian
 architecture; packaging does not establish physical Chromebook audio/graphics
 compatibility or change Rev's OpenGL requirement.
 
-Choose a published release with APT assets and obtain its full signing
-fingerprint from the maintainer. Bootstrap the public key and source file from
-that exact tag, replacing the two uppercase placeholders:
+Choose a published release with APT assets. The repository's signing key,
+configured on 23 September 2026, has primary fingerprint
+`8C3DD4A727C83B93374C993B1F94BC4CEC2DF307`. Bootstrap the public key and source
+file from that exact tag, replacing `RELEASE_TAG` below. Check this fingerprint
+against a trusted copy of the maintainer's documentation before initial setup:
 
 ```sh
 tag=RELEASE_TAG
-fingerprint=TRUSTED_FINGERPRINT
+fingerprint=8C3DD4A727C83B93374C993B1F94BC4CEC2DF307
 base="https://github.com/mirage335-colossus/pumpModem/releases/download/$tag"
 download_dir=$(mktemp -d)
 curl --fail --location "$base/datapump-archive-keyring.gpg" -o "$download_dir/datapump.gpg"
@@ -209,6 +211,9 @@ gh run watch RUN_ID --exit-status
 
 The six original archive byte streams stay unchanged. New metadata records
 their source revision, original tag/inventory hash and packaging-tool revision.
+The new Git tag identifies the packaging-tool revision; `source_sha` identifies
+the application revision whose binaries were reused. Certification builds the
+recorded application revision and checks both identities.
 The old release and its reports remain intact. `publish=false` leaves the new
 release as a draft after signature/payload checks; public APT installation
 cannot run against a draft. The default `publish=true` publishes the experiment

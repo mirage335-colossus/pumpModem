@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -303,6 +304,11 @@ def application_names(metadata):
             for target, details in application_targets(metadata).items()}
 
 
+def tag_revision(metadata):
+    """A schema-3 tag identifies its packaging recipe; source_sha identifies app bytes."""
+    return metadata['packager_sha'] if metadata['schema'] == 3 else metadata['source_sha']
+
+
 def apt_tool():
     """Load the Linux APT packager only for schema-3 release operations."""
     spec = importlib.util.spec_from_file_location('datapump_apt_release', Path(__file__).with_name('apt-release.py'))
@@ -416,6 +422,22 @@ def gh(arguments, *, check=True):
     return subprocess.run(['gh', *arguments], check=check, text=True, capture_output=True)
 
 
+def failure_message(error):
+    """Preserve actionable GitHub errors without printing auth values or response bodies."""
+    if (not isinstance(error, subprocess.CalledProcessError) or not isinstance(error.cmd, (list, tuple))
+            or not error.cmd or error.cmd[0] != 'gh'):
+        return str(error)
+    details = error.stderr or 'GitHub CLI returned no error details'
+    if isinstance(details, bytes):
+        details = details.decode('utf-8', errors='replace')
+    for name in ('GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN'):
+        value = os.environ.get(name)
+        if value:
+            details = details.replace(value, '[REDACTED]')
+    details = re.sub(r'\b(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+)\b', '[REDACTED]', details)
+    return f'GitHub CLI failed with exit {error.returncode}: {details.strip()[:2000]}'
+
+
 def require_absent(endpoint):
     response = gh(['api', '--include', endpoint], check=False)
     if response.returncode == 0:
@@ -460,11 +482,11 @@ def draft_info(metadata, repository):
             or type(info.get('id')) is not int or info['id'] <= 0):
         raise ValueError('Release must be the matching reserved draft with its original title and experiment status')
     reference = json.loads(gh(['api', f'repos/{repository}/git/ref/tags/{tag}']).stdout)
-    if reference.get('object') != {'type': 'commit', 'sha': metadata['source_sha']}:
+    if reference.get('object') != {'type': 'commit', 'sha': tag_revision(metadata)}:
         # GitHub also includes an object URL; only type and SHA define identity.
         obj = reference.get('object', {})
-        if obj.get('type') != 'commit' or obj.get('sha') != metadata['source_sha']:
-            raise ValueError('Reserved release tag does not identify the exact source commit')
+        if obj.get('type') != 'commit' or obj.get('sha') != tag_revision(metadata):
+            raise ValueError('Reserved release tag does not identify the exact source commit or packaging revision')
     assets = api_pages(f'repos/{repository}/releases/{info["id"]}/assets?per_page=100')
     inventory = {asset['name']: asset for asset in assets}
     required = support_files(metadata)
@@ -590,10 +612,10 @@ def create_draft(metadata, repository, notes):
     require_absent(f'repos/{repository}/releases/tags/{tag}')
     require_absent(f'repos/{repository}/git/ref/tags/{tag}')
     gh(['api', '--method', 'POST', f'repos/{repository}/git/refs',
-        '-f', f'ref=refs/tags/{tag}', '-f', f'sha={metadata["source_sha"]}'])
+        '-f', f'ref=refs/tags/{tag}', '-f', f'sha={tag_revision(metadata)}'])
     flags = ['--prerelease', '--latest=false'] if metadata['experiment'] else ['--latest=false']
     gh(['release', 'create', tag, '--repo', repository,
-        '--target', metadata['source_sha'], '--title', metadata['title'],
+        '--target', tag_revision(metadata), '--title', metadata['title'],
         '--notes-file', str(notes), '--draft', '--verify-tag', *flags])
 
 
@@ -656,8 +678,8 @@ def repackage(source_tag, repository, directory, *, version='', run_id, run_atte
             if assets[name].get('digest') != 'sha256:' + expected:
                 raise ValueError(f'Source inventory differs from GitHub asset digest: {name}')
         reference = json.loads(gh(['api', f'repos/{repository}/git/ref/tags/{source_tag}']).stdout).get('object', {})
-        if reference.get('type') != 'commit' or reference.get('sha') != original['source_sha']:
-            raise ValueError('Source release tag does not identify its recorded source commit')
+        if reference.get('type') != 'commit' or reference.get('sha') != tag_revision(original):
+            raise ValueError('Source release tag does not identify its recorded source or packaging commit')
         metadata = make_metadata(source_sha=original['source_sha'], run_id=run_id, run_attempt=run_attempt,
                                  version=version or original['version'], experiment=True,
                                  linux_baseline=original['linux_baseline'], cmake_version=original['project_version'],
@@ -787,7 +809,7 @@ def main(argv=None):
         else:
             value = publish(args.directory, args.repo, publish_now=args.publish)
     except (ValueError, OSError, RuntimeError, subprocess.CalledProcessError) as error:
-        parser.exit(1, f'release: {error}\n')
+        parser.exit(1, f'release: {failure_message(error)}\n')
     print(json.dumps(value, sort_keys=True))
 
 

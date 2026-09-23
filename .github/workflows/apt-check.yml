@@ -44,7 +44,7 @@ jobs:
           test "$(dpkg --print-architecture)" = "$EXPECTED_ARCH"
           apt-get update
           apt-get install -y --no-install-recommends ca-certificates git gh python3 gnupg \
-            xvfb xauth fonts-dejavu-core libgl1-mesa-dri libglx-mesa0 libasound2-plugins
+            xvfb xauth
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false

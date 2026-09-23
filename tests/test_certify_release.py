@@ -649,6 +649,25 @@ class AptCertificationTests(CertificationFixture, unittest.TestCase):
             self.files[name] = data
         self.apt_tool.verify.assert_not_called()
 
+    def test_repackaged_tag_pins_packager_while_certification_pins_application_source(self):
+        self.metadata.update(packager_sha='b' * 40, experiment=True, title='experiment',
+                             repackaged_from={'tag': 'original', 'inventory_sha256': 'c' * 64})
+        self.published.update(prerelease=True, name='experiment')
+        self.commit = self.metadata['packager_sha']
+        self.refresh_metadata()
+        state = self.prepare()
+        self.assertEqual(certify.output_values(state, None)['source_sha'], 'a' * 40)
+        evidence = self.record()
+        self.assertEqual(evidence['source_sha'], 'a' * 40)
+        self.assertEqual(evidence['packager_sha'], 'b' * 40)
+        self.assertEqual(evidence['tag_sha'], 'b' * 40)
+        self.assertEqual(evidence['repackaged_from'], self.metadata['repackaged_from'])
+        self.assertEqual(evidence['status'], 'passed')
+        self.assertIn('--latest=false', self.edits[-1][0])
+        self.commit = self.metadata['source_sha']
+        with self.assertRaisesRegex(ValueError, 'source commit or tag'):
+            certify.prepare(self.repository, self.tag, self.root / 'wrong-tag')
+
     def test_download_apt_verifies_pinned_assets_and_original_linux_payloads(self):
         state = certify.download_apt(self.repository, self.tag, self.root / 'apt',
                                      digest(self.files['SHA256SUMS.txt']), 'A' * 40)

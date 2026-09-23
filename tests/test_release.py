@@ -114,6 +114,14 @@ class MetadataTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Unknown portable'):
                 release.target_platform(value, invalid)
 
+    def test_schema3_tag_identifies_packager_without_changing_application_source(self):
+        value = metadata(schema=3, packager_sha='b' * 40, experiment=True,
+                         repackaged_from={'tag': 'previous', 'inventory_sha256': 'c' * 64})
+        self.assertEqual(release.tag_revision(value), 'b' * 40)
+        self.assertEqual(value['source_sha'], 'a' * 40)
+        for schema in (1, 2):
+            self.assertEqual(release.tag_revision(metadata(schema=schema)), 'a' * 40)
+
     def test_default_and_explicit_version_and_experiment(self):
         default = metadata()
         self.assertEqual(default['tag'], 'v0.7.2-2026-09-22-0252CDT')
@@ -604,6 +612,39 @@ class PublicationTests(ReleaseFixture, unittest.TestCase):
         run.assert_called_once_with(['gh', 'release', 'view', 'literal'], check=True,
                                     text=True, capture_output=True)
 
+    def test_repackaged_release_tags_current_recipe_instead_of_old_application_commit(self):
+        value = metadata(schema=3, experiment=True, packager_sha='b' * 40,
+                         repackaged_from={'tag': 'previous', 'inventory_sha256': 'c' * 64})
+        self.calls = []
+        with patch.object(release, 'gh', side_effect=self.github):
+            release.create_draft(value, 'owner/repository', self.notes)
+        reference = next(call for call in self.calls if call[:3] == ['api', '--method', 'POST'])
+        self.assertIn('sha=' + 'b' * 40, reference)
+        self.assertNotIn('sha=' + 'a' * 40, reference)
+        create = self.calls[-1]
+        self.assertEqual(create[create.index('--target') + 1], 'b' * 40)
+        self.assertIn('--latest=false', create)
+        self.assertIn('--prerelease', create)
+
+    def test_cli_reports_github_stderr_without_tokens_command_values_or_stdout(self):
+        self.publish_fixture()
+        error = subprocess.CalledProcessError(1, ['gh', 'api', 'request-value-not-to-log'],
+                    output='response-body-not-to-log',
+                    stderr='gh: Resource not accessible by integration (HTTP 403) token=fixture-secret github_pat_secret_value ghp_anothersecret')
+        with patch.dict(release.os.environ, {'GH_TOKEN': 'fixture-secret'}), \
+                patch.object(release, 'publish', side_effect=error), \
+                patch('sys.stderr', new_callable=io.StringIO) as stderr:
+            with self.assertRaises(SystemExit):
+                release.main(['publish', '--directory', str(self.output), '--repo', 'owner/repository'])
+        text = stderr.getvalue()
+        self.assertIn('Resource not accessible by integration (HTTP 403)', text)
+        self.assertIn('[REDACTED]', text)
+        for secret in ('fixture-secret', 'github_pat_secret_value', 'ghp_anothersecret',
+                       'request-value-not-to-log', 'response-body-not-to-log'):
+            self.assertNotIn(secret, text)
+        self.assertIn('HTTP 422', release.failure_message(subprocess.CalledProcessError(
+            1, ['gh', 'api'], stderr=b'gh: Reference already exists (HTTP 422)')))
+
 
 class AssetDownloadTests(unittest.TestCase):
     def setUp(self):
@@ -995,6 +1036,37 @@ class StagedPublicationTests(ReleaseFixture, unittest.TestCase):
                                   apt_signing_key=Path('key'), apt_signing_fingerprint='A' * 40)
         tool.build.assert_not_called()
         publish.assert_not_called()
+
+    def test_schema3_draft_checks_packager_tag_but_retains_application_source(self):
+        self.backend_inputs(schema=3)
+        value = metadata(schema=3, experiment=True, packager_sha='b' * 40,
+                         repackaged_from={'tag': 'previous', 'inventory_sha256': 'c' * 64})
+        release.write_json(self.metadata, value)
+        release.reserve(self.metadata, self.notes, 'owner/repository')
+        self.assertEqual(self.reference, value['packager_sha'])
+        self.assertEqual(release.draft_info(value, 'owner/repository').keys(), release.support_files(value))
+        self.reference = value['source_sha']
+        with self.assertRaisesRegex(ValueError, 'packaging revision'):
+            release.draft_info(value, 'owner/repository')
+
+    def test_repackage_accepts_prior_schema3_tag_at_its_packager_commit(self):
+        self.prepare_repackage_source()
+        tool = apt_fixture()
+        first = self.root / 'first-repackage'
+        second = self.root / 'second-repackage'
+        with patch.object(release, 'apt_tool', return_value=tool), patch.object(release, 'publish'):
+            value = release.repackage(self.value['tag'], 'owner/repository', first, version='vfirst',
+                                      run_id='456', packager_sha='b' * 40,
+                                      apt_signing_key=Path('key'), apt_signing_fingerprint='A' * 40)
+            self.remote = {path.name: path.read_bytes() for path in first.iterdir()}
+            self.reference = value['packager_sha']
+            self.info['tag_name'] = value['tag']
+            result = release.repackage(value['tag'], 'owner/repository', second, version='vsecond',
+                                       run_id='789', packager_sha='c' * 40,
+                                       apt_signing_key=Path('key'), apt_signing_fingerprint='A' * 40)
+        self.assertEqual(result['source_sha'], 'a' * 40)
+        self.assertEqual(result['packager_sha'], 'c' * 40)
+        self.assertEqual(result['repackaged_from']['tag'], value['tag'])
 
 
 if __name__ == '__main__':
