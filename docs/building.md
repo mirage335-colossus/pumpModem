@@ -76,8 +76,15 @@ objects. This dependency handoff uses neither Actions cache nor artifacts.
 
 Native sanitizer/CLI/Rev combinations use distinct directories. `--jobs N`
 controls build and test concurrency (default 2); `DATAPUMP_JOBS` or
-`CMAKE_BUILD_PARALLEL_LEVEL` can set that default. Prefer a modest limit on
-memory-constrained hosts. Use `--stop-on-failure` with `test` or `sanitize` for early CI feedback after a
+`CMAKE_BUILD_PARALLEL_LEVEL` can set that default. `--build-jobs N` overrides
+compilation concurrency independently, so a large CI runner can compile with all
+available cores while tests retain their established concurrency:
+
+```sh
+./build.sh test gui --build-jobs "$(nproc)" --jobs 2
+```
+
+Prefer a modest limit on memory-constrained hosts. Use `--stop-on-failure` with `test` or `sanitize` for early CI feedback after a
 failure; successful runs still execute the entire selected group.
 Native GUI tests must have a display, preferably an
 isolated Xvfb session; `./build.sh test native` builds and runs them explicitly.
@@ -215,6 +222,15 @@ duplicate push, PR and manual workflows; a full manual dispatch after temporary
 Do not rerun an expensive unchanged suite after recording a pass unless later
 changes or failures invalidate that evidence. Compile with available cores, but
 keep timing-sensitive test concurrency at its documented limits.
+
+Manual workflows expose `linux_runner` and `windows_runner` dropdowns for the
+organization's larger x86-64 runners. Agents can pass those same names with
+`gh workflow run -f linux_runner=ubuntu-latest-l -f windows_runner=windows-latest-l`.
+Use the [runner selection guide](releases.md#runner-selection-and-build-parallelism)
+to choose and verify access before a long run. `ci.yml` with `devfast=true` and
+`diagnostic=runner-capacity` checks routing, visible CPUs and small production
+compiler fixtures without building SDKs or running calibration. This routing
+check does not replace applicable source regression or release certification.
 
 For a completed branch candidate, use the full workflow, and SDK qualification
 when the change touches its supported toolchains or portable packages:

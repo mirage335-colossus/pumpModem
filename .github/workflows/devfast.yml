@@ -3,6 +3,14 @@ name: Focused development diagnostics
 on:
   workflow_call:
     inputs:
+      linux_runner:
+        description: 'Linux x86_64 runner label'
+        type: string
+        default: ubuntu-24.04
+      windows_runner:
+        description: 'Windows x64 runner label'
+        type: string
+        default: windows-2022
       repetitions:
         description: 'Consecutive focused passes required (1–20); stop at the first failure'
         type: number
@@ -17,11 +25,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-2022]
+        os:
+          - "${{ inputs.linux_runner || 'ubuntu-24.04' }}"
+          - "${{ inputs.windows_runner || 'windows-2022' }}"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     env:
       DIAGNOSTIC_REPETITIONS: ${{ inputs.repetitions }}
+      UseMultiToolTask: 'true'
+      EnforceProcessCountAcrossBuilds: 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -48,7 +60,8 @@ jobs:
       - name: Build only the diagnostic with available cores
         shell: pwsh
         run: |
-          cmake --build build/devfast --config Release --parallel ([Environment]::ProcessorCount)
+          $buildJobs = if ($IsWindows) { $env:NUMBER_OF_PROCESSORS } else { & nproc }
+          cmake --build build/devfast --config Release --parallel $buildJobs
           if ($LASTEXITCODE -ne 0) { throw 'Focused build failed' }
       - name: Repeat the focused test serially; stop on first failure
         shell: pwsh

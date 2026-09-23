@@ -245,6 +245,60 @@ qualification also retain extensive regression coverage. A cold SDK build remain
 an occasional maintenance task, not work repeated for each application release.
 These timings are observed hosted-runner results, not guarantees.
 
+## Runner selection and build parallelism
+
+Manual portable release, native CI, SDK qualification, base maintenance and
+certification workflows expose two runner dropdowns. The same input names work
+through GitHub CLI for agents and maintainers:
+
+| Input | Choices | Default |
+| --- | --- | --- |
+| `linux_runner` | `ubuntu-24.04`, `ubuntu-latest-m`, `ubuntu-latest-l`, `ubuntu-latest-h` | `ubuntu-24.04` |
+| `windows_runner` | `windows-2022`, `windows-latest-l`, `windows-latest-h` | `windows-2022` |
+
+The larger labels are the runners configured by `mirage335-colossus`. Select one
+explicitly for faster builds; automatic push/PR runs keep the standard defaults.
+The selections reach reusable workflows as well as the main jobs. Small helper,
+metadata and report jobs stay on standard runners. ARM64 builds and diagnostics
+stay on `ubuntu-24.04-arm`; selecting a larger x86-64 runner must not produce an
+x86-64 executable under an ARM64 download name. Existing Linux baseline
+containers, SDK recipes and portable ABI ceilings remain unchanged.
+
+Check access and actual resources with the short capacity diagnostic before
+starting expensive work on a newly configured runner:
+
+```sh
+gh workflow run ci.yml --ref codex/portable-releases \
+  -f devfast=true -f diagnostic=runner-capacity \
+  -f linux_runner=ubuntu-latest-l -f windows_runner=windows-latest-l
+
+gh workflow run release.yml --ref codex/portable-releases \
+  -f experiment=true -f publish=false -f linux_baseline=bookworm-sdk \
+  -f linux_runner=ubuntu-latest-h -f windows_runner=windows-latest-h
+```
+
+Use the intended source branch as `--ref`. The capacity diagnostic records the
+selected label, actual runner, architecture, available CPUs and memory. It
+compiles small existing production fixtures: Legacy on the Linux Ubuntu 22.04
+baseline and Rev modules with MSVC on Windows. It does not build an SDK, create
+release assets or claim certification. A queued job has not demonstrated runner
+access; the organization must grant this repository access to the selected label.
+
+Compilation uses `nproc` on Linux and `NUMBER_OF_PROCESSORS` on Windows. The
+build wrapper's `--build-jobs` lets SDK and certification builds use those cores
+while test `--jobs` stays at two, or one for existing serial checks. Certifying
+older immutable releases whose wrapper lacks this option retains their original
+two-job behavior. Windows jobs enable
+[MSBuild MultiToolTask with a process limit shared across projects](https://devblogs.microsoft.com/cppblog/cpp-build-throughput-investigation-and-tune-up/)
+so source files within a project can compile concurrently without multiplying
+the CPU limit for every project. Module dependencies and link steps still impose
+serial work; larger runners do not guarantee a particular elapsed time.
+
+Base reuse remains the first optimization. Cold SDK builds use available cores
+when base maintenance's `jobs=0`; normal application builds continue retrieving
+the exact existing base instead of rebuilding it. Larger runners do not change
+`devfast=false` defaults, test assertions or release certification requirements.
+
 ## Windows dependency base
 
 Select `platform=windows` in [Maintain base SDK](../.github/workflows/sdk-base.yml).
@@ -351,7 +405,7 @@ Read the attached report before describing a particular release as tested.
 | Linux x86_64, `bookworm-sdk` | SDK, glibc 2.36 | Debian 12 and 13; Ubuntu 24.04 and 26.04; Arch Linux |
 | Linux x86_64, `ubuntu-22.04` | Ubuntu 22.04, glibc 2.35 | Debian 12 and 13; Ubuntu 22.04, 24.04 and 26.04; Arch Linux |
 | Linux aarch64 | Ubuntu 22.04, glibc 2.35 | Debian 12 and 13; Ubuntu 22.04, 24.04 and 26.04 |
-| Windows x64 | Visual Studio 2022 with static CRT | Windows Server 2022 hosted-runner tests and archive relocation |
+| Windows x64 | Visual Studio 2022 with static CRT | Selected Windows x64 hosted runner and archive relocation; the default is `windows-2022` |
 
 Linux package verification audits all shipped ELF libraries for the selected
 glibc ceiling and checks relocation, checksums, CLI operation and the GUI
@@ -386,8 +440,10 @@ outside the hosted tests.
 
 Microsoft documents Visual Studio 2022's ability to build desktop applications
 for [Windows 10 and 11](https://learn.microsoft.com/en-us/visualstudio/releases/2022/compatibility?view=vs-2022).
-The hosted runner uses Windows Server 2022. Windows 10 and Windows 11 client
-installations are not directly tested by this workflow.
+The default `windows-2022` runner uses Windows Server 2022. Organization runner
+labels may select another image; consult that run's image/toolchain logs.
+Windows 10 and Windows 11 client installations are not directly tested by this
+workflow.
 
 All Linux GUI users still need X11 or XWayland, fonts and appropriate system
 drivers. Live audio depends on host devices, ALSA configuration and plugins;

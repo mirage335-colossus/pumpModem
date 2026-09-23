@@ -24,7 +24,8 @@ DISPLAY_WARNING_POLICY = ('Display cadence warnings do not fail certification; '
                           'content/physical/pending checks remain mandatory.')
 SCOPE = ('Hosted source contract, GUI and packaging tests, plus checks of the exact '
          'published archives. Linux containers share the runner kernel; Windows '
-         'uses the hosted Windows Server runner. Physical audio devices, Raspberry '
+         'uses the selected Windows x64 hosted runner, with its image recorded in '
+         'the workflow logs. Physical audio devices, Raspberry '
          'Pi and Chromebook hardware, and Windows 10/11 client installations are '
          'not qualified by this report.')
 
@@ -40,7 +41,7 @@ def required_coverage(metadata):
                             'groups': ['build', 'contract', 'gui', 'packaging']},
             'linux-aarch64': {'environment': 'Ubuntu 22.04',
                              'groups': ['build', 'contract', 'gui', 'packaging']},
-            'windows-x86_64': {'environment': 'Windows Server 2022 hosted runner',
+            'windows-x86_64': {'environment': 'Selected Windows x64 hosted runner',
                               'groups': ['contract', 'gui', 'packaging']},
         },
         'published_archives': {
@@ -48,7 +49,7 @@ def required_coverage(metadata):
                             'checks': checks + ['ELF ABI ceiling'], 'glibc_max': '2.36' if sdk else '2.35'},
             'linux-aarch64': {'environments': linux + ['Ubuntu 22.04'],
                              'checks': checks + ['ELF ABI ceiling'], 'glibc_max': '2.35'},
-            'windows-x86_64': {'environments': ['Windows Server 2022 hosted runner'], 'checks': checks},
+            'windows-x86_64': {'environments': ['Selected Windows x64 hosted runner'], 'checks': checks},
         },
     }
     coverage = {section: {} for section in platforms}

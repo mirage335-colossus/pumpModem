@@ -382,8 +382,13 @@ class CertificationTests(CertificationFixture, unittest.TestCase):
                 self.assertNotIn('Arch Linux', arm['environments'])
                 self.assertEqual(arm['glibc_max'], '2.35')
                 self.assertEqual(scope['source_tests']['windows-x86_64']['environment'],
-                                 'Windows Server 2022 hosted runner')
+                                 'Selected Windows x64 hosted runner')
+                self.assertEqual(scope['published_archives']['windows-x86_64']['environments'],
+                                 ['Selected Windows x64 hosted runner'])
                 report = self.uploads['certification-789-attempt-2.md'].decode()
+                self.assertNotIn('Windows Server 2022', report)
+                self.assertIn('image recorded in the workflow logs', report)
+                self.assertIn('Windows 10/11 client installations are not qualified', report)
                 self.assertIn(expected_url + '/attempts/2', report)
                 self.assertIn('Source suites rebuild the recorded release commit', report)
                 self.assertIn('Archive checks run the published bytes', report)
@@ -539,6 +544,11 @@ class BackendCertificationTests(CertificationFixture, unittest.TestCase):
                         item = evidence['required_coverage'][section][target]
                         self.assertEqual(item['gui_backend'], identity['gui_backend'])
                         self.assertEqual(item['platform'], identity['platform'])
+                        if identity['platform'] == 'windows-x86_64':
+                            if section == 'source_tests':
+                                self.assertEqual(item['environment'], 'Selected Windows x64 hosted runner')
+                            else:
+                                self.assertEqual(item['environments'], ['Selected Windows x64 hosted runner'])
                     self.assertIn('Source `' + target + '`', report)
                     self.assertIn('Published `' + target + '`', report)
                 for backend in ('fltk', 'rev'):

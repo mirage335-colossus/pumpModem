@@ -1,0 +1,75 @@
+name: Focused runner capacity check
+
+on:
+  workflow_call:
+    inputs:
+      linux_runner:
+        type: string
+        default: ubuntu-24.04
+      windows_runner:
+        type: string
+        default: windows-2022
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Runner and baseline compiler (${{ inputs.linux_runner }})
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+    container: ubuntu:22.04
+    timeout-minutes: 5
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      SELECTED_RUNNER: ${{ inputs.linux_runner }}
+    steps:
+      - name: Check architecture and CPU availability inside the build baseline
+        run: |
+          test "$(uname -m)" = x86_64
+          {
+            echo "Selected runner: $SELECTED_RUNNER; actual: $RUNNER_NAME"
+            echo "Build baseline: Ubuntu 22.04; architecture: $(uname -m); compile jobs: $(nproc)"
+            awk '/MemTotal/ {print "Host memory: " $2 " KiB"}' /proc/meminfo
+            echo 'Focused compiler/routing check only; no SDK build, packages or certification.'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git cmake ninja-build g++
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Compile the small production Legacy fixture using available cores
+        run: |
+          cmake -S tests/devfast -B build/runner-capacity -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/runner-capacity --target test_gui_legacy_poll --parallel "$(nproc)"
+          ctest --test-dir build/runner-capacity --output-on-failure -R '^gui_legacy_poll$' --parallel 1 --no-tests=error
+
+  windows:
+    name: Runner and module compiler (${{ inputs.windows_runner }})
+    runs-on: ${{ inputs.windows_runner || 'windows-2022' }}
+    timeout-minutes: 5
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      SELECTED_RUNNER: ${{ inputs.windows_runner }}
+      UseMultiToolTask: 'true'
+      EnforceProcessCountAcrossBuilds: 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check architecture and report effective compilation resources
+        run: |
+          if ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64') { throw 'An x64 Windows runner is required' }
+          $memoryGiB = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 1)
+          $details = "Selected runner: $env:SELECTED_RUNNER; actual: $env:RUNNER_NAME`nImage: $env:ImageOS/$env:ImageVersion; compile jobs: $env:NUMBER_OF_PROCESSORS; memory: $memoryGiB GiB`nMultiToolTask and shared process cap enabled. Focused compiler/routing check only; no dependency build, packages or certification."
+          $details
+          $details >> $env:GITHUB_STEP_SUMMARY
+      - name: Compile and test actual Rev modules with bounded MSBuild parallelism
+        run: |
+          cmake -S tests/rev-style-probe -B build/runner-capacity -G 'Visual Studio 17 2022' -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'Module probe configuration failed' }
+          cmake --build build/runner-capacity --config Release --parallel $env:NUMBER_OF_PROCESSORS
+          if ($LASTEXITCODE -ne 0) { throw 'Module probe compilation failed' }
+          ctest --test-dir build/runner-capacity -C Release --output-on-failure --parallel 1 --no-tests=error
+          if ($LASTEXITCODE -ne 0) { throw 'Module probe regression failed' }

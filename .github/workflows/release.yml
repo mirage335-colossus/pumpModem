@@ -21,6 +21,16 @@ on:
         type: choice
         options: [bookworm-sdk, ubuntu-22.04]
         default: bookworm-sdk
+      linux_runner:
+        description: 'x86-64 Linux runner; ARM64 retains its dedicated runner'
+        type: choice
+        options: [ubuntu-24.04, ubuntu-latest-m, ubuntu-latest-l, ubuntu-latest-h]
+        default: ubuntu-24.04
+      windows_runner:
+        description: 'Windows x64 runner'
+        type: choice
+        options: [windows-2022, windows-latest-l, windows-latest-h]
+        default: windows-2022
   pull_request:
     paths:
       - '.github/workflows/release.yml'
@@ -108,7 +118,7 @@ jobs:
   linux:
     name: Linux ${{ matrix.arch }} / ${{ matrix.backend }}
     needs: metadata
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || inputs.linux_runner || 'ubuntu-24.04' }}
     container: ${{ matrix.image }}
     timeout-minutes: 45
     permissions:
@@ -181,12 +191,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.metadata.outputs.windows_matrix) }}
-    runs-on: windows-2022
+    runs-on: ${{ inputs.windows_runner || 'windows-2022' }}
     timeout-minutes: 45
     permissions:
       contents: write
     env:
       VCPKG_DISABLE_METRICS: '1'
+      UseMultiToolTask: 'true'
+      EnforceProcessCountAcrossBuilds: 'true'
       GH_TOKEN: ${{ github.token }}
       RELEASE_METADATA: ${{ needs.metadata.outputs.metadata_json }}
       GUI_BACKEND: ${{ matrix.backend }}

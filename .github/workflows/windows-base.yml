@@ -3,6 +3,10 @@ name: Build Windows base dependencies
 on:
   workflow_call:
     inputs:
+      windows_runner:
+        description: 'Windows x64 runner label'
+        type: string
+        default: windows-2022
       source:
         description: 'auto reuses base; base requires reuse; rebuild compiles without overwriting an existing recipe'
         type: string
@@ -38,12 +42,17 @@ jobs:
   dependencies:
     if: github.event_name == 'workflow_dispatch'
     needs: helpers
-    runs-on: windows-2022
+    runs-on: ${{ inputs.windows_runner || 'windows-2022' }}
+    defaults:
+      run:
+        shell: pwsh
     timeout-minutes: 45
     permissions:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
+      UseMultiToolTask: 'true'
+      EnforceProcessCountAcrossBuilds: 'true'
       VCPKG_DISABLE_METRICS: '1'
       VCPKG_BINARY_SOURCES: clear
       SOURCE: ${{ inputs.source }}

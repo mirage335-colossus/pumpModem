@@ -2,6 +2,11 @@ name: Focused Windows Rev diagnostic
 
 on:
   workflow_call:
+    inputs:
+      windows_runner:
+        description: 'Windows x64 runner label'
+        type: string
+        default: windows-2022
 
 permissions:
   contents: read
@@ -9,10 +14,15 @@ permissions:
 jobs:
   rev:
     name: Windows Rev compiler and event pump (not certification)
-    runs-on: windows-2022
+    runs-on: ${{ inputs.windows_runner || 'windows-2022' }}
+    defaults:
+      run:
+        shell: pwsh
     timeout-minutes: 20
     env:
       GH_TOKEN: ${{ github.token }}
+      UseMultiToolTask: 'true'
+      EnforceProcessCountAcrossBuilds: 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

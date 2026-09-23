@@ -15,6 +15,7 @@ Usage: ./build.sh [build|test GROUP|sanitize [GROUP]|package] [OPTIONS] [-- CMAK
   --cli                Omit the native GUI (shared GUI tests remain available).
   --backend fltk|rev   Select a GUI backend; Rev needs its own suitable toolchain.
   --jobs N, -j N       Parallel build/test limit (default: 2).
+  --build-jobs N       Override compilation concurrency; keep --jobs for tests.
   --stop-on-failure   Stop a test run after its first failed test (CI feedback).
   --build-dir PATH     Separate output tree, e.g. for another compiler/toolchain.
   --sdk PATH           Use a prepared source SDK; keep host dependencies separate.
@@ -40,6 +41,8 @@ backend=fltk
 backend_explicit=no
 cli=no
 jobs=${DATAPUMP_JOBS:-${CMAKE_BUILD_PARALLEL_LEVEL:-2}}
+build_jobs=
+build_jobs_explicit=no
 build_dir=
 sdk_root=
 stop_on_failure=no
@@ -50,6 +53,7 @@ while [ "$#" -gt 0 ]; do
         --stop-on-failure) stop_on_failure=yes; shift ;;
         --backend) need_value "$@"; backend=$2; backend_explicit=yes; shift 2 ;;
         --jobs|-j) need_value "$@"; jobs=$2; shift 2 ;;
+        --build-jobs) need_value "$@"; build_jobs=$2; build_jobs_explicit=yes; shift 2 ;;
         --build-dir) need_value "$@"; build_dir=$2; shift 2 ;;
         --sdk) need_value "$@"; [ -n "$2" ] || die "--sdk needs a nonempty path"; sdk_root=$2; shift 2 ;;
         --) shift; break ;;
@@ -71,6 +75,9 @@ done
 case "$backend" in fltk|rev) ;; *) die "backend must be fltk or rev" ;; esac
 case "$jobs" in ''|*[!0-9]*|0) die "jobs must be a positive integer" ;; esac
 [ "$jobs" -gt 0 ] || die "jobs must be a positive integer"
+if [ "$build_jobs_explicit" = no ]; then build_jobs=$jobs; fi
+case "$build_jobs" in ''|*[!0-9]*|0) die "build jobs must be a positive integer" ;; esac
+[ "$build_jobs" -gt 0 ] || die "build jobs must be a positive integer"
 if [ -n "${DATAPUMP_MAX_GLIBC:-}" ]; then
     case "$DATAPUMP_MAX_GLIBC" in *[!0-9.]*|.*|*..*|*.) die "DATAPUMP_MAX_GLIBC must be a dotted version, e.g. 2.35" ;; esac
     case "$DATAPUMP_MAX_GLIBC" in *.*) ;; *) die "DATAPUMP_MAX_GLIBC must be a dotted version, e.g. 2.35" ;; esac
@@ -264,7 +271,7 @@ target=datapump-apps
 if [ -n "$group" ]; then target=datapump-tests-$group; fi
 if [ "$group" = all ]; then target=datapump-tests; fi
 if [ "$command_name" = package ]; then target=package; fi
-cmake --build "$build_dir" --config "$build_config" --target "$target" --parallel "$jobs"
+cmake --build "$build_dir" --config "$build_config" --target "$target" --parallel "$build_jobs"
 
 if [ -n "$group" ]; then
     set --

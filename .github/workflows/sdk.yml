@@ -53,6 +53,16 @@ on:
       - 'tests/test_build_wrapper.py'
   workflow_dispatch:
     inputs:
+      linux_runner:
+        description: 'Linux x86_64 runner for compilation and qualification'
+        type: choice
+        options: [ubuntu-24.04, ubuntu-latest-m, ubuntu-latest-l, ubuntu-latest-h]
+        default: ubuntu-24.04
+      windows_runner:
+        description: 'Windows x64 runner for compilation and qualification'
+        type: choice
+        options: [windows-2022, windows-latest-l, windows-latest-h]
+        default: windows-2022
       devfast:
         description: 'Run only focused Legacy diagnostics; skip SDK, application and portability qualification'
         type: boolean
@@ -69,11 +79,14 @@ jobs:
   devfast:
     if: github.event_name == 'workflow_dispatch' && inputs.devfast
     uses: ./.github/workflows/devfast.yml
+    with:
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
 
   application:
     if: ${{ !inputs.devfast }}
     name: App and tests with SDK, ${{ matrix.backend }} on ${{ matrix.name }}
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
     container: ${{ matrix.image }}
     timeout-minutes: 120
     strategy:
@@ -161,20 +174,20 @@ jobs:
           PY
       - name: Build and verify portable application archives
         run: |
-          ./build.sh package --sdk "$GITHUB_WORKSPACE/build/sdk" --backend '${{ matrix.backend }}' --build-dir build/sdk-application --jobs 2
+          ./build.sh package --sdk "$GITHUB_WORKSPACE/build/sdk" --backend '${{ matrix.backend }}' --build-dir build/sdk-application --jobs 2 --build-jobs "$(nproc)"
           xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' build/sdk/bin/cmake -DARCHIVE_DIR="$PWD/build/sdk-application/releases" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.36 -P tools/verify-native-archives.cmake
       - name: Run build and packaging isolation regressions
         run: |
-          ./build.sh test build --sdk "$GITHUB_WORKSPACE/build/sdk" --backend '${{ matrix.backend }}' --build-dir build/sdk-application --jobs 2 -- -DDATAPUMP_PORTABLE=ON
-          ./build.sh test packaging --sdk "$GITHUB_WORKSPACE/build/sdk" --backend '${{ matrix.backend }}' --build-dir build/sdk-application --jobs 2 -- -DDATAPUMP_PORTABLE=ON
+          ./build.sh test build --sdk "$GITHUB_WORKSPACE/build/sdk" --backend '${{ matrix.backend }}' --build-dir build/sdk-application --jobs 2 --build-jobs "$(nproc)" -- -DDATAPUMP_PORTABLE=ON
+          ./build.sh test packaging --sdk "$GITHUB_WORKSPACE/build/sdk" --backend '${{ matrix.backend }}' --build-dir build/sdk-application --jobs 2 --build-jobs "$(nproc)" -- -DDATAPUMP_PORTABLE=ON
       - name: Preserve wire and shared GUI contracts with the SDK toolchain
         if: matrix.backend == 'fltk'
-        run: ./build.sh test contract --sdk "$GITHUB_WORKSPACE/build/sdk" --backend fltk --build-dir build/sdk-application --jobs 2 -- -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600
+        run: ./build.sh test contract --sdk "$GITHUB_WORKSPACE/build/sdk" --backend fltk --build-dir build/sdk-application --jobs 2 --build-jobs "$(nproc)" -- -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600
       - name: Run Rev native conformance separately under a private display
         if: matrix.backend == 'rev'
         # Full validation includes the complete workflow; devfast never runs it.
         # Only its overall allowance changes, not the internal assertions.
-        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' ./build.sh test native --sdk "$GITHUB_WORKSPACE/build/sdk" --backend rev --build-dir build/sdk-application --jobs 2 -- -DDATAPUMP_PORTABLE=ON -DGUI_SMOKE_TIMEOUT=600
+        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' ./build.sh test native --sdk "$GITHUB_WORKSPACE/build/sdk" --backend rev --build-dir build/sdk-application --jobs 2 --build-jobs "$(nproc)" -- -DDATAPUMP_PORTABLE=ON -DGUI_SMOKE_TIMEOUT=600
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: DataPump-SDK-${{ matrix.backend }}-Linux-x86_64-glibc-2.36
@@ -190,7 +203,7 @@ jobs:
     if: ${{ !inputs.devfast }}
     name: Copied SDK-built ${{ matrix.backend }} on ${{ matrix.image }}
     needs: application
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
     container: ${{ matrix.image }}
     timeout-minutes: 45
     strategy:

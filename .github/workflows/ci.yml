@@ -5,6 +5,16 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
+      linux_runner:
+        description: 'Linux x86_64 runner for compilation and qualification'
+        type: choice
+        options: [ubuntu-24.04, ubuntu-latest-m, ubuntu-latest-l, ubuntu-latest-h]
+        default: ubuntu-24.04
+      windows_runner:
+        description: 'Windows x64 runner for compilation and qualification'
+        type: choice
+        options: [windows-2022, windows-latest-l, windows-latest-h]
+        default: windows-2022
       devfast:
         description: 'Run only the selected focused diagnostic; skip full regression and release work'
         type: boolean
@@ -12,7 +22,7 @@ on:
       diagnostic:
         description: 'Focused check used only with devfast=true'
         type: choice
-        options: [legacy, windows-rev, graphics, arm-rev-package]
+        options: [legacy, windows-rev, graphics, arm-rev-package, runner-capacity]
         default: legacy
       diagnostic_release:
         description: 'Published release tag for graphics diagnostics only; no binaries are rebuilt'
@@ -23,22 +33,35 @@ permissions:
   contents: read
 
 concurrency:
-  group: native-${{ github.workflow }}-${{ github.ref }}-${{ inputs.devfast && 'devfast' || 'full' }}
+  group: native-${{ github.workflow }}-${{ github.ref }}-${{ inputs.devfast && 'devfast' || 'full' }}-${{ inputs.linux_runner || 'ubuntu-24.04' }}-${{ inputs.windows_runner || 'windows-2022' }}
   cancel-in-progress: true
 
 jobs:
   devfast:
     if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'legacy'
     uses: ./.github/workflows/devfast.yml
+    with:
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
 
   windows-rev-diagnostic:
     if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'windows-rev'
     uses: ./.github/workflows/windows-rev-diagnostic.yml
+    with:
+      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
+
+  runner-capacity:
+    if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'runner-capacity'
+    uses: ./.github/workflows/runner-capacity.yml
+    with:
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
 
   graphics-diagnostic:
     if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'graphics'
     uses: ./.github/workflows/graphics-diagnostic.yml
     with:
+      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
       release_tag: ${{ inputs.diagnostic_release }}
 
   arm-rev-package-diagnostic:
@@ -48,7 +71,7 @@ jobs:
   gui-contract:
     if: ${{ !inputs.devfast }}
     name: GUI contract (${{ matrix.backend }})
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
     container: debian:trixie-slim
     timeout-minutes: 30
     strategy:
@@ -77,11 +100,11 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release -DDATAPUMP_PORTABLE=OFF
           -DDATAPUMP_GUI_BACKEND=${{ matrix.backend }} -DDATAPUMP_TEST_NATIVE_GUI=ON
           -DGUI_SMOKE_TIMEOUT=600 -DDART_TESTING_TIMEOUT=3600
-      - run: cmake --build build-gui --target datapump-tests-gui --parallel 2
+      - run: cmake --build build-gui --target datapump-tests-gui --parallel "$(nproc)"
       - name: Check offline build and dependency tooling
         if: matrix.backend == 'fltk'
         run: |
-          cmake --build build-gui --target datapump-tests-build --parallel 2
+          cmake --build build-gui --target datapump-tests-build --parallel "$(nproc)"
           ctest --test-dir build-gui --output-on-failure -L '^build$'
       - name: Test shared behavior, native contract and simulated workflow
         run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' ctest --test-dir build-gui --output-on-failure -L gui
@@ -89,7 +112,7 @@ jobs:
   linux:
     if: ${{ !inputs.devfast }}
     name: Linux ${{ matrix.build_type }} (glibc 2.35)
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
     # Compile every application and collected library against this baseline,
     # rather than letting a newer hosted runner raise the minimum glibc ABI.
     container: ubuntu:22.04
@@ -133,7 +156,7 @@ jobs:
           -DDATAPUMP_PORTABLE=${{ matrix.portable }}
           -DDART_TESTING_TIMEOUT=3600
           -DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE
-      - run: cmake --build build --target datapump-apps datapump-tests --parallel 2
+      - run: cmake --build build --target datapump-apps datapump-tests --parallel "$(nproc)"
       - run: ctest --test-dir build --output-on-failure --parallel 2
       - name: Exercise native desktop workflow
         run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' ./build/datapump-gui --smoke-test --smoke-timeout 600
@@ -145,7 +168,7 @@ jobs:
       - name: Create and verify both native archives
         if: matrix.portable == 'ON'
         run: |
-          cmake --build build --target package
+          cmake --build build --target package --parallel "$(nproc)"
           xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/build/releases" -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.35 -P tools/verify-native-archives.cmake
       - name: Upload Linux offline bundles
         if: matrix.portable == 'ON'
@@ -164,7 +187,7 @@ jobs:
     if: ${{ !inputs.devfast }}
     name: Copied Linux binaries on Ubuntu ${{ matrix.ubuntu }}
     needs: linux
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
     container: ubuntu:${{ matrix.ubuntu }}
     # Both archive formats run the full workflow; measured checks exceed ten
     # minutes even though devfast never runs these compatibility jobs.
@@ -199,12 +222,17 @@ jobs:
   windows:
     if: ${{ !inputs.devfast }}
     name: Microsoft Windows x64 (static CRT)
-    runs-on: windows-2022
+    runs-on: ${{ inputs.windows_runner || 'windows-2022' }}
+    defaults:
+      run:
+        shell: pwsh
     # Full validation includes calibration and both packaged GUI workflows;
     # the separate devfast diagnostic still has its short overall budget.
     timeout-minutes: 120
     env:
       VCPKG_DISABLE_METRICS: "1"
+      UseMultiToolTask: 'true'
+      EnforceProcessCountAcrossBuilds: 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -234,7 +262,7 @@ jobs:
       - name: Create and verify both native archives
         shell: pwsh
         run: |
-          cmake --build build --config Release --target package
+          cmake --build build --config Release --target package --parallel $env:NUMBER_OF_PROCESSORS
           if ($LASTEXITCODE -ne 0) { throw "Native packaging failed" }
           cmake -DARCHIVE_DIR="$PWD/build/releases" -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P tools/verify-native-archives.cmake
           if ($LASTEXITCODE -ne 0) { throw "Archive verification failed" }

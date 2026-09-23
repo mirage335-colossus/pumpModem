@@ -3,6 +3,16 @@ name: Maintain base SDK
 on:
   workflow_dispatch:
     inputs:
+      linux_runner:
+        description: 'Linux x86_64 runner for compilation and qualification'
+        type: choice
+        options: [ubuntu-24.04, ubuntu-latest-m, ubuntu-latest-l, ubuntu-latest-h]
+        default: ubuntu-24.04
+      windows_runner:
+        description: 'Windows x64 runner for compilation and qualification'
+        type: choice
+        options: [windows-2022, windows-latest-l, windows-latest-h]
+        default: windows-2022
       platform:
         description: 'Reusable Linux source SDK or Windows static application dependencies'
         type: choice
@@ -53,6 +63,7 @@ jobs:
     needs: helper
     uses: ./.github/workflows/sdk-build.yml
     with:
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
       source: ${{ inputs.source }}
       jobs: ${{ inputs.jobs }}
       publish_base: ${{ inputs.publish }}
@@ -62,5 +73,6 @@ jobs:
     needs: helper
     uses: ./.github/workflows/windows-base.yml
     with:
+      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
       source: ${{ inputs.source }}
       publish: ${{ inputs.publish }}

@@ -146,6 +146,31 @@ if os.environ.get("FAIL_STEP") == ("build" if "--build" in sys.argv else "config
         self.assertIn("--no-tests=error", calls[2])
         self.assertEqual(calls[2][calls[2].index("--parallel") + 1], "3")
 
+    def test_compile_parallelism_does_not_raise_test_concurrency(self):
+        for args in (("--jobs", "2", "--build-jobs", "32"),
+                     ("--build-jobs", "32", "--jobs", "2")):
+            with self.subTest(args=args):
+                if self.log.exists():
+                    self.log.unlink()
+                _, calls = self.run_wrapper("test", "contract", *args)
+                self.assertEqual(calls[1][calls[1].index("--parallel") + 1], "32")
+                self.assertEqual(calls[2][calls[2].index("--parallel") + 1], "2")
+                self.assertIn("^contract$", calls[2])
+
+    def test_compile_parallelism_keeps_legacy_jobs_default(self):
+        _, calls = self.run_wrapper("test", "build", DATAPUMP_JOBS="3")
+        for call in calls[1:]:
+            self.assertEqual(call[call.index("--parallel") + 1], "3")
+
+    def test_compile_parallelism_rejects_invalid_values_before_tools(self):
+        for value in ("", "0", "00", "-1", "1.5", "many"):
+            with self.subTest(value=value):
+                _, calls = self.run_wrapper("test", "build", "--build-jobs", value,
+                                            success=False)
+                self.assertEqual(calls, [])
+        _, calls = self.run_wrapper("--build-jobs", success=False)
+        self.assertEqual(calls, [])
+
     def test_fail_fast_is_opt_in_and_keeps_the_complete_group(self):
         _, calls = self.run_wrapper("test", "contract", "--stop-on-failure")
         self.assertIn("datapump-tests-contract", calls[1])

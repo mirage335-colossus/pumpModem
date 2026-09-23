@@ -12,6 +12,16 @@ on:
         description: 'Diagnose current branch source only; skip expensive tests and all certification/release changes'
         type: boolean
         default: false
+      linux_runner:
+        description: 'x86-64 Linux runner; ARM64 retains its dedicated runner'
+        type: choice
+        options: [ubuntu-24.04, ubuntu-latest-m, ubuntu-latest-l, ubuntu-latest-h]
+        default: ubuntu-24.04
+      windows_runner:
+        description: 'Windows x64 runner'
+        type: choice
+        options: [windows-2022, windows-latest-l, windows-latest-h]
+        default: windows-2022
 
   pull_request:
     paths:
@@ -30,6 +40,9 @@ jobs:
   devfast:
     if: github.event_name == 'workflow_dispatch' && inputs.devfast
     uses: ./.github/workflows/devfast.yml
+    with:
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
 
   helpers:
     if: ${{ !inputs.devfast }}
@@ -74,7 +87,7 @@ jobs:
     name: Source and published Linux ${{ matrix.arch }} / ${{ matrix.backend }}
     if: ${{ !inputs.devfast }}
     needs: prepare
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || inputs.linux_runner || 'ubuntu-24.04' }}
     container: ${{ matrix.image }}
     timeout-minutes: 120
     strategy:
@@ -132,9 +145,18 @@ jobs:
             if [ "$GUI_BACKEND" = rev ]; then export CC=clang-19 CXX=clang++-19;
             else export CC=gcc-11 CXX=g++-11; fi
           fi
+          # Certification checks out immutable released source. Older wrappers
+          # lack --build-jobs, so keep their existing two-job behavior.
+          separate_build_jobs=false
+          if ./build.sh --help | grep -q -- '--build-jobs'; then
+            separate_build_jobs=true
+          else
+            echo 'Released build wrapper has no --build-jobs; retaining two build/test jobs.'
+          fi
           # Run adapter/package checks before the slower numerical calibration.
           for group in build gui packaging contract; do
             set -- --backend "$GUI_BACKEND" --build-dir build/certify --jobs 2
+            if [ "$separate_build_jobs" = true ]; then set -- "$@" --build-jobs "$(nproc)"; fi
             if [ "$USE_SDK" = true ]; then set -- "$@" --sdk "$GITHUB_WORKSPACE/build/sdk"; fi
             ./build.sh test "$group" --stop-on-failure "$@" -- -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600
             if [ "$group" = gui ]; then
@@ -151,7 +173,7 @@ jobs:
             audio_cmake="$GITHUB_WORKSPACE/build/sdk/bin/cmake"
             audio_ctest="$GITHUB_WORKSPACE/build/sdk/bin/ctest"
           fi
-          "$audio_cmake" --build build/certify --target test_alsa_audio test_windows_audio test_audio_rates test_resampler --parallel 2
+          "$audio_cmake" --build build/certify --target test_alsa_audio test_windows_audio test_audio_rates test_resampler --parallel "$(nproc)"
           "$audio_ctest" --test-dir build/certify --output-on-failure -R '^(alsa_audio_contract|windows_audio_contract|audio_rates|resampler)$' --parallel 1 --stop-on-failure --no-tests=error
       - name: Download and verify the exact published archive
         id: binary
@@ -176,10 +198,12 @@ jobs:
       matrix: ${{ fromJSON(needs.prepare.outputs.windows_matrix) }}
     if: ${{ !inputs.devfast }}
     needs: prepare
-    runs-on: windows-2022
+    runs-on: ${{ inputs.windows_runner || 'windows-2022' }}
     timeout-minutes: 120
     env:
       VCPKG_DISABLE_METRICS: '1'
+      UseMultiToolTask: 'true'
+      EnforceProcessCountAcrossBuilds: 'true'
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ inputs.release_tag }}
       GUI_BACKEND: ${{ matrix.backend }}
@@ -245,7 +269,7 @@ jobs:
     name: Published ${{ matrix.target }} on ${{ matrix.image }}
     if: ${{ !inputs.devfast }}
     needs: prepare
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || inputs.linux_runner || 'ubuntu-24.04' }}
     container: ${{ matrix.image }}
     timeout-minutes: 30
     strategy:
