@@ -1,0 +1,92 @@
+name: Install signed release packages on Bookworm
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        type: string
+        required: true
+      inventory_sha256:
+        type: string
+        required: true
+      linux_runner:
+        type: string
+        default: ubuntu-latest-l
+      arm_runner:
+        type: string
+        default: ubuntu-24.04-arm-l
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    name: Signed APT / Bookworm ${{ matrix.arch }} / both backends
+    runs-on: ${{ matrix.arch == 'arm64' && inputs.arm_runner || inputs.linux_runner }}
+    container: debian:bookworm-slim
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      INVENTORY_SHA256: ${{ inputs.inventory_sha256 }}
+      APT_FINGERPRINT: ${{ vars.DATAPUMP_APT_SIGNING_FINGERPRINT }}
+      EXPECTED_ARCH: ${{ matrix.arch }}
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      LP_NUM_THREADS: '2'
+    steps:
+      - name: Install inspection tools and host services without a compiler
+        run: |
+          test "$(dpkg --print-architecture)" = "$EXPECTED_ARCH"
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git gh python3 gnupg \
+            xvfb xauth fonts-dejavu-core libgl1-mesa-dri libglx-mesa0 libasound2-plugins
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify signed metadata and bind every Debian payload to its portable archive
+        run: |
+          python3 tools/certify-release.py download-apt --repo "$GITHUB_REPOSITORY" \
+            --tag "$RELEASE_TAG" --directory apt-assets --inventory-sha256 "$INVENTORY_SHA256" \
+            --apt-signing-fingerprint "$APT_FINGERPRINT"
+      - name: Configure the public release repository with the verified signing key
+        run: |
+          install -d -m 0755 /etc/apt/keyrings
+          install -m 0644 apt-assets/datapump-archive-keyring.gpg /etc/apt/keyrings/datapump.gpg
+          # Pin the tested tag even when a regular release's convenience source
+          # file points to Latest; concurrent promotion must not change coverage.
+          cat > /etc/apt/sources.list.d/datapump.sources <<EOF
+          Types: deb
+          URIs: https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/
+          Suites: ./
+          Architectures: $EXPECTED_ARCH
+          Signed-By: /etc/apt/keyrings/datapump.gpg
+          EOF
+          apt-get update
+      - name: Install both backends from GitHub through APT and verify installed bytes
+        run: |
+          for backend in fltk rev; do
+            set -- apt-assets/datapump-"$backend"_*_"$EXPECTED_ARCH".deb
+            test "$#" -eq 1 && test -f "$1"
+            version=$(dpkg-deb --field "$1" Version)
+            apt-get install -y --no-install-recommends "datapump-$backend=$version"
+            test "$(dpkg-query -W -f='${Status}' "datapump-$backend")" = 'install ok installed'
+            expected=$(mktemp -d)
+            dpkg-deb --extract "$1" "$expected"
+            diff -qr "$expected/opt/datapump/$backend" "/opt/datapump/$backend"
+            cmp "$expected/usr/bin/datapump-$backend" "/usr/bin/datapump-$backend"
+            cmp "$expected/usr/bin/datapump-cli-$backend" "/usr/bin/datapump-cli-$backend"
+            cmp "$expected/usr/share/applications/datapump-$backend.desktop" "/usr/share/applications/datapump-$backend.desktop"
+            rm -rf "$expected"
+            timeout 30 "datapump-cli-$backend" --version
+            timeout 30 xvfb-run -a -s '-screen 0 1280x1024x24 -dpi 96' "datapump-$backend" --self-check
+          done
+          {
+            echo "Bookworm $EXPECTED_ARCH: apt-get update and installation from GitHub succeeded."
+            echo 'Both GUI backends coexist; installed payloads match the signed packages and portable archives.'
+            echo 'CLI and GUI self-checks passed. This verifies packaging, not physical audio hardware or full GUI regression coverage.'
+          } >> "$GITHUB_STEP_SUMMARY"

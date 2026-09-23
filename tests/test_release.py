@@ -9,7 +9,7 @@ import subprocess
 import tarfile
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,27 +46,62 @@ def backend_archive(path, base, backend, *, include_info=True, duplicate_info=Fa
                 archive.writestr(name, content)
 
 
+APT_NAMES = {'Packages', 'Packages.gz', 'Release', 'InRelease', 'Release.gpg',
+             'datapump-archive-keyring.gpg', 'datapump.sources', 'apt-repository.json'} | {
+                 f'datapump-{backend}_0.7.2+fixture_{arch}.deb'
+                 for backend in ('fltk', 'rev') for arch in ('amd64', 'arm64')}
+
+
+def apt_fixture():
+    """Keep orchestrator tests separate from real signing/dpkg tests in the APT helper suite."""
+    def build(directory, value, repository, key, fingerprint):
+        for name in APT_NAMES:
+            (directory / name).write_bytes(('signed fixture ' + name).encode())
+    tool = Mock()
+    tool.asset_names.return_value = APT_NAMES
+    tool.build.side_effect = build
+    return tool
+
+
 class MetadataTests(unittest.TestCase):
     def test_new_metadata_defaults_to_both_backends_and_legacy_stays_readable(self):
         value = release.make_metadata(source_sha='a' * 40, run_id='123', run_attempt='1')
-        self.assertEqual(value['schema'], 2)
+        self.assertEqual(value['schema'], 3)
         self.assertEqual(value['gui_backends'], ['fltk', 'rev'])
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / 'metadata.json'
-            for schema in (1, 2):
+            for schema in (1, 2, 3):
                 original = metadata(schema=schema)
                 release.write_json(path, original)
                 self.assertEqual(release.load_metadata(path), original)
                 self.assertEqual(len(release.application_targets(original)), 3 if schema == 1 else 6)
-            for changes in ({'schema': 3}, {'schema': True}, {'gui_backends': ['fltk']},
+            for changes in ({'schema': 4}, {'schema': True}, {'gui_backends': ['fltk']},
                             {'gui_backends': ['rev', 'fltk']}, {'gui_backends': ['fltk', 'rev', 'rev']},
                             {'gui_backends': None}):
                 release.write_json(path, {**metadata(schema=2), **changes})
                 with self.subTest(changes=changes), self.assertRaises(ValueError):
                     release.load_metadata(path)
 
+    def test_schema3_requires_apt_marker_and_valid_packaging_provenance(self):
+        value = metadata(schema=3)
+        self.assertEqual(value['apt_repository'], {
+            'schema': 1, 'architectures': ['amd64', 'arm64'], 'gui_backends': ['fltk', 'rev']})
+        self.assertEqual(value['packager_sha'], value['source_sha'])
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'metadata.json'
+            for change in ({'apt_repository': None}, {'apt_repository': {'schema': 1}},
+                           {'packager_sha': 'main'}, {'repackaged_from': {'tag': '../bad'}}):
+                release.write_json(path, {**value, **change})
+                with self.subTest(change=change), self.assertRaises(ValueError):
+                    release.load_metadata(path)
+        provenance = {'tag': 'v001-old', 'inventory_sha256': 'b' * 64}
+        with self.assertRaisesRegex(ValueError, 'must remain experiments'):
+            metadata(schema=3, repackaged_from=provenance)
+        with self.assertRaisesRegex(ValueError, 'schema 3'):
+            metadata(schema=2, packager_sha='c' * 40)
+
     def test_target_helpers_bind_platform_backend_and_package_root(self):
-        for schema in (1, 2):
+        for schema in (1, 2, 3):
             value = metadata(schema=schema)
             for target in release.application_targets(value):
                 platform = release.target_platform(value, target)
@@ -124,7 +159,7 @@ class MetadataTests(unittest.TestCase):
 
 class MatrixTests(unittest.TestCase):
     def test_both_schemas_and_baselines_cover_every_expected_target(self):
-        for schema in (1, 2):
+        for schema in (1, 2, 3):
             for baseline in ('bookworm-sdk', 'ubuntu-22.04'):
                 with self.subTest(schema=schema, baseline=baseline):
                     value = metadata(schema=schema, linux_baseline=baseline)
@@ -133,7 +168,7 @@ class MatrixTests(unittest.TestCase):
                     windows = matrices['windows_matrix']['include']
                     compatibility = matrices['compatibility_matrix']['include']
                     backends = ('fltk',) if schema == 1 else ('fltk', 'rev')
-                    expected = {f'{platform}-{backend}' if schema == 2 else platform
+                    expected = {f'{platform}-{backend}' if schema >= 2 else platform
                                 for platform in ('linux-x86_64', 'linux-aarch64', 'windows-x86_64')
                                 for backend in backends}
                     self.assertEqual({row['target'] for row in linux + windows}, expected)
@@ -143,7 +178,7 @@ class MatrixTests(unittest.TestCase):
                     self.assertEqual(len({(row['target'], row['image']) for row in compatibility}), len(compatibility))
                     for row in linux + windows:
                         self.assertIn(row['backend'], backends)
-                        if schema == 2:
+                        if schema >= 2:
                             self.assertTrue(row['target'].endswith('-' + row['backend']))
                     for row in windows:
                         self.assertEqual(set(row), {'backend', 'target'})
@@ -227,8 +262,8 @@ class ReleaseFixture:
     def assemble(self, **options):
         return release.assemble(self.artifacts, self.metadata, self.notes, self.output, **options)
 
-    def backend_inputs(self):
-        value = metadata(schema=2)
+    def backend_inputs(self, schema=2):
+        value = metadata(schema=schema)
         release.write_json(self.metadata, value)
         # Use a separate root so no legacy fixture can accidentally satisfy it.
         self.artifacts = self.root / 'backend-inputs'
@@ -244,6 +279,30 @@ class ReleaseFixture:
 
 
 class InventoryTests(ReleaseFixture, unittest.TestCase):
+    def test_schema3_requires_apt_assets_and_signature_verification(self):
+        value = self.backend_inputs(schema=3)
+        tool = apt_fixture()
+        with patch.object(release, 'apt_tool', return_value=tool):
+            self.assemble(repository='owner/repository', apt_signing_key=Path('key'), apt_signing_fingerprint='A' * 40)
+            args = tool.build.call_args.args
+            self.assertEqual(args[1:], (value, 'owner/repository', Path('key'), 'A' * 40))
+            self.assertEqual(set(release.verify_release(self.output)[1]),
+                             set(release.application_names(value).values()) | release.support_files(value) | APT_NAMES)
+            tool.verify.assert_called_with(self.output, value)
+            (self.output / 'InRelease').unlink()
+            self.sums(self.output)
+            with self.assertRaisesRegex(ValueError, 'missing an application target or support file'):
+                release.verify_release(self.output)
+
+    def test_apt_signature_failure_leaves_no_complete_release_output(self):
+        self.backend_inputs(schema=3)
+        tool = apt_fixture()
+        tool.verify.side_effect = ValueError('APT signature mismatch')
+        with patch.object(release, 'apt_tool', return_value=tool):
+            with self.assertRaisesRegex(ValueError, 'signature mismatch'):
+                self.assemble(repository='owner/repository', apt_signing_key=Path('key'), apt_signing_fingerprint='A' * 40)
+        self.assertFalse(self.output.exists())
+
     def test_six_backend_archives_are_assembled_and_verified(self):
         value = self.backend_inputs()
         self.assertEqual(self.assemble(), value)
@@ -861,6 +920,81 @@ class StagedPublicationTests(ReleaseFixture, unittest.TestCase):
             release.finalize(self.metadata, 'owner/repository', self.output, True)
         self.assertTrue(self.info['draft'])
         self.assertFalse(any(call[1] == 'edit' for call in self.mutations()))
+
+    def test_schema3_finalize_signs_then_uploads_complete_apt_inventory_before_publish(self):
+        self.value = self.backend_inputs(schema=3)
+        release.reserve(self.metadata, self.notes, 'owner/repository')
+        for target in release.application_targets(self.value):
+            release.upload(self.metadata, 'owner/repository', target, self.artifacts / target)
+        tool = apt_fixture()
+        with patch.object(release, 'apt_tool', return_value=tool):
+            release.finalize(self.metadata, 'owner/repository', self.output, True,
+                             apt_signing_key=Path('key'), apt_signing_fingerprint='A' * 40)
+            self.assertEqual(set(self.remote), release.required_assets(self.value) | {'SHA256SUMS.txt'})
+            release.verify_release(self.output)
+        self.assertEqual(tool.build.call_args.args[1:],
+                         (self.value, 'owner/repository', Path('key'), 'A' * 40))
+        upload, edit = self.mutations()[-2:]
+        self.assertEqual({Path(name).name for name in upload[5:]}, APT_NAMES | {'SHA256SUMS.txt'})
+        self.assertIn('--latest=false', edit)
+        self.assertFalse(self.info['draft'])
+
+    def test_failed_apt_signing_never_finalizes_or_publishes(self):
+        self.value = self.backend_inputs(schema=3)
+        release.reserve(self.metadata, self.notes, 'owner/repository')
+        for target in release.application_targets(self.value):
+            release.upload(self.metadata, 'owner/repository', target, self.artifacts / target)
+        tool = apt_fixture()
+        tool.build.side_effect = ValueError('Missing signing key')
+        before = len(self.mutations())
+        with patch.object(release, 'apt_tool', return_value=tool):
+            with self.assertRaisesRegex(ValueError, 'signing key'):
+                release.finalize(self.metadata, 'owner/repository', self.output, True)
+        self.assertEqual(len(self.mutations()), before)
+        self.assertTrue(self.info['draft'])
+        self.assertNotIn('SHA256SUMS.txt', self.remote)
+        self.assertFalse(self.output.exists())
+
+    def prepare_repackage_source(self):
+        self.value = self.backend_inputs()
+        self.assemble()
+        self.remote = {path.name: path.read_bytes() for path in self.output.iterdir()}
+        self.reference, self.exists = self.value['source_sha'], True
+        self.info['tag_name'] = self.value['tag']
+
+    def test_repackage_preserves_all_source_bytes_and_records_new_packager_and_origin(self):
+        self.prepare_repackage_source()
+        original = dict(self.remote)
+        destination = self.root / 'repackaged'
+        tool = apt_fixture()
+        with patch.object(release, 'apt_tool', return_value=tool), patch.object(release, 'publish') as publish:
+            value = release.repackage(self.value['tag'], 'owner/repository', destination,
+                                      version='vapt', run_id='456', run_attempt='2', packager_sha='b' * 40,
+                                      apt_signing_key=Path('key'), apt_signing_fingerprint='A' * 40)
+            release.verify_release(destination)
+        self.assertEqual(self.remote, original)
+        self.assertEqual(value['source_sha'], self.value['source_sha'])
+        self.assertEqual(value['packager_sha'], 'b' * 40)
+        self.assertEqual(value['repackaged_from'], {'tag': self.value['tag'],
+                         'inventory_sha256': release.hashlib.sha256(original['SHA256SUMS.txt']).hexdigest()})
+        self.assertEqual(value['title'], 'experiment')
+        self.assertTrue(value['experiment'])
+        for target, name in release.application_names(value).items():
+            self.assertEqual((destination / name).read_bytes(), original[release.application_names(self.value)[target]])
+        publish.assert_called_once_with(destination, 'owner/repository', publish_now=False)
+
+    def test_corrupt_repackage_source_cannot_sign_or_publish(self):
+        self.prepare_repackage_source()
+        archive = release.application_names(self.value)['linux-x86_64-fltk']
+        self.corrupt_download[archive] = b'changed'
+        tool = apt_fixture()
+        with patch.object(release, 'apt_tool', return_value=tool), patch.object(release, 'publish') as publish:
+            with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
+                release.repackage(self.value['tag'], 'owner/repository', self.root / 'repackaged',
+                                  run_id='456', packager_sha='b' * 40,
+                                  apt_signing_key=Path('key'), apt_signing_fingerprint='A' * 40)
+        tool.build.assert_not_called()
+        publish.assert_not_called()
 
 
 if __name__ == '__main__':

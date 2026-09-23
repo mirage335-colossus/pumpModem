@@ -1,5 +1,5 @@
 name: Manual portable release
-run-name: Build portable binaries (${{ inputs.linux_baseline }}, experiment=${{ inputs.experiment }})
+run-name: ${{ inputs.source_release && format('APT packages from {0} (experiment)', inputs.source_release) || format('Build portable binaries ({0}, experiment={1})', inputs.linux_baseline, inputs.experiment) }}
 
 on:
   workflow_dispatch:
@@ -36,11 +36,19 @@ on:
         type: choice
         options: [windows-2022, windows-latest-l, windows-latest-h]
         default: windows-2022
+      source_release:
+        description: 'Optional complete release to repackage for APT as a new experiment; blank builds applications'
+        type: string
+        default: ''
   pull_request:
     paths:
       - '.github/workflows/release.yml'
+      - '.github/workflows/apt-release.yml'
+      - '.github/workflows/apt-check.yml'
       - '.github/workflows/certify.yml'
       - 'tools/release.py'
+      - 'tools/apt-release.py'
+      - 'tests/test_apt_release.py'
       - 'tools/certify-release.py'
       - 'tests/test_release.py'
       - 'tests/test_certify_release.py'
@@ -61,7 +69,23 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  repackage:
+    if: github.event_name == 'workflow_dispatch' && inputs.source_release != ''
+    permissions:
+      contents: write
+    uses: ./.github/workflows/apt-release.yml
+    with:
+      source_tag: ${{ inputs.source_release }}
+      version: ${{ inputs.version }}
+      publish: ${{ inputs.publish }}
+      # Repackaging uses larger L/H pools, including when the normal release
+      # selectors retain their standard-runner defaults.
+      linux_runner: ${{ inputs.linux_runner == 'ubuntu-latest-h' && 'ubuntu-latest-h' || 'ubuntu-latest-l' }}
+      arm_runner: ${{ inputs.arm_runner == 'ubuntu-24.04-arm-h' && 'ubuntu-24.04-arm-h' || 'ubuntu-24.04-arm-l' }}
+    secrets: inherit
+
   helpers:
+    if: ${{ !inputs.source_release }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -70,13 +94,14 @@ jobs:
           persist-credentials: false
       - run: |
           python3 tests/test_release.py
+          python3 tests/test_apt_release.py
           python3 tests/test_certify_release.py
           python3 tests/test_sdk_release.py
           python3 tests/test_release_rev_tools.py
           python3 tests/test_windows_base.py
 
   metadata:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && !inputs.source_release
     needs: helpers
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -93,6 +118,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Require APT signing configuration before building applications
+        env:
+          APT_SIGNING_KEY: ${{ secrets.DATAPUMP_APT_SIGNING_KEY }}
+          APT_FINGERPRINT: ${{ vars.DATAPUMP_APT_SIGNING_FINGERPRINT }}
+        run: |
+          if [ -z "$APT_SIGNING_KEY" ]; then
+            echo '::error::Configure DATAPUMP_APT_SIGNING_KEY before releasing Debian packages.'
+            exit 1
+          fi
+          if ! [[ "$APT_FINGERPRINT" =~ ^[A-Fa-f0-9]{40}$ ]]; then
+            echo '::error::Configure DATAPUMP_APT_SIGNING_FINGERPRINT with the pinned public key fingerprint.'
+            exit 1
+          fi
       - name: Record one build date and exact source revision
         id: meta
         env:
@@ -110,7 +148,7 @@ jobs:
       - name: Reserve a draft for direct release-asset uploads
         run: |
           cat > release-details.md <<NOTES
-          Download the archive matching your operating system, architecture and GUI backend (fltk or rev). Each backend has a separate bundle and extraction directory. Unpack the whole archive and keep bin/, lib/ and share/ together; required application libraries are bundled. Host audio/graphics services and drivers remain required.
+          Download the archive matching your operating system, architecture and GUI backend (fltk or rev), or install the signed Debian packages from this release's flat APT repository. Each backend has a separate bundle and extraction directory. Unpack the whole archive and keep bin/, lib/ and share/ together; required application libraries are bundled. Host audio/graphics services and drivers remain required. Debian installation instructions are in the release documentation linked below.
 
           The attached warning.log describes known nonfatal Rev replay/waterfall display-cadence warnings. They do not fail builds or certification; data integrity, pending-message identity and physical-completion checks remain mandatory.
 
@@ -249,12 +287,22 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Verify all uploaded bytes, attach checksums and publish
+      - name: Verify all uploaded bytes, sign the APT repository and publish
+        env:
+          APT_SIGNING_KEY: ${{ secrets.DATAPUMP_APT_SIGNING_KEY }}
+          APT_FINGERPRINT: ${{ vars.DATAPUMP_APT_SIGNING_FINGERPRINT }}
         run: |
           printf '%s\n' "$RELEASE_METADATA" > release-metadata.json
           args=()
           if [ "$PUBLISH" = true ]; then args+=(--publish); fi
-          python3 tools/release.py finalize --metadata release-metadata.json --repo "$GITHUB_REPOSITORY" --directory release-assets "${args[@]}"
+          umask 077
+          signing_key=$(mktemp "$RUNNER_TEMP/datapump-apt-signing.XXXXXX")
+          trap 'rm -f "$signing_key"' EXIT
+          printf '%s\n' "$APT_SIGNING_KEY" > "$signing_key"
+          unset APT_SIGNING_KEY
+          python3 tools/release.py finalize --metadata release-metadata.json --repo "$GITHUB_REPOSITORY" \
+            --directory release-assets --apt-signing-key "$signing_key" \
+            --apt-signing-fingerprint "$APT_FINGERPRINT" "${args[@]}"
           python3 - <<'PYSUMMARY'
           import json, os
           metadata = json.load(open('release-metadata.json'))

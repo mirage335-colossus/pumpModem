@@ -11,7 +11,7 @@ import subprocess
 import tarfile
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,7 +32,7 @@ class CertificationFixture:
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.metadata = certify.release.make_metadata(source_sha='a' * 40, run_id='123', run_attempt='1',
-            now=datetime(2026, 9, 22, 7, 52, tzinfo=timezone.utc), cmake_version='0.7.2')
+            now=datetime(2026, 9, 22, 7, 52, tzinfo=timezone.utc), cmake_version='0.7.2', schema=self.schema)
         if self.schema == 1:
             self.metadata['schema'] = 1
             self.metadata.pop('gui_backends', None)
@@ -40,7 +40,7 @@ class CertificationFixture:
         self.repository = 'owner/project'
         self.commit = self.metadata['source_sha']
         self.files = {'release-notes.md': b'Original release notes\n'}
-        if self.schema == 2:
+        if self.schema >= 2:
             self.files['warning.log'] = b'Display cadence warnings are advisory; other checks remain mandatory.\n'
         for target, name in certify.release.application_names(self.metadata).items():
             self.files[name] = self.archive(target)
@@ -63,7 +63,7 @@ class CertificationFixture:
         executable = '.exe' if system == 'Windows' else ''
         files = {f'{root}/manifest.sha256': b'inventory',
                  f'{root}/bin/pump{executable}': b'CLI', f'{root}/bin/datapump-gui{executable}': b'GUI'}
-        if self.metadata['schema'] == 2:
+        if self.metadata['schema'] >= 2:
             backend = certify.release.target_backend(self.metadata, target)
             files[f'{root}/share/doc/datapump/build-info.txt'] = f'DataPump 0.7.2\nGUI: ON ({backend})\n'.encode()
         if extra:
@@ -135,8 +135,8 @@ class CertificationFixture:
 
     def results(self, jobs=None, **extra):
         value = {'source_sha': self.metadata['source_sha'], 'inventory_sha256': digest(self.files['SHA256SUMS.txt']),
-                 'jobs': dict.fromkeys(certify.REQUIRED_JOBS, 'success') if jobs is None else jobs}
-        if self.metadata['schema'] == 2:
+                 'jobs': dict.fromkeys(certify.required_jobs(self.metadata), 'success') if jobs is None else jobs}
+        if self.metadata['schema'] >= 2:
             value['tested_targets'] = list(certify.release.application_targets(self.metadata))
         value.update(extra)
         path = self.root / 'results.json'
@@ -263,13 +263,14 @@ class CertificationTests(CertificationFixture, unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Unsafe'):
             certify.extract_archive(archive, self.root, self.metadata, 'linux-x86_64')
 
-    def test_passed_report_uploads_only_evidence_then_promotes_normal_release(self):
+    def test_passed_legacy_report_uploads_only_evidence_and_preserves_apt_latest(self):
         evidence = self.record()
         self.assertEqual(evidence['status'], 'passed')
         self.assertEqual(set(evidence['assets']), set(certify.release.application_names(self.metadata).values()))
         self.assertEqual(set(self.uploads), {'certification-789-attempt-2.json', 'certification-789-attempt-2.md'})
-        self.assertIn('--latest=true', self.edits[0][0])
-        self.assertIn('--prerelease=false', self.edits[0][0])
+        self.assertIn('--latest=false', self.edits[0][0])
+        self.assertFalse(evidence['latest_eligible'])
+        self.assertIn('cannot become Latest', self.edits[0][1])
         self.assertTrue(self.edits[0][1].startswith('Original release notes'))
         upload = next(i for i, args in enumerate(self.calls) if args[:2] == ['release', 'upload'])
         edit = next(i for i, args in enumerate(self.calls) if args[:2] == ['release', 'edit'])
@@ -334,8 +335,8 @@ class CertificationTests(CertificationFixture, unittest.TestCase):
                     self.assertIn('--prerelease', retry_flags)
                     self.assertEqual(retry_flags[retry_flags.index('--title') + 1], 'experiment')
                 else:
-                    self.assertIn('--latest=true', retry_flags)
-                    self.assertIn('--prerelease=false', retry_flags)
+                    self.assertIn('--latest=false', retry_flags)
+                    self.assertNotIn('--latest=true', retry_flags)
 
     def test_status_replaces_pending_notice_and_preserves_prose_and_history(self):
         history = 'Certification run 100: **passed** ([report](https://example.test/old.md)).'
@@ -555,7 +556,8 @@ class BackendCertificationTests(CertificationFixture, unittest.TestCase):
                     x86 = evidence['required_coverage']['published_archives']['linux-x86_64-' + backend]
                     self.assertEqual('Ubuntu 22.04' in x86['environments'], baseline == 'ubuntu-22.04')
                     self.assertIn('Arch Linux', x86['environments'])
-                self.assertIn('--latest=true', self.edits[-1][0])
+                self.assertIn('--latest=false', self.edits[-1][0])
+                self.assertFalse(evidence['latest_eligible'])
 
     def test_missing_or_fltk_only_coverage_attaches_failed_report_without_promotion(self):
         cases = [None, [], [target for target in certify.release.application_targets(self.metadata)
@@ -616,6 +618,96 @@ class BackendCertificationTests(CertificationFixture, unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'already exists'):
             self.record()
         self.assertEqual(len(self.edits), edit_count)
+
+
+class AptCertificationTests(CertificationFixture, unittest.TestCase):
+    schema = 3
+
+    def setUp(self):
+        super().setUp()
+        self.apt_names = {'Packages', 'Packages.gz', 'Release', 'InRelease', 'Release.gpg',
+                          'datapump-archive-keyring.gpg', 'datapump.sources', 'apt-repository.json'} | {
+                              f'datapump-{backend}_0.7.2+20260922_{arch}.deb'
+                              for backend in ('fltk', 'rev') for arch in ('amd64', 'arm64')}
+        self.apt_tool = Mock()
+        self.apt_tool.asset_names.return_value = self.apt_names
+        patched = patch.object(certify.release, 'apt_tool', return_value=self.apt_tool)
+        patched.start()
+        self.addCleanup(patched.stop)
+        self.files.update({name: ('apt fixture ' + name).encode() for name in self.apt_names})
+        self.refresh_metadata()
+
+    def test_prepare_requires_all_signed_apt_files_and_emits_feature_marker(self):
+        state = self.prepare()
+        self.assertEqual(certify.output_values(state, None)['apt_repository'], 'true')
+        self.assertEqual(self.downloads, ['SHA256SUMS.txt', 'release-metadata.json'])
+        for index, name in enumerate(sorted(self.apt_names)):
+            data = self.files.pop(name)
+            self.refresh_metadata()
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, 'missing application or support'):
+                certify.prepare(self.repository, self.tag, self.root / f'missing-{index}')
+            self.files[name] = data
+        self.apt_tool.verify.assert_not_called()
+
+    def test_download_apt_verifies_pinned_assets_and_original_linux_payloads(self):
+        state = certify.download_apt(self.repository, self.tag, self.root / 'apt',
+                                     digest(self.files['SHA256SUMS.txt']), 'A' * 40)
+        expected = self.apt_names | {'SHA256SUMS.txt', 'release-metadata.json'} | {
+            name for target, name in certify.release.application_names(self.metadata).items()
+            if target.startswith('linux-')}
+        self.assertEqual(set(self.downloads), expected)
+        self.assertFalse(any('windows' in name for name in self.downloads))
+        self.apt_tool.verify.assert_called_once_with(state['directory'], self.metadata,
+                                                     repository=self.repository, trusted_fingerprint='A' * 40)
+
+    def test_corrupt_apt_asset_cannot_reach_signature_or_payload_verification(self):
+        for asset in self.assets:
+            asset.pop('digest')
+        self.files['InRelease'] += b'tampered'
+        with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
+            certify.download_apt(self.repository, self.tag, self.root / 'apt',
+                                 digest(self.files['SHA256SUMS.txt']))
+        self.apt_tool.verify.assert_not_called()
+
+    def test_apt_verification_failure_propagates_to_the_job(self):
+        self.apt_tool.verify.side_effect = ValueError('APT signature mismatch')
+        with self.assertRaisesRegex(ValueError, 'signature mismatch'):
+            certify.download_apt(self.repository, self.tag, self.root / 'apt',
+                                 digest(self.files['SHA256SUMS.txt']))
+
+    def test_passed_record_binds_all_apt_hashes_and_demands_apt_job(self):
+        evidence = self.record()
+        self.assertEqual(evidence['schema'], 3)
+        self.assertEqual(evidence['status'], 'passed')
+        self.assertEqual(evidence['apt_assets'], {name: digest(self.files[name]) for name in self.apt_names})
+        self.assertIn('apt-repository', evidence['required_jobs'])
+        self.assertIn('--latest=true', self.edits[-1][0])
+        report = self.uploads['certification-789-attempt-2.md'].decode()
+        self.assertIn('Signed APT repository', report)
+        self.assertIn('Published APT asset SHA-256 values', report)
+        for name in self.apt_names:
+            self.assertIn(name, report)
+
+    def test_missing_failed_or_skipped_apt_job_cannot_promote(self):
+        for result in (None, 'failure', 'skipped', 'cancelled', 'pending'):
+            jobs = dict.fromkeys(certify.REQUIRED_JOBS, 'success')
+            if result is not None:
+                jobs['apt-repository'] = result
+            with self.subTest(result=result):
+                evidence = self.record(jobs=jobs)
+                self.assertEqual(evidence['status'], 'failed')
+                self.assertIn('--latest=false', self.edits[-1][0])
+                self.assertNotIn('--latest=true', self.edits[-1][0])
+
+    def test_no_server_digest_requires_record_to_recheck_apt_bytes(self):
+        for asset in self.assets:
+            if asset['name'] in self.apt_names:
+                asset.pop('digest')
+        self.files['Packages.gz'] += b'tampered'
+        with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
+            self.record()
+        self.assertFalse(self.uploads)
+        self.assertFalse(self.edits)
 
 
 if __name__ == '__main__':

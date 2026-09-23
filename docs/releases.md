@@ -12,7 +12,7 @@ be copied into the system `/lib` directory. Linux uses `.tar.gz`; Windows uses
 Publication and extensive testing are separate operations. Publication checks
 build success, both package formats, checksums, relocation, CLI/self-check
 operation, dependency closure and the Linux ABI ceiling. It then publishes the
-six selected downloads with **certification pending**. The separate
+six selected downloads and a signed flat APT repository with **certification pending**. The separate
 [certification workflow](../.github/workflows/certify.yml) later tests the exact
 published downloads and attaches immutable reports to that same release. The
 long preservation contract and GUI tests remain intact in that workflow.
@@ -26,6 +26,7 @@ long preservation contract and GUI tests remain intact in that workflow.
 | `publish` | Checked | Publish after all six platform/backend packages pass basic checks. Uncheck to retain a draft with its assets for inspection. |
 | `linux_baseline` | `bookworm-sdk` | Source SDK/glibc 2.36 for x86_64, or `ubuntu-22.04`/glibc 2.35. ARM64 always uses the Ubuntu 22.04 baseline. |
 | `arm_runner` | `ubuntu-24.04-arm-l` | ARM64 host: organization L or H tier, or standard `ubuntu-24.04-arm`. See [runner selection](#runner-selection-and-build-parallelism) for all three architecture selectors. |
+| `source_release` | Empty | Build normally when blank. Otherwise reuse that complete release's six archives to create a new APT experiment; application/SDK builds are skipped. |
 
 Leave `experiment` checked for builds users needing assurance should avoid.
 An ordinary release uses its version/date tag as the title. It becomes Latest
@@ -94,9 +95,10 @@ release, with links in its description. Missing, skipped, cancelled or failed
 required jobs cannot grant a pass. Repeated runs retain prior reports. An
 upload failure cannot promote a release. Drafts cannot be certified. Older ad-hoc releases without this workflow's
 metadata, checksums and source-side certification tools are outside this path.
-Existing schema-1 releases retain their original three FLTK assets and remain
-readable; new schema-2 releases require all six backend-specific assets and a
-checksummed `warning.log`. Upload and certification check each archive's root
+Existing schema-1 releases retain their original three FLTK assets; schema-2
+releases retain all six backend-specific assets and a checksummed `warning.log`.
+Both remain readable. New schema-3 releases also require the signed APT assets
+and Debian installation checks described below. Upload and certification check each archive's root
 and shipped build information, so relabeling an FLTK package as Rev is rejected.
 Certification of a new release requires coverage of every declared backend.
 
@@ -104,6 +106,130 @@ For the Ubuntu 22.04 x86_64 baseline, set `linux_baseline=ubuntu-22.04`.
 Clear `experiment` for an ordinary release. `publish=false` still reserves a
 tag and uploads to a draft; it is no longer an Actions-artifact rehearsal.
 PRs changing automation run helper tests without creating releases or tags.
+
+## Debian installation from GitHub Releases
+
+The release assets form a flat APT repository: four `.deb` packages (FLTK and
+Rev, each for `amd64` and `arm64`), `Packages`/`Packages.gz`, signed `InRelease`
+and `Release.gpg`, and their support metadata. No package pool, generated index
+or signing key is committed to Git. GitHub Pages and an additional server are
+unnecessary. The packages wrap the existing portable payloads without compiling
+the application or SDK again.
+
+`datapump-fltk` and `datapump-rev` can be installed together. They keep their
+complete private `bin/`, `lib/` and `share/` trees under `/opt/datapump/fltk/`
+and `/opt/datapump/rev/`, with application-menu entries and these commands:
+
+| Package | GUI | CLI |
+| --- | --- | --- |
+| `datapump-fltk` | `datapump-fltk` | `datapump-cli-fltk` |
+| `datapump-rev` | `datapump-rev` | `datapump-cli-rev` |
+
+Bookworm `amd64`/`arm64` is the installation-test baseline. The package manager
+also installs host audio plugins, fonts and graphics drivers. A compatible
+ChromeOS Linux container or VelvetOS installation can use the matching Debian
+architecture; packaging does not establish physical Chromebook audio/graphics
+compatibility or change Rev's OpenGL requirement.
+
+Choose a published release with APT assets and obtain its full signing
+fingerprint from the maintainer. Bootstrap the public key and source file from
+that exact tag, replacing the two uppercase placeholders:
+
+```sh
+tag=RELEASE_TAG
+fingerprint=TRUSTED_FINGERPRINT
+base="https://github.com/mirage335-colossus/pumpModem/releases/download/$tag"
+download_dir=$(mktemp -d)
+curl --fail --location "$base/datapump-archive-keyring.gpg" -o "$download_dir/datapump.gpg"
+actual=$(gpg --batch --show-keys --with-colons "$download_dir/datapump.gpg" |
+  awk -F: '$1 == "fpr" {print $10; exit}')
+test "$actual" = "$fingerprint" || { echo 'Signing fingerprint mismatch' >&2; exit 1; }
+curl --fail --location "$base/datapump.sources" -o "$download_dir/datapump.sources"
+sudo install -d -m 0755 /etc/apt/keyrings
+sudo install -m 0644 "$download_dir/datapump.gpg" /etc/apt/keyrings/datapump.gpg
+sudo install -m 0644 "$download_dir/datapump.sources" /etc/apt/sources.list.d/datapump.sources
+rm -rf "$download_dir"
+sudo apt-get update
+sudo apt-get install datapump-fltk
+# Optional second GUI, with its own CLI and private libraries:
+sudo apt-get install datapump-rev
+```
+
+The bootstrap commands need `curl` and `gpg`. Keep the installed keyring for
+future updates; key replacement is a separate maintainer operation. The source
+file uses `Signed-By: /etc/apt/keyrings/datapump.gpg` and `Suites: ./`.
+For a regular release its URI is
+`https://github.com/mirage335-colossus/pumpModem/releases/latest/download/`, so
+normal `apt-get update` and `apt-get upgrade` follow qualified releases.
+For an **experiment**, the supplied source file stays pinned to that exact
+release tag. Installing it is an explicit opt-in and does not switch to Latest.
+
+Package indexes point to immutable versioned release URLs, including when the
+index itself was fetched through Latest. Versions include the project version,
+UTC build timestamp and workflow identity, so APT upgrades remain ordered
+across the CDT/CST clock change. Publication alone never changes Latest: a
+regular schema-3 release must pass full certification, including APT checks.
+Older schema-1/2 releases can still be certified, but cannot replace this APT
+update channel because they lack its assets.
+
+### Maintainer signing configuration
+
+Configure a dedicated APT signing key before dispatching a release. Store the
+ASCII-armored private key as the repository Actions secret
+`DATAPUMP_APT_SIGNING_KEY`, and its full primary fingerprint as the repository
+Actions variable `DATAPUMP_APT_SIGNING_FINGERPRINT`. The CI key must support
+unattended signing without an interactive passphrase. Keep its backup outside
+the checkout; only the exported public key belongs in release assets.
+
+```sh
+gh secret set DATAPUMP_APT_SIGNING_KEY --repo mirage335-colossus/pumpModem \
+  < /secure/path/datapump-apt-private.asc
+gh variable set DATAPUMP_APT_SIGNING_FINGERPRINT --repo mirage335-colossus/pumpModem \
+  --body FULL_PRIMARY_FINGERPRINT
+```
+
+The workflow fails before application builds when signing configuration is
+missing. Signing uses a temporary private key file and keyring, verifies the
+configured fingerprint, and removes the temporary material afterward. Every
+Debian payload is checked against its original portable archive; signed index
+and package hashes join the release's final checksum inventory before upload
+and publication. Existing release assets are never overwritten.
+
+### Package an existing release without rebuilding it
+
+The existing release entry point accepts a complete release, including a
+finalized draft, and calls the [APT workflow](../.github/workflows/apt-release.yml)
+to create a **new experiment**:
+
+```sh
+gh workflow run release.yml --ref REF -f source_release=SOURCE_RELEASE_TAG \
+  -f publish=true -f linux_runner=ubuntu-latest-h -f arm_runner=ubuntu-24.04-arm-h
+gh run watch RUN_ID --exit-status
+```
+
+The six original archive byte streams stay unchanged. New metadata records
+their source revision, original tag/inventory hash and packaging-tool revision.
+The old release and its reports remain intact. `publish=false` leaves the new
+release as a draft after signature/payload checks; public APT installation
+cannot run against a draft. The default `publish=true` publishes the experiment
+and then tests actual GitHub `apt-get update`, installation of both backends,
+installed-file hashes and bounded CLI/GUI self-checks on Bookworm AMD64 and
+ARM64. Its runner dropdowns contain the larger L/H tiers only.
+When called through `release.yml`, H selections are preserved and other runner
+selections use L; Windows and baseline selectors do not trigger builds.
+This path always creates an experiment, regardless of the ordinary release's
+`experiment` checkbox. An optional `version` overrides its display label;
+otherwise the original label is retained. Once registered on the default
+branch, `apt-release.yml` can also be dispatched directly with
+`source_tag=SOURCE_RELEASE_TAG`. The existing `release.yml` entry point permits
+testing this path from an unmerged branch without registering a new workflow.
+
+During packaging development, run the affected helper tests first. After the
+candidate is complete, run this full two-architecture APT installation coverage
+without repeating unchanged application or SDK builds. These checks do not
+certify the application: follow publication with `certify.yml`, `devfast=false`,
+for the new tag. Certification includes the same APT coverage for schema-3
+releases and binds the report to all published hashes.
 
 ## Rev display warnings
 

@@ -230,6 +230,16 @@ Do not rerun an expensive unchanged suite after recording a pass unless later
 changes or failures invalidate that evidence. Compile with available cores, but
 keep timing-sensitive test concurrency at its documented limits.
 
+For changes confined to Debian release packaging, start with
+`python3 tests/test_apt_release.py` and the affected release/certification helper
+tests; `./build.sh test build` runs their normal group. Once complete, use
+`release.yml` with `source_release=SOURCE_RELEASE_TAG` to wrap existing verified archives in a new experiment and
+test real APT installation on Bookworm AMD64 and ARM64 with the larger runners.
+This path does not rebuild application binaries or SDKs. Follow publication
+with full `certify.yml`, `devfast=false`, for that new release; packaging-only
+checks are not a substitute for release certification. See
+[APT packaging and validation](releases.md#package-an-existing-release-without-rebuilding-it).
+
 Manual workflows expose `linux_runner` and `windows_runner` dropdowns for the
 organization's larger x86-64 runners. Native CI, portable release and
 certification also expose `arm_runner`: `ubuntu-24.04-arm-l` (the default),
@@ -422,6 +432,15 @@ warnings and do not prevent publication or certification; pending-progress,
 content, physical-completion and cancellation assertions remain mandatory.
 See [release warnings](releases.md#rev-display-warnings). Physical-device
 qualification remains a separate scope.
+
+The [signed Debian repository](releases.md#debian-installation-from-github-releases)
+is generated entirely as GitHub Release assets. `datapump-fltk` and
+`datapump-rev` wrap those same Linux portable directories under separate
+`/opt/datapump/` backend paths, with GUI/CLI wrappers in `/usr/bin`; they can
+coexist. No SDK is needed on the user's machine. The regular source file follows
+GitHub's Latest download URL after full certification, while an experiment's
+source file pins its own tag. Signing setup and installation commands are in the
+release guide. Generated `.deb` files, indexes and private keys stay out of Git.
 
 The existing native CI still uses Ubuntu 22.04 and audits a glibc 2.35 ceiling,
 then tests copied artifacts on Ubuntu 22.04 and 24.04. A 2.36 SDK does not imply

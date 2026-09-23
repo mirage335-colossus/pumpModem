@@ -31,6 +31,8 @@ on:
   pull_request:
     paths:
       - '.github/workflows/certify.yml'
+      - '.github/workflows/apt-check.yml'
+      - 'tools/apt-release.py'
       - 'tools/certify-release.py'
       - 'tests/test_certify_release.py'
 
@@ -72,6 +74,7 @@ jobs:
       compatibility_matrix: ${{ steps.matrix.outputs.compatibility_matrix }}
       windows_matrix: ${{ steps.matrix.outputs.windows_matrix }}
       application_targets: ${{ steps.release.outputs.application_targets }}
+      apt_repository: ${{ steps.release.outputs.apt_repository }}
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ inputs.release_tag }}
@@ -116,6 +119,13 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.prepare.outputs.source_sha }}
+      - name: Load current release metadata tooling without changing the released source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .certification-tools
+          sparse-checkout: tools
       - name: Fetch exact SDK from base (no compiler rebuild)
         if: matrix.sdk
         id: sdk
@@ -184,7 +194,7 @@ jobs:
         id: binary
         env:
           RELEASE_TARGET: ${{ matrix.target }}
-        run: python3 tools/certify-release.py download --repo "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --target "$RELEASE_TARGET" --directory published --inventory-sha256 "$INVENTORY_SHA256" --github-output "$GITHUB_OUTPUT"
+        run: python3 .certification-tools/tools/certify-release.py download --repo "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --target "$RELEASE_TARGET" --directory published --inventory-sha256 "$INVENTORY_SHA256" --github-output "$GITHUB_OUTPUT"
       - name: Test published GUI, CLI, relocation and ELF dependencies
         env:
           PACKAGE_ROOT: ${{ steps.binary.outputs.package_root }}
@@ -261,7 +271,7 @@ jobs:
         id: binary
         shell: pwsh
         run: |
-          python tools/certify-release.py download --repo "$env:GITHUB_REPOSITORY" --tag "$env:RELEASE_TAG" --target "$env:RELEASE_TARGET" --directory published --inventory-sha256 "$env:INVENTORY_SHA256" --github-output "$env:GITHUB_OUTPUT"
+          python .certification-tools/tools/certify-release.py download --repo "$env:GITHUB_REPOSITORY" --tag "$env:RELEASE_TAG" --target "$env:RELEASE_TARGET" --directory published --inventory-sha256 "$env:INVENTORY_SHA256" --github-output "$env:GITHUB_OUTPUT"
           if ($LASTEXITCODE -ne 0) { throw 'Published archive verification failed' }
       - name: Test the published GUI, CLI and relocation
         shell: pwsh
@@ -303,11 +313,18 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.prepare.outputs.source_sha }}
+      - name: Load current release metadata tooling without changing the released source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .certification-tools
+          sparse-checkout: tools
       - name: Download and verify this target's published archive
         id: binary
         env:
           RELEASE_TARGET: ${{ matrix.target }}
-        run: python3 tools/certify-release.py download --repo "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --target "$RELEASE_TARGET" --directory published --inventory-sha256 "$INVENTORY_SHA256" --github-output "$GITHUB_OUTPUT"
+        run: python3 .certification-tools/tools/certify-release.py download --repo "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --target "$RELEASE_TARGET" --directory published --inventory-sha256 "$INVENTORY_SHA256" --github-output "$GITHUB_OUTPUT"
       - name: Use the pinned dependency scanner
         run: |
           sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
@@ -320,8 +337,18 @@ jobs:
           xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DPACKAGE_ROOT="$PACKAGE_ROOT" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P tools/verify-native-package.cmake
           cmake -DPACKAGE_ROOT="$PACKAGE_ROOT" -DMAX_GLIBC="$GLIBC_CEILING" -P tools/verify-linux-abi.cmake
 
+  apt-repository:
+    if: ${{ !inputs.devfast && needs.prepare.outputs.apt_repository == 'true' }}
+    needs: prepare
+    uses: ./.github/workflows/apt-check.yml
+    with:
+      release_tag: ${{ inputs.release_tag }}
+      inventory_sha256: ${{ needs.prepare.outputs.inventory_sha256 }}
+      linux_runner: ${{ inputs.linux_runner == 'ubuntu-24.04' && 'ubuntu-latest-l' || inputs.linux_runner || 'ubuntu-latest-l' }}
+      arm_runner: ${{ inputs.arm_runner == 'ubuntu-24.04-arm' && 'ubuntu-24.04-arm-l' || inputs.arm_runner || 'ubuntu-24.04-arm-l' }}
+
   record:
-    needs: [prepare, linux-tests, windows-tests, compatibility]
+    needs: [prepare, linux-tests, windows-tests, compatibility, apt-repository]
     if: ${{ always() && !inputs.devfast && needs.prepare.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -335,6 +362,7 @@ jobs:
       INVENTORY_SHA256: ${{ needs.prepare.outputs.inventory_sha256 }}
       JOB_RESULTS: ${{ toJSON(needs) }}
       TESTED_TARGETS: ${{ needs.prepare.outputs.application_targets }}
+      APT_REPOSITORY: ${{ needs.prepare.outputs.apt_repository }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -344,9 +372,12 @@ jobs:
           python3 - <<'PYRESULTS'
           import json, os
           needs = json.loads(os.environ['JOB_RESULTS'])
+          jobs = ['linux-tests', 'windows-tests', 'compatibility']
+          if os.environ['APT_REPOSITORY'] == 'true':
+              jobs.append('apt-repository')
           results = {'source_sha': os.environ['SOURCE_SHA'], 'inventory_sha256': os.environ['INVENTORY_SHA256'],
                      'tested_targets': json.loads(os.environ['TESTED_TARGETS']),
-                     'jobs': {name: needs[name]['result'] for name in ('linux-tests', 'windows-tests', 'compatibility')}}
+                     'jobs': {name: needs[name]['result'] for name in jobs}}
           with open('certification-results.json', 'w') as out:
               json.dump(results, out)
           PYRESULTS

@@ -30,6 +30,10 @@ SCOPE = ('Hosted source contract, GUI and packaging tests, plus checks of the ex
          'not qualified by this report.')
 
 
+def required_jobs(metadata):
+    return REQUIRED_JOBS | ({'apt-repository'} if metadata['schema'] == 3 else set())
+
+
 def required_coverage(metadata):
     sdk = metadata['linux_baseline'] == 'bookworm-sdk'
     linux = ['Debian 12', 'Debian 13', 'Ubuntu 24.04', 'Ubuntu 26.04']
@@ -58,7 +62,7 @@ def required_coverage(metadata):
         backend = release.target_backend(metadata, target)
         for section, items in platforms.items():
             coverage[section][target] = dict(items[platform])
-            if metadata['schema'] == 2:
+            if metadata['schema'] >= 2:
                 coverage[section][target].update(platform=platform, gui_backend=backend)
     return coverage
 
@@ -77,7 +81,7 @@ def api(endpoint):
 def checksums(path):
     inventory = {}
     for line in path.read_text(encoding='utf-8').splitlines():
-        match = re.fullmatch(r'([0-9a-f]{64})  ([A-Za-z0-9][A-Za-z0-9_.-]*)', line)
+        match = re.fullmatch(r'([0-9a-f]{64})  ([A-Za-z0-9][A-Za-z0-9_.+-]*)', line)
         if not match or match[2] == 'SHA256SUMS.txt' or match[2] in inventory:
             raise ValueError('Malformed or duplicate published checksum entry')
         inventory[match[2]] = match[1]
@@ -144,7 +148,7 @@ def prepare(repository, tag, directory, expected_inventory=None):
     metadata_path = download_asset(repository, tag, 'release-metadata.json', directory, assets,
                                    inventory.get('release-metadata.json'))
     metadata = release.load_metadata(metadata_path)
-    required = set(release.application_names(metadata).values()) | release.support_files(metadata)
+    required = release.required_assets(metadata)
     if not required <= inventory.keys() or not set(inventory) <= assets.keys():
         raise ValueError('Published inventory is missing application or support assets')
     extra = set(inventory) - required
@@ -166,7 +170,7 @@ def extract_archive(archive, directory, metadata, target):
     if target not in release.application_targets(metadata):
         raise ValueError('Unknown application target for this release')
     roots = set(release.package_bases(metadata, target))
-    # Schema 2 must identify the backend inside the checksummed archive, not
+    # Schemas 2 and 3 identify the backend inside the checksummed archive, not
     # just in its filename. Legacy releases retain their original root format.
     release.verify_archive_backend(archive, metadata, target)
     seen, selected = set(), set()
@@ -235,6 +239,24 @@ def download(repository, tag, target, directory, inventory_sha):
     return state
 
 
+def download_apt(repository, tag, directory, inventory_sha, trusted_fingerprint=None):
+    """Pin the signed repository and original payloads to the prepared release."""
+    if not re.fullmatch(r'[0-9a-f]{64}', inventory_sha):
+        raise ValueError('A complete prepared inventory SHA-256 is required')
+    state = prepare(repository, tag, directory, inventory_sha)
+    metadata = state['metadata']
+    if metadata['schema'] != 3:
+        raise ValueError('This release does not contain a signed APT repository')
+    names = release.apt_assets(metadata) | {
+        name for target, name in release.application_names(metadata).items()
+        if release.target_platform(metadata, target).startswith('linux-')}
+    for name in sorted(names):
+        download_asset(repository, tag, name, state['directory'], state['assets'], state['inventory'][name])
+    release.apt_tool().verify(state['directory'], metadata, repository=repository,
+                              trusted_fingerprint=trusted_fingerprint)
+    return state
+
+
 def record(repository, tag, run_id, results_path, run_attempt='1'):
     if not re.fullmatch(r'[1-9][0-9]*', str(run_id)) or not re.fullmatch(r'[1-9][0-9]*', str(run_attempt)):
         raise ValueError('Run ID and attempt must be positive integers')
@@ -249,10 +271,11 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
     inventory_sha = results.get('inventory_sha256', '')
     if not re.fullmatch(r'[0-9a-f]{64}', inventory_sha):
         raise ValueError('Results require the prepared inventory SHA-256')
-    jobs_passed = REQUIRED_JOBS <= jobs.keys() and all(value == 'success' for value in jobs.values())
     with tempfile.TemporaryDirectory(prefix='datapump-certification-') as scratch:
         state = prepare(repository, tag, Path(scratch) / 'published', inventory_sha)
         metadata = state['metadata']
+        required = required_jobs(metadata)
+        jobs_passed = required <= jobs.keys() and all(value == 'success' for value in jobs.values())
         if results.get('source_sha') != metadata['source_sha']:
             raise ValueError('Tested source commit differs from the published release')
         names = release.application_names(metadata)
@@ -261,9 +284,11 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
                 or len(set(tested_targets)) != len(tested_targets) or not set(tested_targets) <= names.keys()):
             raise ValueError('Tested targets must be unique application identities from this release')
         passed = jobs_passed and set(tested_targets) == names.keys()
+        latest_eligible = passed and not metadata['experiment'] and metadata['schema'] == 3
         # GitHub normally supplies SHA-256 asset digests. Older hosts require
         # re-reading bytes before a report can describe the current assets.
-        checked_names = list(names.values()) + (['warning.log'] if metadata['schema'] == 2 else [])
+        checked_names = (list(names.values()) + sorted(release.apt_assets(metadata))
+                         + (['warning.log'] if metadata['schema'] >= 2 else []))
         for name in checked_names:
             if not state['assets'][name].get('digest'):
                 download_asset(repository, tag, name, state['directory'], state['assets'], state['inventory'][name])
@@ -275,11 +300,12 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
             'linux_baseline': metadata['linux_baseline'], 'experiment': metadata['experiment'],
             'run_id': str(run_id), 'run_attempt': str(run_attempt), 'run_url': run_url,
             'created_at': datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z'),
-            'required_jobs': sorted(REQUIRED_JOBS), 'jobs': jobs, 'scope': SCOPE,
+            'required_jobs': sorted(required), 'jobs': jobs, 'scope': SCOPE,
             'required_coverage': required_coverage(metadata),
             'assets': {name: state['inventory'][name] for name in names.values()},
+            'latest_eligible': latest_eligible,
         }
-        if metadata['schema'] == 2:
+        if metadata['schema'] >= 2:
             evidence.update(
                 gui_backends=metadata['gui_backends'], tested_targets=sorted(tested_targets),
                 known_warning_asset='warning.log', warning_sha256=state['inventory']['warning.log'],
@@ -289,6 +315,8 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
                     'gui_backend': release.target_backend(metadata, target),
                     'asset': name, 'sha256': state['inventory'][name],
                 } for target, name in names.items()})
+        if metadata['schema'] == 3:
+            evidence['apt_assets'] = {name: state['inventory'][name] for name in sorted(release.apt_assets(metadata))}
         stem = f'certification-{run_id}-attempt-{run_attempt}'
         if any(stem + suffix in state['assets'] for suffix in ('.json', '.md')):
             raise ValueError('Certification evidence already exists; never overwrite a prior run')
@@ -299,12 +327,12 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
             f'# Release certification: {evidence["status"]}\n\n'
             f'Release `{tag}`; source `{metadata["source_sha"]}`; '
             f'[workflow run {run_id}, attempt {run_attempt}]({run_url}/attempts/{run_attempt}).\n\n{SCOPE}\n\n'
-            + '\n'.join(f'- {job}: **{jobs.get(job, "missing")}**' for job in sorted(REQUIRED_JOBS | jobs.keys()))
+            + '\n'.join(f'- {job}: **{jobs.get(job, "missing")}**' for job in sorted(required | jobs.keys()))
             + ('\n\nRecorded application targets: ' + ', '.join(f'`{target}`' for target in tested_targets)
                + '. Missing targets: ' + (', '.join(f'`{target}`' for target in names if target not in tested_targets) or 'none')
-               + '.' if metadata['schema'] == 2 else '')
+               + '.' if metadata['schema'] >= 2 else '')
             + (f'\n\n{DISPLAY_WARNING_POLICY} Known limitations: '
-               f'[warning.log]({asset_base}/warning.log).' if metadata['schema'] == 2 else '')
+               f'[warning.log]({asset_base}/warning.log).' if metadata['schema'] >= 2 else '')
             + '\n\nRequired coverage below is complete only when the report status is **passed**. '
             'Source suites rebuild the recorded release commit, including the full calibration tests. '
             'Archive checks run the published bytes identified by the hashes below.\n\n'
@@ -315,8 +343,13 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
                         + ', '.join(item['checks'])
                         + (f'; GLIBC <= {item["glibc_max"]}' if 'glibc_max' in item else '') + '.'
                         for target, item in coverage['published_archives'].items())
+            + ('\n\nSigned APT repository: signatures, indexes, package metadata and payloads must pass '
+               'the apt-repository job against this same release inventory.\n' if metadata['schema'] == 3 else '')
             + '\n\nPublished application SHA-256 values:\n\n'
-            + '\n'.join(f'- `{name}`: `{digest}`' for name, digest in evidence['assets'].items()) + '\n',
+            + '\n'.join(f'- `{name}`: `{digest}`' for name, digest in evidence['assets'].items()) + '\n'
+            + ('\nPublished APT asset SHA-256 values:\n\n'
+               + '\n'.join(f'- `{name}`: `{digest}`' for name, digest in evidence['apt_assets'].items())
+               + '\n' if metadata['schema'] == 3 else ''),
             encoding='utf-8')
         # No --clobber, no binary upload, and no promotion before evidence upload.
         gh(['release', 'upload', tag, '--repo', repository, str(json_path), str(markdown_path)])
@@ -331,9 +364,12 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
                  f'**{evidence["status"]}** '
                  f'([report]({asset_base}/{stem}.md), [JSON]({asset_base}/{stem}.json)). '
                  'This report applies only to the recorded source and asset hashes.\n')
+        if metadata['schema'] < 3:
+            body += ('This archive-only release cannot become Latest because it lacks the signed APT '
+                     'repository required by the current update channel.\n')
         notes = Path(scratch) / 'release-body.md'
         notes.write_text(body, encoding='utf-8')
-        flags = ['--latest=true', '--prerelease=false'] if passed and not metadata['experiment'] else ['--latest=false']
+        flags = ['--latest=true', '--prerelease=false'] if latest_eligible else ['--latest=false']
         if metadata['experiment']:
             flags += ['--title', 'experiment', '--prerelease']
         gh(['release', 'edit', tag, '--repo', repository, '--notes-file', str(notes), *flags])
@@ -345,6 +381,7 @@ def output_values(state, output):
     values = {'source_sha': metadata['source_sha'], 'baseline': metadata['linux_baseline'],
               'experiment': str(metadata['experiment']).lower(), 'inventory_sha256': state['inventory_sha256'],
               'schema': str(metadata['schema']),
+              'apt_repository': str(metadata['schema'] == 3).lower(),
               'gui_backends': json.dumps(metadata.get('gui_backends', ['fltk']), separators=(',', ':')),
               'application_targets': json.dumps(list(release.application_targets(metadata)), separators=(',', ':'))}
     for name in ('archive', 'package_root'):
@@ -362,7 +399,7 @@ def output_values(state, output):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
-    for name in ('prepare', 'download', 'record'):
+    for name in ('prepare', 'download', 'download-apt', 'record'):
         command = commands.add_parser(name)
         command.add_argument('--repo', required=True)
         command.add_argument('--tag', required=True)
@@ -375,11 +412,17 @@ def main(argv=None):
             command.add_argument('--github-output', type=Path)
         if name == 'download':
             command.add_argument('--target', required=True)
+        if name in ('download', 'download-apt'):
             command.add_argument('--inventory-sha256', required=True)
+        if name == 'download-apt':
+            command.add_argument('--apt-signing-fingerprint')
     args = parser.parse_args(argv)
     try:
         if args.command == 'prepare':
             result = output_values(prepare(args.repo, args.tag, args.directory), args.github_output)
+        elif args.command == 'download-apt':
+            result = output_values(download_apt(args.repo, args.tag, args.directory, args.inventory_sha256,
+                                                args.apt_signing_fingerprint), args.github_output)
         elif args.command == 'download':
             result = output_values(download(args.repo, args.tag, args.target, args.directory, args.inventory_sha256), args.github_output)
         else:

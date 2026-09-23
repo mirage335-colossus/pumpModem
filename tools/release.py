@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Create, verify and publish the manual portable-release inventory with gh.
+"""Create, verify and publish portable releases and their signed APT repositories.
 
-Packaging and platform qualification belong to build.sh and the workflow. This
-helper only accepts their complete, checksummed archive pairs; it never rebuilds
-an archive or treats a failed GitHub request as evidence that a tag is available.
+Application builds and platform qualification belong to build.sh and the workflow.
+This helper preserves their checksummed archive bytes and adds Debian delivery
+assets without compiling the application or rebuilding SDKs.
 """
 import argparse
 from datetime import datetime, timedelta, timezone
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import re
@@ -65,8 +66,9 @@ def chicago_time(instant):
 
 
 def make_metadata(*, source_sha, run_id, run_attempt, version='', experiment=False,
-                  linux_baseline='bookworm-sdk', now=None, cmake_version=None, schema=2):
-    if type(schema) is not int or schema not in (1, 2):
+                  linux_baseline='bookworm-sdk', now=None, cmake_version=None, schema=3,
+                  packager_sha=None, repackaged_from=None):
+    if type(schema) is not int or schema not in (1, 2, 3):
         raise ValueError('Unsupported release metadata schema')
     cmake_version = cmake_version or project_version()
     if not re.fullmatch(r'\d+(?:\.\d+){1,3}', cmake_version):
@@ -93,8 +95,28 @@ def make_metadata(*, source_sha, run_id, run_attempt, version='', experiment=Fal
         'created_at': instant.astimezone(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z'),
         'build_date': local.strftime('%Y-%m-%d-%H%M%Z'), 'timezone': 'America/Chicago',
     }
-    if schema == 2:
+    if schema >= 2:
         value['gui_backends'] = list(GUI_BACKENDS)
+    if schema == 3:
+        value['apt_repository'] = {
+            'schema': 1, 'architectures': ['amd64', 'arm64'], 'gui_backends': list(GUI_BACKENDS)}
+        packager_sha = source_sha if packager_sha is None else packager_sha
+        if not isinstance(packager_sha, str) or not SHA.fullmatch(packager_sha):
+            raise ValueError('Packager SHA must be a complete lowercase Git object ID')
+        value['packager_sha'] = packager_sha
+        if repackaged_from is not None:
+            if (not isinstance(repackaged_from, dict) or set(repackaged_from) != {'tag', 'inventory_sha256'}
+                    or not isinstance(repackaged_from['tag'], str)
+                    or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,100}', repackaged_from['tag'])
+                    or '..' in repackaged_from['tag']
+                    or not isinstance(repackaged_from['inventory_sha256'], str)
+                    or not re.fullmatch(r'[0-9a-f]{64}', repackaged_from['inventory_sha256'])):
+                raise ValueError('Repackaged provenance requires an original tag and inventory SHA-256')
+            if not experiment:
+                raise ValueError('Repackaged releases must remain experiments')
+            value['repackaged_from'] = dict(repackaged_from)
+    elif packager_sha is not None or repackaged_from is not None:
+        raise ValueError('Packaging provenance requires release metadata schema 3')
     return value
 
 
@@ -105,7 +127,9 @@ def load_metadata(path):
                                  run_attempt=value['run_attempt'], version=value['version'],
                                  experiment=value['experiment'], linux_baseline=value['linux_baseline'],
                                  now=datetime.fromisoformat(value['created_at'].replace('Z', '+00:00')),
-                                 cmake_version=value['project_version'], schema=value['schema'])
+                                 cmake_version=value['project_version'], schema=value['schema'],
+                                 packager_sha=value.get('packager_sha'),
+                                 repackaged_from=value.get('repackaged_from'))
     except (KeyError, TypeError, AttributeError) as error:
         raise ValueError('Incomplete or invalid release metadata') from error
     if value != expected:
@@ -135,12 +159,7 @@ def check_inventory(directory, checksum_name='SHA256SUMS.txt'):
     checksum = directory / checksum_name
     if not checksum.is_file():
         raise ValueError(f'Missing checksum inventory: {checksum}')
-    inventory = {}
-    for line in checksum.read_text(encoding='utf-8').splitlines():
-        match = re.fullmatch(r'([0-9a-f]{64})  ([A-Za-z0-9][A-Za-z0-9_.-]*)', line)
-        if not match or match[2] == checksum_name or match[2] in inventory:
-            raise ValueError(f'Invalid or duplicate checksum entry: {line!r}')
-        inventory[match[2]] = match[1]
+    inventory = checksum_entries(checksum)
     actual = {entry.name for entry in entries if entry.name != checksum_name}
     if not inventory or set(inventory) != actual:
         raise ValueError(f'Checksum inventory does not match files in {directory}')
@@ -150,11 +169,23 @@ def check_inventory(directory, checksum_name='SHA256SUMS.txt'):
     return inventory
 
 
+def checksum_entries(checksum):
+    inventory = {}
+    for line in checksum.read_text(encoding='utf-8').splitlines():
+        match = re.fullmatch(r'([0-9a-f]{64})  ([A-Za-z0-9][A-Za-z0-9_.+-]*)', line)
+        if not match or match[2] == checksum.name or match[2] in inventory:
+            raise ValueError(f'Invalid or duplicate checksum entry: {line!r}')
+        inventory[match[2]] = match[1]
+    if not inventory:
+        raise ValueError('Checksum inventory must not be empty')
+    return inventory
+
+
 def application_targets(metadata):
     """Map download identities to their physical platform/archive format."""
     if metadata['schema'] == 1:
         return dict(TARGETS)
-    if metadata['schema'] != 2 or metadata.get('gui_backends') != list(GUI_BACKENDS):
+    if metadata['schema'] not in (2, 3) or metadata.get('gui_backends') != list(GUI_BACKENDS):
         raise ValueError('Unsupported release schema or GUI backend inventory')
     return {f'{platform}-{backend}': details for platform, details in TARGETS.items()
             for backend in GUI_BACKENDS}
@@ -272,17 +303,34 @@ def application_names(metadata):
             for target, details in application_targets(metadata).items()}
 
 
+def apt_tool():
+    """Load the Linux APT packager only for schema-3 release operations."""
+    spec = importlib.util.spec_from_file_location('datapump_apt_release', Path(__file__).with_name('apt-release.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def apt_assets(metadata):
+    return set(apt_tool().asset_names(metadata)) if metadata['schema'] == 3 else set()
+
+
+def required_assets(metadata):
+    """Final inventory; draft upload accepts only the original support files."""
+    return set(application_names(metadata).values()) | support_files(metadata) | apt_assets(metadata)
+
+
 def support_files(metadata):
-    return SUPPORT_FILES | ({'warning.log'} if metadata['schema'] == 2 else set())
+    return SUPPORT_FILES | ({'warning.log'} if metadata['schema'] >= 2 else set())
 
 
 def write_warning(metadata, directory):
-    if metadata['schema'] == 2:
+    if metadata['schema'] >= 2:
         (directory / 'warning.log').write_text(WARNING_LOG, encoding='utf-8')
 
 
 def verify_warning(metadata, directory):
-    if metadata['schema'] == 2 and (directory / 'warning.log').read_text(encoding='utf-8') != WARNING_LOG:
+    if metadata['schema'] >= 2 and (directory / 'warning.log').read_text(encoding='utf-8') != WARNING_LOG:
         raise ValueError('Release warning.log must preserve the known Rev presentation limitation')
 
 
@@ -311,7 +359,8 @@ def release_notes(metadata, details):
             f'- Linux ABI: {baseline}\n\n{details}')
 
 
-def assemble(artifacts, metadata_path, notes, output, sdk_artifacts=None):
+def assemble(artifacts, metadata_path, notes, output, sdk_artifacts=None, *, repository=None,
+             apt_signing_key=None, apt_signing_fingerprint=None):
     metadata = load_metadata(metadata_path)
     if not notes.is_file() or notes.is_symlink() or not notes.read_text(encoding='utf-8').strip():
         raise ValueError('Release notes must be a nonempty regular UTF-8 file')
@@ -337,6 +386,8 @@ def assemble(artifacts, metadata_path, notes, output, sdk_artifacts=None):
         (staged / 'release-notes.md').write_text(
             release_notes(metadata, notes.read_text(encoding='utf-8')), encoding='utf-8')
         write_warning(metadata, staged)
+        if metadata['schema'] == 3:
+            apt_tool().build(staged, metadata, repository, apt_signing_key, apt_signing_fingerprint)
         checksums = ''.join(f'{digest(path)}  {path.name}\n' for path in sorted(staged.iterdir()))
         (staged / 'SHA256SUMS.txt').write_text(checksums, encoding='utf-8')
         verify_release(staged)
@@ -347,13 +398,15 @@ def assemble(artifacts, metadata_path, notes, output, sdk_artifacts=None):
 def verify_release(directory):
     inventory = check_inventory(directory)
     metadata = load_metadata(directory / 'release-metadata.json')
-    required = set(application_names(metadata).values()) | support_files(metadata)
+    required = required_assets(metadata)
     if not required <= set(inventory):
         raise ValueError('Release inventory is missing an application target or support file')
     extra = set(inventory) - required
     if extra:
         verify_sdk_pair(extra)
     verify_warning(metadata, directory)
+    if metadata['schema'] == 3:
+        apt_tool().verify(directory, metadata)
     for target, name in application_names(metadata).items():
         verify_archive_backend(directory / name, metadata, target)
     return metadata, sorted(inventory)
@@ -498,7 +551,8 @@ def upload(metadata_path, repository, target, directory):
     return metadata
 
 
-def finalize(metadata_path, repository, directory, publish_now=False):
+def finalize(metadata_path, repository, directory, publish_now=False, *,
+             apt_signing_key=None, apt_signing_fingerprint=None):
     metadata = load_metadata(metadata_path)
     if directory.exists() or directory.is_symlink():
         raise ValueError('Refusing to replace an existing final release directory')
@@ -515,11 +569,15 @@ def finalize(metadata_path, repository, directory, publish_now=False):
         if {path.name for path in staged.iterdir()} != expected:
             raise ValueError('Downloaded final release inventory contains unexpected files')
         check_draft_metadata(metadata, staged)
+        if metadata['schema'] == 3:
+            apt_tool().build(staged, metadata, repository, apt_signing_key, apt_signing_fingerprint)
         sums = ''.join(f'{digest(path)}  {path.name}\n' for path in sorted(staged.iterdir()))
         (staged / 'SHA256SUMS.txt').write_text(sums, encoding='utf-8')
         verify_release(staged)
         staged.rename(directory)
-    gh(['release', 'upload', metadata['tag'], '--repo', repository, str(directory / 'SHA256SUMS.txt')])
+    gh(['release', 'upload', metadata['tag'], '--repo', repository,
+        *[str(directory / name) for name in sorted(apt_assets(metadata))],
+        str(directory / 'SHA256SUMS.txt')])
     if publish_now:
         gh(['release', 'edit', metadata['tag'], '--repo', repository, '--draft=false', '--latest=false'])
     return metadata
@@ -557,6 +615,79 @@ def publish(directory, repository, *, publish_now=False):
     return metadata
 
 
+def repackage(source_tag, repository, directory, *, version='', run_id, run_attempt='1',
+              packager_sha, apt_signing_key, apt_signing_fingerprint, publish_now=False):
+    """Create an experimental signed repository from immutable existing app bytes."""
+    repository_name(repository)
+    if (not isinstance(source_tag, str) or '..' in source_tag
+            or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,100}', source_tag)):
+        raise ValueError('Invalid source release tag')
+    if directory.exists() or directory.is_symlink():
+        raise ValueError('Refusing to replace an existing release directory')
+    matches = [item for item in api_pages(f'repos/{repository}/releases?per_page=100')
+               if item.get('tag_name') == source_tag]
+    if len(matches) != 1 or type(matches[0].get('id')) is not int or matches[0]['id'] <= 0:
+        raise ValueError('Source release must identify exactly one existing release')
+    items = api_pages(f'repos/{repository}/releases/{matches[0]["id"]}/assets?per_page=100')
+    assets = {item['name']: item for item in items}
+    if len(assets) != len(items) or not {'SHA256SUMS.txt', 'release-metadata.json'} <= assets.keys():
+        raise ValueError('Source release must have a unique finalized asset inventory')
+    directory.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='.release-repackage-', dir=directory.parent) as temporary:
+        source = Path(temporary) / 'source'
+        staged = Path(temporary) / 'assets'
+        source.mkdir()
+        staged.mkdir()
+        for name in ('SHA256SUMS.txt', 'release-metadata.json'):
+            download_asset(repository, assets[name], source / name)
+        inventory = checksum_entries(source / 'SHA256SUMS.txt')
+        if inventory.get('release-metadata.json') != digest(source / 'release-metadata.json'):
+            raise ValueError('Source release metadata checksum mismatch')
+        original = load_metadata(source / 'release-metadata.json')
+        if original['tag'] != source_tag or original['schema'] < 2:
+            raise ValueError('Repackaging requires the source release with all six GUI targets')
+        required = required_assets(original)
+        if not required <= inventory.keys() or not set(inventory) <= assets.keys():
+            raise ValueError('Source release has an incomplete finalized inventory')
+        extra = set(inventory) - required
+        if extra:
+            verify_sdk_pair(extra)
+        for name, expected in inventory.items():
+            if assets[name].get('digest') != 'sha256:' + expected:
+                raise ValueError(f'Source inventory differs from GitHub asset digest: {name}')
+        reference = json.loads(gh(['api', f'repos/{repository}/git/ref/tags/{source_tag}']).stdout).get('object', {})
+        if reference.get('type') != 'commit' or reference.get('sha') != original['source_sha']:
+            raise ValueError('Source release tag does not identify its recorded source commit')
+        metadata = make_metadata(source_sha=original['source_sha'], run_id=run_id, run_attempt=run_attempt,
+                                 version=version or original['version'], experiment=True,
+                                 linux_baseline=original['linux_baseline'], cmake_version=original['project_version'],
+                                 packager_sha=packager_sha,
+                                 repackaged_from={'tag': source_tag,
+                                                 'inventory_sha256': digest(source / 'SHA256SUMS.txt')})
+        for target, old_name in application_names(original).items():
+            archive = source / old_name
+            download_asset(repository, assets[old_name], archive)
+            if digest(archive) != inventory[old_name]:
+                raise ValueError(f'Source archive checksum mismatch: {old_name}')
+            verify_archive_backend(archive, original, target)
+            shutil.copyfile(archive, staged / application_names(metadata)[target])
+        write_json(staged / 'release-metadata.json', metadata)
+        details = (f'Application archives are byte-for-byte copies of release `{source_tag}`.\n\n'
+                   f'- Original inventory SHA-256: `{metadata["repackaged_from"]["inventory_sha256"]}`\n'
+                   f'- Packaging source commit: `{packager_sha}`\n\n'
+                   'This experiment checks the APT delivery path; earlier certification results '
+                   'for the application remain relevant and do not constitute certification of this release.\n')
+        (staged / 'release-notes.md').write_text(release_notes(metadata, details), encoding='utf-8')
+        write_warning(metadata, staged)
+        apt_tool().build(staged, metadata, repository, apt_signing_key, apt_signing_fingerprint)
+        sums = ''.join(f'{digest(path)}  {path.name}\n' for path in sorted(staged.iterdir()))
+        (staged / 'SHA256SUMS.txt').write_text(sums, encoding='utf-8')
+        verify_release(staged)
+        staged.rename(directory)
+    publish(directory, repository, publish_now=publish_now)
+    return metadata
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
@@ -578,10 +709,25 @@ def main(argv=None):
     stage.add_argument('--notes', type=Path, required=True)
     stage.add_argument('--output', type=Path, required=True)
     stage.add_argument('--sdk-artifacts', type=Path)
+    stage.add_argument('--repo')
+    stage.add_argument('--apt-signing-key', type=Path)
+    stage.add_argument('--apt-signing-fingerprint')
     release = commands.add_parser('publish', help='Create a draft, upload all assets, optionally publish')
     release.add_argument('--directory', type=Path, required=True)
     release.add_argument('--repo', required=True)
     release.add_argument('--publish', action='store_true')
+    repack = commands.add_parser('repackage', help='Create a new experiment from finalized application archives')
+    repack.add_argument('--source-tag', required=True)
+    repack.add_argument('--repo', required=True)
+    repack.add_argument('--version', default='')
+    repack.add_argument('--run-id', required=True)
+    repack.add_argument('--run-attempt', default='1')
+    repack.add_argument('--packager-sha', required=True)
+    repack.add_argument('--directory', type=Path, required=True)
+    repack.add_argument('--github-output', type=Path)
+    repack.add_argument('--apt-signing-key', type=Path, required=True)
+    repack.add_argument('--apt-signing-fingerprint', required=True)
+    repack.add_argument('--publish', action='store_true')
     for name in ('reserve', 'upload', 'finalize'):
         command = commands.add_parser(name)
         command.add_argument('--metadata', type=Path, required=True)
@@ -592,9 +738,11 @@ def main(argv=None):
             command.add_argument('--directory', type=Path, required=True)
         if name == 'upload':
             command.add_argument('--target', required=True,
-                                 help='Platform identity, including -fltk or -rev for schema 2')
+                                 help='Platform identity, including -fltk or -rev for schemas 2 and 3')
         if name == 'finalize':
             command.add_argument('--publish', action='store_true')
+            command.add_argument('--apt-signing-key', type=Path)
+            command.add_argument('--apt-signing-fingerprint')
     args = parser.parse_args(argv)
     try:
         if args.command == 'metadata':
@@ -615,13 +763,27 @@ def main(argv=None):
                     for key, data in {'metadata_json': metadata, **value}.items():
                         output.write(f'{key}={json.dumps(data, separators=(",", ":"))}\n')
         elif args.command == 'assemble':
-            value = assemble(args.artifacts, args.metadata, args.notes, args.output, args.sdk_artifacts)
+            value = assemble(args.artifacts, args.metadata, args.notes, args.output, args.sdk_artifacts,
+                             repository=args.repo, apt_signing_key=args.apt_signing_key,
+                             apt_signing_fingerprint=args.apt_signing_fingerprint)
+        elif args.command == 'repackage':
+            value = repackage(args.source_tag, args.repo, args.directory, version=args.version,
+                              run_id=args.run_id, run_attempt=args.run_attempt, packager_sha=args.packager_sha,
+                              apt_signing_key=args.apt_signing_key, apt_signing_fingerprint=args.apt_signing_fingerprint,
+                              publish_now=args.publish)
+            if args.github_output:
+                with args.github_output.open('a', encoding='utf-8') as output:
+                    for key in ('tag', 'title', 'source_sha'):
+                        output.write(f'{key}={value[key]}\n')
+                    output.write(f'inventory_sha256={digest(args.directory / "SHA256SUMS.txt")}\n')
         elif args.command == 'reserve':
             value = reserve(args.metadata, args.notes, args.repo)
         elif args.command == 'upload':
             value = upload(args.metadata, args.repo, args.target, args.directory)
         elif args.command == 'finalize':
-            value = finalize(args.metadata, args.repo, args.directory, args.publish)
+            value = finalize(args.metadata, args.repo, args.directory, args.publish,
+                             apt_signing_key=args.apt_signing_key,
+                             apt_signing_fingerprint=args.apt_signing_fingerprint)
         else:
             value = publish(args.directory, args.repo, publish_now=args.publish)
     except (ValueError, OSError, RuntimeError, subprocess.CalledProcessError) as error:
