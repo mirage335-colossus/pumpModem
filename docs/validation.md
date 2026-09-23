@@ -62,7 +62,7 @@ export containing OpenSSL, GLEW and FreeType, plus the pinned vcpkg source and
 download inventory. Consumer workflows verify the exact recipe and checksums,
 check that the runner's linker is at least as new as the producer's, then reuse
 the export without rebuilding dependencies. Microsoft compiler/SDK files are
-not included. **21 focused helper tests** pass, including Windows-safe imports,
+not included. **22 focused helper tests** pass, including Windows-safe imports,
 raw-export layout, corruption/traversal, immutable publication, authentication
 errors and linker compatibility. The full local build group passes **12/12** in
 **6.63 seconds**; workflow lint and whitespace checks pass.
@@ -74,8 +74,26 @@ ambiguity under strict Clang diagnostics and passes after the change. Its
 regression checks mutable/const symmetry, values/units, color alpha, notification
 and transition metadata, and layout-versus-paint decisions. The case is also
 retained in the normal Rev GUI group; Windows release builds run the small probe
-before dependency download or application compilation. Hosted verification of
-these follow-ups is recorded separately when complete.
+before dependency download or application compilation.
+
+[Windows base production](https://github.com/mirage335-colossus/pumpModem/actions/runs/35868536506)
+passes on source `ba80ff6e300ab0fe885067206d56be54b9f2428f`. Recipe
+`1be51afd94ed0cb4555a` retains a **57,012,854-byte** compiled export and
+**549,046,640-byte** source/download archive plus their checksum inventory in
+`base`. The cold dependency build/export took **6m17s**, relocation **4s**, and
+the actual static OpenSSL/GLEW/FreeType compile/link/run probe **12s**. The Windows
+job completed in **7m24s** including upload. All 22 helper tests also pass on
+Windows. A preceding fast attempt caught ZIP fixture separator normalization
+before compilation; the literal-path regression and original-name validation
+were corrected without weakening the unsafe-path assertion. Git attributes keep
+the recipe identity identical under Windows checkout line-ending conversion.
+
+Static Rev packaging now explicitly includes the GLEW/FreeType vcpkg notices,
+which a DLL dependency scan cannot discover for statically linked libraries.
+The focused packaging fixture verifies their exact contents after relocation and
+that CLI/FLTK packages do not select unused Rev notices. Existing archive,
+corruption and timeout checks pass. Reuse/publication/certification follow-ups
+are recorded separately when complete.
 
 ## Full validation after focused diagnosis — 23 September 2026
 

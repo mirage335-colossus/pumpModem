@@ -11,7 +11,7 @@ if(CXX_COMPILER)
   list(APPEND compiler_options "-DCMAKE_CXX_COMPILER:FILEPATH=${CXX_COMPILER}")
 endif()
 execute_process(COMMAND "${CMAKE_COMMAND}" -S "${source}" -B "${BINARY_DIR}" -DCMAKE_BUILD_TYPE=Release
-  ${compiler_options}
+  -DNOTICE_BACKEND=rev ${compiler_options}
   RESULT_VARIABLE configured OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT configured EQUAL 0)
   message(FATAL_ERROR "Packaging fixture configure failed:\n${output}\n${error}")
@@ -34,6 +34,34 @@ set(BUILD_DIR "${BINARY_DIR}")
 set(CONFIG Release)
 set(GUI_SMOKE OFF)
 include("${CMAKE_CURRENT_LIST_DIR}/package_native.cmake")
+
+# Static GUI dependency notices must survive the actual install and relocation,
+# independently of runtime dependency discovery and the builder's platform.
+file(GLOB installed_notices "${relocated}/share/doc/datapump/runtime-notices/local-*-copyright")
+foreach(port glew freetype)
+  set(found_notice FALSE)
+  foreach(notice IN LISTS installed_notices)
+    file(READ "${notice}" contents)
+    if(contents STREQUAL "${port} fixture copyright and complete license notice.\n")
+      set(found_notice TRUE)
+    endif()
+  endforeach()
+  if(NOT found_notice)
+    message(FATAL_ERROR "Portable Rev package omitted the ${port} static dependency notice")
+  endif()
+endforeach()
+foreach(backend cli fltk)
+  execute_process(COMMAND "${CMAKE_COMMAND}" -S "${source}" -B "${BINARY_DIR}/notice-${backend}"
+    -DCMAKE_BUILD_TYPE=Release "-DNOTICE_BACKEND=${backend}" ${compiler_options}
+    RESULT_VARIABLE configured OUTPUT_VARIABLE output ERROR_VARIABLE error)
+  if(NOT configured EQUAL 0)
+    message(FATAL_ERROR "${backend} notice fixture configure failed:\n${output}\n${error}")
+  endif()
+  file(READ "${BINARY_DIR}/notice-${backend}/package-native-configured.cmake" configured_script)
+  if(configured_script MATCHES "/share/(glew|freetype)/copyright")
+    message(FATAL_ERROR "Portable ${backend} package selected unused Rev dependency notices")
+  endif()
+endforeach()
 
 if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
   set(alsa_soname "${relocated}/lib/libasound.so.2")
