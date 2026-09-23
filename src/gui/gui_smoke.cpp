@@ -1,9 +1,11 @@
 #include "gui_smoke.hpp"
+#include "gui_smoke_replay.hpp"
 #include "bitmap_sources.hpp"
 #include "datapump/runtime.hpp"
 #include "datapump/received_text.hpp"
 #include <cmath>
 #include <fstream>
+#include <iostream>
 #include <set>
 #include <tuple>
 #include <thread>
@@ -185,15 +187,10 @@ struct Smoke::Impl {
                 const auto elapsed=std::chrono::duration<double>(Clock::now()-replay.started).count();
                 if(replay.binary && !controller.settings().transfer.modem.pattern_symbols)require(!replay.saw_symbols&&!replay.pending_poll&&snapshot.signals.empty()&&snapshot.received.empty(),
                         "Unsynchronized raw replay fabricated symbol lock or received bits");
-                const auto replay_diagnostics=std::string("Replay did not show changing measured frames and pending reception over about three seconds")+
-                        ": elapsed="+std::to_string(elapsed)+" frames="+std::to_string(replay.frames)+
-                        " changes="+std::to_string(replay.waveform_changes)+" fraction="+std::to_string(replay.fraction)+
-                        " symbols="+std::to_string(replay.saw_symbols)+" dropped="+std::to_string(snapshot.constellation_dropped)+
-                        " pending="+std::to_string(replay.pending_poll);
-                require(elapsed>=2.4&&elapsed<=8&&replay.frames>=(replay.binary?2U:10U)&&
-                        replay.waveform_changes>=(replay.binary?1U:5U)&&replay.fraction>=.9&&
-                        (controller.settings().transfer.modem.pattern_symbols||replay.binary||(replay.saw_symbols&&(!replay.pending_required||replay.pending_poll))),
-                        replay_diagnostics.c_str());
+                smoke_detail::check_replay({elapsed,replay.fraction,replay.frames,replay.waveform_changes,
+                        replay.binary,controller.settings().transfer.modem.pattern_symbols,replay.saw_symbols,
+                        replay.pending_required,replay.pending_poll,snapshot.constellation_dropped,static_cast<int>(phase)},
+                        DATAPUMP_GUI_BACKEND,std::cerr);
                 completed_replay=replay.id;
             }
         }

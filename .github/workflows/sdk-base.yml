@@ -1,0 +1,78 @@
+name: Maintain base SDK
+
+on:
+  workflow_dispatch:
+    inputs:
+      linux_runner:
+        description: 'Linux x86_64 runner for compilation and qualification'
+        type: choice
+        options: [ubuntu-24.04, ubuntu-latest-m, ubuntu-latest-l, ubuntu-latest-h]
+        default: ubuntu-24.04
+      windows_runner:
+        description: 'Windows x64 runner for compilation and qualification'
+        type: choice
+        options: [windows-2022, windows-latest-l, windows-latest-h]
+        default: windows-2022
+      platform:
+        description: 'Reusable Linux source SDK or Windows static application dependencies'
+        type: choice
+        options: [linux, windows]
+        default: linux
+      source:
+        description: 'auto reuses base; base verifies durable reuse; rebuild compiles from source'
+        type: choice
+        options: [auto, base, rebuild]
+        default: auto
+      jobs:
+        description: 'Cold SDK compilation jobs; 0 uses all available runner CPUs'
+        type: string
+        default: '0'
+      publish:
+        description: 'Preserve the verified SDK and sources in the base release'
+        type: boolean
+        default: true
+
+  pull_request:
+    paths:
+      - '.github/workflows/sdk-base.yml'
+      - '.github/workflows/sdk-build.yml'
+      - '.github/workflows/windows-base.yml'
+      - 'tools/sdk-release.py'
+      - 'tests/test_sdk_release.py'
+
+permissions:
+  contents: write
+
+# A single durable base release is shared by all branches.
+concurrency:
+  group: sdk-base-publication
+  cancel-in-progress: false
+
+jobs:
+  helper:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: python3 tests/test_sdk_release.py
+
+  sdk:
+    if: github.event_name == 'workflow_dispatch' && inputs.platform != 'windows'
+    needs: helper
+    uses: ./.github/workflows/sdk-build.yml
+    with:
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+      source: ${{ inputs.source }}
+      jobs: ${{ inputs.jobs }}
+      publish_base: ${{ inputs.publish }}
+
+  windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.platform == 'windows'
+    needs: helper
+    uses: ./.github/workflows/windows-base.yml
+    with:
+      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
+      source: ${{ inputs.source }}
+      publish: ${{ inputs.publish }}

@@ -32,6 +32,17 @@ Local fix: `Elements/Text.ixx` also destroys its owned selection/cursor line pri
 Local compiler and Linux compatibility fixes:
 
 - Include `<algorithm>` in DirtyFlag and Element, and `<cstdint>` in WinEvent.
+- Const-qualify the read-only distance, color and visibility equality operators.
+  This removes ambiguous C++20 reversed candidates rejected by MSVC; comparison
+  bodies, dirty notifications and transition behavior are unchanged. The small
+  `tests/rev-style-probe` project checks the actual modules without graphics or
+  application dependencies, and the Rev GUI group retains the regression.
+- Supply the missing nonblocking Win32 event pump, including message-only
+  service windows and keyboard translation. Each call yields after one paint
+  or a bounded callback batch so application progress can run between frames.
+  `WM_QUIT` requests the application's normal close path; the Linux pump keeps
+  its existing event batch and reports continued operation. The small
+  `tests/rev-event-probe` project tests queue behavior without OpenGL.
 - Give `sentinel::null` inline constexpr linkage so exported module defaults
   can refer to it under GCC 15. Its negative-zero value and unset-bit convention
   remain unchanged.

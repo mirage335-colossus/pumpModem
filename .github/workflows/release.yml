@@ -1,0 +1,373 @@
+name: Manual portable release
+run-name: ${{ inputs.package_check && inputs.package_check != 'none' && format('Check {0} packages in {1}', inputs.package_check, inputs.source_release) || inputs.source_release && format('Linux packages from {0} (experiment)', inputs.source_release) || format('Build portable binaries ({0}, experiment={1})', inputs.linux_baseline, inputs.experiment) }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Optional release label, for example v001_00; blank uses the CMake version'
+        type: string
+        default: ''
+      experiment:
+        description: 'Title exactly experiment; prerelease, never Latest'
+        type: boolean
+        default: true
+      publish:
+        description: 'Publish after packaging; unchecked leaves a draft release for inspection'
+        type: boolean
+        default: true
+      linux_baseline:
+        description: 'x86-64 SDK (glibc 2.36), or older Ubuntu baseline (glibc 2.35)'
+        type: choice
+        options: [bookworm-sdk, ubuntu-22.04]
+        default: bookworm-sdk
+      linux_runner:
+        description: 'x86-64 Linux runner'
+        type: choice
+        options: [ubuntu-24.04, ubuntu-latest-m, ubuntu-latest-l, ubuntu-latest-h]
+        default: ubuntu-24.04
+      arm_runner:
+        description: 'Linux ARM64 runner for compilation and qualification'
+        type: choice
+        options: [ubuntu-24.04-arm-l, ubuntu-24.04-arm-h, ubuntu-24.04-arm]
+        default: ubuntu-24.04-arm-l
+      windows_runner:
+        description: 'Windows x64 runner'
+        type: choice
+        options: [windows-2022, windows-latest-l, windows-latest-h]
+        default: windows-2022
+      package_check:
+        description: 'Read-only checks of source_release; none retains normal build/repackage behavior'
+        type: choice
+        options: [none, all, apt, arch, gentoo]
+        default: none
+      source_release:
+        description: 'Existing release to repackage, or to check when package_check is selected; blank builds apps'
+        type: string
+        default: ''
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+      - '.github/workflows/apt-release.yml'
+      - '.github/workflows/apt-check.yml'
+      - '.github/workflows/distro-check.yml'
+      - '.github/workflows/certify.yml'
+      - 'tools/release.py'
+      - 'tools/apt-release.py'
+      - 'tests/test_apt_release.py'
+      - 'tools/distro-release.py'
+      - 'tools/arch-release.py'
+      - 'tools/gentoo-release.py'
+      - 'tools/gentoo-sync.py'
+      - 'tests/test_arch_release.py'
+      - 'tests/test_gentoo_sync.py'
+      - 'tests/test_distro_release.py'
+      - 'tools/certify-release.py'
+      - 'tests/test_release.py'
+      - 'tests/test_certify_release.py'
+      - 'tools/install-release-rev.py'
+      - 'tests/test_release_rev_tools.py'
+      - 'tools/windows-base.py'
+      - 'tools/use-windows-base.ps1'
+      - 'tools/select-windows-toolchain.ps1'
+      - 'tests/test_windows_toolchain.ps1'
+      - 'tests/test_windows_base.py'
+      - 'third_party/build-support/windows-base.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  # Read-only distribution diagnostics can run independently. Mutating release
+  # dispatches keep their shared lock so same-minute tags cannot race.
+  group: portable-release-${{ github.ref }}-${{ inputs.linux_baseline }}-${{ inputs.package_check != 'none' && inputs.package_check && format('{0}-{1}', inputs.package_check, inputs.source_release) || 'publish' }}
+  cancel-in-progress: false
+
+jobs:
+  package-check-prepare:
+    if: github.event_name == 'workflow_dispatch' && inputs.package_check != 'none'
+    runs-on: ${{ inputs.linux_runner == 'ubuntu-latest-h' && 'ubuntu-latest-h' || 'ubuntu-latest-l' }}
+    timeout-minutes: 5
+    outputs:
+      inventory_sha256: ${{ steps.release.outputs.inventory_sha256 }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.source_release }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Pin the existing published release without changing assets
+        id: release
+        run: |
+          if [ -z "$RELEASE_TAG" ]; then
+            echo '::error::package_check requires source_release to name a published release.'
+            exit 1
+          fi
+          python3 tools/certify-release.py prepare --repo "$GITHUB_REPOSITORY" \
+            --tag "$RELEASE_TAG" --directory checked-release --github-output "$GITHUB_OUTPUT"
+
+  package-check-apt:
+    if: inputs.package_check == 'all' || inputs.package_check == 'apt'
+    needs: package-check-prepare
+    uses: ./.github/workflows/apt-check.yml
+    with:
+      release_tag: ${{ inputs.source_release }}
+      inventory_sha256: ${{ needs.package-check-prepare.outputs.inventory_sha256 }}
+      linux_runner: ${{ inputs.linux_runner == 'ubuntu-latest-h' && 'ubuntu-latest-h' || 'ubuntu-latest-l' }}
+      arm_runner: ${{ inputs.arm_runner == 'ubuntu-24.04-arm-h' && 'ubuntu-24.04-arm-h' || 'ubuntu-24.04-arm-l' }}
+
+  package-check-distro:
+    if: inputs.package_check == 'all' || inputs.package_check == 'arch' || inputs.package_check == 'gentoo'
+    needs: package-check-prepare
+    uses: ./.github/workflows/distro-check.yml
+    with:
+      release_tag: ${{ inputs.source_release }}
+      inventory_sha256: ${{ needs.package-check-prepare.outputs.inventory_sha256 }}
+      linux_runner: ${{ inputs.linux_runner == 'ubuntu-latest-h' && 'ubuntu-latest-h' || 'ubuntu-latest-l' }}
+      distro: ${{ inputs.package_check }}
+
+  repackage:
+    if: github.event_name == 'workflow_dispatch' && inputs.source_release != '' && inputs.package_check == 'none'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/apt-release.yml
+    with:
+      source_tag: ${{ inputs.source_release }}
+      version: ${{ inputs.version }}
+      publish: ${{ inputs.publish }}
+      # Repackaging uses larger L/H pools, including when the normal release
+      # selectors retain their standard-runner defaults.
+      linux_runner: ${{ inputs.linux_runner == 'ubuntu-latest-h' && 'ubuntu-latest-h' || 'ubuntu-latest-l' }}
+      arm_runner: ${{ inputs.arm_runner == 'ubuntu-24.04-arm-h' && 'ubuntu-24.04-arm-h' || 'ubuntu-24.04-arm-l' }}
+    secrets: inherit
+
+  helpers:
+    if: ${{ !inputs.source_release && (!inputs.package_check || inputs.package_check == 'none') }}
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-l' }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: |
+          python3 tests/test_release.py
+          python3 tests/test_apt_release.py
+          python3 tests/test_distro_release.py
+          python3 tests/test_arch_release.py
+          python3 tests/test_gentoo_sync.py
+          python3 tests/test_certify_release.py
+          python3 tests/test_sdk_release.py
+          python3 tests/test_release_rev_tools.py
+          python3 tests/test_windows_base.py
+
+  metadata:
+    if: github.event_name == 'workflow_dispatch' && !inputs.source_release
+    needs: helpers
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-l' }}
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      metadata_json: ${{ steps.meta.outputs.metadata_json }}
+      linux_matrix: ${{ steps.meta.outputs.linux_matrix }}
+      windows_matrix: ${{ steps.meta.outputs.windows_matrix }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Require APT signing configuration before building applications
+        env:
+          APT_SIGNING_KEY: ${{ secrets.DATAPUMP_APT_SIGNING_KEY }}
+          APT_FINGERPRINT: ${{ vars.DATAPUMP_APT_SIGNING_FINGERPRINT }}
+        run: |
+          if [ -z "$APT_SIGNING_KEY" ]; then
+            echo '::error::Configure DATAPUMP_APT_SIGNING_KEY before releasing Debian packages.'
+            exit 1
+          fi
+          if ! [[ "$APT_FINGERPRINT" =~ ^[A-Fa-f0-9]{40}$ ]]; then
+            echo '::error::Configure DATAPUMP_APT_SIGNING_FINGERPRINT with the pinned public key fingerprint.'
+            exit 1
+          fi
+      - name: Record one build date and exact source revision
+        id: meta
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          LINUX_BASELINE: ${{ inputs.linux_baseline }}
+          EXPERIMENT: ${{ inputs.experiment }}
+        run: |
+          args=()
+          if [ "$EXPERIMENT" = true ]; then args+=(--experiment); fi
+          python3 tools/release.py metadata --version "$RELEASE_VERSION" \
+            --linux-baseline "$LINUX_BASELINE" --source-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" --output release-metadata.json \
+            --github-output "$GITHUB_OUTPUT" "${args[@]}"
+          python3 tools/release.py matrices --metadata release-metadata.json --github-output "$GITHUB_OUTPUT"
+      - name: Reserve a draft for direct release-asset uploads
+        run: |
+          cat > release-details.md <<NOTES
+          Download the archive matching your operating system, architecture and GUI backend (fltk or rev), or install the signed Debian packages from this release's flat APT repository. Each backend has a separate bundle and extraction directory. Unpack the whole archive and keep bin/, lib/ and share/ together; required application libraries are bundled. Host audio/graphics services and drivers remain required. Debian installation instructions are in the release documentation linked below.
+
+          The attached warning.log describes known nonfatal Rev replay/waterfall display-cadence warnings. They do not fail builds or certification; data integrity, pending-message identity and physical-completion checks remain mandatory.
+
+          Packaging checks have passed when this release is published. Extensive contract, GUI and copied-binary checks run separately through the Certify published release workflow; its hash-bound reports will be attached here later. Hosted checks do not qualify physical audio hardware.
+
+          The ARM64 bundle requires a compatible 64-bit Linux installation, including Raspberry Pi OS or Velvet OS. Windows requires Windows 10 1903+/11 x64. See [requirements and certification scope](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_SHA/docs/releases.md).
+
+          Reusable developer SDKs and their complete source archives are preserved separately in the [base release](https://github.com/$GITHUB_REPOSITORY/releases/tag/base). Application releases never rebuild an SDK automatically.
+          NOTES
+          python3 tools/release.py reserve --metadata release-metadata.json --notes release-details.md --repo "$GITHUB_REPOSITORY"
+
+  linux:
+    name: Linux ${{ matrix.arch }} / ${{ matrix.backend }}
+    needs: metadata
+    runs-on: ${{ matrix.arch == 'aarch64' && (inputs.arm_runner || 'ubuntu-24.04-arm-l') || inputs.linux_runner || 'ubuntu-24.04' }}
+    container: ${{ matrix.image }}
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.metadata.outputs.linux_matrix) }}
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_METADATA: ${{ needs.metadata.outputs.metadata_json }}
+    steps:
+      - name: Install download and archive inspection prerequisites
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git gh python3 file binutils make libgl1 libopengl0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Fetch exact SDK from base (no compiler rebuild)
+        if: matrix.sdk
+        id: sdk
+        run: python3 tools/sdk-release.py fetch --binary-only --repo "$GITHUB_REPOSITORY" --directory downloaded-sdk --github-output "$GITHUB_OUTPUT"
+      - name: Install verified SDK
+        if: matrix.sdk
+        env:
+          SDK_FOUND: ${{ steps.sdk.outputs.found }}
+        run: |
+          if [ "$SDK_FOUND" != true ]; then echo 'Run Maintain base SDK for this recipe first.' >&2; exit 1; fi
+          set -- downloaded-sdk/datapump-sdk-*-linux-x86_64.tar.gz
+          test "$#" -eq 1
+          python3 tools/build-sdk.py install --archive "$1" --destination "$GITHUB_WORKSPACE/build/sdk"
+          python3 tools/build-sdk.py verify "$GITHUB_WORKSPACE/build/sdk" --max-host-glibc 2.36
+      - name: Install native baseline dependencies and pinned scanner
+        if: ${{ !matrix.sdk }}
+        run: |
+          apt-get install -y --no-install-recommends cmake ninja-build g++-11 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev
+          sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
+          echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
+      - name: Install native Rev compiler and module-aware Ninja
+        if: ${{ !matrix.sdk && matrix.backend == 'rev' }}
+        run: |
+          python3 tools/install-release-rev.py "$GITHUB_WORKSPACE/build/ci-rev-tools"
+          echo "$GITHUB_WORKSPACE/build/ci-rev-tools/bin" >> "$GITHUB_PATH"
+      - name: Build application, package and check relocation and ABI
+        env:
+          USE_SDK: ${{ matrix.sdk }}
+          GUI_BACKEND: ${{ matrix.backend }}
+          DATAPUMP_MAX_GLIBC: ${{ matrix.glibc }}
+        run: |
+          if [ "$USE_SDK" = true ]; then
+            ./build.sh package --sdk "$GITHUB_WORKSPACE/build/sdk" --backend "$GUI_BACKEND" --build-dir build/release-app --jobs "$(nproc)"
+          elif [ "$GUI_BACKEND" = rev ]; then
+            CC=clang-19 CXX=clang++-19 ./build.sh package --backend rev --build-dir build/release-app --jobs "$(nproc)"
+          else
+            CC=gcc-11 CXX=g++-11 ./build.sh package --backend fltk --build-dir build/release-app --jobs "$(nproc)"
+          fi
+      - name: Upload this platform directly to the draft release
+        env:
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          printf '%s\n' "$RELEASE_METADATA" > release-metadata.json
+          mkdir build/upload
+          cp build/release-app/releases/*.tar.gz build/release-app/releases/*.zip build/release-app/releases/SHA256SUMS.txt build/upload/
+          python3 tools/release.py upload --metadata release-metadata.json --repo "$GITHUB_REPOSITORY" --target "$RELEASE_TARGET" --directory build/upload
+
+  windows:
+    name: Windows x64 / ${{ matrix.backend }}
+    needs: metadata
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.metadata.outputs.windows_matrix) }}
+    runs-on: ${{ inputs.windows_runner || 'windows-2022' }}
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      VCPKG_DISABLE_METRICS: '1'
+      UseMultiToolTask: 'true'
+      EnforceProcessCountAcrossBuilds: 'true'
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_METADATA: ${{ needs.metadata.outputs.metadata_json }}
+      GUI_BACKEND: ${{ matrix.backend }}
+      RELEASE_TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Reuse verified static dependencies from base
+        shell: pwsh
+        run: ./tools/use-windows-base.ps1 -Repository "$env:GITHUB_REPOSITORY" -Destination "$PWD/build/windows-base"
+      - name: Build and package with the Windows SDK and static runtime
+        shell: pwsh
+        run: |
+          cmake -S . -B build/release-windows -A x64 -DCMAKE_TOOLCHAIN_FILE="$env:DATAPUMP_WINDOWS_TOOLCHAIN" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DDATAPUMP_GUI_BACKEND="$env:GUI_BACKEND" -DDATAPUMP_PORTABLE=ON -DBUILD_TESTING=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          if ($LASTEXITCODE -ne 0) { throw 'Configure failed' }
+          cmake --build build/release-windows --config Release --target package --parallel $env:NUMBER_OF_PROCESSORS
+          if ($LASTEXITCODE -ne 0) { throw 'Packaging failed' }
+          cmake -DARCHIVE_DIR="$PWD/build/release-windows/releases" -DBUILD_DIR="$PWD/build/release-windows" -P tools/verify-native-archives.cmake
+          if ($LASTEXITCODE -ne 0) { throw 'Archive checks failed' }
+      - name: Upload this platform directly to the draft release
+        shell: pwsh
+        run: |
+          $env:RELEASE_METADATA | Set-Content -Encoding utf8 release-metadata.json
+          New-Item -ItemType Directory build/upload | Out-Null
+          Copy-Item build/release-windows/releases/*.tar.gz, build/release-windows/releases/*.zip, build/release-windows/releases/SHA256SUMS.txt build/upload/
+          python tools/release.py upload --metadata release-metadata.json --repo "$env:GITHUB_REPOSITORY" --target "$env:RELEASE_TARGET" --directory build/upload
+          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }
+
+  publish:
+    needs: [metadata, linux, windows]
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-l' }}
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_METADATA: ${{ needs.metadata.outputs.metadata_json }}
+      PUBLISH: ${{ inputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify all uploaded bytes, sign the APT repository and publish
+        env:
+          APT_SIGNING_KEY: ${{ secrets.DATAPUMP_APT_SIGNING_KEY }}
+          APT_FINGERPRINT: ${{ vars.DATAPUMP_APT_SIGNING_FINGERPRINT }}
+        run: |
+          printf '%s\n' "$RELEASE_METADATA" > release-metadata.json
+          args=()
+          if [ "$PUBLISH" = true ]; then args+=(--publish); fi
+          umask 077
+          signing_key=$(mktemp "$RUNNER_TEMP/datapump-apt-signing.XXXXXX")
+          trap 'rm -f "$signing_key"' EXIT
+          printf '%s\n' "$APT_SIGNING_KEY" > "$signing_key"
+          unset APT_SIGNING_KEY
+          python3 tools/release.py finalize --metadata release-metadata.json --repo "$GITHUB_REPOSITORY" \
+            --directory release-assets --apt-signing-key "$signing_key" \
+            --apt-signing-fingerprint "$APT_FINGERPRINT" "${args[@]}"
+          python3 - <<'PYSUMMARY'
+          import json, os
+          metadata = json.load(open('release-metadata.json'))
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
+              out.write(f"Release: [{metadata['tag']}](https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/tag/{metadata['tag']})\n\n")
+              out.write('Extensive certification is a separate workflow. Dispatch **Certify published release** with this tag after publication.\n')
+          PYSUMMARY

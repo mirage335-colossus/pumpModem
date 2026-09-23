@@ -1,4 +1,9 @@
 cmake_minimum_required(VERSION 3.21)
+include("${CMAKE_CURRENT_LIST_DIR}/../tools/gui-smoke-timeout.cmake")
+set(gui_smoke_options "")
+if(DEFINED GUI_SMOKE_TIMEOUT)
+  list(APPEND gui_smoke_options "-DGUI_SMOKE_TIMEOUT=${GUI_SMOKE_TIMEOUT}")
+endif()
 if(NOT DEFINED BUILD_DIR)
   message(FATAL_ERROR "Provide -DBUILD_DIR=/path/to/native/build")
 endif()
@@ -20,7 +25,7 @@ file(COPY "${original}/" DESTINATION "${relocated}")
 file(RENAME "${original}" "${scratch}/unavailable original")
 set(verifier "${CMAKE_CURRENT_LIST_DIR}/../tools/verify-native-package.cmake")
 execute_process(COMMAND "${CMAKE_COMMAND}" "-DPACKAGE_ROOT=${relocated}" "-DBUILD_DIR=${BUILD_DIR}"
-  "-DGUI_SMOKE=${GUI_SMOKE}" -P "${verifier}"
+  "-DGUI_SMOKE=${GUI_SMOKE}" ${gui_smoke_options} -P "${verifier}"
   RESULT_VARIABLE verified OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT verified EQUAL 0)
   message(FATAL_ERROR "Native relocation failed:\n${output}\n${error}")

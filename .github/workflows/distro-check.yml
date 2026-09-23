@@ -1,0 +1,202 @@
+name: Install and update release packages on Arch and Gentoo
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        type: string
+        required: true
+      inventory_sha256:
+        type: string
+        required: true
+      linux_runner:
+        type: string
+        default: ubuntu-latest-l
+      distro:
+        description: Native package check to run (all, arch, or gentoo)
+        type: string
+        default: all
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    name: ${{ matrix.distro }} release packages / x86-64 / both backends
+    runs-on: ${{ inputs.linux_runner == 'ubuntu-latest-h' && 'ubuntu-latest-h' || 'ubuntu-latest-l' }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: ${{ fromJSON(inputs.distro == 'arch' && '["arch"]' || inputs.distro == 'gentoo' && '["gentoo"]' || '["arch", "gentoo"]') }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      INVENTORY_SHA256: ${{ inputs.inventory_sha256 }}
+      APT_FINGERPRINT: ${{ vars.DATAPUMP_APT_SIGNING_FINGERPRINT }}
+      RECIPE_KIND: ${{ matrix.distro }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify distribution signatures and bind them to the original binary archives
+        id: assets
+        run: |
+          python3 tools/certify-release.py download-distro --repo "$GITHUB_REPOSITORY" \
+            --tag "$RELEASE_TAG" --directory distro-assets --inventory-sha256 "$INVENTORY_SHA256" \
+            --apt-signing-fingerprint "$APT_FINGERPRINT" --github-output "$GITHUB_OUTPUT"
+          python3 tools/distro-release.py extract --directory distro-assets \
+            --metadata distro-assets/release-metadata.json --kind "$RECIPE_KIND" --destination recipes
+      - name: Make and install Arch packages without compiling the application
+        if: matrix.distro == 'arch' && steps.assets.outputs.distro_channels != 'true'
+        run: |
+          docker run --rm -i \
+            --mount "type=bind,source=$PWD/recipes,target=/recipes,readonly" \
+            --mount "type=bind,source=$PWD/distro-assets,target=/release,readonly" \
+            --mount "type=bind,source=$PWD/tools,target=/tools,readonly" \
+            archlinux:base bash -euo pipefail <<'ARCH'
+          pacman -Syu --noconfirm --needed base-devel python
+          useradd --create-home --shell /bin/bash datapump-packager
+          printf '%s\n' 'datapump-packager ALL=(root) NOPASSWD: /usr/bin/pacman' > /etc/sudoers.d/datapump-packager
+          chmod 0440 /etc/sudoers.d/datapump-packager
+          cp -a /recipes/datapump-arch-recipes /build
+          chown -R datapump-packager:datapump-packager /build
+          for backend in fltk rev; do
+            directory="/build/datapump-$backend-bin"
+            # makepkg fetches and verifies the immutable archive itself, then
+            # wraps it. The recipe has no application compilation phase.
+            runuser -u datapump-packager -- makepkg --dir "$directory" --syncdeps --noconfirm
+            mapfile -t packages < <(runuser -u datapump-packager -- makepkg --dir "$directory" --packagelist)
+            test "${#packages[@]}" -eq 1
+            pacman -U --noconfirm "${packages[@]}"
+            pacman -Qk "datapump-$backend-bin"
+            python3 /tools/distro-release.py verify-installed --directory /release \
+              --metadata /release/release-metadata.json --backend "$backend" --architecture amd64 --root /
+            timeout 30 "datapump-cli-$backend" --version
+            timeout 120 "datapump-$backend" --self-check
+          done
+          ARCH
+      - name: Install signed Arch release packages through pacman
+        if: matrix.distro == 'arch' && steps.assets.outputs.distro_channels == 'true'
+        run: |
+          docker run --rm -i -e APT_FINGERPRINT -e GITHUB_REPOSITORY -e RELEASE_TAG \
+            --mount "type=bind,source=$PWD/distro-assets,target=/release,readonly" \
+            --mount "type=bind,source=$PWD/tools,target=/tools,readonly" \
+            --mount "type=bind,source=$PWD/tests,target=/tests,readonly" \
+            archlinux:base bash -euo pipefail <<'ARCH'
+          pacman -Syu --noconfirm --needed python
+          python3 /tests/test_arch_release.py
+          pacman-key --init
+          pacman-key --add /release/datapump-pacman-keyring.gpg
+          pacman-key --lsign-key "$APT_FINGERPRINT"
+          # Certify the prepared tag before promotion, even for a regular
+          # candidate whose user-facing config will eventually follow Latest.
+          printf '\n[datapump-x86_64]\nSigLevel = PackageRequired DatabaseRequired\nServer = https://github.com/%s/releases/download/%s\n' \
+            "$GITHUB_REPOSITORY" "$RELEASE_TAG" >> /etc/pacman.conf
+          pacman -Syu --noconfirm datapump-fltk-bin datapump-rev-bin
+          # Repeated standard updates must accept the same signed repository.
+          pacman -Syu --noconfirm
+          for backend in fltk rev; do
+            pacman -Qkk "datapump-$backend-bin"
+            python3 /tools/distro-release.py verify-installed --directory /release \
+              --metadata /release/release-metadata.json --backend "$backend" --architecture amd64 --root /
+            timeout 30 "datapump-cli-$backend" --version
+            timeout 120 "datapump-$backend" --self-check
+          done
+          ARCH
+      - name: Merge Gentoo binary ebuilds using only prebuilt host dependencies
+        if: matrix.distro == 'gentoo'
+        run: |
+          # The official Portage image supplies a snapshot directly; no sync or
+          # dependency source build is needed in this packaging check.
+          snapshot="datapump-portage-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          docker create -v /var/db/repos/gentoo --name "$snapshot" gentoo/portage:latest /bin/true
+          trap 'docker rm -v "$snapshot" >/dev/null' EXIT
+          docker run --rm -i --volumes-from "$snapshot":ro -e APT_FINGERPRINT -e GITHUB_REPOSITORY -e RELEASE_TAG \
+            --mount "type=bind,source=$PWD/recipes,target=/recipes,readonly" \
+            --mount "type=bind,source=$PWD/distro-assets,target=/release,readonly" \
+            --mount "type=bind,source=$PWD/tools,target=/tools,readonly" \
+            gentoo/stage3:latest bash -euo pipefail <<'GENTOO'
+          mkdir -p /etc/portage/repos.conf /etc/portage/package.accept_keywords /etc/portage/package.license /etc/portage/package.use
+          if test -f /release/datapump-gentoo-sync.py; then
+            # download-distro authenticated these helper bytes before execution.
+            install -m644 /release/datapump-archive-keyring.gpg /etc/portage/datapump-release-keyring.gpg
+            python3 /release/datapump-gentoo-sync.py install --assets /release \
+              --keyring /etc/portage/datapump-release-keyring.gpg --fingerprint "$APT_FINGERPRINT" \
+              --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG"
+            emaint sync -r datapump-bin
+          else
+            cp -a /recipes/datapump-gentoo-overlay /var/db/repos/datapump-bin
+            cat > /etc/portage/repos.conf/datapump-bin.conf <<'REPOSITORY'
+          [datapump-bin]
+          location = /var/db/repos/datapump-bin
+          auto-sync = no
+          REPOSITORY
+          fi
+          printf '%s\n' 'media-radio/datapump-fltk-bin ~amd64' 'media-radio/datapump-rev-bin ~amd64' \
+            > /etc/portage/package.accept_keywords/datapump-bin
+          printf '%s\n' 'media-radio/datapump-fltk-bin DataPump-Bundled' 'media-radio/datapump-rev-bin DataPump-Bundled' \
+            > /etc/portage/package.license/datapump-bin
+          # The official generic binhost currently lacks alsa-plugins. Its v3
+          # binhost provides the PulseAudio bridge as a binary. This changes
+          # only CI's host dependencies, never the generic release payload.
+          case "$(/lib64/ld-linux-x86-64.so.2 --help)" in
+            *'x86-64-v3 (supported, searched)'*) ;;
+            *) echo 'Gentoo binary-only check requires an x86-64-v3 capable larger runner.' >&2; exit 1 ;;
+          esac
+          # Replace the disposable container's default binhost so only the
+          # selected official repository supplies new host dependencies.
+          rm -rf /etc/portage/binrepos.conf
+          mkdir /etc/portage/binrepos.conf
+          cat > /etc/portage/binrepos.conf/datapump-ci.conf <<'BINHOST'
+          [datapump-ci]
+          priority = 9999
+          sync-uri = https://distfiles.gentoo.org/releases/amd64/binpackages/23.0/x86-64-v3/
+          verify-signature = true
+          BINHOST
+          # Select one official desktop configuration before considering
+          # binaries. Otherwise --usepkgonly defaults to ignoring USE flags
+          # and can mix SELinux, multilib, and non-desktop package variants.
+          # Match Gentoo's tintin/openrc-v3-23 builder profile and baseline
+          # CPU flags (proj/binhost.git e3df757d). Stage3's SSE2-only defaults
+          # reject v3 binaries such as pixman even on a capable runner.
+          eselect profile set default/linux/amd64/23.0/desktop/gnome
+          cat >> /etc/portage/make.conf <<'CONFIG'
+          ABI_X86="64"
+          USE="bindist cet native-extensions"
+          CPU_FLAGS_X86="cmov cx8 fpu fxsr mmx osfxsr sce mmxext sse sse2 cmpxchg16b lahf_sahf popcnt sse3 sse4_1 sse4_2 ssse3 avx avx2 bmi1 bmi2 f16c fma3 lzcnt movbe osxsave"
+          CONFIG
+          printf '%s\n' 'media-plugins/alsa-plugins pulseaudio' > /etc/portage/package.use/datapump-ci
+          # This filesystem is discarded on exit. Avoid per-package power-loss
+          # durability syncs and allow parallel merges on the larger runner.
+          # Keep merge-wait, ebuild locks and system dependency ordering intact.
+          export FEATURES="$(portageq envvar FEATURES) parallel-install -merge-sync -sandbox -usersandbox -pid-sandbox -ipc-sandbox -network-sandbox"
+          emerge --info
+          for backend in fltk rev; do
+            set -- /var/db/repos/datapump-bin/media-radio/datapump-"$backend"-bin/*.ebuild
+            test "$#" -eq 1
+            cpv="media-radio/$(basename "$1" .ebuild)"
+            # Produce a local Portage binary package from the verified recipe.
+            # Configure/compile phases are empty; Manifest pins all downloads.
+            # Having the local binary lets binary-only emerge resolve the real
+            # conditional RDEPEND without requiring an upstream app binhost.
+            ebuild "$1" package
+            emerge --getbinpkgonly --usepkgonly --binpkg-respect-use=y \
+              --oneshot --with-bdeps=n --jobs="$(nproc)" "=$cpv"
+            portageq has_version / "=$cpv"
+            python3 /tools/distro-release.py verify-installed --directory /release \
+              --metadata /release/release-metadata.json --backend "$backend" --architecture amd64 --root /
+            timeout 30 "datapump-cli-$backend" --version
+            timeout 120 "datapump-$backend" --self-check
+          done
+          # Portage metadata/cache work during installation must not prevent the
+          # next normal authenticated overlay refresh.
+          if test -f /release/datapump-gentoo-sync.py; then emaint sync -r datapump-bin; fi
+          GENTOO
+      - name: Record packaging scope
+        run: |
+          {
+            echo "$RECIPE_KIND x86-64: native package frontend installed both release backends; schema-5 channels exercised native repository refresh."
+            echo 'Installed payloads and wrappers match the original portable archives; bounded CLI and headless GUI self-checks passed.'
+            echo 'No application or SDK was compiled. Physical audio and desktop graphics remain separate certification scopes.'
+          } >> "$GITHUB_STEP_SUMMARY"

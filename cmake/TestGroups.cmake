@@ -11,8 +11,8 @@ endforeach()
 # Exceptions to the usual test_<CTest name> convention. Scripts with no
 # executable prerequisite are listed explicitly so new cases cannot silently
 # run without their required build step.
-set(_script_tests legacy_boundary fast_boundary vendored_lzma_source
-  gui_adapter_boundary gui_boundary_regression packaging_support sdk_packaging build_wrapper build_dependencies build_source_sdk build_sdk_runtime)
+set(_script_tests legacy_boundary fast_boundary vendored_lzma_source packaging_cxx_runtime
+  gui_adapter_boundary gui_boundary_regression packaging_support sdk_packaging build_wrapper build_dependencies build_source_sdk build_sdk_runtime build_release build_sdk_release build_certify_release build_release_rev_tools build_windows_base build_apt_release build_distro_release build_arch_release build_gentoo_sync)
 set(_aliases
   "gui_document_layout=test_document_layout"
   "gui_record_reconciliation=test_record_reconciliation"
@@ -63,7 +63,7 @@ foreach(_test IN LISTS _tests)
     list(APPEND _labels legacy)
   elseif(_test MATCHES "^build_" OR _test STREQUAL "vendored_lzma_source")
     list(APPEND _labels build)
-  elseif(_test STREQUAL "packaging_support" OR _test STREQUAL "native_relocation" OR _test STREQUAL "sdk_packaging")
+  elseif(_test MATCHES "^packaging_" OR _test STREQUAL "native_relocation" OR _test STREQUAL "sdk_packaging")
     list(APPEND _labels packaging)
   elseif(NOT "gui" IN_LIST _labels AND NOT _test STREQUAL "rev_utf8")
     list(APPEND _labels regular)

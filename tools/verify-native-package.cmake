@@ -87,6 +87,12 @@ function(check_command command_timeout)
   if(NOT status EQUAL 0)
     message(FATAL_ERROR "Relocated native command failed: ${ARGN}\n${output}\n${error}")
   endif()
+  # Successful Rev smoke checks may still report display-cadence warnings.
+  # Preserve them in CI logs instead of hiding captured stderr on success.
+  string(REGEX MATCHALL "WARNING REV_REPLAY_CADENCE:[^\r\n]*" warnings "${output}\n${error}")
+  foreach(warning IN LISTS warnings)
+    message(STATUS "${warning}")
+  endforeach()
   set(command_output "${output}" PARENT_SCOPE)
 endfunction()
 check_command(120 "${pump}" --version)

@@ -23,4 +23,8 @@ if(NOT TARGET datapump_gui_application)
       -O1 -fsanitize=address,undefined -fno-omit-frame-pointer)
   endif()
   target_compile_definitions(datapump_gui_application PRIVATE DATAPUMP_VERSION="${PROJECT_VERSION}")
+  # Only the smoke harness classifies Rev display cadence as advisory. Feature
+  # behavior and every source/content/physical/pending check remain shared.
+  set_property(SOURCE src/gui/gui_smoke.cpp APPEND PROPERTY COMPILE_DEFINITIONS
+    DATAPUMP_GUI_BACKEND="${DATAPUMP_GUI_BACKEND}")
 endif()

@@ -1,0 +1,157 @@
+name: Build Windows base dependencies
+
+on:
+  workflow_call:
+    inputs:
+      windows_runner:
+        description: 'Windows x64 runner label'
+        type: string
+        default: windows-2022
+      source:
+        description: 'auto reuses base; base requires reuse; rebuild compiles without overwriting an existing recipe'
+        type: string
+        default: auto
+      publish:
+        description: 'Preserve verified dependency binaries and source downloads in base'
+        type: boolean
+        default: true
+  pull_request:
+    paths:
+      - '.github/workflows/windows-base.yml'
+      - 'tools/windows-base.py'
+      - 'tools/use-windows-base.ps1'
+      - 'tools/select-windows-toolchain.ps1'
+      - 'tests/test_windows_base.py'
+      - 'tests/test_windows_toolchain.ps1'
+      - 'tests/windows-base-probe/**'
+      - 'third_party/build-support/windows-base.json'
+
+permissions:
+  contents: read
+
+# sdk-base.yml serializes publication for the shared Linux/Windows shelf.
+
+jobs:
+  helpers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: python3 tests/test_windows_base.py
+
+  dependencies:
+    if: github.event_name == 'workflow_dispatch'
+    needs: helpers
+    runs-on: ${{ inputs.windows_runner || 'windows-2022' }}
+    defaults:
+      run:
+        shell: pwsh
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      UseMultiToolTask: 'true'
+      EnforceProcessCountAcrossBuilds: 'true'
+      VCPKG_DISABLE_METRICS: '1'
+      VCPKG_BINARY_SOURCES: clear
+      SOURCE: ${{ inputs.source }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the helper on Windows before dependency work
+        run: |
+          & ./tests/test_windows_toolchain.ps1
+          python tests/test_windows_base.py
+          if ($LASTEXITCODE -ne 0) { throw 'Windows base helper tests failed' }
+      - name: Select the installed v143 compiler
+        run: '& ./tools/select-windows-toolchain.ps1 -GitHubEnvironment'
+      - name: Select the exact reusable recipe
+        id: recipe
+        run: |
+          if ($env:SOURCE -notin @('auto', 'base', 'rebuild')) { throw 'Invalid Windows dependency source' }
+          python tools/windows-base.py identity --github-output "$env:GITHUB_OUTPUT"
+      - name: Find and verify existing base assets
+        id: reuse
+        if: inputs.source != 'rebuild'
+        shell: pwsh
+        run: |
+          python tools/windows-base.py fetch --repo "$env:GITHUB_REPOSITORY" --directory windows-base-assets --github-output "$env:GITHUB_OUTPUT"
+          if ($LASTEXITCODE -ne 0) { throw 'Base lookup or verification failed' }
+      - name: Require explicit reuse when requested
+        if: inputs.source == 'base' && steps.reuse.outputs.found != 'true'
+        run: throw 'This Windows recipe is absent from base. Run once with source=auto to prepare it.'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.reuse.outputs.found != 'true'
+        with:
+          repository: microsoft/vcpkg
+          ref: ${{ steps.recipe.outputs.vcpkg_ref }}
+          path: .ci-vcpkg
+          persist-credentials: false
+      - name: Build and export the shared dependency set once
+        if: steps.reuse.outputs.found != 'true'
+        shell: pwsh
+        run: |
+          $recipe = Get-Content third_party/build-support/windows-base.json -Raw | ConvertFrom-Json
+          $env:VCPKG_MAX_CONCURRENCY = $env:NUMBER_OF_PROCESSORS
+          $toolchain = & ./tools/select-windows-toolchain.ps1
+          $env:VCPKG_VISUAL_STUDIO_PATH = $toolchain.Instance
+          # Toolset/version are triplet settings, not vcpkg environment options.
+          # Extend the pinned static triplet without changing the base recipe.
+          $triplets = New-Item -ItemType Directory -Path build/windows-base-triplets -Force
+          $upstreamTriplet = Get-Content ".ci-vcpkg/triplets/$($recipe.triplet).cmake"
+          @(
+            $upstreamTriplet
+            'set(VCPKG_PLATFORM_TOOLSET v143)'
+            "set(VCPKG_PLATFORM_TOOLSET_VERSION $($toolchain.ToolsetVersion))"
+          ) | Set-Content -Encoding utf8 (Join-Path $triplets.FullName "$($recipe.triplet).cmake")
+          $provenance = @{
+            source_sha = $env:GITHUB_SHA
+            runner_image = "$env:ImageOS/$env:ImageVersion"
+            toolset_version = $toolchain.ToolsetVersion
+            compiler_version = $toolchain.CompilerVersion
+            linker_version = $toolchain.LinkerVersion
+          }
+          $provenance | ConvertTo-Json | Set-Content -Encoding utf8 windows-base-provenance.json
+          # vcpkg configures individual ports with Ninja; do not give those
+          # subprocesses the application's Visual Studio generator defaults.
+          Remove-Item Env:CMAKE_GENERATOR, Env:CMAKE_GENERATOR_INSTANCE, Env:CMAKE_GENERATOR_TOOLSET
+          & ./.ci-vcpkg/bootstrap-vcpkg.bat -disableMetrics
+          if ($LASTEXITCODE -ne 0) { throw 'vcpkg bootstrap failed' }
+          $ports = @($recipe.ports | ForEach-Object { "${_}:$($recipe.triplet)" })
+          & ./.ci-vcpkg/vcpkg.exe install @ports --overlay-triplets="$($triplets.FullName)"
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency build failed' }
+          $exports = @($recipe.ports | ForEach-Object { ($_ -replace '\[.*\]', '') + ':' + $recipe.triplet })
+          & ./.ci-vcpkg/vcpkg.exe export @exports --raw --overlay-triplets="$($triplets.FullName)" --output=windows-dependencies --output-dir="$PWD/build/windows-export"
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency export failed' }
+          git -C .ci-vcpkg archive --format=zip --output="$PWD/.ci-vcpkg/downloads/vcpkg-source.zip" $recipe.vcpkg_ref
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency recipe preservation failed' }
+          Copy-Item (Join-Path $triplets.FullName "$($recipe.triplet).cmake") .ci-vcpkg/downloads/datapump-v143-triplet.cmake
+          python tools/windows-base.py assemble --export-root build/windows-export/windows-dependencies --sources-dir .ci-vcpkg/downloads --directory windows-base-assets --provenance windows-base-provenance.json
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency inventory creation failed' }
+      - name: Install at a different path and check the compiler
+        id: installed
+        shell: pwsh
+        run: |
+          $toolchain = & ./tools/select-windows-toolchain.ps1
+          python tools/windows-base.py install --directory windows-base-assets --destination "$PWD/build/relocated-windows-base" --linker-version $toolchain.LinkerVersion --github-output "$env:GITHUB_OUTPUT"
+          if ($LASTEXITCODE -ne 0) { throw 'Relocated dependency verification failed' }
+      - name: Compile and run a small static dependency probe
+        env:
+          BASE_TOOLCHAIN: ${{ steps.installed.outputs.toolchain_file }}
+        shell: pwsh
+        run: |
+          cmake -S tests/windows-base-probe -B build/windows-base-probe -A x64 -DCMAKE_TOOLCHAIN_FILE="$env:BASE_TOOLCHAIN" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          if ($LASTEXITCODE -ne 0) { throw 'Relocated dependency configure failed' }
+          cmake --build build/windows-base-probe --config Release --parallel $env:NUMBER_OF_PROCESSORS
+          if ($LASTEXITCODE -ne 0) { throw 'Relocated dependency link failed' }
+          & ./build/windows-base-probe/Release/windows-base-probe.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Relocated dependency runtime probe failed' }
+      - name: Preserve new verified assets without overwriting a recipe
+        if: inputs.publish && steps.reuse.outputs.found != 'true'
+        run: |
+          python tools/windows-base.py publish --repo "$env:GITHUB_REPOSITORY" --directory windows-base-assets
+          if ($LASTEXITCODE -ne 0) { throw 'Base publication failed' }

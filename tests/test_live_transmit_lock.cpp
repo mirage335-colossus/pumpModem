@@ -27,7 +27,7 @@ template<class F> void rejected(F operation,const char* message) {
 }
 struct Playback {
     std::atomic<std::uint64_t> released{0},delivered{0};
-    std::atomic<unsigned> opened{0},started{0},closed{0};
+    std::atomic<unsigned> opened{0},started{0},closed{0},captures{0};
     std::atomic<bool> finish{false};
 };
 Playback* script=nullptr;
@@ -272,8 +272,14 @@ void unkeyed_slow_quiet_override() {
     session.transmit_bits(Bytes{0},true);
     await([&]{return playback.started==2 && playback.delivered==total+1;},
           "one-shot override did not bypass unencrypted multi-minute separation",3s);
+    const auto captures_before_cancel=playback.captures.load();
     session.cancel_transmit();
     await([&]{return playback.closed==2;},"forced unencrypted playback did not close");
+    // Device closure precedes the source thread's return to capture. Wait for
+    // that transition so its idle status cannot overwrite the next request's
+    // preparation status before the polling thread observes it.
+    await([&]{return playback.captures>captures_before_cancel;},
+          "capture did not resume after forced unencrypted playback");
     const auto cancelled=session.snapshot();
     const auto elapsed=std::chrono::duration<double>(std::chrono::steady_clock::now()-completed_at).count();
     check(cancelled.transmit_key_lock_seconds==0 && cancelled.long_transmit_key_lock_seconds==0 &&
@@ -301,6 +307,7 @@ std::vector<Device> devices() { return {{"epoch guard test","deterministic outpu
 void capture(std::uint32_t rate,const std::string&,const CaptureCallback&,std::stop_token stop,
              StreamFormatCallback on_format) {
     if(on_format)on_format({rate,rate,static_cast<double>(rate)/2,0});
+    ++script->captures;
     while(!stop.stop_requested())std::this_thread::sleep_for(1ms);
 }
 void playback(std::uint32_t rate,const std::string&,const PlaybackCallback& next,std::stop_token stop,

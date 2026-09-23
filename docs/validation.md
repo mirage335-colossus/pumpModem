@@ -1,8 +1,931 @@
-# Local validation record — version 0.7.2
+# Validation record — version 0.7.2
 
 The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
+
+
+## Arch/Gentoo signed update channels — 23 September 2026
+
+Schema 5 adds native signed pacman packages and per-architecture `.db`/`.files`
+indexes, plus a signed Gentoo overlay channel and authenticated Portage sync
+adapter. Existing binary payloads are reused. APT's signed manifest also binds
+all new assets. Schemas 1–4 remain readable, but only fully certified regular
+schema-5 releases can become Latest, preventing an older delivery layout from
+removing update channels. Experiments remain explicitly tag-pinned.
+
+Focused fixtures cover real signatures, native package bytes/modes, generated
+mtree data, required asset inventories, APT's complete signed distribution hash
+set and certification gates. Gentoo HTTP fixtures exercise a moving Latest URL,
+A-to-B refresh, unchanged refresh, downgrade/tamper/wrong-key/unsafe-archive
+rejection and atomic replacement failures retaining the previous tree. Its
+inventory can be read on Windows without Linux-only runtime imports. Native
+pacman update fixtures run in an isolated root in the Arch installation job.
+The full build-tool group passes **16/16 in 12.22 seconds**. Final focused
+helpers pass **74 release**, **67 certification**, **9 APT**, **8 recipe**,
+**8 Arch** and **11 Gentoo** tests. Two additional native pacman cases require
+the root Arch container and are skipped locally. Native Portage plugin
+discovery and construction also pass against the upstream Portage source.
+Workflow lint and all 29 documentation shell examples pass. The [schema-5 publication run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35901986281)
+published [experiment `v001_00-2026-09-23-1322CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-23-1322CDT)
+with **50 assets**, packager `8b90225786d84775ef311c1552fdc1a9692ce768`,
+application source `88fb87bc491c5a0a487b68894ae6890239793e6b`, and inventory
+SHA-256 `b58aed15904aae6024cf59117602bf04100c54c575d518dc78f42f6f3313436f`.
+All six application archives were reused unchanged; publication took **82 seconds**.
+All nine Debian/Ubuntu jobs pass, covering the same Bookworm-onward matrix.
+
+The first Arch attempt exposed only fixture errors: `--noprogressbar` is invalid
+for `pacman -Q`, and libalpm may stop after the first missing package. The
+[corrected Arch-only run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35902631226)
+passes all **10** helper/native tests and installs both real release packages
+with required database/package signatures. `pacman -Qkk` reports zero altered
+files for both backends, exact private payload verification passes, and both
+CLI/headless GUI checks pass. The complete job took **96 seconds**.
+
+Gentoo's authenticated installer and native `emaint sync` passed in the initial
+run. Its host-dependency installation then exposed a bootstrap-directory error:
+creating `/etc/portage/gnupg` early made `getuto` skip initialization of Gentoo's
+own trust anchor. The bootstrap now uses the separate
+`/etc/portage/datapump-release-keyring.gpg` file. Signatures remain required;
+no application or release asset needed changing. The [focused Gentoo retry](https://github.com/mirage335-colossus/pumpModem/actions/runs/35902837031)
+passes in **7m26s**, including native overlay sync, signed prebuilt host
+dependencies, both backend installations, exact payload verification and
+CLI/headless GUI checks. These package checks all use larger H runners.
+Final bootstrap review additionally requires exactly one pinned primary key in
+all downloaded keyrings, excluding signing subkeys from that count. APT's source
+configuration is authenticated through the signed Release and manifest before
+installation. The documented APT and Gentoo verification commands pass against
+the published assets without installing anything; parser probes reject added
+primary keys and accept a legitimate signing subkey.
+
+Separate [full certification](https://github.com/mirage335-colossus/pumpModem/actions/runs/35903397995)
+uses workflow revision `9ed4c6899ed1493998ee7b7021d173d0efa512b1`, all-H
+Linux/ARM64/Windows runners, `devfast=false`, the exact published hashes and
+existing SDKs. Gentoo passes again, including another native sync after both
+packages are installed. All **20 copied Linux distribution checks**, **nine
+signed APT jobs** and **both native package-manager jobs** pass. Linux FLTK
+passes on both x86-64 and ARM64, including all 30 contract tests with numerical
+calibration, shared/native GUI tests, packaging, audio routing and the exact
+published archive. SDK fetch/install on x86-64 takes **27 seconds**; its complete
+contract group takes **1,648.66 seconds**, compared with **1,563.53 seconds** on
+ARM64. The extended duration is full regression, not an SDK rebuild.
+
+Full certification is **failed**. Windows Rev compilation and base reuse succeed, but its initial
+native graphics probe reproduces the known unavailable WGL ARB extensions on
+the hosted runner. Windows FLTK's adapter fixture also reports an estimate-label
+warning-tone mismatch, and Linux x86-64 Rev's native adapter fixture reports a
+label-only document clip retaining editable input/focus after all 37 shared GUI
+tests passed. ARM64 Rev passes all 37 shared GUI, five native GUI and four
+packaging tests, then its differential-receiver CLI estimate exceeds the
+30-second subprocess bound. These failures are not the advisory waterfall
+cadence warning. The attached [certification report](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-23-1322CDT/certification-35903397995-attempt-1.md)
+is bound to the exact source and release inventory; the release remains an experiment and is not Latest.
+Package checks alone do not certify application correctness or physical
+audio/hardware.
+
+## Arch/Gentoo recipes and shared Debian/Ubuntu packages — 23 September 2026
+
+New schema-4 releases add Arch `PKGBUILD`/`.SRCINFO` recipes and a Gentoo EAPI-8
+local overlay for separate FLTK/Rev binary packages on x86-64 and ARM64. The
+recipe archives and their manifest are signed through their hashes in
+`apt-repository.json`. Native package managers fetch immutable tagged application
+archives and verify SHA-256 (plus BLAKE2B/SHA512 for Gentoo). The complete private
+payload, wrappers and desktop files remain byte-for-byte equivalent to the
+Debian installation; package tools must not strip or rewrite binaries. Original
+bundled notices remain present. Generated recipes stay in release assets.
+
+Focused coverage passes **8 distro**, **9 APT**, **72 release** and **54
+certification** helper tests. Distro coverage executes both actual shell recipe
+installation functions for all four Linux target/backend combinations and
+checks their resulting file bytes and modes, tampering, extra files, safe
+extraction, version syntax and source hashes. A real signature regression proves
+that changing a recipe asset invalidates the signed APT manifest. Legacy
+metadata schemas remain readable. Schema 4 required successful distribution
+checks for Latest at this stage; current promotion additionally requires the
+schema-5 update channels described above. The full build-tool group passes **14/14 in 6.92
+seconds**. Workflow lint, documentation shell syntax and whitespace checks pass.
+
+The APT workflow installs the same four `.deb` files on Debian 12 Bookworm,
+Debian 13 Trixie, Ubuntu 24.04 and Ubuntu 26.04, with both AMD64 and ARM64 jobs.
+Ubuntu 22.04 is additionally checked on ARM64. Bookworm-SDK AMD64 requires
+glibc 2.36, so Ubuntu 22.04's glibc 2.35 is correctly excluded for that archive.
+No runtime dependency names were changed: distro-native packages resolve their
+own ALSA time64 transition and graphics/font dependencies. The Arch check uses
+unprivileged `makepkg` then pacman; the Gentoo check uses a local binary package
+and binary-only Portage dependency resolution, with no source fallback.
+
+The [first native installation run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35891683676)
+passed Arch and six APT environments. Gentoo rejected the missing EAPI-8
+`eapply_user` preparation hook; the corrected recipe and fixture now require
+it. Both Trixie jobs lacked the test tool `gpgv` (APT uses its own verifier), so
+the harness now installs it explicitly. Ubuntu 26.04 ARM64 installed both
+packages and verified their bytes, but Rev's headless self-check exceeded the
+new harness's 30-second cap. This check includes a modem simulation, not a
+display-cadence probe; its bound now matches the existing portable-package
+verifier's 120 seconds. No application assertion was removed or downgraded.
+These failures remain recorded against the initial `1152CDT` experiment.
+
+The [corrected package run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35892588927)
+published [`v001_00-2026-09-23-1200CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-23-1200CDT)
+with all 25 assets from packaging commit `c251077`. All nine Debian/Ubuntu
+installation jobs pass, each in **63–95 seconds** on architecture-specific H
+runners. Arch passes in **66 seconds**; signing, packaging and publication take
+**43 seconds**. The application archives remain byte-for-byte copies of the
+`88fb87b` build. Gentoo's corrected EAPI preparation/package phase passes, but
+the first binary-only dependency resolution selected incompatible USE/ABI
+variants. This separate CI setup fault does not change the published recipes.
+The full build-tool group after the preparation fix passes **14/14 in 6.71
+seconds**.
+
+Gentoo dependency diagnosis uses `package_check=gentoo` against the unchanged
+`1200CDT` release, without republishing or repeating the nine passing APT jobs
+and Arch job. Its official generic binhost lacks the required ALSA audio bridge;
+the v3 binhost supplies it. CI verifies CPU support, uses strict USE matching
+and aligns its desktop profile/global CPU flags with the official
+`tintin/openrc-v3-23` builder (upstream configuration `e3df757d`). This affects
+only the disposable container's host packages, not the application CPU baseline.
+The first focused retry retained stage3's SSE2 flags and rejected pixman;
+that failure remains recorded in run `35893912339`. Dependency source builds
+remain disabled.
+
+The [Gentoo-only corrected run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35894812942)
+passes on `149d985`: both binary packages install through Portage, installed
+payloads match, and both CLI/headless GUI self-checks pass. The whole job takes
+**9m56s**, mostly installing 177 prebuilt desktop dependencies into the empty
+container. It found a desktop-menu category warning: `Audio` requires the
+`AudioVideo` parent category. The shared Debian/Arch/Gentoo desktop generator
+and a semantic regression now enforce that parent. The final experiment below
+contains this correction; original application archive bytes stay unchanged.
+
+The final Gentoo harness enables parallel package installation and uses all
+runner cores, while retaining Portage's merge locks, merge-wait and system
+dependency ordering. Per-package `merge-sync` durability writes are disabled
+only in the discarded container. This follows the
+[Portage feature definitions](https://raw.githubusercontent.com/gentoo/portage/master/man/make.conf.5)
+and does not bypass signature, dependency, installed-payload or application
+self-checks.
+
+The [final package-only run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35896483127)
+passes from packaging commit `f2aecd2`, publishing
+[`v001_00-2026-09-23-1234CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-23-1234CDT)
+as **experiment** with all 25 assets. All **11 native installation jobs** pass:
+the nine Debian/Ubuntu jobs take **80–105 seconds**, Arch **87 seconds**, and
+Gentoo **7m08s**. Signing, packaging and publication take **49 seconds**.
+Gentoo's observed whole-job time fell by **2m48s** from the preceding **9m56s**
+run; these are ordinary hosted-job observations, not a controlled benchmark.
+Both GUI backends' installed files and bounded CLI/headless GUI checks pass.
+The corrected desktop entries produce no invalid-category warning.
+
+All six application archive hashes remain identical to the `1200CDT` release
+and original `88fb87b` application build. The final checksum inventory SHA-256
+is `c8c05e962e115970f4465ae32fa6602cc97bb3d6b8770ccb76b70e4fa8bc1384`.
+No application/SDK rebuild, smaller-runner retest or Actions artifact/cache
+storage was used. Earlier experiments and failure records remain preserved;
+their descriptions point to the corrected packages. These delivery checks do
+not grant full application or hardware certification, and no regular Latest
+release has qualified. Native Arch/Gentoo frontend checks cover x86-64; ARM64
+recipes share the payloads tested by the Debian/Ubuntu matrix and local recipe
+fixtures, without a separate native ARM64 Portage/makepkg claim.
+
+## Signed flat APT release assets — 23 September 2026
+
+Schema-3 application releases include four Debian packages, a flat package
+index, signed release metadata, the public key and a Deb822 source file.
+Generated packages, indexes and keys remain in GitHub Releases, outside Git.
+Both GUI backends coexist under separate `/opt/datapump/` directories. Package
+payload bytes and executable modes are verified against the portable archives;
+APT uses a pinned signing key and immutable versioned package URLs even when
+the index is read through `releases/latest/download/`.
+
+Focused coverage passes **7 APT**, **70 release** and **43 certification**
+helper tests. It includes real GPG signatures and an isolated local
+`apt-get update`/download after the mocked Latest route moves, modified payload
+and signature rejection, restrictive signing umasks, directory permissions,
+both architectures/backends, packaging/application source identity and bounded
+GitHub error diagnostics with credential redaction. The entire build-tool
+group passes **13/13 in 5.20 seconds**. Workflow lint and whitespace checks pass.
+
+The first live packaging attempt passed its helper tests and package
+construction, then failed while trying to tag the older application commit.
+Repackaged releases now tag the current packaging revision and preserve the
+original `source_sha`, tag, inventory hash and all six archive byte streams.
+Certification validates the packaging tag and uses `source_sha` for application
+tests. No personal token or SDK rebuild is required for this path.
+
+The [live release and installation run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35888336578)
+passes from packaging commit `53c54c3964c532efeb7d25a609f71689c60688cc`.
+It published [`v001_00-2026-09-23-1123CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-23-1123CDT)
+as **experiment**, with all 22 assets. Its six portable archives are byte-for-byte
+copies of finalized draft `v001_00-2026-09-23-1033CDT`, built from application
+source `88fb87bc491c5a0a487b68894ae6890239793e6b`. The final checksum inventory SHA-256
+is `4ff3d58260197ef62729cfa90756ab8e57d80bc64d78bad8f42b666264db799a`.
+
+| Job | Runner | Whole job |
+| --- | --- | ---: |
+| Sign, package and publish | `ubuntu-latest-h` | 44 seconds |
+| Bookworm AMD64, both backends | `ubuntu-latest-h` | 74 seconds |
+| Bookworm ARM64, both backends | `ubuntu-24.04-arm-h` | 86 seconds |
+
+Both clean Bookworm containers successfully fetched the public signed GitHub
+index with `apt-get update`, installed both backends and their declared runtime
+dependencies through APT, verified every installed payload, and passed CLI
+version/GUI self-checks. Only inspection/display harness tools were installed
+before the application packages. All application build jobs were skipped;
+no SDK/base was rebuilt and no smaller runner was retested. The times exclude
+queueing. These packaging checks do not replace full source/binary certification
+or qualify physical audio/graphics hardware. The older full certification run
+`35878492914` is complete with its recorded failures; all 20 published Linux
+distribution checks passed. No regular Latest release exists yet.
+
+APT signing uses the dedicated primary fingerprint
+`8C3DD4A727C83B93374C993B1F94BC4CEC2DF307`; private material is held in the
+repository Actions secret, never in Git or release assets. At this stage,
+qualified regular schema-3 releases could become Latest; new releases now
+now require schema 5 and the distribution update checks above. Experiments remain pinned to an
+explicit tag, and earlier release schemas cannot remove the APT update channel.
+
+## Larger runners and independent compilation concurrency — 23 September 2026
+
+Manual workflows now propagate Linux x86_64, Windows x64 and, where applicable,
+ARM64 runner selections into their reusable build and diagnostic jobs. The
+organization's new `ubuntu-24.04-arm-l` and `ubuntu-24.04-arm-h` pools use the
+official Ubuntu 24.04 ARM64 image with 8 and 32 CPUs respectively. ARM64 defaults
+to L. Container/SDK ABI baselines remain unchanged. Compilation uses the selected
+host's available cores independently of the existing test-concurrency limits;
+Windows enables bounded MultiToolTask compilation across projects.
+
+Focused ARM-only checks passed on source `5b33ec8`: [L](https://github.com/mirage335-colossus/pumpModem/actions/runs/35881699198)
+reported aarch64, 8 CPUs and about 32 GB RAM, with a **25-second** whole job;
+[H](https://github.com/mirage335-colossus/pumpModem/actions/runs/35881705867)
+reported aarch64, 32 CPUs and about 128 GB RAM, with a **28-second** whole job.
+Both compiled and ran the existing Legacy fixture inside Ubuntu 22.04. These
+small jobs verify routing/compiler access, not a general speedup benchmark or
+release certification. No smaller ARM pool was retested.
+
+The x86_64 capacity checks passed on M/L/H Linux pools. Their Windows jobs
+immediately exposed an image mismatch: the larger Windows hosts supply VS2026,
+while the workflow requested VS2022. The new selector uses the installed v143
+compiler under the matching IDE, retaining the existing Windows base identity
+`1be51afd94ed0cb4555a`. Certification uses current runner discovery while keeping
+the published source's dependency helper/recipe. No Windows base is rebuilt
+implicitly. The local build group passed **12/12 in 5.52 seconds**, including
+**40 wrapper cases** for independent compilation/test limits. The unchanged
+Windows base helper passed **22/22**; workflow lint and whitespace checks passed.
+
+The [larger Windows follow-up](https://github.com/mirage335-colossus/pumpModem/actions/runs/35882155071)
+passed on `88fb87b`: the toolchain fixture selected VS2026 with
+`v143,version=14.44.35207,host=x64` and linker `14.44.35228.0`, then compiled
+the actual Rev style modules and passed their regression in **0.07 seconds**.
+The whole Windows H job took **40 seconds**. It used all 32 visible CPUs for
+compilation without raising the serial test limit.
+
+The [all-H six-package verification](https://github.com/mirage335-colossus/pumpModem/actions/runs/35882420441)
+passed on the same `88fb87b` source. All six build jobs ran on the selected
+32-CPU architecture-specific H hosts; only helper/metadata/finalization jobs
+used standard runners. It left `v001_00-2026-09-23-1033CDT` as an **experiment
+draft**, containing six archives, metadata, notes, `warning.log` and checksums.
+Archive relocation, dependency/ABI checks and the complete inventory gate passed.
+
+| Build job | Whole job | Windows base restore, when applicable |
+| --- | ---: | ---: |
+| Linux x86_64 FLTK | 2m15s | — |
+| Linux x86_64 Rev | 2m35s | — |
+| Linux ARM64 FLTK | 3m30s | — |
+| Linux ARM64 Rev | 5m03s | — |
+| Windows x64 FLTK | 2m15s | 15s |
+| Windows x64 Rev | 2m32s | 20s |
+
+The preceding standard-runner publication's Windows jobs took 5m43s/6m49s.
+These observed job timings include setup and package work and are not a
+controlled benchmark or a guarantee. The Linux x86_64 SDK and Windows dependency
+base were reused; cold dependency production was deliberately not repeated. This
+package verification is separate from full source/binary certification.
+
+An earlier full certification of source `e72906d`, [run 35878492914](https://github.com/mirage335-colossus/pumpModem/actions/runs/35878492914),
+was already running on standard hosts before the larger-runner changes. Its
+Windows Rev native probe lacks the required WGL extensions. Windows FLTK's
+adapter fixture reports "Layout lifecycle fixture lost native controls" after
+its full GUI workflow passed. ARM64 Rev passed all **37 shared GUI**, **5 native
+GUI** and **4 packaging** tests, then the CLI differential-estimate subprocess
+exceeded its 30-second deadline. These are separate environment, assertion and
+timeout failures; none is the advisory Rev cadence condition. They remain
+recorded failures, and this runner work does not waive them or certify that
+release. Logs are preserved under `build/ci-diagnostics-20260923/backend-runs/`.
+
+## Backend-specific releases and advisory Rev cadence — 23 September 2026
+
+New release metadata requires separate FLTK and Rev archives for Linux x86_64,
+Linux aarch64 and Windows x64. Download names and CPack extraction roots identify
+the backend. The release helper checks both generated archive formats, embedded
+GUI provenance and the complete six-target inventory; certification requires
+those same six identities. Existing schema-1 releases remain readable and retain
+their original FLTK assets. The SDK recipe remains unchanged; both x86_64
+backends use the existing `base` SDK. Native Ubuntu 22.04 Rev builds use signed,
+pinned LLVM 19 and a checksum-pinned Ninja 1.13.2 bootstrap.
+
+The maintainer has explicitly classified Rev replay/waterfall display cadence
+as advisory. The earlier 13-frame/0.898309-progress and 6-frame failures below
+were display-cadence misses. They now emit `WARNING REV_REPLAY_CADENCE` with
+measured elapsed time, frames, changes, fraction and phase. Required physical
+observations, pending presentation, chronology, source/bitmap consistency,
+content and completion checks remain hard failures. FLTK retains its cadence
+check. This is a diagnostic policy change, not a rendering-performance fix.
+Every new release includes a checksummed `warning.log` describing the known
+Rev limitation; it does not claim that publication measured its framerate.
+Successful portable smoke checks preserve observed warnings in CI logs, and
+certification reports link the warning notice without failing on cadence alone.
+
+Focused helper coverage passes **58 release**, **35 certification**, **27 SDK
+storage** and **4 native Rev toolchain** tests. The deterministic replay fixture
+covers both recorded misses, healthy/boundary cases and mandatory correctness
+failures even when cadence also misses. It passes in **0.01 seconds**; actual
+FLTK/native and Rev/SDK source compilation probes and GUI boundary regressions
+also pass. Packaging fixtures cover both backend roots, missing pairs, warning
+propagation from stdout/stderr, and nonzero GUI exits remaining fatal. The
+small upstream Ninja archive's SHA-256 matches the existing SDK source pin;
+installer tests mock apt rather than changing the developer host.
+
+Full local follow-up uses the existing SDK through `./build.sh test GROUP
+--stop-on-failure --sdk "$PWD/build/sdk-qualified-local" --backend fltk
+--build-dir build/sdk-local-fltk --jobs 2 -- -DDATAPUMP_PORTABLE=ON`:
+
+- `gui`: **35/35**, **112.74 seconds**, with native display tests disabled.
+- `build`: **11/11**, **6.78 seconds**.
+- `packaging`: **3/3**, **39.96 seconds**, including real relocated application
+  checks and the SDK-compiler fixture.
+
+Logs are under `build/ci-diagnostics-20260923/backend-full-*.log`. Workflow lint
+and whitespace checks pass. The [six-package publication attempt](https://github.com/mirage335-colossus/pumpModem/actions/runs/35865999118)
+used source `c4309fc191539f748b3d3b0b1b1a2c636924ec11`. All four Linux
+backend/architecture packages and Windows FLTK passed. Windows Rev failed to
+compile read-only style equality operators because MSVC rejects their ambiguous
+C++20 reversed candidates. The release correctly remained an incomplete draft;
+certification was not dispatched for it. This is a separate compilation issue,
+not a cadence warning. Windows dependency preparation took **5m57s (FLTK)**
+and **5m58s (Rev)**; FLTK application building and packaging took **5m48s**.
+The Windows SDK itself was already installed on the runner.
+
+The follow-up adds a shared Windows dependency base: a relocatable static vcpkg
+export containing OpenSSL, GLEW and FreeType, plus the pinned vcpkg source and
+download inventory. Consumer workflows verify the exact recipe and checksums,
+check that the runner's linker is at least as new as the producer's, then reuse
+the export without rebuilding dependencies. Microsoft compiler/SDK files are
+not included. **22 focused helper tests** pass, including Windows-safe imports,
+raw-export layout, corruption/traversal, immutable publication, authentication
+errors and linker compatibility. The full local build group passes **12/12** in
+**6.63 seconds**; workflow lint and whitespace checks pass.
+
+The MSVC failure is corrected by const-qualifying four read-only Rev style
+equality operators, leaving their comparison bodies unchanged. A dependency-free
+probe compiling the four actual production modules reproduces the original
+ambiguity under strict Clang diagnostics and passes after the change. Its
+regression checks mutable/const symmetry, values/units, color alpha, notification
+and transition metadata, and layout-versus-paint decisions. The case is also
+retained in the normal Rev GUI group. The focused Windows diagnostic runs the
+small event probe before dependency download or application compilation; ordinary
+publication leaves those regressions to diagnosis/certification after the fix
+is established.
+
+[Windows base production](https://github.com/mirage335-colossus/pumpModem/actions/runs/35868536506)
+passes on source `ba80ff6e300ab0fe885067206d56be54b9f2428f`. Recipe
+`1be51afd94ed0cb4555a` retains a **57,012,854-byte** compiled export and
+**549,046,640-byte** source/download archive plus their checksum inventory in
+`base`. The cold dependency build/export took **6m17s**, relocation **4s**, and
+the actual static OpenSSL/GLEW/FreeType compile/link/run probe **12s**. The Windows
+job completed in **7m24s** including upload. All 22 helper tests also pass on
+Windows. A preceding fast attempt caught ZIP fixture separator normalization
+before compilation; the literal-path regression and original-name validation
+were corrected without weakening the unsafe-path assertion. Git attributes keep
+the recipe identity identical under Windows checkout line-ending conversion.
+
+Static Rev packaging now explicitly includes the GLEW/FreeType vcpkg notices,
+which a DLL dependency scan cannot discover for statically linked libraries.
+The focused packaging fixture verifies their exact contents after relocation and
+that CLI/FLTK packages do not select unused Rev notices. Existing archive,
+corruption and timeout checks pass. Full SDK packaging follows up with **3/3**
+in **37.95 seconds**.
+
+[Windows base-only reuse](https://github.com/mirage335-colossus/pumpModem/actions/runs/35869666909)
+passes on source `b8c260b319428b3bc18d582d918a3edadbfc8dac`: download and verified
+inventory **7s**, installation/compiler check **3s**, fresh link/run probe **17s**,
+whole Windows job **44s** including checkout. The vcpkg checkout, dependency
+build/export and upload steps are skipped. Both base workflows use zero Actions
+artifacts/cache.
+
+The [second six-package attempt](https://github.com/mirage335-colossus/pumpModem/actions/runs/35869672617)
+uses that same source and again passes all four Linux packages and Windows FLTK.
+Windows dependency reuse takes **19s (FLTK)** and **11s (Rev)**. The actual MSVC
+style probe passes (25s including configure/build, 0.12s test), confirming the
+first compiler correction. Rev compilation then exposes a missing Win32
+`NativeWindow::pumpEvents` implementation; publication correctly remains a draft.
+The next iteration uses native CI's targeted `devfast=true,
+diagnostic=windows-rev` selection before another full release attempt, retaining
+all required regression and exact-release certification steps afterward.
+
+The Win32 implementation now pumps the entire thread queue without blocking,
+dispatches at most 64 messages per application poll, yields after a paint, and
+reports `WM_QUIT` to the application. This preserves service-window input and
+prevents continuous repaint feedback from starving application progress. The
+Linux pump retains its existing bounded behavior and reports its continuing
+state through the same API. A dependency-free regression covers input
+translation, FIFO/service delivery, close, bounded feedback, paint fairness and
+quit; mutations of the yield, translation, bound and quit behavior fail their
+respective assertions.
+
+The first [focused Windows event run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35871173191)
+caught a fixture failure in 0.01 seconds: a fully hidden HWND did not generate
+the expected paint. No dependencies or application compilation followed that
+failure. Using a small nonactivating window fixes the fixture without changing
+production behavior or weakening its assertions. The corrected
+[Windows diagnostic](https://github.com/mirage335-colossus/pumpModem/actions/runs/35871985005)
+passes on source `1bbc8a724c32aa467d9eef94f313a359bdeeb462`: the real Win32
+regression takes **0.05 seconds**, existing dependencies are reused in **21
+seconds**, and actual MSVC Rev application compilation and the bounded headless
+self-check pass. This establishes compilation/event behavior, not graphics
+qualification.
+
+Windows Rev certification now runs the existing real-context coordinate check
+before building the full regression selection. The coordinate fixture explicitly
+injects `WM_DPICHANGED` for its 1x/2x cases rather than assuming that the hosted
+monitor has both DPI settings. It preserves all physical/client, caret, focus,
+wheel and relayout assertions. The two Linux coordinate cases pass on a private
+Xvfb display; actual Windows graphics qualification remains a later check.
+
+After these changes the complete local Rev shared GUI group passes **37/37**
+in **120.56 seconds**, using `CC=clang-19 CXX=clang++-19 ./build.sh test gui
+--backend rev --build-dir build/rev --jobs 2 -- -DDATAPUMP_TEST_NATIVE_GUI=OFF`.
+The log is `build/ci-diagnostics-20260923/backend-final-rev-gui.log`; the separate
+native coordinate checks above provide display coverage for that fixture.
+
+The [final six-package publication](https://github.com/mirage335-colossus/pumpModem/actions/runs/35872706235)
+passes on source `81d5aaab0ed93b48e979db581de116959ec37ada`. The published
+[v001_00-2026-09-23-0914CDT release](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-23-0914CDT)
+has the exact title `experiment`, remains a prerelease, and contains all six
+backend/architecture archives plus metadata, notes, `warning.log` and checksums.
+Publication completes in about seven minutes. Windows dependency setup takes
+**13 seconds (FLTK)** and **14 seconds (Rev)**; entire Windows jobs take **6m01s**
+and **4m48s**, respectively. Neither Windows nor Linux rebuilds its saved base.
+The separate [full certification](https://github.com/mirage335-colossus/pumpModem/actions/runs/35873643774)
+is dispatched with `devfast=false` against that release's source and binary
+hashes; publication itself is not a certification claim.
+
+The first certification attempt finds additional failures before long tests:
+Windows Rev's real-context check reports unavailable required WGL extensions in
+**0.28 seconds**; ARM64 Rev on Ubuntu 24.04 cannot choose a GLX visual. Neither
+is a display-cadence warning. A separate ARM64/Trixie job fails while downloading
+its asset before testing. The detailed graphics implementation and loader cause
+require focused inspection of the unchanged published binaries.
+
+The SDK/GCC 15 Rev source build exposes a module-import failure in the new style
+fixture's implicit `DirtyFlag` constructor. The four-module reproducer fails
+before the correction and passes after explicit aggregate initialization with
+`DirtyFlag dirty{}`. GCC 15.3 and strict Clang 19 both pass the unchanged
+assertions. No production module or SDK changes are needed; the original
+certification source/run retains its recorded failure.
+
+The [bounded graphics diagnostic](https://github.com/mirage335-colossus/pumpModem/actions/runs/35874888207)
+identifies both environments without rebuilding the app or SDK. Windows reports
+**Microsoft Corporation / GDI Generic / OpenGL 1.1.0**, with both required WGL
+ARB entrypoints absent. ARM64's loader reports that bundled `libstdc++.so.6`
+lacks **GLIBCXX_3.4.32**, required by Ubuntu 24.04's host `libLLVM.so.20.1`.
+The host itself supplies working software GLX; inheriting the older application's
+C++ runtime prevents that driver from loading.
+
+The packaging correction extends static GNU C++ runtime linking to portable
+Linux Clang builds selecting libstdc++, and hides only the selected C++/unwind
+archive exports so host drivers bind to their own runtime. Existing GNU behavior,
+nonportable/sanitizer configurations, libc++ selection, runtime dependency checks
+and ABI ceilings remain intact. Static license notices are retained. A small
+before/after packaging fixture reproduces inherited bundled-runtime lookup and
+then verifies a separately loaded C++ plugin uses the host runtime. Removing
+archive-symbol hiding fails its RTTI isolation assertion. Native Clang 19,
+native GCC 14 and SDK GCC 15 fixtures pass. The actual Clang Rev packaging group
+passes **4/4** in **71.92 seconds**, including relocation; its bundle contains
+neither `libstdc++.so` nor `libgcc_s.so` and retains both runtime notices.
+
+Remaining long certification jobs for the known-bad candidate were cancelled
+after diagnosis. The automatic reporting job attached the
+[failed attempt report](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-23-0914CDT/certification-35873643774-attempt-1.md)
+without changing any binary or original checksum. Copied-binary checks finish
+**17 passed / 3 failed**: the ARM64 GLX failure, the ARM64/Trixie asset download,
+and a separate x86_64 Rev/Ubuntu 26.04 phase-21 text-reception assertion. Its
+earlier cadence warning does not cause that semantic failure. All ten FLTK
+compatibility jobs pass. Partial source checks include both FLTK GUI groups
+**36/36**, ARM64 Rev GUI **37/37**, and ARM64 FLTK native/packaging **3/3** each.
+Windows FLTK completes 24 GUI cases before cancellation. No completed full
+source contract/calibration or release certification is claimed for this attempt.
+
+Focused inspection of the phase-21 failure finds that the 17 received bits are
+exactly the suffix of the intended 32-bit `Help` payload, after a 15-bit loss;
+the editor's pre-transmission assertion had verified all 32 bits. A small keyed
+Session probe against the current libraries receives 32/32 with immediate,
+frozen-epoch and warmed starts. This does not establish a deterministic cause or
+justify adding a readiness delay. The relevant receiver/smoke paths are unchanged;
+the semantic qualification failure remains unresolved, separate from cadence.
+
+After the fixture and runtime-packaging corrections, the complete local Rev
+shared GUI group passes **37/37** with the existing **SDK GCC 15** in **114.34
+seconds**, and **37/37** with **native Clang 19, portable runtime linking** in
+**119.14 seconds**. Logs are
+`build/ci-diagnostics-20260923/backend-final-sdk-rev-gui.log` and
+`build/ci-diagnostics-20260923/backend-final-static-clang-rev-gui.log`.
+
+The [focused ARM64 packaging and graphics run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35876268016)
+passes on source `e72906dc431192372b1b81562cc7cd9112d113c5`. It builds the Rev
+package on Ubuntu 22.04 and verifies both TGZ and ZIP archives, including
+relocation, dependency closure and all **35 packaged ELF files** against the
+**glibc 2.35** ceiling. On Ubuntu 24.04, the unchanged copied GUI runs
+`--simulation` with empty `PATH`/`LD_LIBRARY_PATH` under private Xvfb. Its exact
+`Data Pump` window remains visible for **2.05 seconds** while the process stays
+alive. Process mappings confirm host **Mesa 25.2.8**, **LLVM 20.1** and
+**libstdc++.so.6.0.33**, all outside the package; no C++ runtime DSOs are bundled.
+Strict package inventory verification passes both before and after startup.
+The log retains an ALSA missing-configuration warning; this simulation startup
+does not qualify audio devices. This is focused packaging and host-driver
+startup evidence, not full GUI smoke, calibration or release certification.
+No existing release assets change. The completed log records checkout in
+**2.26 seconds**, with no fetch retry, and the package-build step starting at
+**14:43:35 UTC**; earlier live status did not establish a checkout delay. The
+hosted log is `build/ci-diagnostics-20260923/backend-runs/107232881295.log`.
+
+The [corrected six-package publication](https://github.com/mirage335-colossus/pumpModem/actions/runs/35877402140)
+passes on `e72906dc431192372b1b81562cc7cd9112d113c5` and publishes
+[v001_00-2026-09-23-0952CDT](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-23-0952CDT)
+with all six archives and the original metadata/notes/warning/checksum assets.
+It retains the exact title `experiment`, prerelease status and no Latest
+promotion. Windows restores the existing dependency recipe in approximately
+**13 seconds (FLTK)** and **25 seconds (Rev)**; the complete Windows jobs take
+**5m43s** and **6m49s**. Application compilation and packaging account for the
+remaining time; neither dependency base is rebuilt.
+
+Separate [full certification](https://github.com/mirage335-colossus/pumpModem/actions/runs/35878492914)
+is dispatched with `devfast=false` for the new tag. The workflow pins its source
+and inventory and attaches its own immutable result report without replacing
+binaries. This entry records dispatch, not a pass: follow that run and its
+attached report for the result. The known hosted Windows OpenGL limitation and
+prior semantic acquisition failure are not waived.
+
+## Full validation after focused diagnosis — 23 September 2026
+
+Agent and development guidance now requires focused diagnosis followed by full
+applicable validation once a candidate is complete. A fast pass cannot complete
+a runtime change. Passing evidence for the same source/configuration is reused;
+manual full runs after `[skip ci]` avoid duplicate automatic runs. Documentation
+changes receive proportionate checks without discarding outstanding code
+validation. Release certification remains tied to the actual published source
+and binary hashes.
+
+Full validation uses `129f064ba8db6b777bc80bcb248f965f69998e66`, including
+the Legacy cancellation fix and alignment of full-CI time budgets and dependency
+inspection with the existing release checks. Local
+`cmake -DBINARY_DIR="$PWD/build/ci-timeout-fixture" -P tests/packaging_support.cmake`
+passes real installation/relocation, tamper and unlisted-file rejection, ELF ABI
+rejection, ALSA SONAME and smoke-timeout forwarding/bounds checks. Configure-only
+probes verify the default GUI smoke/test limits of 300/330 seconds, configured
+600/630 seconds, and rejection of 601 seconds. Actionlint accepts the changed
+native/SDK workflows; whitespace checks pass. These checks do not stand in for
+application regression coverage.
+
+The full [native CI run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35852524828)
+and [SDK qualification run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35852528862)
+use `devfast=false` on `129f064ba8db6b777bc80bcb248f965f69998e66`.
+Saved logs and run snapshots are under
+`build/ci-diagnostics-20260923/full-runs`. Completed evidence is:
+
+| Scope | Recorded result |
+| --- | --- |
+| Native Linux Release | **Passed:** **122/122** source tests in **2,191.07 seconds**, including numerical calibration in **1,327.83 seconds**. Desktop workflow, CLI regressions, relocation and both archive formats also pass. |
+| Native Linux Debug with ASan/UBSan | **Failed:** **115/120** pass in **5,996.03 seconds**. `fast_session`, `gui_fast_live`, `live` and `live_profiles` fail; `differential_receiver_probability` reaches its **3,600.11-second** timeout. Later desktop/CLI/archive steps are skipped. |
+| Native FLTK GUI job | **Passed:** build checks **10/10**, GUI checks **37/37**. |
+| Native Rev GUI job | **Failed:** GUI checks **38/39**; `gui_workflow` phase 21 reports replay fraction **0.898309**, with 13 observed frames over 3.014539 seconds. |
+| Native Windows source suite | **Failed:** **117/119** pass in **2,973.90 seconds**. `fast_low_rate` and `pattern_code` fail. Both Legacy cancellation regressions pass; numerical calibration passes in **1,501.85 seconds**. Later Windows archive/relocation steps are skipped. |
+| Native copied-distribution matrix | **Skipped** because the prerequisite Linux Debug job fails. |
+| SDK FLTK job | Both copied TGZ/ZIP archives pass verification including GUI smoke; build checks pass **10/10**. Packaging checks pass **2/3**, with `packaging_support` failing on the synthetic ALSA fixture; real native relocation passes. Later contract coverage does not run. |
+| SDK Rev job | **Failed:** copied-archive GUI smoke phase 13 observes only **6 frames** over 2.701923 seconds. Later regression coverage does not run. |
+| SDK distribution matrix | **Skipped** because the prerequisite SDK jobs fail. |
+
+Commit `ec93a9932e4e66ecdfd84129478667160a3bf769` fixes only the synthetic
+ALSA fixture's unused C++ runtime dependencies. Focused packaging checks then
+pass with both native and SDK compilers, including relocation, corruption and
+smoke-timeout checks. Application/runtime sources and the SDK recipe remain
+unchanged. This local correction does not change the original SDK run's failed
+status. The supplemental full SDK preservation contract passes **30/30** in
+**1,643.99 seconds**, including unchanged numerical calibration in **1,289.66
+seconds**. It uses:
+
+```sh
+./build.sh test contract --stop-on-failure \
+  --sdk "$PWD/build/sdk-qualified-local" --backend fltk \
+  --build-dir build/sdk-local-fltk --jobs 2 -- \
+  -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600
+```
+
+The log is
+`build/ci-diagnostics-20260923/sdk-full-contract.log`.
+The same wrapper's full `packaging` group then passes **3/3** in **40.36
+seconds**, including the fixed fixture, real native relocation and SDK isolation.
+Its log is `build/ci-diagnostics-20260923/sdk-full-packaging.log`.
+
+Both hosted workflows finish with **failure**. Windows exposes a
+`fast_low_rate` failure; a scratch
+probe reproduces the failure with the exact MSVC Gaussian sampling algorithm.
+The current Windows run also fails `pattern_code` at its unchanged waveform
+chunking tolerance. A scratch double-precision probe reproduces that assertion
+without changing the tolerance; its proposed runtime correction is not applied.
+The Windows, Rev replay and Debug failures remain unresolved. No assertion,
+internal deadline or production runtime behavior was changed to make these
+results pass. Scratch candidate changes have not been incorporated into the
+application. This is a completed validation attempt, not a full passing
+qualification.
+
+The observed Debug `live` timeout and `live_profiles` queue-overrun messages
+come from explicit regression assertions, not sanitizer diagnostics themselves.
+The generic `live` wait needs stage-specific evidence to identify the stalled
+predicate. The `live_profiles` synthetic source delivers about 20 ms of PCM
+per 1 ms sleep; its assertion detects an actual bounded-queue discard and
+reacquisition. Instrumentation cost or test contention may affect throughput,
+but the cause is not established. Focused follow-up should isolate the failing
+stage/case and measure progress/queue occupancy while preserving deadlines,
+queue limits and assertions. Debug `fast_session` reports capture overrun and
+missing physical end; `gui_fast_live` reports changed pending identity or exposed
+completed content. These failures also remain open; the passing Release run does
+not substitute for their sanitizer configuration. The calibration timeout leaves
+that configuration's numerical coverage incomplete, even though the Release,
+Windows and supplemental SDK calibration runs pass.
+
+The existing `v001_00-2026-09-23-0453CDT` experiment remains bound to source
+`17199557113ea52b44e72ba40724f7a20c3a9dee`, with its failed certification report
+and all six original assets unchanged. It does not contain the later controller
+fix. Qualifying the fixed release requires a new publication followed by full
+certification of that new tag; source-CI success alone does not certify its
+published binaries.
+
+## Focused Legacy cancellation diagnosis and devfast — 23 September 2026
+
+The Windows certification timeout exposed a reproducible Legacy controller race.
+The audio worker may finish between `observe()` and the next `Session::active()`
+query. Restarting capture immediately then hides the inactive snapshot that
+clears cancellation, leaving a listening controller stuck on “Cancelling…”.
+The same interleaving could discard the worker's final error. The fix observes
+that final state after confirming closure and before starting another session.
+No wire format, audio timing, test deadline or physical-completion rule changes.
+
+`gui_legacy_poll` scripts this legal interleaving without sleeps, clocks or
+production test hooks. It fails immediately before the fix and passes afterward,
+checking resumed capture, Transmit/status presentation, retained draft, final
+error visibility and closure. An independently delayed real-worker interleaving
+also changes from a 10.408-second timeout to a 0.500-second pass. The existing
+live fixture retains every assertion, sleep and ten-second per-stage deadline.
+Both tests are included in the ordinary GUI and Legacy groups.
+
+The manual `devfast` checkbox defaults to **false** in native CI, SDK qualification
+and certification. When checked, each calls one read-only Linux/Windows workflow
+that compiles only the affected controller, modem/session and fixtures. Common
+sources compile once per platform. It uses available cores for compilation and
+requires three serial passes of each test, stopping on the first failure. It
+does not configure OpenSSL/FLTK, build SDKs or applications, run calibration or
+the general matrix, upload packages, or issue/promote certification. Diagnostics
+use the selected branch SHA; full certification still pins the published source
+and hashes. Full job selections remain unchanged with `devfast` off.
+
+The hosted [before-fix reproducer](https://github.com/mirage335-colossus/pumpModem/actions/runs/35850779905)
+uses source `240a5d17e7df86c3abbe489610815539665c8206`. Both platforms build
+successfully and fail `gui_legacy_poll` with “Resumed capture retained stale
+cancellation state”. The Windows job takes **52 seconds** total and its actual
+regression fails in **0.01 seconds**; Linux takes **24 seconds**.
+
+The [fixed diagnostic run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35850989064)
+uses source `adde430f8cbb1aa7600fbe2d5862a0a4c7c1b0b7` and passes on both
+platforms in **1m10s** overall. Windows takes **61 seconds**, including its six
+test executions in **14.97 seconds**; the three unchanged live cases take
+4.95/5.00/4.97 seconds. Linux takes **29 seconds**. Preparation, full source
+suites, compatibility and certification reporting are visibly skipped, and
+GitHub reports **zero Actions artifacts**. The signed-in GitHub browser also
+confirms Success and the checked-out source SHA.
+
+After focused proof, `./build.sh test gui --stop-on-failure --build-dir
+build/audio-portable-validation --jobs 2 --cli` passes **33/33** in **104.48
+seconds**. The same wrapper's `legacy` group passes **8/8** in **2.14 seconds**.
+Workflow lint and whitespace checks pass. These affected integration groups
+include the shared controller/application boundaries. At that focused stage,
+the regular modem's slow calibration and native adapter suites had not yet been
+rerun. The later full validation above records their follow-up; release
+certification remains a separate qualification step.
+
+Redundant broad runs were stopped while this focused diagnosis proceeded.
+The previously published release's [certification attempt](https://github.com/mirage335-colossus/pumpModem/actions/runs/35846897564)
+finishes cancelled; its always-run reporting job adds a **failed** JSON/Markdown
+report recording compatibility success, Linux cancellation and Windows failure.
+All six original release assets, their hashes, source and tag remain unchanged.
+The release stays `experiment` and a prerelease. This source fix is in the PR;
+it is not retroactively included in those already published binaries.
+
+## Separate publication, durable SDK and shared audio — 23 September 2026
+
+Publication now builds and verifies packages before releasing three binaries;
+extensive source/GUI/copied-binary qualification is a separately dispatched
+workflow. Certification pins the source commit and published checksum inventory,
+records exact binary hashes and required job outcomes, and attaches immutable
+JSON/Markdown reports. SDK archives and preserved sources live once per recipe
+in the `base` release. The release, certification and SDK maintenance paths have
+no Actions artifact/cache dependency. Cold SDK compilation uses available CPUs
+through the existing SDK helper, leaving recipe `b8685ab239d7ac8650e6` unchanged.
+
+Local validation passes **43** release-helper, **27** SDK-storage and **23** certification tests and
+all **10/10** build suites. Packaging validation passes **3/3** suites, including
+a new sentinel proving that `dlopen("libasound.so.2")` resolves to the packaged
+library; the sentinel fails before the missing alias fix. Audio routing,
+Windows audio stubs, rate conversion and resampling pass **4/4** focused suites.
+The application build also passes. Workflow lint and whitespace checks pass.
+The qualified 668 MiB SDK/source pair passes outer hashes, source replay hashes,
+recipe identity and binary manifest verification without rebuilding it.
+
+Linux audio now retains the requested endpoint if opening/configuring it fails;
+it no longer silently substitutes an exclusive card endpoint for `default`.
+Tests preserve rate/channel negotiation and exact PCM assertions while checking
+busy/shared endpoints and independent capture handles. Relocated ALSA discovers
+architecture-matched host plugins when no user override/private plugin directory
+is present. A probe with the released SDK library and a synthetic PulseAudio
+endpoint confirms automatic host-plugin discovery; an explicit invalid plugin
+path remains authoritative. No physical audio devices were exercised, so this
+is not a hardware or desktop-session concurrency certification. No application
+singleton restriction was found.
+
+The first GitHub split-pipeline rehearsal found two CLI/API integration issues:
+`gh release download` saw an empty embedded asset list even though the dedicated
+assets endpoint had the complete uploads, and `gh release view` did not support
+the requested `databaseId` field. Helpers now enumerate paginated REST release
+and asset inventories and stream downloads by asset ID, verifying server digests,
+recorded hashes and sizes. Regression fixtures cover empty embedded inventories
+and multi-page asset responses. Its incomplete draft is retained for inspection.
+
+The corrected [durable SDK reuse run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35845549918)
+passes on source `17199557113ea52b44e72ba40724f7a20c3a9dee`. Its SDK job takes
+**64 seconds**, skips every cold-build step, verifies the archived SDK after
+relocation with the glibc 2.36 host ceiling, and reports `published=false`,
+`reused=true`. Automatic cold-build parallelism resolves to **4 jobs** on this
+runner. Recipe `b8685ab239d7ac8650e6` remains unchanged. The durable `base` release
+contains the 244,502,346-byte compiled archive, 455,866,711-byte source archive
+and matching per-recipe checksum file; all three server digests match the
+qualified local seed. A fresh binary-only download also passes local validation.
+
+The corrected [publication run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35845553697)
+passes on that same exact source and publishes
+[`v001_00-2026-09-23-0453CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-23-0453CDT)
+as `experiment`, prerelease and never Latest. Total workflow elapsed time is
+**11m50s**. Both Linux builds, the Windows build, archive relocation/ABI checks,
+direct uploads and final inventory verification succeed before publication.
+GitHub reports **zero Actions artifacts** for both this publication and the
+successful base maintenance run. Independent local downloads verify all six assets: three app archives,
+metadata, notes and checksum inventory. The x86_64/ARM64/Windows downloads are
+15,724,956 / 14,506,413 / 6,502,297 bytes. The published x86_64 bundle contains
+both `libasound.so.2` and `libasound.so.2.0.0`.
+
+A local integration probe runs **two copies of this published Linux GUI**
+concurrently under a private Xvfb display. Both show “Listening for Fast modem
+training” and live receive plots at 48.0 kHz. Each uses the built-in ALSA file
+plugin over a null PCM, fed synthetic zero-valued mono PCM through a separate
+paced FIFO (960 frames every 20 ms). Both load the bundle's `libasound.so.2`;
+neither opens `/dev/snd`. Two mapped native windows have distinct process IDs.
+All probe children are stopped afterward. This establishes concurrent GUI and
+synthetic capture operation, not physical-device sharing. Local evidence is in
+`build/release-evidence-split/multi-instance-paced-probe/report.json` and
+`both-windows.png`.
+
+The separate [certification run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35846897564)
+starts only after publication, pins the release source and checksum inventory,
+and runs the unchanged source/GUI/calibration groups plus focused audio and
+copied-archive checks. All **10** published-Linux compatibility jobs pass.
+The Windows job builds successfully but `gui_legacy_live` fails after 14.89
+seconds with its existing generic timeout. Later Windows tests and its published
+archive qualification are consequently skipped; this attempt cannot grant a
+passing certification. The binaries remain available as an experimental release.
+
+That fixture and its controller/session sources are identical to the previously
+passing release. Eight local diagnostic trials with every fixture sleep rounded
+up to 16 ms still pass in approximately 5.1 seconds, so coarse timer resolution
+alone does not reproduce this failure. The test now names each wait stage and
+reports synchronized sample counters and controller state on timeout. Its
+assertions, sleeps and ten-second per-stage deadlines remain unchanged. This
+diagnostic-only change is for later source revisions; the published release and
+its source-pinned certification are not modified. The final local shared GUI
+selection passes **32/32** in **104.16 seconds** with `./build.sh test gui --cli`
+in the native audio-validation tree. An initial link failure came from stale
+cached static OpenSSL paths in that non-portable tree; clearing those library
+cache entries restores its configured shared-OpenSSL selection, with no source
+change. A certification-helper
+regression also exercises a failed first attempt followed by a successful retry,
+retaining both reports, their history and the same binary/source identities.
+Experimental retries remain prereleases and never Latest.
+
+The earlier artifact-only runs remain historical evidence of the previous
+combined build/test/publication workflow.
+
+## Manual portable release qualification — 23 September 2026 UTC
+
+The manual release workflow builds three application bundles: Linux x86_64,
+Linux aarch64 and Windows x64, each with the FLTK frontend and CLI. The default
+x86_64 builder uses the existing Bookworm source SDK; the selectable Ubuntu
+22.04 baseline and the ARM64 builder use glibc 2.35. Windows uses the Windows
+SDK and static MSVC/OpenSSL runtimes. [Release instructions](releases.md)
+describe version/date labels, the experimental prerelease checkbox, the
+artifact-only default and the platform limits.
+
+Both final artifact-only rehearsals pass after the fixture corrections:
+[Ubuntu baseline](https://github.com/mirage335-colossus/pumpModem/actions/runs/35814958363)
+and [source SDK](https://github.com/mirage335-colossus/pumpModem/actions/runs/35814967358).
+The SDK dispatch uses source `0e98b72242c49793114cfb134d4930f955b374ca`.
+Its **10** copied-distribution jobs and the native rehearsal's **11** jobs
+all pass, followed by successful assembly. The SDK inventory includes three
+application archives and the matching compiled SDK/source archive pair.
+The combined inventory also verifies after downloading with GitHub CLI:
+all file hashes, the `v001_00-2026-09-22-2242CDT` label, exact `experiment`
+title, source SHA and matching SDK/source recipe identifiers pass.
+
+Local validation passes all **26** release-helper tests, **37** wrapper tests,
+**8/8** build suites, **33/33** shared GUI suites and **3/3** packaging suites.
+Actionlint accepts the release and shared SDK workflows. The complete local
+preservation-contract selection passes **30/30** after the floating-point
+compiler change, including calibration in **1,100.60 seconds**; total elapsed
+time is **1,395.03 seconds**. A final packaging run passes in **36.65 seconds**.
+Both locally SDK-built archive formats pass copied-directory CLI/GUI smoke,
+relocation and glibc 2.36 audits.
+
+The complete [Ubuntu-baseline GitHub rehearsal](https://github.com/mirage335-colossus/pumpModem/actions/runs/35812235690)
+passes on source `960c0cd`. Both Linux architectures pass all **74** selected
+build/contract/GUI/packaging executions, including overlapping selections.
+Windows passes **65** GUI/contract/packaging executions, including calibration
+in **1,497.94 seconds**. Every platform verifies both archive formats and the
+complete GUI smoke. All **11** copied-Linux distribution jobs pass: Debian
+12/13 and Ubuntu 22.04/24.04/26.04 on both architectures, plus Arch x86_64.
+The Linux audit covers 45 ELF files per bundle and enforces glibc 2.35.
+
+Assembly produces exactly three application downloads with one metadata,
+notes and checksum inventory, which also verifies after downloading with
+GitHub CLI. The tag is `v001_00-2026-09-22-2154CDT`, title `experiment`, with
+the exact source SHA retained. The Linux x86_64/aarch64 archives are
+12,945,357/12,531,371 bytes and the Windows ZIP is 6,497,042 bytes. These are
+observed sizes, not limits. Earlier rehearsals exceeded the 300-second outer
+GUI allowance late in the cumulative workflow; the successful runs use the
+harness's existing 600-second allowance. Frame, pending-progress,
+cancellation and replay assertions retain their original limits.
+
+The [source SDK release builder](https://github.com/mirage335-colossus/pumpModem/actions/runs/35814967358/job/107035855339)
+on `0e98b72` reuses, relocates and verifies recipe `b8685ab239d7ac8650e6`,
+with host tools and target libraries both meeting glibc 2.36. All **74**
+selected SDK-built executions pass, including calibration in **1,318.89
+seconds**. Both copied archive formats pass complete GUI smoke and audits
+covering 36 ELF files. The separate
+[SDK FLTK qualification job](https://github.com/mirage335-colossus/pumpModem/actions/runs/35814958358/job/107034690615)
+also passes both archive formats and all **8/8** build, **3/3** packaging and
+**30/30** contract suites. Its calibration takes **1,560.30 seconds**, exceeding
+CTest's default process allowance. Release and SDK qualification explicitly
+set a 3,600-second outer limit without changing samples or numerical
+assertions.
+
+Actual cross-platform failures exposed compiler and fixture assumptions.
+Disabling implicit floating-point contraction preserves the exact scalar,
+cached and batched receiver comparisons on ARM64; their independent reference
+assertions remain unchanged. The bitmap-noise fixture now specifies the same
+sampling algorithm that libstdc++ previously supplied; six million generated
+values match its previous output bit for bit. UTF-8 fixture paths, GCC 11
+constant-expression compatibility, ARM disassembly comments, mocked SDK host
+identity and Windows vendored-source line endings are corrected without
+altering transport or GUI behavior. Checksum-pinned CMake 3.31.10 fixes native
+dependency inspection's inherited-RPATH handling; strict host-library
+rejection and the application ABI floors remain enforced.
+
+The [final Windows job](https://github.com/mirage335-colossus/pumpModem/actions/runs/35814967358/job/107035657934)
+passes all **65** selected executions and both copied archive GUI checks.
+The profile and transmit-lock fixtures pass in **179.48/7.61 seconds**, and
+calibration in **1,503.69 seconds**. The live-profile fixture requests and
+restores 1 ms timer resolution for its existing 1 ms sleeps. A coarse-timer
+reproduction delivers only 571,392 of
+723,328 required samples by the unchanged 30-second deadline while the decoder
+queue is empty. An earlier run also exposes a separate transmit-lock fixture
+synchronization race after cancellation. The fixture now waits for capture
+to resume before queuing its next request, preserving
+the exact status, no-output checks and deadlines. A deliberately delayed
+capture handoff reproduces the original failure and passes with this fix;
+the complete local transmit-lock suite passes in **7.27 seconds**.
+
+Release-helper tests cover timestamp/DST naming, exact experimental titles,
+strict inventories, checksum failures, SDK/source pairing, immutable tag
+creation and publication ordering. Real read-only GitHub API checks verify
+missing tag/release handling and rejection of an existing ref. No release or
+tag has been created by these rehearsals; public publication remains an
+untested side effect until a maintainer explicitly dispatches with `publish`.
+
+The separate general CI retains its older, insufficient GUI/job budgets; its
+FLTK workflow reaches the 300-second smoke limit. The independent
+[Rev SDK check](https://github.com/mirage335-colossus/pumpModem/actions/runs/35814958358/job/107034690546)
+retains its replay-frame failure (nine frames in 3.139409 seconds, where ten
+are required); it is not an overall process timeout and its
+assertion is not weakened. Release bundles select FLTK. Hosted containers
+share the runner kernel, and Windows hosted tests use Windows Server rather
+than separate Windows 10/11 installations. These results do not qualify
+physical audio devices, Chromebook/Pi graphics or sound drivers, Gentoo,
+32-bit Raspberry Pi OS or musl installations.
 
 ## Source SDK and glibc 2.36 target — 22 September 2026 UTC
 

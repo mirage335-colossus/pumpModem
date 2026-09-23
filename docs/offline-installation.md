@@ -89,7 +89,11 @@ that option or a matching source checkout.
 ## Copy and run
 
 Copy the entire `DataPump-portable` directory, or extract a CPack TGZ/ZIP archive
-on the destination. Preserve executable permissions on Linux. The layout is:
+on the destination, anywhere your account can write. Keep `bin/`, `lib/` and
+`share/` together. The bundle's `lib/` is private to this installation: do not
+copy its contents into `/lib` or `/usr/lib`. No administrator access, system
+library installation or `ldconfig` command is needed. Preserve executable
+permissions on Linux. The layout is:
 
 | Location | Contents |
 | --- | --- |
@@ -151,12 +155,23 @@ when packaging, live audio can use an existing compatible system ALSA library;
 otherwise it reports that audio is unavailable. WAV transfer and simulation
 remain available without audio hardware. Windows uses its native WinMM service.
 
+On Linux, sharing audio with another instance or application depends on the
+selected ALSA endpoint. The `default` endpoint follows the host's audio
+configuration; Data Pump reports an open/configuration failure instead of
+silently switching to a hardware device. Use a shared desktop audio route,
+such as a working PulseAudio or PipeWire ALSA endpoint, when other applications
+need the same device. Explicit `hw:` or `plughw:` endpoints can reserve a device
+for one client. The bundle's private libraries do not provide an audio server
+or change the host's device-sharing policy.
+
 ## Verify a copied installation
 
 `bin/datapump-gui --self-check` runs native application checks without opening a
 window. Opening the application verifies display integration; `--smoke-test`
 exercises its native GUI workflow and needs a desktop display. Neither test
 transmits live audio.
+Successful simulation and GUI smoke checks do not verify physical audio-device
+access or sharing between applications.
 
 On Linux, inventory verification can also use the operating system's checksum
 tool from inside the copied directory:

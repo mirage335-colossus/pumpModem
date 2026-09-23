@@ -115,6 +115,32 @@ struct CoordinateWindow:Rev::Window {
     }
 };
 
+void set_test_scale(CoordinateWindow& app,float scale) {
+#ifdef _WIN32
+    // Select this fixture's DPI through the production Windows notification,
+    // independent of the runner's monitor DPI. Preserve the physical rectangle
+    // so the existing coordinate assertions exercise only the logical change.
+    RECT rectangle{},client_before{},client_after{};
+    const auto handle=app.window->handle;
+    require(GetWindowRect(handle,&rectangle) && GetClientRect(handle,&client_before),
+        "Cannot inspect native rectangle before test DPI change");
+    const auto dpi=static_cast<UINT>(std::lround(96.0f*scale));
+    SendMessageW(handle,WM_DPICHANGED,MAKEWPARAM(dpi,dpi),reinterpret_cast<LPARAM>(&rectangle));
+    require(GetClientRect(handle,&client_after)!=0,"Cannot inspect native rectangle after test DPI change");
+    require(client_after.right-client_after.left==client_before.right-client_before.left &&
+        client_after.bottom-client_after.top==client_before.bottom-client_before.top,
+        "Test DPI change unexpectedly changed the physical client extent");
+    require(std::abs(app.window->scale-scale)<0.02f && std::abs(app.details.scale-scale)<0.02f,
+        "WM_DPICHANGED did not select test scale "+std::to_string(scale)+"; native="+
+        std::to_string(app.window->scale)+" shared="+std::to_string(app.details.scale));
+#else
+    // X11 has no per-window DPI notification. Retain the existing native Scale
+    // dispatch after REV_SCALE selected the initial scale at window creation.
+    app.window->scale=scale;
+    app.window->notifyEvent({WinEvent::Scale});
+#endif
+}
+
 void check_point(CoordinateWindow& app,float x,float y) {
     const float tolerance=0.6f;
     require(std::abs(app.event.mouse.pos.x-x)<tolerance && std::abs(app.event.mouse.pos.y-y)<tolerance,
@@ -164,10 +190,19 @@ int main(int argc,char** argv) {
         Pointer pointer(scale);
 #endif
         std::vector<void*> windows;CoordinateWindow app(windows);
+#ifdef _WIN32
+        set_test_scale(app,scale);
+#endif
         pump(300);
         require(std::abs(app.details.scale-scale)<0.02f,"Native DPI did not select the requested test scale");
         for(const auto& origin:std::vector<std::pair<int,int>>{{123,87},{337,169},{-17,53}}) {
-            app.setPos(origin.first,origin.second);pump(150);
+            app.setPos(origin.first,origin.second);
+#ifdef _WIN32
+            // Moving between host monitors can deliver another real DPI event.
+            // Reapply the chosen fixture scale after the synchronous move.
+            set_test_scale(app,scale);
+#endif
+            pump(150);
             click(pointer,app,app.first,1);click(pointer,app,app.second,3);
             // Start from the second editor, then deliver a wheel at the first.
             const float x=app.first->rect.x+20,y=app.first->rect.y+20;
@@ -175,13 +210,11 @@ int main(int argc,char** argv) {
             check_point(app,x,y);
             check_scroll(pointer,app);
         }
-        // X11 has no per-window DPI notification. Exercise the same native
-        // Scale dispatch used by Win32, then inject real pointer events against
-        // the resized logical layout. The native pixel dimensions stay fixed.
+        // Exercise a native scale change, then inject real pointer events
+        // against the resized logical layout. Physical pixels stay fixed.
         const float changed_scale=scale==1?2.0f:1.0f;
         app.shared->layoutDirty=false;
-        app.window->scale=changed_scale;
-        app.window->notifyEvent({WinEvent::Scale});
+        set_test_scale(app,changed_scale);
         require(app.shared->layoutDirty,"DPI change did not invalidate the logical layout");
         pump(250);
         require(std::abs(app.details.scale-changed_scale)<0.02f,"DPI change was not applied");

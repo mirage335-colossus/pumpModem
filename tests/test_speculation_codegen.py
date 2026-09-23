@@ -21,7 +21,10 @@ def function(disassembly, name):
         instruction = re.match(r'\s*([0-9a-f]+):\s+([a-z][a-z0-9.]*)\s*(.*)', line)
         if instruction:
             instructions.addresses.append(int(instruction[1], 16))
-            instructions.append((instruction[2], instruction[3].strip()))
+            # AArch64 objdump annotates conditions, e.g. "cc // cc = lo, ul,
+            # last". These comments are not operands; retain # immediates.
+            operand = instruction[3].split('//', 1)[0].strip()
+            instructions.append((instruction[2], operand))
     return instructions
 
 

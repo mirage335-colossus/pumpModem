@@ -1,0 +1,53 @@
+name: Focused Windows Rev diagnostic
+
+on:
+  workflow_call:
+    inputs:
+      windows_runner:
+        description: 'Windows x64 runner label'
+        type: string
+        default: windows-2022
+
+permissions:
+  contents: read
+
+jobs:
+  rev:
+    name: Windows Rev compiler and event pump (not certification)
+    runs-on: ${{ inputs.windows_runner || 'windows-2022' }}
+    defaults:
+      run:
+        shell: pwsh
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      UseMultiToolTask: 'true'
+      EnforceProcessCountAcrossBuilds: 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run the dependency-free Win32 event regression first
+        shell: pwsh
+        run: |
+          & ./tools/select-windows-toolchain.ps1 -GitHubEnvironment
+          cmake -S tests/rev-event-probe -B build/rev-event-probe -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'Event probe configure failed' }
+          cmake --build build/rev-event-probe --config Release --parallel $env:NUMBER_OF_PROCESSORS
+          if ($LASTEXITCODE -ne 0) { throw 'Event probe build failed' }
+          ctest --test-dir build/rev-event-probe -C Release --output-on-failure --stop-on-failure --no-tests=error
+          if ($LASTEXITCODE -ne 0) { throw 'Event probe regression failed' }
+      - name: Reuse the exact Windows dependency base
+        shell: pwsh
+        run: ./tools/use-windows-base.ps1 -Repository "$env:GITHUB_REPOSITORY" -Destination "$PWD/build/windows-base"
+      - name: Compile the actual Rev GUI and run its headless self-check
+        shell: pwsh
+        run: |
+          cmake -S . -B build/windows-rev -A x64 -DCMAKE_TOOLCHAIN_FILE="$env:DATAPUMP_WINDOWS_TOOLCHAIN" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DDATAPUMP_GUI_BACKEND=rev -DDATAPUMP_PORTABLE=ON -DBUILD_TESTING=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          if ($LASTEXITCODE -ne 0) { throw 'Rev configure failed' }
+          cmake --build build/windows-rev --config Release --target datapump-gui --parallel $env:NUMBER_OF_PROCESSORS
+          if ($LASTEXITCODE -ne 0) { throw 'Rev application compilation failed' }
+          $process = Start-Process -FilePath "$PWD/build/windows-rev/Release/datapump-gui.exe" -ArgumentList '--self-check' -PassThru
+          if (!$process.WaitForExit(30000)) { $process.Kill(); throw 'Rev self-check exceeded 30 seconds' }
+          if ($process.ExitCode -ne 0) { throw 'Rev self-check failed' }
+          "Focused Windows Rev compilation/self-check passed for $env:GITHUB_SHA. Display, full regression and published binaries require later certification." >> $env:GITHUB_STEP_SUMMARY

@@ -1,0 +1,133 @@
+name: Package existing release for Linux package managers
+run-name: Package ${{ inputs.source_tag }} for Linux package managers (experiment, no application rebuild)
+
+on:
+  workflow_call:
+    inputs:
+      source_tag:
+        type: string
+        required: true
+      version:
+        type: string
+        default: ''
+      publish:
+        type: boolean
+        default: true
+      linux_runner:
+        type: string
+        default: ubuntu-latest-l
+      arm_runner:
+        type: string
+        default: ubuntu-24.04-arm-l
+    secrets:
+      DATAPUMP_APT_SIGNING_KEY:
+        required: true
+  workflow_dispatch:
+    inputs:
+      source_tag:
+        description: 'Complete existing release whose six portable archives will be reused unchanged'
+        type: string
+        required: true
+      version:
+        description: 'Optional label for the new experiment; blank preserves the source release label'
+        type: string
+        default: ''
+      publish:
+        description: 'Publish the new experiment, then test Debian/Ubuntu, Arch and Gentoo installation'
+        type: boolean
+        default: true
+      linux_runner:
+        description: 'Larger x86-64 runner for packaging and distribution installation'
+        type: choice
+        options: [ubuntu-latest-l, ubuntu-latest-h]
+        default: ubuntu-latest-l
+      arm_runner:
+        description: 'Larger ARM64 runner for Debian and Ubuntu installation'
+        type: choice
+        options: [ubuntu-24.04-arm-l, ubuntu-24.04-arm-h]
+        default: ubuntu-24.04-arm-l
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apt-release-${{ github.ref }}-${{ inputs.source_tag }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Sign packages from existing binaries
+    runs-on: ${{ inputs.linux_runner }}
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.package.outputs.tag }}
+      inventory_sha256: ${{ steps.package.outputs.inventory_sha256 }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_TAG: ${{ inputs.source_tag }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      PUBLISH: ${{ inputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check packaging helpers without building applications or SDKs
+        run: |
+          python3 tests/test_apt_release.py
+          python3 tests/test_distro_release.py
+          python3 tests/test_arch_release.py
+          python3 tests/test_gentoo_sync.py
+          python3 tests/test_release.py
+          python3 tests/test_certify_release.py
+      - name: Create a new experiment with unchanged archive bytes and signed distribution update channels
+        id: package
+        env:
+          APT_SIGNING_KEY: ${{ secrets.DATAPUMP_APT_SIGNING_KEY }}
+          APT_FINGERPRINT: ${{ vars.DATAPUMP_APT_SIGNING_FINGERPRINT }}
+        run: |
+          if [ -z "$APT_SIGNING_KEY" ] || ! [[ "$APT_FINGERPRINT" =~ ^[A-Fa-f0-9]{40}$ ]]; then
+            echo '::error::Configure the APT signing secret and pinned fingerprint before packaging.'
+            exit 1
+          fi
+          umask 077
+          signing_key=$(mktemp "$RUNNER_TEMP/datapump-apt-signing.XXXXXX")
+          trap 'rm -f "$signing_key"' EXIT
+          printf '%s\n' "$APT_SIGNING_KEY" > "$signing_key"
+          unset APT_SIGNING_KEY
+          args=()
+          if [ "$PUBLISH" = true ]; then args+=(--publish); fi
+          python3 tools/release.py repackage --source-tag "$SOURCE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --version "$RELEASE_VERSION" --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --packager-sha "$GITHUB_SHA" --directory apt-release-assets --github-output "$GITHUB_OUTPUT" \
+            --apt-signing-key "$signing_key" --apt-signing-fingerprint "$APT_FINGERPRINT" "${args[@]}"
+      - name: Explain release status and next validation stage
+        env:
+          RELEASE_TAG: ${{ steps.package.outputs.tag }}
+        run: |
+          {
+            printf 'Release: [%s](https://github.com/%s/releases/tag/%s)\n\n' "$RELEASE_TAG" "$GITHUB_REPOSITORY" "$RELEASE_TAG"
+            echo 'Portable archive bytes were reused unchanged; no application or SDK was rebuilt.'
+            echo 'This is an experiment and is never marked Latest. Published experiments receive Debian/Ubuntu APT and Arch/Gentoo repository installation checks below.'
+            echo 'Full hash-bound release certification remains a separate workflow; these packaging checks do not certify the application.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  apt-repository:
+    if: inputs.publish
+    needs: package
+    uses: ./.github/workflows/apt-check.yml
+    with:
+      release_tag: ${{ needs.package.outputs.tag }}
+      inventory_sha256: ${{ needs.package.outputs.inventory_sha256 }}
+      linux_runner: ${{ inputs.linux_runner }}
+      arm_runner: ${{ inputs.arm_runner }}
+
+  distro-recipes:
+    if: inputs.publish
+    needs: package
+    uses: ./.github/workflows/distro-check.yml
+    with:
+      release_tag: ${{ needs.package.outputs.tag }}
+      inventory_sha256: ${{ needs.package.outputs.inventory_sha256 }}
+      linux_runner: ${{ inputs.linux_runner }}

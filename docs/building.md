@@ -48,6 +48,25 @@ supplied by the SDK's own compiler build. Those host tools still require their
 documented glibc baseline; release SDKs are built in Bookworm and audited after
 relocation. The default native build remains available.
 
+Manual releases with version/date tags, an experiment checkbox and six portable
+application downloads are documented in [manual portable releases](releases.md).
+Windows release, certification and full CI jobs reuse a checksummed dependency
+bundle from the durable `base` release: static OpenSSL, GLEW and FreeType for
+both GUI backends. The runner supplies MSVC and the Windows SDK separately.
+The [toolchain selector](../tools/select-windows-toolchain.ps1) prefers an
+installed Visual Studio 2022, or uses Visual Studio 2026 with its installed
+v143 tools. The current larger Windows images have VS2026 and v143 14.44;
+the default `windows-2022` image retains VS2022. The selector sets the matching
+CMake generator and pins v143 instead of adopting VS2026's default toolset.
+VS2026 requires CMake 4.2 or newer. This host selection does not change the
+dependency recipe or rebuild the existing base.
+An absent matching recipe requires explicit
+[Windows base maintenance](releases.md#windows-dependency-base); routine jobs
+never start a cold dependency build. Reuse includes relocation and a check
+that the consuming linker is at least as new as the recorded builder. Keep
+the compiler at least as new too, within v143; the bundle contains no LTO
+objects. This dependency handoff uses neither Actions cache nor artifacts.
+
 ## Commands and profiles
 
 | Command | Output/configuration | Work performed |
@@ -64,11 +83,21 @@ relocation. The default native build remains available.
 
 Native sanitizer/CLI/Rev combinations use distinct directories. `--jobs N`
 controls build and test concurrency (default 2); `DATAPUMP_JOBS` or
-`CMAKE_BUILD_PARALLEL_LEVEL` can set that default. Prefer a modest limit on
-memory-constrained hosts. Native GUI tests must have a display, preferably an
+`CMAKE_BUILD_PARALLEL_LEVEL` can set that default. `--build-jobs N` overrides
+compilation concurrency independently, so a large CI runner can compile with all
+available cores while tests retain their established concurrency:
+
+```sh
+./build.sh test gui --build-jobs "$(nproc)" --jobs 2
+```
+
+Prefer a modest limit on memory-constrained hosts. Use `--stop-on-failure` with `test` or `sanitize` for early CI feedback after a
+failure; successful runs still execute the entire selected group.
+Native GUI tests must have a display, preferably an
 isolated Xvfb session; `./build.sh test native` builds and runs them explicitly.
 Run native workflow checks separately from other heavy test/build processes:
-their measured replay-frame assertions are sensitive to CPU contention.
+their measured replay cadence is sensitive to CPU contention. Rev cadence
+misses are advisory warnings; correctness checks still fail normally.
 The wrapper does not open or control a user's desktop.
 
 Use `--build-dir PATH` for a different compiler/toolchain. Never switch compilers
@@ -174,7 +203,192 @@ Other aggregate targets are `datapump-apps`, `datapump-tests`, and
 tests but do not compile them. For individual work, existing targets such as
 `test_compression_short` continue to work.
 
+## Testing stages
+
+Use focused feedback while a fault or feature is still changing, then broaden
+validation after the candidate is complete. A fast diagnostic pass establishes
+that a particular case works; it does not establish that the rest of the
+application, another compiler/platform or the distributed package still works.
+
+| Stage | Appropriate checks | Completion condition |
+| --- | --- | --- |
+| Investigate or iterate | Smallest relevant reproducer, target or affected group; `devfast=true` when its cases match the issue. Build only those prerequisites. | The regression fails before the fix and passes afterward, or the feature's intended behavior is demonstrated. |
+| Validate the completed candidate | Normal full source CI with `devfast=false`, plus applicable preservation-contract, GUI/native, SDK, platform and packaging coverage. | Required jobs actually finish successfully for the final source/configuration; failures return to focused diagnosis. |
+| Qualify a release | Publish the intended binaries after packaging checks, then run certification with `devfast=false` for their exact tag. | The attached report passes for the actual source and asset hashes being offered to users. |
+
+Agents should progress through the relevant stages without requiring another
+reminder after each focused success. Do not stop at the first row for a runtime
+fix or completed feature merely because full coverage takes longer. The slow
+tests belong at the validation stage instead of every edit. Documentation-only
+changes need proportionate checks, but do not erase outstanding validation for
+earlier code changes in the same task.
+
+Reuse passing results for the same source and configuration. Avoid scheduling
+duplicate push, PR and manual workflows; a full manual dispatch after temporary
+`[skip ci]` commits is sufficient when it covers the required final candidate.
+Do not rerun an expensive unchanged suite after recording a pass unless later
+changes or failures invalidate that evidence. Compile with available cores, but
+keep timing-sensitive test concurrency at its documented limits.
+
+For changes confined to Linux distribution packaging, start with
+`python3 tests/test_apt_release.py`, `python3 tests/test_distro_release.py`,
+`python3 tests/test_arch_release.py`, `python3 tests/test_gentoo_sync.py` and
+the affected release/certification helper tests; `./build.sh test build` runs their normal group. Once complete, use
+`release.yml` with `source_release=SOURCE_RELEASE_TAG` to wrap existing verified archives in a new experiment and
+test the same packages on Debian/Ubuntu AMD64 and ARM64 and native Arch/Gentoo
+repositories with the larger runners. For update channels, also exercise a signed
+A-to-B update, idempotent refresh and rejected tampered/older metadata with the
+small local fixtures before native installation. Gentoo host dependencies must come from its
+binary repository; a missing binary fails with an actionable error instead of
+starting an expensive source build.
+This path does not rebuild application binaries or SDKs. Follow publication
+with full `certify.yml`, `devfast=false`, for that new release; packaging-only
+checks are not a substitute for release certification. See
+[APT packaging and validation](releases.md#package-an-existing-release-without-rebuilding-it).
+
+Manual workflows expose `linux_runner` and `windows_runner` dropdowns for the
+organization's larger x86-64 runners. Native CI, portable release and
+certification also expose `arm_runner`: `ubuntu-24.04-arm-l` (the default),
+`ubuntu-24.04-arm-h`, or standard `ubuntu-24.04-arm`. The ARM64 L and H tiers
+provide 8 and 32 CPUs respectively. Automatic push/PR x86-64 jobs retain their
+standard runner defaults; the ARM64 selector does not affect x86-64 routing.
+Agents can pass these input names through `gh workflow run -f`.
+Use the [runner selection guide](releases.md#runner-selection-and-build-parallelism)
+to choose and verify access before a long run. `ci.yml` with `devfast=true` and
+`diagnostic=runner-capacity` checks routing, visible CPUs and small production
+compiler fixtures without building SDKs or running calibration. This routing
+check does not replace applicable source regression or release certification.
+
+Check a larger ARM64 pool without repeating x86-64 or Windows diagnostics:
+
+```sh
+gh workflow run ci.yml --ref REF -f devfast=true \
+  -f diagnostic=arm-runner-capacity -f arm_runner=ubuntu-24.04-arm-h
+```
+
+Validate the new L and H pools directly, reusing earlier evidence instead of
+retesting smaller runners. Keep the applicable full regression and release
+certification sequence below after the focused checks.
+
+For a completed branch candidate, use the full workflow, and SDK qualification
+when the change touches its supported toolchains or portable packages:
+
+```sh
+gh workflow run ci.yml --ref REF -f devfast=false
+gh workflow run sdk.yml --ref REF -f devfast=false
+gh run watch RUN_ID --exit-status
+```
+
+Replace `REF` and `RUN_ID` with the intended revision and the actual dispatched
+run. Check each required result; a queued, running, skipped or cancelled job is
+not a pass. Diagnose a failure narrowly and rerun the affected full checks once
+fixed. Record source SHA, commands/run links, outcomes and untested boundaries in
+[validation](validation.md). If a check cannot finish, state what is blocked and
+what remains; do not describe the change as fully validated or the release as
+certified. See [release validation](releases.md#diagnose-a-branch-before-full-validation)
+for the separate publication/certification sequence and source-pinning rules.
+
+## Focused development diagnostics
+
+The manual `devfast` checkbox in native CI (`ci.yml`), SDK qualification
+(`sdk.yml`) and release certification (`certify.yml`) defaults to **false**.
+The default runs retain their full suites and calibration. With `devfast=true`,
+each workflow defaults to the same small Legacy diagnostic on Linux and
+Windows: compile the production Legacy controller/session and existing
+`gui_legacy_live` fixture and deterministic `gui_legacy_poll` cancellation/error
+regression, then require three consecutive serial passes, stopping
+at the first failure. Builds use the runner's available CPU cores. This path
+does not build the SDK or full application, run the general platform matrix,
+create packages, use Actions artifacts/cache, or certify/promote a release.
+
+Dispatch one of these equivalent diagnostic entry points after pushing the
+branch under investigation:
+
+```sh
+gh workflow run ci.yml --ref codex/portable-releases -f devfast=true
+# Alternatively; no release_tag is needed for a source diagnostic:
+gh workflow run certify.yml --ref codex/portable-releases -f devfast=true
+```
+
+For a Windows Rev compiler or event-loop fault, native CI also offers a focused
+selection that first runs the dependency-free Win32 message regression, then
+downloads the existing Windows base and compiles only the actual Rev GUI:
+
+```sh
+gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=windows-rev
+```
+
+For a graphics-driver startup failure after publication, use the bounded
+environment diagnostic on the unchanged archive:
+
+```sh
+gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=graphics \
+  -f diagnostic_release=RELEASE_TAG
+```
+
+It inspects the Windows WGL bootstrap using the installed compiler/SDK and
+compares host GLX with the published ARM64 Rev binary on Ubuntu 24.04. It builds
+neither the application nor its dependencies. Loader output and bounded startup
+failures are diagnostics, not full smoke/certification results. Archives,
+drivers and registry settings remain unchanged.
+
+After correcting the ARM64 portable runtime, `devfast=true,
+diagnostic=arm-rev-package` builds only that Rev package on Ubuntu 22.04 and
+checks its unchanged archive on Ubuntu 24.04. The startup check requires a
+visible window and host Mesa/LLVM/C++ runtime mappings within 15 seconds.
+It does not run the full GUI smoke or calibration, upload artifacts, or publish
+a release. Follow a focused pass with applicable full validation.
+
+This path performs a bounded headless self-check; it creates no release or
+Actions artifact, and it does not qualify rendering, full regression coverage
+or published binaries. `diagnostic=legacy` remains the default. Choose the
+selection that reproduces the current fault, then follow with applicable full
+checks and certification once the candidate is complete.
+
+The diagnostic logs and run summary identify the checked-out branch SHA.
+A new dispatch selects the current branch commit; rerunning an earlier run
+uses its original commit. Full certification instead checks out the published
+release's recorded source revision and tests its published binary hashes.
+Diagnostic jobs have read-only repository permissions and never issue
+certification reports or change release status.
+
+The same focused build needs CMake 3.21+, a C++20 compiler and the selected
+build generator, without OpenSSL, native GUI dependencies or an SDK. On Linux:
+
+```sh
+cmake -S tests/devfast -B build/devfast -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build/devfast --parallel "$(nproc)"
+ctest --test-dir build/devfast --output-on-failure -R '^gui_legacy_(poll|live)$' \
+  --parallel 1 --repeat until-fail:3 --stop-on-failure --no-tests=error
+```
+
+On Windows with Visual Studio 2022 or 2026 and installed v143 tools, using
+PowerShell (CMake 4.2 or newer is required for VS2026):
+
+```powershell
+$toolchain = & ./tools/select-windows-toolchain.ps1
+cmake -S tests/devfast -B build/devfast -A x64
+cmake --build build/devfast --config Release --parallel $env:NUMBER_OF_PROCESSORS
+ctest --test-dir build/devfast -C Release --output-on-failure -R '^gui_legacy_(poll|live)$' `
+  --parallel 1 --repeat until-fail:3 --stop-on-failure --no-tests=error
+```
+
+Manual `devfast` does not suppress workflows triggered by the preceding push.
+For intermediate diagnosis commits, a temporary `[skip ci]` commit-message
+marker can [skip automatic push/PR runs](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/skip-workflow-runs)
+while still allowing manual dispatch. After the candidate is complete, either
+omit that marker from the final validation commit or explicitly dispatch the
+ordinary workflows with `devfast=false` (or unchecked), including applicable
+contract, GUI/native and packaging checks. Wait for those outcomes as described
+in [testing stages](#testing-stages). A focused pass is development feedback,
+not a substitute for those gates.
+
 ## Compile-time policy
+
+GNU/Clang builds disable implicit fused multiply/add contraction in the modem
+library and its consumers. This preserves exact scalar, cached and batched
+receiver equivalence on ARM64 as well as generic x86-64; the independent
+reference assertions remain unchanged.
 
 When available, ccache is enabled through CMake's compiler launchers. Existing
 explicit launchers take precedence. Disable auto-detection with
@@ -208,18 +422,31 @@ from outside that sysroot and obtains notices from the SDK's own license
 inventory. It does not copy the host's glibc or graphics drivers.
 
 Use `./build.sh package --sdk /path/to/installed-sdk` for this path. The separate
-[SDK workflow](../.github/workflows/sdk.yml) qualifies both the SDK's host tools
-and copied application bundles on Bookworm and Ubuntu 24.04. It runs on SDK and
-build infrastructure changes, Rev/resource-preparation changes, or manual
-dispatch and reuses an archived SDK by
-recipe hash. Successful qualification, rather than the presence of a sysroot
-alone, establishes the support claim. The workflow can explicitly publish the
-compiled SDK, preserved sources and FLTK bundle to an existing release after
-those checks; see [SDK maintenance](../third_party/build-support/README.md#ci-publication-and-upgrades).
-Copied-archive GUI checks use `-DGUI_SMOKE_TIMEOUT=300` with
-`tools/verify-native-archives.cmake`, matching the native test group's workflow
-allowance. This option changes only the GUI smoke deadline; it leaves replay
-assertions, CLI checks and the verifier's omitted-option defaults intact.
+[SDK workflow](../.github/workflows/sdk.yml) qualifies the SDK's host tools and
+copied FLTK/Rev bundles on Bookworm and Ubuntu 24.04. It downloads the exact
+recipe from the durable `base` release without rebuilding the toolchain.
+[Base maintenance](../.github/workflows/sdk-base.yml) explicitly builds/reuses
+and preserves SDKs and complete source archives; see
+[SDK maintenance](../third_party/build-support/README.md#ci-publication-and-upgrades).
+
+Application publication and extensive qualification are separate:
+[manual portable releases](releases.md) publishes after packaging checks, then
+[certification](../.github/workflows/certify.yml) attaches source/test outcomes
+and the exact published binary hashes to that release. Copied GUI checks use
+`-DGUI_SMOKE_TIMEOUT=600`. Rev replay/waterfall cadence misses emit visible
+warnings and do not prevent publication or certification; pending-progress,
+content, physical-completion and cancellation assertions remain mandatory.
+See [release warnings](releases.md#rev-display-warnings). Physical-device
+qualification remains a separate scope.
+
+The [signed Debian repository](releases.md#debian-installation-from-github-releases)
+is generated entirely as GitHub Release assets. `datapump-fltk` and
+`datapump-rev` wrap those same Linux portable directories under separate
+`/opt/datapump/` backend paths, with GUI/CLI wrappers in `/usr/bin`; they can
+coexist. No SDK is needed on the user's machine. The regular source file follows
+GitHub's Latest download URL after full certification, while an experiment's
+source file pins its own tag. Signing setup and installation commands are in the
+release guide. Generated `.deb` files, indexes and private keys stay out of Git.
 
 The existing native CI still uses Ubuntu 22.04 and audits a glibc 2.35 ceiling,
 then tests copied artifacts on Ubuntu 22.04 and 24.04. A 2.36 SDK does not imply

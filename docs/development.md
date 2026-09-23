@@ -206,7 +206,11 @@ and decoder could otherwise change the codebook together without a test failing.
 | In-memory per-key TX lock, pulse lookahead, cancellation/profile changes, clock corrections and one-transmission override | `live_transmit_lock` |
 | Pending prefixes and row identity, restricted completed copy/paste, short/raw compose edits and transmission inspection | `gui_application`, `gui_controller`, `gui_inspection`, `gui_binary_editor` |
 
-From the repository root, build and run the focused headless coverage:
+During diagnosis, start with the smallest relevant case or group. Once a fix or
+feature is complete, run the full applicable regression coverage; do not use
+`devfast=true` as the final gate. The [testing stages](building.md#testing-stages)
+describe this progression, including full CI and release certification. From
+the repository root, build and run the complete preservation-contract coverage:
 
 ```sh
 ./build.sh test contract --jobs 2

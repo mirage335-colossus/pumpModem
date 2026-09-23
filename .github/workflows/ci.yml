@@ -4,18 +4,88 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      linux_runner:
+        description: 'Linux x86_64 runner for compilation and qualification'
+        type: choice
+        options: [ubuntu-24.04, ubuntu-latest-m, ubuntu-latest-l, ubuntu-latest-h]
+        default: ubuntu-24.04
+      arm_runner:
+        description: 'Linux ARM64 runner for compilation and qualification'
+        type: choice
+        options: [ubuntu-24.04-arm-l, ubuntu-24.04-arm-h, ubuntu-24.04-arm]
+        default: ubuntu-24.04-arm-l
+      windows_runner:
+        description: 'Windows x64 runner for compilation and qualification'
+        type: choice
+        options: [windows-2022, windows-latest-l, windows-latest-h]
+        default: windows-2022
+      devfast:
+        description: 'Run only the selected focused diagnostic; skip full regression and release work'
+        type: boolean
+        default: false
+      diagnostic:
+        description: 'Focused check used only with devfast=true'
+        type: choice
+        options: [legacy, windows-rev, graphics, arm-rev-package, runner-capacity, arm-runner-capacity]
+        default: legacy
+      diagnostic_release:
+        description: 'Published release tag for graphics diagnostics only; no binaries are rebuilt'
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
 concurrency:
-  group: native-${{ github.workflow }}-${{ github.ref }}
+  group: native-${{ github.workflow }}-${{ github.ref }}-${{ inputs.devfast && 'devfast' || 'full' }}-${{ inputs.linux_runner || 'ubuntu-24.04' }}-${{ inputs.windows_runner || 'windows-2022' }}-${{ inputs.arm_runner || 'ubuntu-24.04-arm-l' }}
   cancel-in-progress: true
 
 jobs:
+  devfast:
+    if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'legacy'
+    uses: ./.github/workflows/devfast.yml
+    with:
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
+
+  windows-rev-diagnostic:
+    if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'windows-rev'
+    uses: ./.github/workflows/windows-rev-diagnostic.yml
+    with:
+      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
+
+  runner-capacity:
+    if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'runner-capacity'
+    uses: ./.github/workflows/runner-capacity.yml
+    with:
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
+
+  arm-runner-capacity:
+    if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'arm-runner-capacity'
+    uses: ./.github/workflows/arm-runner-capacity.yml
+    with:
+      arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-l' }}
+
+  graphics-diagnostic:
+    if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'graphics'
+    uses: ./.github/workflows/graphics-diagnostic.yml
+    with:
+      arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-l' }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
+      release_tag: ${{ inputs.diagnostic_release }}
+
+  arm-rev-package-diagnostic:
+    if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'arm-rev-package'
+    uses: ./.github/workflows/arm-rev-package-diagnostic.yml
+    with:
+      arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-l' }}
+
   gui-contract:
+    if: ${{ !inputs.devfast }}
     name: GUI contract (${{ matrix.backend }})
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
     container: debian:trixie-slim
     timeout-minutes: 30
     strategy:
@@ -31,32 +101,38 @@ jobs:
       - name: Prepare shared native conformance environment
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends ca-certificates git cmake ninja-build g++ clang-19 clang-tools-19 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev libxrandr-dev libgl-dev libglew-dev libfreetype-dev libxtst6 libgl1-mesa-dri xvfb xauth fonts-dejavu-core python3
+          apt-get install -y --no-install-recommends ca-certificates git cmake ninja-build make g++ clang-19 clang-tools-19 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev libxrandr-dev libgl-dev libglew-dev libfreetype-dev libxtst6 libgl1-mesa-dri xvfb xauth fonts-dejavu-core python3
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Configure the same contract suite for the selected adapter
+        # Full validation runs the whole smoke sequence; devfast skips it.
+        # Extend only its overall budget, preserving every internal deadline.
         run: >-
           cmake -S . -B build-gui -G Ninja
           -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19
           -DCMAKE_BUILD_TYPE=Release -DDATAPUMP_PORTABLE=OFF
           -DDATAPUMP_GUI_BACKEND=${{ matrix.backend }} -DDATAPUMP_TEST_NATIVE_GUI=ON
-      - run: cmake --build build-gui --target datapump-tests-gui --parallel 2
+          -DGUI_SMOKE_TIMEOUT=600 -DDART_TESTING_TIMEOUT=3600
+      - run: cmake --build build-gui --target datapump-tests-gui --parallel "$(nproc)"
       - name: Check offline build and dependency tooling
         if: matrix.backend == 'fltk'
         run: |
-          cmake --build build-gui --target datapump-tests-build --parallel 2
+          cmake --build build-gui --target datapump-tests-build --parallel "$(nproc)"
           ctest --test-dir build-gui --output-on-failure -L '^build$'
       - name: Test shared behavior, native contract and simulated workflow
         run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' ctest --test-dir build-gui --output-on-failure -L gui
 
   linux:
+    if: ${{ !inputs.devfast }}
     name: Linux ${{ matrix.build_type }} (glibc 2.35)
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
     # Compile every application and collected library against this baseline,
     # rather than letting a newer hosted runner raise the minimum glibc ABI.
     container: ubuntu:22.04
-    timeout-minutes: 30
+    # Full suites include calibration, sanitizer work and archive GUI checks;
+    # devfast retains its separate short diagnostic budget.
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -76,10 +152,14 @@ jobs:
       - name: Prepare build dependencies
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends ca-certificates git cmake ninja-build make g++-11 binutils libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev xvfb xauth fontconfig-config fonts-dejavu-core python3
+          apt-get install -y --no-install-recommends ca-certificates curl git cmake ninja-build make g++-11 binutils libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev xvfb xauth fontconfig-config fonts-dejavu-core python3
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Install the pinned dependency scanner
+        run: |
+          sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
+          echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
       - name: Configure native application without Python
         # liblzma is pinned in third_party/xz and compiled statically; there is
         # no liblzma development package or compression source download.
@@ -88,21 +168,22 @@ jobs:
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
           -DDATAPUMP_SANITIZERS=${{ matrix.sanitizers }}
           -DDATAPUMP_PORTABLE=${{ matrix.portable }}
+          -DDART_TESTING_TIMEOUT=3600
           -DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE
-      - run: cmake --build build --target datapump-apps datapump-tests --parallel 2
+      - run: cmake --build build --target datapump-apps datapump-tests --parallel "$(nproc)"
       - run: ctest --test-dir build --output-on-failure --parallel 2
       - name: Exercise native desktop workflow
-        run: xvfb-run -a ./build/datapump-gui --smoke-test --smoke-timeout 300
+        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' ./build/datapump-gui --smoke-test --smoke-timeout 600
       - name: Developer CLI regressions (Python is not packaged)
         run: python3 tests/test_cli.py build/pump
       - name: Verify relocated native GUI and package inventory
         if: matrix.portable == 'ON'
-        run: xvfb-run -a cmake -DBUILD_DIR="$PWD/build" -DCONFIG=Release -DGUI_SMOKE=ON -P tests/package_native.cmake
+        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DBUILD_DIR="$PWD/build" -DCONFIG=Release -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P tests/package_native.cmake
       - name: Create and verify both native archives
         if: matrix.portable == 'ON'
         run: |
-          cmake --build build --target package
-          xvfb-run -a cmake -DARCHIVE_DIR="$PWD/build/releases" -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -DMAX_GLIBC=2.35 -P tools/verify-native-archives.cmake
+          cmake --build build --target package --parallel "$(nproc)"
+          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/build/releases" -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.35 -P tools/verify-native-archives.cmake
       - name: Upload Linux offline bundles
         if: matrix.portable == 'ON'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -114,14 +195,17 @@ jobs:
             build/releases/SHA256SUMS.txt
           if-no-files-found: error
           compression-level: 0
-          retention-days: 30
+          retention-days: 1
 
   linux-compatibility:
+    if: ${{ !inputs.devfast }}
     name: Copied Linux binaries on Ubuntu ${{ matrix.ubuntu }}
     needs: linux
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
     container: ubuntu:${{ matrix.ubuntu }}
-    timeout-minutes: 10
+    # Both archive formats run the full workflow; measured checks exceed ten
+    # minutes even though devfast never runs these compatibility jobs.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -134,61 +218,67 @@ jobs:
       - name: Prepare compatibility checks
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends ca-certificates git cmake binutils xvfb xauth fontconfig-config fonts-dejavu-core
+          apt-get install -y --no-install-recommends ca-certificates curl git cmake binutils xvfb xauth fontconfig-config fonts-dejavu-core
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Install the pinned dependency scanner
+        run: |
+          sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
+          echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: DataPump-Linux-x86_64-glibc-2.35
           path: downloaded
       - name: Run copied archives with isolated runtime paths
-        run: xvfb-run -a cmake -DARCHIVE_DIR="$PWD/downloaded" -DGUI_SMOKE=ON -DMAX_GLIBC=2.35 -P tools/verify-native-archives.cmake
+        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/downloaded" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.35 -P tools/verify-native-archives.cmake
 
   windows:
+    if: ${{ !inputs.devfast }}
     name: Microsoft Windows x64 (static CRT)
-    runs-on: windows-2022
-    timeout-minutes: 45
+    runs-on: ${{ inputs.windows_runner || 'windows-2022' }}
+    defaults:
+      run:
+        shell: pwsh
+    # Full validation includes calibration and both packaged GUI workflows;
+    # the separate devfast diagnostic still has its short overall budget.
+    timeout-minutes: 120
     env:
       VCPKG_DISABLE_METRICS: "1"
+      UseMultiToolTask: 'true'
+      EnforceProcessCountAcrossBuilds: 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Use a pinned dependency registry and build tool
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: microsoft/vcpkg
-          ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d # 2026.07.29
-          path: .ci-vcpkg
-          persist-credentials: false
-      - name: Prepare static OpenSSL build dependency
+      - name: Reuse verified static dependencies from base
         shell: pwsh
-        run: |
-          & ./.ci-vcpkg/bootstrap-vcpkg.bat -disableMetrics
-          if ($LASTEXITCODE -ne 0) { throw "vcpkg bootstrap failed" }
-          & ./.ci-vcpkg/vcpkg.exe install openssl:x64-windows-static --clean-after-build
-          if ($LASTEXITCODE -ne 0) { throw "Static OpenSSL build failed" }
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./tools/use-windows-base.ps1 -Repository "$env:GITHUB_REPOSITORY" -Destination "$PWD/build/windows-base"
       - name: Configure native application without Python
         shell: pwsh
         # The same offline C sources build with MSVC; no liblzma DLL or vcpkg
         # compression package is required on the copied installation.
         run: >-
-          cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-          -DCMAKE_TOOLCHAIN_FILE="$PWD/.ci-vcpkg/scripts/buildsystems/vcpkg.cmake"
+          cmake -S . -B build -A x64
+          -DCMAKE_TOOLCHAIN_FILE="$env:DATAPUMP_WINDOWS_TOOLCHAIN"
           -DVCPKG_TARGET_TRIPLET=x64-windows-static
           -DDATAPUMP_PORTABLE=ON -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          -DDART_TESTING_TIMEOUT=3600
           -DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE
-      - run: cmake --build build --config Release --target datapump-apps datapump-tests --parallel 2
-      - run: ctest --test-dir build -C Release --output-on-failure --parallel 2
+      - run: cmake --build build --config Release --target datapump-apps datapump-tests --parallel $env:NUMBER_OF_PROCESSORS
+      # The live/audio fixtures have their own workers and internal deadlines.
+      # Preserve the complete selection without competing suites on the runner.
+      - run: ctest --test-dir build -C Release --output-on-failure --parallel 1
       - name: Verify Windows GUI and relocation with an empty PATH
-        run: cmake -DBUILD_DIR="$PWD/build" -DCONFIG=Release -DGUI_SMOKE=ON -P tests/package_native.cmake
+        run: cmake -DBUILD_DIR="$PWD/build" -DCONFIG=Release -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P tests/package_native.cmake
       - name: Create and verify both native archives
         shell: pwsh
         run: |
-          cmake --build build --config Release --target package
+          cmake --build build --config Release --target package --parallel $env:NUMBER_OF_PROCESSORS
           if ($LASTEXITCODE -ne 0) { throw "Native packaging failed" }
-          cmake -DARCHIVE_DIR="$PWD/build/releases" -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -P tools/verify-native-archives.cmake
+          cmake -DARCHIVE_DIR="$PWD/build/releases" -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P tools/verify-native-archives.cmake
           if ($LASTEXITCODE -ne 0) { throw "Archive verification failed" }
       - name: Upload Windows offline bundles
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -200,4 +290,4 @@ jobs:
             build/releases/SHA256SUMS.txt
           if-no-files-found: error
           compression-level: 0
-          retention-days: 30
+          retention-days: 1

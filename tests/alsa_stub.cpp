@@ -12,6 +12,7 @@ void reset(){state=State{};}
 extern "C" {
 int snd_pcm_open(void** pcm,const char* name,int direction,int) {
     auto& s=alsa_test::state;s.attempts.emplace_back(name);
+    for(const auto& [device,error]:s.open_errors)if(device==name)return error;
     if(std::find(s.available.begin(),s.available.end(),name)==s.available.end())return -2;
     *pcm=reinterpret_cast<void*>(1);s.selected=name;s.direction=direction;++s.opens;++s.live;return 0;
 }

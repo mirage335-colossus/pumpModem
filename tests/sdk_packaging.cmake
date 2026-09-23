@@ -78,7 +78,7 @@ function(package_fixture expected_error)
   file(REMOVE_RECURSE "${installation}/lib" "${installation}/share")
   execute_process(COMMAND "${CMAKE_COMMAND}" -E env "PATH=${scratch}/host tools:$ENV{PATH}"
     "DATAPUMP_DPKG_PROBE=${scratch}/host-dpkg-was-called"
-    "LD_LIBRARY_PATH=${host}" -- "${CMAKE_COMMAND}" "-DCMAKE_INSTALL_PREFIX=${installation}"
+    "LD_LIBRARY_PATH=${host}" "${CMAKE_COMMAND}" "-DCMAKE_INSTALL_PREFIX=${installation}"
     -P "${scratch}/package.cmake" RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error)
   if(expected_error)
     if(status STREQUAL "0" OR NOT error MATCHES "${expected_error}")

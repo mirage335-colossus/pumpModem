@@ -1,0 +1,6 @@
+# The XZ receive-hardening overlay verifies the exact upstream SHA256 inventory.
+# Preserve those bytes even with core.autocrlf=true on Windows checkouts.
+third_party/xz/** -text
+# Windows dependency identities must match across native and Linux checkouts.
+tools/windows-base.py text eol=lf
+third_party/build-support/windows-base.json text eol=lf

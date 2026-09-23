@@ -3,9 +3,11 @@
 function(check_gui_smoke_timeouts package_directory archive_directory fixture_build)
   set(package_verifier "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../tools/verify-native-package.cmake")
   set(archive_verifier "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../tools/verify-native-archives.cmake")
+  set(relocation_verifier "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/package_native.cmake")
   file(REAL_PATH "${package_verifier}" package_verifier)
   file(REAL_PATH "${archive_verifier}" archive_verifier)
-  foreach(verifier IN ITEMS "${package_verifier}" "${archive_verifier}")
+  file(REAL_PATH "${relocation_verifier}" relocation_verifier)
+  foreach(verifier IN ITEMS "${package_verifier}" "${archive_verifier}" "${relocation_verifier}")
     foreach(invalid IN ITEMS "" 9 601 -1 1.5 30s)
       execute_process(COMMAND "${CMAKE_COMMAND}" "-DGUI_SMOKE_TIMEOUT=${invalid}" -P "${verifier}"
         RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error)
@@ -31,6 +33,11 @@ function(check_gui_smoke_timeouts package_directory archive_directory fixture_bu
     if(NOT status EQUAL 0)
       message(FATAL_ERROR "GUI timeout fixture '${allowance}' failed: ${output}\n${error}")
     endif()
+    foreach(stream stdout stderr)
+      if(NOT output MATCHES "WARNING REV_REPLAY_CADENCE: fixture ${stream} warning")
+        message(FATAL_ERROR "Successful GUI check hid its ${stream} replay cadence warning")
+      endif()
+    endforeach()
     file(STRINGS "${trace}" lines)
     set(smoke_commands 0)
     set(other_commands 0)
@@ -82,6 +89,14 @@ function(check_gui_smoke_timeouts package_directory archive_directory fixture_bu
     endif()
   endforeach()
 
+  execute_process(COMMAND "${CMAKE_COMMAND}" -E env DATAPUMP_PACKAGING_SMOKE_FAIL=1
+    "${CMAKE_COMMAND}" "-DPACKAGE_ROOT=${package_directory}" "-DBUILD_DIR=${fixture_build}"
+    -DGUI_SMOKE=ON -P "${package_verifier}"
+    RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error)
+  if(status EQUAL 0 OR NOT error MATCHES "Relocated native command failed")
+    message(FATAL_ERROR "GUI replay cadence warnings hid a failing GUI process")
+  endif()
+
   set(trace "${fixture_build}/gui-timeout-archives.jsonl")
   execute_process(COMMAND "${CMAKE_COMMAND}" --trace-expand --trace-format=json-v1
     "--trace-source=${archive_verifier}" "--trace-redirect=${trace}"
@@ -105,7 +120,41 @@ function(check_gui_smoke_timeouts package_directory archive_directory fixture_bu
   if(NOT forwarded EQUAL 2)
     message(FATAL_ERROR "GUI timeout was not checked for both archive formats")
   endif()
-  message(STATUS "GUI smoke timeout defaults, bounds, process deadlines, and archive forwarding verified")
+
+  foreach(allowance IN ITEMS default 600)
+    set(options "")
+    if(NOT allowance STREQUAL "default")
+      list(APPEND options "-DGUI_SMOKE_TIMEOUT=${allowance}")
+    endif()
+    set(trace "${fixture_build}/gui-timeout-relocation-${allowance}.jsonl")
+    execute_process(COMMAND "${CMAKE_COMMAND}" --trace-expand --trace-format=json-v1
+      "--trace-source=${relocation_verifier}" "--trace-redirect=${trace}"
+      "-DBUILD_DIR=${fixture_build}" -DCONFIG=Release -DGUI_SMOKE=ON ${options}
+      -P "${relocation_verifier}"
+      RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error)
+    if(NOT status EQUAL 0)
+      message(FATAL_ERROR "Relocation GUI timeout fixture failed: ${output}\n${error}")
+    endif()
+    file(STRINGS "${trace}" lines)
+    set(forwarded 0)
+    foreach(line IN LISTS lines)
+      string(JSON command ERROR_VARIABLE ignored GET "${line}" cmd)
+      if(command STREQUAL "execute_process" AND line MATCHES "verify-native-package\\.cmake" AND line MATCHES "-DGUI_SMOKE=ON")
+        if(allowance STREQUAL "default")
+          if(line MATCHES "-DGUI_SMOKE_TIMEOUT=")
+            message(FATAL_ERROR "Default relocation gained an explicit GUI allowance")
+          endif()
+        elseif(NOT line MATCHES "-DGUI_SMOKE_TIMEOUT=${allowance}")
+          message(FATAL_ERROR "Relocation did not forward the requested GUI workflow allowance")
+        endif()
+        math(EXPR forwarded "${forwarded} + 1")
+      endif()
+    endforeach()
+    if(NOT forwarded EQUAL 1)
+      message(FATAL_ERROR "Expected one relocated GUI invocation plus the unchanged corruption checks")
+    endif()
+  endforeach()
+  message(STATUS "GUI smoke timeout defaults, bounds, process deadlines, archive and relocation forwarding verified")
 endfunction()
 
 check_gui_smoke_timeouts("${archive_source}/DataPump-fixture-native" "${archive_directory}" "${BINARY_DIR}")
