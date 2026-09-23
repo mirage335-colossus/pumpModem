@@ -189,6 +189,9 @@ jobs:
             timeout 30 "datapump-cli-$backend" --version
             timeout 120 "datapump-$backend" --self-check
           done
+          # Portage metadata/cache work during installation must not prevent the
+          # next normal authenticated overlay refresh.
+          if test -f /release/datapump-gentoo-sync.py; then emaint sync -r datapump-bin; fi
           GENTOO
       - name: Record packaging scope
         run: |
