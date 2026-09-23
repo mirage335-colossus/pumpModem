@@ -95,6 +95,39 @@ Clear `experiment` for an ordinary release. `publish=false` still reserves a
 tag and uploads to a draft; it is no longer an Actions-artifact rehearsal.
 PRs changing automation run helper tests without creating releases or tags.
 
+## Diagnose a branch before full validation
+
+Native CI (`ci.yml`), SDK qualification (`sdk.yml`) and certification
+(`certify.yml`) expose a manual boolean `devfast`, default **false**. Leave it
+unchecked for the existing full suites, including calibration and compatibility
+matrices. For a focused Legacy investigation, dispatch either entry point:
+
+```sh
+gh workflow run ci.yml --ref codex/portable-releases -f devfast=true
+# Alternative entry point; release_tag may be omitted in this mode:
+gh workflow run certify.yml --ref codex/portable-releases -f devfast=true
+```
+
+These commands run the same small Linux/Windows diagnostic against the selected
+branch commit. They compile only its Legacy controller/session fixture with
+available cores and repeat `gui_legacy_poll` and `gui_legacy_live` three times
+serially, stopping on failure. They skip SDK/application builds, calibration, the general test matrix
+and packaging, and use neither Actions artifacts nor cache storage. The source
+SHA is printed in the run summary. Dispatch again after pushing a fix; a rerun
+of an older run still uses that run's original revision.
+
+`devfast` never downloads a published application, issues a certification
+report, changes a release or grants Latest status. Full certification continues
+to bind the release's recorded source and published hashes, even when the
+dispatch branch has newer code. Publish a new version/date release when a code
+fix must be included in the binaries being certified.
+
+See [local focused commands](building.md#focused-development-diagnostics).
+For temporary investigation commits, `[skip ci]` can suppress automatic
+push/PR matrices while manual diagnostics remain available. Remove the marker
+from the final validation commit and run with `devfast=false` or unchecked;
+successful focused diagnostics do not replace full regression or certification.
+
 ## Durable SDK storage and compilation time
 
 The [base maintenance workflow](../.github/workflows/sdk-base.yml) owns the

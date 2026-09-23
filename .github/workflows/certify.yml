@@ -1,13 +1,17 @@
 name: Certify published release
-run-name: Certify ${{ inputs.release_tag }} (published binary hashes)
+run-name: ${{ inputs.devfast && 'devfast source diagnostics' || format('Certify {0} (published binary hashes)', inputs.release_tag) }}
 
 on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Existing published portable release to certify; binaries are never replaced'
+        description: 'Published release to certify (required unless devfast); binaries are never replaced'
         type: string
-        required: true
+        required: false
+      devfast:
+        description: 'Diagnose current branch source only; skip expensive tests and all certification/release changes'
+        type: boolean
+        default: false
 
   pull_request:
     paths:
@@ -19,11 +23,16 @@ permissions:
   contents: read
 
 concurrency:
-  group: certify-release-${{ inputs.release_tag }}
+  group: certify-release-${{ inputs.devfast && github.ref || inputs.release_tag }}-${{ inputs.devfast && 'devfast' || 'full' }}
   cancel-in-progress: false
 
 jobs:
+  devfast:
+    if: github.event_name == 'workflow_dispatch' && inputs.devfast
+    uses: ./.github/workflows/devfast.yml
+
   helpers:
+    if: ${{ !inputs.devfast }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -33,7 +42,7 @@ jobs:
       - run: python3 tests/test_certify_release.py
 
   prepare:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && !inputs.devfast
     needs: helpers
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -52,7 +61,9 @@ jobs:
           persist-credentials: false
       - name: Pin published source revision and checksum inventory
         id: release
-        run: python3 tools/certify-release.py prepare --repo "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --directory release-info --github-output "$GITHUB_OUTPUT"
+        run: |
+          if [ -z "$RELEASE_TAG" ]; then echo '::error::release_tag is required for full certification.'; exit 1; fi
+          python3 tools/certify-release.py prepare --repo "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --directory release-info --github-output "$GITHUB_OUTPUT"
       - name: Select full test and copied-binary coverage
         id: matrix
         env:
@@ -78,6 +89,7 @@ jobs:
           PYMATRIX
 
   linux-tests:
+    if: ${{ !inputs.devfast }}
     needs: prepare
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.image }}
@@ -162,6 +174,7 @@ jobs:
           "$scanner" -DPACKAGE_ROOT="$PACKAGE_ROOT" -DMAX_GLIBC="$GLIBC_CEILING" -P tools/verify-linux-abi.cmake
 
   windows-tests:
+    if: ${{ !inputs.devfast }}
     needs: prepare
     runs-on: windows-2022
     timeout-minutes: 120
@@ -220,6 +233,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Published application checks failed' }
 
   compatibility:
+    if: ${{ !inputs.devfast }}
     needs: prepare
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.image }}
@@ -264,7 +278,7 @@ jobs:
 
   record:
     needs: [prepare, linux-tests, windows-tests, compatibility]
-    if: ${{ always() && needs.prepare.result == 'success' }}
+    if: ${{ always() && !inputs.devfast && needs.prepare.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:

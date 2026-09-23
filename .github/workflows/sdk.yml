@@ -52,16 +52,26 @@ on:
       - 'tests/packaging_fixture/**'
       - 'tests/test_build_wrapper.py'
   workflow_dispatch:
+    inputs:
+      devfast:
+        description: 'Run only focused Legacy diagnostics; skip SDK, application and portability qualification'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: source-sdk-${{ github.ref }}
+  group: source-sdk-${{ github.ref }}-${{ inputs.devfast && 'devfast' || 'full' }}
   cancel-in-progress: true
 
 jobs:
+  devfast:
+    if: github.event_name == 'workflow_dispatch' && inputs.devfast
+    uses: ./.github/workflows/devfast.yml
+
   application:
+    if: ${{ !inputs.devfast }}
     name: SDK build, ${{ matrix.backend }} on ${{ matrix.name }}
     runs-on: ubuntu-24.04
     container: ${{ matrix.image }}
@@ -175,6 +185,7 @@ jobs:
           retention-days: 1
 
   compatibility:
+    if: ${{ !inputs.devfast }}
     name: Copied SDK-built ${{ matrix.backend }} on ${{ matrix.image }}
     needs: application
     runs-on: ubuntu-24.04

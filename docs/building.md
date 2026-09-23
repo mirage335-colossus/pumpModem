@@ -179,6 +179,62 @@ Other aggregate targets are `datapump-apps`, `datapump-tests`, and
 tests but do not compile them. For individual work, existing targets such as
 `test_compression_short` continue to work.
 
+## Focused development diagnostics
+
+The manual `devfast` checkbox in native CI (`ci.yml`), SDK qualification
+(`sdk.yml`) and release certification (`certify.yml`) defaults to **false**.
+The default runs retain their full suites and calibration. With `devfast=true`,
+each workflow instead calls the same small Legacy diagnostic on Linux and
+Windows: compile the production Legacy controller/session and existing
+`gui_legacy_live` fixture and deterministic `gui_legacy_poll` cancellation/error
+regression, then require three consecutive serial passes, stopping
+at the first failure. Builds use the runner's available CPU cores. This path
+does not build the SDK or full application, run the general platform matrix,
+create packages, use Actions artifacts/cache, or certify/promote a release.
+
+Dispatch one of these equivalent diagnostic entry points after pushing the
+branch under investigation:
+
+```sh
+gh workflow run ci.yml --ref codex/portable-releases -f devfast=true
+# Alternatively; no release_tag is needed for a source diagnostic:
+gh workflow run certify.yml --ref codex/portable-releases -f devfast=true
+```
+
+The diagnostic logs and run summary identify the checked-out branch SHA.
+A new dispatch selects the current branch commit; rerunning an earlier run
+uses its original commit. Full certification instead checks out the published
+release's recorded source revision and tests its published binary hashes.
+Diagnostic jobs have read-only repository permissions and never issue
+certification reports or change release status.
+
+The same focused build needs CMake 3.21+, a C++20 compiler and the selected
+build generator, without OpenSSL, native GUI dependencies or an SDK. On Linux:
+
+```sh
+cmake -S tests/devfast -B build/devfast -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build/devfast --parallel "$(nproc)"
+ctest --test-dir build/devfast --output-on-failure -R '^gui_legacy_(poll|live)$' \
+  --parallel 1 --repeat until-fail:3 --stop-on-failure --no-tests=error
+```
+
+On Windows with Visual Studio 2022, using PowerShell:
+
+```powershell
+cmake -S tests/devfast -B build/devfast -G 'Visual Studio 17 2022' -A x64
+cmake --build build/devfast --config Release --parallel $env:NUMBER_OF_PROCESSORS
+ctest --test-dir build/devfast -C Release --output-on-failure -R '^gui_legacy_(poll|live)$' `
+  --parallel 1 --repeat until-fail:3 --stop-on-failure --no-tests=error
+```
+
+Manual `devfast` does not suppress workflows triggered by the preceding push.
+For intermediate diagnosis commits, a temporary `[skip ci]` commit-message
+marker can [skip automatic push/PR runs](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/skip-workflow-runs)
+while still allowing manual dispatch. Omit that marker from the final
+validation commit and run the ordinary workflows with `devfast=false` (or
+unchecked), including the applicable contract, GUI/native and packaging checks.
+A focused pass is development feedback, not a substitute for those gates.
+
 ## Compile-time policy
 
 GNU/Clang builds disable implicit fused multiply/add contraction in the modem

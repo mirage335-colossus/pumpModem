@@ -1,0 +1,57 @@
+name: Focused development diagnostics
+
+on:
+  workflow_call:
+    inputs:
+      repetitions:
+        description: 'Consecutive focused passes required (1–20); stop at the first failure'
+        type: number
+        default: 3
+
+permissions:
+  contents: read
+
+jobs:
+  legacy-diagnostic:
+    name: devfast Legacy (${{ matrix.os }}) — not certification
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    env:
+      DIAGNOSTIC_REPETITIONS: ${{ inputs.repetitions }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Identify the source and diagnostic scope
+        shell: pwsh
+        run: |
+          $count = 0
+          if (![int]::TryParse($env:DIAGNOSTIC_REPETITIONS, [ref]$count) -or $count -lt 1 -or $count -gt 20) {
+            throw 'repetitions must be an integer from 1 to 20'
+          }
+          $sha = git rev-parse HEAD
+          "devfast checks source $sha; no SDK build, calibration, packages or certification."
+          "## Focused development diagnostic`nSource: $sha`n`nThis run cannot certify or promote a release. Full regression testing is still required." >> $env:GITHUB_STEP_SUMMARY
+      - name: Configure only the Legacy diagnostic
+        shell: pwsh
+        run: |
+          if ($IsWindows) {
+            cmake -S tests/devfast -B build/devfast -G 'Visual Studio 17 2022' -A x64
+          } else {
+            cmake -S tests/devfast -B build/devfast -G Ninja -DCMAKE_BUILD_TYPE=Release
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Focused configuration failed' }
+      - name: Build only the diagnostic with available cores
+        shell: pwsh
+        run: |
+          cmake --build build/devfast --config Release --parallel ([Environment]::ProcessorCount)
+          if ($LASTEXITCODE -ne 0) { throw 'Focused build failed' }
+      - name: Repeat the focused test serially; stop on first failure
+        shell: pwsh
+        run: |
+          ctest --test-dir build/devfast -C Release --output-on-failure -R '^gui_legacy_(poll|live)$' --parallel 1 --repeat "until-fail:$env:DIAGNOSTIC_REPETITIONS" --stop-on-failure --no-tests=error
+          if ($LASTEXITCODE -ne 0) { throw 'Focused diagnostic failed; see the named stage and counters above' }
