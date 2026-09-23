@@ -26,8 +26,10 @@ the applicable daylight-saving abbreviation. Tags have the form
 `v001_00-2026-09-22-0252CDT`. All platform jobs use the same label even if they
 finish on different dates. The release records the exact source commit;
 the label is not a replacement for that provenance. Existing tag or release
-collisions fail rather than moving a tag or replacing assets. For another
-release with the same version label, dispatch again with a new build timestamp.
+collisions fail rather than moving a tag or replacing assets. If publication fails after reserving the tag or creating the draft, those may
+remain for inspection; the workflow never deletes or overwrites them on retry.
+Dispatch again with a new build timestamp, or deliberately remove the failed
+tag/draft after inspecting it before reusing its exact label.
 
 ## Run with GitHub CLI
 

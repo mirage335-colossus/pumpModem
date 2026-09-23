@@ -1,5 +1,5 @@
 name: Manual portable release
-run-name: Portable release (${{ inputs.linux_baseline || 'ubuntu-22.04' }}, experiment=${{ inputs.experiment != false }})
+run-name: Portable release (${{ inputs.linux_baseline || 'ubuntu-22.04' }}, experiment=${{ github.event_name != 'workflow_dispatch' || inputs.experiment }})
 
 on:
   workflow_dispatch:
@@ -311,7 +311,14 @@ jobs:
         run: |
           args=()
           if [ "$LINUX_BASELINE" = bookworm-sdk ]; then args+=(--sdk-artifacts build/release-sdk-inputs); fi
-          python3 tools/release.py assemble --artifacts build/release-inputs --metadata build/release-meta/release-metadata.json --notes docs/releases.md --output build/release-assets "${args[@]}"
+          cat > build/release-notes.md <<NOTES
+          Download the archive matching your operating system and architecture; keep its full contents together.
+
+          The Linux ARM64 package covers compatible 64-bit Raspberry Pi OS and Velvet OS installations. These downloads require glibc Linux with X11/XWayland, or Windows 10 1903+/11 x64. 32-bit Raspberry Pi OS and musl Linux need separate builds. Hosted checks do not qualify physical audio hardware.
+
+          See the [platform requirements, tested distributions and release instructions](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_SHA/docs/releases.md) for this exact source revision. Verify downloads against SHA256SUMS.txt.
+          NOTES
+          python3 tools/release.py assemble --artifacts build/release-inputs --metadata build/release-meta/release-metadata.json --notes build/release-notes.md --output build/release-assets "${args[@]}"
           cat build/release-assets/SHA256SUMS.txt >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
