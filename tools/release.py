@@ -13,7 +13,6 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -24,7 +23,6 @@ TARGETS = {
     'windows-x86_64': ('Windows', ('AMD64', 'x86_64', 'amd64'), '.zip'),
 }
 LABEL = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,63}')
-SDK_NAME = re.compile(r'datapump-sdk-(?:sources-)?[A-Za-z0-9_.-]+\.tar\.gz')
 SHA = re.compile(r'[0-9a-f]{40}|[0-9a-f]{64}')
 SUPPORT_FILES = {'release-metadata.json', 'release-notes.md'}
 
@@ -143,6 +141,30 @@ def application_names(metadata):
             for target, details in TARGETS.items()}
 
 
+def verify_sdk_pair(names):
+    binaries = [(name, re.fullmatch(r'datapump-sdk-([A-Za-z0-9][A-Za-z0-9_.-]*)-linux-x86_64\.tar\.gz', name))
+                for name in names]
+    binaries = [(name, match[1]) for name, match in binaries if match]
+    if len(binaries) != 1 or set(names) != {
+            binaries[0][0], f'datapump-sdk-sources-{binaries[0][1]}.tar.gz'}:
+        raise ValueError('SDK assets must be one binary and its matching preserved source archive')
+
+
+def release_notes(metadata, details):
+    warning = ('> **Experimental build:** this prerelease is for evaluation. '
+               'Users needing assurance should use a qualified regular release.\n\n'
+               if metadata['experiment'] else '')
+    baseline = ('x86-64: glibc 2.36 (Bookworm source SDK); AArch64: glibc 2.35'
+                if metadata['linux_baseline'] == 'bookworm-sdk'
+                else 'x86-64 and AArch64: glibc 2.35 (Ubuntu 22.04)')
+    return (f'{warning}Build **{metadata["tag"]}**\n\n'
+            f'- Source commit: `{metadata["source_sha"]}`\n'
+            f'- Build date: `{metadata["build_date"]}` (America/Chicago)\n'
+            f'- Workflow run: `{metadata["run_id"]}`, attempt `{metadata["run_attempt"]}`\n'
+            f'- Application version: `{metadata["project_version"]}`\n'
+            f'- Linux ABI: {baseline}\n\n{details}')
+
+
 def assemble(artifacts, metadata_path, notes, output, sdk_artifacts=None):
     metadata = load_metadata(metadata_path)
     if not notes.is_file() or notes.is_symlink() or not notes.read_text(encoding='utf-8').strip():
@@ -162,10 +184,7 @@ def assemble(artifacts, metadata_path, notes, output, sdk_artifacts=None):
         copies.append((directory / (bases[0] + extension), application_names(metadata)[target]))
     if sdk_artifacts:
         inventory = check_inventory(sdk_artifacts, 'SHA256SUMS')
-        if any(not SDK_NAME.fullmatch(name) for name in inventory):
-            raise ValueError('SDK inventory contains an unexpected asset name')
-        if not any(name.startswith('datapump-sdk-sources-') for name in inventory):
-            raise ValueError('SDK assets must include their preserved source archive')
+        verify_sdk_pair(inventory)
         copies.extend((sdk_artifacts / name, name) for name in sorted(inventory))
     output.parent.mkdir(parents=True, exist_ok=True)
     # Validate everything before creating the visible output. A copy failure
@@ -176,7 +195,8 @@ def assemble(artifacts, metadata_path, notes, output, sdk_artifacts=None):
         for source, name in copies:
             shutil.copyfile(source, staged / name)
         write_json(staged / 'release-metadata.json', metadata)
-        shutil.copyfile(notes, staged / 'release-notes.md')
+        (staged / 'release-notes.md').write_text(
+            release_notes(metadata, notes.read_text(encoding='utf-8')), encoding='utf-8')
         checksums = ''.join(f'{digest(path)}  {path.name}\n' for path in sorted(staged.iterdir()))
         (staged / 'SHA256SUMS.txt').write_text(checksums, encoding='utf-8')
         verify_release(staged)
@@ -190,8 +210,9 @@ def verify_release(directory):
     required = set(application_names(metadata).values()) | SUPPORT_FILES
     if not required <= set(inventory):
         raise ValueError('Release inventory is missing an application target or support file')
-    if any(not SDK_NAME.fullmatch(name) for name in set(inventory) - required):
-        raise ValueError('Release inventory contains an unexpected asset')
+    extra = set(inventory) - required
+    if extra:
+        verify_sdk_pair(extra)
     return metadata, sorted(inventory)
 
 
@@ -219,10 +240,14 @@ def publish(directory, repository, *, publish_now=False):
     tag = metadata['tag']
     require_absent(f'repos/{repository}/releases/tags/{tag}')
     require_absent(f'repos/{repository}/git/ref/tags/{tag}')
+    # Creating the ref is atomic: unlike release create --target alone, it fails
+    # if someone else claimed this tag between preflight and creation.
+    gh(['api', '--method', 'POST', f'repos/{repository}/git/refs',
+        '-f', f'ref=refs/tags/{tag}', '-f', f'sha={metadata["source_sha"]}'])
     flags = ['--prerelease', '--latest=false'] if metadata['experiment'] else ['--latest=false']
     gh(['release', 'create', tag, '--repo', repository,
         '--target', metadata['source_sha'], '--title', metadata['title'],
-        '--notes-file', str(directory / 'release-notes.md'), '--draft', *flags])
+        '--notes-file', str(directory / 'release-notes.md'), '--draft', '--verify-tag', *flags])
     # No --clobber: an unexpected collision must fail. Publishing is the final
     # operation; upload failures intentionally leave a recoverable draft.
     gh(['release', 'upload', tag, '--repo', repository,

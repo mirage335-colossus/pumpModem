@@ -2,7 +2,6 @@
 """Release identity, checksum inventory and fail-closed GitHub publication tests."""
 from datetime import datetime, timezone
 import importlib.util
-import json
 from pathlib import Path
 import subprocess
 import tempfile
@@ -67,7 +66,7 @@ class MetadataTests(unittest.TestCase):
         self.assertRegex(release.project_version(), r'^\d+(?:\.\d+)+$')
 
 
-class InventoryTests(unittest.TestCase):
+class ReleaseFixture:
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix='datapump-release-')
         self.addCleanup(self.temporary.cleanup)
@@ -95,6 +94,8 @@ class InventoryTests(unittest.TestCase):
     def assemble(self, **options):
         return release.assemble(self.artifacts, self.metadata, self.notes, self.output, **options)
 
+
+class InventoryTests(ReleaseFixture, unittest.TestCase):
     def test_minimal_inventory_selects_one_archive_per_target(self):
         value = self.assemble()
         expected = set(release.application_names(value).values()) | release.SUPPORT_FILES | {'SHA256SUMS.txt'}
@@ -172,6 +173,16 @@ class InventoryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'does not match'):
             self.assemble()
 
+    def test_notes_show_experiment_warning_and_build_provenance(self):
+        value = metadata(experiment=True)
+        release.write_json(self.metadata, value)
+        self.assemble()
+        notes = (self.output / 'release-notes.md').read_text(encoding='utf-8')
+        self.assertTrue(notes.startswith('> **Experimental build:**'))
+        for expected in (value['tag'], value['source_sha'], value['run_id'], 'glibc 2.36',
+                         'Portable release qualification notes.'):
+            self.assertIn(expected, notes)
+
     def test_partial_release_inventory_is_rejected_even_with_new_checksums(self):
         self.assemble()
         next(self.output.glob('*.zip')).unlink()
@@ -191,8 +202,13 @@ class InventoryTests(unittest.TestCase):
         self.assemble(sdk_artifacts=sdk)
         self.assertEqual(len(release.verify_release(self.output)[1]), 7)
 
+    def test_sdk_recipe_mismatch_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'matching preserved source archive'):
+            release.verify_sdk_pair({'datapump-sdk-one-linux-x86_64.tar.gz',
+                                     'datapump-sdk-sources-two.tar.gz'})
 
-class PublicationTests(InventoryTests):
+
+class PublicationTests(ReleaseFixture, unittest.TestCase):
     # Reuse the on-disk fixture while keeping publication tests free of network.
     def github(self, arguments, check=True):
         self.calls.append(arguments)
@@ -212,12 +228,16 @@ class PublicationTests(InventoryTests):
         create, upload = self.calls[-2:]
         self.assertEqual(create[:3], ['release', 'create', metadata()['tag']])
         self.assertIn('--draft', create)
+        self.assertIn('--verify-tag', create)
         self.assertEqual(create[create.index('--target') + 1], 'a' * 40)
         self.assertEqual(create[create.index('--title') + 1], metadata()['tag'])
         self.assertEqual(upload[:2], ['release', 'upload'])
         self.assertNotIn('--clobber', upload)
         self.assertEqual(len(upload[5:]), 6)
         self.assertFalse(any(call[:2] == ['release', 'edit'] for call in self.calls))
+        self.assertEqual(self.calls[-3], ['api', '--method', 'POST',
+            'repos/owner/repository/git/refs', '-f', f'ref=refs/tags/{metadata()["tag"]}',
+            '-f', 'sha=' + 'a' * 40])
 
     def test_experiment_is_prerelease_never_latest_and_publishes_last(self):
         self.publish_fixture(experiment=True)
@@ -277,6 +297,18 @@ class PublicationTests(InventoryTests):
                 release.publish(self.output, 'owner/repository', publish_now=True)
         self.assertIn('--draft', self.calls[-2])
         self.assertFalse(any(call[:2] == ['release', 'edit'] for call in self.calls))
+
+    def test_concurrent_tag_creation_stops_release_creation(self):
+        self.publish_fixture()
+        def failure(arguments, check=True):
+            if arguments[:3] == ['api', '--method', 'POST']:
+                self.calls.append(arguments)
+                raise subprocess.CalledProcessError(422, arguments, stderr='Reference already exists')
+            return self.github(arguments, check=check)
+        with patch.object(release, 'gh', side_effect=failure):
+            with self.assertRaises(subprocess.CalledProcessError):
+                release.publish(self.output, 'owner/repository', publish_now=True)
+        self.assertFalse(any(call[0] == 'release' for call in self.calls))
 
     def test_bad_local_inventory_and_repository_never_call_github(self):
         self.publish_fixture()
