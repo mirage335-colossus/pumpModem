@@ -327,6 +327,10 @@ the existing SDK directly. Windows uses the runner's Visual Studio 2022 and
 Windows SDK, static C/C++ runtimes and the verified
 [Windows dependency base](#windows-dependency-base). Rev additionally links its
 static GLEW and FreeType dependencies from that same bundle.
+Linux portable Clang builds using libstdc++ link their C++ runtime statically,
+as GNU builds do, and keep its archive symbols private. This prevents an older
+bundled C++ runtime from blocking newer host graphics drivers. The bundle still
+retains the static runtime's license notices and the same glibc ceiling.
 Generic CPU targets avoid requiring the particular build runner's instruction
 set extensions. GitHub documents the available
 [native ARM64 and Windows runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).

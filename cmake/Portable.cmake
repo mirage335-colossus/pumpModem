@@ -1,4 +1,5 @@
 include_guard(GLOBAL)
+include("${CMAKE_CURRENT_LIST_DIR}/StaticCxxRuntime.cmake")
 set(DATAPUMP_RUNTIME_DIRS "" CACHE STRING "Additional existing native-library search directories")
 set(DATAPUMP_EXTRA_LICENSES "" CACHE STRING "Local runtime license/notice files to include")
 
@@ -72,8 +73,8 @@ function(datapump_install_native)
   if(TARGET ZLIB::ZLIB)
     list(APPEND DATAPUMP_NOTICE_INPUTS "$<TARGET_FILE:ZLIB::ZLIB>")
   endif()
-  if(NOT DATAPUMP_SDK_ROOT AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND NOT DATAPUMP_SANITIZERS)
-    foreach(archive libstdc++.a libgcc.a)
+  if(NOT DATAPUMP_SDK_ROOT AND DATAPUMP_STATIC_GNU_RUNTIME)
+    foreach(archive libstdc++.a libgcc.a libgcc_eh.a)
       execute_process(COMMAND "${CMAKE_CXX_COMPILER}" "-print-file-name=${archive}"
         OUTPUT_VARIABLE archive_path OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
       if(EXISTS "${archive_path}")

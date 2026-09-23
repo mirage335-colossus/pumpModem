@@ -40,9 +40,8 @@ target_include_directories(datapump PRIVATE third_party/qrcodegen)
 target_include_directories(datapump PRIVATE third_party/xz/src/liblzma/api)
 target_link_libraries(datapump PUBLIC OpenSSL::Crypto Threads::Threads ${CMAKE_DL_LIBS})
 target_link_libraries(datapump PRIVATE liblzma)
-if(DATAPUMP_PORTABLE AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND NOT DATAPUMP_SANITIZERS)
-  target_link_options(datapump PUBLIC -static-libstdc++ -static-libgcc)
-endif()
+include(cmake/StaticCxxRuntime.cmake)
+datapump_link_static_cxx_runtime(datapump PUBLIC)
 if(WIN32)
   target_link_libraries(datapump PRIVATE winmm advapi32)
 endif()
@@ -445,6 +444,12 @@ if(BUILD_TESTING AND DATAPUMP_PORTABLE)
     -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/packaging-fixture
     -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
     -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging_support.cmake)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND DATAPUMP_STATIC_GNU_RUNTIME)
+    add_test(NAME packaging_cxx_runtime COMMAND ${CMAKE_COMMAND}
+      -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/packaging-cxx-runtime
+      -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging_cxx_runtime.cmake)
+  endif()
   if(NOT DATAPUMP_SANITIZERS)
     add_test(NAME native_relocation COMMAND ${CMAKE_COMMAND}
       -DBUILD_DIR=${CMAKE_CURRENT_BINARY_DIR} -DCONFIG=$<CONFIG>

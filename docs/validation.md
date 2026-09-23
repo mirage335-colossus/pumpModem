@@ -175,6 +175,38 @@ before the correction and passes after explicit aggregate initialization with
 assertions. No production module or SDK changes are needed; the original
 certification source/run retains its recorded failure.
 
+The [bounded graphics diagnostic](https://github.com/mirage335-colossus/pumpModem/actions/runs/35874888207)
+identifies both environments without rebuilding the app or SDK. Windows reports
+**Microsoft Corporation / GDI Generic / OpenGL 1.1.0**, with both required WGL
+ARB entrypoints absent. ARM64's loader reports that bundled `libstdc++.so.6`
+lacks **GLIBCXX_3.4.32**, required by Ubuntu 24.04's host `libLLVM.so.20.1`.
+The host itself supplies working software GLX; inheriting the older application's
+C++ runtime prevents that driver from loading.
+
+The packaging correction extends static GNU C++ runtime linking to portable
+Linux Clang builds selecting libstdc++, and hides only the selected C++/unwind
+archive exports so host drivers bind to their own runtime. Existing GNU behavior,
+nonportable/sanitizer configurations, libc++ selection, runtime dependency checks
+and ABI ceilings remain intact. Static license notices are retained. A small
+before/after packaging fixture reproduces inherited bundled-runtime lookup and
+then verifies a separately loaded C++ plugin uses the host runtime. Removing
+archive-symbol hiding fails its RTTI isolation assertion. Native Clang 19,
+native GCC 14 and SDK GCC 15 fixtures pass. The actual Clang Rev packaging group
+passes **4/4** in **71.92 seconds**, including relocation; its bundle contains
+neither `libstdc++.so` nor `libgcc_s.so` and retains both runtime notices.
+
+Remaining long certification jobs for the known-bad candidate were cancelled
+after diagnosis. The automatic reporting job attached the
+[failed attempt report](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-23-0914CDT/certification-35873643774-attempt-1.md)
+without changing any binary or original checksum. Copied-binary checks finish
+**17 passed / 3 failed**: the ARM64 GLX failure, the ARM64/Trixie asset download,
+and a separate x86_64 Rev/Ubuntu 26.04 phase-21 text-reception assertion. Its
+earlier cadence warning does not cause that semantic failure. All ten FLTK
+compatibility jobs pass. Partial source checks include both FLTK GUI groups
+**36/36**, ARM64 Rev GUI **37/37**, and ARM64 FLTK native/packaging **3/3** each.
+Windows FLTK completes 24 GUI cases before cancellation. No completed full
+source contract/calibration or release certification is claimed for this attempt.
+
 ## Full validation after focused diagnosis — 23 September 2026
 
 Agent and development guidance now requires focused diagnosis followed by full

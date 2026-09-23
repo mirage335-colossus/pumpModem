@@ -278,6 +278,13 @@ neither the application nor its dependencies. Loader output and bounded startup
 failures are diagnostics, not full smoke/certification results. Archives,
 drivers and registry settings remain unchanged.
 
+After correcting the ARM64 portable runtime, `devfast=true,
+diagnostic=arm-rev-package` builds only that Rev package on Ubuntu 22.04 and
+checks its unchanged archive on Ubuntu 24.04. The startup check requires a
+visible window and host Mesa/LLVM/C++ runtime mappings within 15 seconds.
+It does not run the full GUI smoke or calibration, upload artifacts, or publish
+a release. Follow a focused pass with applicable full validation.
+
 This path performs a bounded headless self-check; it creates no release or
 Actions artifact, and it does not qualify rendering, full regression coverage
 or published binaries. `diagnostic=legacy` remains the default. Choose the

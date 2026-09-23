@@ -1,0 +1,46 @@
+name: Focused ARM64 Rev portable runtime check
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: ARM64 Rev baseline package and newer host graphics (not certification)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build only the affected package in its Ubuntu 22.04 baseline
+        run: |
+          docker run --rm -v "$PWD:/workspace" -w /workspace -e DEBIAN_FRONTEND=noninteractive ubuntu:22.04 sh -ec '
+            apt-get update
+            apt-get install -y --no-install-recommends ca-certificates curl git python3 file binutils make cmake ninja-build g++-11 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev libgl1 libopengl0
+            git config --global --add safe.directory /workspace
+            sh tools/install-release-cmake.sh /workspace/build/ci-cmake
+            python3 tools/install-release-rev.py /workspace/build/ci-rev-tools
+            export PATH=/workspace/build/ci-cmake/bin:/workspace/build/ci-rev-tools/bin:$PATH
+            CC=clang-19 CXX=clang++-19 DATAPUMP_MAX_GLIBC=2.35 ./build.sh package --backend rev --build-dir build/arm-rev-package --jobs "$(nproc)"
+          '
+      - name: Verify the unchanged archive and visible GUI with the newer host driver
+        run: |
+          docker run --rm -v "$PWD:/workspace" -w /workspace -e DEBIAN_FRONTEND=noninteractive -e LIBGL_ALWAYS_SOFTWARE=1 -e LP_NUM_THREADS=2 ubuntu:24.04 sh -ec '
+            apt-get update
+            apt-get install -y --no-install-recommends python3 cmake binutils xvfb xauth x11-utils mesa-utils fonts-dejavu-core fontconfig-config libgl1 libopengl0 libgl1-mesa-dri
+            mkdir -p "build/arm-rev-copied destination"
+            set -- build/arm-rev-package/releases/*.tar.gz
+            test "$#" -eq 1
+            tar -xzf "$1" -C "build/arm-rev-copied destination"
+            set -- "build/arm-rev-copied destination"/DataPump-*
+            test "$#" -eq 1
+            package_root=$PWD/$1
+            cmake -DPACKAGE_ROOT="$package_root" -DVERIFY_ONLY=ON -P tools/verify-native-package.cmake
+            xvfb-run -a -s "-screen 0 2400x1800x24 -dpi 96" python3 tools/check-rev-graphics-startup.py "$package_root" "$PWD/build/arm-rev-graphics-startup.log"
+            cmake -DPACKAGE_ROOT="$package_root" -DVERIFY_ONLY=ON -P tools/verify-native-package.cmake
+          '
+      - name: Record focused scope
+        run: echo 'ARM64 Rev packaging and visible startup with the Ubuntu 24.04 host driver passed. No full smoke, calibration or certification claim; no release assets changed.' >> "$GITHUB_STEP_SUMMARY"
