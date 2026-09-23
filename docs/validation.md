@@ -143,6 +143,38 @@ monitor has both DPI settings. It preserves all physical/client, caret, focus,
 wheel and relayout assertions. The two Linux coordinate cases pass on a private
 Xvfb display; actual Windows graphics qualification remains a later check.
 
+After these changes the complete local Rev shared GUI group passes **37/37**
+in **120.56 seconds**, using `CC=clang-19 CXX=clang++-19 ./build.sh test gui
+--backend rev --build-dir build/rev --jobs 2 -- -DDATAPUMP_TEST_NATIVE_GUI=OFF`.
+The log is `build/ci-diagnostics-20260923/backend-final-rev-gui.log`; the separate
+native coordinate checks above provide display coverage for that fixture.
+
+The [final six-package publication](https://github.com/mirage335-colossus/pumpModem/actions/runs/35872706235)
+passes on source `81d5aaab0ed93b48e979db581de116959ec37ada`. The published
+[v001_00-2026-09-23-0914CDT release](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-23-0914CDT)
+has the exact title `experiment`, remains a prerelease, and contains all six
+backend/architecture archives plus metadata, notes, `warning.log` and checksums.
+Publication completes in about seven minutes. Windows dependency setup takes
+**13 seconds (FLTK)** and **14 seconds (Rev)**; entire Windows jobs take **6m01s**
+and **4m48s**, respectively. Neither Windows nor Linux rebuilds its saved base.
+The separate [full certification](https://github.com/mirage335-colossus/pumpModem/actions/runs/35873643774)
+is dispatched with `devfast=false` against that release's source and binary
+hashes; publication itself is not a certification claim.
+
+The first certification attempt finds additional failures before long tests:
+Windows Rev's real-context check reports unavailable required WGL extensions in
+**0.28 seconds**; ARM64 Rev on Ubuntu 24.04 cannot choose a GLX visual. Neither
+is a display-cadence warning. A separate ARM64/Trixie job fails while downloading
+its asset before testing. The detailed graphics implementation and loader cause
+require focused inspection of the unchanged published binaries.
+
+The SDK/GCC 15 Rev source build exposes a module-import failure in the new style
+fixture's implicit `DirtyFlag` constructor. The four-module reproducer fails
+before the correction and passes after explicit aggregate initialization with
+`DirtyFlag dirty{}`. GCC 15.3 and strict Clang 19 both pass the unchanged
+assertions. No production module or SDK changes are needed; the original
+certification source/run retains its recorded failure.
+
 ## Full validation after focused diagnosis — 23 September 2026
 
 Agent and development guidance now requires focused diagnosis followed by full

@@ -1,0 +1,61 @@
+name: Focused graphics environment diagnostics
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows WGL bootstrap (not certification)
+    runs-on: windows-2022
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Inspect the active graphics implementation without rebuilding dependencies
+        shell: pwsh
+        run: ./tools/windows-gl-probe.ps1
+
+  linux:
+    name: Published ARM64 Rev GLX on Ubuntu 24.04 (not certification)
+    runs-on: ubuntu-24.04-arm
+    container: ubuntu:24.04
+    timeout-minutes: 8
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      DEBIAN_FRONTEND: noninteractive
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      LP_NUM_THREADS: '2'
+    steps:
+      - name: Install inspection tools and the host graphics stack
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git gh python3 cmake binutils xvfb xauth mesa-utils fonts-dejavu-core fontconfig-config libgl1 libopengl0 libgl1-mesa-dri
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify the published source and checksum inventory
+        id: release
+        run: |
+          test -n "$RELEASE_TAG"
+          python3 tools/certify-release.py prepare --repo "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --directory release-info --github-output "$GITHUB_OUTPUT"
+      - name: Download the original ARM64 Rev archive without rebuilding it
+        id: binary
+        env:
+          INVENTORY_SHA256: ${{ steps.release.outputs.inventory_sha256 }}
+        run: python3 tools/certify-release.py download --repo "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --target linux-aarch64-rev --directory published --inventory-sha256 "$INVENTORY_SHA256" --github-output "$GITHUB_OUTPUT"
+      - name: Inspect host GLX and the unchanged binary's loader diagnostics
+        env:
+          PACKAGE_ROOT: ${{ steps.binary.outputs.package_root }}
+        run: |
+          cmake -DPACKAGE_ROOT="$PACKAGE_ROOT" -DVERIFY_ONLY=ON -P tools/verify-native-package.cmake
+          mkdir -p build
+          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' sh tools/diagnose-linux-rev-graphics.sh "$PACKAGE_ROOT" "$PWD/build/graphics-loader.log"

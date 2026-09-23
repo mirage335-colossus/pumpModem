@@ -264,6 +264,20 @@ downloads the existing Windows base and compiles only the actual Rev GUI:
 gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=windows-rev
 ```
 
+For a graphics-driver startup failure after publication, use the bounded
+environment diagnostic on the unchanged archive:
+
+```sh
+gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=graphics \
+  -f diagnostic_release=RELEASE_TAG
+```
+
+It inspects the Windows WGL bootstrap using the installed compiler/SDK and
+compares host GLX with the published ARM64 Rev binary on Ubuntu 24.04. It builds
+neither the application nor its dependencies. Loader output and bounded startup
+failures are diagnostics, not full smoke/certification results. Archives,
+drivers and registry settings remain unchanged.
+
 This path performs a bounded headless self-check; it creates no release or
 Actions artifact, and it does not qualify rendering, full regression coverage
 or published binaries. `diagnostic=legacy` remains the default. Choose the

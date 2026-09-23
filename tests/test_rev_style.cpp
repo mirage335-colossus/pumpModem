@@ -11,7 +11,9 @@ void check(bool condition, const char* message) {
 }
 void equality() {
     using namespace Rev::Appearance;
-    Rev::Core::DirtyFlag dirty;
+    // Explicit aggregate initialization avoids GCC 15's module-import failure
+    // for the implicit default constructor; the flag stays clean and lists empty.
+    Rev::Core::DirtyFlag dirty{};
     auto distance=Px(12), same=Px(12);
     same.transition=250;same.dirty=&dirty;
     const auto fixed=Px(12);
