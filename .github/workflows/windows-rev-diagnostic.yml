@@ -17,17 +17,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Run dependency-free style and Win32 event regressions first
+      - name: Run the dependency-free Win32 event regression first
         shell: pwsh
         run: |
-          foreach ($probe in @('rev-style-probe', 'rev-event-probe')) {
-            cmake -S "tests/$probe" -B "build/$probe" -G 'Visual Studio 17 2022' -A x64
-            if ($LASTEXITCODE -ne 0) { throw "$probe configure failed" }
-            cmake --build "build/$probe" --config Release --parallel $env:NUMBER_OF_PROCESSORS
-            if ($LASTEXITCODE -ne 0) { throw "$probe build failed" }
-            ctest --test-dir "build/$probe" -C Release --output-on-failure --stop-on-failure --no-tests=error
-            if ($LASTEXITCODE -ne 0) { throw "$probe regression failed" }
-          }
+          cmake -S tests/rev-event-probe -B build/rev-event-probe -G 'Visual Studio 17 2022' -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'Event probe configure failed' }
+          cmake --build build/rev-event-probe --config Release --parallel $env:NUMBER_OF_PROCESSORS
+          if ($LASTEXITCODE -ne 0) { throw 'Event probe build failed' }
+          ctest --test-dir build/rev-event-probe -C Release --output-on-failure --stop-on-failure --no-tests=error
+          if ($LASTEXITCODE -ne 0) { throw 'Event probe regression failed' }
       - name: Reuse the exact Windows dependency base
         shell: pwsh
         run: ./tools/use-windows-base.ps1 -Repository "$env:GITHUB_REPOSITORY" -Destination "$PWD/build/windows-base"

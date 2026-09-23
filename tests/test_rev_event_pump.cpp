@@ -1,4 +1,5 @@
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <vector>
 #include <rev_win_message_pump.hpp>
@@ -53,15 +54,17 @@ struct Probe {
     Probe() {
         WNDCLASSW type{};type.lpfnWndProc=window_proc;type.hInstance=GetModuleHandleW(nullptr);type.lpszClassName=class_name;
         check(RegisterClassW(&type)!=0,"cannot register private message test class");
-        // Neither window is shown and neither creates an OpenGL context.
-        main=CreateWindowExW(0,class_name,L"",WS_OVERLAPPED,0,0,64,64,nullptr,nullptr,type.hInstance,this);
+        // A hidden HWND does not reliably generate WM_PAINT from invalidation.
+        // Show a tiny nonactivating tool window; no OpenGL context is needed.
+        main=CreateWindowExW(WS_EX_NOACTIVATE|WS_EX_TOOLWINDOW,class_name,L"",WS_POPUP,0,0,64,64,nullptr,nullptr,type.hInstance,this);
         service=CreateWindowExW(0,class_name,L"",0,0,0,0,0,HWND_MESSAGE,nullptr,type.hInstance,this);
         check(main && service,"cannot create private message test windows");
+        ShowWindow(main,SW_SHOWNOACTIVATE);
+        check(IsWindowVisible(main)!=0,"private paint test window is not visible");
     }
     ~Probe() {DestroyWindow(service);DestroyWindow(main);UnregisterClassW(class_name,GetModuleHandleW(nullptr));}
     void repaint() {
         check(InvalidateRect(main,nullptr,FALSE)!=0,"cannot invalidate test window");
-        check(RedrawWindow(main,nullptr,nullptr,RDW_INTERNALPAINT)!=0,"cannot request internal paint");
     }
 #else
     Probe() {
@@ -71,6 +74,20 @@ struct Probe {
     ~Probe() {dispatch={};queue.clear();}
     void repaint() {PostMessageW(main,WM_PAINT,0,0);}
 #endif
+    void verify(bool condition,const char* message) const {
+        if(condition)return;
+        std::ostringstream detail;
+        detail<<message<<"; paints="<<paints<<" callbacks="<<received.size()
+              <<" characters="<<characters<<" closes="<<closes;
+#ifdef _WIN32
+        detail<<" visible="<<IsWindowVisible(main)
+              <<" update_region="<<GetUpdateRect(main,nullptr,FALSE)
+              <<" queue_status="<<GetQueueStatus(QS_ALLINPUT);
+#else
+        detail<<" queued="<<queue.size();
+#endif
+        throw std::runtime_error(detail.str());
+    }
     void post(HWND window,UINT message,WPARAM value=0,LPARAM data=0) {
         check(PostMessageW(window,message,value,data)!=0,"cannot post private test message");
     }
@@ -113,14 +130,14 @@ void run() {
     check(RevWinMessagePump::pump() && probe.received.size()==delivered+1,"bounded pump discarded queued input");
 
     probe.paints=0;probe.repeat_paints=true;probe.repaint();
-    check(RevWinMessagePump::pump() && probe.paints==1,"repaint feedback must yield after one frame");
+    probe.verify(RevWinMessagePump::pump() && probe.paints==1,"repaint feedback must yield after one frame");
     probe.post(probe.service,probe_message,300);
     // Input and the next frame may be separate batches; both must remain live.
     for(unsigned i=0;i<2;++i) {
         const auto painted=probe.paints;
-        check(RevWinMessagePump::pump() && probe.paints<=painted+1,"paint feedback starved an application poll");
+        probe.verify(RevWinMessagePump::pump() && probe.paints<=painted+1,"paint feedback starved an application poll");
     }
-    check(probe.received.back()==300 && probe.paints>=2,"yielding lost service input or the successor frame");
+    probe.verify(probe.received.back()==300 && probe.paints>=2,"yielding lost service input or the successor frame");
     probe.repeat_paints=false;check(RevWinMessagePump::pump(),"final paint requested shutdown");
     PostQuitMessage(7);
     check(!RevWinMessagePump::pump(),"WM_QUIT did not request orderly application shutdown");

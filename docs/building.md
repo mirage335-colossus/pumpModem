@@ -257,8 +257,8 @@ gh workflow run certify.yml --ref codex/portable-releases -f devfast=true
 ```
 
 For a Windows Rev compiler or event-loop fault, native CI also offers a focused
-selection that first runs dependency-free style and Win32 message regressions,
-then downloads the existing Windows base and compiles only the actual Rev GUI:
+selection that first runs the dependency-free Win32 message regression, then
+downloads the existing Windows base and compiles only the actual Rev GUI:
 
 ```sh
 gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=windows-rev
