@@ -20,6 +20,8 @@ struct Settings {
     bool mono=true;
     audio::ChannelMode channel_mode=audio::ChannelMode::left_mono;
     std::uint64_t quota_bytes=256ULL*1024*1024;
+    double transmit_gain=1.0;
+    bool exclusive=false;
 };
 struct Snapshot {
     bool active=false,transmitting=false,listening=false;

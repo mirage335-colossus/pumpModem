@@ -27,13 +27,13 @@ enum class Slot {
     compression_explanation, short_bits_label, short_bits, short_bits_detail, compression_codes,
     short_use_text, short_send_key, short_transmit, short_transmit_noise, short_cancel, short_airtime,
     compression_signals, copy_raw_signal, paste_raw_signal, raw_recovery_actions, received_raw_bits,
-    device, mono, bandwidth, carrier, snr, long_snr, receive_snr, pattern, fec, dsp_workspace, diagnostics, status,
+    device, mono, volume, exclusive, bandwidth, carrier, snr, long_snr, receive_snr, pattern, fec, dsp_workspace, diagnostics, status,
     fast_profile, fast_expected_snr, fast_symbol_rate, fast_constellation, fast_coding, fast_fec, fast_depth, fast_device, fast_mono, fast_encryption,
     fast_key, fast_key_path, fast_open_key, fast_generate_key, fast_text, fast_file, fast_choose_file,
     fast_transmit, fast_cancel, fast_save, fast_progress, fast_rate, fast_tracking,
-    fast_correction, fast_auth, fast_detail, fast_history, fast_status,
+    fast_correction, fast_auth, fast_detail, fast_history, fast_status, fast_volume, fast_exclusive,
     fast_waveform, fast_waterfall, fast_constellation_plot, fast_airtime, fast_diagnostics, fast_snr, fast_files, fast_use_text, fast_copy_signal, fast_paste_signal, fast_qr, fast_qr_brightness,
-    legacy_profile, legacy_carrier, legacy_squelch, legacy_transcript, legacy_text, legacy_transmit, legacy_waterfall, legacy_status, legacy_mono,
+    legacy_profile, legacy_carrier, legacy_squelch, legacy_transcript, legacy_text, legacy_transmit, legacy_waterfall, legacy_status, legacy_device, legacy_volume, legacy_exclusive, legacy_mono,
     count
 };
 inline constexpr bool persistent_slot(Slot slot) {
@@ -45,7 +45,7 @@ inline constexpr bool persistent_slot(Slot slot) {
     case Slot::simulation_oscillator: case Slot::simulation_oscillator_detail:
     case Slot::lpi_estimate:
     case Slot::key_actions: case Slot::key_path: case Slot::key:
-    case Slot::device: case Slot::mono: case Slot::bandwidth: case Slot::carrier: case Slot::snr: case Slot::long_snr: case Slot::receive_snr: case Slot::pattern:
+    case Slot::device: case Slot::mono: case Slot::volume: case Slot::exclusive: case Slot::bandwidth: case Slot::carrier: case Slot::snr: case Slot::long_snr: case Slot::receive_snr: case Slot::pattern:
     case Slot::fec: case Slot::dsp_workspace: case Slot::diagnostics: case Slot::status: return true;
     default: return false;
     }
@@ -83,6 +83,9 @@ struct DesktopLayout {
         // absolute slots are shared by both native adapters.
         const int fast_gap=18,fast_width=width-2*margin;
         const int fast_wide_column=(fast_width-2*fast_gap)/3;
+        constexpr int volume_width=132,exclusive_width=116,audio_gap=12;
+        const int volume_x=width-margin-exclusive_width-audio_gap-volume_width;
+        const int exclusive_x=width-margin-exclusive_width;
         out[Slot::fast_airtime]={352,13,std::max(0,width-825),28};
         out[Slot::fast_text]={margin,114,fast_width-190,128};
         out[Slot::fast_file]={margin,114,fast_width-190,field_height};
@@ -113,7 +116,9 @@ struct DesktopLayout {
         out[Slot::fast_profile]={margin+fast_wide_column+fast_gap,height-80,fast_wide_column,field_height};
         out[Slot::fast_expected_snr]={margin+2*(fast_wide_column+fast_gap),height-80,fast_width-2*(fast_wide_column+fast_gap),field_height};
         out[Slot::fast_mono]={margin,height-32,156,field_height};
-        out[Slot::fast_diagnostics]={margin+174,height-31,fast_width-174,26};
+        out[Slot::fast_diagnostics]={margin+174,height-31,volume_x-audio_gap-margin-174,26};
+        out[Slot::fast_volume]={volume_x,height-31,volume_width,field_height};
+        out[Slot::fast_exclusive]={exclusive_x,height-31,exclusive_width,field_height};
         // Developer modem page, with no console-only source or history widgets.
         out[Slot::fast_symbol_rate]={margin,118,fast_wide_column,field_height};
         out[Slot::fast_constellation]={margin+fast_wide_column+fast_gap,118,fast_wide_column,field_height};
@@ -134,10 +139,13 @@ struct DesktopLayout {
         const int legacy_transcript_height=(height-486)*3/5;
         const int legacy_draft_height=(height-486)-legacy_transcript_height;
         out[Slot::legacy_squelch]={margin,height-284,240,field_height};
+        out[Slot::legacy_device]={margin+258,height-284,fast_width-258,field_height};
         out[Slot::legacy_transcript]={margin,140,fast_width,legacy_transcript_height};
         out[Slot::legacy_text]={margin,170+legacy_transcript_height,fast_width,legacy_draft_height};
         out[Slot::legacy_waterfall]={margin,height-218,fast_width,166};
-        out[Slot::legacy_status]={margin,height-40,fast_width,24};
+        out[Slot::legacy_status]={margin,height-31,volume_x-audio_gap-margin,24};
+        out[Slot::legacy_volume]={volume_x,height-31,volume_width,field_height};
+        out[Slot::legacy_exclusive]={exclusive_x,height-31,exclusive_width,field_height};
         out[Slot::callsign] = {margin, 62, 115, field_height};
         out[Slot::grid] = {142, 62, 85, field_height};
         out[Slot::repeatable] = {238, 61, 119, 28};
@@ -306,8 +314,10 @@ struct DesktopLayout {
         // Audio routing and diagnostics sit below the modem settings without
         // narrowing the editors or their labels at the minimum desktop width.
         out[Slot::mono] = {margin, content_height - 56, 156, 22};
-        out[Slot::diagnostics] = {margin + 174, content_height - 56, width - 2 * margin - 174, 22};
-        out[Slot::status] = {margin, content_height - 31, width - 2 * margin, 24};
+        out[Slot::diagnostics] = {margin + 174, content_height - 56, volume_x - audio_gap - margin - 174, 22};
+        out[Slot::status] = {margin, content_height - 31, volume_x - audio_gap - margin, 24};
+        out[Slot::volume] = {volume_x, content_height - 31, volume_width, field_height};
+        out[Slot::exclusive] = {exclusive_x, content_height - 31, exclusive_width, field_height};
         // Reserve clock and computation rows above every page. Lower settings
         // remain anchored to the window's bottom edge.
         for(std::size_t index=static_cast<std::size_t>(Slot::tabs);index<static_cast<std::size_t>(Slot::fast_profile);++index)

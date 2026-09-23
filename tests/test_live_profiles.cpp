@@ -564,6 +564,16 @@ void sampled_long_fft_seeds() {
 // test executable. The live Session still uses its real asynchronous hardware
 // capture queue, receiver bank, progress presentation and content publication.
 namespace datapump::audio {
+void capture(std::uint32_t rate,const std::string& device,const CaptureCallback& callback,
+             std::stop_token stop,StreamFormatCallback format,Options options) {
+    validate_options(options);
+    capture(rate,device,callback,stop,std::move(format));
+}
+void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& callback,
+              std::stop_token stop,StreamFormatCallback format,ChannelMode channels,Options options) {
+    validate_options(options);
+    playback(rate,device,callback,stop,std::move(format),channels);
+}
 std::vector<Device> devices() { return {{"controlled profile capture", "deterministic test input"}}; }
 void capture(std::uint32_t rate, const std::string& device, const CaptureCallback& on_chunk,
              std::stop_token stop, StreamFormatCallback on_format) {

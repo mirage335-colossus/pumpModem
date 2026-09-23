@@ -337,6 +337,25 @@ follows audio-device availability during transmission. Robust routing changes
 preserve the running receiver, pending bits, plots and airtime estimate and apply
 to the next playback. Simulated samples and exported WAV framing remain unchanged.
 
+Each modem also has a lower-right **TX volume** dropdown beside **Exclusive**.
+Volume starts at **100%** and multiplies the existing playback PCM only after
+rate conversion; unity gain retains the original sample conversion exactly.
+Choices, in order, are **0.01%, 0.1%, 0.5%, 1%, 2%, 3%, 4%, 5%, 10%, 20%, 30%,
+40%, 50%, 60%, 70%, 75%, 80%, 85%, 90%, 95%, 100%, 105%, 110%, 115%, 125%,
+150%, 175%**. Boosted samples saturate at the existing hardware PCM limit.
+Changing volume applies to the next transmission without restarting reception;
+capture, simulation, modem normalization and exported WAV samples do not change.
+Both controls are unavailable during transmission or shutdown.
+
+Exclusive starts off. Linux uses the selected system route, or directional
+`dmix`/`dsnoop` routes for an explicit hardware card. Opting into Exclusive opens
+that card's raw hardware endpoint; unresolved named aliases report an actionable
+error. No failed route silently switches to exclusive hardware or another card.
+Windows WinMM does not expose exclusive access, so the toggle is disabled.
+Device or access-mode changes close capture before reopening it. Fast and Legacy
+device selectors are dropdowns populated from the same asynchronous enumeration
+as Robust; custom selections survive an inventory update.
+
 The persistent **Oscillator model** dropdown below the Simulation estimates
 offers **Free-running crystal** (the unchanged default), **GPSDO: hobbyist XO
 (no oven)**, **GPSDO: TCXO (no oven)** and **GPSDO: OCXO**. A neighboring label

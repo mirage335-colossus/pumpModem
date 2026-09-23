@@ -35,6 +35,7 @@ struct Application::Impl {
     fast_ui::Controller fast_controller;
     legacy_ui::Controller legacy_controller;
     bool audio_suspended=false;
+    std::size_t device_count=0;
     BitmapSources bitmaps;
     Clock::time_point next=Clock::now(),next_presentation=next,started=next,completed=next;
     std::unique_ptr<Smoke> smoke;
@@ -109,7 +110,13 @@ bool Application::tick() {
     const auto now=Clock::now();
     if(now>=impl_->next) {
         impl_->next=now+std::chrono::milliseconds(40);
-        impl_->controller.poll();impl_->fast_controller.poll();impl_->legacy_controller.poll();impl_->bitmaps.update(impl_->controller);
+        impl_->controller.poll();
+        const auto& devices=impl_->controller.audio_devices();
+        if(impl_->device_count!=devices.size()) {
+            impl_->fast_controller.set_devices(devices);impl_->legacy_controller.set_devices(devices);
+            impl_->device_count=devices.size();
+        }
+        impl_->fast_controller.poll();impl_->legacy_controller.poll();impl_->bitmaps.update(impl_->controller);
         if(impl_->audio_suspended&&!impl_->auxiliary_active()&&impl_->regular_selected()) {
             impl_->controller.resume_capture();impl_->audio_suspended=false;
         }
@@ -184,8 +191,10 @@ void Application::select(const ui::Control& declaration,std::string id) {
 void Application::toggle(ui::Field field,bool value) {
     if(closing()||field==ui::Field::count||!this->field(field).visible)return;
     // The modem selector only accepts choice IDs; obsolete toggle callbacks are inert.
-    if(field==ui::Field::fast_mode||legacy_ui::owns(field))return;
-    if(fast_ui::owns(field)) {
+    if(field==ui::Field::fast_mode)return;
+    if(legacy_ui::owns(field)) {
+        if(impl_->legacy_selected())impl_->legacy_controller.toggle(field,value);
+    } else if(fast_ui::owns(field)) {
         if(impl_->fast_selected()&&!impl_->legacy_controller.active())impl_->fast_controller.toggle(field,value);
     } else if(field==ui::Field::developer_mode) {
         if(impl_->developer_mode.checked==value)return;

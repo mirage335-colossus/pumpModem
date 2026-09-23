@@ -44,6 +44,7 @@ public:
     std::string command_label(ui::Command command) const; // Empty keeps the declaration label.
     const live::Snapshot& snapshot() const;
     const live::Settings& settings() const;
+    const std::vector<audio::Device>& audio_devices() const;
     const Inbox& inbox() const;
     const Signals& signals() const;
     const std::shared_ptr<const Inspection>& inspection() const;

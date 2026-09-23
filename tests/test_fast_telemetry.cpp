@@ -44,6 +44,14 @@ void capture(std::uint32_t rate,const std::string&,const CaptureCallback& consum
         std::this_thread::sleep_for(5ms);
     }
 }
+void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& source,
+              std::stop_token stop,StreamFormatCallback format,ChannelMode channels,Options) {
+    playback(rate,device,source,stop,std::move(format),channels);
+}
+void capture(std::uint32_t rate,const std::string& device,const CaptureCallback& consume,
+             std::stop_token stop,StreamFormatCallback format,Options) {
+    capture(rate,device,consume,stop,std::move(format));
+}
 }
 namespace {
 void require(bool condition,const char* message) {if(!condition)throw std::runtime_error(message);}

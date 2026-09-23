@@ -3,6 +3,7 @@
 #include "datapump/audio.hpp"
 #include "datapump/types.hpp"
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <iostream>
@@ -20,6 +21,10 @@ std::mutex mutex;
 std::vector<float> transmitted,input;
 std::size_t position=0;
 audio::ChannelMode last_channels=audio::ChannelMode::stereo;
+std::atomic<unsigned> capture_opens=0,capture_active=0;
+std::atomic<bool> capture_overlap=false;
+std::string last_device;
+audio::Options last_options;
 }
 // Only hardware is replaced. The real Fast encoder, sampled modem, receiver,
 // telemetry worker and shared GUI controller process all samples and symbols.
@@ -52,12 +57,57 @@ void capture(std::uint32_t rate,const std::string&,const CaptureCallback& consum
         std::this_thread::sleep_for(50ms);
     }
 }
+void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& source,
+              std::stop_token stop,StreamFormatCallback format,ChannelMode channels,Options) {
+    playback(rate,device,source,stop,std::move(format),channels);
+}
+void capture(std::uint32_t rate,const std::string& device,const CaptureCallback& consume,
+             std::stop_token stop,StreamFormatCallback format,Options options) {
+    if(fixture::capture_active.fetch_add(1))fixture::capture_overlap=true;
+    struct Done {~Done(){--fixture::capture_active;}} done;
+    {std::lock_guard lock(fixture::mutex);fixture::last_device=device;fixture::last_options=options;}
+    ++fixture::capture_opens;
+    capture(rate,device,consume,stop,std::move(format));
+}
 }
 namespace {
 const std::string console_message="Continuous Fast console: café and exact bytes.;()\\&\n";
 const std::string restricted_message="Continuous Fast console_ caf__ and exact bytes._____\n";
 const std::string shellcode_message="Continuous Fast console: caf__ and exact bytes.;()\\&\n";
 void check(bool condition,const char* why) {if(!condition)throw Error(why);}
+void audio_reconfiguration() {
+    using F=ui::Field;
+    fast_ui::Controller controller([] {return true;});
+    const auto initial_opens=fixture::capture_opens.load();
+    controller.set_devices({{"first","First interface"},{"second","Second interface"}});
+    controller.select(F::fast_device,"first");controller.set_selected(true);
+    const auto wait=[&](auto predicate,const char* message) {
+        const auto deadline=std::chrono::steady_clock::now()+3s;
+        do {
+            controller.poll();if(predicate())return;
+            check(std::chrono::steady_clock::now()<deadline,message);std::this_thread::sleep_for(5ms);
+        }while(true);
+    };
+    wait([&] {return fixture::capture_active==1&&fixture::capture_opens>initial_opens;},"Fast initial capture did not open");
+    auto opens=fixture::capture_opens.load();
+    controller.select(F::fast_volume,"0.1");
+    for(unsigned i=0;i<15;++i) {controller.poll();std::this_thread::sleep_for(10ms);}
+    check(fixture::capture_opens==opens&&fixture::capture_active==1,"Changing Fast volume restarted reception");
+    controller.select(F::fast_device,"second");
+    wait([&] {return fixture::capture_opens==opens+1&&fixture::capture_active==1;},"Fast device selection did not restart reception");
+    {std::lock_guard lock(fixture::mutex);
+        check(fixture::last_device=="second"&&fixture::last_options.transmit_gain==.001&&!fixture::last_options.exclusive,
+              "Fast device restart lost the selected device or volume");}
+    if(audio::exclusive_supported()) {
+        ++opens;controller.toggle(F::fast_exclusive,true);
+        wait([&] {return fixture::capture_opens==opens+1&&fixture::capture_active==1;},"Fast exclusive override did not restart reception");
+        std::lock_guard lock(fixture::mutex);
+        check(fixture::last_device=="second"&&fixture::last_options.exclusive,"Fast exclusive override lost the selected device");
+    }
+    check(!fixture::capture_overlap,"Fast reconfiguration opened audio before the old capture closed");
+    controller.close();wait([&] {return controller.ready_to_close();},"Fast reconfigured capture did not close");
+    check(fixture::capture_active==0,"Fast close acknowledged before capture release");
+}
 std::string path_text(const std::filesystem::path& path) {
     const auto utf8=path.u8string();return {utf8.begin(),utf8.end()};
 }
@@ -402,7 +452,7 @@ void completion_between_polls() {
 }
 int main() {
     try {
-        continuous_console();completion_between_polls();
+        audio_reconfiguration();continuous_console();completion_between_polls();
         // Exercise the ordinary controller/session path for cable and both
         // separate acoustic profiles, including their startup, coding cycle
         // and physical-end geometry.

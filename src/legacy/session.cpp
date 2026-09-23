@@ -8,7 +8,10 @@
 #include <thread>
 namespace datapump::legacy {
 namespace {
-void check(const Settings& s) {validate(s.config);if(s.device.empty())throw std::invalid_argument("Select a Legacy audio device");}
+void check(const Settings& s) {
+    validate(s.config);audio::validate_options({s.transmit_gain,s.exclusive});
+    if(s.device.empty())throw std::invalid_argument("Select a Legacy audio device");
+}
 void check_format(const Settings& s,const audio::StreamFormat& f) {
     const double half=s.config.mode==Mode::olivia4_2000?1000:(s.config.mode==Mode::bpsk125?250:62.5);
     if(s.config.carrier_hz+half>f.usable_passband_hz)throw std::runtime_error("Legacy signal exceeds the audio device passband");
@@ -57,7 +60,7 @@ struct Session::Impl {
                     if(block.size()>sample_rate-queued_samples) {overrun=true;changed.notify_all();return false;}
                     queue.emplace_back(block.begin(),block.end());queued_samples+=block.size();changed.notify_all();
                     return !stop.stop_requested();
-                },capture_stop,[&](const auto& format){check_format(s,format);});
+                },capture_stop,[&](const auto& format){check_format(s,format);},{s.transmit_gain,s.exclusive});
             }catch(const std::exception& e) {
                 std::lock_guard lock(queue_mutex);if(!capture_stop.stop_requested()&&!stop.stop_requested())capture_error=e.what();
             }
@@ -89,7 +92,7 @@ struct Session::Impl {
         audio::playback(sample_rate,s.device,[&](std::span<float> out) {
             if(stop.stop_requested())return std::size_t{};
             const auto count=transmitter.read(out);if(count)samples(out.first(count));return count;
-        },stop,[&](const auto& format){check_format(s,format);},audio::output_channels(s.mono,s.channel_mode));
+        },stop,[&](const auto& format){check_format(s,format);},audio::output_channels(s.mono,s.channel_mode),{s.transmit_gain,s.exclusive});
         if(!stop.stop_requested())update([&](auto& out){out.sent_bytes=text.size();});
     }
     void launch(bool tx,std::string text={}) {

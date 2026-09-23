@@ -73,9 +73,57 @@ void channel_routing() {
         require(error<.00015,"resampling changed active-channel phase/amplitude");clean();
     }
 }
+void audio_options() {
+    require(!audio::exclusive_supported(),"WinMM incorrectly advertises exclusive hardware support");
+    const std::vector<float> samples{0,.25f,-.5f,1,-1,2,-2,.00004f,-.00004f};
+    const std::vector<std::pair<double,std::vector<std::int16_t>>> vectors{
+        {.0001,{0,0,-1,3,-3,6,-6,0,0}},
+        {.001,{0,8,-16,32,-32,65,-65,0,0}},
+        {.005,{0,40,-81,163,-163,327,-327,0,0}},
+        {.5,{0,4095,-8191,16383,-16383,32767,-32767,0,0}},
+        {1.,{0,8191,-16383,32767,-32767,32767,-32767,1,-1}},
+        {1.05,{0,8601,-17202,32767,-32767,32767,-32767,1,-1}},
+        {1.75,{0,14335,-28671,32767,-32767,32767,-32767,2,-2}}};
+    for(const auto channels:{audio::ChannelMode::left_mono,audio::ChannelMode::right_mono,audio::ChannelMode::stereo}) {
+        for(const auto& [gain,pcm]:vectors) {
+            fake::reset();fake::state.supported_channels={2};
+            audio::play(samples,48000,"7",{},{},channels,{gain,false});direct_format();
+            require(fake::state.selected_device==7 && fake::state.played.size()==samples.size()*2,"transmit gain changed device or duration");
+            for(std::size_t i=0;i<samples.size();++i) {
+                const auto expected=pcm[i];
+                require(fake::state.played[2*i]==(channels==audio::ChannelMode::right_mono?0:expected) &&
+                        fake::state.played[2*i+1]==(channels==audio::ChannelMode::left_mono?0:expected),
+                        "gain was applied before clipping/routing or changed unity PCM");
+            }
+            clean();
+        }
+    }
+    std::vector<float> tone(15001);
+    for(std::size_t i=0;i<tone.size();++i)tone[i]=static_cast<float>(1.2*std::sin(i*.071));
+    for(const unsigned rate:{48000u,96000u})
+        for(const unsigned hardware_channels:{1u,2u})
+            for(const auto channels:{audio::ChannelMode::left_mono,audio::ChannelMode::right_mono,audio::ChannelMode::stereo}) {
+                fake::reset();fake::state.supported_rates={48000};fake::state.supported_channels={hardware_channels};
+                audio::play(tone,rate,"7",{},{},channels);const auto original=fake::state.played;clean();
+                fake::reset();fake::state.supported_rates={48000};fake::state.supported_channels={hardware_channels};
+                audio::play(tone,rate,"7",{},{},channels,{1.,false});
+                require(fake::state.played==original,"100% changed existing hardware PCM after resampling");clean();
+            }
+    fake::reset();const auto quiet=audio::record(.01,48000,"7",1024*1024,{},{},{.0001,false});clean();
+    fake::reset();const auto loud=audio::record(.01,48000,"7",1024*1024,{},{},{1.75,false});clean();
+    require(quiet==loud,"transmit volume scaled captured PCM");
+    for(const double gain:{0.,-.01,.00001,1.75001,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()}) {
+        fake::reset();rejects([&]{audio::play(samples,48000,"default",{},{},audio::ChannelMode::left_mono,{gain,false});});
+        require(fake::state.open_calls==0,"invalid gain opened hardware");
+    }
+    fake::reset();rejects([&]{audio::play(samples,48000,"default",{},{},audio::ChannelMode::left_mono,{1.,true});});
+    require(fake::state.open_calls==0,"unsupported exclusive playback opened shared audio");
+    fake::reset();rejects([&]{audio::record(.01,48000,"default",1024*1024,{},{},{1.,true});});
+    require(fake::state.open_calls==0,"unsupported exclusive capture opened shared audio");
+}
 int main() {
     try {
-        channel_routing();
+        channel_routing();audio_options();
         std::vector<float> samples(30000);
         for(std::size_t i=0;i<samples.size();++i)samples[i]=static_cast<float>(i%1000)/1000;
         fake::reset();audio::play(samples,48000,"default");direct_format();

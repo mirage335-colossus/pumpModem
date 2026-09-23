@@ -17,6 +17,7 @@ namespace {
 using Clock=std::chrono::steady_clock;
 void check_settings(const Settings& s) {
     validate(s.profile);
+    audio::validate_options({s.transmit_gain,s.exclusive});
     if(s.device.empty())throw Error("Select a fast audio device");
     if(s.quota_bytes<65536||s.quota_bytes>256ULL*1024*1024)
         throw Error("Fast storage quota must be 64 KiB..256 MiB");
@@ -63,7 +64,7 @@ struct Session::Impl {
                     }
                     queue.emplace_back(samples.begin(),samples.end());queued_samples+=samples.size();
                     changed.notify_all();return !stop.stop_requested();
-                },capture_stop,[&](const auto& format){check_format(s,format);});
+                },capture_stop,[&](const auto& format){check_format(s,format);},{s.transmit_gain,s.exclusive});
             } catch(const std::exception& e) {
                 std::lock_guard lock(queue_mutex);if(!capture_stop.stop_requested()&&!stop.stop_requested())capture_error=e.what();
             }
@@ -151,7 +152,7 @@ struct Session::Impl {
                 out.status=std::string("Transmitting fast ")+(s.key?"encrypted ":"unencrypted ")+(text?"text":"file");
             });
             return count;
-        },stop,[&](const auto& format){check_format(s,format);},audio::output_channels(s.mono,s.channel_mode));
+        },stop,[&](const auto& format){check_format(s,format);},audio::output_channels(s.mono,s.channel_mode),{s.transmit_gain,s.exclusive});
         update([&](auto& out) {
             out.status=stop.stop_requested()?"Transmission cancelled":"Transmission sent; receiver observes physical absence";
             if(!stop.stop_requested())out.transmit_fraction=1;

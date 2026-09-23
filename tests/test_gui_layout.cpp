@@ -35,7 +35,7 @@ void established_default() {
     check(layout[Slot::snr] == Rect{16, 956, 260, 27} &&
           layout[Slot::long_snr] == Rect{286, 956, 260, 27} &&
           layout[Slot::receive_snr] == Rect{556, 956, 608, 27}, "separate transmit targets lost their persistent row");
-    check(layout[Slot::status] == Rect{16, 1017, 1148, 24}, "persistent status moved");
+    check(layout[Slot::status] == Rect{16, 1017, 876, 24}, "persistent status must reserve the volume controls");
 }
 void document_widths() {
     for(const auto viewport:{480,1000,1400}) {
@@ -57,6 +57,28 @@ void supported_sizes() {
               fast_brightness.y+fast_brightness.h<fast_qr.y&&fast_qr.w==fast_qr.h&&
               fast_qr.y+fast_qr.h<layout[Slot::fast_generate_key].y,
               "Fast QR brightness must fit above its preview without overlapping key controls");
+        for(const auto audio_slots:{std::array{Slot::volume,Slot::exclusive,Slot::status},
+                                    std::array{Slot::fast_volume,Slot::fast_exclusive,Slot::fast_diagnostics},
+                                    std::array{Slot::legacy_volume,Slot::legacy_exclusive,Slot::legacy_status}}) {
+            const auto volume=layout[audio_slots[0]],exclusive=layout[audio_slots[1]],status=layout[audio_slots[2]];
+            check(volume.y==size.h-31&&exclusive.y==volume.y&&volume.h==field_height&&exclusive.h==volume.h&&
+                  volume.w>=132&&exclusive.w>=116&&volume.x+volume.w+12==exclusive.x&&
+                  exclusive.x+exclusive.w==size.w-margin&&status.x+status.w+12==volume.x,
+                  "Every modem must keep its volume and Exclusive controls adjacent at the lower right, clear of status");
+            Control choice{Kind::choice};choice.slot=audio_slots[0];choice.label="TX volume";choice.open_upward=true;
+            const auto native=control_layout(choice,{},size.w,size.h,std::span<const Control>{&choice,1});
+            check(native.has_label&&native.label.y==volume.y-label_height&&native.widget==volume&&native.popup_upward,
+                  "TX volume must retain its native label and upward dropdown geometry");
+        }
+        check(layout[Slot::fast_diagnostics].w>=552&&
+              layout[Slot::fast_expected_snr].y+field_height<layout[Slot::fast_volume].y-label_height&&
+              layout[Slot::legacy_waterfall].y+layout[Slot::legacy_waterfall].h<layout[Slot::legacy_volume].y-label_height,
+              "Audio volume labels overlap the preceding modem controls or waterfall");
+        const auto legacy_device=layout[Slot::legacy_device],legacy_squelch=layout[Slot::legacy_squelch];
+        check(legacy_device.y==legacy_squelch.y&&legacy_device.x>=legacy_squelch.x+legacy_squelch.w+18&&
+              legacy_device.w>=600&&legacy_device.x+legacy_device.w==size.w-margin&&
+              legacy_device.y+legacy_device.h<layout[Slot::legacy_waterfall].y-23,
+              "Legacy audio device must fit beside Squelch above the waterfall");
         for (std::size_t index = 1; index < static_cast<std::size_t>(Slot::count); ++index) {
             const auto slot = static_cast<Slot>(index);
             const auto rect = layout[slot];
@@ -245,7 +267,7 @@ void supported_sizes() {
         const auto mono=layout[Slot::mono],diagnostics=layout[Slot::diagnostics],device=layout[Slot::device];
         check(persistent_slot(Slot::mono)&&mono.x==device.x&&mono.y>device.y+device.h&&
               mono.w>=150&&mono.h>=22&&mono.x+mono.w<diagnostics.x&&mono.y==diagnostics.y&&
-              diagnostics.w>=824&&diagnostics.x+diagnostics.w==size.w-margin&&
+              diagnostics.w>=552&&diagnostics.x+diagnostics.w+12==layout[Slot::volume].x&&
               mono.y+mono.h<layout[Slot::status].y,
               "Audio-channel choice must fit below its device without overlapping diagnostics or status");
     }
@@ -328,7 +350,7 @@ void hidden_simulation_estimates_reclaim_space() {
             check(compact[slot].h==0,"Hidden simulation estimates must reserve no native height");
         for(const auto slot:{Slot::simulation,Slot::link_power,Slot::link_loss,Slot::link_noise,Slot::simulation_confidence,
                              Slot::simulation_oscillator,Slot::simulation_oscillator_detail,Slot::lpi_estimate,
-                             Slot::device,Slot::mono,Slot::bandwidth,Slot::carrier,Slot::snr,Slot::long_snr,
+                             Slot::device,Slot::mono,Slot::volume,Slot::exclusive,Slot::bandwidth,Slot::carrier,Slot::snr,Slot::long_snr,
                              Slot::receive_snr,Slot::pattern,Slot::fec,Slot::dsp_workspace,Slot::diagnostics,Slot::status})
             check(compact[slot]==expanded[slot],"Simulation visibility must not move persistent inputs or bottom settings");
         const auto page=compact[Slot::page],old_page=expanded[Slot::page];

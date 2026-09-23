@@ -1,6 +1,7 @@
 #include "datapump/attachment.hpp"
 #include "datapump/compression.hpp"
 #include "controller.hpp"
+#include "audio_controls.hpp"
 #include "datapump/received_text.hpp"
 #include "record_presentations.hpp"
 #include "transmit_scope.hpp"
@@ -168,6 +169,7 @@ struct Controller::Impl {
     PlotReplayPolicy plot_policy;
     PlotUpdate plot_update;
     bool started=false,closing=false,preparing=false,key_loading=false,key_failed=false,file_loading=false;
+    std::vector<audio::Device> audio_devices;
     bool need_devices=true,settings_valid=true,transmit_requested=false,noise_requested=false,was_encrypted=false;
     bool attachment_image=false,target_supported=true;
     bool shellcode_mode=false,composer_received=false,previous_received=false;
@@ -244,6 +246,8 @@ struct Controller::Impl {
         f(UiField::transmit_scope_format).options={{"none","None"},{"hex-auto-hide","Hex, auto-hide"},{"hex","Hex"},{"bits","Bits"}};
         f(UiField::transmit_scope_format).selected="hex-auto-hide";
         f(UiField::device).text="default"; f(UiField::device).options={{"default","default"}};
+        f(UiField::volume).options=audio_controls::volume_options();
+        f(UiField::volume).selected="100";
         f(UiField::mono).checked=true;
         f(UiField::mono).options={{"left","Left mono"},{"right","Right mono"},{"stereo","Stereo"}};
         f(UiField::mono).selected="left";
@@ -511,6 +515,8 @@ struct Controller::Impl {
             if(next_encrypted) { const auto* key=selected_key(); if(!key) throw Error("Select a valid encryption key entry"); next.transfer.key=key->key; }
             if(!next_tone)for(const auto& key:keys) next.receive_keys.push_back(key.key);
             next.device=f(UiField::device).text.empty()?"default":f(UiField::device).text;
+            next.transmit_gain=audio_controls::volume_gain(f(UiField::volume).selected);
+            next.exclusive=f(UiField::exclusive).checked;
             next.mono=f(UiField::mono).selected!="stereo";
             next.channel_mode=f(UiField::mono).selected=="right"?audio::ChannelMode::right_mono:
                 next.mono?audio::ChannelMode::left_mono:audio::ChannelMode::stereo;
@@ -993,7 +999,8 @@ struct Controller::Impl {
         f(UiField::planner_target).enabled=!closing;
         f(UiField::planner_command).enabled=!closing;
         sync_launch_command();
-        for(auto id:{UiField::simulation,UiField::simulation_oscillator,UiField::link_power,UiField::link_loss,UiField::link_noise,UiField::key,UiField::device,UiField::mono,UiField::bandwidth,UiField::carrier,UiField::snr,UiField::long_snr,UiField::receive_snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
+        for(auto id:{UiField::simulation,UiField::simulation_oscillator,UiField::link_power,UiField::link_loss,UiField::link_noise,UiField::key,UiField::device,UiField::mono,UiField::volume,UiField::exclusive,UiField::bandwidth,UiField::carrier,UiField::snr,UiField::long_snr,UiField::receive_snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
+        f(UiField::exclusive).enabled=!busy&&audio_controls::exclusive_supported();
         const bool simulation=f(UiField::simulation).selected=="yes";
         for(auto id:{UiField::link_power,UiField::link_loss,UiField::link_noise})f(id).visible=true;
         f(UiField::simulation_cpu_time).visible=f(UiField::simulation_gpu_time).visible=simulation;
@@ -1112,6 +1119,7 @@ struct Controller::Impl {
             f(UiField::message).text=attachment::marker(path_text(attachment_path.filename()));
             f(UiField::message_label).text="Attached: "+display_label(path_text(attachment_path.filename())); dirty();
         } else if(result.kind==PrepKind::devices) {
+            audio_devices=result.devices;
             auto& state=f(UiField::device); state.options={{"default","default"}}; for(const auto& device:result.devices) if(device.id!="default") state.options.push_back({device.id,device.id});
         } else if(result.kind==PrepKind::estimate&&result.revision==revision) {
             inspection=std::move(result.inspection); estimate=inspection->estimate; estimated_revision=revision;
@@ -1512,7 +1520,11 @@ void Controller::select(UiField field,std::string id) {
             std::any_of(state.options.begin(),state.options.end(),[&](const auto& option){return option.id==id&&option.enabled;});
         if(!available)throw Error("Select an available item");
         state.selected=std::move(id);
-        if(field==UiField::mono) {
+        if(field==UiField::volume) {
+            p.settings.transmit_gain=audio_controls::volume_gain(state.selected);
+            if(p.started)p.session.set_transmit_gain(p.settings.transmit_gain);
+        }
+        else if(field==UiField::mono) {
             state.checked=state.selected!="stereo";
             p.settings.mono=state.checked;
             p.settings.channel_mode=state.selected=="right"?audio::ChannelMode::right_mono:
@@ -1532,7 +1544,10 @@ void Controller::select(UiField field,std::string id) {
 void Controller::toggle(UiField field,bool value) {
     auto& p=*impl_;
     if(p.f(field).enabled&&p.f(field).checked!=value) {
-        if(field==UiField::repeatable)p.set_repeatable(value);
+        if(field==UiField::exclusive) {
+            p.f(field).checked=value;p.configure();
+        }
+        else if(field==UiField::repeatable)p.set_repeatable(value);
         else if(field==UiField::mono) {
             p.f(field).checked=value;
             p.f(field).selected=value?"left":"stereo";
@@ -1561,6 +1576,7 @@ std::string Controller::command_label(Command command) const {
 }
 const live::Snapshot& Controller::snapshot() const { return impl_->snapshot; }
 const live::Settings& Controller::settings() const { return impl_->settings; }
+const std::vector<audio::Device>& Controller::audio_devices() const {return impl_->audio_devices;}
 const Inbox& Controller::inbox() const { return impl_->inbox; }
 const Signals& Controller::signals() const { return impl_->signals; }
 const std::shared_ptr<const Inspection>& Controller::inspection() const { return impl_->inspection; }

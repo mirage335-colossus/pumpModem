@@ -936,9 +936,27 @@ void mono_controls() {
           controller.field(F::mono).selected=="left"&&controller.field(F::mono).options.size()==3&&
           controller.settings().channel_mode==audio::ChannelMode::left_mono,
           "Mono audio routing must be enabled by default in the shared GUI and live settings");
+    check(controller.field(F::volume).selected=="100"&&controller.settings().transmit_gain==1.0&&
+          !controller.field(F::exclusive).checked&&!controller.settings().exclusive&&
+          controller.field(F::exclusive).enabled==audio::exclusive_supported(),
+          "Audio defaults changed output gain or selected exclusive hardware");
+    const std::vector<std::string> volumes{"0.01","0.1","0.5","1","2","3","4","5","10","20","30","40","50","60","70","75","80","85","90","95","100","105","110","115","125","150","175"};
+    check(controller.field(F::volume).options.size()==volumes.size(),"Transmit volume choices are incomplete");
+    for(std::size_t i=0;i<volumes.size();++i)
+        check(controller.field(F::volume).options[i].id==volumes[i]&&controller.field(F::volume).options[i].label==volumes[i]+"%",
+              "Transmit volume choices changed order or labels");
     controller.edit(F::binary,"001");prepare(controller);
     const auto prepared_revision=controller.revision();
     const auto prepared_inspection=controller.inspection();
+    controller.select(F::volume,"0.01");
+    check(controller.settings().transmit_gain==0.0001&&controller.revision()==prepared_revision&&
+          controller.inspection()==prepared_inspection&&controller.enabled(C::transmit),
+          "Changing transmit volume invalidated exact bits or prepared transmission");
+    controller.select(F::volume,"175");
+    check(controller.settings().transmit_gain==1.75,"Transmit boost did not reach live settings");
+    controller.select(F::volume,"not-a-volume");
+    check(controller.field(F::volume).selected=="175"&&controller.settings().transmit_gain==1.75,"Invalid gain changed settings");
+    controller.select(F::volume,"100");
     controller.toggle(F::mono,false);
     check(!controller.field(F::mono).checked&&!controller.settings().mono&&
           controller.revision()==prepared_revision&&controller.inspection()==prepared_inspection&&
@@ -984,8 +1002,11 @@ void mono_controls() {
               "Changing audio output routing invalidated the prepared message or cleared receiver plots");
     }
     controller.activate(C::transmit);
-    check(!controller.field(F::mono).enabled&&!controller.field(F::device).enabled,
+    check(!controller.field(F::volume).enabled&&!controller.field(F::exclusive).enabled&&
+          !controller.field(F::mono).enabled&&!controller.field(F::device).enabled,
           "Audio routing remained editable while transmitting");
+    controller.select(F::volume,"20");controller.toggle(F::exclusive,true);
+    check(controller.settings().transmit_gain==1.0&&!controller.settings().exclusive,"Disabled controls changed transmit audio");
     controller.toggle(F::mono,false);
     check(controller.field(F::mono).checked&&controller.settings().mono,
           "A disabled Mono callback changed the active transmission routing");

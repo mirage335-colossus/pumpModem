@@ -12,6 +12,8 @@ namespace fixture {
 std::atomic<int> inputs=0,outputs=0;
 std::atomic<bool> overlap=false,fail_after_generation=false;
 std::atomic<std::size_t> samples=0;
+std::atomic<double> last_gain=1.0;
+std::atomic<bool> last_exclusive=false;
 std::mutex pcm_mutex;
 std::vector<float> pcm;
 void clear_pcm(){std::lock_guard lock(pcm_mutex);pcm.clear();}
@@ -36,6 +38,14 @@ void playback(std::uint32_t rate,const std::string&,const PlaybackCallback& sour
     }
     --fixture::outputs;
     if(fixture::fail_after_generation)throw std::runtime_error("fixture drain failure");
+}
+void capture(std::uint32_t rate,const std::string& device,const CaptureCallback& consume,std::stop_token stop,StreamFormatCallback format,Options options) {
+    fixture::last_gain=options.transmit_gain;fixture::last_exclusive=options.exclusive;
+    capture(rate,device,consume,stop,std::move(format));
+}
+void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& source,std::stop_token stop,StreamFormatCallback format,ChannelMode channels,Options options) {
+    fixture::last_gain=options.transmit_gain;fixture::last_exclusive=options.exclusive;
+    playback(rate,device,source,stop,std::move(format),channels);
 }
 }
 void check(bool value,const char* why){if(!value)throw std::runtime_error(why);}
@@ -108,6 +118,7 @@ int main() {
         check(reserved,"Olivia silently accepted a reserved control as text");
         Session s;s.configure({{Mode::bpsk125,1500},"fixture",true});s.listen();
         wait([]{return fixture::inputs.load()==1;});
+        check(fixture::last_gain==1.0&&!fixture::last_exclusive,"Legacy default changed volume or required exclusive audio");
         bool rejected=false;try{s.transmit_text("busy");}catch(const std::exception&){rejected=true;}
         check(rejected,"TX started while RX was open");
         s.cancel();wait([&]{return !s.active();});
@@ -126,10 +137,18 @@ int main() {
         check(p.error.empty()&&p.sent_bytes==text.size()&&sent=="\n\n\n"+text+'\n',"Sent transcript differs from exact LF-wrapped text");
         check(incremental&&p.audio_revision>1&&fixture::samples>0,"No incremental sampled TX progress");
         check(!fixture::overlap,"Input and output devices overlapped");
+        Settings audio_settings{{Mode::bpsk125,1500},"fixture",true};
+        audio_settings.transmit_gain=1.75;audio_settings.exclusive=datapump::audio::exclusive_supported();
+        s.configure(audio_settings);
         fixture::fail_after_generation=true;s.transmit_text("unsent draft");wait([&]{return !s.active();});
+        check(fixture::last_gain==audio_settings.transmit_gain&&fixture::last_exclusive==audio_settings.exclusive,
+              "Legacy playback lost selected gain or exclusive access");
         check(s.poll().sent_bytes==0&&!s.poll().error.empty(),"Playback failure committed generated text as sent");
         fixture::fail_after_generation=false;
-        s.listen();wait([]{return fixture::inputs.load()==1;});s.close();wait([&]{return s.ready_to_close();});
+        audio_settings.transmit_gain=.0001;audio_settings.exclusive=false;s.configure(audio_settings);
+        s.listen();wait([]{return fixture::inputs.load()==1;});
+        check(fixture::last_gain==audio_settings.transmit_gain&&!fixture::last_exclusive,"Legacy capture lost selected audio options");
+        s.close();wait([&]{return s.ready_to_close();});
         check(fixture::inputs==0&&!fixture::outputs,"Close leaked an audio operation");
         for(const auto mode:{Mode::bpsk31,Mode::bpsk125,Mode::olivia4_2000})line_breaks(mode);
         check(!fixture::overlap,"LF-wrapped transmission violated simplex audio isolation");

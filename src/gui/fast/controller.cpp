@@ -1,6 +1,7 @@
 #include "controller.hpp"
 #include "screen.hpp"
 #include "presentation.hpp"
+#include "../audio_controls.hpp"
 #include "../utf8_policy.hpp"
 #include "../plot_render.hpp"
 #include "datapump/audio.hpp"
@@ -100,6 +101,10 @@ struct Controller::Impl {
         f(F::fast_depth).options={{"1","1 · short messages"},{"4","4"},{"5","5 · acoustic"},{"16","16 · radio"},{"62","62 · long cable transfers"},{"64","64"}};
         f(F::fast_fec).options={{"robust","RS(128,112) · robust"},{"high-rate","RS(128,120) · high rate"}};
         f(F::fast_device).text="default";
+        f(F::fast_device).selected="default";
+        f(F::fast_device).options={{"default","Default audio device"}};
+        f(F::fast_volume).options=audio_controls::volume_options();
+        f(F::fast_volume).selected="100";
         f(F::fast_mono).options={{"left","Left mono"},{"right","Right mono"},{"stereo","Stereo"}};
         f(F::fast_mono).selected="left";f(F::fast_mono).checked=true;
         f(F::fast_qr_brightness).options={{"normal","Normal"},{"dim","Dim"},{"dark","Dark"},{"off","Off"}};
@@ -308,7 +313,7 @@ struct Controller::Impl {
         record_snapshot();++revision;
     }
     void configure_session() {
-        fast::validate(settings.profile);settings.device=f(F::fast_device).text;
+        fast::validate(settings.profile);settings.device=f(F::fast_device).selected;
         auto effective=settings;if(!f(F::fast_encryption).checked)effective.key.reset();session.configure(effective);
     }
     void settings_changed() {
@@ -322,7 +327,8 @@ struct Controller::Impl {
     }
     void refresh() {
         const bool edit=editable();
-        for(const auto field:{F::fast_profile,F::fast_expected_snr,F::fast_symbol_rate,F::fast_constellation,F::fast_coding,F::fast_fec,F::fast_depth,F::fast_device,F::fast_mono,F::fast_encryption,F::fast_source,F::fast_text,F::fast_file})f(field).enabled=edit;
+        for(const auto field:{F::fast_profile,F::fast_expected_snr,F::fast_symbol_rate,F::fast_constellation,F::fast_coding,F::fast_fec,F::fast_depth,F::fast_device,F::fast_mono,F::fast_volume,F::fast_encryption,F::fast_source,F::fast_text,F::fast_file})f(field).enabled=edit;
+        f(F::fast_exclusive).enabled=edit&&audio::exclusive_supported();
         f(F::fast_key).enabled=edit&&f(F::fast_encryption).checked;
         f(F::fast_key_path).enabled=f(F::fast_encryption).checked;
         f(F::fast_text).visible=f(F::fast_source).selected=="text";
@@ -493,6 +499,9 @@ void Controller::set_shellcode_mode(bool enabled) {
 void Controller::close() {auto& p=*impl_;if(p.closing)return;p.closing=true;p.pending_start=C::none;p.session.close();p.pending.clear();p.services.clear();p.refresh();}
 bool Controller::ready_to_close() const {return impl_->closing&&!impl_->key_loading&&impl_->session.ready_to_close();}
 bool Controller::active() const {return impl_->session.active()||impl_->pending_start!=C::none;}
+void Controller::set_devices(const std::vector<audio::Device>& devices) {
+    auto& p=*impl_;audio_controls::set_device_options(p.f(F::fast_device),devices);++p.revision;
+}
 void Controller::edit(F field,std::string text) {
     auto& p=*impl_;if(!owns(field)||!p.f(field).enabled||!p.f(field).visible)return;
     if(field==F::fast_text) {
@@ -506,7 +515,20 @@ void Controller::edit(F field,std::string text) {
         const auto bytes=std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(text.data()),text.size());
         if(text.size()>fast::text_byte_limit||!valid_clipboard_text(bytes)) {report_error("Fast text requires valid UTF-8 without NUL, up to 32,768 bytes.");return;}
     }
-    if(field==F::fast_device||field==F::fast_file||field==F::fast_text) {p.f(field).text=std::move(text);if(field==F::fast_file)p.inspect_file();if(field==F::fast_device)p.settings_changed();p.estimate_key.clear();++p.revision;p.refresh();}
+    if(field==F::fast_device||field==F::fast_file||field==F::fast_text) {
+        p.f(field).text=std::move(text);
+        if(field==F::fast_file)p.inspect_file();
+        if(field==F::fast_device) {
+            // Preserve programmatic/custom-device edits while native adapters
+            // present only the enumerated device dropdown.
+            p.f(field).selected=p.f(field).text;
+            auto& options=p.f(field).options;
+            if(!p.f(field).selected.empty()&&std::none_of(options.begin(),options.end(),[&](const auto& option){return option.id==p.f(field).selected;}))
+                options.push_back({p.f(field).selected,p.f(field).selected});
+            p.settings_changed();
+        }
+        p.estimate_key.clear();++p.revision;p.refresh();
+    }
 }
 void Controller::select(F field,std::string id) {
     auto& p=*impl_;if(!owns(field)||!p.f(field).enabled)return;
@@ -519,6 +541,15 @@ void Controller::select(F field,std::string id) {
     const auto& options=p.f(field).options;
     if(std::none_of(options.begin(),options.end(),[&](const auto& option){return option.id==id&&option.enabled;}))return;
     try {
+        if(field==F::fast_volume) {
+            p.settings.transmit_gain=audio_controls::volume_gain(id);
+            p.f(field).selected=std::move(id);++p.revision;p.refresh();return;
+        }
+        if(field==F::fast_device) {
+            if(id==p.f(field).selected)return;
+            p.f(field).text=id;p.f(field).selected=std::move(id);
+            p.settings_changed();++p.revision;p.refresh();return;
+        }
         if(field==F::fast_profile) {
             if(id==p.f(field).selected)return;
             p.set_profile(fast::parse_channel(id));
@@ -554,6 +585,10 @@ void Controller::select(F field,std::string id) {
 void Controller::toggle(F field,bool value) {
     auto& p=*impl_;
     if(field==F::fast_mono) {select(field,value?"left":"stereo");return;}
+    if(field==F::fast_exclusive&&p.f(field).enabled&&p.f(field).checked!=value) {
+        p.settings.exclusive=value;p.f(field).checked=value;
+        p.settings_changed();++p.revision;p.refresh();return;
+    }
     if(field==F::fast_encryption&&p.f(field).enabled) {
         p.f(field).checked=value;p.settings_changed();++p.revision;p.refresh();
     }

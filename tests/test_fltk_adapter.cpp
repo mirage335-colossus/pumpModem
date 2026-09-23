@@ -473,13 +473,63 @@ void fast_mode_visibility() {
         while(Clock::now()<until)Fl::wait(.005);
         Fl::flush();
     };
+    const auto verify_audio=[&](ui::Field volume_field,ui::Field exclusive_field,ui::Field device_field=ui::Field::count) {
+        const auto native_field=[&]<class Widget>(ui::Field field) -> Widget* {
+            const auto& declarations=ui::console_screen();
+            const auto found=std::find_if(declarations.begin(),declarations.end(),[&](const auto& c){return c.field==field;});
+            require(found!=declarations.end(),"Audio control lacks its shared declaration");
+            const auto expected=app.application.control_layout(*found,window->w(),window->h()).widget;
+            Widget* result=nullptr;
+            const std::function<void(Fl_Group&)> locate=[&](Fl_Group& group) {
+                for(int i=0;i<group.children();++i) {
+                    auto* child=group.child(i);
+                    if(auto* widget=dynamic_cast<Widget*>(child);widget&&widget->visible_r()&&
+                       ui::Rect{widget->x(),widget->y(),widget->w(),widget->h()}==expected)result=widget;
+                    if(auto* nested=dynamic_cast<Fl_Group*>(child))locate(*nested);
+                }
+            };
+            locate(*window);return result;
+        };
+        auto* volume=native_field.template operator()<NativeChoice>(volume_field);
+        auto* exclusive=native_field.template operator()<NativeCheckbox>(exclusive_field);
+        require(volume&&volume->active_r()&&exclusive&&volume->size()==28&&
+            app.application.field(volume_field).selected=="100"&&!exclusive->value(),
+            "Native audio controls must start at unchanged 100% gain and shared audio");
+        for(const auto* id:{"0.01","175","100"}) {
+            const auto& options=app.application.field(volume_field).options;
+            const auto option=std::find_if(options.begin(),options.end(),[&](const auto& value){return value.id==id;});
+            require(option!=options.end(),"Native TX volume omitted a required endpoint or default");
+            volume->picked(volume->menu()+std::distance(options.begin(),option));refresh();
+            require(app.application.field(volume_field).selected==id,"Native TX volume callback did not reach its modem");
+        }
+        const bool supported=app.application.field(exclusive_field).enabled;
+        require(static_cast<bool>(exclusive->active_r())==supported,"Native Exclusive availability differs from the backend capability");
+        exclusive->value(1);exclusive->do_callback();refresh();
+        require(app.application.field(exclusive_field).checked==supported,"Native Exclusive callback bypassed or missed its capability check");
+        exclusive->value(0);exclusive->do_callback();refresh();
+        require(!app.application.field(exclusive_field).checked,"Native Exclusive callback did not restore shared audio");
+        if(device_field!=ui::Field::count) {
+            auto* device=native_field.template operator()<NativeChoice>(device_field);
+            require(device&&device->active_r()&&!app.application.field(device_field).options.empty(),
+                "Native modem audio-device control is not a populated dropdown");
+            const auto last=app.application.field(device_field).options.back().id;
+            const auto last_index=app.application.field(device_field).options.size()-1;
+            device->picked(device->menu()+last_index);refresh();
+            require(app.application.field(device_field).selected==last,"Native device dropdown selected the wrong device identity");
+            device->picked(device->menu());refresh();
+            require(app.application.field(device_field).selected=="default"&&app.application.field(device_field).text=="default",
+                "Native device dropdown did not restore the system default");
+        }
+    };
     app.application.edit(ui::Field::binary,"001");
     for(const auto size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
         window->size(size.first,size.second);refresh();
+        verify_audio(ui::Field::volume,ui::Field::exclusive);
         selector->picked(selector->menu());refresh();
         require(app.application.field(ui::Field::fast_mode).selected=="fast"&&selector->visible_r()&&selector->active_r()&&choose->visible_r()&&text->visible_r()&&
             transmit->visible_r()&&brightness->visible_r()&&brightness->active_r()&&!encryption->value()&&!regular->visible_r(),
             "Fast Modem selection did not show the default plain-text interface");
+        verify_audio(ui::Field::fast_volume,ui::Field::fast_exclusive,ui::Field::fast_device);
         for(int i=0;i<4;++i) {
             brightness->picked(brightness->menu()+i);refresh();
             require(app.application.field(ui::Field::fast_qr_brightness).selected==std::array{"normal","dim","dark","off"}[i],
@@ -580,6 +630,7 @@ void fast_mode_visibility() {
         choose->do_callback();require(app.application.take_services().empty(),"Hidden fast native callback opened a file chooser");
     }
     selector->picked(selector->menu()+2);refresh();
+    verify_audio(ui::Field::legacy_volume,ui::Field::legacy_exclusive,ui::Field::legacy_device);
     auto* transcript=field_widget.template operator()<NativeEditor>("Received and transmitted text");
     auto* legacy_draft=field_widget.template operator()<NativeEditor>("Text to transmit");
     auto* legacy_carrier=field_widget.template operator()<NativeInput>("Carrier (Hz)");

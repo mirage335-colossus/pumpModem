@@ -4,7 +4,8 @@ using namespace ui;
 namespace {
 Control placed(Kind kind,Field field,const char* label,Slot slot) {
     Control c{kind,field,Command::none,Bitmap::none,Page::console,0,label};
-    c.slot=slot;c.persistent=true;c.scope=ScreenScope::legacy;return c;
+    c.slot=slot;c.persistent=true;c.scope=ScreenScope::legacy;
+    c.open_upward=slot==Slot::legacy_device||slot==Slot::legacy_squelch||slot==Slot::legacy_volume;return c;
 }
 }
 bool owns(Field field) {return field>=Field::legacy_profile&&field<=Field::legacy_mono;}
@@ -24,6 +25,9 @@ const std::vector<Control>& screen() {
         [] {auto c=placed(Kind::bitmap,Field::count,"Waterfall",Slot::legacy_waterfall);c.bitmap=Bitmap::legacy_waterfall;
             c.help="Live audio from 0 to 4 kHz; newest row at the top. Reception pauses during transmission.";return c;}(),
         placed(Kind::choice,Field::legacy_squelch,"Squelch",Slot::legacy_squelch),
+        placed(Kind::choice,Field::legacy_device,"Audio device",Slot::legacy_device),
+        [] {auto c=placed(Kind::choice,Field::legacy_volume,"TX volume",Slot::legacy_volume);c.help=transmit_volume_help;return c;}(),
+        [] {auto c=placed(Kind::toggle,Field::legacy_exclusive,"Exclusive",Slot::legacy_exclusive);c.help=exclusive_audio_help;return c;}(),
         [] {auto c=placed(Kind::choice,Field::legacy_mono,"Audio channels",Slot::legacy_mono);
             c.help="Transmit on the left, right, or both stereo channels. Mono devices use their sole channel.";return c;}(),
         placed(Kind::label,Field::legacy_status,"",Slot::legacy_status)

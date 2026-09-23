@@ -348,8 +348,8 @@ printf 'clipboard text' | ./build/dev/pump tx --input - --output message.wav
 
 `listen` continuously receives from the operating system's default audio device;
 `--device` selects an override. Device enumeration is optional. Linux loads the common
-ALSA `libasound.so.2`; when the global default fails, it discovers a card default
-and, if needed, a format-converting endpoint on that card. Windows uses the system
+ALSA `libasound.so.2`; a failed default route reports an error instead of silently
+opening exclusive hardware. Windows uses the system
 WinMM audio API. WAV and simulation
 operation work without audio hardware or the ALSA library. No radio is keyed or
 transmitted by the automated tests. Physical audio transfer and Windows hardware
@@ -362,6 +362,22 @@ for both stereo outputs. All three GUIs offer **Left mono**, **Right mono**, and
 **Stereo**, with Left mono selected by default. Mono-only devices use their sole
 channel with every selection; WAV output and simulation keep their existing
 single-channel waveform.
+
+All three GUIs have a **TX volume** dropdown in the lower-right corner, starting
+at **100%**, which preserves the existing output exactly. The available levels
+range from **0.01%** to **175%**; values above 100% can clip at the hardware PCM
+limit. This scales playback only, leaving capture, simulation and WAV exports
+unchanged. Fast and Legacy provide **Audio device** dropdowns.
+
+The adjacent **Exclusive** checkbox starts off. On Linux, system default and
+named routes use the system's sharing configuration; explicit `hw`/`plughw`
+cards use `dmix` for playback and `dsnoop` for capture. Checking Exclusive opens
+the selected hardware card directly (or ALSA's default hardware card when
+**System default** is selected). Named aliases whose hardware cannot be inferred
+report an error and request an explicit card. A failed shared route never falls
+back to exclusive access. PipeWire/PulseAudio is usually the simplest way to
+share audio between instances. Windows WinMM remains shared; Exclusive is
+disabled because that backend does not expose exclusive access.
 
 Ordinary desktop launches now open **Fast Modem** on **Speakers / mic · short**
 at **−6 dB expected SNR** and listen continuously. Its Console provides text/file

@@ -124,6 +124,7 @@ modem::ChannelConfig channel_config(const Settings& settings) {
     return channel;
 }
 Settings normalized(Settings value) {
+    audio::validate_options({value.transmit_gain,value.exclusive});
     if (value.content_limit == default_memory_limit) value.content_limit = value.transfer.content_limit;
     if (value.dsp_workspace_bytes == runtime::default_dsp_workspace_bytes()) value.dsp_workspace_bytes = value.transfer.dsp_workspace_bytes;
     value.transfer.content_limit = value.content_limit;
@@ -1434,7 +1435,9 @@ struct Session::Impl {
                 }
                 if (wave) {
                     audio::ChannelMode channels;
-                    { std::lock_guard lock(mutex); channels = audio::output_channels(settings.mono,settings.channel_mode); }
+                    audio::Options output_options;
+                    { std::lock_guard lock(mutex); channels = audio::output_channels(settings.mono,settings.channel_mode);
+                        output_options={settings.transmit_gain,value.exclusive}; }
                     discontinuity();
                     audio::playback(transmit_modem.sample_rate, value.device, [&](std::span<float> output) {
                         const auto before=wave->transmitter->samples_emitted();
@@ -1457,7 +1460,7 @@ struct Session::Impl {
                             wave->prepare_hardware(*wave);
                             wave->prepare_hardware={};
                         }
-                    }, channels);
+                    }, channels, output_options);
                     discontinuity(); complete_tx(*wave); wave.reset(); plot_window.reset(); continue;
                 }
                 {
@@ -1471,7 +1474,7 @@ struct Session::Impl {
                     enqueue_audio(chunk, version);
                     std::lock_guard lock(mutex);
                     return current.running && generation == version && !ready && !capture_suspended;
-                }, capture_token, [&](const auto& format) { audio_format(format, version); });
+                }, capture_token, [&](const auto& format) { audio_format(format, version); }, {1.0,value.exclusive});
             } catch (const std::exception& exception) {
                 const auto cancelled_transmission = wave && wave->stop.stop_requested();
                 if (!cancelled_transmission) simulation_bank.reset();
@@ -1686,6 +1689,11 @@ void Session::set_channel_mode(audio::ChannelMode channels) {
     std::lock_guard lock(impl_->mutex);
     impl_->settings.channel_mode = channels;
     impl_->settings.mono = channels != audio::ChannelMode::stereo;
+}
+void Session::set_transmit_gain(double gain) {
+    if(!std::isfinite(gain)||gain<0.0001||gain>1.75)throw Error("Transmit volume must be between 0.01% and 175%");
+    std::lock_guard lock(impl_->mutex);
+    impl_->settings.transmit_gain=gain;
 }
 bool Session::try_suspend_capture() {
     std::lock_guard lock(impl_->mutex);

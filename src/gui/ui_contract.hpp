@@ -13,15 +13,15 @@ enum class Field {
     simulation_confidence, simulation_cpu_time, simulation_gpu_time,
     simulation_oscillator, simulation_oscillator_detail, lpi_estimate, planner_target, planner_command,
     key, message, binary,
-    qr_brightness, send_key, device, mono, bandwidth, carrier, snr, long_snr, receive_snr, pattern, fec, dsp_workspace,
+    qr_brightness, send_key, device, mono, volume, exclusive, bandwidth, carrier, snr, long_snr, receive_snr, pattern, fec, dsp_workspace,
     files, signals, mode, status, airtime, force_transmit, key_path, message_label, binary_label,
     diagnostics, inspection, flow_detail, transmission_detail, payload_alphabet,
     reference_alphabet, waveform_zoom, short_bits, short_bits_detail, received_raw_bits,
     compression_codes, transmit_scope, transmit_scope_caption, transmit_scope_format, profile_reference,
     developer_mode, shellcode_mode, fast_mode, fast_profile, fast_expected_snr, fast_symbol_rate, fast_constellation, fast_coding, fast_fec, fast_depth,
-    fast_device, fast_mono, fast_encryption, fast_key, fast_key_path, fast_source, fast_text, fast_file, fast_status,
+    fast_device, fast_mono, fast_volume, fast_exclusive, fast_encryption, fast_key, fast_key_path, fast_source, fast_text, fast_file, fast_status,
     fast_progress, fast_rate, fast_tracking, fast_correction, fast_auth, fast_detail, fast_history, fast_airtime, fast_diagnostics, fast_snr, fast_qr_brightness, fast_files,
-    legacy_profile, legacy_carrier, legacy_squelch, legacy_transcript, legacy_text, legacy_status, legacy_mono, count
+    legacy_profile, legacy_carrier, legacy_squelch, legacy_transcript, legacy_text, legacy_status, legacy_device, legacy_volume, legacy_exclusive, legacy_mono, count
 };
 enum class Command {
     none, transmit, force_transmit, transmit_noise, cancel, clear_received, attach_file, use_text, paste_previous, open_keyfile,
@@ -48,6 +48,8 @@ enum class Kind { label, action, toggle, choice, text, list, bitmap };
 enum class Menu { none, keyfile, recovery };
 enum class TextTone { normal, muted, data, inverse, negative };
 enum class BitmapCaption { footer, overlay_error };
+inline constexpr char transmit_volume_help[] = "Transmit audio gain relative to the modem's existing output. 100% preserves the original level. Values above 100% can clip. Does not change system volume or received audio.";
+inline constexpr char exclusive_audio_help[] = "Off prefers shared audio without silently falling back to direct hardware. System default and custom routes retain their configuration. On selects exclusive direct hardware and may prevent other instances from using that device; the default hardware card can differ from the system's default audio route. Exclusive access is unavailable with the Windows WinMM backend.";
 // Overlay controls use viewport-relative insets and optional fixed dimensions.
 // A zero width/height fills the space between the corresponding insets.
 struct OverlayPlacement {

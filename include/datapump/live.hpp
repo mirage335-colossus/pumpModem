@@ -37,6 +37,9 @@ struct Settings {
     std::uint64_t simulation_seed = 1;
     double simulation_speed = 1;
     std::vector<Crypto> receive_keys;
+    // Hardware playback gain; unity leaves existing normalization unchanged.
+    double transmit_gain = 1.0;
+    bool exclusive = false;
     // Selecting a transmit key restricts reception to matching keyed streams.
     // Pattern-only raw results carry no separate authentication tag.
     bool permits_plaintext() const noexcept {
@@ -184,6 +187,8 @@ public:
     // or changing audio already being transmitted.
     void set_mono(bool mono);
     void set_channel_mode(audio::ChannelMode channels);
+    // Output-only gain changes leave ongoing reception and prepared PCM intact.
+    void set_transmit_gain(double gain);
     // Release only idle hardware capture for another local engine. Refuses
     // pending RX/TX; repeated polls acknowledge actual device closure. Does
     // not cancel recovery, complete a reception, or change saved settings.

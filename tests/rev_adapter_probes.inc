@@ -32,6 +32,35 @@
             require(details.size.width==width&&details.size.height==height,"Rev modem fixture did not reach the requested viewport");
             settle();
         };
+        const auto verify_audio=[&](ui::Field volume_field,ui::Field exclusive_field,ui::Field device_field=ui::Field::count) {
+            auto* volume=by_field(volume_field).choice;
+            auto* exclusive=by_field(exclusive_field).toggle;
+            require(volume&&allows_input(volume)&&exclusive&&!by_field(exclusive_field).element->resolved.hidden&&
+                volume->params.options.size()==27&&volume->params.value=="100"&&!exclusive->value,
+                "Rev audio controls must start at unchanged 100% gain and shared audio");
+            re::Event change;
+            for(const auto* id:{"0.01","175","100"}) {
+                volume->params.value=id;volume->onChange(change);settle();
+                require(application.field(volume_field).selected==id,"Rev TX volume callback did not reach its modem");
+            }
+            const bool supported=application.field(exclusive_field).enabled;
+            require(allows_input(exclusive)==supported,"Rev Exclusive availability differs from the backend capability");
+            exclusive->checkbox->click(change);settle();
+            require(application.field(exclusive_field).checked==supported,"Rev Exclusive callback bypassed or missed its capability check");
+            exclusive->checkbox->click(change);settle();
+            require(!application.field(exclusive_field).checked,"Rev Exclusive callback did not restore shared audio");
+            if(device_field!=ui::Field::count) {
+                auto* device=by_field(device_field).choice;
+                require(device&&allows_input(device)&&!device->params.options.empty(),
+                    "Rev modem audio-device control is not a populated dropdown");
+                const auto last=application.field(device_field).options.back().id;
+                device->params.value=last;device->onChange(change);settle();
+                require(application.field(device_field).selected==last,"Rev device dropdown selected the wrong device identity");
+                device->params.value="default";device->onChange(change);settle();
+                require(application.field(device_field).selected=="default"&&application.field(device_field).text=="default",
+                    "Rev device dropdown did not restore the system default");
+            }
+        };
         for(const auto size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
             resize(size.first,size.second);
             for(bool fast:{true,false}) {
@@ -40,6 +69,8 @@
                     "Rev modem selector callback failed or hid itself");
                 application.toggle(ui::Field::fast_mode,!fast);
                 require(application.field(ui::Field::fast_mode).selected==(fast?"fast":"robust"),"Rev obsolete toggle changed the selected modem");
+                if(fast)verify_audio(ui::Field::fast_volume,ui::Field::fast_exclusive,ui::Field::fast_device);
+                else verify_audio(ui::Field::volume,ui::Field::exclusive);
                 if(fast) {
                     require(!encryption->value&&application.enabled(ui::Command::fast_listen)&&application.field(ui::Field::fast_source).selected=="text"&&
                         !by_field(ui::Field::fast_text).element->resolved.hidden&&by_field(ui::Field::fast_file).element->resolved.hidden,
@@ -128,6 +159,7 @@
         }
         resize(ui::default_width,ui::default_height);
         re::Event legacy_selection;selector->params.value="legacy";selector->onChange(legacy_selection);settle();
+        verify_audio(ui::Field::legacy_volume,ui::Field::legacy_exclusive,ui::Field::legacy_device);
         auto* transcript=by_field(ui::Field::legacy_transcript).editor;
         auto* draft=by_field(ui::Field::legacy_text).editor;
         require(transcript&&draft&&transcript->read_only&&!transcript->editable&&transcript->selectable&&

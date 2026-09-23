@@ -169,6 +169,33 @@ void deferred_ownership() {
     check(!controller.active()&&requests==2&&controller.field(ui::Field::legacy_text).text=="unsent","Leaving Legacy retained queued audio work or discarded unsent text");
     controller.close();check(controller.ready_to_close(),"Idle Legacy did not close promptly");
 }
+void audio_settings() {
+    using F=ui::Field;
+    legacy_ui::Controller controller([] {return false;});
+    check(control(F::legacy_device).kind==ui::Kind::choice&&controller.field(F::legacy_device).selected=="default",
+          "Legacy audio device is not a dropdown with the system default");
+    controller.set_devices({{"first","First interface"},{"second","Second interface"}});
+    controller.select(F::legacy_device,"second");
+    check(controller.field(F::legacy_device).selected=="second","Legacy dropdown ignored selected device");
+    controller.edit(F::legacy_device,"custom-interface");controller.set_devices({{"first","First interface"}});
+    check(controller.field(F::legacy_device).selected=="custom-interface"&&controller.field(F::legacy_device).options.back().id=="custom-interface",
+          "Legacy enumeration discarded selected custom device");
+    controller.select(F::legacy_device,"unknown");
+    check(controller.field(F::legacy_device).selected=="custom-interface","Legacy dropdown accepted an unknown device");
+    check(controller.field(F::legacy_volume).selected=="100"&&controller.field(F::legacy_volume).options.size()==27,
+          "Legacy volume default or choices changed");
+    controller.select(F::legacy_volume,"0.01");
+    check(controller.field(F::legacy_volume).selected=="0.01","Legacy volume selection ignored");
+    controller.toggle(F::legacy_exclusive,true);
+    check(controller.field(F::legacy_exclusive).checked==audio::exclusive_supported(),"Legacy exclusive override ignored its platform support");
+    controller.selected(true);controller.edit(F::legacy_text,"pending TX");controller.transmit();
+    for(const auto field:{F::legacy_device,F::legacy_volume,F::legacy_exclusive})
+        check(!controller.field(field).enabled,"Legacy pending transmit did not lock audio settings");
+    controller.select(F::legacy_volume,"100");controller.toggle(F::legacy_exclusive,false);
+    check(controller.field(F::legacy_volume).selected=="0.01"&&controller.field(F::legacy_exclusive).checked==audio::exclusive_supported(),
+          "Legacy pending transmit accepted stale audio settings callbacks");
+    controller.close();
+}
 void waterfall() {
     legacy_ui::Waterfall plot;std::vector<float> samples(512);
     for(std::size_t i=0;i<samples.size();++i)samples[i]=static_cast<float>(.5*std::sin(2*3.141592653589793*1500*i/8000));
@@ -194,6 +221,6 @@ void waterfall() {
 }
 }
 int main() {
-    try {presentation_and_isolation();progress_and_bounded_text();received_character_boundary();send_shortcut_and_cancel();deferred_ownership();waterfall();std::cout<<"Legacy GUI checks passed\n";}
+    try {audio_settings();presentation_and_isolation();progress_and_bounded_text();received_character_boundary();send_shortcut_and_cancel();deferred_ownership();waterfall();std::cout<<"Legacy GUI checks passed\n";}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

@@ -29,6 +29,8 @@ struct Playback {
     std::atomic<std::uint64_t> released{0},delivered{0};
     std::atomic<unsigned> opened{0},started{0},closed{0},captures{0};
     std::atomic<bool> finish{false};
+    std::atomic<double> gain{0};
+    std::atomic<bool> exclusive{false};
 };
 Playback* script=nullptr;
 live::Settings slow_settings() {
@@ -222,19 +224,24 @@ void normal_quiet_override() {
     const auto total=transfer::binary_transmitter(Bytes{0},settings.transfer)->total_samples();
     live::Session session([]{return static_cast<double>(epoch);});
     session.start(settings);
+    session.set_transmit_gain(0.005);
+    rejected([&]{session.set_transmit_gain(0);},"invalid live gain accepted");
     playback.released=total;
     session.transmit_bits(Bytes{0});
     await([&]{return playback.delivered==total;},"normal quiet fixture did not complete waveform");
+    check(playback.gain==0.005&&!playback.exclusive,"live TX did not receive chosen gain/shared access");
     playback.finish=true;
     await([&]{return session.snapshot().transmission_finished;},"normal completion did not settle");
     check(session.snapshot().transmit_separation_seconds>6,
           "normal completion lost its existing absence separation");
+    session.set_transmit_gain(1.0);
     playback.finish=false;playback.released=total+1;
     session.transmit_bits(Bytes{0},true);
     // A missing force bypass would wait at least six more seconds; the
     // fixture must emit within this shorter bounded interval instead.
     await([&]{return playback.started==2 && playback.delivered==total+1;},
           "one-shot override did not bypass normal completion quiet wait",3s);
+    check(playback.gain==1.0,"restoring 100% did not reach the next playback");
     session.cancel_transmit();
     await([&]{return playback.closed==2;},"forced quiet fixture failed to cancel");
     check(session.snapshot().transmit_separation_seconds>0,
@@ -303,6 +310,17 @@ void unkeyed_slow_quiet_override() {
 }
 }
 namespace datapump::audio {
+void capture(std::uint32_t rate,const std::string& device,const CaptureCallback& callback,
+             std::stop_token stop,StreamFormatCallback format,Options options) {
+    validate_options(options);
+    capture(rate,device,callback,stop,std::move(format));
+}
+void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& callback,
+              std::stop_token stop,StreamFormatCallback format,ChannelMode channels,Options options) {
+    validate_options(options);
+    script->gain=options.transmit_gain;script->exclusive=options.exclusive;
+    playback(rate,device,callback,stop,std::move(format),channels);
+}
 std::vector<Device> devices() { return {{"epoch guard test","deterministic output"}}; }
 void capture(std::uint32_t rate,const std::string&,const CaptureCallback&,std::stop_token stop,
              StreamFormatCallback on_format) {

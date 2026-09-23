@@ -127,9 +127,87 @@ void channel_routing() {
         check(f::state.live==0 && f::state.opens==f::state.closes,"stereo rate negotiation leaked a device");
     }
 }
+void audio_options() {
+    check(a::exclusive_supported(),"ALSA lost explicit exclusive hardware support");
+    const std::vector<float> samples{0,.25f,-.5f,1,-1,2,-2,.00004f,-.00004f};
+    const std::vector<std::pair<double,std::vector<std::int16_t>>> vectors{
+        {.0001,{0,0,-1,3,-3,6,-6,0,0}},
+        {.001,{0,8,-16,32,-32,65,-65,0,0}},
+        {.005,{0,40,-81,163,-163,327,-327,0,0}},
+        {.5,{0,4095,-8191,16383,-16383,32767,-32767,0,0}},
+        {1.,{0,8191,-16383,32767,-32767,32767,-32767,1,-1}},
+        {1.05,{0,8601,-17202,32767,-32767,32767,-32767,1,-1}},
+        {1.75,{0,14335,-28671,32767,-32767,32767,-32767,2,-2}}};
+    for(const auto channels:{a::ChannelMode::left_mono,a::ChannelMode::right_mono,a::ChannelMode::stereo}) {
+        for(const auto& [gain,pcm]:vectors) {
+            f::reset();f::state.available={"default"};f::state.supported_channels={2};f::state.write_limit=2;
+            a::play(samples,48000,"default",{},{},channels,{gain,false});
+            check(f::state.played.size()==samples.size()*2,"transmit gain changed duration");
+            for(std::size_t i=0;i<samples.size();++i) {
+                const auto expected=pcm[i];
+                check(f::state.played[2*i]==(channels==a::ChannelMode::right_mono?0:expected) &&
+                      f::state.played[2*i+1]==(channels==a::ChannelMode::left_mono?0:expected),
+                      "gain was applied before clipping/routing or changed unity PCM");
+            }
+        }
+    }
+    // Resampled 100% output must also retain the original conversion exactly.
+    std::vector<float> tone(15001);
+    for(std::size_t i=0;i<tone.size();++i)tone[i]=static_cast<float>(1.2*std::sin(i*.071));
+    for(const unsigned rate:{48000u,96000u})
+        for(const unsigned hardware_channels:{1u,2u})
+            for(const auto channels:{a::ChannelMode::left_mono,a::ChannelMode::right_mono,a::ChannelMode::stereo}) {
+                f::reset();f::state.available={"default"};f::state.supported_rates={48000};f::state.supported_channels={hardware_channels};
+                a::play(tone,rate,"default",{},{},channels);const auto original=f::state.played;
+                f::reset();f::state.available={"default"};f::state.supported_rates={48000};f::state.supported_channels={hardware_channels};
+                a::play(tone,rate,"default",{},{},channels,{1.,false});
+                check(f::state.played==original,"100% changed existing hardware PCM after resampling");
+            }
+    for(const double gain:{0.,-.01,.00001,1.75001,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()}) {
+        f::reset();f::state.available={"default"};
+        rejects([&]{a::play(samples,48000,"default",{},{},a::ChannelMode::left_mono,{gain,false});});
+        check(f::state.attempts.empty(),"invalid gain opened hardware");
+    }
+    for(const auto& device:std::vector<std::string>{"hw:CARD=USB,DEV=2","plughw:CARD=USB,DEV=2","default:CARD=USB,DEV=2","sysdefault:CARD=USB,DEV=2","dmix:CARD=USB,DEV=2","dsnoop:CARD=USB,DEV=2"}) {
+        const std::string shared_output="plug:SLAVE='dmix:CARD=USB,DEV=2'";
+        const std::string shared_input="plug:SLAVE='dsnoop:CARD=USB,DEV=2'";
+        const std::string hardware="hw:CARD=USB,DEV=2";
+        f::reset();f::state.available={shared_input,shared_output,hardware};
+        a::play(samples,48000,device,{},{},a::ChannelMode::left_mono,{});
+        check(f::state.selected==shared_output,"shared output did not preserve selected hardware coordinates");
+        const auto shared=a::record(.01,48000,device,1024*1024,{},{},{1.75,false});
+        check(f::state.selected==shared_input,"shared input did not preserve selected hardware coordinates");
+        f::state.captured=0;
+        const auto exclusive=a::record(.01,48000,device,1024*1024,{},{},{.0001,true});
+        check(f::state.selected==hardware && exclusive==shared,"exclusive capture changed device or transmit gain scaled capture");
+        a::play(samples,48000,device,{},{},a::ChannelMode::left_mono,{1.,true});
+        check(f::state.selected==hardware,"exclusive output did not use the selected hardware");
+        check(f::state.live==0 && f::state.opens==f::state.closes,"sharing mode leaked a device");
+    }
+    f::reset();f::state.available={"hw"};
+    a::play(samples,48000,"default",{},{},a::ChannelMode::left_mono,{1.,true});
+    check(f::state.selected=="hw","exclusive default did not use ALSA's configured raw card");
+    for(const auto& device:std::vector<std::string>{"pulse","pipewire","custom-route","front:CARD=USB,DEV=0","hw:CARD=USB,RATE=48000",
+            "hw:CARD=USB,DEV=-1","hw:CARD=USB,DEV=-","hw:CARD=USB,CARD=Other","hw:CARD=USB,DEV=1,DEV=2","hw:CARD=USB,DEV=1,"}) {
+        f::reset();rejects([&]{a::play(samples,48000,device,{},{},a::ChannelMode::left_mono,{1.,true});});
+        check(f::state.attempts.empty(),"exclusive mode guessed hardware for an ambiguous route");
+    }
+    f::reset();f::state.available={"hw:CARD=USB,DEV=2"};
+    rejects([&]{a::play(samples,48000,"hw:CARD=USB,DEV=2",{},{},a::ChannelMode::left_mono,{});});
+    check(f::state.attempts==std::vector<std::string>{"plug:SLAVE='dmix:CARD=USB,DEV=2'"},"shared failure silently took exclusive hardware");
+    f::reset();f::state.available={"plug:SLAVE='dsnoop:1,2'"};f::state.open_errors={{"hw:1,2",-EBUSY}};bool simultaneous=false;
+    rejects([&]{a::capture(48000,"hw:1,2",[](std::span<const float>){return false;},{},{},{1.,true});});
+    a::capture(48000,"plughw:1,2",[&](std::span<const float>) {
+        a::capture(48000,"hw:1,2",[&](std::span<const float>) {simultaneous=f::state.live==2;return false;},{},{},{});
+        return false;
+    },{},{},{});
+    check(simultaneous&&f::state.live==0,"explicit shared capture streams blocked one another");
+    check(f::state.attempts==std::vector<std::string>{"hw:1,2","plug:SLAVE='dsnoop:1,2'","plug:SLAVE='dsnoop:1,2'"},
+          "shared capture did not keep its own route after exclusive access was busy");
+}
 int main(){try{
     plugin_directories();selected_endpoint();
-    channel_routing();
+    channel_routing();audio_options();
     f::reset();f::state.available={"default:CARD=Good"};f::state.hints={{"default:CARD=Good",""}};
     rejects([&]{a::play(std::vector<float>(1),48000,"explicit-bad");});
     check(f::state.attempts==std::vector<std::string>{"explicit-bad"},"explicit endpoint must not silently change");

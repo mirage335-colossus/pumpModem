@@ -8,6 +8,7 @@
 #include <thread>
 #include <chrono>
 #include <cerrno>
+#include <string_view>
 #ifdef _WIN32
 #define NOMINMAX
 #include <windows.h>
@@ -44,10 +45,13 @@ std::vector<std::uint32_t> rate_candidates(std::uint32_t logical_rate) {
 void report_format(std::uint32_t logical,std::uint32_t hardware,std::size_t workspace,const StreamFormatCallback& callback) {
     if(callback)callback({logical,hardware,(logical==hardware?.5:.42)*std::min(logical,hardware),workspace});
 }
-void playback_pcm(std::span<const float> samples,std::span<std::int16_t> output,unsigned channels,ChannelMode mode) {
+void playback_pcm(std::span<const float> samples,std::span<std::int16_t> output,unsigned channels,ChannelMode mode,double gain) {
     for(std::size_t i=0;i<samples.size();++i) {
         if(!std::isfinite(samples[i]))throw Error("nonfinite transmit sample");
-        const auto sample=static_cast<std::int16_t>(std::clamp(samples[i],-1.0f,1.0f)*32767);
+        // Preserve the original float arithmetic exactly at the default 100%.
+        const auto sample=gain==1.0
+            ? static_cast<std::int16_t>(std::clamp(samples[i],-1.0f,1.0f)*32767)
+            : static_cast<std::int16_t>(std::clamp(static_cast<double>(samples[i])*gain,-1.0,1.0)*32767);
         output[i*channels]=channels==2 && mode==ChannelMode::right_mono?0:sample;
         if(channels==2)output[i*channels+1]=mode==ChannelMode::left_mono?0:sample;
     }
@@ -107,6 +111,62 @@ public:
 }
 #ifndef _WIN32
 namespace {
+// Preserve card/device/subdevice identity when switching between shared ALSA
+// plugins and raw hardware. Do not reinterpret another plugin's arguments as
+// hardware coordinates (for example HDMI's DEV can denote a logical output).
+bool hardware_arguments(std::string_view arguments) {
+    if(arguments.empty())return false;
+    unsigned positional=0;
+    std::array<bool,3> present{};
+    while(!arguments.empty()) {
+        const auto comma=arguments.find(',');
+        auto token=arguments.substr(0,comma);
+        const auto equals=token.find('=');
+        unsigned field=positional;
+        if(equals!=std::string_view::npos) {
+            const auto name=token.substr(0,equals);
+            if(name!="CARD" && name!="DEV" && name!="SUBDEV")return false;
+            field=name=="CARD"?0u:name=="DEV"?1u:2u;token.remove_prefix(equals+1);
+        } else ++positional;
+        if(field>=present.size() || present[field])return false;
+        present[field]=true;
+        if(token.empty())return false;
+        // ALSA uses -1 for any hardware subdevice; other indices are unsigned.
+        if(field==2 && token=="-1")token.remove_prefix(1);
+        for(const unsigned char c:token) {
+            const bool digit=c>='0' && c<='9';
+            if(!digit && !(field==0 && ((c>='A'&&c<='Z') || (c>='a'&&c<='z') || c=='_' || c=='-')))return false;
+        }
+        if(comma==std::string_view::npos)return true;
+        arguments.remove_prefix(comma+1);
+        if(arguments.empty())return false;
+    }
+    return true;
+}
+std::string selected_endpoint(const std::string& device,bool recording,bool exclusive) {
+    const auto requested=device.empty()?std::string("default"):device;
+    if(requested=="default")return exclusive?"hw":requested;
+    const auto colon=requested.find(':');
+    const auto kind=requested.substr(0,colon);
+    const auto arguments=colon==std::string::npos?std::string{}:requested.substr(colon+1);
+    const bool hardware=kind=="hw" || kind=="plughw" || kind=="default" || kind=="sysdefault" || kind=="dmix" || kind=="dsnoop";
+    if(hardware) {
+        if(colon!=std::string::npos && !hardware_arguments(arguments))
+            throw Error("cannot select audio sharing for '"+requested+"'; choose a hw/plughw card with CARD, DEV and optional SUBDEV arguments");
+        const auto suffix=arguments.empty()?std::string{}:":"+arguments;
+        if(exclusive)return "hw"+suffix;
+        // plug adapts mono/stereo to a shared endpoint; set_params still
+        // disables automatic ALSA rate conversion as for other endpoints.
+        return std::string("plug:SLAVE='")+(recording?"dsnoop":"dmix")+suffix+"'";
+    }
+    if(exclusive)
+        throw Error("exclusive audio cannot resolve hardware for '"+requested+"'; choose default or an explicit hw/plughw card");
+    if(kind=="front" || kind=="rear" || kind=="center_lfe" || kind=="side" || kind=="hdmi" || kind=="iec958" || kind.starts_with("surround"))
+        throw Error("shared audio cannot resolve hardware for '"+requested+"'; choose default, PipeWire/PulseAudio, or an explicit hw/plughw card");
+    // An explicitly configured alias owns its routing policy, just as default
+    // does. Never fall back from a missing/busy alias to another endpoint.
+    return requested;
+}
 // ALSA is resolved at runtime. File/simulation operation needs no audio library.
 struct Alsa {
     void* library=nullptr;
@@ -203,7 +263,7 @@ std::vector<Device> devices() {
     if(hints) api.free_hint(hints);
     return result;
 }
-void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop,StreamFormatCallback on_format,ChannelMode channels) {
+static void playback_device(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop,StreamFormatCallback on_format,ChannelMode channels,double gain) {
     check_cancelled(stop);
     if(!next_samples)throw Error("playback callback is required");
     Alsa api; Stream stream(api,device,0,rate);
@@ -218,7 +278,7 @@ void playback(std::uint32_t rate,const std::string& device,const PlaybackCallbac
         const auto count=source.read(samples);
         if(count>samples.size())throw Error("playback callback returned invalid sample count");
         if(!count)break;
-        playback_pcm(std::span<const float>(samples.data(),count),block,stream.channels,channels);
+        playback_pcm(std::span<const float>(samples.data(),count),block,stream.channels,channels,gain);
         std::size_t offset=0;
         while(offset<count) {
             check_cancelled(stop);
@@ -246,7 +306,7 @@ std::vector<float> record(double seconds,std::uint32_t rate,const std::string& d
     },stop,std::move(on_format));
     return samples;
 }
-void capture(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop,StreamFormatCallback on_format) {
+static void capture_device(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop,StreamFormatCallback on_format) {
     check_cancelled(stop);
     if(!on_chunk) throw Error("capture callback is required");
     Alsa api; Stream stream(api,device,1,rate,true);
@@ -278,6 +338,7 @@ void capture(std::uint32_t rate,const std::string& device,const CaptureCallback&
 }
 #else
 namespace {
+std::string selected_endpoint(const std::string& device,bool,bool) {return device;}
 WAVEFORMATEX format(std::uint32_t rate,unsigned channels) {
     if(rate<8000 || rate>384000) throw Error("invalid audio sample rate");
     WAVEFORMATEX f{};f.wFormatTag=WAVE_FORMAT_PCM;f.nChannels=static_cast<WORD>(channels);f.nSamplesPerSec=rate;
@@ -390,7 +451,7 @@ std::vector<Device> devices() {
         if(waveOutGetDevCapsA(i,&caps,sizeof(caps))==MMSYSERR_NOERROR) result.push_back({std::to_string(i),std::string("Output: ")+caps.szPname});}
     return result;
 }
-void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop,StreamFormatCallback on_format,ChannelMode channels) {
+static void playback_device(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop,StreamFormatCallback on_format,ChannelMode channels,double gain) {
     check_cancelled(stop);
     if(!next_samples)throw Error("playback callback is required");
     WaveSession session(false,rate,device);
@@ -408,7 +469,7 @@ void playback(std::uint32_t rate,const std::string& device,const PlaybackCallbac
         check_cancelled(stop);
         if(count>samples.size())throw Error("playback callback returned invalid sample count");
         if(!count){finished=true;return;}
-        playback_pcm(std::span<const float>(samples.data(),count),session.pcm[slot],session.channels,channels);
+        playback_pcm(std::span<const float>(samples.data(),count),session.pcm[slot],session.channels,channels,gain);
         auto& header=session.headers[slot];
         header.dwBufferLength=static_cast<DWORD>(count*session.channels*sizeof(std::int16_t));
         // The other buffer may finish while the producer computes this block.
@@ -446,7 +507,7 @@ std::vector<float> record(double seconds,std::uint32_t rate,const std::string& d
     },stop,std::move(on_format));
     return result;
 }
-void capture(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop,StreamFormatCallback on_format) {
+static void capture_device(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop,StreamFormatCallback on_format) {
     check_cancelled(stop);
     if(!on_chunk) throw Error("capture callback is required");
     WaveSession session(true,rate,device);
@@ -480,6 +541,20 @@ void capture(std::uint32_t rate,const std::string& device,const CaptureCallback&
 }
 
 #endif
+void capture(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop,StreamFormatCallback on_format) {
+    capture_device(rate,device,on_chunk,stop,std::move(on_format));
+}
+void capture(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop,StreamFormatCallback on_format,Options options) {
+    check_cancelled(stop);validate_options(options);
+    capture_device(rate,selected_endpoint(device,true,options.exclusive),on_chunk,stop,std::move(on_format));
+}
+void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop,StreamFormatCallback on_format,ChannelMode channels) {
+    playback_device(rate,device,next_samples,stop,std::move(on_format),channels,1.0);
+}
+void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop,StreamFormatCallback on_format,ChannelMode channels,Options options) {
+    check_cancelled(stop);validate_options(options);
+    playback_device(rate,selected_endpoint(device,false,options.exclusive),next_samples,stop,std::move(on_format),channels,options.transmit_gain);
+}
 void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop,StreamFormatCallback on_format,bool mono) {
     playback(rate,device,next_samples,stop,std::move(on_format),output_channels(mono));
 }
@@ -495,5 +570,27 @@ void play(std::span<const float> samples,std::uint32_t rate,const std::string& d
         std::copy_n(samples.begin()+static_cast<std::ptrdiff_t>(offset),count,chunk.begin());
         offset+=count;return count;
     },stop,std::move(on_format),channels);
+}
+void play(std::span<const float> samples,std::uint32_t rate,const std::string& device,std::stop_token stop,StreamFormatCallback on_format,ChannelMode channels,Options options) {
+    check_cancelled(stop);validate_options(options);
+    for(const auto sample:samples)if(!std::isfinite(sample))throw Error("nonfinite transmit sample");
+    std::size_t offset=0;
+    playback(rate,device,[&](std::span<float> chunk) {
+        const auto count=std::min(chunk.size(),samples.size()-offset);
+        std::copy_n(samples.begin()+static_cast<std::ptrdiff_t>(offset),count,chunk.begin());
+        offset+=count;return count;
+    },stop,std::move(on_format),channels,options);
+}
+std::vector<float> record(double seconds,std::uint32_t rate,const std::string& device,std::size_t memory_limit,std::stop_token stop,StreamFormatCallback on_format,Options options) {
+    check_cancelled(stop);validate_options(options);
+    std::vector<float> samples(sample_count(seconds,rate,memory_limit));
+    if(samples.empty())return samples;
+    std::size_t offset=0;
+    capture(rate,device,[&](std::span<const float> chunk) {
+        const auto count=std::min(chunk.size(),samples.size()-offset);
+        std::copy_n(chunk.begin(),count,samples.begin()+static_cast<std::ptrdiff_t>(offset));
+        offset+=count;return offset<samples.size();
+    },stop,std::move(on_format),options);
+    return samples;
 }
 }

@@ -79,6 +79,41 @@ const ui::Control& action(ui::Command command) {
     for(const auto& c:ui::console_screen())if(c.command==command)return c;
     throw Error("Missing shared fast action");
 }
+void audio_settings() {
+    using F=ui::Field;
+    fast_ui::Controller controller([] {return false;});
+    check(control(F::fast_device).kind==ui::Kind::choice&&controller.field(F::fast_device).selected=="default",
+          "Fast audio device is not a dropdown with the system default");
+    controller.set_devices({{"first","First interface"},{"second","Second interface"}});
+    controller.select(F::fast_device,"second");
+    check(controller.field(F::fast_device).selected=="second"&&controller.field(F::fast_device).text=="second",
+          "Fast device dropdown ignored an enumerated interface");
+    controller.edit(F::fast_device,"custom-interface");controller.set_devices({{"first","First interface"}});
+    check(controller.field(F::fast_device).selected=="custom-interface"&&
+          controller.field(F::fast_device).options.back().id=="custom-interface",
+          "Fast enumeration discarded a selected custom device");
+    controller.select(F::fast_device,"unknown");
+    check(controller.field(F::fast_device).selected=="custom-interface","Fast dropdown accepted an unknown device");
+    const std::vector<std::string> volumes={"0.01","0.1","0.5","1","2","3","4","5","10","20","30","40","50","60","70","75","80","85","90","95","100","105","110","115","125","150","175"};
+    const auto& volume=controller.field(F::fast_volume);
+    check(volume.selected=="100"&&volume.options.size()==volumes.size(),"Fast volume default or list changed");
+    for(std::size_t i=0;i<volumes.size();++i) {
+        check(volume.options[i].id==volumes[i]&&volume.options[i].label==volumes[i]+"%","Fast volume choices differ from requested percentages");
+        controller.select(F::fast_volume,volumes[i]);
+        check(volume.selected==volumes[i],"Fast volume selection ignored");
+    }
+    check(!controller.field(F::fast_exclusive).checked&&controller.field(F::fast_exclusive).enabled==audio::exclusive_supported(),
+          "Fast exclusive access default or platform support is incorrect");
+    controller.toggle(F::fast_exclusive,true);
+    check(controller.field(F::fast_exclusive).checked==audio::exclusive_supported(),"Fast exclusive override ignored its platform support");
+    controller.edit(F::fast_text,"pending TX");controller.activate(ui::Command::fast_transmit);
+    for(const auto field:{F::fast_device,F::fast_volume,F::fast_exclusive})
+        check(!controller.field(field).enabled,"Fast pending transmit did not lock audio settings");
+    controller.select(F::fast_volume,"100");controller.toggle(F::fast_exclusive,false);
+    check(volume.selected=="175"&&controller.field(F::fast_exclusive).checked==audio::exclusive_supported(),
+          "Fast pending transmit accepted stale audio settings callbacks");
+    controller.close();
+}
 void message_submit_shortcut() {
     using F=ui::Field;using C=ui::Command;
     Application app({.simulation=true});
@@ -654,6 +689,6 @@ void regular_work_keeps_polling() {
 }
 }
 int main() {
-    try {rate_and_spectrum_presentation();damaged_reception_presentation();snr_and_symbol_rate_controls();message_submit_shortcut();presentation_and_retention();service_generations();retained_key_and_result_presentation();live_plot_presentation();unsynchronized_plot_presentation();regular_work_keeps_polling();std::cout<<"Fast GUI isolation tests passed\n";}
+    try {audio_settings();rate_and_spectrum_presentation();damaged_reception_presentation();snr_and_symbol_rate_controls();message_submit_shortcut();presentation_and_retention();service_generations();retained_key_and_result_presentation();live_plot_presentation();unsynchronized_plot_presentation();regular_work_keeps_polling();std::cout<<"Fast GUI isolation tests passed\n";}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

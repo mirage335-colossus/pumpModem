@@ -17,6 +17,8 @@ using namespace std::chrono_literals;
 namespace fixture {
 std::atomic<unsigned> opened=0,active=0,played=0;
 std::atomic<audio::ChannelMode> last_channels=audio::ChannelMode::stereo;
+std::atomic<double> last_gain=1.0;
+std::atomic<bool> last_exclusive=false;
 std::mutex mutex;
 std::vector<float> input;
 std::vector<float> output;
@@ -58,6 +60,14 @@ void playback(std::uint32_t rate,const std::string&,const PlaybackCallback& sour
         {std::lock_guard lock(fixture::mutex);if(fixture::record)fixture::output.insert(fixture::output.end(),block.begin(),block.begin()+static_cast<std::ptrdiff_t>(n));}
         std::this_thread::sleep_for(3ms);
     }
+}
+void capture(std::uint32_t rate,const std::string& device,const CaptureCallback& consume,std::stop_token stop,StreamFormatCallback format,Options options) {
+    fixture::last_gain=options.transmit_gain;fixture::last_exclusive=options.exclusive;
+    capture(rate,device,consume,stop,std::move(format));
+}
+void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& source,std::stop_token stop,StreamFormatCallback format,ChannelMode channels,Options options) {
+    fixture::last_gain=options.transmit_gain;fixture::last_exclusive=options.exclusive;
+    playback(rate,device,source,stop,std::move(format),channels);
 }
 }
 namespace {
@@ -109,11 +119,15 @@ void fast_cancel() {
     const auto before=fixture::played.load();session.transmit(path);
     await([&]{return fixture::played>before;},"fast playback did not start");
     check(fixture::last_channels.load()==audio::ChannelMode::left_mono,"Session lost default cable left output routing");
+    check(fixture::last_gain==1.0&&!fixture::last_exclusive,"Fast default changed output volume or required exclusive audio");
     bool blocked=false;try{session.configure(s);}catch(const Error&){blocked=true;}
     check(blocked,"active fast settings changed midstream");session.cancel();
     await([&]{return !session.active();},"fast cancellation did not release audio");
     auto result=session.poll();check(result.cancelled&&!result.complete&&!result.physical_complete&&!result.file,"cancelled fast TX claimed reception");
-    fixture::reset({},true);session.listen();await([]{return fixture::active>0;},"fast capture did not start");session.close();
+    s.transmit_gain=.0001;s.exclusive=audio::exclusive_supported();session.configure(s);
+    fixture::reset({},true);session.listen();await([]{return fixture::active>0;},"fast capture did not start");
+    check(fixture::last_gain==s.transmit_gain&&fixture::last_exclusive==s.exclusive,"Fast capture lost selected audio options");
+    session.close();
     await([&]{return session.ready_to_close();},"fast shutdown blocked");
     result=session.poll();check(!result.complete&&!result.physical_complete&&!result.file,"capture cancellation manufactured completion");
 }
@@ -123,6 +137,7 @@ void text_audio_roundtrip() {
         fast::Settings s;s.device="fixture";s.profile.interleave_depth=1;
         s.channel_mode=encrypted?audio::ChannelMode::right_mono:audio::ChannelMode::stereo;
         s.mono=encrypted; // Explicit local routing overrides stay usable.
+        s.transmit_gain=encrypted?1.75:.1;s.exclusive=encrypted&&audio::exclusive_supported();
         if(encrypted)s.key=Crypto(Bytes(32,37));
         fixture::reset({},true,true);
         const auto path=std::filesystem::temp_directory_path()/("datapump-fast-session-file-"+
@@ -136,6 +151,7 @@ void text_audio_roundtrip() {
         await([&]{return !tx.active();},"text audio TX did not finish");
         const auto sent=tx.poll();
         check(fixture::last_channels.load()==audio::output_channels(s.mono,s.channel_mode),"Session ignored explicit local output routing");
+        check(fixture::last_gain==s.transmit_gain&&fixture::last_exclusive==s.exclusive,"Fast playback lost selected gain or exclusive access");
         check(sent.error.empty()&&sent.source_bytes==text.size()&&sent.encrypted==encrypted,
               "text audio source or encryption selection changed");
         check(sent.estimated_seconds>6.25&&sent.transmit_fraction==1,"TX estimate and terminal progress missing");

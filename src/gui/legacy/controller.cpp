@@ -2,6 +2,7 @@
 #include "screen.hpp"
 #include "presentation.hpp"
 #include "plots.hpp"
+#include "../audio_controls.hpp"
 #include <array>
 #include <optional>
 #include <stdexcept>
@@ -27,11 +28,18 @@ struct Controller::Impl {
         f(F::legacy_squelch).selected="normal";
         f(F::legacy_mono).options={{"left","Left mono"},{"right","Right mono"},{"stereo","Stereo"}};
         f(F::legacy_mono).selected="left";
+        f(F::legacy_device).selected=f(F::legacy_device).text="default";
+        f(F::legacy_device).options={{"default","Default audio device"}};
+        f(F::legacy_volume).options=audio_controls::volume_options();
+        f(F::legacy_volume).selected="100";
         f(F::legacy_status).text="Select Legacy Modem to receive.";
+        refresh();
     }
     void refresh() {
         const bool edit=!closing&&!snapshot.transmitting&&!pending_tx&&!cancelling;
         f(F::legacy_profile).enabled=edit;f(F::legacy_carrier).enabled=edit;f(F::legacy_squelch).enabled=edit;f(F::legacy_mono).enabled=edit;
+        f(F::legacy_device).enabled=edit;f(F::legacy_volume).enabled=edit;
+        f(F::legacy_exclusive).enabled=edit&&audio::exclusive_supported();
         f(F::legacy_text).enabled=!closing;
     }
     void changed_settings() {
@@ -100,11 +108,21 @@ void Controller::poll() {
 void Controller::close() {auto& p=*impl_;p.closing=true;p.selected=false;p.pending_tx.reset();p.session.close();p.refresh();++p.revision;}
 bool Controller::ready_to_close() const {return impl_->closing&&impl_->session.ready_to_close();}
 bool Controller::active() const {return impl_->session.active()||impl_->pending_tx.has_value();}
+void Controller::set_devices(const std::vector<audio::Device>& devices) {
+    auto& p=*impl_;audio_controls::set_device_options(p.f(F::legacy_device),devices);++p.revision;
+}
 void Controller::edit(F field,std::string value) {
     auto& p=*impl_;if(p.closing||!p.f(field).enabled||p.f(field).text==value)return;
     if(field==F::legacy_text) {
         if(const auto error=ui::edit_error(value,true,legacy::text_byte_limit);!error.empty()) {report_error(error);return;}
         p.text.edited(value);p.f(field).text=std::move(value);++p.revision;
+    } else if(field==F::legacy_device) {
+        if(const auto error=ui::edit_error(value,false,4096);!error.empty()) {report_error(error);return;}
+        p.settings.device=value;p.f(field).selected=value;p.f(field).text=std::move(value);
+        auto& options=p.f(field).options;
+        if(!p.f(field).selected.empty()&&std::none_of(options.begin(),options.end(),[&](const auto& option){return option.id==p.f(field).selected;}))
+            options.push_back({p.f(field).selected,p.f(field).selected});
+        p.changed_settings();p.refresh();
     } else if(field==F::legacy_carrier) {
         if(const auto error=ui::edit_error(value,false,32);!error.empty()) {report_error(error);return;}
         p.f(field).text=std::move(value);p.valid=false;
@@ -119,7 +137,17 @@ void Controller::edit(F field,std::string value) {
     }
 }
 void Controller::select(F field,std::string value) {
-    auto& p=*impl_;if((field!=F::legacy_profile&&field!=F::legacy_squelch&&field!=F::legacy_mono)||p.closing||!p.f(field).enabled||value==p.f(field).selected)return;
+    auto& p=*impl_;if((field!=F::legacy_profile&&field!=F::legacy_squelch&&field!=F::legacy_mono&&field!=F::legacy_device&&field!=F::legacy_volume)||p.closing||!p.f(field).enabled||value==p.f(field).selected)return;
+    const auto& options=p.f(field).options;
+    if(std::none_of(options.begin(),options.end(),[&](const auto& option){return option.id==value&&option.enabled;}))return;
+    if(field==F::legacy_device) {
+        p.settings.device=value;p.f(field).text=value;p.f(field).selected=std::move(value);
+        p.changed_settings();p.refresh();return;
+    }
+    if(field==F::legacy_volume) {
+        p.settings.transmit_gain=audio_controls::volume_gain(value);p.f(field).selected=std::move(value);
+        ++p.revision;return;
+    }
     if(field==F::legacy_mono) {
         if(value!="left"&&value!="right"&&value!="stereo")return;
         p.settings.mono=value!="stereo";
@@ -139,6 +167,11 @@ void Controller::select(F field,std::string value) {
     try {legacy::validate(config);}
     catch(const std::exception& e) {report_error(e.what());return;}
     p.settings.config=config;p.f(field).selected=std::move(value);p.changed_settings();
+}
+void Controller::toggle(F field,bool value) {
+    auto& p=*impl_;
+    if(field!=F::legacy_exclusive||p.closing||!p.f(field).enabled||p.f(field).checked==value)return;
+    p.settings.exclusive=value;p.f(field).checked=value;p.changed_settings();p.refresh();
 }
 void Controller::activate(C command) {
     if(!enabled(command))return;

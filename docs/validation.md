@@ -4,6 +4,27 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Audio device sharing and transmit volume — 23 September 2026
+
+The GUI candidate adds per-modem playback volume (0.01–175%, default 100%), an
+explicit Linux Exclusive checkbox, and enumerated Fast/Legacy device dropdowns.
+The unity-gain path keeps the previous PCM conversion expression. Gain is applied
+after resampling and before hardware clipping; modem normalization, received PCM,
+simulation, exported WAV data and wire framing remain unchanged. Named system
+routes retain their configuration; explicit hardware cards use dmix/dsnoop with
+Exclusive off. Failed shared opens never select raw hardware. WinMM does not
+provide exclusive access, so its toggle is disabled.
+
+The native application builds locally. Focused controller/layout checks pass,
+along with the ALSA and Windows driver fixtures, Fast/Legacy session tests and
+Legacy live/controller lifecycle checks. Independent PCM vectors and old/new
+comparisons cover unity output, attenuation, boost/clipping, channel routing and
+resampling. Shared-open fixtures exercise simultaneous capture and busy raw
+endpoints; controller fixtures retain reception during volume changes and close
+capture before device/access changes. Full candidate validation is pending and
+will be recorded below after the required workflows finish. No physical
+two-process audio test or new portable release is claimed by these fixtures.
+
 ## CI cleanup and Windows graphics coverage — 23 September 2026
 
 Following the recorded sanitizer throughput diagnosis below, native CI now makes

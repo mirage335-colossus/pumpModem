@@ -1,6 +1,7 @@
 #pragma once
 #include "../ui_contract.hpp"
 #include "../bitmap.hpp"
+#include "datapump/audio.hpp"
 #include <functional>
 #include <memory>
 namespace datapump::gui::fast_ui {
@@ -14,6 +15,7 @@ public:
     // Selected Fast mode keeps receiving until explicitly paused.
     void set_selected(bool selected);
     void set_shellcode_mode(bool enabled);
+    void set_devices(const std::vector<audio::Device>& devices);
     void close();
     bool ready_to_close() const;
     bool active() const;

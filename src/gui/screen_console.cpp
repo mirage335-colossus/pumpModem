@@ -101,6 +101,8 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.help="Click to expand the QR code to fill the window. Click again or press Escape to restore its original size.";
     }
     if(slot==Slot::mono)control.help="Choose Left mono (default), Right mono, or Stereo. Mono devices use their sole channel.";
+    if(slot==Slot::volume)control.help=transmit_volume_help;
+    if(slot==Slot::exclusive)control.help=exclusive_audio_help;
     if(slot==Slot::bandwidth)control.help="Nominal modem rate, 0.01 Hz through 30 MHz; occupied bandwidth depends on the waveform. Decimal Hz values are accepted. Chip rate is half this value; narrower rates make chips and symbols longer and require tighter frequency stability. Defaults to 3.6 kHz with a 1.5 kHz carrier. Changing Rate resets Carrier to the recommended frequency; edit Carrier afterward to choose another frequency.";
     if(slot==Slot::carrier)control.help="Audio carrier frequency. The dropdown offers the current rate's default carrier and center frequency (half the rate): 1.5 kHz and 1.8 kHz at the 3.6 kHz rate. Manual entry accepts Hz, kHz or MHz. Your choice applies to transmit and receive and stays selected until Rate changes. Some pattern or tone modes require a higher carrier.";
     if(slot==Slot::snr)control.help="Design C/N0 in a 1 Hz noise bandwidth for text of 1–16 source bytes inclusive and exact raw bits, default 32 dB-Hz. Counts UTF-8 and any callsign/grid/Repeatable text. Automatic modes use lower targets for longer integration; higher targets select shorter patterns subject to the minimum pattern length. This is not an enforced minimum received signal strength. The link budget sets channel C/N0 independently, and longer symbols remain limited by clock/phase drift. Changing either transmit target to a valid value resets RX targets to both distinct current targets; RX targets can then be edited independently. Automatic modes choose a nearby clock/RAM fit at every target, preferring an equal or weaker target. Typing keeps your text; the label shows any adjustment. Enter or a preset displays the exact selected value.";
@@ -212,6 +214,8 @@ const std::vector<Control>& console_screen() {
         placed({Kind::action,Field::count,Command::zoom_out,Bitmap::none,Page::console,13,"Zoom out"}, Slot::zoom_out),
         placed({Kind::action,Field::count,Command::reset_zoom,Bitmap::none,Page::console,13,"Reset zoom"}, Slot::reset_zoom),
         placed({Kind::choice,Field::mono,Command::none,Bitmap::none,Page::console,14,""}, Slot::mono),
+        placed({Kind::choice,Field::volume,Command::none,Bitmap::none,Page::console,14,"TX volume"}, Slot::volume),
+        placed({Kind::toggle,Field::exclusive,Command::none,Bitmap::none,Page::console,14,"Exclusive"}, Slot::exclusive),
         placed({Kind::label,Field::diagnostics,Command::none,Bitmap::none,Page::console,14,""}, Slot::diagnostics),
         placed({Kind::label,Field::status,Command::none,Bitmap::none,Page::console,15,""}, Slot::status),
         placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::compression,0,

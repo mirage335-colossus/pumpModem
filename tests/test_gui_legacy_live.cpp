@@ -16,10 +16,13 @@ std::size_t position=0;
 std::atomic<int> inputs=0,outputs=0,capture_starts=0;
 std::atomic<bool> overlap=false;
 std::atomic<datapump::audio::ChannelMode> channels=datapump::audio::ChannelMode::stereo;
+std::atomic<double> gain=1.0;
+std::atomic<bool> exclusive=false;
+std::string device;
 }
 namespace datapump::audio {
 void capture(std::uint32_t rate,const std::string&,const CaptureCallback& consume,std::stop_token stop,StreamFormatCallback format) {
-    ++fixture::capture_starts;++fixture::inputs;if(fixture::outputs)fixture::overlap=true;
+    ++fixture::capture_starts;++fixture::inputs;if(fixture::outputs||fixture::inputs>1)fixture::overlap=true;
     if(format)format({rate,rate,3900,4096});
     while(!stop.stop_requested()) {
         std::vector<float> block;
@@ -41,6 +44,18 @@ void playback(std::uint32_t rate,const std::string&,const PlaybackCallback& sour
         std::this_thread::sleep_for(1ms);
     }
     --fixture::outputs;
+}
+void capture(std::uint32_t rate,const std::string& device,const CaptureCallback& consume,std::stop_token stop,StreamFormatCallback format,Options options) {
+    validate_options(options);
+    fixture::gain=options.transmit_gain;fixture::exclusive=options.exclusive;
+    {std::lock_guard lock(fixture::mutex);fixture::device=device;}
+    capture(rate,device,consume,stop,std::move(format));
+}
+void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& source,std::stop_token stop,StreamFormatCallback format,ChannelMode channels,Options options) {
+    validate_options(options);
+    fixture::gain=options.transmit_gain;fixture::exclusive=options.exclusive;
+    {std::lock_guard lock(fixture::mutex);fixture::device=device;}
+    playback(rate,device,source,stop,std::move(format),channels);
 }
 }
 void check(bool value,const char* why){if(!value)throw std::runtime_error(why);}
@@ -81,6 +96,19 @@ int main() {
         controller.set_shellcode_mode(false);
         check(controller.field(F::legacy_transcript).text==displayed_received,"Legacy controller retained shellcode after disabling it");
         check(controller.bitmap_revision()>1,"Sampled RX did not update waterfall");
+        check(fixture::gain==1.0&&!fixture::exclusive,"Legacy GUI defaults changed volume or required exclusive audio");
+        auto opens=fixture::capture_starts.load();
+        controller.select(F::legacy_volume,"175");
+        for(unsigned i=0;i<5;++i) {controller.poll();std::this_thread::sleep_for(2ms);}
+        check(fixture::capture_starts==opens&&fixture::inputs==1,"Changing Legacy transmit volume restarted reception");
+        controller.set_devices({{"second","Second interface"}});controller.select(F::legacy_device,"second");
+        until(controller,"switching capture devices",[&]{return fixture::capture_starts==opens+1&&fixture::inputs==1;});
+        {std::lock_guard lock(fixture::mutex);check(fixture::device=="second","Legacy selected device did not reach capture");}
+        if(audio::exclusive_supported()) {
+            ++opens;controller.toggle(F::legacy_exclusive,true);
+            until(controller,"changing exclusive access",[&]{return fixture::capture_starts==opens+1&&fixture::inputs==1;});
+            check(fixture::exclusive,"Legacy exclusive override did not reach capture");
+        }
         controller.edit(F::legacy_text,sent);controller.activate(C::legacy_transmit);
         check(controller.command_label()=="Cancel"&&controller.enabled(C::legacy_transmit),"Queued TX cannot be cancelled");
         bool partial=false,appended=false;
@@ -93,6 +121,7 @@ int main() {
             return appended&&controller.field(F::legacy_text).text==later&&fixture::outputs==0&&fixture::inputs==1;
         });
         check(partial,"Legacy did not expose TX characters during playback");
+        check(fixture::gain==1.75&&fixture::exclusive==audio::exclusive_supported(),"Legacy selected volume/access did not reach playback");
         check(controller.field(F::legacy_transcript).text==displayed_received+"\n\n\n"+sent+"\n","Live RX/TX transcript lost safe received text or local transmission separators");
         check(controller.command_label()=="Transmit","Completed TX retained Cancel button");
         check(!fixture::overlap,"Legacy GUI overlapped TX and RX");

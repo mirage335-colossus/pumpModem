@@ -12,10 +12,12 @@ Control placed(Kind kind,Field field,Command command,const char* label,Slot slot
     case Slot::fast_tracking:case Slot::fast_correction:case Slot::fast_auth:case Slot::fast_detail:
         c.page=Page::fast_modem;c.developer_only=true;break;
     case Slot::clear:case Slot::fast_airtime:case Slot::fast_device:case Slot::fast_profile:
-    case Slot::fast_expected_snr:case Slot::fast_mono:case Slot::fast_diagnostics:
+    case Slot::fast_expected_snr:case Slot::fast_mono:case Slot::fast_volume:case Slot::fast_exclusive:case Slot::fast_diagnostics:
         c.persistent=true;break;
     default:break;
     }
+    c.open_upward=slot==Slot::fast_device||slot==Slot::fast_profile||slot==Slot::fast_expected_snr||
+        slot==Slot::fast_mono||slot==Slot::fast_volume;
     return c;
 }
 Control plot(Bitmap bitmap,const char* label,Slot slot,const char* help) {
@@ -35,8 +37,10 @@ const std::vector<Control>& screen() {
         placed(Kind::choice,Field::fast_coding,Command::none,"Inner error correction",Slot::fast_coding),
         placed(Kind::choice,Field::fast_depth,Command::none,"Interleave depth",Slot::fast_depth,"More blocks spread brief disturbances; fewer blocks reduce short-message latency. Both peers must match."),
         placed(Kind::choice,Field::fast_fec,Command::none,"Interleaved Reed–Solomon",Slot::fast_fec),
-        placed(Kind::text,Field::fast_device,Command::none,"Audio device",Slot::fast_device),
+        placed(Kind::choice,Field::fast_device,Command::none,"Audio device",Slot::fast_device),
         placed(Kind::choice,Field::fast_mono,Command::none,"",Slot::fast_mono,"Choose Left mono (default), Right mono, or Stereo. Mono devices use their sole channel."),
+        placed(Kind::choice,Field::fast_volume,Command::none,"TX volume",Slot::fast_volume,transmit_volume_help),
+        placed(Kind::toggle,Field::fast_exclusive,Command::none,"Exclusive",Slot::fast_exclusive,exclusive_audio_help),
         placed(Kind::toggle,Field::fast_encryption,Command::none,"Encryption",Slot::fast_encryption,"Off sends public data with a checksum. On requires matching keys at both ends; there is no fallback."),
         placed(Kind::choice,Field::fast_key,Command::none,"Encryption key entry",Slot::fast_key),
         placed(Kind::action,Field::count,Command::fast_open_key,"Open keyfile…",Slot::fast_open_key),
