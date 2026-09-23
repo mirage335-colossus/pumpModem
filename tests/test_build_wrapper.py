@@ -146,6 +146,19 @@ if os.environ.get("FAIL_STEP") == ("build" if "--build" in sys.argv else "config
         self.assertIn("--no-tests=error", calls[2])
         self.assertEqual(calls[2][calls[2].index("--parallel") + 1], "3")
 
+    def test_fail_fast_is_opt_in_and_keeps_the_complete_group(self):
+        _, calls = self.run_wrapper("test", "contract", "--stop-on-failure")
+        self.assertIn("datapump-tests-contract", calls[1])
+        self.assertIn("--stop-on-failure", calls[2])
+        self.assertIn("^contract$", calls[2])
+        self.log.unlink()
+        _, calls = self.run_wrapper("test", "contract")
+        self.assertNotIn("--stop-on-failure", calls[2])
+
+    def test_fail_fast_rejects_non_test_commands(self):
+        _, calls = self.run_wrapper("package", "--stop-on-failure", success=False)
+        self.assertEqual(calls, [])
+
     def test_all_tests_exclude_native_display(self):
         _, calls = self.run_wrapper("test", "all")
         self.assertIn("-DDATAPUMP_TEST_NATIVE_GUI=OFF", calls[0])

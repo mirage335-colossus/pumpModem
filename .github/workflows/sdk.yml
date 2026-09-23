@@ -9,6 +9,8 @@ on:
       - 'third_party/rev/**'
       - 'src/gui/*rev*'
       - 'tools/build-sdk.py'
+      - 'tools/install-release-cmake.sh'
+      - 'tools/release-cmake.sha256'
       - 'tools/prepare_rev.py'
       - 'tools/package-native.cmake'
       - 'tools/gui-smoke-timeout.cmake'
@@ -31,6 +33,8 @@ on:
       - 'third_party/rev/**'
       - 'src/gui/*rev*'
       - 'tools/build-sdk.py'
+      - 'tools/install-release-cmake.sh'
+      - 'tools/release-cmake.sha256'
       - 'tools/prepare_rev.py'
       - 'tools/package-native.cmake'
       - 'tools/gui-smoke-timeout.cmake'
@@ -195,7 +199,7 @@ jobs:
       - name: Install runtime inspection and display tools only
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends ca-certificates git cmake binutils xvfb xauth fonts-dejavu-core fontconfig-config libgl1 libopengl0 libgl1-mesa-dri libxtst6
+          apt-get install -y --no-install-recommends ca-certificates curl git cmake binutils xvfb xauth fonts-dejavu-core fontconfig-config libgl1 libopengl0 libgl1-mesa-dri libxtst6
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -203,6 +207,10 @@ jobs:
         with:
           name: DataPump-SDK-${{ matrix.backend }}-Linux-x86_64-glibc-2.36
           path: downloaded
+      - name: Use the pinned dependency scanner with inherited RPATH support
+        run: |
+          sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
+          echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
       - name: Verify the identical archives on this distribution
         run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/downloaded" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=300 -DMAX_GLIBC=2.36 -P tools/verify-native-archives.cmake
 

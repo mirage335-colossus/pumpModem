@@ -170,3 +170,11 @@ local verification and runtime requirements.
 
 Pull requests changing release automation exercise the Ubuntu 22.04 build path
 without publishing. Manual dispatch defaults to the source SDK path.
+
+Release Linux builders and compatibility jobs use checksum-pinned CMake 3.31.10
+from Kitware for dependency inspection. Older CMake versions can lose inherited
+executable RPATHs during recursive scans and falsely report conflicts with host
+X11/font libraries. This is a host-tool upgrade: the application still compiles
+against the selected glibc baseline, and host dependency rejection remains strict.
+Release tests stop after the first failed suite for prompt feedback; successful
+runs execute the full contract, GUI and packaging selections.

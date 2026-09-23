@@ -23,6 +23,12 @@ find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
 find_package(Threads REQUIRED)
 include(cmake/VendoredLzma.cmake)
 add_library(datapump src/crypto.cpp src/stream_codec.cpp src/recovery.cpp src/attachment.cpp src/boundary_sync.cpp src/compression_short.cpp src/compression_lzma.cpp src/modem.cpp src/streaming_modem.cpp src/pattern_code.cpp src/pattern_receiver.cpp src/pattern_correlator.cpp src/search_parallel.cpp src/channel.cpp src/runtime.cpp src/audio.cpp src/resampler.cpp src/qr.cpp src/transfer.cpp src/tuning.cpp src/live.cpp src/signal_view.cpp third_party/qrcodegen/qrcodegen.cpp)
+# Scalar, cached and batched receiver paths must preserve identical arithmetic.
+# AArch64 can fuse multiply/add by default where generic x86-64 cannot. Keep
+# separate rounding in both the library and its independent reference tests.
+if(CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang)$")
+  target_compile_options(datapump PUBLIC "$<$<COMPILE_LANGUAGE:CXX>:-ffp-contract=off>")
+endif()
 target_sources(datapump PRIVATE src/pattern_correlator_batch.cpp src/pattern_fft_batch.cpp src/simulation_estimate.cpp src/lpi_estimate.cpp src/pattern_search.cpp src/correlation_experiment.cpp)
 target_sources(datapump PRIVATE src/receiver_probability.cpp src/receiver_probability_differential.cpp)
 target_include_directories(datapump PUBLIC include)

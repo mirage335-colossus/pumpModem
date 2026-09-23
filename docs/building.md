@@ -68,7 +68,9 @@ application downloads are documented in [manual portable releases](releases.md).
 Native sanitizer/CLI/Rev combinations use distinct directories. `--jobs N`
 controls build and test concurrency (default 2); `DATAPUMP_JOBS` or
 `CMAKE_BUILD_PARALLEL_LEVEL` can set that default. Prefer a modest limit on
-memory-constrained hosts. Native GUI tests must have a display, preferably an
+memory-constrained hosts. Use `--stop-on-failure` with `test` or `sanitize` for early CI feedback after a
+failure; successful runs still execute the entire selected group.
+Native GUI tests must have a display, preferably an
 isolated Xvfb session; `./build.sh test native` builds and runs them explicitly.
 Run native workflow checks separately from other heavy test/build processes:
 their measured replay-frame assertions are sensitive to CPU contention.
@@ -178,6 +180,11 @@ tests but do not compile them. For individual work, existing targets such as
 `test_compression_short` continue to work.
 
 ## Compile-time policy
+
+GNU/Clang builds disable implicit fused multiply/add contraction in the modem
+library and its consumers. This preserves exact scalar, cached and batched
+receiver equivalence on ARM64 as well as generic x86-64; the independent
+reference assertions remain unchanged.
 
 When available, ccache is enabled through CMake's compiler launchers. Existing
 explicit launchers take precedence. Disable auto-detection with

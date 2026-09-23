@@ -15,6 +15,7 @@ Usage: ./build.sh [build|test GROUP|sanitize [GROUP]|package] [OPTIONS] [-- CMAK
   --cli                Omit the native GUI (shared GUI tests remain available).
   --backend fltk|rev   Select a GUI backend; Rev needs its own suitable toolchain.
   --jobs N, -j N       Parallel build/test limit (default: 2).
+  --stop-on-failure   Stop a test run after its first failed test (CI feedback).
   --build-dir PATH     Separate output tree, e.g. for another compiler/toolchain.
   --sdk PATH           Use a prepared source SDK; keep host dependencies separate.
   --help, -h           Show this help.
@@ -41,10 +42,12 @@ cli=no
 jobs=${DATAPUMP_JOBS:-${CMAKE_BUILD_PARALLEL_LEVEL:-2}}
 build_dir=
 sdk_root=
+stop_on_failure=no
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --help|-h) usage; exit 0 ;;
         --cli) cli=yes; shift ;;
+        --stop-on-failure) stop_on_failure=yes; shift ;;
         --backend) need_value "$@"; backend=$2; backend_explicit=yes; shift 2 ;;
         --jobs|-j) need_value "$@"; jobs=$2; shift 2 ;;
         --build-dir) need_value "$@"; build_dir=$2; shift 2 ;;
@@ -81,6 +84,7 @@ if [ -n "$group" ]; then
         *) die "unknown test group: $group" ;;
     esac
 fi
+[ "$stop_on_failure" = no ] || [ -n "$group" ] || die "--stop-on-failure requires test or sanitize"
 [ "$group" != native ] || [ "$cli" != yes ] || die "native tests require the GUI; omit --cli"
 
 # Resolve paths before changing directory so invocation from elsewhere works.
@@ -263,16 +267,18 @@ if [ "$command_name" = package ]; then target=package; fi
 cmake --build "$build_dir" --config "$build_config" --target "$target" --parallel "$jobs"
 
 if [ -n "$group" ]; then
+    set --
+    if [ "$stop_on_failure" = yes ]; then set -- --stop-on-failure; fi
     label=$group
     if [ "$group" = native ]; then label=native_gui; fi
     if [ "$group" = all ]; then
-        ctest --test-dir "$build_dir" -C "$build_config" --output-on-failure \
+        ctest "$@" --test-dir "$build_dir" -C "$build_config" --output-on-failure \
             --no-tests=error --parallel "$jobs" -LE native_gui
     elif [ "$group" = native ]; then
-        ctest --test-dir "$build_dir" -C "$build_config" --output-on-failure \
+        ctest "$@" --test-dir "$build_dir" -C "$build_config" --output-on-failure \
             --no-tests=error --parallel "$jobs" -L "^$label$"
     else
-        ctest --test-dir "$build_dir" -C "$build_config" --output-on-failure \
+        ctest "$@" --test-dir "$build_dir" -C "$build_config" --output-on-failure \
             --no-tests=error --parallel "$jobs" -L "^$label$" -LE native_gui
     fi
 elif [ "$command_name" = package ]; then

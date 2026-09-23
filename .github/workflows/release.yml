@@ -27,6 +27,8 @@ on:
       - '.github/workflows/release.yml'
       - '.github/workflows/sdk-build.yml'
       - 'tools/release.py'
+      - 'tools/install-release-cmake.sh'
+      - 'tools/release-cmake.sha256'
       - 'tests/test_release.py'
 
 permissions:
@@ -133,7 +135,7 @@ jobs:
       - name: Build and test with isolated SDK dependencies
         run: |
           for group in build contract gui packaging; do
-            ./build.sh test "$group" --sdk "$GITHUB_WORKSPACE/build/sdk" --build-dir build/release-sdk --jobs 2 -- -DDATAPUMP_PORTABLE=ON
+            ./build.sh test "$group" --stop-on-failure --sdk "$GITHUB_WORKSPACE/build/sdk" --build-dir build/release-sdk --jobs 2 -- -DDATAPUMP_PORTABLE=ON
           done
           DATAPUMP_MAX_GLIBC=2.36 ./build.sh package --sdk "$GITHUB_WORKSPACE/build/sdk" --build-dir build/release-sdk --jobs 2
           xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' build/sdk/bin/cmake -DARCHIVE_DIR="$PWD/build/release-sdk/releases" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=300 -DMAX_GLIBC=2.36 -P tools/verify-native-archives.cmake
@@ -161,17 +163,21 @@ jobs:
       - name: Install baseline compiler and native dependencies
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends ca-certificates git cmake ninja-build make g++-11 binutils libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev xvfb xauth fontconfig-config fonts-dejavu-core python3
+          apt-get install -y --no-install-recommends ca-certificates curl git cmake ninja-build make g++-11 binutils libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev xvfb xauth fontconfig-config fonts-dejavu-core python3
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Use the pinned dependency scanner with inherited RPATH support
+        run: |
+          sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
+          echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
       - name: Build, test and audit the generic CPU bundle
         env:
           CC: gcc-11
           CXX: g++-11
         run: |
           for group in build contract gui packaging; do
-            ./build.sh test "$group" --build-dir build/release-native --jobs 2 -- -DDATAPUMP_PORTABLE=ON
+            ./build.sh test "$group" --stop-on-failure --build-dir build/release-native --jobs 2 -- -DDATAPUMP_PORTABLE=ON
           done
           DATAPUMP_MAX_GLIBC=2.35 ./build.sh package --build-dir build/release-native --jobs 2
           xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/build/release-native/releases" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=300 -DMAX_GLIBC=2.35 -P tools/verify-native-archives.cmake
@@ -215,7 +221,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Configure failed' }
           cmake --build build/release-windows --config Release --target datapump-apps datapump-tests-contract datapump-tests-gui datapump-tests-packaging --parallel 2
           if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
-          ctest --test-dir build/release-windows -C Release --output-on-failure -L '^(contract|gui|packaging)$' --parallel 2
+          ctest --test-dir build/release-windows -C Release --output-on-failure -L '^(contract|gui|packaging)$' --parallel 2 --stop-on-failure
           if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
           cmake --build build/release-windows --config Release --target package --parallel 2
           if ($LASTEXITCODE -ne 0) { throw 'Packaging failed' }
@@ -247,9 +253,9 @@ jobs:
         run: |
           if command -v apt-get >/dev/null; then
             apt-get update
-            apt-get install -y --no-install-recommends ca-certificates git cmake binutils xvfb xauth fontconfig-config fonts-dejavu-core libxtst6
+            apt-get install -y --no-install-recommends ca-certificates curl git cmake binutils xvfb xauth fontconfig-config fonts-dejavu-core libxtst6
           else
-            pacman -Syu --noconfirm --needed ca-certificates git cmake binutils xorg-server-xvfb xorg-xauth ttf-dejavu fontconfig libxtst
+            pacman -Syu --noconfirm --needed ca-certificates curl git cmake binutils xorg-server-xvfb xorg-xauth ttf-dejavu fontconfig libxtst
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -258,6 +264,10 @@ jobs:
         with:
           name: linux-${{ matrix.arch }}
           path: downloaded
+      - name: Use the pinned dependency scanner with inherited RPATH support
+        run: |
+          sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
+          echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
       - name: Run identical copied archives on this distribution
         run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/downloaded" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=300 -DMAX_GLIBC=${{ matrix.glibc }} -P tools/verify-native-archives.cmake
 
