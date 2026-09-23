@@ -191,3 +191,11 @@ It covers the complete text, attachment, interruption and replacement sequence;
 the previous 300-second CI allowance expired late in that sequence on hosted
 runners. Per-frame, pending-progress and cancellation checks retain their
 original deadlines. Compatibility jobs allow both archive formats to finish.
+
+The Windows live-profile capture fixture requests 1 ms timer resolution for
+its existing 1 ms sleeps and restores it on exit, following Microsoft's
+[timer API contract](https://learn.microsoft.com/en-us/windows/win32/api/timeapi/nf-timeapi-timebeginperiod).
+Coarse timer rounding could otherwise leave fixture audio undelivered after
+30 seconds even with an empty decoder queue. The same audio chunks, 30-second
+deadline and all receiver assertions remain in place. Windows runs the full
+calibration after the other selected tests to report platform failures sooner.

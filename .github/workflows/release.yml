@@ -224,9 +224,13 @@ jobs:
           # The live/audio fixtures have their own workers and wall-clock
           # deadlines. Keep independent suites from competing on hosted CPUs.
           foreach ($group in @('gui', 'contract', 'packaging')) {
-            ctest --test-dir build/release-windows -C Release --output-on-failure -L "^$group`$" --parallel 1 --stop-on-failure
+            ctest --test-dir build/release-windows -C Release --output-on-failure -L "^$group`$" -LE '^calibration$' --parallel 1 --stop-on-failure
             if ($LASTEXITCODE -ne 0) { throw "$group tests failed" }
           }
+          # Preserve the complete selection; run the long calibration after
+          # the other regressions so a platform failure is reported promptly.
+          ctest --test-dir build/release-windows -C Release --output-on-failure -L '^(contract|gui|packaging)$' -L '^calibration$' --parallel 1 --stop-on-failure --no-tests=error
+          if ($LASTEXITCODE -ne 0) { throw 'Calibration tests failed' }
           cmake --build build/release-windows --config Release --target package --parallel 2
           if ($LASTEXITCODE -ne 0) { throw 'Packaging failed' }
           cmake -DARCHIVE_DIR="$PWD/build/release-windows/releases" -DBUILD_DIR="$PWD/build/release-windows" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P tools/verify-native-archives.cmake

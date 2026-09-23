@@ -13,6 +13,13 @@
 #include <random>
 #include <set>
 #include <thread>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <mmsystem.h>
+#endif
 
 using namespace datapump;
 using namespace std::chrono_literals;
@@ -21,6 +28,22 @@ namespace {
 void check(bool value, const std::string& message) {
     if (!value) throw Error(message);
 }
+
+#ifdef _WIN32
+// The simulated capture yields for 1 ms after each unchanged PCM chunk.
+// A coarse Windows timer can round that yield to 15.6 ms and make the fixture
+// itself exceed its deadline before delivering all samples to an idle decoder.
+// Scope the intended timer resolution to this test process, not the application.
+struct FixtureTimerResolution {
+    FixtureTimerResolution() {
+        check(timeBeginPeriod(1) == TIMERR_NOERROR,
+              "could not request the profile fixture's 1 ms timer resolution");
+    }
+    ~FixtureTimerResolution() { timeEndPeriod(1); }
+    FixtureTimerResolution(const FixtureTimerResolution&) = delete;
+    FixtureTimerResolution& operator=(const FixtureTimerResolution&) = delete;
+};
+#endif
 
 // Supply the ordinary hardware capture/decoder queue with deterministic PCM.
 // Keeping capture open at a checkpoint also proves that neither an audio EOF
@@ -247,7 +270,9 @@ void advance(live::Session& session, CaptureScript& capture, std::size_t target,
         } else drained_at.reset();
         std::this_thread::sleep_for(1ms);
     }
-    throw Error("controlled profile capture did not drain its bounded decoder queue");
+    throw Error("controlled profile capture did not drain its bounded decoder queue: delivered=" +
+                std::to_string(capture.delivered.load()) + " target=" + std::to_string(target) +
+                " buffered=" + std::to_string(session.snapshot().buffered_samples));
 }
 
 void receive_wave(live::Session& session, CaptureScript& capture, const Waveform& expected,
@@ -556,6 +581,9 @@ void playback(std::uint32_t, const std::string&, const PlaybackCallback&, std::s
 int main(int argc, char** argv) {
     std::string context;
     try {
+#ifdef _WIN32
+        const FixtureTimerResolution timer_resolution;
+#endif
         const std::string suite = argc > 1 ? argv[1] : "all";
         check(suite == "all" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds",
               "unknown profile test suite");
