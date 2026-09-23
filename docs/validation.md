@@ -23,7 +23,7 @@ checks their resulting file bytes and modes, tampering, extra files, safe
 extraction, version syntax and source hashes. A real signature regression proves
 that changing a recipe asset invalidates the signed APT manifest. Legacy
 metadata schemas remain readable; only schema 4 with successful distribution
-checks can become Latest. The full build-tool group passes **14/14 in 7.53
+checks can become Latest. The full build-tool group passes **14/14 in 6.92
 seconds**. Workflow lint, documentation shell syntax and whitespace checks pass.
 
 The APT workflow installs the same four `.deb` files on Debian 12 Bookworm,
@@ -75,8 +75,8 @@ payloads match, and both CLI/headless GUI self-checks pass. The whole job takes
 **9m56s**, mostly installing 177 prebuilt desktop dependencies into the empty
 container. It found a desktop-menu category warning: `Audio` requires the
 `AudioVideo` parent category. The shared Debian/Arch/Gentoo desktop generator
-and a semantic regression now enforce that parent. A new experiment is needed
-for this metadata correction; original application archive bytes stay unchanged.
+and a semantic regression now enforce that parent. The final experiment below
+contains this correction; original application archive bytes stay unchanged.
 
 The final Gentoo harness enables parallel package installation and uses all
 runner cores, while retaining Portage's merge locks, merge-wait and system
@@ -85,6 +85,28 @@ only in the discarded container. This follows the
 [Portage feature definitions](https://raw.githubusercontent.com/gentoo/portage/master/man/make.conf.5)
 and does not bypass signature, dependency, installed-payload or application
 self-checks.
+
+The [final package-only run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35896483127)
+passes from packaging commit `f2aecd2`, publishing
+[`v001_00-2026-09-23-1234CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-23-1234CDT)
+as **experiment** with all 25 assets. All **11 native installation jobs** pass:
+the nine Debian/Ubuntu jobs take **80–105 seconds**, Arch **87 seconds**, and
+Gentoo **7m08s**. Signing, packaging and publication take **49 seconds**.
+Gentoo's observed whole-job time fell by **2m48s** from the preceding **9m56s**
+run; these are ordinary hosted-job observations, not a controlled benchmark.
+Both GUI backends' installed files and bounded CLI/headless GUI checks pass.
+The corrected desktop entries produce no invalid-category warning.
+
+All six application archive hashes remain identical to the `1200CDT` release
+and original `88fb87b` application build. The final checksum inventory SHA-256
+is `c8c05e962e115970f4465ae32fa6602cc97bb3d6b8770ccb76b70e4fa8bc1384`.
+No application/SDK rebuild, smaller-runner retest or Actions artifact/cache
+storage was used. Earlier experiments and failure records remain preserved;
+their descriptions point to the corrected packages. These delivery checks do
+not grant full application or hardware certification, and no regular Latest
+release has qualified. Native Arch/Gentoo frontend checks cover x86-64; ARM64
+recipes share the payloads tested by the Debian/Ubuntu matrix and local recipe
+fixtures, without a separate native ARM64 Portage/makepkg claim.
 
 ## Signed flat APT release assets — 23 September 2026
 

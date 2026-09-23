@@ -155,10 +155,10 @@ file from that exact tag, replacing `RELEASE_TAG` below. Check this fingerprint
 against a trusted copy of the maintainer's documentation before initial setup.
 
 The current package experiment is
-[`v001_00-2026-09-23-1200CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-23-1200CDT),
+[`v001_00-2026-09-23-1234CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-23-1234CDT),
 including the Arch and Gentoo recipes below.
 It reuses the six archives built from application commit `88fb87b`.
-[Debian/Ubuntu installation checks](https://github.com/mirage335-colossus/pumpModem/actions/runs/35892588927)
+[Debian/Ubuntu installation checks](https://github.com/mirage335-colossus/pumpModem/actions/runs/35896483127)
 passed in all nine environments above; these are separate from full
 application certification. As of
 23 September 2026, no regular release has qualified for Latest, so use its
