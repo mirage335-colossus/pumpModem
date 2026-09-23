@@ -1,7 +1,11 @@
 #include "datapump/audio.hpp"
 #include "alsa_stub.hpp"
+#include "../src/alsa_plugin_path.hpp"
 #include <algorithm>
+#include <cerrno>
+#include <chrono>
 #include <cmath>
+#include <fstream>
 #include <numbers>
 #include <iostream>
 #include <limits>
@@ -10,6 +14,65 @@ namespace a=datapump::audio;
 namespace f=alsa_test;
 void check(bool value,const char* reason){if(!value)throw std::runtime_error(reason);}
 template<class F> void rejects(F action){try{action();}catch(const datapump::Error&){check(f::state.live==0,"leaked failed stream");return;}throw std::runtime_error("invalid audio accepted");}
+void plugin_directories() {
+    namespace fs=std::filesystem;
+    const auto root=fs::temp_directory_path()/("datapump-alsa-plugins-"+
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    check(fs::create_directory(root),"could not create plugin-directory fixture");
+    struct Cleanup {fs::path path;~Cleanup(){std::error_code error;fs::remove_all(path,error);}} cleanup{root};
+    fs::create_directories(root/"bundle/lib");
+    const auto library=root/"bundle/lib/libasound.so.2";
+    {std::ofstream fixture(library);fixture<<"fixture";}
+    const std::vector<fs::path> hosts{root/"missing/alsa-lib",root/"host/multiarch/alsa-lib",root/"host/lib/alsa-lib"};
+    fs::create_directories(hosts[1]);fs::create_directories(hosts[2]);
+    const auto selected=[&](const char* configured) {return a::detail::alsa_plugin_directory(configured,library,hosts);};
+    check(selected(nullptr)==hosts[1].string(),"relocated ALSA did not discover the host module directory");
+    check(selected("/explicit/plugins").empty()&&selected("").empty(),"explicit ALSA_PLUGIN_DIR was overridden");
+    fs::create_directory(library.parent_path()/"alsa-lib");
+    check(selected(nullptr).empty(),"library-owned ALSA plugins lost precedence");
+    fs::remove(library.parent_path()/"alsa-lib");fs::remove_all(root/"host");
+    check(selected(nullptr).empty(),"missing host plugins manufactured a module directory");
+}
+void selected_endpoint() {
+    // A missing/busy shared route must not quietly reserve a different card.
+    for(const auto& requested:std::vector<std::string>{"default",""}) {
+        f::reset();f::state.hints={{"null",""},{"default:CARD=HDMI","Output"},
+            {"default:CARD=Generic_1",""},{"sysdefault:CARD=Generic_1",""},{"plughw:CARD=Generic_1,DEV=0",""}};
+        f::state.available={"null","default:CARD=Generic_1","sysdefault:CARD=Generic_1","plughw:CARD=Generic_1,DEV=0"};
+        f::state.open_errors={{"default",-EBUSY}};
+        std::string error;
+        try {a::record(.1,48000,requested);}catch(const datapump::Error& e){error=e.what();}
+        check(error.find("'default'")!=std::string::npos&&error.find("shared audio route")!=std::string::npos&&
+              error.find(std::error_code(EBUSY,std::generic_category()).message())!=std::string::npos,
+              "default failure omitted its busy reason or shared-audio guidance");
+        check(f::state.attempts==std::vector<std::string>{"default"}&&f::state.opens==0,
+              "failed default capture opened an unrequested endpoint");
+        rejects([&]{a::play(std::vector<float>(10,.1f),48000,requested);});
+        check(f::state.attempts==std::vector<std::string>{"default","default"}&&f::state.opens==0,
+              "failed default playback opened an unrequested endpoint");
+    }
+    f::reset();f::state.hints={{"default:CARD=Good",""},{"plughw:CARD=Good,DEV=0",""}};
+    f::state.available={"default","default:CARD=Good","plughw:CARD=Good,DEV=0"};
+    f::state.wrong_format={"default"};
+    rejects([&]{a::play(std::vector<float>(100,.25f),96000,"default");});
+    check(!f::state.attempts.empty()&&std::all_of(f::state.attempts.begin(),f::state.attempts.end(),
+              [](const auto& id){return id=="default";})&&f::state.opens==f::state.closes,
+          "default format negotiation changed endpoint or leaked a stream");
+    for(const auto& device:std::vector<std::string>{"default:CARD=Generic_1","plughw:CARD=Generic_1,DEV=0","pulse","pipewire"}) {
+        f::reset();f::state.available={device};
+        const auto captured=a::record(.01,48000,device);
+        a::play(std::vector<float>(10,.1f),48000,device);
+        check(captured.size()==480&&f::state.selected==device&&f::state.opens==f::state.closes&&f::state.live==0,
+              "explicit audio endpoint was unavailable or changed");
+    }
+    f::reset();f::state.available={"default"};bool simultaneous=false;
+    a::capture(48000,"default",[&](std::span<const float>) {
+        a::capture(48000,"default",[&](std::span<const float>) {simultaneous=f::state.live==2;return false;});
+        return false;
+    });
+    check(simultaneous&&f::state.live==0&&f::state.opens==2&&f::state.closes==2,
+          "independent shared capture streams blocked or leaked each other");
+}
 void channel_routing() {
     const std::vector<float> samples{0,.25f,-.5f,1,-1,2,-2};
     const std::vector<std::int16_t> pcm{0,8191,-16383,32767,-32767,32767,-32767};
@@ -65,28 +128,8 @@ void channel_routing() {
     }
 }
 int main(){try{
+    plugin_directories();selected_endpoint();
     channel_routing();
-    f::reset();f::state.hints={{"null",""},{"default:CARD=HDMI","Output"},{"default:CARD=Generic_1",""}};
-    f::state.available={"null","default:CARD=Generic_1"};
-    auto captured=a::record(.1,48000,"default");
-    check(f::state.attempts==std::vector<std::string>{"default","default:CARD=Generic_1"},"default must discover direction-compatible card default, never null");
-    check(captured.size()==4800 && f::state.opens==1 && f::state.live==0,"capture fallback lifecycle");
-    f::reset();f::state.hints={{"default:CARD=HDMI","Output"},{"default:CARD=Generic_1",""}};
-    f::state.available={"default:CARD=HDMI","default:CARD=Generic_1"};
-    a::record(.01,48000,"default");
-    const auto input_default=f::state.selected;
-    a::play(std::vector<float>(10,.1f),48000,"default");
-    check(f::state.selected==input_default,"fallback must prefer the same duplex card for input and output over output-only HDMI");
-    f::reset();f::state.hints={{"default:CARD=Bad",""},{"default:CARD=Good",""}};
-    f::state.available={"default","default:CARD=Bad","default:CARD=Good"};
-    f::state.wrong_format={"default","default:CARD=Bad"};
-    a::play(std::vector<float>(100,.25f),96000,"default");
-    check(f::state.selected=="default:CARD=Good" && f::state.rate==96000 && f::state.opens==f::state.closes,"24k bandwidth sample rate must try a compatible default format");
-    f::reset();f::state.hints={{"plughw:CARD=HDMI,DEV=0","Output"},{"default:CARD=Generic_1",""},{"plughw:CARD=Generic_1,DEV=0",""}};
-    f::state.available={"default:CARD=Generic_1","plughw:CARD=HDMI,DEV=0","plughw:CARD=Generic_1,DEV=0"};
-    f::state.wrong_format={"default:CARD=Generic_1"};
-    a::play(std::vector<float>(10,.1f),96000,"default");
-    check(f::state.selected=="plughw:CARD=Generic_1,DEV=0","format fallback must stay on a discovered default card with PCM conversion");
     f::reset();f::state.available={"default:CARD=Good"};f::state.hints={{"default:CARD=Good",""}};
     rejects([&]{a::play(std::vector<float>(1),48000,"explicit-bad");});
     check(f::state.attempts==std::vector<std::string>{"explicit-bad"},"explicit endpoint must not silently change");

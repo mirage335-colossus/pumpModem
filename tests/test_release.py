@@ -2,6 +2,7 @@
 """Release identity, checksum inventory and fail-closed GitHub publication tests."""
 from datetime import datetime, timezone
 import importlib.util
+import json
 from pathlib import Path
 import subprocess
 import tempfile
@@ -251,11 +252,11 @@ class PublicationTests(ReleaseFixture, unittest.TestCase):
         self.assertIn('--draft=false', edit)
         self.assertIn('--latest=false', edit)
 
-    def test_regular_publication_becomes_latest_only_after_upload(self):
+    def test_regular_publication_waits_for_separate_certification_to_become_latest(self):
         self.publish_fixture()
         with patch.object(release, 'gh', side_effect=self.github):
             release.publish(self.output, 'owner/repository', publish_now=True)
-        self.assertIn('--latest=true', self.calls[-1])
+        self.assertIn('--latest=false', self.calls[-1])
 
     def test_existing_release_or_tag_stops_before_any_mutation(self):
         self.publish_fixture()
@@ -324,6 +325,201 @@ class PublicationTests(ReleaseFixture, unittest.TestCase):
             release.gh(['release', 'view', 'literal'])
         run.assert_called_once_with(['gh', 'release', 'view', 'literal'], check=True,
                                     text=True, capture_output=True)
+
+
+class StagedPublicationTests(ReleaseFixture, unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        self.value = metadata()
+        self.calls = []
+        self.remote = {}
+        self.exists = False
+        self.reference = None
+        self.info = {'databaseId': 77, 'isDraft': True, 'isPrerelease': False,
+                     'name': self.value['title'], 'tagName': self.value['tag']}
+        self.corrupt_download = {}
+        self.missing_digest = None
+        self.fail_upload = None
+        patched = patch.object(release, 'gh', side_effect=self.github)
+        patched.start()
+        self.addCleanup(patched.stop)
+
+    def github(self, args, check=True):
+        self.calls.append(args)
+        if args[:2] == ['api', '--paginate']:
+            if '/assets?' in args[-1]:
+                data = [{'name': name, 'digest': None if self.missing_digest == name else 'sha256:' + release.hashlib.sha256(value).hexdigest(),
+                         'state': 'uploaded'} for name, value in self.remote.items()]
+            else:
+                data = [{'tag_name': self.value['tag']}] if self.exists else []
+            return subprocess.CompletedProcess(args, 0, json.dumps(data), '')
+        if args[:2] == ['api', '--include']:
+            present = self.exists if '/releases/tags/' in args[-1] else self.reference is not None
+            return subprocess.CompletedProcess(args, 0 if present else 1,
+                'HTTP/2.0 200 OK\n\n{}' if present else 'HTTP/2.0 404 Not Found\n\n{}', '')
+        if args[:3] == ['api', '--method', 'POST']:
+            self.reference = next(value.removeprefix('sha=') for value in args if value.startswith('sha='))
+        elif args[:1] == ['api']:
+            data = {'object': {'type': 'commit', 'sha': self.reference, 'url': 'https://example.invalid/commit'}} if '/git/ref/' in args[-1] else {}
+            return subprocess.CompletedProcess(args, 0, json.dumps(data), '')
+        elif args[:2] == ['release', 'create']:
+            self.exists = True
+            self.info['name'] = args[args.index('--title') + 1]
+            self.info['isPrerelease'] = '--prerelease' in args
+        elif args[:2] == ['release', 'view']:
+            return subprocess.CompletedProcess(args, 0, json.dumps(self.info), '')
+        elif args[:2] == ['release', 'upload']:
+            for filename in args[5:]:
+                path = Path(filename)
+                if path.name == self.fail_upload:
+                    raise subprocess.CalledProcessError(1, args, stderr='upload failed')
+                if path.name in self.remote:
+                    raise subprocess.CalledProcessError(1, args, stderr='existing asset')
+                self.remote[path.name] = path.read_bytes()
+        elif args[:2] == ['release', 'download']:
+            directory = Path(args[args.index('--dir') + 1])
+            for index, item in enumerate(args):
+                if item == '--pattern':
+                    name = args[index + 1]
+                    (directory / name).write_bytes(self.corrupt_download.get(name, self.remote[name]))
+        elif args[:2] == ['release', 'edit']:
+            self.assertIn('--latest=false', args)
+            self.info['isDraft'] = False
+        else:
+            raise AssertionError(f'Unexpected gh command: {args}')
+        return subprocess.CompletedProcess(args, 0, '', '')
+
+    def reserve(self, experiment=False):
+        self.value = metadata(experiment=experiment)
+        release.write_json(self.metadata, self.value)
+        release.reserve(self.metadata, self.notes, 'owner/repository')
+
+    def upload_all(self):
+        for target in release.TARGETS:
+            release.upload(self.metadata, 'owner/repository', target, self.artifacts / target)
+
+    def mutations(self):
+        return [call for call in self.calls if call[:1] == ['release'] and call[1] in ('create', 'upload', 'edit')]
+
+    def test_reserve_creates_exact_commit_draft_and_pending_notes_without_binaries(self):
+        self.reserve(experiment=True)
+        self.assertEqual(self.reference, self.value['source_sha'])
+        self.assertEqual(set(self.remote), release.SUPPORT_FILES)
+        self.assertEqual(self.info['name'], 'experiment')
+        self.assertTrue(self.info['isDraft'])
+        self.assertTrue(self.info['isPrerelease'])
+        self.assertIn(release.CERTIFICATION_PENDING.encode(), self.remote['release-notes.md'])
+        self.assertIn('--latest=false', next(call for call in self.calls if call[:2] == ['release', 'create']))
+
+    def test_reserve_rejects_existing_draft_before_creating_a_tag(self):
+        self.exists = True
+        with self.assertRaisesRegex(ValueError, 'existing release or draft'):
+            release.reserve(self.metadata, self.notes, 'owner/repository')
+        self.assertIsNone(self.reference)
+        self.assertEqual(self.mutations(), [])
+
+    def test_upload_validates_both_archive_formats_then_uploads_one_renamed_target(self):
+        self.reserve()
+        target = 'linux-x86_64'
+        release.upload(self.metadata, 'owner/repository', target, self.artifacts / target)
+        expected = release.application_names(self.value)[target]
+        self.assertEqual(set(self.remote), release.SUPPORT_FILES | {expected})
+        self.assertEqual(self.remote[expected], b'linux-x86_64 .tar.gz')
+        self.assertTrue(all('--clobber' not in call for call in self.calls))
+
+    def test_upload_rejects_corrupt_companion_before_network(self):
+        next((self.artifacts / 'linux-x86_64').glob('*.zip')).write_bytes(b'corrupt companion')
+        with self.assertRaisesRegex(ValueError, 'Checksum mismatch'):
+            release.upload(self.metadata, 'owner/repository', 'linux-x86_64', self.artifacts / 'linux-x86_64')
+        self.assertEqual(self.calls, [])
+
+    def test_upload_refuses_existing_asset_and_changed_source_identity(self):
+        self.reserve()
+        target = 'windows-x86_64'
+        release.upload(self.metadata, 'owner/repository', target, self.artifacts / target)
+        before = len(self.mutations())
+        with self.assertRaisesRegex(ValueError, 'overwrite an existing target'):
+            release.upload(self.metadata, 'owner/repository', target, self.artifacts / target)
+        self.reference = 'b' * 40
+        with self.assertRaisesRegex(ValueError, 'exact source commit'):
+            release.upload(self.metadata, 'owner/repository', 'linux-aarch64', self.artifacts / 'linux-aarch64')
+        self.assertEqual(len(self.mutations()), before)
+
+    def test_upload_requires_matching_workflow_metadata_and_pending_notes(self):
+        self.reserve()
+        original = self.remote['release-metadata.json']
+        self.remote['release-metadata.json'] = json.dumps(metadata(run_id='999')).encode()
+        with self.assertRaisesRegex(ValueError, 'another workflow run'):
+            release.upload(self.metadata, 'owner/repository', 'linux-aarch64', self.artifacts / 'linux-aarch64')
+        self.remote['release-metadata.json'] = original
+        self.remote['release-notes.md'] = b'certification status removed'
+        with self.assertRaisesRegex(ValueError, 'pending certification'):
+            release.upload(self.metadata, 'owner/repository', 'linux-aarch64', self.artifacts / 'linux-aarch64')
+
+    def test_published_or_mismatched_experiment_release_cannot_receive_assets(self):
+        self.reserve()
+        self.info['isDraft'] = False
+        with self.assertRaisesRegex(ValueError, 'matching reserved draft'):
+            release.upload(self.metadata, 'owner/repository', 'linux-aarch64', self.artifacts / 'linux-aarch64')
+        self.info['isDraft'] = True
+        self.info['isPrerelease'] = True
+        with self.assertRaisesRegex(ValueError, 'matching reserved draft'):
+            release.upload(self.metadata, 'owner/repository', 'linux-aarch64', self.artifacts / 'linux-aarch64')
+
+    def test_finalize_requires_all_three_targets_and_rejects_extra_assets(self):
+        self.reserve()
+        with self.assertRaisesRegex(ValueError, 'three portable targets'):
+            release.finalize(self.metadata, 'owner/repository', self.output, True)
+        self.upload_all()
+        self.remote['unexpected.txt'] = b'unexpected'
+        with self.assertRaisesRegex(ValueError, 'unexpected assets'):
+            release.finalize(self.metadata, 'owner/repository', self.output, True)
+        self.assertNotIn('SHA256SUMS.txt', self.remote)
+        self.assertTrue(self.info['isDraft'])
+
+    def test_finalize_verifies_server_digests_before_uploading_checksum_and_publishing(self):
+        self.reserve()
+        self.upload_all()
+        release.finalize(self.metadata, 'owner/repository', self.output, True)
+        self.assertEqual(set(self.remote), set(release.application_names(self.value).values()) | release.SUPPORT_FILES | {'SHA256SUMS.txt'})
+        release.verify_release(self.output)
+        self.assertFalse(self.info['isDraft'])
+        self.assertEqual(self.mutations()[-2][1], 'upload')
+        self.assertEqual(Path(self.mutations()[-2][-1]).name, 'SHA256SUMS.txt')
+        self.assertEqual(self.mutations()[-1][1], 'edit')
+        self.assertIn('--latest=false', self.mutations()[-1])
+
+    def test_finalize_without_publish_keeps_draft_with_complete_inventory(self):
+        self.reserve()
+        self.upload_all()
+        release.finalize(self.metadata, 'owner/repository', self.output)
+        self.assertTrue(self.info['isDraft'])
+        self.assertIn('SHA256SUMS.txt', self.remote)
+        self.assertFalse(any(call[1] == 'edit' for call in self.mutations()))
+
+    def test_corrupt_download_or_missing_server_digest_never_finalizes(self):
+        self.reserve()
+        self.upload_all()
+        archive = release.application_names(self.value)['windows-x86_64']
+        self.corrupt_download[archive] = b'corruption'
+        with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
+            release.finalize(self.metadata, 'owner/repository', self.output, True)
+        self.corrupt_download.clear()
+        self.missing_digest = archive
+        with self.assertRaisesRegex(ValueError, 'completed SHA-256 digest'):
+            release.finalize(self.metadata, 'owner/repository', self.output, True)
+        self.assertFalse(self.output.exists())
+        self.assertNotIn('SHA256SUMS.txt', self.remote)
+        self.assertTrue(self.info['isDraft'])
+
+    def test_checksum_upload_failure_never_publishes(self):
+        self.reserve()
+        self.upload_all()
+        self.fail_upload = 'SHA256SUMS.txt'
+        with self.assertRaises(subprocess.CalledProcessError):
+            release.finalize(self.metadata, 'owner/repository', self.output, True)
+        self.assertTrue(self.info['isDraft'])
+        self.assertFalse(any(call[1] == 'edit' for call in self.mutations()))
 
 
 if __name__ == '__main__':

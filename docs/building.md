@@ -218,18 +218,19 @@ from outside that sysroot and obtains notices from the SDK's own license
 inventory. It does not copy the host's glibc or graphics drivers.
 
 Use `./build.sh package --sdk /path/to/installed-sdk` for this path. The separate
-[SDK workflow](../.github/workflows/sdk.yml) qualifies both the SDK's host tools
-and copied application bundles on Bookworm and Ubuntu 24.04. It runs on SDK and
-build infrastructure changes, Rev/resource-preparation changes, or manual
-dispatch and reuses an archived SDK by
-recipe hash. Successful qualification, rather than the presence of a sysroot
-alone, establishes the support claim. The workflow can explicitly publish the
-compiled SDK, preserved sources and FLTK bundle to an existing release after
-those checks; see [SDK maintenance](../third_party/build-support/README.md#ci-publication-and-upgrades).
-Copied-archive GUI checks use `-DGUI_SMOKE_TIMEOUT=300` with
-`tools/verify-native-archives.cmake`, matching the native test group's workflow
-allowance. This option changes only the GUI smoke deadline; it leaves replay
-assertions, CLI checks and the verifier's omitted-option defaults intact.
+[SDK workflow](../.github/workflows/sdk.yml) qualifies the SDK's host tools and
+copied FLTK/Rev bundles on Bookworm and Ubuntu 24.04. It downloads the exact
+recipe from the durable `base` release without rebuilding the toolchain.
+[Base maintenance](../.github/workflows/sdk-base.yml) explicitly builds/reuses
+and preserves SDKs and complete source archives; see
+[SDK maintenance](../third_party/build-support/README.md#ci-publication-and-upgrades).
+
+Application publication and extensive qualification are separate:
+[manual portable releases](releases.md) publishes after packaging checks, then
+[certification](../.github/workflows/certify.yml) attaches source/test outcomes
+and the exact published binary hashes to that release. Copied GUI checks use
+`-DGUI_SMOKE_TIMEOUT=600`; per-frame, pending-progress and cancellation assertions
+remain unchanged. Physical-device qualification remains a separate scope.
 
 The existing native CI still uses Ubuntu 22.04 and audits a glibc 2.35 ceiling,
 then tests copied artifacts on Ubuntu 22.04 and 24.04. A 2.36 SDK does not imply

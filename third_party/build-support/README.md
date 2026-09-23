@@ -156,31 +156,37 @@ being advertised as Bookworm-compatible.
 
 ### CI, publication and upgrades
 
-The SDK workflow runs for SDK/build infrastructure changes, vendored Rev or
-resource-preparation changes, and manual dispatch.
-It caches completed SDK and source archives by the recipe/helper hash, so
-ordinary application edits do not rebuild the compiler or dependencies. The
-existing native CI and compatibility gates remain active. Artifact retention
-in CI is temporary; it is not the durable source archive. Binary SDK and source
-archives are uploaded separately so application jobs download only the compiler
-SDK. Each artifact has its own `SHA256SUMS`; the source artifact also retains
-the combined `SDK-SHA256SUMS.txt` inventory published with both release archives.
-The Bookworm application job also runs the unchanged wire/shared GUI contract
-group with the SDK compiler; both consumer jobs run build and packaging
-isolation tests without a separate host compiler.
-They reuse the application's compiled libraries from the packaging build.
-The Rev consumer then runs the native conformance group under a private Xvfb
-display, separately from the other build/test steps.
-The SDK producer discards only its own intermediate CI build tree after export
-to leave space for relocation checks; local preparation retains its build cache.
+The [base maintenance workflow](../../.github/workflows/sdk-base.yml) stores
+compiled SDKs, complete source archives and a per-recipe SHA-256 inventory in
+the GitHub release named `base` (prerelease, never Latest). Exact recipe IDs come
+from the unchanged SDK helper and recipe inputs. Reuse is independent of
+Actions cache/artifact quotas. Old recipes are retained and existing asset
+bytes cannot be overwritten.
 
-To attach a qualified SDK, its sources and the default FLTK application bundle
-to an existing GitHub release, dispatch the workflow using that release's tag
-as the workflow ref and supply the same `release_tag` input. Publication checks
-the exact source revision and waits for compatibility checks. It does not
-create a release or overwrite existing assets. An empty input, ordinary push,
-or pull request only produces CI artifacts. Rev remains a tested optional
-backend; this workflow does not publish its bundle automatically.
+Dispatch `source=auto` to reuse the current recipe or build if missing;
+`source=base` verifies reuse only; `source=rebuild` performs a cold build.
+`jobs=0` uses all CPUs reported by `nproc`; a positive value overrides it.
+The producer forwards the count to Buildroot's existing internal build
+parallelism, preserves the sources, builds from their offline replay, relocates
+the SDK and verifies its host ABI before optional publication. `publish=false`
+skips publication; it creates no durable archive upload. Local preparation
+continues retaining its ordinary cache.
+
+The separate [SDK regression workflow](../../.github/workflows/sdk.yml) runs on
+SDK/build infrastructure, Rev/resource-preparation changes, or manual dispatch.
+It downloads only the exact compiled SDK from `base`, verifies its checksum and
+manifest, and uses it without a separate host compiler. A missing recipe fails
+with maintenance instructions. Both consumers keep build/packaging isolation
+checks; Bookworm keeps the full wire/shared-GUI contract, and Rev keeps native
+conformance under private Xvfb. Small application artifacts last one day for
+cross-host copy checks; they do not contain the large SDK or preserved sources.
+
+The [application release workflow](../../.github/workflows/release.yml) builds
+and publishes three application bundles with basic packaging checks.
+[Certification](../../.github/workflows/certify.yml) runs later against those
+exact published assets and attaches hash-bound reports without replacing them.
+Developer SDKs remain in `base` instead of being duplicated in every app release.
+See [release instructions](../../docs/releases.md) for dispatch commands.
 
 For upgrades, change [the manifest](source-sdk/manifest.json),
 [Buildroot configuration](source-sdk/configs/datapump_defconfig) and local

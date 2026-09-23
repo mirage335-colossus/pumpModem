@@ -2,13 +2,26 @@ name: Build source SDK archives
 
 on:
   workflow_call:
+    inputs:
+      source:
+        description: 'auto: base/build; base: require the published recipe; rebuild: cold build'
+        type: string
+        default: auto
+      jobs:
+        description: 'SDK compilation jobs; 0 uses all CPUs available to the runner'
+        type: string
+        default: '0'
+      publish_base:
+        description: 'Preserve verified archives in the durable base release'
+        type: boolean
+        default: false
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   sdk:
-    name: Build reusable source SDK
+    name: Reuse or build source SDK
     runs-on: ubuntu-24.04
     # Only SDK production needs the baseline bootstrap environment. Consumers
     # use the resulting directory without a container, chroot, or root access.
@@ -17,31 +30,63 @@ jobs:
     env:
       DEBIAN_FRONTEND: noninteractive
     steps:
-      - name: Install bootstrap prerequisites
+      - name: Install archive and verification prerequisites
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends build-essential binutils file wget curl cpio unzip rsync bc perl python3 git ca-certificates patch xz-utils bzip2 zstd passwd util-linux debianutils
+          apt-get install -y --no-install-recommends binutils file python3 git gh ca-certificates xz-utils
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Reuse immutable SDK and source archives
-        id: cache
-        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
-        with:
-          path: third_party/build-support/cache/source-sdk/releases
-          key: source-sdk-bookworm-x86_64-v1-${{ hashFiles('tools/build-sdk.py', 'third_party/build-support/source-sdk/**') }}
+      - name: Select exact recipe and available build parallelism
+        id: settings
+        env:
+          SDK_SOURCE: ${{ inputs.source }}
+          SDK_REQUESTED_JOBS: ${{ inputs.jobs }}
+        run: |
+          python3 - <<'PYSETTINGS'
+          import os, re, subprocess
+          source = os.environ['SDK_SOURCE']
+          if source not in ('auto', 'base', 'rebuild'):
+              raise SystemExit('SDK source must be auto, base or rebuild')
+          requested = os.environ['SDK_REQUESTED_JOBS']
+          if not re.fullmatch(r'[0-9]+', requested):
+              raise SystemExit('SDK jobs must be 0 (automatic) or a positive integer')
+          jobs = int(requested) or int(subprocess.check_output(['nproc'], text=True))
+          identity = subprocess.check_output(['python3', 'tools/build-sdk.py', 'id'], text=True).strip()
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write(f'recipe_id={identity}\njobs={jobs}\n')
+          print(f'SDK recipe {identity}; cold compilation will use {jobs} jobs')
+          PYSETTINGS
+      - name: Retrieve the exact recipe from durable base release storage
+        if: inputs.source != 'rebuild'
+        id: base
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/sdk-release.py fetch --repo "$GITHUB_REPOSITORY" --directory third_party/build-support/cache/source-sdk/releases --github-output "$GITHUB_OUTPUT"
+      - name: Require published SDK when base-only reuse was selected
+        if: inputs.source == 'base' && steps.base.outputs.found != 'true'
+        run: |
+          echo 'The base release has no complete SDK for this exact recipe.' >&2
+          exit 1
+      - name: Install cold-build bootstrap prerequisites
+        if: steps.base.outputs.found != 'true'
+        run: apt-get install -y --no-install-recommends build-essential wget curl cpio unzip rsync bc perl patch bzip2 zstd passwd util-linux debianutils
       - name: Prepare an ordinary build user
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: steps.base.outputs.found != 'true'
         run: |
           useradd --create-home sdkbuilder
           chown -R sdkbuilder:sdkbuilder "$GITHUB_WORKSPACE"
       - name: Fetch pinned sources explicitly
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: runuser -u sdkbuilder -- python3 tools/build-sdk.py fetch --jobs 2
+        if: steps.base.outputs.found != 'true'
+        env:
+          SDK_JOBS: ${{ steps.settings.outputs.jobs }}
+        run: runuser -u sdkbuilder -- python3 tools/build-sdk.py fetch --jobs "$SDK_JOBS"
       - name: Preserve source archive and build from its offline replay
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: steps.base.outputs.found != 'true'
+        env:
+          SDK_JOBS: ${{ steps.settings.outputs.jobs }}
         run: |
-          runuser -u sdkbuilder -- python3 tools/build-sdk.py sources --jobs 2
+          runuser -u sdkbuilder -- python3 tools/build-sdk.py sources --jobs "$SDK_JOBS"
           mkdir -p build/sdk-replay
           set -- third_party/build-support/cache/source-sdk/releases/datapump-sdk-sources-*.tar.gz
           test "$#" -eq 1
@@ -53,13 +98,22 @@ jobs:
           set -- build/sdk-replay/datapump-sdk-sources-*
           test "$#" -eq 1
           # shellcheck disable=SC2016 # expanded by the child shell
-          runuser -u sdkbuilder -- sh -c 'cd "$1"; exec python3 tools/build-sdk.py build --jobs 2' sh "$1"
+          runuser -u sdkbuilder -- sh -c 'cd "$1"; exec python3 tools/build-sdk.py build --jobs "$2"' sh "$1" "$SDK_JOBS"
           cp "$1"/third_party/build-support/cache/source-sdk/releases/datapump-sdk-*-linux-x86_64.tar.gz third_party/build-support/cache/source-sdk/releases/
-          # Only the verified source/SDK archives are cached, not the multi-GB
+          # Keep verified source/SDK archives, not the multi-GB
           # intermediate compiler tree. These are this job's generated paths.
           rm -rf build/sdk-replay
           cd third_party/build-support/cache/source-sdk/releases
           sha256sum -- *.tar.gz > SHA256SUMS
+      - name: Record whether this SDK was retrieved or compiled
+        env:
+          BASE_FOUND: ${{ steps.base.outputs.found }}
+          SDK_RECIPE: ${{ steps.settings.outputs.recipe_id }}
+          SDK_JOBS: ${{ steps.settings.outputs.jobs }}
+        run: |
+          origin='cold source build'
+          if [ "$BASE_FOUND" = true ]; then origin='base release'; fi
+          echo "SDK $SDK_RECIPE: $origin. Cold-build parallelism: $SDK_JOBS jobs." >> "$GITHUB_STEP_SUMMARY"
       - name: Check archived SDK after relocation
         run: |
           cd third_party/build-support/cache/source-sdk/releases
@@ -69,28 +123,8 @@ jobs:
           test "$#" -eq 1
           python3 tools/build-sdk.py install --archive "$1" --destination "$GITHUB_WORKSPACE/build/sdk-qualified"
           python3 tools/build-sdk.py verify "$GITHUB_WORKSPACE/build/sdk-qualified" --max-host-glibc 2.36
-      - name: Separate consumer SDK from preserved sources
-        run: |
-          mkdir -p build/sdk-upload/binary build/sdk-upload/sources
-          cp --reflink=auto third_party/build-support/cache/source-sdk/releases/datapump-sdk-*-linux-x86_64.tar.gz build/sdk-upload/binary/
-          cp --reflink=auto third_party/build-support/cache/source-sdk/releases/datapump-sdk-sources-*.tar.gz build/sdk-upload/sources/
-          cp third_party/build-support/cache/source-sdk/releases/SHA256SUMS build/sdk-upload/sources/SDK-SHA256SUMS.txt
-          cd build/sdk-upload/binary
-          sha256sum -- *.tar.gz > SHA256SUMS
-          cd ../sources
-          sha256sum -- *.tar.gz > SHA256SUMS
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: DataPump-source-sdk
-          path: build/sdk-upload/binary/*
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 30
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: DataPump-source-sdk-sources
-          path: build/sdk-upload/sources/*
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 30
-
+      - name: Preserve SDK and complete sources in base (never Latest)
+        if: inputs.publish_base
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/sdk-release.py publish --repo "$GITHUB_REPOSITORY" --directory third_party/build-support/cache/source-sdk/releases --source-sha "$GITHUB_SHA"

@@ -5,7 +5,6 @@
 #include <cmath>
 #include <cstdlib>
 #include <memory>
-#include <string_view>
 #include <thread>
 #include <chrono>
 #include <cerrno>
@@ -14,7 +13,9 @@
 #include <windows.h>
 #include <mmsystem.h>
 #else
+#include "alsa_plugin_path.hpp"
 #include <dlfcn.h>
+#include <mutex>
 #endif
 
 namespace datapump::audio {
@@ -135,6 +136,18 @@ struct Alsa {
             symbol(hint,"snd_device_name_hint");symbol(get_hint,"snd_device_name_get_hint");
             symbol(free_hint,"snd_device_name_free_hint");
             symbol(wait,"snd_pcm_wait");
+            // Configure before any ALSA call can cache its plugin directory.
+            // All audio workers share this initialization; user configuration
+            // and plugins supplied beside libasound retain their precedence.
+            static std::once_flag plugin_directory;
+            std::call_once(plugin_directory,[&] {
+                Dl_info location{};
+                if(!dladdr(reinterpret_cast<void*>(open),&location) || !location.dli_fname)return;
+                const auto directory=detail::alsa_plugin_directory(std::getenv("ALSA_PLUGIN_DIR"),
+                    location.dli_fname,detail::host_alsa_plugin_directories());
+                if(!directory.empty() && setenv("ALSA_PLUGIN_DIR",directory.c_str(),0)!=0)
+                    throw Error("cannot configure the host ALSA plugin directory");
+            });
         } catch(...) {dlclose(library);throw;}
     }
     ~Alsa(){dlclose(library);}
@@ -147,6 +160,7 @@ struct Stream {
         const auto rates=rate_candidates(rate);
         const auto requested=device.empty()?std::string("default"):device;
         std::string attempted;
+        int last_error=0;
         const auto try_device=[&](const std::string& name) {
             for(const auto candidate:rates) {
                 // Stereo lets us route transmit PCM explicitly. Mono-only
@@ -154,10 +168,12 @@ struct Stream {
                 for(unsigned candidate_channels=direction?1:2;candidate_channels>0;--candidate_channels) {
                     if(!attempted.empty())attempted+=", ";
                     attempted+=name+"@"+std::to_string(candidate)+"Hz/"+std::to_string(candidate_channels)+"ch";
-                    if(api.open(&pcm,name.c_str(),direction,nonblocking?1:0)<0){pcm=nullptr;return false;}
+                    last_error=api.open(&pcm,name.c_str(),direction,nonblocking?1:0);
+                    if(last_error<0){pcm=nullptr;return false;}
                     // Let the application own rate conversion: an accepted ALSA
                     // rate is the selected endpoint's clock, not a modem setting.
-                    if(api.set_params(pcm,2,3,candidate_channels,candidate,0,100000)>=0) {
+                    last_error=api.set_params(pcm,2,3,candidate_channels,candidate,0,100000);
+                    if(last_error>=0) {
                         hardware_rate=candidate;channels=candidate_channels;return true;
                     }
                     api.close(pcm);pcm=nullptr;
@@ -166,46 +182,11 @@ struct Stream {
             return false;
         };
         if(try_device(requested))return;
-        if(requested=="default") {
-            void** hints=nullptr;
-            if(api.hint(-1,"pcm",&hints)>=0) {
-                const auto release=[&](void** value){if(value)api.free_hint(value);};
-                std::unique_ptr<void*,decltype(release)> guard(hints,release);
-                struct Endpoint {std::string name;bool duplex;};
-                std::vector<Endpoint> defaults,system_defaults,converters;
-                const auto card=[](std::string_view name) {
-                    const auto start=name.find("CARD=");
-                    if(start==std::string_view::npos)return std::string{};
-                    const auto end=name.find(',',start);
-                    return std::string(name.substr(start,end==std::string_view::npos?end:end-start));
-                };
-                for(auto** hint=hints;hint && *hint;++hint) {
-                    std::unique_ptr<char,decltype(&std::free)> name(api.get_hint(*hint,"NAME"),std::free);
-                    std::unique_ptr<char,decltype(&std::free)> io(api.get_hint(*hint,"IOID"),std::free);
-                    const bool duplex=!io || std::string_view(io.get()).empty();
-                    if(!name || (!duplex && std::string_view(io.get())!=(direction?"Input":"Output")))continue;
-                    const std::string value=name.get();
-                    auto* group=value.starts_with("default:")?&defaults:value.starts_with("sysdefault:")?&system_defaults:value.starts_with("plughw:")?&converters:nullptr;
-                    if(group && std::none_of(group->begin(),group->end(),[&](const auto& endpoint){return endpoint.name==value;}))
-                        group->push_back({value,duplex});
-                }
-                // A modem needs both directions. Prefer the same duplex card
-                // over an earlier output-only HDMI default. Within that card,
-                // conversion may be necessary for the 96 kHz bandwidth preset.
-                for(const bool duplex:{true,false}) {
-                    for(const auto& endpoint:defaults)if(endpoint.duplex==duplex && try_device(endpoint.name))return;
-                    for(const auto& endpoint:system_defaults)if(endpoint.duplex==duplex && try_device(endpoint.name))return;
-                    for(const auto& endpoint:converters) {
-                        const auto candidate=card(endpoint.name);
-                        const auto matches=[&](const Endpoint& id){return id.duplex==duplex && card(id.name)==candidate;};
-                        if(!candidate.empty() && (std::any_of(defaults.begin(),defaults.end(),matches) ||
-                           std::any_of(system_defaults.begin(),system_defaults.end(),matches)))
-                            if(try_device(endpoint.name))return;
-                    }
-                }
-            }
-        }
-        throw Error("cannot open audio device at "+std::to_string(rate)+" Hz (tried "+attempted+")");
+        auto message="cannot open audio device '"+requested+"': "+
+            std::error_code(-last_error,std::generic_category()).message();
+        if(requested=="default")
+            message+=". Configure the system's shared audio route (PipeWire/PulseAudio or ALSA dmix/dsnoop), or select an explicit Audio device";
+        throw Error(message+" (tried "+attempted+")");
     }
     ~Stream(){if(pcm) api.close(pcm);}
 };

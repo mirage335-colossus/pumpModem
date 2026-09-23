@@ -25,6 +25,8 @@ TARGETS = {
 LABEL = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,63}')
 SHA = re.compile(r'[0-9a-f]{40}|[0-9a-f]{64}')
 SUPPORT_FILES = {'release-metadata.json', 'release-notes.md'}
+CERTIFICATION_PENDING = ('> **Certification pending:** this release has not completed release '
+                         'certification and is not marked Latest.')
 
 
 def project_version(root=ROOT):
@@ -157,7 +159,7 @@ def release_notes(metadata, details):
     baseline = ('x86-64: glibc 2.36 (Bookworm source SDK); AArch64: glibc 2.35'
                 if metadata['linux_baseline'] == 'bookworm-sdk'
                 else 'x86-64 and AArch64: glibc 2.35 (Ubuntu 22.04)')
-    return (f'{warning}Build **{metadata["tag"]}**\n\n'
+    return (f'{warning}{CERTIFICATION_PENDING}\n\nBuild **{metadata["tag"]}**\n\n'
             f'- Source commit: `{metadata["source_sha"]}`\n'
             f'- Build date: `{metadata["build_date"]}` (America/Chicago)\n'
             f'- Workflow run: `{metadata["run_id"]}`, attempt `{metadata["run_attempt"]}`\n'
@@ -230,31 +232,170 @@ def require_absent(endpoint):
         raise RuntimeError(f'Cannot confirm GitHub resource is absent: {endpoint}\n{response.stderr.strip()}')
 
 
-def publish(directory, repository, *, publish_now=False):
+def repository_name(repository):
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*', repository):
         raise ValueError('Repository must be OWNER/REPO')
-    metadata, inventory = verify_release(directory)
-    # Establish repository visibility first: private-repository denial can also
-    # be reported as 404 for the individual tag/release resources.
+    return repository
+
+
+def api_pages(endpoint):
+    response = gh(['api', '--paginate', endpoint]).stdout
+    decoder = json.JSONDecoder()
+    rows = []
+    while response.strip():
+        response = response.lstrip()
+        page, end = decoder.raw_decode(response)
+        if not isinstance(page, list):
+            raise ValueError('Expected a paginated GitHub array')
+        rows.extend(page)
+        response = response[end:]
+    return rows
+
+
+def draft_info(metadata, repository):
+    repository_name(repository)
+    tag = metadata['tag']
+    # gh performs the GraphQL pending-tag lookup needed for drafts. The REST
+    # /releases/tags endpoint alone only finds published releases.
+    info = json.loads(gh(['release', 'view', tag, '--repo', repository, '--json',
+                         'databaseId,isDraft,isPrerelease,name,tagName']).stdout)
+    if (not info.get('isDraft') or info.get('tagName') != tag
+            or info.get('name') != metadata['title']
+            or info.get('isPrerelease') != metadata['experiment']
+            or not isinstance(info.get('databaseId'), int)):
+        raise ValueError('Release must be the matching reserved draft with its original title and experiment status')
+    reference = json.loads(gh(['api', f'repos/{repository}/git/ref/tags/{tag}']).stdout)
+    if reference.get('object') != {'type': 'commit', 'sha': metadata['source_sha']}:
+        # GitHub also includes an object URL; only type and SHA define identity.
+        obj = reference.get('object', {})
+        if obj.get('type') != 'commit' or obj.get('sha') != metadata['source_sha']:
+            raise ValueError('Reserved release tag does not identify the exact source commit')
+    assets = api_pages(f'repos/{repository}/releases/{info["databaseId"]}/assets?per_page=100')
+    inventory = {asset['name']: asset for asset in assets}
+    allowed = set(application_names(metadata).values()) | SUPPORT_FILES
+    if len(inventory) != len(assets) or not SUPPORT_FILES <= set(inventory) or not set(inventory) <= allowed:
+        raise ValueError('Reserved draft has missing support files, duplicate, finalized or unexpected assets')
+    return inventory
+
+
+def download_assets(metadata, repository, directory, assets, wanted):
+    gh(['release', 'download', metadata['tag'], '--repo', repository, '--dir', str(directory),
+        *[argument for name in sorted(wanted) for argument in ('--pattern', name)]])
+    for name in wanted:
+        path = directory / name
+        expected = assets[name].get('digest')
+        if (assets[name].get('state') != 'uploaded' or not isinstance(expected, str)
+                or not re.fullmatch(r'sha256:[0-9a-f]{64}', expected)):
+            raise ValueError(f'GitHub has not supplied a completed SHA-256 digest for {name}')
+        if path.is_symlink() or not path.is_file() or digest(path) != expected.removeprefix('sha256:'):
+            raise ValueError(f'Downloaded release asset checksum mismatch: {name}')
+
+
+def check_draft_metadata(metadata, directory):
+    if load_metadata(directory / 'release-metadata.json') != metadata:
+        raise ValueError('Reserved draft metadata belongs to another workflow run or source commit')
+    if CERTIFICATION_PENDING not in (directory / 'release-notes.md').read_text(encoding='utf-8'):
+        raise ValueError('Reserved draft notes must retain the pending certification status')
+
+
+def reserve(metadata_path, notes, repository):
+    repository_name(repository)
+    metadata = load_metadata(metadata_path)
+    if not notes.is_file() or notes.is_symlink() or not notes.read_text(encoding='utf-8').strip():
+        raise ValueError('Release notes must be a nonempty regular UTF-8 file')
+    # Listing also finds a pre-existing draft whose pending tag has no Git ref.
+    existing = api_pages(f'repos/{repository}/releases?per_page=100')
+    if any(item.get('tag_name') == metadata['tag'] for item in existing):
+        raise ValueError('Refusing to overwrite an existing release or draft')
+    with tempfile.TemporaryDirectory(prefix='release-reserve-') as temporary:
+        directory = Path(temporary)
+        write_json(directory / 'release-metadata.json', metadata)
+        (directory / 'release-notes.md').write_text(
+            release_notes(metadata, notes.read_text(encoding='utf-8')), encoding='utf-8')
+        create_draft(metadata, repository, directory / 'release-notes.md')
+        gh(['release', 'upload', metadata['tag'], '--repo', repository,
+            str(directory / 'release-metadata.json'), str(directory / 'release-notes.md')])
+    return metadata
+
+
+def upload(metadata_path, repository, target, directory):
+    metadata = load_metadata(metadata_path)
+    if target not in TARGETS:
+        raise ValueError('Unknown portable release target')
+    system, architectures, extension = TARGETS[target]
+    inventory = check_inventory(directory)
+    candidates = [f'DataPump-{metadata["project_version"]}-{system}-{arch}-native' for arch in architectures]
+    bases = [base for base in candidates if set(inventory) == {base + '.tar.gz', base + '.zip'}]
+    if len(bases) != 1:
+        raise ValueError(f'Expected one matching native TGZ/ZIP pair for {target}')
+    assets = draft_info(metadata, repository)
+    name = application_names(metadata)[target]
+    if name in assets:
+        raise ValueError(f'Refusing to overwrite an existing target asset: {name}')
+    with tempfile.TemporaryDirectory(prefix='release-upload-') as temporary:
+        staged = Path(temporary)
+        download_assets(metadata, repository, staged, assets, SUPPORT_FILES)
+        check_draft_metadata(metadata, staged)
+        shutil.copyfile(directory / (bases[0] + extension), staged / name)
+        gh(['release', 'upload', metadata['tag'], '--repo', repository, str(staged / name)])
+    return metadata
+
+
+def finalize(metadata_path, repository, directory, publish_now=False):
+    metadata = load_metadata(metadata_path)
+    if directory.exists() or directory.is_symlink():
+        raise ValueError('Refusing to replace an existing final release directory')
+    assets = draft_info(metadata, repository)
+    expected = set(application_names(metadata).values()) | SUPPORT_FILES
+    if set(assets) != expected:
+        raise ValueError('Draft is missing one or more of the three portable targets')
+    directory.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='.release-finalize-', dir=directory.parent) as temporary:
+        staged = Path(temporary) / 'assets'
+        staged.mkdir()
+        download_assets(metadata, repository, staged, assets, expected)
+        if {path.name for path in staged.iterdir()} != expected:
+            raise ValueError('Downloaded final release inventory contains unexpected files')
+        check_draft_metadata(metadata, staged)
+        sums = ''.join(f'{digest(path)}  {path.name}\n' for path in sorted(staged.iterdir()))
+        (staged / 'SHA256SUMS.txt').write_text(sums, encoding='utf-8')
+        verify_release(staged)
+        staged.rename(directory)
+    gh(['release', 'upload', metadata['tag'], '--repo', repository, str(directory / 'SHA256SUMS.txt')])
+    if publish_now:
+        gh(['release', 'edit', metadata['tag'], '--repo', repository, '--draft=false', '--latest=false'])
+    return metadata
+
+
+def create_draft(metadata, repository, notes):
+    repository_name(repository)
     gh(['api', f'repos/{repository}'])
     tag = metadata['tag']
     require_absent(f'repos/{repository}/releases/tags/{tag}')
     require_absent(f'repos/{repository}/git/ref/tags/{tag}')
-    # Creating the ref is atomic: unlike release create --target alone, it fails
-    # if someone else claimed this tag between preflight and creation.
     gh(['api', '--method', 'POST', f'repos/{repository}/git/refs',
         '-f', f'ref=refs/tags/{tag}', '-f', f'sha={metadata["source_sha"]}'])
     flags = ['--prerelease', '--latest=false'] if metadata['experiment'] else ['--latest=false']
     gh(['release', 'create', tag, '--repo', repository,
         '--target', metadata['source_sha'], '--title', metadata['title'],
-        '--notes-file', str(directory / 'release-notes.md'), '--draft', '--verify-tag', *flags])
+        '--notes-file', str(notes), '--draft', '--verify-tag', *flags])
+
+
+def publish(directory, repository, *, publish_now=False):
+    repository_name(repository)
+    metadata, inventory = verify_release(directory)
+    # Establish repository visibility first: private-repository denial can also
+    # be reported as 404 for the individual tag/release resources.
+    tag = metadata['tag']
+    # Creating the ref is atomic: unlike release create --target alone, it fails
+    # if someone else claimed this tag between preflight and creation.
+    create_draft(metadata, repository, directory / 'release-notes.md')
     # No --clobber: an unexpected collision must fail. Publishing is the final
     # operation; upload failures intentionally leave a recoverable draft.
     gh(['release', 'upload', tag, '--repo', repository,
         *[str(directory / name) for name in inventory], str(directory / 'SHA256SUMS.txt')])
     if publish_now:
-        gh(['release', 'edit', tag, '--repo', repository, '--draft=false',
-            f'--latest={"false" if metadata["experiment"] else "true"}'])
+        gh(['release', 'edit', tag, '--repo', repository, '--draft=false', '--latest=false'])
     return metadata
 
 
@@ -280,6 +421,18 @@ def main(argv=None):
     release.add_argument('--directory', type=Path, required=True)
     release.add_argument('--repo', required=True)
     release.add_argument('--publish', action='store_true')
+    for name in ('reserve', 'upload', 'finalize'):
+        command = commands.add_parser(name)
+        command.add_argument('--metadata', type=Path, required=True)
+        command.add_argument('--repo', required=True)
+        if name == 'reserve':
+            command.add_argument('--notes', type=Path, required=True)
+        else:
+            command.add_argument('--directory', type=Path, required=True)
+        if name == 'upload':
+            command.add_argument('--target', choices=tuple(TARGETS), required=True)
+        if name == 'finalize':
+            command.add_argument('--publish', action='store_true')
     args = parser.parse_args(argv)
     try:
         if args.command == 'metadata':
@@ -294,6 +447,12 @@ def main(argv=None):
                         output.write(f'{key}={text}\n')
         elif args.command == 'assemble':
             value = assemble(args.artifacts, args.metadata, args.notes, args.output, args.sdk_artifacts)
+        elif args.command == 'reserve':
+            value = reserve(args.metadata, args.notes, args.repo)
+        elif args.command == 'upload':
+            value = upload(args.metadata, args.repo, args.target, args.directory)
+        elif args.command == 'finalize':
+            value = finalize(args.metadata, args.repo, args.directory, args.publish)
         else:
             value = publish(args.directory, args.repo, publish_now=args.publish)
     except (ValueError, OSError, RuntimeError, subprocess.CalledProcessError) as error:

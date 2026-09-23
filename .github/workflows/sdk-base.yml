@@ -1,0 +1,52 @@
+name: Maintain base SDK
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: 'auto reuses base; base verifies durable reuse; rebuild compiles from source'
+        type: choice
+        options: [auto, base, rebuild]
+        default: auto
+      jobs:
+        description: 'Cold SDK compilation jobs; 0 uses all available runner CPUs'
+        type: string
+        default: '0'
+      publish:
+        description: 'Preserve the verified SDK and sources in the base release'
+        type: boolean
+        default: true
+
+  pull_request:
+    paths:
+      - '.github/workflows/sdk-base.yml'
+      - '.github/workflows/sdk-build.yml'
+      - 'tools/sdk-release.py'
+      - 'tests/test_sdk_release.py'
+
+permissions:
+  contents: write
+
+# A single durable base release is shared by all branches.
+concurrency:
+  group: sdk-base-publication
+  cancel-in-progress: false
+
+jobs:
+  helper:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: python3 tests/test_sdk_release.py
+
+  sdk:
+    if: github.event_name == 'workflow_dispatch'
+    needs: helper
+    uses: ./.github/workflows/sdk-build.yml
+    with:
+      source: ${{ inputs.source }}
+      jobs: ${{ inputs.jobs }}
+      publish_base: ${{ inputs.publish }}

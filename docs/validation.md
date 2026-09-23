@@ -4,6 +4,41 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Separate publication, durable SDK and shared audio — 23 September 2026
+
+Publication now builds and verifies packages before releasing three binaries;
+extensive source/GUI/copied-binary qualification is a separately dispatched
+workflow. Certification pins the source commit and published checksum inventory,
+records exact binary hashes and required job outcomes, and attaches immutable
+JSON/Markdown reports. SDK archives and preserved sources live once per recipe
+in the `base` release. The release, certification and SDK maintenance paths have
+no Actions artifact/cache dependency. Cold SDK compilation uses available CPUs
+through the existing SDK helper, leaving recipe `b8685ab239d7ac8650e6` unchanged.
+
+Local validation passes **38** release-helper and **27** SDK-storage tests and
+all **10/10** build suites. Packaging validation passes **3/3** suites, including
+a new sentinel proving that `dlopen("libasound.so.2")` resolves to the packaged
+library; the sentinel fails before the missing alias fix. Audio routing,
+Windows audio stubs, rate conversion and resampling pass **4/4** focused suites.
+The application build also passes. Workflow lint and whitespace checks pass.
+The qualified 657 MiB SDK/source pair passes outer hashes, source replay hashes,
+recipe identity and binary manifest verification without rebuilding it.
+
+Linux audio now retains the requested endpoint if opening/configuring it fails;
+it no longer silently substitutes an exclusive card endpoint for `default`.
+Tests preserve rate/channel negotiation and exact PCM assertions while checking
+busy/shared endpoints and independent capture handles. Relocated ALSA discovers
+architecture-matched host plugins when no user override/private plugin directory
+is present. A probe with the released SDK library and a synthetic PulseAudio
+endpoint confirms automatic host-plugin discovery; an explicit invalid plugin
+path remains authoritative. No physical audio devices were exercised, so this
+is not a hardware or desktop-session concurrency certification. No application
+singleton restriction was found.
+
+GitHub publication and subsequent certification results are recorded below when
+complete. The earlier artifact-only runs remain historical evidence of the
+previous combined build/test/publication workflow.
+
 ## Manual portable release qualification — 23 September 2026 UTC
 
 The manual release workflow builds three application bundles: Linux x86_64,

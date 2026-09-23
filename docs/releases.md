@@ -1,85 +1,137 @@
 # Manual portable releases
 
-The [release workflow](../.github/workflows/release.yml) builds, tests and
-optionally publishes a release from a manually selected Git revision. Every
-release contains three user bundles: Linux x86_64, Linux aarch64 and Windows
-x64. Each contains the FLTK GUI, CLI, required application libraries, notices
-and build information. Linux uses `.tar.gz`; Windows uses `.zip`. There is no
-separate download for every Linux distribution or Windows version.
+The [release workflow](../.github/workflows/release.yml) builds and publishes
+three portable application bundles: Linux x86_64, Linux aarch64 and Windows x64.
+Each contains the FLTK GUI, CLI, required application libraries and notices.
+Unpack the whole archive and keep `bin/` and `lib/` together. Nothing needs to
+be copied into the system `/lib` directory. Linux uses `.tar.gz`; Windows uses
+`.zip`. Compatible distributions share the same binary.
+
+Publication and extensive testing are separate operations. Publication checks
+build success, both package formats, checksums, relocation, CLI/self-check
+operation, dependency closure and the Linux ABI ceiling. It then publishes the
+three selected downloads with **certification pending**. The separate
+[certification workflow](../.github/workflows/certify.yml) later tests the exact
+published downloads and attaches immutable reports to that same release. The
+long preservation contract and GUI tests remain intact in that workflow.
 
 ## Dispatch inputs
 
 | Input | Default | Meaning |
 | --- | --- | --- |
-| `version` | Empty | Use the CMake project version, currently `0.7.2`, producing a `v0.7.2` prefix. A release label such as `v001_00` can be supplied instead. |
-| `experiment` | Checked / `true` | Set the release title to exactly `experiment`, mark it as a GitHub prerelease, and never mark it latest. |
-| `publish` | Unchecked / `false` | Build and test only; retain downloadable Actions artifacts without creating a release or tag. Check to publish after all required jobs pass. |
-| `linux_baseline` | `bookworm-sdk` | Select the Linux x86_64 builder: the source SDK with glibc 2.36, or `ubuntu-22.04` with glibc 2.35. ARM64 always uses the native Ubuntu 22.04 baseline. |
+| `version` | Empty | Use the CMake version (`0.7.2`) as `v0.7.2`, or supply a label such as `v001_00`. |
+| `experiment` | Checked | Title exactly `experiment`; GitHub prerelease; never Latest, even after certification passes. |
+| `publish` | Checked | Publish after all three packages pass basic checks. Uncheck to retain a draft with its assets for inspection. |
+| `linux_baseline` | `bookworm-sdk` | Source SDK/glibc 2.36 for x86_64, or `ubuntu-22.04`/glibc 2.35. ARM64 always uses the Ubuntu 22.04 baseline. |
 
-Leave `experiment` checked for builds that users needing assurance should
-avoid. Clearing it selects an ordinary release with the version/build label
-as its title; it does not add physical-device certification.
+Leave `experiment` checked for builds users needing assurance should avoid.
+An ordinary release uses its version/date tag as the title. It becomes Latest
+only after a successful separate certification; publication alone does not
+promote it. Hosted certification is limited to the tests listed below and
+cannot establish physical-device compatibility.
 
-The run generates one shared build timestamp in `America/Chicago`, including
-the applicable daylight-saving abbreviation. Tags have the form
-`VERSION-YYYY-MM-DD-HHMMCDT` or `VERSION-YYYY-MM-DD-HHMMCST`, for example
-`v001_00-2026-09-22-0252CDT`. All platform jobs use the same label even if they
-finish on different dates. The release records the exact source commit;
-the label is not a replacement for that provenance. Existing tag or release
-collisions fail rather than moving a tag or replacing assets. If publication
-fails after reserving the tag or creating the draft, those may remain for inspection; the workflow never deletes or overwrites them on retry.
-Dispatch again with a new build timestamp, or deliberately remove the failed
-tag/draft after inspecting it before reusing its exact label.
+One `America/Chicago` timestamp supplies every platform's tag and filename:
+`VERSION-YYYY-MM-DD-HHMMCDT` or `VERSION-YYYY-MM-DD-HHMMCST`, such as
+`v001_00-2026-09-22-0252CDT`. Exact source commit and workflow identity are also
+recorded. A colliding tag fails; tags are never moved and assets never clobbered.
+A failed build/upload may leave a draft and reserved tag for inspection.
+Dispatch with a fresh timestamp after correcting the problem; cleanup of a
+failed draft/tag is a deliberate maintainer operation.
 
 ## Run with GitHub CLI
 
-Run these commands from a checkout whose GitHub remote is the intended
-repository, or add `--repo OWNER/REPO`. The workflow must first exist on the
-repository's default branch, and the account needs write access. A branch or
-tag selected with `--ref` determines the source to build. See GitHub's
-[manual dispatch documentation](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)
-and the [GitHub CLI reference](https://cli.github.com/manual/gh_workflow_run).
+Use a checkout of the intended repository or add `--repo OWNER/REPO`. Workflows
+must be registered on the default branch before normal manual dispatch; `--ref`
+selects the build source. The account needs repository write access. See
+[GitHub manual dispatch](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)
+and the [CLI reference](https://cli.github.com/manual/gh_workflow_run).
 
-First exercise the complete build and validation without publishing:
+Prepare the SDK once, or after changing its recipe:
 
 ```sh
-gh workflow run release.yml --ref main \
-  -f experiment=true -f publish=false -f linux_baseline=bookworm-sdk
-gh run list --workflow release.yml --limit 5
-gh run watch RUN_ID --exit-status
-gh run download RUN_ID --dir release-artifacts
+gh workflow run sdk-base.yml --ref main -f source=auto -f jobs=0 -f publish=true
 ```
 
-Replace `main` with the repository's intended branch and `RUN_ID` with the ID
-reported for that dispatch. Inspect its logs and artifacts before choosing to
-publish. A later dispatch is a new build with its own label.
-
-Publish an experimental release with the requested version style:
+Build and publish an experimental application release:
 
 ```sh
 gh workflow run release.yml --ref main \
   -f version=v001_00 -f experiment=true -f publish=true \
   -f linux_baseline=bookworm-sdk
+gh run list --workflow release.yml --limit 5
+gh run watch RUN_ID --exit-status
+gh release download RELEASE_TAG --dir portable-downloads
 ```
 
-For an ordinary release that also covers Ubuntu 22.04 on x86_64:
+Later, dispatch certification for that existing, published tag:
 
 ```sh
-gh workflow run release.yml --ref main \
-  -f experiment=false -f publish=true -f linux_baseline=ubuntu-22.04
+gh workflow run certify.yml --ref main -f release_tag=RELEASE_TAG
+gh run list --workflow certify.yml --limit 5
+gh run watch CERTIFICATION_RUN_ID --exit-status
 ```
 
-Omitting `version` uses the CMake version. In the Actions web interface, the
-same options appear under **Run workflow**, with checkboxes for `experiment`
-and `publish`.
+Replace the uppercase placeholders with the recorded IDs/tag. Certification
+checks out the release's exact source revision, regardless of the current tip
+of `main`. It pins `SHA256SUMS.txt` before testing and refuses certification if
+the source, tag, checksum inventory or published asset hashes change. It never
+rebuilds or replaces the published downloads. Source unit tests compile from
+the recorded revision; archive/GUI/CLI tests execute the released binaries.
+
+Every completed certification records passed/failed status, required job
+outcomes, source SHA and binary hashes in
+`certification-RUN_ID-attempt-ATTEMPT.json` and `.md`. Reports are added to the
+release, with links in its description. Missing, skipped, cancelled or failed
+required jobs cannot grant a pass. Repeated runs retain prior reports. An
+upload failure cannot promote a release. Drafts cannot be certified.
+
+For the Ubuntu 22.04 x86_64 baseline, set `linux_baseline=ubuntu-22.04`.
+Clear `experiment` for an ordinary release. `publish=false` still reserves a
+tag and uploads to a draft; it is no longer an Actions-artifact rehearsal.
+PRs changing automation run helper tests without creating releases or tags.
+
+## Durable SDK storage and compilation time
+
+The [base maintenance workflow](../.github/workflows/sdk-base.yml) owns the
+[shared SDK producer](../.github/workflows/sdk-build.yml). It keeps compiled
+SDKs, matching complete source archives and per-recipe checksum inventories in
+the `base` release. This developer-only release is a prerelease, never Latest.
+Old recipes remain available; an identical recipe is reused, and different
+bytes under an existing recipe name are rejected. Each source archive preserves
+the helper, recipe, pinned source downloads and bootstrap sources needed for
+reconstruction.
+
+`source=auto` retrieves the exact current recipe from `base`, building only if
+absent. `source=base` requires and verifies durable reuse. `source=rebuild`
+performs a cold replay from pinned sources; `publish=false` allows inspection
+without changing durable storage. Cold rebuilds can produce different bytes;
+existing recipe assets are immutable. Use a new recipe identity for an upgrade.
+`jobs=0` uses `nproc`, the CPUs actually available to the runner, and passes that
+count through Buildroot's internal parallelism. A positive number overrides it.
+Application packaging also uses available runner cores; time-sensitive test
+concurrency remains controlled independently.
+
+Routine app builds download only the compiled SDK and checksum inventory. The
+source archive stays in `base` for developers. Neither publication, certification
+nor base maintenance uses Actions cache or artifact storage: platform builds
+upload directly to a draft, and certification downloads the published assets.
+The separate optional SDK/Rev regression workflow retains small application
+artifacts for one day solely to test copies on other hosts. Those are not durable
+releases. Existing unrelated CI artifacts are unchanged.
+
+The earlier successful run spent **57 seconds** retrieving/verifying its SDK;
+the **46m59s** application job included the extensive tests. Separating those
+checks removes them from the publication path. A cold SDK build remains an
+occasional maintenance task, not work repeated for each application release.
 
 ## Choose the Linux baseline
 
 `bookworm-sdk` uses the pinned, relocatable
 [source SDK](../third_party/build-support/README.md#source-sdk-for-the-bookworm-abi-baseline).
-The release workflow calls the shared `sdk-build.yml` workflow, reuses
-its recipe-keyed archive cache, then installs and verifies that SDK before
-building the application. Its isolated target dependencies and glibc ceiling
+The release workflow downloads the exact recipe from the durable `base`
+release, then verifies and installs that SDK before building the application.
+A missing recipe fails with maintenance instructions; it never starts a cold
+SDK build inside an application release. Its isolated target dependencies and glibc ceiling
 are checked during packaging. The initial SDK targets x86_64 with glibc 2.36;
 it does not supply an ARM compiler.
 
@@ -91,9 +143,8 @@ has three user bundles. Neither option covers every historical Ubuntu LTS.
 The release inventory names the application downloads
 `DataPump-TAG-linux-x86_64.tar.gz`, `DataPump-TAG-linux-aarch64.tar.gz` and
 `DataPump-TAG-windows-x86_64.zip`, where `TAG` is the shared version/build label.
-It also includes release notes, metadata and `SHA256SUMS.txt`. SDK releases also
-include the compiled SDK and its corresponding source archive for developers;
-these are separate from the three application bundles. The optional `version`
+It also includes release notes, metadata and `SHA256SUMS.txt`. Compiled SDKs and their corresponding source archives are retained once per
+recipe in `base`, separately from application releases. The optional `version`
 input labels the release and archives; it does not rewrite the CMake project
 version embedded in the application's `--version` output.
 
@@ -114,10 +165,9 @@ set extensions. GitHub documents the available
 
 ## Compatibility checks and scope
 
-The workflow tests copies of the completed archives on the following systems;
-it does not rebuild one binary per test distribution. Publication depends on
-successful build, package and compatibility jobs. Read the run results before
-describing a particular release as tested.
+The separate certification workflow runs the full build, contract, GUI and
+packaging selections and tests the published archives on the hosts below.
+Read the attached report before describing a particular release as tested.
 
 | Bundle | Build baseline | Copied-archive compatibility jobs |
 | --- | --- | --- |
@@ -168,9 +218,6 @@ Windows uses WinMM. Keep the complete extracted bundle, including its libraries
 and notices, together. See [offline installation](offline-installation.md) for
 local verification and runtime requirements.
 
-Pull requests changing release automation exercise the Ubuntu 22.04 build path
-without publishing. Manual dispatch defaults to the source SDK path.
-
 Native Linux builders and compatibility jobs use checksum-pinned CMake 3.31.10
 from Kitware for dependency inspection; SDK builds use their bundled CMake. Older CMake versions can lose inherited
 executable RPATHs during recursive scans and falsely report conflicts with host
@@ -190,7 +237,8 @@ The copied-archive GUI smoke uses the existing 600-second overall allowance.
 It covers the complete text, attachment, interruption and replacement sequence;
 the previous 300-second CI allowance expired late in that sequence on hosted
 runners. Per-frame, pending-progress and cancellation checks retain their
-original deadlines. Compatibility jobs allow both archive formats to finish.
+original deadlines. Certification tests the selected published format on each compatibility host;
+publication still verifies both generated package formats.
 
 The Windows live-profile capture fixture requests 1 ms timer resolution for
 its existing 1 ms sleeps and restores it on exit, following Microsoft's

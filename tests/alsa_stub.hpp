@@ -9,6 +9,7 @@ struct Hint {std::string name,io;};
 struct State {
     std::vector<Hint> hints;
     std::vector<std::string> available,wrong_format,attempts;
+    std::vector<std::pair<std::string,int>> open_errors;
     std::vector<std::int16_t> played;
     std::vector<unsigned> supported_rates;
     // Existing scalar PCM fixtures model a mono-only sound card.
