@@ -67,9 +67,9 @@ def chicago_time(instant):
 
 
 def make_metadata(*, source_sha, run_id, run_attempt, version='', experiment=False,
-                  linux_baseline='bookworm-sdk', now=None, cmake_version=None, schema=3,
+                  linux_baseline='bookworm-sdk', now=None, cmake_version=None, schema=4,
                   packager_sha=None, repackaged_from=None):
-    if type(schema) is not int or schema not in (1, 2, 3):
+    if type(schema) is not int or schema not in (1, 2, 3, 4):
         raise ValueError('Unsupported release metadata schema')
     cmake_version = cmake_version or project_version()
     if not re.fullmatch(r'\d+(?:\.\d+){1,3}', cmake_version):
@@ -98,7 +98,7 @@ def make_metadata(*, source_sha, run_id, run_attempt, version='', experiment=Fal
     }
     if schema >= 2:
         value['gui_backends'] = list(GUI_BACKENDS)
-    if schema == 3:
+    if schema >= 3:
         value['apt_repository'] = {
             'schema': 1, 'architectures': ['amd64', 'arm64'], 'gui_backends': list(GUI_BACKENDS)}
         packager_sha = source_sha if packager_sha is None else packager_sha
@@ -118,6 +118,10 @@ def make_metadata(*, source_sha, run_id, run_attempt, version='', experiment=Fal
             value['repackaged_from'] = dict(repackaged_from)
     elif packager_sha is not None or repackaged_from is not None:
         raise ValueError('Packaging provenance requires release metadata schema 3')
+    if schema >= 4:
+        value['distro_recipes'] = {
+            'schema': 1, 'formats': ['arch', 'gentoo'], 'architectures': ['x86_64', 'aarch64'],
+            'gui_backends': list(GUI_BACKENDS)}
     return value
 
 
@@ -186,7 +190,7 @@ def application_targets(metadata):
     """Map download identities to their physical platform/archive format."""
     if metadata['schema'] == 1:
         return dict(TARGETS)
-    if metadata['schema'] not in (2, 3) or metadata.get('gui_backends') != list(GUI_BACKENDS):
+    if metadata['schema'] not in (2, 3, 4) or metadata.get('gui_backends') != list(GUI_BACKENDS):
         raise ValueError('Unsupported release schema or GUI backend inventory')
     return {f'{platform}-{backend}': details for platform, details in TARGETS.items()
             for backend in GUI_BACKENDS}
@@ -305,12 +309,12 @@ def application_names(metadata):
 
 
 def tag_revision(metadata):
-    """A schema-3 tag identifies its packaging recipe; source_sha identifies app bytes."""
-    return metadata['packager_sha'] if metadata['schema'] == 3 else metadata['source_sha']
+    """A schema-3+ tag identifies its packaging recipe; source_sha identifies app bytes."""
+    return metadata['packager_sha'] if metadata['schema'] >= 3 else metadata['source_sha']
 
 
 def apt_tool():
-    """Load the Linux APT packager only for schema-3 release operations."""
+    """Load the Linux APT packager only for schema-3+ release operations."""
     spec = importlib.util.spec_from_file_location('datapump_apt_release', Path(__file__).with_name('apt-release.py'))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -318,12 +322,32 @@ def apt_tool():
 
 
 def apt_assets(metadata):
-    return set(apt_tool().asset_names(metadata)) if metadata['schema'] == 3 else set()
+    return set(apt_tool().asset_names(metadata)) if metadata['schema'] >= 3 else set()
+
+
+def distro_tool():
+    """Load binary package recipes only for schema-4 release operations."""
+    spec = importlib.util.spec_from_file_location('datapump_distro_release', Path(__file__).with_name('distro-release.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def distro_assets(metadata):
+    return set(distro_tool().asset_names(metadata)) if metadata['schema'] >= 4 else set()
+
+
+def build_delivery_assets(directory, metadata, repository, signing_key, signing_fingerprint):
+    # Sign the recipe asset hashes along with the APT metadata.
+    if metadata['schema'] >= 4:
+        distro_tool().build(directory, metadata, repository)
+    if metadata['schema'] >= 3:
+        apt_tool().build(directory, metadata, repository, signing_key, signing_fingerprint)
 
 
 def required_assets(metadata):
     """Final inventory; draft upload accepts only the original support files."""
-    return set(application_names(metadata).values()) | support_files(metadata) | apt_assets(metadata)
+    return set(application_names(metadata).values()) | support_files(metadata) | apt_assets(metadata) | distro_assets(metadata)
 
 
 def support_files(metadata):
@@ -392,8 +416,7 @@ def assemble(artifacts, metadata_path, notes, output, sdk_artifacts=None, *, rep
         (staged / 'release-notes.md').write_text(
             release_notes(metadata, notes.read_text(encoding='utf-8')), encoding='utf-8')
         write_warning(metadata, staged)
-        if metadata['schema'] == 3:
-            apt_tool().build(staged, metadata, repository, apt_signing_key, apt_signing_fingerprint)
+        build_delivery_assets(staged, metadata, repository, apt_signing_key, apt_signing_fingerprint)
         checksums = ''.join(f'{digest(path)}  {path.name}\n' for path in sorted(staged.iterdir()))
         (staged / 'SHA256SUMS.txt').write_text(checksums, encoding='utf-8')
         verify_release(staged)
@@ -411,8 +434,10 @@ def verify_release(directory):
     if extra:
         verify_sdk_pair(extra)
     verify_warning(metadata, directory)
-    if metadata['schema'] == 3:
+    if metadata['schema'] >= 3:
         apt_tool().verify(directory, metadata)
+    if metadata['schema'] >= 4:
+        distro_tool().verify(directory, metadata)
     for target, name in application_names(metadata).items():
         verify_archive_backend(directory / name, metadata, target)
     return metadata, sorted(inventory)
@@ -591,14 +616,13 @@ def finalize(metadata_path, repository, directory, publish_now=False, *,
         if {path.name for path in staged.iterdir()} != expected:
             raise ValueError('Downloaded final release inventory contains unexpected files')
         check_draft_metadata(metadata, staged)
-        if metadata['schema'] == 3:
-            apt_tool().build(staged, metadata, repository, apt_signing_key, apt_signing_fingerprint)
+        build_delivery_assets(staged, metadata, repository, apt_signing_key, apt_signing_fingerprint)
         sums = ''.join(f'{digest(path)}  {path.name}\n' for path in sorted(staged.iterdir()))
         (staged / 'SHA256SUMS.txt').write_text(sums, encoding='utf-8')
         verify_release(staged)
         staged.rename(directory)
     gh(['release', 'upload', metadata['tag'], '--repo', repository,
-        *[str(directory / name) for name in sorted(apt_assets(metadata))],
+        *[str(directory / name) for name in sorted(apt_assets(metadata) | distro_assets(metadata))],
         str(directory / 'SHA256SUMS.txt')])
     if publish_now:
         gh(['release', 'edit', metadata['tag'], '--repo', repository, '--draft=false', '--latest=false'])
@@ -697,11 +721,12 @@ def repackage(source_tag, repository, directory, *, version='', run_id, run_atte
         details = (f'Application archives are byte-for-byte copies of release `{source_tag}`.\n\n'
                    f'- Original inventory SHA-256: `{metadata["repackaged_from"]["inventory_sha256"]}`\n'
                    f'- Packaging source commit: `{packager_sha}`\n\n'
-                   'This experiment checks the APT delivery path; earlier certification results '
+                   f'[Debian/Ubuntu, Arch and Gentoo installation instructions](https://github.com/{repository}/blob/{packager_sha}/docs/releases.md).\n\n'
+                   'This experiment checks the Debian, Arch and Gentoo delivery paths; earlier certification results '
                    'for the application remain relevant and do not constitute certification of this release.\n')
         (staged / 'release-notes.md').write_text(release_notes(metadata, details), encoding='utf-8')
         write_warning(metadata, staged)
-        apt_tool().build(staged, metadata, repository, apt_signing_key, apt_signing_fingerprint)
+        build_delivery_assets(staged, metadata, repository, apt_signing_key, apt_signing_fingerprint)
         sums = ''.join(f'{digest(path)}  {path.name}\n' for path in sorted(staged.iterdir()))
         (staged / 'SHA256SUMS.txt').write_text(sums, encoding='utf-8')
         verify_release(staged)
@@ -760,7 +785,7 @@ def main(argv=None):
             command.add_argument('--directory', type=Path, required=True)
         if name == 'upload':
             command.add_argument('--target', required=True,
-                                 help='Platform identity, including -fltk or -rev for schemas 2 and 3')
+                                 help='Platform identity, including -fltk or -rev for schemas 2 and newer')
         if name == 'finalize':
             command.add_argument('--publish', action='store_true')
             command.add_argument('--apt-signing-key', type=Path)

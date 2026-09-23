@@ -671,7 +671,7 @@ class AptCertificationTests(CertificationFixture, unittest.TestCase):
     def test_download_apt_verifies_pinned_assets_and_original_linux_payloads(self):
         state = certify.download_apt(self.repository, self.tag, self.root / 'apt',
                                      digest(self.files['SHA256SUMS.txt']), 'A' * 40)
-        expected = self.apt_names | {'SHA256SUMS.txt', 'release-metadata.json'} | {
+        expected = self.apt_names | getattr(self, 'distro_names', set()) | {'SHA256SUMS.txt', 'release-metadata.json'} | {
             name for target, name in certify.release.application_names(self.metadata).items()
             if target.startswith('linux-')}
         self.assertEqual(set(self.downloads), expected)
@@ -696,11 +696,11 @@ class AptCertificationTests(CertificationFixture, unittest.TestCase):
 
     def test_passed_record_binds_all_apt_hashes_and_demands_apt_job(self):
         evidence = self.record()
-        self.assertEqual(evidence['schema'], 3)
+        self.assertEqual(evidence['schema'], self.schema)
         self.assertEqual(evidence['status'], 'passed')
         self.assertEqual(evidence['apt_assets'], {name: digest(self.files[name]) for name in self.apt_names})
         self.assertIn('apt-repository', evidence['required_jobs'])
-        self.assertIn('--latest=true', self.edits[-1][0])
+        self.assertIn('--latest=true' if self.schema >= 4 else '--latest=false', self.edits[-1][0])
         report = self.uploads['certification-789-attempt-2.md'].decode()
         self.assertIn('Signed APT repository', report)
         self.assertIn('Published APT asset SHA-256 values', report)
@@ -727,6 +727,55 @@ class AptCertificationTests(CertificationFixture, unittest.TestCase):
             self.record()
         self.assertFalse(self.uploads)
         self.assertFalse(self.edits)
+
+
+class DistroCertificationTests(AptCertificationTests):
+    schema = 4
+
+    def setUp(self):
+        super().setUp()
+        self.distro_names = {'datapump-arch-recipes.tar.gz', 'datapump-gentoo-overlay.tar.gz', 'distro-packages.json'}
+        self.distro_tool = Mock()
+        self.distro_tool.asset_names.return_value = self.distro_names
+        patched = patch.object(certify.release, 'distro_tool', return_value=self.distro_tool)
+        patched.start()
+        self.addCleanup(patched.stop)
+        self.files.update({name: ('distro fixture ' + name).encode() for name in self.distro_names})
+        self.refresh_metadata()
+
+    def test_distro_download_verifies_signed_recipe_inventory_and_original_archives(self):
+        state = certify.download_distro(self.repository, self.tag, self.root / 'distro',
+                                        digest(self.files['SHA256SUMS.txt']), 'A' * 40)
+        self.assertTrue(self.distro_names <= set(self.downloads))
+        self.assertEqual(certify.output_values(state, None)['distro_recipes'], 'true')
+        self.apt_tool.verify.assert_called_once()
+        self.distro_tool.verify.assert_called_once_with(state['directory'], self.metadata, repository=self.repository)
+        self.distro_tool.verify.side_effect = ValueError('Recipe contents mismatch')
+        with self.assertRaisesRegex(ValueError, 'Recipe contents'):
+            certify.download_distro(self.repository, self.tag, self.root / 'invalid-distro',
+                                     digest(self.files['SHA256SUMS.txt']), 'A' * 40)
+
+    def test_distribution_job_is_required_and_evidence_binds_all_recipe_hashes(self):
+        evidence = self.record()
+        self.assertIn('distro-recipes', evidence['required_jobs'])
+        self.assertEqual(evidence['distribution_assets'], {name: digest(self.files[name]) for name in self.distro_names})
+        self.assertIn('--latest=true', self.edits[-1][0])
+        for result in (None, 'failure', 'skipped'):
+            jobs = dict.fromkeys(certify.required_jobs(self.metadata) - {'distro-recipes'}, 'success')
+            if result is not None:
+                jobs['distro-recipes'] = result
+            with self.subTest(result=result):
+                evidence = self.record(jobs=jobs)
+                self.assertEqual(evidence['status'], 'failed')
+                self.assertIn('--latest=false', self.edits[-1][0])
+
+    def test_missing_or_corrupt_recipe_cannot_reach_installation(self):
+        name = sorted(self.distro_names)[0]
+        self.files.pop(name)
+        self.refresh_metadata()
+        with self.assertRaisesRegex(ValueError, 'missing application or support'):
+            self.prepare()
+        self.distro_tool.verify.assert_not_called()
 
 
 if __name__ == '__main__':

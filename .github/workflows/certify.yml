@@ -32,7 +32,9 @@ on:
     paths:
       - '.github/workflows/certify.yml'
       - '.github/workflows/apt-check.yml'
+      - '.github/workflows/distro-check.yml'
       - 'tools/apt-release.py'
+      - 'tools/distro-release.py'
       - 'tools/certify-release.py'
       - 'tests/test_certify_release.py'
 
@@ -75,6 +77,7 @@ jobs:
       windows_matrix: ${{ steps.matrix.outputs.windows_matrix }}
       application_targets: ${{ steps.release.outputs.application_targets }}
       apt_repository: ${{ steps.release.outputs.apt_repository }}
+      distro_recipes: ${{ steps.release.outputs.distro_recipes }}
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ inputs.release_tag }}
@@ -347,8 +350,17 @@ jobs:
       linux_runner: ${{ inputs.linux_runner == 'ubuntu-24.04' && 'ubuntu-latest-l' || inputs.linux_runner || 'ubuntu-latest-l' }}
       arm_runner: ${{ inputs.arm_runner == 'ubuntu-24.04-arm' && 'ubuntu-24.04-arm-l' || inputs.arm_runner || 'ubuntu-24.04-arm-l' }}
 
+  distro-recipes:
+    if: ${{ !inputs.devfast && needs.prepare.outputs.distro_recipes == 'true' }}
+    needs: prepare
+    uses: ./.github/workflows/distro-check.yml
+    with:
+      release_tag: ${{ inputs.release_tag }}
+      inventory_sha256: ${{ needs.prepare.outputs.inventory_sha256 }}
+      linux_runner: ${{ inputs.linux_runner == 'ubuntu-latest-h' && 'ubuntu-latest-h' || 'ubuntu-latest-l' }}
+
   record:
-    needs: [prepare, linux-tests, windows-tests, compatibility, apt-repository]
+    needs: [prepare, linux-tests, windows-tests, compatibility, apt-repository, distro-recipes]
     if: ${{ always() && !inputs.devfast && needs.prepare.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -363,6 +375,7 @@ jobs:
       JOB_RESULTS: ${{ toJSON(needs) }}
       TESTED_TARGETS: ${{ needs.prepare.outputs.application_targets }}
       APT_REPOSITORY: ${{ needs.prepare.outputs.apt_repository }}
+      DISTRO_RECIPES: ${{ needs.prepare.outputs.distro_recipes }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -375,6 +388,8 @@ jobs:
           jobs = ['linux-tests', 'windows-tests', 'compatibility']
           if os.environ['APT_REPOSITORY'] == 'true':
               jobs.append('apt-repository')
+          if os.environ['DISTRO_RECIPES'] == 'true':
+              jobs.append('distro-recipes')
           results = {'source_sha': os.environ['SOURCE_SHA'], 'inventory_sha256': os.environ['INVENTORY_SHA256'],
                      'tested_targets': json.loads(os.environ['TESTED_TARGETS']),
                      'jobs': {name: needs[name]['result'] for name in jobs}}

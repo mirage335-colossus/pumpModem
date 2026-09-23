@@ -31,7 +31,8 @@ SCOPE = ('Hosted source contract, GUI and packaging tests, plus checks of the ex
 
 
 def required_jobs(metadata):
-    return REQUIRED_JOBS | ({'apt-repository'} if metadata['schema'] == 3 else set())
+    return (REQUIRED_JOBS | ({'apt-repository'} if metadata['schema'] >= 3 else set())
+            | ({'distro-recipes'} if metadata['schema'] >= 4 else set()))
 
 
 def required_coverage(metadata):
@@ -245,15 +246,24 @@ def download_apt(repository, tag, directory, inventory_sha, trusted_fingerprint=
         raise ValueError('A complete prepared inventory SHA-256 is required')
     state = prepare(repository, tag, directory, inventory_sha)
     metadata = state['metadata']
-    if metadata['schema'] != 3:
+    if metadata['schema'] < 3:
         raise ValueError('This release does not contain a signed APT repository')
-    names = release.apt_assets(metadata) | {
+    names = release.apt_assets(metadata) | release.distro_assets(metadata) | {
         name for target, name in release.application_names(metadata).items()
         if release.target_platform(metadata, target).startswith('linux-')}
     for name in sorted(names):
         download_asset(repository, tag, name, state['directory'], state['assets'], state['inventory'][name])
     release.apt_tool().verify(state['directory'], metadata, repository=repository,
                               trusted_fingerprint=trusted_fingerprint)
+    if metadata['schema'] >= 4:
+        release.distro_tool().verify(state['directory'], metadata, repository=repository)
+    return state
+
+
+def download_distro(repository, tag, directory, inventory_sha, trusted_fingerprint=None):
+    state = download_apt(repository, tag, directory, inventory_sha, trusted_fingerprint)
+    if state['metadata']['schema'] < 4:
+        raise ValueError('This release does not contain distribution recipes')
     return state
 
 
@@ -284,10 +294,10 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
                 or len(set(tested_targets)) != len(tested_targets) or not set(tested_targets) <= names.keys()):
             raise ValueError('Tested targets must be unique application identities from this release')
         passed = jobs_passed and set(tested_targets) == names.keys()
-        latest_eligible = passed and not metadata['experiment'] and metadata['schema'] == 3
+        latest_eligible = passed and not metadata['experiment'] and metadata['schema'] >= 4
         # GitHub normally supplies SHA-256 asset digests. Older hosts require
         # re-reading bytes before a report can describe the current assets.
-        checked_names = (list(names.values()) + sorted(release.apt_assets(metadata))
+        checked_names = (list(names.values()) + sorted(release.apt_assets(metadata) | release.distro_assets(metadata))
                          + (['warning.log'] if metadata['schema'] >= 2 else []))
         for name in checked_names:
             if not state['assets'][name].get('digest'):
@@ -315,12 +325,14 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
                     'gui_backend': release.target_backend(metadata, target),
                     'asset': name, 'sha256': state['inventory'][name],
                 } for target, name in names.items()})
-        if metadata['schema'] == 3:
+        if metadata['schema'] >= 3:
             evidence['apt_assets'] = {name: state['inventory'][name] for name in sorted(release.apt_assets(metadata))}
             evidence['packager_sha'] = metadata['packager_sha']
             evidence['tag_sha'] = release.tag_revision(metadata)
             if 'repackaged_from' in metadata:
                 evidence['repackaged_from'] = metadata['repackaged_from']
+        if metadata['schema'] >= 4:
+            evidence['distribution_assets'] = {name: state['inventory'][name] for name in sorted(release.distro_assets(metadata))}
         stem = f'certification-{run_id}-attempt-{run_attempt}'
         if any(stem + suffix in state['assets'] for suffix in ('.json', '.md')):
             raise ValueError('Certification evidence already exists; never overwrite a prior run')
@@ -348,12 +360,15 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
                         + (f'; GLIBC <= {item["glibc_max"]}' if 'glibc_max' in item else '') + '.'
                         for target, item in coverage['published_archives'].items())
             + ('\n\nSigned APT repository: signatures, indexes, package metadata and payloads must pass '
-               'the apt-repository job against this same release inventory.\n' if metadata['schema'] == 3 else '')
+               'the apt-repository job against this same release inventory.\n' if metadata['schema'] >= 3 else '')
             + '\n\nPublished application SHA-256 values:\n\n'
             + '\n'.join(f'- `{name}`: `{digest}`' for name, digest in evidence['assets'].items()) + '\n'
             + ('\nPublished APT asset SHA-256 values:\n\n'
                + '\n'.join(f'- `{name}`: `{digest}`' for name, digest in evidence['apt_assets'].items())
-               + '\n' if metadata['schema'] == 3 else ''),
+               + '\n' if metadata['schema'] >= 3 else '')
+            + ('\nPublished distribution recipe SHA-256 values (distro-recipes job required):\n\n'
+               + '\n'.join(f'- `{name}`: `{digest}`' for name, digest in evidence['distribution_assets'].items())
+               + '\n' if metadata['schema'] >= 4 else ''),
             encoding='utf-8')
         # No --clobber, no binary upload, and no promotion before evidence upload.
         gh(['release', 'upload', tag, '--repo', repository, str(json_path), str(markdown_path)])
@@ -368,9 +383,9 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
                  f'**{evidence["status"]}** '
                  f'([report]({asset_base}/{stem}.md), [JSON]({asset_base}/{stem}.json)). '
                  'This report applies only to the recorded source and asset hashes.\n')
-        if metadata['schema'] < 3:
-            body += ('This archive-only release cannot become Latest because it lacks the signed APT '
-                     'repository required by the current update channel.\n')
+        if metadata['schema'] < 4:
+            body += ('This older release cannot become Latest because it lacks the signed APT repository '
+                     'or distribution recipes required by the current update channel.\n')
         notes = Path(scratch) / 'release-body.md'
         notes.write_text(body, encoding='utf-8')
         flags = ['--latest=true', '--prerelease=false'] if latest_eligible else ['--latest=false']
@@ -385,7 +400,8 @@ def output_values(state, output):
     values = {'source_sha': metadata['source_sha'], 'baseline': metadata['linux_baseline'],
               'experiment': str(metadata['experiment']).lower(), 'inventory_sha256': state['inventory_sha256'],
               'schema': str(metadata['schema']),
-              'apt_repository': str(metadata['schema'] == 3).lower(),
+              'apt_repository': str(metadata['schema'] >= 3).lower(),
+              'distro_recipes': str(metadata['schema'] >= 4).lower(),
               'gui_backends': json.dumps(metadata.get('gui_backends', ['fltk']), separators=(',', ':')),
               'application_targets': json.dumps(list(release.application_targets(metadata)), separators=(',', ':'))}
     for name in ('archive', 'package_root'):
@@ -403,7 +419,7 @@ def output_values(state, output):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
-    for name in ('prepare', 'download', 'download-apt', 'record'):
+    for name in ('prepare', 'download', 'download-apt', 'download-distro', 'record'):
         command = commands.add_parser(name)
         command.add_argument('--repo', required=True)
         command.add_argument('--tag', required=True)
@@ -416,14 +432,17 @@ def main(argv=None):
             command.add_argument('--github-output', type=Path)
         if name == 'download':
             command.add_argument('--target', required=True)
-        if name in ('download', 'download-apt'):
+        if name in ('download', 'download-apt', 'download-distro'):
             command.add_argument('--inventory-sha256', required=True)
-        if name == 'download-apt':
+        if name in ('download-apt', 'download-distro'):
             command.add_argument('--apt-signing-fingerprint')
     args = parser.parse_args(argv)
     try:
         if args.command == 'prepare':
             result = output_values(prepare(args.repo, args.tag, args.directory), args.github_output)
+        elif args.command == 'download-distro':
+            result = output_values(download_distro(args.repo, args.tag, args.directory, args.inventory_sha256,
+                                                   args.apt_signing_fingerprint), args.github_output)
         elif args.command == 'download-apt':
             result = output_values(download_apt(args.repo, args.tag, args.directory, args.inventory_sha256,
                                                 args.apt_signing_fingerprint), args.github_output)

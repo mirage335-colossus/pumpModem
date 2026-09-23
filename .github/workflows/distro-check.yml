@@ -1,0 +1,128 @@
+name: Install release recipes on Arch and Gentoo
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        type: string
+        required: true
+      inventory_sha256:
+        type: string
+        required: true
+      linux_runner:
+        type: string
+        default: ubuntu-latest-l
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    name: ${{ matrix.distro }} binary recipes / x86-64 / both backends
+    runs-on: ${{ inputs.linux_runner == 'ubuntu-latest-h' && 'ubuntu-latest-h' || 'ubuntu-latest-l' }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [arch, gentoo]
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      INVENTORY_SHA256: ${{ inputs.inventory_sha256 }}
+      APT_FINGERPRINT: ${{ vars.DATAPUMP_APT_SIGNING_FINGERPRINT }}
+      RECIPE_KIND: ${{ matrix.distro }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify recipe signatures and bind them to the original binary archives
+        run: |
+          python3 tools/certify-release.py download-distro --repo "$GITHUB_REPOSITORY" \
+            --tag "$RELEASE_TAG" --directory distro-assets --inventory-sha256 "$INVENTORY_SHA256" \
+            --apt-signing-fingerprint "$APT_FINGERPRINT"
+          python3 tools/distro-release.py extract --directory distro-assets \
+            --metadata distro-assets/release-metadata.json --kind "$RECIPE_KIND" --destination recipes
+      - name: Make and install Arch packages without compiling the application
+        if: matrix.distro == 'arch'
+        run: |
+          docker run --rm -i \
+            --mount "type=bind,source=$PWD/recipes,target=/recipes,readonly" \
+            --mount "type=bind,source=$PWD/distro-assets,target=/release,readonly" \
+            --mount "type=bind,source=$PWD/tools,target=/tools,readonly" \
+            archlinux:base bash -euo pipefail <<'ARCH'
+          pacman -Syu --noconfirm --needed base-devel python
+          useradd --create-home --shell /bin/bash datapump-packager
+          printf '%s\n' 'datapump-packager ALL=(root) NOPASSWD: /usr/bin/pacman' > /etc/sudoers.d/datapump-packager
+          chmod 0440 /etc/sudoers.d/datapump-packager
+          cp -a /recipes/datapump-arch-recipes /build
+          chown -R datapump-packager:datapump-packager /build
+          for backend in fltk rev; do
+            directory="/build/datapump-$backend-bin"
+            # makepkg fetches and verifies the immutable archive itself, then
+            # wraps it. The recipe has no application compilation phase.
+            runuser -u datapump-packager -- makepkg --dir "$directory" --syncdeps --noconfirm
+            mapfile -t packages < <(runuser -u datapump-packager -- makepkg --dir "$directory" --packagelist)
+            test "${#packages[@]}" -eq 1
+            pacman -U --noconfirm "${packages[@]}"
+            pacman -Qk "datapump-$backend-bin"
+            python3 /tools/distro-release.py verify-installed --directory /release \
+              --metadata /release/release-metadata.json --backend "$backend" --architecture amd64 --root /
+            timeout 30 "datapump-cli-$backend" --version
+            timeout 30 "datapump-$backend" --self-check
+          done
+          ARCH
+      - name: Merge Gentoo binary ebuilds using only prebuilt host dependencies
+        if: matrix.distro == 'gentoo'
+        run: |
+          # The official Portage image supplies a snapshot directly; no sync or
+          # dependency source build is needed in this packaging check.
+          snapshot="datapump-portage-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          docker create -v /var/db/repos/gentoo --name "$snapshot" gentoo/portage:latest /bin/true
+          trap 'docker rm -v "$snapshot" >/dev/null' EXIT
+          docker run --rm -i --volumes-from "$snapshot":ro \
+            --mount "type=bind,source=$PWD/recipes,target=/recipes,readonly" \
+            --mount "type=bind,source=$PWD/distro-assets,target=/release,readonly" \
+            --mount "type=bind,source=$PWD/tools,target=/tools,readonly" \
+            gentoo/stage3:latest bash -euo pipefail <<'GENTOO'
+          cp -a /recipes/datapump-gentoo-overlay /var/db/repos/datapump-bin
+          mkdir -p /etc/portage/repos.conf /etc/portage/package.accept_keywords /etc/portage/package.license /etc/portage/binrepos.conf
+          cat > /etc/portage/repos.conf/datapump-bin.conf <<'REPOSITORY'
+          [datapump-bin]
+          location = /var/db/repos/datapump-bin
+          auto-sync = no
+          REPOSITORY
+          printf '%s\n' 'media-radio/datapump-fltk-bin ~amd64' 'media-radio/datapump-rev-bin ~amd64' \
+            > /etc/portage/package.accept_keywords/datapump-bin
+          printf '%s\n' 'media-radio/datapump-fltk-bin DataPump-Bundled' 'media-radio/datapump-rev-bin DataPump-Bundled' \
+            > /etc/portage/package.license/datapump-bin
+          cat > /etc/portage/binrepos.conf/datapump-ci.conf <<'BINHOST'
+          [datapump-ci]
+          priority = 9999
+          sync-uri = https://distfiles.gentoo.org/releases/amd64/binpackages/23.0/x86-64/
+          verify-signature = true
+          BINHOST
+          export FEATURES="$(portageq envvar FEATURES) -sandbox -usersandbox -pid-sandbox -network-sandbox"
+          for backend in fltk rev; do
+            set -- /var/db/repos/datapump-bin/media-radio/datapump-"$backend"-bin/*.ebuild
+            test "$#" -eq 1
+            cpv="media-radio/$(basename "$1" .ebuild)"
+            # Produce a local Portage binary package from the verified recipe.
+            # Configure/compile phases are empty; Manifest pins all downloads.
+            # Having the local binary lets binary-only emerge resolve the real
+            # conditional RDEPEND without requiring an upstream app binhost.
+            ebuild "$1" package
+            emerge --getbinpkgonly --usepkgonly --oneshot --with-bdeps=n --jobs=4 "=$cpv"
+            portageq has_version / "=$cpv"
+            python3 /tools/distro-release.py verify-installed --directory /release \
+              --metadata /release/release-metadata.json --backend "$backend" --architecture amd64 --root /
+            timeout 30 "datapump-cli-$backend" --version
+            timeout 30 "datapump-$backend" --self-check
+          done
+          GENTOO
+      - name: Record packaging scope
+        run: |
+          {
+            echo "$RECIPE_KIND x86-64: native package frontend installed both release backends."
+            echo 'Installed payloads and wrappers match the original portable archives; bounded CLI and headless GUI self-checks passed.'
+            echo 'No application or SDK was compiled. Physical audio and desktop graphics remain separate certification scopes.'
+          } >> "$GITHUB_STEP_SUMMARY"

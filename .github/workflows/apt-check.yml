@@ -1,4 +1,4 @@
-name: Install signed release packages on Bookworm
+name: Install unchanged signed packages on Debian and Ubuntu
 
 on:
   workflow_call:
@@ -21,14 +21,20 @@ permissions:
 
 jobs:
   install:
-    name: Signed APT / Bookworm ${{ matrix.arch }} / both backends
+    name: Signed APT / ${{ matrix.image }} ${{ matrix.arch }} / both backends
     runs-on: ${{ matrix.arch == 'arm64' && inputs.arm_runner || inputs.linux_runner }}
-    container: debian:bookworm-slim
+    container: ${{ matrix.image }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         arch: [amd64, arm64]
+        image: [debian:bookworm-slim, debian:trixie-slim, ubuntu:24.04, ubuntu:26.04]
+        include:
+          # The ARM64 binary retains glibc 2.35. The x86-64 Bookworm SDK
+          # requires glibc 2.36, so Ubuntu 22.04 is not promised for that build.
+          - arch: arm64
+            image: ubuntu:22.04
     env:
       DEBIAN_FRONTEND: noninteractive
       GH_TOKEN: ${{ github.token }}
@@ -36,6 +42,7 @@ jobs:
       INVENTORY_SHA256: ${{ inputs.inventory_sha256 }}
       APT_FINGERPRINT: ${{ vars.DATAPUMP_APT_SIGNING_FINGERPRINT }}
       EXPECTED_ARCH: ${{ matrix.arch }}
+      DISTRO_IMAGE: ${{ matrix.image }}
       LIBGL_ALWAYS_SOFTWARE: '1'
       LP_NUM_THREADS: '2'
     steps:
@@ -86,7 +93,7 @@ jobs:
             timeout 30 xvfb-run -a -s '-screen 0 1280x1024x24 -dpi 96' "datapump-$backend" --self-check
           done
           {
-            echo "Bookworm $EXPECTED_ARCH: apt-get update and installation from GitHub succeeded."
+            echo "$DISTRO_IMAGE $EXPECTED_ARCH: apt-get update and installation of the unchanged release packages from GitHub succeeded."
             echo 'Both GUI backends coexist; installed payloads match the signed packages and portable archives.'
             echo 'CLI and GUI self-checks passed. This verifies packaging, not physical audio hardware or full GUI regression coverage.'
           } >> "$GITHUB_STEP_SUMMARY"

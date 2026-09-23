@@ -63,19 +63,32 @@ def apt_fixture():
     return tool
 
 
+DISTRO_NAMES = {'datapump-arch-recipes.tar.gz', 'datapump-gentoo-overlay.tar.gz', 'distro-packages.json'}
+
+
+def distro_fixture():
+    def build(directory, value, repository):
+        for name in DISTRO_NAMES:
+            (directory / name).write_bytes(('recipe fixture ' + name).encode())
+    tool = Mock()
+    tool.asset_names.return_value = DISTRO_NAMES
+    tool.build.side_effect = build
+    return tool
+
+
 class MetadataTests(unittest.TestCase):
     def test_new_metadata_defaults_to_both_backends_and_legacy_stays_readable(self):
         value = release.make_metadata(source_sha='a' * 40, run_id='123', run_attempt='1')
-        self.assertEqual(value['schema'], 3)
+        self.assertEqual(value['schema'], 4)
         self.assertEqual(value['gui_backends'], ['fltk', 'rev'])
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / 'metadata.json'
-            for schema in (1, 2, 3):
+            for schema in (1, 2, 3, 4):
                 original = metadata(schema=schema)
                 release.write_json(path, original)
                 self.assertEqual(release.load_metadata(path), original)
                 self.assertEqual(len(release.application_targets(original)), 3 if schema == 1 else 6)
-            for changes in ({'schema': 4}, {'schema': True}, {'gui_backends': ['fltk']},
+            for changes in ({'schema': 5}, {'schema': True}, {'gui_backends': ['fltk']},
                             {'gui_backends': ['rev', 'fltk']}, {'gui_backends': ['fltk', 'rev', 'rev']},
                             {'gui_backends': None}):
                 release.write_json(path, {**metadata(schema=2), **changes})
@@ -100,8 +113,18 @@ class MetadataTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'schema 3'):
             metadata(schema=2, packager_sha='c' * 40)
 
+    def test_schema4_requires_complete_distribution_marker(self):
+        value = metadata(schema=4)
+        self.assertEqual(value['distro_recipes']['formats'], ['arch', 'gentoo'])
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'metadata.json'
+            for marker in (None, {}, {'schema': 1, 'formats': ['arch']}):
+                release.write_json(path, {**value, 'distro_recipes': marker})
+                with self.subTest(marker=marker), self.assertRaises(ValueError):
+                    release.load_metadata(path)
+
     def test_target_helpers_bind_platform_backend_and_package_root(self):
-        for schema in (1, 2, 3):
+        for schema in (1, 2, 3, 4):
             value = metadata(schema=schema)
             for target in release.application_targets(value):
                 platform = release.target_platform(value, target)
@@ -167,7 +190,7 @@ class MetadataTests(unittest.TestCase):
 
 class MatrixTests(unittest.TestCase):
     def test_both_schemas_and_baselines_cover_every_expected_target(self):
-        for schema in (1, 2, 3):
+        for schema in (1, 2, 3, 4):
             for baseline in ('bookworm-sdk', 'ubuntu-22.04'):
                 with self.subTest(schema=schema, baseline=baseline):
                     value = metadata(schema=schema, linux_baseline=baseline)
@@ -980,6 +1003,32 @@ class StagedPublicationTests(ReleaseFixture, unittest.TestCase):
         self.assertIn('--latest=false', edit)
         self.assertFalse(self.info['draft'])
 
+    def test_schema4_finalizes_recipe_assets_before_signing_and_preserves_complete_inventory(self):
+        self.value = self.backend_inputs(schema=4)
+        release.reserve(self.metadata, self.notes, 'owner/repository')
+        for target in release.application_targets(self.value):
+            release.upload(self.metadata, 'owner/repository', target, self.artifacts / target)
+        apt, distro = apt_fixture(), distro_fixture()
+        build_apt = apt.build.side_effect
+        def sign(directory, value, repository, key, fingerprint):
+            self.assertTrue(DISTRO_NAMES <= {p.name for p in directory.iterdir()})
+            build_apt(directory, value, repository, key, fingerprint)
+        apt.build.side_effect = sign
+        with patch.object(release, 'apt_tool', return_value=apt), patch.object(release, 'distro_tool', return_value=distro):
+            release.finalize(self.metadata, 'owner/repository', self.output, True,
+                             apt_signing_key=Path('key'), apt_signing_fingerprint='A' * 40)
+            self.assertEqual(set(self.remote), release.required_assets(self.value) | {'SHA256SUMS.txt'})
+            missing = self.output / sorted(DISTRO_NAMES)[0]
+            missing.unlink()
+            # Rehashing cannot disguise an omitted recipe asset.
+            (self.output / 'SHA256SUMS.txt').write_text(''.join(
+                f'{release.digest(p)}  {p.name}\n' for p in sorted(self.output.iterdir()) if p.name != 'SHA256SUMS.txt'))
+            with self.assertRaisesRegex(ValueError, 'missing'):
+                release.verify_release(self.output)
+        distro.verify.assert_called_once()
+        upload = self.mutations()[-2]
+        self.assertEqual({Path(name).name for name in upload[5:]}, APT_NAMES | DISTRO_NAMES | {'SHA256SUMS.txt'})
+
     def test_failed_apt_signing_never_finalizes_or_publishes(self):
         self.value = self.backend_inputs(schema=3)
         release.reserve(self.metadata, self.notes, 'owner/repository')
@@ -1008,7 +1057,7 @@ class StagedPublicationTests(ReleaseFixture, unittest.TestCase):
         original = dict(self.remote)
         destination = self.root / 'repackaged'
         tool = apt_fixture()
-        with patch.object(release, 'apt_tool', return_value=tool), patch.object(release, 'publish') as publish:
+        with patch.object(release, 'apt_tool', return_value=tool), patch.object(release, 'distro_tool', return_value=distro_fixture()), patch.object(release, 'publish') as publish:
             value = release.repackage(self.value['tag'], 'owner/repository', destination,
                                       version='vapt', run_id='456', run_attempt='2', packager_sha='b' * 40,
                                       apt_signing_key=Path('key'), apt_signing_fingerprint='A' * 40)
@@ -1029,7 +1078,7 @@ class StagedPublicationTests(ReleaseFixture, unittest.TestCase):
         archive = release.application_names(self.value)['linux-x86_64-fltk']
         self.corrupt_download[archive] = b'changed'
         tool = apt_fixture()
-        with patch.object(release, 'apt_tool', return_value=tool), patch.object(release, 'publish') as publish:
+        with patch.object(release, 'apt_tool', return_value=tool), patch.object(release, 'distro_tool', return_value=distro_fixture()), patch.object(release, 'publish') as publish:
             with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
                 release.repackage(self.value['tag'], 'owner/repository', self.root / 'repackaged',
                                   run_id='456', packager_sha='b' * 40,
@@ -1054,7 +1103,7 @@ class StagedPublicationTests(ReleaseFixture, unittest.TestCase):
         tool = apt_fixture()
         first = self.root / 'first-repackage'
         second = self.root / 'second-repackage'
-        with patch.object(release, 'apt_tool', return_value=tool), patch.object(release, 'publish'):
+        with patch.object(release, 'apt_tool', return_value=tool), patch.object(release, 'distro_tool', return_value=distro_fixture()), patch.object(release, 'publish'):
             value = release.repackage(self.value['tag'], 'owner/repository', first, version='vfirst',
                                       run_id='456', packager_sha='b' * 40,
                                       apt_signing_key=Path('key'), apt_signing_fingerprint='A' * 40)

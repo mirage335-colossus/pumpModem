@@ -1,5 +1,5 @@
 name: Manual portable release
-run-name: ${{ inputs.source_release && format('APT packages from {0} (experiment)', inputs.source_release) || format('Build portable binaries ({0}, experiment={1})', inputs.linux_baseline, inputs.experiment) }}
+run-name: ${{ inputs.source_release && format('Linux packages from {0} (experiment)', inputs.source_release) || format('Build portable binaries ({0}, experiment={1})', inputs.linux_baseline, inputs.experiment) }}
 
 on:
   workflow_dispatch:
@@ -37,7 +37,7 @@ on:
         options: [windows-2022, windows-latest-l, windows-latest-h]
         default: windows-2022
       source_release:
-        description: 'Optional complete release to repackage for APT as a new experiment; blank builds applications'
+        description: 'Optional complete release to repackage for Linux package managers as an experiment; blank builds apps'
         type: string
         default: ''
   pull_request:
@@ -45,10 +45,13 @@ on:
       - '.github/workflows/release.yml'
       - '.github/workflows/apt-release.yml'
       - '.github/workflows/apt-check.yml'
+      - '.github/workflows/distro-check.yml'
       - '.github/workflows/certify.yml'
       - 'tools/release.py'
       - 'tools/apt-release.py'
       - 'tests/test_apt_release.py'
+      - 'tools/distro-release.py'
+      - 'tests/test_distro_release.py'
       - 'tools/certify-release.py'
       - 'tests/test_release.py'
       - 'tests/test_certify_release.py'
@@ -95,6 +98,7 @@ jobs:
       - run: |
           python3 tests/test_release.py
           python3 tests/test_apt_release.py
+          python3 tests/test_distro_release.py
           python3 tests/test_certify_release.py
           python3 tests/test_sdk_release.py
           python3 tests/test_release_rev_tools.py

@@ -230,11 +230,14 @@ Do not rerun an expensive unchanged suite after recording a pass unless later
 changes or failures invalidate that evidence. Compile with available cores, but
 keep timing-sensitive test concurrency at its documented limits.
 
-For changes confined to Debian release packaging, start with
-`python3 tests/test_apt_release.py` and the affected release/certification helper
-tests; `./build.sh test build` runs their normal group. Once complete, use
+For changes confined to Linux distribution packaging, start with
+`python3 tests/test_apt_release.py`, `python3 tests/test_distro_release.py` and
+the affected release/certification helper tests; `./build.sh test build` runs their normal group. Once complete, use
 `release.yml` with `source_release=SOURCE_RELEASE_TAG` to wrap existing verified archives in a new experiment and
-test real APT installation on Bookworm AMD64 and ARM64 with the larger runners.
+test the same packages on Debian/Ubuntu AMD64 and ARM64 and native Arch/Gentoo
+recipes with the larger runners. Gentoo host dependencies must come from its
+binary repository; a missing binary fails with an actionable error instead of
+starting an expensive source build.
 This path does not rebuild application binaries or SDKs. Follow publication
 with full `certify.yml`, `devfast=false`, for that new release; packaging-only
 checks are not a substitute for release certification. See

@@ -1,5 +1,5 @@
-name: Package existing release for APT
-run-name: Package ${{ inputs.source_tag }} for APT (experiment, no application rebuild)
+name: Package existing release for Linux package managers
+run-name: Package ${{ inputs.source_tag }} for Linux package managers (experiment, no application rebuild)
 
 on:
   workflow_call:
@@ -33,16 +33,16 @@ on:
         type: string
         default: ''
       publish:
-        description: 'Publish the new experiment after signature checks, then test real APT installation'
+        description: 'Publish the new experiment, then test Debian/Ubuntu, Arch and Gentoo installation'
         type: boolean
         default: true
       linux_runner:
-        description: 'Larger x86-64 runner for packaging and Bookworm installation'
+        description: 'Larger x86-64 runner for packaging and distribution installation'
         type: choice
         options: [ubuntu-latest-l, ubuntu-latest-h]
         default: ubuntu-latest-l
       arm_runner:
-        description: 'Larger ARM64 runner for Bookworm installation'
+        description: 'Larger ARM64 runner for Debian and Ubuntu installation'
         type: choice
         options: [ubuntu-24.04-arm-l, ubuntu-24.04-arm-h]
         default: ubuntu-24.04-arm-l
@@ -76,6 +76,7 @@ jobs:
       - name: Check packaging helpers without building applications or SDKs
         run: |
           python3 tests/test_apt_release.py
+          python3 tests/test_distro_release.py
           python3 tests/test_release.py
           python3 tests/test_certify_release.py
       - name: Create a new experiment with unchanged archive bytes and signed Debian packages
@@ -106,7 +107,7 @@ jobs:
           {
             printf 'Release: [%s](https://github.com/%s/releases/tag/%s)\n\n' "$RELEASE_TAG" "$GITHUB_REPOSITORY" "$RELEASE_TAG"
             echo 'Portable archive bytes were reused unchanged; no application or SDK was rebuilt.'
-            echo 'This is an experiment and is never marked Latest. Published experiments receive real Bookworm APT installation checks below.'
+            echo 'This is an experiment and is never marked Latest. Published experiments receive Debian/Ubuntu APT and Arch/Gentoo recipe installation checks below.'
             echo 'Full hash-bound release certification remains a separate workflow; these packaging checks do not certify the application.'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -119,3 +120,12 @@ jobs:
       inventory_sha256: ${{ needs.package.outputs.inventory_sha256 }}
       linux_runner: ${{ inputs.linux_runner }}
       arm_runner: ${{ inputs.arm_runner }}
+
+  distro-recipes:
+    if: inputs.publish
+    needs: package
+    uses: ./.github/workflows/distro-check.yml
+    with:
+      release_tag: ${{ needs.package.outputs.tag }}
+      inventory_sha256: ${{ needs.package.outputs.inventory_sha256 }}
+      linux_runner: ${{ inputs.linux_runner }}

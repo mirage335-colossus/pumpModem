@@ -97,8 +97,9 @@ upload failure cannot promote a release. Drafts cannot be certified. Older ad-ho
 metadata, checksums and source-side certification tools are outside this path.
 Existing schema-1 releases retain their original three FLTK assets; schema-2
 releases retain all six backend-specific assets and a checksummed `warning.log`.
-Both remain readable. New schema-3 releases also require the signed APT assets
-and Debian installation checks described below. Upload and certification check each archive's root
+Both remain readable. Schema-3 releases also require the signed APT assets
+and Debian installation checks described below. New schema-4 releases add signed
+Arch/Gentoo recipe hashes and require native recipe installation checks. Upload and certification check each archive's root
 and shipped build information, so relabeling an FLTK package as Rev is rejected.
 Certification of a new release requires coverage of every declared backend.
 
@@ -125,8 +126,23 @@ and `/opt/datapump/rev/`, with application-menu entries and these commands:
 | `datapump-fltk` | `datapump-fltk` | `datapump-cli-fltk` |
 | `datapump-rev` | `datapump-rev` | `datapump-cli-rev` |
 
-Bookworm `amd64`/`arm64` is the installation-test baseline. The package manager
-also installs host audio plugins, fonts and graphics drivers. A compatible
+The same `.deb` files target Debian 12 Bookworm and newer glibc-based Debian
+systems, and Ubuntu 24.04 and newer. The installation matrix covers Bookworm,
+Debian 13 Trixie, Ubuntu 24.04 and Ubuntu 26.04 on both `amd64` and `arm64`.
+ARM64 additionally targets Ubuntu 22.04 because that archive's baseline is
+glibc 2.35. The normal Bookworm-SDK AMD64 archive requires glibc 2.36, so its
+package correctly refuses installation on Ubuntu 22.04 (glibc 2.35). An explicit
+`linux_baseline=ubuntu-22.04` build can provide an AMD64 package with the lower
+baseline; this is a new build choice, not a change to existing archive bytes.
+Future distribution versions are expected to remain compatible while these
+ABIs and dependency names remain available; they are not automatically certified.
+
+The package manager supplies each distribution's own audio plugins, fonts and
+graphics drivers. Dependencies use names shared by Debian and Ubuntu; the
+host's ALSA plugins resolve the appropriate `libasound2`/`libasound2t64` package.
+Ubuntu needs its normal `universe` component enabled for `libasound2-plugins`.
+See the upstream [Ubuntu ALSA package](https://packages.ubuntu.com/noble/libasound2-plugins)
+and [Ubuntu 22.04 glibc baseline](https://packages.ubuntu.com/jammy/libc6). A compatible
 ChromeOS Linux container or VelvetOS installation can use the matching Debian
 architecture; packaging does not establish physical Chromebook audio/graphics
 compatibility or change Rev's OpenGL requirement.
@@ -179,9 +195,9 @@ Package indexes point to immutable versioned release URLs, including when the
 index itself was fetched through Latest. Versions include the project version,
 UTC build timestamp and workflow identity, so APT upgrades remain ordered
 across the CDT/CST clock change. Publication alone never changes Latest: a
-regular schema-3 release must pass full certification, including APT checks.
-Older schema-1/2 releases can still be certified, but cannot replace this APT
-update channel because they lack its assets.
+regular schema-4 release must pass full certification, including APT and native
+Arch/Gentoo recipe checks. Older schemas remain readable and certifiable, but
+cannot replace the current update channel without all of its delivery assets.
 
 ### Maintainer signing configuration
 
@@ -227,8 +243,8 @@ The old release and its reports remain intact. `publish=false` leaves the new
 release as a draft after signature/payload checks; public APT installation
 cannot run against a draft. The default `publish=true` publishes the experiment
 and then tests actual GitHub `apt-get update`, installation of both backends,
-installed-file hashes and bounded CLI/GUI self-checks on Bookworm AMD64 and
-ARM64. Its runner dropdowns contain the larger L/H tiers only.
+installed-file hashes and bounded CLI/GUI self-checks across the Debian/Ubuntu
+matrix above. Native Arch and Gentoo recipe installation checks run separately. Its runner dropdowns contain the larger L/H tiers only.
 When called through `release.yml`, H selections are preserved and other runner
 selections use L; Windows and baseline selectors do not trigger builds.
 This path always creates an experiment, regardless of the ordinary release's
@@ -239,11 +255,102 @@ branch, `apt-release.yml` can also be dispatched directly with
 testing this path from an unmerged branch without registering a new workflow.
 
 During packaging development, run the affected helper tests first. After the
-candidate is complete, run this full two-architecture APT installation coverage
+candidate is complete, run the full Debian/Ubuntu and native recipe installation coverage
 without repeating unchanged application or SDK builds. These checks do not
 certify the application: follow publication with `certify.yml`, `devfast=false`,
-for the new tag. Certification includes the same APT coverage for schema-3
-releases and binds the report to all published hashes.
+for the new tag. Certification includes the same APT coverage for schema-3 and newer releases,
+plus Arch/Gentoo recipe checks for schema 4, and binds the report to all
+published hashes.
+
+
+## Arch Linux and Gentoo binary recipes
+
+Schema-4 releases also carry `datapump-arch-recipes.tar.gz`,
+`datapump-gentoo-overlay.tar.gz` and `distro-packages.json`. Generated recipes
+remain release assets; no overlay or package repository is added to the Git
+layout. Each backend has a separate `datapump-fltk-bin` or `datapump-rev-bin`
+package. They fetch the exact versioned portable archive, verify its hashes,
+and install the same private payload and commands as the Debian packages.
+Neither recipe compiles the application or SDK, strips binaries, or substitutes
+system libraries for bundled files. Both backends can coexist.
+
+Arch recipes include `PKGBUILD` and `.SRCINFO` for `x86_64` and `aarch64`;
+Arch Linux itself supports x86-64, while the latter recipe targets Arch Linux
+ARM. Gentoo uses an EAPI-8 local overlay with `~amd64`/`~arm64` testing keywords,
+architecture-specific archive manifests and host dependencies. These require
+a glibc-based system; musl profiles and 32-bit ARM are outside these binaries'
+ABI scope. Native frontend installation checks cover Arch/Gentoo x86-64;
+the same ARM64 payloads receive the Debian/Ubuntu matrix checks above.
+
+Recipe archives are bound by SHA-256 in `apt-repository.json`, which is covered
+by the release's signed `InRelease`. Before executing either recipe, verify
+the release assets using the same trusted public fingerprint as APT:
+
+```sh
+tag=RELEASE_TAG
+base="https://github.com/mirage335-colossus/pumpModem/releases/download/$tag"
+mkdir "datapump-recipes-$tag" || exit 1
+cd "datapump-recipes-$tag" || exit 1
+for asset in datapump-archive-keyring.gpg InRelease apt-repository.json \
+  datapump-arch-recipes.tar.gz datapump-gentoo-overlay.tar.gz distro-packages.json; do
+  curl --fail --location "$base/$asset" -o "$asset" || exit 1
+done
+actual=$(gpg --batch --show-keys --with-colons datapump-archive-keyring.gpg |
+  awk -F: '$1 == "fpr" {print $10; exit}')
+test "$actual" = 8C3DD4A727C83B93374C993B1F94BC4CEC2DF307 || exit 1
+gpgv --keyring "$PWD/datapump-archive-keyring.gpg" --output Release InRelease || exit 1
+awk '/^SHA256:/{hashes=1;next} hashes && $3 == "apt-repository.json" {print $1 "  " $3}' \
+  Release | sha256sum --check --strict || exit 1
+python3 - <<'CHECK' || exit 1
+import hashlib, json
+from pathlib import Path
+expected = json.loads(Path('apt-repository.json').read_text())['distribution_assets']
+assert set(expected) == {'datapump-arch-recipes.tar.gz', 'datapump-gentoo-overlay.tar.gz', 'distro-packages.json'}
+for name, digest in expected.items():
+    if hashlib.sha256(Path(name).read_bytes()).hexdigest() != digest:
+        raise SystemExit(f'Checksum mismatch: {name}')
+CHECK
+```
+
+On Arch, extract the verified recipe archive and run `makepkg` as an ordinary
+user. Standard `base-devel` packaging tools are needed, but the recipe performs
+no application compilation:
+
+```sh
+tar -xzf datapump-arch-recipes.tar.gz
+cd datapump-arch-recipes/datapump-fltk-bin
+makepkg -si
+# For Rev, use the adjacent datapump-rev-bin directory.
+```
+
+On Gentoo, install the verified overlay in a version-specific directory and
+register it locally. The main Gentoo repository must already be available:
+
+```sh
+tar -xzf datapump-gentoo-overlay.tar.gz
+sudo mkdir -p "/var/db/repos/datapump-bin-$tag" /etc/portage/repos.conf
+sudo cp -a datapump-gentoo-overlay/. "/var/db/repos/datapump-bin-$tag/"
+printf '[datapump-bin]\nlocation = /var/db/repos/datapump-bin-%s\nmasters = gentoo\nauto-sync = no\n' "$tag" |
+  sudo tee /etc/portage/repos.conf/datapump-bin.conf
+sudo mkdir -p /etc/portage/package.accept_keywords /etc/portage/package.license
+printf 'media-radio/datapump-fltk-bin\nmedia-radio/datapump-rev-bin\n' |
+  sudo tee /etc/portage/package.accept_keywords/datapump-bin
+printf 'media-radio/datapump-fltk-bin DataPump-Bundled\nmedia-radio/datapump-rev-bin DataPump-Bundled\n' |
+  sudo tee /etc/portage/package.license/datapump-bin
+sudo emerge --ask media-radio/datapump-fltk-bin
+# Optional second backend:
+sudo emerge --ask media-radio/datapump-rev-bin
+```
+
+`DataPump-Bundled` preserves the archive's component notices together; it does
+not grant new rights or describe every bundled component as CC0. Read the
+included license file before accepting it. Gentoo may build missing **host**
+dependencies according to local Portage settings; CI requires binary host
+packages and fails if they are unavailable, so it cannot silently start a long
+source build. Updating means verifying the new release's recipe archive and
+repeating `makepkg -si`, or selecting its new overlay directory and running
+`emerge --update`. These local recipes are not submitted to AUR or Gentoo's main
+repository, and are not an automatically synchronized package feed.
 
 ## Rev display warnings
 
