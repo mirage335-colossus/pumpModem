@@ -9,6 +9,36 @@
 #include <random>
 #include <stdexcept>
 
+// Freeze this fixture's Gaussian PCM, as in test_gui_bitmaps.cpp.
+// std::normal_distribution may use a different polar coordinate order or
+// uniform-float conversion on another standard library with the same seed.
+// Preserve the existing GNU float sequence, including its rejection rules.
+class FixtureGaussian {
+    float mean_, deviation_, saved_=0;
+    bool has_saved_=false;
+    static float uniform(std::mt19937& random) {
+        return std::min(std::ldexp(static_cast<float>(random()), -32),
+                        std::nextafter(1.0f, 0.0f));
+    }
+public:
+    FixtureGaussian(float mean,float deviation):mean_(mean),deviation_(deviation) {}
+    float operator()(std::mt19937& random) {
+        float value;
+        if(has_saved_) {value=saved_;has_saved_=false;}
+        else {
+            float x,y,radius;
+            do {
+                x=2.0f*uniform(random)-1.0f;
+                y=2.0f*uniform(random)-1.0f;
+                radius=x*x+y*y;
+            } while(radius==0.0f||radius>1.0f);
+            const float scale=std::sqrt(-2.0f*std::log(radius)/radius);
+            saved_=x*scale;has_saved_=true;value=y*scale;
+        }
+        return value*deviation_+mean_;
+    }
+};
+
 using namespace datapump::fast;
 namespace {
 void require(bool condition,const char* message) {if(!condition)throw std::runtime_error(message);}
@@ -61,7 +91,7 @@ void sampled(Profile p,double reference_snr_db=100,double reference_bandwidth=24
     const auto nominal_power=p.amplitude*p.amplitude*gain*gain/2;
     const auto sigma=noisy?std::sqrt(nominal_power*p.sample_rate/
         (2*reference_bandwidth*std::pow(10.,reference_snr_db/10))):0;
-    std::normal_distribution<float> noise(0,static_cast<float>(sigma));
+    FixtureGaussian noise(0,static_cast<float>(sigma));
     const auto corrupt=[&](std::span<float> block) {
         for(auto& value:block) {
             value=static_cast<float>(gain*value)+(noisy?noise(random):0);

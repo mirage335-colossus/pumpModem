@@ -6,7 +6,7 @@ on:
       linux_runner:
         description: 'Linux x86_64 runner label'
         type: string
-        default: ubuntu-24.04
+        default: ubuntu-latest-h
       source:
         description: 'auto: base/build; base: require the published recipe; rebuild: cold build'
         type: string
@@ -26,7 +26,7 @@ permissions:
 jobs:
   sdk:
     name: Reuse or build source SDK
-    runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
     # Only SDK production needs the baseline bootstrap environment. Consumers
     # use the resulting directory without a container, chroot, or root access.
     container: debian:bookworm-slim

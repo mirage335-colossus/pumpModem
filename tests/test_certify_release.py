@@ -815,6 +815,50 @@ class ChannelCertificationTests(DistroCertificationTests):
         self.assertIn('--latest=true', self.edits[-1][0])
         self.assertTrue(self.channel_names <= set(evidence['distribution_assets']))
 
+    def test_exact_windows_graphics_warning_is_green_but_not_full_qualification(self):
+        warnings = [certify.windows_certification.warning_record()]
+        evidence = self.record(warnings=warnings)
+        self.assertEqual(evidence['status'], 'passed_with_warnings')
+        self.assertFalse(evidence['latest_eligible'])
+        self.assertEqual(evidence['warnings'], warnings)
+        self.assertEqual(evidence['coverage_exclusions']['windows-x86_64-rev'],
+                         warnings[0]['omitted_checks'])
+        self.assertNotIn('source:gui_platform_conformance', warnings[0]['omitted_checks'])
+        self.assertIn('--latest=false', self.edits[-1][0])
+        self.assertNotIn('--latest=true', self.edits[-1][0])
+        log_name = 'certification-789-attempt-2-warning.log'
+        self.assertEqual(evidence['warning_report_asset'], log_name)
+        self.assertEqual(evidence['warning_report_sha256'], digest(self.uploads[log_name]))
+        self.assertIn(b'cannot open the Rev GUI', self.uploads[log_name])
+        self.assertIn('native graphics remain unqualified', self.edits[-1][1])
+
+    def test_warning_never_hides_other_failed_jobs(self):
+        jobs = dict.fromkeys(certify.required_jobs(self.metadata), 'success')
+        jobs['linux-tests'] = 'failure'
+        evidence = self.record(jobs=jobs, warnings=[certify.windows_certification.warning_record()])
+        self.assertEqual(evidence['status'], 'failed')
+        self.assertFalse(evidence['latest_eligible'])
+
+    def test_arbitrary_or_expanded_exclusions_are_rejected(self):
+        known = certify.windows_certification.warning_record()
+        changed = copy.deepcopy(known)
+        changed['omitted_checks'].append('source:cli')
+        wrong_target = dict(known, target='linux-x86_64-rev')
+        wrong_probe = dict(known, probe={'test': 'gui_coordinates_1x', 'exit_code': 9,
+                                        'output': known['probe']['output']})
+        for warnings in ({}, [known, known], [changed], [wrong_target], [wrong_probe]):
+            with self.subTest(warnings=warnings), self.assertRaisesRegex(ValueError, 'warning'):
+                self.record(warnings=warnings)
+        self.assertFalse(self.uploads)
+
+    def test_warning_record_cli_returns_success_but_other_failures_do_not(self):
+        args = ['record', '--repo', self.repository, '--tag', self.tag, '--run-id', '789',
+                '--results-json', str(self.results())]
+        with patch.object(certify, 'record', return_value={'status': 'passed_with_warnings'}):
+            self.assertEqual(certify.main(args), 0)
+        with patch.object(certify, 'record', return_value={'status': 'failed'}):
+            self.assertEqual(certify.main(args), 1)
+
 
 if __name__ == '__main__':
     unittest.main()

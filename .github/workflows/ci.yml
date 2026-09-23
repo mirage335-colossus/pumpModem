@@ -1,25 +1,50 @@
-name: Portable native binaries
+name: Focused checks and full native regression
 
 on:
+  # Branch pushes are covered by their PR. Automatic work is deliberately
+  # bounded; completed candidates use the explicit full manual dispatch.
   push:
+    branches: [main]
+    paths:
+      - '.github/workflows/**'
+      - 'src/**'
+      - 'include/**'
+      - 'tests/**'
+      - 'cmake/**'
+      - 'third_party/**'
+      - 'tools/**'
+      - 'CMakeLists.txt'
+      - 'CMakePresets.json'
+      - 'build.sh'
   pull_request:
+    paths:
+      - '.github/workflows/**'
+      - 'src/**'
+      - 'include/**'
+      - 'tests/**'
+      - 'cmake/**'
+      - 'third_party/**'
+      - 'tools/**'
+      - 'CMakeLists.txt'
+      - 'CMakePresets.json'
+      - 'build.sh'
   workflow_dispatch:
     inputs:
       linux_runner:
         description: 'Linux x86_64 runner for compilation and qualification'
         type: choice
         options: [ubuntu-24.04, ubuntu-latest-m, ubuntu-latest-l, ubuntu-latest-h]
-        default: ubuntu-24.04
+        default: ubuntu-latest-h
       arm_runner:
         description: 'Linux ARM64 runner for compilation and qualification'
         type: choice
         options: [ubuntu-24.04-arm-l, ubuntu-24.04-arm-h, ubuntu-24.04-arm]
-        default: ubuntu-24.04-arm-l
+        default: ubuntu-24.04-arm-h
       windows_runner:
         description: 'Windows x64 runner for compilation and qualification'
         type: choice
         options: [windows-2022, windows-latest-l, windows-latest-h]
-        default: windows-2022
+        default: windows-latest-h
       devfast:
         description: 'Run only the selected focused diagnostic; skip full regression and release work'
         type: boolean
@@ -27,7 +52,7 @@ on:
       diagnostic:
         description: 'Focused check used only with devfast=true'
         type: choice
-        options: [legacy, windows-rev, graphics, arm-rev-package, runner-capacity, arm-runner-capacity]
+        options: [legacy, certification, windows-rev, graphics, arm-rev-package, runner-capacity, arm-runner-capacity]
         default: legacy
       diagnostic_release:
         description: 'Published release tag for graphics diagnostics only; no binaries are rebuilt'
@@ -38,54 +63,80 @@ permissions:
   contents: read
 
 concurrency:
-  group: native-${{ github.workflow }}-${{ github.ref }}-${{ inputs.devfast && 'devfast' || 'full' }}-${{ inputs.linux_runner || 'ubuntu-24.04' }}-${{ inputs.windows_runner || 'windows-2022' }}-${{ inputs.arm_runner || 'ubuntu-24.04-arm-l' }}
+  group: native-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ inputs.diagnostic || 'legacy' }}-${{ inputs.devfast && 'devfast' || 'full' }}-${{ inputs.linux_runner || 'ubuntu-latest-h' }}-${{ inputs.windows_runner || 'windows-latest-h' }}-${{ inputs.arm_runner || 'ubuntu-24.04-arm-h' }}
   cancel-in-progress: true
 
 jobs:
+  tooling:
+    if: github.event_name != 'workflow_dispatch'
+    name: Lightweight build and SDK helper checks (not full regression)
+    runs-on: ubuntu-latest-h
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check orchestration with small offline fixtures
+        run: |
+          python3 tests/test_build_wrapper.py
+          python3 tests/test_build_dependencies.py
+          python3 tests/test_source_sdk.py
+          python3 tests/test_sdk_build.py
+      - name: Record the remaining candidate gate
+        run: echo 'Automatic checks are focused feedback only. Completed runtime changes require explicit ci.yml devfast=false, applicable SDK qualification, and release certification when publishing.' >> "$GITHUB_STEP_SUMMARY"
+
   devfast:
-    if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'legacy'
+    if: github.event_name != 'workflow_dispatch' || (inputs.devfast && inputs.diagnostic == 'legacy')
     uses: ./.github/workflows/devfast.yml
     with:
-      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
-      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
+
+  certification-diagnostic:
+    if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'certification'
+    uses: ./.github/workflows/certification-diagnostic.yml
+    with:
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
+      arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-h' }}
 
   windows-rev-diagnostic:
     if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'windows-rev'
     uses: ./.github/workflows/windows-rev-diagnostic.yml
     with:
-      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
 
   runner-capacity:
     if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'runner-capacity'
     uses: ./.github/workflows/runner-capacity.yml
     with:
-      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
-      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
 
   arm-runner-capacity:
     if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'arm-runner-capacity'
     uses: ./.github/workflows/arm-runner-capacity.yml
     with:
-      arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-l' }}
+      arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-h' }}
 
   graphics-diagnostic:
     if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'graphics'
     uses: ./.github/workflows/graphics-diagnostic.yml
     with:
-      arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-l' }}
-      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
+      arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-h' }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
       release_tag: ${{ inputs.diagnostic_release }}
 
   arm-rev-package-diagnostic:
     if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'arm-rev-package'
     uses: ./.github/workflows/arm-rev-package-diagnostic.yml
     with:
-      arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-l' }}
+      arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-h' }}
 
   gui-contract:
-    if: ${{ !inputs.devfast }}
+    if: github.event_name == 'workflow_dispatch' && !inputs.devfast
     name: GUI contract (${{ matrix.backend }})
-    runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
     container: debian:trixie-slim
     timeout-minutes: 30
     strategy:
@@ -124,9 +175,9 @@ jobs:
         run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' ctest --test-dir build-gui --output-on-failure -L gui
 
   linux:
-    if: ${{ !inputs.devfast }}
+    if: github.event_name == 'workflow_dispatch' && !inputs.devfast
     name: Linux ${{ matrix.build_type }} (glibc 2.35)
-    runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
     # Compile every application and collected library against this baseline,
     # rather than letting a newer hosted runner raise the minimum glibc ABI.
     container: ubuntu:22.04
@@ -198,10 +249,10 @@ jobs:
           retention-days: 1
 
   linux-compatibility:
-    if: ${{ !inputs.devfast }}
+    if: github.event_name == 'workflow_dispatch' && !inputs.devfast
     name: Copied Linux binaries on Ubuntu ${{ matrix.ubuntu }}
     needs: linux
-    runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
     container: ubuntu:${{ matrix.ubuntu }}
     # Both archive formats run the full workflow; measured checks exceed ten
     # minutes even though devfast never runs these compatibility jobs.
@@ -234,9 +285,9 @@ jobs:
         run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/downloaded" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.35 -P tools/verify-native-archives.cmake
 
   windows:
-    if: ${{ !inputs.devfast }}
+    if: github.event_name == 'workflow_dispatch' && !inputs.devfast
     name: Microsoft Windows x64 (static CRT)
-    runs-on: ${{ inputs.windows_runner || 'windows-2022' }}
+    runs-on: ${{ inputs.windows_runner || 'windows-latest-h' }}
     defaults:
       run:
         shell: pwsh

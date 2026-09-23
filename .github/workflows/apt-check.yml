@@ -11,10 +11,10 @@ on:
         required: true
       linux_runner:
         type: string
-        default: ubuntu-latest-l
+        default: ubuntu-latest-h
       arm_runner:
         type: string
-        default: ubuntu-24.04-arm-l
+        default: ubuntu-24.04-arm-h
 
 permissions:
   contents: read

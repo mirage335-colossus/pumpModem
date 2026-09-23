@@ -1,5 +1,6 @@
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
+#include "../src/pattern_carrier.hpp"
 #include "datapump/transfer.hpp"
 #include "datapump/streaming_modem.hpp"
 #include "datapump/crypto.hpp"
@@ -191,6 +192,23 @@ void public_waveform_uses_amplitude_and_phase() {
           "public pattern chips must occupy both quadratures, not a two-point binary line");
     check(std::abs(energy/count-1)<.08 && energy_square/count-std::pow(energy/count,2)>.4,
           "public pattern chips must vary amplitude as well as phase");
+}
+void carrier_phase_integer_positions() {
+    struct Example {std::uint64_t cursor;std::uint32_t rate;double carrier,cycles;};
+    // Expected values use exact rational arithmetic on the binary64 carrier,
+    // integer cursor and rate, followed by one final rounding to double. They
+    // do not use the production reduction or a large floating-point angle.
+    for(const auto& example:std::array{
+        Example{0,64,16,0},Example{1,64,16,.25},Example{64,64,16,0},
+        Example{691200017,48000,1500,-.46875},
+        Example{281474976710655ULL,192000,.1,.37013282063802083},
+        Example{18446744073709551615ULL,48000,1234.5,-.40171875},
+        Example{18446744073709551615ULL,44100,1234.567,.41254950113378686},
+        Example{18446744073709551615ULL,120000000,59999999.25,-.18469759375}}) {
+        const auto cycles=modem::detail::pattern_carrier_cycles(example.cursor,example.rate,example.carrier);
+        check(std::abs(std::remainder(cycles-example.cycles,1.))<1e-15,
+              "carrier phase lost a fractional cycle at a long integer sample position");
+    }
 }
 void exact_pcm_and_chunks() {
     auto c = config(); c.scramble = true; c.dsss = true;
@@ -661,7 +679,7 @@ int main() {
     try {
         seek_and_domains(); symbol_epoch_schedule(); symbol_schedule_integer_bounds();
         alphabet_and_repetition(); public_waveform_uses_amplitude_and_phase();
-        exact_pcm_and_chunks(); tones_and_bounded_state();
+        carrier_phase_integer_positions();exact_pcm_and_chunks(); tones_and_bounded_state();
         streaming_and_modem_integration();complete_symbols_require_aligned_starts();
         rounded_hardware_duration();hardware_noise_keystreams();
         hardware_data_byte_encryption();

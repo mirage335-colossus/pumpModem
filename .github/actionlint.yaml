@@ -1,0 +1,11 @@
+# Organization-provisioned GitHub larger-runner labels. actionlint uses this
+# catalog for custom labels even when GitHub, rather than us, hosts the runner.
+self-hosted-runner:
+  labels:
+    - ubuntu-latest-m
+    - ubuntu-latest-l
+    - ubuntu-latest-h
+    - windows-latest-l
+    - windows-latest-h
+    - ubuntu-24.04-arm-l
+    - ubuntu-24.04-arm-h

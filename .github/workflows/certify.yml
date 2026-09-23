@@ -16,21 +16,24 @@ on:
         description: 'x86-64 Linux runner'
         type: choice
         options: [ubuntu-24.04, ubuntu-latest-m, ubuntu-latest-l, ubuntu-latest-h]
-        default: ubuntu-24.04
+        default: ubuntu-latest-h
       arm_runner:
         description: 'Linux ARM64 runner for compilation and qualification'
         type: choice
         options: [ubuntu-24.04-arm-l, ubuntu-24.04-arm-h, ubuntu-24.04-arm]
-        default: ubuntu-24.04-arm-l
+        default: ubuntu-24.04-arm-h
       windows_runner:
         description: 'Windows x64 runner'
         type: choice
         options: [windows-2022, windows-latest-l, windows-latest-h]
-        default: windows-2022
+        default: windows-latest-h
 
   pull_request:
     paths:
       - '.github/workflows/certify.yml'
+      - '.github/workflows/certify-windows.yml'
+      - 'tools/windows-certification.py'
+      - 'tests/test_windows_certification.py'
       - '.github/workflows/apt-check.yml'
       - '.github/workflows/distro-check.yml'
       - 'tools/apt-release.py'
@@ -55,23 +58,24 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.devfast
     uses: ./.github/workflows/devfast.yml
     with:
-      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
-      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
 
   helpers:
     if: ${{ !inputs.devfast }}
-    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-l' }}
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - run: python3 tests/test_certify_release.py
+      - run: python3 tests/test_windows_certification.py
 
   prepare:
     if: github.event_name == 'workflow_dispatch' && !inputs.devfast
     needs: helpers
-    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-l' }}
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
     timeout-minutes: 10
     outputs:
       source_sha: ${{ steps.release.outputs.source_sha }}
@@ -79,7 +83,6 @@ jobs:
       inventory_sha256: ${{ steps.release.outputs.inventory_sha256 }}
       linux_matrix: ${{ steps.matrix.outputs.linux_matrix }}
       compatibility_matrix: ${{ steps.matrix.outputs.compatibility_matrix }}
-      windows_matrix: ${{ steps.matrix.outputs.windows_matrix }}
       application_targets: ${{ steps.release.outputs.application_targets }}
       apt_repository: ${{ steps.release.outputs.apt_repository }}
       distro_recipes: ${{ steps.release.outputs.distro_recipes }}
@@ -103,7 +106,7 @@ jobs:
     name: Source and published Linux ${{ matrix.arch }} / ${{ matrix.backend }}
     if: ${{ !inputs.devfast }}
     needs: prepare
-    runs-on: ${{ matrix.arch == 'aarch64' && (inputs.arm_runner || 'ubuntu-24.04-arm-l') || inputs.linux_runner || 'ubuntu-24.04' }}
+    runs-on: ${{ matrix.arch == 'aarch64' && (inputs.arm_runner || 'ubuntu-24.04-arm-h') || inputs.linux_runner || 'ubuntu-latest-h' }}
     container: ${{ matrix.image }}
     timeout-minutes: 120
     strategy:
@@ -214,86 +217,65 @@ jobs:
           xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' "$scanner" -DPACKAGE_ROOT="$PACKAGE_ROOT" -DBUILD_DIR="$PWD/build/certify" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P tools/verify-native-package.cmake
           "$scanner" -DPACKAGE_ROOT="$PACKAGE_ROOT" -DMAX_GLIBC="$GLIBC_CEILING" -P tools/verify-linux-abi.cmake
 
-  windows-tests:
-    name: Source and published Windows x64 / ${{ matrix.backend }}
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.prepare.outputs.windows_matrix) }}
+  windows-fltk:
     if: ${{ !inputs.devfast }}
     needs: prepare
-    runs-on: ${{ inputs.windows_runner || 'windows-2022' }}
-    timeout-minutes: 120
-    env:
-      VCPKG_DISABLE_METRICS: '1'
-      UseMultiToolTask: 'true'
-      EnforceProcessCountAcrossBuilds: 'true'
-      GH_TOKEN: ${{ github.token }}
-      RELEASE_TAG: ${{ inputs.release_tag }}
-      GUI_BACKEND: ${{ matrix.backend }}
-      RELEASE_TARGET: ${{ matrix.target }}
-      INVENTORY_SHA256: ${{ needs.prepare.outputs.inventory_sha256 }}
+    uses: ./.github/workflows/certify-windows.yml
+    with:
+      backend: fltk
+      target: ${{ contains(needs.prepare.outputs.application_targets, 'windows-x86_64-fltk') && 'windows-x86_64-fltk' || 'windows-x86_64' }}
+      source_sha: ${{ needs.prepare.outputs.source_sha }}
+      tooling_sha: ${{ github.sha }}
+      release_tag: ${{ inputs.release_tag }}
+      inventory_sha256: ${{ needs.prepare.outputs.inventory_sha256 }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
+
+  windows-rev:
+    if: ${{ !inputs.devfast && contains(needs.prepare.outputs.application_targets, 'windows-x86_64-rev') }}
+    needs: prepare
+    uses: ./.github/workflows/certify-windows.yml
+    with:
+      backend: rev
+      target: windows-x86_64-rev
+      source_sha: ${{ needs.prepare.outputs.source_sha }}
+      tooling_sha: ${{ github.sha }}
+      release_tag: ${{ inputs.release_tag }}
+      inventory_sha256: ${{ needs.prepare.outputs.inventory_sha256 }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
+
+  windows-tests:
+    name: Collect Windows certification results and warnings
+    if: ${{ always() && !inputs.devfast && needs.prepare.result == 'success' }}
+    needs: [prepare, windows-fltk, windows-rev]
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+    timeout-minutes: 5
+    outputs:
+      warnings: ${{ steps.result.outputs.warnings }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ needs.prepare.outputs.source_sha }}
-      - name: Load current runner tooling without changing the released source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ github.sha }}
-          path: .certification-tools
-      - name: Reuse verified static dependencies from base
-        shell: pwsh
-        run: |
-          # Keep the release's recipe identity, with current runner discovery.
-          # Releases predating dependency bases retain the existing fallback.
-          $recipeRoot = if (Test-Path tools/windows-base.py) { "$PWD" } else { "$PWD/.certification-tools" }
-          & ./.certification-tools/tools/use-windows-base.ps1 -SourceRoot $recipeRoot -Repository "$env:GITHUB_REPOSITORY" -Destination "$PWD/build/windows-base"
-      - name: Build with the Windows SDK and static MSVC runtime
-        shell: pwsh
-        run: |
-          cmake -S . -B build/release-windows -A x64 -DCMAKE_TOOLCHAIN_FILE="$env:DATAPUMP_WINDOWS_TOOLCHAIN" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DDATAPUMP_GUI_BACKEND="$env:GUI_BACKEND" -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600 -DDATAPUMP_TEST_NATIVE_GUI=ON -DGUI_SMOKE_TIMEOUT=600 -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
-          if ($LASTEXITCODE -ne 0) { throw 'Configure failed' }
-          if ($env:GUI_BACKEND -eq 'rev') {
-            # Diagnose the real OpenGL context and native adapter before the
-            # full regression build; its compiled Rev dependencies are reused.
-            cmake --build build/release-windows --config Release --target test_rev_coordinates --parallel $env:NUMBER_OF_PROCESSORS
-            if ($LASTEXITCODE -ne 0) { throw 'Rev native context probe build failed' }
-            ctest --test-dir build/release-windows -C Release -R '^gui_coordinates_1x$' --output-on-failure --parallel 1 --stop-on-failure --no-tests=error
-            if ($LASTEXITCODE -ne 0) { throw 'Rev native context or adapter check failed' }
-          }
-          cmake --build build/release-windows --config Release --target datapump-apps datapump-tests-contract datapump-tests-gui datapump-tests-packaging --parallel $env:NUMBER_OF_PROCESSORS
-          if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
-          # The live/audio fixtures have their own workers and wall-clock
-          # deadlines. Keep independent suites from competing on hosted CPUs.
-          foreach ($group in @('gui', 'contract', 'packaging')) {
-            ctest --test-dir build/release-windows -C Release --output-on-failure -L "^$group`$" -LE '^calibration$' --parallel 1 --stop-on-failure
-            if ($LASTEXITCODE -ne 0) { throw "$group tests failed" }
-          }
-          # Preserve the complete selection; run the long calibration after
-          # the other regressions so a platform failure is reported promptly.
-          ctest --test-dir build/release-windows -C Release --output-on-failure -L '^(contract|gui|packaging)$' -L '^calibration$' --parallel 1 --stop-on-failure --no-tests=error
-          if ($LASTEXITCODE -ne 0) { throw 'Calibration tests failed' }
-      - name: Download and verify the exact published Windows archive
-        id: binary
-        shell: pwsh
-        run: |
-          python .certification-tools/tools/certify-release.py download --repo "$env:GITHUB_REPOSITORY" --tag "$env:RELEASE_TAG" --target "$env:RELEASE_TARGET" --directory published --inventory-sha256 "$env:INVENTORY_SHA256" --github-output "$env:GITHUB_OUTPUT"
-          if ($LASTEXITCODE -ne 0) { throw 'Published archive verification failed' }
-      - name: Test the published GUI, CLI and relocation
-        shell: pwsh
+      - name: Preserve warnings and require all applicable Windows jobs
+        id: result
         env:
-          PACKAGE_ROOT: ${{ steps.binary.outputs.package_root }}
+          JOB_RESULTS: ${{ toJSON(needs) }}
+          TARGETS: ${{ needs.prepare.outputs.application_targets }}
         run: |
-          cmake -DPACKAGE_ROOT="$env:PACKAGE_ROOT" -DBUILD_DIR="$PWD/build/release-windows" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P tools/verify-native-package.cmake
-          if ($LASTEXITCODE -ne 0) { throw 'Published application checks failed' }
+          python3 - <<'PYRESULTS'
+          import json, os
+          needs = json.loads(os.environ['JOB_RESULTS'])
+          warnings = json.loads(needs['windows-rev'].get('outputs', {}).get('warnings') or '[]')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write('warnings=' + json.dumps(warnings, separators=(',', ':')) + '\n')
+          required = ['windows-fltk']
+          if 'windows-x86_64-rev' in json.loads(os.environ['TARGETS']):
+              required.append('windows-rev')
+          if any(needs[name]['result'] != 'success' for name in required):
+              raise SystemExit('A required Windows certification job failed or did not complete')
+          PYRESULTS
 
   compatibility:
     name: Published ${{ matrix.target }} on ${{ matrix.image }}
     if: ${{ !inputs.devfast }}
     needs: prepare
-    runs-on: ${{ matrix.arch == 'aarch64' && (inputs.arm_runner || 'ubuntu-24.04-arm-l') || inputs.linux_runner || 'ubuntu-24.04' }}
+    runs-on: ${{ matrix.arch == 'aarch64' && (inputs.arm_runner || 'ubuntu-24.04-arm-h') || inputs.linux_runner || 'ubuntu-latest-h' }}
     container: ${{ matrix.image }}
     timeout-minutes: 30
     strategy:
@@ -352,8 +334,8 @@ jobs:
     with:
       release_tag: ${{ inputs.release_tag }}
       inventory_sha256: ${{ needs.prepare.outputs.inventory_sha256 }}
-      linux_runner: ${{ inputs.linux_runner == 'ubuntu-24.04' && 'ubuntu-latest-l' || inputs.linux_runner || 'ubuntu-latest-l' }}
-      arm_runner: ${{ inputs.arm_runner == 'ubuntu-24.04-arm' && 'ubuntu-24.04-arm-l' || inputs.arm_runner || 'ubuntu-24.04-arm-l' }}
+      linux_runner: ${{ inputs.linux_runner == 'ubuntu-24.04' && 'ubuntu-latest-l' || inputs.linux_runner || 'ubuntu-latest-h' }}
+      arm_runner: ${{ inputs.arm_runner == 'ubuntu-24.04-arm' && 'ubuntu-24.04-arm-l' || inputs.arm_runner || 'ubuntu-24.04-arm-h' }}
 
   distro-recipes:
     if: ${{ !inputs.devfast && needs.prepare.outputs.distro_recipes == 'true' }}
@@ -362,12 +344,12 @@ jobs:
     with:
       release_tag: ${{ inputs.release_tag }}
       inventory_sha256: ${{ needs.prepare.outputs.inventory_sha256 }}
-      linux_runner: ${{ inputs.linux_runner == 'ubuntu-latest-h' && 'ubuntu-latest-h' || 'ubuntu-latest-l' }}
+      linux_runner: ${{ inputs.linux_runner == 'ubuntu-latest-l' && 'ubuntu-latest-l' || 'ubuntu-latest-h' }}
 
   record:
     needs: [prepare, linux-tests, windows-tests, compatibility, apt-repository, distro-recipes]
     if: ${{ always() && !inputs.devfast && needs.prepare.result == 'success' }}
-    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-l' }}
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
     timeout-minutes: 15
     permissions:
       contents: write
@@ -397,7 +379,8 @@ jobs:
               jobs.append('distro-recipes')
           results = {'source_sha': os.environ['SOURCE_SHA'], 'inventory_sha256': os.environ['INVENTORY_SHA256'],
                      'tested_targets': json.loads(os.environ['TESTED_TARGETS']),
-                     'jobs': {name: needs[name]['result'] for name in jobs}}
+                     'jobs': {name: needs[name]['result'] for name in jobs},
+                     'warnings': json.loads(needs['windows-tests'].get('outputs', {}).get('warnings') or '[]')}
           with open('certification-results.json', 'w') as out:
               json.dump(results, out)
           PYRESULTS

@@ -6,7 +6,7 @@ on:
       arm_runner:
         description: 'Linux ARM64 runner label'
         type: string
-        default: ubuntu-24.04-arm-l
+        default: ubuntu-24.04-arm-h
 
 permissions:
   contents: read
@@ -14,7 +14,7 @@ permissions:
 jobs:
   package:
     name: ARM64 Rev baseline package and newer host graphics (not certification)
-    runs-on: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-l' }}
+    runs-on: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-h' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

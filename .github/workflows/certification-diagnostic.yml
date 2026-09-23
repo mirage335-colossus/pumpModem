@@ -1,0 +1,133 @@
+name: Focused certification regressions
+
+on:
+  workflow_call:
+    inputs:
+      linux_runner:
+        type: string
+        default: ubuntu-latest-h
+      windows_runner:
+        type: string
+        default: windows-latest-h
+      arm_runner:
+        type: string
+        default: ubuntu-24.04-arm-h
+
+permissions:
+  contents: read
+
+jobs:
+  linux-adapter:
+    name: Linux ${{ matrix.backend }} adapter (not certification)
+    runs-on: ${{ inputs.linux_runner }}
+    container: debian:bookworm-slim
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [fltk, rev]
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      GH_TOKEN: ${{ github.token }}
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      LP_NUM_THREADS: '2'
+      GUI_BACKEND: ${{ matrix.backend }}
+    steps:
+      - name: Install download and display prerequisites
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git gh python3 file binutils make xvfb xauth fonts-dejavu-core fontconfig-config libxtst6 libgl1 libopengl0 libgl1-mesa-dri
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Reuse the exact prepared SDK
+        id: sdk
+        run: python3 tools/sdk-release.py fetch --binary-only --repo "$GITHUB_REPOSITORY" --directory downloaded-sdk --github-output "$GITHUB_OUTPUT"
+      - name: Install and verify the SDK without rebuilding it
+        env:
+          SDK_FOUND: ${{ steps.sdk.outputs.found }}
+        run: |
+          if [ "$SDK_FOUND" != true ]; then echo 'Run Maintain base SDK for this recipe first.' >&2; exit 1; fi
+          set -- downloaded-sdk/datapump-sdk-*-linux-x86_64.tar.gz
+          test "$#" -eq 1
+          python3 tools/build-sdk.py install --archive "$1" --destination "$GITHUB_WORKSPACE/build/sdk"
+          python3 tools/build-sdk.py verify "$GITHUB_WORKSPACE/build/sdk" --max-host-glibc 2.36
+      - name: Build only the adapter regression prerequisites
+        run: |
+          export PATH="$GITHUB_WORKSPACE/build/sdk/bin:$PATH"
+          cmake -S . -B build/adapter-diagnostic -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/cmake/toolchains/source-sdk.cmake" \
+            -DDATAPUMP_SDK_ROOT="$GITHUB_WORKSPACE/build/sdk" \
+            -DCMAKE_BUILD_TYPE=Release -DDATAPUMP_PORTABLE=ON \
+            -DDATAPUMP_GUI_BACKEND="$GUI_BACKEND" -DDATAPUMP_TEST_NATIVE_GUI=ON
+          cmake --build build/adapter-diagnostic --target "test_${GUI_BACKEND}_adapter" --parallel "$(nproc)"
+      - name: Run the existing native adapter assertions under a private display
+        run: |
+          if [ "$GUI_BACKEND" = rev ]; then selector=--inline-document; else selector=--estimate-colors; fi
+          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' \
+            "build/adapter-diagnostic/test_${GUI_BACKEND}_adapter" "$selector"
+          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' \
+            build/sdk/bin/ctest --test-dir build/adapter-diagnostic --output-on-failure \
+            -R '^gui_adapter_conformance$' --parallel 1 --stop-on-failure --no-tests=error
+          echo "Linux $GUI_BACKEND adapter passed for $GITHUB_SHA. This focused result does not qualify a release." >> "$GITHUB_STEP_SUMMARY"
+
+  windows-regressions:
+    name: Windows FLTK adapter and DSP regressions (not certification)
+    runs-on: ${{ inputs.windows_runner }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      GH_TOKEN: ${{ github.token }}
+      UseMultiToolTask: 'true'
+      EnforceProcessCountAcrossBuilds: 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Reuse the exact Windows dependency base
+        run: ./tools/use-windows-base.ps1 -Repository "$env:GITHUB_REPOSITORY" -Destination "$PWD/build/windows-base"
+      - name: Build only the three regression prerequisites
+        run: |
+          cmake -S . -B build/certification-diagnostic -A x64 -DCMAKE_TOOLCHAIN_FILE="$env:DATAPUMP_WINDOWS_TOOLCHAIN" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DDATAPUMP_GUI_BACKEND=fltk -DDATAPUMP_TEST_NATIVE_GUI=ON -DDATAPUMP_PORTABLE=ON -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          if ($LASTEXITCODE -ne 0) { throw 'Focused configuration failed' }
+          cmake --build build/certification-diagnostic --config Release --target test_fltk_adapter test_fast_low_rate test_pattern_code --parallel $env:NUMBER_OF_PROCESSORS
+          if ($LASTEXITCODE -ne 0) { throw 'Focused build failed' }
+      - name: Run unchanged focused assertions without calibration or smoke sequences
+        run: |
+          & ./build/certification-diagnostic/Release/test_fltk_adapter.exe --estimate-colors
+          if ($LASTEXITCODE -ne 0) { throw 'Focused Windows estimate-color regression failed' }
+          ctest --test-dir build/certification-diagnostic -C Release --output-on-failure -R '^(gui_adapter_conformance|fast_low_rate|pattern_code)$' --parallel 1 --stop-on-failure --no-tests=error
+          if ($LASTEXITCODE -ne 0) { throw 'Focused Windows regression failed' }
+          "Windows adapter and DSP regressions passed for $env:GITHUB_SHA. Full platform regression remains required." >> $env:GITHUB_STEP_SUMMARY
+
+  arm-cli:
+    name: ARM64 CLI differential estimate (not certification)
+    runs-on: ${{ inputs.arm_runner }}
+    container: ubuntu:22.04
+    timeout-minutes: 15
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - name: Install the same compiler baseline as ARM64 Rev certification
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git python3 file binutils make cmake ninja-build g++-11 libssl-dev
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare the pinned compiler tools; do not build a source SDK
+        run: |
+          sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
+          python3 tools/install-release-rev.py "$GITHUB_WORKSPACE/build/ci-rev-tools"
+          echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
+          echo "$GITHUB_WORKSPACE/build/ci-rev-tools/bin" >> "$GITHUB_PATH"
+      - name: Build only the production CLI with the Rev compiler
+        run: CC=clang-19 CXX=clang++-19 ./build.sh --backend rev --cli --build-dir build/arm-cli-diagnostic --build-jobs "$(nproc)" --jobs 1 -- -DDATAPUMP_PORTABLE=ON
+      - name: Run only the bounded differential estimate regression
+        run: |
+          cmake --build build/arm-cli-diagnostic --target test_differential_probability --parallel "$(nproc)"
+          ctest --test-dir build/arm-cli-diagnostic --output-on-failure -R '^differential_probability$' --parallel 1 --stop-on-failure --no-tests=error
+          python3 tests/test_cli.py build/arm-cli-diagnostic/pump StreamCLI.test_link_analysis_differential_receiver_estimate
+          echo "ARM64 differential estimate passed for $GITHUB_SHA. No full CLI, calibration or release certification was run." >> "$GITHUB_STEP_SUMMARY"

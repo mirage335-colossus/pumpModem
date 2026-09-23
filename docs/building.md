@@ -56,7 +56,7 @@ both GUI backends. The runner supplies MSVC and the Windows SDK separately.
 The [toolchain selector](../tools/select-windows-toolchain.ps1) prefers an
 installed Visual Studio 2022, or uses Visual Studio 2026 with its installed
 v143 tools. The current larger Windows images have VS2026 and v143 14.44;
-the default `windows-2022` image retains VS2022. The selector sets the matching
+the optional `windows-2022` image retains VS2022. The selector sets the matching
 CMake generator and pins v143 instead of adopting VS2026's default toolset.
 VS2026 requires CMake 4.2 or newer. This host selection does not change the
 dependency recipe or rebuild the existing base.
@@ -230,6 +230,18 @@ Do not rerun an expensive unchanged suite after recording a pass unless later
 changes or failures invalidate that evidence. Compile with available cores, but
 keep timing-sensitive test concurrency at its documented limits.
 
+Automatic `ci.yml` runs are bounded feedback: PRs and pushes to `main` run the
+small Linux/Windows Legacy diagnostic and offline build/SDK helper fixtures.
+Branch pushes do not launch a second copy of the PR checks, and documentation
+changes alone do not trigger them. Release and base workflows retain their
+path-specific helper checks. Automatic green checks do **not** mean the full
+application passed regression testing. Dispatch `ci.yml` with `devfast=false`
+when the candidate is ready; its native GUI, sanitizer, Windows, application
+and archive checks remain intact. `sdk.yml` is now manual so the additional
+SDK host-tool and copied Bookworm/Ubuntu matrix runs when relevant, without
+duplicating every push and PR. Ordinary consumers fail on a missing base recipe
+instead of silently building an SDK.
+
 For changes confined to Linux distribution packaging, start with
 `python3 tests/test_apt_release.py`, `python3 tests/test_distro_release.py`,
 `python3 tests/test_arch_release.py`, `python3 tests/test_gentoo_sync.py` and
@@ -247,11 +259,13 @@ checks are not a substitute for release certification. See
 [APT packaging and validation](releases.md#package-an-existing-release-without-rebuilding-it).
 
 Manual workflows expose `linux_runner` and `windows_runner` dropdowns for the
-organization's larger x86-64 runners. Native CI, portable release and
-certification also expose `arm_runner`: `ubuntu-24.04-arm-l` (the default),
-`ubuntu-24.04-arm-h`, or standard `ubuntu-24.04-arm`. The ARM64 L and H tiers
-provide 8 and 32 CPUs respectively. Automatic push/PR x86-64 jobs retain their
-standard runner defaults; the ARM64 selector does not affect x86-64 routing.
+organization's larger x86-64 runners. Defaults and automatic jobs now use
+`ubuntu-latest-h` and `windows-latest-h`; native CI, portable release and
+certification default `arm_runner` to `ubuntu-24.04-arm-h`. Explicit smaller
+choices remain available when desired, but checks do not repeat on those pools.
+The ARM64 L and H tiers provide 8 and 32 CPUs respectively. The ARM64 selector
+does not affect x86-64 routing. Package-manager checks remain on larger L/H
+pools and use H unless L is explicitly selected.
 Agents can pass these input names through `gh workflow run -f`.
 Use the [runner selection guide](releases.md#runner-selection-and-build-parallelism)
 to choose and verify access before a long run. `ci.yml` with `devfast=true` and
@@ -266,9 +280,9 @@ gh workflow run ci.yml --ref REF -f devfast=true \
   -f diagnostic=arm-runner-capacity -f arm_runner=ubuntu-24.04-arm-h
 ```
 
-Validate the new L and H pools directly, reusing earlier evidence instead of
-retesting smaller runners. Keep the applicable full regression and release
-certification sequence below after the focused checks.
+Reuse the earlier runner-capacity evidence instead of retesting smaller pools.
+Keep the applicable full regression and release certification sequence below
+after the focused checks.
 
 For a completed branch candidate, use the full workflow, and SDK qualification
 when the change touches its supported toolchains or portable packages:
@@ -292,7 +306,7 @@ for the separate publication/certification sequence and source-pinning rules.
 
 The manual `devfast` checkbox in native CI (`ci.yml`), SDK qualification
 (`sdk.yml`) and release certification (`certify.yml`) defaults to **false**.
-The default runs retain their full suites and calibration. With `devfast=true`,
+Default manual dispatches retain their full suites and calibration. With `devfast=true`,
 each workflow defaults to the same small Legacy diagnostic on Linux and
 Windows: compile the production Legacy controller/session and existing
 `gui_legacy_live` fixture and deterministic `gui_legacy_poll` cancellation/error
@@ -317,6 +331,22 @@ downloads the existing Windows base and compiles only the actual Rev GUI:
 ```sh
 gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=windows-rev
 ```
+
+For the adapter, Windows DSP and ARM64 CLI regressions found by full
+certification, use the bounded selection:
+
+```sh
+gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=certification
+```
+
+It builds only the existing Linux FLTK/Rev adapter tests, Windows FLTK adapter
+plus `pattern_code`/`fast_low_rate`, and the ARM64 CLI differential-estimate
+case. Linux x86-64 and Windows dependencies come from the exact reusable base;
+ARM64 uses the same Clang baseline as the Rev release. Tests retain their
+assertions and individual deadlines. No calibration, full smoke sequence,
+package publication or certification runs in this diagnostic. Once fixed,
+run the affected full checks and publish/certify new binaries when runtime
+changes must reach users.
 
 For a graphics-driver startup failure after publication, use the bounded
 environment diagnostic on the unchanged archive:
@@ -373,12 +403,12 @@ ctest --test-dir build/devfast -C Release --output-on-failure -R '^gui_legacy_(p
   --parallel 1 --repeat until-fail:3 --stop-on-failure --no-tests=error
 ```
 
-Manual `devfast` does not suppress workflows triggered by the preceding push.
+Manual `devfast` does not suppress lightweight checks triggered by a preceding
+PR update or push to `main`.
 For intermediate diagnosis commits, a temporary `[skip ci]` commit-message
 marker can [skip automatic push/PR runs](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/skip-workflow-runs)
-while still allowing manual dispatch. After the candidate is complete, either
-omit that marker from the final validation commit or explicitly dispatch the
-ordinary workflows with `devfast=false` (or unchecked), including applicable
+while still allowing manual dispatch. After the candidate is complete,
+explicitly dispatch the ordinary workflows with `devfast=false` (or unchecked), including applicable
 contract, GUI/native and packaging checks. Wait for those outcomes as described
 in [testing stages](#testing-stages). A focused pass is development feedback,
 not a substitute for those gates.

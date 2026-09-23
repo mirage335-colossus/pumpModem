@@ -390,8 +390,12 @@ void estimate_warning_colors() {
             while((!label||label->labelcolor()!=text_color(tone))&&Clock::now()<deadline) {
                 Fl::wait(.01);label=find_label(*window,state.text);
             }
-            require(state.text_tone==tone&&label&&label->labelcolor()==text_color(tone),
-                "FLTK estimate label ignored or retained a shared warning tone");
+            if(state.text_tone!=tone||!label||label->labelcolor()!=text_color(tone))
+                throw std::runtime_error("FLTK estimate label ignored or retained a shared warning tone: field="+
+                    std::to_string(static_cast<int>(field))+" expected="+std::to_string(static_cast<int>(tone))+
+                    " shared="+std::to_string(static_cast<int>(state.text_tone))+" color="+
+                    std::to_string(label?label->labelcolor():0)+" expected_color="+std::to_string(text_color(tone))+
+                    " text="+state.text);
         });
         app.application.close();while(!app.application.finished())Fl::wait(.005);
     }
@@ -1542,7 +1546,12 @@ void clipboard() {
 #endif
 }
 }
-int main() {
-    try {theme::apply_palette();palette_roles();estimate_warning_colors();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editor_history_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();fast_mode_visibility();developer_mode_visibility();tab_clicks();repeatable_clicks();expanded_bitmap_clicks();expanded_bitmap_hover_repaint();shared_overlay_controls();extension_controls();inline_document_editor();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();compression_page_labels();std::cout<<"FLTK generic adapter checks passed: menus, tab clicks, repeatable clicks, expanded bitmaps, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins, compression labels and shared extensions.\n";return 0;}
+int main(int argc,char** argv) {
+    try {
+        if(argc==2&&std::string_view(argv[1])=="--estimate-colors") {
+            theme::apply_palette();estimate_warning_colors();return 0;
+        }
+        if(argc!=1)throw std::runtime_error("Unknown FLTK adapter probe");
+        theme::apply_palette();palette_roles();estimate_warning_colors();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editor_history_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();fast_mode_visibility();developer_mode_visibility();tab_clicks();repeatable_clicks();expanded_bitmap_clicks();expanded_bitmap_hover_repaint();shared_overlay_controls();extension_controls();inline_document_editor();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();compression_page_labels();std::cout<<"FLTK generic adapter checks passed: menus, tab clicks, repeatable clicks, expanded bitmaps, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins, compression labels and shared extensions.\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

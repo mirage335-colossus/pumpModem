@@ -1,0 +1,118 @@
+name: Certify Windows source and published archive
+
+on:
+  workflow_call:
+    inputs:
+      backend:
+        type: string
+        required: true
+      target:
+        type: string
+        required: true
+      source_sha:
+        type: string
+        required: true
+      tooling_sha:
+        type: string
+        required: true
+      release_tag:
+        type: string
+        required: true
+      inventory_sha256:
+        type: string
+        required: true
+      windows_runner:
+        type: string
+        default: windows-latest-h
+    outputs:
+      warnings:
+        description: 'Exact, scoped hosted-graphics exceptions for the certificate'
+        value: ${{ jobs.windows.outputs.warnings }}
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Source and published Windows x64 / ${{ inputs.backend }}
+    runs-on: ${{ inputs.windows_runner }}
+    timeout-minutes: 120
+    outputs:
+      warnings: ${{ steps.graphics.outputs.warnings || '[]' }}
+    env:
+      VCPKG_DISABLE_METRICS: '1'
+      UseMultiToolTask: 'true'
+      EnforceProcessCountAcrossBuilds: 'true'
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      GUI_BACKEND: ${{ inputs.backend }}
+      RELEASE_TARGET: ${{ inputs.target }}
+      INVENTORY_SHA256: ${{ inputs.inventory_sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.source_sha }}
+      - name: Load current runner tooling without changing the released source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.tooling_sha }}
+          path: .certification-tools
+      - name: Reuse verified static dependencies from base
+        shell: pwsh
+        run: |
+          # Keep the release's recipe identity, with current runner discovery.
+          # Releases predating dependency bases retain the existing fallback.
+          $recipeRoot = if (Test-Path tools/windows-base.py) { "$PWD" } else { "$PWD/.certification-tools" }
+          & ./.certification-tools/tools/use-windows-base.ps1 -SourceRoot $recipeRoot -Repository "$env:GITHUB_REPOSITORY" -Destination "$PWD/build/windows-base"
+      - name: Configure and compile the native Windows Rev context probe
+        shell: pwsh
+        run: |
+          cmake -S . -B build/release-windows -A x64 -DCMAKE_TOOLCHAIN_FILE="$env:DATAPUMP_WINDOWS_TOOLCHAIN" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DDATAPUMP_GUI_BACKEND="$env:GUI_BACKEND" -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600 -DDATAPUMP_TEST_NATIVE_GUI=ON -DGUI_SMOKE_TIMEOUT=600 -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          if ($LASTEXITCODE -ne 0) { throw 'Configure failed' }
+          if ($env:GUI_BACKEND -eq 'rev') {
+            cmake --build build/release-windows --config Release --target test_rev_coordinates --parallel $env:NUMBER_OF_PROCESSORS
+            if ($LASTEXITCODE -ne 0) { throw 'Rev native context probe build failed' }
+          }
+      - name: Classify only the known hosted WGL limitation
+        id: graphics
+        if: inputs.backend == 'rev'
+        shell: pwsh
+        run: |
+          python .certification-tools/tools/windows-certification.py --executable build/release-windows/Release/test_rev_coordinates.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Rev native context or adapter check failed' }
+      - name: Build and run required Windows source regressions
+        shell: pwsh
+        env:
+          GUI_SMOKE: ${{ steps.graphics.outputs.gui_smoke || 'ON' }}
+        run: |
+          cmake --build build/release-windows --config Release --target datapump-apps datapump-tests-contract datapump-tests-gui datapump-tests-packaging --parallel $env:NUMBER_OF_PROCESSORS
+          if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
+          # Only native graphics are unavailable after the exact WGL warning.
+          # Headless GUI, CLI, modem, package and calibration checks stay required.
+          $graphicsExclusions = @()
+          if ($env:GUI_SMOKE -eq 'OFF') {
+            # Clipboard platform conformance does not require OpenGL.
+            $graphicsExclusions = @('-E', '^(gui_workflow|gui_adapter_conformance|gui_coordinates_1x|gui_coordinates_2x)$')
+          }
+          foreach ($group in @('gui', 'contract', 'packaging')) {
+            ctest --test-dir build/release-windows -C Release --output-on-failure -L "^$group`$" -LE '^calibration$' @graphicsExclusions --parallel 1 --stop-on-failure --no-tests=error
+            if ($LASTEXITCODE -ne 0) { throw "$group tests failed" }
+          }
+          ctest --test-dir build/release-windows -C Release --output-on-failure -L '^(contract|gui|packaging)$' -L '^calibration$' --parallel 1 --stop-on-failure --no-tests=error
+          if ($LASTEXITCODE -ne 0) { throw 'Calibration tests failed' }
+      - name: Download and verify the exact published Windows archive
+        id: binary
+        shell: pwsh
+        run: |
+          python .certification-tools/tools/certify-release.py download --repo "$env:GITHUB_REPOSITORY" --tag "$env:RELEASE_TAG" --target "$env:RELEASE_TARGET" --directory published --inventory-sha256 "$env:INVENTORY_SHA256" --github-output "$env:GITHUB_OUTPUT"
+          if ($LASTEXITCODE -ne 0) { throw 'Published archive verification failed' }
+      - name: Test the published GUI, CLI and relocation
+        shell: pwsh
+        env:
+          PACKAGE_ROOT: ${{ steps.binary.outputs.package_root }}
+          GUI_SMOKE: ${{ steps.graphics.outputs.gui_smoke || 'ON' }}
+        run: |
+          cmake -DPACKAGE_ROOT="$env:PACKAGE_ROOT" -DBUILD_DIR="$PWD/build/release-windows" -DGUI_SMOKE="$env:GUI_SMOKE" -DGUI_SMOKE_TIMEOUT=600 -P tools/verify-native-package.cmake
+          if ($LASTEXITCODE -ne 0) { throw 'Published application checks failed' }

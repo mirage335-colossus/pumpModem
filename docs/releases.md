@@ -25,13 +25,13 @@ long preservation contract and GUI tests remain intact in that workflow.
 | `experiment` | Checked | Title exactly `experiment`; GitHub prerelease; never Latest, even after certification passes. |
 | `publish` | Checked | Publish after all six platform/backend packages pass basic checks. Uncheck to retain a draft with its assets for inspection. |
 | `linux_baseline` | `bookworm-sdk` | Source SDK/glibc 2.36 for x86_64, or `ubuntu-22.04`/glibc 2.35. ARM64 always uses the Ubuntu 22.04 baseline. |
-| `arm_runner` | `ubuntu-24.04-arm-l` | ARM64 host: organization L or H tier, or standard `ubuntu-24.04-arm`. See [runner selection](#runner-selection-and-build-parallelism) for all three architecture selectors. |
+| `arm_runner` | `ubuntu-24.04-arm-h` | ARM64 host: organization L or H tier, or standard `ubuntu-24.04-arm`. See [runner selection](#runner-selection-and-build-parallelism) for all three architecture selectors. |
 | `source_release` | Empty | Build normally when blank. Otherwise reuse that complete release's six archives to create a new APT experiment; application/SDK builds are skipped. |
 | `package_check` | `none` | Read-only checks of a published `source_release`: `all`, `apt`, `arch` or `gentoo`. Creates no release and rebuilds no application or SDK. |
 
 Leave `experiment` checked for builds users needing assurance should avoid.
 An ordinary release uses its version/date tag as the title. It becomes Latest
-only after a successful separate certification; publication alone does not
+only after complete separate certification without omitted graphics coverage; publication alone does not
 promote it. Hosted certification is limited to the tests listed below and
 cannot establish physical-device compatibility.
 
@@ -104,7 +104,9 @@ Arch/Gentoo recipe hashes and native recipe installation checks. New schema-5
 releases additionally require signed pacman repositories and verified Gentoo
 update channels. Upload and certification check each archive's root
 and shipped build information, so relabeling an FLTK package as Rev is rejected.
-Certification of a new release requires coverage of every declared backend.
+Full qualification of a new release requires coverage of every declared backend.
+The scoped Windows Rev WGL warning described below permits a green workflow with
+explicitly incomplete graphics coverage; that outcome does not promote Latest.
 
 For the Ubuntu 22.04 x86_64 baseline, set `linux_baseline=ubuntu-22.04`.
 Clear `experiment` for an ordinary release. `publish=false` still reserves a
@@ -566,6 +568,23 @@ Rev also requires a working desktop OpenGL driver (4.4, or 4.3 with
 `GL_ARB_buffer_storage`). That is a runtime requirement, distinct from a cadence
 warning. The FLTK bundle remains available for systems lacking that capability.
 
+Windows certification treats only the exact coordinate-probe error
+`[NativeWindow] Required WGL ARB extensions not available` with exit code 1 as a
+hosted-environment warning. Compilation and all headless GUI/CLI, modem,
+clipboard, package, relocation and calibration checks remain mandatory.
+Only `gui_workflow`, `gui_adapter_conformance`, `gui_coordinates_1x`,
+`gui_coordinates_2x` and the published Rev GUI smoke are omitted on that runner.
+Unexpected output, different failures, crashes and timeouts still fail.
+
+If all remaining checks pass, GitHub displays a green check and the report says
+`passed_with_warnings`. A prominent summary, release notes and immutable
+`certification-RUN-attempt-N-warning.log` record the missing coverage. Existing
+release `warning.log` and earlier reports remain untouched. Such a result does
+not qualify Windows Rev desktop graphics or promote a regular release to Latest.
+The runner limitation is minor for build delivery, but a user machine with the
+same limitation cannot launch the Rev GUI; that is a functional limitation,
+with FLTK available as the alternative frontend.
+
 ## Diagnose a branch before full validation
 
 Native CI (`ci.yml`), SDK qualification (`sdk.yml`) and certification
@@ -603,8 +622,10 @@ dispatch branch has newer code. Publish a new version/date release when a code
 fix must be included in the binaries being certified.
 
 See [local focused commands](building.md#focused-development-diagnostics).
-For temporary investigation commits, `[skip ci]` can suppress automatic
-push/PR matrices while manual dispatch remains available. Once the candidate is
+Automatic CI runs lightweight Legacy and helper checks on PRs and pushes to
+`main`; SDK qualification and full native matrices are manual. A PR branch push
+does not duplicate the PR run. For temporary investigation commits, `[skip ci]`
+can suppress the automatic checks while manual dispatch remains available. Once the candidate is
 complete, continue with full source CI and applicable SDK qualification on that
 same revision, using `devfast=false` or unchecked:
 
@@ -621,7 +642,7 @@ Wait for the relevant full runs to complete successfully and address any
 regressions they expose. **Do not finish bug or feature work with only a fast
 pass.** Full manual dispatch after a `[skip ci]` commit provides this validation;
 there is no need to launch duplicate push/PR runs solely to remove the marker.
-Alternatively, omit the marker and use the normal full automatic runs. Record
+Automatic green checks do not replace that full manual validation. Record
 the tested commit and run IDs in either case.
 
 For a release task, follow successful source validation with publication and
@@ -697,15 +718,14 @@ their ARM64 jobs and diagnostics. The same input names work through GitHub CLI:
 
 | Input | Choices | Default |
 | --- | --- | --- |
-| `linux_runner` | `ubuntu-24.04`, `ubuntu-latest-m`, `ubuntu-latest-l`, `ubuntu-latest-h` | `ubuntu-24.04` |
-| `arm_runner` | `ubuntu-24.04-arm-l`, `ubuntu-24.04-arm-h`, `ubuntu-24.04-arm` | `ubuntu-24.04-arm-l` |
-| `windows_runner` | `windows-2022`, `windows-latest-l`, `windows-latest-h` | `windows-2022` |
+| `linux_runner` | `ubuntu-24.04`, `ubuntu-latest-m`, `ubuntu-latest-l`, `ubuntu-latest-h` | `ubuntu-latest-h` |
+| `arm_runner` | `ubuntu-24.04-arm-l`, `ubuntu-24.04-arm-h`, `ubuntu-24.04-arm` | `ubuntu-24.04-arm-h` |
+| `windows_runner` | `windows-2022`, `windows-latest-l`, `windows-latest-h` | `windows-latest-h` |
 
-The larger labels are the runners configured by `mirage335-colossus`. Select one
-explicitly for x86-64 builds; automatic push/PR x86-64 jobs keep their standard
-defaults. Manual ARM64 selection defaults to L and reaches reusable diagnostics,
-release builds and certification checks. Small helper, metadata and report jobs
-stay on standard runners. Each architecture has its own selector: an x86-64
+The larger labels are the runners configured by `mirage335-colossus`. All
+architecture defaults and automatic fallbacks now use H pools, including helper,
+metadata and report jobs. Existing smaller choices remain available for an
+explicit manual selection; they are not silently substituted or retested. Each architecture has its own selector: an x86-64
 label cannot replace an ARM64 host. Existing Linux baseline containers, SDK
 recipes and portable ABI ceilings remain unchanged.
 
@@ -901,7 +921,7 @@ Read the attached report before describing a particular release as tested.
 | Linux x86_64, `bookworm-sdk` | SDK, glibc 2.36 | Debian 12 and 13; Ubuntu 24.04 and 26.04; Arch Linux |
 | Linux x86_64, `ubuntu-22.04` | Ubuntu 22.04, glibc 2.35 | Debian 12 and 13; Ubuntu 22.04, 24.04 and 26.04; Arch Linux |
 | Linux aarch64 | Ubuntu 22.04, glibc 2.35 | Debian 12 and 13; Ubuntu 22.04, 24.04 and 26.04 |
-| Windows x64 | MSVC v143 with static CRT | Selected Windows x64 hosted runner and archive relocation; the default is `windows-2022` with VS2022 |
+| Windows x64 | MSVC v143 with static CRT | Selected Windows x64 hosted runner and archive relocation; the default is `windows-latest-h`, currently using VS2026 with v143 |
 
 Linux package verification audits all shipped ELF libraries for the selected
 glibc ceiling and checks relocation, checksums, CLI operation and the GUI
@@ -934,11 +954,11 @@ ordinary Debian ARMv7 `armhf` binaries would not cover the original Pi/Zero's
 ARMv6 hard-float user space. Hardware-specific Raspberry Pi audio remains
 outside the hosted tests.
 
-For the default VS2022 toolchain, Microsoft documents the ability to build
+For the supported VS2022/v143 toolchain, Microsoft documents the ability to build
 desktop applications
 for [Windows 10 and 11](https://learn.microsoft.com/en-us/visualstudio/releases/2022/compatibility?view=vs-2022).
-The default `windows-2022` runner uses Windows Server 2022. Organization runner
-labels may select another image; consult that run's image/toolchain logs.
+The optional `windows-2022` runner uses Windows Server 2022. The default
+organization H runner uses its configured image; consult that run's image/toolchain logs.
 Windows 10 and Windows 11 client installations are not directly tested by this
 workflow.
 

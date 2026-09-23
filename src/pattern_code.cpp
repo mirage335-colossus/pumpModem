@@ -2,6 +2,7 @@
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/symbol_schedule.hpp"
 #include "datapump/crypto.hpp"
+#include "pattern_carrier.hpp"
 
 #include <openssl/crypto.h>
 #include <algorithm>
@@ -398,8 +399,7 @@ struct PatternTransmitter::Impl {
         } capture(code,trace);
         cancelled(stop);
         const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(output.size(), total - cursor));
-        const auto angle = std::remainder(static_cast<long double>(cursor) * tau * config.carrier_hz / config.sample_rate,
-                                         static_cast<long double>(tau));
+        const auto angle = detail::pattern_carrier_cycles(cursor,config.sample_rate,config.carrier_hz)*tau;
         auto oscillator = std::polar(1., static_cast<double>(angle));
         const auto step = std::polar(1., tau * config.carrier_hz / config.sample_rate);
         const auto amplitude = std::sqrt(2 * nominal_signal_power);

@@ -6,7 +6,7 @@ on:
       windows_runner:
         description: 'Windows x64 runner label'
         type: string
-        default: windows-2022
+        default: windows-latest-h
 
 permissions:
   contents: read
@@ -14,7 +14,7 @@ permissions:
 jobs:
   rev:
     name: Windows Rev compiler and event pump (not certification)
-    runs-on: ${{ inputs.windows_runner || 'windows-2022' }}
+    runs-on: ${{ inputs.windows_runner || 'windows-latest-h' }}
     defaults:
       run:
         shell: pwsh
