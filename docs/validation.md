@@ -58,10 +58,9 @@ stage-specific diagnostics now identify any remaining general `live` timeout.
 Calibration uses available cores up to 16, with matching CTest processor
 accounting and exclusive scheduling. Cheap partition checks verify all 64
 seeds appear exactly once for every supported worker count; no capture or
-numerical acceptance criterion is removed. This scheduling change still needs
-the full numerical run below. Historical sanitizer real-time overruns and GUI
-pending-identity failures remain failures until current evidence establishes
-their outcome; the WGL exception does not apply to them.
+numerical acceptance criterion is removed. The complete Windows and Linux
+Release numerical runs below pass. Sanitizer real-time overruns remain
+failures; the WGL exception does not apply to them.
 
 The [Windows Rev diagnostic](https://github.com/mirage335-colossus/pumpModem/actions/runs/35920957351)
 is **green** on `f582d8eb2827c2cdff02d7e8df40adac55c0ce74`: the native event test,
@@ -94,6 +93,47 @@ identity corruption or a sanitizer memory/UB report. The unchanged assertions
 still fail (**4.83** and **49.28 seconds**); they are not covered by the WGL waiver.
 Release build results are separate evidence, and no conclusion about physical
 hardware performance follows from these hosted or simulated checks alone.
+
+[Experiment `v001_00-2026-09-23-1629CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-23-1629CDT)
+is published successfully by [run 35922653913](https://github.com/mirage335-colossus/pumpModem/actions/runs/35922653913),
+with all six freshly built application archives and **50** delivery assets,
+including signed Debian, Arch and Gentoo update channels. Source and packager
+are `81858d2ffd7fecfbf3fcc23d121efcfb69a7b33f`;
+inventory SHA-256 is
+`e57ecf5f0099a290e4180fb72e2a3b61e60b3729debbccddcee3316e8b3ffa43`.
+The separate full [certification run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35923981422)
+uses tooling `cf2553e8eeec21ed60cc40d12fa546b3404338bc`, `devfast=false`,
+unchanged prepared SDKs and H runners. All **nine** Debian/Ubuntu installation
+jobs and both Arch/Gentoo jobs pass, including Bookworm on x86-64 and ARM64.
+The [Windows Rev job](https://github.com/mirage335-colossus/pumpModem/actions/runs/35923981422/job/107394669632)
+is **green**: 38 GUI/clipboard tests, 29 non-calibration contract tests, two
+packaging tests, full calibration (**182.01 seconds**) and exact published
+archive checks pass. Only the enumerated native WGL-dependent checks are
+omitted, with the intended warning.
+Windows FLTK, both Linux x86-64 backends and Linux ARM64 FLTK also pass their
+complete source and published-archive certification jobs. Their source contract
+groups retain all 30 tests, including numerical calibration; the Linux contract
+groups finish in **690–783 seconds**.
+
+Full [native regression](https://github.com/mirage335-colossus/pumpModem/actions/runs/35921401021)
+uses `4656214c0b448ef8fc8c278357340b86d19d6bd9`; subsequent source differences
+are test fixtures, failure diagnostics and documentation, not application
+behavior. Both full Linux GUI selections pass (**39 FLTK**, **42 Rev**), as do
+all **121 Windows tests in 1,225.03 seconds**, followed by GUI relocation and
+both native archive checks. Its complete receiver calibration passes in
+**178.42 seconds** with 16 workers and every original capture retained.
+Linux Release passes all **125 tests in 1,218.52 seconds**, followed by native
+desktop, CLI, relocation and both archive checks.
+Remaining full-run outcomes are recorded below.
+
+An older FLTK rendering diagnostic also remains: its default ABI clipping
+stack has ten entries, and local complete adapter logs emit one overflow /
+underflow pair. Inspected application push/pop calls are balanced and older
+logs contain the same pair. Nested native/offscreen drawing can exhaust that
+limit; the existing logs do not establish whether the triggering draw is
+test-only. All adapter assertions pass. This is a minor unresolved clipping
+diagnostic that could affect a drawn frame, not an observed transport or
+data-integrity failure.
 
 
 ## Arch/Gentoo signed update channels — 23 September 2026

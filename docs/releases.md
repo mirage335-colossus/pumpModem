@@ -615,8 +615,10 @@ small nonactivating window to exercise real paint messages. Use this
 selection for Windows Rev compiler/event-loop diagnosis before another
 build of all six packages. It does not certify graphics or publish release assets.
 
-`devfast` never downloads a published application, issues a certification
-report, changes a release or grants Latest status. Full certification continues
+The Legacy and certification `devfast` routes test source without downloading a
+published application. The graphics diagnostic instead checks an existing
+published archive. Neither route issues a certification report, changes a
+release or grants Latest status. Full certification continues
 to bind the release's recorded source and published hashes, even when the
 dispatch branch has newer code. Publish a new version/date release when a code
 fix must be included in the binaries being certified.
@@ -725,7 +727,12 @@ their ARM64 jobs and diagnostics. The same input names work through GitHub CLI:
 The larger labels are the runners configured by `mirage335-colossus`. All
 architecture defaults and automatic fallbacks now use H pools, including helper,
 metadata and report jobs. Existing smaller choices remain available for an
-explicit manual selection; they are not silently substituted or retested. Each architecture has its own selector: an x86-64
+explicit manual selection in build workflows. Arch/Gentoo checks and release
+repository repackaging use L when explicitly selected and H otherwise, including
+when the parent build uses a standard or M runner. Certification's APT checks
+retain the selected larger runner and map standard runner choices to L.
+No job retries on a smaller runner.
+Each architecture has its own selector: an x86-64
 label cannot replace an ARM64 host. Existing Linux baseline containers, SDK
 recipes and portable ABI ceilings remain unchanged.
 
@@ -813,7 +820,7 @@ The [runner toolchain selector](../tools/select-windows-toolchain.ps1) prefers
 VS2022 when installed. The current larger Windows images supply VS2026; on
 those images it selects the installed v143 14.44 tools and the VS2026 CMake
 generator, which requires CMake 4.2 or newer. It does not silently adopt the
-newer default toolset. The default `windows-2022` image continues using VS2022.
+newer default toolset. The optional `windows-2022` image continues using VS2022.
 Run logs identify the selected generator, toolset and linker version.
 This selection leaves the existing base recipe identity and assets unchanged;
 its hosted compile results must still be checked before claiming qualification.
