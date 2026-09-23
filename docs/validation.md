@@ -4,6 +4,101 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Full validation after focused diagnosis — 23 September 2026
+
+Agent and development guidance now requires focused diagnosis followed by full
+applicable validation once a candidate is complete. A fast pass cannot complete
+a runtime change. Passing evidence for the same source/configuration is reused;
+manual full runs after `[skip ci]` avoid duplicate automatic runs. Documentation
+changes receive proportionate checks without discarding outstanding code
+validation. Release certification remains tied to the actual published source
+and binary hashes.
+
+Full validation uses `129f064ba8db6b777bc80bcb248f965f69998e66`, including
+the Legacy cancellation fix and alignment of full-CI time budgets and dependency
+inspection with the existing release checks. Local
+`cmake -DBINARY_DIR="$PWD/build/ci-timeout-fixture" -P tests/packaging_support.cmake`
+passes real installation/relocation, tamper and unlisted-file rejection, ELF ABI
+rejection, ALSA SONAME and smoke-timeout forwarding/bounds checks. Configure-only
+probes verify the default GUI smoke/test limits of 300/330 seconds, configured
+600/630 seconds, and rejection of 601 seconds. Actionlint accepts the changed
+native/SDK workflows; whitespace checks pass. These checks do not stand in for
+application regression coverage.
+
+The full [native CI run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35852524828)
+and [SDK qualification run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35852528862)
+use `devfast=false` on `129f064ba8db6b777bc80bcb248f965f69998e66`.
+Saved logs and run snapshots are under
+`build/ci-diagnostics-20260923/full-runs`. Completed evidence is:
+
+| Scope | Recorded result |
+| --- | --- |
+| Native Linux Release | **Passed:** **122/122** source tests in **2,191.07 seconds**, including numerical calibration in **1,327.83 seconds**. Desktop workflow, CLI regressions, relocation and both archive formats also pass. |
+| Native Linux Debug with ASan/UBSan | **Failed:** **115/120** pass in **5,996.03 seconds**. `fast_session`, `gui_fast_live`, `live` and `live_profiles` fail; `differential_receiver_probability` reaches its **3,600.11-second** timeout. Later desktop/CLI/archive steps are skipped. |
+| Native FLTK GUI job | **Passed:** build checks **10/10**, GUI checks **37/37**. |
+| Native Rev GUI job | **Failed:** GUI checks **38/39**; `gui_workflow` phase 21 reports replay fraction **0.898309**, with 13 observed frames over 3.014539 seconds. |
+| Native Windows source suite | **Failed:** **117/119** pass in **2,973.90 seconds**. `fast_low_rate` and `pattern_code` fail. Both Legacy cancellation regressions pass; numerical calibration passes in **1,501.85 seconds**. Later Windows archive/relocation steps are skipped. |
+| Native copied-distribution matrix | **Skipped** because the prerequisite Linux Debug job fails. |
+| SDK FLTK job | Both copied TGZ/ZIP archives pass verification including GUI smoke; build checks pass **10/10**. Packaging checks pass **2/3**, with `packaging_support` failing on the synthetic ALSA fixture; real native relocation passes. Later contract coverage does not run. |
+| SDK Rev job | **Failed:** copied-archive GUI smoke phase 13 observes only **6 frames** over 2.701923 seconds. Later regression coverage does not run. |
+| SDK distribution matrix | **Skipped** because the prerequisite SDK jobs fail. |
+
+Commit `ec93a9932e4e66ecdfd84129478667160a3bf769` fixes only the synthetic
+ALSA fixture's unused C++ runtime dependencies. Focused packaging checks then
+pass with both native and SDK compilers, including relocation, corruption and
+smoke-timeout checks. Application/runtime sources and the SDK recipe remain
+unchanged. This local correction does not change the original SDK run's failed
+status. The supplemental full SDK preservation contract passes **30/30** in
+**1,643.99 seconds**, including unchanged numerical calibration in **1,289.66
+seconds**. It uses:
+
+```sh
+./build.sh test contract --stop-on-failure \
+  --sdk "$PWD/build/sdk-qualified-local" --backend fltk \
+  --build-dir build/sdk-local-fltk --jobs 2 -- \
+  -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600
+```
+
+The log is
+`build/ci-diagnostics-20260923/sdk-full-contract.log`.
+The same wrapper's full `packaging` group then passes **3/3** in **40.36
+seconds**, including the fixed fixture, real native relocation and SDK isolation.
+Its log is `build/ci-diagnostics-20260923/sdk-full-packaging.log`.
+
+Both hosted workflows finish with **failure**. Windows exposes a
+`fast_low_rate` failure; a scratch
+probe reproduces the failure with the exact MSVC Gaussian sampling algorithm.
+The current Windows run also fails `pattern_code` at its unchanged waveform
+chunking tolerance. A scratch double-precision probe reproduces that assertion
+without changing the tolerance; its proposed runtime correction is not applied.
+The Windows, Rev replay and Debug failures remain unresolved. No assertion,
+internal deadline or production runtime behavior was changed to make these
+results pass. Scratch candidate changes have not been incorporated into the
+application. This is a completed validation attempt, not a full passing
+qualification.
+
+The observed Debug `live` timeout and `live_profiles` queue-overrun messages
+come from explicit regression assertions, not sanitizer diagnostics themselves.
+The generic `live` wait needs stage-specific evidence to identify the stalled
+predicate. The `live_profiles` synthetic source delivers about 20 ms of PCM
+per 1 ms sleep; its assertion detects an actual bounded-queue discard and
+reacquisition. Instrumentation cost or test contention may affect throughput,
+but the cause is not established. Focused follow-up should isolate the failing
+stage/case and measure progress/queue occupancy while preserving deadlines,
+queue limits and assertions. Debug `fast_session` reports capture overrun and
+missing physical end; `gui_fast_live` reports changed pending identity or exposed
+completed content. These failures also remain open; the passing Release run does
+not substitute for their sanitizer configuration. The calibration timeout leaves
+that configuration's numerical coverage incomplete, even though the Release,
+Windows and supplemental SDK calibration runs pass.
+
+The existing `v001_00-2026-09-23-0453CDT` experiment remains bound to source
+`17199557113ea52b44e72ba40724f7a20c3a9dee`, with its failed certification report
+and all six original assets unchanged. It does not contain the later controller
+fix. Qualifying the fixed release requires a new publication followed by full
+certification of that new tag; source-CI success alone does not certify its
+published binaries.
+
 ## Focused Legacy cancellation diagnosis and devfast — 23 September 2026
 
 The Windows certification timeout exposed a reproducible Legacy controller race.
@@ -51,9 +146,10 @@ After focused proof, `./build.sh test gui --stop-on-failure --build-dir
 build/audio-portable-validation --jobs 2 --cli` passes **33/33** in **104.48
 seconds**. The same wrapper's `legacy` group passes **8/8** in **2.14 seconds**.
 Workflow lint and whitespace checks pass. These affected integration groups
-include the shared controller/application boundaries; the regular modem's slow
-calibration and native adapter suites were not rerun for this controller-only
-change. Full release certification remains a separate qualification step.
+include the shared controller/application boundaries. At that focused stage,
+the regular modem's slow calibration and native adapter suites had not yet been
+rerun. The later full validation above records their follow-up; release
+certification remains a separate qualification step.
 
 Redundant broad runs were stopped while this focused diagnosis proceeded.
 The previously published release's [certification attempt](https://github.com/mirage335-colossus/pumpModem/actions/runs/35846897564)

@@ -1,4 +1,4 @@
-name: Source SDK and Bookworm portability
+name: Application checks with the base SDK
 
 on:
   push:
@@ -72,7 +72,7 @@ jobs:
 
   application:
     if: ${{ !inputs.devfast }}
-    name: SDK build, ${{ matrix.backend }} on ${{ matrix.name }}
+    name: App and tests with SDK, ${{ matrix.backend }} on ${{ matrix.name }}
     runs-on: ubuntu-24.04
     container: ${{ matrix.image }}
     timeout-minutes: 120

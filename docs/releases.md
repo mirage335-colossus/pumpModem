@@ -189,9 +189,9 @@ Routine app builds download only the compiled SDK and checksum inventory. The
 source archive stays in `base` for developers. Neither publication, certification
 nor base maintenance uses Actions cache or artifact storage: platform builds
 upload directly to a draft, and certification downloads the published assets.
-The separate optional SDK/Rev regression workflow retains small application
-artifacts for one day solely to test copies on other hosts. Those are not durable
-releases. Existing unrelated CI artifacts are unchanged.
+The separate native and SDK/Rev regression workflows retain small application
+artifacts for one day for CI inspection and copied-binary checks on other hosts.
+Those are not durable releases.
 
 GitHub [limits each release asset to under 2 GiB](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases),
 while documenting no limit on aggregate release size or download bandwidth.
@@ -205,9 +205,10 @@ existing application binaries or per-run certification reports.
 The first successful split publication took **11m50s**, and the separate base
 maintenance job reused and verified its SDK in **64 seconds** without compiling
 it. The earlier **46m59s** application job included the extensive tests, which
-now run only in certification. A cold SDK build remains an occasional maintenance
-task, not work repeated for each application release. These timings are observed
-hosted-runner results, not guarantees.
+the release pipeline now defers to separate certification. Native CI and SDK
+qualification also retain extensive regression coverage. A cold SDK build remains
+an occasional maintenance task, not work repeated for each application release.
+These timings are observed hosted-runner results, not guarantees.
 
 ## Choose the Linux baseline
 
@@ -251,7 +252,8 @@ set extensions. GitHub documents the available
 ## Compatibility checks and scope
 
 The separate certification workflow runs the full build, contract, GUI and
-packaging selections and tests the published archives on the hosts below.
+packaging selections on Linux, and the contract, GUI and packaging selections
+on Windows. It also tests the published archives on the hosts below.
 Read the attached report before describing a particular release as tested.
 
 | Bundle | Build baseline | Copied-archive compatibility jobs |
