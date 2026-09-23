@@ -157,10 +157,10 @@ file from that exact tag, replacing `RELEASE_TAG` below. Check this fingerprint
 against a trusted copy of the maintainer's documentation before initial setup.
 
 The current package experiment is
-[`v001_00-2026-09-23-1234CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-23-1234CDT),
-including the Arch and Gentoo recipes below.
+[`v001_00-2026-09-23-1322CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-23-1322CDT),
+including the signed Arch and Gentoo update channels below.
 It reuses the six archives built from application commit `88fb87b`.
-[Debian/Ubuntu installation checks](https://github.com/mirage335-colossus/pumpModem/actions/runs/35896483127)
+[Debian/Ubuntu installation checks](https://github.com/mirage335-colossus/pumpModem/actions/runs/35901986281)
 passed in all nine environments above; these are separate from full
 application certification. As of
 23 September 2026, no regular release has qualified for Latest, so use its
@@ -171,11 +171,31 @@ tag=RELEASE_TAG
 fingerprint=8C3DD4A727C83B93374C993B1F94BC4CEC2DF307
 base="https://github.com/mirage335-colossus/pumpModem/releases/download/$tag"
 download_dir=$(mktemp -d)
-curl --fail --location "$base/datapump-archive-keyring.gpg" -o "$download_dir/datapump.gpg"
+curl --fail --location "$base/datapump-archive-keyring.gpg" -o "$download_dir/datapump.gpg" || exit 1
 actual=$(gpg --batch --show-keys --with-colons "$download_dir/datapump.gpg" |
-  awk -F: '$1 == "fpr" {print $10; exit}')
+  awk -F: '$1 == "pub" {primary=1; next} primary && $1 == "fpr" {print $10; primary=0}')
 test "$actual" = "$fingerprint" || { echo 'Signing fingerprint mismatch' >&2; exit 1; }
-curl --fail --location "$base/datapump.sources" -o "$download_dir/datapump.sources"
+for asset in InRelease apt-repository.json datapump.sources; do
+  curl --fail --location "$base/$asset" -o "$download_dir/$asset" || exit 1
+done
+gpgv --keyring "$download_dir/datapump.gpg" --output "$download_dir/Release" \
+  "$download_dir/InRelease" || exit 1
+python3 - "$download_dir" "$tag" <<'VERIFY' || exit 1
+import hashlib, json, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+release_hashes = root.joinpath('Release').read_text().split('SHA256:\n', 1)[1].splitlines()
+expected = [line.split()[0] for line in release_hashes
+            if len(line.split()) == 3 and line.split()[2] == 'apt-repository.json']
+manifest = root.joinpath('apt-repository.json').read_bytes()
+if expected != [hashlib.sha256(manifest).hexdigest()]:
+    raise SystemExit('Repository manifest checksum mismatch')
+metadata = json.loads(manifest)
+if metadata['repository'] != 'mirage335-colossus/pumpModem' or metadata['tag'] != sys.argv[2]:
+    raise SystemExit('Unexpected repository or release tag')
+if hashlib.sha256(root.joinpath('datapump.sources').read_bytes()).hexdigest() != metadata['sources_sha256']:
+    raise SystemExit('APT source configuration checksum mismatch')
+VERIFY
 sudo install -d -m 0755 /etc/apt/keyrings
 sudo install -m 0644 "$download_dir/datapump.gpg" /etc/apt/keyrings/datapump.gpg
 sudo install -m 0644 "$download_dir/datapump.sources" /etc/apt/sources.list.d/datapump.sources
@@ -186,7 +206,8 @@ sudo apt-get install datapump-fltk
 sudo apt-get install datapump-rev
 ```
 
-The bootstrap commands need `curl` and `gpg`. Keep the installed keyring for
+The bootstrap commands need `curl`, `gpg`, `gpgv` and Python 3. They authenticate
+the source configuration before installing it. Keep the installed keyring for
 future updates; key replacement is a separate maintainer operation. The source
 file uses `Signed-By: /etc/apt/keyrings/datapump.gpg` and `Suites: ./`.
 For a regular release its URI is
@@ -294,6 +315,8 @@ FLTK and Rev packages can coexist. Installation preserves the portable archive's
 private `bin/`, `lib/`, notices and shared files under `/opt/datapump/BACKEND`.
 No application or SDK compilation is needed.
 
+Bootstrap checks require exactly one primary key with the pinned fingerprint;
+additional primary keys are rejected before trusting downloaded signatures.
 Both channels use the same pinned signing fingerprint as APT:
 `8C3DD4A727C83B93374C993B1F94BC4CEC2DF307`. Keep the trusted key installed;
 automatic updates never replace that trust anchor. A regular release must pass
@@ -313,7 +336,7 @@ base=https://github.com/mirage335-colossus/pumpModem/releases/latest/download
 # base=https://github.com/mirage335-colossus/pumpModem/releases/download/RELEASE_TAG
 curl --fail --location "$base/datapump-pacman-keyring.gpg" -o datapump-pacman-keyring.gpg || exit 1
 actual=$(gpg --batch --show-keys --with-colons datapump-pacman-keyring.gpg |
-  awk -F: '$1 == "fpr" {print $10; exit}')
+  awk -F: '$1 == "pub" {primary=1; next} primary && $1 == "fpr" {print $10; primary=0}')
 test "$actual" = 8C3DD4A727C83B93374C993B1F94BC4CEC2DF307 || exit 1
 sudo pacman-key --init
 sudo pacman-key --add datapump-pacman-keyring.gpg
@@ -360,7 +383,7 @@ for asset in datapump-archive-keyring.gpg datapump-gentoo-channel.json datapump-
 done
 fingerprint=8C3DD4A727C83B93374C993B1F94BC4CEC2DF307
 actual=$(gpg --batch --show-keys --with-colons datapump-archive-keyring.gpg |
-  awk -F: '$1 == "fpr" {print $10; exit}')
+  awk -F: '$1 == "pub" {primary=1; next} primary && $1 == "fpr" {print $10; primary=0}')
 test "$actual" = "$fingerprint" || exit 1
 gpgv --keyring "$PWD/datapump-archive-keyring.gpg" \
   datapump-gentoo-channel.json.asc datapump-gentoo-channel.json || exit 1
@@ -458,7 +481,7 @@ for asset in datapump-archive-keyring.gpg InRelease apt-repository.json \
   curl --fail --location "$base/$asset" -o "$asset" || exit 1
 done
 actual=$(gpg --batch --show-keys --with-colons datapump-archive-keyring.gpg |
-  awk -F: '$1 == "fpr" {print $10; exit}')
+  awk -F: '$1 == "pub" {primary=1; next} primary && $1 == "fpr" {print $10; primary=0}')
 test "$actual" = 8C3DD4A727C83B93374C993B1F94BC4CEC2DF307 || exit 1
 gpgv --keyring "$PWD/datapump-archive-keyring.gpg" --output Release InRelease || exit 1
 awk '/^SHA256:/{hashes=1;next} hashes && $3 == "apt-repository.json" {print $1 "  " $3}' \
