@@ -74,7 +74,7 @@ ambiguity under strict Clang diagnostics and passes after the change. Its
 regression checks mutable/const symmetry, values/units, color alpha, notification
 and transition metadata, and layout-versus-paint decisions. The case is also
 retained in the normal Rev GUI group. The focused Windows diagnostic runs the
-small probes before dependency download or application compilation; ordinary
+small event probe before dependency download or application compilation; ordinary
 publication leaves those regressions to diagnosis/certification after the fix
 is established.
 
@@ -113,6 +113,35 @@ first compiler correction. Rev compilation then exposes a missing Win32
 The next iteration uses native CI's targeted `devfast=true,
 diagnostic=windows-rev` selection before another full release attempt, retaining
 all required regression and exact-release certification steps afterward.
+
+The Win32 implementation now pumps the entire thread queue without blocking,
+dispatches at most 64 messages per application poll, yields after a paint, and
+reports `WM_QUIT` to the application. This preserves service-window input and
+prevents continuous repaint feedback from starving application progress. The
+Linux pump retains its existing bounded behavior and reports its continuing
+state through the same API. A dependency-free regression covers input
+translation, FIFO/service delivery, close, bounded feedback, paint fairness and
+quit; mutations of the yield, translation, bound and quit behavior fail their
+respective assertions.
+
+The first [focused Windows event run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35871173191)
+caught a fixture failure in 0.01 seconds: a fully hidden HWND did not generate
+the expected paint. No dependencies or application compilation followed that
+failure. Using a small nonactivating window fixes the fixture without changing
+production behavior or weakening its assertions. The corrected
+[Windows diagnostic](https://github.com/mirage335-colossus/pumpModem/actions/runs/35871985005)
+passes on source `1bbc8a724c32aa467d9eef94f313a359bdeeb462`: the real Win32
+regression takes **0.05 seconds**, existing dependencies are reused in **21
+seconds**, and actual MSVC Rev application compilation and the bounded headless
+self-check pass. This establishes compilation/event behavior, not graphics
+qualification.
+
+Windows Rev certification now runs the existing real-context coordinate check
+before building the full regression selection. The coordinate fixture explicitly
+injects `WM_DPICHANGED` for its 1x/2x cases rather than assuming that the hosted
+monitor has both DPI settings. It preserves all physical/client, caret, focus,
+wheel and relayout assertions. The two Linux coordinate cases pass on a private
+Xvfb display; actual Windows graphics qualification remains a later check.
 
 ## Full validation after focused diagnosis — 23 September 2026
 
