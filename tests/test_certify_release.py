@@ -671,7 +671,7 @@ class AptCertificationTests(CertificationFixture, unittest.TestCase):
     def test_download_apt_verifies_pinned_assets_and_original_linux_payloads(self):
         state = certify.download_apt(self.repository, self.tag, self.root / 'apt',
                                      digest(self.files['SHA256SUMS.txt']), 'A' * 40)
-        expected = self.apt_names | getattr(self, 'distro_names', set()) | {'SHA256SUMS.txt', 'release-metadata.json'} | {
+        expected = self.apt_names | getattr(self, 'distro_names', set()) | getattr(self, 'channel_names', set()) | {'SHA256SUMS.txt', 'release-metadata.json'} | {
             name for target, name in certify.release.application_names(self.metadata).items()
             if target.startswith('linux-')}
         self.assertEqual(set(self.downloads), expected)
@@ -700,7 +700,7 @@ class AptCertificationTests(CertificationFixture, unittest.TestCase):
         self.assertEqual(evidence['status'], 'passed')
         self.assertEqual(evidence['apt_assets'], {name: digest(self.files[name]) for name in self.apt_names})
         self.assertIn('apt-repository', evidence['required_jobs'])
-        self.assertIn('--latest=true' if self.schema >= 4 else '--latest=false', self.edits[-1][0])
+        self.assertIn('--latest=true' if self.schema >= 5 else '--latest=false', self.edits[-1][0])
         report = self.uploads['certification-789-attempt-2.md'].decode()
         self.assertIn('Signed APT repository', report)
         self.assertIn('Published APT asset SHA-256 values', report)
@@ -758,8 +758,8 @@ class DistroCertificationTests(AptCertificationTests):
     def test_distribution_job_is_required_and_evidence_binds_all_recipe_hashes(self):
         evidence = self.record()
         self.assertIn('distro-recipes', evidence['required_jobs'])
-        self.assertEqual(evidence['distribution_assets'], {name: digest(self.files[name]) for name in self.distro_names})
-        self.assertIn('--latest=true', self.edits[-1][0])
+        self.assertEqual(evidence['distribution_assets'], {name: digest(self.files[name]) for name in self.distro_names | getattr(self, 'channel_names', set())})
+        self.assertIn('--latest=true' if self.schema >= 5 else '--latest=false', self.edits[-1][0])
         for result in (None, 'failure', 'skipped'):
             jobs = dict.fromkeys(certify.required_jobs(self.metadata) - {'distro-recipes'}, 'success')
             if result is not None:
@@ -776,6 +776,44 @@ class DistroCertificationTests(AptCertificationTests):
         with self.assertRaisesRegex(ValueError, 'missing application or support'):
             self.prepare()
         self.distro_tool.verify.assert_not_called()
+
+
+class ChannelCertificationTests(DistroCertificationTests):
+    schema = 5
+
+    def setUp(self):
+        # Parent setup refreshes schema-5 inventory, so install channel stubs first.
+        self.channels = {}
+        for kind in ('arch', 'gentoo'):
+            tool = Mock()
+            tool.asset_names.return_value = {f'{kind}-channel.fixture'}
+            self.channels[kind] = tool
+        patched = patch.object(certify.release, 'channel_tool', side_effect=self.channels.__getitem__)
+        patched.start()
+        self.addCleanup(patched.stop)
+        super().setUp()
+        self.channel_names = set().union(*(tool.asset_names.return_value for tool in self.channels.values()))
+        self.files.update({name: ('channel fixture ' + name).encode() for name in self.channel_names})
+        self.refresh_metadata()
+
+    def test_channel_verification_is_required_before_installation(self):
+        state = certify.download_distro(self.repository, self.tag, self.root / 'channels',
+                                        digest(self.files['SHA256SUMS.txt']), 'A' * 40)
+        self.assertTrue(self.channel_names <= set(self.downloads))
+        self.assertEqual(certify.output_values(state, None)['distro_channels'], 'true')
+        for tool in self.channels.values():
+            tool.verify.assert_called_once_with(state['directory'], self.metadata,
+                                                 repository=self.repository, expected_fingerprint='A' * 40)
+        self.channels['gentoo'].verify.side_effect = ValueError('channel signature mismatch')
+        with self.assertRaisesRegex(ValueError, 'channel signature'):
+            certify.download_distro(self.repository, self.tag, self.root / 'bad-channel',
+                                     digest(self.files['SHA256SUMS.txt']), 'A' * 40)
+
+    def test_signed_update_channels_are_required_to_promote_latest(self):
+        evidence = self.record()
+        self.assertEqual(evidence['status'], 'passed')
+        self.assertIn('--latest=true', self.edits[-1][0])
+        self.assertTrue(self.channel_names <= set(evidence['distribution_assets']))
 
 
 if __name__ == '__main__':

@@ -1,4 +1,4 @@
-name: Install release recipes on Arch and Gentoo
+name: Install and update release packages on Arch and Gentoo
 
 on:
   workflow_call:
@@ -22,7 +22,7 @@ permissions:
 
 jobs:
   install:
-    name: ${{ matrix.distro }} binary recipes / x86-64 / both backends
+    name: ${{ matrix.distro }} release packages / x86-64 / both backends
     runs-on: ${{ inputs.linux_runner == 'ubuntu-latest-h' && 'ubuntu-latest-h' || 'ubuntu-latest-l' }}
     timeout-minutes: 20
     strategy:
@@ -39,15 +39,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Verify recipe signatures and bind them to the original binary archives
+      - name: Verify distribution signatures and bind them to the original binary archives
+        id: assets
         run: |
           python3 tools/certify-release.py download-distro --repo "$GITHUB_REPOSITORY" \
             --tag "$RELEASE_TAG" --directory distro-assets --inventory-sha256 "$INVENTORY_SHA256" \
-            --apt-signing-fingerprint "$APT_FINGERPRINT"
+            --apt-signing-fingerprint "$APT_FINGERPRINT" --github-output "$GITHUB_OUTPUT"
           python3 tools/distro-release.py extract --directory distro-assets \
             --metadata distro-assets/release-metadata.json --kind "$RECIPE_KIND" --destination recipes
       - name: Make and install Arch packages without compiling the application
-        if: matrix.distro == 'arch'
+        if: matrix.distro == 'arch' && steps.assets.outputs.distro_channels != 'true'
         run: |
           docker run --rm -i \
             --mount "type=bind,source=$PWD/recipes,target=/recipes,readonly" \
@@ -75,6 +76,34 @@ jobs:
             timeout 120 "datapump-$backend" --self-check
           done
           ARCH
+      - name: Install signed Arch release packages through pacman
+        if: matrix.distro == 'arch' && steps.assets.outputs.distro_channels == 'true'
+        run: |
+          docker run --rm -i -e APT_FINGERPRINT -e GITHUB_REPOSITORY -e RELEASE_TAG \
+            --mount "type=bind,source=$PWD/distro-assets,target=/release,readonly" \
+            --mount "type=bind,source=$PWD/tools,target=/tools,readonly" \
+            --mount "type=bind,source=$PWD/tests,target=/tests,readonly" \
+            archlinux:base bash -euo pipefail <<'ARCH'
+          pacman -Syu --noconfirm --needed python
+          python3 /tests/test_arch_release.py
+          pacman-key --init
+          pacman-key --add /release/datapump-pacman-keyring.gpg
+          pacman-key --lsign-key "$APT_FINGERPRINT"
+          # Certify the prepared tag before promotion, even for a regular
+          # candidate whose user-facing config will eventually follow Latest.
+          printf '\n[datapump-x86_64]\nSigLevel = PackageRequired DatabaseRequired\nServer = https://github.com/%s/releases/download/%s\n' \
+            "$GITHUB_REPOSITORY" "$RELEASE_TAG" >> /etc/pacman.conf
+          pacman -Syu --noconfirm datapump-fltk-bin datapump-rev-bin
+          # Repeated standard updates must accept the same signed repository.
+          pacman -Syu --noconfirm
+          for backend in fltk rev; do
+            pacman -Qkk "datapump-$backend-bin"
+            python3 /tools/distro-release.py verify-installed --directory /release \
+              --metadata /release/release-metadata.json --backend "$backend" --architecture amd64 --root /
+            timeout 30 "datapump-cli-$backend" --version
+            timeout 120 "datapump-$backend" --self-check
+          done
+          ARCH
       - name: Merge Gentoo binary ebuilds using only prebuilt host dependencies
         if: matrix.distro == 'gentoo'
         run: |
@@ -83,18 +112,28 @@ jobs:
           snapshot="datapump-portage-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           docker create -v /var/db/repos/gentoo --name "$snapshot" gentoo/portage:latest /bin/true
           trap 'docker rm -v "$snapshot" >/dev/null' EXIT
-          docker run --rm -i --volumes-from "$snapshot":ro \
+          docker run --rm -i --volumes-from "$snapshot":ro -e APT_FINGERPRINT -e GITHUB_REPOSITORY -e RELEASE_TAG \
             --mount "type=bind,source=$PWD/recipes,target=/recipes,readonly" \
             --mount "type=bind,source=$PWD/distro-assets,target=/release,readonly" \
             --mount "type=bind,source=$PWD/tools,target=/tools,readonly" \
             gentoo/stage3:latest bash -euo pipefail <<'GENTOO'
-          cp -a /recipes/datapump-gentoo-overlay /var/db/repos/datapump-bin
           mkdir -p /etc/portage/repos.conf /etc/portage/package.accept_keywords /etc/portage/package.license /etc/portage/package.use
-          cat > /etc/portage/repos.conf/datapump-bin.conf <<'REPOSITORY'
+          if test -f /release/datapump-gentoo-sync.py; then
+            # download-distro authenticated these helper bytes before execution.
+            mkdir -p /etc/portage/gnupg
+            install -m644 /release/datapump-archive-keyring.gpg /etc/portage/gnupg/datapump.gpg
+            python3 /release/datapump-gentoo-sync.py install --assets /release \
+              --keyring /etc/portage/gnupg/datapump.gpg --fingerprint "$APT_FINGERPRINT" \
+              --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG"
+            emaint sync -r datapump-bin
+          else
+            cp -a /recipes/datapump-gentoo-overlay /var/db/repos/datapump-bin
+            cat > /etc/portage/repos.conf/datapump-bin.conf <<'REPOSITORY'
           [datapump-bin]
           location = /var/db/repos/datapump-bin
           auto-sync = no
           REPOSITORY
+          fi
           printf '%s\n' 'media-radio/datapump-fltk-bin ~amd64' 'media-radio/datapump-rev-bin ~amd64' \
             > /etc/portage/package.accept_keywords/datapump-bin
           printf '%s\n' 'media-radio/datapump-fltk-bin DataPump-Bundled' 'media-radio/datapump-rev-bin DataPump-Bundled' \
@@ -155,7 +194,7 @@ jobs:
       - name: Record packaging scope
         run: |
           {
-            echo "$RECIPE_KIND x86-64: native package frontend installed both release backends."
+            echo "$RECIPE_KIND x86-64: native package frontend installed both release backends; schema-5 channels exercised native repository refresh."
             echo 'Installed payloads and wrappers match the original portable archives; bounded CLI and headless GUI self-checks passed.'
             echo 'No application or SDK was compiled. Physical audio and desktop graphics remain separate certification scopes.'
           } >> "$GITHUB_STEP_SUMMARY"

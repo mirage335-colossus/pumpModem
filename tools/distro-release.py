@@ -165,13 +165,13 @@ def expected(directory, metadata, repository):
     apt = apt_module()
     release = apt.release_module()
     release.repository_name(repository)
-    if metadata.get('schema') != 4 or metadata.get('gui_backends') != list(BACKENDS):
-        raise ValueError('Distribution recipes require release metadata schema 4 and both backends')
+    if metadata.get('schema') not in (4, 5) or metadata.get('gui_backends') != list(BACKENDS):
+        raise ValueError('Distribution recipes require release metadata schema 4+ and both backends')
     # Validate canonical fields before interpolating any shell recipe text.
     checked = release.make_metadata(source_sha=metadata['source_sha'], run_id=metadata['run_id'],
         run_attempt=metadata['run_attempt'], version=metadata['version'], experiment=metadata['experiment'],
         linux_baseline=metadata['linux_baseline'], now=datetime.fromisoformat(metadata['created_at'].replace('Z', '+00:00')),
-        cmake_version=metadata['project_version'], schema=4, packager_sha=metadata['packager_sha'],
+        cmake_version=metadata['project_version'], schema=metadata['schema'], packager_sha=metadata['packager_sha'],
         repackaged_from=metadata.get('repackaged_from'))
     if checked != metadata:
         raise ValueError('Distribution release metadata differs from its canonical identity')

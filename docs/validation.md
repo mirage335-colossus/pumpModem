@@ -5,6 +5,30 @@ tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
 
+## Arch/Gentoo signed update channels — 23 September 2026
+
+Schema 5 adds native signed pacman packages and per-architecture `.db`/`.files`
+indexes, plus a signed Gentoo overlay channel and authenticated Portage sync
+adapter. Existing binary payloads are reused. APT's signed manifest also binds
+all new assets. Schemas 1–4 remain readable, but only fully certified regular
+schema-5 releases can become Latest, preventing an older delivery layout from
+removing update channels. Experiments remain explicitly tag-pinned.
+
+Focused fixtures cover real signatures, native package bytes/modes, generated
+mtree data, required asset inventories, APT's complete signed distribution hash
+set and certification gates. Gentoo HTTP fixtures exercise a moving Latest URL,
+A-to-B refresh, unchanged refresh, downgrade/tamper/wrong-key/unsafe-archive
+rejection and atomic replacement failures retaining the previous tree. Its
+inventory can be read on Windows without Linux-only runtime imports. Native
+pacman update fixtures run in an isolated root in the Arch installation job.
+The full build-tool group passes **16/16 in 12.22 seconds**. Final focused
+helpers pass **74 release**, **67 certification**, **9 APT**, **8 recipe**,
+**8 Arch** and **11 Gentoo** tests. Two additional native pacman cases require
+the root Arch container and are skipped locally. Native Portage plugin
+discovery and construction also pass against the upstream Portage source.
+Workflow lint and all 29 documentation shell examples pass. Hosted native
+installation results are recorded below after the candidate run completes.
+
 ## Arch/Gentoo recipes and shared Debian/Ubuntu packages — 23 September 2026
 
 New schema-4 releases add Arch `PKGBUILD`/`.SRCINFO` recipes and a Gentoo EAPI-8
@@ -22,8 +46,9 @@ installation functions for all four Linux target/backend combinations and
 checks their resulting file bytes and modes, tampering, extra files, safe
 extraction, version syntax and source hashes. A real signature regression proves
 that changing a recipe asset invalidates the signed APT manifest. Legacy
-metadata schemas remain readable; only schema 4 with successful distribution
-checks can become Latest. The full build-tool group passes **14/14 in 6.92
+metadata schemas remain readable. Schema 4 required successful distribution
+checks for Latest at this stage; current promotion additionally requires the
+schema-5 update channels described above. The full build-tool group passes **14/14 in 6.92
 seconds**. Workflow lint, documentation shell syntax and whitespace checks pass.
 
 The APT workflow installs the same four `.deb` files on Debian 12 Bookworm,
@@ -162,7 +187,7 @@ APT signing uses the dedicated primary fingerprint
 `8C3DD4A727C83B93374C993B1F94BC4CEC2DF307`; private material is held in the
 repository Actions secret, never in Git or release assets. At this stage,
 qualified regular schema-3 releases could become Latest; new releases now
-require schema 4 and the distribution checks above. Experiments remain pinned to an
+now require schema 5 and the distribution update checks above. Experiments remain pinned to an
 explicit tag, and earlier release schemas cannot remove the APT update channel.
 
 ## Larger runners and independent compilation concurrency — 23 September 2026

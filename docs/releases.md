@@ -99,8 +99,10 @@ metadata, checksums and source-side certification tools are outside this path.
 Existing schema-1 releases retain their original three FLTK assets; schema-2
 releases retain all six backend-specific assets and a checksummed `warning.log`.
 Both remain readable. Schema-3 releases also require the signed APT assets
-and Debian installation checks described below. New schema-4 releases add signed
-Arch/Gentoo recipe hashes and require native recipe installation checks. Upload and certification check each archive's root
+and Debian installation checks described below. Schema-4 releases add signed
+Arch/Gentoo recipe hashes and native recipe installation checks. New schema-5
+releases additionally require signed pacman repositories and verified Gentoo
+update channels. Upload and certification check each archive's root
 and shipped build information, so relabeling an FLTK package as Rev is rejected.
 Certification of a new release requires coverage of every declared backend.
 
@@ -197,13 +199,15 @@ Package indexes point to immutable versioned release URLs, including when the
 index itself was fetched through Latest. Versions include the project version,
 UTC build timestamp and workflow identity, so APT upgrades remain ordered
 across the CDT/CST clock change. Publication alone never changes Latest: a
-regular schema-4 release must pass full certification, including APT and native
-Arch/Gentoo recipe checks. Older schemas remain readable and certifiable, but
+regular schema-5 release must pass full certification, including APT and native
+Arch/Gentoo repository checks. Older schemas remain readable and certifiable, but
 cannot replace the current update channel without all of its delivery assets.
 
 ### Maintainer signing configuration
 
-Configure a dedicated APT signing key before dispatching a release. Store the
+Configure a dedicated release signing key before dispatching a release. The
+existing APT secret also signs pacman packages/databases and the Gentoo channel
+manifest; no additional secret is needed. Store the
 ASCII-armored private key as the repository Actions secret
 `DATAPUMP_APT_SIGNING_KEY`, and its full primary fingerprint as the repository
 Actions variable `DATAPUMP_APT_SIGNING_FINGERPRINT`. The CI key must support
@@ -277,11 +281,147 @@ candidate is complete, run the full Debian/Ubuntu and native recipe installation
 without repeating unchanged application or SDK builds. These checks do not
 certify the application: follow publication with `certify.yml`, `devfast=false`,
 for the new tag. Certification includes the same APT coverage for schema-3 and newer releases,
-plus Arch/Gentoo recipe checks for schema 4, and binds the report to all
+plus Arch/Gentoo delivery checks for schema 4 and newer, and binds the report to all
 published hashes.
 
 
-## Arch Linux and Gentoo binary recipes
+## Arch and Gentoo update channels
+
+Schema-5 releases add signed native pacman packages/repository databases and a
+verified Gentoo overlay sync helper. Generated package trees and indexes live
+in GitHub Release assets; the Git repository layout stays unchanged. Separate
+FLTK and Rev packages can coexist. Installation preserves the portable archive's
+private `bin/`, `lib/`, notices and shared files under `/opt/datapump/BACKEND`.
+No application or SDK compilation is needed.
+
+Both channels use the same pinned signing fingerprint as APT:
+`8C3DD4A727C83B93374C993B1F94BC4CEC2DF307`. Keep the trusted key installed;
+automatic updates never replace that trust anchor. A regular release must pass
+full certification before becoming Latest. An experiment requires an explicit
+tag and never enters the Latest channel. Until a qualified regular schema-5
+release exists, use a published experiment's exact tag for evaluation.
+
+### Arch: normal pacman updates
+
+Packages are provided for `x86_64` and `aarch64` (Arch Linux ARM). Set `base` to
+Latest for normal updates, or to `.../releases/download/RELEASE_TAG` to stay on
+one experiment. Bootstrap with the independently pinned public fingerprint:
+
+```sh
+base=https://github.com/mirage335-colossus/pumpModem/releases/latest/download
+# For an experiment instead:
+# base=https://github.com/mirage335-colossus/pumpModem/releases/download/RELEASE_TAG
+curl --fail --location "$base/datapump-pacman-keyring.gpg" -o datapump-pacman-keyring.gpg || exit 1
+actual=$(gpg --batch --show-keys --with-colons datapump-pacman-keyring.gpg |
+  awk -F: '$1 == "fpr" {print $10; exit}')
+test "$actual" = 8C3DD4A727C83B93374C993B1F94BC4CEC2DF307 || exit 1
+sudo pacman-key --init
+sudo pacman-key --add datapump-pacman-keyring.gpg
+sudo pacman-key --lsign-key 8C3DD4A727C83B93374C993B1F94BC4CEC2DF307
+arch=$(uname -m)
+case "$arch" in x86_64|aarch64) ;; *) exit 1 ;; esac
+printf '[datapump-%s]\nSigLevel = PackageRequired DatabaseRequired\nServer = %s\n' "$arch" "$base" |
+  sudo tee /etc/pacman.d/datapump.conf
+```
+
+Add `Include = /etc/pacman.d/datapump.conf` once at the end of
+`/etc/pacman.conf`, then install either or both backends:
+
+```sh
+sudo pacman -Syu datapump-fltk-bin datapump-rev-bin
+# Subsequent updates use the normal command:
+sudo pacman -Syu
+```
+
+Both database and package signatures are required. Versioned package names
+include the UTC build timestamp and workflow identity. Pacman requires package
+basenames in its database, so it cannot use APT's relative path to immutable
+release URLs. If Latest moves between fetching an index and a package, the
+operation fails safely; retry **the full `pacman -Syu`** to refresh both. Do not
+work around this with disabled signatures or a partial system upgrade.
+Exact-tag repositories remain available for reproducible installation.
+
+### Gentoo: verified overlay sync
+
+Gentoo uses the release's EAPI-8 binary ebuild overlay. Install Python 3, GnuPG
+(`gpg` and `gpgv`), curl and Portage first; the main Gentoo repository must be
+available. The bootstrap below authenticates the updater and Portage adapter
+before either is executed. Downloads after manifest verification use its exact
+tag, even if Latest changes while the commands run.
+
+```sh
+base=https://github.com/mirage335-colossus/pumpModem/releases/latest/download
+# For an experiment instead:
+# base=https://github.com/mirage335-colossus/pumpModem/releases/download/RELEASE_TAG
+mkdir datapump-gentoo-bootstrap || exit 1
+cd datapump-gentoo-bootstrap || exit 1
+for asset in datapump-archive-keyring.gpg datapump-gentoo-channel.json datapump-gentoo-channel.json.asc; do
+  curl --fail --location "$base/$asset" -o "$asset" || exit 1
+done
+fingerprint=8C3DD4A727C83B93374C993B1F94BC4CEC2DF307
+actual=$(gpg --batch --show-keys --with-colons datapump-archive-keyring.gpg |
+  awk -F: '$1 == "fpr" {print $10; exit}')
+test "$actual" = "$fingerprint" || exit 1
+gpgv --keyring "$PWD/datapump-archive-keyring.gpg" \
+  datapump-gentoo-channel.json.asc datapump-gentoo-channel.json || exit 1
+python3 - <<'VERIFY' || exit 1
+import hashlib, json, re, urllib.request
+from pathlib import Path
+channel = json.loads(Path('datapump-gentoo-channel.json').read_text())
+if channel['repository'] != 'mirage335-colossus/pumpModem':
+    raise SystemExit('Unexpected repository')
+tag = channel['tag']
+if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,100}', tag) or '..' in tag:
+    raise SystemExit('Unsafe release tag')
+base = f'https://github.com/mirage335-colossus/pumpModem/releases/download/{tag}'
+for name in ('datapump-gentoo-sync.py', 'datapump-gentoo-portage-sync.py', 'datapump-gentoo-overlay.tar.gz'):
+    data = urllib.request.urlopen(f'{base}/{name}', timeout=60).read()
+    expected = channel['assets'][name]
+    if len(data) != expected['size'] or hashlib.sha256(data).hexdigest() != expected['sha256']:
+        raise SystemExit(f'Checksum mismatch: {name}')
+    Path(name).write_bytes(data)
+VERIFY
+sudo install -Dm644 datapump-archive-keyring.gpg /etc/portage/gnupg/datapump.gpg
+sudo python3 datapump-gentoo-sync.py install --assets "$PWD" \
+  --keyring /etc/portage/gnupg/datapump.gpg --fingerprint "$fingerprint" \
+  --repository mirage335-colossus/pumpModem
+# For an experiment, add --tag RELEASE_TAG to that install command.
+```
+
+The installer registers `datapump-bin` with automatic sync enabled. The helper
+requires a valid signature and matching overlay hash, rejects experiments on
+Latest and older releases, and stages the entire overlay before replacing it.
+A failed refresh preserves the previous overlay. The signed ebuild Manifest
+then pins downloads to the immutable portable application archives.
+
+Accept the two testing keywords and preserved component licenses after reading
+`licenses/DataPump-Bundled`, then install your selected backend:
+
+```sh
+sudo mkdir -p /etc/portage/package.accept_keywords /etc/portage/package.license
+printf 'media-radio/datapump-fltk-bin\nmedia-radio/datapump-rev-bin\n' |
+  sudo tee /etc/portage/package.accept_keywords/datapump-bin
+printf 'media-radio/datapump-fltk-bin DataPump-Bundled\nmedia-radio/datapump-rev-bin DataPump-Bundled\n' |
+  sudo tee /etc/portage/package.license/datapump-bin
+sudo emerge --ask media-radio/datapump-fltk-bin media-radio/datapump-rev-bin
+# Normal subsequent updates:
+sudo emerge --sync
+sudo emerge --ask --update --deep --newuse @world
+# To refresh only this overlay:
+sudo emaint sync -r datapump-bin
+```
+
+The helper does not update its own executable or replace its trusted key.
+Repeat the verified bootstrap to upgrade the helper, or after a Portage/Python
+upgrade relocates Portage's sync plugin directory. Gentoo may compile missing
+**host dependencies** according to your Portage settings; these binary ebuilds
+never compile DataPump or its SDK. CI uses only signed binary host dependencies.
+Native Arch/Gentoo installation checks cover x86-64; helper/recipe fixtures
+cover both architectures, and ARM64 application payloads also receive the
+Debian/Ubuntu installation matrix. These binaries require glibc; musl and
+32-bit ARM are outside their ABI scope.
+
+### Pinned recipes for older releases
 
 Schema-4 releases also carry `datapump-arch-recipes.tar.gz`,
 `datapump-gentoo-overlay.tar.gz` and `distro-packages.json`. Generated recipes
@@ -325,8 +465,10 @@ python3 - <<'CHECK' || exit 1
 import hashlib, json
 from pathlib import Path
 expected = json.loads(Path('apt-repository.json').read_text())['distribution_assets']
-assert set(expected) == {'datapump-arch-recipes.tar.gz', 'datapump-gentoo-overlay.tar.gz', 'distro-packages.json'}
-for name, digest in expected.items():
+names = {'datapump-arch-recipes.tar.gz', 'datapump-gentoo-overlay.tar.gz', 'distro-packages.json'}
+assert names <= set(expected)
+for name in names:
+    digest = expected[name]
     if hashlib.sha256(Path(name).read_bytes()).hexdigest() != digest:
         raise SystemExit(f'Checksum mismatch: {name}')
 CHECK
@@ -375,10 +517,10 @@ application archive's CPU baseline or alter users' Portage configuration.
 CI also uses Portage's `parallel-install` with the runner's available cores,
 retains dependency ordering/merge locks, and disables per-package power-loss
 disk syncs only inside this discarded container.
-Updating means verifying the new release's recipe archive and
+For these older/manual recipes, updating means verifying the new release's recipe archive and
 repeating `makepkg -si`, or selecting its new overlay directory and running
 `emerge --update`. These local recipes are not submitted to AUR or Gentoo's main
-repository, and are not an automatically synchronized package feed.
+repository. Use the schema-5 channels above for automatic repository updates.
 
 ## Rev display warnings
 

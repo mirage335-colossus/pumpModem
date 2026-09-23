@@ -231,11 +231,14 @@ changes or failures invalidate that evidence. Compile with available cores, but
 keep timing-sensitive test concurrency at its documented limits.
 
 For changes confined to Linux distribution packaging, start with
-`python3 tests/test_apt_release.py`, `python3 tests/test_distro_release.py` and
+`python3 tests/test_apt_release.py`, `python3 tests/test_distro_release.py`,
+`python3 tests/test_arch_release.py`, `python3 tests/test_gentoo_sync.py` and
 the affected release/certification helper tests; `./build.sh test build` runs their normal group. Once complete, use
 `release.yml` with `source_release=SOURCE_RELEASE_TAG` to wrap existing verified archives in a new experiment and
 test the same packages on Debian/Ubuntu AMD64 and ARM64 and native Arch/Gentoo
-recipes with the larger runners. Gentoo host dependencies must come from its
+repositories with the larger runners. For update channels, also exercise a signed
+A-to-B update, idempotent refresh and rejected tampered/older metadata with the
+small local fixtures before native installation. Gentoo host dependencies must come from its
 binary repository; a missing binary fails with an actionable error instead of
 starting an expensive source build.
 This path does not rebuild application binaries or SDKs. Follow publication

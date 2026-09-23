@@ -77,9 +77,11 @@ jobs:
         run: |
           python3 tests/test_apt_release.py
           python3 tests/test_distro_release.py
+          python3 tests/test_arch_release.py
+          python3 tests/test_gentoo_sync.py
           python3 tests/test_release.py
           python3 tests/test_certify_release.py
-      - name: Create a new experiment with unchanged archive bytes and signed Debian packages
+      - name: Create a new experiment with unchanged archive bytes and signed distribution update channels
         id: package
         env:
           APT_SIGNING_KEY: ${{ secrets.DATAPUMP_APT_SIGNING_KEY }}
@@ -107,7 +109,7 @@ jobs:
           {
             printf 'Release: [%s](https://github.com/%s/releases/tag/%s)\n\n' "$RELEASE_TAG" "$GITHUB_REPOSITORY" "$RELEASE_TAG"
             echo 'Portable archive bytes were reused unchanged; no application or SDK was rebuilt.'
-            echo 'This is an experiment and is never marked Latest. Published experiments receive Debian/Ubuntu APT and Arch/Gentoo recipe installation checks below.'
+            echo 'This is an experiment and is never marked Latest. Published experiments receive Debian/Ubuntu APT and Arch/Gentoo repository installation checks below.'
             echo 'Full hash-bound release certification remains a separate workflow; these packaging checks do not certify the application.'
           } >> "$GITHUB_STEP_SUMMARY"
 

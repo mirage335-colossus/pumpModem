@@ -248,7 +248,7 @@ def download_apt(repository, tag, directory, inventory_sha, trusted_fingerprint=
     metadata = state['metadata']
     if metadata['schema'] < 3:
         raise ValueError('This release does not contain a signed APT repository')
-    names = release.apt_assets(metadata) | release.distro_assets(metadata) | {
+    names = release.apt_assets(metadata) | release.distribution_assets(metadata) | {
         name for target, name in release.application_names(metadata).items()
         if release.target_platform(metadata, target).startswith('linux-')}
     for name in sorted(names):
@@ -257,6 +257,7 @@ def download_apt(repository, tag, directory, inventory_sha, trusted_fingerprint=
                               trusted_fingerprint=trusted_fingerprint)
     if metadata['schema'] >= 4:
         release.distro_tool().verify(state['directory'], metadata, repository=repository)
+    release.verify_channels(state['directory'], metadata, repository, trusted_fingerprint)
     return state
 
 
@@ -294,10 +295,10 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
                 or len(set(tested_targets)) != len(tested_targets) or not set(tested_targets) <= names.keys()):
             raise ValueError('Tested targets must be unique application identities from this release')
         passed = jobs_passed and set(tested_targets) == names.keys()
-        latest_eligible = passed and not metadata['experiment'] and metadata['schema'] >= 4
+        latest_eligible = passed and not metadata['experiment'] and metadata['schema'] >= 5
         # GitHub normally supplies SHA-256 asset digests. Older hosts require
         # re-reading bytes before a report can describe the current assets.
-        checked_names = (list(names.values()) + sorted(release.apt_assets(metadata) | release.distro_assets(metadata))
+        checked_names = (list(names.values()) + sorted(release.apt_assets(metadata) | release.distribution_assets(metadata))
                          + (['warning.log'] if metadata['schema'] >= 2 else []))
         for name in checked_names:
             if not state['assets'][name].get('digest'):
@@ -332,7 +333,7 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
             if 'repackaged_from' in metadata:
                 evidence['repackaged_from'] = metadata['repackaged_from']
         if metadata['schema'] >= 4:
-            evidence['distribution_assets'] = {name: state['inventory'][name] for name in sorted(release.distro_assets(metadata))}
+            evidence['distribution_assets'] = {name: state['inventory'][name] for name in sorted(release.distribution_assets(metadata))}
         stem = f'certification-{run_id}-attempt-{run_attempt}'
         if any(stem + suffix in state['assets'] for suffix in ('.json', '.md')):
             raise ValueError('Certification evidence already exists; never overwrite a prior run')
@@ -366,7 +367,7 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
             + ('\nPublished APT asset SHA-256 values:\n\n'
                + '\n'.join(f'- `{name}`: `{digest}`' for name, digest in evidence['apt_assets'].items())
                + '\n' if metadata['schema'] >= 3 else '')
-            + ('\nPublished distribution recipe SHA-256 values (distro-recipes job required):\n\n'
+            + ('\nPublished distribution delivery SHA-256 values (distro-recipes job required):\n\n'
                + '\n'.join(f'- `{name}`: `{digest}`' for name, digest in evidence['distribution_assets'].items())
                + '\n' if metadata['schema'] >= 4 else ''),
             encoding='utf-8')
@@ -383,9 +384,9 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
                  f'**{evidence["status"]}** '
                  f'([report]({asset_base}/{stem}.md), [JSON]({asset_base}/{stem}.json)). '
                  'This report applies only to the recorded source and asset hashes.\n')
-        if metadata['schema'] < 4:
+        if metadata['schema'] < 5:
             body += ('This older release cannot become Latest because it lacks the signed APT repository '
-                     'or distribution recipes required by the current update channel.\n')
+                     'or signed Arch/Gentoo update channels required by current consumers.\n')
         notes = Path(scratch) / 'release-body.md'
         notes.write_text(body, encoding='utf-8')
         flags = ['--latest=true', '--prerelease=false'] if latest_eligible else ['--latest=false']
@@ -402,6 +403,7 @@ def output_values(state, output):
               'schema': str(metadata['schema']),
               'apt_repository': str(metadata['schema'] >= 3).lower(),
               'distro_recipes': str(metadata['schema'] >= 4).lower(),
+              'distro_channels': str(metadata['schema'] >= 5).lower(),
               'gui_backends': json.dumps(metadata.get('gui_backends', ['fltk']), separators=(',', ':')),
               'application_targets': json.dumps(list(release.application_targets(metadata)), separators=(',', ':'))}
     for name in ('archive', 'package_root'):

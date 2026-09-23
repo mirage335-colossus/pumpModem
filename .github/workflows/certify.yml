@@ -35,6 +35,11 @@ on:
       - '.github/workflows/distro-check.yml'
       - 'tools/apt-release.py'
       - 'tools/distro-release.py'
+      - 'tools/arch-release.py'
+      - 'tools/gentoo-release.py'
+      - 'tools/gentoo-sync.py'
+      - 'tests/test_arch_release.py'
+      - 'tests/test_gentoo_sync.py'
       - 'tools/certify-release.py'
       - 'tests/test_certify_release.py'
 
@@ -55,7 +60,7 @@ jobs:
 
   helpers:
     if: ${{ !inputs.devfast }}
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-l' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -66,7 +71,7 @@ jobs:
   prepare:
     if: github.event_name == 'workflow_dispatch' && !inputs.devfast
     needs: helpers
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-l' }}
     timeout-minutes: 10
     outputs:
       source_sha: ${{ steps.release.outputs.source_sha }}
@@ -362,7 +367,7 @@ jobs:
   record:
     needs: [prepare, linux-tests, windows-tests, compatibility, apt-repository, distro-recipes]
     if: ${{ always() && !inputs.devfast && needs.prepare.result == 'success' }}
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-l' }}
     timeout-minutes: 15
     permissions:
       contents: write

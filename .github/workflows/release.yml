@@ -56,6 +56,11 @@ on:
       - 'tools/apt-release.py'
       - 'tests/test_apt_release.py'
       - 'tools/distro-release.py'
+      - 'tools/arch-release.py'
+      - 'tools/gentoo-release.py'
+      - 'tools/gentoo-sync.py'
+      - 'tests/test_arch_release.py'
+      - 'tests/test_gentoo_sync.py'
       - 'tests/test_distro_release.py'
       - 'tools/certify-release.py'
       - 'tests/test_release.py'
@@ -137,7 +142,7 @@ jobs:
 
   helpers:
     if: ${{ !inputs.source_release && (!inputs.package_check || inputs.package_check == 'none') }}
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-l' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -147,6 +152,8 @@ jobs:
           python3 tests/test_release.py
           python3 tests/test_apt_release.py
           python3 tests/test_distro_release.py
+          python3 tests/test_arch_release.py
+          python3 tests/test_gentoo_sync.py
           python3 tests/test_certify_release.py
           python3 tests/test_sdk_release.py
           python3 tests/test_release_rev_tools.py
@@ -155,7 +162,7 @@ jobs:
   metadata:
     if: github.event_name == 'workflow_dispatch' && !inputs.source_release
     needs: helpers
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-l' }}
     timeout-minutes: 10
     permissions:
       contents: write
@@ -327,7 +334,7 @@ jobs:
 
   publish:
     needs: [metadata, linux, windows]
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-l' }}
     timeout-minutes: 15
     permissions:
       contents: write

@@ -76,7 +76,7 @@ def metadata_identity(metadata):
 def validate_location(metadata, repository):
     release = release_module()
     release.repository_name(repository)
-    if metadata.get('schema') not in (3, 4) or metadata.get('gui_backends') != list(BACKENDS):
+    if metadata.get('schema') not in (3, 4, 5) or metadata.get('gui_backends') != list(BACKENDS):
         raise ValueError('APT packaging requires the complete schema-3+ backend inventory')
     tag = metadata['tag']
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,100}', tag) or '..' in tag:
@@ -237,7 +237,7 @@ def build(directory, metadata, repository, signing_key, signing_fingerprint):
                 'signing_fingerprint': fpr, 'packages': []}
     if metadata['schema'] >= 4:
         manifest['distribution_assets'] = {name: sha256(directory / name)
-                                            for name in sorted(release.distro_assets(metadata))}
+                                            for name in sorted(release.distribution_assets(metadata))}
     stanzas = []
     for arch in ARCHES:
         for backend in BACKENDS:
@@ -340,7 +340,7 @@ def verify(directory, metadata, repository=None, trusted_fingerprint=None):
             raise ValueError('Signed APT repository checksum mismatch')
     if metadata['schema'] >= 4:
         expected_distribution = {name: sha256(directory / name)
-                                 for name in sorted(release_module().distro_assets(metadata))}
+                                 for name in sorted(release_module().distribution_assets(metadata))}
         if manifest.get('distribution_assets') != expected_distribution:
             raise ValueError('Signed distribution recipe checksum mismatch')
     if gzip.decompress((directory / 'Packages.gz').read_bytes()) != (directory / 'Packages').read_bytes():

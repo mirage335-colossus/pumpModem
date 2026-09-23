@@ -76,19 +76,34 @@ def distro_fixture():
     return tool
 
 
+CHANNEL_NAMES = {'arch': {'datapump-x86_64.db', 'datapump-aarch64.db'},
+                 'gentoo': {'distro-channel.json', 'distro-channel.json.asc', 'datapump-gentoo-sync.py'}}
+
+
+def channel_fixture(kind):
+    names = CHANNEL_NAMES[kind]
+    def build(directory, value, repository, key, fingerprint):
+        for name in names:
+            (directory / name).write_bytes(('channel fixture ' + name).encode())
+    tool = Mock()
+    tool.asset_names.return_value = names
+    tool.build.side_effect = build
+    return tool
+
+
 class MetadataTests(unittest.TestCase):
     def test_new_metadata_defaults_to_both_backends_and_legacy_stays_readable(self):
         value = release.make_metadata(source_sha='a' * 40, run_id='123', run_attempt='1')
-        self.assertEqual(value['schema'], 4)
+        self.assertEqual(value['schema'], 5)
         self.assertEqual(value['gui_backends'], ['fltk', 'rev'])
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / 'metadata.json'
-            for schema in (1, 2, 3, 4):
+            for schema in (1, 2, 3, 4, 5):
                 original = metadata(schema=schema)
                 release.write_json(path, original)
                 self.assertEqual(release.load_metadata(path), original)
                 self.assertEqual(len(release.application_targets(original)), 3 if schema == 1 else 6)
-            for changes in ({'schema': 5}, {'schema': True}, {'gui_backends': ['fltk']},
+            for changes in ({'schema': 6}, {'schema': True}, {'gui_backends': ['fltk']},
                             {'gui_backends': ['rev', 'fltk']}, {'gui_backends': ['fltk', 'rev', 'rev']},
                             {'gui_backends': None}):
                 release.write_json(path, {**metadata(schema=2), **changes})
@@ -123,8 +138,18 @@ class MetadataTests(unittest.TestCase):
                 with self.subTest(marker=marker), self.assertRaises(ValueError):
                     release.load_metadata(path)
 
+    def test_schema5_requires_complete_update_channels(self):
+        value = metadata(schema=5)
+        self.assertEqual(value['distro_channels']['formats'], ['pacman', 'gentoo-sync'])
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'metadata.json'
+            for marker in (None, {}, {'schema': 1, 'formats': ['pacman']}):
+                release.write_json(path, {**value, 'distro_channels': marker})
+                with self.subTest(marker=marker), self.assertRaises(ValueError):
+                    release.load_metadata(path)
+
     def test_target_helpers_bind_platform_backend_and_package_root(self):
-        for schema in (1, 2, 3, 4):
+        for schema in (1, 2, 3, 4, 5):
             value = metadata(schema=schema)
             for target in release.application_targets(value):
                 platform = release.target_platform(value, target)
@@ -190,7 +215,7 @@ class MetadataTests(unittest.TestCase):
 
 class MatrixTests(unittest.TestCase):
     def test_both_schemas_and_baselines_cover_every_expected_target(self):
-        for schema in (1, 2, 3, 4):
+        for schema in (1, 2, 3, 4, 5):
             for baseline in ('bookworm-sdk', 'ubuntu-22.04'):
                 with self.subTest(schema=schema, baseline=baseline):
                     value = metadata(schema=schema, linux_baseline=baseline)
@@ -1029,6 +1054,33 @@ class StagedPublicationTests(ReleaseFixture, unittest.TestCase):
         upload = self.mutations()[-2]
         self.assertEqual({Path(name).name for name in upload[5:]}, APT_NAMES | DISTRO_NAMES | {'SHA256SUMS.txt'})
 
+    def test_schema5_signs_all_channels_before_publication_and_rejects_missing_channel(self):
+        self.value = self.backend_inputs(schema=5)
+        release.reserve(self.metadata, self.notes, 'owner/repository')
+        for target in release.application_targets(self.value):
+            release.upload(self.metadata, 'owner/repository', target, self.artifacts / target)
+        apt, distro = apt_fixture(), distro_fixture()
+        channels = {kind: channel_fixture(kind) for kind in CHANNEL_NAMES}
+        all_channels = set().union(*CHANNEL_NAMES.values())
+        build_apt = apt.build.side_effect
+        def sign(directory, value, repository, key, fingerprint):
+            self.assertTrue((DISTRO_NAMES | all_channels) <= {p.name for p in directory.iterdir()})
+            build_apt(directory, value, repository, key, fingerprint)
+        apt.build.side_effect = sign
+        with patch.object(release, 'apt_tool', return_value=apt), patch.object(release, 'distro_tool', return_value=distro), patch.object(release, 'channel_tool', side_effect=channels.__getitem__):
+            release.finalize(self.metadata, 'owner/repository', self.output, True,
+                             apt_signing_key=Path('key'), apt_signing_fingerprint='A' * 40)
+            self.assertTrue(all_channels <= set(self.remote))
+            for channel in channels.values():
+                channel.verify.assert_called_once()
+            missing = self.output / sorted(all_channels)[0]
+            missing.unlink()
+            (self.output / 'SHA256SUMS.txt').write_text(''.join(
+                f'{release.digest(p)}  {p.name}\n' for p in sorted(self.output.iterdir()) if p.name != 'SHA256SUMS.txt'))
+            with self.assertRaisesRegex(ValueError, 'missing'):
+                release.verify_release(self.output)
+        self.assertIn('--latest=false', self.mutations()[-1])
+
     def test_failed_apt_signing_never_finalizes_or_publishes(self):
         self.value = self.backend_inputs(schema=3)
         release.reserve(self.metadata, self.notes, 'owner/repository')
@@ -1057,7 +1109,7 @@ class StagedPublicationTests(ReleaseFixture, unittest.TestCase):
         original = dict(self.remote)
         destination = self.root / 'repackaged'
         tool = apt_fixture()
-        with patch.object(release, 'apt_tool', return_value=tool), patch.object(release, 'distro_tool', return_value=distro_fixture()), patch.object(release, 'publish') as publish:
+        with patch.object(release, 'apt_tool', return_value=tool), patch.object(release, 'distro_tool', return_value=distro_fixture()), patch.object(release, 'channel_tool', side_effect=channel_fixture), patch.object(release, 'publish') as publish:
             value = release.repackage(self.value['tag'], 'owner/repository', destination,
                                       version='vapt', run_id='456', run_attempt='2', packager_sha='b' * 40,
                                       apt_signing_key=Path('key'), apt_signing_fingerprint='A' * 40)
@@ -1078,7 +1130,7 @@ class StagedPublicationTests(ReleaseFixture, unittest.TestCase):
         archive = release.application_names(self.value)['linux-x86_64-fltk']
         self.corrupt_download[archive] = b'changed'
         tool = apt_fixture()
-        with patch.object(release, 'apt_tool', return_value=tool), patch.object(release, 'distro_tool', return_value=distro_fixture()), patch.object(release, 'publish') as publish:
+        with patch.object(release, 'apt_tool', return_value=tool), patch.object(release, 'distro_tool', return_value=distro_fixture()), patch.object(release, 'channel_tool', side_effect=channel_fixture), patch.object(release, 'publish') as publish:
             with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
                 release.repackage(self.value['tag'], 'owner/repository', self.root / 'repackaged',
                                   run_id='456', packager_sha='b' * 40,
@@ -1103,7 +1155,7 @@ class StagedPublicationTests(ReleaseFixture, unittest.TestCase):
         tool = apt_fixture()
         first = self.root / 'first-repackage'
         second = self.root / 'second-repackage'
-        with patch.object(release, 'apt_tool', return_value=tool), patch.object(release, 'distro_tool', return_value=distro_fixture()), patch.object(release, 'publish'):
+        with patch.object(release, 'apt_tool', return_value=tool), patch.object(release, 'distro_tool', return_value=distro_fixture()), patch.object(release, 'channel_tool', side_effect=channel_fixture), patch.object(release, 'publish'):
             value = release.repackage(self.value['tag'], 'owner/repository', first, version='vfirst',
                                       run_id='456', packager_sha='b' * 40,
                                       apt_signing_key=Path('key'), apt_signing_fingerprint='A' * 40)

@@ -2,7 +2,7 @@
 """Create, verify and publish portable releases and their signed APT repositories.
 
 Application builds and platform qualification belong to build.sh and the workflow.
-This helper preserves their checksummed archive bytes and adds Debian delivery
+This helper preserves their checksummed archive bytes and adds signed Linux delivery
 assets without compiling the application or rebuilding SDKs.
 """
 import argparse
@@ -67,9 +67,9 @@ def chicago_time(instant):
 
 
 def make_metadata(*, source_sha, run_id, run_attempt, version='', experiment=False,
-                  linux_baseline='bookworm-sdk', now=None, cmake_version=None, schema=4,
+                  linux_baseline='bookworm-sdk', now=None, cmake_version=None, schema=5,
                   packager_sha=None, repackaged_from=None):
-    if type(schema) is not int or schema not in (1, 2, 3, 4):
+    if type(schema) is not int or schema not in (1, 2, 3, 4, 5):
         raise ValueError('Unsupported release metadata schema')
     cmake_version = cmake_version or project_version()
     if not re.fullmatch(r'\d+(?:\.\d+){1,3}', cmake_version):
@@ -122,6 +122,10 @@ def make_metadata(*, source_sha, run_id, run_attempt, version='', experiment=Fal
         value['distro_recipes'] = {
             'schema': 1, 'formats': ['arch', 'gentoo'], 'architectures': ['x86_64', 'aarch64'],
             'gui_backends': list(GUI_BACKENDS)}
+    if schema >= 5:
+        value['distro_channels'] = {
+            'schema': 1, 'formats': ['pacman', 'gentoo-sync'],
+            'architectures': ['x86_64', 'aarch64'], 'gui_backends': list(GUI_BACKENDS)}
     return value
 
 
@@ -190,7 +194,7 @@ def application_targets(metadata):
     """Map download identities to their physical platform/archive format."""
     if metadata['schema'] == 1:
         return dict(TARGETS)
-    if metadata['schema'] not in (2, 3, 4) or metadata.get('gui_backends') != list(GUI_BACKENDS):
+    if metadata['schema'] not in (2, 3, 4, 5) or metadata.get('gui_backends') != list(GUI_BACKENDS):
         raise ValueError('Unsupported release schema or GUI backend inventory')
     return {f'{platform}-{backend}': details for platform, details in TARGETS.items()
             for backend in GUI_BACKENDS}
@@ -326,7 +330,7 @@ def apt_assets(metadata):
 
 
 def distro_tool():
-    """Load binary package recipes only for schema-4 release operations."""
+    """Load binary package recipes for schema-4+ release operations."""
     spec = importlib.util.spec_from_file_location('datapump_distro_release', Path(__file__).with_name('distro-release.py'))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -337,17 +341,46 @@ def distro_assets(metadata):
     return set(distro_tool().asset_names(metadata)) if metadata['schema'] >= 4 else set()
 
 
+def channel_tool(kind):
+    if kind not in ('arch', 'gentoo'):
+        raise ValueError('Unknown distribution update channel')
+    spec = importlib.util.spec_from_file_location(f'datapump_{kind}_release',
+        Path(__file__).with_name(f'{kind}-release.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def channel_assets(metadata):
+    if metadata['schema'] < 5:
+        return set()
+    return set().union(*(channel_tool(kind).asset_names(metadata) for kind in ('arch', 'gentoo')))
+
+
+def distribution_assets(metadata):
+    return distro_assets(metadata) | channel_assets(metadata)
+
+
+def verify_channels(directory, metadata, repository=None, fingerprint=None):
+    if metadata['schema'] >= 5:
+        for kind in ('arch', 'gentoo'):
+            channel_tool(kind).verify(directory, metadata, repository=repository, expected_fingerprint=fingerprint)
+
+
 def build_delivery_assets(directory, metadata, repository, signing_key, signing_fingerprint):
-    # Sign the recipe asset hashes along with the APT metadata.
+    # Generate signed native channels before APT binds all distribution asset hashes.
     if metadata['schema'] >= 4:
         distro_tool().build(directory, metadata, repository)
+    if metadata['schema'] >= 5:
+        for kind in ('arch', 'gentoo'):
+            channel_tool(kind).build(directory, metadata, repository, signing_key, signing_fingerprint)
     if metadata['schema'] >= 3:
         apt_tool().build(directory, metadata, repository, signing_key, signing_fingerprint)
 
 
 def required_assets(metadata):
     """Final inventory; draft upload accepts only the original support files."""
-    return set(application_names(metadata).values()) | support_files(metadata) | apt_assets(metadata) | distro_assets(metadata)
+    return set(application_names(metadata).values()) | support_files(metadata) | apt_assets(metadata) | distribution_assets(metadata)
 
 
 def support_files(metadata):
@@ -438,6 +471,7 @@ def verify_release(directory):
         apt_tool().verify(directory, metadata)
     if metadata['schema'] >= 4:
         distro_tool().verify(directory, metadata)
+    verify_channels(directory, metadata)
     for target, name in application_names(metadata).items():
         verify_archive_backend(directory / name, metadata, target)
     return metadata, sorted(inventory)
@@ -622,7 +656,7 @@ def finalize(metadata_path, repository, directory, publish_now=False, *,
         verify_release(staged)
         staged.rename(directory)
     gh(['release', 'upload', metadata['tag'], '--repo', repository,
-        *[str(directory / name) for name in sorted(apt_assets(metadata) | distro_assets(metadata))],
+        *[str(directory / name) for name in sorted(apt_assets(metadata) | distribution_assets(metadata))],
         str(directory / 'SHA256SUMS.txt')])
     if publish_now:
         gh(['release', 'edit', metadata['tag'], '--repo', repository, '--draft=false', '--latest=false'])

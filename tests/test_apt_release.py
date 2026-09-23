@@ -105,22 +105,23 @@ class AptReleaseTests(unittest.TestCase):
             files.append(set(apt.deb_files(self.base / apt.package_name(self.metadata, 'amd64', backend))))
         self.assertFalse(files[0] & files[1])
 
-    def test_schema4_signs_arch_and_gentoo_recipe_assets(self):
-        value = release.make_metadata(source_sha='a' * 40, run_id='124', run_attempt='1', schema=4,
-            cmake_version='0.7.2', experiment=True, now=datetime.now(timezone.utc).replace(microsecond=0))
-        with tempfile.TemporaryDirectory() as temporary:
-            directory = Path(temporary)
-            for target, name in release.application_names(value).items():
-                if target.startswith('linux-'):
-                    fixture_archive(directory / name, value, target)
-            for name in release.distro_assets(value):
-                (directory / name).write_bytes(b'recipe fixture')
-            manifest = apt.build(directory, value, 'test-owner/test-repo', self.key, self.fingerprint)
-            self.assertEqual(set(manifest['distribution_assets']), release.distro_assets(value))
-            apt.verify(directory, value, 'test-owner/test-repo', self.fingerprint)
-            (directory / sorted(release.distro_assets(value))[0]).write_bytes(b'tampered')
-            with self.assertRaisesRegex(ValueError, 'distribution recipe checksum'):
+    def test_schema4_and_5_sign_all_distribution_assets(self):
+        for schema in (4, 5):
+            value = release.make_metadata(source_sha='a' * 40, run_id='124', run_attempt='1', schema=schema,
+                cmake_version='0.7.2', experiment=True, now=datetime.now(timezone.utc).replace(microsecond=0))
+            with tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                for target, name in release.application_names(value).items():
+                    if target.startswith('linux-'):
+                        fixture_archive(directory / name, value, target)
+                for name in release.distribution_assets(value):
+                    (directory / name).write_bytes(b'distribution fixture')
+                manifest = apt.build(directory, value, 'test-owner/test-repo', self.key, self.fingerprint)
+                self.assertEqual(set(manifest['distribution_assets']), release.distribution_assets(value))
                 apt.verify(directory, value, 'test-owner/test-repo', self.fingerprint)
+                (directory / sorted(release.distribution_assets(value))[0]).write_bytes(b'tampered')
+                with self.assertRaisesRegex(ValueError, 'distribution recipe checksum'):
+                    apt.verify(directory, value, 'test-owner/test-repo', self.fingerprint)
 
     def test_version_uses_utc_and_legal_debian_characters(self):
         before = dict(self.metadata, created_at='2026-11-01T06:59:00Z')
