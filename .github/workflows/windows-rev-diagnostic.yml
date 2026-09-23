@@ -40,14 +40,19 @@ jobs:
       - name: Reuse the exact Windows dependency base
         shell: pwsh
         run: ./tools/use-windows-base.ps1 -Repository "$env:GITHUB_REPOSITORY" -Destination "$PWD/build/windows-base"
-      - name: Compile the actual Rev GUI and run its headless self-check
+      - name: Compile the Rev GUI and its native context probe
         shell: pwsh
         run: |
-          cmake -S . -B build/windows-rev -A x64 -DCMAKE_TOOLCHAIN_FILE="$env:DATAPUMP_WINDOWS_TOOLCHAIN" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DDATAPUMP_GUI_BACKEND=rev -DDATAPUMP_PORTABLE=ON -DBUILD_TESTING=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          cmake -S . -B build/windows-rev -A x64 -DCMAKE_TOOLCHAIN_FILE="$env:DATAPUMP_WINDOWS_TOOLCHAIN" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DDATAPUMP_GUI_BACKEND=rev -DDATAPUMP_PORTABLE=ON -DDATAPUMP_TEST_NATIVE_GUI=ON -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
           if ($LASTEXITCODE -ne 0) { throw 'Rev configure failed' }
-          cmake --build build/windows-rev --config Release --target datapump-gui --parallel $env:NUMBER_OF_PROCESSORS
+          cmake --build build/windows-rev --config Release --target datapump-gui test_rev_coordinates --parallel $env:NUMBER_OF_PROCESSORS
           if ($LASTEXITCODE -ne 0) { throw 'Rev application compilation failed' }
+      - name: Check headless operation and the scoped WGL warning policy
+        shell: pwsh
+        run: |
           $process = Start-Process -FilePath "$PWD/build/windows-rev/Release/datapump-gui.exe" -ArgumentList '--self-check' -PassThru
           if (!$process.WaitForExit(30000)) { $process.Kill(); throw 'Rev self-check exceeded 30 seconds' }
           if ($process.ExitCode -ne 0) { throw 'Rev self-check failed' }
-          "Focused Windows Rev compilation/self-check passed for $env:GITHUB_SHA. Display, full regression and published binaries require later certification." >> $env:GITHUB_STEP_SUMMARY
+          python tools/windows-certification.py --executable build/windows-rev/Release/test_rev_coordinates.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Rev native probe failed outside the scoped WGL exception' }
+          "Focused Windows Rev compilation, self-check and context classification passed for $env:GITHUB_SHA. A WGL warning leaves desktop graphics unqualified; full regression and published binaries require later certification." >> $env:GITHUB_STEP_SUMMARY

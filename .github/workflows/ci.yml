@@ -52,7 +52,7 @@ on:
       diagnostic:
         description: 'Focused check used only with devfast=true'
         type: choice
-        options: [legacy, certification, windows-rev, graphics, arm-rev-package, runner-capacity, arm-runner-capacity]
+        options: [legacy, certification, windows-certification, windows-rev, graphics, arm-rev-package, runner-capacity, arm-runner-capacity]
         default: legacy
       diagnostic_release:
         description: 'Published release tag for graphics diagnostics only; no binaries are rebuilt'
@@ -93,9 +93,10 @@ jobs:
       windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
 
   certification-diagnostic:
-    if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'certification'
+    if: github.event_name == 'workflow_dispatch' && inputs.devfast && (inputs.diagnostic == 'certification' || inputs.diagnostic == 'windows-certification')
     uses: ./.github/workflows/certification-diagnostic.yml
     with:
+      scope: ${{ inputs.diagnostic == 'windows-certification' && 'windows' || 'all' }}
       linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
       windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
       arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-h' }}

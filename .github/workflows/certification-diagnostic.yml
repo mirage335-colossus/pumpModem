@@ -3,6 +3,10 @@ name: Focused certification regressions
 on:
   workflow_call:
     inputs:
+      scope:
+        description: 'all checks, or windows only when unchanged Linux/ARM checks already passed'
+        type: string
+        default: all
       linux_runner:
         type: string
         default: ubuntu-latest-h
@@ -18,6 +22,7 @@ permissions:
 
 jobs:
   linux-adapter:
+    if: inputs.scope == 'all'
     name: Linux ${{ matrix.backend }} adapter (not certification)
     runs-on: ${{ inputs.linux_runner }}
     container: debian:bookworm-slim
@@ -80,9 +85,13 @@ jobs:
         shell: pwsh
     env:
       GH_TOKEN: ${{ github.token }}
+      DIAGNOSTIC_SCOPE: ${{ inputs.scope }}
       UseMultiToolTask: 'true'
       EnforceProcessCountAcrossBuilds: 'true'
     steps:
+      - name: Validate the focused selection
+        run: |
+          if ($env:DIAGNOSTIC_SCOPE -notin @('all', 'windows')) { throw 'Diagnostic scope must be all or windows' }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -103,6 +112,7 @@ jobs:
           "Windows adapter and DSP regressions passed for $env:GITHUB_SHA. Full platform regression remains required." >> $env:GITHUB_STEP_SUMMARY
 
   arm-cli:
+    if: inputs.scope == 'all'
     name: ARM64 CLI differential estimate (not certification)
     runs-on: ${{ inputs.arm_runner }}
     container: ubuntu:22.04
