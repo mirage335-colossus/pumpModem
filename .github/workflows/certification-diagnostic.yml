@@ -107,6 +107,8 @@ jobs:
         run: |
           & ./build/certification-diagnostic/Release/test_fltk_adapter.exe --estimate-colors
           if ($LASTEXITCODE -ne 0) { throw 'Focused Windows estimate-color regression failed' }
+          & ./build/certification-diagnostic/Release/test_fltk_adapter.exe --layout-lifecycle
+          if ($LASTEXITCODE -ne 0) { throw 'Focused Windows layout lifecycle regression failed' }
           ctest --test-dir build/certification-diagnostic -C Release --output-on-failure -R '^(gui_adapter_conformance|fast_low_rate|pattern_code)$' --parallel 1 --stop-on-failure --no-tests=error
           if ($LASTEXITCODE -ne 0) { throw 'Focused Windows regression failed' }
           "Windows adapter and DSP regressions passed for $env:GITHUB_SHA. Full platform regression remains required." >> $env:GITHUB_STEP_SUMMARY

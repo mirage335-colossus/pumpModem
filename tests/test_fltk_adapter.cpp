@@ -13,6 +13,17 @@
 
 namespace {
 void require(bool value,const char* message) {if(!value)throw std::runtime_error(message);}
+NativeWindow* application_window() {
+    // first_window() is event ordered, not the application's main window. A
+    // tooltip or other native surface can become first during Fl::check().
+    NativeWindow* result=nullptr;
+    for(auto* window=Fl::first_window();window;window=Fl::next_window(window)) {
+        if(auto* native=dynamic_cast<NativeWindow*>(window)) {
+            require(!result,"Adapter fixture retained more than one application window");result=native;
+        }
+    }
+    return result;
+}
 void palette_roles() {
     for(bool color:{false,true}) {
         theme::apply_palette(color);
@@ -382,7 +393,7 @@ void estimate_warning_colors() {
     for(bool color:{false,true}) {
         theme::apply_palette(color);
         Launch launch;launch.color=color;launch.simulation=true;NativeApp app(launch);Fl::check();
-        auto* window=Fl::first_window();require(window,"Estimate color fixture has no native window");
+        auto* window=application_window();require(window,"Estimate color fixture has no native window");
         test::estimate_warning_fields(app.application,[] {Fl::wait(.01);},[&](ui::Field field,ui::TextTone tone) {
             const auto& state=app.application.field(field);
             auto* label=find_label(*window,state.text);
@@ -403,7 +414,7 @@ void estimate_warning_colors() {
 }
 void fast_mode_visibility() {
     Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
-    auto* window=Fl::first_window();require(window,"Fast fixture has no native window");
+    auto* window=application_window();require(window,"Fast fixture has no native window");
     const std::function<NativeChoice*(Fl_Group&)> mode_choice=[&](Fl_Group& group) -> NativeChoice* {
         for(int i=0;i<group.children();++i) {
             auto* child=group.child(i);
@@ -587,7 +598,7 @@ void fast_mode_visibility() {
 }
 void developer_mode_visibility() {
     Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
-    auto* window=Fl::first_window();require(window,"Developer mode fixture has no native window");
+    auto* window=application_window();require(window,"Developer mode fixture has no native window");
     auto* toggle=dynamic_cast<NativeCheckbox*>(find_button(*window,"Developer mode"));
     auto* shellcode=dynamic_cast<NativeCheckbox*>(find_button(*window,"Shellcode mode"));
     auto* clear=find_button(*window,"Clear received");
@@ -700,7 +711,7 @@ void developer_mode_visibility() {
 void tab_clicks() {
     Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
     app.application.toggle(ui::Field::developer_mode,true);
-    auto* window=Fl::first_window();require(window,"Tab fixture has no native window");
+    auto* window=application_window();require(window,"Tab fixture has no native window");
     const auto key=Fl::e_keysym,x=Fl::e_x,y=Fl::e_y,state=Fl::e_state;
     const auto refresh=[] {
         const auto until=Clock::now()+std::chrono::milliseconds(130);
@@ -754,7 +765,7 @@ void tab_clicks() {
 void repeatable_clicks() {
     Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
     app.application.toggle(ui::Field::developer_mode,true);
-    auto* window=Fl::first_window();require(window,"Repeatable fixture has no native window");
+    auto* window=application_window();require(window,"Repeatable fixture has no native window");
     auto* toggle=dynamic_cast<NativeCheckbox*>(find_button(*window,"Repeatable"));
     require(toggle,"Repeatable fixture has no native checkbox");
     const auto key=Fl::e_keysym,x=Fl::e_x,y=Fl::e_y,state=Fl::e_state;
@@ -819,7 +830,7 @@ void repeatable_clicks() {
 }
 void expanded_bitmap_clicks() {
     Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
-    auto* window=Fl::first_window();require(window,"Expanded fixture has no native window");
+    auto* window=application_window();require(window,"Expanded fixture has no native window");
     const auto controls=ui::console_screen();
     const auto declared=std::find_if(controls.begin(),controls.end(),[](const auto& control){return control.bitmap==ui::Bitmap::qr;});
     require(declared!=controls.end(),"Expanded fixture has no declared bitmap");
@@ -950,7 +961,7 @@ void expanded_bitmap_clicks() {
 void expanded_bitmap_hover_repaint() {
 #ifdef __linux__
     Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
-    auto* window=Fl::first_window();require(window,"QR hover fixture has no native window");
+    auto* window=application_window();require(window,"QR hover fixture has no native window");
     std::unique_ptr<Display,decltype(&XCloseDisplay)> display(XOpenDisplay(nullptr),XCloseDisplay);
     require(display!=nullptr,"QR hover fixture could not open a native pointer connection");
     struct TooltipSettings {
@@ -1021,7 +1032,7 @@ void expanded_bitmap_hover_repaint() {
 
 void shared_overlay_controls() {
     Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
-    auto* window=Fl::first_window();require(window,"Shared overlay fixture has no native window");
+    auto* window=application_window();require(window,"Shared overlay fixture has no native window");
     const auto refresh=[] {
         const auto until=Clock::now()+std::chrono::milliseconds(130);while(Clock::now()<until)Fl::wait(.005);
     };
@@ -1118,7 +1129,7 @@ void shared_overlay_controls() {
 void extension_controls() {
     auto declarations=datapump::gui::test::extension_controls();
     Launch launch;launch.simulation=true;NativeApp app(launch,declarations);Fl::check();
-    auto* window=Fl::first_window();require(window,"Extension fixture did not create a native window");
+    auto* window=application_window();require(window,"Extension fixture did not create a native window");
     for(const auto& page:ui::pages())require(find_button(*window,page.title),"Native tab label diverged from shared page title");
     require(find_label(*window,"Extension / literal & label"),"Shared extension label did not render through the unchanged control factory");
     auto* action=find_button(*window,datapump::gui::test::extension_controls()[1].label);require(action,"Shared extension action did not render");
@@ -1183,7 +1194,7 @@ void extension_controls() {
 }
 void inline_document_editor() {
     Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
-    auto* window=Fl::first_window();require(window,"Inline control fixture has no native window");
+    auto* window=application_window();require(window,"Inline control fixture has no native window");
     const auto refresh=[] {
         const auto until=Clock::now()+std::chrono::milliseconds(140);
         while(Clock::now()<until)Fl::wait(.005);
@@ -1282,7 +1293,7 @@ void inline_document_editor() {
 void policy_lifecycle() {
     auto declarations=datapump::gui::test::policy_lifecycle_controls();
     Launch launch;launch.simulation=true;NativeApp app(launch,declarations);Fl::check();
-    auto* window=Fl::first_window();require(window,"Policy lifecycle fixture has no native window");
+    auto* window=application_window();require(window,"Policy lifecycle fixture has no native window");
     const auto child=[&](std::size_t index,auto* type) {
         using Widget=std::remove_pointer_t<decltype(type)>;
         auto* heading=find_label(*window,declarations[index].label);require(heading,"Policy lifecycle heading is missing");
@@ -1335,7 +1346,13 @@ void policy_lifecycle() {
 void layout_lifecycle() {
     auto declarations=datapump::gui::test::layout_lifecycle_controls();
     Launch launch;launch.simulation=true;NativeApp app(launch,declarations);Fl::check();
-    auto* window=Fl::first_window();require(window,"Layout lifecycle fixture has no native window");
+    // Exercise the same event-order hazard as a tooltip becoming first on
+    // Windows. The retained controls still belong to the application's window.
+    Fl_Double_Window unrelated(120,80,"Adapter window identity regression");unrelated.end();unrelated.show();Fl::check();
+    Fl::first_window(&unrelated);
+    require(Fl::first_window()==&unrelated,"Window identity fixture did not establish another first window");
+    auto* window=application_window();require(window,"Layout lifecycle fixture has no native window");
+    unrelated.hide();
     NativeInput* editor=nullptr;NativeBitmap* bitmap=nullptr;
     const std::function<void(Fl_Group&)> locate=[&](Fl_Group& parent) {
         for(int i=0;i<parent.children();++i) {
@@ -1344,7 +1361,12 @@ void layout_lifecycle() {
             if(auto* group=dynamic_cast<Fl_Group*>(parent.child(i)))locate(*group);
         }
     };
-    locate(*window);require(editor&&bitmap,"Layout lifecycle fixture lost native controls");
+    locate(*window);
+    if(!editor||!bitmap)throw std::runtime_error("Layout lifecycle fixture lost native controls: editor="+
+        std::to_string(editor!=nullptr)+" bitmap="+std::to_string(bitmap!=nullptr)+
+        " window_visible="+std::to_string(window->visible())+" page="+
+        std::to_string(static_cast<int>(app.application.page()))+" width="+std::to_string(window->w())+
+        " height="+std::to_string(window->h()));
     auto* heading=editor->parent()->child(0);auto* bitmap_heading=bitmap->parent()->child(0);
     const auto rect=[](Fl_Widget* widget){return ui::Rect{widget->x(),widget->y(),widget->w(),widget->h()};};
     for(unsigned stage=0;stage<3;++stage) {
@@ -1375,7 +1397,7 @@ void document_geometry(Fl_Group& parent) {
     }
 }
 void popup_polling_and_document_layout() {
-    Launch launch;launch.simulation=true;NativeApp app(launch);auto* window=Fl::first_window();require(window,"Popup polling fixture has no native window");
+    Launch launch;launch.simulation=true;NativeApp app(launch);auto* window=application_window();require(window,"Popup polling fixture has no native window");
     app.application.toggle(ui::Field::developer_mode,true);
     for(const auto& size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
         window->size(size.first,size.second);
@@ -1423,7 +1445,7 @@ void compression_page_labels() {
     Launch launch;launch.simulation=true;launch.page=ui::Page::compression;
     NativeApp app(launch);Fl::check();
     app.application.toggle(ui::Field::developer_mode,true);app.application.select_page(ui::Page::compression);
-    auto* window=Fl::first_window();require(window,"Compression fixture has no native window");
+    auto* window=application_window();require(window,"Compression fixture has no native window");
     window->resize(window->x(),window->y(),ui::min_width,ui::min_height);
     for(const auto* draft:{"","010","0010","01010"}) {
         if(*draft)app.application.edit(ui::Field::short_bits,draft);
@@ -1550,6 +1572,9 @@ int main(int argc,char** argv) {
     try {
         if(argc==2&&std::string_view(argv[1])=="--estimate-colors") {
             theme::apply_palette();estimate_warning_colors();return 0;
+        }
+        if(argc==2&&std::string_view(argv[1])=="--layout-lifecycle") {
+            theme::apply_palette();layout_lifecycle();return 0;
         }
         if(argc!=1)throw std::runtime_error("Unknown FLTK adapter probe");
         theme::apply_palette();palette_roles();estimate_warning_colors();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editor_history_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();fast_mode_visibility();developer_mode_visibility();tab_clicks();repeatable_clicks();expanded_bitmap_clicks();expanded_bitmap_hover_repaint();shared_overlay_controls();extension_controls();inline_document_editor();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();compression_page_labels();std::cout<<"FLTK generic adapter checks passed: menus, tab clicks, repeatable clicks, expanded bitmaps, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins, compression labels and shared extensions.\n";return 0;}
