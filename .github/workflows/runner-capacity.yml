@@ -65,9 +65,13 @@ jobs:
           $details = "Selected runner: $env:SELECTED_RUNNER; actual: $env:RUNNER_NAME`nImage: $env:ImageOS/$env:ImageVersion; compile jobs: $env:NUMBER_OF_PROCESSORS; memory: $memoryGiB GiB`nMultiToolTask and shared process cap enabled. Focused compiler/routing check only; no dependency build, packages or certification."
           $details
           $details >> $env:GITHUB_STEP_SUMMARY
+      - name: Verify toolchain selection and select the installed v143 compiler
+        run: |
+          & ./tests/test_windows_toolchain.ps1
+          & ./tools/select-windows-toolchain.ps1 -GitHubEnvironment
       - name: Compile and test actual Rev modules with bounded MSBuild parallelism
         run: |
-          cmake -S tests/rev-style-probe -B build/runner-capacity -G 'Visual Studio 17 2022' -A x64
+          cmake -S tests/rev-style-probe -B build/runner-capacity -A x64
           if ($LASTEXITCODE -ne 0) { throw 'Module probe configuration failed' }
           cmake --build build/runner-capacity --config Release --parallel $env:NUMBER_OF_PROCESSORS
           if ($LASTEXITCODE -ne 0) { throw 'Module probe compilation failed' }

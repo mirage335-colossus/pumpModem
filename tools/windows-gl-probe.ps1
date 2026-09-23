@@ -2,11 +2,10 @@ param(
     [ValidateRange(1,30)][int]$TimeoutSeconds = 30
 )
 $ErrorActionPreference = 'Stop'
-if (!$IsWindows) { throw 'This diagnostic requires Windows and Visual Studio 2022.' }
+if (!$IsWindows) { throw 'This diagnostic requires Windows and the MSVC v143 build tools.' }
 
-$vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
-$vs = & $vswhere -latest -version '[17.0,18.0)' -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-if ($LASTEXITCODE -ne 0 -or !$vs) { throw 'Visual Studio 2022 x64 C++ tools are required.' }
+$toolchain = & (Join-Path $PSScriptRoot 'select-windows-toolchain.ps1')
+$vs = $toolchain.Instance
 $vcvars = Join-Path $vs 'VC/Auxiliary/Build/vcvarsall.bat'
 $temporaryRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [System.IO.Path]::GetTempPath() }
 $work = Join-Path $temporaryRoot ('datapump-wgl-' + [guid]::NewGuid().ToString('N'))
@@ -215,7 +214,7 @@ cleanup:
     [System.IO.File]::WriteAllText((Join-Path $work 'probe.c'), $source, [System.Text.UTF8Encoding]::new($false))
     $build = @"
 @echo off
-call "$vcvars" x64
+call "$vcvars" x64 -vcvars_ver=$($toolchain.ToolsetVersion)
 if errorlevel 1 exit /b %errorlevel%
 cl.exe /nologo /W4 /O2 /MT /TC probe.c /Feprobe.exe /Foprobe.obj /link opengl32.lib gdi32.lib user32.lib
 exit /b %errorlevel%

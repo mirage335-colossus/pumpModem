@@ -261,7 +261,7 @@ jobs:
         # The same offline C sources build with MSVC; no liblzma DLL or vcpkg
         # compression package is required on the copied installation.
         run: >-
-          cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+          cmake -S . -B build -A x64
           -DCMAKE_TOOLCHAIN_FILE="$env:DATAPUMP_WINDOWS_TOOLCHAIN"
           -DVCPKG_TARGET_TRIPLET=x64-windows-static
           -DDATAPUMP_PORTABLE=ON -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded

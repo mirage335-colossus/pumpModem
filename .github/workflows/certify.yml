@@ -219,8 +219,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.prepare.outputs.source_sha }}
-      - name: Load dependency tooling when certifying an older release
-        if: ${{ hashFiles('tools/windows-base.py') == '' }}
+      - name: Load current runner tooling without changing the released source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -229,12 +228,14 @@ jobs:
       - name: Reuse verified static dependencies from base
         shell: pwsh
         run: |
-          $script = if (Test-Path tools/use-windows-base.ps1) { './tools/use-windows-base.ps1' } else { './.certification-tools/tools/use-windows-base.ps1' }
-          & $script -Repository "$env:GITHUB_REPOSITORY" -Destination "$PWD/build/windows-base"
+          # Keep the release's recipe identity, with current runner discovery.
+          # Releases predating dependency bases retain the existing fallback.
+          $recipeRoot = if (Test-Path tools/windows-base.py) { "$PWD" } else { "$PWD/.certification-tools" }
+          & ./.certification-tools/tools/use-windows-base.ps1 -SourceRoot $recipeRoot -Repository "$env:GITHUB_REPOSITORY" -Destination "$PWD/build/windows-base"
       - name: Build with the Windows SDK and static MSVC runtime
         shell: pwsh
         run: |
-          cmake -S . -B build/release-windows -G 'Visual Studio 17 2022' -A x64 -DCMAKE_TOOLCHAIN_FILE="$env:DATAPUMP_WINDOWS_TOOLCHAIN" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DDATAPUMP_GUI_BACKEND="$env:GUI_BACKEND" -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600 -DDATAPUMP_TEST_NATIVE_GUI=ON -DGUI_SMOKE_TIMEOUT=600 -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          cmake -S . -B build/release-windows -A x64 -DCMAKE_TOOLCHAIN_FILE="$env:DATAPUMP_WINDOWS_TOOLCHAIN" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DDATAPUMP_GUI_BACKEND="$env:GUI_BACKEND" -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600 -DDATAPUMP_TEST_NATIVE_GUI=ON -DGUI_SMOKE_TIMEOUT=600 -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
           if ($LASTEXITCODE -ne 0) { throw 'Configure failed' }
           if ($env:GUI_BACKEND -eq 'rev') {
             # Diagnose the real OpenGL context and native adapter before the

@@ -20,7 +20,9 @@ on:
       - '.github/workflows/windows-base.yml'
       - 'tools/windows-base.py'
       - 'tools/use-windows-base.ps1'
+      - 'tools/select-windows-toolchain.ps1'
       - 'tests/test_windows_base.py'
+      - 'tests/test_windows_toolchain.ps1'
       - 'tests/windows-base-probe/**'
       - 'third_party/build-support/windows-base.json'
 
@@ -61,7 +63,12 @@ jobs:
         with:
           persist-credentials: false
       - name: Check the helper on Windows before dependency work
-        run: python tests/test_windows_base.py
+        run: |
+          & ./tests/test_windows_toolchain.ps1
+          python tests/test_windows_base.py
+          if ($LASTEXITCODE -ne 0) { throw 'Windows base helper tests failed' }
+      - name: Select the installed v143 compiler
+        run: '& ./tools/select-windows-toolchain.ps1 -GitHubEnvironment'
       - name: Select the exact reusable recipe
         id: recipe
         run: |
@@ -90,53 +97,54 @@ jobs:
         run: |
           $recipe = Get-Content third_party/build-support/windows-base.json -Raw | ConvertFrom-Json
           $env:VCPKG_MAX_CONCURRENCY = $env:NUMBER_OF_PROCESSORS
-          $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
-          $vs = & $vswhere -latest -version '[17.0,18.0)' -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          if ($LASTEXITCODE -ne 0 -or !$vs) { throw 'Visual Studio 2022 C++ tools are required' }
-          $env:VCPKG_VISUAL_STUDIO_PATH = $vs
-          $toolset = (Get-Content "$vs/VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt" -Raw).Trim()
-          function FileVersion($path) {
-            $v = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($path)
-            return "$($v.FileMajorPart).$($v.FileMinorPart).$($v.FileBuildPart).$($v.FilePrivatePart)"
-          }
+          $toolchain = & ./tools/select-windows-toolchain.ps1
+          $env:VCPKG_VISUAL_STUDIO_PATH = $toolchain.Instance
+          # Toolset/version are triplet settings, not vcpkg environment options.
+          # Extend the pinned static triplet without changing the base recipe.
+          $triplets = New-Item -ItemType Directory -Path build/windows-base-triplets -Force
+          $upstreamTriplet = Get-Content ".ci-vcpkg/triplets/$($recipe.triplet).cmake"
+          @(
+            $upstreamTriplet
+            'set(VCPKG_PLATFORM_TOOLSET v143)'
+            "set(VCPKG_PLATFORM_TOOLSET_VERSION $($toolchain.ToolsetVersion))"
+          ) | Set-Content -Encoding utf8 (Join-Path $triplets.FullName "$($recipe.triplet).cmake")
           $provenance = @{
             source_sha = $env:GITHUB_SHA
             runner_image = "$env:ImageOS/$env:ImageVersion"
-            toolset_version = $toolset
-            compiler_version = FileVersion "$vs/VC/Tools/MSVC/$toolset/bin/Hostx64/x64/cl.exe"
-            linker_version = FileVersion "$vs/VC/Tools/MSVC/$toolset/bin/Hostx64/x64/link.exe"
+            toolset_version = $toolchain.ToolsetVersion
+            compiler_version = $toolchain.CompilerVersion
+            linker_version = $toolchain.LinkerVersion
           }
           $provenance | ConvertTo-Json | Set-Content -Encoding utf8 windows-base-provenance.json
+          # vcpkg configures individual ports with Ninja; do not give those
+          # subprocesses the application's Visual Studio generator defaults.
+          Remove-Item Env:CMAKE_GENERATOR, Env:CMAKE_GENERATOR_INSTANCE, Env:CMAKE_GENERATOR_TOOLSET
           & ./.ci-vcpkg/bootstrap-vcpkg.bat -disableMetrics
           if ($LASTEXITCODE -ne 0) { throw 'vcpkg bootstrap failed' }
           $ports = @($recipe.ports | ForEach-Object { "${_}:$($recipe.triplet)" })
-          & ./.ci-vcpkg/vcpkg.exe install @ports
+          & ./.ci-vcpkg/vcpkg.exe install @ports --overlay-triplets="$($triplets.FullName)"
           if ($LASTEXITCODE -ne 0) { throw 'Dependency build failed' }
           $exports = @($recipe.ports | ForEach-Object { ($_ -replace '\[.*\]', '') + ':' + $recipe.triplet })
-          & ./.ci-vcpkg/vcpkg.exe export @exports --raw --output=windows-dependencies --output-dir="$PWD/build/windows-export"
+          & ./.ci-vcpkg/vcpkg.exe export @exports --raw --overlay-triplets="$($triplets.FullName)" --output=windows-dependencies --output-dir="$PWD/build/windows-export"
           if ($LASTEXITCODE -ne 0) { throw 'Dependency export failed' }
           git -C .ci-vcpkg archive --format=zip --output="$PWD/.ci-vcpkg/downloads/vcpkg-source.zip" $recipe.vcpkg_ref
           if ($LASTEXITCODE -ne 0) { throw 'Dependency recipe preservation failed' }
+          Copy-Item (Join-Path $triplets.FullName "$($recipe.triplet).cmake") .ci-vcpkg/downloads/datapump-v143-triplet.cmake
           python tools/windows-base.py assemble --export-root build/windows-export/windows-dependencies --sources-dir .ci-vcpkg/downloads --directory windows-base-assets --provenance windows-base-provenance.json
           if ($LASTEXITCODE -ne 0) { throw 'Dependency inventory creation failed' }
       - name: Install at a different path and check the compiler
         id: installed
         shell: pwsh
         run: |
-          $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
-          $vs = & $vswhere -latest -version '[17.0,18.0)' -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          if ($LASTEXITCODE -ne 0 -or !$vs) { throw 'Visual Studio 2022 C++ tools are required' }
-          $toolset = (Get-Content "$vs/VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt" -Raw).Trim()
-          $v = [System.Diagnostics.FileVersionInfo]::GetVersionInfo("$vs/VC/Tools/MSVC/$toolset/bin/Hostx64/x64/link.exe")
-          $linkerVersion = "$($v.FileMajorPart).$($v.FileMinorPart).$($v.FileBuildPart).$($v.FilePrivatePart)"
-          python tools/windows-base.py install --directory windows-base-assets --destination "$PWD/build/relocated-windows-base" --linker-version $linkerVersion --github-output "$env:GITHUB_OUTPUT"
+          $toolchain = & ./tools/select-windows-toolchain.ps1
+          python tools/windows-base.py install --directory windows-base-assets --destination "$PWD/build/relocated-windows-base" --linker-version $toolchain.LinkerVersion --github-output "$env:GITHUB_OUTPUT"
           if ($LASTEXITCODE -ne 0) { throw 'Relocated dependency verification failed' }
       - name: Compile and run a small static dependency probe
         env:
           BASE_TOOLCHAIN: ${{ steps.installed.outputs.toolchain_file }}
         shell: pwsh
         run: |
-          cmake -S tests/windows-base-probe -B build/windows-base-probe -G 'Visual Studio 17 2022' -A x64 -DCMAKE_TOOLCHAIN_FILE="$env:BASE_TOOLCHAIN" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          cmake -S tests/windows-base-probe -B build/windows-base-probe -A x64 -DCMAKE_TOOLCHAIN_FILE="$env:BASE_TOOLCHAIN" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
           if ($LASTEXITCODE -ne 0) { throw 'Relocated dependency configure failed' }
           cmake --build build/windows-base-probe --config Release --parallel $env:NUMBER_OF_PROCESSORS
           if ($LASTEXITCODE -ne 0) { throw 'Relocated dependency link failed' }

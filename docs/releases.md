@@ -25,6 +25,7 @@ long preservation contract and GUI tests remain intact in that workflow.
 | `experiment` | Checked | Title exactly `experiment`; GitHub prerelease; never Latest, even after certification passes. |
 | `publish` | Checked | Publish after all six platform/backend packages pass basic checks. Uncheck to retain a draft with its assets for inspection. |
 | `linux_baseline` | `bookworm-sdk` | Source SDK/glibc 2.36 for x86_64, or `ubuntu-22.04`/glibc 2.35. ARM64 always uses the Ubuntu 22.04 baseline. |
+| `arm_runner` | `ubuntu-24.04-arm-l` | ARM64 host: organization L or H tier, or standard `ubuntu-24.04-arm`. See [runner selection](#runner-selection-and-build-parallelism) for all three architecture selectors. |
 
 Leave `experiment` checked for builds users needing assurance should avoid.
 An ordinary release uses its version/date tag as the title. It becomes Latest
@@ -248,33 +249,57 @@ These timings are observed hosted-runner results, not guarantees.
 ## Runner selection and build parallelism
 
 Manual portable release, native CI, SDK qualification, base maintenance and
-certification workflows expose two runner dropdowns. The same input names work
-through GitHub CLI for agents and maintainers:
+certification workflows expose x86-64 Linux and Windows runner dropdowns.
+Portable release, native CI and certification also expose `arm_runner` for
+their ARM64 jobs and diagnostics. The same input names work through GitHub CLI:
 
 | Input | Choices | Default |
 | --- | --- | --- |
 | `linux_runner` | `ubuntu-24.04`, `ubuntu-latest-m`, `ubuntu-latest-l`, `ubuntu-latest-h` | `ubuntu-24.04` |
+| `arm_runner` | `ubuntu-24.04-arm-l`, `ubuntu-24.04-arm-h`, `ubuntu-24.04-arm` | `ubuntu-24.04-arm-l` |
 | `windows_runner` | `windows-2022`, `windows-latest-l`, `windows-latest-h` | `windows-2022` |
 
 The larger labels are the runners configured by `mirage335-colossus`. Select one
-explicitly for faster builds; automatic push/PR runs keep the standard defaults.
-The selections reach reusable workflows as well as the main jobs. Small helper,
-metadata and report jobs stay on standard runners. ARM64 builds and diagnostics
-stay on `ubuntu-24.04-arm`; selecting a larger x86-64 runner must not produce an
-x86-64 executable under an ARM64 download name. Existing Linux baseline
-containers, SDK recipes and portable ABI ceilings remain unchanged.
+explicitly for x86-64 builds; automatic push/PR x86-64 jobs keep their standard
+defaults. Manual ARM64 selection defaults to L and reaches reusable diagnostics,
+release builds and certification checks. Small helper, metadata and report jobs
+stay on standard runners. Each architecture has its own selector: an x86-64
+label cannot replace an ARM64 host. Existing Linux baseline containers, SDK
+recipes and portable ABI ceilings remain unchanged.
+
+The organization created Ubuntu 24.04 ARM64 pools in the existing
+`DefaultLargerRunners` group, which permits public repositories. Both pools were
+confirmed Ready on **2026-09-23**. Their configured capacities and GitHub's
+published prices checked that day are:
+
+| ARM64 label | CPUs | RAM | SSD | Maximum concurrent jobs | USD/minute per running job |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `ubuntu-24.04-arm-l` | 8 | 32 GB | 300 GB | 15 | $0.014 |
+| `ubuntu-24.04-arm-h` | 32 | 128 GB | 1200 GB | 10 | $0.050 |
+
+GitHub bills larger runners for job execution, including in public repositories,
+rounding each job up to whole minutes; idle configured pools have no execution
+charge. Choose H when its shorter build time justifies its higher per-minute
+cost. See [runner specifications](https://docs.github.com/en/actions/reference/runners/larger-runners)
+and [current prices](https://docs.github.com/en/billing/reference/actions-runner-pricing).
+Both pools are ARM64, not 32-bit ARM.
 
 Check access and actual resources with the short capacity diagnostic before
 starting expensive work on a newly configured runner:
 
 ```sh
-gh workflow run ci.yml --ref codex/portable-releases \
+gh workflow run ci.yml --ref REF \
   -f devfast=true -f diagnostic=runner-capacity \
   -f linux_runner=ubuntu-latest-l -f windows_runner=windows-latest-l
 
-gh workflow run release.yml --ref codex/portable-releases \
+gh workflow run ci.yml --ref REF \
+  -f devfast=true -f diagnostic=arm-runner-capacity \
+  -f arm_runner=ubuntu-24.04-arm-h
+
+gh workflow run release.yml --ref REF \
   -f experiment=true -f publish=false -f linux_baseline=bookworm-sdk \
-  -f linux_runner=ubuntu-latest-h -f windows_runner=windows-latest-h
+  -f linux_runner=ubuntu-latest-h -f arm_runner=ubuntu-24.04-arm-h \
+  -f windows_runner=windows-latest-h
 ```
 
 Use the intended source branch as `--ref`. The capacity diagnostic records the
@@ -283,6 +308,10 @@ compiles small existing production fixtures: Legacy on the Linux Ubuntu 22.04
 baseline and Rev modules with MSVC on Windows. It does not build an SDK, create
 release assets or claim certification. A queued job has not demonstrated runner
 access; the organization must grant this repository access to the selected label.
+The ARM-only diagnostic checks the selected ARM64 pool without scheduling x86-64
+or Windows jobs. Validate the new L and H pools directly; do not repeat the
+smaller standard-runner checks merely to compare capacity. Reuse existing
+evidence and proceed to the applicable full checks on the selected larger hosts.
 
 Compilation uses `nproc` on Linux and `NUMBER_OF_PROCESSORS` on Windows. The
 build wrapper's `--build-jobs` lets SDK and certification builds use those cores

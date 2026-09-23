@@ -30,7 +30,8 @@ jobs:
       - name: Run the dependency-free Win32 event regression first
         shell: pwsh
         run: |
-          cmake -S tests/rev-event-probe -B build/rev-event-probe -G 'Visual Studio 17 2022' -A x64
+          & ./tools/select-windows-toolchain.ps1 -GitHubEnvironment
+          cmake -S tests/rev-event-probe -B build/rev-event-probe -A x64
           if ($LASTEXITCODE -ne 0) { throw 'Event probe configure failed' }
           cmake --build build/rev-event-probe --config Release --parallel $env:NUMBER_OF_PROCESSORS
           if ($LASTEXITCODE -ne 0) { throw 'Event probe build failed' }
@@ -42,7 +43,7 @@ jobs:
       - name: Compile the actual Rev GUI and run its headless self-check
         shell: pwsh
         run: |
-          cmake -S . -B build/windows-rev -G 'Visual Studio 17 2022' -A x64 -DCMAKE_TOOLCHAIN_FILE="$env:DATAPUMP_WINDOWS_TOOLCHAIN" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DDATAPUMP_GUI_BACKEND=rev -DDATAPUMP_PORTABLE=ON -DBUILD_TESTING=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          cmake -S . -B build/windows-rev -A x64 -DCMAKE_TOOLCHAIN_FILE="$env:DATAPUMP_WINDOWS_TOOLCHAIN" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DDATAPUMP_GUI_BACKEND=rev -DDATAPUMP_PORTABLE=ON -DBUILD_TESTING=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
           if ($LASTEXITCODE -ne 0) { throw 'Rev configure failed' }
           cmake --build build/windows-rev --config Release --target datapump-gui --parallel $env:NUMBER_OF_PROCESSORS
           if ($LASTEXITCODE -ne 0) { throw 'Rev application compilation failed' }

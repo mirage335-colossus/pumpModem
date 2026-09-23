@@ -224,13 +224,28 @@ changes or failures invalidate that evidence. Compile with available cores, but
 keep timing-sensitive test concurrency at its documented limits.
 
 Manual workflows expose `linux_runner` and `windows_runner` dropdowns for the
-organization's larger x86-64 runners. Agents can pass those same names with
-`gh workflow run -f linux_runner=ubuntu-latest-l -f windows_runner=windows-latest-l`.
+organization's larger x86-64 runners. Native CI, portable release and
+certification also expose `arm_runner`: `ubuntu-24.04-arm-l` (the default),
+`ubuntu-24.04-arm-h`, or standard `ubuntu-24.04-arm`. The ARM64 L and H tiers
+provide 8 and 32 CPUs respectively. Automatic push/PR x86-64 jobs retain their
+standard runner defaults; the ARM64 selector does not affect x86-64 routing.
+Agents can pass these input names through `gh workflow run -f`.
 Use the [runner selection guide](releases.md#runner-selection-and-build-parallelism)
 to choose and verify access before a long run. `ci.yml` with `devfast=true` and
 `diagnostic=runner-capacity` checks routing, visible CPUs and small production
 compiler fixtures without building SDKs or running calibration. This routing
 check does not replace applicable source regression or release certification.
+
+Check a larger ARM64 pool without repeating x86-64 or Windows diagnostics:
+
+```sh
+gh workflow run ci.yml --ref REF -f devfast=true \
+  -f diagnostic=arm-runner-capacity -f arm_runner=ubuntu-24.04-arm-h
+```
+
+Validate the new L and H pools directly, reusing earlier evidence instead of
+retesting smaller runners. Keep the applicable full regression and release
+certification sequence below after the focused checks.
 
 For a completed branch candidate, use the full workflow, and SDK qualification
 when the change touches its supported toolchains or portable packages:

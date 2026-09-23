@@ -52,7 +52,8 @@ jobs:
         shell: pwsh
         run: |
           if ($IsWindows) {
-            cmake -S tests/devfast -B build/devfast -G 'Visual Studio 17 2022' -A x64
+            & ./tools/select-windows-toolchain.ps1 -GitHubEnvironment
+            cmake -S tests/devfast -B build/devfast -A x64
           } else {
             cmake -S tests/devfast -B build/devfast -G Ninja -DCMAKE_BUILD_TYPE=Release
           }
