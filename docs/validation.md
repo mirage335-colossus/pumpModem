@@ -207,6 +207,56 @@ compatibility jobs pass. Partial source checks include both FLTK GUI groups
 Windows FLTK completes 24 GUI cases before cancellation. No completed full
 source contract/calibration or release certification is claimed for this attempt.
 
+Focused inspection of the phase-21 failure finds that the 17 received bits are
+exactly the suffix of the intended 32-bit `Help` payload, after a 15-bit loss;
+the editor's pre-transmission assertion had verified all 32 bits. A small keyed
+Session probe against the current libraries receives 32/32 with immediate,
+frozen-epoch and warmed starts. This does not establish a deterministic cause or
+justify adding a readiness delay. The relevant receiver/smoke paths are unchanged;
+the semantic qualification failure remains unresolved, separate from cadence.
+
+After the fixture and runtime-packaging corrections, the complete local Rev
+shared GUI group passes **37/37** with the existing **SDK GCC 15** in **114.34
+seconds**, and **37/37** with **native Clang 19, portable runtime linking** in
+**119.14 seconds**. Logs are
+`build/ci-diagnostics-20260923/backend-final-sdk-rev-gui.log` and
+`build/ci-diagnostics-20260923/backend-final-static-clang-rev-gui.log`.
+
+The [focused ARM64 packaging and graphics run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35876268016)
+passes on source `e72906dc431192372b1b81562cc7cd9112d113c5`. It builds the Rev
+package on Ubuntu 22.04 and verifies both TGZ and ZIP archives, including
+relocation, dependency closure and all **35 packaged ELF files** against the
+**glibc 2.35** ceiling. On Ubuntu 24.04, the unchanged copied GUI runs
+`--simulation` with empty `PATH`/`LD_LIBRARY_PATH` under private Xvfb. Its exact
+`Data Pump` window remains visible for **2.05 seconds** while the process stays
+alive. Process mappings confirm host **Mesa 25.2.8**, **LLVM 20.1** and
+**libstdc++.so.6.0.33**, all outside the package; no C++ runtime DSOs are bundled.
+Strict package inventory verification passes both before and after startup.
+The log retains an ALSA missing-configuration warning; this simulation startup
+does not qualify audio devices. This is focused packaging and host-driver
+startup evidence, not full GUI smoke, calibration or release certification.
+No existing release assets change. The completed log records checkout in
+**2.26 seconds**, with no fetch retry, and the package-build step starting at
+**14:43:35 UTC**; earlier live status did not establish a checkout delay. The
+hosted log is `build/ci-diagnostics-20260923/backend-runs/107232881295.log`.
+
+The [corrected six-package publication](https://github.com/mirage335-colossus/pumpModem/actions/runs/35877402140)
+passes on `e72906dc431192372b1b81562cc7cd9112d113c5` and publishes
+[v001_00-2026-09-23-0952CDT](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-23-0952CDT)
+with all six archives and the original metadata/notes/warning/checksum assets.
+It retains the exact title `experiment`, prerelease status and no Latest
+promotion. Windows restores the existing dependency recipe in approximately
+**13 seconds (FLTK)** and **25 seconds (Rev)**; the complete Windows jobs take
+**5m43s** and **6m49s**. Application compilation and packaging account for the
+remaining time; neither dependency base is rebuilt.
+
+Separate [full certification](https://github.com/mirage335-colossus/pumpModem/actions/runs/35878492914)
+is dispatched with `devfast=false` for the new tag. The workflow pins its source
+and inventory and attaches its own immutable result report without replacing
+binaries. This entry records dispatch, not a pass: follow that run and its
+attached report for the result. The known hosted Windows OpenGL limitation and
+prior semantic acquisition failure are not waived.
+
 ## Full validation after focused diagnosis — 23 September 2026
 
 Agent and development guidance now requires focused diagnosis followed by full

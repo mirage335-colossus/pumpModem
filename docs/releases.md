@@ -278,12 +278,15 @@ compiler-specific LTO objects would require tighter toolset matching. Reuse
 removes repeated dependency compilation, but does not guarantee a particular
 workflow duration or replace application validation.
 
-The first hosted consumers reduced dependency setup from about six minutes
-per backend to **19 seconds for FLTK** and **11 seconds for Rev**. A separate
-reuse-only maintenance run completed its Windows job in **44 seconds**,
+Hosted consumers reduced dependency setup from about six minutes per backend
+to **13 seconds for FLTK** and **25 seconds for Rev** in the corrected
+six-package release. The complete Windows jobs took **5m43s** and **6m49s**,
+respectively, including fresh application compilation and packaging checks. A
+separate reuse-only maintenance run completed its Windows job in **44 seconds**,
 including a fresh static compile/link/run probe, with dependency compilation
 and upload skipped. See the [validation record](validation.md) for those exact
-runs. The application itself still needs compilation on each fresh runner.
+runs. Long regression/calibration work belongs to the separate certification
+workflow and does not indicate that dependencies were rebuilt.
 
 ## Choose the Linux baseline
 
