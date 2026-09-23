@@ -179,6 +179,51 @@ Other aggregate targets are `datapump-apps`, `datapump-tests`, and
 tests but do not compile them. For individual work, existing targets such as
 `test_compression_short` continue to work.
 
+## Testing stages
+
+Use focused feedback while a fault or feature is still changing, then broaden
+validation after the candidate is complete. A fast diagnostic pass establishes
+that a particular case works; it does not establish that the rest of the
+application, another compiler/platform or the distributed package still works.
+
+| Stage | Appropriate checks | Completion condition |
+| --- | --- | --- |
+| Investigate or iterate | Smallest relevant reproducer, target or affected group; `devfast=true` when its cases match the issue. Build only those prerequisites. | The regression fails before the fix and passes afterward, or the feature's intended behavior is demonstrated. |
+| Validate the completed candidate | Normal full source CI with `devfast=false`, plus applicable preservation-contract, GUI/native, SDK, platform and packaging coverage. | Required jobs actually finish successfully for the final source/configuration; failures return to focused diagnosis. |
+| Qualify a release | Publish the intended binaries after packaging checks, then run certification with `devfast=false` for their exact tag. | The attached report passes for the actual source and asset hashes being offered to users. |
+
+Agents should progress through the relevant stages without requiring another
+reminder after each focused success. Do not stop at the first row for a runtime
+fix or completed feature merely because full coverage takes longer. The slow
+tests belong at the validation stage instead of every edit. Documentation-only
+changes need proportionate checks, but do not erase outstanding validation for
+earlier code changes in the same task.
+
+Reuse passing results for the same source and configuration. Avoid scheduling
+duplicate push, PR and manual workflows; a full manual dispatch after temporary
+`[skip ci]` commits is sufficient when it covers the required final candidate.
+Do not rerun an expensive unchanged suite after recording a pass unless later
+changes or failures invalidate that evidence. Compile with available cores, but
+keep timing-sensitive test concurrency at its documented limits.
+
+For a completed branch candidate, use the full workflow, and SDK qualification
+when the change touches its supported toolchains or portable packages:
+
+```sh
+gh workflow run ci.yml --ref REF -f devfast=false
+gh workflow run sdk.yml --ref REF -f devfast=false
+gh run watch RUN_ID --exit-status
+```
+
+Replace `REF` and `RUN_ID` with the intended revision and the actual dispatched
+run. Check each required result; a queued, running, skipped or cancelled job is
+not a pass. Diagnose a failure narrowly and rerun the affected full checks once
+fixed. Record source SHA, commands/run links, outcomes and untested boundaries in
+[validation](validation.md). If a check cannot finish, state what is blocked and
+what remains; do not describe the change as fully validated or the release as
+certified. See [release validation](releases.md#diagnose-a-branch-before-full-validation)
+for the separate publication/certification sequence and source-pinning rules.
+
 ## Focused development diagnostics
 
 The manual `devfast` checkbox in native CI (`ci.yml`), SDK qualification
@@ -230,10 +275,12 @@ ctest --test-dir build/devfast -C Release --output-on-failure -R '^gui_legacy_(p
 Manual `devfast` does not suppress workflows triggered by the preceding push.
 For intermediate diagnosis commits, a temporary `[skip ci]` commit-message
 marker can [skip automatic push/PR runs](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/skip-workflow-runs)
-while still allowing manual dispatch. Omit that marker from the final
-validation commit and run the ordinary workflows with `devfast=false` (or
-unchecked), including the applicable contract, GUI/native and packaging checks.
-A focused pass is development feedback, not a substitute for those gates.
+while still allowing manual dispatch. After the candidate is complete, either
+omit that marker from the final validation commit or explicitly dispatch the
+ordinary workflows with `devfast=false` (or unchecked), including applicable
+contract, GUI/native and packaging checks. Wait for those outcomes as described
+in [testing stages](#testing-stages). A focused pass is development feedback,
+not a substitute for those gates.
 
 ## Compile-time policy
 

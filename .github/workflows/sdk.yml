@@ -172,7 +172,9 @@ jobs:
         run: ./build.sh test contract --sdk "$GITHUB_WORKSPACE/build/sdk" --backend fltk --build-dir build/sdk-application --jobs 2 -- -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600
       - name: Run Rev native conformance separately under a private display
         if: matrix.backend == 'rev'
-        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' ./build.sh test native --sdk "$GITHUB_WORKSPACE/build/sdk" --backend rev --build-dir build/sdk-application --jobs 2 -- -DDATAPUMP_PORTABLE=ON
+        # Full validation includes the complete workflow; devfast never runs it.
+        # Only its overall allowance changes, not the internal assertions.
+        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' ./build.sh test native --sdk "$GITHUB_WORKSPACE/build/sdk" --backend rev --build-dir build/sdk-application --jobs 2 -- -DDATAPUMP_PORTABLE=ON -DGUI_SMOKE_TIMEOUT=600
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: DataPump-SDK-${{ matrix.backend }}-Linux-x86_64-glibc-2.36

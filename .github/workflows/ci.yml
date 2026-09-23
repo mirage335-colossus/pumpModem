@@ -46,11 +46,14 @@ jobs:
         with:
           persist-credentials: false
       - name: Configure the same contract suite for the selected adapter
+        # Full validation runs the whole smoke sequence; devfast skips it.
+        # Extend only its overall budget, preserving every internal deadline.
         run: >-
           cmake -S . -B build-gui -G Ninja
           -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19
           -DCMAKE_BUILD_TYPE=Release -DDATAPUMP_PORTABLE=OFF
           -DDATAPUMP_GUI_BACKEND=${{ matrix.backend }} -DDATAPUMP_TEST_NATIVE_GUI=ON
+          -DGUI_SMOKE_TIMEOUT=600 -DDART_TESTING_TIMEOUT=3600
       - run: cmake --build build-gui --target datapump-tests-gui --parallel 2
       - name: Check offline build and dependency tooling
         if: matrix.backend == 'fltk'
@@ -67,7 +70,9 @@ jobs:
     # Compile every application and collected library against this baseline,
     # rather than letting a newer hosted runner raise the minimum glibc ABI.
     container: ubuntu:22.04
-    timeout-minutes: 30
+    # Full suites include calibration, sanitizer work and archive GUI checks;
+    # devfast retains its separate short diagnostic budget.
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -87,10 +92,14 @@ jobs:
       - name: Prepare build dependencies
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends ca-certificates git cmake ninja-build make g++-11 binutils libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev xvfb xauth fontconfig-config fonts-dejavu-core python3
+          apt-get install -y --no-install-recommends ca-certificates curl git cmake ninja-build make g++-11 binutils libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev xvfb xauth fontconfig-config fonts-dejavu-core python3
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Install the pinned dependency scanner
+        run: |
+          sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
+          echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
       - name: Configure native application without Python
         # liblzma is pinned in third_party/xz and compiled statically; there is
         # no liblzma development package or compression source download.
@@ -99,21 +108,22 @@ jobs:
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
           -DDATAPUMP_SANITIZERS=${{ matrix.sanitizers }}
           -DDATAPUMP_PORTABLE=${{ matrix.portable }}
+          -DDART_TESTING_TIMEOUT=3600
           -DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE
       - run: cmake --build build --target datapump-apps datapump-tests --parallel 2
       - run: ctest --test-dir build --output-on-failure --parallel 2
       - name: Exercise native desktop workflow
-        run: xvfb-run -a ./build/datapump-gui --smoke-test --smoke-timeout 300
+        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' ./build/datapump-gui --smoke-test --smoke-timeout 600
       - name: Developer CLI regressions (Python is not packaged)
         run: python3 tests/test_cli.py build/pump
       - name: Verify relocated native GUI and package inventory
         if: matrix.portable == 'ON'
-        run: xvfb-run -a cmake -DBUILD_DIR="$PWD/build" -DCONFIG=Release -DGUI_SMOKE=ON -P tests/package_native.cmake
+        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DBUILD_DIR="$PWD/build" -DCONFIG=Release -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P tests/package_native.cmake
       - name: Create and verify both native archives
         if: matrix.portable == 'ON'
         run: |
           cmake --build build --target package
-          xvfb-run -a cmake -DARCHIVE_DIR="$PWD/build/releases" -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -DMAX_GLIBC=2.35 -P tools/verify-native-archives.cmake
+          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/build/releases" -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.35 -P tools/verify-native-archives.cmake
       - name: Upload Linux offline bundles
         if: matrix.portable == 'ON'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -125,7 +135,7 @@ jobs:
             build/releases/SHA256SUMS.txt
           if-no-files-found: error
           compression-level: 0
-          retention-days: 30
+          retention-days: 1
 
   linux-compatibility:
     if: ${{ !inputs.devfast }}
@@ -133,7 +143,9 @@ jobs:
     needs: linux
     runs-on: ubuntu-24.04
     container: ubuntu:${{ matrix.ubuntu }}
-    timeout-minutes: 10
+    # Both archive formats run the full workflow; measured checks exceed ten
+    # minutes even though devfast never runs these compatibility jobs.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -146,22 +158,28 @@ jobs:
       - name: Prepare compatibility checks
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends ca-certificates git cmake binutils xvfb xauth fontconfig-config fonts-dejavu-core
+          apt-get install -y --no-install-recommends ca-certificates curl git cmake binutils xvfb xauth fontconfig-config fonts-dejavu-core
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Install the pinned dependency scanner
+        run: |
+          sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
+          echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: DataPump-Linux-x86_64-glibc-2.35
           path: downloaded
       - name: Run copied archives with isolated runtime paths
-        run: xvfb-run -a cmake -DARCHIVE_DIR="$PWD/downloaded" -DGUI_SMOKE=ON -DMAX_GLIBC=2.35 -P tools/verify-native-archives.cmake
+        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/downloaded" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.35 -P tools/verify-native-archives.cmake
 
   windows:
     if: ${{ !inputs.devfast }}
     name: Microsoft Windows x64 (static CRT)
     runs-on: windows-2022
-    timeout-minutes: 45
+    # Full validation includes calibration and both packaged GUI workflows;
+    # the separate devfast diagnostic still has its short overall budget.
+    timeout-minutes: 120
     env:
       VCPKG_DISABLE_METRICS: "1"
     steps:
@@ -191,17 +209,20 @@ jobs:
           -DCMAKE_TOOLCHAIN_FILE="$PWD/.ci-vcpkg/scripts/buildsystems/vcpkg.cmake"
           -DVCPKG_TARGET_TRIPLET=x64-windows-static
           -DDATAPUMP_PORTABLE=ON -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          -DDART_TESTING_TIMEOUT=3600
           -DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE
       - run: cmake --build build --config Release --target datapump-apps datapump-tests --parallel 2
-      - run: ctest --test-dir build -C Release --output-on-failure --parallel 2
+      # The live/audio fixtures have their own workers and internal deadlines.
+      # Preserve the complete selection without competing suites on the runner.
+      - run: ctest --test-dir build -C Release --output-on-failure --parallel 1
       - name: Verify Windows GUI and relocation with an empty PATH
-        run: cmake -DBUILD_DIR="$PWD/build" -DCONFIG=Release -DGUI_SMOKE=ON -P tests/package_native.cmake
+        run: cmake -DBUILD_DIR="$PWD/build" -DCONFIG=Release -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P tests/package_native.cmake
       - name: Create and verify both native archives
         shell: pwsh
         run: |
           cmake --build build --config Release --target package
           if ($LASTEXITCODE -ne 0) { throw "Native packaging failed" }
-          cmake -DARCHIVE_DIR="$PWD/build/releases" -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -P tools/verify-native-archives.cmake
+          cmake -DARCHIVE_DIR="$PWD/build/releases" -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P tools/verify-native-archives.cmake
           if ($LASTEXITCODE -ne 0) { throw "Archive verification failed" }
       - name: Upload Windows offline bundles
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -213,4 +234,4 @@ jobs:
             build/releases/SHA256SUMS.txt
           if-no-files-found: error
           compression-level: 0
-          retention-days: 30
+          retention-days: 1

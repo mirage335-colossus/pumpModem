@@ -7,6 +7,35 @@ run the appropriate tests. Stable profiles live under `build/`; older top-level
 `include/`, `tests/` and `cmake/` first; vendored code and historical validation
 captures have their own documented provenance. Keep all checks below intact.
 
+## Testing sequence for agents
+
+- During diagnosis and implementation, build and run the smallest meaningful
+  reproducer or affected test group. Use `devfast=true` only when its focused
+  cases cover the fault; it is not general coverage. Avoid repeatedly running
+  calibration, every platform or SDK builds while the same fault is unresolved.
+- Once the bug is fixed and requested features are complete, advance to the
+  normal full regression/general coverage for the final candidate. For CI use
+  `devfast=false` (the default), including the applicable contract, GUI/native,
+  platform, SDK and packaging checks. Do not finish a runtime change with only
+  focused passes because broader checks are slower. Pure documentation changes
+  need proportionate checks unless earlier code changes still await validation.
+- Reuse completed evidence for the same source/configuration and avoid duplicate
+  push, PR and manual runs. A temporary `[skip ci]` during diagnosis must be
+  followed by an explicit full manual run or ordinary CI before completion.
+  Wait for results; investigate failures with focused tests, then rerun the
+  affected full checks. Do not count skipped, cancelled or queued jobs as passes.
+- When release delivery or assurance is in scope, follow publication with full
+  certification of that release's exact source and binary hashes. A branch fix
+  does not fix an older release; publish new binaries when needed. Diagnostic
+  success cannot certify or promote a release. Preserve earlier release assets
+  and reports, and record actual results and remaining limits in
+  [docs/validation.md](docs/validation.md).
+
+See [testing stages](docs/building.md#testing-stages) and
+[release validation](docs/releases.md#diagnose-a-branch-before-full-validation).
+
+## Compatibility requirements
+
 Preserve the existing short-message, fixed-interval and pending-reception behavior.
 Read [the development contract](docs/development.md) before changing transport,
 compression, receiver progress, CLI messaging or GUI message presentation.

@@ -100,12 +100,14 @@ PRs changing automation run helper tests without creating releases or tags.
 Native CI (`ci.yml`), SDK qualification (`sdk.yml`) and certification
 (`certify.yml`) expose a manual boolean `devfast`, default **false**. Leave it
 unchecked for the existing full suites, including calibration and compatibility
-matrices. For a focused Legacy investigation, dispatch either entry point:
+matrices. `devfast=true` is temporary diagnosis while resolving a bug or feature.
+For a focused Legacy investigation, dispatch either entry point, replacing
+`REF` with the branch or tag containing the candidate:
 
 ```sh
-gh workflow run ci.yml --ref codex/portable-releases -f devfast=true
+gh workflow run ci.yml --ref REF -f devfast=true
 # Alternative entry point; release_tag may be omitted in this mode:
-gh workflow run certify.yml --ref codex/portable-releases -f devfast=true
+gh workflow run certify.yml --ref REF -f devfast=true
 ```
 
 These commands run the same small Linux/Windows diagnostic against the selected
@@ -124,9 +126,43 @@ fix must be included in the binaries being certified.
 
 See [local focused commands](building.md#focused-development-diagnostics).
 For temporary investigation commits, `[skip ci]` can suppress automatic
-push/PR matrices while manual diagnostics remain available. Remove the marker
-from the final validation commit and run with `devfast=false` or unchecked;
-successful focused diagnostics do not replace full regression or certification.
+push/PR matrices while manual dispatch remains available. Once the candidate is
+complete, continue with full source CI and applicable SDK qualification on that
+same revision, using `devfast=false` or unchecked:
+
+```sh
+gh workflow run ci.yml --ref REF -f devfast=false
+# Also run SDK/toolchain and copied-bundle coverage when relevant to the change:
+gh workflow run sdk.yml --ref REF -f devfast=false
+gh run list --workflow ci.yml --limit 5
+gh run list --workflow sdk.yml --limit 5
+gh run watch RUN_ID --exit-status
+```
+
+Wait for the relevant full runs to complete successfully and address any
+regressions they expose. **Do not finish bug or feature work with only a fast
+pass.** Full manual dispatch after a `[skip ci]` commit provides this validation;
+there is no need to launch duplicate push/PR runs solely to remove the marker.
+Alternatively, omit the marker and use the normal full automatic runs. Record
+the tested commit and run IDs in either case.
+
+For a release task, follow successful source validation with publication and
+full certification of the correct published source:
+
+```sh
+# When the fix needs new binaries, publish a new version/date release first:
+gh workflow run release.yml --ref REF -f experiment=true -f publish=true
+# After publication completes, use its actual new tag:
+gh workflow run certify.yml --ref REF -f release_tag=RELEASE_TAG -f devfast=false
+gh run list --workflow certify.yml --limit 5
+gh run watch CERTIFICATION_RUN_ID --exit-status
+```
+
+Publication remains separate from certification. Existing binaries and prior
+reports stay immutable; selecting a newer `REF` cannot apply a source fix to an
+older release. A diagnostic pass does not qualify either release, and an
+experimental release remains a prerelease and never Latest even after full
+certification passes.
 
 ## Durable SDK storage and compilation time
 
