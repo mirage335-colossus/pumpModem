@@ -49,6 +49,10 @@ on:
         description: 'Run only the selected focused diagnostic; skip full regression and release work'
         type: boolean
         default: false
+      sanitizer_realtime:
+        description: 'Include real-time Fast RX checks in the instrumented Debug job (full runs only)'
+        type: boolean
+        default: false
       diagnostic:
         description: 'Focused check used only with devfast=true'
         type: choice
@@ -63,7 +67,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: native-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ inputs.diagnostic || 'legacy' }}-${{ inputs.devfast && 'devfast' || 'full' }}-${{ inputs.linux_runner || 'ubuntu-latest-h' }}-${{ inputs.windows_runner || 'windows-latest-h' }}-${{ inputs.arm_runner || 'ubuntu-24.04-arm-h' }}
+  group: native-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ inputs.diagnostic || 'legacy' }}-${{ inputs.devfast && 'devfast' || 'full' }}-${{ !inputs.devfast && inputs.sanitizer_realtime && 'realtime' || 'standard' }}-${{ inputs.linux_runner || 'ubuntu-latest-h' }}-${{ inputs.windows_runner || 'windows-latest-h' }}-${{ inputs.arm_runner || 'ubuntu-24.04-arm-h' }}
   cancel-in-progress: true
 
 jobs:
@@ -224,7 +228,20 @@ jobs:
           -DDART_TESTING_TIMEOUT=3600
           -DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE
       - run: cmake --build build --target datapump-apps datapump-tests --parallel "$(nproc)"
-      - run: ctest --test-dir build --output-on-failure --parallel 2
+      - name: Run native tests with explicit sanitizer throughput scope
+        env:
+          DATAPUMP_SANITIZERS: ${{ matrix.sanitizers }}
+          SANITIZER_REALTIME: ${{ inputs.sanitizer_realtime }}
+        run: |
+          set --
+          if [ "$DATAPUMP_SANITIZERS" = ON ] && [ "$SANITIZER_REALTIME" != true ]; then
+            set -- --exclude-regex '^(fast_session|gui_fast_live)$'
+            echo '::notice::Instrumented real-time checks omitted: fast_session, gui_fast_live. Set sanitizer_realtime=true to include them. Release checks remain required.'
+            echo 'Sanitizer scope: fast_session and gui_fast_live omitted because their wall-clock audio budgets are sensitive to instrumentation overhead. This omits their instrumented end-to-end coverage, not a pass. Both remain mandatory in Release. Set sanitizer_realtime=true for the complete instrumented selection; failures then remain fatal.' >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$DATAPUMP_SANITIZERS" = ON ]; then
+            echo 'Sanitizer scope: complete selection, including fast_session and gui_fast_live real-time checks. All failures remain fatal.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          ctest --test-dir build --output-on-failure --parallel 2 "$@"
       - name: Exercise native desktop workflow
         run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' ./build/datapump-gui --smoke-test --smoke-timeout 600
       - name: Developer CLI regressions (Python is not packaged)

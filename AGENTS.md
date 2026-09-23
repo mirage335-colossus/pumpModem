@@ -28,6 +28,13 @@ captures have their own documented provenance. Keep all checks below intact.
   native and SDK qualification require explicit manual dispatch after fixes.
   Runner defaults use the organization's H pools; do not repeat checks on
   smaller runners unless specifically requested.
+- Native CI excludes only `fast_session` and `gui_fast_live` from its instrumented
+  Debug job unless `sanitizer_realtime=true` is explicitly requested. Their
+  real-time audio budgets are sensitive to sanitizer overhead; this is omitted
+  instrumented coverage, not proof of a hardware-only problem or a test pass.
+  Keep both mandatory in Release and retain their existing assertions. Other
+  sanitizer failures remain fatal; do not extend this exclusion to new failures.
+  Local tests remain available unchanged. See [sanitizer throughput scope](docs/building.md#sanitizer-throughput-scope).
 - Reuse the exact prepared Linux SDK and Windows dependency recipes from the
   durable `base` release where applicable in ordinary release, certification
   and full CI jobs.

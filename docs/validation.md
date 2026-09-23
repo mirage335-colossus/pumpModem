@@ -6,6 +6,29 @@ it is not installed with the application.
 
 ## CI cleanup and Windows graphics coverage — 23 September 2026
 
+Following the recorded sanitizer throughput diagnosis below, native CI now makes
+only `fast_session` and `gui_fast_live` opt-in in its instrumented Debug job via
+`sanitizer_realtime=true` (default false). Release coverage remains mandatory.
+The job records omitted instrumented coverage explicitly, and every selected
+test failure remains fatal. Local test selection and runtime behavior are
+unchanged. This policy does not establish a hardware-only cause, erase earlier
+failures or turn omitted tests into passes.
+
+Actionlint and whitespace checks pass. Twenty shell probes cover default/empty
+input, explicit opt-in, unchanged Release selection and CTest nonzero status
+propagation in both `sh` and `bash`. CTest discovery against the existing local
+sanitizer and Release trees confirms that the anchored expression removes
+exactly the two named tests (140 to 138 and 142 to 140 respectively); these are
+selection checks, not executions or new regression passes. The shell probes
+verify that Release never applies that expression. No full native run,
+calibration or SDK rebuild is needed to verify this CI-only policy change.
+The [ordinary focused PR checks](https://github.com/mirage335-colossus/pumpModem/actions/runs/35933045074)
+pass on `d0057642b7ea7117833e0cccbfdc0d9c6b007480`: build helpers and repeated
+Linux/Windows Legacy diagnostics use H runners. Final review additionally makes
+the concurrency key ignore the checkbox with `devfast=true`, preventing duplicate
+equivalent diagnostics; actionlint and the four boolean combinations pass after
+that adjustment. This is not a new full sanitizer-regression result.
+
 The Windows certification harness recognizes only exit 1 with the exact Rev
 message `[NativeWindow] Required WGL ARB extensions not available` as a hosted
 graphics warning. Compilation, clipboard, headless GUI/CLI, modem, calibration,
