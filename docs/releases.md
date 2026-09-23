@@ -367,7 +367,12 @@ not grant new rights or describe every bundled component as CC0. Read the
 included license file before accepting it. Gentoo may build missing **host**
 dependencies according to local Portage settings; CI requires binary host
 packages and fails if they are unavailable, so it cannot silently start a long
-source build. Updating means verifying the new release's recipe archive and
+source build. The disposable Gentoo CI container uses an official desktop
+profile and the official x86-64-v3 binhost after checking runner CPU support;
+the generic binhost currently lacks the required ALSA/PulseAudio bridge.
+This choice applies only to CI's host dependencies and does not raise the
+application archive's CPU baseline or alter users' Portage configuration.
+Updating means verifying the new release's recipe archive and
 repeating `makepkg -si`, or selecting its new overlay directory and running
 `emerge --update`. These local recipes are not submitted to AUR or Gentoo's main
 repository, and are not an automatically synchronized package feed.
