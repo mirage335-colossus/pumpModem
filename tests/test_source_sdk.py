@@ -146,7 +146,11 @@ class SourceSdkTests(unittest.TestCase):
                 'BR2_PACKAGE_XLIB_LIBXFT=y', 'BR2_PACKAGE_LIBOPENSSL=y',
                 'BR2_TOOLCHAIN_BUILDROOT_GLIBC=y', f'BR2_GENERATE_LOCALE="{generated_locales}"',
             ]) + '\n')
-        with patch.object(sdk, 'patch_buildroot'), patch.object(sdk, 'run', side_effect=configure), \
+        # This fixture simulates the initial x86_64 recipe on every test host;
+        # it does not run Buildroot or qualify an ARM-hosted SDK build.
+        with patch.object(sdk.platform, 'system', return_value='Linux'), \
+                patch.object(sdk.platform, 'machine', return_value='x86_64'), \
+                patch.object(sdk, 'patch_buildroot'), patch.object(sdk, 'run', side_effect=configure), \
                 patch.object(sdk.urllib.request, 'urlopen', side_effect=AssertionError('network')):
             command, _ = sdk.prepare(self.cache, manifest, 'fixture-id', False, 2)
             # Newer Buildroot's host-localedef cannot generate this older libc's

@@ -219,7 +219,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
           cmake --build build/release-windows --config Release --target package --parallel 2
           if ($LASTEXITCODE -ne 0) { throw 'Packaging failed' }
-          cmake -DARCHIVE_DIR="$PWD/build/release-windows/releases" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=300 -P tools/verify-native-archives.cmake
+          cmake -DARCHIVE_DIR="$PWD/build/release-windows/releases" -DBUILD_DIR="$PWD/build/release-windows" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=300 -P tools/verify-native-archives.cmake
           if ($LASTEXITCODE -ne 0) { throw 'Archive checks failed' }
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
