@@ -6,9 +6,14 @@ on:
   workflow_dispatch:
     inputs:
       devfast:
-        description: 'Run only focused Legacy diagnostics; skip full builds, regression suites and packaging'
+        description: 'Run only the selected focused diagnostic; skip full regression and release work'
         type: boolean
         default: false
+      diagnostic:
+        description: 'Focused check used only with devfast=true'
+        type: choice
+        options: [legacy, windows-rev]
+        default: legacy
 
 permissions:
   contents: read
@@ -19,8 +24,12 @@ concurrency:
 
 jobs:
   devfast:
-    if: github.event_name == 'workflow_dispatch' && inputs.devfast
+    if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic != 'windows-rev'
     uses: ./.github/workflows/devfast.yml
+
+  windows-rev-diagnostic:
+    if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'windows-rev'
+    uses: ./.github/workflows/windows-rev-diagnostic.yml
 
   gui-contract:
     if: ${{ !inputs.devfast }}

@@ -934,7 +934,7 @@ export namespace Rev {
             poll(&fd, 1, timeoutMs);
         }
 
-        static void pumpEvents() {
+        static bool pumpEvents() {
             ensureDisplay();
             // Painting can queue another frame. Bound this batch to the events
             // already pending so continuous redraws yield to application work.
@@ -1051,6 +1051,7 @@ export namespace Rev {
                     }
                 }
             }
+            return true;
         }
 
         static size_t decodeUtf8(const unsigned char* input, size_t length, uint32_t& codepoint) {

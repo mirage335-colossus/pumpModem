@@ -1349,7 +1349,8 @@ int run(Launch launch) {
     configure_theme(launch.color);std::vector<void*> windows;
     auto app=std::make_unique<RevApp>(windows,launch);
     while(!app->application.finished()) {
-        Rev::NativeWindow::pumpEvents();app->platform.poll();
+        if(!Rev::NativeWindow::pumpEvents())app->application.close();
+        app->platform.poll();
         if(app->application.tick()) {
             app->select_page(app->application.page());app->apply();
             app->smoke_layout_pending=launch.smoke;

@@ -239,7 +239,7 @@ for the separate publication/certification sequence and source-pinning rules.
 The manual `devfast` checkbox in native CI (`ci.yml`), SDK qualification
 (`sdk.yml`) and release certification (`certify.yml`) defaults to **false**.
 The default runs retain their full suites and calibration. With `devfast=true`,
-each workflow instead calls the same small Legacy diagnostic on Linux and
+each workflow defaults to the same small Legacy diagnostic on Linux and
 Windows: compile the production Legacy controller/session and existing
 `gui_legacy_live` fixture and deterministic `gui_legacy_poll` cancellation/error
 regression, then require three consecutive serial passes, stopping
@@ -255,6 +255,20 @@ gh workflow run ci.yml --ref codex/portable-releases -f devfast=true
 # Alternatively; no release_tag is needed for a source diagnostic:
 gh workflow run certify.yml --ref codex/portable-releases -f devfast=true
 ```
+
+For a Windows Rev compiler or event-loop fault, native CI also offers a focused
+selection that first runs dependency-free style and Win32 message regressions,
+then downloads the existing Windows base and compiles only the actual Rev GUI:
+
+```sh
+gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=windows-rev
+```
+
+This path performs a bounded headless self-check; it creates no release or
+Actions artifact, and it does not qualify rendering, full regression coverage
+or published binaries. `diagnostic=legacy` remains the default. Choose the
+selection that reproduces the current fault, then follow with applicable full
+checks and certification once the candidate is complete.
 
 The diagnostic logs and run summary identify the checked-out branch SHA.
 A new dispatch selects the current branch commit; rerunning an earlier run

@@ -23,6 +23,7 @@ module;
 // Misc
 #include <glew/glew.h>
 #include <dbg.hpp>
+#include <rev_win_message_pump.hpp>
 
 #include "WinEvent.hpp"
 
@@ -556,6 +557,9 @@ export namespace Rev {
                 + operation
             );
         }
+
+        // False requests orderly application shutdown after WM_QUIT.
+        static bool pumpEvents() { return RevWinMessagePump::pump(); }
 
         NativeWindow(
             void* ownerOrParent,

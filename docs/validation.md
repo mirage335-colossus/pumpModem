@@ -73,8 +73,10 @@ probe compiling the four actual production modules reproduces the original
 ambiguity under strict Clang diagnostics and passes after the change. Its
 regression checks mutable/const symmetry, values/units, color alpha, notification
 and transition metadata, and layout-versus-paint decisions. The case is also
-retained in the normal Rev GUI group; Windows release builds run the small probe
-before dependency download or application compilation.
+retained in the normal Rev GUI group. The focused Windows diagnostic runs the
+small probes before dependency download or application compilation; ordinary
+publication leaves those regressions to diagnosis/certification after the fix
+is established.
 
 [Windows base production](https://github.com/mirage335-colossus/pumpModem/actions/runs/35868536506)
 passes on source `ba80ff6e300ab0fe885067206d56be54b9f2428f`. Recipe
@@ -92,8 +94,25 @@ Static Rev packaging now explicitly includes the GLEW/FreeType vcpkg notices,
 which a DLL dependency scan cannot discover for statically linked libraries.
 The focused packaging fixture verifies their exact contents after relocation and
 that CLI/FLTK packages do not select unused Rev notices. Existing archive,
-corruption and timeout checks pass. Reuse/publication/certification follow-ups
-are recorded separately when complete.
+corruption and timeout checks pass. Full SDK packaging follows up with **3/3**
+in **37.95 seconds**.
+
+[Windows base-only reuse](https://github.com/mirage335-colossus/pumpModem/actions/runs/35869666909)
+passes on source `b8c260b319428b3bc18d582d918a3edadbfc8dac`: download and verified
+inventory **7s**, installation/compiler check **3s**, fresh link/run probe **17s**,
+whole Windows job **44s** including checkout. The vcpkg checkout, dependency
+build/export and upload steps are skipped. Both base workflows use zero Actions
+artifacts/cache.
+
+The [second six-package attempt](https://github.com/mirage335-colossus/pumpModem/actions/runs/35869672617)
+uses that same source and again passes all four Linux packages and Windows FLTK.
+Windows dependency reuse takes **19s (FLTK)** and **11s (Rev)**. The actual MSVC
+style probe passes (25s including configure/build, 0.12s test), confirming the
+first compiler correction. Rev compilation then exposes a missing Win32
+`NativeWindow::pumpEvents` implementation; publication correctly remains a draft.
+The next iteration uses native CI's targeted `devfast=true,
+diagnostic=windows-rev` selection before another full release attempt, retaining
+all required regression and exact-release certification steps afterward.
 
 ## Full validation after focused diagnosis — 23 September 2026
 

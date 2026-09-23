@@ -146,6 +146,12 @@ and packaging, and use neither Actions artifacts nor cache storage. The source
 SHA is printed in the run summary. Dispatch again after pushing a fix; a rerun
 of an older run still uses that run's original revision.
 
+Native CI additionally accepts `diagnostic=windows-rev` with `devfast=true`.
+It runs the small style and Win32 event-pump regressions, reuses the Windows
+base, compiles the Rev GUI and runs a bounded headless self-check. Use this
+selection for Windows Rev compiler/event-loop diagnosis before another
+build of all six packages. It does not certify graphics or publish release assets.
+
 `devfast` never downloads a published application, issues a certification
 report, changes a release or grants Latest status. Full certification continues
 to bind the release's recorded source and published hashes, even when the
