@@ -135,7 +135,16 @@ Choose a published release with APT assets. The repository's signing key,
 configured on 23 September 2026, has primary fingerprint
 `8C3DD4A727C83B93374C993B1F94BC4CEC2DF307`. Bootstrap the public key and source
 file from that exact tag, replacing `RELEASE_TAG` below. Check this fingerprint
-against a trusted copy of the maintainer's documentation before initial setup:
+against a trusted copy of the maintainer's documentation before initial setup.
+
+The first published APT experiment is
+[`v001_00-2026-09-23-1123CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-23-1123CDT).
+It reuses the six archives built from application commit `88fb87b`.
+[Bookworm installation checks](https://github.com/mirage335-colossus/pumpModem/actions/runs/35888336578)
+passed for both packages on AMD64 and ARM64; these are separate from full
+application certification. As of
+23 September 2026, no regular release has qualified for Latest, so use its
+explicit tag when opting into this experiment.
 
 ```sh
 tag=RELEASE_TAG

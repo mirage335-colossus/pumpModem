@@ -4,6 +4,62 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Signed flat APT release assets — 23 September 2026
+
+Schema-3 application releases include four Debian packages, a flat package
+index, signed release metadata, the public key and a Deb822 source file.
+Generated packages, indexes and keys remain in GitHub Releases, outside Git.
+Both GUI backends coexist under separate `/opt/datapump/` directories. Package
+payload bytes and executable modes are verified against the portable archives;
+APT uses a pinned signing key and immutable versioned package URLs even when
+the index is read through `releases/latest/download/`.
+
+Focused coverage passes **7 APT**, **70 release** and **43 certification**
+helper tests. It includes real GPG signatures and an isolated local
+`apt-get update`/download after the mocked Latest route moves, modified payload
+and signature rejection, restrictive signing umasks, directory permissions,
+both architectures/backends, packaging/application source identity and bounded
+GitHub error diagnostics with credential redaction. The entire build-tool
+group passes **13/13 in 5.20 seconds**. Workflow lint and whitespace checks pass.
+
+The first live packaging attempt passed its helper tests and package
+construction, then failed while trying to tag the older application commit.
+Repackaged releases now tag the current packaging revision and preserve the
+original `source_sha`, tag, inventory hash and all six archive byte streams.
+Certification validates the packaging tag and uses `source_sha` for application
+tests. No personal token or SDK rebuild is required for this path.
+
+The [live release and installation run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35888336578)
+passes from packaging commit `53c54c3964c532efeb7d25a609f71689c60688cc`.
+It published [`v001_00-2026-09-23-1123CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-23-1123CDT)
+as **experiment**, with all 22 assets. Its six portable archives are byte-for-byte
+copies of finalized draft `v001_00-2026-09-23-1033CDT`, built from application
+source `88fb87bc491c5a0a487b68894ae6890239793e6b`. The final checksum inventory SHA-256
+is `4ff3d58260197ef62729cfa90756ab8e57d80bc64d78bad8f42b666264db799a`.
+
+| Job | Runner | Whole job |
+| --- | --- | ---: |
+| Sign, package and publish | `ubuntu-latest-h` | 44 seconds |
+| Bookworm AMD64, both backends | `ubuntu-latest-h` | 74 seconds |
+| Bookworm ARM64, both backends | `ubuntu-24.04-arm-h` | 86 seconds |
+
+Both clean Bookworm containers successfully fetched the public signed GitHub
+index with `apt-get update`, installed both backends and their declared runtime
+dependencies through APT, verified every installed payload, and passed CLI
+version/GUI self-checks. Only inspection/display harness tools were installed
+before the application packages. All application build jobs were skipped;
+no SDK/base was rebuilt and no smaller runner was retested. The times exclude
+queueing. These packaging checks do not replace full source/binary certification
+or qualify physical audio/graphics hardware. The older full certification run
+`35878492914` is complete with its recorded failures; all 20 published Linux
+distribution checks passed. No regular Latest release exists yet.
+
+APT signing uses the dedicated primary fingerprint
+`8C3DD4A727C83B93374C993B1F94BC4CEC2DF307`; private material is held in the
+repository Actions secret, never in Git or release assets. Only qualified
+regular schema-3 releases can be Latest. Experiments remain pinned to an
+explicit tag, and earlier release schemas cannot remove the APT update channel.
+
 ## Larger runners and independent compilation concurrency — 23 September 2026
 
 Manual workflows now propagate Linux x86_64, Windows x64 and, where applicable,
