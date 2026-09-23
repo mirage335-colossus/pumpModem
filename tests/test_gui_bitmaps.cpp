@@ -624,8 +624,24 @@ void sampled_pattern_score_clouds() {
     const auto noise_samples = [&](float deviation) {
         std::vector<float> samples(15 * symbol);
         std::mt19937 random(991);
-        std::normal_distribution<float> distribution(0, deviation);
-        for (auto& sample : samples) sample = distribution(random);
+        // Freeze the polar Gaussian sampling order used by this fixture.
+        // normal_distribution's algorithm differs between standard libraries,
+        // even with the same engine/seed, changing the actual received PCM.
+        const auto uniform = [&] {
+            return std::min(std::ldexp(static_cast<float>(random()), -32),
+                            std::nextafter(1.0f, 0.0f));
+        };
+        for (std::size_t i = 0; i < samples.size();) {
+            float x, y, radius;
+            do {
+                x = 2.0f * uniform() - 1.0f;
+                y = 2.0f * uniform() - 1.0f;
+                radius = x * x + y * y;
+            } while (radius == 0.0f || radius > 1.0f);
+            const float scale = std::sqrt(-2.0f * std::log(radius) / radius);
+            samples[i++] = y * scale * deviation;
+            if (i < samples.size()) samples[i++] = x * scale * deviation;
+        }
         return samples;
     };
     const auto noise = noise_samples(.0001f);

@@ -58,6 +58,9 @@ const std::string console_message="Continuous Fast console: café and exact byte
 const std::string restricted_message="Continuous Fast console_ caf__ and exact bytes._____\n";
 const std::string shellcode_message="Continuous Fast console: caf__ and exact bytes.;()\\&\n";
 void check(bool condition,const char* why) {if(!condition)throw Error(why);}
+std::string path_text(const std::filesystem::path& path) {
+    const auto utf8=path.u8string();return {utf8.begin(),utf8.end()};
+}
 Bytes render(const BitmapSource& source) {
     BitmapImage image(128,80);
     source.paint(full_bitmap_request(128,80,false,true),[&](unsigned x,unsigned y,PixelBlock block) {image.blit(x,y,block);});
@@ -168,7 +171,15 @@ void run_transfer(fast_ui::Controller& controller,bool receive) {
         check(controller.field(ui::Field::fast_history).records.empty()&&controller.field(ui::Field::fast_files).records.empty(),
             "Transmitted content appeared in the received Signals or Files lists");
     }
-    check(changed[0]&&changed[1]&&changed[2]&&captured,"Actual audio failed to update all three Fast plots");
+    if(!(changed[0]&&changed[1]&&changed[2]&&captured)) {
+        std::string diagnostic="Actual audio failed to update all three Fast plots: ";
+        diagnostic+=controller.field(ui::Field::fast_profile).selected+(receive?" RX: ":" TX: ");
+        diagnostic+=controller.field(ui::Field::fast_status).text+"; "+controller.field(ui::Field::fast_progress).text;
+        for(std::size_t i=0;i<ids.size();++i)
+            diagnostic+="; plot "+std::to_string(i)+" changed="+std::to_string(changed[i])+
+                " revision="+std::to_string(revisions[i])+" "+controller.bitmap_caption(ids[i]);
+        throw Error(diagnostic);
+    }
     if(receive)check(controller.bitmap_title(ui::Bitmap::fast_constellation)=="Retained RX equalized constellation",
                      "Valid received payload never replaced unsynchronized input I/Q with equalized symbols");
     for(std::size_t i=0;i<ids.size();++i) {
@@ -373,12 +384,14 @@ int main() {
             const auto suffix=std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".txt";
             const auto filename=std::string("Fast ")+profile+" café;()-"+suffix;
             const auto displayed_filename=std::string("Fast ")+profile+" caf_____-"+suffix;
-            const auto input_path=std::filesystem::temp_directory_path()/filename;
+            // GUI service paths are UTF-8 even when the test process uses the
+            // Windows ANSI code page. Keep the accented filename intact.
+            const auto input_path=std::filesystem::temp_directory_path()/std::filesystem::path(std::u8string(filename.begin(),filename.end()));
             struct RemoveSource {std::filesystem::path path;~RemoveSource(){std::error_code ec;std::filesystem::remove(path,ec);}} remove_source{input_path};
             {std::ofstream input(input_path,std::ios::binary);input<<message;}
             controller.activate(ui::Command::fast_choose_file);const auto attachment_request=controller.take_services();
             check(attachment_request.size()==1,"Attachment fixture did not request a file");
-            controller.complete_service({attachment_request.front().id,false,input_path.string(),{}});
+            controller.complete_service({attachment_request.front().id,false,path_text(input_path),{}});
             unsynchronized_audio(controller);
             run_transfer(controller,false);
             {std::lock_guard lock(fixture::mutex);
@@ -402,7 +415,7 @@ int main() {
             const auto requests=controller.take_services();check(requests.size()==1&&requests.front().value==displayed_filename,
                 "Save dialog received an unsafe filename, including in Shellcode mode");
             check(!std::filesystem::exists(path),"Receive wrote content before Save destination was chosen");
-            controller.complete_service({requests.front().id,false,path.string(),{}});
+            controller.complete_service({requests.front().id,false,path_text(path),{}});
             const auto deadline=std::chrono::steady_clock::now()+5s;
             while(controller.field(ui::Field::fast_status).text!="Saved complete received bytes.") {
                 controller.poll();check(std::chrono::steady_clock::now()<deadline,"Explicit Fast Save did not finish");

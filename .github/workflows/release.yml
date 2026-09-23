@@ -135,7 +135,7 @@ jobs:
       - name: Build and test with isolated SDK dependencies
         run: |
           for group in build contract gui packaging; do
-            ./build.sh test "$group" --stop-on-failure --sdk "$GITHUB_WORKSPACE/build/sdk" --build-dir build/release-sdk --jobs 2 -- -DDATAPUMP_PORTABLE=ON
+            ./build.sh test "$group" --stop-on-failure --sdk "$GITHUB_WORKSPACE/build/sdk" --build-dir build/release-sdk --jobs 2 -- -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600
           done
           DATAPUMP_MAX_GLIBC=2.36 ./build.sh package --sdk "$GITHUB_WORKSPACE/build/sdk" --build-dir build/release-sdk --jobs 2
           xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' build/sdk/bin/cmake -DARCHIVE_DIR="$PWD/build/release-sdk/releases" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=300 -DMAX_GLIBC=2.36 -P tools/verify-native-archives.cmake
@@ -177,7 +177,7 @@ jobs:
           CXX: g++-11
         run: |
           for group in build contract gui packaging; do
-            ./build.sh test "$group" --stop-on-failure --build-dir build/release-native --jobs 2 -- -DDATAPUMP_PORTABLE=ON
+            ./build.sh test "$group" --stop-on-failure --build-dir build/release-native --jobs 2 -- -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600
           done
           DATAPUMP_MAX_GLIBC=2.35 ./build.sh package --build-dir build/release-native --jobs 2
           xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/build/release-native/releases" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=300 -DMAX_GLIBC=2.35 -P tools/verify-native-archives.cmake
@@ -217,12 +217,16 @@ jobs:
       - name: Build with the Windows SDK and static MSVC runtime
         shell: pwsh
         run: |
-          cmake -S . -B build/release-windows -G 'Visual Studio 17 2022' -A x64 -DCMAKE_TOOLCHAIN_FILE="$PWD/.ci-vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DDATAPUMP_PORTABLE=ON -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          cmake -S . -B build/release-windows -G 'Visual Studio 17 2022' -A x64 -DCMAKE_TOOLCHAIN_FILE="$PWD/.ci-vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600 -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
           if ($LASTEXITCODE -ne 0) { throw 'Configure failed' }
           cmake --build build/release-windows --config Release --target datapump-apps datapump-tests-contract datapump-tests-gui datapump-tests-packaging --parallel 2
           if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
-          ctest --test-dir build/release-windows -C Release --output-on-failure -L '^(contract|gui|packaging)$' --parallel 2 --stop-on-failure
-          if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
+          # The live/audio fixtures have their own workers and wall-clock
+          # deadlines. Keep independent suites from competing on hosted CPUs.
+          foreach ($group in @('gui', 'contract', 'packaging')) {
+            ctest --test-dir build/release-windows -C Release --output-on-failure -L "^$group`$" --parallel 1 --stop-on-failure
+            if ($LASTEXITCODE -ne 0) { throw "$group tests failed" }
+          }
           cmake --build build/release-windows --config Release --target package --parallel 2
           if ($LASTEXITCODE -ne 0) { throw 'Packaging failed' }
           cmake -DARCHIVE_DIR="$PWD/build/release-windows/releases" -DBUILD_DIR="$PWD/build/release-windows" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=300 -P tools/verify-native-archives.cmake

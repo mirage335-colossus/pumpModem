@@ -178,3 +178,10 @@ X11/font libraries. This is a host-tool upgrade: the application still compiles
 against the selected glibc baseline, and host dependency rejection remains strict.
 Release tests stop after the first failed suite for prompt feedback; successful
 runs execute the full contract, GUI and packaging selections.
+
+The hosted release configuration gives each otherwise-unbounded CTest case a
+3600-second process limit instead of CTest's 1500-second default: the full
+probability calibration exceeded that default on a hosted x86-64 runner. It
+retains every sample and numerical assertion. Windows suites run serially to
+avoid competing with the live/audio fixtures' own workers; their internal
+progress deadlines remain unchanged.
