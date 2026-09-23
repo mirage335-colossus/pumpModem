@@ -1,5 +1,6 @@
 #include "gui_smoke.hpp"
 #include "gui_smoke_replay.hpp"
+#include "gui_smoke_pending.hpp"
 #include "bitmap_sources.hpp"
 #include "datapump/runtime.hpp"
 #include "datapump/received_text.hpp"
@@ -143,10 +144,10 @@ struct Smoke::Impl {
             require(snapshot.replay_frame_count==replay.frame_count,"Simulation replay changed its retained frame count");
             for(const auto& signal:snapshot.signals) {
                 require(!signal.validated&&!signal.complete&&signal.binary,"Replay delivered completed source content before its physical end");
-                const auto& lines=controller.signals().lines();
-                const auto found=std::find_if(lines.begin(),lines.end(),[&](const auto& line){return line.id==signal.id;});
-                require(found!=lines.end()&&!found->validated&&!found->complete,"Pending replay signal was not presented");
-                const auto index=static_cast<std::size_t>(found-lines.begin());
+                const auto retained=smoke_detail::pending_replay_row(signal,snapshot,controller.signals());
+                if(!retained)continue;
+                const auto index=*retained;
+                const auto* found=&controller.signals().lines()[index];
                 require(!controller.signals().copy_id(index)&&!controller.signals().copy_bits(index),"Pending reception became copyable before completion");
                 require(!found->pre_fec_accuracy&&signal_status_label(*found)=="binary pending",
                         "Pending physical observations claimed completed content or measured FEC accuracy");

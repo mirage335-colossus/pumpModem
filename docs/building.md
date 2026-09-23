@@ -238,6 +238,14 @@ Do not rerun an expensive unchanged suite after recording a pass unless later
 changes or failures invalidate that evidence. Compile with available cores, but
 keep timing-sensitive test concurrency at its documented limits.
 
+For a pending-replay row assertion, build only `test_gui_controller` in an
+existing configured tree and run it with `--pending-replay-batch` first. This
+small fixture checks real reception reconciliation, explicit retirement chains
+and the smoke checker without running a modem replay. Follow a completed
+checker change with the affected `gui` and `native` groups. A retry against an
+unchanged published archive does not test a newer checker committed to source;
+retain and distinguish both results.
+
 Automatic `ci.yml` runs are bounded feedback: PRs and pushes to `main` run the
 small Linux/Windows Legacy diagnostic and offline build/SDK helper fixtures.
 Branch pushes do not launch a second copy of the PR checks, and documentation
@@ -388,9 +396,24 @@ visible window and host Mesa/LLVM/C++ runtime mappings within 15 seconds.
 It does not run the full GUI smoke or calibration, upload artifacts, or publish
 a release. Follow a focused pass with applicable full validation.
 
-This path performs a bounded headless self-check; it creates no release or
-Actions artifact, and it does not qualify rendering, full regression coverage
-or published binaries. `diagnostic=legacy` remains the default. Choose the
+For a copied ARM64 Rev smoke failure on Debian Trixie, build only the affected
+package from the corrected branch and run its complete GUI smoke there:
+
+```sh
+gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=arm-rev-smoke
+```
+
+This mode retains the Ubuntu 22.04 build baseline, verifies archive/package
+hashes and the glibc 2.35 ceiling, then runs one full copied GUI smoke with its
+600-second allowance and the same Trixie display prerequisites as certification.
+It uses the H ARM64 runner by default and the pinned runtime dependency scanner;
+it does not rebuild an SDK, run calibration or a general matrix, upload artifacts,
+publish or certify a release. Rerunning an older release cannot test this new
+checker; this diagnostic rebuilds the selected branch's package explicitly.
+
+The `windows-rev` path performs a bounded headless self-check; it creates no
+release or Actions artifact and does not qualify rendering, full regression
+coverage or published binaries. `diagnostic=legacy` remains the default. Choose the
 selection that reproduces the current fault, then follow with applicable full
 checks and certification once the candidate is complete.
 

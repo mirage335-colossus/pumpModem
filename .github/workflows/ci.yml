@@ -52,7 +52,7 @@ on:
       diagnostic:
         description: 'Focused check used only with devfast=true'
         type: choice
-        options: [legacy, certification, windows-certification, windows-rev, graphics, arm-rev-package, runner-capacity, arm-runner-capacity]
+        options: [legacy, certification, windows-certification, windows-rev, graphics, arm-rev-package, arm-rev-smoke, runner-capacity, arm-runner-capacity]
         default: legacy
       diagnostic_release:
         description: 'Published release tag for graphics diagnostics only; no binaries are rebuilt'
@@ -129,10 +129,11 @@ jobs:
       release_tag: ${{ inputs.diagnostic_release }}
 
   arm-rev-package-diagnostic:
-    if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'arm-rev-package'
+    if: github.event_name == 'workflow_dispatch' && inputs.devfast && (inputs.diagnostic == 'arm-rev-package' || inputs.diagnostic == 'arm-rev-smoke')
     uses: ./.github/workflows/arm-rev-package-diagnostic.yml
     with:
       arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-h' }}
+      smoke: ${{ inputs.diagnostic == 'arm-rev-smoke' }}
 
   gui-contract:
     if: github.event_name == 'workflow_dispatch' && !inputs.devfast

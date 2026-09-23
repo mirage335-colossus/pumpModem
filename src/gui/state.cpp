@@ -306,6 +306,9 @@ void Signals::erase(std::uint64_t id) {
     if(retired_ids_.size()>=64)retired_ids_.pop_front();
     retired_ids_.push_back(id);
 }
+bool Signals::retired(std::uint64_t id) const noexcept {
+    return std::find(retired_ids_.begin(),retired_ids_.end(),id)!=retired_ids_.end();
+}
 void apply_receptions(Inbox& inbox, Signals& signals, live::Snapshot& snapshot) {
     if(snapshot.signals.empty() && snapshot.received.empty())return;
     Signals staged=signals;

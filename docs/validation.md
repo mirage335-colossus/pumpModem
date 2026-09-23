@@ -115,6 +115,23 @@ complete source and published-archive certification jobs. Their source contract
 groups retain all 30 tests, including numerical calibration; the Linux contract
 groups finish in **690–783 seconds**.
 
+The copied ARM64 Rev archive passes on Bookworm and Ubuntu 22.04, 24.04 and
+26.04, but its first Trixie check fails at smoke phase 21 (`Pending replay
+signal was not presented`). Earlier cadence messages are already warnings;
+this separate pending-row assertion remains fatal. A deterministic fixture
+using real `apply_receptions` proves a checker defect: a batch can explicitly
+retire an earlier pending ID, so that ID correctly has no retained row. The
+corrected smoke helper requires actual retirement and a visible pending
+replacement, including retirement chains. Missing active rows, stale or
+ambiguous replacement claims, eviction, cycles and completed replacements still
+fail. The production ingestion behavior and 64-ID retirement bound are unchanged;
+the only model addition is a read-only retirement query. Focused fixtures pass
+in **0.002 seconds**, and all **36** shared GUI tests pass in **107.64 seconds**.
+The original hosted log lacks identity detail, so this establishes a checker
+defect without proving the exact cause of that particular failure. New errors
+include batch/retained identities and revisions. This correction is newer than
+the immutable experiment above; an old-release retry cannot validate it.
+
 Full [native regression](https://github.com/mirage335-colossus/pumpModem/actions/runs/35921401021)
 uses `4656214c0b448ef8fc8c278357340b86d19d6bd9`; subsequent source differences
 are test fixtures, failure diagnostics and documentation, not application
@@ -124,7 +141,13 @@ both native archive checks. Its complete receiver calibration passes in
 **178.42 seconds** with 16 workers and every original capture retained.
 Linux Release passes all **125 tests in 1,218.52 seconds**, followed by native
 desktop, CLI, relocation and both archive checks.
-Remaining full-run outcomes are recorded below.
+Linux Debug with ASan/UBSan completes **120/122 tests in 3,155.76 seconds**;
+full numerical calibration passes in **1,066.64 seconds**. The only failures
+are `fast_session` (**4.22 seconds**, capture overrun) and `gui_fast_live`
+(**49.43 seconds**, incomplete reception), consistent with the isolated
+diagnosis above. No sanitizer memory/UB report appears. **Overall native CI
+remains failed**. Its dependent copied-Ubuntu jobs are skipped, not passed;
+the separate release certification checks published binaries independently.
 
 An older FLTK rendering diagnostic also remains: its default ABI clipping
 stack has ten entries, and local complete adapter logs emit one overflow /

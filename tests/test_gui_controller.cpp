@@ -1,4 +1,5 @@
 #include "../src/gui/gui_smoke.hpp"
+#include "../src/gui/gui_smoke_pending.hpp"
 #include "../src/gui/bitmap_sources.hpp"
 #include "../src/gui/binary_editor.hpp"
 #include "../src/gui/transmit_scope.hpp"
@@ -500,6 +501,129 @@ void revised_reception_ingestion() {
               "Erasing cached content left its signal ownership behind");
         inbox.put(first.received.front().content,Inbox::ReceptionIdentity{101,1});inbox.clear();
         check(!inbox.revision(101)&&inbox.items().empty(),"Clearing received content retained stale signal ownership");
+    }
+}
+void pending_replay_batch() {
+    const auto pending=[](std::uint64_t id,std::uint64_t revision,std::string bits) {
+        live::SignalUpdate signal;signal.id=id;signal.revision=revision;signal.binary=true;
+        signal.text=std::move(bits);signal.received_bits=signal.text.size();signal.pattern_score=32;
+        return signal;
+    };
+    const auto first=pending(101,1,"0");
+    auto replacement=pending(102,2,"001");replacement.superseded_ids={first.id};
+    for(const bool reverse:{false,true}) {
+        Inbox inbox;Signals signals;live::Snapshot snapshot;
+        snapshot.signals={first,replacement};
+        if(reverse)std::reverse(snapshot.signals.begin(),snapshot.signals.end());
+        apply_receptions(inbox,signals,snapshot);
+        // This reproduces the original smoke failure using real reconciliation:
+        // A is correctly absent after B retires it, including when A arrives late.
+        check(signals.lines().size()==1&&signals.lines().front().id==replacement.id&&
+              signals.lines().front().text=="001"&&!signals.lines().front().complete&&signals.retired(first.id),
+              "Atomic pending supersession did not retain exactly the replacement prefix");
+        check(!smoke_detail::pending_replay_row(first,snapshot,signals)&&
+              smoke_detail::pending_replay_row(replacement,snapshot,signals)==0&&
+              !signals.copy_id(0)&&!signals.copy_bits(0)&&!signals.copy_raw_bits(0),
+              "Replay smoke did not distinguish retired pending evidence from its visible replacement");
+        auto late=live::Snapshot{};late.signals={first};apply_receptions(inbox,signals,late);
+        check(signals.lines().size()==1&&signals.lines().front().id==replacement.id,
+              "A later poll restored the superseded pending identity");
+    }
+    {
+        Inbox inbox;Signals signals;live::Snapshot snapshot;
+        snapshot.signals={first,pending(first.id,first.revision,"00")};
+        apply_receptions(inbox,signals,snapshot);
+        check(signals.lines().size()==1&&signals.lines().front().text=="00"&&
+              smoke_detail::pending_replay_row(snapshot.signals[0],snapshot,signals)==0&&
+              smoke_detail::pending_replay_row(snapshot.signals[1],snapshot,signals)==0,
+              "Replay smoke lost ordinary same-identity pending progress");
+        snapshot.signals={pending(first.id,2,"001"),first};apply_receptions(inbox,signals,snapshot);
+        check(signals.lines().front().revision==2&&signals.lines().front().text=="001"&&
+              smoke_detail::pending_replay_row(first,snapshot,signals)==0,
+              "Replay smoke rejected a retained pending row newer than a stale event");
+    }
+    const auto rejected=[&](const live::Snapshot& snapshot,const Signals& signals,const char* message) {
+        try { (void)smoke_detail::pending_replay_row(first,snapshot,signals); }
+        catch(const Error& error) {
+            const std::string detail=error.what();
+            check(detail.find("event=101@1")!=std::string::npos&&detail.find("rows=[")!=std::string::npos&&
+                  detail.find("batch=[")!=std::string::npos,"Pending smoke failure lost batch/row identity evidence");
+            return;
+        }
+        throw Error(message);
+    };
+    live::Snapshot batch;batch.signals={first,replacement};
+    rejected(batch,Signals{},"Replay smoke waived missing pending and replacement rows");
+    {
+        Signals retired;retired.erase(first.id);
+        rejected(batch,retired,"Replay smoke accepted retirement without a visible replacement");
+    }
+    for(const bool complete:{false,true}) {
+        Inbox inbox;Signals signals;live::Snapshot unrelated;
+        auto row=replacement;row.complete=complete;
+        unrelated.signals={row};apply_receptions(inbox,signals,unrelated);
+        auto unnamed=batch;unnamed.signals[1].superseded_ids.clear();
+        rejected(unnamed,signals,"Replay smoke inferred supersession without an explicit identity claim");
+        if(complete)rejected(batch,signals,"Replay smoke accepted a completed replacement during pending replay");
+    }
+    for(const auto revision:{1U,3U}) {
+        Inbox inbox;Signals signals;live::Snapshot other_revision;
+        auto row=replacement;row.revision=revision;other_revision.signals={row};
+        apply_receptions(inbox,signals,other_revision);
+        rejected(batch,signals,"Replay smoke accepted an unobserved or stale replacement revision");
+    }
+    {
+        Inbox inbox;Signals signals;live::Snapshot completed;
+        auto row=first;row.complete=true;completed.signals={row};apply_receptions(inbox,signals,completed);
+        rejected(batch,signals,"Replay smoke waived an unexpectedly completed pending identity");
+    }
+    {
+        Inbox inbox;Signals signals;live::Snapshot history;history.signals={first};
+        apply_receptions(inbox,signals,history);
+        for(std::uint64_t id=200;id<264;++id) {
+            history.signals={pending(id,1,"0")};apply_receptions(inbox,signals,history);
+        }
+        auto retained=replacement;retained.superseded_ids.clear();history.signals={retained};
+        apply_receptions(inbox,signals,history);
+        check(signals.lines().size()==64&&!signals.retired(first.id),
+              "The pending history fixture did not distinguish eviction from explicit retirement");
+        rejected(batch,signals,"Replay smoke mistook an evicted pending row for an explicitly retired identity");
+    }
+    {
+        Signals signals;SignalLine row;row.id=replacement.id;row.revision=replacement.revision;
+        row.validated=true;row.complete=true;signals.update(row);signals.erase(first.id);
+        rejected(batch,signals,"Replay smoke accepted a validated replacement during pending replay");
+    }
+    {
+        Inbox inbox;Signals signals;live::Snapshot chain=batch;
+        auto last=pending(103,3,"0011");last.superseded_ids={replacement.id};chain.signals.push_back(last);
+        apply_receptions(inbox,signals,chain);
+        check(signals.lines().size()==1&&signals.lines().front().id==last.id&&
+              signals.retired(first.id)&&signals.retired(replacement.id)&&
+              !smoke_detail::pending_replay_row(first,chain,signals)&&
+              !smoke_detail::pending_replay_row(replacement,chain,signals)&&
+              smoke_detail::pending_replay_row(last,chain,signals)==0&&!signals.copy_bits(0),
+              "Replay smoke rejected a chain of actual retirements ending at visible pending evidence");
+        signals.erase(last.id);
+        rejected(chain,signals,"Replay smoke accepted a retirement chain without its final pending row");
+    }
+    {
+        // B's older revision never retires A, even though C later retires B.
+        // Following only the event graph would incorrectly excuse missing A.
+        Inbox inbox;Signals signals;live::Snapshot initial;
+        initial.signals={pending(replacement.id,3,"0011")};apply_receptions(inbox,signals,initial);
+        live::Snapshot stale;auto last=pending(103,4,"00110");last.superseded_ids={replacement.id};
+        stale.signals={replacement,last};apply_receptions(inbox,signals,stale);
+        check(!signals.retired(first.id)&&signals.retired(replacement.id)&&signals.lines().size()==1,
+              "The stale retirement fixture did not preserve ignored-event semantics");
+        rejected(stale,signals,"Replay smoke used a stale intermediate claim to waive a missing active row");
+    }
+    {
+        Inbox inbox;Signals signals;live::Snapshot cycle=batch;
+        auto back=first;back.superseded_ids={replacement.id};cycle.signals.push_back(back);
+        apply_receptions(inbox,signals,cycle);
+        signals.erase(replacement.id);
+        rejected(cycle,signals,"Replay smoke accepted a cycle without visible pending evidence");
     }
 }
 void noise_start_stop(Controller& controller) {
@@ -2226,12 +2350,18 @@ void bitmap_source_checks() {
 
 int main(int argc,char** argv) {
     try {
+        if(argc>1&&std::string_view(argv[1])=="--pending-replay-batch") {
+            revised_reception_ingestion();pending_replay_batch();
+            std::cout<<"Pending replay batch checks passed\n";
+            return 0;
+        }
         datapump::gui::controller_self_check();
         simulation_estimate_controls();
         empty_composer_preview();
         oscillator_controls();
         lpi_estimate_controls();
         revised_reception_ingestion();
+        pending_replay_batch();
         rate_carrier_controls();
         sub_hertz_controls();
         shannon_capacity_display();
