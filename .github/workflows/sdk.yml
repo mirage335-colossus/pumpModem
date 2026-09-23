@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - '.github/workflows/sdk.yml'
+      - '.github/workflows/sdk-build.yml'
       - 'third_party/build-support/source-sdk/**'
       - 'third_party/rev/**'
       - 'src/gui/*rev*'
@@ -25,6 +26,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/sdk.yml'
+      - '.github/workflows/sdk-build.yml'
       - 'third_party/build-support/source-sdk/**'
       - 'third_party/rev/**'
       - 'src/gui/*rev*'
@@ -60,90 +62,7 @@ concurrency:
 
 jobs:
   sdk:
-    name: Build reusable source SDK
-    runs-on: ubuntu-24.04
-    # Only SDK production needs the baseline bootstrap environment. Consumers
-    # use the resulting directory without a container, chroot, or root access.
-    container: debian:bookworm-slim
-    timeout-minutes: 360
-    env:
-      DEBIAN_FRONTEND: noninteractive
-    steps:
-      - name: Install bootstrap prerequisites
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends build-essential binutils file wget curl cpio unzip rsync bc perl python3 git ca-certificates patch xz-utils bzip2 zstd passwd util-linux debianutils
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Reuse immutable SDK and source archives
-        id: cache
-        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
-        with:
-          path: third_party/build-support/cache/source-sdk/releases
-          key: source-sdk-bookworm-x86_64-v1-${{ hashFiles('tools/build-sdk.py', 'third_party/build-support/source-sdk/**') }}
-      - name: Prepare an ordinary build user
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: |
-          useradd --create-home sdkbuilder
-          chown -R sdkbuilder:sdkbuilder "$GITHUB_WORKSPACE"
-      - name: Fetch pinned sources explicitly
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: runuser -u sdkbuilder -- python3 tools/build-sdk.py fetch --jobs 2
-      - name: Preserve source archive and build from its offline replay
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: |
-          runuser -u sdkbuilder -- python3 tools/build-sdk.py sources --jobs 2
-          mkdir -p build/sdk-replay
-          set -- third_party/build-support/cache/source-sdk/releases/datapump-sdk-sources-*.tar.gz
-          test "$#" -eq 1
-          tar -xf "$1" -C build/sdk-replay
-          chown -R sdkbuilder:sdkbuilder build/sdk-replay
-          # The replay contains every selected source. Drop this CI-only
-          # duplicate to leave room for the compiler's cold build.
-          rm -rf third_party/build-support/cache/source-sdk/downloads third_party/build-support/cache/source-sdk/work
-          set -- build/sdk-replay/datapump-sdk-sources-*
-          test "$#" -eq 1
-          runuser -u sdkbuilder -- sh -c 'cd "$1"; exec python3 tools/build-sdk.py build --jobs 2' sh "$1"
-          cp "$1"/third_party/build-support/cache/source-sdk/releases/datapump-sdk-*-linux-x86_64.tar.gz third_party/build-support/cache/source-sdk/releases/
-          # Only the verified source/SDK archives are cached, not the multi-GB
-          # intermediate compiler tree. These are this job's generated paths.
-          rm -rf build/sdk-replay
-          cd third_party/build-support/cache/source-sdk/releases
-          sha256sum *.tar.gz > SHA256SUMS
-      - name: Check archived SDK after relocation
-        run: |
-          cd third_party/build-support/cache/source-sdk/releases
-          sha256sum --check SHA256SUMS
-          cd "$GITHUB_WORKSPACE"
-          set -- third_party/build-support/cache/source-sdk/releases/datapump-sdk-*-linux-x86_64.tar.gz
-          test "$#" -eq 1
-          python3 tools/build-sdk.py install --archive "$1" --destination "$GITHUB_WORKSPACE/build/sdk-qualified"
-          python3 tools/build-sdk.py verify "$GITHUB_WORKSPACE/build/sdk-qualified" --max-host-glibc 2.36
-      - name: Separate consumer SDK from preserved sources
-        run: |
-          mkdir -p build/sdk-upload/binary build/sdk-upload/sources
-          cp --reflink=auto third_party/build-support/cache/source-sdk/releases/datapump-sdk-*-linux-x86_64.tar.gz build/sdk-upload/binary/
-          cp --reflink=auto third_party/build-support/cache/source-sdk/releases/datapump-sdk-sources-*.tar.gz build/sdk-upload/sources/
-          cp third_party/build-support/cache/source-sdk/releases/SHA256SUMS build/sdk-upload/sources/SDK-SHA256SUMS.txt
-          cd build/sdk-upload/binary
-          sha256sum *.tar.gz > SHA256SUMS
-          cd ../sources
-          sha256sum *.tar.gz > SHA256SUMS
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: DataPump-source-sdk
-          path: build/sdk-upload/binary/*
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 30
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: DataPump-source-sdk-sources
-          path: build/sdk-upload/sources/*
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 30
+    uses: ./.github/workflows/sdk-build.yml
 
   application:
     name: SDK build, ${{ matrix.backend }} on ${{ matrix.name }}

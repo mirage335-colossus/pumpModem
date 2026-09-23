@@ -1,0 +1,3 @@
+# The XZ receive-hardening overlay verifies the exact upstream SHA256 inventory.
+# Preserve those bytes even with core.autocrlf=true on Windows checkouts.
+third_party/xz/** -text

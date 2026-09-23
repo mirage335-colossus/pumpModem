@@ -31,7 +31,7 @@ jobs:
       - name: Prepare shared native conformance environment
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends ca-certificates git cmake ninja-build g++ clang-19 clang-tools-19 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev libxrandr-dev libgl-dev libglew-dev libfreetype-dev libxtst6 libgl1-mesa-dri xvfb xauth fonts-dejavu-core python3
+          apt-get install -y --no-install-recommends ca-certificates git cmake ninja-build make g++ clang-19 clang-tools-19 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev libxrandr-dev libgl-dev libglew-dev libfreetype-dev libxtst6 libgl1-mesa-dri xvfb xauth fonts-dejavu-core python3
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false

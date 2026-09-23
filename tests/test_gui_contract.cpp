@@ -55,7 +55,6 @@ static_assert(theme::text_rgb(ui::TextTone::normal,false)==theme::Rgb{240,240,24
 static_assert(theme::text_rgb(ui::TextTone::normal,true)==theme::Rgb{208,208,208});
 static_assert(theme::text_rgb(ui::TextTone::data,false)==theme::Rgb{255,255,255});
 static_assert(theme::text_rgb(ui::TextTone::data,true)==theme::Rgb{144,192,184});
-static_assert(ui::FieldState{}.text_tone==ui::TextTone::normal);
 static_assert(theme::text_rgb(ui::TextTone::negative,true)==theme::negative_tint);
 static_assert(theme::text_rgb(ui::TextTone::negative,false)==theme::text_rgb(ui::TextTone::normal,false));
 static_assert(theme::text_rgb(ui::TextTone::negative,true)==theme::text_rgb(ui::DocumentTone::negative,true));
@@ -99,5 +98,11 @@ static_assert([] {
 }());
 
 int main() {
+    // GCC 11's standard library does not make FieldState's string members
+    // literal types. Keep this default-value check active in Release too.
+    if (ui::FieldState{}.text_tone != ui::TextTone::normal) {
+        std::cerr << "Default GUI field text tone must be normal.\n";
+        return 1;
+    }
     std::cout << "GUI interface compiles without application internals or a toolkit.\n";
 }

@@ -48,6 +48,9 @@ supplied by the SDK's own compiler build. Those host tools still require their
 documented glibc baseline; release SDKs are built in Bookworm and audited after
 relocation. The default native build remains available.
 
+Manual releases with version/date tags, an experiment checkbox and three portable
+application downloads are documented in [manual portable releases](releases.md).
+
 ## Commands and profiles
 
 | Command | Output/configuration | Work performed |

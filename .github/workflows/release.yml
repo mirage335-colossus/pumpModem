@@ -1,0 +1,341 @@
+name: Manual portable release
+run-name: Portable release (${{ inputs.linux_baseline || 'ubuntu-22.04' }}, experiment=${{ inputs.experiment != false }})
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Optional release label (for example v001_00); blank uses the CMake version'
+        type: string
+        default: ''
+      experiment:
+        description: 'Title exactly experiment; prerelease, never Latest'
+        type: boolean
+        default: true
+      publish:
+        description: 'Publish after every build and compatibility check passes (off = artifact-only rehearsal)'
+        type: boolean
+        default: false
+      linux_baseline:
+        description: 'x86-64 SDK (glibc 2.36), or older Ubuntu baseline (glibc 2.35)'
+        type: choice
+        options: [bookworm-sdk, ubuntu-22.04]
+        default: bookworm-sdk
+  # Exercise the same graph before merging; PRs never have publication authority.
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+      - '.github/workflows/sdk-build.yml'
+      - 'tools/release.py'
+      - 'tests/test_release.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portable-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  metadata:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      baseline: ${{ steps.matrix.outputs.baseline }}
+      native_matrix: ${{ steps.matrix.outputs.native_matrix }}
+      compatibility_matrix: ${{ steps.matrix.outputs.compatibility_matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test release naming and publication safeguards
+        run: python3 tests/test_release.py
+      - name: Record a single build date and exact source revision
+        id: meta
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          LINUX_BASELINE: ${{ inputs.linux_baseline || 'ubuntu-22.04' }}
+          EXPERIMENT: ${{ github.event_name != 'workflow_dispatch' || inputs.experiment }}
+        run: |
+          args=()
+          if [ "$EXPERIMENT" = true ]; then args+=(--experiment); fi
+          python3 tools/release.py metadata --version "$RELEASE_VERSION" \
+            --linux-baseline "$LINUX_BASELINE" --source-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" --output release-metadata.json \
+            --github-output "$GITHUB_OUTPUT" "${args[@]}"
+      - name: Select three packages and compatible test hosts
+        id: matrix
+        env:
+          LINUX_BASELINE: ${{ inputs.linux_baseline || 'ubuntu-22.04' }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          baseline = os.environ['LINUX_BASELINE']
+          if baseline not in ('bookworm-sdk', 'ubuntu-22.04'):
+              raise SystemExit('Unknown Linux baseline')
+          native = [{'arch': 'aarch64', 'runner': 'ubuntu-24.04-arm'}]
+          if baseline == 'ubuntu-22.04':
+              native.append({'arch': 'x86_64', 'runner': 'ubuntu-24.04'})
+          compatibility = []
+          for arch, runner in [('x86_64', 'ubuntu-24.04'), ('aarch64', 'ubuntu-24.04-arm')]:
+              ceiling = '2.36' if arch == 'x86_64' and baseline == 'bookworm-sdk' else '2.35'
+              images = ['debian:bookworm-slim', 'debian:trixie-slim', 'ubuntu:24.04', 'ubuntu:26.04']
+              if ceiling == '2.35':
+                  images.append('ubuntu:22.04')
+              if arch == 'x86_64':
+                  images.append('archlinux:base')
+              compatibility.extend({'arch': arch, 'runner': runner, 'image': image, 'glibc': ceiling} for image in images)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('baseline=' + baseline + '\n')
+              output.write('native_matrix=' + json.dumps({'include': native}) + '\n')
+              output.write('compatibility_matrix=' + json.dumps({'include': compatibility}) + '\n')
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-metadata
+          path: release-metadata.json
+          if-no-files-found: error
+
+  sdk:
+    needs: metadata
+    if: needs.metadata.outputs.baseline == 'bookworm-sdk'
+    uses: ./.github/workflows/sdk-build.yml
+
+  sdk-linux:
+    needs: sdk
+    runs-on: ubuntu-24.04
+    container: debian:bookworm-slim
+    timeout-minutes: 120
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - name: Install runtime and verification prerequisites
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git python3 file binutils make xvfb xauth fonts-dejavu-core fontconfig-config libxtst6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: DataPump-source-sdk
+          path: downloaded-sdk
+      - name: Install the verified source SDK
+        run: |
+          cd downloaded-sdk
+          sha256sum --check SHA256SUMS
+          cd "$GITHUB_WORKSPACE"
+          set -- downloaded-sdk/datapump-sdk-*-linux-x86_64.tar.gz
+          test "$#" -eq 1
+          python3 tools/build-sdk.py install --archive "$1" --destination "$GITHUB_WORKSPACE/build/sdk"
+          python3 tools/build-sdk.py verify "$GITHUB_WORKSPACE/build/sdk" --max-host-glibc 2.36
+      - name: Build and test with isolated SDK dependencies
+        run: |
+          for group in build contract gui packaging; do
+            ./build.sh test "$group" --sdk "$GITHUB_WORKSPACE/build/sdk" --build-dir build/release-sdk --jobs 2 -- -DDATAPUMP_PORTABLE=ON
+          done
+          DATAPUMP_MAX_GLIBC=2.36 ./build.sh package --sdk "$GITHUB_WORKSPACE/build/sdk" --build-dir build/release-sdk --jobs 2
+          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' build/sdk/bin/cmake -DARCHIVE_DIR="$PWD/build/release-sdk/releases" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=300 -DMAX_GLIBC=2.36 -P tools/verify-native-archives.cmake
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linux-x86_64
+          path: |
+            build/release-sdk/releases/*.tar.gz
+            build/release-sdk/releases/*.zip
+            build/release-sdk/releases/SHA256SUMS.txt
+          if-no-files-found: error
+          compression-level: 0
+
+  native-linux:
+    needs: metadata
+    runs-on: ${{ matrix.runner }}
+    container: ubuntu:22.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.metadata.outputs.native_matrix) }}
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - name: Install baseline compiler and native dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git cmake ninja-build make g++-11 binutils libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev xvfb xauth fontconfig-config fonts-dejavu-core python3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build, test and audit the generic CPU bundle
+        env:
+          CC: gcc-11
+          CXX: g++-11
+        run: |
+          for group in build contract gui packaging; do
+            ./build.sh test "$group" --build-dir build/release-native --jobs 2 -- -DDATAPUMP_PORTABLE=ON
+          done
+          DATAPUMP_MAX_GLIBC=2.35 ./build.sh package --build-dir build/release-native --jobs 2
+          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/build/release-native/releases" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=300 -DMAX_GLIBC=2.35 -P tools/verify-native-archives.cmake
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linux-${{ matrix.arch }}
+          path: |
+            build/release-native/releases/*.tar.gz
+            build/release-native/releases/*.zip
+            build/release-native/releases/SHA256SUMS.txt
+          if-no-files-found: error
+          compression-level: 0
+
+  windows:
+    needs: metadata
+    runs-on: windows-2022
+    timeout-minutes: 120
+    env:
+      VCPKG_DISABLE_METRICS: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: microsoft/vcpkg
+          ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d # 2026.07.29
+          path: .ci-vcpkg
+          persist-credentials: false
+      - name: Prepare pinned static OpenSSL
+        shell: pwsh
+        run: |
+          & ./.ci-vcpkg/bootstrap-vcpkg.bat -disableMetrics
+          if ($LASTEXITCODE -ne 0) { throw 'vcpkg bootstrap failed' }
+          & ./.ci-vcpkg/vcpkg.exe install openssl:x64-windows-static --clean-after-build
+          if ($LASTEXITCODE -ne 0) { throw 'OpenSSL build failed' }
+      - name: Build with the Windows SDK and static MSVC runtime
+        shell: pwsh
+        run: |
+          cmake -S . -B build/release-windows -G 'Visual Studio 17 2022' -A x64 -DCMAKE_TOOLCHAIN_FILE="$PWD/.ci-vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DDATAPUMP_PORTABLE=ON -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          if ($LASTEXITCODE -ne 0) { throw 'Configure failed' }
+          cmake --build build/release-windows --config Release --target datapump-apps datapump-tests-contract datapump-tests-gui datapump-tests-packaging --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
+          ctest --test-dir build/release-windows -C Release --output-on-failure -L '^(contract|gui|packaging)$' --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
+          cmake --build build/release-windows --config Release --target package --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw 'Packaging failed' }
+          cmake -DARCHIVE_DIR="$PWD/build/release-windows/releases" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=300 -P tools/verify-native-archives.cmake
+          if ($LASTEXITCODE -ne 0) { throw 'Archive checks failed' }
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-x86_64
+          path: |
+            build/release-windows/releases/*.tar.gz
+            build/release-windows/releases/*.zip
+            build/release-windows/releases/SHA256SUMS.txt
+          if-no-files-found: error
+          compression-level: 0
+
+  compatibility:
+    needs: [metadata, native-linux, sdk-linux]
+    if: ${{ !cancelled() && !failure() && needs.native-linux.result == 'success' && (needs.sdk-linux.result == 'success' || needs.sdk-linux.result == 'skipped') }}
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.image }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.metadata.outputs.compatibility_matrix) }}
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - name: Install inspection and display tools (no compiler)
+        run: |
+          if command -v apt-get >/dev/null; then
+            apt-get update
+            apt-get install -y --no-install-recommends ca-certificates git cmake binutils xvfb xauth fontconfig-config fonts-dejavu-core libxtst6
+          else
+            pacman -Syu --noconfirm --needed ca-certificates git cmake binutils xorg-server-xvfb xorg-xauth ttf-dejavu fontconfig libxtst
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linux-${{ matrix.arch }}
+          path: downloaded
+      - name: Run identical copied archives on this distribution
+        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/downloaded" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=300 -DMAX_GLIBC=${{ matrix.glibc }} -P tools/verify-native-archives.cmake
+
+  assemble:
+    needs: [metadata, windows, compatibility]
+    if: ${{ !cancelled() && !failure() && needs.windows.result == 'success' && needs.compatibility.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-metadata
+          path: build/release-meta
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linux-x86_64
+          path: build/release-inputs/linux-x86_64
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linux-aarch64
+          path: build/release-inputs/linux-aarch64
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-x86_64
+          path: build/release-inputs/windows-x86_64
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: needs.metadata.outputs.baseline == 'bookworm-sdk'
+        with:
+          name: DataPump-source-sdk
+          path: build/sdk-inputs/binary
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: needs.metadata.outputs.baseline == 'bookworm-sdk'
+        with:
+          name: DataPump-source-sdk-sources
+          path: build/sdk-inputs/sources
+      - name: Preserve the SDK and corresponding sources
+        if: needs.metadata.outputs.baseline == 'bookworm-sdk'
+        run: |
+          (cd build/sdk-inputs/binary && sha256sum --check SHA256SUMS)
+          (cd build/sdk-inputs/sources && sha256sum --check SHA256SUMS)
+          mkdir build/release-sdk-inputs
+          cp build/sdk-inputs/binary/*.tar.gz build/sdk-inputs/sources/*.tar.gz build/release-sdk-inputs/
+          cp build/sdk-inputs/sources/SDK-SHA256SUMS.txt build/release-sdk-inputs/SHA256SUMS
+          (cd build/release-sdk-inputs && sha256sum --check SHA256SUMS)
+      - name: Assemble three user downloads with one checksum inventory
+        env:
+          LINUX_BASELINE: ${{ needs.metadata.outputs.baseline }}
+        run: |
+          args=()
+          if [ "$LINUX_BASELINE" = bookworm-sdk ]; then args+=(--sdk-artifacts build/release-sdk-inputs); fi
+          python3 tools/release.py assemble --artifacts build/release-inputs --metadata build/release-meta/release-metadata.json --notes docs/releases.md --output build/release-assets "${args[@]}"
+          cat build/release-assets/SHA256SUMS.txt >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-${{ needs.metadata.outputs.tag }}
+          path: build/release-assets/*
+          if-no-files-found: error
+          compression-level: 0
+
+  publish:
+    needs: [metadata, assemble]
+    if: ${{ !cancelled() && !failure() && github.event_name == 'workflow_dispatch' && inputs.publish && needs.assemble.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-${{ needs.metadata.outputs.tag }}
+          path: release-assets
+      - name: Create a draft, upload verified assets, then publish
+        run: python3 tools/release.py publish --directory release-assets --repo "$GITHUB_REPOSITORY" --publish
