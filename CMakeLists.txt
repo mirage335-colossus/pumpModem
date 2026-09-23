@@ -27,7 +27,11 @@ add_library(datapump src/crypto.cpp src/stream_codec.cpp src/recovery.cpp src/at
 # AArch64 can fuse multiply/add by default where generic x86-64 cannot. Keep
 # separate rounding in both the library and its independent reference tests.
 if(CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang)$")
-  target_compile_options(datapump PUBLIC "$<$<COMPILE_LANGUAGE:CXX>:-ffp-contract=off>")
+  if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    target_compile_options(datapump PUBLIC "$<$<COMPILE_LANGUAGE:CXX>:/clang:-ffp-contract=off>")
+  else()
+    target_compile_options(datapump PUBLIC "$<$<COMPILE_LANGUAGE:CXX>:-ffp-contract=off>")
+  endif()
 endif()
 target_sources(datapump PRIVATE src/pattern_correlator_batch.cpp src/pattern_fft_batch.cpp src/simulation_estimate.cpp src/lpi_estimate.cpp src/pattern_search.cpp src/correlation_experiment.cpp)
 target_sources(datapump PRIVATE src/receiver_probability.cpp src/receiver_probability_differential.cpp)

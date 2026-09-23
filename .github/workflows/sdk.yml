@@ -158,7 +158,7 @@ jobs:
       - name: Build and verify portable application archives
         run: |
           ./build.sh package --sdk "$GITHUB_WORKSPACE/build/sdk" --backend '${{ matrix.backend }}' --build-dir build/sdk-application --jobs 2
-          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' build/sdk/bin/cmake -DARCHIVE_DIR="$PWD/build/sdk-application/releases" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=300 -DMAX_GLIBC=2.36 -P tools/verify-native-archives.cmake
+          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' build/sdk/bin/cmake -DARCHIVE_DIR="$PWD/build/sdk-application/releases" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.36 -P tools/verify-native-archives.cmake
       - name: Run build and packaging isolation regressions
         run: |
           ./build.sh test build --sdk "$GITHUB_WORKSPACE/build/sdk" --backend '${{ matrix.backend }}' --build-dir build/sdk-application --jobs 2 -- -DDATAPUMP_PORTABLE=ON
@@ -185,7 +185,7 @@ jobs:
     needs: application
     runs-on: ubuntu-24.04
     container: ${{ matrix.image }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -212,7 +212,7 @@ jobs:
           sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
           echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
       - name: Verify the identical archives on this distribution
-        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/downloaded" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=300 -DMAX_GLIBC=2.36 -P tools/verify-native-archives.cmake
+        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/downloaded" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.36 -P tools/verify-native-archives.cmake
 
   publish:
     name: Attach SDK, sources and default application to existing release

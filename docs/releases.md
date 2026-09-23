@@ -26,8 +26,8 @@ the applicable daylight-saving abbreviation. Tags have the form
 `v001_00-2026-09-22-0252CDT`. All platform jobs use the same label even if they
 finish on different dates. The release records the exact source commit;
 the label is not a replacement for that provenance. Existing tag or release
-collisions fail rather than moving a tag or replacing assets. If publication fails after reserving the tag or creating the draft, those may
-remain for inspection; the workflow never deletes or overwrites them on retry.
+collisions fail rather than moving a tag or replacing assets. If publication
+fails after reserving the tag or creating the draft, those may remain for inspection; the workflow never deletes or overwrites them on retry.
 Dispatch again with a new build timestamp, or deliberately remove the failed
 tag/draft after inspecting it before reusing its exact label.
 
@@ -171,8 +171,8 @@ local verification and runtime requirements.
 Pull requests changing release automation exercise the Ubuntu 22.04 build path
 without publishing. Manual dispatch defaults to the source SDK path.
 
-Release Linux builders and compatibility jobs use checksum-pinned CMake 3.31.10
-from Kitware for dependency inspection. Older CMake versions can lose inherited
+Native Linux builders and compatibility jobs use checksum-pinned CMake 3.31.10
+from Kitware for dependency inspection; SDK builds use their bundled CMake. Older CMake versions can lose inherited
 executable RPATHs during recursive scans and falsely report conflicts with host
 X11/font libraries. This is a host-tool upgrade: the application still compiles
 against the selected glibc baseline, and host dependency rejection remains strict.
@@ -185,3 +185,9 @@ probability calibration exceeded that default on a hosted x86-64 runner. It
 retains every sample and numerical assertion. Windows suites run serially to
 avoid competing with the live/audio fixtures' own workers; their internal
 progress deadlines remain unchanged.
+
+The copied-archive GUI smoke uses the existing 600-second overall allowance.
+It covers the complete text, attachment, interruption and replacement sequence;
+the previous 300-second CI allowance expired late in that sequence on hosted
+runners. Per-frame, pending-progress and cancellation checks retain their
+original deadlines. Compatibility jobs allow both archive formats to finish.
