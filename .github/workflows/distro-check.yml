@@ -120,10 +120,9 @@ jobs:
           mkdir -p /etc/portage/repos.conf /etc/portage/package.accept_keywords /etc/portage/package.license /etc/portage/package.use
           if test -f /release/datapump-gentoo-sync.py; then
             # download-distro authenticated these helper bytes before execution.
-            mkdir -p /etc/portage/gnupg
-            install -m644 /release/datapump-archive-keyring.gpg /etc/portage/gnupg/datapump.gpg
+            install -m644 /release/datapump-archive-keyring.gpg /etc/portage/datapump-release-keyring.gpg
             python3 /release/datapump-gentoo-sync.py install --assets /release \
-              --keyring /etc/portage/gnupg/datapump.gpg --fingerprint "$APT_FINGERPRINT" \
+              --keyring /etc/portage/datapump-release-keyring.gpg --fingerprint "$APT_FINGERPRINT" \
               --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG"
             emaint sync -r datapump-bin
           else

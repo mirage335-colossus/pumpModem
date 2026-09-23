@@ -381,14 +381,16 @@ for name in ('datapump-gentoo-sync.py', 'datapump-gentoo-portage-sync.py', 'data
         raise SystemExit(f'Checksum mismatch: {name}')
     Path(name).write_bytes(data)
 VERIFY
-sudo install -Dm644 datapump-archive-keyring.gpg /etc/portage/gnupg/datapump.gpg
+sudo install -Dm644 datapump-archive-keyring.gpg /etc/portage/datapump-release-keyring.gpg
 sudo python3 datapump-gentoo-sync.py install --assets "$PWD" \
-  --keyring /etc/portage/gnupg/datapump.gpg --fingerprint "$fingerprint" \
+  --keyring /etc/portage/datapump-release-keyring.gpg --fingerprint "$fingerprint" \
   --repository mirage335-colossus/pumpModem
 # For an experiment, add --tag RELEASE_TAG to that install command.
 ```
 
-The installer registers `datapump-bin` with automatic sync enabled. The helper
+The public key uses its own keyring file outside `/etc/portage/gnupg`, which
+Portage manages for official binary-package trust. The installer registers
+`datapump-bin` with automatic sync enabled. The helper
 requires a valid signature and matching overlay hash, rejects experiments on
 Latest and older releases, and stages the entire overlay before replacing it.
 A failed refresh preserves the previous overlay. The signed ebuild Manifest
