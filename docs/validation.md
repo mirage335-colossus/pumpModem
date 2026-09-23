@@ -4,6 +4,48 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+
+## Arch/Gentoo recipes and shared Debian/Ubuntu packages — 23 September 2026
+
+New schema-4 releases add Arch `PKGBUILD`/`.SRCINFO` recipes and a Gentoo EAPI-8
+local overlay for separate FLTK/Rev binary packages on x86-64 and ARM64. The
+recipe archives and their manifest are signed through their hashes in
+`apt-repository.json`. Native package managers fetch immutable tagged application
+archives and verify SHA-256 (plus BLAKE2B/SHA512 for Gentoo). The complete private
+payload, wrappers and desktop files remain byte-for-byte equivalent to the
+Debian installation; package tools must not strip or rewrite binaries. Original
+bundled notices remain present. Generated recipes stay in release assets.
+
+Focused coverage passes **8 distro**, **8 APT**, **72 release** and **54
+certification** helper tests. Distro coverage executes both actual shell recipe
+installation functions for all four Linux target/backend combinations and
+checks their resulting file bytes and modes, tampering, extra files, safe
+extraction, version syntax and source hashes. A real signature regression proves
+that changing a recipe asset invalidates the signed APT manifest. Legacy
+metadata schemas remain readable; only schema 4 with successful distribution
+checks can become Latest. The full build-tool group passes **14/14 in 7.53
+seconds**. Workflow lint, documentation shell syntax and whitespace checks pass.
+
+The APT workflow installs the same four `.deb` files on Debian 12 Bookworm,
+Debian 13 Trixie, Ubuntu 24.04 and Ubuntu 26.04, with both AMD64 and ARM64 jobs.
+Ubuntu 22.04 is additionally checked on ARM64. Bookworm-SDK AMD64 requires
+glibc 2.36, so Ubuntu 22.04's glibc 2.35 is correctly excluded for that archive.
+No runtime dependency names were changed: distro-native packages resolve their
+own ALSA time64 transition and graphics/font dependencies. The Arch check uses
+unprivileged `makepkg` then pacman; the Gentoo check uses a local binary package
+and binary-only Portage dependency resolution, with no source fallback.
+
+The [first native installation run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35891683676)
+passed Arch and six APT environments. Gentoo rejected the missing EAPI-8
+`eapply_user` preparation hook; the corrected recipe and fixture now require
+it. Both Trixie jobs lacked the test tool `gpgv` (APT uses its own verifier), so
+the harness now installs it explicitly. Ubuntu 26.04 ARM64 installed both
+packages and verified their bytes, but Rev's headless self-check exceeded the
+new harness's 30-second cap. This check includes a modem simulation, not a
+display-cadence probe; its bound now matches the existing portable-package
+verifier's 120 seconds. No application assertion was removed or downgraded.
+These failures remain recorded against the initial `1152CDT` experiment.
+
 ## Signed flat APT release assets — 23 September 2026
 
 Schema-3 application releases include four Debian packages, a flat package

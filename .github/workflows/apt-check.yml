@@ -50,7 +50,7 @@ jobs:
         run: |
           test "$(dpkg --print-architecture)" = "$EXPECTED_ARCH"
           apt-get update
-          apt-get install -y --no-install-recommends ca-certificates git gh python3 gnupg \
+          apt-get install -y --no-install-recommends ca-certificates git gh python3 gnupg gpgv \
             xvfb xauth
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -90,7 +90,11 @@ jobs:
             cmp "$expected/usr/share/applications/datapump-$backend.desktop" "/usr/share/applications/datapump-$backend.desktop"
             rm -rf "$expected"
             timeout 30 "datapump-cli-$backend" --version
-            timeout 30 xvfb-run -a -s '-screen 0 1280x1024x24 -dpi 96' "datapump-$backend" --self-check
+            # This includes a real modem simulation. Keep the same bound as
+            # verify-native-package.cmake, including on slower ARM hosts.
+            started=$(date +%s)
+            timeout 120 xvfb-run -a -s '-screen 0 1280x1024x24 -dpi 96' "datapump-$backend" --self-check
+            echo "$backend self-check completed in $(($(date +%s) - started)) seconds"
           done
           {
             echo "$DISTRO_IMAGE $EXPECTED_ARCH: apt-get update and installation of the unchanged release packages from GitHub succeeded."

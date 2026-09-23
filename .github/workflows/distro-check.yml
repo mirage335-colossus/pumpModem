@@ -68,7 +68,7 @@ jobs:
             python3 /tools/distro-release.py verify-installed --directory /release \
               --metadata /release/release-metadata.json --backend "$backend" --architecture amd64 --root /
             timeout 30 "datapump-cli-$backend" --version
-            timeout 30 "datapump-$backend" --self-check
+            timeout 120 "datapump-$backend" --self-check
           done
           ARCH
       - name: Merge Gentoo binary ebuilds using only prebuilt host dependencies
@@ -101,7 +101,7 @@ jobs:
           sync-uri = https://distfiles.gentoo.org/releases/amd64/binpackages/23.0/x86-64/
           verify-signature = true
           BINHOST
-          export FEATURES="$(portageq envvar FEATURES) -sandbox -usersandbox -pid-sandbox -network-sandbox"
+          export FEATURES="$(portageq envvar FEATURES) -sandbox -usersandbox -pid-sandbox -ipc-sandbox -network-sandbox"
           for backend in fltk rev; do
             set -- /var/db/repos/datapump-bin/media-radio/datapump-"$backend"-bin/*.ebuild
             test "$#" -eq 1
@@ -116,7 +116,7 @@ jobs:
             python3 /tools/distro-release.py verify-installed --directory /release \
               --metadata /release/release-metadata.json --backend "$backend" --architecture amd64 --root /
             timeout 30 "datapump-cli-$backend" --version
-            timeout 30 "datapump-$backend" --self-check
+            timeout 120 "datapump-$backend" --self-check
           done
           GENTOO
       - name: Record packaging scope

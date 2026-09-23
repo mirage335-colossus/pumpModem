@@ -284,7 +284,9 @@ the same ARM64 payloads receive the Debian/Ubuntu matrix checks above.
 
 Recipe archives are bound by SHA-256 in `apt-repository.json`, which is covered
 by the release's signed `InRelease`. Before executing either recipe, verify
-the release assets using the same trusted public fingerprint as APT:
+the release assets using the same trusted public fingerprint as APT. The
+verification commands need `curl`, `gpg`, `gpgv`, `sha256sum` and Python 3;
+minimal Debian 13 systems may need the separate `gpgv` package installed:
 
 ```sh
 tag=RELEASE_TAG

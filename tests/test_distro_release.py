@@ -139,8 +139,11 @@ class DistroReleaseTests(unittest.TestCase):
             insinto() { install_dest="$1"; }
             doins() { for source in "$@"; do install -Dm644 "$source" "$ED/$install_dest/$(basename "$source")"; done; }
             docompress() { :; }
+            eapply_user() { eapi_user_patch_hook_called=yes; }
             source "$1"
             src_prepare
+            # Portage requires eapply_user (or default, which calls it) in EAPI 8.
+            test "${eapi_user_patch_hook_called:-no}" = yes || die "EAPI user-patch hook missing"
             src_configure
             src_compile
             src_install

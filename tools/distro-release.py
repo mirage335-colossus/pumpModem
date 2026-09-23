@@ -138,7 +138,8 @@ def gentoo_recipe(metadata, repository, backend, rows):
              f'RDEPEND="\n\tamd64? ( >=sys-libs/glibc-{floor} )\n\tarm64? ( >=sys-libs/glibc-2.35 )\n'
              '\tmedia-libs/fontconfig\n\tmedia-fonts/dejavu\n\tmedia-libs/libglvnd[X]\n\tmedia-libs/mesa[X]\n'
              '\t|| ( media-video/pipewire[pipewire-alsa] media-plugins/alsa-plugins[pulseaudio] )\n"\n\n'
-             'src_prepare() { :; }\nsrc_configure() { :; }\nsrc_compile() { :; }\n\n'
+             '# EAPI 8 requires the user-patch hook even for a prebuilt payload.\n'
+             'src_prepare() { eapply_user; }\nsrc_configure() { :; }\nsrc_compile() { :; }\n\n'
              'src_install() {\n\tlocal root\n\tcase "${ARCH}" in\n')
     text += ''.join(f'\t\t{gentoo}) root="${{WORKDIR}}/{rows[f"linux-{arch}-{backend}"]["package_root"]}" ;;\n'
                     for arch, gentoo in ARCHES.items())
