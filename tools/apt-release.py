@@ -135,7 +135,7 @@ def package_files(payload, backend):
         result[f'usr/bin/{name}'] = (f'#!/bin/sh\nexec /{prefix}/bin/{executable} "$@"\n'.encode(), 0o755)
     desktop = (f'[Desktop Entry]\nType=Application\nName=DataPump ({backend.upper()})\n'
                f'Comment=Portable audio modem\nExec=datapump-{backend}\nTerminal=false\n'
-               'Icon=utilities-terminal\nCategories=Utility;Audio;\n')
+               'Icon=utilities-terminal\nCategories=AudioVideo;Audio;\n')
     result[f'usr/share/applications/datapump-{backend}.desktop'] = (desktop.encode(), 0o644)
     return result
 

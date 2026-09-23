@@ -130,7 +130,10 @@ jobs:
           CONFIG
           printf '%s\n' 'media-plugins/alsa-plugins pulseaudio' > /etc/portage/package.use/datapump-ci
           emerge --info
-          export FEATURES="$(portageq envvar FEATURES) -sandbox -usersandbox -pid-sandbox -ipc-sandbox -network-sandbox"
+          # This filesystem is discarded on exit. Avoid per-package power-loss
+          # durability syncs and allow parallel merges on the larger runner.
+          # Keep merge-wait, ebuild locks and system dependency ordering intact.
+          export FEATURES="$(portageq envvar FEATURES) parallel-install -merge-sync -sandbox -usersandbox -pid-sandbox -ipc-sandbox -network-sandbox"
           for backend in fltk rev; do
             set -- /var/db/repos/datapump-bin/media-radio/datapump-"$backend"-bin/*.ebuild
             test "$#" -eq 1
@@ -141,7 +144,7 @@ jobs:
             # conditional RDEPEND without requiring an upstream app binhost.
             ebuild "$1" package
             emerge --getbinpkgonly --usepkgonly --binpkg-respect-use=y \
-              --oneshot --with-bdeps=n --jobs=4 "=$cpv"
+              --oneshot --with-bdeps=n --jobs="$(nproc)" "=$cpv"
             portageq has_version / "=$cpv"
             python3 /tools/distro-release.py verify-installed --directory /release \
               --metadata /release/release-metadata.json --backend "$backend" --architecture amd64 --root /

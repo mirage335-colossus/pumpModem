@@ -43,6 +43,21 @@ def fixture_archive(path, metadata, target, additions=()):
             archive.addfile(info)
 
 
+class DesktopEntryTests(unittest.TestCase):
+    def test_audio_desktop_entries_include_the_required_parent_category(self):
+        # Freedesktop's registered Audio category requires AudioVideo. This
+        # shared entry is installed by Debian, Arch and Gentoo packaging.
+        for backend in apt.BACKENDS:
+            with self.subTest(backend=backend):
+                data, mode = apt.package_files({}, backend)[f'usr/share/applications/datapump-{backend}.desktop']
+                fields = dict(line.split('=', 1) for line in data.decode().splitlines() if '=' in line)
+                categories = set(filter(None, fields['Categories'].split(';')))
+                self.assertIn('Audio', categories)
+                self.assertIn('AudioVideo', categories)
+                self.assertNotIn('Utility', categories)
+                self.assertEqual(mode, 0o644)
+
+
 @unittest.skipUnless(all(shutil.which(name) for name in ('dpkg-deb', 'gpg', 'gpgv', 'apt-get')), 'Linux Debian packaging tools required')
 class AptReleaseTests(unittest.TestCase):
     @classmethod

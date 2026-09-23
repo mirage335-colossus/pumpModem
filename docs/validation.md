@@ -16,7 +16,7 @@ payload, wrappers and desktop files remain byte-for-byte equivalent to the
 Debian installation; package tools must not strip or rewrite binaries. Original
 bundled notices remain present. Generated recipes stay in release assets.
 
-Focused coverage passes **8 distro**, **8 APT**, **72 release** and **54
+Focused coverage passes **8 distro**, **9 APT**, **72 release** and **54
 certification** helper tests. Distro coverage executes both actual shell recipe
 installation functions for all four Linux target/backend combinations and
 checks their resulting file bytes and modes, tampering, extra files, safe
@@ -57,6 +57,34 @@ the first binary-only dependency resolution selected incompatible USE/ABI
 variants. This separate CI setup fault does not change the published recipes.
 The full build-tool group after the preparation fix passes **14/14 in 6.71
 seconds**.
+
+Gentoo dependency diagnosis uses `package_check=gentoo` against the unchanged
+`1200CDT` release, without republishing or repeating the nine passing APT jobs
+and Arch job. Its official generic binhost lacks the required ALSA audio bridge;
+the v3 binhost supplies it. CI verifies CPU support, uses strict USE matching
+and aligns its desktop profile/global CPU flags with the official
+`tintin/openrc-v3-23` builder (upstream configuration `e3df757d`). This affects
+only the disposable container's host packages, not the application CPU baseline.
+The first focused retry retained stage3's SSE2 flags and rejected pixman;
+that failure remains recorded in run `35893912339`. Dependency source builds
+remain disabled.
+
+The [Gentoo-only corrected run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35894812942)
+passes on `149d985`: both binary packages install through Portage, installed
+payloads match, and both CLI/headless GUI self-checks pass. The whole job takes
+**9m56s**, mostly installing 177 prebuilt desktop dependencies into the empty
+container. It found a desktop-menu category warning: `Audio` requires the
+`AudioVideo` parent category. The shared Debian/Arch/Gentoo desktop generator
+and a semantic regression now enforce that parent. A new experiment is needed
+for this metadata correction; original application archive bytes stay unchanged.
+
+The final Gentoo harness enables parallel package installation and uses all
+runner cores, while retaining Portage's merge locks, merge-wait and system
+dependency ordering. Per-package `merge-sync` durability writes are disabled
+only in the discarded container. This follows the
+[Portage feature definitions](https://raw.githubusercontent.com/gentoo/portage/master/man/make.conf.5)
+and does not bypass signature, dependency, installed-payload or application
+self-checks.
 
 ## Signed flat APT release assets — 23 September 2026
 

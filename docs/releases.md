@@ -372,6 +372,9 @@ profile and the official x86-64-v3 binhost after checking runner CPU support;
 the generic binhost currently lacks the required ALSA/PulseAudio bridge.
 This choice applies only to CI's host dependencies and does not raise the
 application archive's CPU baseline or alter users' Portage configuration.
+CI also uses Portage's `parallel-install` with the runner's available cores,
+retains dependency ordering/merge locks, and disables per-package power-loss
+disk syncs only inside this discarded container.
 Updating means verifying the new release's recipe archive and
 repeating `makepkg -si`, or selecting its new overlay directory and running
 `emerge --update`. These local recipes are not submitted to AUR or Gentoo's main
