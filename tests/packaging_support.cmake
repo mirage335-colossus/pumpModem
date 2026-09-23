@@ -4,10 +4,26 @@ if(NOT DEFINED BINARY_DIR)
 endif()
 
 set(source "${CMAKE_CURRENT_LIST_DIR}/packaging_fixture")
+set(compiler_options "")
+if(CXX_COMPILER)
+  # Reuse the selected compiler without selecting the application's SDK
+  # packaging policy: this fixture exercises native shared-library collection.
+  list(APPEND compiler_options "-DCMAKE_CXX_COMPILER:FILEPATH=${CXX_COMPILER}")
+endif()
 execute_process(COMMAND "${CMAKE_COMMAND}" -S "${source}" -B "${BINARY_DIR}" -DCMAKE_BUILD_TYPE=Release
+  ${compiler_options}
   RESULT_VARIABLE configured OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT configured EQUAL 0)
   message(FATAL_ERROR "Packaging fixture configure failed:\n${output}\n${error}")
+endif()
+if(CXX_COMPILER)
+  load_cache("${BINARY_DIR}" READ_WITH_PREFIX fixture_ CMAKE_CXX_COMPILER)
+  file(REAL_PATH "${CXX_COMPILER}" requested_compiler)
+  file(REAL_PATH "${fixture_CMAKE_CXX_COMPILER}" configured_compiler)
+  if(NOT configured_compiler STREQUAL requested_compiler)
+    message(FATAL_ERROR "Packaging fixture used '${fixture_CMAKE_CXX_COMPILER}' instead of '${CXX_COMPILER}'")
+  endif()
+  message(STATUS "Packaging fixture C++ compiler: ${fixture_CMAKE_CXX_COMPILER}")
 endif()
 execute_process(COMMAND "${CMAKE_COMMAND}" --build "${BINARY_DIR}" --config Release --parallel 2
   RESULT_VARIABLE built OUTPUT_VARIABLE output ERROR_VARIABLE error)
@@ -64,6 +80,7 @@ foreach(format TGZ ZIP)
   endif()
 endforeach()
 set(archive_verifier "${CMAKE_CURRENT_LIST_DIR}/../tools/verify-native-archives.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/package_gui_smoke_timeout.cmake")
 execute_process(COMMAND "${CMAKE_COMMAND}" "-DARCHIVE_DIR=${archive_directory}" "-DBUILD_DIR=${BINARY_DIR}"
   -P "${archive_verifier}" RESULT_VARIABLE verified OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT verified EQUAL 0 OR NOT EXISTS "${archive_directory}/SHA256SUMS.txt")

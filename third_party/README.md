@@ -18,12 +18,14 @@ the copied files against that commit, and record paths, omissions, and patches.
 Update the relevant note and checksums, preserve license notices, and run the
 integration checks described there.
 
-OpenSSL and platform libraries are supplied by the build environment rather
-than vendored here. See [build requirements](../README.md#build-and-run) and
-[portable packaging](../docs/offline-installation.md); their exact versions
-depend on the build environment.
+OpenSSL and platform libraries are supplied by native development packages or
+the opt-in [source SDK](build-support/README.md#source-sdk-for-the-bookworm-abi-baseline).
+The latter pins a Buildroot recipe, glibc 2.36 source snapshot and all target
+dependencies, with complete source and compiled SDK archives kept in release
+storage rather than Git. See [build requirements](../README.md#build-and-run)
+and [portable packaging](../docs/offline-installation.md).
 
-An optional [native build SDK recipe](build-support/README.md) retains pinned
+An optional [native dependency supplement](build-support/README.md#native-debian-13-dependency-supplement) retains pinned
 Debian archive metadata and supports verified offline preparation into an ignored
 persistent cache. It is separate from these vendored application sources and is
 never downloaded by the build. See [build profiles](../docs/building.md) for

@@ -30,11 +30,23 @@ installation. A missing dependency should be installed or explicitly supplied,
 not recovered from an old application bundle.
 
 For restricted Debian development hosts, the optional
-[verified native SDK recipe](../third_party/build-support/README.md) prepares
+[verified native dependency supplement](../third_party/build-support/README.md#native-debian-13-dependency-supplement) prepares
 headers and linker aliases in a persistent ignored cache. The helper retains
 archive hashes and checks installed runtime versions. The default prepared cache
 is detected automatically; no build relies on `/tmp` symlinks. An explicit
 `DATAPUMP_DEPENDENCY_PREFIX` overrides it.
+
+For an isolated Bookworm-compatible target toolchain, use the separate
+[source SDK](../third_party/build-support/README.md#source-sdk-for-the-bookworm-abi-baseline).
+It builds pinned upstream sources rather than extracting distribution packages.
+The Git repository retains the recipe; release storage holds a compiled SDK and
+its complete source archive. Download or build it once, explicitly install it
+with `tools/build-sdk.py install`, then pass `--sdk /absolute/path` to the same
+build wrapper. Using a prepared SDK requires no container, chroot or root access.
+It includes private C++ runtime libraries for CMake, Ninja and GCC helpers,
+supplied by the SDK's own compiler build. Those host tools still require their
+documented glibc baseline; release SDKs are built in Bookworm and audited after
+relocation. The default native build remains available.
 
 ## Commands and profiles
 
@@ -45,6 +57,8 @@ is detected automatically; no build relies on `/tmp` symlinks. An explicit
 | `./build.sh test GROUP` | `build/dev` normally | Builds the group's prerequisites, then runs CTest |
 | `./build.sh sanitize GROUP` | `build/sanitize`, Debug + ASan/UBSan, headless | Instrumented tests; default group is `contract` |
 | `./build.sh package` | `build/release`, portable Release, tests disabled | Creates TGZ/ZIP and verifies both archives and relocation |
+| `./build.sh --sdk PATH` | `build/dev-sdk` | Uses the prepared SDK's compiler, build tools and isolated target dependencies |
+| `./build.sh package --sdk PATH` | `build/release-sdk` | Collects SDK runtime libraries/notices and enforces its glibc ceiling |
 | `./build.sh test packaging` | `build/package-tests`, portable Release | Packaging fixtures and application relocation |
 | `CC=clang-19 CXX=clang++-19 ./build.sh --backend rev` | `build/rev` | Optional C++23/Rev build with its extra dependencies |
 
@@ -67,6 +81,31 @@ spaces and additional CMake arguments are supported:
   -DCMAKE_TOOLCHAIN_FILE=/path/to/toolchain.cmake
 ./build.sh -- -DDATAPUMP_DEPENDENCY_PREFIX=/persistent/native-sdk/usr
 ```
+
+The SDK itself must be installed at a path without spaces because its upstream
+relocation machinery has that restriction. `--sdk` owns compiler and target
+dependency selection: unset `CC`, `CXX` and compiler include/library environment
+overrides instead of combining them with it. SDK changes or relocation require a
+fresh application build tree. For the optional Rev frontend, the source SDK
+supplies its newer GCC/CMake requirements:
+
+```sh
+./build.sh --backend rev --sdk /persistent/datapump-sdk
+./build.sh test build --sdk /persistent/datapump-sdk
+```
+
+SDK development and test executables also use the SDK's static OpenSSL,
+`libstdc++` and `libgcc`, so they do not require the host's newer C++ or OpenSSL
+runtime. Needed target shared libraries are copied into an adjacent
+`sdk-runtime/` directory and found relative to the executable. Keep that
+directory with development executables; use `package` to distribute a complete
+bundle with notices and manifests. The destination still supplies glibc and
+graphics drivers.
+
+The initial source SDK does not include ASan/UBSan runtimes. Running `sanitize`
+with that SDK fails with an explanation rather than taking those libraries from
+the host. Use `./build.sh sanitize GROUP` with the native development toolchain,
+or prepare an SDK that supplies the target sanitizer runtimes explicitly.
 
 Do not run simultaneous configure/build operations against the same directory.
 Separate agents should share a completed incremental build or use a deliberately
@@ -114,6 +153,11 @@ it. Shared GUI changes also require native checks for affected backends under
 the existing [GUI maintenance rules](gui-architecture.md#verification-and-maintenance-guardrails).
 Python-dependent cases are registered only when Python is available. CI keeps
 its no-Python application build and explicit Python CLI checks.
+The differential receiver calibration declares its four internal workers to
+CTest. At the default two-job limit it runs alone; larger limits can schedule
+other cases in the remaining slots. Its numerical checks and timeout are
+unchanged. Avoid overlapping independent heavy build/test runs during timing
+and display qualification.
 
 Direct CMake remains supported, including on Windows:
 
@@ -155,15 +199,41 @@ are not interchangeable. No machine-specific CPU flags are added to releases.
 
 The portable product is one relocatable directory containing CLI and GUI
 executables, required application libraries and notices. It is not a single ELF
-for every UNIX, CPU architecture or libc. Linux packages retain the glibc/loader
-requirement of their builder. The existing CI uses Ubuntu 22.04 and audits a
-glibc 2.35 ceiling, then tests copied artifacts on Ubuntu 22.04 and 24.04.
+for every UNIX, CPU architecture or libc. Native Linux packages retain the
+glibc/loader requirement of their build environment. SDK packages use their
+selected target ABI; building on a newer host does not raise it. The initial
+source SDK targets x86_64 glibc 2.36, suitable for Debian Bookworm and compatible
+newer glibc-based distributions. Packaging refuses to collect target libraries
+from outside that sysroot and obtains notices from the SDK's own license
+inventory. It does not copy the host's glibc or graphics drivers.
+
+Use `./build.sh package --sdk /path/to/installed-sdk` for this path. The separate
+[SDK workflow](../.github/workflows/sdk.yml) qualifies both the SDK's host tools
+and copied application bundles on Bookworm and Ubuntu 24.04. It runs on SDK and
+build infrastructure changes, Rev/resource-preparation changes, or manual
+dispatch and reuses an archived SDK by
+recipe hash. Successful qualification, rather than the presence of a sysroot
+alone, establishes the support claim. The workflow can explicitly publish the
+compiled SDK, preserved sources and FLTK bundle to an existing release after
+those checks; see [SDK maintenance](../third_party/build-support/README.md#ci-publication-and-upgrades).
+Copied-archive GUI checks use `-DGUI_SMOKE_TIMEOUT=300` with
+`tools/verify-native-archives.cmake`, matching the native test group's workflow
+allowance. This option changes only the GUI smoke deadline; it leaves replay
+assertions, CLI checks and the verifier's omitted-option defaults intact.
+
+The existing native CI still uses Ubuntu 22.04 and audits a glibc 2.35 ceiling,
+then tests copied artifacts on Ubuntu 22.04 and 24.04. A 2.36 SDK does not imply
+compatibility with those older 2.35 systems. Do not merge the two promises.
 
 `DATAPUMP_MAX_GLIBC=2.35 ./build.sh package` enforces that ceiling; it does not
 make a newer host's binary compatible. The ordinary command audits the observed
-ABI without inventing a compatibility claim. Use the baseline builder for a
-release with that guarantee. Native display checks and hardware qualification
-remain distinct from headless package verification.
+ABI without inventing a compatibility claim. Use the corresponding baseline
+builder or SDK for a release with that guarantee. Native display checks and
+hardware qualification remain distinct from headless package verification.
+An unchanged bundle can run across compatible distributions; another CPU
+architecture, musl libc, absent X11/XWayland or inadequate OpenGL support for Rev
+is outside that guarantee. ALSA plugins/configuration and hardware drivers remain
+host integration boundaries.
 
 Historical `docs/validation-data` captures are retained in the source repository
 but omitted from normal binary bundles (about 57 MiB at this change). Set

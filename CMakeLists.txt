@@ -12,6 +12,7 @@ if(DATAPUMP_PORTABLE)
 endif()
 project(DataPump VERSION 0.7.2 LANGUAGES C CXX)
 include(cmake/BuildDependencies.cmake)
+include(cmake/SdkBuild.cmake)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -177,7 +178,10 @@ if(BUILD_TESTING)
     add_test(NAME ${component} COMMAND test_${component})
   endforeach()
   target_include_directories(test_differential_probability PRIVATE src)
-  set_tests_properties(differential_receiver_probability PROPERTIES LABELS "calibration")
+  # This calibration starts four workers internally; account for them in CTest
+  # so small parallel runs do not overlap it with another CPU-heavy suite.
+  set_tests_properties(differential_receiver_probability PROPERTIES
+    LABELS "calibration" PROCESSORS 4)
   # Shared UI models and policies need no toolkit, including in CLI-only builds.
   add_executable(test_gui_layout tests/test_gui_layout.cpp)
   add_test(NAME gui_layout COMMAND test_gui_layout)
@@ -341,6 +345,16 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME build_wrapper COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_build_wrapper.py)
     add_test(NAME build_dependencies COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_build_dependencies.py)
+    if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+      add_test(NAME build_source_sdk COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_source_sdk.py)
+      add_test(NAME build_sdk_runtime COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sdk_build.py)
+      if(DATAPUMP_SDK_ROOT)
+        set_tests_properties(build_source_sdk PROPERTIES ENVIRONMENT
+          "DATAPUMP_TEST_CXX_COMPILER=${CMAKE_CXX_COMPILER};DATAPUMP_TEST_READELF=${CMAKE_READELF};DATAPUMP_TEST_PATCHELF=${DATAPUMP_SDK_ROOT}/bin/patchelf")
+        set_tests_properties(build_sdk_runtime PROPERTIES ENVIRONMENT
+          "DATAPUMP_TEST_C_COMPILER=${CMAKE_C_COMPILER};DATAPUMP_TEST_CXX_COMPILER=${CMAKE_CXX_COMPILER};DATAPUMP_TEST_OBJDUMP=${CMAKE_OBJDUMP};DATAPUMP_TEST_SYSROOT=${CMAKE_SYSROOT}")
+      endif()
+    endif()
     add_test(NAME fast_cable_benchmark COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fast_cable_benchmark.py $<TARGET_FILE:pump>)
     add_test(NAME fast_cli COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fast_cli.py $<TARGET_FILE:pump>)
     add_test(NAME fast_snr COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fast_snr.py $<TARGET_FILE:fast_regression>)
@@ -379,6 +393,7 @@ datapump_install_native(TARGETS ${datapump_executables})
 if(BUILD_TESTING AND DATAPUMP_PORTABLE)
   add_test(NAME packaging_support COMMAND ${CMAKE_COMMAND}
     -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/packaging-fixture
+    -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
     -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging_support.cmake)
   if(NOT DATAPUMP_SANITIZERS)
     add_test(NAME native_relocation COMMAND ${CMAKE_COMMAND}
@@ -387,6 +402,13 @@ if(BUILD_TESTING AND DATAPUMP_PORTABLE)
   endif()
 endif()
 if(BUILD_TESTING)
+  if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+    add_test(NAME sdk_packaging COMMAND ${CMAKE_COMMAND}
+      -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/sdk-packaging-fixture
+      -DC_COMPILER=${CMAKE_C_COMPILER} -DOBJDUMP=${CMAKE_OBJDUMP}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/sdk_packaging.cmake)
+    set_tests_properties(sdk_packaging PROPERTIES LABELS "build;packaging")
+  endif()
   include(cmake/TestGroups.cmake)
 endif()
 set(CPACK_PACKAGE_NAME DataPump)

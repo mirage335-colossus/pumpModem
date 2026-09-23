@@ -28,6 +28,8 @@ import Rev.Core.Svg;
 export namespace Rev {
 
     using namespace Rev::Element;
+    using namespace Rev::Core;
+    using namespace Rev::Appearance;
 
     struct Window : public Rev::Element::Element {
 

@@ -1,5 +1,10 @@
 # Use the same verifier for local CPack output and freshly downloaded CI artifacts.
 cmake_minimum_required(VERSION 3.21)
+include("${CMAKE_CURRENT_LIST_DIR}/gui-smoke-timeout.cmake")
+set(gui_smoke_options "")
+if(DEFINED GUI_SMOKE_TIMEOUT)
+  list(APPEND gui_smoke_options "-DGUI_SMOKE_TIMEOUT=${GUI_SMOKE_TIMEOUT}")
+endif()
 if(NOT DEFINED ARCHIVE_DIR)
   message(FATAL_ERROR "Provide -DARCHIVE_DIR=/path/to/native/archives")
 endif()
@@ -52,7 +57,7 @@ foreach(archive IN LISTS archives)
   list(GET manifests 0 manifest)
   get_filename_component(package_root "${manifest}" DIRECTORY)
   execute_process(COMMAND "${CMAKE_COMMAND}" "-DPACKAGE_ROOT=${package_root}"
-    "-DBUILD_DIR=${BUILD_DIR}" "-DGUI_SMOKE=${GUI_SMOKE}"
+    "-DBUILD_DIR=${BUILD_DIR}" "-DGUI_SMOKE=${GUI_SMOKE}" ${gui_smoke_options}
     -P "${CMAKE_CURRENT_LIST_DIR}/verify-native-package.cmake"
     RESULT_VARIABLE verified)
   if(NOT verified EQUAL 0)

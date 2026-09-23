@@ -24,6 +24,9 @@ import Rev.Element.ControlTheme;
 
 export namespace Rev::Element {
 
+    using namespace Rev::Core;
+    using namespace Rev::Appearance;
+
     using namespace ControlTheme;
 
     struct Dropdown : public Element {

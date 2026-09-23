@@ -4,6 +4,97 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Source SDK and glibc 2.36 target — 22 September 2026 UTC
+
+The opt-in source SDK recipe builds GCC 15.3, a maintained glibc 2.36 snapshot,
+CMake and the development dependencies for both native GUI backends. Normal
+application builds select the prepared SDK with `./build.sh --sdk PATH`; they
+do not fetch sources or rebuild the compiler. Target library discovery, runtime
+collection and license inventory use the SDK instead of the build host. Neither
+GTK nor GLib is included. See [building](building.md) and
+[SDK preparation and maintenance](../third_party/build-support/README.md).
+
+Recipe `b8685ab239d7ac8650e6` was built from verified, cached sources on Debian
+13, exported, installed at a different path and verified after relocation.
+The compiled archive is 226.4 MiB, the preserved source archive 430.3 MiB and
+the installed SDK 744 MiB; compiler/package intermediates occupy 8.9 GiB in
+addition to downloads and exports. These measurements are local observations,
+not size limits or a reproducibility claim.
+
+The source archive was extracted independently of the application checkout.
+Its helper/recipe identity matches, all 59 preserved downloads pass their
+hashes, and all 77 resolved packages have their required sources. Unselected
+cache files are absent. The pinned Buildroot/glibc archives and fresh Buildroot
+overlay also verify. A second complete cold compiler build from that extracted
+archive was not repeated locally; the new CI producer explicitly builds from
+the source archive's offline replay before qualifying its SDK.
+
+Both FLTK and Rev Release applications compile with the SDK's GCC 15.3. Rev
+also rebuilds with the existing Clang 19 profile. The Rev compatibility changes
+make its negative-zero sentinel constant-expression eligible, add explicit
+module-local namespace/header dependencies, and name the adapter's width and
+height aggregate fields. Their values and application behavior are unchanged;
+[vendored provenance](../third_party/rev/README.datapump.md) records the patches.
+
+The build group passes **7/7** with each SDK backend. The native build and
+packaging groups also pass. Focused SDK fixtures exercise source/hash failures,
+archive traversal and link rejection, host C++ runtime resolution, target ABI
+ceilings, runtime/plugin loading and rejection of libraries outside the SDK.
+The optional archive GUI deadline fixture checks defaults, bounds, the actual
+GUI command/process allowance and forwarding through both archive formats.
+CLI/self-check deadlines and omitted-option GUI defaults remain unchanged.
+The native packaging fixture receives the selected compiler explicitly and
+verifies its configured path, so SDK consumers need no separate host compiler
+to run this test. It still exercises native shared-library collection;
+the separate SDK fixtures check sysroot isolation.
+
+All **30/30** preservation-contract suites pass with the SDK compiler in one
+complete run. The differential receiver calibration passes in **1,407.61
+seconds** within its unchanged **1,500-second** timeout; total elapsed time is
+1,507.97 seconds. Exact wire vectors, physical completion, next-poll pending
+progress and recovery behavior remain intact. The test build reuses the
+application's compiled libraries. CTest now accounts for the calibration's
+four existing workers, so a two-job run schedules it alone; this metadata
+change does not alter test code, assertions or the timeout.
+
+All **5/5** Rev native display checks pass on a private 2400×1800, 96 DPI Xvfb
+display with software OpenGL after heavy workloads finish: production workflow
+275.33 seconds, adapter 94.28 seconds, platform 6.19 seconds and both coordinate
+scales 5.16 seconds each. The production replay assertions are unchanged.
+
+Both TGZ and ZIP packages for each backend pass copied-directory inventory,
+checksum, isolated CLI/codec and GUI self-check verification. ELF audits cover
+36 FLTK and 24 Rev files, find no GTK/GLib dependency and enforce glibc 2.36.
+A CLI short-text simulation also passes using the SDK's actual glibc 2.36
+loader and libraries, retaining its exact text and physical completion result.
+
+The full copied-directory GUI workflow passes for both FLTK archive formats
+with an explicit 300-second allowance, matching the existing native group.
+Initial FLTK archive checks with the application's 100-second smoke default
+expired during later workflow phases; that default remains unchanged. The
+copied Rev tar bundle instead reproduces the previously recorded phase-13
+replay timing failure: elapsed 2.979890 seconds, eight frames, seven changes,
+fraction 0.915255, 1,276 dropped samples and pending count 406. This is a failed
+replay assertion, not an overall smoke timeout. It is retained without a
+weakened threshold or repeated attempts to obtain a pass. The copied Rev ZIP
+workflow is not rerun; its headless package checks above pass. Thus the local
+Rev native group passes, but complete copied-Rev GUI qualification does not.
+Display checks use private Xvfb displays, not the user's desktop; sandboxed
+attempts that could not bind the X socket ran no GUI assertions.
+
+The local SDK's observed requirements are **glibc 2.38 for host tools** and
+**2.36 for target libraries**. This local build is therefore not a
+Bookworm-qualified SDK. The new CI workflow constructs host tools inside
+Bookworm on a newer runner, audits their 2.36 ceiling, builds with the same SDK
+on Bookworm and Ubuntu 24.04, and checks copied application archives on both.
+That workflow has not been executed during this local validation. Kernel,
+distribution and physical audio/graphics-driver qualification are not implied
+by the local ABI and generated-audio checks.
+
+Logs and generated archives remain in ignored `build/sdk-*` trees and
+`third_party/build-support/cache/source-sdk/`. No SDK binaries, downloads or
+compiler intermediates are added to Git.
+
 ## Received line-feed newlines — 22 September 2026 UTC
 
 The shared received-text allowlist now permits ASCII LF (`0x0a`) in both

@@ -4,7 +4,10 @@ include_guard(GLOBAL)
 # A system package installation remains the normal dependency provider.
 set(_datapump_local_prefix "${CMAKE_CURRENT_SOURCE_DIR}/third_party/build-support/cache/sysroot/usr")
 set(DATAPUMP_DEPENDENCY_PREFIX "" CACHE PATH "Optional existing native dependency prefix (not a cross-compilation sysroot)")
-if(NOT DATAPUMP_DEPENDENCY_PREFIX AND NOT CMAKE_CROSSCOMPILING
+if(DATAPUMP_SDK_ROOT AND DATAPUMP_DEPENDENCY_PREFIX)
+  message(FATAL_ERROR "A source SDK cannot be combined with a native dependency prefix. Use a fresh --build-dir and remove DATAPUMP_DEPENDENCY_PREFIX.")
+endif()
+if(NOT DATAPUMP_DEPENDENCY_PREFIX AND NOT DATAPUMP_SDK_ROOT AND NOT CMAKE_CROSSCOMPILING
     AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$"
     AND EXISTS "${_datapump_local_prefix}/../prepared.json")
   set(DATAPUMP_DEPENDENCY_PREFIX "${_datapump_local_prefix}" CACHE PATH "Optional existing native dependency prefix" FORCE)

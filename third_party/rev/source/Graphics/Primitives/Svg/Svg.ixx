@@ -1,6 +1,7 @@
 module;
 
 #include <cstddef>
+#include <functional>
 #include <managed.hpp>
 
 export module Rev.Primitive.Svg;
@@ -22,6 +23,9 @@ import Rev.Graphics.Pipeline;
 import Rev.Graphics.Shader;
 
 export namespace Rev::Primitives {
+
+    using namespace Rev::Core;
+    using namespace Rev::Graphics;
 
     struct Svg : public Primitive {
 

@@ -123,7 +123,7 @@ void configure_theme(bool color) {
 void place(re::Element* element,ui::Rect rect) {
     element->style->layout.position=Position::Absolute;
     element->style->position={.left=Px(rect.x),.top=Px(rect.y)};
-    element->style->size={Px(rect.w),Px(rect.h),.min={Px(rect.w),Px(rect.h)},.max={Px(rect.w),Px(rect.h)}};
+    element->style->size={.width=Px(rect.w),.height=Px(rect.h),.min={Px(rect.w),Px(rect.h)},.max={Px(rect.w),Px(rect.h)}};
     element->style->margin={0_px,0_px,0_px,0_px};
 }
 void compact_dropdown(re::Dropdown* choice) {

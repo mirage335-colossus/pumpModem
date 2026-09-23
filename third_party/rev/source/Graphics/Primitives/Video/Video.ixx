@@ -1,6 +1,7 @@
 module;
 
 #include <cstddef>
+#include <functional>
 #include <managed.hpp>
 
 export module Rev.Primitive.Video;
@@ -17,6 +18,9 @@ import Rev.Graphics.UniformBuffer;
 import Rev.Graphics.VertexBuffer;
 
 export namespace Rev::Primitives {
+
+    using namespace Rev::Core;
+    using namespace Rev::Graphics;
 
     struct Video : public Primitive {
 

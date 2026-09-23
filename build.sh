@@ -16,6 +16,7 @@ Usage: ./build.sh [build|test GROUP|sanitize [GROUP]|package] [OPTIONS] [-- CMAK
   --backend fltk|rev   Select a GUI backend; Rev needs its own suitable toolchain.
   --jobs N, -j N       Parallel build/test limit (default: 2).
   --build-dir PATH     Separate output tree, e.g. for another compiler/toolchain.
+  --sdk PATH           Use a prepared source SDK; keep host dependencies separate.
   --help, -h           Show this help.
 
 Environment: DATAPUMP_JOBS (or CMAKE_BUILD_PARALLEL_LEVEL), CC, CXX,
@@ -39,6 +40,7 @@ backend_explicit=no
 cli=no
 jobs=${DATAPUMP_JOBS:-${CMAKE_BUILD_PARALLEL_LEVEL:-2}}
 build_dir=
+sdk_root=
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --help|-h) usage; exit 0 ;;
@@ -46,6 +48,7 @@ while [ "$#" -gt 0 ]; do
         --backend) need_value "$@"; backend=$2; backend_explicit=yes; shift 2 ;;
         --jobs|-j) need_value "$@"; jobs=$2; shift 2 ;;
         --build-dir) need_value "$@"; build_dir=$2; shift 2 ;;
+        --sdk) need_value "$@"; [ -n "$2" ] || die "--sdk needs a nonempty path"; sdk_root=$2; shift 2 ;;
         --) shift; break ;;
         build|test|sanitize|package)
             if [ "$command_seen" = no ]; then
@@ -85,6 +88,25 @@ source_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 if [ -n "$build_dir" ]; then
     case "$build_dir" in /*) ;; *) build_dir=$PWD/$build_dir ;; esac
 fi
+if [ -n "$sdk_root" ]; then
+    [ -d "$sdk_root" ] || die "SDK directory is missing: $sdk_root"
+    sdk_root=$(CDPATH= cd -- "$sdk_root" && pwd -P)
+    [ -f "$sdk_root/share/datapump-sdk/manifest.json" ] ||
+        die "SDK manifest is missing; prepare the SDK explicitly before building"
+    relocated_root=
+    if [ -f "$sdk_root/share/datapump-sdk/relocated-root.txt" ]; then
+        IFS= read -r relocated_root < "$sdk_root/share/datapump-sdk/relocated-root.txt" || :
+    fi
+    [ "$relocated_root" = "$sdk_root" ] ||
+        die "SDK needs explicit installation/relocation; use tools/build-sdk.py install before building"
+    [ -z "${CC:-}${CXX:-}${CMAKE_TOOLCHAIN_FILE:-}" ] ||
+        die "--sdk selects its own compiler and toolchain; unset CC, CXX and CMAKE_TOOLCHAIN_FILE"
+    # GCC can search these outside --sysroot, making the result host-dependent.
+    [ -z "${CPATH:-}${C_INCLUDE_PATH:-}${CPLUS_INCLUDE_PATH:-}${OBJC_INCLUDE_PATH:-}${LIBRARY_PATH:-}${GCC_EXEC_PREFIX:-}${COMPILER_PATH:-}" ] ||
+        die "--sdk requires compiler search-path environment overrides to be unset"
+    PATH=$sdk_root/bin:$PATH
+    export PATH
+fi
 cd "$source_dir"
 preset=dev
 build_config=Release
@@ -118,6 +140,15 @@ if [ -z "$build_dir" ]; then
     if [ "$preset" = sanitize ] && [ "$gui" = ON ] && [ "$backend" = fltk ]; then
         build_dir=$build_dir-gui
     fi
+    if [ -n "$sdk_root" ]; then build_dir=$build_dir-sdk; fi
+fi
+
+# Never reuse cached native paths with an SDK, or vice versa. CMake also checks
+# the SDK manifest fingerprint so upgrading it in place needs a fresh tree.
+if [ -f "$build_dir/CMakeCache.txt" ]; then
+    cached_sdk=$(sed -n 's/^DATAPUMP_CONFIGURED_SDK_ROOT:[^=]*=//p' "$build_dir/CMakeCache.txt")
+    [ "$cached_sdk" = "$sdk_root" ] ||
+        die "SDK differs from the configured tree; use --build-dir with a new directory"
 fi
 
 command -v cmake >/dev/null 2>&1 || die "CMake 3.21 or newer is required"
@@ -127,17 +158,34 @@ esac
 
 # Honor a cached generator; selecting Ninja again would reject an existing Make tree.
 generator=${CMAKE_GENERATOR:-}
+cmake_define_next=no
 for arg do
+    option=$arg
+    if [ "$cmake_define_next" = yes ]; then option=-D$arg; cmake_define_next=no; fi
+    if [ "$arg" = -D ]; then cmake_define_next=yes; fi
     case "$arg" in
         -G|-G?*) generator=explicit ;;
         -B|-B?*|-S|-S?*|--preset|--preset=*)
             die "use --build-dir for output paths; source and preset are selected by this script" ;;
     esac
+    if [ -n "$sdk_root" ]; then
+        case "$option" in
+            --toolchain|--toolchain=*|-DCMAKE_TOOLCHAIN_FILE=*|-DCMAKE_TOOLCHAIN_FILE:*=*|\
+            -DCMAKE_C_COMPILER=*|-DCMAKE_C_COMPILER:*=*|-DCMAKE_CXX_COMPILER=*|-DCMAKE_CXX_COMPILER:*=*|\
+            -DCMAKE_SYSROOT=*|-DCMAKE_SYSROOT:*=*|-DDATAPUMP_SDK_ROOT=*|-DDATAPUMP_SDK_ROOT:*=*|\
+            -DDATAPUMP_DEPENDENCY_PREFIX=*|-DDATAPUMP_DEPENDENCY_PREFIX:*=*)
+                die "--sdk selects the compiler, toolchain and dependency root; remove the competing CMake option: $option" ;;
+        esac
+    fi
 done
 if [ -z "$generator" ] && [ ! -f "$build_dir/CMakeCache.txt" ]; then
     if command -v ninja >/dev/null 2>&1; then generator=Ninja; else generator='Unix Makefiles'; fi
 fi
 if [ -n "$generator" ] && [ "$generator" != explicit ]; then set -- -G "$generator" "$@"; fi
+if [ -n "$sdk_root" ]; then
+    set -- "-DCMAKE_TOOLCHAIN_FILE=$source_dir/cmake/toolchains/source-sdk.cmake" \
+        "-DDATAPUMP_SDK_ROOT=$sdk_root" "$@"
+fi
 
 # Match CMake's simple compiler-name + raw PROGRAM_ARGS form without evaluating
 # shell text. Compiler arguments can contain quotes; they are compared verbatim.
@@ -231,6 +279,11 @@ elif [ "$command_name" = package ]; then
     set -- "-DARCHIVE_DIR=$build_dir/releases" "-DBUILD_DIR=$build_dir" -DGUI_SMOKE=OFF
     if [ -n "${DATAPUMP_MAX_GLIBC:-}" ]; then
         set -- "$@" "-DMAX_GLIBC=$DATAPUMP_MAX_GLIBC"
+    elif [ -n "$sdk_root" ]; then
+        [ -f "$build_dir/CMakeCache.txt" ] || die "SDK configuration cache is missing"
+        sdk_glibc=$(sed -n 's/^DATAPUMP_SDK_GLIBC_MAX:[^=]*=//p' "$build_dir/CMakeCache.txt")
+        [ -n "$sdk_glibc" ] || die "SDK configuration did not provide its glibc baseline"
+        set -- "$@" "-DMAX_GLIBC=$sdk_glibc"
     fi
     # These are newly generated local archives, not downloaded release artifacts.
     rm -f "$build_dir/releases/SHA256SUMS.txt"

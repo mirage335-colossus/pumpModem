@@ -5,7 +5,7 @@
 
 namespace sentinel {
 
-    const float null = -0.0f;
+    inline constexpr float null = -0.0f;
 
     // Returns if value is set
     inline bool set(float& f) {
