@@ -110,10 +110,11 @@ is **green**: 38 GUI/clipboard tests, 29 non-calibration contract tests, two
 packaging tests, full calibration (**182.01 seconds**) and exact published
 archive checks pass. Only the enumerated native WGL-dependent checks are
 omitted, with the intended warning.
-Windows FLTK, both Linux x86-64 backends and Linux ARM64 FLTK also pass their
+Windows FLTK and both Linux backends on x86-64 and ARM64 also pass their
 complete source and published-archive certification jobs. Their source contract
 groups retain all 30 tests, including numerical calibration; the Linux contract
-groups finish in **690–783 seconds**.
+groups finish in **690–849 seconds**. ARM64 Rev initially waits about 30 minutes
+for larger-runner capacity; this is queue time, not an SDK rebuild.
 
 The copied ARM64 Rev archive passes on Bookworm and Ubuntu 22.04, 24.04 and
 26.04, but its first Trixie check fails at smoke phase 21 (`Pending replay
@@ -131,6 +132,49 @@ The original hosted log lacks identity detail, so this establishes a checker
 defect without proving the exact cause of that particular failure. New errors
 include batch/retained identities and revisions. This correction is newer than
 the immutable experiment above; an old-release retry cannot validate it.
+
+The first certification attempt records **19/20** copied-distribution checks
+passing and correctly reports overall failure for the Trixie assertion. Its
+[attempt-1 report](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-23-1629CDT/certification-35923981422-attempt-1.md)
+and warning log remain attached to the release. Only the failed Trixie job and
+its dependent report are retried; successful source, package-manager and
+distribution checks are retained.
+
+The single-job retry passes, and [attempt 2](https://github.com/mirage335-colossus/pumpModem/actions/runs/35923981422/attempts/2)
+is **green**, with certificate status `passed_with_warnings`. All five required
+job categories succeed, including all **20** copied-distribution checks. The
+[attempt-2 certificate](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-23-1629CDT/certification-35923981422-attempt-2.md)
+and [warning log](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-23-1629CDT/certification-35923981422-attempt-2-warning.log)
+bind the same source/inventory and explicitly omit only the five Windows Rev
+graphics checks. The downloaded warning hash matches its certificate. The
+experiment remains a prerelease and is not Latest; native Windows Rev graphics
+remain unqualified. The retry establishes an intermittent old-checker failure,
+not proof of its cause or validation of the newer checker.
+
+The [corrected-source ARM64/Trixie diagnostic](https://github.com/mirage335-colossus/pumpModem/actions/runs/35929767834)
+passes on `c04cff85e32b9f51bb5e6f3b395c8d84d1277ec7`. It builds only Rev in
+the Ubuntu 22.04 baseline (**4m37s**), then verifies the same archive's hashes,
+inventory, glibc 2.35 ceiling and complete GUI smoke on Trixie (**5m38s** for
+the verification/display setup step). Cadence misses remain warnings, including
+phase 21; pending-row and content assertions pass. It uses the ARM64 H runner,
+does not rebuild an SDK or change release assets, and is focused evidence for
+the new checker rather than certification of a new release.
+
+The local software-rendered Rev smoke reaches its existing **300-second**
+budget in phase 15, then the hosted **600-second** allowance in phase 21.
+Neither run reports a pending-row/content assertion failure, but both are
+timeouts and provide incomplete local full-smoke coverage. The successful
+larger-runner check above provides the complete new-source Rev smoke result;
+local time limits are not extended further. These local Rev runs use
+`LIBGL_ALWAYS_SOFTWARE=1` with `LP_NUM_THREADS` unset, unlike CI's cap of two;
+their timing is not a like-for-like comparison with the hosted display.
+The remaining four local Rev native adapter/platform/coordinate tests pass
+in **67.95 seconds** on the same isolated display.
+All three local FLTK native tests pass in **296.53 seconds**, including the
+complete shared smoke (**228.33 seconds**), adapter conformance (**68.13
+seconds**) and document conformance (**0.06 seconds**). The private Xvfb display
+is stopped after the sequential checks. Actionlint and whitespace checks pass
+for the final workflow/documentation state.
 
 Full [native regression](https://github.com/mirage335-colossus/pumpModem/actions/runs/35921401021)
 uses `4656214c0b448ef8fc8c278357340b86d19d6bd9`; subsequent source differences

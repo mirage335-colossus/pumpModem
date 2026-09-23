@@ -95,6 +95,11 @@ Prefer a modest limit on memory-constrained hosts. Use `--stop-on-failure` with 
 failure; successful runs still execute the entire selected group.
 Native GUI tests must have a display, preferably an
 isolated Xvfb session; `./build.sh test native` builds and runs them explicitly.
+For the full sequence on a slower software-rendered desktop, pass
+`-- -DGUI_SMOKE_TIMEOUT=600` to use the same overall allowance as hosted
+certification. Individual reception and presentation assertions still apply.
+With Mesa software rendering, set `LIBGL_ALWAYS_SOFTWARE=1 LP_NUM_THREADS=2`,
+matching CI's renderer thread cap so drawing does not crowd out GUI polling.
 Run native workflow checks separately from other heavy test/build processes:
 their measured replay cadence is sensitive to CPU contention. Rev cadence
 misses are advisory warnings; correctness checks still fail normally.
