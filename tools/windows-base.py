@@ -186,6 +186,10 @@ def archive_inventory(path, root):
     hashes, small, seen = {}, {}, set()
     with zipfile.ZipFile(path) as archive:
         for member in archive.infolist():
+            # ZipInfo normalizes the host separator on Windows and truncates at
+            # NUL. Reject the stored name before either transformation can hide
+            # an unsafe archive entry.
+            valid_path(member.orig_filename)
             valid_path(member.filename)
             if not member.filename.startswith(root + '/'):
                 raise ValueError('Unexpected Windows base archive root')

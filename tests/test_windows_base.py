@@ -18,6 +18,15 @@ SPEC.loader.exec_module(base)
 REPO = 'owner/repository'
 
 
+def raw_zip_entry(archive, filename, data):
+    # ZipInfo's constructor normalizes backslashes on Windows. Assign the raw
+    # filename afterward so the fixture writes the exact hostile ZIP header.
+    member = zipfile.ZipInfo('placeholder')
+    member.filename = filename
+    member.orig_filename = filename
+    archive.writestr(member, data)
+
+
 class WindowsBaseTests(unittest.TestCase):
     def test_import_does_not_require_posix_only_sdk_modules(self):
         original = builtins.__import__
@@ -232,11 +241,28 @@ class WindowsBaseTests(unittest.TestCase):
         for relative in ('../escape', '/absolute', 'C:/escape', 'scripts\\escape', 'scripts/CON.txt', 'scripts/trailing.'):
             (self.stage / self.binary).write_bytes(original)
             with zipfile.ZipFile(self.stage / self.binary, 'a') as archive:
-                archive.writestr(self.binary.removesuffix('.zip') + '/' + relative, b'unsafe')
+                raw_zip_entry(archive, self.binary.removesuffix('.zip') + '/' + relative, b'unsafe')
             self.sums()
             with self.subTest(relative=relative), self.assertRaisesRegex(ValueError, 'Unsafe archive path'):
                 base.install(self.stage, self.destination)
             self.assertFalse(self.destination.exists())
+
+    def test_original_zip_name_is_checked_before_windows_separator_normalization(self):
+        with zipfile.ZipFile(self.stage / self.binary, 'a') as archive:
+            raw_zip_entry(archive, self.binary.removesuffix('.zip') + '/scripts\\escape', b'unsafe')
+        self.sums()
+        original_init = zipfile.ZipInfo.__init__
+        def windows_init(member, *args, **kwargs):
+            original_init(member, *args, **kwargs)
+            member.filename = member.filename.replace('\\', '/')
+        with patch.object(zipfile.ZipInfo, '__init__', windows_init):
+            with zipfile.ZipFile(self.stage / self.binary) as archive:
+                hostile = archive.infolist()[-1]
+                self.assertIn('\\', hostile.orig_filename)
+                self.assertNotIn('\\', hostile.filename)
+            with self.assertRaisesRegex(ValueError, 'Unsafe archive path'):
+                base.install(self.stage, self.destination)
+        self.assertFalse(self.destination.exists())
 
     def test_duplicate_case_insensitive_paths_and_symlinks_are_rejected(self):
         original = (self.stage / self.binary).read_bytes()
