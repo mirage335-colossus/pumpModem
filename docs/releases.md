@@ -124,7 +124,7 @@ describing a particular release as tested.
 | Linux x86_64, `bookworm-sdk` | SDK, glibc 2.36 | Debian 12 and 13; Ubuntu 24.04 and 26.04; Arch Linux |
 | Linux x86_64, `ubuntu-22.04` | Ubuntu 22.04, glibc 2.35 | Debian 12 and 13; Ubuntu 22.04, 24.04 and 26.04; Arch Linux |
 | Linux aarch64 | Ubuntu 22.04, glibc 2.35 | Debian 12 and 13; Ubuntu 22.04, 24.04 and 26.04 |
-| Windows x64 | Visual Studio 2022 with static CRT | Native Windows hosted-runner tests and archive relocation |
+| Windows x64 | Visual Studio 2022 with static CRT | Windows Server 2022 hosted-runner tests and archive relocation |
 
 Linux package verification audits all shipped ELF libraries for the selected
 glibc ceiling and checks relocation, checksums, CLI operation and the GUI
@@ -149,7 +149,7 @@ avoids imposing the Rev frontend's OpenGL requirement. The workflow does not
 test the physical Chromebook's audio devices or drivers.
 
 Raspberry Pi's [architecture guide](https://www.raspberrypi.com/news/raspberry-pi-os-64-bit/)
-distinguishes the original Pi/Zero's ARMv6, Pi 2's ARMv7 and the ARM64-capable
+distinguishes the original Pi/Zero's ARMv6, early Pi 2's ARMv7 and the ARM64-capable
 Pi 3/Zero 2 W and later families. Check the current
 [64-bit OS hardware list](https://www.raspberrypi.com/software/operating-systems/).
 A 64-bit CPU with a 32-bit user space still needs a 32-bit application. Adding
@@ -159,8 +159,8 @@ outside the hosted tests.
 
 Microsoft documents Visual Studio 2022's ability to build desktop applications
 for [Windows 10 and 11](https://learn.microsoft.com/en-us/visualstudio/releases/2022/compatibility?view=vs-2022).
-The Windows hosted-runner checks do not constitute separate qualification on
-physical Windows 10 and Windows 11 computers.
+The hosted runner uses Windows Server 2022. Windows 10 and Windows 11 client
+installations are not directly tested by this workflow.
 
 All Linux GUI users still need X11 or XWayland, fonts and appropriate system
 drivers. Live audio depends on host devices, ALSA configuration and plugins;

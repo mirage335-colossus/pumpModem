@@ -4,6 +4,87 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Manual portable release qualification — 23 September 2026 UTC
+
+The manual release workflow builds three application bundles: Linux x86_64,
+Linux aarch64 and Windows x64, each with the FLTK frontend and CLI. The default
+x86_64 builder uses the existing Bookworm source SDK; the selectable Ubuntu
+22.04 baseline and the ARM64 builder use glibc 2.35. Windows uses the Windows
+SDK and static MSVC/OpenSSL runtimes. [Release instructions](releases.md)
+describe version/date labels, the experimental prerelease checkbox, the
+artifact-only default and the platform limits.
+
+Local validation passes all **26** release-helper tests, **37** wrapper tests,
+**8/8** build suites, **33/33** shared GUI suites and **3/3** packaging suites.
+Actionlint accepts the release and shared SDK workflows. The complete local
+preservation-contract selection passes **30/30** after the floating-point
+compiler change, including calibration in **1,100.60 seconds**; total elapsed
+time is **1,395.03 seconds**. A final packaging run passes in **36.65 seconds**.
+Both locally SDK-built archive formats pass copied-directory CLI/GUI smoke,
+relocation and glibc 2.36 audits.
+
+The [native GitHub rehearsal](https://github.com/mirage335-colossus/pumpModem/actions/runs/35808222088)
+passes all **74** selected build/contract/GUI/packaging executions on both
+x86_64 and aarch64, including overlapping group selections. Both archive
+formats pass relocation, complete GUI smoke and the glibc 2.35 audit. Copied
+archives pass all five ARM64 distribution jobs, plus Arch and Ubuntu 26.04 on
+x86_64. Four other x86_64 distribution checks reach their previous 300-second
+overall GUI allowance late in the cumulative workflow. The release now uses
+the harness's existing 600-second allowance; frame, pending-progress,
+cancellation and replay assertions retain their original limits.
+
+The [source SDK rehearsal](https://github.com/mirage335-colossus/pumpModem/actions/runs/35808893470)
+reuses, relocates and verifies recipe `b8685ab239d7ac8650e6`, with host tools
+and target libraries both meeting glibc 2.36. All **74** selected SDK-built
+executions pass, including calibration in **1,572.98 seconds**. This exceeds
+CTest's default process allowance, so release and SDK qualification explicitly
+set a 3,600-second outer limit without changing samples or numerical
+assertions. Both archive ABI checks and the first copied GUI run pass before
+this rehearsal is canceled for its successor. A separate
+[SDK qualification job](https://github.com/mirage335-colossus/pumpModem/actions/runs/35808879560/job/107015985904)
+passes complete copied TGZ and ZIP GUI checks with the 600-second allowance.
+
+Actual cross-platform failures exposed compiler and fixture assumptions.
+Disabling implicit floating-point contraction preserves the exact scalar,
+cached and batched receiver comparisons on ARM64; their independent reference
+assertions remain unchanged. The bitmap-noise fixture now specifies the same
+sampling algorithm that libstdc++ previously supplied; six million generated
+values match its previous output bit for bit. UTF-8 fixture paths, GCC 11
+constant-expression compatibility, ARM disassembly comments, mocked SDK host
+identity and Windows vendored-source line endings are corrected without
+altering transport or GUI behavior. Checksum-pinned CMake 3.31.10 fixes native
+dependency inspection's inherited-RPATH handling; strict host-library
+rejection and the application ABI floors remain enforced.
+
+Windows has passed all **33/33** shared GUI cases and the full calibration.
+The live-profile fixture requests and restores 1 ms timer resolution for its
+existing 1 ms sleeps. A coarse-timer reproduction delivers only 571,392 of
+723,328 required samples by the unchanged 30-second deadline while the decoder
+queue is empty. With the timer request, the
+[Windows profile check](https://github.com/mirage335-colossus/pumpModem/actions/runs/35812238814/job/107027508026)
+passes in **179.72 seconds**. That run subsequently exposes a separate
+transmit-lock fixture synchronization race after cancellation. The fixture
+now waits for capture to resume before queuing its next request, preserving
+the exact status, no-output checks and deadlines. A deliberately delayed
+capture handoff reproduces the original failure and passes with this fix;
+the complete local transmit-lock suite passes in **7.27 seconds**. Complete
+Windows release qualification is still pending at this point in the record.
+
+Release-helper tests cover timestamp/DST naming, exact experimental titles,
+strict inventories, checksum failures, SDK/source pairing, immutable tag
+creation and publication ordering. Real read-only GitHub API checks verify
+missing tag/release handling and rejection of an existing ref. No release or
+tag has been created by these rehearsals; public publication remains an
+untested side effect until a maintainer explicitly dispatches with `publish`.
+
+The independent Rev SDK check retains its replay-frame failure (seven frames
+where ten are required); it is not an overall process timeout and its
+assertion is not weakened. Release bundles select FLTK. Hosted containers
+share the runner kernel, and Windows hosted tests use Windows Server rather
+than separate Windows 10/11 installations. These results do not qualify
+physical audio devices, Chromebook/Pi graphics or sound drivers, Gentoo,
+32-bit Raspberry Pi OS or musl installations.
+
 ## Source SDK and glibc 2.36 target — 22 September 2026 UTC
 
 The opt-in source SDK recipe builds GCC 15.3, a maintained glibc 2.36 snapshot,
