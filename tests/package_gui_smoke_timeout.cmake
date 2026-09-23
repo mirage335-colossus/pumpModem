@@ -33,6 +33,11 @@ function(check_gui_smoke_timeouts package_directory archive_directory fixture_bu
     if(NOT status EQUAL 0)
       message(FATAL_ERROR "GUI timeout fixture '${allowance}' failed: ${output}\n${error}")
     endif()
+    foreach(stream stdout stderr)
+      if(NOT output MATCHES "WARNING REV_REPLAY_CADENCE: fixture ${stream} warning")
+        message(FATAL_ERROR "Successful GUI check hid its ${stream} replay cadence warning")
+      endif()
+    endforeach()
     file(STRINGS "${trace}" lines)
     set(smoke_commands 0)
     set(other_commands 0)
@@ -83,6 +88,14 @@ function(check_gui_smoke_timeouts package_directory archive_directory fixture_bu
       message(FATAL_ERROR "Expected one GUI workflow plus version, two simulations, and GUI self-check")
     endif()
   endforeach()
+
+  execute_process(COMMAND "${CMAKE_COMMAND}" -E env DATAPUMP_PACKAGING_SMOKE_FAIL=1
+    "${CMAKE_COMMAND}" "-DPACKAGE_ROOT=${package_directory}" "-DBUILD_DIR=${fixture_build}"
+    -DGUI_SMOKE=ON -P "${package_verifier}"
+    RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error)
+  if(status EQUAL 0 OR NOT error MATCHES "Relocated native command failed")
+    message(FATAL_ERROR "GUI replay cadence warnings hid a failing GUI process")
+  endif()
 
   set(trace "${fixture_build}/gui-timeout-archives.jsonl")
   execute_process(COMMAND "${CMAKE_COMMAND}" --trace-expand --trace-format=json-v1

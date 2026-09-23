@@ -260,6 +260,14 @@ the complete shared smoke through the production executable. This keeps the
 workflow's initial state and clock independent of native probe duration, and
 avoids maintaining a second workflow lifecycle in an adapter's test code.
 
+Rev replay/waterfall display cadence is advisory. The shared smoke measures
+the existing elapsed/frame/change/progress targets and emits
+`WARNING REV_REPLAY_CADENCE:` for Rev misses; FLTK retains its strict cadence
+check. Physical observations, pending-message identity, chronological frames,
+source/bitmap agreement and content/completion checks remain hard requirements.
+The display warning must stay visible in logs and release `warning.log` without
+turning low framerate into a failed build or certification.
+
 The CI GUI-contract matrix builds **both FLTK and Rev** and runs the same shared
 suite and simulation workflow, plus their native conformance tests on a private
 display. Register display-dependent tests explicitly with

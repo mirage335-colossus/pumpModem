@@ -24,17 +24,24 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
-class CertificationTests(unittest.TestCase):
+class CertificationFixture:
+    schema = 1
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix='datapump-certify-test-')
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.metadata = certify.release.make_metadata(source_sha='a' * 40, run_id='123', run_attempt='1',
             now=datetime(2026, 9, 22, 7, 52, tzinfo=timezone.utc), cmake_version='0.7.2')
+        if self.schema == 1:
+            self.metadata['schema'] = 1
+            self.metadata.pop('gui_backends', None)
         self.tag = self.metadata['tag']
         self.repository = 'owner/project'
         self.commit = self.metadata['source_sha']
         self.files = {'release-notes.md': b'Original release notes\n'}
+        if self.schema == 2:
+            self.files['warning.log'] = b'Display cadence warnings are advisory; other checks remain mandatory.\n'
         for target, name in certify.release.application_names(self.metadata).items():
             self.files[name] = self.archive(target)
         self.published = {'id': 456, 'tag_name': self.tag, 'draft': False, 'prerelease': False, 'name': self.tag,
@@ -51,11 +58,14 @@ class CertificationTests(unittest.TestCase):
         self.addCleanup(patched.stop)
 
     def archive(self, target, extra=None):
-        system, architectures, extension = certify.release.TARGETS[target]
-        root = f'DataPump-0.7.2-{system}-{architectures[0]}-native'
+        system, _, extension = certify.release.application_targets(self.metadata)[target]
+        root = sorted(certify.release.package_bases(self.metadata, target))[0]
         executable = '.exe' if system == 'Windows' else ''
         files = {f'{root}/manifest.sha256': b'inventory',
                  f'{root}/bin/pump{executable}': b'CLI', f'{root}/bin/datapump-gui{executable}': b'GUI'}
+        if self.metadata['schema'] == 2:
+            backend = certify.release.target_backend(self.metadata, target)
+            files[f'{root}/share/doc/datapump/build-info.txt'] = f'DataPump 0.7.2\nGUI: ON ({backend})\n'.encode()
         if extra:
             files.update(extra)
         buffer = io.BytesIO()
@@ -126,6 +136,8 @@ class CertificationTests(unittest.TestCase):
     def results(self, jobs=None, **extra):
         value = {'source_sha': self.metadata['source_sha'], 'inventory_sha256': digest(self.files['SHA256SUMS.txt']),
                  'jobs': dict.fromkeys(certify.REQUIRED_JOBS, 'success') if jobs is None else jobs}
+        if self.metadata['schema'] == 2:
+            value['tested_targets'] = list(certify.release.application_targets(self.metadata))
         value.update(extra)
         path = self.root / 'results.json'
         path.write_text(json.dumps(value))
@@ -134,6 +146,8 @@ class CertificationTests(unittest.TestCase):
     def record(self, **options):
         return certify.record(self.repository, self.tag, '789', self.results(**options), '2')
 
+
+class CertificationTests(CertificationFixture, unittest.TestCase):
     def test_prepare_pins_metadata_inventory_and_source_without_archive_download(self):
         state = self.prepare()
         self.assertEqual(state['metadata'], self.metadata)
@@ -146,6 +160,10 @@ class CertificationTests(unittest.TestCase):
         certify.output_values(state, output)
         self.assertIn('source_sha=' + self.commit, output.read_text())
         self.assertIn('baseline=bookworm-sdk', output.read_text())
+        values = certify.output_values(state, None)
+        self.assertEqual(values['schema'], '1')
+        self.assertEqual(json.loads(values['gui_backends']), ['fltk'])
+        self.assertEqual(set(json.loads(values['application_targets'])), set(certify.release.TARGETS))
 
     def test_wrong_source_tag_and_draft_are_rejected(self):
         self.commit = 'b' * 40
@@ -430,6 +448,164 @@ class CertificationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
             self.record()
         self.assertFalse(self.uploads)
+
+
+class BackendCertificationTests(CertificationFixture, unittest.TestCase):
+    schema = 2
+
+    def test_prepare_emits_all_six_backend_aware_targets(self):
+        state = self.prepare()
+        values = certify.output_values(state, None)
+        expected = {platform + '-' + backend for platform in certify.release.TARGETS
+                    for backend in ('fltk', 'rev')}
+        self.assertEqual(values['schema'], '2')
+        self.assertEqual(json.loads(values['gui_backends']), ['fltk', 'rev'])
+        self.assertEqual(set(json.loads(values['application_targets'])), expected)
+        self.assertEqual(len(certify.release.application_names(self.metadata)), 6)
+        self.assertEqual(self.downloads, ['SHA256SUMS.txt', 'release-metadata.json'])
+
+    def test_prepare_requires_every_rev_asset_even_when_fltk_is_complete(self):
+        del self.files[certify.release.application_names(self.metadata)['linux-x86_64-rev']]
+        self.refresh_metadata()
+        with self.assertRaisesRegex(ValueError, 'missing application'):
+            self.prepare()
+
+    def test_prepare_requires_published_warning_log(self):
+        del self.files['warning.log']
+        self.refresh_metadata()
+        with self.assertRaisesRegex(ValueError, 'missing application or support'):
+            self.prepare()
+
+    def test_download_verifies_and_extracts_each_platform_backend(self):
+        for target in certify.release.application_targets(self.metadata):
+            with self.subTest(target=target):
+                state = certify.download(self.repository, self.tag, target, self.root / target,
+                                         digest(self.files['SHA256SUMS.txt']))
+                backend = certify.release.target_backend(self.metadata, target)
+                self.assertTrue(state['package_root'].name.endswith('-native-' + backend))
+                self.assertEqual(state['package_root'].parent.name, 'offline destination with spaces')
+                self.assertIn('GUI: ON (' + backend + ')',
+                              (state['package_root'] / 'share/doc/datapump/build-info.txt').read_text())
+                self.assertEqual(state['archive'].name, certify.release.application_names(self.metadata)[target])
+        self.assertEqual(len([name for name in self.downloads if name.startswith('DataPump-')]), 6)
+
+    def test_wrong_backend_build_info_or_package_root_cannot_satisfy_rev(self):
+        target = 'linux-x86_64-rev'
+        root = sorted(certify.release.package_bases(self.metadata, target))[0]
+        wrong_info = {f'{root}/share/doc/datapump/build-info.txt': b'GUI: ON (fltk)\n'}
+        for label, data in (('info', self.archive(target, wrong_info)),
+                            ('root', self.archive('linux-x86_64-fltk'))):
+            with self.subTest(case=label):
+                name = certify.release.application_names(self.metadata)[target]
+                self.files[name] = data
+                self.refresh_metadata()
+                with self.assertRaises(ValueError):
+                    certify.download(self.repository, self.tag, target, self.root / label,
+                                     digest(self.files['SHA256SUMS.txt']))
+                self.assertFalse((self.root / label / 'offline destination with spaces').exists())
+
+    def test_download_rejects_metadata_incompatible_and_unsafe_targets(self):
+        for number, target in enumerate(('linux-x86_64', 'linux-x86_64-qt', '../linux-x86_64-rev')):
+            with self.subTest(target=target), self.assertRaisesRegex(ValueError, 'Unknown application target'):
+                certify.download(self.repository, self.tag, target, self.root / f'unknown-{number}',
+                                 digest(self.files['SHA256SUMS.txt']))
+        self.assertFalse([name for name in self.downloads if name.startswith('DataPump-')])
+
+    def test_success_requires_all_six_targets_and_records_backend_scope_and_hashes(self):
+        for baseline in ('bookworm-sdk', 'ubuntu-22.04'):
+            with self.subTest(baseline=baseline):
+                self.metadata['linux_baseline'] = baseline
+                self.refresh_metadata()
+                evidence = self.record()
+                names = certify.release.application_names(self.metadata)
+                self.assertEqual(evidence['schema'], 2)
+                self.assertEqual(evidence['status'], 'passed')
+                self.assertEqual(evidence['gui_backends'], ['fltk', 'rev'])
+                self.assertEqual(evidence['known_warning_asset'], 'warning.log')
+                self.assertEqual(evidence['warning_sha256'], digest(self.files['warning.log']))
+                self.assertEqual(evidence['warning_policy'], certify.DISPLAY_WARNING_POLICY)
+                self.assertEqual(set(evidence['tested_targets']), set(names))
+                self.assertEqual(set(evidence['application_targets']), set(names))
+                self.assertEqual(set(evidence['assets']), set(names.values()))
+                report = self.uploads['certification-789-attempt-2.md'].decode()
+                self.assertIn(certify.DISPLAY_WARNING_POLICY, report)
+                self.assertIn('/warning.log)', report)
+                for target, name in names.items():
+                    identity = evidence['application_targets'][target]
+                    self.assertEqual(identity['asset'], name)
+                    self.assertEqual(identity['sha256'], digest(self.files[name]))
+                    self.assertEqual(identity['gui_backend'], target.rsplit('-', 1)[1])
+                    for section in ('source_tests', 'published_archives'):
+                        item = evidence['required_coverage'][section][target]
+                        self.assertEqual(item['gui_backend'], identity['gui_backend'])
+                        self.assertEqual(item['platform'], identity['platform'])
+                    self.assertIn('Source `' + target + '`', report)
+                    self.assertIn('Published `' + target + '`', report)
+                for backend in ('fltk', 'rev'):
+                    x86 = evidence['required_coverage']['published_archives']['linux-x86_64-' + backend]
+                    self.assertEqual('Ubuntu 22.04' in x86['environments'], baseline == 'ubuntu-22.04')
+                    self.assertIn('Arch Linux', x86['environments'])
+                self.assertIn('--latest=true', self.edits[-1][0])
+
+    def test_missing_or_fltk_only_coverage_attaches_failed_report_without_promotion(self):
+        cases = [None, [], [target for target in certify.release.application_targets(self.metadata)
+                           if target.endswith('-fltk')]]
+        for index, targets in enumerate(cases):
+            results = self.results(tested_targets=targets)
+            if targets is None:
+                value = json.loads(results.read_text())
+                value.pop('tested_targets')
+                results.write_text(json.dumps(value))
+            with self.subTest(targets=targets):
+                evidence = certify.record(self.repository, self.tag, '789', results, str(index + 1))
+                self.assertEqual(evidence['status'], 'failed')
+                self.assertIn('--latest=false', self.edits[-1][0])
+                self.assertNotIn('--latest=true', self.edits[-1][0])
+                report = self.uploads[f'certification-789-attempt-{index + 1}.md'].decode()
+                self.assertIn('Missing targets:', report)
+                self.assertIn('`windows-x86_64-rev`', report)
+
+    def test_duplicate_wrong_or_non_list_coverage_is_rejected_without_evidence(self):
+        targets = list(certify.release.application_targets(self.metadata))
+        for value in (targets + [targets[0]], targets + ['linux-x86_64'],
+                      ['linux-x86_64-qt'], 'all', [None], [[]], None):
+            with self.subTest(targets=value), self.assertRaisesRegex(ValueError, 'Tested targets'):
+                self.record(tested_targets=value)
+        self.assertFalse(self.uploads)
+        self.assertFalse(self.edits)
+
+    def test_all_targets_do_not_override_failed_jobs_or_experiment_policy(self):
+        jobs = dict.fromkeys(certify.REQUIRED_JOBS, 'success')
+        jobs['compatibility'] = 'failure'
+        self.assertEqual(self.record(jobs=jobs)['status'], 'failed')
+        self.assertIn('--latest=false', self.edits[-1][0])
+        self.metadata.update(experiment=True, title='experiment')
+        self.published.update(prerelease=True, name='experiment')
+        self.refresh_metadata()
+        self.assertEqual(self.record()['status'], 'passed')
+        flags = self.edits[-1][0]
+        self.assertIn('--latest=false', flags)
+        self.assertIn('--prerelease', flags)
+        self.assertEqual(flags[flags.index('--title') + 1], 'experiment')
+
+    def test_warning_bytes_are_rechecked_without_server_digest(self):
+        for asset in self.assets:
+            if asset['name'] == 'warning.log':
+                asset.pop('digest')
+        self.files['warning.log'] += b'changed'
+        with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
+            self.record()
+        self.assertFalse(self.uploads)
+        self.assertFalse(self.edits)
+
+    def test_schema2_certificate_is_immutable_and_never_uploads_binaries(self):
+        self.record()
+        self.assertEqual(set(self.uploads), {'certification-789-attempt-2.json', 'certification-789-attempt-2.md'})
+        self.assets.append({'name': 'certification-789-attempt-2.json'})
+        edit_count = len(self.edits)
+        with self.assertRaisesRegex(ValueError, 'already exists'):
+            self.record()
+        self.assertEqual(len(self.edits), edit_count)
 
 
 if __name__ == '__main__':

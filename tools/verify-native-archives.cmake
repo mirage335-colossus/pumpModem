@@ -9,8 +9,10 @@ if(NOT DEFINED ARCHIVE_DIR)
   message(FATAL_ERROR "Provide -DARCHIVE_DIR=/path/to/native/archives")
 endif()
 get_filename_component(ARCHIVE_DIR "${ARCHIVE_DIR}" ABSOLUTE)
-file(GLOB tarballs "${ARCHIVE_DIR}/DataPump-*-native.tar.gz")
-file(GLOB zipfiles "${ARCHIVE_DIR}/DataPump-*-native.zip")
+file(GLOB tarballs "${ARCHIVE_DIR}/DataPump-*-native.tar.gz"
+  "${ARCHIVE_DIR}/DataPump-*-native-fltk.tar.gz" "${ARCHIVE_DIR}/DataPump-*-native-rev.tar.gz")
+file(GLOB zipfiles "${ARCHIVE_DIR}/DataPump-*-native.zip"
+  "${ARCHIVE_DIR}/DataPump-*-native-fltk.zip" "${ARCHIVE_DIR}/DataPump-*-native-rev.zip")
 if(NOT tarballs OR NOT zipfiles)
   message(FATAL_ERROR "Both native TGZ and ZIP archives must be present")
 endif()

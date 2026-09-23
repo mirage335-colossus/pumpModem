@@ -1,16 +1,18 @@
 # Manual portable releases
 
 The [release workflow](../.github/workflows/release.yml) builds and publishes
-three portable application bundles: Linux x86_64, Linux aarch64 and Windows x64.
-Each contains the FLTK GUI, CLI, required application libraries and notices.
-Unpack the whole archive and keep `bin/` and `lib/` together. Nothing needs to
+six portable application bundles: separate **FLTK** and **Rev** builds for Linux
+x86_64, Linux aarch64 and Windows x64. Each contains its selected GUI, the CLI,
+required application libraries and notices. Backend names appear in both the
+download filename and extracted directory, so the two installations can coexist.
+Unpack the whole archive and keep `bin/`, `lib/` and `share/` together. Nothing needs to
 be copied into the system `/lib` directory. Linux uses `.tar.gz`; Windows uses
 `.zip`. Compatible distributions share the same binary.
 
 Publication and extensive testing are separate operations. Publication checks
 build success, both package formats, checksums, relocation, CLI/self-check
 operation, dependency closure and the Linux ABI ceiling. It then publishes the
-three selected downloads with **certification pending**. The separate
+six selected downloads with **certification pending**. The separate
 [certification workflow](../.github/workflows/certify.yml) later tests the exact
 published downloads and attaches immutable reports to that same release. The
 long preservation contract and GUI tests remain intact in that workflow.
@@ -21,7 +23,7 @@ long preservation contract and GUI tests remain intact in that workflow.
 | --- | --- | --- |
 | `version` | Empty | Use the CMake version (`0.7.2`) as `v0.7.2`, or supply a label such as `v001_00`. |
 | `experiment` | Checked | Title exactly `experiment`; GitHub prerelease; never Latest, even after certification passes. |
-| `publish` | Checked | Publish after all three packages pass basic checks. Uncheck to retain a draft with its assets for inspection. |
+| `publish` | Checked | Publish after all six platform/backend packages pass basic checks. Uncheck to retain a draft with its assets for inspection. |
 | `linux_baseline` | `bookworm-sdk` | Source SDK/glibc 2.36 for x86_64, or `ubuntu-22.04`/glibc 2.35. ARM64 always uses the Ubuntu 22.04 baseline. |
 
 Leave `experiment` checked for builds users needing assurance should avoid.
@@ -72,7 +74,7 @@ gh run watch CERTIFICATION_RUN_ID --exit-status
 ```
 
 Replace the uppercase placeholders with the recorded IDs/tag. Download the
-three application archives from the release page linked in the run summary.
+application archive for the desired platform and GUI backend from the release page linked in the run summary.
 The helpers enumerate the dedicated, paginated release-assets API and stream
 downloads by asset ID; they do not rely on an embedded release asset list.
 Certification
@@ -89,11 +91,35 @@ release, with links in its description. Missing, skipped, cancelled or failed
 required jobs cannot grant a pass. Repeated runs retain prior reports. An
 upload failure cannot promote a release. Drafts cannot be certified. Older ad-hoc releases without this workflow's
 metadata, checksums and source-side certification tools are outside this path.
+Existing schema-1 releases retain their original three FLTK assets and remain
+readable; new schema-2 releases require all six backend-specific assets and a
+checksummed `warning.log`. Upload and certification check each archive's root
+and shipped build information, so relabeling an FLTK package as Rev is rejected.
+Certification of a new release requires coverage of every declared backend.
 
 For the Ubuntu 22.04 x86_64 baseline, set `linux_baseline=ubuntu-22.04`.
 Clear `experiment` for an ordinary release. `publish=false` still reserves a
 tag and uploads to a draft; it is no longer an Actions-artifact rehearsal.
 PRs changing automation run helper tests without creating releases or tags.
+
+## Rev display warnings
+
+The release's `warning.log` records a known presentation limitation: Rev may
+refresh its replay/waterfall display below the target cadence. This is advisory,
+not a build or certification failure. It is a known-limit notice, not a claim
+that publication measured the current build's framerate.
+
+When an extensive GUI smoke observes a cadence miss, it emits
+`WARNING REV_REPLAY_CADENCE:` with elapsed time, frame/change counts, displayed
+fraction and phase. Portable verification preserves these warnings in CI logs,
+and certification reports link the release's checksummed warning notice.
+Missing physical observations, premature completed content, changed pending
+identity, wrong source/bitmap data and other correctness checks remain failures.
+Do not tune the framerate or repeat long suites just to eliminate this advisory.
+
+Rev also requires a working desktop OpenGL driver (4.4, or 4.3 with
+`GL_ARB_buffer_storage`). That is a runtime requirement, distinct from a cadence
+warning. The FLTK bundle remains available for systems lacking that capability.
 
 ## Diagnose a branch before full validation
 
@@ -224,12 +250,14 @@ it does not supply an ARM compiler.
 `ubuntu-22.04` builds Linux x86_64 natively against glibc 2.35, using the same
 portable packaging checks. Select it when Ubuntu 22.04 compatibility matters.
 It replaces the SDK-built x86_64 bundle for that release, so the release still
-has three user bundles. Neither option covers every historical Ubuntu LTS.
+has six user bundles. Neither option covers every historical Ubuntu LTS.
 
 The release inventory names the application downloads
-`DataPump-TAG-linux-x86_64.tar.gz`, `DataPump-TAG-linux-aarch64.tar.gz` and
-`DataPump-TAG-windows-x86_64.zip`, where `TAG` is the shared version/build label.
-It also includes release notes, metadata and `SHA256SUMS.txt`. Compiled SDKs and their corresponding source archives are retained once per
+`DataPump-TAG-linux-x86_64-BACKEND.tar.gz`,
+`DataPump-TAG-linux-aarch64-BACKEND.tar.gz` and
+`DataPump-TAG-windows-x86_64-BACKEND.zip`, where `TAG` is the shared version/build
+label and `BACKEND` is `fltk` or `rev`. It also includes release notes, metadata,
+`warning.log` and `SHA256SUMS.txt`. Compiled SDKs and their corresponding source archives are retained once per
 recipe in `base`, separately from application releases. The optional `version`
 input labels the release and archives; it does not rewrite the CMake project
 version embedded in the application's `--version` output.
@@ -243,8 +271,12 @@ components are not copied into the bundle. Debian Bookworm's libc is
 the SDK and native baselines.
 
 ARM64 builds run natively on a GitHub ARM64 runner in an Ubuntu 22.04 build
-environment and retain the glibc 2.35 ceiling. Windows uses Visual Studio 2022,
-the Windows SDK, static C/C++ runtimes and pinned static OpenSSL dependencies.
+environment and retain the glibc 2.35 ceiling. Native Rev builds use signed,
+pinned LLVM 19 packages and a small pinned Ninja bootstrap for C++ modules;
+application libraries still come from that Ubuntu baseline. SDK Rev builds use
+the existing SDK directly. Windows uses Visual Studio 2022, the Windows SDK,
+static C/C++ runtimes and pinned static OpenSSL dependencies; Rev additionally
+uses static GLEW and FreeType dependencies.
 Generic CPU targets avoid requiring the particular build runner's instruction
 set extensions. GitHub documents the available
 [native ARM64 and Windows runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
@@ -253,7 +285,8 @@ set extensions. GitHub documents the available
 
 The separate certification workflow runs the full build, contract, GUI and
 packaging selections on Linux, and the contract, GUI and packaging selections
-on Windows. It also tests the published archives on the hosts below.
+on Windows, for each published GUI backend. It also tests both backends' published
+archives on the hosts below.
 Read the attached report before describing a particular release as tested.
 
 | Bundle | Build baseline | Copied-archive compatibility jobs |
@@ -323,8 +356,9 @@ progress deadlines remain unchanged.
 The copied-archive GUI smoke uses the existing 600-second overall allowance.
 It covers the complete text, attachment, interruption and replacement sequence;
 the previous 300-second CI allowance expired late in that sequence on hosted
-runners. Per-frame, pending-progress and cancellation checks retain their
-original deadlines. Certification tests the selected published format on each compatibility host;
+runners. Rev display cadence is measured and reported as a warning; pending
+progress, content correctness and cancellation checks remain mandatory.
+Certification tests the selected published format on each compatibility host;
 publication still verifies both generated package formats.
 
 The Windows live-profile capture fixture requests 1 ms timer resolution for

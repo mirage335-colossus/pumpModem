@@ -52,6 +52,8 @@ jobs:
       inventory_sha256: ${{ steps.release.outputs.inventory_sha256 }}
       linux_matrix: ${{ steps.matrix.outputs.linux_matrix }}
       compatibility_matrix: ${{ steps.matrix.outputs.compatibility_matrix }}
+      windows_matrix: ${{ steps.matrix.outputs.windows_matrix }}
+      application_targets: ${{ steps.release.outputs.application_targets }}
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ inputs.release_tag }}
@@ -64,31 +66,12 @@ jobs:
         run: |
           if [ -z "$RELEASE_TAG" ]; then echo '::error::release_tag is required for full certification.'; exit 1; fi
           python3 tools/certify-release.py prepare --repo "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --directory release-info --github-output "$GITHUB_OUTPUT"
-      - name: Select full test and copied-binary coverage
+      - name: Select full test and copied-binary coverage for every published backend
         id: matrix
-        env:
-          LINUX_BASELINE: ${{ steps.release.outputs.baseline }}
-        run: |
-          python3 - <<'PYMATRIX'
-          import json, os
-          sdk = os.environ['LINUX_BASELINE'] == 'bookworm-sdk'
-          linux = [
-              {'arch': 'x86_64', 'runner': 'ubuntu-24.04', 'image': 'debian:bookworm-slim' if sdk else 'ubuntu:22.04', 'sdk': sdk, 'glibc': '2.36' if sdk else '2.35'},
-              {'arch': 'aarch64', 'runner': 'ubuntu-24.04-arm', 'image': 'ubuntu:22.04', 'sdk': False, 'glibc': '2.35'}]
-          compatibility = []
-          for platform in linux:
-              images = ['debian:bookworm-slim', 'debian:trixie-slim', 'ubuntu:24.04', 'ubuntu:26.04']
-              if platform['glibc'] == '2.35':
-                  images.append('ubuntu:22.04')
-              if platform['arch'] == 'x86_64':
-                  images.append('archlinux:base')
-              compatibility.extend(dict(platform, image=image) for image in images)
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
-              out.write('linux_matrix=' + json.dumps({'include': linux}) + '\n')
-              out.write('compatibility_matrix=' + json.dumps({'include': compatibility}) + '\n')
-          PYMATRIX
+        run: python3 tools/release.py matrices --metadata release-info/release-metadata.json --github-output "$GITHUB_OUTPUT"
 
   linux-tests:
+    name: Source and published Linux ${{ matrix.arch }} / ${{ matrix.backend }}
     if: ${{ !inputs.devfast }}
     needs: prepare
     runs-on: ${{ matrix.runner }}
@@ -99,14 +82,18 @@ jobs:
       matrix: ${{ fromJSON(needs.prepare.outputs.linux_matrix) }}
     env:
       DEBIAN_FRONTEND: noninteractive
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      LP_NUM_THREADS: '2'
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ inputs.release_tag }}
+      GUI_BACKEND: ${{ matrix.backend }}
+      RELEASE_TARGET: ${{ matrix.target }}
       INVENTORY_SHA256: ${{ needs.prepare.outputs.inventory_sha256 }}
     steps:
       - name: Install download and archive inspection prerequisites
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends ca-certificates curl git gh python3 file binutils make xvfb xauth fonts-dejavu-core fontconfig-config libxtst6
+          apt-get install -y --no-install-recommends ca-certificates curl git gh python3 file binutils make xvfb xauth fonts-dejavu-core fontconfig-config libxtst6 libgl1 libopengl0 libgl1-mesa-dri
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -131,20 +118,29 @@ jobs:
           apt-get install -y --no-install-recommends cmake ninja-build g++-11 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev
           sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
           echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
+      - name: Install native Rev compiler and module-aware Ninja
+        if: ${{ !matrix.sdk && matrix.backend == 'rev' }}
+        run: |
+          python3 tools/install-release-rev.py "$GITHUB_WORKSPACE/build/ci-rev-tools"
+          echo "$GITHUB_WORKSPACE/build/ci-rev-tools/bin" >> "$GITHUB_PATH"
       - name: Run the complete source contract, GUI and packaging suites
         env:
           USE_SDK: ${{ matrix.sdk }}
           DATAPUMP_MAX_GLIBC: ${{ matrix.glibc }}
         run: |
-          if [ "$USE_SDK" = true ]; then
-            for group in build contract gui packaging; do
-              ./build.sh test "$group" --stop-on-failure --sdk "$GITHUB_WORKSPACE/build/sdk" --build-dir build/certify --jobs 2 -- -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600
-            done
-          else
-            for group in build contract gui packaging; do
-              CC=gcc-11 CXX=g++-11 ./build.sh test "$group" --stop-on-failure --build-dir build/certify --jobs 2 -- -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600
-            done
+          if [ "$USE_SDK" != true ]; then
+            if [ "$GUI_BACKEND" = rev ]; then export CC=clang-19 CXX=clang++-19;
+            else export CC=gcc-11 CXX=g++-11; fi
           fi
+          # Run adapter/package checks before the slower numerical calibration.
+          for group in build gui packaging contract; do
+            set -- --backend "$GUI_BACKEND" --build-dir build/certify --jobs 2
+            if [ "$USE_SDK" = true ]; then set -- "$@" --sdk "$GITHUB_WORKSPACE/build/sdk"; fi
+            ./build.sh test "$group" --stop-on-failure "$@" -- -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600
+            if [ "$group" = gui ]; then
+              xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' ./build.sh test native --stop-on-failure "$@" -- -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600 -DGUI_SMOKE_TIMEOUT=600
+            fi
+          done
       - name: Verify shared audio routing and both audio platform adapters
         env:
           USE_SDK: ${{ matrix.sdk }}
@@ -160,7 +156,7 @@ jobs:
       - name: Download and verify the exact published archive
         id: binary
         env:
-          RELEASE_TARGET: linux-${{ matrix.arch }}
+          RELEASE_TARGET: ${{ matrix.target }}
         run: python3 tools/certify-release.py download --repo "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --target "$RELEASE_TARGET" --directory published --inventory-sha256 "$INVENTORY_SHA256" --github-output "$GITHUB_OUTPUT"
       - name: Test published GUI, CLI, relocation and ELF dependencies
         env:
@@ -174,6 +170,10 @@ jobs:
           "$scanner" -DPACKAGE_ROOT="$PACKAGE_ROOT" -DMAX_GLIBC="$GLIBC_CEILING" -P tools/verify-linux-abi.cmake
 
   windows-tests:
+    name: Source and published Windows x64 / ${{ matrix.backend }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.windows_matrix) }}
     if: ${{ !inputs.devfast }}
     needs: prepare
     runs-on: windows-2022
@@ -182,6 +182,8 @@ jobs:
       VCPKG_DISABLE_METRICS: '1'
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ inputs.release_tag }}
+      GUI_BACKEND: ${{ matrix.backend }}
+      RELEASE_TARGET: ${{ matrix.target }}
       INVENTORY_SHA256: ${{ needs.prepare.outputs.inventory_sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -194,17 +196,19 @@ jobs:
           ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d # 2026.07.29
           path: .ci-vcpkg
           persist-credentials: false
-      - name: Prepare pinned static OpenSSL
+      - name: Prepare pinned static application dependencies
         shell: pwsh
         run: |
           & ./.ci-vcpkg/bootstrap-vcpkg.bat -disableMetrics
           if ($LASTEXITCODE -ne 0) { throw 'vcpkg bootstrap failed' }
-          & ./.ci-vcpkg/vcpkg.exe install openssl:x64-windows-static --clean-after-build
-          if ($LASTEXITCODE -ne 0) { throw 'OpenSSL build failed' }
+          $ports = @('openssl:x64-windows-static')
+          if ($env:GUI_BACKEND -eq 'rev') { $ports += @('glew:x64-windows-static', 'freetype[core]:x64-windows-static') }
+          & ./.ci-vcpkg/vcpkg.exe install @ports --clean-after-build
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency build failed' }
       - name: Build with the Windows SDK and static MSVC runtime
         shell: pwsh
         run: |
-          cmake -S . -B build/release-windows -G 'Visual Studio 17 2022' -A x64 -DCMAKE_TOOLCHAIN_FILE="$PWD/.ci-vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600 -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          cmake -S . -B build/release-windows -G 'Visual Studio 17 2022' -A x64 -DCMAKE_TOOLCHAIN_FILE="$PWD/.ci-vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DDATAPUMP_GUI_BACKEND="$env:GUI_BACKEND" -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600 -DDATAPUMP_TEST_NATIVE_GUI=ON -DGUI_SMOKE_TIMEOUT=600 -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
           if ($LASTEXITCODE -ne 0) { throw 'Configure failed' }
           cmake --build build/release-windows --config Release --target datapump-apps datapump-tests-contract datapump-tests-gui datapump-tests-packaging --parallel 2
           if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
@@ -222,7 +226,7 @@ jobs:
         id: binary
         shell: pwsh
         run: |
-          python tools/certify-release.py download --repo "$env:GITHUB_REPOSITORY" --tag "$env:RELEASE_TAG" --target windows-x86_64 --directory published --inventory-sha256 "$env:INVENTORY_SHA256" --github-output "$env:GITHUB_OUTPUT"
+          python tools/certify-release.py download --repo "$env:GITHUB_REPOSITORY" --tag "$env:RELEASE_TAG" --target "$env:RELEASE_TARGET" --directory published --inventory-sha256 "$env:INVENTORY_SHA256" --github-output "$env:GITHUB_OUTPUT"
           if ($LASTEXITCODE -ne 0) { throw 'Published archive verification failed' }
       - name: Test the published GUI, CLI and relocation
         shell: pwsh
@@ -233,6 +237,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Published application checks failed' }
 
   compatibility:
+    name: Published ${{ matrix.target }} on ${{ matrix.image }}
     if: ${{ !inputs.devfast }}
     needs: prepare
     runs-on: ${{ matrix.runner }}
@@ -243,17 +248,21 @@ jobs:
       matrix: ${{ fromJSON(needs.prepare.outputs.compatibility_matrix) }}
     env:
       DEBIAN_FRONTEND: noninteractive
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      LP_NUM_THREADS: '2'
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ inputs.release_tag }}
+      GUI_BACKEND: ${{ matrix.backend }}
+      RELEASE_TARGET: ${{ matrix.target }}
       INVENTORY_SHA256: ${{ needs.prepare.outputs.inventory_sha256 }}
     steps:
       - name: Install inspection and display tools (no compiler)
         run: |
           if command -v apt-get >/dev/null; then
             apt-get update
-            apt-get install -y --no-install-recommends ca-certificates curl git gh python3 cmake binutils xvfb xauth fontconfig-config fonts-dejavu-core libxtst6
+            apt-get install -y --no-install-recommends ca-certificates curl git gh python3 cmake binutils xvfb xauth fontconfig-config fonts-dejavu-core libxtst6 libgl1 libopengl0 libgl1-mesa-dri
           else
-            pacman -Syu --noconfirm --needed ca-certificates curl git github-cli python cmake binutils xorg-server-xvfb xorg-xauth ttf-dejavu fontconfig libxtst
+            pacman -Syu --noconfirm --needed ca-certificates curl git github-cli python cmake binutils xorg-server-xvfb xorg-xauth ttf-dejavu fontconfig libxtst libglvnd mesa
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -262,7 +271,7 @@ jobs:
       - name: Download and verify this target's published archive
         id: binary
         env:
-          RELEASE_TARGET: linux-${{ matrix.arch }}
+          RELEASE_TARGET: ${{ matrix.target }}
         run: python3 tools/certify-release.py download --repo "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --target "$RELEASE_TARGET" --directory published --inventory-sha256 "$INVENTORY_SHA256" --github-output "$GITHUB_OUTPUT"
       - name: Use the pinned dependency scanner
         run: |
@@ -290,6 +299,7 @@ jobs:
       SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
       INVENTORY_SHA256: ${{ needs.prepare.outputs.inventory_sha256 }}
       JOB_RESULTS: ${{ toJSON(needs) }}
+      TESTED_TARGETS: ${{ needs.prepare.outputs.application_targets }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -300,6 +310,7 @@ jobs:
           import json, os
           needs = json.loads(os.environ['JOB_RESULTS'])
           results = {'source_sha': os.environ['SOURCE_SHA'], 'inventory_sha256': os.environ['INVENTORY_SHA256'],
+                     'tested_targets': json.loads(os.environ['TESTED_TARGETS']),
                      'jobs': {name: needs[name]['result'] for name in ('linux-tests', 'windows-tests', 'compatibility')}}
           with open('certification-results.json', 'w') as out:
               json.dump(results, out)

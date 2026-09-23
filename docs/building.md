@@ -48,7 +48,7 @@ supplied by the SDK's own compiler build. Those host tools still require their
 documented glibc baseline; release SDKs are built in Bookworm and audited after
 relocation. The default native build remains available.
 
-Manual releases with version/date tags, an experiment checkbox and three portable
+Manual releases with version/date tags, an experiment checkbox and six portable
 application downloads are documented in [manual portable releases](releases.md).
 
 ## Commands and profiles
@@ -73,7 +73,8 @@ failure; successful runs still execute the entire selected group.
 Native GUI tests must have a display, preferably an
 isolated Xvfb session; `./build.sh test native` builds and runs them explicitly.
 Run native workflow checks separately from other heavy test/build processes:
-their measured replay-frame assertions are sensitive to CPU contention.
+their measured replay cadence is sensitive to CPU contention. Rev cadence
+misses are advisory warnings; correctness checks still fail normally.
 The wrapper does not open or control a user's desktop.
 
 Use `--build-dir PATH` for a different compiler/toolchain. Never switch compilers
@@ -332,8 +333,11 @@ Application publication and extensive qualification are separate:
 [manual portable releases](releases.md) publishes after packaging checks, then
 [certification](../.github/workflows/certify.yml) attaches source/test outcomes
 and the exact published binary hashes to that release. Copied GUI checks use
-`-DGUI_SMOKE_TIMEOUT=600`; per-frame, pending-progress and cancellation assertions
-remain unchanged. Physical-device qualification remains a separate scope.
+`-DGUI_SMOKE_TIMEOUT=600`. Rev replay/waterfall cadence misses emit visible
+warnings and do not prevent publication or certification; pending-progress,
+content, physical-completion and cancellation assertions remain mandatory.
+See [release warnings](releases.md#rev-display-warnings). Physical-device
+qualification remains a separate scope.
 
 The existing native CI still uses Ubuntu 22.04 and audits a glibc 2.35 ceiling,
 then tests copied artifacts on Ubuntu 22.04 and 24.04. A 2.36 SDK does not imply

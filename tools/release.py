@@ -13,7 +13,9 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import tarfile
 import tempfile
+import zipfile
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,9 +24,14 @@ TARGETS = {
     'linux-aarch64': ('Linux', ('aarch64', 'arm64'), '.tar.gz'),
     'windows-x86_64': ('Windows', ('AMD64', 'x86_64', 'amd64'), '.zip'),
 }
+GUI_BACKENDS = ('fltk', 'rev')
 LABEL = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,63}')
 SHA = re.compile(r'[0-9a-f]{40}|[0-9a-f]{64}')
 SUPPORT_FILES = {'release-metadata.json', 'release-notes.md'}
+WARNING_LOG = ('REV_REPLAY_CADENCE: Rev replay/waterfall may refresh below the display target.\n'
+               'Display cadence deviations are warnings; data integrity and physical-completion\n'
+               'checks remain mandatory. Actual observed warnings are recorded in later\n'
+               'certification reports/logs.\n')
 CERTIFICATION_PENDING = ('> **Certification pending:** this release has not completed release '
                          'certification and is not marked Latest.')
 
@@ -58,7 +65,9 @@ def chicago_time(instant):
 
 
 def make_metadata(*, source_sha, run_id, run_attempt, version='', experiment=False,
-                  linux_baseline='bookworm-sdk', now=None, cmake_version=None):
+                  linux_baseline='bookworm-sdk', now=None, cmake_version=None, schema=2):
+    if type(schema) is not int or schema not in (1, 2):
+        raise ValueError('Unsupported release metadata schema')
     cmake_version = cmake_version or project_version()
     if not re.fullmatch(r'\d+(?:\.\d+){1,3}', cmake_version):
         raise ValueError('Invalid CMake project version')
@@ -76,14 +85,17 @@ def make_metadata(*, source_sha, run_id, run_attempt, version='', experiment=Fal
     instant = now or datetime.now(timezone.utc)
     local = chicago_time(instant)
     tag = f'{version}-{local:%Y-%m-%d-%H%M%Z}'
-    return {
-        'schema': 1, 'version': version, 'project_version': cmake_version,
+    value = {
+        'schema': schema, 'version': version, 'project_version': cmake_version,
         'tag': tag, 'title': 'experiment' if experiment else tag,
         'experiment': experiment, 'linux_baseline': linux_baseline,
         'source_sha': source_sha, 'run_id': str(run_id), 'run_attempt': str(run_attempt),
         'created_at': instant.astimezone(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z'),
         'build_date': local.strftime('%Y-%m-%d-%H%M%Z'), 'timezone': 'America/Chicago',
     }
+    if schema == 2:
+        value['gui_backends'] = list(GUI_BACKENDS)
+    return value
 
 
 def load_metadata(path):
@@ -93,7 +105,7 @@ def load_metadata(path):
                                  run_attempt=value['run_attempt'], version=value['version'],
                                  experiment=value['experiment'], linux_baseline=value['linux_baseline'],
                                  now=datetime.fromisoformat(value['created_at'].replace('Z', '+00:00')),
-                                 cmake_version=value['project_version'])
+                                 cmake_version=value['project_version'], schema=value['schema'])
     except (KeyError, TypeError, AttributeError) as error:
         raise ValueError('Incomplete or invalid release metadata') from error
     if value != expected:
@@ -138,9 +150,140 @@ def check_inventory(directory, checksum_name='SHA256SUMS.txt'):
     return inventory
 
 
+def application_targets(metadata):
+    """Map download identities to their physical platform/archive format."""
+    if metadata['schema'] == 1:
+        return dict(TARGETS)
+    if metadata['schema'] != 2 or metadata.get('gui_backends') != list(GUI_BACKENDS):
+        raise ValueError('Unsupported release schema or GUI backend inventory')
+    return {f'{platform}-{backend}': details for platform, details in TARGETS.items()
+            for backend in GUI_BACKENDS}
+
+
+def target_platform(metadata, target):
+    if target not in application_targets(metadata):
+        raise ValueError('Unknown portable release target')
+    return target if metadata['schema'] == 1 else target.rsplit('-', 1)[0]
+
+
+def target_backend(metadata, target):
+    target_platform(metadata, target)
+    return 'fltk' if metadata['schema'] == 1 else target.rsplit('-', 1)[1]
+
+
+def build_matrices(metadata):
+    """Use the release identities for both builders and copied-binary coverage."""
+    baseline = metadata['linux_baseline']
+    if baseline not in ('bookworm-sdk', 'ubuntu-22.04'):
+        raise ValueError('Unknown Linux baseline')
+    linux, windows, compatibility = [], [], []
+    for target in application_targets(metadata):
+        platform = target_platform(metadata, target)
+        backend = target_backend(metadata, target)
+        if platform == 'windows-x86_64':
+            windows.append({'backend': backend, 'target': target})
+            continue
+        arch = platform.removeprefix('linux-')
+        sdk = arch == 'x86_64' and baseline == 'bookworm-sdk'
+        row = {'arch': arch,
+               'runner': 'ubuntu-24.04-arm' if arch == 'aarch64' else 'ubuntu-24.04',
+               'image': 'debian:bookworm-slim' if sdk else 'ubuntu:22.04',
+               'sdk': sdk, 'glibc': '2.36' if sdk else '2.35',
+               'backend': backend, 'target': target}
+        linux.append(row)
+        images = ['debian:bookworm-slim', 'debian:trixie-slim', 'ubuntu:24.04', 'ubuntu:26.04']
+        if row['glibc'] == '2.35':
+            images.append('ubuntu:22.04')
+        if arch == 'x86_64':
+            images.append('archlinux:base')
+        compatibility.extend(dict(row, image=image) for image in images)
+    return {'linux_matrix': {'include': linux}, 'windows_matrix': {'include': windows},
+            'compatibility_matrix': {'include': compatibility}}
+
+
+def package_bases(metadata, target):
+    system, architectures, _ = TARGETS[target_platform(metadata, target)]
+    suffix = '' if metadata['schema'] == 1 else '-' + target_backend(metadata, target)
+    return [f'DataPump-{metadata["project_version"]}-{system}-{arch}-native{suffix}'
+            for arch in architectures]
+
+
+def verify_archive_backend(archive, metadata, target):
+    """Check new bundles' root and shipped build provenance without extracting."""
+    target_platform(metadata, target)
+    if metadata['schema'] == 1:
+        return  # Existing releases predate backend-qualified package roots.
+    bases = set(package_bases(metadata, target))
+    provenance = 'share/doc/datapump/build-info.txt'
+    contents = None
+    roots = set()
+
+    def inspect(name, size, regular, read):
+        nonlocal contents
+        name = name.removeprefix('./').rstrip('/')
+        parts = name.split('/')
+        if (not name or any(part in ('', '.', '..') for part in parts)
+                or '\\' in name or parts[0] not in bases):
+            raise ValueError(f'Archive has an unexpected package root or path for {target}')
+        roots.add(parts[0])
+        if '/'.join(parts[1:]) == provenance:
+            if contents is not None or not regular or size > 65536:
+                raise ValueError(f'Archive has duplicate or unsafe backend build-info for {target}')
+            contents = read()
+
+    try:
+        if archive.name.endswith('.tar.gz'):
+            with tarfile.open(archive, 'r:gz') as source:
+                for member in source:
+                    inspect(member.name, member.size, member.isfile(),
+                            lambda member=member: source.extractfile(member).read())
+        elif archive.name.endswith('.zip'):
+            with zipfile.ZipFile(archive) as source:
+                for member in source.infolist():
+                    kind = (member.external_attr >> 16) & 0o170000
+                    inspect(member.filename, member.file_size,
+                            not member.is_dir() and kind in (0, 0o100000),
+                            lambda member=member: source.read(member))
+        else:
+            raise ValueError('Unsupported application archive format')
+        if len(roots) != 1 or contents is None:
+            raise ValueError(f'Archive is missing backend build-info for {target}')
+        lines = [line for line in contents.decode('utf-8').splitlines() if line.startswith('GUI:')]
+        backend = target_backend(metadata, target)
+        if len(lines) != 1 or not re.fullmatch(rf'GUI: (?:ON|TRUE|YES|1) \({backend}\)', lines[0]):
+            raise ValueError(f'Archive backend build-info does not match {target}')
+    except (tarfile.TarError, zipfile.BadZipFile, UnicodeError) as error:
+        raise ValueError(f'Invalid application archive or backend build-info for {target}') from error
+
+
+def native_pair(directory, metadata, target):
+    inventory = check_inventory(directory)
+    bases = [base for base in package_bases(metadata, target)
+             if set(inventory) == {base + '.tar.gz', base + '.zip'}]
+    if len(bases) != 1:
+        raise ValueError(f'Expected one matching native TGZ/ZIP pair for {target}')
+    for extension in ('.tar.gz', '.zip'):
+        verify_archive_backend(directory / (bases[0] + extension), metadata, target)
+    return directory / (bases[0] + application_targets(metadata)[target][2])
+
+
 def application_names(metadata):
     return {target: f'DataPump-{metadata["tag"]}-{target}{details[2]}'
-            for target, details in TARGETS.items()}
+            for target, details in application_targets(metadata).items()}
+
+
+def support_files(metadata):
+    return SUPPORT_FILES | ({'warning.log'} if metadata['schema'] == 2 else set())
+
+
+def write_warning(metadata, directory):
+    if metadata['schema'] == 2:
+        (directory / 'warning.log').write_text(WARNING_LOG, encoding='utf-8')
+
+
+def verify_warning(metadata, directory):
+    if metadata['schema'] == 2 and (directory / 'warning.log').read_text(encoding='utf-8') != WARNING_LOG:
+        raise ValueError('Release warning.log must preserve the known Rev presentation limitation')
 
 
 def verify_sdk_pair(names):
@@ -164,6 +307,7 @@ def release_notes(metadata, details):
             f'- Build date: `{metadata["build_date"]}` (America/Chicago)\n'
             f'- Workflow run: `{metadata["run_id"]}`, attempt `{metadata["run_attempt"]}`\n'
             f'- Application version: `{metadata["project_version"]}`\n'
+            f'- GUI downloads: {", ".join(metadata.get("gui_backends", ["fltk"]))}\n'
             f'- Linux ABI: {baseline}\n\n{details}')
 
 
@@ -174,16 +318,9 @@ def assemble(artifacts, metadata_path, notes, output, sdk_artifacts=None):
     if output.exists():
         raise ValueError(f'Refusing to replace an existing output directory: {output}')
     copies = []
-    for target, (system, architectures, extension) in TARGETS.items():
+    for target in application_targets(metadata):
         directory = artifacts / target
-        inventory = check_inventory(directory)
-        candidates = [f'DataPump-{metadata["project_version"]}-{system}-{arch}-native'
-                      for arch in architectures]
-        bases = [base for base in candidates
-                 if set(inventory) == {base + '.tar.gz', base + '.zip'}]
-        if len(bases) != 1:
-            raise ValueError(f'Expected one matching native TGZ/ZIP pair for {target}')
-        copies.append((directory / (bases[0] + extension), application_names(metadata)[target]))
+        copies.append((native_pair(directory, metadata, target), application_names(metadata)[target]))
     if sdk_artifacts:
         inventory = check_inventory(sdk_artifacts, 'SHA256SUMS')
         verify_sdk_pair(inventory)
@@ -199,6 +336,7 @@ def assemble(artifacts, metadata_path, notes, output, sdk_artifacts=None):
         write_json(staged / 'release-metadata.json', metadata)
         (staged / 'release-notes.md').write_text(
             release_notes(metadata, notes.read_text(encoding='utf-8')), encoding='utf-8')
+        write_warning(metadata, staged)
         checksums = ''.join(f'{digest(path)}  {path.name}\n' for path in sorted(staged.iterdir()))
         (staged / 'SHA256SUMS.txt').write_text(checksums, encoding='utf-8')
         verify_release(staged)
@@ -209,12 +347,15 @@ def assemble(artifacts, metadata_path, notes, output, sdk_artifacts=None):
 def verify_release(directory):
     inventory = check_inventory(directory)
     metadata = load_metadata(directory / 'release-metadata.json')
-    required = set(application_names(metadata).values()) | SUPPORT_FILES
+    required = set(application_names(metadata).values()) | support_files(metadata)
     if not required <= set(inventory):
         raise ValueError('Release inventory is missing an application target or support file')
     extra = set(inventory) - required
     if extra:
         verify_sdk_pair(extra)
+    verify_warning(metadata, directory)
+    for target, name in application_names(metadata).items():
+        verify_archive_backend(directory / name, metadata, target)
     return metadata, sorted(inventory)
 
 
@@ -273,8 +414,9 @@ def draft_info(metadata, repository):
             raise ValueError('Reserved release tag does not identify the exact source commit')
     assets = api_pages(f'repos/{repository}/releases/{info["id"]}/assets?per_page=100')
     inventory = {asset['name']: asset for asset in assets}
-    allowed = set(application_names(metadata).values()) | SUPPORT_FILES
-    if len(inventory) != len(assets) or not SUPPORT_FILES <= set(inventory) or not set(inventory) <= allowed:
+    required = support_files(metadata)
+    allowed = set(application_names(metadata).values()) | required
+    if len(inventory) != len(assets) or not required <= set(inventory) or not set(inventory) <= allowed:
         raise ValueError('Reserved draft has missing support files, duplicate, finalized or unexpected assets')
     return inventory
 
@@ -316,6 +458,7 @@ def check_draft_metadata(metadata, directory):
         raise ValueError('Reserved draft metadata belongs to another workflow run or source commit')
     if CERTIFICATION_PENDING not in (directory / 'release-notes.md').read_text(encoding='utf-8'):
         raise ValueError('Reserved draft notes must retain the pending certification status')
+    verify_warning(metadata, directory)
 
 
 def reserve(metadata_path, notes, repository):
@@ -332,31 +475,25 @@ def reserve(metadata_path, notes, repository):
         write_json(directory / 'release-metadata.json', metadata)
         (directory / 'release-notes.md').write_text(
             release_notes(metadata, notes.read_text(encoding='utf-8')), encoding='utf-8')
+        write_warning(metadata, directory)
         create_draft(metadata, repository, directory / 'release-notes.md')
         gh(['release', 'upload', metadata['tag'], '--repo', repository,
-            str(directory / 'release-metadata.json'), str(directory / 'release-notes.md')])
+            *[str(directory / name) for name in sorted(support_files(metadata))]])
     return metadata
 
 
 def upload(metadata_path, repository, target, directory):
     metadata = load_metadata(metadata_path)
-    if target not in TARGETS:
-        raise ValueError('Unknown portable release target')
-    system, architectures, extension = TARGETS[target]
-    inventory = check_inventory(directory)
-    candidates = [f'DataPump-{metadata["project_version"]}-{system}-{arch}-native' for arch in architectures]
-    bases = [base for base in candidates if set(inventory) == {base + '.tar.gz', base + '.zip'}]
-    if len(bases) != 1:
-        raise ValueError(f'Expected one matching native TGZ/ZIP pair for {target}')
+    source = native_pair(directory, metadata, target)
     assets = draft_info(metadata, repository)
     name = application_names(metadata)[target]
     if name in assets:
         raise ValueError(f'Refusing to overwrite an existing target asset: {name}')
     with tempfile.TemporaryDirectory(prefix='release-upload-') as temporary:
         staged = Path(temporary)
-        download_assets(metadata, repository, staged, assets, SUPPORT_FILES)
+        download_assets(metadata, repository, staged, assets, support_files(metadata))
         check_draft_metadata(metadata, staged)
-        shutil.copyfile(directory / (bases[0] + extension), staged / name)
+        shutil.copyfile(source, staged / name)
         gh(['release', 'upload', metadata['tag'], '--repo', repository, str(staged / name)])
     return metadata
 
@@ -366,9 +503,10 @@ def finalize(metadata_path, repository, directory, publish_now=False):
     if directory.exists() or directory.is_symlink():
         raise ValueError('Refusing to replace an existing final release directory')
     assets = draft_info(metadata, repository)
-    expected = set(application_names(metadata).values()) | SUPPORT_FILES
+    expected = set(application_names(metadata).values()) | support_files(metadata)
     if set(assets) != expected:
-        raise ValueError('Draft is missing one or more of the three portable targets')
+        count = 'three' if metadata['schema'] == 1 else 'six'
+        raise ValueError(f'Draft is missing one or more of the {count} portable targets')
     directory.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.release-finalize-', dir=directory.parent) as temporary:
         staged = Path(temporary) / 'assets'
@@ -431,6 +569,9 @@ def main(argv=None):
     metadata.add_argument('--linux-baseline', choices=('bookworm-sdk', 'ubuntu-22.04'), default='bookworm-sdk')
     metadata.add_argument('--output', type=Path, required=True)
     metadata.add_argument('--github-output', type=Path)
+    matrices = commands.add_parser('matrices', help='Select schema-aware build and compatibility jobs')
+    matrices.add_argument('--metadata', type=Path, required=True)
+    matrices.add_argument('--github-output', type=Path)
     stage = commands.add_parser('assemble', help='Verify inputs and stage the minimal release assets')
     stage.add_argument('--artifacts', type=Path, required=True)
     stage.add_argument('--metadata', type=Path, required=True)
@@ -450,7 +591,8 @@ def main(argv=None):
         else:
             command.add_argument('--directory', type=Path, required=True)
         if name == 'upload':
-            command.add_argument('--target', choices=tuple(TARGETS), required=True)
+            command.add_argument('--target', required=True,
+                                 help='Platform identity, including -fltk or -rev for schema 2')
         if name == 'finalize':
             command.add_argument('--publish', action='store_true')
     args = parser.parse_args(argv)
@@ -465,6 +607,13 @@ def main(argv=None):
                     for key in ('tag', 'title', 'version', 'experiment', 'build_date', 'source_sha'):
                         text = str(value[key]).lower() if type(value[key]) is bool else value[key]
                         output.write(f'{key}={text}\n')
+        elif args.command == 'matrices':
+            metadata = load_metadata(args.metadata)
+            value = build_matrices(metadata)
+            if args.github_output:
+                with args.github_output.open('a', encoding='utf-8') as output:
+                    for key, data in {'metadata_json': metadata, **value}.items():
+                        output.write(f'{key}={json.dumps(data, separators=(",", ":"))}\n')
         elif args.command == 'assemble':
             value = assemble(args.artifacts, args.metadata, args.notes, args.output, args.sdk_artifacts)
         elif args.command == 'reserve':

@@ -101,3 +101,36 @@ execute_process(COMMAND "${CMAKE_COMMAND}" "-DARCHIVE_DIR=${archive_directory}" 
 if(rejected EQUAL 0 OR NOT error MATCHES "checksums differ")
   message(FATAL_ERROR "Native archive verifier failed to reject a changed download")
 endif()
+
+# GUI backends use distinct roots so both releases can share one download
+# directory. Keep the unsuffixed CLI fixture above and verify each GUI pair.
+foreach(backend fltk rev)
+  set(basename "DataPump-fixture-native-${backend}")
+  set(backend_archives "${scratch}/${backend} archives")
+  file(MAKE_DIRECTORY "${archive_source}/${basename}" "${backend_archives}")
+  file(COPY "${relocated}/" DESTINATION "${archive_source}/${basename}")
+  file(REMOVE "${archive_source}/${basename}/unexpected-file.txt")
+  foreach(format TGZ ZIP)
+    if(format STREQUAL "TGZ")
+      set(archive_arguments cfz "${backend_archives}/${basename}.tar.gz")
+    else()
+      set(archive_arguments cf "${backend_archives}/${basename}.zip" --format=zip)
+    endif()
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E tar ${archive_arguments} "${basename}"
+      WORKING_DIRECTORY "${archive_source}" RESULT_VARIABLE archived)
+    if(NOT archived EQUAL 0)
+      message(FATAL_ERROR "Could not create ${backend} packaging test archive")
+    endif()
+  endforeach()
+  execute_process(COMMAND "${CMAKE_COMMAND}" "-DARCHIVE_DIR=${backend_archives}" "-DBUILD_DIR=${BINARY_DIR}"
+    -P "${archive_verifier}" RESULT_VARIABLE verified OUTPUT_VARIABLE output ERROR_VARIABLE error)
+  if(NOT verified EQUAL 0 OR NOT EXISTS "${backend_archives}/SHA256SUMS.txt")
+    message(FATAL_ERROR "${backend} archive fixture failed verification: ${output}\n${error}")
+  endif()
+  file(REMOVE "${backend_archives}/${basename}.zip" "${backend_archives}/SHA256SUMS.txt")
+  execute_process(COMMAND "${CMAKE_COMMAND}" "-DARCHIVE_DIR=${backend_archives}" -P "${archive_verifier}"
+    RESULT_VARIABLE rejected OUTPUT_VARIABLE output ERROR_VARIABLE error)
+  if(rejected EQUAL 0 OR NOT error MATCHES "Both native TGZ and ZIP archives must be present")
+    message(FATAL_ERROR "${backend} archive verifier accepted an incomplete pair")
+  endif()
+endforeach()

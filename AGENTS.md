@@ -30,6 +30,11 @@ captures have their own documented provenance. Keep all checks below intact.
   success cannot certify or promote a release. Preserve earlier release assets
   and reports, and record actual results and remaining limits in
   [docs/validation.md](docs/validation.md).
+- Rev replay/waterfall display cadence is an advisory warning, not a build or
+  certification gate. Keep it visible in logs/release `warning.log`, and do not
+  spend long diagnostic runs tuning this known presentation limitation unless
+  requested. Data integrity, physical completion, pending identity and source/
+  bitmap correctness remain mandatory; see [release warnings](docs/releases.md#rev-display-warnings).
 
 See [testing stages](docs/building.md#testing-stages) and
 [release validation](docs/releases.md#diagnose-a-branch-before-full-validation).

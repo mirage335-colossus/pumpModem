@@ -2,12 +2,15 @@
 """Release identity, checksum inventory and fail-closed GitHub publication tests."""
 from datetime import datetime, timezone
 import importlib.util
+import io
 import json
 from pathlib import Path
 import subprocess
+import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location('release', ROOT / 'tools/release.py')
@@ -16,14 +19,66 @@ SPEC.loader.exec_module(release)
 
 
 def metadata(**options):
+    # Keep the existing published-schema fixture to prove backward compatibility.
     defaults = dict(source_sha='a' * 40, run_id='123', run_attempt='1',
                     now=datetime(2026, 9, 22, 7, 52, tzinfo=timezone.utc),
-                    cmake_version='0.7.2')
+                    cmake_version='0.7.2', schema=1)
     defaults.update(options)
     return release.make_metadata(**defaults)
 
 
+def backend_archive(path, base, backend, *, include_info=True, duplicate_info=False):
+    entries = [(f'{base}/bin/pump', b'fixture executable')]
+    if include_info:
+        entries.append((f'{base}/share/doc/datapump/build-info.txt',
+                        f'DataPump 0.7.2\nGUI: ON ({backend})\n'.encode()))
+        if duplicate_info:
+            entries.append(entries[-1])
+    if path.name.endswith('.tar.gz'):
+        with tarfile.open(path, 'w:gz') as archive:
+            for name, content in entries:
+                member = tarfile.TarInfo(name)
+                member.size = len(content)
+                archive.addfile(member, io.BytesIO(content))
+    else:
+        with zipfile.ZipFile(path, 'w') as archive:
+            for name, content in entries:
+                archive.writestr(name, content)
+
+
 class MetadataTests(unittest.TestCase):
+    def test_new_metadata_defaults_to_both_backends_and_legacy_stays_readable(self):
+        value = release.make_metadata(source_sha='a' * 40, run_id='123', run_attempt='1')
+        self.assertEqual(value['schema'], 2)
+        self.assertEqual(value['gui_backends'], ['fltk', 'rev'])
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'metadata.json'
+            for schema in (1, 2):
+                original = metadata(schema=schema)
+                release.write_json(path, original)
+                self.assertEqual(release.load_metadata(path), original)
+                self.assertEqual(len(release.application_targets(original)), 3 if schema == 1 else 6)
+            for changes in ({'schema': 3}, {'schema': True}, {'gui_backends': ['fltk']},
+                            {'gui_backends': ['rev', 'fltk']}, {'gui_backends': ['fltk', 'rev', 'rev']},
+                            {'gui_backends': None}):
+                release.write_json(path, {**metadata(schema=2), **changes})
+                with self.subTest(changes=changes), self.assertRaises(ValueError):
+                    release.load_metadata(path)
+
+    def test_target_helpers_bind_platform_backend_and_package_root(self):
+        for schema in (1, 2):
+            value = metadata(schema=schema)
+            for target in release.application_targets(value):
+                platform = release.target_platform(value, target)
+                backend = release.target_backend(value, target)
+                self.assertIn(platform, release.TARGETS)
+                self.assertIn(backend, release.GUI_BACKENDS)
+                for base in release.package_bases(value, target):
+                    self.assertTrue(base.endswith('-native' if schema == 1 else '-native-' + backend))
+            invalid = 'linux-x86_64-rev' if schema == 1 else 'linux-x86_64'
+            with self.assertRaisesRegex(ValueError, 'Unknown portable'):
+                release.target_platform(value, invalid)
+
     def test_default_and_explicit_version_and_experiment(self):
         default = metadata()
         self.assertEqual(default['tag'], 'v0.7.2-2026-09-22-0252CDT')
@@ -67,6 +122,83 @@ class MetadataTests(unittest.TestCase):
         self.assertRegex(release.project_version(), r'^\d+(?:\.\d+)+$')
 
 
+class MatrixTests(unittest.TestCase):
+    def test_both_schemas_and_baselines_cover_every_expected_target(self):
+        for schema in (1, 2):
+            for baseline in ('bookworm-sdk', 'ubuntu-22.04'):
+                with self.subTest(schema=schema, baseline=baseline):
+                    value = metadata(schema=schema, linux_baseline=baseline)
+                    matrices = release.build_matrices(value)
+                    linux = matrices['linux_matrix']['include']
+                    windows = matrices['windows_matrix']['include']
+                    compatibility = matrices['compatibility_matrix']['include']
+                    backends = ('fltk',) if schema == 1 else ('fltk', 'rev')
+                    expected = {f'{platform}-{backend}' if schema == 2 else platform
+                                for platform in ('linux-x86_64', 'linux-aarch64', 'windows-x86_64')
+                                for backend in backends}
+                    self.assertEqual({row['target'] for row in linux + windows}, expected)
+                    self.assertEqual(len(linux), 2 * len(backends))
+                    self.assertEqual(len(windows), len(backends))
+                    self.assertEqual(len(compatibility), (10 if baseline == 'bookworm-sdk' else 11) * len(backends))
+                    self.assertEqual(len({(row['target'], row['image']) for row in compatibility}), len(compatibility))
+                    for row in linux + windows:
+                        self.assertIn(row['backend'], backends)
+                        if schema == 2:
+                            self.assertTrue(row['target'].endswith('-' + row['backend']))
+                    for row in windows:
+                        self.assertEqual(set(row), {'backend', 'target'})
+
+    def test_compatibility_images_follow_each_architecture_and_abi_floor(self):
+        for baseline in ('bookworm-sdk', 'ubuntu-22.04'):
+            value = metadata(schema=2, linux_baseline=baseline)
+            matrices = release.build_matrices(value)
+            for row in matrices['linux_matrix']['include']:
+                x86 = row['arch'] == 'x86_64'
+                sdk = x86 and baseline == 'bookworm-sdk'
+                self.assertEqual(row['sdk'], sdk)
+                self.assertEqual(row['glibc'], '2.36' if sdk else '2.35')
+                self.assertEqual(row['runner'], 'ubuntu-24.04' if x86 else 'ubuntu-24.04-arm')
+                self.assertEqual(row['image'], 'debian:bookworm-slim' if sdk else 'ubuntu:22.04')
+                expected_images = {'debian:bookworm-slim', 'debian:trixie-slim', 'ubuntu:24.04', 'ubuntu:26.04'}
+                if not sdk:
+                    expected_images.add('ubuntu:22.04')
+                if x86:
+                    expected_images.add('archlinux:base')
+                copies = [copy for copy in matrices['compatibility_matrix']['include'] if copy['target'] == row['target']]
+                self.assertEqual({copy['image'] for copy in copies}, expected_images)
+                for copy in copies:
+                    self.assertEqual({key: data for key, data in copy.items() if key != 'image'},
+                                     {key: data for key, data in row.items() if key != 'image'})
+
+    def test_cli_emits_all_matrix_outputs_and_preserves_existing_step_outputs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'metadata.json'
+            output = Path(temporary) / 'github-output'
+            value = metadata(schema=2)
+            release.write_json(path, value)
+            output.write_text('tag=' + value['tag'] + '\n', encoding='utf-8')
+            with patch('sys.stdout', new_callable=io.StringIO) as stdout:
+                release.main(['matrices', '--metadata', str(path), '--github-output', str(output)])
+            matrices = release.build_matrices(value)
+            self.assertEqual(json.loads(stdout.getvalue()), matrices)
+            rows = dict(line.split('=', 1) for line in output.read_text(encoding='utf-8').splitlines())
+            self.assertEqual(rows.pop('tag'), value['tag'])
+            self.assertEqual(json.loads(rows.pop('metadata_json')), value)
+            self.assertEqual({key: json.loads(data) for key, data in rows.items()}, matrices)
+
+    def test_cli_rejects_incomplete_backend_metadata_before_writing_outputs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'metadata.json'
+            output = Path(temporary) / 'github-output'
+            value = metadata(schema=2)
+            value['gui_backends'] = ['fltk']
+            release.write_json(path, value)
+            with patch('sys.stderr', new_callable=io.StringIO), self.assertRaises(SystemExit) as failure:
+                release.main(['matrices', '--metadata', str(path), '--github-output', str(output)])
+            self.assertEqual(failure.exception.code, 1)
+            self.assertFalse(output.exists())
+
+
 class ReleaseFixture:
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix='datapump-release-')
@@ -95,8 +227,95 @@ class ReleaseFixture:
     def assemble(self, **options):
         return release.assemble(self.artifacts, self.metadata, self.notes, self.output, **options)
 
+    def backend_inputs(self):
+        value = metadata(schema=2)
+        release.write_json(self.metadata, value)
+        # Use a separate root so no legacy fixture can accidentally satisfy it.
+        self.artifacts = self.root / 'backend-inputs'
+        self.artifacts.mkdir()
+        for target in release.application_targets(value):
+            directory = self.artifacts / target
+            directory.mkdir()
+            base = release.package_bases(value, target)[0]
+            for extension in ('.tar.gz', '.zip'):
+                backend_archive(directory / (base + extension), base, release.target_backend(value, target))
+            self.sums(directory)
+        return value
+
 
 class InventoryTests(ReleaseFixture, unittest.TestCase):
+    def test_six_backend_archives_are_assembled_and_verified(self):
+        value = self.backend_inputs()
+        self.assertEqual(self.assemble(), value)
+        verified, names = release.verify_release(self.output)
+        self.assertEqual(verified, value)
+        self.assertEqual(len(names), 9)
+        self.assertEqual((self.output / 'warning.log').read_text(encoding='utf-8'), release.WARNING_LOG)
+        for target, name in release.application_names(value).items():
+            self.assertIn(target + release.application_targets(value)[target][2], name)
+            original = release.native_pair(self.artifacts / target, value, target)
+            self.assertEqual((self.output / name).read_bytes(), original.read_bytes())
+
+    def test_missing_or_swapped_backend_build_info_rejects_both_formats(self):
+        value = self.backend_inputs()
+        target = 'linux-x86_64-fltk'
+        directory = self.artifacts / target
+        base = release.package_bases(value, target)[0]
+        for extension in ('.tar.gz', '.zip'):
+            archive = directory / (base + extension)
+            for include_info, backend in ((False, 'fltk'), (True, 'rev')):
+                backend_archive(archive, base, backend, include_info=include_info)
+                self.sums(directory)
+                with self.subTest(extension=extension, backend=backend, info=include_info):
+                    with self.assertRaisesRegex(ValueError, 'backend build-info'):
+                        self.assemble()
+                    self.assertFalse(self.output.exists())
+            backend_archive(archive, base, 'fltk')
+            self.sums(directory)
+
+    def test_new_metadata_requires_all_six_targets(self):
+        self.backend_inputs()
+        (self.artifacts / 'windows-x86_64-rev').rename(self.artifacts / 'missing')
+        with self.assertRaisesRegex(ValueError, 'Missing or unsafe artifact directory'):
+            self.assemble()
+        self.assertFalse(self.output.exists())
+
+    def test_wrong_root_and_duplicate_build_info_are_rejected(self):
+        value = self.backend_inputs()
+        target = 'linux-aarch64-rev'
+        directory = self.artifacts / target
+        base = release.package_bases(value, target)[0]
+        archive = directory / (base + '.tar.gz')
+        backend_archive(archive, base.replace('-rev', '-fltk'), 'rev')
+        with self.assertRaisesRegex(ValueError, 'unexpected package root'):
+            release.verify_archive_backend(archive, value, target)
+        backend_archive(archive, base, 'rev', duplicate_info=True)
+        with self.assertRaisesRegex(ValueError, 'duplicate or unsafe'):
+            release.verify_archive_backend(archive, value, target)
+
+    def test_final_inventory_rejects_backend_swap_even_with_updated_checksums(self):
+        value = self.backend_inputs()
+        self.assemble()
+        names = release.application_names(value)
+        (self.output / names['windows-x86_64-fltk']).write_bytes(
+            (self.output / names['windows-x86_64-rev']).read_bytes())
+        self.sums(self.output)
+        with self.assertRaisesRegex(ValueError, 'unexpected package root'):
+            release.verify_release(self.output)
+
+    def test_schema2_warning_is_required_and_preserves_the_known_limitation(self):
+        self.backend_inputs()
+        self.assemble()
+        warning = self.output / 'warning.log'
+        warning.unlink()
+        self.sums(self.output)
+        with self.assertRaisesRegex(ValueError, 'missing an application target or support file'):
+            release.verify_release(self.output)
+        warning.write_text('No known warnings.\n', encoding='utf-8')
+        self.sums(self.output)
+        with self.assertRaisesRegex(ValueError, 'preserve the known Rev'):
+            release.verify_release(self.output)
+
     def test_minimal_inventory_selects_one_archive_per_target(self):
         value = self.assemble()
         expected = set(release.application_names(value).values()) | release.SUPPORT_FILES | {'SHA256SUMS.txt'}
@@ -467,6 +686,61 @@ class StagedPublicationTests(ReleaseFixture, unittest.TestCase):
 
     def mutations(self):
         return [call for call in self.calls if call[:1] == ['release'] and call[1] in ('create', 'upload', 'edit')]
+
+    def test_six_backend_uploads_require_complete_inventory_before_publication(self):
+        self.value = self.backend_inputs()
+        release.reserve(self.metadata, self.notes, 'owner/repository')
+        targets = list(release.application_targets(self.value))
+        for target in targets[:-1]:
+            release.upload(self.metadata, 'owner/repository', target, self.artifacts / target)
+        with self.assertRaisesRegex(ValueError, 'six portable targets'):
+            release.finalize(self.metadata, 'owner/repository', self.output, True)
+        self.assertTrue(self.info['draft'])
+        self.assertNotIn('SHA256SUMS.txt', self.remote)
+        target = targets[-1]
+        with patch('sys.stdout', new_callable=io.StringIO):
+            release.main(['upload', '--metadata', str(self.metadata), '--repo', 'owner/repository',
+                          '--target', target, '--directory', str(self.artifacts / target)])
+        with self.assertRaisesRegex(ValueError, 'overwrite an existing target'):
+            release.upload(self.metadata, 'owner/repository', target, self.artifacts / target)
+        release.finalize(self.metadata, 'owner/repository', self.output, True)
+        self.assertEqual(len(self.remote), 10)
+        self.assertEqual(set(self.remote), set(release.application_names(self.value).values()) |
+                         release.support_files(self.value) | {'SHA256SUMS.txt'})
+        self.assertEqual(self.remote['warning.log'], release.WARNING_LOG.encode())
+        self.assertFalse(self.info['draft'])
+        self.assertIn('--latest=false', self.mutations()[-1])
+        self.assertTrue(all('--clobber' not in call for call in self.calls))
+
+    def test_backend_mismatch_prevents_upload_before_network(self):
+        value = self.backend_inputs()
+        target = 'windows-x86_64-rev'
+        directory = self.artifacts / target
+        base = release.package_bases(value, target)[0]
+        backend_archive(directory / (base + '.zip'), base, 'fltk')
+        self.sums(directory)
+        with self.assertRaisesRegex(ValueError, 'backend build-info'):
+            release.upload(self.metadata, 'owner/repository', target, directory)
+        self.assertEqual(self.calls, [])
+
+    def test_draft_requires_original_warning_before_upload_or_finalize(self):
+        self.value = self.backend_inputs()
+        release.reserve(self.metadata, self.notes, 'owner/repository')
+        original = self.remote.pop('warning.log')
+        target = 'linux-x86_64-rev'
+        with self.assertRaisesRegex(ValueError, 'missing support files'):
+            release.upload(self.metadata, 'owner/repository', target, self.artifacts / target)
+        self.remote['warning.log'] = b'No warnings.'
+        with self.assertRaisesRegex(ValueError, 'preserve the known Rev'):
+            release.upload(self.metadata, 'owner/repository', target, self.artifacts / target)
+        self.remote['warning.log'] = original
+        for target in release.application_targets(self.value):
+            release.upload(self.metadata, 'owner/repository', target, self.artifacts / target)
+        self.remote['warning.log'] = b'No warnings.'
+        with self.assertRaisesRegex(ValueError, 'preserve the known Rev'):
+            release.finalize(self.metadata, 'owner/repository', self.output, True)
+        self.assertTrue(self.info['draft'])
+        self.assertNotIn('SHA256SUMS.txt', self.remote)
 
     def test_reserve_creates_exact_commit_draft_and_pending_notes_without_binaries(self):
         self.reserve(experiment=True)
