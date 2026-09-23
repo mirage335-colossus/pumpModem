@@ -91,7 +91,9 @@ def download_asset(repository, tag, name, directory, assets, expected=None):
     path = directory / name
     if path.exists() or path.is_symlink():
         raise ValueError(f'Refusing to replace downloaded file: {path}')
-    gh(['release', 'download', tag, '--repo', repository, '--pattern', name, '--dir', str(directory)])
+    # Download the exact REST asset ID: the release's embedded asset list (and
+    # therefore `gh release download`) can be empty despite available assets.
+    release.download_asset(repository, assets[name], path, require_digest=False)
     if not path.is_file() or path.is_symlink():
         raise ValueError(f'Download is not a regular file: {name}')
     actual = release.digest(path)
@@ -114,7 +116,11 @@ def prepare(repository, tag, directory, expected_inventory=None):
     published = api(f'repos/{repository}/releases/tags/{quote(tag, safe="")}')
     if published.get('draft') or published.get('tag_name') != tag:
         raise ValueError('Certification requires the exact published, non-draft release')
-    items = published.get('assets', [])
+    if type(published.get('id')) is not int or published['id'] <= 0:
+        raise ValueError('Published release has no valid REST release ID')
+    # Per-run certificates accumulate here; enumerate every page rather than
+    # trusting a partial or empty assets field in the release response.
+    items = release.api_pages(f'repos/{repository}/releases/{published["id"]}/assets?per_page=100')
     assets = {item['name']: item for item in items}
     if len(assets) != len(items):
         raise ValueError('Release has duplicate asset names')

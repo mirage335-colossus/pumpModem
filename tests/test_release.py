@@ -327,6 +327,65 @@ class PublicationTests(ReleaseFixture, unittest.TestCase):
                                     text=True, capture_output=True)
 
 
+class AssetDownloadTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix='datapump-download-test-')
+        self.addCleanup(temporary.cleanup)
+        self.path = Path(temporary.name) / 'asset.tar.gz'
+        self.data = b'\x00\xffbinary archive\r\n'
+        self.asset = {'id': 101, 'state': 'uploaded', 'size': len(self.data),
+                      'digest': 'sha256:' + release.hashlib.sha256(self.data).hexdigest()}
+
+    def stream(self, args, *, check, stdout, stderr):
+        self.assertEqual(args, ['gh', 'api', 'repos/owner/repository/releases/assets/101',
+                                '-H', 'Accept:application/octet-stream'])
+        self.assertTrue(check)
+        self.assertEqual(stderr, subprocess.PIPE)
+        stdout.write(self.data)
+        return subprocess.CompletedProcess(args, 0, None, b'')
+
+    def test_download_streams_binary_bytes_by_asset_id_without_embedded_assets(self):
+        with patch.object(release.subprocess, 'run', side_effect=self.stream):
+            release.download_asset('owner/repository', self.asset, self.path)
+        self.assertEqual(self.path.read_bytes(), self.data)
+
+    def test_invalid_id_state_or_digest_fails_before_download(self):
+        for change in ({'id': True}, {'id': -1}, {'state': 'starter'}, {'digest': None},
+                       {'digest': 'sha256:' + 'f' * 63}):
+            with self.subTest(change=change), patch.object(release.subprocess, 'run') as run:
+                with self.assertRaises(ValueError):
+                    release.download_asset('owner/repository', {**self.asset, **change}, self.path)
+                run.assert_not_called()
+                self.assertFalse(self.path.exists())
+
+    def test_corruption_and_failed_request_remove_partial_file(self):
+        with patch.object(release.subprocess, 'run', side_effect=self.stream):
+            with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
+                release.download_asset('owner/repository', {**self.asset, 'digest': 'sha256:' + 'a' * 64}, self.path)
+        self.assertFalse(self.path.exists())
+        def fail(args, **options):
+            options['stdout'].write(b'partial response')
+            raise subprocess.CalledProcessError(1, args, stderr=b'network interrupted')
+        with patch.object(release.subprocess, 'run', side_effect=fail):
+            with self.assertRaises(subprocess.CalledProcessError):
+                release.download_asset('owner/repository', self.asset, self.path)
+        self.assertFalse(self.path.exists())
+
+    def test_existing_file_is_never_overwritten(self):
+        self.path.write_bytes(b'existing')
+        with patch.object(release.subprocess, 'run') as run:
+            with self.assertRaises(FileExistsError):
+                release.download_asset('owner/repository', self.asset, self.path)
+            run.assert_not_called()
+        self.assertEqual(self.path.read_bytes(), b'existing')
+
+    def test_legacy_digest_is_only_optional_when_explicitly_requested(self):
+        with patch.object(release.subprocess, 'run', side_effect=self.stream):
+            release.download_asset('owner/repository', {**self.asset, 'digest': None}, self.path,
+                                   require_digest=False)
+        self.assertEqual(self.path.read_bytes(), self.data)
+
+
 class StagedPublicationTests(ReleaseFixture, unittest.TestCase):
     def setUp(self):
         super().setUp()
@@ -335,23 +394,26 @@ class StagedPublicationTests(ReleaseFixture, unittest.TestCase):
         self.remote = {}
         self.exists = False
         self.reference = None
-        self.info = {'databaseId': 77, 'isDraft': True, 'isPrerelease': False,
-                     'name': self.value['title'], 'tagName': self.value['tag']}
+        self.info = {'id': 77, 'draft': True, 'prerelease': False,
+                     'name': self.value['title'], 'tag_name': self.value['tag']}
         self.corrupt_download = {}
         self.missing_digest = None
         self.fail_upload = None
         patched = patch.object(release, 'gh', side_effect=self.github)
         patched.start()
         self.addCleanup(patched.stop)
+        streaming = patch.object(release.subprocess, 'run', side_effect=self.stream_asset)
+        streaming.start()
+        self.addCleanup(streaming.stop)
 
     def github(self, args, check=True):
         self.calls.append(args)
         if args[:2] == ['api', '--paginate']:
             if '/assets?' in args[-1]:
-                data = [{'name': name, 'digest': None if self.missing_digest == name else 'sha256:' + release.hashlib.sha256(value).hexdigest(),
-                         'state': 'uploaded'} for name, value in self.remote.items()]
+                data = [{'id': index + 101, 'name': name, 'size': len(value), 'digest': None if self.missing_digest == name else 'sha256:' + release.hashlib.sha256(value).hexdigest(),
+                         'state': 'uploaded'} for index, (name, value) in enumerate(self.remote.items())]
             else:
-                data = [{'tag_name': self.value['tag']}] if self.exists else []
+                data = [self.info] if self.exists else []
             return subprocess.CompletedProcess(args, 0, json.dumps(data), '')
         if args[:2] == ['api', '--include']:
             present = self.exists if '/releases/tags/' in args[-1] else self.reference is not None
@@ -365,7 +427,7 @@ class StagedPublicationTests(ReleaseFixture, unittest.TestCase):
         elif args[:2] == ['release', 'create']:
             self.exists = True
             self.info['name'] = args[args.index('--title') + 1]
-            self.info['isPrerelease'] = '--prerelease' in args
+            self.info['prerelease'] = '--prerelease' in args
         elif args[:2] == ['release', 'view']:
             return subprocess.CompletedProcess(args, 0, json.dumps(self.info), '')
         elif args[:2] == ['release', 'upload']:
@@ -376,18 +438,23 @@ class StagedPublicationTests(ReleaseFixture, unittest.TestCase):
                 if path.name in self.remote:
                     raise subprocess.CalledProcessError(1, args, stderr='existing asset')
                 self.remote[path.name] = path.read_bytes()
-        elif args[:2] == ['release', 'download']:
-            directory = Path(args[args.index('--dir') + 1])
-            for index, item in enumerate(args):
-                if item == '--pattern':
-                    name = args[index + 1]
-                    (directory / name).write_bytes(self.corrupt_download.get(name, self.remote[name]))
         elif args[:2] == ['release', 'edit']:
             self.assertIn('--latest=false', args)
-            self.info['isDraft'] = False
+            self.info['draft'] = False
         else:
             raise AssertionError(f'Unexpected gh command: {args}')
         return subprocess.CompletedProcess(args, 0, '', '')
+
+    def stream_asset(self, args, *, check, stdout, stderr):
+        self.assertTrue(check)
+        self.assertEqual(stderr, subprocess.PIPE)
+        self.assertEqual(args[:2], ['gh', 'api'])
+        self.assertEqual(args[-2:], ['-H', 'Accept:application/octet-stream'])
+        self.calls.append(args[1:])
+        asset_id = int(args[2].rsplit('/', 1)[1])
+        name = list(self.remote)[asset_id - 101]
+        stdout.write(self.corrupt_download.get(name, self.remote[name]))
+        return subprocess.CompletedProcess(args, 0, None, b'')
 
     def reserve(self, experiment=False):
         self.value = metadata(experiment=experiment)
@@ -406,8 +473,8 @@ class StagedPublicationTests(ReleaseFixture, unittest.TestCase):
         self.assertEqual(self.reference, self.value['source_sha'])
         self.assertEqual(set(self.remote), release.SUPPORT_FILES)
         self.assertEqual(self.info['name'], 'experiment')
-        self.assertTrue(self.info['isDraft'])
-        self.assertTrue(self.info['isPrerelease'])
+        self.assertTrue(self.info['draft'])
+        self.assertTrue(self.info['prerelease'])
         self.assertIn(release.CERTIFICATION_PENDING.encode(), self.remote['release-notes.md'])
         self.assertIn('--latest=false', next(call for call in self.calls if call[:2] == ['release', 'create']))
 
@@ -458,11 +525,11 @@ class StagedPublicationTests(ReleaseFixture, unittest.TestCase):
 
     def test_published_or_mismatched_experiment_release_cannot_receive_assets(self):
         self.reserve()
-        self.info['isDraft'] = False
+        self.info['draft'] = False
         with self.assertRaisesRegex(ValueError, 'matching reserved draft'):
             release.upload(self.metadata, 'owner/repository', 'linux-aarch64', self.artifacts / 'linux-aarch64')
-        self.info['isDraft'] = True
-        self.info['isPrerelease'] = True
+        self.info['draft'] = True
+        self.info['prerelease'] = True
         with self.assertRaisesRegex(ValueError, 'matching reserved draft'):
             release.upload(self.metadata, 'owner/repository', 'linux-aarch64', self.artifacts / 'linux-aarch64')
 
@@ -475,7 +542,7 @@ class StagedPublicationTests(ReleaseFixture, unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'unexpected assets'):
             release.finalize(self.metadata, 'owner/repository', self.output, True)
         self.assertNotIn('SHA256SUMS.txt', self.remote)
-        self.assertTrue(self.info['isDraft'])
+        self.assertTrue(self.info['draft'])
 
     def test_finalize_verifies_server_digests_before_uploading_checksum_and_publishing(self):
         self.reserve()
@@ -483,7 +550,7 @@ class StagedPublicationTests(ReleaseFixture, unittest.TestCase):
         release.finalize(self.metadata, 'owner/repository', self.output, True)
         self.assertEqual(set(self.remote), set(release.application_names(self.value).values()) | release.SUPPORT_FILES | {'SHA256SUMS.txt'})
         release.verify_release(self.output)
-        self.assertFalse(self.info['isDraft'])
+        self.assertFalse(self.info['draft'])
         self.assertEqual(self.mutations()[-2][1], 'upload')
         self.assertEqual(Path(self.mutations()[-2][-1]).name, 'SHA256SUMS.txt')
         self.assertEqual(self.mutations()[-1][1], 'edit')
@@ -493,7 +560,7 @@ class StagedPublicationTests(ReleaseFixture, unittest.TestCase):
         self.reserve()
         self.upload_all()
         release.finalize(self.metadata, 'owner/repository', self.output)
-        self.assertTrue(self.info['isDraft'])
+        self.assertTrue(self.info['draft'])
         self.assertIn('SHA256SUMS.txt', self.remote)
         self.assertFalse(any(call[1] == 'edit' for call in self.mutations()))
 
@@ -510,7 +577,7 @@ class StagedPublicationTests(ReleaseFixture, unittest.TestCase):
             release.finalize(self.metadata, 'owner/repository', self.output, True)
         self.assertFalse(self.output.exists())
         self.assertNotIn('SHA256SUMS.txt', self.remote)
-        self.assertTrue(self.info['isDraft'])
+        self.assertTrue(self.info['draft'])
 
     def test_checksum_upload_failure_never_publishes(self):
         self.reserve()
@@ -518,7 +585,7 @@ class StagedPublicationTests(ReleaseFixture, unittest.TestCase):
         self.fail_upload = 'SHA256SUMS.txt'
         with self.assertRaises(subprocess.CalledProcessError):
             release.finalize(self.metadata, 'owner/repository', self.output, True)
-        self.assertTrue(self.info['isDraft'])
+        self.assertTrue(self.info['draft'])
         self.assertFalse(any(call[1] == 'edit' for call in self.mutations()))
 
 

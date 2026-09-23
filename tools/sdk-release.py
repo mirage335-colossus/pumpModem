@@ -16,6 +16,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location('datapump_source_sdk', ROOT / 'tools/build-sdk.py')
 sdk = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(sdk)
+RELEASE_SPEC = importlib.util.spec_from_file_location('datapump_release', ROOT / 'tools/release.py')
+release = importlib.util.module_from_spec(RELEASE_SPEC)
+RELEASE_SPEC.loader.exec_module(release)
 HEX = re.compile(r'[0-9a-f]{64}')
 
 
@@ -225,13 +228,14 @@ def has_pair(info, identity):
     return True
 
 
-def download_pair(repository, directory, identity, binary_only=False):
+def download_pair(repository, directory, identity, info, binary_only=False):
     directory.mkdir()
     assets = names(identity)
     if binary_only:
         assets = (assets[0], assets[2])
-    gh(['release', 'download', 'base', '--repo', repository, '--dir', str(directory),
-        *[argument for name in assets for argument in ('--pattern', name)]])
+    inventory = {asset['name']: asset for asset in info['assets']}
+    for name in assets:
+        release.download_asset(repository, inventory[name], directory / name)
     (directory / names(identity)[2]).rename(directory / 'SHA256SUMS')
     return validate(directory, identity, binary_only=binary_only)
 
@@ -248,7 +252,7 @@ def fetch(repository, directory, binary_only=False):
     directory.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.sdk-fetch-', dir=directory.parent) as temporary:
         staged = Path(temporary) / 'archives'
-        download_pair(repository, staged, identity, binary_only=binary_only)
+        download_pair(repository, staged, identity, info, binary_only=binary_only)
         if directory.exists():
             directory.rmdir()  # Only an empty directory passed the check above.
         staged.rename(directory)
@@ -264,7 +268,7 @@ def publish(repository, directory, source_sha):
     present = has_pair(info, identity)
     if present:
         with tempfile.TemporaryDirectory(prefix='sdk-base-compare-') as temporary:
-            remote = download_pair(repository, Path(temporary) / 'archives', identity)
+            remote = download_pair(repository, Path(temporary) / 'archives', identity, info)
         if remote != local:
             raise ValueError('The immutable base recipe assets differ from the local archives; refusing to overwrite')
         if info.get('draft') or info.get('name') != 'base' or not info.get('prerelease'):

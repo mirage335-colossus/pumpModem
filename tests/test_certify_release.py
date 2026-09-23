@@ -37,12 +37,16 @@ class CertificationTests(unittest.TestCase):
         self.files = {'release-notes.md': b'Original release notes\n'}
         for target, name in certify.release.application_names(self.metadata).items():
             self.files[name] = self.archive(target)
-        self.published = {'tag_name': self.tag, 'draft': False, 'prerelease': False, 'name': self.tag,
+        self.published = {'id': 456, 'tag_name': self.tag, 'draft': False, 'prerelease': False, 'name': self.tag,
                           'html_url': f'https://github.com/{self.repository}/releases/tag/{self.tag}',
                           'body': 'Original release notes', 'assets': []}
         self.refresh_metadata()
-        self.calls, self.uploads, self.edits = [], {}, []
-        patched = patch.object(certify, 'gh', side_effect=self.gh)
+        self.calls, self.uploads, self.edits, self.downloads = [], {}, [], []
+        for module in (certify, certify.release):
+            patched = patch.object(module, 'gh', side_effect=self.gh)
+            patched.start()
+            self.addCleanup(patched.stop)
+        patched = patch.object(certify.release, 'download_asset', side_effect=self.download_asset)
         patched.start()
         self.addCleanup(patched.stop)
 
@@ -75,25 +79,36 @@ class CertificationTests(unittest.TestCase):
         self.refresh_assets()
 
     def refresh_assets(self):
-        self.published['assets'] = [{'id': i, 'name': name, 'digest': 'sha256:' + digest(data)}
-                                    for i, (name, data) in enumerate(self.files.items(), 1)]
+        self.assets = [{'id': i, 'name': name, 'state': 'uploaded', 'size': len(data),
+                        'digest': 'sha256:' + digest(data)}
+                       for i, (name, data) in enumerate(self.files.items(), 1)]
+
+    def download_asset(self, repository, asset, path, *, require_digest=True):
+        self.assertEqual(repository, self.repository)
+        self.assertFalse(require_digest)
+        self.assertIsInstance(asset['id'], int)
+        self.assertFalse(path.exists())
+        self.downloads.append(asset['name'])
+        with path.open('xb') as output:
+            output.write(self.files[asset['name']])
 
     def gh(self, args, **_):
         self.calls.append(args)
         if args[0] == 'api':
-            endpoint = args[1]
+            endpoint = args[-1]
             if '/releases/tags/' in endpoint:
                 value = copy.deepcopy(self.published)
+            elif endpoint == f'repos/{self.repository}/releases/456/assets?per_page=100':
+                self.assertIn('--paginate', args)
+                # GitHub CLI emits adjacent JSON page arrays without --slurp.
+                pages = json.dumps(self.assets[:3]) + '\n' + json.dumps(self.assets[3:])
+                return subprocess.CompletedProcess(args, 0, pages, '')
             elif '/git/ref/tags/' in endpoint:
                 value = {'object': {'type': 'commit', 'sha': self.commit}}
             else:
                 self.fail(f'Unexpected API endpoint: {endpoint}')
             return subprocess.CompletedProcess(args, 0, json.dumps(value), '')
-        if args[:2] == ['release', 'download']:
-            name = args[args.index('--pattern') + 1]
-            directory = Path(args[args.index('--dir') + 1])
-            (directory / name).write_bytes(self.files[name])
-        elif args[:2] == ['release', 'upload']:
+        if args[:2] == ['release', 'upload']:
             self.assertNotIn('--clobber', args)
             for name in args[5:]:
                 path = Path(name)
@@ -122,6 +137,8 @@ class CertificationTests(unittest.TestCase):
     def test_prepare_pins_metadata_inventory_and_source_without_archive_download(self):
         state = self.prepare()
         self.assertEqual(state['metadata'], self.metadata)
+        self.assertEqual(self.published['assets'], [])
+        self.assertEqual(set(state['assets']), set(self.files))
         self.assertEqual(state['inventory_sha256'], digest(self.files['SHA256SUMS.txt']))
         self.assertEqual(sorted(path.name for path in state['directory'].iterdir()),
                          ['SHA256SUMS.txt', 'release-metadata.json'])
@@ -137,6 +154,31 @@ class CertificationTests(unittest.TestCase):
         self.published['draft'] = True
         with self.assertRaisesRegex(ValueError, 'non-draft'):
             certify.prepare(self.repository, self.tag, self.root / 'other')
+
+    def test_asset_pagination_rejects_duplicates_and_never_uses_stale_embedded_inventory(self):
+        self.assets.append(copy.deepcopy(self.assets[0]))
+        with self.assertRaisesRegex(ValueError, 'duplicate asset names'):
+            self.prepare()
+        self.assets.pop()
+        self.published['assets'] = copy.deepcopy(self.assets)
+        self.assets.clear()
+        with self.assertRaisesRegex(ValueError, 'Missing published asset'):
+            certify.prepare(self.repository, self.tag, self.root / 'stale')
+        self.assertFalse(self.downloads)
+
+    def test_missing_or_invalid_rest_release_id_is_rejected(self):
+        for value in (None, '456', True, 0, -1):
+            self.published['id'] = value
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, 'REST release ID'):
+                certify.prepare(self.repository, self.tag, self.root / str(value))
+        self.assertFalse(self.downloads)
+
+    def test_asset_download_failure_cannot_issue_or_promote_a_certificate(self):
+        with patch.object(certify.release, 'download_asset', side_effect=subprocess.CalledProcessError(1, ['gh', 'api'])):
+            with self.assertRaises(subprocess.CalledProcessError):
+                self.record()
+        self.assertFalse(self.uploads)
+        self.assertFalse(self.edits)
 
     def test_missing_target_is_rejected(self):
         del self.files[certify.release.application_names(self.metadata)['linux-aarch64']]
@@ -174,15 +216,14 @@ class CertificationTests(unittest.TestCase):
                 self.assertEqual(state['archive'].name, certify.release.application_names(self.metadata)[target])
                 self.assertTrue((state['package_root'] / 'manifest.sha256').is_file())
                 self.assertEqual(state['package_root'].parent.name, 'offline destination with spaces')
-                app_downloads = [args for args in self.calls if args[:2] == ['release', 'download']
-                                 and args[args.index('--pattern') + 1].startswith('DataPump-')]
+                app_downloads = [name for name in self.downloads if name.startswith('DataPump-')]
                 self.assertEqual(len(app_downloads), list(certify.release.TARGETS).index(target) + 1)
 
     def test_checksum_mismatch_is_rejected_before_extraction(self):
         name = certify.release.application_names(self.metadata)['linux-x86_64']
         self.files[name] += b'changed'
         # Simulate a server without asset digests; local hashing is still mandatory.
-        for asset in self.published['assets']:
+        for asset in self.assets:
             asset.pop('digest')
         with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
             certify.download(self.repository, self.tag, 'linux-x86_64', self.root / 'download',
@@ -305,11 +346,11 @@ class CertificationTests(unittest.TestCase):
         self.assertFalse(self.edits)
 
     def test_existing_certificate_or_upload_failure_cannot_promote(self):
-        self.published['assets'].append({'name': 'certification-789-attempt-2.json'})
+        self.assets.append({'name': 'certification-789-attempt-2.json'})
         with self.assertRaisesRegex(ValueError, 'already exists'):
             self.record()
         self.assertFalse(self.edits)
-        self.published['assets'].pop()
+        self.assets.pop()
         original = self.gh
         def fail_upload(args, **options):
             if args[:2] == ['release', 'upload']:
@@ -320,7 +361,7 @@ class CertificationTests(unittest.TestCase):
         self.assertFalse(self.edits)
 
     def test_without_server_digests_record_rechecks_all_published_application_bytes(self):
-        for asset in self.published['assets']:
+        for asset in self.assets:
             asset.pop('digest')
         name = certify.release.application_names(self.metadata)['windows-x86_64']
         self.files[name] += b'changed'

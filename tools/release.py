@@ -255,14 +255,15 @@ def api_pages(endpoint):
 def draft_info(metadata, repository):
     repository_name(repository)
     tag = metadata['tag']
-    # gh performs the GraphQL pending-tag lookup needed for drafts. The REST
-    # /releases/tags endpoint alone only finds published releases.
-    info = json.loads(gh(['release', 'view', tag, '--repo', repository, '--json',
-                         'databaseId,isDraft,isPrerelease,name,tagName']).stdout)
-    if (not info.get('isDraft') or info.get('tagName') != tag
+    # Authenticated release listing includes drafts and works with older gh
+    # versions whose release view JSON does not support databaseId.
+    matches = [item for item in api_pages(f'repos/{repository}/releases?per_page=100')
+               if item.get('tag_name') == tag]
+    info = matches[0] if len(matches) == 1 else {}
+    if (not info.get('draft') or info.get('tag_name') != tag
             or info.get('name') != metadata['title']
-            or info.get('isPrerelease') != metadata['experiment']
-            or not isinstance(info.get('databaseId'), int)):
+            or info.get('prerelease') != metadata['experiment']
+            or type(info.get('id')) is not int or info['id'] <= 0):
         raise ValueError('Release must be the matching reserved draft with its original title and experiment status')
     reference = json.loads(gh(['api', f'repos/{repository}/git/ref/tags/{tag}']).stdout)
     if reference.get('object') != {'type': 'commit', 'sha': metadata['source_sha']}:
@@ -270,7 +271,7 @@ def draft_info(metadata, repository):
         obj = reference.get('object', {})
         if obj.get('type') != 'commit' or obj.get('sha') != metadata['source_sha']:
             raise ValueError('Reserved release tag does not identify the exact source commit')
-    assets = api_pages(f'repos/{repository}/releases/{info["databaseId"]}/assets?per_page=100')
+    assets = api_pages(f'repos/{repository}/releases/{info["id"]}/assets?per_page=100')
     inventory = {asset['name']: asset for asset in assets}
     allowed = set(application_names(metadata).values()) | SUPPORT_FILES
     if len(inventory) != len(assets) or not SUPPORT_FILES <= set(inventory) or not set(inventory) <= allowed:
@@ -278,17 +279,36 @@ def draft_info(metadata, repository):
     return inventory
 
 
+def download_asset(repository, asset, path, *, require_digest=True):
+    """Stream an inventoried asset by ID, without gh's embedded asset lookup."""
+    repository_name(repository)
+    asset_id = asset.get('id')
+    expected = asset.get('digest')
+    if type(asset_id) is not int or asset_id <= 0 or asset.get('state') != 'uploaded':
+        raise ValueError(f'GitHub asset is not a completed upload: {path.name}')
+    if ((require_digest or expected is not None)
+            and (not isinstance(expected, str) or not re.fullmatch(r'sha256:[0-9a-f]{64}', expected))):
+        raise ValueError(f'GitHub has not supplied a completed SHA-256 digest for {path.name}')
+    # gh follows the asset API redirect. stdout goes directly to disk, avoiding
+    # text decoding or buffering hundreds of megabytes of SDK data in memory.
+    with path.open('xb') as output:
+        try:
+            subprocess.run(['gh', 'api', f'repos/{repository}/releases/assets/{asset_id}',
+                            '-H', 'Accept:application/octet-stream'],
+                           check=True, stdout=output, stderr=subprocess.PIPE)
+        except BaseException:
+            output.close()
+            path.unlink()
+            raise
+    if ((expected is not None and digest(path) != expected.removeprefix('sha256:'))
+            or ('size' in asset and path.stat().st_size != asset['size'])):
+        path.unlink()
+        raise ValueError(f'Downloaded release asset checksum mismatch: {path.name}')
+
+
 def download_assets(metadata, repository, directory, assets, wanted):
-    gh(['release', 'download', metadata['tag'], '--repo', repository, '--dir', str(directory),
-        *[argument for name in sorted(wanted) for argument in ('--pattern', name)]])
-    for name in wanted:
-        path = directory / name
-        expected = assets[name].get('digest')
-        if (assets[name].get('state') != 'uploaded' or not isinstance(expected, str)
-                or not re.fullmatch(r'sha256:[0-9a-f]{64}', expected)):
-            raise ValueError(f'GitHub has not supplied a completed SHA-256 digest for {name}')
-        if path.is_symlink() or not path.is_file() or digest(path) != expected.removeprefix('sha256:'):
-            raise ValueError(f'Downloaded release asset checksum mismatch: {name}')
+    for name in sorted(wanted):
+        download_asset(repository, assets[name], directory / name)
 
 
 def check_draft_metadata(metadata, directory):

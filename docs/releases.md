@@ -60,7 +60,7 @@ gh workflow run release.yml --ref main \
   -f linux_baseline=bookworm-sdk
 gh run list --workflow release.yml --limit 5
 gh run watch RUN_ID --exit-status
-gh release download RELEASE_TAG --dir portable-downloads
+gh release view RELEASE_TAG
 ```
 
 Later, dispatch certification for that existing, published tag:
@@ -71,7 +71,11 @@ gh run list --workflow certify.yml --limit 5
 gh run watch CERTIFICATION_RUN_ID --exit-status
 ```
 
-Replace the uppercase placeholders with the recorded IDs/tag. Certification
+Replace the uppercase placeholders with the recorded IDs/tag. Download the
+three application archives from the release page linked in the run summary.
+The helpers enumerate the dedicated, paginated release-assets API and stream
+downloads by asset ID; they do not rely on an embedded release asset list.
+Certification
 checks out the release's exact source revision, regardless of the current tip
 of `main`. It pins `SHA256SUMS.txt` before testing and refuses certification if
 the source, tag, checksum inventory or published asset hashes change. It never

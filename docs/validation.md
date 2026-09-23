@@ -15,13 +15,13 @@ in the `base` release. The release, certification and SDK maintenance paths have
 no Actions artifact/cache dependency. Cold SDK compilation uses available CPUs
 through the existing SDK helper, leaving recipe `b8685ab239d7ac8650e6` unchanged.
 
-Local validation passes **38** release-helper and **27** SDK-storage tests and
+Local validation passes **43** release-helper, **27** SDK-storage and **22** certification tests and
 all **10/10** build suites. Packaging validation passes **3/3** suites, including
 a new sentinel proving that `dlopen("libasound.so.2")` resolves to the packaged
 library; the sentinel fails before the missing alias fix. Audio routing,
 Windows audio stubs, rate conversion and resampling pass **4/4** focused suites.
 The application build also passes. Workflow lint and whitespace checks pass.
-The qualified 657 MiB SDK/source pair passes outer hashes, source replay hashes,
+The qualified 668 MiB SDK/source pair passes outer hashes, source replay hashes,
 recipe identity and binary manifest verification without rebuilding it.
 
 Linux audio now retains the requested endpoint if opening/configuring it fails;
@@ -34,6 +34,14 @@ endpoint confirms automatic host-plugin discovery; an explicit invalid plugin
 path remains authoritative. No physical audio devices were exercised, so this
 is not a hardware or desktop-session concurrency certification. No application
 singleton restriction was found.
+
+The first GitHub split-pipeline rehearsal found two CLI/API integration issues:
+`gh release download` saw an empty embedded asset list even though the dedicated
+assets endpoint had the complete uploads, and `gh release view` did not support
+the requested `databaseId` field. Helpers now enumerate paginated REST release
+and asset inventories and stream downloads by asset ID, verifying server digests,
+recorded hashes and sizes. Regression fixtures cover empty embedded inventories
+and multi-page asset responses. Its incomplete draft is retained for inspection.
 
 GitHub publication and subsequent certification results are recorded below when
 complete. The earlier artifact-only runs remain historical evidence of the

@@ -54,7 +54,7 @@ class SdkReleaseTests(unittest.TestCase):
             'baseline': {'glibc': '2.36'},
             'target': {'triple': 'x86_64-buildroot-linux-gnu', 'processor': 'x86_64'}}
         self.calls = []
-        self.info = {'id': 55, 'name': 'base', 'draft': False, 'prerelease': True}
+        self.info = {'id': 55, 'name': 'base', 'draft': False, 'prerelease': True, 'assets': []}
         self.remote = {}
         self.status = 200
         self.failure = None
@@ -64,6 +64,9 @@ class SdkReleaseTests(unittest.TestCase):
             patched = patch.object(target, replacement[0], side_effect=replacement[1])
             patched.start()
             self.addCleanup(patched.stop)
+        streaming = patch.object(release.release.subprocess, 'run', side_effect=self.stream_asset)
+        streaming.start()
+        self.addCleanup(streaming.stop)
         self.write_pair()
 
     def write_pair(self, *, manifest=None, source_inventory=None, binary_inventory=None,
@@ -111,16 +114,11 @@ class SdkReleaseTests(unittest.TestCase):
             if '/releases?' in args[-1]:
                 rows = [] if self.info is None else [{**self.info, 'tag_name': 'base'}]
                 return subprocess.CompletedProcess(args, 0, json.dumps(rows), '')
-            assets = [{'name': name} for name in self.remote]
+            assets = [{'id': index + 101, 'name': name, 'digest': 'sha256:' + sha(data),
+                       'size': len(data), 'state': 'uploaded'}
+                      for index, (name, data) in enumerate(self.remote.items())]
             # Exercise concatenated pages from gh api --paginate.
             return subprocess.CompletedProcess(args, 0, json.dumps(assets[:1]) + '\n' + json.dumps(assets[1:]), '')
-        if args[:3] == ['release', 'download', 'base']:
-            directory = Path(args[args.index('--dir') + 1])
-            for index, value in enumerate(args):
-                if value == '--pattern':
-                    name = args[index + 1]
-                    (directory / name).write_bytes(self.remote[name])
-            return subprocess.CompletedProcess(args, 0, '', '')
         if args[:3] == ['release', 'create', 'base']:
             self.info = {'id': 55, 'name': 'base', 'draft': True, 'prerelease': True}
         elif args[:3] == ['release', 'upload', 'base']:
@@ -134,6 +132,19 @@ class SdkReleaseTests(unittest.TestCase):
         else:
             raise AssertionError(f'Unexpected gh command: {args}')
         return subprocess.CompletedProcess(args, 0, '', '')
+
+    def stream_asset(self, args, *, check, stdout, stderr):
+        self.assertTrue(check)
+        self.assertEqual(stderr, subprocess.PIPE)
+        self.assertEqual(args[:2], ['gh', 'api'])
+        self.assertEqual(args[-2:], ['-H', 'Accept:application/octet-stream'])
+        self.calls.append(args[1:])
+        if self.failure:
+            self.failure(args[1:])
+        asset_id = int(args[2].rsplit('/', 1)[1])
+        name = list(self.remote)[asset_id - 101]
+        stdout.write(self.remote[name])
+        return subprocess.CompletedProcess(args, 0, None, b'')
 
     def mutations(self):
         return [call for call in self.calls if call[:1] == ['release'] and call[1] in ('create', 'upload', 'edit')]
@@ -244,8 +255,8 @@ class SdkReleaseTests(unittest.TestCase):
         self.assertEqual({path.name for path in self.destination.iterdir()},
                          {release.names(IDENTITY)[0], 'SHA256SUMS'})
         release.validate(self.destination, IDENTITY, binary_only=True)
-        download = next(call for call in self.calls if call[:2] == ['release', 'download'])
-        self.assertNotIn(release.names(IDENTITY)[1], download)
+        downloads = [call[1] for call in self.calls if len(call) > 1 and '/releases/assets/' in call[1]]
+        self.assertEqual(downloads, [f'repos/{REPO}/releases/assets/{asset_id}' for asset_id in (101, 103)])
         self.assertEqual((self.destination / 'SHA256SUMS').read_bytes(), (self.directory / 'SHA256SUMS').read_bytes())
 
     def test_binary_only_still_checks_archive_digest_and_internal_identity(self):
