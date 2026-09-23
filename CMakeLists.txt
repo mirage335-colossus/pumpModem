@@ -138,6 +138,20 @@ if(BUILD_TESTING)
   target_link_libraries(test_gui_legacy_live PRIVATE datapump_gui_application datapump_legacy)
   add_test(NAME gui_legacy_live COMMAND test_gui_legacy_live)
   set_tests_properties(gui_legacy_live PROPERTIES LABELS "gui")
+  # The scripted Session replaces only worker scheduling; use the production
+  # controller, plots and codecs without also linking the real Session object.
+  add_executable(test_gui_legacy_poll tests/test_gui_legacy_poll.cpp
+    src/gui/legacy/controller.cpp src/gui/legacy/plots.cpp
+    src/legacy/modem.cpp src/legacy/psk.cpp src/legacy/olivia.cpp)
+  target_include_directories(test_gui_legacy_poll PRIVATE src/gui include)
+  target_link_libraries(test_gui_legacy_poll PRIVATE Threads::Threads)
+  add_dependencies(test_gui_legacy_poll datapump_gui_boundary datapump_legacy_boundary)
+  if(DATAPUMP_SANITIZERS AND NOT MSVC)
+    target_compile_options(test_gui_legacy_poll PRIVATE -O1 -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(test_gui_legacy_poll PRIVATE -fsanitize=address,undefined)
+  endif()
+  add_test(NAME gui_legacy_poll COMMAND test_gui_legacy_poll)
+  set_tests_properties(gui_legacy_poll PROPERTIES LABELS "gui")
   foreach(component codec compression attachment modem files session transfer telemetry ldpc qam acoustic acoustic_short acoustic_short_weak ofdm_presence radio presets low_rate pilot_presence output_power)
     add_executable(test_fast_${component} tests/test_fast_${component}.cpp)
     target_link_libraries(test_fast_${component} PRIVATE datapump_fast datapump)

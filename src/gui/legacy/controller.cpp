@@ -73,7 +73,12 @@ void Controller::poll() {
     const bool audio_active=p.session.active();
     if(!p.selected&&!audio_active&&!p.snapshot.active)return;
     if(audio_active||p.snapshot.active)p.observe();
-    if(p.closing||!p.selected||!p.valid||p.session.active()||(p.failed&&!p.pending_tx))return;
+    if(p.closing||!p.selected||!p.valid||p.session.active())return;
+    // The worker can close after observe() took its snapshot. Consume the
+    // final state before another session makes active() true again, otherwise
+    // cancellation remains pending and a final playback error can be lost.
+    p.observe();
+    if(p.failed&&!p.pending_tx)return;
     try {
         if(p.acquire_audio&&!p.acquire_audio()) {
             if(p.f(F::legacy_status).text!="Waiting for the other modem to release audio…") {
