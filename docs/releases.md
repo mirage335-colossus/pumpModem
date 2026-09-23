@@ -27,6 +27,7 @@ long preservation contract and GUI tests remain intact in that workflow.
 | `linux_baseline` | `bookworm-sdk` | Source SDK/glibc 2.36 for x86_64, or `ubuntu-22.04`/glibc 2.35. ARM64 always uses the Ubuntu 22.04 baseline. |
 | `arm_runner` | `ubuntu-24.04-arm-l` | ARM64 host: organization L or H tier, or standard `ubuntu-24.04-arm`. See [runner selection](#runner-selection-and-build-parallelism) for all three architecture selectors. |
 | `source_release` | Empty | Build normally when blank. Otherwise reuse that complete release's six archives to create a new APT experiment; application/SDK builds are skipped. |
+| `package_check` | `none` | Read-only checks of a published `source_release`: `all`, `apt`, `arch` or `gentoo`. Creates no release and rebuilds no application or SDK. |
 
 Leave `experiment` checked for builds users needing assurance should avoid.
 An ordinary release uses its version/date tag as the title. It becomes Latest
@@ -153,11 +154,12 @@ configured on 23 September 2026, has primary fingerprint
 file from that exact tag, replacing `RELEASE_TAG` below. Check this fingerprint
 against a trusted copy of the maintainer's documentation before initial setup.
 
-The first published APT experiment is
-[`v001_00-2026-09-23-1123CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-23-1123CDT).
+The current package experiment is
+[`v001_00-2026-09-23-1200CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-23-1200CDT),
+including the Arch and Gentoo recipes below.
 It reuses the six archives built from application commit `88fb87b`.
-[Bookworm installation checks](https://github.com/mirage335-colossus/pumpModem/actions/runs/35888336578)
-passed for both packages on AMD64 and ARM64; these are separate from full
+[Debian/Ubuntu installation checks](https://github.com/mirage335-colossus/pumpModem/actions/runs/35892588927)
+passed in all nine environments above; these are separate from full
 application certification. As of
 23 September 2026, no regular release has qualified for Latest, so use its
 explicit tag when opting into this experiment.
@@ -253,6 +255,22 @@ otherwise the original label is retained. Once registered on the default
 branch, `apt-release.yml` can also be dispatched directly with
 `source_tag=SOURCE_RELEASE_TAG`. The existing `release.yml` entry point permits
 testing this path from an unmerged branch without registering a new workflow.
+
+For a package-manager setup fault, select just that manager against the existing
+published tag. This keeps passing distribution checks and application binaries
+out of the retry:
+
+```sh
+gh workflow run release.yml --ref REF -f source_release=RELEASE_TAG \
+  -f package_check=gentoo -f linux_runner=ubuntu-latest-h
+```
+
+`package_check=apt` runs the Debian/Ubuntu matrix; `arch` and `gentoo` select one
+native recipe check, and `all` checks every package format. The default `none`
+retains normal build/repackage behavior. Package checks neither publish assets
+nor grant certification or Latest status. If recipe bytes change, publish a new
+experiment first; never overwrite an existing signed recipe asset to make a
+retry pass.
 
 During packaging development, run the affected helper tests first. After the
 candidate is complete, run the full Debian/Ubuntu and native recipe installation coverage
@@ -721,7 +739,7 @@ hardware, sound system or desktop session.
 | Debian 13 Trixie / Debian 12 Bookworm | Use the bundle matching the installed x86_64 or aarch64 user space. Both Linux baselines cover their glibc requirements. |
 | Ubuntu / Ubuntu LTS | Match architecture and glibc floor. For Ubuntu 22.04 x86_64 choose a release built with `ubuntu-22.04`; the default SDK covers Ubuntu 24.04 and newer compatible releases. |
 | Arch Linux | x86_64 bundle, with the selected ABI floor and a working X11/XWayland desktop. Rolling package updates may require renewed validation. |
-| Gentoo | Matching x86_64/aarch64 bundle on a compatible glibc installation with X11/XWayland. Gentoo's musl configurations are outside this release format; Gentoo itself is not a compatibility-matrix job. |
+| Gentoo | Matching x86_64/aarch64 bundle or binary ebuild on a compatible glibc installation with X11/XWayland. Native recipe checks cover x86_64; musl configurations are outside this release format. |
 | Velvet OS on Lenovo 100e Chromebook 2nd Gen | aarch64 bundle for the ARM64 Debian-based Velvet installation. Confirm the installed user-space architecture and glibc version; the model name alone is insufficient. |
 | Raspberry Pi | aarch64 bundle for supported hardware running 64-bit Raspberry Pi OS with glibc 2.35 or newer. A 32-bit OS needs a separate 32-bit build that this workflow does not produce. |
 | Windows 10 / Windows 11 | x64 bundle; Windows 10 version 1903 or newer is required by the application's Unicode-path behavior. This is not a native Windows ARM64 or 32-bit x86 build. |

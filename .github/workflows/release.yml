@@ -1,5 +1,5 @@
 name: Manual portable release
-run-name: ${{ inputs.source_release && format('Linux packages from {0} (experiment)', inputs.source_release) || format('Build portable binaries ({0}, experiment={1})', inputs.linux_baseline, inputs.experiment) }}
+run-name: ${{ inputs.package_check && inputs.package_check != 'none' && format('Check {0} packages in {1}', inputs.package_check, inputs.source_release) || inputs.source_release && format('Linux packages from {0} (experiment)', inputs.source_release) || format('Build portable binaries ({0}, experiment={1})', inputs.linux_baseline, inputs.experiment) }}
 
 on:
   workflow_dispatch:
@@ -36,8 +36,13 @@ on:
         type: choice
         options: [windows-2022, windows-latest-l, windows-latest-h]
         default: windows-2022
+      package_check:
+        description: 'Read-only checks of source_release; none retains normal build/repackage behavior'
+        type: choice
+        options: [none, all, apt, arch, gentoo]
+        default: none
       source_release:
-        description: 'Optional complete release to repackage for Linux package managers as an experiment; blank builds apps'
+        description: 'Existing release to repackage, or to check when package_check is selected; blank builds apps'
         type: string
         default: ''
   pull_request:
@@ -72,8 +77,51 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  package-check-prepare:
+    if: github.event_name == 'workflow_dispatch' && inputs.package_check != 'none'
+    runs-on: ${{ inputs.linux_runner == 'ubuntu-latest-h' && 'ubuntu-latest-h' || 'ubuntu-latest-l' }}
+    timeout-minutes: 5
+    outputs:
+      inventory_sha256: ${{ steps.release.outputs.inventory_sha256 }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.source_release }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Pin the existing published release without changing assets
+        id: release
+        run: |
+          if [ -z "$RELEASE_TAG" ]; then
+            echo '::error::package_check requires source_release to name a published release.'
+            exit 1
+          fi
+          python3 tools/certify-release.py prepare --repo "$GITHUB_REPOSITORY" \
+            --tag "$RELEASE_TAG" --directory checked-release --github-output "$GITHUB_OUTPUT"
+
+  package-check-apt:
+    if: inputs.package_check == 'all' || inputs.package_check == 'apt'
+    needs: package-check-prepare
+    uses: ./.github/workflows/apt-check.yml
+    with:
+      release_tag: ${{ inputs.source_release }}
+      inventory_sha256: ${{ needs.package-check-prepare.outputs.inventory_sha256 }}
+      linux_runner: ${{ inputs.linux_runner == 'ubuntu-latest-h' && 'ubuntu-latest-h' || 'ubuntu-latest-l' }}
+      arm_runner: ${{ inputs.arm_runner == 'ubuntu-24.04-arm-h' && 'ubuntu-24.04-arm-h' || 'ubuntu-24.04-arm-l' }}
+
+  package-check-distro:
+    if: inputs.package_check == 'all' || inputs.package_check == 'arch' || inputs.package_check == 'gentoo'
+    needs: package-check-prepare
+    uses: ./.github/workflows/distro-check.yml
+    with:
+      release_tag: ${{ inputs.source_release }}
+      inventory_sha256: ${{ needs.package-check-prepare.outputs.inventory_sha256 }}
+      linux_runner: ${{ inputs.linux_runner == 'ubuntu-latest-h' && 'ubuntu-latest-h' || 'ubuntu-latest-l' }}
+      distro: ${{ inputs.package_check }}
+
   repackage:
-    if: github.event_name == 'workflow_dispatch' && inputs.source_release != ''
+    if: github.event_name == 'workflow_dispatch' && inputs.source_release != '' && inputs.package_check == 'none'
     permissions:
       contents: write
     uses: ./.github/workflows/apt-release.yml
@@ -88,7 +136,7 @@ jobs:
     secrets: inherit
 
   helpers:
-    if: ${{ !inputs.source_release }}
+    if: ${{ !inputs.source_release && (!inputs.package_check || inputs.package_check == 'none') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

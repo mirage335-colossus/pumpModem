@@ -46,6 +46,18 @@ display-cadence probe; its bound now matches the existing portable-package
 verifier's 120 seconds. No application assertion was removed or downgraded.
 These failures remain recorded against the initial `1152CDT` experiment.
 
+The [corrected package run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35892588927)
+published [`v001_00-2026-09-23-1200CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-23-1200CDT)
+with all 25 assets from packaging commit `c251077`. All nine Debian/Ubuntu
+installation jobs pass, each in **63–95 seconds** on architecture-specific H
+runners. Arch passes in **66 seconds**; signing, packaging and publication take
+**43 seconds**. The application archives remain byte-for-byte copies of the
+`88fb87b` build. Gentoo's corrected EAPI preparation/package phase passes, but
+the first binary-only dependency resolution selected incompatible USE/ABI
+variants. This separate CI setup fault does not change the published recipes.
+The full build-tool group after the preparation fix passes **14/14 in 6.71
+seconds**.
+
 ## Signed flat APT release assets — 23 September 2026
 
 Schema-3 application releases include four Debian packages, a flat package
@@ -98,8 +110,9 @@ distribution checks passed. No regular Latest release exists yet.
 
 APT signing uses the dedicated primary fingerprint
 `8C3DD4A727C83B93374C993B1F94BC4CEC2DF307`; private material is held in the
-repository Actions secret, never in Git or release assets. Only qualified
-regular schema-3 releases can be Latest. Experiments remain pinned to an
+repository Actions secret, never in Git or release assets. At this stage,
+qualified regular schema-3 releases could become Latest; new releases now
+require schema 4 and the distribution checks above. Experiments remain pinned to an
 explicit tag, and earlier release schemas cannot remove the APT update channel.
 
 ## Larger runners and independent compilation concurrency — 23 September 2026

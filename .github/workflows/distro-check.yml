@@ -12,6 +12,10 @@ on:
       linux_runner:
         type: string
         default: ubuntu-latest-l
+      distro:
+        description: Native package check to run (all, arch, or gentoo)
+        type: string
+        default: all
 
 permissions:
   contents: read
@@ -24,7 +28,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        distro: [arch, gentoo]
+        distro: ${{ fromJSON(inputs.distro == 'arch' && '["arch"]' || inputs.distro == 'gentoo' && '["gentoo"]' || '["arch", "gentoo"]') }}
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ inputs.release_tag }}
@@ -85,7 +89,7 @@ jobs:
             --mount "type=bind,source=$PWD/tools,target=/tools,readonly" \
             gentoo/stage3:latest bash -euo pipefail <<'GENTOO'
           cp -a /recipes/datapump-gentoo-overlay /var/db/repos/datapump-bin
-          mkdir -p /etc/portage/repos.conf /etc/portage/package.accept_keywords /etc/portage/package.license /etc/portage/binrepos.conf
+          mkdir -p /etc/portage/repos.conf /etc/portage/package.accept_keywords /etc/portage/package.license /etc/portage/package.use
           cat > /etc/portage/repos.conf/datapump-bin.conf <<'REPOSITORY'
           [datapump-bin]
           location = /var/db/repos/datapump-bin
@@ -95,12 +99,30 @@ jobs:
             > /etc/portage/package.accept_keywords/datapump-bin
           printf '%s\n' 'media-radio/datapump-fltk-bin DataPump-Bundled' 'media-radio/datapump-rev-bin DataPump-Bundled' \
             > /etc/portage/package.license/datapump-bin
+          # The official generic binhost currently lacks alsa-plugins. Its v3
+          # binhost provides the PulseAudio bridge as a binary. This changes
+          # only CI's host dependencies, never the generic release payload.
+          case "$(/lib64/ld-linux-x86-64.so.2 --help)" in
+            *'x86-64-v3 (supported, searched)'*) ;;
+            *) echo 'Gentoo binary-only check requires an x86-64-v3 capable larger runner.' >&2; exit 1 ;;
+          esac
+          # Replace the disposable container's default binhost so only the
+          # selected official repository supplies new host dependencies.
+          rm -rf /etc/portage/binrepos.conf
+          mkdir /etc/portage/binrepos.conf
           cat > /etc/portage/binrepos.conf/datapump-ci.conf <<'BINHOST'
           [datapump-ci]
           priority = 9999
-          sync-uri = https://distfiles.gentoo.org/releases/amd64/binpackages/23.0/x86-64/
+          sync-uri = https://distfiles.gentoo.org/releases/amd64/binpackages/23.0/x86-64-v3/
           verify-signature = true
           BINHOST
+          # Select one official desktop configuration before considering
+          # binaries. Otherwise --usepkgonly defaults to ignoring USE flags
+          # and can mix SELinux, multilib, and non-desktop package variants.
+          eselect profile set default/linux/amd64/23.0/desktop
+          printf '%s\n' 'ABI_X86="64"' >> /etc/portage/make.conf
+          printf '%s\n' 'media-plugins/alsa-plugins pulseaudio' > /etc/portage/package.use/datapump-ci
+          emerge --info
           export FEATURES="$(portageq envvar FEATURES) -sandbox -usersandbox -pid-sandbox -ipc-sandbox -network-sandbox"
           for backend in fltk rev; do
             set -- /var/db/repos/datapump-bin/media-radio/datapump-"$backend"-bin/*.ebuild
@@ -111,7 +133,8 @@ jobs:
             # Having the local binary lets binary-only emerge resolve the real
             # conditional RDEPEND without requiring an upstream app binhost.
             ebuild "$1" package
-            emerge --getbinpkgonly --usepkgonly --oneshot --with-bdeps=n --jobs=4 "=$cpv"
+            emerge --getbinpkgonly --usepkgonly --binpkg-respect-use=y \
+              --oneshot --with-bdeps=n --jobs=4 "=$cpv"
             portageq has_version / "=$cpv"
             python3 /tools/distro-release.py verify-installed --directory /release \
               --metadata /release/release-metadata.json --backend "$backend" --architecture amd64 --root /
