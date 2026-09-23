@@ -24,6 +24,13 @@ captures have their own documented provenance. Keep all checks below intact.
   followed by an explicit full manual run or ordinary CI before completion.
   Wait for results; investigate failures with focused tests, then rerun the
   affected full checks. Do not count skipped, cancelled or queued jobs as passes.
+- Reuse the exact prepared Linux SDK and Windows dependency recipes from the
+  durable `base` release where applicable in ordinary release, certification
+  and full CI jobs.
+  Missing recipes require explicit base maintenance, not an implicit cold
+  dependency build. Preserve source inputs, provenance and checksums, and never
+  overwrite existing recipe assets. Windows reuses the runner's MSVC/Windows
+  SDK separately; do not redistribute them. See [base maintenance](docs/releases.md#windows-dependency-base).
 - When release delivery or assurance is in scope, follow publication with full
   certification of that release's exact source and binary hashes. A branch fix
   does not fix an older release; publish new binaries when needed. Diagnostic

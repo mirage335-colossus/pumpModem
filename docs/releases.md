@@ -48,10 +48,12 @@ selects the build source. The account needs repository write access. See
 [GitHub manual dispatch](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)
 and the [CLI reference](https://cli.github.com/manual/gh_workflow_run).
 
-Prepare the SDK once, or after changing its recipe:
+Prepare the Linux SDK and Windows dependencies once, or after changing the
+corresponding recipe:
 
 ```sh
 gh workflow run sdk-base.yml --ref main -f source=auto -f jobs=0 -f publish=true
+gh workflow run windows-base.yml --ref main -f source=auto -f publish=true
 ```
 
 Build and publish an experimental application release:
@@ -236,6 +238,39 @@ qualification also retain extensive regression coverage. A cold SDK build remain
 an occasional maintenance task, not work repeated for each application release.
 These timings are observed hosted-runner results, not guarantees.
 
+## Windows dependency base
+
+The [Windows maintenance workflow](../.github/workflows/windows-base.yml)
+preserves a relocatable, precompiled dependency bundle in the same `base`
+release. Its [recipe](../third_party/build-support/windows-base.json) pins
+vcpkg and the shared union of static OpenSSL, GLEW and FreeType dependencies
+for both FLTK and Rev, including Debug and Release configurations. The runner
+already supplies Visual Studio 2022/MSVC and the Windows SDK. The cold step
+compiles these third-party dependencies; it does not rebuild or redistribute
+Microsoft's compiler or SDK.
+
+Ordinary Windows release, certification and full CI jobs download, verify and
+relocate the exact recipe through [the helper](../tools/windows-base.py).
+They fail with maintenance instructions if it is missing, rather than starting
+an implicit vcpkg build. The dependency handoff uses release assets, with no
+Actions cache or artifact storage. Application compilation and the selected
+tests still run normally.
+
+Maintenance uses `source=auto` to reuse the exact bundle or build it when
+missing, `source=base` to require reuse, and `source=rebuild` for an explicit
+cold build. `publish=true` preserves the bundle, matching source inputs,
+checksums and build provenance; `publish=false` leaves durable storage alone.
+Cold dependency compilation uses the available runner cores. Existing recipe
+assets are immutable: an upgrade needs a new recipe identity, and rebuilding
+an existing recipe does not authorize replacing its bytes.
+
+The consuming MSVC compiler/linker must be the same version or newer than the
+one recorded for the bundle, within the supported v143 toolset. Installation
+checks the linker version. These static dependencies are built without LTO;
+compiler-specific LTO objects would require tighter toolset matching. Reuse
+removes repeated dependency compilation, but does not guarantee a particular
+workflow duration or replace application validation.
+
 ## Choose the Linux baseline
 
 `bookworm-sdk` uses the pinned, relocatable
@@ -274,9 +309,10 @@ ARM64 builds run natively on a GitHub ARM64 runner in an Ubuntu 22.04 build
 environment and retain the glibc 2.35 ceiling. Native Rev builds use signed,
 pinned LLVM 19 packages and a small pinned Ninja bootstrap for C++ modules;
 application libraries still come from that Ubuntu baseline. SDK Rev builds use
-the existing SDK directly. Windows uses Visual Studio 2022, the Windows SDK,
-static C/C++ runtimes and pinned static OpenSSL dependencies; Rev additionally
-uses static GLEW and FreeType dependencies.
+the existing SDK directly. Windows uses the runner's Visual Studio 2022 and
+Windows SDK, static C/C++ runtimes and the verified
+[Windows dependency base](#windows-dependency-base). Rev additionally links its
+static GLEW and FreeType dependencies from that same bundle.
 Generic CPU targets avoid requiring the particular build runner's instruction
 set extensions. GitHub documents the available
 [native ARM64 and Windows runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).

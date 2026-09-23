@@ -12,12 +12,18 @@ with output in `build/rev`. Run `./build.sh test gui --backend rev` and, on a
 private display, `./build.sh test native --backend rev`. The direct CMake
 commands below remain supported for a separate custom tree.
 
-Rev requires CMake 3.28+, Ninja, a C++23 standard library, and a compiler with
-C++ module support. Clang 19 is the tested Linux toolchain. GCC 14 crashes while
-serializing an upstream module and is rejected with an actionable configuration
-error. GCC 15+ and the Windows/MSVC path still require platform testing; their
-build paths do not establish a tested release. macOS/Metal is not integrated.
+Rev requires CMake 3.28+, Ninja 1.11+, and a C++23 compiler with
+C++ module support. Clang 19 and the source SDK's GCC 15.3 have passed Linux
+application builds. GCC 14 crashes while serializing an upstream module and is
+rejected with an actionable configuration error. Windows/MSVC build and display
+qualification are recorded separately for each candidate; a successful compile
+alone does not establish display compatibility. macOS/Metal is not integrated.
 FLTK and CLI-only builds retain their C++20 requirements.
+
+Manual portable releases now build separate FLTK and Rev archives for each
+supported platform. See [release documentation](releases.md) and the
+version-specific [validation record](validation.md) for actual build and
+certification outcomes; backend availability alone is not certification.
 
 Linux needs OpenSSL 3, OpenGL, GLEW, FreeType, and X11/Xrandr/Xext development
 files. Python 3 embeds the pinned shaders, SVG icons and monospaced DejaVu font
@@ -127,6 +133,14 @@ the smoke's received-symbol observation to fail. The bounded profile passed the
 same assertions. Poll and presentation frequencies are UI scheduling targets;
 slow rendering can still delay them. Replay intentionally accounts for skipped
 points and returns to live input at its deadline rather than extending playback.
+
+Rev display cadence is advisory. A smoke run that observes too few display
+frames or misses the displayed-progress target emits `WARNING REV_REPLAY_CADENCE`
+with measured details instead of failing. The release's `warning.log` makes
+this known presentation limitation visible. This policy does not relax missing
+physical observations, pending-message identity, source/bitmap consistency or
+content/completion assertions, and it does not change rendering or playback
+timing. Do not repeat expensive tests just to eliminate the cadence warning.
 
 The implementation was exercised on Mesa llvmpipe (LLVM 19.1.7, OpenGL 4.5,
 Mesa 25.0.7) in a private X11 virtual display. Before the shared desktop and rich

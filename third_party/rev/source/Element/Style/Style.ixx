@@ -121,7 +121,7 @@ export namespace Rev::Appearance {
             return type != Unset;
         }
 
-        bool operator==(const Dist& other) {
+        bool operator==(const Dist& other) const {
             return (
                 type == other.type &&
                 val == other.val
@@ -203,7 +203,7 @@ export namespace Rev::Appearance {
             if (a != old.a) { Transition::createNew(a, old.a, transitions, time, transitionLength); }
         }
 
-        bool operator==(const sColor& other) {
+        bool operator==(const sColor& other) const {
             return (
                 type == other.type &&
                 r == other.r && g == other.g && b == other.b && a == other.a
@@ -877,8 +877,8 @@ export namespace Rev::Appearance {
         inline void apply(VisibilityStyle& other) { if (other.mode != Visibility::Unset) { *this = other; } }
         explicit operator bool() { return mode != Visibility::Unset; }
 
-        bool operator==(const VisibilityStyle& other) { return (mode == other.mode); }
-        bool operator==(const Visibility& otherMode) { return (mode == otherMode); }
+        bool operator==(const VisibilityStyle& other) const { return (mode == other.mode); }
+        bool operator==(const Visibility& otherMode) const { return (mode == otherMode); }
 
         // Assign from Visibility enum
         VisibilityStyle& operator=(const Visibility& newMode) {

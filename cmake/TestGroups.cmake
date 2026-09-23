@@ -12,7 +12,7 @@ endforeach()
 # executable prerequisite are listed explicitly so new cases cannot silently
 # run without their required build step.
 set(_script_tests legacy_boundary fast_boundary vendored_lzma_source
-  gui_adapter_boundary gui_boundary_regression packaging_support sdk_packaging build_wrapper build_dependencies build_source_sdk build_sdk_runtime build_release build_sdk_release build_certify_release build_release_rev_tools)
+  gui_adapter_boundary gui_boundary_regression packaging_support sdk_packaging build_wrapper build_dependencies build_source_sdk build_sdk_runtime build_release build_sdk_release build_certify_release build_release_rev_tools build_windows_base)
 set(_aliases
   "gui_document_layout=test_document_layout"
   "gui_record_reconciliation=test_record_reconciliation"

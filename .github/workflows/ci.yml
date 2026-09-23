@@ -186,32 +186,23 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Use a pinned dependency registry and build tool
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: microsoft/vcpkg
-          ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d # 2026.07.29
-          path: .ci-vcpkg
-          persist-credentials: false
-      - name: Prepare static OpenSSL build dependency
+      - name: Reuse verified static dependencies from base
         shell: pwsh
-        run: |
-          & ./.ci-vcpkg/bootstrap-vcpkg.bat -disableMetrics
-          if ($LASTEXITCODE -ne 0) { throw "vcpkg bootstrap failed" }
-          & ./.ci-vcpkg/vcpkg.exe install openssl:x64-windows-static --clean-after-build
-          if ($LASTEXITCODE -ne 0) { throw "Static OpenSSL build failed" }
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./tools/use-windows-base.ps1 -Repository "$env:GITHUB_REPOSITORY" -Destination "$PWD/build/windows-base"
       - name: Configure native application without Python
         shell: pwsh
         # The same offline C sources build with MSVC; no liblzma DLL or vcpkg
         # compression package is required on the copied installation.
         run: >-
           cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-          -DCMAKE_TOOLCHAIN_FILE="$PWD/.ci-vcpkg/scripts/buildsystems/vcpkg.cmake"
+          -DCMAKE_TOOLCHAIN_FILE="$env:DATAPUMP_WINDOWS_TOOLCHAIN"
           -DVCPKG_TARGET_TRIPLET=x64-windows-static
           -DDATAPUMP_PORTABLE=ON -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
           -DDART_TESTING_TIMEOUT=3600
           -DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE
-      - run: cmake --build build --config Release --target datapump-apps datapump-tests --parallel 2
+      - run: cmake --build build --config Release --target datapump-apps datapump-tests --parallel $env:NUMBER_OF_PROCESSORS
       # The live/audio fixtures have their own workers and internal deadlines.
       # Preserve the complete selection without competing suites on the runner.
       - run: ctest --test-dir build -C Release --output-on-failure --parallel 1

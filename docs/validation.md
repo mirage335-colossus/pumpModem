@@ -4,6 +4,79 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Backend-specific releases and advisory Rev cadence — 23 September 2026
+
+New release metadata requires separate FLTK and Rev archives for Linux x86_64,
+Linux aarch64 and Windows x64. Download names and CPack extraction roots identify
+the backend. The release helper checks both generated archive formats, embedded
+GUI provenance and the complete six-target inventory; certification requires
+those same six identities. Existing schema-1 releases remain readable and retain
+their original FLTK assets. The SDK recipe remains unchanged; both x86_64
+backends use the existing `base` SDK. Native Ubuntu 22.04 Rev builds use signed,
+pinned LLVM 19 and a checksum-pinned Ninja 1.13.2 bootstrap.
+
+The maintainer has explicitly classified Rev replay/waterfall display cadence
+as advisory. The earlier 13-frame/0.898309-progress and 6-frame failures below
+were display-cadence misses. They now emit `WARNING REV_REPLAY_CADENCE` with
+measured elapsed time, frames, changes, fraction and phase. Required physical
+observations, pending presentation, chronology, source/bitmap consistency,
+content and completion checks remain hard failures. FLTK retains its cadence
+check. This is a diagnostic policy change, not a rendering-performance fix.
+Every new release includes a checksummed `warning.log` describing the known
+Rev limitation; it does not claim that publication measured its framerate.
+Successful portable smoke checks preserve observed warnings in CI logs, and
+certification reports link the warning notice without failing on cadence alone.
+
+Focused helper coverage passes **58 release**, **35 certification**, **27 SDK
+storage** and **4 native Rev toolchain** tests. The deterministic replay fixture
+covers both recorded misses, healthy/boundary cases and mandatory correctness
+failures even when cadence also misses. It passes in **0.01 seconds**; actual
+FLTK/native and Rev/SDK source compilation probes and GUI boundary regressions
+also pass. Packaging fixtures cover both backend roots, missing pairs, warning
+propagation from stdout/stderr, and nonzero GUI exits remaining fatal. The
+small upstream Ninja archive's SHA-256 matches the existing SDK source pin;
+installer tests mock apt rather than changing the developer host.
+
+Full local follow-up uses the existing SDK through `./build.sh test GROUP
+--stop-on-failure --sdk "$PWD/build/sdk-qualified-local" --backend fltk
+--build-dir build/sdk-local-fltk --jobs 2 -- -DDATAPUMP_PORTABLE=ON`:
+
+- `gui`: **35/35**, **112.74 seconds**, with native display tests disabled.
+- `build`: **11/11**, **6.78 seconds**.
+- `packaging`: **3/3**, **39.96 seconds**, including real relocated application
+  checks and the SDK-compiler fixture.
+
+Logs are under `build/ci-diagnostics-20260923/backend-full-*.log`. Workflow lint
+and whitespace checks pass. The [six-package publication attempt](https://github.com/mirage335-colossus/pumpModem/actions/runs/35865999118)
+used source `c4309fc191539f748b3d3b0b1b1a2c636924ec11`. All four Linux
+backend/architecture packages and Windows FLTK passed. Windows Rev failed to
+compile read-only style equality operators because MSVC rejects their ambiguous
+C++20 reversed candidates. The release correctly remained an incomplete draft;
+certification was not dispatched for it. This is a separate compilation issue,
+not a cadence warning. Windows dependency preparation took **5m57s (FLTK)**
+and **5m58s (Rev)**; FLTK application building and packaging took **5m48s**.
+The Windows SDK itself was already installed on the runner.
+
+The follow-up adds a shared Windows dependency base: a relocatable static vcpkg
+export containing OpenSSL, GLEW and FreeType, plus the pinned vcpkg source and
+download inventory. Consumer workflows verify the exact recipe and checksums,
+check that the runner's linker is at least as new as the producer's, then reuse
+the export without rebuilding dependencies. Microsoft compiler/SDK files are
+not included. **21 focused helper tests** pass, including Windows-safe imports,
+raw-export layout, corruption/traversal, immutable publication, authentication
+errors and linker compatibility. The full local build group passes **12/12** in
+**6.63 seconds**; workflow lint and whitespace checks pass.
+
+The MSVC failure is corrected by const-qualifying four read-only Rev style
+equality operators, leaving their comparison bodies unchanged. A dependency-free
+probe compiling the four actual production modules reproduces the original
+ambiguity under strict Clang diagnostics and passes after the change. Its
+regression checks mutable/const symmetry, values/units, color alpha, notification
+and transition metadata, and layout-versus-paint decisions. The case is also
+retained in the normal Rev GUI group; Windows release builds run the small probe
+before dependency download or application compilation. Hosted verification of
+these follow-ups is recorded separately when complete.
+
 ## Full validation after focused diagnosis — 23 September 2026
 
 Agent and development guidance now requires focused diagnosis followed by full

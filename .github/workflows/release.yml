@@ -31,6 +31,10 @@ on:
       - 'tests/test_certify_release.py'
       - 'tools/install-release-rev.py'
       - 'tests/test_release_rev_tools.py'
+      - 'tools/windows-base.py'
+      - 'tools/use-windows-base.ps1'
+      - 'tests/test_windows_base.py'
+      - 'third_party/build-support/windows-base.json'
 
 permissions:
   contents: read
@@ -52,6 +56,7 @@ jobs:
           python3 tests/test_certify_release.py
           python3 tests/test_sdk_release.py
           python3 tests/test_release_rev_tools.py
+          python3 tests/test_windows_base.py
 
   metadata:
     if: github.event_name == 'workflow_dispatch'
@@ -190,25 +195,23 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: microsoft/vcpkg
-          ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d # 2026.07.29
-          path: .ci-vcpkg
-          persist-credentials: false
-      - name: Prepare pinned static application dependencies
+      - name: Check Rev style comparisons before the application build
+        if: matrix.backend == 'rev'
         shell: pwsh
         run: |
-          & ./.ci-vcpkg/bootstrap-vcpkg.bat -disableMetrics
-          if ($LASTEXITCODE -ne 0) { throw 'vcpkg bootstrap failed' }
-          $ports = @('openssl:x64-windows-static')
-          if ($env:GUI_BACKEND -eq 'rev') { $ports += @('glew:x64-windows-static', 'freetype[core]:x64-windows-static') }
-          & ./.ci-vcpkg/vcpkg.exe install @ports --clean-after-build
-          if ($LASTEXITCODE -ne 0) { throw 'Dependency build failed' }
+          cmake -S tests/rev-style-probe -B build/rev-style-probe -G 'Visual Studio 17 2022' -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'Rev style probe configure failed' }
+          cmake --build build/rev-style-probe --config Release --parallel $env:NUMBER_OF_PROCESSORS
+          if ($LASTEXITCODE -ne 0) { throw 'Rev style module compilation failed' }
+          ctest --test-dir build/rev-style-probe -C Release --output-on-failure --no-tests=error
+          if ($LASTEXITCODE -ne 0) { throw 'Rev style comparison regression failed' }
+      - name: Reuse verified static dependencies from base
+        shell: pwsh
+        run: ./tools/use-windows-base.ps1 -Repository "$env:GITHUB_REPOSITORY" -Destination "$PWD/build/windows-base"
       - name: Build and package with the Windows SDK and static runtime
         shell: pwsh
         run: |
-          cmake -S . -B build/release-windows -G 'Visual Studio 17 2022' -A x64 -DCMAKE_TOOLCHAIN_FILE="$PWD/.ci-vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DDATAPUMP_GUI_BACKEND="$env:GUI_BACKEND" -DDATAPUMP_PORTABLE=ON -DBUILD_TESTING=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          cmake -S . -B build/release-windows -G 'Visual Studio 17 2022' -A x64 -DCMAKE_TOOLCHAIN_FILE="$env:DATAPUMP_WINDOWS_TOOLCHAIN" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DDATAPUMP_GUI_BACKEND="$env:GUI_BACKEND" -DDATAPUMP_PORTABLE=ON -DBUILD_TESTING=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
           if ($LASTEXITCODE -ne 0) { throw 'Configure failed' }
           cmake --build build/release-windows --config Release --target package --parallel $env:NUMBER_OF_PROCESSORS
           if ($LASTEXITCODE -ne 0) { throw 'Packaging failed' }

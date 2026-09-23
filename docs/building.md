@@ -50,6 +50,15 @@ relocation. The default native build remains available.
 
 Manual releases with version/date tags, an experiment checkbox and six portable
 application downloads are documented in [manual portable releases](releases.md).
+Windows release, certification and full CI jobs reuse a checksummed dependency
+bundle from the durable `base` release: static OpenSSL, GLEW and FreeType for
+both GUI backends. The runner supplies MSVC and the Windows SDK separately.
+An absent matching recipe requires explicit
+[Windows base maintenance](releases.md#windows-dependency-base); routine jobs
+never start a cold dependency build. Reuse includes relocation and a check
+that the consuming linker is at least as new as the recorded builder. Keep
+the compiler at least as new too, within v143; the bundle contains no LTO
+objects. This dependency handoff uses neither Actions cache nor artifacts.
 
 ## Commands and profiles
 

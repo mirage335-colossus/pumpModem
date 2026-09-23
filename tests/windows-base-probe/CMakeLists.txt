@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.21)
+project(DataPumpWindowsBaseProbe LANGUAGES CXX)
+set(OPENSSL_USE_STATIC_LIBS TRUE)
+find_package(OpenSSL 3 REQUIRED)
+find_package(GLEW REQUIRED)
+find_package(Freetype REQUIRED)
+add_executable(windows-base-probe main.cpp)
+target_link_libraries(windows-base-probe PRIVATE OpenSSL::Crypto GLEW::GLEW Freetype::Freetype)

@@ -190,27 +190,24 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.prepare.outputs.source_sha }}
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Load dependency tooling when certifying an older release
+        if: ${{ hashFiles('tools/windows-base.py') == '' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: microsoft/vcpkg
-          ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d # 2026.07.29
-          path: .ci-vcpkg
           persist-credentials: false
-      - name: Prepare pinned static application dependencies
+          ref: ${{ github.sha }}
+          path: .certification-tools
+      - name: Reuse verified static dependencies from base
         shell: pwsh
         run: |
-          & ./.ci-vcpkg/bootstrap-vcpkg.bat -disableMetrics
-          if ($LASTEXITCODE -ne 0) { throw 'vcpkg bootstrap failed' }
-          $ports = @('openssl:x64-windows-static')
-          if ($env:GUI_BACKEND -eq 'rev') { $ports += @('glew:x64-windows-static', 'freetype[core]:x64-windows-static') }
-          & ./.ci-vcpkg/vcpkg.exe install @ports --clean-after-build
-          if ($LASTEXITCODE -ne 0) { throw 'Dependency build failed' }
+          $script = if (Test-Path tools/use-windows-base.ps1) { './tools/use-windows-base.ps1' } else { './.certification-tools/tools/use-windows-base.ps1' }
+          & $script -Repository "$env:GITHUB_REPOSITORY" -Destination "$PWD/build/windows-base"
       - name: Build with the Windows SDK and static MSVC runtime
         shell: pwsh
         run: |
-          cmake -S . -B build/release-windows -G 'Visual Studio 17 2022' -A x64 -DCMAKE_TOOLCHAIN_FILE="$PWD/.ci-vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DDATAPUMP_GUI_BACKEND="$env:GUI_BACKEND" -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600 -DDATAPUMP_TEST_NATIVE_GUI=ON -DGUI_SMOKE_TIMEOUT=600 -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          cmake -S . -B build/release-windows -G 'Visual Studio 17 2022' -A x64 -DCMAKE_TOOLCHAIN_FILE="$env:DATAPUMP_WINDOWS_TOOLCHAIN" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DDATAPUMP_GUI_BACKEND="$env:GUI_BACKEND" -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600 -DDATAPUMP_TEST_NATIVE_GUI=ON -DGUI_SMOKE_TIMEOUT=600 -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
           if ($LASTEXITCODE -ne 0) { throw 'Configure failed' }
-          cmake --build build/release-windows --config Release --target datapump-apps datapump-tests-contract datapump-tests-gui datapump-tests-packaging --parallel 2
+          cmake --build build/release-windows --config Release --target datapump-apps datapump-tests-contract datapump-tests-gui datapump-tests-packaging --parallel $env:NUMBER_OF_PROCESSORS
           if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
           # The live/audio fixtures have their own workers and wall-clock
           # deadlines. Keep independent suites from competing on hosted CPUs.
