@@ -3,6 +3,10 @@ name: Focused graphics environment diagnostics
 on:
   workflow_call:
     inputs:
+      arm_runner:
+        description: 'Linux ARM64 runner label'
+        type: string
+        default: ubuntu-24.04-arm-l
       windows_runner:
         description: 'Windows x64 runner label'
         type: string
@@ -32,7 +36,7 @@ jobs:
 
   linux:
     name: Published ARM64 Rev GLX on Ubuntu 24.04 (not certification)
-    runs-on: ubuntu-24.04-arm
+    runs-on: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-l' }}
     container: ubuntu:24.04
     timeout-minutes: 8
     env:

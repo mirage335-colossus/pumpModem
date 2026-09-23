@@ -1,0 +1,42 @@
+name: Focused ARM64 runner capacity check
+
+on:
+  workflow_call:
+    inputs:
+      arm_runner:
+        type: string
+        default: ubuntu-24.04-arm-l
+
+permissions:
+  contents: read
+
+jobs:
+  arm:
+    name: Runner and baseline compiler (${{ inputs.arm_runner }})
+    runs-on: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-l' }}
+    container: ubuntu:22.04
+    timeout-minutes: 5
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      SELECTED_RUNNER: ${{ inputs.arm_runner }}
+    steps:
+      - name: Check architecture and CPU availability inside the build baseline
+        run: |
+          test "$(uname -m)" = aarch64
+          {
+            echo "Selected runner: $SELECTED_RUNNER; actual: $RUNNER_NAME"
+            echo "Build baseline: Ubuntu 22.04; architecture: $(uname -m); compile jobs: $(nproc)"
+            awk '/MemTotal/ {print "Host memory: " $2 " KiB"}' /proc/meminfo
+            echo 'Focused compiler/routing check only; no SDK build, packages or certification.'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git cmake ninja-build g++
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Compile the small production Legacy fixture using available cores
+        run: |
+          cmake -S tests/devfast -B build/runner-capacity -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/runner-capacity --target test_gui_legacy_poll --parallel "$(nproc)"
+          ctest --test-dir build/runner-capacity --output-on-failure -R '^gui_legacy_poll$' --parallel 1 --no-tests=error
+

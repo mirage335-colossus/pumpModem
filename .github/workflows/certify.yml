@@ -13,10 +13,15 @@ on:
         type: boolean
         default: false
       linux_runner:
-        description: 'x86-64 Linux runner; ARM64 retains its dedicated runner'
+        description: 'x86-64 Linux runner'
         type: choice
         options: [ubuntu-24.04, ubuntu-latest-m, ubuntu-latest-l, ubuntu-latest-h]
         default: ubuntu-24.04
+      arm_runner:
+        description: 'Linux ARM64 runner for compilation and qualification'
+        type: choice
+        options: [ubuntu-24.04-arm-l, ubuntu-24.04-arm-h, ubuntu-24.04-arm]
+        default: ubuntu-24.04-arm-l
       windows_runner:
         description: 'Windows x64 runner'
         type: choice
@@ -87,7 +92,7 @@ jobs:
     name: Source and published Linux ${{ matrix.arch }} / ${{ matrix.backend }}
     if: ${{ !inputs.devfast }}
     needs: prepare
-    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || inputs.linux_runner || 'ubuntu-24.04' }}
+    runs-on: ${{ matrix.arch == 'aarch64' && (inputs.arm_runner || 'ubuntu-24.04-arm-l') || inputs.linux_runner || 'ubuntu-24.04' }}
     container: ${{ matrix.image }}
     timeout-minutes: 120
     strategy:
@@ -269,7 +274,7 @@ jobs:
     name: Published ${{ matrix.target }} on ${{ matrix.image }}
     if: ${{ !inputs.devfast }}
     needs: prepare
-    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || inputs.linux_runner || 'ubuntu-24.04' }}
+    runs-on: ${{ matrix.arch == 'aarch64' && (inputs.arm_runner || 'ubuntu-24.04-arm-l') || inputs.linux_runner || 'ubuntu-24.04' }}
     container: ${{ matrix.image }}
     timeout-minutes: 30
     strategy:
