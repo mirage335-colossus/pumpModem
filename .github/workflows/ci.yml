@@ -67,7 +67,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: native-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ inputs.diagnostic || 'legacy' }}-${{ inputs.devfast && 'devfast' || 'full' }}-${{ inputs.sanitizer_realtime && 'realtime' || 'standard' }}-${{ inputs.linux_runner || 'ubuntu-latest-h' }}-${{ inputs.windows_runner || 'windows-latest-h' }}-${{ inputs.arm_runner || 'ubuntu-24.04-arm-h' }}
+  group: native-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ inputs.diagnostic || 'legacy' }}-${{ inputs.devfast && 'devfast' || 'full' }}-${{ !inputs.devfast && inputs.sanitizer_realtime && 'realtime' || 'standard' }}-${{ inputs.linux_runner || 'ubuntu-latest-h' }}-${{ inputs.windows_runner || 'windows-latest-h' }}-${{ inputs.arm_runner || 'ubuntu-24.04-arm-h' }}
   cancel-in-progress: true
 
 jobs:

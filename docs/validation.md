@@ -22,6 +22,12 @@ exactly the two named tests (140 to 138 and 142 to 140 respectively); these are
 selection checks, not executions or new regression passes. The shell probes
 verify that Release never applies that expression. No full native run,
 calibration or SDK rebuild is needed to verify this CI-only policy change.
+The [ordinary focused PR checks](https://github.com/mirage335-colossus/pumpModem/actions/runs/35933045074)
+pass on `d0057642b7ea7117833e0cccbfdc0d9c6b007480`: build helpers and repeated
+Linux/Windows Legacy diagnostics use H runners. Final review additionally makes
+the concurrency key ignore the checkbox with `devfast=true`, preventing duplicate
+equivalent diagnostics; actionlint and the four boolean combinations pass after
+that adjustment. This is not a new full sanitizer-regression result.
 
 The Windows certification harness recognizes only exit 1 with the exact Rev
 message `[NativeWindow] Required WGL ARB extensions not available` as a hosted
