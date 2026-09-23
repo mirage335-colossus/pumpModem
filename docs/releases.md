@@ -267,8 +267,8 @@ stay on standard runners. Each architecture has its own selector: an x86-64
 label cannot replace an ARM64 host. Existing Linux baseline containers, SDK
 recipes and portable ABI ceilings remain unchanged.
 
-The organization created Ubuntu 24.04 ARM64 pools in the existing
-`DefaultLargerRunners` group, which permits public repositories. Both pools were
+The organization created Ubuntu 24.04 ARM64 pools in its existing
+larger-runner group, which permits public repositories. Both pools were
 confirmed Ready on **2026-09-23**. Their configured capacities and GitHub's
 published prices checked that day are:
 
@@ -323,6 +323,14 @@ so source files within a project can compile concurrently without multiplying
 the CPU limit for every project. Module dependencies and link steps still impose
 serial work; larger runners do not guarantee a particular elapsed time.
 
+The [six-package H-runner verification](https://github.com/mirage335-colossus/pumpModem/actions/runs/35882420441)
+passed on 2026-09-23 and retained an experiment draft. Windows FLTK/Rev whole
+jobs took **2m15s/2m32s**, with existing base restore in **15s/20s**; the preceding
+standard-runner publication took **5m43s/6m49s** for those jobs. ARM64 FLTK/Rev
+took **3m30s/5m03s**. These are observed results, not a speed guarantee or full
+certification. See the [validation record](validation.md#larger-runners-and-independent-compilation-concurrency--23-september-2026)
+for source/run identities and the separate certification limitations.
+
 Base reuse remains the first optimization. Cold SDK builds use available cores
 when base maintenance's `jobs=0`; normal application builds continue retrieving
 the exact existing base instead of rebuilding it. Larger runners do not change
@@ -335,9 +343,18 @@ Its [Windows build workflow](../.github/workflows/windows-base.yml) preserves a 
 release. Its [recipe](../third_party/build-support/windows-base.json) pins
 vcpkg and the shared union of static OpenSSL, GLEW and FreeType dependencies
 for both FLTK and Rev, including Debug and Release configurations. The runner
-already supplies Visual Studio 2022/MSVC and the Windows SDK. The cold step
+already supplies Visual Studio/MSVC and the Windows SDK. The cold step
 compiles these third-party dependencies; it does not rebuild or redistribute
 Microsoft's compiler or SDK.
+
+The [runner toolchain selector](../tools/select-windows-toolchain.ps1) prefers
+VS2022 when installed. The current larger Windows images supply VS2026; on
+those images it selects the installed v143 14.44 tools and the VS2026 CMake
+generator, which requires CMake 4.2 or newer. It does not silently adopt the
+newer default toolset. The default `windows-2022` image continues using VS2022.
+Run logs identify the selected generator, toolset and linker version.
+This selection leaves the existing base recipe identity and assets unchanged;
+its hosted compile results must still be checked before claiming qualification.
 
 Ordinary Windows release, certification and full CI jobs download, verify and
 relocate the exact recipe through [the helper](../tools/windows-base.py).
@@ -345,6 +362,13 @@ They fail with maintenance instructions if it is missing, rather than starting
 an implicit vcpkg build. The dependency handoff uses release assets, with no
 Actions cache or artifact storage. Application compilation and the selected
 tests still run normally.
+
+Certification checks out the published source and current workflow tooling into
+separate directories. Its current runner-discovery wrapper invokes the released
+source's dependency helper and recipe, preserving that release's base identity
+while accommodating the selected runner image. Releases predating that helper
+retain the current-tooling fallback. The application source, published archives
+and report hash bindings remain those of the release under certification.
 
 Maintenance uses `source=auto` to reuse the exact bundle or build it when
 missing, `source=base` to require reuse, and `source=rebuild` for an explicit
@@ -409,8 +433,9 @@ ARM64 builds run natively on a GitHub ARM64 runner in an Ubuntu 22.04 build
 environment and retain the glibc 2.35 ceiling. Native Rev builds use signed,
 pinned LLVM 19 packages and a small pinned Ninja bootstrap for C++ modules;
 application libraries still come from that Ubuntu baseline. SDK Rev builds use
-the existing SDK directly. Windows uses the runner's Visual Studio 2022 and
-Windows SDK, static C/C++ runtimes and the verified
+the existing SDK directly. Windows uses the runner's installed MSVC v143 tools
+under Visual Studio 2022 or 2026 and its Windows SDK, static C/C++ runtimes and
+the verified
 [Windows dependency base](#windows-dependency-base). Rev additionally links its
 static GLEW and FreeType dependencies from that same bundle.
 Linux portable Clang builds using libstdc++ link their C++ runtime statically,
@@ -434,7 +459,7 @@ Read the attached report before describing a particular release as tested.
 | Linux x86_64, `bookworm-sdk` | SDK, glibc 2.36 | Debian 12 and 13; Ubuntu 24.04 and 26.04; Arch Linux |
 | Linux x86_64, `ubuntu-22.04` | Ubuntu 22.04, glibc 2.35 | Debian 12 and 13; Ubuntu 22.04, 24.04 and 26.04; Arch Linux |
 | Linux aarch64 | Ubuntu 22.04, glibc 2.35 | Debian 12 and 13; Ubuntu 22.04, 24.04 and 26.04 |
-| Windows x64 | Visual Studio 2022 with static CRT | Selected Windows x64 hosted runner and archive relocation; the default is `windows-2022` |
+| Windows x64 | MSVC v143 with static CRT | Selected Windows x64 hosted runner and archive relocation; the default is `windows-2022` with VS2022 |
 
 Linux package verification audits all shipped ELF libraries for the selected
 glibc ceiling and checks relocation, checksums, CLI operation and the GUI
@@ -467,7 +492,8 @@ ordinary Debian ARMv7 `armhf` binaries would not cover the original Pi/Zero's
 ARMv6 hard-float user space. Hardware-specific Raspberry Pi audio remains
 outside the hosted tests.
 
-Microsoft documents Visual Studio 2022's ability to build desktop applications
+For the default VS2022 toolchain, Microsoft documents the ability to build
+desktop applications
 for [Windows 10 and 11](https://learn.microsoft.com/en-us/visualstudio/releases/2022/compatibility?view=vs-2022).
 The default `windows-2022` runner uses Windows Server 2022. Organization runner
 labels may select another image; consult that run's image/toolchain logs.

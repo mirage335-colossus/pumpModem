@@ -4,6 +4,74 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Larger runners and independent compilation concurrency — 23 September 2026
+
+Manual workflows now propagate Linux x86_64, Windows x64 and, where applicable,
+ARM64 runner selections into their reusable build and diagnostic jobs. The
+organization's new `ubuntu-24.04-arm-l` and `ubuntu-24.04-arm-h` pools use the
+official Ubuntu 24.04 ARM64 image with 8 and 32 CPUs respectively. ARM64 defaults
+to L. Container/SDK ABI baselines remain unchanged. Compilation uses the selected
+host's available cores independently of the existing test-concurrency limits;
+Windows enables bounded MultiToolTask compilation across projects.
+
+Focused ARM-only checks passed on source `5b33ec8`: [L](https://github.com/mirage335-colossus/pumpModem/actions/runs/35881699198)
+reported aarch64, 8 CPUs and about 32 GB RAM, with a **25-second** whole job;
+[H](https://github.com/mirage335-colossus/pumpModem/actions/runs/35881705867)
+reported aarch64, 32 CPUs and about 128 GB RAM, with a **28-second** whole job.
+Both compiled and ran the existing Legacy fixture inside Ubuntu 22.04. These
+small jobs verify routing/compiler access, not a general speedup benchmark or
+release certification. No smaller ARM pool was retested.
+
+The x86_64 capacity checks passed on M/L/H Linux pools. Their Windows jobs
+immediately exposed an image mismatch: the larger Windows hosts supply VS2026,
+while the workflow requested VS2022. The new selector uses the installed v143
+compiler under the matching IDE, retaining the existing Windows base identity
+`1be51afd94ed0cb4555a`. Certification uses current runner discovery while keeping
+the published source's dependency helper/recipe. No Windows base is rebuilt
+implicitly. The local build group passed **12/12 in 5.52 seconds**, including
+**40 wrapper cases** for independent compilation/test limits. The unchanged
+Windows base helper passed **22/22**; workflow lint and whitespace checks passed.
+
+The [larger Windows follow-up](https://github.com/mirage335-colossus/pumpModem/actions/runs/35882155071)
+passed on `88fb87b`: the toolchain fixture selected VS2026 with
+`v143,version=14.44.35207,host=x64` and linker `14.44.35228.0`, then compiled
+the actual Rev style modules and passed their regression in **0.07 seconds**.
+The whole Windows H job took **40 seconds**. It used all 32 visible CPUs for
+compilation without raising the serial test limit.
+
+The [all-H six-package verification](https://github.com/mirage335-colossus/pumpModem/actions/runs/35882420441)
+passed on the same `88fb87b` source. All six build jobs ran on the selected
+32-CPU architecture-specific H hosts; only helper/metadata/finalization jobs
+used standard runners. It left `v001_00-2026-09-23-1033CDT` as an **experiment
+draft**, containing six archives, metadata, notes, `warning.log` and checksums.
+Archive relocation, dependency/ABI checks and the complete inventory gate passed.
+
+| Build job | Whole job | Windows base restore, when applicable |
+| --- | ---: | ---: |
+| Linux x86_64 FLTK | 2m15s | — |
+| Linux x86_64 Rev | 2m35s | — |
+| Linux ARM64 FLTK | 3m30s | — |
+| Linux ARM64 Rev | 5m03s | — |
+| Windows x64 FLTK | 2m15s | 15s |
+| Windows x64 Rev | 2m32s | 20s |
+
+The preceding standard-runner publication's Windows jobs took 5m43s/6m49s.
+These observed job timings include setup and package work and are not a
+controlled benchmark or a guarantee. The Linux x86_64 SDK and Windows dependency
+base were reused; cold dependency production was deliberately not repeated. This
+package verification is separate from full source/binary certification.
+
+An earlier full certification of source `e72906d`, [run 35878492914](https://github.com/mirage335-colossus/pumpModem/actions/runs/35878492914),
+was already running on standard hosts before the larger-runner changes. Its
+Windows Rev native probe lacks the required WGL extensions. Windows FLTK's
+adapter fixture reports "Layout lifecycle fixture lost native controls" after
+its full GUI workflow passed. ARM64 Rev passed all **37 shared GUI**, **5 native
+GUI** and **4 packaging** tests, then the CLI differential-estimate subprocess
+exceeded its 30-second deadline. These are separate environment, assertion and
+timeout failures; none is the advisory Rev cadence condition. They remain
+recorded failures, and this runner work does not waive them or certify that
+release. Logs are preserved under `build/ci-diagnostics-20260923/backend-runs/`.
+
 ## Backend-specific releases and advisory Rev cadence — 23 September 2026
 
 New release metadata requires separate FLTK and Rev archives for Linux x86_64,

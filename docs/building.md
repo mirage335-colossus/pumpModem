@@ -53,6 +53,13 @@ application downloads are documented in [manual portable releases](releases.md).
 Windows release, certification and full CI jobs reuse a checksummed dependency
 bundle from the durable `base` release: static OpenSSL, GLEW and FreeType for
 both GUI backends. The runner supplies MSVC and the Windows SDK separately.
+The [toolchain selector](../tools/select-windows-toolchain.ps1) prefers an
+installed Visual Studio 2022, or uses Visual Studio 2026 with its installed
+v143 tools. The current larger Windows images have VS2026 and v143 14.44;
+the default `windows-2022` image retains VS2022. The selector sets the matching
+CMake generator and pins v143 instead of adopting VS2026's default toolset.
+VS2026 requires CMake 4.2 or newer. This host selection does not change the
+dependency recipe or rebuild the existing base.
 An absent matching recipe requires explicit
 [Windows base maintenance](releases.md#windows-dependency-base); routine jobs
 never start a cold dependency build. Reuse includes relocation and a check
@@ -339,10 +346,12 @@ ctest --test-dir build/devfast --output-on-failure -R '^gui_legacy_(poll|live)$'
   --parallel 1 --repeat until-fail:3 --stop-on-failure --no-tests=error
 ```
 
-On Windows with Visual Studio 2022, using PowerShell:
+On Windows with Visual Studio 2022 or 2026 and installed v143 tools, using
+PowerShell (CMake 4.2 or newer is required for VS2026):
 
 ```powershell
-cmake -S tests/devfast -B build/devfast -G 'Visual Studio 17 2022' -A x64
+$toolchain = & ./tools/select-windows-toolchain.ps1
+cmake -S tests/devfast -B build/devfast -A x64
 cmake --build build/devfast --config Release --parallel $env:NUMBER_OF_PROCESSORS
 ctest --test-dir build/devfast -C Release --output-on-failure -R '^gui_legacy_(poll|live)$' `
   --parallel 1 --repeat until-fail:3 --stop-on-failure --no-tests=error
