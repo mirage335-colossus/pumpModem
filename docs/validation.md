@@ -63,6 +63,38 @@ the full numerical run below. Historical sanitizer real-time overruns and GUI
 pending-identity failures remain failures until current evidence establishes
 their outcome; the WGL exception does not apply to them.
 
+The [Windows Rev diagnostic](https://github.com/mirage335-colossus/pumpModem/actions/runs/35920957351)
+is **green** on `f582d8eb2827c2cdff02d7e8df40adac55c0ce74`: the native event test,
+Rev compilation and headless self-check pass, and the actual missing-WGL
+message produces the intended warning. Dependency-base reuse takes about
+**14 seconds**, with no SDK rebuild. This diagnostic does not certify published
+archives.
+
+The first Windows fixture retry exposes a second independent assumption:
+the lifecycle fixture placed a bitmap in the full console's bottom plot area,
+which correctly has zero height in the hosted **1028×749** client area. The
+fixture now uses the bounded QR area and FLTK explicitly exercises the reported
+small size. All retained-control assertions remain. The affected FLTK and Rev
+probes pass locally in **0.38** and **0.29 seconds**. The application's normal
+minimum layout remains **1030×968**; this is a potentially significant usability
+limit for an actual undersized desktop, not a transport or data-integrity fault.
+The [corrected Windows-only run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35922024305)
+is **green** on `81858d2ffd7fecfbf3fcc23d121efcfb69a7b33f`: both targeted adapter
+probes and all **three** complete adapter/DSP tests pass (**99.20 seconds** for
+the CTest selection). Unchanged Linux and ARM diagnostics were not repeated.
+
+Two cached ASan/UBSan real-time checks still fail when run alone. New failure-only
+diagnostics show Fast RX receiving **156,000 samples in 3.225 seconds** while its
+last decoder telemetry reaches **105,600 samples**, followed by the production
+one-second FIFO overrun. No coding cycle or LDPC frame fails before that overrun.
+The GUI case records three such overruns followed by automatic listening retries;
+the retained row remains `INCOMPLETE`, nonactivatable and without exposed source
+content. This reproduces instrumented throughput failure, not demonstrated row
+identity corruption or a sanitizer memory/UB report. The unchanged assertions
+still fail (**4.83** and **49.28 seconds**); they are not covered by the WGL waiver.
+Release build results are separate evidence, and no conclusion about physical
+hardware performance follows from these hosted or simulated checks alone.
+
 
 ## Arch/Gentoo signed update channels — 23 September 2026
 

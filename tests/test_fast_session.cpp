@@ -144,12 +144,25 @@ void text_audio_roundtrip() {
         {std::lock_guard lock(fixture::mutex);recorded=std::move(fixture::output);}
         check(!recorded.empty(),"text transmission did not produce audio");
         fixture::reset(std::move(recorded),true);
-        fast::Session rx;rx.configure(s);rx.listen();
+        fast::Session rx;rx.configure(s);
+        const auto receive_started=std::chrono::steady_clock::now();
+        rx.listen();
         await([&]{return !rx.active();},"text audio RX did not finish");
         const auto received=rx.poll();
-        if(!received.complete || !received.physical_complete || !received.file || !received.error.empty())
+        if(!received.complete || !received.physical_complete || !received.file || !received.error.empty()) {
+            std::size_t delivered=0,total=0;
+            {std::lock_guard lock(fixture::mutex);delivered=fixture::offset;total=fixture::input.size();}
             std::cerr<<"text RX: "<<received.status<<"; error="<<received.error
-                <<"; physical_end="<<received.physical_complete<<"; intervals="<<received.intervals<<'\n';
+                <<"; encrypted="<<encrypted<<"; attachment="<<attachment
+                <<"; physical_end="<<received.physical_complete<<"; intervals="<<received.intervals
+                <<"; wall_seconds="<<std::chrono::duration<double>(std::chrono::steady_clock::now()-receive_started).count()
+                <<"; session_seconds="<<received.elapsed_seconds
+                <<"; delivered_samples="<<delivered<<"/"<<total<<"; sample_rate="<<s.profile.sample_rate
+                <<"; last_telemetry_samples="<<(received.diagnostics?received.diagnostics->samples:0)
+                <<"; coding_cycles="<<received.coding_cycles<<"; failed_cycles="<<received.failed_cycles
+                <<"; ldpc_frames="<<received.ldpc_frames<<"; ldpc_failed="<<received.ldpc_failed_frames
+                <<"; ldpc_iterations="<<received.ldpc_iterations<<'\n';
+        }
         check(received.complete&&received.physical_complete&&received.file&&received.error.empty(),
               "text audio reception did not observe a valid physical end");
         check(Bytes(received.file->bytes().begin(),received.file->bytes().end())==Bytes(text.begin(),text.end()),"text audio changed UTF-8, newline or zero bytes");
