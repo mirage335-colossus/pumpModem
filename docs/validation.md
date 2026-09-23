@@ -47,8 +47,41 @@ run. Its host-dependency installation then exposed a bootstrap-directory error:
 creating `/etc/portage/gnupg` early made `getuto` skip initialization of Gentoo's
 own trust anchor. The bootstrap now uses the separate
 `/etc/portage/datapump-release-keyring.gpg` file. Signatures remain required;
-no application or release asset needed changing. The focused Gentoo retry is
-[run 35902837031](https://github.com/mirage335-colossus/pumpModem/actions/runs/35902837031).
+no application or release asset needed changing. The [focused Gentoo retry](https://github.com/mirage335-colossus/pumpModem/actions/runs/35902837031)
+passes in **7m26s**, including native overlay sync, signed prebuilt host
+dependencies, both backend installations, exact payload verification and
+CLI/headless GUI checks. These package checks all use larger H runners.
+Final bootstrap review additionally requires exactly one pinned primary key in
+all downloaded keyrings, excluding signing subkeys from that count. APT's source
+configuration is authenticated through the signed Release and manifest before
+installation. The documented APT and Gentoo verification commands pass against
+the published assets without installing anything; parser probes reject added
+primary keys and accept a legitimate signing subkey.
+
+Separate [full certification](https://github.com/mirage335-colossus/pumpModem/actions/runs/35903397995)
+uses workflow revision `9ed4c6899ed1493998ee7b7021d173d0efa512b1`, all-H
+Linux/ARM64/Windows runners, `devfast=false`, the exact published hashes and
+existing SDKs. Gentoo passes again, including another native sync after both
+packages are installed. All **20 copied Linux distribution checks**, **nine
+signed APT jobs** and **both native package-manager jobs** pass. Linux FLTK
+passes on both x86-64 and ARM64, including all 30 contract tests with numerical
+calibration, shared/native GUI tests, packaging, audio routing and the exact
+published archive. SDK fetch/install on x86-64 takes **27 seconds**; its complete
+contract group takes **1,648.66 seconds**, compared with **1,563.53 seconds** on
+ARM64. The extended duration is full regression, not an SDK rebuild.
+
+Full certification is **failed**. Windows Rev compilation and base reuse succeed, but its initial
+native graphics probe reproduces the known unavailable WGL ARB extensions on
+the hosted runner. Windows FLTK's adapter fixture also reports an estimate-label
+warning-tone mismatch, and Linux x86-64 Rev's native adapter fixture reports a
+label-only document clip retaining editable input/focus after all 37 shared GUI
+tests passed. ARM64 Rev passes all 37 shared GUI, five native GUI and four
+packaging tests, then its differential-receiver CLI estimate exceeds the
+30-second subprocess bound. These failures are not the advisory waterfall
+cadence warning. The attached [certification report](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-23-1322CDT/certification-35903397995-attempt-1.md)
+is bound to the exact source and release inventory; the release remains an experiment and is not Latest.
+Package checks alone do not certify application correctness or physical
+audio/hardware.
 
 ## Arch/Gentoo recipes and shared Debian/Ubuntu packages — 23 September 2026
 
