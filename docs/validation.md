@@ -4,6 +4,65 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Focused Legacy cancellation diagnosis and devfast — 23 September 2026
+
+The Windows certification timeout exposed a reproducible Legacy controller race.
+The audio worker may finish between `observe()` and the next `Session::active()`
+query. Restarting capture immediately then hides the inactive snapshot that
+clears cancellation, leaving a listening controller stuck on “Cancelling…”.
+The same interleaving could discard the worker's final error. The fix observes
+that final state after confirming closure and before starting another session.
+No wire format, audio timing, test deadline or physical-completion rule changes.
+
+`gui_legacy_poll` scripts this legal interleaving without sleeps, clocks or
+production test hooks. It fails immediately before the fix and passes afterward,
+checking resumed capture, Transmit/status presentation, retained draft, final
+error visibility and closure. An independently delayed real-worker interleaving
+also changes from a 10.408-second timeout to a 0.500-second pass. The existing
+live fixture retains every assertion, sleep and ten-second per-stage deadline.
+Both tests are included in the ordinary GUI and Legacy groups.
+
+The manual `devfast` checkbox defaults to **false** in native CI, SDK qualification
+and certification. When checked, each calls one read-only Linux/Windows workflow
+that compiles only the affected controller, modem/session and fixtures. Common
+sources compile once per platform. It uses available cores for compilation and
+requires three serial passes of each test, stopping on the first failure. It
+does not configure OpenSSL/FLTK, build SDKs or applications, run calibration or
+the general matrix, upload packages, or issue/promote certification. Diagnostics
+use the selected branch SHA; full certification still pins the published source
+and hashes. Full job selections remain unchanged with `devfast` off.
+
+The hosted [before-fix reproducer](https://github.com/mirage335-colossus/pumpModem/actions/runs/35850779905)
+uses source `240a5d17e7df86c3abbe489610815539665c8206`. Both platforms build
+successfully and fail `gui_legacy_poll` with “Resumed capture retained stale
+cancellation state”. The Windows job takes **52 seconds** total and its actual
+regression fails in **0.01 seconds**; Linux takes **24 seconds**.
+
+The [fixed diagnostic run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35850989064)
+uses source `adde430f8cbb1aa7600fbe2d5862a0a4c7c1b0b7` and passes on both
+platforms in **1m10s** overall. Windows takes **61 seconds**, including its six
+test executions in **14.97 seconds**; the three unchanged live cases take
+4.95/5.00/4.97 seconds. Linux takes **29 seconds**. Preparation, full source
+suites, compatibility and certification reporting are visibly skipped, and
+GitHub reports **zero Actions artifacts**. The signed-in GitHub browser also
+confirms Success and the checked-out source SHA.
+
+After focused proof, `./build.sh test gui --stop-on-failure --build-dir
+build/audio-portable-validation --jobs 2 --cli` passes **33/33** in **104.48
+seconds**. The same wrapper's `legacy` group passes **8/8** in **2.14 seconds**.
+Workflow lint and whitespace checks pass. These affected integration groups
+include the shared controller/application boundaries; the regular modem's slow
+calibration and native adapter suites were not rerun for this controller-only
+change. Full release certification remains a separate qualification step.
+
+Redundant broad runs were stopped while this focused diagnosis proceeded.
+The previously published release's [certification attempt](https://github.com/mirage335-colossus/pumpModem/actions/runs/35846897564)
+finishes cancelled; its always-run reporting job adds a **failed** JSON/Markdown
+report recording compatibility success, Linux cancellation and Windows failure.
+All six original release assets, their hashes, source and tag remain unchanged.
+The release stays `experiment` and a prerelease. This source fix is in the PR;
+it is not retroactively included in those already published binaries.
+
 ## Separate publication, durable SDK and shared audio — 23 September 2026
 
 Publication now builds and verifies packages before releasing three binaries;
