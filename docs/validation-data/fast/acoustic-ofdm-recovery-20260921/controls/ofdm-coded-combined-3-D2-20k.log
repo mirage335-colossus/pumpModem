@@ -1,0 +1,2 @@
+estimate old_bps=9317.73 new_bps=8570 throughput_loss_percent=8.02481
+expected=3 echo=0.5 qam=4 code=2/3 D=2 TX_seconds=41.472 source_intervals=192 acquired=12.4587 completed=47.7013 premature=0 RX_intervals=192 raw_errors=21159 raw_erasures=0 exact=1 ldpc_frames=6 ldpc_failed=0 failed_cycles=0 status=Verified and physically complete

@@ -31,6 +31,8 @@ namespace {
 using Clock = std::chrono::steady_clock;
 constexpr std::size_t plot_size = 2048;
 constexpr std::size_t maximum_events = 64;
+constexpr std::size_t maximum_recovery_jobs = 8;
+constexpr std::size_t recovery_workspace_limit = 16 * 1024 * 1024;
 constexpr std::size_t replay_frames = 60;
 constexpr std::size_t replay_wave_samples = 256;
 constexpr std::size_t replay_bins = 257;
@@ -38,6 +40,10 @@ constexpr std::size_t minimum_constellation_limit = 2048;
 std::size_t constellation_limit(const modem::Config& config) {
     return std::max({minimum_constellation_limit, detail::SignalWindow::constellation_capacity(config),
                      modem::StreamingTransmitter::constellation_history_capacity(config)});
+}
+std::size_t constellation_limit(const Settings& settings) {
+    return std::max(constellation_limit(settings.transfer.modem), settings.long_message_modem ?
+        constellation_limit(*settings.long_message_modem) : std::size_t{});
 }
 constexpr std::size_t pattern_score_limit = Snapshot::pattern_score_limit;
 constexpr auto replay_duration = std::chrono::seconds(3);
@@ -65,7 +71,7 @@ constexpr std::size_t replay_result_workspace = sizeof(transfer::Received) +
     sizeof(SignalUpdate) + 2*replay_text_limit + 64 + reception_alias_bytes + minimum_constellation_limit * sizeof(std::complex<double>);
 std::size_t replay_workspace(const Settings& value) {
     return value.simulation ? std::min(value.dsp_workspace_bytes / 8,
-        replay_result_workspace + replay_frames * (replay_frame_base + constellation_limit(value.transfer.modem) * sizeof(std::complex<float>))) : 0;
+        replay_result_workspace + replay_frames * (replay_frame_base + constellation_limit(value) * sizeof(std::complex<float>))) : 0;
 }
 double epoch_now() {
     return std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -85,7 +91,7 @@ std::string display_text(const Message& message) {
 }
 constexpr std::size_t minimum_workspace = 512 * 1024;
 std::size_t plot_workspace(const Settings& value) { return plot_size * (sizeof(float) + sizeof(double)) +
-                                       constellation_limit(value.transfer.modem) * 3 * sizeof(std::complex<double>) +
+                                       constellation_limit(value) * 3 * sizeof(std::complex<double>) +
                                        detail::SignalWindow::sample_capacity(value.transfer.modem) * 2 * sizeof(float) +
                                        pattern_score_limit * (4 * (sizeof(std::complex<double>) + sizeof(PatternScoreObservation)) + sizeof(modem::PatternEvidence)) +
                                        sizeof(detail::PatternScoreHistory) +
@@ -130,6 +136,20 @@ Settings normalized(Settings value) {
             value.transfer.receive_pattern_mode = tuning::PatternMode::auto_tone;
     } else if (value.transfer.key) value.transfer.modem.scramble = true;
     modem::validate(value.transfer.modem);
+    if (value.long_message_modem) {
+        auto& longer = *value.long_message_modem;
+        const auto& base = value.transfer.modem;
+        if (longer.sample_rate != base.sample_rate || longer.carrier_hz != base.carrier_hz ||
+            longer.bandwidth_hz != base.bandwidth_hz || longer.spreading_mode != base.spreading_mode)
+            throw Error("short and long transmit profiles must share sample rate, carrier, bandwidth and spreading mode");
+        if (longer.spreading_mode == modem::SpreadingMode::tone) {
+            longer.data_key.reset(); longer.scramble = longer.dsss = false;
+            longer.spreading_seed.fill(0); longer.dsss_seed.fill(0);
+        } else if (value.transfer.key) longer.scramble = true;
+        modem::validate(longer);
+        if ((longer.scramble || longer.dsss) && !value.transfer.key && value.receive_keys.empty())
+            throw Error("encrypted spreading requires a loaded key");
+    }
     if (!value.simulation && value.transfer.modem.bandwidth_hz > 192000)
         throw Error("This bandwidth requires an SDR frontend; this build supports audio hardware and simulation. Enable simulation for the selected band.");
     if (!value.content_limit) throw Error("received content cache must have a positive capacity");
@@ -169,6 +189,7 @@ void append_points(modem::ConstellationBatch& target, modem::ConstellationBatch 
 
 struct Session::Impl {
     struct Prepared {
+        modem::Config modem;
         std::unique_ptr<modem::StreamingTransmitter> transmitter;
         std::function<void(Prepared&)> prepare_hardware;
         std::optional<std::uint64_t> protected_epoch;
@@ -182,6 +203,9 @@ struct Session::Impl {
         std::vector<std::optional<SignalUpdate>> signals;
         std::optional<SignalUpdate> verified;
         std::optional<transfer::Received> received;
+        // Stamped when a physically completed result is staged, so clearing
+        // history can invalidate a source-thread result before replay handoff.
+        std::uint64_t recovery_clear_generation=0;
         std::size_t replay_count = 0, point_limit = 0;
         std::vector<std::complex<double>> pattern_scores;
         std::vector<PatternScoreObservation> pattern_score_observations;
@@ -189,11 +213,21 @@ struct Session::Impl {
         std::stop_token stop;
     };
     struct AudioBlock { std::vector<float> samples; std::uint64_t revision; };
+    struct RecoveryTask {
+        transfer::Received result;
+        std::shared_ptr<transfer::RecoveryJob> job;
+        SignalUpdate event;
+        std::stop_source stop;
+        std::uint64_t generation=0;
+        std::size_t reserved_bytes=0, retained_bytes=0;
+        bool started=false, obsolete=false;
+    };
     struct Receiver {
         transfer::Options options;
         Bytes key_tag;
         std::uint64_t epoch = 0;
         double admitted_at = 0;
+        bool prefer_streamed_templates = false;
         double last_confident_at = 0;
         std::uint64_t last_confident_end = 0;
         std::uint64_t sample_origin = 0, family = 0;
@@ -239,9 +273,12 @@ struct Session::Impl {
     Snapshot current;
     std::uint64_t generation = 0, decoder_generation = 0, tx_serial = 0, receive_revision = 0, next_signal = 1, next_event = 1;
     std::uint64_t last_pattern_transmit_epoch = 0;
+    std::uint64_t recovery_clear_generation = 0;
     std::array<std::uint8_t,16> reception_namespace{};
     std::atomic<std::uint64_t> pattern_score_observation_id{0};
     bool tx_busy = false;
+    bool capture_suspended=false,source_active=false,receive_pending=false;
+    std::optional<Clock::time_point> simulation_compute_started;
     Clock::time_point next_hardware_send{};
     using Transmission = std::variant<Message, Bytes, modem::Noise>;
     std::deque<Transmission> queued;
@@ -249,6 +286,9 @@ struct Session::Impl {
     std::deque<AudioBlock> input;
     std::size_t input_bytes = 0, decoding_bytes = 0, received_bytes = 0, receiver_bytes = 0;
     std::size_t audio_bytes = 0;
+    // At most one coordinator runs; each job owns its bounded parallel search.
+    std::deque<std::shared_ptr<RecoveryTask>> recoveries;
+    std::shared_ptr<RecoveryTask> active_recovery;
     modem::ConstellationBatch pending_points;
     ConstellationSource pending_source = ConstellationSource::input;
     std::vector<ReplayFrame> replay;
@@ -263,7 +303,7 @@ struct Session::Impl {
     std::size_t first_visible_replay_frame = 0;
     double replay_bin_hz = 0;
     std::stop_source capture_stop, tx_stop, decode_stop;
-    std::jthread source, encoder, decoder;
+    std::jthread source, encoder, decoder, recovery_worker;
 
     explicit Impl(EpochClock clock, ReplayClock presentation_clock)
         : epoch_clock(clock ? std::move(clock) : EpochClock(epoch_now)),
@@ -275,10 +315,11 @@ struct Session::Impl {
         source = std::jthread([this](std::stop_token stop) { source_loop(stop); });
         encoder = std::jthread([this](std::stop_token stop) { encode_loop(stop); });
         decoder = std::jthread([this](std::stop_token stop) { decode_loop(stop); });
+        recovery_worker = std::jthread([this](std::stop_token stop) { recovery_loop(stop); });
     }
     ~Impl() {
-        halt(); source.request_stop(); encoder.request_stop(); decoder.request_stop(); changed.notify_all();
-        source.join(); encoder.join(); decoder.join();
+        halt(); source.request_stop(); encoder.request_stop(); decoder.request_stop(); recovery_worker.request_stop(); changed.notify_all();
+        source.join(); encoder.join(); decoder.join(); recovery_worker.join();
     }
     double current_epoch() const {
         const auto now = epoch_clock();
@@ -289,6 +330,14 @@ struct Session::Impl {
     }
     std::string idle_status() const {
         return settings.simulation ? "Simulated independent radios; sampled audio, clock error and phase noise" : "Listening to audio input";
+    }
+    void update_simulation_elapsed() {
+        if(simulation_compute_started)
+            current.simulation_compute_seconds=std::chrono::duration<double>(Clock::now()-*simulation_compute_started).count();
+    }
+    void finish_simulation_elapsed() {
+        update_simulation_elapsed();simulation_compute_started.reset();
+        current.simulation_receiving_tail=false;
     }
     void clear_replay(bool discard_pending = true) {
         if (discard_pending && replay_signal_id)
@@ -304,9 +353,23 @@ struct Session::Impl {
         current.pattern_scores.clear();
         current.pattern_score_observations.clear();
     }
+    void discard_staged_recovery(std::optional<transfer::Received>& received,
+                                 std::optional<SignalUpdate>& completed,
+                                 std::vector<std::optional<SignalUpdate>>& events) {
+        const bool recovering=(received && (received->recovery || received->recovery_progress.state!=transfer::RecoveryState::none)) ||
+            (completed && completed->recovery_progress.state!=transfer::RecoveryState::none);
+        if(!recovering)return;
+        const auto id=completed?completed->id:0;
+        received.reset();completed.reset();staged_received_bytes=0;
+        if(!id)return;
+        for(auto& event:events)if(event && event->id==id)event.reset();
+        std::erase_if(current.signals,[&](const auto& event){return event.id==id;});
+        if(replay_signal_id==id)replay_signal_id=0;
+    }
     // Called with mutex held, after validation. Invalid input must leave a
     // currently presented simulation and its pending result untouched.
     void enqueue(Transmission transmission) {
+        if(capture_suspended)throw Error("Audio is reserved by the other mode");
         if (current.transmitting_noise) throw Error("stop noise before transmitting a message");
         const bool noise = std::holds_alternative<modem::Noise>(transmission);
         if (noise && (tx_busy || !queued.empty())) throw Error("wait for transmission to finish before starting noise");
@@ -317,6 +380,7 @@ struct Session::Impl {
         if (!tx_busy) {
             current.transmitting_noise = noise;
             current.transmission_fraction = current.transmission_seconds = 0;
+            current.simulation_compute_seconds=0;current.simulation_receiving_tail=false;
             current.transmit_trace = {};
             clear_replay();
         }
@@ -329,7 +393,7 @@ struct Session::Impl {
         if (batch.points.empty() && !batch.dropped) return;
         if (pending_source != source_kind) pending_points = {};
         pending_source = source_kind;
-        append_points(pending_points, std::move(batch), constellation_limit(settings.transfer.modem));
+        append_points(pending_points, std::move(batch), constellation_limit(settings));
     }
     void advance_replay(Clock::time_point now) {
         if (replay.empty()) return;
@@ -350,6 +414,12 @@ struct Session::Impl {
             event.reset();
         }
         if (elapsed >= replay_duration) {
+            if(replay_received && replay_received->recovery && replay_verified) {
+                // Search starts after this simulation's physical completion
+                // reaches the presentation clock, preserving replay ordering.
+                queue_recovery(std::move(*replay_received),*replay_verified);
+                replay_received.reset();staged_received_bytes=0;
+            }
             if (replay_verified) {
                 // A stalled consumer needs the final state once, rather than
                 // every unpresented prefix followed by that same final state.
@@ -395,7 +465,7 @@ struct Session::Impl {
             if (replay[i].source != frame.source) { visible = {}; continue; }
             modem::ConstellationBatch points; points.dropped = replay[i].dropped;
             for (const auto point : replay[i].constellation) points.points.emplace_back(point.real(), point.imag());
-            append_points(visible, std::move(points), constellation_limit(settings.transfer.modem));
+            append_points(visible, std::move(points), constellation_limit(settings));
         }
         result.constellation = std::move(visible.points); result.constellation_dropped = visible.dropped;
         // Each frame already contains a bounded history; replacing it keeps
@@ -406,6 +476,7 @@ struct Session::Impl {
     }
     void halt() {
         std::lock_guard lock(mutex);
+        finish_simulation_elapsed();
         current.running = current.transmitting = current.transmitting_noise = false;
         current.transmission_finished = true; current.transmission_cancelled = true;
         current.status = "Stopped";
@@ -413,6 +484,8 @@ struct Session::Impl {
         replay_omitted = 0;
         ++generation; ++tx_serial; ++receive_revision;
         queued.clear(); ready.reset(); tx_busy = false; input.clear(); input_bytes = 0;
+        const auto unavailable=unavailable_recovery_events();invalidate_recoveries();
+        for(auto event:unavailable)append_signal(std::move(event));
         capture_stop.request_stop(); tx_stop.request_stop(); decode_stop.request_stop(); changed.notify_all();
     }
     void configure(const Settings& requested) {
@@ -421,11 +494,15 @@ struct Session::Impl {
         capture_stop.request_stop(); tx_stop.request_stop(); decode_stop.request_stop();
         decode_stop = std::stop_source{};
         settings = std::move(value); ++generation; ++tx_serial; ++receive_revision;
+        receive_pending=false;
         queued.clear(); ready.reset(); tx_busy = false; input.clear();
         input_bytes = receiver_bytes = received_bytes = audio_bytes = 0;
+        auto unavailable=unavailable_recovery_events();invalidate_recoveries();
         clear_replay(); pending_points = {};
         replay_omitted = 0;
         current = {}; current.running = true; current.simulation = settings.simulation;
+        simulation_compute_started.reset();
+        for(auto& event:unavailable)append_signal(std::move(event));
         current.status = idle_status(); changed.notify_all();
     }
     void account(std::uint64_t samples, std::uint64_t version) {
@@ -521,7 +598,7 @@ struct Session::Impl {
     }
     void enqueue_audio(std::span<const float> samples, std::uint64_t version) {
         std::lock_guard lock(mutex);
-        if (!current.running || generation != version) return;
+        if (!current.running || generation != version || capture_suspended) return;
         const auto bytes = samples.size_bytes();
         const auto queue_limit = settings.dsp_workspace_bytes / 8;
         if (bytes > queue_limit) { current.error = "audio callback exceeds streaming workspace"; return; }
@@ -593,13 +670,16 @@ struct Session::Impl {
                 }
                 Receiver receiver;
                 receiver.sample_origin=bank.samples;receiver.family=family;
+                receiver.prefer_streamed_templates=keys.size()>1 || profiles.size()>1 || epochs.size()>1;
                 receiver.options = value.transfer; receiver.options.modem=profile;receiver.options.key = key; receiver.epoch = epoch;
                 receiver.admitted_at=now;
                 receiver.key_tag = tag;
                 const auto config = transfer::seeded_config(receiver.options, epoch);
                 try {
                     modem::PatternSearch search;
-
+                    search.expand_clock_search=true;
+                    search.prefer_streamed_templates=receiver.prefer_streamed_templates;
+                    search.allow_local_clock_fallback=true;
                     search.compact_clock_search=compact;
                     search.search_stream_phases=key.has_value();
                     search.bit_limit=transfer::pattern_bit_limit(value.content_limit);
@@ -668,12 +748,136 @@ struct Session::Impl {
         }
         current.signals.push_back(std::move(event));
     }
+    std::size_t recovery_bytes() const {
+        const auto bytes=[](const RecoveryTask& task) {
+            return task.retained_bytes+task.job->working_bytes();
+        };
+        std::size_t total=0;
+        for(const auto& task:recoveries)total+=bytes(*task);
+        if(active_recovery && std::find(recoveries.begin(),recoveries.end(),active_recovery)==recoveries.end())
+            total+=bytes(*active_recovery);
+        return total;
+    }
+    std::vector<SignalUpdate> unavailable_recovery_events() {
+        std::vector<SignalUpdate> events;
+        for(const auto& task:recoveries)if(!task->obsolete) {
+            auto event=task->event;event.recovery_progress=task->job->progress();
+            event.recovery_progress.state=transfer::RecoveryState::unavailable;
+            event.sequence=next_event++;events.push_back(std::move(event));
+        }
+        return events;
+    }
+    std::size_t recovery_reserved_bytes() const {
+        std::size_t total=0;
+        for(const auto& task:recoveries)total+=task->reserved_bytes;
+        if(active_recovery && std::find(recoveries.begin(),recoveries.end(),active_recovery)==recoveries.end())
+            total+=active_recovery->reserved_bytes;
+        return total;
+    }
+    void invalidate_recoveries(const SignalUpdate* replacement=nullptr) {
+        const auto obsolete=[&](const auto& task) {
+            return !replacement || (task->event.id==replacement->id && task->event.revision<replacement->revision) ||
+                std::find(replacement->superseded_ids.begin(),replacement->superseded_ids.end(),task->event.id)!=replacement->superseded_ids.end();
+        };
+        for(const auto& task:recoveries)if(obsolete(task)) {
+            task->obsolete=true;task->stop.request_stop();
+        }
+        std::erase_if(recoveries,[&](const auto& task){return task->obsolete;});
+        changed.notify_all();
+    }
+    void queue_recovery(transfer::Received result,SignalUpdate& event) {
+        if(!result.recovery || !result.stream_complete || result.content_validated)return;
+        event.recovery_progress=result.recovery->progress();
+        // Plot samples remain in the live diagnostic presentation. Background
+        // recovery retains only the hard-bit capture and scalar diagnostics.
+        result.diagnostics.waveform=std::vector<float>{};
+        result.diagnostics.constellation=std::vector<std::complex<double>>{};
+        const auto retained=sizeof(RecoveryTask)+4096+result.raw_bits.capacity()+result.error.capacity()+
+            result.content.message.data.capacity()+result.content.message.filename.capacity()+
+            result.content.message.callsign.capacity()+result.content.message.grid.capacity()+
+            event.text.capacity()+event.raw_bits.capacity()+event.reception_id.capacity()+
+            event.superseded_ids.capacity()*sizeof(std::uint64_t);
+        const auto memory=result.recovery->workspace_bound()+retained;
+        const auto used=recovery_reserved_bytes(),limit=recovery_workspace_limit;
+        if(recoveries.size()+(active_recovery && std::find(recoveries.begin(),recoveries.end(),active_recovery)==recoveries.end())>=maximum_recovery_jobs ||
+           memory>limit || used>limit-memory) {
+            event.recovery_progress.state=transfer::RecoveryState::unavailable;
+            return;
+        }
+        auto task=std::make_shared<RecoveryTask>();task->job=result.recovery;
+        task->reserved_bytes=memory;task->retained_bytes=retained;
+        task->result=std::move(result);task->event=event;task->generation=generation;
+        recoveries.push_back(std::move(task));changed.notify_all();
+    }
+    void publish_recovery_progress() {
+        // Only thread-safe counters are read on the UI path; no search or
+        // source decoding runs here, even when an audio stream is idle.
+        for(const auto& task:recoveries) {
+            if(task->obsolete || task!=active_recovery || task->generation!=generation)continue;
+            auto progress=task->job->progress();
+            // The codeword search may finish before bounded source validation.
+            // Keep that CPU work pending until the coordinator publishes it.
+            if(progress.state==transfer::RecoveryState::recovered)progress.state=transfer::RecoveryState::running;
+            const auto& previous=task->event.recovery_progress;
+            if(progress.state==previous.state && progress.attempts==previous.attempts &&
+               progress.elapsed.count()/1000==previous.elapsed.count()/1000)continue;
+            task->event.recovery_progress=progress;
+            auto event=task->event;event.sequence=next_event++;
+            append_signal(std::move(event));
+        }
+    }
+    void recovery_loop(std::stop_token stop) {
+        while(!stop.stop_requested()) {
+            std::shared_ptr<RecoveryTask> task;
+            transfer::Received result;
+            {
+                std::unique_lock lock(mutex);
+                changed.wait(lock,stop,[&]{return current.running && std::any_of(recoveries.begin(),recoveries.end(),
+                    [](const auto& item){return !item->started && !item->obsolete;});});
+                if(stop.stop_requested())return;
+                const auto next=std::find_if(recoveries.begin(),recoveries.end(),[](const auto& item){return !item->started && !item->obsolete;});
+                if(next==recoveries.end())continue;
+                task=*next;task->started=true;active_recovery=task;
+                result=std::move(task->result);
+            }
+            try { result=transfer::recover_received(std::move(result),task->stop.get_token()); }
+            catch(const std::exception& error) {
+                result.error=error.what();result.recovery_progress=task->job->progress();
+                result.recovery_progress.state=transfer::RecoveryState::unavailable;
+            }
+            std::lock_guard lock(mutex);
+            active_recovery.reset();
+            task->result=std::move(result);
+            if(task->obsolete || !current.running || task->generation!=generation)continue;
+            auto& recovered=task->result;
+            auto event=task->event;event.recovery_progress=recovered.recovery_progress;
+            if(recovered.content_validated) {
+                recovered.content.message.local_id=content_identity(event.id);
+                event.text=display_text(recovered.content.message);event.binary=false;event.validated=true;
+                event.reception_id=reception_id(recovered.content.message);
+                event.pre_fec_accuracy=recovered.content.pre_fec_accuracy;event.fec_stats=recovered.content.fec_stats;
+                try {
+                    admit_received(recovered.content.message.data.size(),settings.content_limit);
+                    current.received.push_back(std::move(recovered));
+                } catch(const Error& error) {
+                    current.error=error.what();event=task->event;
+                    event.recovery_progress.state=transfer::RecoveryState::unavailable;
+                }
+            }
+            task->event=event;event.sequence=next_event++;append_signal(std::move(event));
+            const auto state=task->event.recovery_progress.state;
+            if(state!=transfer::RecoveryState::incomplete && state!=transfer::RecoveryState::cancelled)
+                std::erase(recoveries,task);
+            ++current.sequence;
+        }
+    }
     std::array<std::uint8_t,16> content_identity(std::uint64_t signal_id) const {
         auto id=reception_namespace;
         for(std::size_t i=0;i<8;++i)id[8+i]^=static_cast<std::uint8_t>(signal_id>>(8*i));
         return id;
     }
     void discard_obsolete(const SignalUpdate& replacement,Prepared* wave) {
+        invalidate_recoveries(&replacement);
         const auto merged=[&](std::uint64_t id) {
             return std::find(replacement.superseded_ids.begin(),replacement.superseded_ids.end(),id)!=
                 replacement.superseded_ids.end();
@@ -827,6 +1031,9 @@ struct Session::Impl {
                                 event.superseded_ids.assign(decision.superseded_ids.begin(),decision.superseded_ids.end());
                                 result.content.message.local_id=content_identity(event.id);
                                 event.text=std::move(bits);event.binary=true;event.complete=result.stream_complete;
+                                event.recovery_progress=result.recovery_progress;
+                                if(simulation_wave && result.recovery_progress.state!=transfer::RecoveryState::none)
+                                    simulation_wave->recovery_clear_generation=recovery_clear_generation;
                                 event.received_bits=result.observed_bits;event.pattern_score=score;event.missing_symbols=result.missing_symbols;
                                 if(result.content_validated) {
                                     event.text=display_text(result.content.message);event.binary=false;event.validated=true;
@@ -842,8 +1049,15 @@ struct Session::Impl {
                                     discard_obsolete(event,simulation_wave);
                                     display.published_revision=decision.revision;
                                 }
+                                const bool recovery=result.recovery && result.stream_complete && !result.content_validated;
+                                if(recovery) {
+                                    event.recovery_progress=result.recovery_progress;
+                                    if(simulation_wave) {
+                                        simulation_wave->received=std::move(result);staged_received_bytes=0;
+                                    } else queue_recovery(std::move(result),event);
+                                }
                                 add_signal(std::move(event),simulation_wave);
-                                if((result.content_validated || result.short_text_decoded) && !display.content_reported) {
+                                if(!recovery && (result.content_validated || result.short_text_decoded) && !display.content_reported) {
                                     const auto bytes=result.content.message.data.size();
                                     if(simulation_wave) {
                                         simulation_wave->received.reset();staged_received_bytes=0;
@@ -869,7 +1083,10 @@ struct Session::Impl {
                             if(current.running && generation==version)current.error=error.what();
                         }
                         bank.limited=true;
-                        modem::PatternSearch search;search.bit_limit=transfer::pattern_bit_limit(value.content_limit);
+                        modem::PatternSearch search;search.expand_clock_search=true;
+                        search.prefer_streamed_templates=receiver.prefer_streamed_templates;
+                        search.allow_local_clock_fallback=true;
+                        search.bit_limit=transfer::pattern_bit_limit(value.content_limit);
 
                         search.compact_clock_search=receiver.options.key &&
                             modem::symbol_sample_count(receiver.options.modem)>=60ULL*receiver.options.modem.sample_rate;
@@ -946,6 +1163,9 @@ struct Session::Impl {
         const auto observation_id = pattern_score_observation_id.load(std::memory_order_relaxed);
         std::lock_guard lock(mutex);
         if (current.running && generation == version && !stop.stop_requested()) {
+            receive_pending=std::any_of(bank.receivers.begin(),bank.receivers.end(),[](const auto& receiver) {
+                return receiver.modem->synchronized();
+            });
             if (simulation_wave) {
                 simulation_wave->pattern_scores = std::move(pattern_scores);
                 simulation_wave->pattern_score_observations = std::move(pattern_observations);
@@ -959,7 +1179,11 @@ struct Session::Impl {
             }
             receiver_bytes = bank.working_bytes;
             if(bank.limited)current.status="Pattern search is limited by the configured DSP workspace";
-            else if(current.status=="Pattern search is limited by the configured DSP workspace")current.status=idle_status();
+            else if(std::any_of(bank.receivers.begin(),bank.receivers.end(),[](const auto& receiver) {
+                return receiver.modem->local_clock_fallback();
+            }))current.status="Using local carrier search; increase DSP memory for wider clock coverage";
+            else if(current.status=="Pattern search is limited by the configured DSP workspace" ||
+                    current.status=="Using local carrier search; increase DSP memory for wider clock coverage")current.status=idle_status();
             current.dsp_buffered_bytes = receiver_bytes + input_bytes + decoding_bytes + audio_bytes + plot_workspace(value) + (tx_busy ? value.dsp_workspace_bytes / 4 : 0);
         }
     }
@@ -981,9 +1205,10 @@ struct Session::Impl {
     void complete_tx(Prepared& wave, const std::string& error = {}) {
         std::lock_guard lock(mutex);
         if (wave.generation != generation || wave.serial != tx_serial) return;
+        finish_simulation_elapsed();
         if (wave.transmitter) current.transmit_trace = wave.transmitter->transmit_trace();
         if(!settings.simulation && !wave.noise)next_hardware_send=Clock::now()+std::chrono::duration_cast<Clock::duration>(
-            std::chrono::duration<double>(static_cast<double>(modem::pattern_absence_samples(settings.transfer.modem))/settings.transfer.modem.sample_rate+1.));
+            std::chrono::duration<double>(static_cast<double>(modem::pattern_absence_samples(wave.modem))/wave.modem.sample_rate+1.));
         tx_busy = false; current.transmitting = settings.simulation ? false : !queued.empty();
         current.transmitting_noise = false;
         current.transmission_finished = settings.simulation || queued.empty(); current.transmission_cancelled = wave.stop.stop_requested();
@@ -992,12 +1217,14 @@ struct Session::Impl {
         else if (!wave.stop.stop_requested()) {
             current.transmission_fraction = 1;
             if (settings.simulation && !wave.replay.empty()) {
+                if(wave.recovery_clear_generation!=recovery_clear_generation)
+                    discard_staged_recovery(wave.received,wave.verified,wave.signals);
                 replay = std::move(wave.replay); delivered_replay_frame.reset(); first_visible_replay_frame = 0;
                 replay_signals = std::move(wave.signals); replay_signal_cursor = 0;
                 replay_verified = std::move(wave.verified); replay_received = std::move(wave.received);
                 if (replay_verified) replay_signal_id = replay_verified->id;
                 else for (const auto& event : replay_signals) if (event) { replay_signal_id = event->id; break; }
-                replay_bin_hz = static_cast<double>(settings.transfer.modem.sample_rate) / (plot_size / 4);
+                replay_bin_hz = static_cast<double>(wave.modem.sample_rate) / (plot_size / 4);
                 replay_started = replay_clock(); current.simulation_replay = true;
                 detail::rebase_pattern_score_observations(replay, replay_started, replay_duration);
                 current.transmit_trace = replay.front().transmit_trace;
@@ -1013,13 +1240,14 @@ struct Session::Impl {
         std::lock_guard lock(mutex);
         if (generation != wave.generation || tx_serial != wave.serial) return;
         current.transmit_trace = wave.transmitter->transmit_trace();
-        current.transmission_seconds = static_cast<double>(value.simulation ? wave.transmitted_samples : wave.transmitter->samples_emitted()) / value.transfer.modem.sample_rate;
+        current.transmission_seconds = static_cast<double>(value.simulation ? wave.transmitted_samples : wave.transmitter->samples_emitted()) / wave.modem.sample_rate;
         current.transmission_fraction = wave.noise ? 0 : static_cast<double>(value.simulation ? wave.transmitted_samples : wave.transmitter->samples_emitted()) /
                                         static_cast<double>(wave.transmitter->total_samples());
+        current.simulation_receiving_tail=value.simulation && !wave.noise && wave.tail_started;
     }
-    void retain_emitted_epoch(const Prepared& wave, const Settings& value) {
+    void retain_emitted_epoch(const Prepared& wave) {
         if(!wave.protected_epoch)return;
-        const auto& config=value.transfer.modem;
+        const auto& config=wave.modem;
         const auto prefix=modem::training_sample_count(config)+modem::pattern_pulse_padding_samples(config);
         const auto end=wave.transmitter->total_samples()-modem::pattern_pulse_padding_samples(config)-modem::suppression_sample_count(config);
         const auto emitted=std::min(end,wave.transmitter->samples_emitted());
@@ -1043,7 +1271,7 @@ struct Session::Impl {
             bool new_burst = false;
             {
                 std::unique_lock lock(mutex);
-                changed.wait(lock, stop, [this] { return current.running && decoder_generation == generation; });
+                changed.wait(lock, stop, [this] { return current.running && !capture_suspended && decoder_generation == generation; });
                 if (stop.stop_requested()) break;
                 advance_replay(replay_clock());
                 value = settings; version = generation; processing_token = decode_stop.get_token();
@@ -1064,8 +1292,14 @@ struct Session::Impl {
                         value.simulation ? "Transmitting sampled audio to an independent receiver" : "Transmitting; audio input paused";
                 }
                 capture_stop = std::stop_source{}; capture_token = capture_stop.get_token();
+                source_active=true;
             }
+            const auto release_activity=[this](Impl*) {
+                std::lock_guard lock(mutex);source_active=false;changed.notify_all();
+            };
+            const std::unique_ptr<Impl,decltype(release_activity)> activity(this,release_activity);
             try {
+                const auto& transmit_modem = wave ? wave->modem : value.transfer.modem;
                 if (value.simulation) {
                     // The receiving computer runs continuously. TX control can
                     // start a waveform, but cannot reset, seed or align RX.
@@ -1089,7 +1323,7 @@ struct Session::Impl {
                         account(count, version); progress(*wave, value);
                         plot_window.push(input_samples);
                         feed_samples(*simulation_bank,input_samples,value,version,wave->stop);
-                        publish(plot_window,value.transfer.modem,version,last_plot,false,
+                        publish(plot_window,transmit_modem,version,last_plot,false,
                             wave->transmitter.get(),wave->serial);
                         const auto deadline = block_start + std::chrono::duration_cast<Clock::duration>(
                             std::chrono::duration<double>(static_cast<double>(count) / value.transfer.modem.sample_rate));
@@ -1104,7 +1338,7 @@ struct Session::Impl {
                         // receiver before any newly transmitted samples arrive.
                         if (wave->replay.empty()) {
                             wave->pattern_score_observation_id = pattern_score_observation_id.load(std::memory_order_relaxed);
-                            collect_replay(*wave, value.transfer.modem, plot_window);
+                            collect_replay(*wave, transmit_modem, plot_window);
                         }
                         std::size_t count = 0;
                         if (!wave->tail_started) {
@@ -1116,7 +1350,7 @@ struct Session::Impl {
                             wave->transmitted_samples = simulation_channel->transmitted_samples();
                             if (!count) {
                                 wave->tail_started = true;
-                                wave->tail_remaining = modem::pattern_absence_samples(value.transfer.modem)+value.transfer.modem.sample_rate+2*modem::pattern_pulse_padding_samples(value.transfer.modem);
+                                wave->tail_remaining = modem::pattern_absence_samples(transmit_modem)+transmit_modem.sample_rate+2*modem::pattern_pulse_padding_samples(transmit_modem);
                             }
                         }
                         if (wave->tail_started && wave->tail_remaining) {
@@ -1128,19 +1362,19 @@ struct Session::Impl {
                         account(count, version); progress(*wave, value);
                         plot_window.push(input_samples);
                         feed_samples(*simulation_bank,input_samples,value,version,wave->stop,wave.get());
-                        publish(plot_window, value.transfer.modem, version, last_plot, false,
+                        publish(plot_window, transmit_modem, version, last_plot, false,
                                 nullptr, wave->serial, &wave->pattern_scores, &wave->pattern_score_observations,
                                 wave->pattern_score_observation_id);
                         if (!wave->tail_started && wave->replay.size() < wave->replay_count &&
                             wave->replay.size()+1 < wave->replay_count &&
                             wave->transmitted_samples >= replay_target(*wave))
-                            collect_replay(*wave, value.transfer.modem, plot_window);
+                            collect_replay(*wave, transmit_modem, plot_window);
                         if (wave->tail_started && !wave->tail_remaining) {
                             // Short pattern bursts can be scored only after
                             // trailing samples complete a receiver window.
                             // Reserve their final replay frame for that evidence.
                             if (wave->replay.size() < wave->replay_count)
-                                collect_replay(*wave, value.transfer.modem, plot_window);
+                                collect_replay(*wave, transmit_modem, plot_window);
                             complete_tx(*wave); wave.reset();
                         }
                         std::this_thread::yield();
@@ -1165,19 +1399,19 @@ struct Session::Impl {
                     continue;
                 }
                 if (wave) {
-                    bool mono;
-                    { std::lock_guard lock(mutex); mono = settings.mono; }
+                    audio::ChannelMode channels;
+                    { std::lock_guard lock(mutex); channels = audio::output_channels(settings.mono,settings.channel_mode); }
                     discontinuity();
-                    audio::playback(value.transfer.modem.sample_rate, value.device, [&](std::span<float> output) {
+                    audio::playback(transmit_modem.sample_rate, value.device, [&](std::span<float> output) {
                         const auto before=wave->transmitter->samples_emitted();
                         const auto count = wave->transmitter->read(output, wave->stop);
-                        retain_emitted_epoch(*wave,value);
+                        retain_emitted_epoch(*wave);
                         account(count, version);
                         plot_window.push(output.first(count));
-                        const auto payload_start=modem::training_sample_count(value.transfer.modem)+
-                            modem::pattern_pulse_padding_samples(value.transfer.modem);
+                        const auto payload_start=modem::training_sample_count(transmit_modem)+
+                            modem::pattern_pulse_padding_samples(transmit_modem);
                         const auto first_payload=before<=payload_start && wave->transmitter->samples_emitted()>payload_start;
-                        publish(plot_window, value.transfer.modem, version, last_plot,
+                        publish(plot_window, transmit_modem, version, last_plot,
                                 first_payload || wave->transmitter->finished(), wave->transmitter.get(), wave->serial);
                         // Publish the first actual payload chips before progress
                         // can describe a post-settling constellation to the UI.
@@ -1189,7 +1423,7 @@ struct Session::Impl {
                             wave->prepare_hardware(*wave);
                             wave->prepare_hardware={};
                         }
-                    }, mono);
+                    }, channels);
                     discontinuity(); complete_tx(*wave); wave.reset(); plot_window.reset(); continue;
                 }
                 {
@@ -1202,7 +1436,7 @@ struct Session::Impl {
                     publish(plot_window, value.transfer.modem, version, last_plot);
                     enqueue_audio(chunk, version);
                     std::lock_guard lock(mutex);
-                    return current.running && generation == version && !ready;
+                    return current.running && generation == version && !ready && !capture_suspended;
                 }, capture_token, [&](const auto& format) { audio_format(format, version); });
             } catch (const std::exception& exception) {
                 const auto cancelled_transmission = wave && wave->stop.stop_requested();
@@ -1212,7 +1446,7 @@ struct Session::Impl {
                 if (current.running && generation == version && !capture_token.stop_requested() && !processing_token.stop_requested() && !cancelled_transmission) {
                     current.error = exception.what(); current.status = value.simulation ? "Simulation paused after channel error" : "Audio input unavailable; retrying";
                     changed.wait_for(lock, stop, std::chrono::seconds(2), [this, version] {
-                        return !current.running || generation != version || ready;
+                        return !current.running || generation != version || ready || capture_suspended;
                     });
                 }
             }
@@ -1235,15 +1469,22 @@ struct Session::Impl {
                 tx_busy = true; current.transmitting = true; current.transmission_finished = false;
                 current.transmitting_noise = std::holds_alternative<modem::Noise>(transmission);
                 current.transmission_fraction = current.transmission_seconds = 0;
+                current.simulation_compute_seconds=0;current.simulation_receiving_tail=false;
+                simulation_compute_started=value.simulation && !current.transmitting_noise?
+                    std::optional<Clock::time_point>(Clock::now()):std::nullopt;
                 current.status = current.transmitting_noise ? "Preparing noise with temporary keys" :
                     std::holds_alternative<Bytes>(transmission) ? "Preparing raw binary signal" :
                     "Preparing fixed-interval stream";
             }
             try {
+                if (const auto* message = std::get_if<Message>(&transmission);
+                    message && value.long_message_modem && !transfer::uses_raw_message(*message))
+                    value.transfer.modem = *value.long_message_modem;
                 if (std::holds_alternative<modem::Noise>(transmission)) {
                     // Ephemeral streams need no saved-key epoch scheduling,
                     // source encoding, receiver-bank key or message replay.
                     auto prepared = std::make_shared<Prepared>();
+                    prepared->modem = value.transfer.modem;
                     prepared->generation = version; prepared->serial = serial;
                     prepared->stop = token; prepared->noise = true;
                     prepared->transmitter = std::make_unique<modem::StreamingTransmitter>(
@@ -1283,6 +1524,7 @@ struct Session::Impl {
                     }
                 }
                 auto prepared = std::make_shared<Prepared>();
+                prepared->modem = value.transfer.modem;
                 prepared->generation = version; prepared->serial = serial; prepared->stop = token;
                 prepared->binary = std::holds_alternative<Bytes>(transmission);
                 if (scheduled_hardware) {
@@ -1334,6 +1576,7 @@ struct Session::Impl {
             } catch (const std::exception& exception) {
                 std::lock_guard lock(mutex);
                 if (generation != version || tx_serial != serial) continue;
+                finish_simulation_elapsed();
                 tx_busy = false; current.transmitting = !queued.empty(); current.transmission_finished = queued.empty();
                 current.transmitting_noise = false;
                 current.status = idle_status(); if (!token.stop_requested()) current.error = exception.what(); changed.notify_all();
@@ -1383,11 +1626,87 @@ struct Session::Impl {
 Session::Session(EpochClock epoch_clock, ReplayClock replay_clock)
     : impl_(std::make_unique<Impl>(std::move(epoch_clock), std::move(replay_clock))) {}
 Session::~Session() = default;
+void validate_settings(const Settings& settings) { (void)normalized(settings); }
 void Session::start(const Settings& settings) { impl_->configure(settings); }
 void Session::configure(const Settings& settings) { impl_->configure(settings); }
 void Session::set_mono(bool mono) {
     std::lock_guard lock(impl_->mutex);
     impl_->settings.mono = mono;
+    impl_->settings.channel_mode = audio::output_channels(mono);
+}
+void Session::set_channel_mode(audio::ChannelMode channels) {
+    std::lock_guard lock(impl_->mutex);
+    impl_->settings.channel_mode = channels;
+    impl_->settings.mono = channels != audio::ChannelMode::stereo;
+}
+bool Session::try_suspend_capture() {
+    std::lock_guard lock(impl_->mutex);
+    if(impl_->settings.simulation)return true;
+    if(!impl_->capture_suspended) {
+        if(impl_->tx_busy||impl_->current.transmitting||!impl_->queued.empty()||impl_->ready||
+           impl_->receive_pending||impl_->decoding_bytes||!impl_->input.empty())return false;
+        impl_->capture_suspended=true;
+        impl_->capture_stop.request_stop();
+        impl_->current.status="Regular audio paused while Fast mode owns the device";
+        ++impl_->current.sequence;impl_->changed.notify_all();
+    }
+    return !impl_->source_active;
+}
+void Session::resume_capture() {
+    std::lock_guard lock(impl_->mutex);
+    if(!impl_->capture_suspended)return;
+    impl_->capture_suspended=false;
+    // No admitted reception was suspended. Discontinuous idle samples must not
+    // be concatenated into a hypothetical symbol on the next device opening.
+    ++impl_->receive_revision;impl_->receive_pending=false;
+    impl_->current.status=impl_->idle_status();++impl_->current.sequence;
+    impl_->changed.notify_all();
+}
+bool Session::resume_recovery(std::uint64_t signal_id) {
+    std::lock_guard lock(impl_->mutex);
+    if(!impl_->current.running)return false;
+    const auto found=std::find_if(impl_->recoveries.begin(),impl_->recoveries.end(),[&](const auto& task) {
+        return task->event.id==signal_id && !task->obsolete && task->generation==impl_->generation;
+    });
+    if(found==impl_->recoveries.end() || *found==impl_->active_recovery)return false;
+    const auto& task=*found;
+    const auto state=task->event.recovery_progress.state;
+    if(state!=transfer::RecoveryState::incomplete && state!=transfer::RecoveryState::cancelled)return false;
+    task->stop=std::stop_source{};task->started=false;
+    task->event.recovery_progress.state=transfer::RecoveryState::ready;
+    auto event=task->event;event.sequence=impl_->next_event++;
+    impl_->append_signal(std::move(event));impl_->changed.notify_all();return true;
+}
+void Session::cancel_recovery(std::uint64_t signal_id) {
+    std::lock_guard lock(impl_->mutex);
+    for(const auto& task:impl_->recoveries) {
+        if(task->event.id!=signal_id || task->obsolete)continue;
+        task->stop.request_stop();
+        if(task!=impl_->active_recovery) {
+            task->started=true;task->event.recovery_progress.state=transfer::RecoveryState::cancelled;
+            auto event=task->event;event.sequence=impl_->next_event++;
+            impl_->append_signal(std::move(event));
+        }
+    }
+}
+void Session::clear_recoveries() {
+    std::lock_guard lock(impl_->mutex);
+    ++impl_->recovery_clear_generation;
+    impl_->discard_staged_recovery(impl_->replay_received,impl_->replay_verified,impl_->replay_signals);
+    if(impl_->ready)
+        impl_->discard_staged_recovery(impl_->ready->received,impl_->ready->verified,impl_->ready->signals);
+    // A finished coordinator can already have released its job while its
+    // publication is still waiting for the next UI poll.
+    std::erase_if(impl_->current.signals,[](const auto& event) {
+        return event.recovery_progress.state!=transfer::RecoveryState::none;
+    });
+    std::erase_if(impl_->current.received,[&](const auto& received) {
+        if(received.recovery_progress.state==transfer::RecoveryState::none)return false;
+        impl_->received_bytes-=received.content.message.data.size();return true;
+    });
+    for(const auto& task:impl_->recoveries)
+        std::erase_if(impl_->current.signals,[&](const auto& event){return event.id==task->event.id;});
+    impl_->invalidate_recoveries();
 }
 void Session::transmit(const Message& message) {
     std::lock_guard lock(impl_->mutex);
@@ -1412,6 +1731,7 @@ void Session::transmit_noise() {
 void Session::cancel_transmit() {
     std::lock_guard lock(impl_->mutex);
     impl_->advance_replay(impl_->replay_clock());
+    impl_->finish_simulation_elapsed();
     impl_->tx_stop.request_stop(); ++impl_->tx_serial; impl_->queued.clear(); impl_->ready.reset(); impl_->tx_busy = false;
     impl_->current.transmitting = impl_->current.transmitting_noise = false;
     impl_->current.transmission_finished = true; impl_->current.transmission_cancelled = true;
@@ -1422,8 +1742,11 @@ void Session::cancel_transmit() {
 }
 Snapshot Session::snapshot() {
     std::lock_guard lock(impl_->mutex);
+    impl_->update_simulation_elapsed();
     const auto now = impl_->replay_clock();
     impl_->advance_replay(now);
+    impl_->publish_recovery_progress();
+    impl_->current.recovery_working_bytes=impl_->recovery_bytes();
     auto signals = std::move(impl_->current.signals); auto received = std::move(impl_->current.received);
     impl_->current.signals.clear(); impl_->current.received.clear(); impl_->received_bytes = 0;
     if (!impl_->pending_points.points.empty() || impl_->pending_points.dropped) {

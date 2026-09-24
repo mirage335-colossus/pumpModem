@@ -1,0 +1,22 @@
+{
+  "CMakeLists.txt": "b9724b693f396b3410321e77060533b90f5cc75f55a161d9fa351c65c28e7e14",
+  "src/fast/profile.cpp": "f151be1732a35a6bc68cacde0adb2ac6725228ea4e436888595401a1806e719a",
+  "include/datapump/fast/profile.hpp": "55c3bc5f3ee65f0b906dd0c7a361a6820d85d206c9b5b19b1985b4f7602b03d8",
+  "src/fast/codec.cpp": "2dc56314bdeba8097566896da41e7053feaa0ec851b2677ede9cf6d191bdf295",
+  "include/datapump/fast/codec.hpp": "0d61c90606e888835db39bb616ea502da8ab31cf9d1b382cf64fe4e476c694a7",
+  "include/datapump/fast/outer_rs.hpp": "cbd583beef1b88c6b9c544e885d0ede05c3168d4e8ed91b1743c3693c847bd1f",
+  "src/fast/ldpc.cpp": "29345ff1b2f502f8cd64e4fa042941827e6f4c22e7a39f674e0772866a39fcd7",
+  "include/datapump/fast/ldpc.hpp": "7e8b00017f62345ec7298d27cda667b57d6bf13c65c0ba124c7d7c040d16399e",
+  "src/fast/modem.cpp": "05dcab83c834adb8b28196e89a12b6f004436f9d46eb0e1f93bfc9da254ef4d4",
+  "include/datapump/fast/modem.hpp": "c7b30f860945333c44aa1785e375b9a766e68e24ce3e6146e395908f0bb30128",
+  "tools/fast_cable_probe.cpp": "ebca571b3c081bbb445ab405a3f4e85e664fa55ffe14a905a5aee4d68317e931",
+  "tools/fast_ldpc_benchmark.cpp": "b0e1f43ecfb69008f1cc1d98e23d42a6c8a95cb993e453eafeed6935567c190b",
+  "src/fast/cli.cpp": "a57c1d26e4d9270d9ee85dfa21120b27e5d086261aa43c85efa851e665184a4c",
+  "src/fast/session.cpp": "cf7a18a7e846192b5a67b172062250036dc4300d21356e1930797d4d05293a82",
+  "src/fast/file_transfer.cpp": "ac31b0d0f87a79bcdde4e36aaff0069a77158b6a5627af9e3f73061a0595a599",
+  "tests/test_fast_codec.cpp": "14f64ff6179459b2ca680cc87aacec28accdb14f3b268f5a1f82346236dc3ae7",
+  "tests/test_fast_qam.cpp": "9839536ac5b62527a3a267ba7bf4faada9c7a7e82e29d1b47ca19e02649a5940",
+  "tests/test_fast_ldpc.cpp": "90e3a1bf4fced784aa94c6035d1f29840bfc878afbe38cafeffeb6729458afd6",
+  "tests/test_fast_cli.py": "73bfebaf8872fc1f5f92a20b5d744e7c30fd243865db83c69375f45709791c4e",
+  "third_party/ldpc/tables.hpp": "82a8297cb54e5915b60167472c4f643f6674d48454926a6b1efb7f3174a05685"
+}

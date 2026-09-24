@@ -149,6 +149,8 @@ void long_raw_symbol_is_bounded_and_cancellable() {
         bounded(snapshot,value);no_reception(snapshot);
         return snapshot.transmitting && snapshot.transmission_fraction>0 && snapshot.samples_received>idle.samples_received;
     });
+    check(processing.simulation_compute_seconds>0,
+          "active simulation did not expose elapsed processing time before completion");
     check(expected.total_seconds>3600 && processing.transmission_fraction<1 && processing.transmission_seconds>0 &&
           std::abs(processing.transmission_seconds/processing.transmission_fraction-expected.total_seconds)<1e-6,
           "hours-long raw symbols must advance actual bounded sample processing");
@@ -172,9 +174,14 @@ void long_raw_symbol_is_bounded_and_cancellable() {
     const auto cancelled=session.snapshot();
     check(cancelled.transmission_cancelled && !cancelled.transmitting && !cancelled.simulation_replay,
           "cancelled long raw computation reported a completed simulation");
+    check(cancelled.simulation_compute_seconds>=processing.simulation_compute_seconds &&
+          cancelled.simulation_compute_seconds>0 && !cancelled.simulation_receiving_tail,
+          "cancelled simulation lost its elapsed time or retained receiver-tail processing");
     wait_for(session,[&](const auto& snapshot) {
         bounded(snapshot,value);no_reception(snapshot);
         check(!snapshot.simulation_replay,"cancelled raw computation published a late replay");
+        check(snapshot.simulation_compute_seconds==cancelled.simulation_compute_seconds,
+              "cancelled simulation continued accumulating computation time");
         return snapshot.samples_received>cancelled.samples_received;
     });
 }

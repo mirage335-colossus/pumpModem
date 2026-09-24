@@ -104,8 +104,8 @@ void validate(const Config& c) {
           "APSK transport has been removed; use one-bit pattern transport");
     check(c.sample_rate >= 64 && c.sample_rate <= 120000000, "internal sample rate must be 64..120000000 Hz");
     check(c.stream_phase_samples < c.sample_rate, "symbol stream phase must be within its whole second");
-    check(std::isfinite(c.bandwidth_hz) && c.bandwidth_hz >= 1 && c.bandwidth_hz <= 30000000 && c.bandwidth_hz <= c.sample_rate / 2.0,
-          "bandwidth must be finite and within 1 Hz..30 MHz and internal Nyquist");
+    check(std::isfinite(c.bandwidth_hz) && c.bandwidth_hz >= minimum_bandwidth_hz && c.bandwidth_hz <= maximum_bandwidth_hz && c.bandwidth_hz <= c.sample_rate / 2.0,
+          "bandwidth must be finite and within 0.01 Hz..30 MHz and internal Nyquist");
     check(std::isfinite(c.training_seconds) && c.training_seconds == 2,
           "normal training duration is fixed at 2 seconds");
     check(std::isfinite(c.integration_seconds) && c.integration_seconds>=0,"invalid integration duration");

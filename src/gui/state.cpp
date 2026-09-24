@@ -168,6 +168,12 @@ std::string folder_uri(const std::filesystem::path& directory) {
 }
 
 namespace {
+bool recovery_pending(const SignalLine& line) {
+    using transfer::RecoveryState;
+    const auto state=line.recovery_progress.state;
+    if(state==RecoveryState::recovered && !line.validated)return true;
+    return state!=RecoveryState::none && state!=RecoveryState::recovered && state!=RecoveryState::exhausted;
+}
 std::optional<Bytes> signal_byte_prefix(const SignalLine& line) {
     if (!signal_byte_aligned(line) || line.text.empty() || line.text.size()>line.received_bits ||
         line.text.find_first_not_of("01")!=std::string::npos) return {};
@@ -176,14 +182,15 @@ std::optional<Bytes> signal_byte_prefix(const SignalLine& line) {
         bytes[i/8]|=static_cast<std::uint8_t>((line.text[i]-'0')<<(7-i%8));
     return bytes;
 }
-bool complete_bits(const SignalLine& line) {
+bool physical_complete_bits(const SignalLine& line) {
     return line.binary && line.complete && line.received_bits &&
         (!line.expected_bits || line.received_bits==line.expected_bits) &&
         line.text.size()==line.received_bits && line.text.find_first_not_of("01")==std::string::npos;
 }
+bool complete_bits(const SignalLine& line) {return !recovery_pending(line) && physical_complete_bits(line);}
 }
 bool signal_byte_aligned(const SignalLine& line) {
-    return line.binary && line.complete && line.received_bits && line.received_bits%8==0;
+    return !recovery_pending(line) && line.binary && line.complete && line.received_bits && line.received_bits%8==0;
 }
 std::string signal_display_text(const SignalLine& line) {
     if(const auto bytes=signal_byte_prefix(line)) return BinaryEditor(*bytes).text();
@@ -192,10 +199,36 @@ std::string signal_display_text(const SignalLine& line) {
     return line.text;
 }
 std::string signal_status_label(const SignalLine& line) {
+    using transfer::RecoveryState;
+    if(line.recovery_progress.state==RecoveryState::recovered && !line.validated)return "source invalid";
+    if(line.recovery_progress.state==RecoveryState::ready || line.recovery_progress.state==RecoveryState::running)return "recovering";
+    if(recovery_pending(line))return "search incomplete";
     if (signal_byte_aligned(line)) return "text received";
     if (line.binary) return line.complete?"binary received":"binary pending";
     if(line.complete && line.pattern_score && !line.validated)return "text received";
     return line.validated?(line.text_message?"decoded":"decoded bytes"):"pending";
+}
+std::string signal_recovery_label(const SignalLine& line) {
+    using transfer::RecoveryState;
+    const auto& progress=line.recovery_progress;
+    if(progress.state==RecoveryState::none)return {};
+    std::string label="Reception complete";
+    switch(progress.state) {
+    case RecoveryState::ready: label+=" — recovery queued";break;
+    case RecoveryState::running: label+=" — recovering";break;
+    case RecoveryState::incomplete: label+=" — search incomplete (time budget reached)";break;
+    case RecoveryState::cancelled: label+=" — search incomplete (cancelled)";break;
+    case RecoveryState::unavailable: label+=" — search unavailable";break;
+    case RecoveryState::ambiguous: label+=" — ambiguous recovery";break;
+    case RecoveryState::exhausted: label+=" — recovery search exhausted";break;
+    case RecoveryState::recovered: label+=line.validated?" — recovered":" — source invalid";break;
+    case RecoveryState::none: break;
+    }
+    label+="; "+std::to_string(progress.attempts);
+    if(progress.total)label+=" / "+std::to_string(progress.total);
+    label+=" attempts";
+    if(progress.elapsed.count())label+="; "+std::to_string(progress.elapsed.count()/1000)+" s";
+    return label;
 }
 std::string signal_gap_label(const SignalLine& line) {
     if(!line.missing_symbols)return {};
@@ -230,6 +263,7 @@ std::string signal_preamble_label(const SignalLine& line) {
     return text.str();
 }
 std::string signal_data_label(const SignalLine& line) {
+    if(recovery_pending(line))return "Source not recovered";
     if(line.complete&&!line.validated&&!line.binary&&!line.raw_bits.empty())return "No checksum / FEC";
     if (line.binary || (line.pattern_score && line.complete && !line.validated))
         return line.received_bits>line.text.size()?"Raw observations / prefix":"Raw observations";
@@ -302,7 +336,7 @@ void apply_receptions(Inbox& inbox, Signals& signals, live::Snapshot& snapshot) 
             signal.preamble_received_percent,signal.pre_fec_accuracy,signal.binary,signal.complete,
             signal.received_bits,signal.expected_bits,signal.pattern_score};
         line.raw_bits=signal.raw_bits;line.missing_symbols=signal.missing_symbols;
-        line.fec_stats=signal.fec_stats;line.revision=signal.revision;
+        line.fec_stats=signal.fec_stats;line.revision=signal.revision;line.recovery_progress=signal.recovery_progress;
         if(!staged.update(std::move(line)))continue;
         if(cached_revision && signal.revision>*cached_revision)retract_signal(signal.id);
         retract(old_reception);
@@ -345,7 +379,7 @@ void apply_receptions(Inbox& inbox, Signals& signals, live::Snapshot& snapshot) 
     signals=std::move(staged);
 }
 std::optional<std::string> Signals::copy_id(std::size_t index) const {
-    if (index>=lines_.size() || lines_[index].binary || !lines_[index].validated || !lines_[index].text_message || lines_[index].reception_id.empty()) return std::nullopt;
+    if (index>=lines_.size() || recovery_pending(lines_[index]) || lines_[index].binary || !lines_[index].validated || !lines_[index].text_message || lines_[index].reception_id.empty()) return std::nullopt;
     return lines_[index].reception_id;
 }
 std::optional<std::string> Signals::copy_bits(std::size_t index) const {
@@ -357,7 +391,10 @@ std::optional<std::string> Signals::copy_bits(std::size_t index) const {
 std::optional<std::string> Signals::copy_raw_bits(std::size_t index) const {
     if (index>=lines_.size()) return {};
     const auto& line=lines_[index];
-    if (complete_bits(line)) return line.text;
+    // Exact admitted observations are a diagnostic/raw operation, independent
+    // of whether a possible coded-source search has completed.
+    if (physical_complete_bits(line)) return line.text;
+    if(recovery_pending(line))return {};
     if (line.binary || !line.complete || line.validated || !line.text_message || line.text.empty() ||
         !line.pattern_score || !std::isfinite(*line.pattern_score) || line.raw_bits.empty()) return {};
     return line.raw_bits;
@@ -370,6 +407,7 @@ std::optional<std::string> Signals::copy_text(std::size_t index) const {
 std::optional<Bytes> Signals::copy_bytes(std::size_t index) const {
     if(index>=lines_.size())return {};
     const auto& line=lines_[index];
+    if(recovery_pending(line))return {};
     if(signal_byte_aligned(line) && complete_bits(line))return signal_byte_prefix(line);
     if(line.binary || !line.complete || line.validated || !line.text_message || !line.pattern_score ||
        !std::isfinite(*line.pattern_score) || line.text.empty())return {};

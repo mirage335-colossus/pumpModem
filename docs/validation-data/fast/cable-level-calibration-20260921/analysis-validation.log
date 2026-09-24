@@ -1,0 +1,27 @@
+mid-a010 65.429 1.02615 % errors
+mid-a020 69.486 0.13199 % errors
+mid-a030 70.986 0.04425 % errors
+mid-a040 70.422 0.05188 % errors
+narrow-a010 68.867 0.19531 % errors
+narrow-a020 69.52 0.0946 % errors
+narrow-a030 70.351 0.04272 % errors
+narrow-a040 68.767 0.0824 % errors
+radio-a010 60.723 0.0 % errors
+radio-a020 62.87 0.0 % errors
+radio-a030 63.635 0.0 % errors
+radio-a040 63.872 0.0 % errors
+radio-narrow-a010 62.385 0.0 % errors
+radio-narrow-a020 62.85 0.0 % errors
+radio-narrow-a030 62.904 0.0 % errors
+radio-narrow-a040 62.799 0.0 % errors
+wide-a010 55.926 6.46215 % errors
+wide-a015 59.368 4.10233 % errors
+wide-a020 61.683 2.80858 % errors
+wide-a025 63.321 1.96743 % errors
+wide-a030-b1000000 64.5 1.42741 % errors
+wide-a030 64.592 1.38641 % errors
+wide-a035-b1000000 65.413 1.03019 % errors
+wide-a035 65.454 1.05115 % errors
+wide-a040-b1000000 63.346 0.74729 % errors
+wide-a040 66.138 0.80047 % errors
+Complete: 26 probes; independent raw BER agrees with probe in every raw case

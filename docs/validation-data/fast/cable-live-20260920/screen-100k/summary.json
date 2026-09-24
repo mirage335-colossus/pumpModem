@@ -1,0 +1,78 @@
+{
+  "method": "Independent binomial file outcomes; stationarity/independence are assumptions, not measured facts. Each lower/upper bound is separately one-sided 95%; together they form a 90% interval.",
+  "limitations": "No extrapolation between file sizes. No raw BER, SNR, or driver recovery counters are exposed by the CLI. Startup uses a timed allowance, not a device-ready signal. These runs alone cannot prove a physical route or rule out audio processing.",
+  "results": [
+    {
+      "candidate": "apsk16-r3_4-robust-d16",
+      "source_bytes": 100000,
+      "attempted_trials": 1,
+      "setup_failures": 0,
+      "exact_transfers": 1,
+      "empirical_success_probability": 1.0,
+      "success_probability_95pct_lower_one_sided": 0.05,
+      "success_probability_95pct_upper_one_sided": 1.0,
+      "meets_80pct_at_95pct_confidence": false,
+      "verified_bytes_per_wall_second": 2298.9213791632583
+    },
+    {
+      "candidate": "apsk64-r3_4-robust-d16",
+      "source_bytes": 100000,
+      "attempted_trials": 1,
+      "setup_failures": 0,
+      "exact_transfers": 1,
+      "empirical_success_probability": 1.0,
+      "success_probability_95pct_lower_one_sided": 0.05,
+      "success_probability_95pct_upper_one_sided": 1.0,
+      "meets_80pct_at_95pct_confidence": false,
+      "verified_bytes_per_wall_second": 3036.778657580704
+    },
+    {
+      "candidate": "apsk256-r3_4-robust-d16",
+      "source_bytes": 100000,
+      "attempted_trials": 1,
+      "setup_failures": 0,
+      "exact_transfers": 1,
+      "empirical_success_probability": 1.0,
+      "success_probability_95pct_lower_one_sided": 0.05,
+      "success_probability_95pct_upper_one_sided": 1.0,
+      "meets_80pct_at_95pct_confidence": false,
+      "verified_bytes_per_wall_second": 3639.929703024788
+    },
+    {
+      "candidate": "apsk256-r7_8-robust-d16",
+      "source_bytes": 100000,
+      "attempted_trials": 1,
+      "setup_failures": 0,
+      "exact_transfers": 1,
+      "empirical_success_probability": 1.0,
+      "success_probability_95pct_lower_one_sided": 0.05,
+      "success_probability_95pct_upper_one_sided": 1.0,
+      "meets_80pct_at_95pct_confidence": false,
+      "verified_bytes_per_wall_second": 4037.470258736799
+    },
+    {
+      "candidate": "apsk256-r7_8-high-rate-d16",
+      "source_bytes": 100000,
+      "attempted_trials": 1,
+      "setup_failures": 0,
+      "exact_transfers": 1,
+      "empirical_success_probability": 1.0,
+      "success_probability_95pct_lower_one_sided": 0.05,
+      "success_probability_95pct_upper_one_sided": 1.0,
+      "meets_80pct_at_95pct_confidence": false,
+      "verified_bytes_per_wall_second": 4271.458433485085
+    },
+    {
+      "candidate": "apsk256-r7_8-high-rate-d62",
+      "source_bytes": 100000,
+      "attempted_trials": 1,
+      "setup_failures": 0,
+      "exact_transfers": 1,
+      "empirical_success_probability": 1.0,
+      "success_probability_95pct_lower_one_sided": 0.05,
+      "success_probability_95pct_upper_one_sided": 1.0,
+      "meets_80pct_at_95pct_confidence": false,
+      "verified_bytes_per_wall_second": 4079.828156228497
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+OFDM raw echo=0 noise=0 ppm=0 acquired=1 intervals=32 errors=0 clock=-5.66214e-09 EVM=2.23294e-08
+OFDM raw echo=0.6 noise=0.0001 ppm=0 acquired=1 intervals=32 errors=0 clock=-0.00060391 EVM=0.00246811
+OFDM raw echo=0.45 noise=0.0001 ppm=0 acquired=1 intervals=32 errors=0 clock=0.000298849 EVM=0.00224848
+OFDM raw echo=0 noise=0 ppm=100 acquired=1 intervals=32 errors=0 clock=99.9532 EVM=5.03386e-05
+OFDM raw echo=0 noise=0 ppm=-100 acquired=1 intervals=32 errors=0 clock=-99.9855 EVM=1.70837e-05
+OFDM codec64QAM peak=0.214029 exact bytes=4096
+OFDM raw echo=0.45 noise=0.0001 ppm=100 acquired=1 intervals=32 errors=0 clock=99.9716 EVM=0.00225931
+acoustic OFDM tests passed

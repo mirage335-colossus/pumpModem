@@ -29,7 +29,7 @@ void channel_routing() {
         require(fake::state.channels==2 && fake::state.attempted_channels==std::vector<unsigned>{2},"stereo playback must prefer two channels, including a stereo-only device");
         require(fake::state.selected_device==7 && fake::state.played.size()==pcm.size()*2,"default mono routing changed device or stereo frame count");
         for(std::size_t i=0;i<pcm.size();++i)
-            require(fake::state.played[2*i]==0 && fake::state.played[2*i+1]==pcm[i],"default mono must silence left and preserve right PCM");
+            require(fake::state.played[2*i]==pcm[i] && fake::state.played[2*i+1]==0,"default mono must preserve left and silence right PCM");
         clean();
         fake::reset();fake::state.supported_channels=supported;
         audio::play(samples,48000,"7",{},{},false);direct_format();
@@ -38,8 +38,9 @@ void channel_routing() {
             require(fake::state.played[2*i]==pcm[i] && fake::state.played[2*i+1]==pcm[i],"disabled mono must send the same PCM through both channels");
         clean();
     }
-    for(const bool mono:{true,false}) {
-        fake::reset();audio::play(samples,48000,"7",{},{},mono);direct_format();
+    for(const auto mode:{audio::ChannelMode::left_mono,audio::ChannelMode::right_mono,audio::ChannelMode::stereo}) {
+        const bool left=mode!=audio::ChannelMode::right_mono,right=mode!=audio::ChannelMode::left_mono;
+        fake::reset();audio::play(samples,48000,"7",{},{},mode);direct_format();
         require(fake::state.channels==1 && fake::state.attempted_channels==std::vector<unsigned>{2,1},"mono-only card did not fall back at its original rate");
         require(fake::state.selected_device==7 && fake::state.played==pcm,"mono-only device lost or changed transmit PCM");clean();
         fake::reset();fake::state.supported_channels={2};
@@ -49,26 +50,27 @@ void channel_routing() {
             const auto count=std::min<std::size_t>(chunk.size(),10003-generated);
             for(std::size_t i=0;i<count;++i)chunk[i]=samples[(generated+i)%samples.size()];
             generated+=count;return count;
-        },{},{},mono);direct_format();
+        },{},{},mode);direct_format();
         require(fake::state.played.size()==20006 && fake::state.open_calls==1,"streamed stereo changed duration or reopened its device");
         require(fake::state.initial_queue==2 && !fake::state.gap,"streamed stereo lost double buffering");
         require(std::all_of(fake::state.queued_frames.begin(),fake::state.queued_frames.end(),[](auto count){return count<=2400;}),"stereo buffers count samples instead of frames");
         for(std::size_t i=0;i<10003;++i)
-            require(fake::state.played[2*i]==(mono?0:pcm[i%pcm.size()]) && fake::state.played[2*i+1]==pcm[i%pcm.size()],"streamed stereo changed channel or source frame alignment");
+            require(fake::state.played[2*i]==(left?pcm[i%pcm.size()]:0) && fake::state.played[2*i+1]==(right?pcm[i%pcm.size()]:0),"streamed stereo changed channel or source frame alignment");
         clean();
         fake::reset();fake::state.supported_rates={44100};fake::state.supported_channels={2};
         std::vector<float> tone(9600+17);
         for(std::size_t i=0;i<tone.size();++i)tone[i]=static_cast<float>(.5*std::sin(2*std::numbers::pi*1500*static_cast<double>(i)/96000));
-        audio::play(tone,96000,"7",{},{},mono);direct_format();
+        audio::play(tone,96000,"7",{},{},mode);direct_format();
         const auto frames=(tone.size()*44100+95999)/96000;
         require(fake::state.rate==44100 && fake::state.channels==2 && fake::state.played.size()==frames*2,"stereo rate fallback changed transmit duration");
         require(fake::state.selected_device==7 && fake::state.initial_queue==2 && !fake::state.gap,"resampled stereo changed endpoint or lost double buffering");
         for(std::size_t i=0;i<frames;++i)
-            require(fake::state.played[2*i]==(mono?0:fake::state.played[2*i+1]),"resampling changed left-channel routing");
+            require((left || fake::state.played[2*i]==0) && (right || fake::state.played[2*i+1]==0) &&
+                  (!(left&&right) || fake::state.played[2*i]==fake::state.played[2*i+1]),"resampling changed channel routing");
         double error=0;
         for(std::size_t i=100;i+100<frames;++i)
-            error=std::max(error,std::abs(fake::state.played[2*i+1]/32767.-.5*std::sin(2*std::numbers::pi*1500*static_cast<double>(i)/44100)));
-        require(error<.00015,"resampling changed stereo right-channel phase/amplitude");clean();
+            error=std::max(error,std::abs(fake::state.played[2*i+(left?0:1)]/32767.-.5*std::sin(2*std::numbers::pi*1500*static_cast<double>(i)/44100)));
+        require(error<.00015,"resampling changed active-channel phase/amplitude");clean();
     }
 }
 int main() {

@@ -39,6 +39,24 @@ incomplete. Later markers may permit later segments to be received independently
 There is no public integrity claim merely because an error pattern was accepted
 by an algebraic decoder.
 
+The optional additional post-end search consumes only retained hard decisions,
+missing-slot masks and already established symbol addresses. It enumerates
+assignments for unknown bits to free RS capacity, and tests fixed-size interval
+alignments. Analog observations and symbol-confidence scores are not inputs.
+Assignments retain their original unknown status for evidence and diagnostics;
+the received bits inside a partially missing byte must remain consistent with
+any recovered byte. No trial changes timing, cipher position, key, local FEC
+profile or source codec. Every keyed candidate still passes the complete
+HMAC-SHA256 verification after ordinary RS correction.
+
+This search has an explicit finite domain and local storage, wall-clock and
+worker limits. Completing only a prefix of that domain cannot establish
+uniqueness: deadline or cancellation retains an unfinished result for resumption,
+without releasing speculative source bytes. Competing credible reconstructions
+are rejected before source parsing. Neither successful authentication nor
+readable/decompressible content supplies missing alignment evidence. See the
+[recovery scope and evidence accounting](protocol.md#exhaustive-hard-bit-recovery).
+
 The marker's independent-fair-bit model budgets at most `2^-84` false acceptance
 across a drained collector, charging all bounded start/deletion/mismatch trials.
 See [marker evidence](protocol.md#marker-evidence-threshold). This model does not
@@ -115,6 +133,16 @@ silence timeout. Received compressed bytes may occupy a capped temporary-file
 spool until completion. Application caches, caller buffers, spool storage and
 codec scratch are separately charged; a content quota is not a process RSS limit.
 Current fixed LZMA2 scratch caps are 64 MiB for encoding and 8 MiB for decoding.
+Additional recovery defaults to five wall-clock minutes per run and at most the
+available CPU cores. It separately retains up to 65,536 hard-bit slots; the
+displayed diagnostic prefix remains limited to 4,096 bits. Recovery retains no
+analog samples and does not expand a quota according to received lengths.
+An unfinished job remains resumable while its owning result is retained; this
+is not a persistent checkpoint or an authenticated total message-length claim.
+Live reception admits at most eight active, queued or suspended recovery jobs
+within a separate 16 MiB recovery pool. Queue admission reserves the job's
+bounded workspace; overflow is reported as unavailable. One coordinator runs
+jobs using their parallel workers, independently of the capture/DSP budget.
 Batch PCM APIs still require a full-waveform budget; simulation work grows with
 sample count. Finite key/timing/frequency banks can be refused when unaffordable.
 

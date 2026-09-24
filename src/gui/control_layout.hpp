@@ -41,7 +41,7 @@ inline ControlLayout control_content_layout(const Control& c,const FieldState& s
     out.label=c.kind==Kind::label?out.frame:out.frame.label_above(
         c.kind==Kind::bitmap||c.kind==Kind::list?23:label_height);
     if(c.footer_height)out.widget=out.widget.without_footer(c.footer_height);
-    if(c.kind==Kind::text&&!state.options.empty()) {
+    if(c.kind==Kind::text&&!c.read_only&&!state.options.empty()) {
         out.has_suggestions=true;
         const int suggestions_width=std::min(23,out.widget.w);
         out.suggestions={out.widget.x+out.widget.w-suggestions_width,out.widget.y,suggestions_width,out.widget.h};
@@ -49,6 +49,16 @@ inline ControlLayout control_content_layout(const Control& c,const FieldState& s
     }
     layout_bitmap_content(c,out);
     return out;
+}
+// Document bounds include the label, unlike desktop widget slots.
+inline ControlLayout document_control_layout(const Control& c,const FieldState& state,Rect outer) {
+    auto widget=outer;
+    const bool label=c.kind!=Kind::label&&c.kind!=Kind::action&&c.kind!=Kind::toggle&&c.label[0];
+    const int inset=label?std::min(label_height,outer.h):0;
+    widget.y+=inset;widget.h-=inset;
+    auto result=control_content_layout(c,state,widget);result.frame=outer;
+    if(label)result.label={outer.x,outer.y,outer.w,inset};
+    return result;
 }
 inline Rect overlay_control_rect(const OverlayPlacement& p,int width,int height) {
     width=std::max(0,width);height=std::max(0,height);
@@ -63,9 +73,9 @@ inline Rect overlay_control_rect(const OverlayPlacement& p,int width,int height)
 // meaning of a slot or independently reserves space for application controls.
 inline ControlLayout control_layout(const Control& c,const FieldState& state,int width,int height,
                                     std::span<const Control> controls=console_screen(),
-                                    bool transmit_scope_visible=true) {
+                                    bool transmit_scope_visible=true,bool simulation_estimates_visible=true) {
     if(c.surface)return control_content_layout(c,state,overlay_control_rect(c.placement,width,height));
-    const DesktopLayout desktop(width,height,transmit_scope_visible);
+    const DesktopLayout desktop(width,height,transmit_scope_visible,simulation_estimates_visible);
     ControlLayout out;
     out.popup_upward=c.open_upward;
     out.frame=desktop[c.slot];
@@ -85,7 +95,7 @@ inline ControlLayout control_layout(const Control& c,const FieldState& state,int
         };
         for(std::size_t i=0;i<controls.size();++i) {
             const auto& sibling=controls[i];
-            if(sibling.surface!=c.surface||sibling.page!=c.page||sibling.row!=c.row||sibling.slot!=Slot::none||menu_continuation(controls,i))continue;
+            if(sibling.document_only||sibling.surface!=c.surface||sibling.page!=c.page||sibling.row!=c.row||sibling.slot!=Slot::none||menu_continuation(controls,i))continue;
             total+=sibling.stretch;
             if(matches(sibling))found=true;
             else if(!found)before+=sibling.stretch;
@@ -121,11 +131,16 @@ template<class Measure> int record_content_width(const Record& record,int minimu
     }
     return width;
 }
-inline Rect page_rect(int width,int height) { return DesktopLayout(width,height)[Slot::page]; }
-inline Rect tabs_rect(int width,int height) { auto rect=DesktopLayout(width,height)[Slot::tabs];rect.h=28;return rect; }
-struct TabLayout {Page page;Rect frame;};
-inline std::vector<TabLayout> tab_layout(int width,int height,std::span<const PageDefinition> definitions=pages()) {
-    const auto bounds=tabs_rect(width,height);int x=bounds.x;
+inline Rect page_rect(int width,int height,bool simulation_estimates_visible=true) {
+    return DesktopLayout(width,height,true,simulation_estimates_visible)[Slot::page];
+}
+inline Rect tabs_rect(int width,int height,bool simulation_estimates_visible=true) {
+    auto rect=DesktopLayout(width,height,true,simulation_estimates_visible)[Slot::tabs];rect.h=28;return rect;
+}
+struct TabLayout {Page page;Rect frame;bool visible=true;};
+inline std::vector<TabLayout> tab_layout(int width,int height,std::span<const PageDefinition> definitions=pages(),
+                                       bool simulation_estimates_visible=true) {
+    const auto bounds=tabs_rect(width,height,simulation_estimates_visible);int x=bounds.x;
     std::vector<TabLayout> result;result.reserve(definitions.size());
     for(const auto& page:definitions) {
         result.push_back({page.id,{x,bounds.y,page.tab_width,bounds.h}});x+=page.tab_width;

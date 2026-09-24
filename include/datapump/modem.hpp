@@ -13,6 +13,8 @@
 
 namespace datapump::modem {
 inline constexpr double nominal_signal_power = 0.153125;
+inline constexpr double minimum_bandwidth_hz = 0.01;
+inline constexpr double maximum_bandwidth_hz = 30000000;
 enum class SpreadingMode : std::uint8_t { pattern, tone };
 struct Config {
     // Pattern transport conveys one bit per independently detectable waveform.

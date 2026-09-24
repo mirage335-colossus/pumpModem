@@ -1,0 +1,112 @@
+[
+  {
+    "expected_snr_db": 13,
+    "waveform": "ofdm",
+    "inner_code": null,
+    "code_rate": "3/4",
+    "constellation": 16,
+    "occupied_bandwidth_hz": 17496.09375,
+    "cycle_intervals": 32,
+    "estimated_seconds": 9.61
+  },
+  {
+    "expected_snr_db": 10,
+    "waveform": "ofdm",
+    "inner_code": null,
+    "code_rate": "2/3",
+    "constellation": 16,
+    "occupied_bandwidth_hz": 15591.796875,
+    "cycle_intervals": 32,
+    "estimated_seconds": 10.343208333333333
+  },
+  {
+    "expected_snr_db": 6,
+    "waveform": "ofdm",
+    "inner_code": null,
+    "code_rate": "3/4",
+    "constellation": 4,
+    "occupied_bandwidth_hz": 17496.09375,
+    "cycle_intervals": 16,
+    "estimated_seconds": 9.61
+  },
+  {
+    "expected_snr_db": 3,
+    "waveform": "ofdm",
+    "inner_code": null,
+    "code_rate": "3/4",
+    "constellation": 4,
+    "occupied_bandwidth_hz": 8765.625,
+    "cycle_intervals": 8,
+    "estimated_seconds": 10.343208333333333
+  },
+  {
+    "expected_snr_db": 0,
+    "waveform": "ofdm",
+    "inner_code": "convolutional",
+    "code_rate": "1/2",
+    "constellation": 4,
+    "occupied_bandwidth_hz": 4388.671875,
+    "cycle_intervals": 2,
+    "estimated_seconds": 9.980541666666667
+  },
+  {
+    "expected_snr_db": -3,
+    "waveform": "single-carrier",
+    "inner_code": "convolutional",
+    "code_rate": "1/2",
+    "constellation": 4,
+    "occupied_bandwidth_hz": 1200,
+    "cycle_intervals": 1,
+    "estimated_seconds": 9.513020833333334
+  },
+  {
+    "expected_snr_db": -6,
+    "waveform": "single-carrier",
+    "inner_code": "convolutional",
+    "code_rate": "1/2",
+    "constellation": 4,
+    "occupied_bandwidth_hz": 1104.1753520965576,
+    "cycle_intervals": 1,
+    "estimated_seconds": 9.7961875
+  },
+  {
+    "expected_snr_db": -10,
+    "waveform": "single-carrier",
+    "inner_code": "convolutional",
+    "code_rate": "1/2",
+    "constellation": 4,
+    "occupied_bandwidth_hz": 439.5801246643068,
+    "cycle_intervals": 1,
+    "estimated_seconds": 15.7145
+  },
+  {
+    "expected_snr_db": -13,
+    "waveform": "single-carrier",
+    "inner_code": "convolutional",
+    "code_rate": "1/2",
+    "constellation": 4,
+    "occupied_bandwidth_hz": 220.31194610595685,
+    "cycle_intervals": 1,
+    "estimated_seconds": 25.134166666666665
+  },
+  {
+    "expected_snr_db": -20,
+    "waveform": "single-carrier",
+    "inner_code": "convolutional",
+    "code_rate": "1/2",
+    "constellation": 4,
+    "occupied_bandwidth_hz": 43.95801200866708,
+    "cycle_intervals": 1,
+    "estimated_seconds": 100.894875
+  },
+  {
+    "expected_snr_db": -27,
+    "waveform": "single-carrier",
+    "inner_code": "convolutional",
+    "code_rate": "1/2",
+    "constellation": 4,
+    "occupied_bandwidth_hz": 8.770775985717592,
+    "cycle_intervals": 1,
+    "estimated_seconds": 480.598
+  }
+]

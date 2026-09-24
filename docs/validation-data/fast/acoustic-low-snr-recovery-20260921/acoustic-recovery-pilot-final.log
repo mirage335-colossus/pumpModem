@@ -1,0 +1,8 @@
+Internal ctest changing into directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+Test project /home/user/___quick/p/_cur/dataPump/pumpModem/build
+    Start 20: fast_pilot_presence
+1/1 Test #20: fast_pilot_presence ..............   Passed   12.98 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =  12.98 sec

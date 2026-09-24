@@ -3,6 +3,7 @@
 #include "control_layout.hpp"
 #include "ui_document.hpp"
 #include "overlay.hpp"
+#include "launch_command.hpp"
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -13,6 +14,7 @@ struct Launch {
     double hold=0,timeout=100,scroll=0;
     ui::Page page=ui::Page::console;
     std::filesystem::path smoke_directory;
+    std::optional<launch_command::Patch> settings;
 };
 struct BitmapPresentation {
     BitmapSource source;
@@ -67,6 +69,9 @@ public:
     void navigate(ui::Page page);
     ui::ControlLayout control_layout(const ui::Control& control,int width,int height,
         std::span<const ui::Control> declarations=ui::console_screen()) const;
+    ui::Rect page_bounds(int width,int height) const;
+    ui::Rect tabs_bounds(int width,int height) const;
+    std::vector<ui::TabLayout> tab_layout(int width,int height) const;
     ControlPresentation control(const ui::Control& control) const;
     MenuPresentation menu(std::span<const ui::Control* const> items) const;
     void select_menu(std::span<const ui::Control* const> items,const std::string& id);
@@ -86,6 +91,7 @@ public:
     BitmapPresentation bitmap(const ui::Control& control,unsigned pixel_width=640) const;
     std::shared_ptr<const ui::DocumentNode> document(ui::Page page,int width);
 private:
+    bool page_visible(ui::Page page) const;
     bool accepts_surface(std::uint64_t surface) const;
     bool accepts_input(const ui::Control& control) const;
     struct Impl;

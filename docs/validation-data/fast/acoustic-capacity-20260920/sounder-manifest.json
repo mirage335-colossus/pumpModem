@@ -1,0 +1,78 @@
+{
+  "runs": [
+    {
+      "name": "a08",
+      "source_directory": "/tmp/fast-acoustic-sounder-a08",
+      "capture_path": "/tmp/fast-acoustic-sounder-a08/capture-stereo.f32",
+      "capture_bytes": 6773760,
+      "capture_sha256": "93de793dc6ca0e3cf86e2e6272280ef265586ef68229e6fc1dbf158448f46ec6",
+      "transmit_mono_sha256": "de22bfd73c181cb82d9944e58c74f4ad98b6fb9fca75a44d2603d328ea9f238e",
+      "transmit_stereo_sha256": "abb1da757746febd9900f92ce2c883c04fbb3ae7af586fb1e9ce4274cf1bd42d",
+      "playback_routing": "identical_both_channels",
+      "source_volume": "Volume: front-left: 17990 /  27% / -33.69 dB,   front-right: 17990 /  27% / -33.69 dB\n        balance 0.00",
+      "sink_volume": "Volume: front-left: 58982 /  90% / -2.75 dB,   front-right: 58982 /  90% / -2.75 dB\n        balance 0.00",
+      "capture_complete": true,
+      "raw_spectral_files": [
+        "/tmp/fast-acoustic-sounder-a08/spectral-analysis-arithmetic_mean.npz",
+        "/tmp/fast-acoustic-sounder-a08/spectral-analysis-channel_1.npz",
+        "/tmp/fast-acoustic-sounder-a08/spectral-analysis-channel_0.npz"
+      ]
+    },
+    {
+      "name": "a20",
+      "source_directory": "/tmp/fast-acoustic-sounder-a20",
+      "capture_path": "/tmp/fast-acoustic-sounder-a20/capture-stereo.f32",
+      "capture_bytes": 6773760,
+      "capture_sha256": "be7e841b9830cb0ca8d96c1c26ba28a304428f487770647c90c170e5a005c44d",
+      "transmit_mono_sha256": "8ab3af176cc7e0f25ef8f0d70cb7f39bd8d07133becb3801cfc97dc76a4f5938",
+      "transmit_stereo_sha256": "5490196d295d4adfec928712fab18a15651c8778f4bf4f039f76a503d33ca750",
+      "playback_routing": "identical_both_channels",
+      "source_volume": "Volume: front-left: 17990 /  27% / -33.69 dB,   front-right: 17990 /  27% / -33.69 dB\n        balance 0.00",
+      "sink_volume": "Volume: front-left: 58982 /  90% / -2.75 dB,   front-right: 58982 /  90% / -2.75 dB\n        balance 0.00",
+      "capture_complete": true,
+      "raw_spectral_files": [
+        "/tmp/fast-acoustic-sounder-a20/spectral-analysis-arithmetic_mean.npz",
+        "/tmp/fast-acoustic-sounder-a20/spectral-analysis-channel_1.npz",
+        "/tmp/fast-acoustic-sounder-a20/spectral-analysis-channel_0.npz"
+      ]
+    },
+    {
+      "name": "a40",
+      "source_directory": "/tmp/fast-acoustic-sounder-a40",
+      "capture_path": "/tmp/fast-acoustic-sounder-a40/capture-stereo.f32",
+      "capture_bytes": 6773760,
+      "capture_sha256": "5a82b9ca7190ee0ca70e200e0f8cb3e5c6fed70a260816ff9533fdc868b78e38",
+      "transmit_mono_sha256": "4332a3c015de39c96fa9be44700f717e6deb2b857cb5f3b369665a293744ab59",
+      "transmit_stereo_sha256": "d6d91891b75bf0838bce853ad2d7bef98d6f3390fc81c7bf2910f8eb10646560",
+      "playback_routing": "identical_both_channels",
+      "source_volume": "Volume: front-left: 17990 /  27% / -33.69 dB,   front-right: 17990 /  27% / -33.69 dB\n        balance 0.00",
+      "sink_volume": "Volume: front-left: 58982 /  90% / -2.75 dB,   front-right: 58982 /  90% / -2.75 dB\n        balance 0.00",
+      "capture_complete": true,
+      "raw_spectral_files": [
+        "/tmp/fast-acoustic-sounder-a40/spectral-analysis-arithmetic_mean.npz",
+        "/tmp/fast-acoustic-sounder-a40/spectral-analysis-channel_1.npz",
+        "/tmp/fast-acoustic-sounder-a40/spectral-analysis-channel_0.npz"
+      ]
+    },
+    {
+      "name": "a20-right",
+      "source_directory": "/tmp/fast-acoustic-sounder-a20-right",
+      "capture_path": "/tmp/fast-acoustic-sounder-a20-right/capture-stereo.f32",
+      "capture_bytes": 6773760,
+      "capture_sha256": "dff2134b3a1d657a31bd1a3a0e53c6c6112edfb8546ba85fd525511fbebb1639",
+      "transmit_mono_sha256": "8ab3af176cc7e0f25ef8f0d70cb7f39bd8d07133becb3801cfc97dc76a4f5938",
+      "transmit_stereo_sha256": "0e1f0209d1350a2064b2b35f7aefcd0718e35656fc1a477fd36645ae7608dd4e",
+      "playback_routing": "right_only",
+      "source_volume": "Volume: front-left: 17990 /  27% / -33.69 dB,   front-right: 17990 /  27% / -33.69 dB\n        balance 0.00",
+      "sink_volume": "Volume: front-left: 58982 /  90% / -2.75 dB,   front-right: 58982 /  90% / -2.75 dB\n        balance 0.00",
+      "capture_complete": true,
+      "raw_spectral_files": [
+        "/tmp/fast-acoustic-sounder-a20-right/spectral-analysis-arithmetic_mean.npz",
+        "/tmp/fast-acoustic-sounder-a20-right/spectral-analysis-channel_1.npz",
+        "/tmp/fast-acoustic-sounder-a20-right/spectral-analysis-channel_0.npz"
+      ]
+    }
+  ],
+  "analysis_source_sha256": "27f2ff56e6857421e615feaa4c70b8f8a1dc47c4f63cea739b6d7839fba85243",
+  "tests_source_sha256": "4a1bdfb08671a550baa0861a1d81bec958bbf6e876865669262d2e23a452a857"
+}

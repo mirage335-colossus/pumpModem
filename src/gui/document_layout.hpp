@@ -12,6 +12,12 @@ struct DocumentRect {
     int x=0,y=0,width=0,height=0;
     bool operator==(const DocumentRect&) const = default;
 };
+inline DocumentRect document_intersection(DocumentRect a,DocumentRect b) {
+    const int x=std::max(a.x,b.x),y=std::max(a.y,b.y);
+    const auto right=std::min(static_cast<long long>(a.x)+a.width,static_cast<long long>(b.x)+b.width);
+    const auto bottom=std::min(static_cast<long long>(a.y)+a.height,static_cast<long long>(b.y)+b.height);
+    return {x,y,static_cast<int>(std::max(0LL,right-x)),static_cast<int>(std::max(0LL,bottom-y))};
+}
 struct DocumentBox {
     DocumentRect bounds;
     DocumentRect content;
@@ -58,6 +64,8 @@ DocumentBox measure(const DocumentNode& node,int available,MeasureText& measure_
         // action's minimum hit area belong to the shared vocabulary.
         if(!node.text.empty())needed=std::max(0,static_cast<int>(std::ceil(measure_text(node,std::max(1,inner)))))+2;
         if(node.kind==DocumentKind::action)needed=std::max(25,needed+8);
+    } else if(node.kind==DocumentKind::control) {
+        needed=45; // Includes the native label and its editor/control.
     } else if(node.kind==DocumentKind::row || node.kind==DocumentKind::column) {
         const bool row=node.kind==DocumentKind::row;
         int cursor=0;

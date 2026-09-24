@@ -1,0 +1,7 @@
+auto0_echo intervals=254 errors=41061 erasures=0 clock_ppm=0.0873196
+auto3_delay intervals=254 errors=14074 erasures=0 clock_ppm=4.1888
+auto0_clock intervals=254 errors=18041 erasures=0 clock_ppm=96.1266
+muted_block_positions erased_bits=11224 EOF_incomplete=1
+corrupted_acquisition_marker rejected=1
+noise_only acquired=0 complete=0
+Fast OFDM presence tests passed (6 cases)

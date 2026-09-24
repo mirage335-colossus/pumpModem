@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.21)
 # helper must not bypass the boundary. New application fields/pages/producers
 # do not require changes to this list; a new public primitive does.
 set(contract_headers
-  application.hpp bitmap.hpp ui_contract.hpp ui_document.hpp
+  application.hpp launch_command.hpp bitmap.hpp ui_contract.hpp ui_document.hpp
   desktop_layout.hpp control_layout.hpp document_layout.hpp document_actions.hpp
   control_binding.hpp record_interactions.hpp presentation_palette.hpp
   text_policy.hpp utf8_policy.hpp control_interactions.hpp record_scroll.hpp service_queue.hpp chrome_layout.hpp theme.hpp

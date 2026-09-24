@@ -1,0 +1,155 @@
+{
+  "mode": "levels",
+  "gain_db": 0,
+  "sample_rate": 48000,
+  "frequencies": [
+    997
+  ],
+  "segments": [
+    {
+      "kind": "silence",
+      "start_sample": 0,
+      "samples": 48000,
+      "frequency_hz": 0,
+      "tx_peak_requested": 0
+    },
+    {
+      "kind": "sync",
+      "start_sample": 48000,
+      "samples": 19200,
+      "frequency_hz": 0,
+      "tx_peak_requested": 0
+    },
+    {
+      "kind": "silence",
+      "start_sample": 67200,
+      "samples": 48000,
+      "frequency_hz": 0,
+      "tx_peak_requested": 0
+    },
+    {
+      "kind": "tone",
+      "start_sample": 115200,
+      "samples": 144000,
+      "frequency_hz": 997,
+      "tx_peak_requested": 0.03
+    },
+    {
+      "kind": "silence",
+      "start_sample": 259200,
+      "samples": 28800,
+      "frequency_hz": 0,
+      "tx_peak_requested": 0
+    },
+    {
+      "kind": "tone",
+      "start_sample": 288000,
+      "samples": 144000,
+      "frequency_hz": 997,
+      "tx_peak_requested": 0.06
+    },
+    {
+      "kind": "silence",
+      "start_sample": 432000,
+      "samples": 28800,
+      "frequency_hz": 0,
+      "tx_peak_requested": 0
+    },
+    {
+      "kind": "tone",
+      "start_sample": 460800,
+      "samples": 144000,
+      "frequency_hz": 997,
+      "tx_peak_requested": 0.12
+    },
+    {
+      "kind": "silence",
+      "start_sample": 604800,
+      "samples": 28800,
+      "frequency_hz": 0,
+      "tx_peak_requested": 0
+    },
+    {
+      "kind": "tone",
+      "start_sample": 633600,
+      "samples": 144000,
+      "frequency_hz": 997,
+      "tx_peak_requested": 0.25
+    },
+    {
+      "kind": "silence",
+      "start_sample": 777600,
+      "samples": 28800,
+      "frequency_hz": 0,
+      "tx_peak_requested": 0
+    },
+    {
+      "kind": "tone",
+      "start_sample": 806400,
+      "samples": 144000,
+      "frequency_hz": 997,
+      "tx_peak_requested": 0.35
+    },
+    {
+      "kind": "silence",
+      "start_sample": 950400,
+      "samples": 28800,
+      "frequency_hz": 0,
+      "tx_peak_requested": 0
+    },
+    {
+      "kind": "tone",
+      "start_sample": 979200,
+      "samples": 144000,
+      "frequency_hz": 997,
+      "tx_peak_requested": 0.5
+    },
+    {
+      "kind": "silence",
+      "start_sample": 1123200,
+      "samples": 28800,
+      "frequency_hz": 0,
+      "tx_peak_requested": 0
+    },
+    {
+      "kind": "tone",
+      "start_sample": 1152000,
+      "samples": 144000,
+      "frequency_hz": 997,
+      "tx_peak_requested": 0.7
+    },
+    {
+      "kind": "silence",
+      "start_sample": 1296000,
+      "samples": 28800,
+      "frequency_hz": 0,
+      "tx_peak_requested": 0
+    },
+    {
+      "kind": "tone",
+      "start_sample": 1324800,
+      "samples": 144000,
+      "frequency_hz": 997,
+      "tx_peak_requested": 0.9
+    },
+    {
+      "kind": "silence",
+      "start_sample": 1468800,
+      "samples": 28800,
+      "frequency_hz": 0,
+      "tx_peak_requested": 0
+    },
+    {
+      "kind": "silence",
+      "start_sample": 1497600,
+      "samples": 96000,
+      "frequency_hz": 0,
+      "tx_peak_requested": 0
+    }
+  ],
+  "transmit_seconds": 33.2,
+  "live": false,
+  "pcm_format": "float32le",
+  "channels": 2,
+  "utc": "2026-09-21T09:41:24Z"
+}

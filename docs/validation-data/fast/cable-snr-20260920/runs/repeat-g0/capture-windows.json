@@ -1,0 +1,194 @@
+[
+  {
+    "key": "measurement_0",
+    "analysis_measurement_index": 0,
+    "capture_start_sample": 178873,
+    "capture_end_sample": 226873,
+    "capture_channels": [
+      "left",
+      "right"
+    ],
+    "analysis_channel": "arithmetic mean of left and right",
+    "sha256": "555a480a6cd66aa0977120ac7345be264d9ef614bddc3e82978c219832b1fe19"
+  },
+  {
+    "key": "measurement_1",
+    "analysis_measurement_index": 1,
+    "capture_start_sample": 274873,
+    "capture_end_sample": 418873,
+    "capture_channels": [
+      "left",
+      "right"
+    ],
+    "analysis_channel": "arithmetic mean of left and right",
+    "sha256": "2fcba8e96211e1c611a06e0350f3d9bee8dc655d4984b45c8f20d8dece7a7e01"
+  },
+  {
+    "key": "measurement_4",
+    "analysis_measurement_index": 4,
+    "capture_start_sample": 466873,
+    "capture_end_sample": 562873,
+    "capture_channels": [
+      "left",
+      "right"
+    ],
+    "analysis_channel": "arithmetic mean of left and right",
+    "sha256": "54e9ae221fdfffc56e9ad7f23bebaff2b37694bf8c9f5b7308de7325bc49445a"
+  },
+  {
+    "key": "measurement_7",
+    "analysis_measurement_index": 7,
+    "capture_start_sample": 610873,
+    "capture_end_sample": 658873,
+    "capture_channels": [
+      "left",
+      "right"
+    ],
+    "analysis_channel": "arithmetic mean of left and right",
+    "sha256": "2fdd43a5c50df48a1db6b56b339850f2ea7c12d19603d10906fabd6740ca403d"
+  },
+  {
+    "key": "measurement_8",
+    "analysis_measurement_index": 8,
+    "capture_start_sample": 706873,
+    "capture_end_sample": 850873,
+    "capture_channels": [
+      "left",
+      "right"
+    ],
+    "analysis_channel": "arithmetic mean of left and right",
+    "sha256": "7e29dd9be7414379ec595578e5f80da2e3ef2a5635fb2e7cca6a17d41df2b461"
+  },
+  {
+    "key": "measurement_11",
+    "analysis_measurement_index": 11,
+    "capture_start_sample": 898873,
+    "capture_end_sample": 994873,
+    "capture_channels": [
+      "left",
+      "right"
+    ],
+    "analysis_channel": "arithmetic mean of left and right",
+    "sha256": "b24c811f9e7cc984d5154c830da02cf73105ea6d13b2a2287b3ec0c77700fa59"
+  },
+  {
+    "key": "measurement_14",
+    "analysis_measurement_index": 14,
+    "capture_start_sample": 1042873,
+    "capture_end_sample": 1090873,
+    "capture_channels": [
+      "left",
+      "right"
+    ],
+    "analysis_channel": "arithmetic mean of left and right",
+    "sha256": "eaa74ccba3c7ba173ad234bec958d0327ae2fd6f7677f7923cf1542305b940fe"
+  },
+  {
+    "key": "measurement_15",
+    "analysis_measurement_index": 15,
+    "capture_start_sample": 1138873,
+    "capture_end_sample": 1282873,
+    "capture_channels": [
+      "left",
+      "right"
+    ],
+    "analysis_channel": "arithmetic mean of left and right",
+    "sha256": "ada649110034eafe2b0e8a9d92f723925543ea0b657f4467f2705254af6e90af"
+  },
+  {
+    "key": "measurement_18",
+    "analysis_measurement_index": 18,
+    "capture_start_sample": 1330873,
+    "capture_end_sample": 1426873,
+    "capture_channels": [
+      "left",
+      "right"
+    ],
+    "analysis_channel": "arithmetic mean of left and right",
+    "sha256": "e911d644f13b06734c9d914b990cd082904204cb382d9be56dfdf25603cf70e8"
+  },
+  {
+    "key": "measurement_21",
+    "analysis_measurement_index": 21,
+    "capture_start_sample": 1474873,
+    "capture_end_sample": 1522873,
+    "capture_channels": [
+      "left",
+      "right"
+    ],
+    "analysis_channel": "arithmetic mean of left and right",
+    "sha256": "338e6067cdb9116abcb2f06377274fc18cf88f529688c4c2a33d0538cf732c15"
+  },
+  {
+    "key": "measurement_22",
+    "analysis_measurement_index": 22,
+    "capture_start_sample": 1570873,
+    "capture_end_sample": 1714873,
+    "capture_channels": [
+      "left",
+      "right"
+    ],
+    "analysis_channel": "arithmetic mean of left and right",
+    "sha256": "bf10e4564a65a4fa418ae30f4510b795a8b4e52435c4cedad870be018051bbe8"
+  },
+  {
+    "key": "measurement_25",
+    "analysis_measurement_index": 25,
+    "capture_start_sample": 1762873,
+    "capture_end_sample": 1858873,
+    "capture_channels": [
+      "left",
+      "right"
+    ],
+    "analysis_channel": "arithmetic mean of left and right",
+    "sha256": "be969abd5f547fa2562340317167d96b4cddd67291ad69ecad5e4dba0eb7d743"
+  },
+  {
+    "key": "measurement_28",
+    "analysis_measurement_index": 28,
+    "capture_start_sample": 1906873,
+    "capture_end_sample": 1954873,
+    "capture_channels": [
+      "left",
+      "right"
+    ],
+    "analysis_channel": "arithmetic mean of left and right",
+    "sha256": "04dafc5fb77fd8382bd9772af56abe7ebaff5d904f1899c6ba6b2e58da9d45b7"
+  },
+  {
+    "key": "measurement_29",
+    "analysis_measurement_index": 29,
+    "capture_start_sample": 2002873,
+    "capture_end_sample": 2146873,
+    "capture_channels": [
+      "left",
+      "right"
+    ],
+    "analysis_channel": "arithmetic mean of left and right",
+    "sha256": "4e47b72a724ec97e717cb3452399c80ec3351a57dc23a0d10c4edaa994f5c461"
+  },
+  {
+    "key": "measurement_32",
+    "analysis_measurement_index": 32,
+    "capture_start_sample": 2194873,
+    "capture_end_sample": 2290873,
+    "capture_channels": [
+      "left",
+      "right"
+    ],
+    "analysis_channel": "arithmetic mean of left and right",
+    "sha256": "bc905bc5346c6a5fed77b54b367aa3e627ff9d953f9b3e6ef5284bc85d7d9c9c"
+  },
+  {
+    "key": "measurement_35",
+    "analysis_measurement_index": 35,
+    "capture_start_sample": 2338873,
+    "capture_end_sample": 2386873,
+    "capture_channels": [
+      "left",
+      "right"
+    ],
+    "analysis_channel": "arithmetic mean of left and right",
+    "sha256": "98331319f1e19e5b2766b7fcbb737e84ef520bf03844ee943f8a9a8726a90d42"
+  }
+]

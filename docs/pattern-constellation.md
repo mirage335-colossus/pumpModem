@@ -142,6 +142,52 @@ error instead of silently reducing timing resolution.
 
 ## Streaming long-symbol correlation
 
+### Local differential evidence
+
+Very long pattern symbols also compare phase relationships between local
+matched windows. `PatternSearch.differential_window_seconds` defaults to
+100 seconds, rounded upward to whole chips with a minimum of 16 chips. The
+branch is eligible only when a complete symbol contains at least 256 complete
+windows. Setting this local option to zero disables this branch alone; the
+existing coherent and four-quarter fits retain their own settings. Tone
+symbols do not use differential pattern scoring.
+
+For each bit alternative, the receiver removes the known pattern transitions
+inside each window and obtains a complex soft match. It compares disjoint
+neighboring pairs, `(0,1), (2,3), ...`, by multiplying one match by the
+conjugate of the other. The receiver never makes a hard bit or phase decision
+for an individual window. An incomplete final window contributes no product;
+the complete symbol must still be observed before any bit can be admitted.
+Real PCM projections use the local carrier Gram matrix to whiten quadrature
+noise before forming a product.
+
+The statistic sums these soft products, normalizes by their squared
+magnitudes, and tests eight fixed phase directions. It removes the strongest
+positive quarter contribution so evidence confined to one fixed quarter cannot
+supply all the evidence. A conditional circular-Gaussian noise bound charges all
+eight directions. The receiver then uses
+`max(existing_coherent_and_quarter_score, differential_score) - ln(2)`,
+clipped at zero, to account for selecting the additional detector. Its
+finite timing, carrier, clock and competing-bit searches remain in force.
+This score is model-based evidence, not a calibrated receive probability.
+
+Only one active local fit and fixed product summaries are retained per compact
+lane. FFT acquisition reuses its spectrum and template work buffers while
+transforming each local window; its per-start accumulator is fixed in size,
+but compute work grows with the number of windows. Small FFT batches can
+instead score their complete starts directly. Optional compact state must fit
+the configured DSP budget. No array of all local window observations is kept.
+
+This branch tolerates loss of absolute coherence across a complete bit when
+neighboring local matches still retain a useful phase relationship. It does
+not supply arbitrary oscillator tracking, eliminate weak-window noise or
+guarantee reception after a particular number of hours. Its observations come
+from the pattern scorer; the plotted differential constellation remains a
+display diagnostic. Wire bits, pending progress and physical completion do
+not change.
+
+### Compact acquisition
+
 `PatternSearch.start_offset_seconds` predicts the first payload symbol's
 start relative to the first captured sample. `start_uncertainty_seconds`
 defines its uncertainty window; `clock_errors_ppm` and
