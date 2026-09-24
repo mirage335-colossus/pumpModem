@@ -1,6 +1,5 @@
 #pragma once
 #include "datapump/modem.hpp"
-#include "datapump/pattern_receiver.hpp"
 #include <functional>
 #include <memory>
 #include <optional>
@@ -12,16 +11,23 @@ struct SymbolObservation {
     std::complex<double> value;
     std::uint64_t sample_count = 0;
 };
-// Newly observed payload physical baseband chip I/Q for pattern transport.
-// Points are never snapped to decisions. A slow
-// consumer receives the newest bounded set and a count
+// Newly observed payload symbols in the decoder's differential-phase and
+// gain-normalized amplitude coordinates. Points are measured, never snapped
+// to decisions. A slow consumer receives the newest bounded set and a count
 // of points displaced before it could consume them.
 struct ConstellationBatch {
     std::vector<std::complex<double>> points;
     std::uint64_t dropped = 0;
 };
+// Validation is deterministic for a given prefix within one receiver instance;
+// repeated identical prefixes may reuse the previous extent/rejection verdict.
+using BootstrapValidator = std::function<std::optional<std::size_t>(const Bytes&)>;
+// Exact complete packet bytes, without the synthetic training prefix. Short
+// frames remain provisional until their digest/MAC passes this callback.
+using PacketValidator = std::function<bool(const Bytes&)>;
+
 // Unframed binary input: one meaningful 0/1 bit per element, including leading
-// zeros. Every symbol carries exactly one bit, including the last symbol.
+// zeros. The final symbol uses only its actual number of remaining bits.
 struct RawBits { Bytes bits; };
 
 class StreamingTransmitter {
@@ -34,21 +40,13 @@ public:
     StreamingTransmitter(StreamingTransmitter&&) noexcept;
     StreamingTransmitter& operator=(StreamingTransmitter&&) noexcept;
     std::size_t read(std::span<float> output, std::stop_token stop = {});
-    // The same sampled waveform before real projection, for physical channel
-    // resampling and carrier rotation. Carries no symbol/framing metadata.
-    std::size_t read_analytic(std::span<std::complex<double>> output,
-                              std::stop_token stop = {});
-    // Removed integrated-symbol interface: throws; use physical samples.
     std::optional<SymbolObservation> next_symbol(std::stop_token stop = {});
     bool finished() const;
     std::uint64_t total_samples() const;
     std::uint64_t samples_emitted() const;
-    // Retained transmitter state, independent of streamed waveform duration.
-    std::size_t working_bytes() const;
-    // Actual payload points whose transmission has begun, oldest first.
-    // Retains physical baseband chips, including all enabled waveform masks.
-    // Settling/training is excluded.
-    // Each point is retained once, regardless of PCM block size or duration.
+    // Actual payload symbols whose transmission has begun, oldest first.
+    // Fixed training and spreading-chip signs are excluded. Each symbol is
+    // retained once, regardless of PCM block size or integration duration.
     std::vector<std::complex<double>> payload_constellation() const;
     ConstellationBatch take_payload_constellation();
     // Reconstruct the actual recent PCM, including spreading and carrier phase.
@@ -64,50 +62,62 @@ private:
 
 class StreamingReceiver {
 public:
-    StreamingReceiver(Config config, std::size_t workspace_bytes = 8 * 1024 * 1024,
-                      PatternSearch pattern_search = {});
+    StreamingReceiver(Config config, Bytes expected_preamble,
+                      std::size_t workspace_bytes = 8 * 1024 * 1024,
+                      BootstrapValidator validator = {}, PacketValidator packet_validator = {});
     ~StreamingReceiver();
     StreamingReceiver(StreamingReceiver&&) noexcept;
     StreamingReceiver& operator=(StreamingReceiver&&) noexcept;
-    // Feed physical PCM, optionally with its shared carrier projection.
+    // Choose PCM or integrated observations for a capture; reset before
+    // changing input kinds. Empty spans do not select an input kind.
     Bytes push(std::span<const float> samples, std::stop_token stop = {});
-    Bytes push(std::span<const float> samples, std::span<const std::complex<double>> projected,
-               std::stop_token stop = {});
-    // Removed integrated-symbol interface: throws; use physical samples.
     Bytes push_symbols(std::span<const SymbolObservation> observations, std::stop_token stop = {});
-    // Finish a finite capture without inserting silence or extra symbols.
-    // Pattern mode returns only complete, sufficiently supported symbols.
-    // No synthetic tail samples or bits are inserted.
+    // End a finite capture by completing only final integrals with at least
+    // 50% observed coverage; integrity validation resolves its decisions.
+    // Does not insert silence or extra data symbols.
     Bytes finish(std::stop_token stop = {});
     bool synchronized() const;
-    // Pattern candidates are accumulating.
+    // A plausible short header is collecting, but is not yet verified/locked.
     bool acquiring() const;
-    // No packet interpretation occurs during acquisition; returns empty.
+    // Bounded, unverified encoded bytes from the best provisional fit. These
+    // are for a clearly tentative preview, never packet/file delivery.
     Bytes provisional_frame() const;
-    // Exact pattern-supported bits, independent of packet interpretation.
-    PatternBurst provisional_pattern() const;
-    std::vector<PatternBurst> take_pattern_bursts();
-    std::vector<PatternEvidence> pattern_candidates() const;
-    std::vector<PatternEvidence> pattern_candidates(std::size_t limit) const;
-    bool clock_windowed() const;
     Diagnostics diagnostics() const;
-    // Physical chip observations for provisional and synchronized pattern fits.
+    // Available for the best provisional fit while acquiring(), then for the
+    // validated receive timing after synchronization. The first
+    // bootstrap symbol has no preceding received phase reference and is
+    // excluded; subsequent points use the same reference as the decoder.
     // Switching tentative fits does not replay already published samples.
     // Reset discards pending points and their overflow count.
     ConstellationBatch take_payload_constellation();
     std::size_t working_bytes() const;
-    // Shared receiver banks can lend unused DSP space to an active recording.
-    // The limit cannot be reduced below storage already in use.
-    void set_workspace_bytes(std::size_t bytes);
-    // Checks storage for pattern observations and decoded bit candidates.
-    // Independent of Config::memory_limit and the received-content quota.
-    bool frame_supported(std::size_t encoded_bytes) const;
     void reset();
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
 
+// Aligned, unframed APSK reception. The bit count and modem settings are known;
+// carrier phase starts at zero and nominal channel gain is one. Decisions come
+// only from observed samples, with no framing, integrity check or correction.
+class BinaryReceiver {
+public:
+    BinaryReceiver(Config config, std::size_t bit_count,
+                   std::size_t workspace_bytes = 8 * 1024 * 1024);
+    ~BinaryReceiver();
+    BinaryReceiver(BinaryReceiver&&) noexcept;
+    BinaryReceiver& operator=(BinaryReceiver&&) noexcept;
+    Bytes push_symbols(std::span<const SymbolObservation> observations, std::stop_token stop = {});
+    // A final symbol with at least99% measured clock coverage may complete;
+    // shorter/incomplete observations produce no invented trailing bits.
+    Bytes finish(std::stop_token stop = {});
+    ConstellationBatch take_payload_constellation();
+    std::size_t bits_received() const;
+    std::size_t working_bytes() const;
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
 SymbolObservation add_awgn(SymbolObservation observation, double sample_snr_db,
                            std::mt19937_64& random);
 }

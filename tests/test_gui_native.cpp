@@ -10,57 +10,8 @@ DecodedPacket packet(std::uint8_t id, std::size_t size) {
     result.message.data.resize(size,id);
     return result;
 }
-void retained_raw_bits() {
-    gui::Signals signals;
-    gui::SignalLine decoded;
-    decoded.text="t";decoded.raw_bits="010";decoded.received_bits=3;
-    decoded.complete=true;decoded.pattern_score=25.;
-    signals.update(decoded);
-    check(signals.copy_raw_bits(0)=="010" && signals.copy_text(0)=="t" &&
-          signals.copy_bytes(0)==Bytes{'t'} && !signals.copy_bits(0) && !signals.copy_id(0));
-    check(signals.lines()[0].raw_bits=="010" && !signals.copy_raw_bits(1));
-
-    const auto unavailable=[&](gui::SignalLine line) {
-        signals.clear();signals.update(std::move(line));check(!signals.copy_raw_bits(0));
-    };
-    auto pending=decoded;pending.complete=false;unavailable(pending);
-    auto partial=decoded;partial.raw_bits="01";unavailable(partial);
-    check(signals.lines()[0].raw_bits.empty());
-    partial=decoded;partial.expected_bits=4;unavailable(partial);
-    for (const auto& invalid : {std::string{},std::string("01x"),std::string("0 1"),std::string("01\0",3)}) {
-        auto malformed=decoded;malformed.raw_bits=invalid;unavailable(malformed);
-        check(signals.lines()[0].raw_bits.empty());
-    }
-    for (const auto score : {std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()}) {
-        auto invalid_score=decoded;invalid_score.pattern_score=score;unavailable(invalid_score);
-    }
-    auto missing_score=decoded;missing_score.pattern_score.reset();unavailable(missing_score);
-    auto verified=decoded;verified.validated=true;unavailable(verified);
-    auto file=decoded;file.text_message=false;unavailable(file);
-    auto empty=decoded;empty.text.clear();unavailable(empty);
-
-    auto bounded=decoded;bounded.raw_bits=std::string(4096,'0');bounded.received_bits=4096;
-    signals.clear();signals.update(bounded);
-    check(signals.copy_raw_bits(0)==bounded.raw_bits);
-    bounded.raw_bits.push_back('0');++bounded.received_bits;unavailable(bounded);
-    check(signals.lines()[0].raw_bits.empty());
-
-    gui::SignalLine binary;
-    binary.binary=true;binary.text="01110100";binary.received_bits=8;binary.complete=true;
-    signals.clear();signals.update(binary);
-    check(signals.copy_raw_bits(0)=="01110100" && signals.copy_text(0)=="t" && !signals.copy_bits(0));
-    binary.text="010";binary.received_bits=3;signals.update(binary);
-    check(signals.copy_raw_bits(0)=="010" && signals.copy_bits(0)=="010" && !signals.copy_text(0));
-    binary.complete=false;unavailable(binary);
-    binary.complete=true;binary.expected_bits=4;unavailable(binary);
-    binary.expected_bits=0;binary.text="01";unavailable(binary);
-    binary.text="01x";unavailable(binary);
-    binary.text=std::string(4097,'0');binary.received_bits=4097;unavailable(binary);
-    check(signals.lines()[0].text.size()==4096);
-}
 int main() {
     try {
-        retained_raw_bits();
         check(gui::parse_binary_bits("0")==Bytes({0}));
         check(gui::parse_binary_bits("000101")==Bytes({0,0,0,1,0,1}));
         check(gui::parse_binary_bits("\t00 01\r\n0\f1\v")==Bytes({0,0,0,1,0,1}));
@@ -72,6 +23,13 @@ int main() {
             try { (void)gui::parse_binary_bits(invalid); } catch (const Error&) { rejected_bits=true; }
             check(rejected_bits);
         }
+        auto source=gui::TransmitSource::message_file;
+        check(!gui::selected_binary_bits(source,"000101"));
+        check(!gui::selected_binary_bits(source,"invalid stale binary text"));
+        source=gui::TransmitSource::binary;
+        check(gui::selected_binary_bits(source,"000101")==std::optional<Bytes>(Bytes{0,0,0,1,0,1}));
+        source=gui::TransmitSource::message_file;
+        check(!gui::selected_binary_bits(source,"000101"));
         gui::Inbox inbox(5);
         inbox.put(packet(1,3));
         inbox.put(packet(1,2));
@@ -157,9 +115,8 @@ int main() {
         binary_line.text="001"; binary_line.complete=true; binary_line.received_bits=3;
         signals.update(binary_line);
         check(gui::signal_status_label(signals.lines()[0])=="binary received");
-        check(!gui::signal_byte_aligned(signals.lines()[0]) && gui::signal_display_text(signals.lines()[0])=="001");
         check(!signals.copy_id(0) && !signals.lines()[0].validated && signals.lines()[0].complete);
-        check(signals.copy_bits(0)=="001" && !signals.copy_text(0) && !signals.copy_bytes(0));
+        check(signals.copy_bits(0)=="001");
         binary_line.text="0"; binary_line.complete=false;
         signals.update(binary_line);
         check(signals.lines()[0].text=="001" && signals.lines()[0].complete);
@@ -182,59 +139,11 @@ int main() {
         signals.update(binary_line); check(!signals.copy_bits(2));
         binary_line.expected_bits=0; binary_line.received_bits=0;
         signals.update(binary_line); check(!signals.copy_bits(2));
-        binary_line.received_bits=3;binary_line.pattern_score=25.;
-        signals.update(binary_line);check(signals.copy_bits(2)=="001");
-        binary_line.pattern_score.reset();
         binary_line.text=std::string(5000,'0'); binary_line.expected_bits=binary_line.received_bits=5000;
         signals.update(binary_line);
         check(signals.lines()[2].complete && signals.lines()[2].text.size()==4096 && !signals.copy_bits(2));
-        check(gui::signal_data_label(signals.lines()[2])=="No checksum / FEC / prefix");
-        check(gui::signal_byte_aligned(signals.lines()[2]) && gui::signal_status_label(signals.lines()[2])=="text received");
-        std::string escaped_prefix;
-        for(std::size_t index=0;index<512;++index)escaped_prefix+="\\x00";
-        check(gui::signal_display_text(signals.lines()[2])==escaped_prefix);
-        check(!signals.copy_text(2) && !signals.copy_bytes(2));
-        check(!signals.copy_bits(3) && !signals.copy_text(3) && !signals.copy_bytes(3));
-
-        gui::Signals byte_signals;
-        gui::SignalLine byte_line;
-        byte_line.id=100; byte_line.binary=true; byte_line.text_message=false;
-        byte_line.text="01001000"; byte_line.received_bits=8; byte_line.expected_bits=32;
-        byte_signals.update(byte_line);
-        check(!gui::signal_byte_aligned(byte_signals.lines()[0]));
-        check(gui::signal_status_label(byte_signals.lines()[0])=="binary pending" &&
-              gui::signal_display_text(byte_signals.lines()[0])=="01001000");
-        check(!byte_signals.copy_bits(0) && !byte_signals.copy_text(0) && !byte_signals.copy_bytes(0));
-        byte_line.complete=true; byte_line.text="01001000011001010110110001110000"; byte_line.received_bits=32;
-        byte_signals.update(byte_line);
-        check(byte_signals.lines().size()==1 && byte_signals.lines()[0].binary && byte_signals.lines()[0].text==byte_line.text);
-        check(gui::signal_byte_aligned(byte_signals.lines()[0]) && gui::signal_status_label(byte_signals.lines()[0])=="text received");
-        check(gui::signal_display_text(byte_signals.lines()[0])=="Help" && byte_signals.copy_text(0)=="Help");
-        check(byte_signals.copy_bytes(0)==Bytes({'H','e','l','p'}) && !byte_signals.copy_bits(0) && !byte_signals.copy_id(0));
-
-        byte_line.id=101; byte_line.text="1100001110101001"; byte_line.received_bits=16; byte_line.expected_bits=0;
-        byte_line.pattern_score=25.;
-        byte_signals.update(byte_line);
-        check(gui::signal_display_text(byte_signals.lines()[1])=="\xc3\xa9" && byte_signals.copy_text(1)=="\xc3\xa9");
-        check(byte_signals.copy_bytes(1)==Bytes({0xc3,0xa9}) && !byte_signals.copy_bits(1));
-
-        byte_line.id=102; byte_line.text="000000001111111101011100"; byte_line.received_bits=byte_line.expected_bits=24;
-        byte_signals.update(byte_line);
-        check(gui::signal_display_text(byte_signals.lines()[2])=="\\x00\\xFF\\\\" && byte_signals.copy_text(2)=="\\x00\\xFF\\\\");
-        check(byte_signals.copy_bytes(2)==Bytes({0,0xff,'\\'}) && !byte_signals.copy_bits(2));
-
-        byte_line.id=103; byte_line.text="01001000"; byte_line.received_bits=8; byte_line.expected_bits=16;
-        byte_signals.update(byte_line);
-        check(!byte_signals.copy_bits(3) && !byte_signals.copy_text(3) && !byte_signals.copy_bytes(3));
-        byte_line.expected_bits=8; byte_line.text="0100100";
-        byte_signals.update(byte_line);
-        check(!byte_signals.copy_bits(3) && !byte_signals.copy_text(3) && !byte_signals.copy_bytes(3));
-        byte_line.text="0100100x";
-        byte_signals.update(byte_line);
-        check(!byte_signals.copy_bits(3) && !byte_signals.copy_text(3) && !byte_signals.copy_bytes(3));
-        byte_line.text.clear(); byte_line.received_bits=byte_line.expected_bits=0;
-        byte_signals.update(byte_line);
-        check(!gui::signal_byte_aligned(byte_signals.lines()[3]) && !byte_signals.copy_text(3) && !byte_signals.copy_bytes(3));
+        check(gui::signal_data_label(signals.lines()[2])=="FEC off / prefix");
+        check(!signals.copy_bits(3));
         gui::Inbox mixed;
         mixed.put(packet(1,3)); // Text belongs to the signal browser only.
         auto file=packet(2,4); file.message.kind=MessageKind::file; file.message.filename="payload.bin";
@@ -277,7 +186,7 @@ int main() {
         check(gui::key_entry_names(" Home, Portable , Caf\xc3\xa9 ")==std::vector<std::string>({"Home","Portable","Caf\xc3\xa9"}));
         const std::vector<std::string> choice_names{"A|B","None","_Home","Home","A&B","AB","Path/Back\\slash"};
         check(gui::key_choice_labels(choice_names)==std::vector<std::string>({
-            "None","1. A|B","2. None","3. _Home","4. Home","5. A&B","6. AB","7. Path/Back\\slash"}));
+            "None","1. A|B","2. None","3. _Home","4. Home","5. A&&B","6. AB","7. Path/Back\\slash"}));
         check(gui::key_choice_labels({})==std::vector<std::string>({"None"}));
         for (const auto* invalid : {"", " ", ",Home", "Home,", "Home,,Portable"}) {
             bool invalid_names=false;

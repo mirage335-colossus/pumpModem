@@ -29,116 +29,27 @@ The caller maps its symbol/sample schedule to byte positions; this library does
 not convert fractional seconds or automatically advance the anchor during a
 transmission.
 
-For byte offset `o`, the AES-256-CTR initial 128-bit counter is
-`domain_pad || BE64(floor(o / 16))`. The optional final `Crypto::stream`
-argument selects `StreamDomain::Payload` by default, whose eight-byte pad is
-all zero, preserving existing payload output. `StreamDomain::Preamble` uses
-the eight ASCII bytes `preamble`. Both domains use the same purpose and epoch
-key; the counter pad is not another key derivation. Discard the first `o % 16`
-keystream bytes and produce the requested count. OpenSSL increments the whole
-counter in big-endian order. The API rejects an offset/count combination whose
-final byte exceeds `2^64-1`, so neither domain can carry into the high counter
-bytes or overlap the other domain.
+For byte offset `o`, the AES-256-CTR initial 128-bit counter is the big-endian
+integer `floor(o / 16)`. Discard the first `o % 16` keystream bytes and produce
+the requested count. OpenSSL increments the whole counter in big-endian order.
+The API rejects an offset/count combination whose final byte exceeds `2^64-1`.
 Changing the whole-second anchor derives a fresh epoch key; counter positions
 therefore do not collide merely because adjacent transmissions cross a second.
-Within one anchor, purpose and domain, random access and sequential generation
-agree.
+Within one anchor and purpose, random access and sequential generation agree.
 
-### Binary pattern chip addressing
+`xor_data` XORs that stream with arbitrary bytes. `mac` computes the complete
+32-byte HMAC-SHA256 over exactly the supplied bytes with the separate MAC key.
+Frame callers must include all metadata that requires integrity in an
+unambiguous encoding. Verification requires a 32-byte tag and compares it with
+`CRYPTO_memcmp`. HMAC does not require a unique message nonce. Packet framing
+decides where the tag is placed and which surrounding coding is applied.
 
-Every selected key on a non-tone transfer enables private Scrambler templates
-as well as Data encryption. DSSS remains an independently selectable private
-purpose. Tone modes force the key, Data mask, Scrambler and DSSS off; they are
-unencrypted modes for ordinary communications or local experiments and provide
-no LPI claim. Explicit old APSK profiles are rejected.
-
-Transfer derives each 32-byte waveform seed from its purpose's original key
-stream at the selected epoch and byte offset zero. `PatternCode` constructs a
-`Crypto` instance from that seed and selects the same purpose and epoch for
-chip generation. Raw payload Data masking uses the original selected key.
-This waveform convention is incompatible with the former real-sign waveform.
-
-For absolute chip position `k`, a private template consumes eight bytes at
-`8*k`. If Scrambler is enabled its bytes supply the row; otherwise a public
-Scrambler stream supplies the base. Enabled DSSS bytes at the same absolute
-position XOR into that row. Two big-endian 32-bit words determine a circular
-I/Q sample: uniform words `u,v` in `(0,1)` produce phase `2*pi*v` and radius
-`min(1.75, sqrt(-log(u))) / sqrt(1-exp(-1.75^2))`. This caps peaks within PCM
-headroom and normalizes expected complex power to one. Both amplitude and
-phase now depend on the private stream. This removes the former invariant
-where squaring real PCM canceled all private +/- signs and exposed a fixed
-squared carrier.
-
-Let `C = ceil(symbol_samples / chip_samples)`. Symbol `j` starts at chip
-`start_chip + j*C`; a partial final chip consumes its entire stream position.
-All addresses are checked, including the eight-byte expansion. Every enabled
-private purpose advances through fresh positions across symbols. Fixed
-512-byte seek caches retain no duration-proportional keystream history and
-are cleansed on release.
-
-The two legal bit alternatives multiply that position's circular private row
-by different public internal-transition masks. Only the selected alternative
-is emitted at each position. The receiver regenerates both alternatives for
-its candidate key, epoch and stream position, fitting unknown common gain and
-phase. FFT correlation divides by the actual template energy; the bounded
-clock-window correlator retains the full two-quadrature Gram matrix. Signal
-start, continuation, end and time/key alignment still come from pattern
-evidence alone, never a preamble, packet header, FEC or MAC.
-
-Unkeyed public patterns use the same circular I/Q mapping with the public
-Scrambler seed, epoch zero and symbol-local chip positions. Amplitude and phase
-both vary, but their rows restart each symbol and are intentionally recognizable.
-Two bit alternatives mean two complete pattern templates, not a two-point
-constellation. Short public templates legitimately yield sparse plots because
-later symbols reuse the same finite chip values. All templates use complex
-`value` samples; the former real `sign`/`fill` API has been removed.
-
-### Protected hardware settling
-
-The hardware-settling prefix uses the same bounded circular-noise mapping and
-one update per chip as private payload templates. Public prefix bytes are
-XORed with the selected Data-purpose bytes and every enabled Scrambler/DSSS
-stream before amplitude and phase mapping. Each layer uses the existing key
-and transmission epoch with `StreamDomain::Preamble`, the separate counter
-range whose high eight bytes are ASCII `preamble`. This pad is local state,
-never an on-air field; no preamble-specific key is generated.
-
-The prefix is generated independently of both payload codewords and carries no
-acquisition marker. It uses no payload stream positions; payload starts at
-position zero afterward.
-The epoch is fixed before the prefix and receiver clock hypotheses account
-for the rounded settling duration. No epoch, prefix length, chip count, nonce
-or sender identity is transmitted as an additional field. There is no legacy
-APSK training prefix or post-encryption symbol padding.
-
-Regular chip timing, finite bandwidth, burst edges and bounded sample amplitudes
-remain physical characteristics of the waveform. Removing the squared-carrier
-invariant is not proof of indistinguishability from arbitrary background noise
-or a measured probability of interception.
-
-### Data, integrity and reuse
-
-`xor_data` XORs arbitrary bytes with the Data stream. `mac` computes the full
-32-byte HMAC-SHA256 using its independent key; verification requires all 32
-bytes and compares with `CRYPTO_memcmp`. Packet callers authenticate metadata,
-content and local epoch context before FEC and whole-stream encryption.
-
-Raw bits and dictionary-coded short text carry no MAC or checksum. Their
-pattern evidence supplies neither cryptographic authentication nor replay
-protection. Compact packets insert their repeated 96-bit recovery word after
-every complete 256 encoded bytes, before Data encryption. Every marker,
-header, integrity and FEC bit is therefore masked. Recovery runs only after
-ordinary Data decryption and never changes a crypto offset, resets a counter,
-or creates another packet parser entry point.
-
-Reusing the same key, timestamp, purpose, domain and stream positions repeats
-CTR output. It can expose plaintext XORs and allow correlation between repeated
-private waveforms; the new mapping cannot repair stream reuse. Independent
-MAC keys remain separate. Automatically timed live keyed bursts wait for a
-fresh whole-second epoch, and encrypted output has its existing cooldown.
-Explicit timestamps are caller-controlled, and separate devices sharing a key
-still require coordination. A cropped reception uses the acquired absolute
-symbol index for Data decryption rather than restarting at zero.
+Reusing the same key, timestamp, purpose, and byte positions repeats CTR output
+and exposes the XOR of the plaintexts. Known plaintext reveals those reused
+positions. It does not directly reveal other CTR positions or the independent
+MAC key. HMAC still rejects altered authenticated content. This is not a claim
+that CTR reuse preserves confidentiality. Use transmission spacing and coordinate
+large transfers sharing a key.
 
 ## Named key sets: keyfile version 2
 

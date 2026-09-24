@@ -1,132 +1,18 @@
-# Data Pump pattern transport and compact packet format
+# Data Pump compact packet format
 
-Automatic modem profiles use one meaningful bit per binary pattern symbol.
-Pattern evidence establishes signal presence, timing and burst boundaries
-before application decoding. Both audio peers need matching modem settings.
-The compact packet codec remains available for larger text, files and
-screenshots; it does not define the presence of a raw-bit signal. Existing
-keyfiles remain compatible. Receiving a file never executes it.
+Release 0.7.0 uses this format exclusively. The old packet formats and their
+compression selectors are removed. Both audio peers must use the compact
+format and matching modem settings. Existing keyfiles and the separate raw-bit
+transmission path are unchanged. Receiving a file never executes it.
 
-The automatic waveform is incompatible with the previous automatic APSK
-waveform. Both peers must use the current pattern transport. Legacy APSK has been removed;
-the receiver does not negotiate compatibility over air.
-Pattern peers also require the periodic recovery convention for compact packets
-of at least 256 encoded bytes. There is no automatic retry of their earlier,
-unstripped representation after a recovery candidate fails validation.
+## On-air sequence
 
-## Raw bits and short text
-
-Raw binary input is transmitted exactly as entered, including leading zeros
-and lengths not divisible by eight. Three input bits produce exactly three
-payload pattern symbols. There is no packet header, checksum, MAC, FEC,
-byte-padding bit, or transmitted length field on this path.
-
-A separate hardware-settling prefix precedes a nonempty transmission when five
-seconds rounds to at least one whole payload-symbol duration. Rounding is to
-nearest, with ties upward: symbols longer than ten seconds add no prefix. This
-independent noise-like waveform helps external gain control and muting settle;
-it carries no payload or training information and is not required for reception.
-Payload stream positions start at zero after the prefix. See
-[settling waveform and timing](pattern-constellation.md#hardware-settling-prefix).
-
-Normal text below 16 original UTF-8 bytes uses the fixed short-byte dictionary
-described below, emitted as exact prefix-code bits. It carries no compression
-flag, original-size field or padding. The receiver decodes complete dictionary
-tokens through the detected burst endpoint and only presents this automatic
-short-text interpretation when the result is below 16 bytes. Truncated or
-uninterpretable input remains available as raw bits. For example, the byte
-`e` is its three-bit dictionary code, rather than a framed one-byte message.
-
-Text of at least 16 source bytes, files and screenshots use the compact
-packet codec below, with periodic byte-boundary recovery on the pattern
-transport. Files and screenshots retain that representation even
-when their payload is below 16 bytes; the application does not invent an
-untransmitted file type or filename from raw bits. Direct packet APIs can also
-encode short text, but those framed bytes are separate from the normal
-short-text transfer path.
-
-The receiver preserves detected bits independently of packet validity. Its
-`raw_bits` diagnostic retains the existing Data-stream decryption result of the
-exact observed bits, including any transport markers. It is distinct from the
-recovered logical packet candidate. A burst may subsequently validate as a
-compact packet; short raw bursts may provide a dictionary interpretation. Neither interpretation
-changes which waveform timing or pattern candidates were selected. Keyed raw
-bits use the independent Data stream before transmission; no authentication
-tag is silently added to them.
-
-## Framed packet sequence
-
-The packet contains a **variable compact bootstrap**, then the optionally
-Reed–Solomon-coded and interleaved body. Automatic binary pattern modulation
-sends each wire bit, including the periodic recovery markers described below,
-as a separate pattern symbol, without symbol padding. The same hardware-settling
-prefix described above can precede it; it is separate from the packet and
-supplies no modem training.
-
-There is no APSK training path or final-symbol zero padding. Byte-oriented
-`pack`/`unpack` APIs remain separate from modulation and do not insert or remove
-transport byte-boundary recovery markers.
-
-### Periodic byte-boundary recovery
-
-For compact packets on the pattern transport, the sender inserts a fixed
-24-byte marker after every complete 256 bytes of the encoded packet, counting
-the protected bootstrap, interleaved body and parity. This includes a final
-block of exactly 256 bytes. A shorter encoded packet adds no marker. The rule
-applies with or without encryption and FEC; the 16-original-byte FEC threshold
-does not change this encoded-byte cadence. Exact raw-bit and short dictionary
-transmissions bypass it.
-
-The marker consists of the same 96-bit word repeated twice. At runtime the word
-is the first 12 digest bytes of SHA-256 over the ASCII label
-`DataPump/byte-boundary/v1`, without a terminating zero; bytes are emitted most
-significant bit first. Source and executable storage use the derivation label,
-not the literal marker bytes. This reduces accidental self-recognition when
-transferring the program or source. It cannot make a finite marker absent from
-every possible file or memory dump.
-
-`message_bits` returns logical packet bits before transport processing.
-`message_wire_bits` inserts markers into those bits, then applies the optional
-Data-stream mask to the entire result, including every marker bit. Markers
-consume Data-stream positions, and all transmitted bits then pass through the
-configured pattern mapping and Scrambler/DSSS layers. Keyed transmission never
-places an unencrypted recovery marker on the wire. With `N` encoded bytes,
-overhead is `24 * floor(N / 256)` bytes, or 9.375% per full block. Markers contain
-no lengths, types, addresses, commands or authentication.
-
-After pattern acquisition and the existing whole-stream Data decryption,
-recovery starts at the existing burst origin and examines only the expected
-plaintext marker slots. It accepts an exact match of both 96-bit copies at
-offsets from -7 through +7 bits around each expected boundary.
-It does not search the rest of the payload for markers. For a matched slot, the
-preceding plaintext interval is normalized to 2,048 bits: retain its prefix,
-trim extra tail bits or zero-fill a missing tail. This preserves the next block's
-byte boundary while leaving the affected region to FEC and whole-packet integrity.
-A corrupt or absent exact marker consumes the nominal 192-bit slot when that
-slot is available; a later intact marker can still restore alignment.
-
-Marker matching and removal operate after the existing Data-stream decryption,
-before body deinterleaving, Reed–Solomon correction and final integrity checks.
-A marker never starts a packet parser or a nested message. The recovered
-candidate permits a single compact packet at the burst
-origin whose declared extent must equal the complete recovered byte extent.
-Failed validation does not trigger a second attempt on the unstripped stream.
-Short dictionary interpretation is limited to 195 acquired bits (15 maximally
-escaped bytes), so a long failed packet cannot fall back to dictionary text.
-Acquired raw bits remain available as diagnostics.
-
-This repairs byte alignment after a net shift of at most seven decoded plaintext
-bits per searched slot, not arbitrary lost spans. It cannot reconstruct a damaged
-tail without a later marker, whole missing blocks or an unknown absolute stream
-offset. Pattern constellation decoding remains the sole authority for timing
-and keystream alignment. Recovery never trials cryptographic offsets, resets
-counters or reseeds streams; it cannot restore Data-stream, Scrambler or DSSS
-alignment. Subsequent bits must still be acquired and decrypted correctly in
-the same burst. There is no improvement to waveform acquisition or carrier/clock
-tracking. An intact marker does not authenticate content: the complete packet must still
-pass SHA-256 or keyed HMAC-SHA256 before validated content is released.
-
-### Compact bootstrap
+The modem sends its fixed five-second training, then a **variable compact
+bootstrap**, then the optionally Reed–Solomon-coded and interleaved body.
+Training contains 32 input bytes mapped onto 64 four-bit APSK segments; it is
+independent of the payload symbol clock. Bootstrap and body form one continuous
+APSK bitstream. There is no internal symbol padding or transmitted zero-byte
+tail. Only the last symbol can contain unused pad bits, excluded from content.
 
 The systematic bootstrap occupies four to eight bytes:
 
@@ -142,8 +28,7 @@ Bits 2–3 select content kind: 0 text, 1 file, 2 screenshot; 3 is invalid.
 Bit 4 indicates compressed payload, bit 5 keyed authentication and bit 6 a
 repeat request. Bit 7 is zero. There is no format-version byte, compression
 algorithm selector, dictionary identifier, transmitted codebook, tag-length
-field, packet-start magic or duplicate payload-length field. The periodic
-transport marker above is outside the packet codec. Original content below
+field, magic marker or duplicate payload-length field. Original content below
 16 bytes forces FEC Off for both header and body, regardless of the requested
 mode. This threshold concerns original bytes, including UTF-8 byte counts,
 and applies to files as well as text. It does not depend on compressed size or
@@ -156,8 +41,7 @@ parity bytes. A five-byte header uses zero, two or four. This is the same nomina
 coding policy; rounding small blocks to even parity makes their actual overhead
 ratio higher. Header and body always use the same modulation and symbol rate.
 
-Within this packet codec, ordinary text under 16 bytes has a **four-byte total
-bootstrap**; normal short-text transfer bypasses it. Packet text under
+Ordinary text under 16 bytes has a **four-byte total bootstrap**. Text under
 256 bytes usually has four or five systematic bytes and at most four parity
 bytes. Long metadata strings can increase the length field by one byte. The
 maximum bootstrap is 14 bytes, a receive-probe bound, not transmitted padding.
@@ -170,22 +54,21 @@ checks that length and its working-buffer cost before allocation.
 `packet_frame_size` accepts a complete variable bootstrap; `packet_header_extent`
 returns its actual protected length. Incomplete prefixes return no size.
 `decode_packet` reports the exact consumed length and ignores a demodulator
-tail after that frame. Pattern transport additionally requires that consumed
-length equal the complete candidate extent; it does not extract inner packets
-or accept a valid packet followed by extra candidate bytes.
+tail after that frame.
 
-Automatic acquisition fits the legal pattern waveforms against noise, with
-unknown common phase and amplitude. It does not use the APSK lattice, packet
-bootstrap, CRC or MAC as a signal-lock gate. Packet sizes and integrity are
-validated only after accepted pattern bits become available.
-Finite frequency/timing coverage, noise and clock drift still limit reception.
+Blind acquisition fits the measured pattern constellation's amplitude lattice
+and differential phase residuals. It tries the first symbol's possible phase
+labels, so loss of the physical training does not require header RS to repair
+an unknown phase reference. Frames up to 2048 encoded bytes remain provisional
+until their complete digest or MAC verifies, while other timing hypotheses keep
+searching. This covers all packets with less than 256 original bytes, including
+maximum metadata. A plausible short header alone cannot commit the receiver to
+a corrupted length. Finite timing, noise and drift limits still apply.
 
-The validated packet length terminates packet content. Pattern evidence
-separately terminates a detected burst. A fade can split a burst because signal
-loss alone cannot establish whether a transmitter intended to stop. No end
-marker or zero-byte guard is sent beyond the periodic recovery cadence;
-finishing a finite capture is local and does
-not increase transmitted airtime.
+The validated length terminates content. Signal fade is not an unambiguous
+message delimiter: a channel fade can also occur within a transmission. No
+end marker or zero-byte guard is sent; finite-capture integration is flushed
+locally and does not increase transmitted airtime.
 
 ## Logical body before coding
 
@@ -213,30 +96,20 @@ checksum uses reflected CRC-32, polynomial `0xEDB88320`, initial and final XOR
 `0xFFFFFFFF`. It also limits accidental identity changes in pending previews.
 Callsign and grid describe content; no routing or destination address exists.
 
-These metadata fields and the repeat flag remain available to the CLI and
-packet API. The desktop Callsign, Grid and Repeatable controls instead insert
-editable in-band text into Message; desktop messages leave their corresponding
-packet metadata empty and the packet repeat flag off. See the
-[desktop compose behavior](../README.md#desktop-console).
-
 The digest/MAC covers the canonical variable systematic bootstrap followed
 by the logical metadata and encoded payload. It excludes the tag itself,
-hardware settling, parity and transport recovery markers. There are no symbol pad bits. A keyed
-receiver rejects unkeyed packets;
+training, parity and symbol pad bits. A keyed receiver rejects unkeyed packets;
 SHA-256 alone supplies integrity, not authentication. Transfer-layer keyed
 MACs bind the local epoch, which is not transmitted as a packet field.
 
-For automatic pattern transport, private Data-stream encryption wraps all wire
-bits after recovery markers are inserted, independently of private pattern and
-DSSS streams. Protected settling uses those same selected keys with separate
-preamble counter positions, mixing the streams before noise amplitude/phase
-mapping. Tone modes force all private protections off. No public whitening
-layer is added after encryption.
+Private stream encryption wraps training and the complete protected packet.
+The existing public whitening mask is then applied to the packet, excluding
+training. The receiver reverses whitening and private masking before FEC and
+integrity verification. Whitening is reversible scrambling, not encryption.
 
 ## Automatic compression
 
-For framed packets, compression is attempted automatically unless explicitly
-disabled by the CLI.
+Compression is attempted automatically unless explicitly disabled by the CLI.
 It is selected only when it saves at least one whole payload byte. The single
 compressed flag and the original length completely determine decoding:
 
@@ -260,11 +133,9 @@ short codes, as in the frequency-weighted idea behind Morse code:
 | Every other byte | `11111` followed by its eight literal bits | 13 |
 
 This codes bytes, including arbitrary binary and UTF-8. There are no phrase
-tokens. Escaping a directly coded byte is noncanonical. The exact-bit short-text
-path terminates at the detected bit endpoint and permits no padding. In the
-framed packet representation, the original byte count terminates decoding and
-only zero to seven zero pad bits may follow. Extra bytes, nonzero padding,
-truncated tokens and expansion beyond the count are rejected.
+tokens. Escaping a directly coded byte is noncanonical. The original byte count
+terminates decoding; only zero to seven zero pad bits may follow. Extra bytes,
+nonzero padding, truncated tokens and expansion beyond the count are rejected.
 
 ### Long data and files
 
@@ -332,5 +203,4 @@ coding policy for this numeric baseline. Fixed training, header and metadata cos
 are excluded; growth of the variable original-length field and its parity is
 part of the incremental encoded cost. At most two seconds of incremental content, or at most one
 original payload byte, is allowed by the default policy. Packet sizes and time
-estimates reflect actual compression, FEC, periodic transport recovery overhead
-where applicable and the single packet symbol boundary.
+estimates reflect actual compression, FEC and the single packet symbol boundary.
