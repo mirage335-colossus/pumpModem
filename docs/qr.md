@@ -19,19 +19,6 @@ default 4. SVG consists exclusively of locally generated rectangles/path
 geometry and never interpolates the input text into markup. PBM needs no image
 library to produce or display in a compatible GUI toolkit.
 
-The GUI dropdown above the QR preview controls its brightness and selects Dark
-red on every startup (Dark gray in monochrome). Dim red and Dark red reduce the
-background and four-module quiet zone to dark red; monochrome output uses gray
-instead. Off hides the preview on black while keeping the message. The selection
-remains in effect when the message changes. Choose Normal for the original
-black-on-white rendering when scanning. This presentation setting does not change
-the module matrix or the black-and-white SVG/PBM exports.
-
-Click the QR preview to fill the app window with a larger, sharply rendered code.
-The window keeps its size and title bar, and the code follows window resizing.
-Click it again or press Escape to restore the original preview and controls.
-The expanded view keeps the selected brightness and follows message changes.
-
 The optical representation is plaintext: it does not automatically add modem
 encryption, authentication, or content trust. It transports the exact supplied
 UTF-8 bytes through a standard QR reader. Users decide how to handle the
