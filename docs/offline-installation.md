@@ -5,8 +5,11 @@ environments, and package downloads are absent from the application installation
 A working installation can be copied as one directory to another compatible
 computer and run immediately.
 
-The complete FLTK 1.4.5 source is pinned in `third_party/fltk`; the QR encoder is
-also vendored. CMake uses these local sources and an already installed C++
+The complete FLTK 1.4.5 source is pinned in `third_party/fltk`; the QR encoder and
+the XZ 5.8.4 liblzma source subset are also vendored. liblzma is compiled into
+the application statically, so the destination needs no compression package or
+liblzma DLL. Its license and source provenance are included in each bundle.
+CMake uses these local sources and an already installed C/C++
 toolchain, OpenSSL development files, and desktop development libraries. There is
 no `FetchContent`, runtime bootstrap, or dependency download during configuration,
 compilation, installation, or packaging.
@@ -28,10 +31,15 @@ cmake --install build --prefix "$PWD/build/DataPump-portable"
 cmake --build build --target package
 ```
 
-The Python switch demonstrates that the complete native build needs no Python.
+The Python switch demonstrates that the default FLTK build needs no Python.
 Omit it if you want CTest to run additional Python CLI integration tests when an
 interpreter is already available. Those tests are developer tooling and are not
 installed.
+
+The optional `-DDATAPUMP_GUI_BACKEND=rev` profile requires Python at build time
+to embed resources, plus its C++23/OpenGL toolchain. Its runtime still needs no
+Python or source assets. Follow [Rev backend](rev-backend.md) for that build;
+host OpenGL loaders and drivers are excluded from its collected libraries.
 
 Both `DATAPUMP_BUILD_GUI` and `DATAPUMP_PORTABLE` default to `ON`. Setting the GUI
 option to `OFF` creates a CLI-only package. Setting the portable option to `OFF`
