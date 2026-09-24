@@ -28,192 +28,6 @@ void prepare(Controller& controller) {
     }
     check(controller.estimate().has_value(),"Payload estimate was not prepared");
 }
-void simulation_estimate_controls() {
-    using F=ui::Field;
-    Controller controller({true,true});
-    const auto text=[&](F field) {return controller.field(field).text;};
-    for(const auto field:{F::simulation_confidence,F::simulation_cpu_time,F::simulation_gpu_time}) {
-        const auto& screen=ui::console_screen();
-        const auto declaration=std::find_if(screen.begin(),screen.end(),[&](const auto& control) {return control.field==field;});
-        check(declaration!=screen.end()&&declaration->kind==ui::Kind::label&&declaration->persistent&&
-              std::string_view(declaration->help).size()>40,
-              "Simulation estimates need persistent shared labels and explanatory help");
-    }
-    controller.edit(F::message,"e");prepare(controller);
-    check(text(F::simulation_confidence).find('%')!=std::string::npos&&
-          text(F::simulation_cpu_time).find("i9-13900H\n~")!=std::string::npos&&
-          text(F::simulation_gpu_time).find("RTX 4090 Laptop (projected)\n~")!=std::string::npos,
-          "Simulation estimates omitted modeled probability or named reference hardware");
-    const auto dictionary_cpu=text(F::simulation_cpu_time);
-    const auto dictionary_confidence=text(F::simulation_confidence);
-    controller.edit(F::short_bits,"001");
-    check(text(F::simulation_confidence).ends_with("Calculating..."),
-          "Draft change left a stale simulation probability on screen");
-    prepare(controller);
-    check(text(F::simulation_cpu_time)==dictionary_cpu&&text(F::simulation_confidence)==dictionary_confidence,
-          "Identical three-bit dictionary and raw transmissions have different simulation estimates");
-    controller.edit(F::message,"A longer message that requires fixed intervals.");prepare(controller);
-    check(text(F::simulation_cpu_time)!=dictionary_cpu,
-          "Simulation compute estimate ignored a longer framed draft");
-    const auto strong_probability=text(F::simulation_confidence);
-    controller.select(F::simulation,std::string(tuning::simulation_presets().back().name));prepare(controller);
-    check(text(F::simulation_confidence)!=strong_probability,
-          "Simulation probability did not respond to the weak channel preset");
-    controller.select(F::simulation,std::string(tuning::simulation_presets().front().name));
-    for(const auto field:{F::simulation_confidence,F::simulation_cpu_time,F::simulation_gpu_time})
-        check(text(field).ends_with("Simulation off"),"Disabling simulation retained a numeric estimate");
-    // An in-flight preparation must not restore an estimate for an older preset.
-    prepare(controller);
-    check(text(F::simulation_cpu_time).ends_with("Simulation off"),"Stale preparation restored a disabled simulation estimate");
-    controller.select(F::simulation,std::string(tuning::simulation_presets()[2].name));
-    controller.edit(F::bandwidth,"invalid");
-    check(text(F::simulation_confidence).ends_with("Invalid settings")&&
-          text(F::simulation_cpu_time).ends_with("Invalid settings"),
-          "Invalid settings left a previous numeric simulation estimate visible");
-    controller.edit(F::bandwidth,"3.6 kHz");prepare(controller);
-    controller.edit(F::short_bits,"001x");
-    check(text(F::simulation_confidence).ends_with("Unavailable"),
-          "Invalid bit draft left a previous numeric reception estimate visible");
-    controller.edit(F::message,"a");
-    controller.edit(F::bandwidth,"1 Hz");
-    controller.select(F::simulation,"3dBm -120dB");prepare(controller);
-    check(text(F::simulation_confidence).ends_with("Carrier outside RX search")&&
-          text(F::simulation_confidence).find('%')==std::string::npos&&
-          text(F::simulation_cpu_time).find("\n~")!=std::string::npos&&
-          text(F::simulation_gpu_time).find("\n~")!=std::string::npos,
-          "1 Hz clock mismatch must explain unavailable confidence while retaining compute estimates");
-    controller.select(F::simulation,"3dBm -60dB");prepare(controller);
-    check(text(F::simulation_confidence).ends_with("Carrier outside RX search"),
-          "High signal strength incorrectly restored confidence outside the carrier search");
-    controller.edit(F::bandwidth,"3.6 kHz");prepare(controller);
-    check(text(F::simulation_confidence).find('%')!=std::string::npos,
-          "Returning to supported carrier coverage did not restore the modeled percentage");
-}
-void revised_reception_ingestion() {
-    const auto complete=[](std::uint64_t row,std::uint64_t revision,MessageKind kind,std::uint8_t byte) {
-        live::Snapshot snapshot;
-        transfer::Received received;received.stream_complete=true;received.content_validated=true;
-        received.content.message.local_id[0]=static_cast<std::uint8_t>(row);
-        received.content.message.kind=kind;received.content.message.data=Bytes{byte,byte};
-        received.content.message.filename=kind==MessageKind::text?"":"profile.bin";
-        live::SignalUpdate signal;signal.id=row;signal.revision=revision;signal.validated=true;signal.complete=true;
-        signal.reception_id=id_label(received.content.message);signal.text=kind==MessageKind::text?"text":"profile.bin";
-        snapshot.received.push_back(std::move(received));snapshot.signals.push_back(std::move(signal));
-        return snapshot;
-    };
-    const auto pending=[](std::uint64_t row,std::uint64_t revision) {
-        live::SignalUpdate signal;signal.id=row;signal.revision=revision;signal.binary=true;
-        signal.text="001";signal.received_bits=3;signal.pattern_score=32;
-        return signal;
-    };
-    for(const auto kind:{MessageKind::text,MessageKind::file}) {
-        Inbox inbox;Signals signals;
-        auto original=complete(101,1,kind,'a');const auto stale=original;
-        apply_receptions(inbox,signals,original);
-        check(inbox.items().size()==1&&inbox.size_bytes()==2&&signals.lines().size()==1&&
-              signals.lines().front().text_message==(kind==MessageKind::text),
-              "Controller reception ingestion did not retain completed source content and type");
-
-        auto stronger=stale;stronger.signals.push_back(pending(101,2));
-        // Both event orders can occur when one UI poll drains several profiles.
-        if(kind==MessageKind::file)std::reverse(stronger.signals.begin(),stronger.signals.end());
-        apply_receptions(inbox,signals,stronger);
-        check(inbox.items().empty()&&inbox.size_bytes()==0&&signals.lines().size()==1&&
-              signals.lines().front().revision==2&&!signals.lines().front().complete&&
-              !signals.copy_id(0)&&!signals.copy_raw_bits(0)&&!signals.copy_text(0),
-              "A later stronger pending profile did not retract the completed inbox source before replayed content was inserted");
-
-        auto replacement=complete(101,3,kind,'b');
-        apply_receptions(inbox,signals,replacement);
-        check(inbox.items().size()==1&&inbox.items().front().message.data==Bytes({'b','b'})&&
-              inbox.size_bytes()==2&&signals.lines().front().revision==3&&signals.lines().front().complete,
-              "Invalidation removed newly completed replacement content sharing the stable reception identity");
-        auto unchanged=complete(102,0,MessageKind::file,'c');apply_receptions(inbox,signals,unchanged);
-        auto late=stale;late.signals.front().superseded_ids={102};apply_receptions(inbox,signals,late);
-        check(signals.lines().size()==2&&signals.lines().front().revision==3&&inbox.items().size()==2&&
-              inbox.items().front().message.data==Bytes({'b','b'}),
-              "A stale revision reinserted old content or retracted an unrelated current reception");
-
-        live::Snapshot merged;auto event=pending(101,4);event.superseded_ids={102};merged.signals.push_back(event);
-        merged.received=complete(102,0,MessageKind::file,'c').received;
-        apply_receptions(inbox,signals,merged);
-        check(signals.lines().size()==1&&signals.lines().front().id==101&&signals.lines().front().revision==4&&
-              !signals.lines().front().complete&&inbox.items().empty()&&inbox.size_bytes()==0,
-              "Merging profile rows left an obsolete file, source payload or duplicate history row");
-        auto retired=complete(102,0,MessageKind::file,'c');apply_receptions(inbox,signals,retired);
-        check(signals.lines().size()==1&&inbox.items().empty(),
-              "A delayed event restored merged-away source content or its retired row");
-        auto final=complete(101,4,kind,'d');apply_receptions(inbox,signals,final);
-        check(signals.lines().size()==1&&signals.lines().front().complete&&inbox.items().size()==1&&
-              inbox.items().front().message.data==Bytes({'d','d'}),
-              "The merged pending reception could not complete with its stable row and source identity");
-        auto replaced_complete=complete(101,5,kind,'e');apply_receptions(inbox,signals,replaced_complete);
-        check(signals.lines().size()==1&&signals.lines().front().revision==5&&inbox.items().size()==1&&
-              inbox.size_bytes()==2&&inbox.items().front().message.data==Bytes({'e','e'}),
-              "Replacing a completed profile removed the new source sharing its canonical local identity");
-    }
-    for(const bool dictionary:{false,true}) {
-        Inbox inbox;Signals signals;live::Snapshot initial;
-        auto observed=pending(103,0);observed.complete=true;
-        if(dictionary) {observed.binary=false;observed.text="e";observed.raw_bits="001";}
-        initial.signals.push_back(observed);apply_receptions(inbox,signals,initial);
-        check(signals.copy_raw_bits(0)=="001","Raw/dictionary fixture lost its completed source bits");
-        live::Snapshot revised;revised.signals.push_back(pending(103,1));apply_receptions(inbox,signals,revised);
-        check(signals.lines().size()==1&&!signals.lines().front().complete&&!signals.copy_raw_bits(0)&&
-              !signals.copy_text(0),"Controller ingestion left completed raw/dictionary copy actions on a superseded profile");
-    }
-    for(const bool merge:{false,true}) {
-        Inbox inbox;Signals signals;
-        auto old=complete(101,5,MessageKind::file,'a');const auto stale=old;
-        apply_receptions(inbox,signals,old);
-        auto unrelated=complete(102,0,MessageKind::file,'b');apply_receptions(inbox,signals,unrelated);
-        for(std::uint64_t id=200;id<264;++id) {
-            SignalLine row;row.id=id;row.binary=true;row.text="0";row.received_bits=1;signals.update(row);
-        }
-        check(signals.lines().size()==64&&signals.lines().front().id==200&&inbox.items().size()==2,
-              "The cache regression did not retain sources beyond the visible row history");
-        auto late=complete(101,4,MessageKind::file,'z');late.signals.front().superseded_ids={102};
-        apply_receptions(inbox,signals,late);
-        live::Snapshot same_revision;same_revision.signals.push_back(pending(101,5));
-        apply_receptions(inbox,signals,same_revision);
-        check(signals.lines().front().id==200&&inbox.items().size()==2&&
-              inbox.items().front().message.data==Bytes({'a','a'}),
-              "Evicting a display row lost cached completion/revision protection or allowed stale alias retraction");
-
-        live::Snapshot revised;auto event=pending(merge?104:101,merge?0:6);
-        if(merge)event.superseded_ids={101};
-        revised.signals.push_back(event);revised.received=stale.received;
-        apply_receptions(inbox,signals,revised);
-        check(inbox.items().size()==1&&inbox.items().front().message.local_id[0]==102&&inbox.size_bytes()==2&&
-              !inbox.revision(101)&&inbox.revision(102)==0&&signals.lines().back().id==event.id&&
-              !signals.lines().back().complete,
-              "A revised or merged profile left its cached attachment after the old display row was evicted");
-        auto delayed=stale;apply_receptions(inbox,signals,delayed);
-        check(inbox.items().size()==1&&inbox.size_bytes()==2,
-              "A delayed completion restored an evicted row's superseded attachment");
-        auto final=complete(event.id,event.revision,MessageKind::file,'c');apply_receptions(inbox,signals,final);
-        check(inbox.items().size()==2&&inbox.revision(event.id)==event.revision&&
-              inbox.items().back().message.data==Bytes({'c','c'}),
-              "A replacement source lost ownership after its earlier display row had expired");
-    }
-    {
-        Inbox inbox(2);
-        const auto first=complete(101,1,MessageKind::file,'a');
-        const auto second=complete(102,2,MessageKind::file,'b');
-        inbox.put(first.received.front().content,Inbox::ReceptionIdentity{101,1});
-        inbox.put(second.received.front().content,Inbox::ReceptionIdentity{102,2});
-        check(!inbox.revision(101)&&inbox.revision(102)==2&&inbox.items().size()==1,
-              "Content-cache eviction retained obsolete signal ownership");
-        inbox.put(second.received.front().content,Inbox::ReceptionIdentity{103,3});
-        check(!inbox.revision(102)&&inbox.revision(103)==3,
-              "Replacing a cached source retained its previous signal ownership");
-        inbox.erase(second.signals.front().reception_id);
-        check(!inbox.revision(103)&&inbox.items().empty()&&inbox.size_bytes()==0,
-              "Erasing cached content left its signal ownership behind");
-        inbox.put(first.received.front().content,Inbox::ReceptionIdentity{101,1});inbox.clear();
-        check(!inbox.revision(101)&&inbox.items().empty(),"Clearing received content retained stale signal ownership");
-    }
-}
 void noise_start_stop(Controller& controller) {
     using F=ui::Field;using C=ui::Command;
     const auto draft=controller.field(F::message).text,binary=controller.field(F::binary).text;
@@ -371,31 +185,8 @@ void rate_carrier_controls() {
     Controller controller({true,true});
     check(controller.field(F::bandwidth).text=="3.6 kHz" && controller.field(F::carrier).text=="1.5 kHz" &&
           controller.settings().transfer.modem.bandwidth_hz==3600 && controller.settings().transfer.modem.carrier_hz==1500 &&
-          controller.field(F::snr).text=="32" && controller.field(F::long_snr).text=="55" &&
-          controller.settings().transfer.fec==FecMode::rs60,
-          "GUI defaults must use the 3.6 kHz rate, 1.5 kHz carrier, 32/55 dB-Hz targets and 60% FEC");
-    struct CarrierPreset { const char* rate; const char* recommended; const char* center; double center_hz; };
-    constexpr CarrierPreset presets[]={
-        {"1 Hz","1.5 kHz","0.5 Hz",.5},{"100 Hz","1.5 kHz","50 Hz",50},
-        {"1.2 kHz","1.5 kHz","600 Hz",600},{"2.4 kHz","1.8 kHz","1.2 kHz",1200},
-        {"3.6 kHz","1.5 kHz","1.8 kHz",1800},{"12 kHz","9 kHz","6 kHz",6000},
-        {"18 kHz","13.5 kHz","9 kHz",9000},{"24 kHz","18 kHz","12 kHz",12000},
-        {"1 MHz","750 kHz","500 kHz",500000},{"30 MHz","22.5 MHz","15 MHz",15000000}};
-    for(const auto& preset:presets) {
-        controller.edit(F::bandwidth,preset.rate);
-        const auto& carrier=controller.field(F::carrier);
-        check(carrier.text==preset.recommended && carrier.options.size()==2 &&
-              carrier.options[0].id==preset.recommended && carrier.options[1].id==preset.center,
-              "Rate presets must keep the recommended carrier first and offer the center frequency");
-        controller.edit(F::carrier,preset.center);
-        check(controller.settings().transfer.modem.carrier_hz==preset.center_hz,
-              "A center carrier suggestion did not reach the modem configuration");
-    }
-    controller.edit(F::bandwidth,"3 kHz");
-    check(controller.field(F::carrier).options.size()==2 && controller.field(F::carrier).options.front().id=="2.25 kHz" &&
-          controller.field(F::carrier).options.back().id=="1.5 kHz",
-          "A manually entered Rate must offer its recommended and center carriers");
-    controller.edit(F::bandwidth,"3.6 kHz");
+          controller.field(F::snr).text=="32" && controller.settings().transfer.fec==FecMode::rs60,
+          "GUI defaults must use the 3.6 kHz rate, 1.5 kHz audio carrier, 32 dB-Hz target and 60% FEC");
     controller.edit(F::carrier,"1650 Hz");
     check(controller.settings().transfer.modem.carrier_hz==1650,
           "A custom audio carrier did not reach the modem configuration");
@@ -437,7 +228,6 @@ void rate_carrier_controls() {
 void shannon_capacity_display() {
     using F=ui::Field;
     Controller controller({true,true});
-    controller.edit(F::message,"e");
     controller.start();
     const auto expect_capacity=[&](std::string_view expected) {
         controller.poll();
@@ -466,7 +256,6 @@ void shannon_capacity_display() {
 void profile_reference_display() {
     using F=ui::Field;
     Controller controller({true,true});
-    controller.edit(F::message,"e");
     const auto active=[&]() -> std::string {
         std::string label;unsigned count=0;
         for(const auto& row:controller.field(F::profile_reference).records)
@@ -1394,8 +1183,8 @@ void binary_source_representation() {
 void receive_target_controls() {
     using F=ui::Field;
     Controller controller({true,true});
-    check(controller.field(F::receive_snr).text=="32, 55" && controller.settings().transfer.receive_targets_db_hz==std::vector<double>({32,55}) &&
-          controller.settings().transfer.automatic_receive_profiles,"automatic reception must cover both default TX targets");
+    check(controller.field(F::receive_snr).text=="32" && controller.settings().transfer.receive_targets_db_hz==std::vector<double>{32} &&
+          controller.settings().transfer.automatic_receive_profiles,"automatic receive targets must default to the TX target of 32");
     const auto tx=controller.settings().transfer.modem;
     controller.edit(F::receive_snr,"40,");
     controller.poll();
@@ -1412,33 +1201,20 @@ void receive_target_controls() {
           "bandwidth changes must preserve custom receive targets");
     controller.edit(F::receive_snr,"20,");
     controller.edit(F::snr,"-23");
-    check(controller.field(F::receive_snr).text=="-23, 55" &&
-          controller.settings().transfer.receive_targets_db_hz==std::vector<double>({-23,55}),
-          "changing short TX SNR must immediately replace pending receive edits with both matching targets");
+    check(controller.field(F::receive_snr).text=="-23" &&
+          controller.settings().transfer.receive_targets_db_hz==std::vector<double>{-23},
+          "changing TX SNR must immediately replace pending receive edits with the matching target");
     std::this_thread::sleep_for(std::chrono::milliseconds(775));controller.poll();
-    check(controller.settings().transfer.receive_targets_db_hz==std::vector<double>({-23,55}),
+    check(controller.settings().transfer.receive_targets_db_hz==std::vector<double>{-23},
           "a pending receive edit must not overwrite the target selected by TX SNR");
     controller.edit(F::snr,"-");
-    check(controller.field(F::receive_snr).text=="-23, 55" &&
-          controller.settings().transfer.receive_targets_db_hz==std::vector<double>({-23,55}),
+    check(controller.field(F::receive_snr).text=="-23" &&
+          controller.settings().transfer.receive_targets_db_hz==std::vector<double>{-23},
           "an incomplete TX SNR edit must preserve the last valid receive target");
     controller.edit(F::snr,"80");
-    check(controller.field(F::receive_snr).text=="80, 55" &&
-          controller.settings().transfer.receive_targets_db_hz==std::vector<double>({80,55}),
-          "correcting TX SNR must restore matching receive targets");
-    controller.edit(F::receive_snr,"20,");controller.edit(F::long_snr,"40");
-    check(controller.field(F::receive_snr).text=="80, 40" &&
-          controller.settings().transfer.receive_targets_db_hz==std::vector<double>({80,40}) &&
-          controller.field(F::snr).text=="80",
-          "changing long TX SNR must replace pending receive edits and preserve the independent short target");
-    controller.edit(F::long_snr,"-");
-    check(controller.field(F::receive_snr).text=="80, 40" &&
-          controller.settings().transfer.receive_targets_db_hz==std::vector<double>({80,40}),
-          "an incomplete long TX target must preserve the last valid receive list");
-    controller.edit(F::long_snr,"80");
     check(controller.field(F::receive_snr).text=="80" &&
           controller.settings().transfer.receive_targets_db_hz==std::vector<double>{80},
-          "equal short and long targets must share one receive target");
+          "correcting TX SNR must restore matching receive targets");
     controller.edit(F::receive_snr,"40, wrong");
     std::this_thread::sleep_for(std::chrono::milliseconds(775));controller.poll();
     check(controller.field(F::receive_snr).text=="32" && controller.settings().transfer.receive_targets_db_hz==std::vector<double>{32},
@@ -1449,108 +1225,6 @@ void receive_target_controls() {
     const auto found=std::find_if(controls.begin(),controls.end(),[](const auto& control){return control.field==F::receive_snr;});
     check(found!=controls.end() && found->persistent && found->kind==ui::Kind::text,
           "receive targets must be an editable persistent text field");
-}
-void message_target_selection() {
-    using F=ui::Field;using C=ui::Command;
-    Controller controller({true,true});
-    controller.start();
-    const auto inspect_value=[&](std::string_view name) {
-        const auto& fields=controller.inspection()->fields;
-        const auto found=std::find_if(fields.begin(),fields.end(),[&](const auto& field){return field.name==name;});
-        check(found!=fields.end(),"Transmission inspection omitted its target or symbol duration");
-        return found->value;
-    };
-    const auto expect=[&](double target,bool stream,bool binary) {
-        prepare(controller);
-        const auto& inspection=*controller.inspection();
-        check(std::stod(inspect_value("TX target C/N0"))==target &&
-              inspection.stream_layout.has_value()==stream && inspection.binary==binary,
-              "Draft source selected the wrong TX target or changed its existing wire path");
-        auto options=controller.settings().transfer;
-        options.modem=tuning::resolve(3600,target,tuning::PatternMode::auto_pattern,false,1500).config;
-        const auto expected=transfer::estimate_binary(Bytes(inspection.estimate.wire_bits,0),options);
-        check(inspection.estimate.total_seconds==expected.total_seconds &&
-              controller.estimate()->coded_seconds==expected.coded_seconds &&
-              controller.estimate()->total_seconds==expected.total_seconds,
-              "Prepared inspection and airtime did not use the selected target's symbol timing");
-        controller.poll();
-        check(controller.field(F::diagnostics).text.starts_with(format_bit_rate(modem::bit_rate(options.modem))+" | Shannon-Hartley limit "+
-              format_bit_rate(tuning::shannon_capacity_bps(3600,target))+" |"),
-              "Draft diagnostics did not follow the selected target and modem geometry");
-    };
-    expect(55,true,false); // Empty text keeps the byte-stream path.
-    controller.edit(F::message,"e");expect(32,false,false);
-    check(controller.estimate()->wire_bits==3,"Short-target selection changed the exact e dictionary code");
-    controller.edit(F::message,"quick brown fox ");expect(32,false,false);
-    check(controller.message_bytes().size()==16 && controller.estimate()->wire_bits==98,
-          "The inclusive 16-byte boundary lost its exact short dictionary endpoint");
-    controller.edit(F::message,"quick brown fox!!");expect(55,true,false);
-    check(controller.message_bytes().size()==17 && controller.estimate()->wire_bits==1216,
-          "The 17-byte boundary changed fixed marker and coded-interval geometry");
-    const std::string utf8="\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9";
-    controller.edit(F::message,utf8);expect(32,false,false);
-    check(controller.message_bytes().size()==16,"UTF-8 target fixture did not contain sixteen source bytes");
-    controller.edit(F::message,utf8+"e");expect(55,true,false);
-    controller.edit(F::message,"e");controller.edit(F::binary,std::string(128,'0'));
-    std::string escaped16;for(unsigned i=0;i<16;++i)escaped16+="\\x00";
-    controller.edit(F::message,escaped16);expect(32,false,false);
-    check(controller.message_bytes()==Bytes(16,0) && controller.field(F::message).text.size()==64,
-          "Escaped source fixture did not distinguish source bytes from visible editor characters");
-    controller.edit(F::message,escaped16+"\\x00");expect(55,true,false);
-    controller.edit(F::message,"\\x0");controller.poll();
-    check(!controller.estimate() && controller.message_bytes()==Bytes(17,0) && controller.settings().long_message_modem &&
-          controller.field(F::diagnostics).text.starts_with(format_bit_rate(modem::bit_rate(*controller.settings().long_message_modem))+" |"),
-          "An incomplete escaped draft changed the target selected by its last committed source bytes");
-    controller.edit(F::message,"e");controller.edit(F::binary,"001");expect(32,false,true);
-    check(controller.estimate()->wire_bits==3,"Raw target selection padded leading zeros or partial bytes");
-    controller.edit(F::short_bits,std::string(3*(transfer::short_message_bytes+1),'0'));expect(32,false,true);
-    check(controller.estimate()->wire_bits==3*(transfer::short_message_bytes+1),
-          "Raw target selection classified decoded text size instead of explicit bit input");
-    controller.edit(F::snr,"26");controller.edit(F::long_snr,"40");
-    controller.edit(F::message,"e");expect(26,false,false);
-    const auto short_airtime=controller.estimate()->total_seconds;
-    controller.edit(F::long_snr,"55");expect(26,false,false);
-    check(controller.estimate()->total_seconds==short_airtime,"Changing the long target altered short-message airtime");
-    controller.edit(F::long_snr,"40");controller.edit(F::message,std::string(17,'e'));expect(40,true,false);
-    const auto long_airtime=controller.estimate()->total_seconds;
-    controller.edit(F::snr,"32");expect(40,true,false);
-    check(controller.estimate()->total_seconds==long_airtime,"Changing the short target altered long-message airtime");
-    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
-    while(controller.snapshot().samples_received<controller.settings().transfer.modem.sample_rate/5 &&
-          std::chrono::steady_clock::now()<deadline) {
-        controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
-    }
-    check(controller.snapshot().samples_received>0,"Target-switch fixture did not start continuous reception");
-    controller.plot_update();
-    auto samples=controller.snapshot().samples_received;
-    auto seconds=controller.snapshot().virtual_seconds;
-    const auto receive_targets=controller.settings().transfer.receive_targets_db_hz;
-    const auto uninterrupted=[&] {
-        controller.poll();
-        check(controller.snapshot().running && controller.snapshot().samples_received>=samples &&
-              controller.snapshot().virtual_seconds>=seconds && !controller.plot_update().clear_waterfall &&
-              controller.settings().transfer.receive_targets_db_hz==receive_targets,
-              "A draft target transition restarted reception, cleared plots or replaced receive targets");
-        samples=controller.snapshot().samples_received;seconds=controller.snapshot().virtual_seconds;
-    };
-    controller.edit(F::message,"e");expect(32,false,false);uninterrupted();
-    controller.edit(F::message,std::string(17,'e'));expect(40,true,false);uninterrupted();
-    controller.edit(F::message,"e");controller.edit(F::binary,"001");expect(32,false,true);uninterrupted();
-    controller.edit(F::message,"e");
-    struct TemporaryAttachment {
-        std::filesystem::path path=std::filesystem::temp_directory_path()/
-            ("datapump-target-attachment-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-        ~TemporaryAttachment(){std::error_code ignored;std::filesystem::remove(path,ignored);}
-    } fixture;
-    write_new_file(fixture.path.string(),Bytes{'e'});
-    controller.activate(C::attach_file);const auto requests=controller.take_services();
-    check(requests.size()==1,"Target fixture did not request its attachment chooser");
-    controller.complete_service({requests.front().id,false,fixture.path.string(),{}});
-    expect(40,true,false);uninterrupted();
-    check(controller.enabled(C::use_text),"One-byte attachment did not keep its attachment source type");
-    controller.activate(C::use_text);expect(32,false,false);uninterrupted();
-    check(controller.message_bytes()==Bytes{'e'},"Use text did not restore the preserved short source");
-    controller.close();
 }
 void workspace_controls() {
     Controller controller({true, true});
@@ -1614,12 +1288,6 @@ void bitmap_source_checks() {
           std::string_view(patterns->help).find("Click to clear") != std::string_view::npos &&
           std::string_view(patterns->help).find("older than six seconds") != std::string_view::npos,
           "Pattern evidence must declare its click-to-clear action and six-second retention in the shared GUI");
-    check(std::string_view(patterns->help).find("noise remains visible") != std::string_view::npos &&
-          std::string_view(patterns->help).find("single-symbol threshold T") != std::string_view::npos &&
-          std::string_view(patterns->help).find("shared logarithmic range") != std::string_view::npos &&
-          std::string_view(patterns->help).find("twice the log score, not twice the probability") != std::string_view::npos &&
-          std::string_view(patterns->help).find("crossing T alone does not guarantee") != std::string_view::npos,
-          "Pattern evidence must explain its threshold references without promising bit admission");
     const auto original = sources.get(ui::Bitmap::qr);
     const auto empty = render(original);
     check(empty.pixels()[0] == 32 && empty.pixels()[1] == 0 && empty.pixels()[2] == 0,
@@ -1685,8 +1353,6 @@ void bitmap_source_checks() {
 int main(int argc,char** argv) {
     try {
         datapump::gui::controller_self_check();
-        simulation_estimate_controls();
-        revised_reception_ingestion();
         rate_carrier_controls();
         shannon_capacity_display();
         profile_reference_display();
@@ -1701,7 +1367,7 @@ int main(int argc,char** argv) {
         binary_editor_controls();
         three_bit_dispatch();
         short_raw_editor();short_raw_reception();
-        receive_target_controls();message_target_selection();short_text_reception();three_bit_text_reception();fixed_text_reception();byte_aligned_pattern_reception();
+        receive_target_controls();short_text_reception();three_bit_text_reception();fixed_text_reception();byte_aligned_pattern_reception();
         escaped_signal_message_paste();binary_source_representation();workspace_controls();
         bitmap_source_checks();
         if(argc>1&&std::string_view(argv[1])=="--smoke") {

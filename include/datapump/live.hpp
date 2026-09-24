@@ -11,11 +11,6 @@
 namespace datapump::live {
 struct Settings {
     transfer::Options transfer;
-    // Optional transmit geometry for fixed-interval text and attachments.
-    // Short text (1–16 source bytes), explicit bits and tuning noise use the
-    // base modem. Both share its sample rate, carrier and bandwidth; selecting
-    // a message path never replaces the independently running receiver bank.
-    std::optional<modem::Config> long_message_modem;
     std::string device = "default";
     // Right channel on stereo output, sole channel on mono output. When off,
     // send the same signal to both stereo channels.
@@ -67,21 +62,11 @@ struct SignalUpdate {
     // Exact transport bits retained when a completed short dictionary stream
     // is presented as text; absent for pending observations and interval data.
     std::string raw_bits;
-    // A stronger physical hypothesis can revise an earlier interpretation,
-    // including one whose shorter profile had already observed its own end.
-    // Consumers replace older revisions and withdraw superseded rows/content.
-    std::uint64_t revision = 0;
-    std::vector<std::uint64_t> superseded_ids;
-    // Physical completion is independent of the bounded, post-end search.
-    transfer::RecoveryProgress recovery_progress;
 };
 enum class ConstellationSource { input, transmitted, received };
 struct PatternScoreObservation {
     std::uint64_t id = 0;
     std::chrono::steady_clock::time_point observed_at{};
-    // Receiver's single-symbol admission reference for this observation.
-    // Zero denotes unavailable metadata; never a fabricated receive threshold.
-    double admission_threshold = 0;
     bool operator==(const PatternScoreObservation&) const = default;
 };
 struct Snapshot {
@@ -132,9 +117,6 @@ struct Snapshot {
     std::uint32_t hardware_sample_rate = 0;
     double audio_passband_hz = 0;
     std::size_t dsp_buffered_bytes = 0;
-    // A separate bounded post-reception search pool; it never consumes the
-    // waveform/receiver workspace reserved by dsp_buffered_bytes.
-    std::size_t recovery_working_bytes = 0;
 };
 
 // Audio callbacks and modem work never run on the caller/UI thread. configure
@@ -171,11 +153,6 @@ public:
     // or use/register saved keys. Stop with cancel_transmit().
     void transmit_noise();
     void cancel_transmit();
-    // Resume a retained incomplete search with another configured time budget,
-    // or stop one search without interrupting reception or audio capture.
-    bool resume_recovery(std::uint64_t signal_id);
-    void cancel_recovery(std::uint64_t signal_id);
-    void clear_recoveries();
     Snapshot snapshot();
     void stop();
 private:

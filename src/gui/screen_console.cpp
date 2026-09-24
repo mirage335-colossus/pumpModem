@@ -8,20 +8,9 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     control.font_size=control.multiline?16:13;
     if(control.kind==Kind::bitmap)control.font_size=11;
     if(menu==Menu::keyfile)control.menu_label="Keyfile";
-    if(menu==Menu::recovery) {
-        control.menu_label="Recovery";control.font_size=11;
-        control.help="Resume the selected incomplete search for another five-minute budget, or cancel its recovery. Reception continues independently.";
-    }
     if(slot==Slot::header)control.font_size=22;
     if(slot==Slot::callsign||slot==Slot::grid)control.help="Convenience text for the editable CQ greeting inserted when Message is cleared. Sent only as message text.";
     if(slot==Slot::repeatable)control.help="Prepends REPEATABLE-XXXXXXXX and a space before the CQ greeting. Each message edit generates 8 random consonants or digits. Automatically turns off for attachments or messages over 256 bytes, including the prefix.";
-    if(slot==Slot::simulation_confidence||slot==Slot::simulation_cpu_time||slot==Slot::simulation_gpu_time)control.font_size=12;
-    if(slot==Slot::simulation_confidence)
-        control.help="Estimated probability of receiving the entire current draft under the selected simulation channel and matching receiver settings. Uses an ideal noise and independent-error model with the selected waveform, exact message length and applicable error correction. Carrier outside RX search means the simulated frequency shift, including clock error at the carrier frequency, exceeds the receiver's finite search span; no numeric probability is supported there, even at high SNR. This is model-based probability, not measured receiver confidence or a guarantee. Additional recovery is excluded.";
-    if(slot==Slot::simulation_cpu_time)
-        control.help="Heuristic simulation computation time for a fixed high-end Intel Core i9-13900H laptop reference. Based on the current draft and modem workload; no local benchmark or hardware detection. Replay playback and additional recovery time are excluded.";
-    if(slot==Slot::simulation_gpu_time)
-        control.help="Projected simulation computation time for a fixed NVIDIA GeForce RTX 4090 Laptop GPU reference. GPU simulation is not implemented. Uses a heuristic workload model, not a local benchmark; actual laptop power and cooling affect performance. Replay playback and additional recovery time are excluded.";
     if(slot==Slot::paste_previous) {control.font_size=11;control.help="Paste the previous transmitted message back into Message for editing or retransmission.";}
     if(slot==Slot::paste_signal) {control.font_size=11;control.help="Load the selected received text into Message, preserving escaped byte values exactly. Binary shows its first 16 bytes.";}
     if(control.multiline) {
@@ -72,12 +61,11 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     }
     if(slot==Slot::mono)control.help="Transmit through the right channel only on stereo devices, or the sole channel on mono devices. Turn off to transmit through both stereo channels. Enabled by default.";
     if(slot==Slot::bandwidth)control.help="Nominal modem rate in Hz; occupied bandwidth depends on the waveform. Defaults to 3.6 kHz with a 1.5 kHz carrier. Changing Rate resets Carrier to the recommended frequency; edit Carrier afterward to choose another frequency.";
-    if(slot==Slot::carrier)control.help="Audio carrier frequency. The dropdown offers the current rate's default carrier and center frequency (half the rate): 1.5 kHz and 1.8 kHz at the 3.6 kHz rate. Manual entry accepts Hz, kHz or MHz. Your choice applies to transmit and receive and stays selected until Rate changes. Some pattern or tone modes require a higher carrier.";
-    if(slot==Slot::snr)control.help="Transmit target signal-to-noise ratio in a 1 Hz noise bandwidth (C/N0) for text of 1–16 source bytes inclusive and exact raw bits, default 32 dB-Hz. Counts UTF-8 and any callsign/grid/Repeatable text. Sets the transmitted pattern duration for these uncoded messages. Changing either transmit target to a valid value resets RX targets to both distinct current targets; RX targets can then be edited independently.";
-    if(slot==Slot::long_snr)control.help="Transmit target signal-to-noise ratio in a 1 Hz noise bandwidth (C/N0) for text of 17 or more source bytes and every attachment, default 55 dB-Hz. Sets the transmitted pattern duration for fixed coding intervals, using the saved error correction setting. Changing either transmit target to a valid value resets RX targets to both distinct current targets; RX targets can then be edited independently.";
-    if(slot==Slot::receive_snr)control.help="Receive target C/N0 values in dB-Hz, separated by commas; initially 32, 55. Changing either transmit target to a valid value resets this list to both distinct current targets. Edit it independently to search other targets with the selected rate, carrier and pattern mode. Up to 16 values from -200 to 200; invalid text resets the complete list to 32. Duplicate profiles share one search.";
+    if(slot==Slot::carrier)control.help="Audio carrier frequency. The dropdown offers only the current rate's default carrier: 1.5 kHz at the 3.6 kHz rate. Manual entry accepts Hz, kHz or MHz. Your choice applies to transmit and receive and stays selected until Rate changes. Some pattern or tone modes require a higher carrier.";
+    if(slot==Slot::snr)control.help="Transmit target signal-to-noise ratio in a 1 Hz noise bandwidth (C/N0), default 32 dB-Hz. This scalar sets the transmitted pattern duration. Changing it to a valid value resets RX targets to that single matching target; RX targets can then be edited independently.";
+    if(slot==Slot::receive_snr)control.help="Receive target C/N0 values in dB-Hz, separated by commas; initially 32. Changing TX SNR to a valid value resets this list to that single matching target. Edit it independently to search other targets with the selected rate, carrier and pattern mode. Up to 16 values from -200 to 200; invalid text resets the complete list to 32. Duplicate profiles share one search.";
     if(slot==Slot::dsp_workspace)control.help="Upper limit for waveform history and DSP processing, measured at startup and when this choice changes. Storage grows only as useful receiver state needs it. The default is 50% of available RAM. Received messages and files have a separate 256 MiB limit.";
-    if(slot==Slot::diagnostics)control.help="Gross modem bitrate followed by the Shannon-Hartley theoretical capacity for an ideal Gaussian-noise channel. Uses the selected nominal Rate as bandwidth B in Hz and the current draft's short or long TX target as C/N0 in dB-Hz: B * log2(1 + 10^(C/N0 / 10) / B). This is a channel capacity estimate; actual payload throughput depends on the modem and coding overhead.";
+    if(slot==Slot::diagnostics)control.help="Gross modem bitrate followed by the Shannon-Hartley theoretical capacity for an ideal Gaussian-noise channel. Uses the selected nominal Rate as bandwidth B in Hz and TX SNR as C/N0 in dB-Hz: B * log2(1 + 10^(C/N0 / 10) / B). This is a channel capacity estimate; actual payload throughput depends on the modem and coding overhead.";
     if(slot==Slot::waterfall) {control.footer_height=24;control.click=Command::clear_waterfall;control.help="Click to clear the spectrum history.";}
     if(slot==Slot::waveform) {
         control.footer_height=24;control.wheel_up=Command::zoom_in;control.wheel_down=Command::zoom_out;
@@ -85,7 +73,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     }
     if(slot==Slot::pattern_scores) {
         control.click=Command::clear_pattern_scores;
-        control.help="Click to clear pattern evidence. Evidence older than six seconds disappears. Received P0 log score is on the horizontal axis and P1 log score on the vertical axis. Solid lines mark each candidate's single-symbol threshold T halfway across the plot. Native log scores below T use the lower half, so noise remains visible. Dashed lines at three-quarters mark 2T: twice the log score, not twice the probability or evidence. Higher scores use a shared logarithmic range fitted to the retained points, with space before the outer edges. This keeps strong-signal variation visible without moving the noise or threshold regions. Chain evidence and the competing-pattern margin also affect admission; crossing T alone does not guarantee a received bit. Candidates appear after complete pattern windows have enough evidence; long symbols take longer. Hardware audio input is paused during transmission. These are diagnostic scores from the receiver's noise model, not measured SNR or calibrated probabilities.";
+        control.help="Click to clear pattern evidence. Evidence older than six seconds disappears. Received P0 evidence is on the horizontal axis and P1 evidence on the vertical axis. Candidates appear after complete pattern windows have enough evidence; long symbols take longer. Hardware audio input is paused during transmission. Scores use natural-log units; they are not measured SNR or calibrated probabilities.";
     }
     if(slot==Slot::copy_signal||slot==Slot::clear_waterfall||slot==Slot::zoom_in||slot==Slot::zoom_out||slot==Slot::reset_zoom)control.font_size=11;
     return control;
@@ -109,10 +97,7 @@ const std::vector<Control>& console_screen() {
         placed({Kind::text,Field::callsign,Command::none,Bitmap::none,Page::console,1,"Callsign",1,false,128}, Slot::callsign),
         placed({Kind::text,Field::grid,Command::none,Bitmap::none,Page::console,1,"Grid",1,false,128}, Slot::grid),
         placed({Kind::toggle,Field::repeatable,Command::none,Bitmap::none,Page::console,1,"Repeatable"}, Slot::repeatable),
-        placed({Kind::choice,Field::simulation,Command::none,Bitmap::none,Page::console,2,"Simulation"}, Slot::simulation),
-        placed({Kind::label,Field::simulation_confidence,Command::none,Bitmap::none,Page::console,2,"RX success (model)"}, Slot::simulation_confidence),
-        placed({Kind::label,Field::simulation_cpu_time,Command::none,Bitmap::none,Page::console,2,"CPU / i9-13900H"}, Slot::simulation_cpu_time),
-        placed({Kind::label,Field::simulation_gpu_time,Command::none,Bitmap::none,Page::console,2,"GPU / RTX 4090 Laptop (projected)"}, Slot::simulation_gpu_time),
+        placed({Kind::choice,Field::simulation,Command::none,Bitmap::none,Page::console,1,"Simulation"}, Slot::simulation),
         placed({Kind::action,Field::count,Command::open_keyfile,Bitmap::none,Page::console,2,"Open keyfile"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::action,Field::count,Command::generate_keyfile,Bitmap::none,Page::console,2,"Generate keyfile"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::action,Field::count,Command::show_key_folder,Bitmap::none,Page::console,2,"Show key folder"}, Slot::key_actions, Menu::keyfile),
@@ -122,12 +107,11 @@ const std::vector<Control>& console_screen() {
         placed({Kind::text,Field::device,Command::none,Bitmap::none,Page::console,4,"Audio device"}, Slot::device),
         placed({Kind::text,Field::bandwidth,Command::none,Bitmap::none,Page::console,4,"Rate"}, Slot::bandwidth),
         placed({Kind::text,Field::carrier,Command::none,Bitmap::none,Page::console,4,"Carrier"}, Slot::carrier),
+        placed({Kind::text,Field::snr,Command::none,Bitmap::none,Page::console,4,"TX SNR (dB-Hz)"}, Slot::snr),
+        placed({Kind::text,Field::receive_snr,Command::none,Bitmap::none,Page::console,4,"RX targets (dB-Hz)",1,false,512}, Slot::receive_snr),
         placed({Kind::choice,Field::pattern,Command::none,Bitmap::none,Page::console,5,"Pattern / tone"}, Slot::pattern),
         placed({Kind::choice,Field::fec,Command::none,Bitmap::none,Page::console,5,"Error correction"}, Slot::fec),
         placed({Kind::choice,Field::dsp_workspace,Command::none,Bitmap::none,Page::console,5,"DSP workspace"}, Slot::dsp_workspace),
-        placed({Kind::text,Field::snr,Command::none,Bitmap::none,Page::console,5,"Short ≤16 B target SNR (dB-Hz)"}, Slot::snr),
-        placed({Kind::text,Field::long_snr,Command::none,Bitmap::none,Page::console,5,"Long / file target SNR (dB-Hz)"}, Slot::long_snr),
-        placed({Kind::text,Field::receive_snr,Command::none,Bitmap::none,Page::console,5,"RX targets (dB-Hz)",1,false,512}, Slot::receive_snr),
         placed({Kind::label,Field::message_label,Command::none,Bitmap::none,Page::console,6,"Message"}, Slot::message_label),
         placed({Kind::action,Field::count,Command::paste_previous,Bitmap::none,Page::console,6,"Previous message - click to paste"}, Slot::paste_previous),
         placed({Kind::label,Field::binary_label,Command::none,Bitmap::none,Page::console,6,"Binary"}, Slot::binary_label),
@@ -145,18 +129,16 @@ const std::vector<Control>& console_screen() {
         placed({Kind::label,Field::transmit_scope_caption,Command::none,Bitmap::none,Page::console,9,""}, Slot::transmit_scope_caption),
         placed({Kind::choice,Field::transmit_scope_format,Command::none,Bitmap::none,Page::console,9,""}, Slot::transmit_scope_format),
         placed({Kind::list,Field::transmit_scope,Command::none,Bitmap::none,Page::console,9,""}, Slot::transmit_scope),
+        placed({Kind::list,Field::profile_reference,Command::none,Bitmap::none,Page::console,10,"Pattern steps"}, Slot::profile_reference),
         placed({Kind::list,Field::signals,Command::none,Bitmap::none,Page::console,10,"Signals",3}, Slot::signals),
         placed({Kind::list,Field::files,Command::none,Bitmap::none,Page::console,10,"Files in memory"}, Slot::files),
         placed({Kind::action,Field::count,Command::copy_signal,Bitmap::none,Page::console,11,"Copy selected"}, Slot::copy_signal),
         placed({Kind::action,Field::count,Command::paste_signal,Bitmap::none,Page::console,11,"Paste as message"}, Slot::paste_signal),
-        placed({Kind::action,Field::count,Command::resume_recovery,Bitmap::none,Page::console,11,"Resume search"}, Slot::recovery_actions, Menu::recovery),
-        placed({Kind::action,Field::count,Command::cancel_recovery,Bitmap::none,Page::console,11,"Cancel search"}, Slot::recovery_actions, Menu::recovery),
         placed({Kind::action,Field::count,Command::save_file,Bitmap::none,Page::console,11,"Save selected..."}, Slot::save_file),
         placed({Kind::bitmap,Field::count,Command::none,Bitmap::waterfall,Page::console,12,"Spectrum"}, Slot::waterfall),
         placed({Kind::bitmap,Field::count,Command::none,Bitmap::waveform,Page::console,12,"Waveform"}, Slot::waveform),
         placed({Kind::bitmap,Field::count,Command::none,Bitmap::constellation,Page::console,12,"Constellation"}, Slot::constellation),
         placed({Kind::bitmap,Field::count,Command::none,Bitmap::pattern_scores,Page::console,12,"Pattern evidence"}, Slot::pattern_scores),
-        placed({Kind::list,Field::profile_reference,Command::none,Bitmap::none,Page::console,12,"Pattern steps"}, Slot::profile_reference),
         placed({Kind::action,Field::count,Command::clear_waterfall,Bitmap::none,Page::console,13,"Clear waterfall"}, Slot::clear_waterfall),
         placed({Kind::action,Field::count,Command::zoom_in,Bitmap::none,Page::console,13,"Zoom in"}, Slot::zoom_in),
         placed({Kind::action,Field::count,Command::zoom_out,Bitmap::none,Page::console,13,"Zoom out"}, Slot::zoom_out),
@@ -181,8 +163,6 @@ const std::vector<Control>& console_screen() {
         placed({Kind::list,Field::signals,Command::none,Bitmap::none,Page::compression,4,"Received signals - select to inspect exact bits"}, Slot::compression_signals),
         placed({Kind::action,Field::count,Command::copy_raw_signal,Bitmap::none,Page::compression,5,"Copy raw bits"}, Slot::copy_raw_signal),
         placed({Kind::action,Field::count,Command::paste_raw_signal,Bitmap::none,Page::compression,5,"Use received bits"}, Slot::paste_raw_signal),
-        placed({Kind::action,Field::count,Command::resume_recovery,Bitmap::none,Page::compression,5,"Resume search"}, Slot::raw_recovery_actions, Menu::recovery),
-        placed({Kind::action,Field::count,Command::cancel_recovery,Bitmap::none,Page::compression,5,"Cancel search"}, Slot::raw_recovery_actions, Menu::recovery),
         placed({Kind::label,Field::received_raw_bits,Command::none,Bitmap::none,Page::compression,6,""}, Slot::received_raw_bits),
     };
     return controls;

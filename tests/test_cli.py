@@ -55,57 +55,6 @@ class StreamCLI(unittest.TestCase):
         self.assertEqual(value['raw_bits'],'001'+'11111'+'00000000')
         self.assertEqual(value['raw_bit_count'],16)
         self.assertEqual(value['filename'],'')
-        self.assertEqual(value['recovery']['state'],'none')
-        self.assertEqual(value['recovery']['attempts'],0)
-    def test_recovery_settings(self):
-        helptext=self.run_pump('--help').stdout
-        for option in ('--recovery-seconds','--recovery-threads','--recovery-bits','--recovery-errors'):
-            self.assertIn(option.encode(),helptext)
-        # Recovery is a local receive policy and never changes the tiny wire path.
-        value=json.loads(self.run_pump('simulate','--text','e','--json','--snr','30',
-            '--clock-error-ppm','0','--phase-noise','0','--recovery-seconds','0',
-            '--recovery-threads','1','--recovery-bits','1024','--recovery-errors','0',*AUDIO).stdout)
-        self.assertTrue(value['stream_complete'])
-        self.assertEqual(value['raw_bits'],'001')
-        self.assertEqual(value['recovery']['state'],'none')
-        self.assertEqual(value['recovery']['attempts'],0)
-        for extra in (('--recovery-seconds','-1'),('--recovery-seconds','86401'),
-                      ('--recovery-threads','1025'),('--recovery-threads','1.5'),
-                      ('--recovery-bits','1023'),('--recovery-bits','1048577'),
-                      ('--recovery-errors','25'),('--recovery-errors','-1')):
-            self.run_pump('simulate','--text','e',*extra,*AUDIO,ok=False)
-        for command in ('tx','estimate','status-rx'):
-            self.run_pump(command,'--recovery-seconds','0',*AUDIO,ok=False)
-    def test_live_json_reception_identity(self):
-        result=self.run_pump('listen','--text','quick brown','--json','--seconds','8',
-            '--simulation','3dBm -90dB','--bw','3600','--pattern','auto-pattern',
-            '--target-snr','32','--receive-targets','55,32','--time','1800000000',
-            '--search-seconds','0','--clock-error-ppm','0','--phase-noise','0')
-        events=[json.loads(line) for line in result.stdout.splitlines()]
-        pending=[event for event in events if event.get('event')=='raw_bits' and not event['complete']]
-        completed=[event for event in events if event.get('stream_complete')]
-        self.assertTrue(pending,'Live JSON lost the pending raw-bit events')
-        self.assertEqual(len(completed),1,'Competing profiles emitted duplicate completed payloads')
-        payload=completed[0]
-        self.assertEqual(base64.b64decode(payload['data_base64']),b'quick brown')
-        updates=[event for event in events if event.get('event')=='reception_update']
-        self.assertTrue(updates,'Completed interpretation did not publish its live reception identity')
-        self.assertEqual(updates[-1]['reception_id'],payload['id'])
-        self.assertEqual(updates[-1]['signal_id'],payload['signal_id'])
-        self.assertEqual(updates[-1]['revision'],payload['revision'])
-        revisions={}
-        for event in events:
-            if 'signal_id' not in event:
-                continue
-            self.assertIsInstance(event['revision'],int)
-            self.assertIsInstance(event['superseded_ids'],list)
-            if event.get('event') in ('raw_bits','reception_update'):
-                self.assertEqual(event['recovery']['state'],'none')
-                self.assertEqual(event['recovery']['attempts'],0)
-            self.assertGreaterEqual(event['revision'],revisions.get(event['signal_id'],0))
-            revisions[event['signal_id']]=event['revision']
-        self.assertTrue(any(event['signal_id']==payload['signal_id'] for event in pending),
-                        'Pending raw bits and completed payload have unrelated identities')
     def test_automatic_profile_short_text_and_binary_dictionary(self):
         defaults=('--bw','3600','--pattern','auto-pattern',
                   '--time','1800000000','--search-seconds','0')
@@ -148,8 +97,6 @@ class StreamCLI(unittest.TestCase):
             self.assertFalse(pending['stream_complete'])
             self.assertFalse(pending['short_text_decoded'])
             self.assertEqual(pending['data_base64'],'')
-            self.assertEqual(pending['recovery']['state'],'none')
-            self.assertEqual(pending['recovery']['attempts'],0)
     def test_sampled_stream_roundtrip(self):
         source=b'fixed intervals\x00\x00'
         value=json.loads(self.run_pump('simulate','--input','-','--json','--snr','30',

@@ -54,50 +54,28 @@ The persistent **Rate** field defaults to `3.6 kHz`, with `18 kHz` also
 available as a preset. The adjacent editable **Carrier** dropdown defaults to
 `1.5 kHz`. Changing Rate resets Carrier to `1.5 kHz` for `3.6 kHz`, otherwise
 to the existing `max(1500, 0.75 × rate)` Hz recommendation. The dropdown offers
-the current rate's default carrier and its center frequency (half the rate),
-including `1.8 kHz` for `3.6 kHz`. A manually entered carrier override
+only the current rate's default carrier. A manually entered carrier override
 persists until the next rate change. Both fields configure transmit planning,
 receive profiles, live audio, simulation and inspection together. Rate remains
 the nominal timing parameter; it does not claim a measured spectral width.
-Two editable **target SNR (dB-Hz)** dropdowns select transmit planning:
-**Short ≤16 B** defaults to `32` for nonempty text of 1–16 source bytes inclusive
-and explicit raw bits; **Long / file** defaults to `55` for longer text, empty
-byte sources and every attachment. Both offer the same presets, including `32`
-and `55`. The boundary counts source bytes, including UTF-8 and visible prefixes,
-not displayed characters or dictionary bits. Draft edits select the corresponding
-plan for estimates, inspection and transmission without restarting reception or
-replacing its pending data. Noise transmission uses the short target.
+**TX SNR (dB-Hz)** defaults to `32`; its presets include
+`140`, `120`, `100`, `80`, `60`, `32`, `20`, `-10`, `-16`, `-20`, `-23`, `-26` and
+`-30` alongside the existing targets.
 
 Diagnostics show the gross modem bitrate followed by the **Shannon-Hartley
 limit**, the ideal Gaussian-noise channel capacity in bit/s. It uses the accepted
-draft's TX target C/N0 and nominal Rate as bandwidth; RX targets and simulation noise do
+TX target C/N0 and nominal Rate as bandwidth; RX targets and simulation noise do
 not select this estimate. It updates with accepted settings and retains the last
 valid value while a setting contains an invalid draft. The diagnostic tooltip
 explains the formula and distinguishes channel capacity from payload throughput.
 
-The **RX targets (dB-Hz)** comma-list initially matches both TX defaults, `32, 55`.
-Changing either TX SNR to a valid value replaces the RX list with both targets,
-deduplicated when equal. The RX list can then be edited independently without
-changing either TX SNR.
+The **RX targets (dB-Hz)** comma-list initially matches the TX default, `32`.
+Changing TX SNR to a valid value replaces the RX list with that single matching
+target. The RX list can then be edited independently without changing TX SNR.
 It trims and deduplicates valid entries, and resets the entire list to `32` on
 invalid input. Its 512-byte edit limit and 750 ms normalization delay allow
 comma/minus drafts while keeping native adapters free of parser logic. Receive
 profiles hold the selected rate, carrier and pattern/tone mode fixed.
-Competing profiles for the same received signal share one pending row. Stronger
-supported pattern evidence may revise that row's bits; only the selected
-profile's observed physical end can complete it. Native correlation scores from
-different DSP paths are not directly comparable, so arbitration caps their
-support at the duration of known, admitted symbols. Missing positions add no
-support. A delayed weaker profile does not create another received message.
-If a much longer symbol first becomes admissible after a shorter interpretation
-has already completed, stronger overlapping evidence revises the original row
-back to pending. Its obsolete content and copy/save eligibility are withdrawn.
-When that evidence spans previously separate fragments, their rows and cached
-content are retired under the oldest reception identity. Revision numbers keep
-delayed old events from restoring an obsolete interpretation. Completed history
-requires actual sample overlap; pending disjoint fragments must also follow the
-longer symbol clock within the earlier reception's absence window. Unscored
-long-symbol silence alone cannot join a later independently timed transmission.
 
 | Vocabulary | Meaning |
 | --- | --- |
@@ -316,10 +294,8 @@ and transmitted constellation display the generated signal from those stages.
 
 ## Layout and documents
 
-`desktop_layout.hpp` defines the desktop arrangement at 1180 by 952 logical
-pixels, with a 1030 by 872 minimum. A persistent simulation row holds the
-dropdown, modeled receive probability and reference CPU/GPU compute estimates.
-`control_layout.hpp` computes frame, label,
+`desktop_layout.hpp` defines the desktop arrangement at 1180 by 866 logical
+pixels, with a 1030 by 786 minimum. `control_layout.hpp` computes frame, label,
 editor, preset, caption and footer rectangles once. Both adapters apply these
 rectangles and convert logical to physical coordinates using their display
 scale. Slot-free rows provide ordered stretch-weight placement for alternate
@@ -425,35 +401,6 @@ provides titles/captions/error-overlay tone without any source-specific decision
 inside an adapter. Changing QR brightness affects only that bitmap and never
 changes modem state. Monochrome and color are shared presentation preferences;
 unsupported targets retain the grayscale path.
-
-Live waterfall history retains at most 160 rows. Short plots show the newest
-rows one per backing pixel; taller plots scale that bounded history to fill the
-available height. Startup history remains bottom-aligned with blank space for
-unobserved rows. Resizing does not clear or add measurements.
-
-The Console **Pattern evidence** plot places received P0 log scores on the
-horizontal axis and P1 log scores on the vertical axis. It preserves the spread
-of noise and signal candidates instead of converting their scores into a
-saturating probability-like coordinate. Each observation uses its captured
-single-symbol admission threshold `T`. The lower half of each axis shows native
-log scores from zero to `T` linearly, keeping noise candidates visible. Solid
-guides mark `T` at 50%; dashed guides mark `2T` at 75%. **2T means twice the
-log score, not twice the evidence or probability.**
-
-Above `T`, the display uses logarithmic interpolation. For `r = score/T`, the
-position from `T` to `2T` is `0.5 + 0.25*log2(r)`. Above `2T`, it is
-`0.75 + 0.2*ln(r/2)/ln(M/2)`, where `M` is the larger of four and the greatest
-retained valid score/threshold ratio across both axes. This fits strong signals
-into the upper region with 5% headroom, rather than piling them onto the edges.
-Only this upper region adapts when strong points arrive or expire; the noise
-region and both guides stay fixed. Ratio logarithms are evaluated without
-overflow even for extreme finite scores and small positive thresholds.
-
-The diagonal means equal P0/P1 scores. Distances describe these diagnostic log
-scores, not a calibrated probability that a bit is correct. The display transform
-changes no receiver decisions. The reference is not a complete admission rule: chain evidence and
-the competing-pattern margin also matter. Missing or invalid threshold metadata
-cannot produce a plotted point with an invented threshold.
 
 Clicking the Console **Pattern evidence** plot clears its retained points.
 Each observation disappears after six seconds, including while input is idle;

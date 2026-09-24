@@ -284,97 +284,6 @@ void progressive_pending_records() {
           rows.front().cells[1].text=="binary pending"&&!rows.front().activatable,
           "A missing timed slot must retain its position and visible zero-placeholder notice while subsequent bits arrive");
 }
-void revised_reception_records() {
-    for(const int kind:{0,1,2,3}) {
-        Signals signals;
-        SignalLine completed;completed.id=93;completed.revision=4;completed.frequency_hz=1500;
-        completed.complete=true;completed.pattern_score=24.5;completed.received_bits=3;
-        completed.binary=kind==0;completed.validated=kind>=2;completed.text_message=kind!=3;
-        completed.text=kind==0?"001":kind==3?"attachment.bin":"e";
-        completed.raw_bits=kind==1?"001":"";
-        completed.reception_id=kind>=2?"completed-source":"";
-        signals.update(completed);
-        check(signals.lines().size()==1&&signals.lines().front().complete,
-              "Revision fixture did not begin as a completed reception");
-
-        SignalLine stronger;stronger.id=completed.id;stronger.revision=5;stronger.frequency_hz=1500;
-        stronger.binary=true;stronger.pattern_score=31;stronger.text="00";stronger.received_bits=2;
-        signals.update(stronger);
-        const auto pending=signal_records(signals);
-        check(pending.size()==1&&pending.front().id=="93"&&pending.front().cells[1].text=="binary pending"&&
-              pending.front().cells[4].text=="00"&&!pending.front().activatable&&
-              signals.lines().front().revision==5&&!signals.lines().front().validated&&
-              !signals.copy_id(0)&&!signals.copy_bits(0)&&!signals.copy_raw_bits(0)&&!signals.copy_text(0),
-              "A stronger profile must retract completed raw, dictionary, text and attachment presentation in the same pending row");
-        signals.update(completed);
-        check(!signals.lines().front().complete&&signals.lines().front().text=="00"&&
-              signals.lines().front().revision==5,
-              "A stale completed revision replaced the stronger profile's pending prefix");
-        stronger.complete=true;stronger.text="001";stronger.received_bits=3;
-        signals.update(stronger);
-        check(signal_records(signals).size()==1&&signal_records(signals).front().activatable&&
-              signals.copy_raw_bits(0)=="001",
-              "Completion of a replacement profile must reuse its pending row and restore exact-bit copying");
-        stronger.complete=false;signals.update(stronger);
-        check(signals.lines().front().complete,
-              "Within one profile revision completed observations lost their existing pending-update protection");
-        signals.erase(completed.id);signals.update(completed);
-        check(signals.lines().empty(),"A delayed superseded row was restored after its identity was merged");
-    }
-}
-void recovery_reception_records() {
-    using transfer::RecoveryState;
-    Signals signals;
-    SignalLine line;line.id=94;line.revision=3;line.complete=true;line.binary=true;
-    line.text="01000001";line.received_bits=8;line.pattern_score=25;
-    for(const auto state:{RecoveryState::ready,RecoveryState::running,RecoveryState::incomplete,
-                          RecoveryState::cancelled,RecoveryState::unavailable,RecoveryState::ambiguous}) {
-        line.recovery_progress={state,2500000,9000000,std::chrono::milliseconds(10000)};
-        signals.update(line);
-        const auto rows=signal_records(signals);
-        check(rows.size()==1&&rows.front().id=="94"&&rows.front().cells[4].text==line.text&&
-              rows.front().cells[4].tone==ui::TextTone::muted&&!rows.front().activatable&&
-              rows.front().cells.back().text.find("Reception complete")!=std::string::npos&&
-              rows.front().cells.back().text.find("2500000 / 9000000 attempts")!=std::string::npos&&
-              signals.lines().front().complete&&!signals.lines().front().validated,
-              "Post-end recovery must keep one physically completed row with its exact pending bits and progress");
-        check(!signals.copy_id(0)&&!signals.copy_bits(0)&&signals.copy_raw_bits(0)==line.text&&
-              !signals.copy_bytes(0)&&!signals.copy_text(0),
-              "Unfinished recovery must allow exact physical raw bits without granting decoded-content copying");
-    }
-    line.recovery_progress.state=RecoveryState::exhausted;signals.update(line);
-    check(signals.copy_raw_bits(0)=="01000001"&&signals.copy_bytes(0)==Bytes{'A'}&&
-          signal_records(signals).front().cells.back().text.find("search exhausted")!=std::string::npos,
-          "Exhausted search must preserve explicitly raw completed observations");
-    line.recovery_progress.state=RecoveryState::recovered;signals.update(line);
-    check(signal_status_label(signals.lines().front())=="source invalid"&&!signals.copy_bytes(0)&&
-          signals.copy_raw_bits(0)==line.text,
-          "Corrected codewords with invalid source syntax must remain visibly unaccepted");
-    line.recovery_progress.state=RecoveryState::recovered;line.validated=true;line.binary=false;
-    line.text_message=true;line.reception_id="recovered-source";line.text="authenticated source";
-    signals.update(line);
-    check(signals.lines().size()==1&&signals.copy_id(0)=="recovered-source"&&signal_records(signals).front().activatable,
-          "Recovered source did not replace the existing pending row");
-    auto pending=line;pending.validated=false;pending.binary=true;pending.text="01000001";
-    pending.recovery_progress.state=RecoveryState::running;
-    signals.update(pending);
-    check(signals.copy_id(0)=="recovered-source","Delayed recovery progress replaced an accepted source");
-    ++pending.revision;pending.complete=false;pending.recovery_progress={};signals.update(pending);
-    signals.update(line);
-    check(!signals.lines().front().complete&&!signals.copy_id(0),
-          "A delayed recovered result replaced a stronger physical hypothesis");
-
-    for(const auto page:{ui::Page::console,ui::Page::compression}) {
-        unsigned actions=0;
-        for(const auto& control:ui::console_screen())if(control.page==page&&control.menu==ui::Menu::recovery) {
-            check(control.kind==ui::Kind::action&&std::string(control.menu_label)=="Recovery"&&
-                  (control.command==ui::Command::resume_recovery||control.command==ui::Command::cancel_recovery),
-                  "Recovery controls escaped the shared menu declarations");
-            ++actions;
-        }
-        check(actions==2,"Both received-signal pages need resume and cancel recovery controls");
-    }
-}
 void presentation() {
     Application app({.simulation=true});
     for(const auto field:{ui::Field::message,ui::Field::binary}) {
@@ -523,25 +432,20 @@ void rate_carrier_declarations() {
     const auto& rate=control(F::bandwidth);const auto& carrier=control(F::carrier);
     check(std::string_view(rate.label)=="Rate" && std::string_view(carrier.label)=="Carrier" &&
           rate.kind==ui::Kind::text && carrier.kind==ui::Kind::text && rate.persistent && carrier.persistent &&
-          carrier.open_upward && app.field(carrier.field).options.size()==2 &&
-          app.field(carrier.field).options.front().id=="1.5 kHz" &&
-          app.field(carrier.field).options.back().id=="1.8 kHz",
+          carrier.open_upward && app.field(carrier.field).options.size()==1 &&
+          app.field(carrier.field).options.front().id=="1.5 kHz",
           "Rate and Carrier must be shared persistent editable dropdowns");
     for(const auto& page:ui::pages()) {
         app.select_page(page.id);app.preset(rate,"2.4 kHz");
-        check(app.field(F::carrier).text=="1.8 kHz" && app.field(F::carrier).options.size()==2 &&
-              app.field(F::carrier).options.front().id=="1.8 kHz" && app.field(F::carrier).options.back().id=="1.2 kHz",
-              "Rate preset did not offer its default and center Carrier on every page");
-        app.preset(carrier,"1.2 kHz");
-        check(app.field(F::carrier).text=="1.2 kHz","Center Carrier preset did not use the shared edit path");
+        check(app.field(F::carrier).text=="1.8 kHz" && app.field(F::carrier).options.size()==1 &&
+              app.field(F::carrier).options.front().id=="1.8 kHz",
+              "Rate preset did not offer only its default Carrier on every page");
         app.edit(carrier,"2150 Hz");
         check(app.field(F::carrier).text=="2150 Hz","Carrier dropdown did not accept a custom frequency");
         app.preset(carrier,"1.8 kHz");
         check(app.field(F::carrier).text=="1.8 kHz","Default Carrier preset did not use the shared edit path");
         app.preset(rate,"3.6 kHz");
         check(app.field(F::carrier).text=="1.5 kHz","HF rate preset did not restore its recommended carrier");
-        app.preset(carrier,"1.8 kHz");
-        check(app.field(F::carrier).text=="1.8 kHz","HF rate center Carrier was not selectable on every page");
         for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
             const auto rate_geometry=ui::control_layout(rate,app.field(rate.field),size.w,size.h);
             const auto carrier_geometry=ui::control_layout(carrier,app.field(carrier.field),size.w,size.h);
@@ -551,48 +455,6 @@ void rate_carrier_declarations() {
                   "Rate and Carrier native editors or suggestion buttons overlap");
         }
     }
-}
-void target_snr_declarations() {
-    using F=ui::Field;
-    Application app({.simulation=true});
-    const auto& short_target=control(F::snr);const auto& long_target=control(F::long_snr);
-    check(short_target.kind==ui::Kind::text && long_target.kind==ui::Kind::text &&
-          short_target.persistent && long_target.persistent &&
-          app.field(F::snr).text=="32" && app.field(F::long_snr).text=="55" &&
-          app.field(F::receive_snr).text=="32, 55",
-          "Both independent TX targets must be persistent editable dropdowns with matching default reception");
-    const auto& short_options=app.field(F::snr).options;
-    const auto& long_options=app.field(F::long_snr).options;
-    check(short_options.size()==long_options.size() &&
-          std::equal(short_options.begin(),short_options.end(),long_options.begin(),
-              [](const auto& a,const auto& b){return a.id==b.id&&a.label==b.label;}) &&
-          std::any_of(long_options.begin(),long_options.end(),[](const auto& option){return option.id=="55";}),
-          "Target dropdowns must share presets including the long-message default of 55");
-    for(const auto& page:ui::pages()) {
-        app.select_page(page.id);
-        check(app.control(short_target).visible && app.control(long_target).visible &&
-              app.control(short_target).enabled && app.control(long_target).enabled,
-              "A target dropdown disappeared on another application page");
-        app.preset(short_target,"20");app.preset(long_target,"55");
-        check(app.field(F::snr).text=="20" && app.field(F::long_snr).text=="55" &&
-              app.field(F::receive_snr).text=="20, 55",
-              "Native target preset callbacks changed the other dropdown or failed to update reception");
-        app.edit(short_target,"31.5");app.edit(long_target,"54.5");
-        check(app.field(F::snr).text=="31.5" && app.field(F::long_snr).text=="54.5" &&
-              app.field(F::receive_snr).text=="31.5, 54.5",
-              "Target dropdowns lost their independent custom-value editing");
-        for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
-            const auto a=ui::control_layout(short_target,app.field(F::snr),size.w,size.h);
-            const auto b=ui::control_layout(long_target,app.field(F::long_snr),size.w,size.h);
-            check(a.has_suggestions && b.has_suggestions && a.widget.w>=40 && b.widget.w>=40 &&
-                  (a.frame.x+a.frame.w<=b.frame.x || b.frame.x+b.frame.w<=a.frame.x ||
-                   a.frame.y+a.frame.h<=b.frame.y || b.frame.y+b.frame.h<=a.frame.y),
-                  "Target dropdown editors, labels or suggestion buttons overlap");
-        }
-    }
-    app.close();app.edit(long_target,"80");app.preset(short_target,"80");
-    check(app.field(F::snr).text=="31.5" && app.field(F::long_snr).text=="54.5",
-          "Stale target callbacks changed a closing application");
 }
 void mono_declaration() {
     Application app({.simulation=true});
@@ -795,7 +657,7 @@ void typed_short_text_inspection() {
     Application app({}); // Production defaults; no audio session is needed to inspect a draft.
     const auto& message=control(F::message);
     check(app.field(F::bandwidth).text=="3.6 kHz" && app.field(F::carrier).text=="1.5 kHz" &&
-          app.field(F::snr).text=="32" && app.field(F::long_snr).text=="55" && app.field(F::receive_snr).text=="32, 55" &&
+          app.field(F::snr).text=="32" && app.field(F::receive_snr).text=="32" &&
           app.field(F::pattern).selected=="auto-pattern" && app.field(F::fec).selected=="rs60" &&
           !app.field(F::repeatable).checked,"Production defaults changed the short message fixture");
     const auto await_layout=[&] {
@@ -851,10 +713,10 @@ void compression_declarations() {
           "Compression view must be a declared native-control page");
     Application app({.simulation=true});
     check(!app.document(ui::Page::compression,900),"Compression controls acquired a duplicate document");
-    std::set<ui::Field> fields;std::set<ui::Command> commands;
+    std::set<ui::Field> fields;std::set<ui::Command> commands;std::vector<const ui::Control*> controls;
     bool explains_code=false;
     for(const auto& c:ui::console_screen())if(c.page==ui::Page::compression) {
-        fields.insert(c.field);commands.insert(c.command);
+        controls.push_back(&c);fields.insert(c.field);commands.insert(c.command);
         check(!c.persistent&&c.slot!=ui::Slot::none,"Compression binding lost shared page geometry");
         if(c.field==ui::Field::short_bits)
             check(c.kind==ui::Kind::text&&c.multiline&&c.byte_limit==2*transfer::short_message_bits&&c.submit==ui::Command::transmit_short_bits&&
@@ -877,14 +739,8 @@ void compression_declarations() {
         check(commands.contains(command),"Compression page lost a required action");
     for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
         std::vector<ui::Rect> occupied;
-        // A named menu has one native control and several action declarations.
-        // Check the same grouped surfaces that both native adapters construct.
-        for(const auto& group:ui::control_groups(ui::console_screen())) {
-            const auto* c=group.control;if(c->page!=ui::Page::compression)continue;
+        for(const auto* c:controls) {
             const auto geometry=ui::control_layout(*c,{},size.w,size.h);
-            for(const auto* item:group.menu_items)
-                check(ui::control_layout(*item,{},size.w,size.h).frame==geometry.frame,
-                      "Compression menu items disagree about their shared native control geometry");
             auto frame=geometry.frame;
             if(geometry.has_label&&c->kind!=ui::Kind::label) {
                 frame.h+=frame.y-geometry.label.y;frame.y=geometry.label.y;
@@ -955,6 +811,6 @@ void noise_declarations_and_dispatch() {
 }
 }
 int main() {
-    try {transmission_scope_records();transmission_scope_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();mono_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();noise_declarations_and_dispatch();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {transmission_scope_records();transmission_scope_reflow();records();progressive_pending_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();mono_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();noise_declarations_and_dispatch();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

@@ -75,103 +75,25 @@ key, epoch and profile. The optional caches are accounted for and discarded
 before they would reduce payload capacity or prevent a workspace reduction.
 Regression tests compare cached and uncached hypotheses and scores exactly.
 
-Iterative pattern scoring uses a shared persistent worker pool, defaulting to
-all but one logical CPU available to the process (at least one, respecting Linux
-CPU affinity). This is calculated on each computer: 8 available logical CPUs
-select 7 workers, 16 select 15, and 1 selects 1. Other platforms use the C++
-runtime's hardware-concurrency count. FFT hypotheses and clock-window fit
-accumulation run concurrently;
-trial counting, tie-breaking, admission and physical completion retain their
-original order. Each worker has private mutable template state. Parallel scratch
-is charged to the receiver workspace and released before it would displace
-payload storage or prevent a workspace reduction. Scratch is retained only
-during processing, preserving idle receiver-bank capacity. Available independent
-hypotheses and spare workspace can limit simultaneous workers. `PatternSearch::worker_threads = 1`
-selects serial scoring for comparisons; zero selects the automatic default.
-The worker count is a concurrency limit, not a promise that every worker stays
-busy. Ordered admission, short batches and synchronization limit scaling.
-Small clock-search banks now use smaller scheduling groups to expose enough
-work to the selected workers. For example, the ordinary unencrypted 1 Hz search
-with a seven-second start uncertainty has 15 origins, five frequencies and one
-clock-rate hypothesis: 75 lanes. Fixed groups of 16 limited it to five runnable
-jobs, even on a machine configured for 11 workers. Adaptive grouping uses single
-lanes in that case while retaining groups of up to 16 for large banks. This
-changes scheduling only; every hypothesis keeps its original arithmetic.
-FFT batch capacity follows the search bank and spare memory independently of
-CPU worker count, while reusing each worker's transform buffer and private
-pattern state; only jobs and results awaiting ordered collection need separate
-storage. Long-symbol correlation groups original blocks between possible
-symbol completions and exposes bounded numerical tiles of up to 65,536 lanes.
-The [compute interfaces and GPU port requirements](search-compute.md) describe
-these CPU implementations and the work still required for device execution.
-Tracking refinements also reuse exact template
-and carrier phase values, using acquisition scratch buffers between transforms
-without increasing receiver memory even when optional caches are unavailable.
-
-A wide key/epoch bank can still fall behind real time. The benchmark below
-measures generated noise through the ordinary streaming receiver with one epoch
-or thirteen epochs. Its final optional argument selects scoring workers. Run it
-without other CPU-heavy jobs. It excludes audio-device behavior, and live startup
-may require additional epoch coverage for the settling interval.
+A wide key/epoch bank can still fall behind real time on a single CPU thread;
+the fourfold gross-rate improvement is not a measured fourfold live transfer
+improvement. The benchmark below measures generated noise through the ordinary
+streaming receiver with one epoch or thirteen epochs. Run it without other
+CPU-heavy jobs. It excludes audio-device behavior, and live startup may require
+additional epoch coverage for the settling interval.
 
 ```sh
 cmake --build build --target benchmark_receiver
-./build/benchmark_receiver 12000 80 0 1
-./build/benchmark_receiver 12000 80 0 0
-./build/benchmark_receiver 12000 80 6 1
-./build/benchmark_receiver 12000 80 6 0
+./build/benchmark_receiver 12000 80 0
+./build/benchmark_receiver 12000 80 6
 ```
 
-For the initial parallel implementation, Release measurements on the
-12-logical-CPU Ryzen 5 PRO 5650U development host on 2026-09-16 used five-second
-runs after warm-up:
-
-| Bandwidth / C/N0 target | Keyed epochs | One worker | Automatic (11 workers) | Speedup |
-| --- | ---: | ---: | ---: | ---: |
-| 12,000 Hz / 80 dB-Hz | 1 | 8.81x real time | 16.55x real time | 1.88x |
-| 12,000 Hz / 80 dB-Hz | 13 | 0.71x real time | 1.25x real time | 1.77x |
-| 1,200 Hz / 40 dB-Hz | 1 | 56.11x real time | 102.53x real time | 1.83x |
-
-The thirteen-epoch case exceeded real-time throughput with automatic workers in
-this run. These generated-noise measurements are CPU results, not successful
-file-transfer or interception tests; speedup depends on profile and hardware.
-
-The separate simulation benchmark runs the actual live session's sampled
-channel, receiver bank, progress and replay preparation, with no audio device
-or native window. It checks exact received bits, zero missing symbols and
-physical completion. A controlled presentation clock excludes the fixed
-three-second replay from the processing measurement. Arguments select bandwidth,
-target C/N0, epoch radius and raw-bit count; workers use the automatic default.
-
-```sh
-cmake --build build --target benchmark_simulation
-./build/benchmark_simulation 12000 80 6 64
-```
-
-After the scheduling and tracking improvements, two final paired simulation
-runs on the same host compared the previous committed receiver with the updated
-receiver, linked against the same remaining library objects. Both used 11
-automatic workers, 12 kHz bandwidth, an 80 dB-Hz target, thirteen keyed epochs
-and 64 raw bits. The run order was reversed for the second pair.
-
-| Simulation CPU processing | Previous receiver | Updated receiver |
-| --- | ---: | ---: |
-| First pair | 17.5172 s | 14.6487 s |
-| Reversed pair | 17.3937 s | 14.6905 s |
-| Mean | 17.4555 s | 14.6696 s |
-
-That is about 16% less processing time, or 19% greater throughput, over the
-previous parallel implementation. Each run processed 12.3663 seconds of sampled
-media and verified exact physical completion. Total process CPU time divided by
-wall time averaged about 3.0 busy logical CPUs before and 3.2 afterward. This
-shows the remaining serial-work and scheduling limits despite the 11-worker
-ceiling; it is not an elevenfold scaling claim. Other development runs varied
-with scheduling and host conditions, so use paired runs on the target computer.
-
-A final paired generated-noise run at the same bandwidth, target and thirteen
-epochs improved from 1.25429x to 1.57008x real time, about 25% more throughput
-than the previous parallel receiver. Both used the automatic 11-worker limit
-and the five-second measurement interval above.
+On this development host, a Release run after the final changes processed
+26.5813 media seconds in 5.00029 wall seconds with one keyed epoch (5.32x real
+time), and 3.84 media seconds in 5.00022 wall seconds with thirteen epochs
+(0.77x real time). Thus this host cannot sustain that broad search bank in
+real time at the new rate. These generated-noise measurements are CPU results,
+not successful file-transfer or interception tests.
 
 ## Higher information density
 

@@ -10,11 +10,6 @@ namespace datapump::live::detail {
 // Presentation bookkeeping only. Candidate coordinates are complete pattern
 // windows; a long unfinished symbol creates no observation or expiry event.
 class PatternScoreHistory {
-    static auto key(const modem::PatternEvidence& candidate) {
-        return std::tie(candidate.first_sample, candidate.end_sample, candidate.stream_symbol,
-            candidate.stream_phase_samples, candidate.frequency_hz, candidate.bit,
-            candidate.score, candidate.alternative_score);
-    }
 public:
     struct Entry {
         modem::PatternEvidence candidate;
@@ -31,8 +26,7 @@ public:
             const auto previous = std::find_if(entries_.begin(), entries_.begin() + size_, same);
             const auto duplicate = std::find_if(next.begin(), next.begin() + count, same);
             const auto observation = previous != entries_.begin() + size_ ? previous->observation :
-                duplicate != next.begin() + count ? duplicate->observation :
-                PatternScoreObservation{allocate_id(), now, candidate.admission_threshold};
+                duplicate != next.begin() + count ? duplicate->observation : PatternScoreObservation{allocate_id(), now};
             next[count++] = {candidate, observation};
         }
         entries_ = next; size_ = count;
@@ -48,6 +42,11 @@ public:
         return now - observation.observed_at > Snapshot::pattern_score_lifetime;
     }
 private:
+    static auto key(const modem::PatternEvidence& candidate) {
+        return std::tie(candidate.first_sample, candidate.end_sample, candidate.stream_symbol,
+            candidate.stream_phase_samples, candidate.frequency_hz, candidate.bit,
+            candidate.score, candidate.alternative_score);
+    }
     std::array<Entry, Snapshot::pattern_score_limit> entries_{};
     std::size_t size_ = 0;
 };

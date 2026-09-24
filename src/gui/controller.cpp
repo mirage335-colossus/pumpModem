@@ -8,7 +8,6 @@
 #include "binary_editor.hpp"
 #include "datapump/audio.hpp"
 #include "datapump/runtime.hpp"
-#include "datapump/simulation_estimate.hpp"
 #include "datapump/tuning.hpp"
 #include <array>
 #include <cctype>
@@ -33,7 +32,7 @@ std::string bit_text(std::span<const std::uint8_t> bits) {
 }
 std::string compression_reference() {
     std::string result="Fixed dictionary (up to "+std::to_string(transfer::short_message_bytes)+" source bytes)\n";
-    for(const auto group:{" etao","in","shrd","luc","mfwy","pbg"}) {
+    for(const auto group:{" etao","in","shrdluc","mfwypbg"}) {
         const auto first=static_cast<std::uint8_t>(group[0]);
         result+=std::to_string(compression::encode_short_bits(Bytes{first}).size())+" bits:  ";
         for(const char* byte=group;*byte;++byte) {
@@ -81,13 +80,6 @@ std::string seconds_text(double seconds) {
     else text<<std::fixed<<std::setprecision(2)<<seconds<<" s";
     return text.str();
 }
-std::string probability_text(double probability) {
-    if(probability<.001)return "<0.1%";
-    if(probability>.999)return ">99.9%";
-    std::ostringstream text;
-    text<<"~"<<std::fixed<<std::setprecision(1)<<100*probability<<'%';
-    return text.str();
-}
 std::string workspace_text(unsigned percent,std::size_t bytes) {
     constexpr std::size_t gib=1024*1024*1024,mib=1024*1024;
     std::ostringstream text;
@@ -124,9 +116,6 @@ struct Controller::Impl {
     std::size_t dsp_workspace_bytes=runtime::dsp_workspace_budget();
     unsigned dsp_workspace_percent=50;
     double zoom=1,channel_snr=0,cpu_percent=0,shannon_capacity_bps=0;
-    std::optional<tuning::Plan> short_plan,long_plan;
-    double short_target=32,long_target=55;
-    std::optional<bool> displayed_short_target;
     std::string draft_error,tuning_explanation;
     std::vector<KeyEntry> keys;
     std::shared_ptr<const Bytes> attachment;
@@ -144,7 +133,6 @@ struct Controller::Impl {
         PrepKind kind=PrepKind::estimate;
         std::uint64_t revision=0;
         std::shared_ptr<const Inspection> inspection;
-        std::optional<simulation::Estimate> simulation_estimate;
         std::vector<KeyEntry> keys;
         std::vector<std::string> names;
         std::vector<audio::Device> devices;
@@ -175,10 +163,8 @@ struct Controller::Impl {
         f(UiField::bandwidth).text="3.6 kHz";
         for(const auto* s:{"1 Hz","100 Hz","1.2 kHz","2.4 kHz","3.6 kHz","12 kHz","18 kHz","24 kHz","1 MHz","30 MHz"}) f(UiField::bandwidth).options.push_back({s,s});
         reset_carrier(3600);
-        f(UiField::snr).text="32"; f(UiField::long_snr).text="55";
-        for(const auto id:{UiField::snr,UiField::long_snr})
-            for(const auto* s:{"140","120","100","80","60","55","40","32","20","6","-6","-10","-16","-20","-23","-26","-30","-60"}) f(id).options.push_back({s,s});
-        f(UiField::receive_snr).text="32, 55";
+        f(UiField::snr).text="32"; for(const auto* s:{"140","120","100","80","60","40","32","20","6","-6","-10","-16","-20","-23","-26","-30","-60"}) f(UiField::snr).options.push_back({s,s});
+        f(UiField::receive_snr).text=f(UiField::snr).text;
         for(const auto& p:tuning::simulation_presets()) f(UiField::simulation).options.push_back({std::string(p.name),p.enabled?std::string(p.name):"No"});
         const auto presets=tuning::simulation_presets();
         f(UiField::simulation).selected=std::string(presets[(options.simulation||options.smoke)?std::min<std::size_t>(2,presets.size()-1):0].name);
@@ -213,51 +199,12 @@ struct Controller::Impl {
         return value;
     }
     void notice(std::string text,double seconds=4) { f(UiField::status).text=std::move(text); notice_until=Clock::now()+std::chrono::milliseconds(static_cast<long long>(seconds*1000)); }
-    bool short_draft() const {
-        return !attachment && (composer.raw_bits().has_value() ||
-            (!composer.bytes().empty() && composer.bytes().size()<=transfer::short_message_bytes));
-    }
-    const modem::Config& transmit_config() const {
-        return !short_draft() && settings.long_message_modem ? *settings.long_message_modem : settings.transfer.modem;
-    }
-    void refresh_transmit_target() {
-        if(!short_plan || !long_plan)return;
-        const bool short_message=short_draft();
-        if(displayed_short_target==short_message)return;
-        displayed_short_target=short_message;
-        const auto& plan=short_message?*short_plan:*long_plan;
-        const auto target=short_message?short_target:long_target;
-        target_supported=plan.target_supported; tuning_explanation=plan.explanation;
-        shannon_capacity_bps=tuning::shannon_capacity_bps(plan.config.bandwidth_hz,target);
-        const auto reference=profile_reference::build(plan.config,target,
-            settings.transfer.receive_pattern_mode,encrypted());
-        auto& field=f(UiField::profile_reference);
-        field.records.clear(); field.selected.clear();
-        for(std::size_t index=0;index<reference.rows.size();++index) {
-            const auto& row=reference.rows[index];
-            field.records.push_back({std::to_string(index),
-                {{row.label,5,1,-5,16,10,row.active?ui::TextTone::data:ui::TextTone::muted,row.active}}});
-        }
-    }
     void dirty() {
-        // Only the draft's transmit presentation changes here. Reconfiguring
-        // live reception would discard a pending symbol when crossing 16 bytes.
-        refresh_transmit_target();
         ++revision; estimate.reset(); inspection.reset(); estimate_requested=Clock::now(); pattern_first=0;
-        simulation_estimate_status(!settings_valid?"Invalid settings":!attachment&&!draft_error.empty()?"Unavailable":"Calculating...");
         f(UiField::airtime).text="Calculating airtime..."; f(UiField::inspection).text="Calculating current transmission...";
         f(UiField::flow_detail).text.clear(); f(UiField::transmission_detail).text.clear();
         f(UiField::payload_alphabet).visible=false; f(UiField::reference_alphabet).visible=false;
         if(!attachment && !draft_error.empty()) { estimated_revision=revision; f(UiField::airtime).text=draft_error; f(UiField::inspection).text=draft_error; }
-    }
-    void simulation_estimate_text(std::string confidence,std::string cpu,std::string gpu) {
-        f(UiField::simulation_confidence).text="RX success (model)\n"+std::move(confidence);
-        f(UiField::simulation_cpu_time).text="CPU / i9-13900H\n"+std::move(cpu);
-        f(UiField::simulation_gpu_time).text="GPU / RTX 4090 Laptop (projected)\n"+std::move(gpu);
-    }
-    void simulation_estimate_status(std::string state) {
-        if(!tuning::parse_simulation_preset(f(UiField::simulation).selected).enabled)state="Simulation off";
-        simulation_estimate_text(state,state,state);
     }
     void encryption_changed() {
         if(tone())f(UiField::key).selected="none";
@@ -271,8 +218,6 @@ struct Controller::Impl {
         auto& carrier=f(UiField::carrier);
         carrier.text=frequency_text(recommended_gui_carrier(rate));
         carrier.options={{carrier.text,carrier.text}};
-        const auto center=frequency_text(rate/2);
-        if(center!=carrier.text)carrier.options.push_back({center,center});
     }
     void configure(bool match_receive_target=false,bool match_carrier=false) {
         receive_targets_due.reset();
@@ -284,16 +229,18 @@ struct Controller::Impl {
             const auto mode=tuning::parse_pattern_mode(f(UiField::pattern).selected);
             const auto rate=frequency(f(UiField::bandwidth).text,"Rate");
             if(match_carrier)reset_carrier(rate);
-            const auto short_snr=number(f(UiField::snr).text,"Short target SNR");
-            const auto long_snr=number(f(UiField::long_snr).text,"Long target SNR");
-            const auto carrier=frequency(f(UiField::carrier).text,"Carrier");
-            const auto plan=tuning::resolve(rate,short_snr,mode,encrypted(),carrier);
-            const auto longer_plan=tuning::resolve(rate,long_snr,mode,encrypted(),carrier);
-            const auto targets=tuning::parse_receive_targets(match_receive_target?
-                f(UiField::snr).text+", "+f(UiField::long_snr).text:f(UiField::receive_snr).text);
+            const auto target_snr=number(f(UiField::snr).text,"Target SNR");
+            const auto plan=tuning::resolve(rate,target_snr,mode,encrypted(),frequency(f(UiField::carrier).text,"Carrier"));
+            const auto capacity=tuning::shannon_capacity_bps(rate,target_snr);
+            const auto targets=tuning::parse_receive_targets(f(match_receive_target?UiField::snr:UiField::receive_snr).text);
             f(UiField::receive_snr).text=targets.canonical;
             next.transfer.modem=plan.config; next.transfer.timestamp=0;
-            next.long_message_modem=longer_plan.config;
+            const auto reference=profile_reference::build(plan.config,target_snr,mode,encrypted());
+            for(std::size_t index=0;index<reference.rows.size();++index) {
+                const auto& row=reference.rows[index];
+                f(UiField::profile_reference).records.push_back({std::to_string(index),
+                    {{row.label,5,1,-5,16,10,row.active?ui::TextTone::data:ui::TextTone::muted,row.active}}});
+            }
             next.transfer.automatic_receive_profiles=true;
             next.transfer.receive_targets_db_hz=targets.values;
             next.transfer.receive_pattern_mode=mode;
@@ -313,13 +260,11 @@ struct Controller::Impl {
             next.content_limit=default_memory_limit; next.dsp_workspace_bytes=dsp_workspace_bytes;
             next.transfer.dsp_workspace_bytes=next.dsp_workspace_bytes;
             f(UiField::dsp_workspace).display_text=workspace_text(workspace_percent,next.dsp_workspace_bytes);
-            settings=std::move(next); settings_valid=true;
-            simulation_estimate_status(!attachment&&!draft_error.empty()?"Unavailable":"Calculating...");
-            short_plan=plan; long_plan=longer_plan; short_target=short_snr; long_target=long_snr;
-            displayed_short_target.reset(); refresh_transmit_target();
+            settings=std::move(next); settings_valid=true; target_supported=plan.target_supported; tuning_explanation=plan.explanation;
+            shannon_capacity_bps=capacity;
             plot_policy.reset(); plot_update.clear_waterfall=true;
             if(started) session.configure(settings);
-        } catch(...) { settings_valid=false; simulation_estimate_status("Invalid settings"); f(UiField::airtime).text="Invalid modem settings"; f(UiField::inspection).text="Invalid modem settings"; throw; }
+        } catch(...) { settings_valid=false; f(UiField::airtime).text="Invalid modem settings"; f(UiField::inspection).text="Invalid modem settings"; throw; }
     }
     void message_label() {
         if(!attachment) f(UiField::message_label).text=composer.raw_bits()?
@@ -529,13 +474,6 @@ struct Controller::Impl {
         case Command::save_file: return selected_file()!=nullptr;
         case Command::copy_signal: { const auto index=selected_signal(); return index && (signals.copy_id(*index)||signals.copy_bits(*index)||signals.copy_text(*index)); }
         case Command::copy_raw_signal: { const auto index=selected_signal();return index&&signals.copy_raw_bits(*index).has_value(); }
-        case Command::resume_recovery: case Command::cancel_recovery: {
-            const auto index=selected_signal();if(!index)return false;
-            const auto state=signals.lines()[*index].recovery_progress.state;
-            return command==Command::resume_recovery?
-                state==transfer::RecoveryState::incomplete || state==transfer::RecoveryState::cancelled:
-                state==transfer::RecoveryState::ready || state==transfer::RecoveryState::running;
-        }
         case Command::paste_raw_signal: {
             const auto index=selected_signal();const auto bits=index?signals.copy_raw_bits(*index):std::nullopt;
             return !attachment&&!file_loading&&bits&&bits->size()<=transfer::short_message_bits;
@@ -564,7 +502,7 @@ struct Controller::Impl {
         if((f(UiField::repeatable).checked||has_repeatable_prefix())&&!pending_repeatable_removal&&
            (attachment||file_loading||composer.bytes().size()>repeatable_limit))set_repeatable(false);
         const bool busy=transmit_requested||snapshot.transmitting||closing;
-        for(auto id:{UiField::simulation,UiField::key,UiField::device,UiField::mono,UiField::bandwidth,UiField::carrier,UiField::snr,UiField::long_snr,UiField::receive_snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
+        for(auto id:{UiField::simulation,UiField::key,UiField::device,UiField::mono,UiField::bandwidth,UiField::carrier,UiField::snr,UiField::receive_snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
         if(key_loading || tone()) f(UiField::key).enabled=false;
         for(auto id:{UiField::callsign,UiField::grid}) f(id).enabled=!closing;
         f(UiField::short_bits).enabled=!attachment&&!file_loading&&!closing;
@@ -621,40 +559,9 @@ struct Controller::Impl {
         } else if(settings_valid&&!estimate&&estimated_revision!=revision&&Clock::now()-estimate_requested>=std::chrono::milliseconds(120)) {
             result.kind=PrepKind::estimate; result.revision=revision; InspectionRequest request;
             request.message=message(); request.options=settings.transfer;
-            request.options.modem=transmit_config();
             if(!attachment&&composer.raw_bits()) request.binary=*composer.raw_bits();
-            request.requested_pattern=f(UiField::pattern).selected; request.target_snr=short_draft()?short_target:long_target; request.simulation=settings.simulation; request.device=settings.device;
-            start_worker([request=std::move(request),simulation_settings=settings](Prepared& value,std::stop_token) {
-                value.inspection=std::make_shared<const Inspection>(inspect(request));
-                if(!simulation_settings.simulation)return;
-                // Keep a failed advisory model independent of transmission preparation.
-                try {
-                    modem::ChannelConfig channel;
-                    channel.snr_db=simulation_settings.simulation_snr_db;
-                    channel.clock_error_ppm=simulation_settings.simulation_clock_error_ppm;
-                    channel.phase_noise_degrees_per_sqrt_second=simulation_settings.simulation_phase_noise_degrees_per_sqrt_second;
-                    channel.seed=simulation_settings.simulation_seed;
-                    const auto& base=simulation_settings.transfer;
-                    // Match the live bank's deduplication of identical key material.
-                    std::vector<Bytes> key_tags;
-                    const auto add_key=[&](const Crypto& key) {
-                        auto tag=key.mac(Bytes{'D','P','-','R','X','-','B','A','N','K'});
-                        if(std::find(key_tags.begin(),key_tags.end(),tag)==key_tags.end())key_tags.push_back(std::move(tag));
-                    };
-                    if(base.key)add_key(*base.key);
-                    for(const auto& key:simulation_settings.receive_keys)add_key(key);
-                    std::vector<modem::Config> profiles;
-                    const auto add_profiles=[&](bool keyed) {
-                        const auto family=tuning::receive_profiles(base.modem,base.receive_targets_db_hz,
-                            base.receive_pattern_mode,keyed);
-                        profiles.insert(profiles.end(),family.begin(),family.end());
-                    };
-                    if(simulation_settings.permits_plaintext())add_profiles(false);
-                    for(std::size_t key=0;key<key_tags.size();++key)add_profiles(true);
-                    value.simulation_estimate=simulation::estimate(value.inspection->estimate,request.options,
-                        request.binary.has_value()||transfer::uses_raw_message(request.message),channel,profiles);
-                } catch(const std::exception&) { value.simulation_estimate.reset(); }
-            },std::move(result));
+            request.requested_pattern=f(UiField::pattern).selected; request.target_snr=number(f(UiField::snr).text,"Target SNR"); request.simulation=settings.simulation; request.device=settings.device;
+            start_worker([request=std::move(request)](Prepared& value,std::stop_token) { value.inspection=std::make_shared<const Inspection>(inspect(request)); },std::move(result));
         }
     }
     void accept(Prepared result) {
@@ -665,7 +572,7 @@ struct Controller::Impl {
         if(result.kind==PrepKind::file&&result.revision!=attachment_revision) return;
         if(!result.error.empty()) {
             if(result.kind==PrepKind::keys) { key_failed=true; f(UiField::key_path).text=result.created?"Keyfile saved; load failed":"Keyfile operation failed"; }
-            if(result.kind==PrepKind::estimate) { if(result.revision==revision) { estimated_revision=revision; simulation_estimate_status("Unavailable"); f(UiField::airtime).text=result.error; f(UiField::inspection).text=result.error; } }
+            if(result.kind==PrepKind::estimate) { if(result.revision==revision) { estimated_revision=revision; f(UiField::airtime).text=result.error; f(UiField::inspection).text=result.error; } }
             else if(result.kind!=PrepKind::devices) notice(result.error,10);
             return;
         }
@@ -688,18 +595,6 @@ struct Controller::Impl {
             auto& state=f(UiField::device); state.options={{"default","default"}}; for(const auto& device:result.devices) if(device.id!="default") state.options.push_back({device.id,device.id});
         } else if(result.kind==PrepKind::estimate&&result.revision==revision) {
             inspection=std::move(result.inspection); estimate=inspection->estimate; estimated_revision=revision;
-            if(!settings.simulation)simulation_estimate_status("Simulation off");
-            else if(receive_targets_due)simulation_estimate_status("Calculating...");
-            else if(!estimate->memory_supported)simulation_estimate_status("Budget exceeded");
-            else if(!estimate->wire_bits)simulation_estimate_status("Enter a message");
-            else if(result.simulation_estimate) {
-                const auto& model=*result.simulation_estimate;
-                const auto confidence=!model.profile_matches?"No matching RX profile":
-                    !model.carrier_in_search?"Carrier outside RX search":
-                    !model.confidence_available?"Unavailable":probability_text(model.success_probability);
-                simulation_estimate_text(confidence,
-                    "~"+seconds_text(model.cpu_seconds),"~"+seconds_text(model.gpu_seconds));
-            } else simulation_estimate_status("Unavailable");
             f(UiField::inspection).text=inspection->title+"\n"+inspection->summary;
             std::ostringstream flow,transmission;
             for(const auto& lane:inspection->lanes) {
@@ -747,10 +642,19 @@ struct Controller::Impl {
         plot_update.update_plots=plot_update.update_plots||changed.update_plots;
         plot_update.append_waterfall=plot_update.append_waterfall||changed.append_waterfall;
         plot_update.clear_waterfall=plot_update.clear_waterfall||changed.clear_waterfall;
-        apply_receptions(inbox,signals,next);
-        if(!next.signals.empty() || !next.received.empty()) {
-            refresh_files();refresh_signals();
+        for(auto& received:next.received)
+            if(received.stream_complete && received.content_validated)inbox.put(std::move(received.content));
+        if(!next.received.empty()) refresh_files();
+        for(const auto& signal:next.signals) {
+            const auto stream=std::find_if(inbox.items().begin(),inbox.items().end(),[&](const auto& item) { return id_label(item.message)==signal.reception_id; });
+            const bool short_text=signal.complete&&!signal.validated&&!signal.binary&&!signal.raw_bits.empty();
+            const bool text=short_text||(stream!=inbox.items().end()&&stream->message.kind==MessageKind::text);
+            SignalLine line{signal.id,signal.frequency_hz,signal.text,signal.validated,signal.reception_id,text,signal.preamble_received_percent,signal.pre_fec_accuracy,signal.binary,signal.complete,signal.received_bits,signal.expected_bits,signal.pattern_score};
+            line.raw_bits=signal.raw_bits;
+            line.missing_symbols=signal.missing_symbols;line.fec_stats=signal.fec_stats;
+            signals.update(std::move(line));
         }
+        if(!next.signals.empty() || !next.received.empty()) refresh_signals();
         if(transmit_requested&&!next.transmitting&&next.transmission_finished) {
             if(!noise_requested)gate.finished();
             transmit_requested=false; noise_requested=false;
@@ -763,7 +667,7 @@ struct Controller::Impl {
         if(next.simulation_replay||snapshot.simulation_replay||Clock::now()>=notice_until) f(UiField::status).text=next.error.empty()?next.status:next.error;
         if(Clock::now()-cpu_time>=std::chrono::seconds(1)) { const auto now=Clock::now(); cpu_percent=100*static_cast<double>(std::clock()-cpu_clock)/CLOCKS_PER_SEC/std::chrono::duration<double>(now-cpu_time).count(); cpu_clock=std::clock(); cpu_time=now; }
         std::ostringstream diagnostics;
-        diagnostics<<format_bit_rate(modem::bit_rate(transmit_config()))
+        diagnostics<<format_bit_rate(modem::bit_rate(settings.transfer.modem))
             <<" | Shannon-Hartley limit "<<format_bit_rate(shannon_capacity_bps)
             <<" | "<<next.samples_received<<" input samples | CPU "<<std::fixed<<std::setprecision(1)<<cpu_percent<<"%";
         if(next.simulation) diagnostics<<" | Channel SNR "<<channel_snr<<" dB / media "<<seconds_text(next.virtual_seconds);
@@ -811,7 +715,7 @@ struct Controller::Impl {
             seeded_message.clear(); sync_composer(); ++f(UiField::message).text_cursor_end_revision; dirty(); break;
         case Command::cancel: session.cancel_transmit(); notice(noise_requested||snapshot.transmitting_noise?
             "Stopping noise...":snapshot.simulation_replay?"Stopping simulation replay...":"Cancelling transmission..."); break;
-        case Command::clear_received: session.clear_recoveries();inbox.clear(); signals.clear(); refresh_files(); refresh_signals(); notice("Received content cleared from memory."); break;
+        case Command::clear_received: inbox.clear(); signals.clear(); refresh_files(); refresh_signals(); notice("Received content cleared from memory."); break;
         case Command::attach_file:
             ++attachment_revision; pending_file.reset(); file_loading=false;
             request(Purpose::attach,ui::ServiceKind::open_file,"Choose an attachment"); break;
@@ -841,12 +745,6 @@ struct Controller::Impl {
             const auto bits=signals.copy_raw_bits(*selected_signal());
             request(Purpose::clipboard,ui::ServiceKind::clipboard,"Copy received raw payload bits",*bits);break;
         }
-        case Command::resume_recovery:
-            if(!session.resume_recovery(signals.lines()[*selected_signal()].id))throw Error("That recovery is no longer retained");
-            notice("Recovery queued for another search budget.");break;
-        case Command::cancel_recovery:
-            session.cancel_recovery(signals.lines()[*selected_signal()].id);
-            notice("Cancelling recovery; reception continues.");break;
         case Command::paste_raw_signal:
             f(UiField::short_bits).text=*signals.copy_raw_bits(*selected_signal());short_bits_changed();
             ++f(UiField::short_bits).text_cursor_end_revision;break;
@@ -934,11 +832,8 @@ void Controller::edit(UiField field,std::string text) {
         p.f(field).text=std::move(text);
         if(field==UiField::short_bits)p.short_bits_changed();
         else if(field==UiField::binary) p.binary_changed();
-        else if(field==UiField::receive_snr) {
-            p.receive_targets_due=Clock::now()+std::chrono::milliseconds(750);
-            p.simulation_estimate_status("Calculating...");
-        }
-        else if(field==UiField::snr||field==UiField::long_snr) p.configure(true);
+        else if(field==UiField::receive_snr)p.receive_targets_due=Clock::now()+std::chrono::milliseconds(750);
+        else if(field==UiField::snr) p.configure(true);
         else if(field==UiField::bandwidth) p.configure(false,true);
         else if(field==UiField::device||field==UiField::carrier) p.configure();
         else if(field==UiField::callsign||field==UiField::grid) { if(untouched&&!p.attachment&&!p.file_loading)p.seed_composer(); }

@@ -88,13 +88,6 @@ no marker confidence. See the [fixed stream protocol](docs/protocol.md).
 
 The desktop has **Console**, **Modem flow**, **Transmission layout**, and
 **Compression / raw bits** tabs.
-Beside **Simulation**, the desktop shows a modeled whole-message receive
-probability and estimated computation times for a fixed **Intel Core i9-13900H**
-and **RTX 4090 Laptop GPU** reference. No local benchmark runs. The GPU figure is
-a projection; simulation currently executes on the CPU. These rough estimates
-update with the draft and settings. A simulated carrier outside the receiver's
-frequency search shows an explanation instead of a numeric probability; see the
-[model and its assumptions](docs/simulation-estimates.md).
 The inspection views show the two pattern codewords, their modeled distances,
 and exact bit/symbol counts. Long patterns use a bounded illustrative prefix;
 keyed previews use clearly labeled public example streams. These design plots
@@ -127,19 +120,15 @@ independently.
 The DSP workspace dropdown is an upper limit: 25%, 50% (default), or 75% of
 available RAM. It does not request that amount of history. Received messages
 and files have a separate 256 MiB quota. The GUI defaults to **Rate**
-`3.6 kHz`, **Carrier** `1.5 kHz`, **Short ≤16 B target SNR (dB-Hz)** `32`, and
-**Long / file target SNR (dB-Hz)** `55`. The short target applies to nonempty
-text of 1–16 source bytes inclusive and exact raw bits. Longer text and all
-attachments use the long target. Estimates, inspection and transmission follow
-the draft's source bytes; crossing the boundary does not restart reception.
+`3.6 kHz`, **Carrier** `1.5 kHz`, and **TX SNR (dB-Hz)** `32`.
 Rate is the nominal chip-rate planning parameter, not a measured occupied
 bandwidth: the default produces 1,800 chips/s and an ideal shaped spectrum of
 375–2,625 Hz, including the 25% RRC rolloff. Rate presets still include `18 kHz`.
 Changing Rate selects its default carrier: `1.5 kHz` for `3.6 kHz`, otherwise
 `max(1500, 0.75 × rate)` Hz. The Carrier dropdown offers only the current rate's
 default carrier; manual frequency entry remains available.
-The **RX targets (dB-Hz)** comma-list starts at `32, 55`. Changing either TX SNR to
-a valid value replaces the RX list with both targets (deduplicated); the RX
+The **RX targets (dB-Hz)** comma-list also starts at `32`. Changing TX SNR to
+a valid value replaces the RX list with that single matching target; the RX
 list can then be edited independently. Search varies this list while holding
 the selected rate, carrier, and pattern/tone mode fixed. Invalid RX input resets
 the entire list to `32`.
@@ -147,7 +136,7 @@ the entire list to `32`.
 Beside the gross bitrate, diagnostics show the **[Shannon-Hartley limit](https://disalw3.epfl.ch/teaching/signals_instruments_systems/ay_2025-26/lecture/SIS_25-26_W07_lecture.pdf#page=33)** for the
 selected TX target and nominal bandwidth. This is ideal Gaussian-noise channel
 capacity: `B * log2(1 + 10^(C/N0_dBHz / 10) / B)` bit/s, with `B` in Hz. At the
-short-message defaults (3.6 kHz, 32 dB-Hz), it is about **1.89 kbit/s**. Actual payload
+GUI defaults (3.6 kHz, 32 dB-Hz), it is about **1.89 kbit/s**. Actual payload
 throughput depends on the waveform and coding overhead. CLI `estimate` reports
 the same value as `shannon_capacity_bps`, using `--bw` and `--target-snr` (default
 32 dB-Hz, including manual modem profiles); values beyond the numeric range are
@@ -190,32 +179,6 @@ content as base64, exact recovered bits, validation flags and DSP diagnostics; w
 or `--json`, binary file content remains unsaved. Text defaults to stdout, so
 normal pipelines work. Public Reed–Solomon correction does not authenticate the
 sender.
-
-After observed symbol absence completes a reception, unresolved interval data
-can use a separate hard-bit recovery search. Its default wall-clock budget is
-five minutes, with workers up to the available CPU cores. `rx`, `simulate` and
-`listen` accept `--recovery-seconds N` (0 disables this additional search),
-`--recovery-threads N` (0 selects the available cores), and `--recovery-bits N`
-(default 65,536 retained symbol slots). These are local receiver settings;
-transmit bits, markers, airtime, encryption and authentication are unchanged.
-The search receives hard bits and missing-slot positions, with no analog samples
-or symbol-confidence scores. It never changes a bit's established encryption
-coordinates or joins receptions across physical completion.
-
-JSON reports `recovery.state`, `attempts`, `total` and `elapsed_ms` separately
-from `stream_complete` and `content_validated`. A physically complete reception
-may still have an incomplete recovery search. Exhausting its time budget does
-not establish a unique candidate or expose speculative source content. Recovery
-remains bounded by the retained slots and selected search scope; it cannot
-recover every possible insertion, deletion or lost interval. The API retains
-unfinished work for a later recovery call while its result remains alive.
-`--recovery-errors N` (default 2, range 0–24) reserves RS capacity for additional
-erroneous bytes by enumerating more missing bits. This can substantially increase
-the search domain; a larger value is not a guarantee that the search will finish
-within its time budget. See [the exact recovery scope](docs/protocol.md#exhaustive-hard-bit-recovery).
-The GUI's Recovery menu in Console + Compression resumes an unfinished search
-for another configured budget or cancels its current run. Clearing received
-content discards these jobs; stopping or reconfiguring the session does too.
 
 ```sh
 printf 'clipboard text' | ./build/pump tx --input - --output message.wav
@@ -478,15 +441,6 @@ pattern evidence and only then compares it with `--bits`. A wrong expected
 string does not steer acquisition. Its JSON reports exact bits, a model score
 and `content_validated: false`. Manual sample-rate/carrier overrides use the same
 pattern transport.
-
-Live `listen --json` events carry `signal_id`, `revision` and `superseded_ids`.
-Keep the latest revision for each signal, clear its prior interpretation when
-the revision increases, and remove identities listed in `superseded_ids`.
-A slower receive profile may revise a completed short interpretation back to
-pending; it completes only after that profile observes physical absence.
-`reception_update` events describe decoded interpretations, and their
-`reception_id` matches the completed payload's `id`. These are local presentation
-identities, not transmitted framing or authentication.
 
 The reference modem accepts nominal bandwidths from 1 Hz through 30 MHz and
 forced durations of 1..16,384 chips. `--target-snr` is the desired C/N0 in dB-Hz,

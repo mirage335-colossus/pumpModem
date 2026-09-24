@@ -8,9 +8,8 @@
 namespace datapump::gui::ui {
 enum class Page { console, compression, flow, transmission, count };
 enum class Field {
-    callsign, grid, repeatable, simulation, simulation_confidence, simulation_cpu_time, simulation_gpu_time,
-    key, message, binary,
-    qr_brightness, send_key, device, mono, bandwidth, carrier, snr, long_snr, receive_snr, pattern, fec, dsp_workspace,
+    callsign, grid, repeatable, simulation, key, message, binary,
+    qr_brightness, send_key, device, mono, bandwidth, carrier, snr, receive_snr, pattern, fec, dsp_workspace,
     files, signals, mode, status, airtime, key_path, message_label, binary_label,
     diagnostics, inspection, flow_detail, transmission_detail, payload_alphabet,
     reference_alphabet, waveform_zoom, short_bits, short_bits_detail, received_raw_bits,
@@ -21,15 +20,14 @@ enum class Command {
     generate_keyfile, show_key_folder, acknowledge_key_failure, save_file,
     copy_signal, paste_signal, zoom_in, zoom_out, reset_zoom, clear_waterfall,
     pattern_first, pattern_previous, pattern_next, pattern_last, toggle_qr_expanded, dismiss_overlay,
-    transmit_short_bits, copy_raw_signal, paste_raw_signal, clear_pattern_scores,
-    resume_recovery, cancel_recovery
+    transmit_short_bits, copy_raw_signal, paste_raw_signal, clear_pattern_scores
 };
 enum class Bitmap {
     none, qr, waveform, waterfall, constellation, pattern_scores, pattern, pattern_distances,
     pattern_evidence, payload_alphabet, reference_alphabet
 };
 enum class Kind { label, action, toggle, choice, text, list, bitmap };
-enum class Menu { none, keyfile, recovery };
+enum class Menu { none, keyfile };
 enum class TextTone { normal, muted, data, inverse };
 enum class BitmapCaption { footer, overlay_error };
 // Overlay controls use viewport-relative insets and optional fixed dimensions.

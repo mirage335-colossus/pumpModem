@@ -15,27 +15,24 @@ bool contains(Rect outer, Rect inner) {
 }
 void established_default() {
     const DesktopLayout layout;
-    check(DesktopLayout::default_width == 1180 && DesktopLayout::default_height == 952 &&
-          DesktopLayout::min_width == 1030 && DesktopLayout::min_height == 872,
+    check(DesktopLayout::default_width == 1180 && DesktopLayout::default_height == 866 &&
+          DesktopLayout::min_width == 1030 && DesktopLayout::min_height == 786,
           "desktop default or minimum size changed");
-    check(layout[Slot::tabs] == Rect{16, 137, 1148, 656}, "tab viewport moved");
-    check(layout[Slot::page] == Rect{16, 169, 1148, 624}, "page viewport moved");
-    check(layout[Slot::message] == Rect{16, 195, 785, 78}, "compact message composition size changed");
-    check(layout[Slot::paste_previous] == Rect{561, 173, 240, 20}, "previous-message button moved");
-    check(layout[Slot::binary] == Rect{815, 195, 220, 78}, "binary editor moved");
-    check(layout[Slot::qr] == Rect{1049, 195, 115, 115}, "QR preview must span the editor and action rows");
-    check(layout[Slot::transmit_scope] == Rect{16, 332, 1148, 206}, "generation scope size changed");
-    check(layout[Slot::profile_reference] == Rect{884, 694, 280, 91}, "profile reference must share the plot row at the right edge");
-    check(layout[Slot::signals] == Rect{16, 561, 882, 110}, "received signals size changed");
-    check(layout[Slot::files] == Rect{912, 561, 252, 74}, "received files size changed");
-    check(layout[Slot::waterfall] == Rect{16, 694, 205, 91}, "waterfall size changed");
-    check(layout[Slot::device] == Rect{16, 817, 220, 27}, "persistent modem controls moved");
-    check(layout[Slot::bandwidth] == Rect{246, 817, 127, 27} &&
-          layout[Slot::carrier] == Rect{383, 817, 135, 27}, "Rate and Carrier editors lost their reserved widths");
-    check(layout[Slot::snr] == Rect{16, 860, 260, 27} &&
-          layout[Slot::long_snr] == Rect{286, 860, 260, 27} &&
-          layout[Slot::receive_snr] == Rect{556, 860, 608, 27}, "separate transmit targets lost their persistent row");
-    check(layout[Slot::status] == Rect{16, 921, 1148, 24}, "persistent status moved");
+    check(layout[Slot::tabs] == Rect{16, 94, 1148, 656}, "tab viewport moved");
+    check(layout[Slot::page] == Rect{16, 126, 1148, 624}, "page viewport moved");
+    check(layout[Slot::message] == Rect{16, 152, 822, 78}, "compact message composition size changed");
+    check(layout[Slot::paste_previous] == Rect{598, 130, 240, 20}, "previous-message button moved");
+    check(layout[Slot::binary] == Rect{852, 152, 220, 78}, "binary editor moved");
+    check(layout[Slot::qr] == Rect{1086, 152, 78, 78}, "QR preview moved");
+    check(layout[Slot::transmit_scope] == Rect{16, 289, 1148, 206}, "generation scope size changed");
+    check(layout[Slot::profile_reference] == Rect{16, 518, 280, 224}, "profile reference must span history and plots on the left");
+    check(layout[Slot::signals] == Rect{308, 518, 590, 110}, "received signals size changed");
+    check(layout[Slot::files] == Rect{912, 518, 252, 74}, "received files size changed");
+    check(layout[Slot::waterfall] == Rect{308, 651, 205, 91}, "waterfall size changed");
+    check(layout[Slot::device] == Rect{16, 774, 112, 27}, "persistent modem controls moved");
+    check(layout[Slot::bandwidth] == Rect{138, 774, 93, 27} &&
+          layout[Slot::carrier] == Rect{241, 774, 101, 27}, "Rate and Carrier editors lost their reserved widths");
+    check(layout[Slot::status] == Rect{16, 835, 1148, 24}, "persistent status moved");
 }
 void document_widths() {
     for(const auto viewport:{480,1000,1400}) {
@@ -47,8 +44,7 @@ void document_widths() {
         "Small native viewports ignored the shared minimum document content width");
 }
 void supported_sizes() {
-    for (const auto size : {Rect{0, 0, min_width, min_height}, Rect{0, 0, min_width, default_height},
-                            Rect{0, 0, min_width, 1200}, Rect{0, 0, 1920, min_height},
+    for (const auto size : {Rect{0, 0, min_width, min_height},
                             Rect{0, 0, default_width, default_height},
                             Rect{0, 0, 1387, 1001}, Rect{0, 0, 1920, 1080}}) {
         const DesktopLayout layout(size.w, size.h);
@@ -62,46 +58,12 @@ void supported_sizes() {
                       "persistent control overlaps a page");
             }
         }
-        const auto simulation=layout[Slot::simulation];
-        auto previous_estimate=simulation;
-        for(const auto slot:{Slot::simulation_confidence,Slot::simulation_cpu_time,Slot::simulation_gpu_time}) {
-            const auto estimate=layout[slot];
-            check(persistent_slot(slot)&&estimate.x>=previous_estimate.x+previous_estimate.w+10&&
-                  estimate.y==simulation.y-label_height&&estimate.y+estimate.h==simulation.y+simulation.h&&
-                  estimate.y>=layout[Slot::callsign].y+layout[Slot::callsign].h&&
-                  estimate.y+estimate.h<layout[Slot::tabs].y&&estimate.h>=2*16&&estimate.w>=200,
-                  "Simulation estimates must remain adjacent, readable and clear of identity controls and tabs");
-            Control label{Kind::label};label.slot=slot;
-            const std::array controls{label};
-            const auto native=control_layout(label,{},size.w,size.h,controls);
-            check(native.has_label&&native.label==estimate&&native.widget==estimate,
-                  "Simulation estimate must use shared native label geometry");
-            previous_estimate=estimate;
-        }
-        check(layout[Slot::simulation_gpu_time].w>=355&&previous_estimate.x+previous_estimate.w==size.w-margin,
-              "Projected laptop GPU estimate lost room for its hardware label");
-        const auto key_action=layout[Slot::key_actions],key_path=layout[Slot::key_path],key=layout[Slot::key];
-        check(layout[Slot::repeatable].x+layout[Slot::repeatable].w<key_action.x&&
-              key_action.x+key_action.w<key_path.x&&key_path.x+key_path.w<key.x&&
-              key_action.y==key_path.y&&key_path.y==key.y&&key_path.w>=298,
-              "Moving Simulation must preserve the key controls and expose more of the key path");
         const auto message = layout[Slot::message], binary = layout[Slot::binary], qr = layout[Slot::qr];
         check(message.y == binary.y && binary.y == qr.y &&
-              message.h == binary.h && qr.h >= 87 && qr.w == qr.h &&
-              qr.h > message.h && qr.y + qr.h <= layout[Slot::transmit].y + layout[Slot::transmit].h,
+              message.h == binary.h && binary.h == qr.h && qr.w == qr.h,
               "composition row is misaligned");
         check(binary.x == message.x + message.w + 14 && qr.x == binary.x + binary.w + 14 &&
               qr.x + qr.w == size.w - margin, "composition gaps changed");
-        auto previous_action=layout[Slot::attach_file];
-        for(const auto slot:{Slot::use_text,Slot::send_key,Slot::transmit,Slot::transmit_noise,Slot::cancel,Slot::airtime}) {
-            const auto action=layout[slot];
-            check(action.y==previous_action.y&&action.h==previous_action.h&&
-                  action.x>=previous_action.x+previous_action.w+9&&action.x+action.w<=qr.x-14,
-                  "Larger QR overlaps compose actions or airtime");
-            previous_action=action;
-        }
-        check(layout[Slot::airtime].w>=218&&qr.y+qr.h<=layout[Slot::transmit_scope_caption].y,
-              "Larger QR clips the airtime or overlaps the generation scope heading");
         check(layout[Slot::qr_brightness].w>=78&&layout[Slot::binary_label].w>=192&&
               layout[Slot::binary_label].x+layout[Slot::binary_label].w+14==layout[Slot::qr_brightness].x,
               "Compact QR brightness choice clips its value or overlaps the binary heading");
@@ -132,19 +94,18 @@ void supported_sizes() {
               waveform.x == waterfall.x + waterfall.w + 12 &&
               constellation.x == waveform.x + waveform.w + 12 &&
               pattern_scores.x == constellation.x + constellation.w + 12 &&
+              pattern_scores.x + pattern_scores.w == size.w - margin &&
               constellation.w >= 130 && pattern_scores.w >= 130,
               "plot row is misaligned");
         const auto reference=layout[Slot::profile_reference];
-        check(reference.x==pattern_scores.x+pattern_scores.w+12&&reference.w==280&&
-              reference.x+reference.w==size.w-margin&&reference.y==pattern_scores.y&&reference.h==pattern_scores.h&&
-              signals.x==margin&&signals.x==waterfall.x&&contains(layout[Slot::page],reference),
-              "Profile reference must fit beside pattern evidence at the same height without narrowing received history");
+        check(reference.x==margin&&reference.w==280&&reference.y==signals.y&&reference.h>=172&&
+              reference.x+reference.w+12==signals.x&&signals.x==waterfall.x&&
+              reference.y+reference.h==waterfall.y+waterfall.h&&contains(layout[Slot::page],reference),
+              "Profile reference must fit beside history and plots without covering received bits");
         check(waterfall.h>=64&&waterfall.y>=signals.y+signals.h+23&&
               waterfall.y+waterfall.h<=layout[Slot::page].y+layout[Slot::page].h,
               "Generation scope displaced plots outside the Console page");
         check(contains(signals, layout[Slot::copy_signal]) && contains(signals, layout[Slot::paste_signal]) &&
-              contains(signals,layout[Slot::recovery_actions])&&
-              layout[Slot::paste_signal].x+layout[Slot::paste_signal].w<layout[Slot::recovery_actions].x&&
               layout[Slot::copy_signal].x+layout[Slot::copy_signal].w<layout[Slot::paste_signal].x &&
               contains(waterfall, layout[Slot::clear_waterfall]), "list or plot footer escapes its block");
         for (const auto slot : {Slot::zoom_in, Slot::zoom_out, Slot::reset_zoom})
@@ -153,7 +114,7 @@ void supported_sizes() {
         for(const auto slot:{Slot::compression_explanation,Slot::short_bits_label,Slot::short_bits,Slot::short_bits_detail,
                 Slot::compression_codes,Slot::short_use_text,Slot::short_send_key,Slot::short_transmit,Slot::short_transmit_noise,
                 Slot::short_cancel,Slot::short_airtime,Slot::compression_signals,Slot::copy_raw_signal,
-                Slot::paste_raw_signal,Slot::raw_recovery_actions,Slot::received_raw_bits})
+                Slot::paste_raw_signal,Slot::received_raw_bits})
             check(!persistent_slot(slot)&&contains(page,layout[slot]),"Compression page control escaped its viewport");
         const auto short_bits=layout[Slot::short_bits],codes=layout[Slot::compression_codes];
         check(short_bits.w>=489&&short_bits.h>=72&&short_bits.y+short_bits.h<layout[Slot::short_bits_detail].y&&
@@ -168,29 +129,20 @@ void supported_sizes() {
               "Exact received bits or their actions overlap the signal history");
         auto previous = layout[Slot::device];
         const auto control_gap = layout[Slot::bandwidth].x - previous.x - previous.w;
-        check(control_gap == 10, "Modem row lost its shared control spacing");
-        for (const auto slot : {Slot::bandwidth, Slot::carrier, Slot::pattern, Slot::fec, Slot::dsp_workspace}) {
+        check(control_gap >= 2 && control_gap <= 10 &&
+              (size.w != min_width || control_gap == 2) &&
+              (size.w < default_width || control_gap == 10),
+              "Modem row did not adapt its gaps to the available width");
+        for (const auto slot : {Slot::bandwidth, Slot::carrier, Slot::snr, Slot::receive_snr, Slot::pattern, Slot::fec, Slot::dsp_workspace}) {
             const auto current = layout[slot];
             check(current.x == previous.x + previous.w + control_gap && current.y == previous.y &&
                   current.h == previous.h, "modem control row is misaligned");
             previous = current;
         }
         check(previous.x + previous.w == size.w - margin, "modem controls do not fill the row");
-        previous = layout[Slot::snr];
-        check(previous.x == margin && previous.y - label_height >= layout[Slot::device].y + field_height,
-              "Transmit target labels overlap the modem controls");
-        for (const auto slot : {Slot::long_snr, Slot::receive_snr}) {
-            const auto current = layout[slot];
-            check(persistent_slot(slot) && current.x == previous.x + previous.w + control_gap &&
-                  current.y == previous.y && current.h == previous.h,
-                  "Transmit and receive targets do not share a persistent row");
-            previous = current;
-        }
-        check(previous.x + previous.w == size.w - margin && previous.y + previous.h < layout[Slot::mono].y,
-              "Target controls overlap audio routing or escape the row");
         check(layout[Slot::bandwidth].w>=82 && layout[Slot::carrier].w>=90 &&
               persistent_slot(Slot::carrier), "Rate or Carrier is unusable at the minimum window size");
-        check(layout[Slot::device].w>=112 && layout[Slot::snr].w>=260 && layout[Slot::long_snr].w>=260 &&
+        check(layout[Slot::device].w>=112 && layout[Slot::snr].w>=130 &&
               layout[Slot::receive_snr].w>=166 && layout[Slot::pattern].w>=130 &&
               layout[Slot::fec].w>=148 && layout[Slot::dsp_workspace].w>=121,
               "A modem control is too narrow for its full native label");
@@ -229,7 +181,7 @@ void hidden_scope_reclaims_space() {
               files.y+files.h+7==save.y&&save.y+save.h==signals.y+signals.h&&
               contains(signals,hidden[Slot::copy_signal])&&contains(signals,hidden[Slot::paste_signal]),
               "Expanded reception history detached its file list or action footers");
-        for(const auto slot:{Slot::waterfall,Slot::waveform,Slot::constellation,Slot::pattern_scores,Slot::profile_reference}) {
+        for(const auto slot:{Slot::waterfall,Slot::waveform,Slot::constellation,Slot::pattern_scores}) {
             const auto plot=hidden[slot],old=visible[slot];
             check(contains(page,plot)&&plot.x==old.x&&plot.w==old.w&&
                   plot.y>=signals.y+signals.h+23&&plot.y+plot.h==old.y+old.h&&
