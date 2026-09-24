@@ -78,7 +78,7 @@ void ReceiveCache::put(ReceivedItem item) {
     std::lock_guard lock(mutex_);
     auto old=std::find_if(items_.begin(),items_.end(),[&](const auto& x){return x.id==item.id;});
     if(old!=items_.end()) {used_-=old->data.size(); items_.erase(old);}
-    // Bound metadata too, including an unlimited stream of empty packets.
+    // Bound metadata too, including an unlimited stream of empty entries.
     while(!items_.empty() && (used_>capacity_-item.data.size() || items_.size()>=4096)) {
         used_-=items_.front().data.size(); items_.pop_front();
     }

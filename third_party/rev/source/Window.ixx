@@ -429,7 +429,22 @@ export namespace Rev {
         //--------------------------------------------------
 
         std::vector<Element*> drawList;
-        std::queue<Element*> deferred;
+        struct DeferredLayer {
+            Element* element;
+            size_t sequence;
+        };
+        struct DeferredLayerOrder {
+            bool operator()(const DeferredLayer& a, const DeferredLayer& b) const {
+                if (a.element->resolved.depth != b.element->resolved.depth)
+                    return a.element->resolved.depth < b.element->resolved.depth;
+                return a.sequence > b.sequence;
+            }
+        };
+        // Lower effective layers paint first even when a higher layer (such as
+        // hover help) was constructed before a dynamic overlay. Equal layers
+        // retain their previous queue insertion order.
+        std::priority_queue<DeferredLayer, std::vector<DeferredLayer>, DeferredLayerOrder> deferred;
+        size_t deferred_sequence = 0;
 
         void recurseDrawList(Element* current) {
 
@@ -445,12 +460,12 @@ export namespace Rev {
                     continue;
                 }
 
-                deferred.push(elem);
+                deferred.push({elem, deferred_sequence++});
             }
 
             while (!deferred.empty()) {
 
-                Element* elem = deferred.front();
+                Element* elem = deferred.top().element;
 
                 if (elem->resolved.hidden) {
                     deferred.pop();
@@ -471,20 +486,16 @@ export namespace Rev {
         void calcDrawList() {
 
             drawList.clear();
-            deferred = std::queue<Element*>();
+            deferred = {};
+            deferred_sequence = 0;
 
             recurseDrawList(this);
 
-            // Flush any elements still in the deferred queue.  These are
-            // children whose `depth` (= ancestor depth + 1 − zIndex) never
-            // exceeded the depth of any ancestor on the unwind path — which
-            // happens whenever zIndex is large relative to the element's
-            // nesting depth (e.g. a dropdown menu with zIndex = +500 sitting
-            // one or two levels deep).  Without this flush they'd silently
-            // vanish from the draw tree.  Appending to drawList here paints
-            // them LAST, which is exactly what a high-zIndex element wants.
+            // Layers lifted above the root remain deferred after unwinding.
+            // Emit them in effective layer order, still traversing each
+            // parent's ordinary children before moving to the next layer.
             while (!deferred.empty()) {
-                Element* elem = deferred.front();
+                Element* elem = deferred.top().element;
                 deferred.pop();
 
                 if (elem->resolved.hidden) {
@@ -642,10 +653,18 @@ export namespace Rev {
                 size_t size = stencilStack.size();
                 Element* back = size ? stencilStack.back() : nullptr;
 
-                // A sibling may leave several nested clipping ancestors at
-                // once. Unwind every exited clip before drawing it; popping
-                // only the leaf leaves later branches under a stale stencil.
-                while (back && back != this && element->resolved.depth <= back->resolved.depth) {
+                const auto descends_from = [](Element* child, Element* ancestor) {
+                    for (Element* parent = child->parent; parent; parent = parent->parent) {
+                        if (parent == ancestor) return true;
+                        if (parent == parent->parent) break;
+                    }
+                    return false;
+                };
+                // A numeric layer depth is not a tree depth: unrelated
+                // branches may have different z-indices. Exit every clip
+                // outside this branch, or escaped by a lifted descendant.
+                while (back && back != this &&
+                       (!descends_from(element, back) || element->resolved.depth <= back->resolved.depth)) {
                     stencilStack.pop_back();
                     size = stencilStack.size();
                     back = size ? stencilStack.back() : nullptr;

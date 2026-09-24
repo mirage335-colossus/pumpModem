@@ -1,0 +1,7 @@
+{
+  "source": "/tmp/acoustic-zero-three-20260921/baseline-snr0.f32",
+  "note": "Original live capture with an artificial permanent delay step; not an untouched live failure.",
+  "sample_rate": 48000,
+  "at_seconds": 21.0,
+  "delay_samples": 16
+}

@@ -1,0 +1,10 @@
+{
+  "sink": "alsa_output.pci-0000_07_00.6.analog-stereo\n",
+  "source": "alsa_input.pci-0000_07_00.6.analog-stereo\n",
+  "sink_volume": "Volume: front-left: 62259 /  95% / -1.34 dB,   front-right: 62259 /  95% / -1.34 dB\n        balance 0.00\n",
+  "source_volume": "Volume: front-left: 17990 /  27% / -33.69 dB,   front-right: 17990 /  27% / -33.69 dB\n        balance 0.00\n",
+  "sink_mute": "Mute: no\n",
+  "source_mute": "Mute: no\n",
+  "user_confirmed": "Speaker and microphone; receiver fails while transmitter still running",
+  "mixer_changes": false
+}

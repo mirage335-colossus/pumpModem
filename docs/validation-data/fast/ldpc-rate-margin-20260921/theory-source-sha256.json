@@ -1,0 +1,6 @@
+{
+  "tools/acoustic_bicm_analysis.py": "3ecd27d0fa4e6967881fd232363d1643ab4ddae5b351f4890ab9d2741c5e1e00",
+  "src/fast/ldpc.cpp": "7450d46a42a4ea9975ee2a08a06c3e2c1dbc58d32910a8e30c4b1e505bba0ddf",
+  "src/fast/modem.cpp": "99e672ed6ed9aacbdf4b2763d48578214e2cd83716ad91deb466553b3b2630e2",
+  "src/fast/codec.cpp": "6108791f78d587c0cea50c0f3286bb31bf4f8f9d5700c334acbe105fffce9b43"
+}

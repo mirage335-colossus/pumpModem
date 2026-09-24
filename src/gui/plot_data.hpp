@@ -91,6 +91,7 @@ inline std::vector<Column> waveform_columns(std::span<const float> samples, std:
 // the whole history instead of independently recoloring each row's noise floor.
 class SpectrumHistory {
 public:
+    static constexpr std::size_t capacity = 160;
     void clear() { rows_.clear(); upper_db_ = max_hz_ = 0; }
     void push(std::span<const double> bins, double bin_hz) {
         if (bins.empty()) return;
@@ -106,7 +107,7 @@ public:
                 if (std::isfinite(bins[bin])) row[i] = std::max(row[i], bins[bin]);
             if (row[i] > upper_db_) upper_db_ = std::ceil(row[i] / 20) * 20;
         }
-        if (rows_.size() == 160) rows_.pop_front();
+        if (rows_.size() == capacity) rows_.pop_front();
         rows_.push_back(std::move(row));
     }
     double intensity(double db) const { return std::clamp((db - lower_db()) / 100., 0., 1.); }

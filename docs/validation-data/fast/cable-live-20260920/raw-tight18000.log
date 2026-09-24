@@ -1,0 +1,2 @@
+ALSA lib pcm_dsnoop.c:567:(snd_pcm_dsnoop_open) unable to open slave
+ALSA lib pcm_dmix.c:1000:(snd_pcm_dmix_open) unable to open slave

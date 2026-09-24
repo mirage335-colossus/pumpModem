@@ -1,0 +1,19 @@
+[0/2] Re-checking globbed directories...
+[1/12] Checking Legacy modem isolation
+[2/12] Checking regular/fast DSP isolation
+-- Regular/fast DSP dependency boundary passed
+[3/12] Checking the shared GUI/native adapter boundary
+[4/12] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/acoustic_ofdm.cpp.o
+[5/12] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/codec.cpp.o
+[6/12] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/session.cpp.o
+[7/12] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/file_transfer.cpp.o
+[8/12] Linking CXX static library libdatapump_fast.a
+[9/12] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/fast/controller.cpp.o
+In file included from /home/user/___quick/p/_cur/dataPump/pumpModem/src/gui/fast/controller.cpp:1:
+In file included from /home/user/___quick/p/_cur/dataPump/pumpModem/src/gui/fast/controller.hpp:3:
+/home/user/___quick/p/_cur/dataPump/pumpModem/src/gui/fast/../bitmap.hpp:59:19: warning: result of comparison of constant 6148914691236517205 with expression of type 'unsigned int' is always false [-Wtautological-constant-out-of-range-compare]
+   59 |         if (width > std::numeric_limits<std::size_t>::max() / 3) throw std::length_error("bitmap row too large");
+      |             ~~~~~ ^ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+1 warning generated.
+[10/12] Linking CXX static library libdatapump_gui_application.a
+[11/12] Linking CXX executable datapump-gui

@@ -1,0 +1,90 @@
+Internal ctest changing into directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+Test project /home/user/___quick/p/_cur/dataPump/pumpModem/build
+      Start  63: differential_receiver_probability
+      Start  66: weak_signal
+ 1/29 Test  #66: weak_signal .........................   Passed  176.87 sec
+      Start  69: live_profiles
+ 2/29 Test  #69: live_profiles .......................   Passed  239.60 sec
+      Start  48: receiver_differential
+ 3/29 Test  #48: receiver_differential ...............   Passed   50.15 sec
+      Start  61: receiver_probability
+ 4/29 Test  #61: receiver_probability ................   Passed   68.99 sec
+      Start  92: gui_controller
+ 5/29 Test  #92: gui_controller ......................   Passed   87.17 sec
+      Start  44: pattern_receiver
+ 6/29 Test  #44: pattern_receiver ....................   Passed  129.07 sec
+      Start  62: differential_probability
+ 7/29 Test  #62: differential_probability ............   Passed   12.17 sec
+      Start  67: live
+ 8/29 Test  #67: live ................................   Passed   50.84 sec
+      Start 113: cli
+ 9/29 Test #113: cli .................................   Passed   34.41 sec
+      Start  60: simulation_estimate
+10/29 Test  #60: simulation_estimate .................   Passed   20.56 sec
+      Start  46: pattern_drift
+11/29 Test  #46: pattern_drift .......................   Passed    4.91 sec
+      Start  45: pattern_correlator
+12/29 Test  #45: pattern_correlator ..................   Passed   14.06 sec
+      Start  49: pattern_fft_batch
+13/29 Test  #49: pattern_fft_batch ...................   Passed    4.42 sec
+      Start  68: live_resources
+14/29 Test  #68: live_resources ......................   Passed   10.75 sec
+      Start  36: stream_receive
+15/29 Test  #36: stream_receive ......................   Passed    2.82 sec
+      Start  98: gui_application
+16/29 Test  #98: gui_application .....................   Passed    1.90 sec
+      Start  59: tuning
+17/29 Test  #59: tuning ..............................   Passed    1.27 sec
+      Start  47: pattern_differential
+18/29 Test  #47: pattern_differential ................   Passed    0.13 sec
+      Start  58: transfer
+19/29 Test  #58: transfer ............................   Passed    0.34 sec
+      Start  34: recovery
+20/29 Test  #34: recovery ............................   Passed    0.28 sec
+      Start  85: gui_inspection
+21/29 Test  #85: gui_inspection ......................   Passed    0.16 sec
+      Start  50: pattern_correlator_batch
+22/29 Test  #50: pattern_correlator_batch ............   Passed    0.10 sec
+      Start  33: stream_codec
+23/29 Test  #33: stream_codec ........................   Passed    0.08 sec
+      Start  91: gui_binary_editor
+24/29 Test  #91: gui_binary_editor ...................   Passed    0.06 sec
+      Start  38: compression_short
+25/29 Test  #38: compression_short ...................   Passed    0.07 sec
+      Start  35: attachment
+26/29 Test  #35: attachment ..........................   Passed    0.02 sec
+      Start  51: pattern_search
+27/29 Test  #51: pattern_search ......................   Passed    0.01 sec
+      Start  70: live_receptions
+28/29 Test  #70: live_receptions .....................   Passed    0.00 sec
+29/29 Test  #63: differential_receiver_probability ...***Timeout 1500.10 sec
+public stable weak: predicted 0.36792, sampled 28/64
+public stable transition: predicted 0.885986, sampled 56/64
+private stable transition: predicted 0.902588, sampled 61/64
+public stable strong: predicted 1, sampled 64/64
+public slow diffusion: predicted 0.894775, sampled 58/64
+private slow diffusion: predicted 0.906006, sampled 56/64
+public differential weak: predicted 0.139893, sampled 7/64
+public differential transition: predicted 0.642822, sampled 40/64
+private differential transition: predicted 0.670654, sampled 45/64
+public differential strong: predicted 1, sampled 64/64
+private differential strong: predicted 1, sampled 64/64
+public faster diffusion: predicted 1, sampled 64/64, previous 43/64
+private faster diffusion: predicted 1, sampled 64/64, previous 49/64
+public 001 diffusion: predicted unavailable (timing ownership), sampled 17/64
+private 001 diffusion: predicted unavailable (timing ownership), sampled 54/64
+Differential probability RMS error 0.0289727, maximum 0.0695801, 13 modeled cases, 517.613 s
+shaped public differential transition: predicted 0.626953, sampled 41/64
+
+
+97% tests passed, 1 tests failed out of 29
+
+Label Time Summary:
+calibration    = 1500.10 sec*proc (1 test)
+gui            =  89.30 sec*proc (4 tests)
+
+Total Test time (real) = 1500.10 sec
+
+The following tests FAILED:
+	 63 - differential_receiver_probability (Timeout)       calibration
+Errors while running CTest

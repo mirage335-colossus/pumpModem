@@ -92,6 +92,9 @@ inline void policy_lifecycle_stage(std::span<ui::Control> controls,unsigned stag
     gestures.wheel_down=active?ui::Command::zoom_out:ui::Command::none;
     gestures.help=active?"Updated gesture help":"";
 }
+inline void read_only_stage(std::span<ui::Control> controls,bool value) {
+    controls[0].read_only=value;controls[1].read_only=value;
+}
 struct BitmapProbe {std::vector<BitmapRequest> requests;};
 // Arbitrary opaque rectangles, including padded strides and blocks taller than
 // a native transfer tile. No plot/domain source is available to either adapter.

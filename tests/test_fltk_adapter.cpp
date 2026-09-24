@@ -1,7 +1,11 @@
 #define DATAPUMP_FLTK_ADAPTER_TEST
 #include "../src/gui/backend_fltk.cpp"
 #include "gui_extension_fixture.hpp"
+#include "estimate_warning_fixture.hpp"
+#include "overlay_fixture.hpp"
+#include <cstring>
 #include <FL/Fl_Image_Surface.H>
+#include <FL/Fl_Tooltip.H>
 #ifdef __linux__
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
@@ -319,6 +323,693 @@ void prompts() {
         "Native chooser buttons did not consume shared service wording");
     file_services.cancel();Fl::check();require(!Fl::modal(),"Cancelling the title lifetime fixture retained its chooser");
 }
+void estimate_warning_colors() {
+    for(bool color:{false,true}) {
+        theme::apply_palette(color);
+        Launch launch;launch.color=color;launch.simulation=true;NativeApp app(launch);Fl::check();
+        auto* window=Fl::first_window();require(window,"Estimate color fixture has no native window");
+        test::estimate_warning_fields(app.application,[] {Fl::wait(.01);},[&](ui::Field field,ui::TextTone tone) {
+            const auto& state=app.application.field(field);
+            auto* label=find_label(*window,state.text);
+            const auto deadline=Clock::now()+std::chrono::seconds(2);
+            while((!label||label->labelcolor()!=text_color(tone))&&Clock::now()<deadline) {
+                Fl::wait(.01);label=find_label(*window,state.text);
+            }
+            require(state.text_tone==tone&&label&&label->labelcolor()==text_color(tone),
+                "FLTK estimate label ignored or retained a shared warning tone");
+        });
+        app.application.close();while(!app.application.finished())Fl::wait(.005);
+    }
+    theme::apply_palette();
+}
+void fast_mode_visibility() {
+    Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
+    auto* window=Fl::first_window();require(window,"Fast fixture has no native window");
+    const std::function<NativeChoice*(Fl_Group&)> mode_choice=[&](Fl_Group& group) -> NativeChoice* {
+        for(int i=0;i<group.children();++i) {
+            auto* child=group.child(i);
+            if(auto* choice=dynamic_cast<NativeChoice*>(child);choice&&choice->size()==4&&
+                literal_menu_text(choice->text(0))=="Fast Modem"&&literal_menu_text(choice->text(1))=="Robust Modem")return choice;
+            if(auto* nested=dynamic_cast<Fl_Group*>(child))if(auto* choice=mode_choice(*nested))return choice;
+        }
+        return nullptr;
+    };
+    require(!(Fl_Preferences::file_access()&Fl_Preferences::ALL_WRITE_OK),"File chooser preferences may write implicitly");
+    auto* selector=mode_choice(*window);
+    auto* encryption=dynamic_cast<NativeCheckbox*>(find_button(*window,"Encryption"));
+    auto* choose=find_button(*window,"Attach file");auto* transmit=find_button(*window,"Transmit text");
+    auto* regular=find_button(*window,"Transmit");
+    require(!find_button(*window,"Listen")&&!find_button(*window,"Pause listening"),"Fast retained listening controls");
+    const auto field_widget=[&]<class Widget>(const char* label) -> Widget* {
+        auto* heading=find_label(*window,label);if(!heading)return nullptr;
+        for(int i=0;i<heading->parent()->children();++i)if(auto* widget=dynamic_cast<Widget*>(heading->parent()->child(i)))return widget;
+        return nullptr;
+    };
+    Fl_Button* fast_attach=nullptr;
+    const std::function<void(Fl_Group&)> find_attach=[&](Fl_Group& group) {
+        const auto expected=ui::DesktopLayout(window->w(),window->h())[ui::Slot::fast_choose_file];
+        for(int i=0;i<group.children();++i) {
+            auto* child=group.child(i);
+            if(auto* button=dynamic_cast<Fl_Button*>(child);button&&button->x()==expected.x&&button->y()==expected.y)fast_attach=button;
+            if(auto* nested=dynamic_cast<Fl_Group*>(child))find_attach(*nested);
+        }
+    };
+    find_attach(*window);choose=fast_attach;
+    auto* expected_snr=field_widget.template operator()<NativeChoice>("Expected SNR");
+    auto* profile=field_widget.template operator()<NativeChoice>("Channel profile");
+    auto* symbol_rate=field_widget.template operator()<NativeChoice>("Symbol rate");
+    auto* text=field_widget.template operator()<NativeEditor>("Message");
+    NativeChoice* brightness=nullptr;
+    const std::function<void(Fl_Group&)> find_fast_editor=[&](Fl_Group& group) {
+        const auto expected=ui::DesktopLayout(window->w(),window->h())[ui::Slot::fast_text];
+        for(int i=0;i<group.children();++i) {
+            auto* child=group.child(i);
+            if(auto* editor=dynamic_cast<NativeEditor*>(child);editor&&editor->x()==expected.x&&editor->y()==expected.y)text=editor;
+            const auto qr_choice=ui::DesktopLayout(window->w(),window->h())[ui::Slot::fast_qr_brightness];
+            if(auto* choice=dynamic_cast<NativeChoice*>(child);choice&&choice->x()==qr_choice.x&&choice->y()==qr_choice.y)brightness=choice;
+            if(auto* nested=dynamic_cast<Fl_Group*>(child))find_fast_editor(*nested);
+        }
+    };
+    find_fast_editor(*window);
+    auto* file=field_widget.template operator()<NativeInput>("Source file");
+    require(selector&&encryption&&expected_snr&&profile&&symbol_rate&&text&&file&&choose&&transmit&&brightness&&regular,"Fast fixture lacks native controls");
+    require(selector->value()==1&&app.application.field(ui::Field::fast_mode).selected=="robust"&&!find_button(*window,"Fast"),
+        "Modem selector did not default to Robust Modem or retained the obsolete Fast toggle");
+    app.application.toggle(ui::Field::fast_mode,true);
+    app.application.select(ui::Field::fast_mode,"invalid-mode");
+    require(app.application.field(ui::Field::fast_mode).selected=="robust","Obsolete toggle or invalid selection changed the modem");
+    const auto refresh=[] {
+        const auto until=Clock::now()+std::chrono::milliseconds(130);
+        while(Clock::now()<until)Fl::wait(.005);
+        Fl::flush();
+    };
+    app.application.edit(ui::Field::binary,"001");
+    for(const auto size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
+        window->size(size.first,size.second);refresh();
+        selector->picked(selector->menu());refresh();
+        require(app.application.field(ui::Field::fast_mode).selected=="fast"&&selector->visible_r()&&selector->active_r()&&choose->visible_r()&&text->visible_r()&&
+            transmit->visible_r()&&brightness->visible_r()&&brightness->active_r()&&!encryption->value()&&!regular->visible_r(),
+            "Fast Modem selection did not show the default plain-text interface");
+        for(int i=0;i<4;++i) {
+            brightness->picked(brightness->menu()+i);refresh();
+            require(app.application.field(ui::Field::fast_qr_brightness).selected==std::array{"normal","dim","dark","off"}[i],
+                "Fast native QR choice did not update its independent brightness");
+        }
+        require(find_button(*window,"Console")->visible_r()&&!find_button(*window,"Modem details")->visible_r(),"Fast console did not hide developer tab by default");
+        app.application.toggle(ui::Field::developer_mode,true);app.application.select_page(ui::Page::fast_modem);refresh();
+        require(symbol_rate->visible_r()&&!text->visible_r(),"Fast modem page did not separate details from message controls");
+        for(const auto* channel:{"wire","acoustic","ssb","fm","acoustic-short"}) {
+            app.application.select(ui::Field::fast_profile,channel);refresh();
+            for(const auto item:{std::pair{profile,ui::Field::fast_profile},std::pair{expected_snr,ui::Field::fast_expected_snr},std::pair{symbol_rate,ui::Field::fast_symbol_rate}}) {
+                auto* widget=item.first;
+                require(widget->visible_r()&&widget->active_r(),"Fast profile/SNR/rate native dropdown is hidden or disabled");
+                fl_font(widget->textfont(),widget->textsize());
+                for(const auto& option:app.application.field(item.second).options) {
+                    int width=0,height=0;fl_measure(option.label.c_str(),width,height,0);
+                    if(width>widget->w()-28||height>widget->h())
+                        throw std::runtime_error("Fast profile/SNR/rate choice clips at the native minimum window size: "+
+                            option.label+" needs "+std::to_string(width)+" x "+std::to_string(height)+
+                            ", available "+std::to_string(widget->w()-28)+" x "+std::to_string(widget->h()));
+                }
+            }
+            const auto nominal=app.application.field(ui::Field::fast_expected_snr).options.at(1).id;
+            const auto low=app.application.field(ui::Field::fast_expected_snr).options.back().id;
+            for(const auto& target:{nominal,low,std::string(channel==std::string_view("acoustic-short")?"-6":"manual"),std::string("manual")}) {
+                app.application.select(ui::Field::fast_expected_snr,target);refresh();
+                const auto& value=app.application.field(ui::Field::fast_detail).text;
+                auto* detail=find_label(*window,value.c_str());
+                require(detail,"Fast detail did not materialize as a native label");
+                fl_font(detail->labelfont(),detail->labelsize());int width=0,height=0;
+                fl_measure(value.c_str(),width,height,0);
+                if(width>detail->w()||height>detail->h())
+                    throw std::runtime_error("Fast profile detail clips at the native minimum window size: "+
+                        std::to_string(width)+" x "+std::to_string(height)+", available "+
+                        std::to_string(detail->w())+" x "+std::to_string(detail->h())+"; "+value);
+            }
+            app.application.select(ui::Field::fast_expected_snr,nominal);refresh();
+        }
+        app.application.select(ui::Field::fast_profile,"wire");
+        app.application.toggle(ui::Field::developer_mode,false);refresh();
+        require(app.application.page()==ui::Page::console&&!symbol_rate->visible_r()&&text->visible_r(),"Hiding developer mode did not restore Fast Console");
+        app.application.toggle(ui::Field::fast_mode,false);
+        require(app.application.field(ui::Field::fast_mode).selected=="fast","Obsolete toggle changed the selected Fast Modem");
+        std::vector<NativeBitmap*> plots;
+        for(const auto& declaration:ui::console_screen())if(declaration.scope==ui::ScreenScope::fast&&declaration.kind==ui::Kind::bitmap&&declaration.bitmap!=ui::Bitmap::fast_qr) {
+            const auto geometry=app.application.control_layout(declaration,window->w(),window->h());
+            const auto expected=geometry.widget;
+            NativeBitmap* plot=nullptr;
+            const std::function<void(Fl_Group&)> locate=[&](Fl_Group& group) {
+                for(int i=0;i<group.children();++i) {
+                    auto* child=group.child(i);
+                    if(auto* bitmap=dynamic_cast<NativeBitmap*>(child);bitmap&&bitmap->visible_r()&&
+                        ui::Rect{bitmap->x(),bitmap->y(),bitmap->w(),bitmap->h()}==expected)plot=bitmap;
+                    if(auto* nested=dynamic_cast<Fl_Group*>(child))locate(*nested);
+                }
+            };
+            locate(*window);require(plot,"Fast bitmap did not materialize at its shared native geometry");plots.push_back(plot);
+            require(plot->w()>0&&plot->h()>0&&plot->x()>=0&&plot->y()>=0&&plot->x()+plot->w()<=window->w()&&
+                plot->y()+plot->h()<=window->h(),"Fast native bitmap escaped the viewport");
+            const auto presentation=app.application.bitmap(declaration,static_cast<unsigned>(plot->w()));
+            require(!presentation.title.empty()&&!presentation.caption.empty(),"Fast bitmap lost its shared title or idle caption");
+            std::size_t painted=0;
+            presentation.source.paint(full_bitmap_request(128,48,false,true),[&](unsigned x,unsigned y,PixelBlock pixels) {
+                validate_pixel_block(pixels);
+                require(x+pixels.width<=128&&y+pixels.height<=48,"Fast bitmap painted outside requested native dimensions");
+                painted+=static_cast<std::size_t>(pixels.width)*pixels.height;
+            });
+            require(painted==128*48,"Fast idle bitmap did not paint a complete native image");
+        }
+        require(plots.size()==3,"Fast interface did not materialize all three native signal plots");
+        text->changed("Native fast café\nSecond line");refresh();
+        require(transmit->active_r()&&buffer_text(*text->buffer())=="Native fast café\nSecond line","Fast native text composer did not preserve UTF-8/newline input");
+        encryption->value(1);encryption->do_callback();refresh();
+        require(!app.application.enabled(ui::Command::fast_listen)&&!transmit->active_r(),"Fast encrypted native actions accepted a missing key");
+        encryption->value(0);encryption->do_callback();refresh();
+        app.application.select(ui::Field::fast_source,"file");refresh();
+        require(!text->visible_r()&&choose->visible_r()&&file->visible_r()&&std::string(transmit->label())=="Transmit file",
+            "Fast native source choice did not replace the text composer");
+        for(const auto* plot:plots)require(plot->visible_r(),"Fast File view hid a live signal plot");
+        file->value("/tmp/native-fast-source.bin");file->do_callback();refresh();
+        app.application.activate(ui::Command::fast_use_text);refresh();
+        require(text->visible_r()&&choose->visible_r()&&buffer_text(*text->buffer())=="Native fast café\nSecond line"&&
+            app.application.field(ui::Field::fast_file).text=="/tmp/native-fast-source.bin"&&std::string(transmit->label())=="Transmit text",
+            "Fast native source switching changed independent drafts");
+        for(const auto& page:ui::pages())require(find_button(*window,page.title)->visible_r()==(page.id==ui::Page::console),"Fast tab visibility is inconsistent");
+        require(text->x()+text->w()<=window->w()&&text->y()+text->h()<=window->h(),"Fast native composer escaped the viewport");
+        const auto draft=app.application.field(ui::Field::binary).text;
+        regular->do_callback();refresh();
+        require(app.application.field(ui::Field::binary).text==draft,"Hidden regular native action changed its exact draft");
+        Fl_Image_Surface surface(window->w(),window->h());Fl_Surface_Device::push_current(&surface);
+        surface.draw(window);Fl_Surface_Device::pop_current();std::unique_ptr<Fl_RGB_Image> image(surface.image());
+        require(image&&image->w()==window->w()&&image->h()==window->h(),"Fast native surface failed to render");
+        selector->picked(selector->menu()+1);refresh();
+        require(app.application.field(ui::Field::fast_mode).selected=="robust"&&selector->visible_r()&&selector->active_r()&&
+            !choose->visible_r()&&!text->visible_r()&&regular->visible_r()&&app.application.field(ui::Field::binary).text=="001",
+            "Returning from Fast did not restore the native regular interface and source");
+        for(const auto* plot:plots)require(!plot->visible_r(),"Fast signal plot remained visible in Robust Modem");
+        choose->do_callback();require(app.application.take_services().empty(),"Hidden fast native callback opened a file chooser");
+    }
+    selector->picked(selector->menu()+2);refresh();
+    auto* transcript=field_widget.template operator()<NativeEditor>("Received and transmitted text");
+    auto* legacy_draft=field_widget.template operator()<NativeEditor>("Text to transmit");
+    auto* legacy_carrier=field_widget.template operator()<NativeInput>("Carrier (Hz)");
+    require(app.application.field(ui::Field::fast_mode).selected=="legacy"&&transcript&&legacy_draft&&legacy_carrier&&
+        transcript->visible_r()&&transcript->active_r()&&transcript->read_only&&legacy_draft->visible_r()&&!legacy_draft->read_only&&
+        std::string(legacy_carrier->value())=="1500","Legacy native text terminal failed to materialize");
+    require(!choose->visible_r()&&!text->visible_r()&&!regular->visible_r(),"Legacy retained Fast or Robust native controls");
+    require(legacy_draft->submit&&buffer_text(*legacy_draft->buffer()).empty()&&
+        !legacy_draft->submit(false,false)&&!legacy_draft->submit(false,true)&&!legacy_draft->submit(true,true)&&
+        legacy_draft->submit(true,false)&&app.application.field(ui::Field::legacy_text).text.empty(),
+        "Legacy native draft did not reserve only Ctrl+Enter for transmission");
+    transcript->apply("Received text\nSent text");
+    require(!transcript->paste("unwanted")&&buffer_text(*transcript->buffer())=="Received text\nSent text",
+        "Legacy transcript accepted a native edit");
+    app.application.close();while(!app.application.finished())Fl::wait(.005);
+}
+void developer_mode_visibility() {
+    Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
+    auto* window=Fl::first_window();require(window,"Developer mode fixture has no native window");
+    auto* toggle=dynamic_cast<NativeCheckbox*>(find_button(*window,"Developer mode"));
+    auto* clear=find_button(*window,"Clear received");
+    require(toggle&&clear&&toggle->visible_r()&&!toggle->value(),"Developer mode did not start as an unchecked native toggle");
+    const auto refresh=[] {
+        const auto until=Clock::now()+std::chrono::milliseconds(130);
+        while(Clock::now()<until)Fl::wait(.005);
+    };
+    const auto frame=[](const Fl_Widget* widget) {return ui::Rect{widget->x(),widget->y(),widget->w(),widget->h()};};
+    const auto set_mode=[&](bool checked) {toggle->value(checked);toggle->do_callback();refresh();};
+    for(const auto& size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
+        window->size(size.first,size.second);refresh();
+        require(toggle->x()+toggle->w()<clear->x()&&toggle->y()==clear->y(),
+            "Developer mode is not immediately left of Clear received");
+        std::vector<std::pair<Fl_Widget*,ui::Rect>> preserved;
+        std::vector<NativeControlGroup*> advanced;
+        const std::function<void(Fl_Group&)> collect=[&](Fl_Group& group) {
+            for(int i=0;i<group.children();++i) {
+                auto* child=group.child(i);
+                if(auto* control=dynamic_cast<NativeControlGroup*>(child)) {
+                    for(const auto& declaration:ui::console_screen())if(declaration.persistent&&
+                        app.application.control_layout(declaration,window->w(),window->h()).frame==frame(control)) {
+                        preserved.push_back({control,frame(control)});
+                        if(declaration.developer_only)advanced.push_back(control);
+                        break;
+                    }
+                }
+                if(auto* nested=dynamic_cast<Fl_Group*>(child))collect(*nested);
+            }
+        };
+        collect(*window);require(!advanced.empty(),"Developer mode fixture found no advanced native controls");
+        for(const auto& definition:ui::pages()) {
+            auto* button=find_button(*window,definition.title);require(button,"Developer mode fixture lost a native tab");
+            preserved.push_back({button,frame(button)});
+        }
+        for(bool checked:{false,true,false,true,false}) {
+            set_mode(checked);
+            require(app.application.field(ui::Field::developer_mode).checked==checked&&toggle->visible_r(),
+                "Native developer mode callback failed or hid its own toggle");
+            for(auto* control:advanced)require(static_cast<bool>(control->visible_r())==checked,
+                "Developer mode did not hide/show an entire advanced control in place");
+            for(const auto& definition:ui::pages()) {
+                auto* button=find_button(*window,definition.title);
+                require(static_cast<bool>(button->visible_r())==((checked||!definition.developer_only)&&definition.id!=ui::Page::fast_modem),
+                    "Developer mode did not update native tab visibility without resizing");
+                if(!button->visible_r()) {
+                    require(!button->take_focus(),"Hidden advanced tab retained keyboard focus eligibility");
+                    button->do_callback();require(app.application.page()==ui::Page::console,
+                        "A stale native callback selected a hidden advanced tab");
+                }
+            }
+            for(const auto& [widget,bounds]:preserved)require(frame(widget)==bounds,
+                "Toggling developer mode moved an existing native control or tab");
+        }
+        for(const auto& definition:ui::pages())if(definition.developer_only&&definition.id!=ui::Page::fast_modem) {
+            set_mode(true);auto* button=find_button(*window,definition.title);button->do_callback();refresh();
+            require(app.application.page()==definition.id,"An enabled advanced native tab could not be selected");
+            set_mode(false);
+            require(app.application.page()==ui::Page::console&&find_button(*window,"Console")->value()&&
+                !button->value()&&!button->visible_r(),"Hiding the selected advanced tab did not display Console");
+        }
+    }
+    app.application.close();while(!app.application.finished())Fl::wait(.005);
+}
+void tab_clicks() {
+    Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
+    app.application.toggle(ui::Field::developer_mode,true);
+    auto* window=Fl::first_window();require(window,"Tab fixture has no native window");
+    const auto key=Fl::e_keysym,x=Fl::e_x,y=Fl::e_y,state=Fl::e_state;
+    const auto refresh=[] {
+        const auto until=Clock::now()+std::chrono::milliseconds(130);
+        while(Clock::now()<until)Fl::wait(.005);
+    };
+    const auto pointer=[&](int event,int px,int py) {
+        Fl::e_keysym=FL_Button+FL_LEFT_MOUSE;Fl::e_x=px;Fl::e_y=py;
+        Fl::e_state=event==FL_RELEASE?0:FL_BUTTON1;Fl::handle(event,window);
+    };
+    const auto selected=[&](ui::Page page) {
+        require(app.application.page()==page,"Native tab click did not select its page");
+        for(const auto& definition:ui::pages()) {
+            auto* button=find_button(*window,definition.title);require(button,"Shared tab is missing");
+            require((button->value()!=0)==(definition.id==page),"Native tab selection disagrees with the displayed page");
+        }
+    };
+    for(const auto& size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
+        window->size(size.first,size.second);
+        for(const auto& initial:ui::pages())for(const auto& target:ui::pages()) {
+            if(initial.id==ui::Page::fast_modem||target.id==ui::Page::fast_modem)continue;
+            app.application.select_page(initial.id);refresh();selected(initial.id);
+            auto* button=find_button(*window,target.title);
+            const int px=button->x()+button->w()/2,py=button->y()+button->h()/2;
+            const auto revision=app.application.revision();
+            pointer(FL_PUSH,px,py);
+            require(Fl::pushed()==button,"Tab click missed its native target");
+            // A stationary press spanning presentation ticks must still commit
+            // on release, including when clicking the already selected tab.
+            refresh();
+            require(app.application.page()==initial.id&&app.application.revision()==revision,
+                "Native tab changed pages before mouse release");
+            pointer(FL_RELEASE,px,py);selected(target.id);refresh();selected(target.id);
+        }
+    }
+    for(const auto& target:ui::pages()) {
+        if(target.id==ui::Page::fast_modem)continue;
+        auto* button=find_button(*window,target.title);
+        const int px=button->x()+button->w()/2,py=button->y()+button->h()/2;
+        for(bool return_inside:{false,true}) {
+            const auto before=app.application.page();
+            pointer(FL_PUSH,px,py);refresh();
+            pointer(FL_DRAG,px,button->y()+button->h()+10);refresh();
+            if(return_inside) {pointer(FL_DRAG,px,py);refresh();}
+            pointer(FL_RELEASE,px,return_inside?py:button->y()+button->h()+10);
+            selected(return_inside?target.id:before);refresh();selected(return_inside?target.id:before);
+        }
+    }
+    Fl::e_keysym=key;Fl::e_x=x;Fl::e_y=y;Fl::e_state=state;
+    app.application.close();while(!app.application.finished())Fl::wait(.005);
+}
+void repeatable_clicks() {
+    Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
+    app.application.toggle(ui::Field::developer_mode,true);
+    auto* window=Fl::first_window();require(window,"Repeatable fixture has no native window");
+    auto* toggle=dynamic_cast<NativeCheckbox*>(find_button(*window,"Repeatable"));
+    require(toggle,"Repeatable fixture has no native checkbox");
+    const auto key=Fl::e_keysym,x=Fl::e_x,y=Fl::e_y,state=Fl::e_state;
+    const auto refresh=[] {
+        const auto until=Clock::now()+std::chrono::milliseconds(130);
+        while(Clock::now()<until)Fl::wait(.005);
+    };
+    const auto pointer=[&](int event,int px,int py) {
+        Fl::e_keysym=FL_Button+FL_LEFT_MOUSE;Fl::e_x=px;Fl::e_y=py;
+        Fl::e_state=event==FL_RELEASE?0:FL_BUTTON1;Fl::handle(event,window);
+    };
+    app.application.edit(ui::Field::message,"Click test body");refresh();
+    const auto geometry=ui::checkbox_layout(toggle->w(),toggle->h());
+    for(const auto& target:{geometry.box,geometry.label})for(bool initial:{false,true}) {
+        app.application.toggle(ui::Field::repeatable,initial);refresh();
+        const auto before=app.application.field(ui::Field::message).text;
+        const int px=toggle->x()+target.x+target.w/2,py=toggle->y()+target.y+target.h/2;
+        pointer(FL_PUSH,px,py);
+        require(Fl::pushed()==toggle,"Repeatable click missed its native target");
+        refresh();
+        require(app.application.field(ui::Field::repeatable).checked==initial&&
+            app.application.field(ui::Field::message).text==before,"Repeatable committed before mouse release");
+        pointer(FL_RELEASE,px,py);
+        require(app.application.field(ui::Field::repeatable).checked!=initial,
+            "Presentation during a held click swallowed the Repeatable toggle");
+        const auto after=app.application.field(ui::Field::message).text;
+        require(initial?after=="Click test body":after.starts_with("REPEATABLE-")&&after.substr(19)==" Click test body",
+            "Native Repeatable click lost the message body or duplicated its marker");
+        refresh();
+        require((toggle->value()!=0)==!initial&&app.application.field(ui::Field::message).text==after,
+            "Presentation after release reverted or repeated the Repeatable toggle");
+
+        // Dragging outside cancels; returning inside before release commits.
+        for(bool return_inside:{false,true}) {
+            const auto checked=app.application.field(ui::Field::repeatable).checked;
+            const auto revision=app.application.revision();
+            pointer(FL_PUSH,px,py);refresh();
+            pointer(FL_DRAG,toggle->x()+toggle->w()+10,py);refresh();
+            if(return_inside) {pointer(FL_DRAG,px,py);refresh();}
+            pointer(FL_RELEASE,return_inside?px:toggle->x()+toggle->w()+10,py);
+            require(app.application.field(ui::Field::repeatable).checked==(checked!=return_inside)&&
+                app.application.revision()==revision+(return_inside?1:0),
+                "Presentation changed native Repeatable drag cancellation or release semantics");
+            refresh();
+        }
+    }
+    for(bool initial:{false,true}) {
+        app.application.toggle(ui::Field::repeatable,initial);refresh();toggle->take_focus();
+        Fl::e_keysym=' ';Fl::e_state=0;toggle->handle(FL_KEYDOWN);refresh();
+        require(app.application.field(ui::Field::repeatable).checked!=initial&&(toggle->value()!=0)==!initial,
+            "Repeatable keyboard toggle did not survive presentation");
+    }
+    pointer(FL_PUSH,toggle->x()+geometry.box.x+1,toggle->y()+geometry.box.y+1);
+    app.application.edit(ui::Field::message,std::string(237,'x'));refresh();
+    require(!toggle->active_r()&&!toggle->value()&&!app.application.field(ui::Field::repeatable).checked,
+        "Disabling Repeatable during a press retained a stale native value");
+    pointer(FL_RELEASE,toggle->x()+geometry.box.x+1,toggle->y()+geometry.box.y+1);refresh();
+    require(!app.application.field(ui::Field::repeatable).checked&&app.application.field(ui::Field::message).text==std::string(237,'x'),
+        "Releasing a disabled Repeatable control changed the draft");
+    Fl::e_keysym=key;Fl::e_x=x;Fl::e_y=y;Fl::e_state=state;
+    app.application.close();while(!app.application.finished())Fl::wait(.005);
+}
+void expanded_bitmap_clicks() {
+    Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
+    auto* window=Fl::first_window();require(window,"Expanded fixture has no native window");
+    const auto controls=ui::console_screen();
+    const auto declared=std::find_if(controls.begin(),controls.end(),[](const auto& control){return control.bitmap==ui::Bitmap::qr;});
+    require(declared!=controls.end(),"Expanded fixture has no declared bitmap");
+    const auto key=Fl::e_keysym,x=Fl::e_x,y=Fl::e_y,state=Fl::e_state;
+    const auto refresh=[] {
+        const auto until=Clock::now()+std::chrono::milliseconds(130);
+        while(Clock::now()<until)Fl::wait(.005);
+    };
+    const auto await_ready=[](const auto& ready,const char* failure) {
+        const auto deadline=Clock::now()+std::chrono::seconds(5);
+        while(!ready()&&Clock::now()<deadline)Fl::wait(.005);
+        require(ready(),failure);
+    };
+    const auto click=[&](int px,int py) {
+        Fl::e_keysym=FL_Button+FL_LEFT_MOUSE;Fl::e_x=px;Fl::e_y=py;Fl::e_state=FL_BUTTON1;
+        Fl::handle(FL_PUSH,window);Fl::e_state=0;Fl::handle(FL_RELEASE,window);
+    };
+    const auto window_count=[] {
+        unsigned count=0;for(auto* candidate=Fl::first_window();candidate;candidate=Fl::next_window(candidate))++count;
+        return count;
+    };
+    const auto expanded=[&]() -> NativeOverlay* {
+        for(int i=0;i<window->children();++i)
+            if(auto* overlay=dynamic_cast<NativeOverlay*>(window->child(i)))return overlay;
+        return nullptr;
+    };
+    const auto bitmap=[](NativeOverlay& overlay) -> NativeBitmap* {
+        auto* group=dynamic_cast<Fl_Group*>(overlay.child(0));
+        if(group)for(int i=0;i<group->children();++i)if(auto* view=dynamic_cast<NativeBitmap*>(group->child(i)))return view;
+        return nullptr;
+    };
+    std::function<NativeBitmap*(Fl_Group&,ui::Rect)> preview=[&](Fl_Group& group,ui::Rect expected) -> NativeBitmap* {
+        for(int i=0;i<group.children();++i) {
+            auto* child=group.child(i);
+            if(auto* view=dynamic_cast<NativeBitmap*>(child);view&&ui::Rect{view->x(),view->y(),view->w(),view->h()}==expected)return view;
+            if(auto* nested=dynamic_cast<Fl_Group*>(child))if(auto* found=preview(*nested,expected))return found;
+        }
+        return nullptr;
+    };
+    const auto fingerprint=[](NativeBitmap& view) {
+        Fl_Image_Surface surface(view.w(),view.h());surface.draw(&view);
+        std::unique_ptr<Fl_RGB_Image> pixels(surface.image());std::uint64_t hash=14695981039346656037ULL;
+        const auto count=static_cast<std::size_t>(pixels->data_w())*pixels->data_h()*pixels->d();
+        for(std::size_t i=0;i<count;++i)hash=(hash^pixels->array[i])*1099511628211ULL;
+        return hash;
+    };
+    app.application.edit(ui::Field::message,"Native expanded bitmap");
+    app.application.select(ui::Field::qr_brightness,"normal");refresh();
+    for(const auto& size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
+        window->resize(43,61,size.first,size.second);refresh();
+        auto* previous_focus=find_button(*window,"Transmit");require(previous_focus,"Expanded fixture has no focus target");
+        // Draft edits debounce for 120 ms before an asynchronous estimate.
+        // A fixed presentation wait does not establish focus eligibility.
+        await_ready([&]{return app.application.enabled(ui::Command::transmit)&&previous_focus->active_r();},
+            "Expanded fixture Transmit focus target did not become enabled before opening");
+        require(previous_focus->take_focus()&&Fl::focus()==previous_focus,
+            "Expanded fixture could not establish its original keyboard focus");
+        const ui::Rect original{window->x(),window->y(),window->w(),window->h()};
+        const auto original_windows=window_count();const auto original_border=window->border();const std::string original_title=window->label();
+        const auto geometry=ui::control_layout(*declared,app.application.control(*declared).state,window->w(),window->h());
+        auto* original_preview=preview(*window,geometry.widget);require(original_preview,"Expanded fixture has no original native preview");
+        click(geometry.widget.x+geometry.widget.w/2,geometry.widget.y+geometry.widget.h/2);refresh();
+        auto* overlay=expanded();require(overlay&&overlay->parent()==window,"Clicking the bitmap did not create an overlay inside the existing window");
+        require(Fl::focus()==overlay,"Expanded bitmap did not retain keyboard focus for Escape");
+        auto* view=bitmap(*overlay);require(view&&view->x()==0&&view->y()==0&&view->w()==window->w()&&view->h()==window->h()&&
+            overlay->x()==0&&overlay->y()==0&&overlay->w()==window->w()&&overlay->h()==window->h(),
+            "Expanded bitmap did not occupy the existing app client area");
+        require(window_count()==original_windows&&window->border()==original_border&&original_title==window->label()&&
+            ui::Rect{window->x(),window->y(),window->w(),window->h()}==original,
+            "Expanding the bitmap changed the native window count, frame or geometry");
+        const auto covered_pixels=[&] {
+            window->make_current();const int width=previous_focus->w(),height=previous_focus->h();
+            std::unique_ptr<unsigned char[]> pixels(fl_read_image(nullptr,previous_focus->x(),previous_focus->y(),width,height));
+            require(pixels!=nullptr,"Expanded bitmap damage probe could not capture the native window");
+            return std::vector<unsigned char>(pixels.get(),pixels.get()+static_cast<std::size_t>(width)*height*3);
+        };
+        Fl::flush();const auto covered=covered_pixels();previous_focus->redraw();
+        require(window->damage()==FL_DAMAGE_CHILD,"Expanded bitmap damage probe did not isolate a covered child redraw");
+        Fl::flush();require(covered_pixels()==covered,"A covered control repainted above the expanded bitmap between presentation ticks");
+        const auto initial=fingerprint(*view);
+        app.application.edit(ui::Field::message,"Updated native expanded bitmap");refresh();
+        const auto updated=fingerprint(*view);require(updated!=initial,"Expanded bitmap retained the old source after a message edit");
+        app.application.select(ui::Field::qr_brightness,"dark");refresh();
+        require(fingerprint(*view)!=updated,"Expanded bitmap ignored a brightness update");
+        window->size(original.w+77,original.h+59);refresh();
+        require(overlay->w()==window->w()&&overlay->h()==window->h()&&view->w()==window->w()&&view->h()==window->h()&&
+            window_count()==original_windows,"Expanded bitmap did not follow an app window resize");
+        // The overlay intentionally deactivates the native background. Check
+        // shared eligibility so dismissal has a ready target to restore.
+        await_ready([&]{return app.application.enabled(ui::Command::transmit);},
+            "Expanded fixture updated draft did not restore Transmit eligibility before dismissal");
+        click(window->w()/2,window->h()/2);refresh();
+        require(!expanded()&&!app.application.overlay()&&window->shown()&&window_count()==original_windows,
+            "Second bitmap click did not restore the existing app view");
+        require(Fl::focus()==previous_focus,"Second bitmap click did not restore the original keyboard focus");
+        const auto restored=ui::control_layout(*declared,app.application.control(*declared).state,window->w(),window->h()).widget;
+        require(window->x()==original.x&&window->y()==original.y&&window->w()==original.w+77&&window->h()==original.h+59&&
+            ui::Rect{original_preview->x(),original_preview->y(),original_preview->w(),original_preview->h()}==restored,
+            "Second bitmap click did not restore the native preview layout at the current app size");
+        window->size(original.w,original.h);refresh();
+        require(ui::Rect{original_preview->x(),original_preview->y(),original_preview->w(),original_preview->h()}==geometry.widget,
+            "Restoring the app size did not recover the original preview geometry");
+        app.application.edit(ui::Field::message,"Native expanded bitmap");
+        app.application.select(ui::Field::qr_brightness,"normal");refresh();
+        click(geometry.widget.x+geometry.widget.w/2,geometry.widget.y+geometry.widget.h/2);refresh();
+        overlay=expanded();require(overlay,"Restored bitmap could not be expanded again");
+        app.application.edit(ui::Field::message,std::string(4096,'x'));
+        // Bitmap sources poll every 40 ms; native presentation polls every
+        // 100 ms. Wait for both stages instead of racing their relative phase.
+        const auto caption_ready=[&] {
+            const auto error=app.application.bitmap(*declared);
+            auto* caption=find_label(*overlay,error.caption);
+            return !error.caption.empty()&&caption&&caption->visible_r()&&caption->labelcolor()==text_color(error.caption_tone);
+        };
+        const auto caption_deadline=Clock::now()+std::chrono::seconds(2);
+        while(!caption_ready()&&Clock::now()<caption_deadline)Fl::wait(.005);
+        require(caption_ready(),
+            "Expanded bitmap lost its error caption or caption tone");
+        Fl::e_keysym=FL_Escape;Fl::e_state=0;Fl::handle(FL_KEYDOWN,window);refresh();
+        require(!expanded()&&!app.application.overlay()&&!app.application.closing()&&window_count()==original_windows&&
+            ui::Rect{window->x(),window->y(),window->w(),window->h()}==original,
+            "Escape did not dismiss only the expanded bitmap within the original app window");
+        app.application.edit(ui::Field::message,"Native expanded bitmap");refresh();
+    }
+    Fl::e_keysym=key;Fl::e_x=x;Fl::e_y=y;Fl::e_state=state;
+    app.application.close();while(!app.application.finished())Fl::wait(.005);
+}
+void expanded_bitmap_hover_repaint() {
+#ifdef __linux__
+    Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
+    auto* window=Fl::first_window();require(window,"QR hover fixture has no native window");
+    std::unique_ptr<Display,decltype(&XCloseDisplay)> display(XOpenDisplay(nullptr),XCloseDisplay);
+    require(display!=nullptr,"QR hover fixture could not open a native pointer connection");
+    struct TooltipSettings {
+        float delay=Fl_Tooltip::delay(),hover=Fl_Tooltip::hoverdelay(),hide=Fl_Tooltip::hidedelay();int enabled=Fl_Tooltip::enabled();
+        ~TooltipSettings() {Fl_Tooltip::exit(nullptr);Fl_Tooltip::delay(delay);Fl_Tooltip::hoverdelay(hover);Fl_Tooltip::hidedelay(hide);Fl_Tooltip::enable(enabled);}
+    } tooltip_settings;
+    Fl_Tooltip::delay(.02f);Fl_Tooltip::hoverdelay(.02f);Fl_Tooltip::hidedelay(5);Fl_Tooltip::enable();
+    const auto move=[&](int x,int y) {
+        XWarpPointer(display.get(),None,DefaultRootWindow(display.get()),0,0,0,0,window->x()+x,window->y()+y);
+        XSync(display.get(),False);
+    };
+    const auto settle=[] {
+        const auto until=Clock::now()+std::chrono::milliseconds(130);while(Clock::now()<until)Fl::wait(.002);
+    };
+    const auto pixels=[&] {
+        window->make_current();std::unique_ptr<unsigned char[]> data(fl_read_image(nullptr,0,0,window->w(),window->h()));
+        require(data!=nullptr,"QR hover fixture could not capture the visible client area");
+        return std::vector<unsigned char>(data.get(),data.get()+static_cast<std::size_t>(window->w())*window->h()*3);
+    };
+    const auto surface=[&]() -> NativeOverlay* {
+        for(int i=0;i<window->children();++i)if(auto* value=dynamic_cast<NativeOverlay*>(window->child(i)))return value;
+        return nullptr;
+    };
+    window->position(80,80);move(window->w()+30,window->h()+30);
+    app.application.edit(ui::Field::message,"Keep the complete expanded QR visible while the pointer moves");
+    app.application.select(ui::Field::qr_brightness,"normal");app.application.activate(ui::Command::toggle_qr_expanded);settle();
+    const auto observe=[&](const std::vector<unsigned char>& expected,int milliseconds,bool* saw_tooltip=nullptr) {
+        const auto until=Clock::now()+std::chrono::milliseconds(milliseconds);
+        do {
+            // Process genuine pointer, tooltip and expose events. Do not ask
+            // the app or root window for a full repaint to repair the image.
+            Fl::wait(.002);
+            require(surface()&&surface()->x()==0&&surface()->y()==0&&surface()->w()==window->w()&&surface()->h()==window->h(),
+                "Hovering changed the expanded QR surface geometry");
+            ui::Rect tip{};
+            if(auto* tooltip=Fl_Tooltip::current_window();tooltip&&tooltip->shown()) {
+                if(saw_tooltip)*saw_tooltip=true;
+                tip={tooltip->x()-window->x()-1,tooltip->y()-window->y()-1,tooltip->w()+2,tooltip->h()+2};
+            }
+            const auto actual=pixels();
+            for(int y=0;y<window->h();++y)for(int x=0;x<window->w();++x) {
+                if(x>=tip.x&&x<tip.x+tip.w&&y>=tip.y&&y<tip.y+tip.h)continue;
+                const auto offset=(static_cast<std::size_t>(y)*window->w()+x)*3;
+                if(!std::equal(actual.begin()+offset,actual.begin()+offset+3,expected.begin()+offset))
+                    throw std::runtime_error("Pointer/tooltip repaint lost expanded QR pixels outside the tooltip at "+std::to_string(x)+","+std::to_string(y));
+            }
+        } while(Clock::now()<until);
+    };
+    const auto initial=pixels();
+    for(const auto& point:{std::pair{32,32},std::pair{window->w()/2,window->h()/2},std::pair{window->w()-32,window->h()-32}}) {
+        move(point.first,point.second);observe(initial,70);
+    }
+    // A native label provides an ordinary tooltip target over the same full
+    // client QR; moving off it generates a real tooltip-uncover expose region.
+    move(window->w()+30,window->h()+30);
+    auto definition=*app.application.overlay();ui::Control hotspot{ui::Kind::label};
+    hotspot.label="QR preview";hotspot.help="Move away to uncover the QR image beneath this native tooltip.";
+    hotspot.placement={.left=24,.top=24,.width=180,.height=28};definition.controls.push_back(hotspot);
+    app.application.show_overlay(std::move(definition));settle();const auto with_hotspot=pixels();
+    bool saw_tooltip=false;move(40,40);observe(with_hotspot,160,&saw_tooltip);
+    require(saw_tooltip,"Native pointer hover did not open the QR fixture tooltip");
+    move(window->w()/2,window->h()/2);observe(with_hotspot,160);
+    require(!Fl_Tooltip::current_window()||!Fl_Tooltip::current_window()->shown(),"Moving off the QR tooltip target did not dismiss its native window");
+    move(window->w()-32,window->h()-32);observe(with_hotspot,70);
+    app.application.close();while(!app.application.finished())Fl::wait(.005);
+#endif
+}
+
+void shared_overlay_controls() {
+    Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
+    auto* window=Fl::first_window();require(window,"Shared overlay fixture has no native window");
+    const auto refresh=[] {
+        const auto until=Clock::now()+std::chrono::milliseconds(130);while(Clock::now()<until)Fl::wait(.005);
+    };
+    const auto overlay=[&]() -> NativeOverlay* {
+        for(int i=0;i<window->children();++i)if(auto* surface=dynamic_cast<NativeOverlay*>(window->child(i)))return surface;
+        return nullptr;
+    };
+    const auto key=[&](int symbol,int modifiers=0,const char* text="") {
+        const auto previous_key=Fl::e_keysym,previous_state=Fl::e_state,previous_length=Fl::e_length;
+        auto* previous_text=Fl::e_text;Fl::e_keysym=symbol;Fl::e_state=modifiers;Fl::e_text=const_cast<char*>(text);Fl::e_length=static_cast<int>(std::strlen(text));
+        Fl::handle(FL_KEYDOWN,window);
+        Fl::e_keysym=previous_key;Fl::e_state=previous_state;Fl::e_text=previous_text;Fl::e_length=previous_length;
+    };
+    const auto field_widget=[]<class Widget>(NativeOverlay& surface,const char* label) -> Widget* {
+        auto* heading=find_label(surface,label);if(!heading)return nullptr;
+        for(int i=0;i<heading->parent()->children();++i)if(auto* widget=dynamic_cast<Widget*>(heading->parent()->child(i)))return widget;
+        return nullptr;
+    };
+    app.application.show_overlay(datapump::gui::test::overlay_fixture());refresh();
+    auto* surface=overlay();require(surface,"Shared declaration did not create the generic native surface");
+    auto* choice=field_widget.template operator()<NativeChoice>(*surface,"Brightness");
+    auto* editor=field_widget.template operator()<NativeInput>(*surface,"Callsign in overlay");
+    auto* close=find_button(*surface,"Close preview");
+    auto* menu=dynamic_cast<NativeMenuButton*>(find_label(*surface,"Overlay actions"));
+    require(choice&&editor&&close&&menu,"Ordinary factory did not create shared overlay choice, editor, action and scoped menu");
+    const auto definition=app.application.overlay();
+    require(menu->size()==3,"Overlay menu merged with the desktop's same named menu");
+    auto* desktop_menu=dynamic_cast<NativeMenuButton*>(find_label(*window,"Keyfile"));
+    require(desktop_menu&&!desktop_menu->visible_r()&&!desktop_menu->active_r(),"Shared overlay layers did not hide and block desktop controls");
+    for(const auto& declaration:definition->controls) {
+        const auto geometry=app.application.control_layout(declaration,window->w(),window->h(),definition->controls);
+        const auto heading=declaration.menu==ui::Menu::none?declaration.label:declaration.menu_label;
+        auto* widget=find_label(*surface,heading);require(widget,"Shared overlay declaration lost its label");
+        const auto* group=widget->parent();require(ui::Rect{group->x(),group->y(),group->w(),group->h()}==geometry.frame,
+            "Shared overlay control bypassed ordinary shared layout");
+    }
+    choice->picked(choice->menu()+0);refresh();
+    require(app.application.field(ui::Field::qr_brightness).selected=="normal","Native overlay choice did not apply its declared field binding");
+    editor->value("W1ABC");editor->do_callback();editor->take_focus();editor->insert_position(5);key('Z',0,"Z");refresh();
+    require(app.application.field(ui::Field::callsign).text=="W1ABCZ","Shared controls keyboard policy did not route editing through the ordinary native editor");
+    close->do_callback();refresh();require(!overlay()&&!app.application.overlay(),"Shared overlay close action did not dismiss through its ordinary command binding");
+
+    app.application.show_overlay(datapump::gui::test::overlay_fixture());refresh();
+    menu=dynamic_cast<NativeMenuButton*>(find_label(*overlay(),"Overlay actions"));menu->picked(menu->menu()+1);refresh();
+    require(!overlay()&&!app.application.overlay(),"Shared scoped menu did not dispatch its ordinary close action");
+    app.application.show_overlay(datapump::gui::test::overlay_fixture());refresh();surface=overlay();
+    menu=dynamic_cast<NativeMenuButton*>(find_label(*surface,"Overlay actions"));
+    struct PopupProbe {NativeApp& app;NativeOverlay* surface;Fl_Window* window;NativeMenuButton* menu;Fl_Widget_Tracker tracker;bool retained=false,stale_ignored=false;};
+    PopupProbe probe{app,surface,window,menu,Fl_Widget_Tracker(menu)};
+    Fl::add_timeout(.03,[](void* context) {
+        auto& value=*static_cast<PopupProbe*>(context);value.app.application.show_overlay(datapump::gui::test::overlay_fixture(1));
+    },&probe);
+    Fl::add_timeout(.18,[](void* context) {
+        auto& value=*static_cast<PopupProbe*>(context);value.retained=value.tracker.exists()&&Fl::grab();
+        if(value.retained) {
+            value.menu->picked(value.menu->menu()+1);
+            value.stale_ignored=bool(value.app.application.overlay());
+        }
+        if(auto* popup=Fl::grab()) {const auto previous=Fl::e_keysym;Fl::e_keysym=FL_Escape;popup->handle(FL_KEYDOWN);Fl::e_keysym=previous;}
+    },&probe);
+    menu->popup();require(probe.retained&&probe.stale_ignored,"Replacing an overlay during a native popup invalidated its callbacks or let a stale menu dismiss the replacement");
+    refresh();surface=overlay();require(surface&&probe.tracker.deleted(),"Native overlay replacement did not finish after its popup unwound");
+    choice=field_widget.template operator()<NativeChoice>(*surface,"Preview brightness");
+    editor=field_widget.template operator()<NativeInput>(*surface,"Updated callsign");
+    require(choice&&editor&&find_button(*surface,"Return to console"),"Shared overlay reorder or relabel required a native factory change");
+    require(desktop_menu->visible_r()&&!desktop_menu->active_r(),"Updated shared overlay layers did not show and block the desktop");
+    editor->take_focus();const auto before=app.application.field(ui::Field::callsign).text;key('Q',0,"Q");refresh();
+    require(app.application.field(ui::Field::callsign).text==before,"Shared consume keyboard policy allowed a native editor to change");
+    key(FL_Escape);refresh();require(app.application.overlay()&&overlay(),"Native adapter hardcoded Escape dismissal instead of the updated shared key binding");
+    key(FL_Enter,FL_CTRL);refresh();require(!app.application.overlay()&&!overlay(),"Shared Ctrl+Enter dismissal was not routed before native editor handling");
+
+    app.application.show_overlay(datapump::gui::test::overlay_fixture());refresh();
+    app.application.activate(ui::Command::generate_keyfile);refresh();
+    auto* dialog=Fl::modal();require(dialog&&overlay()&&!overlay()->active_r(),"Shared service-above policy did not present a native service over a disabled overlay");
+    const auto generation=app.application.overlay()->generation;
+    key(FL_Escape);refresh();require(app.application.overlay()&&app.application.overlay()->generation==generation,
+        "An active service allowed the overlay's Escape binding to run");
+    if((dialog=Fl::modal())) {
+        auto* cancel=find_button(*dialog,ui::service_cancel_label);require(cancel,"Native service has no cancel action");cancel->do_callback();refresh();
+    }
+    require(!Fl::modal(),"Closing a native service retained its modal window");
+    require(app.application.overlay()&&app.application.overlay()->generation==generation,
+        "Closing a native service dismissed or replaced the shared overlay");
+    require(overlay()->active_r(),"Closing a native service failed to restore the overlay's native eligibility");
+    app.application.show_overlay(datapump::gui::test::overlay_fixture(1));refresh();
+    app.application.activate(ui::Command::generate_keyfile);refresh();
+    require(!Fl::modal()&&overlay(),"Shared deferred service policy started a dialog while its overlay was open");
+    key(FL_Enter,FL_CTRL);refresh();dialog=Fl::modal();require(dialog&&!overlay(),"Deferred native service did not start after overlay dismissal");
+    auto* cancel=find_button(*dialog,ui::service_cancel_label);require(cancel,"Deferred native service has no cancel action");cancel->do_callback();refresh();
+    require(!Fl::modal(),"Deferred service fixture failed to cancel its native dialog");
+    app.application.close();while(!app.application.finished())Fl::wait(.005);
+}
+
 void extension_controls() {
     auto declarations=datapump::gui::test::extension_controls();
     Launch launch;launch.simulation=true;NativeApp app(launch,declarations);Fl::check();
@@ -385,6 +1076,104 @@ void extension_controls() {
     require(std::string(toggle->label())==app.application.control(declarations[3]).label,"Native toggle retained a stale shared label");
     app.application.close();while(!app.application.finished())Fl::wait(.005);
 }
+void inline_document_editor() {
+    Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
+    auto* window=Fl::first_window();require(window,"Inline control fixture has no native window");
+    const auto refresh=[] {
+        const auto until=Clock::now()+std::chrono::milliseconds(140);
+        while(Clock::now()<until)Fl::wait(.005);
+    };
+    app.application.select_page(ui::Page::planner);refresh();
+    NativeInput* editor=nullptr;NativeEditor* command_editor=nullptr;NativeMenuButton* presets=nullptr;FltkDocumentView* document=nullptr;
+    const std::function<void(Fl_Group&)> find=[&](Fl_Group& group) {
+        if(auto* view=dynamic_cast<FltkDocumentView*>(&group);view&&view->visible_r())document=view;
+        for(int i=0;i<group.children();++i) {
+            auto* child=group.child(i);
+            if(document&&document->contains(child)) {
+                if(auto* input=dynamic_cast<NativeInput*>(child))editor=input;
+                if(auto* menu=dynamic_cast<NativeMenuButton*>(child);menu&&menu->visible_r())presets=menu;
+                if(auto* command=dynamic_cast<NativeEditor*>(child))command_editor=command;
+            }
+            if(auto* nested=dynamic_cast<Fl_Group*>(child))find(*nested);
+        }
+    };
+    find(*window);
+    require(document&&editor&&presets&&presets->size()>2&&editor->visible_r(),
+        "Scrollable planner did not construct its ordinary native editor and preset dropdown");
+    require(editor->y()>=app.application.page_bounds(window->w(),window->h()).y&&editor->take_focus(),
+        "Inline editor remained in the persistent header or could not take focus");
+    const auto key=Fl::e_keysym,state=Fl::e_state,length=Fl::e_length;auto* event_text=Fl::e_text;
+    char tab_text[]={'\t',0};
+    const auto tab=[&](bool reverse) {
+        Fl::e_keysym=FL_Tab;Fl::e_state=reverse?FL_SHIFT:0;Fl::e_text=tab_text;Fl::e_length=1;Fl::handle(FL_KEYDOWN,window);
+    };
+    tab(false);require(Fl::focus()==presets,"Inline Tab did not move from editor to presets");
+    tab(false);require(Fl::focus()==find_button(*document,"Stronger"),"Inline Tab skipped the adjacent Stronger action");
+    tab(false);require(Fl::focus()==find_button(*document,"Weaker"),"Inline Tab skipped the adjacent Weaker action");
+    tab(true);tab(true);tab(true);require(Fl::focus()==editor,"Inline reverse Tab did not restore document visual order");
+    Fl::e_keysym=key;Fl::e_state=state;Fl::e_text=event_text;Fl::e_length=length;
+    const auto* original=editor;editor->value("-");editor->do_callback();refresh();
+    find(*window);
+    require(editor==original&&Fl::focus()==editor&&std::string(editor->value())=="-"&&
+        app.application.field(ui::Field::planner_target).text=="-",
+        "Invalid typed prefix was replaced or lost focus during a document rebuild");
+    editor->value("-18");editor->insert_position(2,1);editor->do_callback();refresh();
+    require(Fl::focus()==editor&&editor->insert_position()==2&&editor->mark()==1&&std::string(editor->value())=="-18",
+        "Ordinary inline typing lost its cursor, selection or edit buffer");
+    require(editor->submit(false,false),"Inline editor did not preserve ordinary Enter submission");refresh();
+    require(std::string(editor->value())==app.application.field(ui::Field::planner_target).text&&
+        app.application.field(ui::Field::planner_target).display_text.empty(),
+        "Inline Enter did not display the exact accepted target");
+    const auto before=std::string(editor->value());
+    presets->picked(presets->menu()+2);refresh();
+    require(std::string(editor->value())!=before&&app.application.field(ui::Field::planner_target).display_text.empty(),
+        "Inline preset failed to edit and commit through the ordinary native control callback");
+    editor->take_focus();const int old_y=editor->y();
+    app.application.dispatch(ui::Command::planner_toggle_details);refresh();find(*window);
+    require(editor==original&&Fl::focus()==editor,"Adding document details replaced the inline editor or stole focus");
+    auto* scroll=dynamic_cast<Fl_Scroll*>(document->parent()->parent());require(scroll,"Inline editor has no native scroll host");
+    scroll->scroll_to(0,230);refresh();
+    require(editor->y()<old_y&&!editor->visible_r()&&Fl::focus()!=editor&&!editor->take_focus(),
+        "Scrolling the inline editor out of the viewport retained visible input or keyboard focus");
+    scroll->scroll_to(0,0);refresh();
+    require(editor->visible_r()&&editor->take_focus(),"Scrolling the inline editor back did not restore input");
+    require(command_editor&&command_editor->visible_r()&&command_editor->byte_limit==8192&&command_editor->tab_nav(),
+        "Launch command is not a native multiline editor with ordinary focus navigation");
+    app.application.edit(ui::Field::message,"e");refresh();
+    const auto original_rate=app.application.field(ui::Field::bandwidth).text;
+    const auto original_target=app.application.field(ui::Field::snr).text;
+    std::string lines="./datapump-gui --unsupported-setting 1";
+    for(unsigned line=0;line<24;++line)lines+="\n--line "+std::to_string(line);
+    command_editor->buffer()->select(0,command_editor->buffer()->length());
+    require(command_editor->paste(lines),"Multiline native command paste was rejected");refresh();
+    require(buffer_text(*command_editor->buffer())==lines&&app.application.field(ui::Field::planner_command).text==lines,
+        "Native command paste changed wrapped/newline content or failed to retain the buffer");
+    command_editor->take_focus();command_editor->insert_position(command_editor->buffer()->length());command_editor->show_insert_position();refresh();
+    int px=0,py=0;
+    require(command_editor->position_to_xy(command_editor->buffer()->length(),&px,&py)&&
+            !command_editor->position_to_xy(0,&px,&py),"Launch command editor did not scroll to its final line");
+    command_editor->scroll(1,0);refresh();
+    require(command_editor->position_to_xy(0,&px,&py),"Launch command editor could not scroll back to its first line");
+    command_editor->insert_position(command_editor->buffer()->length());command_editor->show_insert_position();
+    const auto enter_key=Fl::e_keysym,enter_state=Fl::e_state,enter_length=Fl::e_length;auto* enter_text=Fl::e_text;
+    char newline[]={'\n',0};Fl::e_keysym=FL_Enter;Fl::e_state=0;Fl::e_text=newline;Fl::e_length=1;
+    command_editor->handle(FL_KEYDOWN);
+    Fl::e_keysym=enter_key;Fl::e_state=enter_state;Fl::e_text=enter_text;Fl::e_length=enter_length;refresh();
+    require(buffer_text(*command_editor->buffer())==lines+"\n"&&!app.application.enabled(ui::Command::cancel)&&
+            app.application.field(ui::Field::message).text=="e"&&app.application.field(ui::Field::bandwidth).text==original_rate&&
+            app.application.field(ui::Field::snr).text==original_target,
+        "Enter in Launch command transmitted, applied settings or failed to insert a newline");
+    auto* load=find_button(*document,"Load");require(load&&load->visible_r(),"Launch command has no native Load action");
+    load->do_callback();refresh();
+    require(app.application.field(ui::Field::planner_command).text==lines+"\n"&&
+            app.application.field(ui::Field::status).text.find("unsupported-setting")!=std::string::npos&&
+            app.application.field(ui::Field::bandwidth).text==original_rate&&!app.application.enabled(ui::Command::cancel),
+        "Native Load failed to validate the retained command without starting transmission");
+    app.application.select_page(ui::Page::console);refresh();
+    require(!editor->visible_r()&&Fl::focus()!=editor,"Hiding the document page retained native editor focus");
+    app.application.close();while(!app.application.finished())Fl::wait(.005);
+}
+
 void policy_lifecycle() {
     auto declarations=datapump::gui::test::policy_lifecycle_controls();
     Launch launch;launch.simulation=true;NativeApp app(launch,declarations);Fl::check();
@@ -427,6 +1216,15 @@ void policy_lifecycle() {
             "Retained native control ignored adding or removing shared gestures");
     }
     Fl::e_keysym=button;Fl::e_x=x;Fl::e_y=y;Fl::e_dy=dy;
+    for(bool readonly:{true,false}) {
+        datapump::gui::test::read_only_stage(declarations,readonly);
+        const auto until=Clock::now()+std::chrono::milliseconds(130);while(Clock::now()<until)Fl::wait(.005);
+        input->apply("");editor->apply("");
+        require(input->active_r()&&editor->active_r()&&bool(input->readonly())==readonly&&editor->read_only==readonly,
+            "Read-only editors must retain native selection/focus without disabling the widget");
+        require(input->paste("a")==!readonly&&editor->paste("a")==!readonly,
+            "Retained native text controls ignored adding/removing read-only policy");
+    }
     app.application.close();while(!app.application.finished())Fl::wait(.005);
 }
 void layout_lifecycle() {
@@ -436,8 +1234,8 @@ void layout_lifecycle() {
     NativeInput* editor=nullptr;NativeBitmap* bitmap=nullptr;
     const std::function<void(Fl_Group&)> locate=[&](Fl_Group& parent) {
         for(int i=0;i<parent.children();++i) {
-            if(auto* input=dynamic_cast<NativeInput*>(parent.child(i)))editor=input;
-            if(auto* image=dynamic_cast<NativeBitmap*>(parent.child(i)))bitmap=image;
+            if(auto* input=dynamic_cast<NativeInput*>(parent.child(i));input&&input->visible_r())editor=input;
+            if(auto* image=dynamic_cast<NativeBitmap*>(parent.child(i));image&&image->visible_r())bitmap=image;
             if(auto* group=dynamic_cast<Fl_Group*>(parent.child(i)))locate(*group);
         }
     };
@@ -447,8 +1245,8 @@ void layout_lifecycle() {
     for(unsigned stage=0;stage<3;++stage) {
         datapump::gui::test::layout_lifecycle_stage(declarations,stage);
         const auto until=Clock::now()+std::chrono::milliseconds(130);while(Clock::now()<until)Fl::wait(.005);
-        const auto text=ui::control_layout(declarations[0],app.application.field(declarations[0].field),window->w(),window->h(),declarations);
-        const auto image=ui::control_layout(declarations[1],{},window->w(),window->h(),declarations);
+        const auto text=app.application.control_layout(declarations[0],window->w(),window->h(),declarations);
+        const auto image=app.application.control_layout(declarations[1],window->w(),window->h(),declarations);
         require(heading->visible()==text.has_label&&bitmap_heading->visible()==image.has_label,
             "Native layout failed to add or remove a shared heading after construction");
         require(rect(editor->parent())==text.frame&&rect(editor)==text.widget&&rect(bitmap->parent())==image.frame&&rect(bitmap)==image.widget,
@@ -473,6 +1271,7 @@ void document_geometry(Fl_Group& parent) {
 }
 void popup_polling_and_document_layout() {
     Launch launch;launch.simulation=true;NativeApp app(launch);auto* window=Fl::first_window();require(window,"Popup polling fixture has no native window");
+    app.application.toggle(ui::Field::developer_mode,true);
     for(const auto& size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
         window->size(size.first,size.second);
         for(const auto& page:ui::pages())if(page.document) {
@@ -515,6 +1314,36 @@ public:
     }
     void draw() override {}
 };
+void compression_page_labels() {
+    Launch launch;launch.simulation=true;launch.page=ui::Page::compression;
+    NativeApp app(launch);Fl::check();
+    app.application.toggle(ui::Field::developer_mode,true);app.application.select_page(ui::Page::compression);
+    auto* window=Fl::first_window();require(window,"Compression fixture has no native window");
+    window->resize(window->x(),window->y(),ui::min_width,ui::min_height);
+    for(const auto* draft:{"","010","0010","01010"}) {
+        if(*draft)app.application.edit(ui::Field::short_bits,draft);
+        const auto until=Clock::now()+std::chrono::milliseconds(80);while(Clock::now()<until)Fl::wait(.005);
+        for(const auto& c:ui::console_screen())if(c.page==ui::Page::compression&&c.kind==ui::Kind::label) {
+            const auto value=app.application.control(c).label;
+            const auto expected=app.application.control_layout(c,window->w(),window->h()).label;
+            // The same status can appear in both tabs; measure this declared
+            // native label, including its page-specific geometry.
+            const std::function<Fl_Widget*(Fl_Group&)> locate=[&](Fl_Group& group)->Fl_Widget* {
+                for(int i=0;i<group.children();++i) {
+                    auto* child=group.child(i);
+                    if(child->label()&&value==child->label()&&ui::Rect{child->x(),child->y(),child->w(),child->h()}==expected)return child;
+                    if(auto* nested=dynamic_cast<Fl_Group*>(child))if(auto* found=locate(*nested))return found;
+                }
+                return nullptr;
+            };
+            auto* label=locate(*window);require(label,"Compression text was not presented as a native label");
+            fl_font(label->labelfont(),label->labelsize());int width=0,height=0;fl_measure(value.c_str(),width,height,0);
+            if(width>label->w()||height>label->h())
+                throw std::runtime_error("Compression label clips at the minimum window size: "+value);
+        }
+    }
+    app.application.close();while(!app.application.finished())Fl::wait(.005);
+}
 void clipboard_shortcuts() {
     Fl_Double_Window host(600,220,"Native editor clipboard shortcuts");
     auto* source=new NativeEditor;source->resize(10,10,580,90);
@@ -531,6 +1360,7 @@ void clipboard_shortcuts() {
     unsigned changes=0,errors=0;
     target->changed=[&](std::string){++changes;};target->error=[&](std::string){++errors;};
     source->apply("01000001 01000010");source->buffer()->select(0,8);source->insert_position(8);source->take_focus();
+    source->read_only=true;
     shortcut(*source,'c',FL_CTRL);
     target->apply("00000000 11111111");target->buffer()->select(9,17);target->insert_position(17);target->take_focus();
     shortcut(*target,'v',FL_CTRL);
@@ -612,6 +1442,6 @@ void clipboard() {
 }
 }
 int main() {
-    try {theme::apply_palette();palette_roles();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();extension_controls();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();std::cout<<"FLTK generic adapter checks passed: menus, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins and shared extensions.\n";return 0;}
+    try {theme::apply_palette();palette_roles();estimate_warning_colors();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();fast_mode_visibility();developer_mode_visibility();tab_clicks();repeatable_clicks();expanded_bitmap_clicks();expanded_bitmap_hover_repaint();shared_overlay_controls();extension_controls();inline_document_editor();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();compression_page_labels();std::cout<<"FLTK generic adapter checks passed: menus, tab clicks, repeatable clicks, expanded bitmaps, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins, compression labels and shared extensions.\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

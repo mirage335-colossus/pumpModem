@@ -6,28 +6,60 @@
 #include <vector>
 
 namespace datapump::gui::ui {
-enum class Page { console, flow, transmission, count };
+enum class Page { console, compression, flow, transmission, planner, fast_modem, count };
 enum class Field {
-    callsign, grid, repeatable, simulation, key, message, binary,
-    qr_brightness, send_key, device, bandwidth, snr, receive_snr, pattern, fec, dsp_workspace,
+    callsign, grid, repeatable, simulation, link_power, link_loss, link_noise,
+    simulation_confidence, simulation_cpu_time, simulation_gpu_time,
+    simulation_oscillator, simulation_oscillator_detail, lpi_estimate, planner_target, planner_command,
+    key, message, binary,
+    qr_brightness, send_key, device, mono, bandwidth, carrier, snr, long_snr, receive_snr, pattern, fec, dsp_workspace,
     files, signals, mode, status, airtime, key_path, message_label, binary_label,
     diagnostics, inspection, flow_detail, transmission_detail, payload_alphabet,
-    reference_alphabet, waveform_zoom, count
+    reference_alphabet, waveform_zoom, short_bits, short_bits_detail, received_raw_bits,
+    compression_codes, transmit_scope, transmit_scope_caption, transmit_scope_format, profile_reference,
+    developer_mode, fast_mode, fast_profile, fast_expected_snr, fast_symbol_rate, fast_constellation, fast_coding, fast_fec, fast_depth,
+    fast_device, fast_mono, fast_encryption, fast_key, fast_key_path, fast_source, fast_text, fast_file, fast_status,
+    fast_progress, fast_rate, fast_tracking, fast_correction, fast_auth, fast_detail, fast_history, fast_airtime, fast_diagnostics, fast_snr, fast_qr_brightness, fast_files,
+    legacy_profile, legacy_carrier, legacy_squelch, legacy_transcript, legacy_text, legacy_status, legacy_mono, count
 };
 enum class Command {
-    none, transmit, cancel, clear_received, attach_file, use_text, paste_previous, open_keyfile,
+    none, transmit, transmit_noise, cancel, clear_received, attach_file, use_text, paste_previous, open_keyfile,
     generate_keyfile, show_key_folder, acknowledge_key_failure, save_file,
-    copy_signal, zoom_in, zoom_out, reset_zoom, clear_waterfall,
-    pattern_first, pattern_previous, pattern_next, pattern_last
+    copy_signal, paste_signal, zoom_in, zoom_out, reset_zoom, clear_waterfall,
+    pattern_first, pattern_previous, pattern_next, pattern_last, toggle_qr_expanded, dismiss_overlay,
+    transmit_short_bits, copy_raw_signal, paste_raw_signal, clear_pattern_scores,
+    resume_recovery, cancel_recovery,
+    planner_target, planner_load_command, planner_stronger, planner_weaker, planner_example_short, planner_example_lpi,
+    planner_fast, planner_day, planner_clock, planner_toggle_details, planner_toggle_draft,
+    planner_power, planner_loss, planner_noise, planner_apply_short, planner_apply_long,
+    planner_power_100w, planner_power_4w, planner_power_1w, planner_power_100mw,
+    planner_power_2mw, planner_power_1mw, planner_power_30uw, planner_power_1uw,
+    fast_open_key, fast_generate_key, fast_choose_file, fast_transmit, fast_listen, fast_cancel, fast_save, fast_use_text, fast_clear_received, fast_copy_signal, fast_paste_signal, fast_toggle_qr_expanded,
+    legacy_transmit
 };
 enum class Bitmap {
-    none, qr, waveform, waterfall, constellation, pattern, pattern_distances,
-    pattern_evidence, payload_alphabet, reference_alphabet
+    none, qr, waveform, waterfall, constellation, pattern_scores, pattern, pattern_distances,
+    pattern_evidence, payload_alphabet, reference_alphabet, fast_waveform, fast_waterfall, fast_constellation, fast_qr,
+    legacy_waterfall
 };
+enum class ScreenScope { regular, fast, legacy, shared };
 enum class Kind { label, action, toggle, choice, text, list, bitmap };
-enum class Menu { none, keyfile };
-enum class TextTone { normal, muted, data, inverse };
+enum class Menu { none, keyfile, recovery };
+enum class TextTone { normal, muted, data, inverse, negative };
 enum class BitmapCaption { footer, overlay_error };
+// Overlay controls use viewport-relative insets and optional fixed dimensions.
+// A zero width/height fills the space between the corresponding insets.
+struct OverlayPlacement {
+    int left=0,top=0,right=0,bottom=0,width=0,height=0;
+    bool anchor_right=false,anchor_bottom=false;
+};
+enum class Key { other,escape,enter,space,tab,left,right,up,down,backspace,del };
+struct KeyStroke {
+    Key key=Key::other;
+    bool ctrl=false,shift=false,alt=false;
+    bool operator==(const KeyStroke&) const = default;
+};
+struct KeyBinding {KeyStroke stroke;Command command=Command::none;};
 // The same structured record can be composed from native labels in any toolkit.
 // Cell coordinates are logical units within one row. Negative width means the
 // remaining width minus its magnitude; positive widths are fixed.
@@ -76,6 +108,15 @@ struct Control {
     Command click = Command::none, double_click = Command::none;
     Command wheel_up = Command::none, wheel_down = Command::none;
     unsigned instance=0; // Distinguishes intentional repeated bindings on a page.
+    // Zero identifies the desktop; Application stamps an immutable overlay's
+    // controls with its generation so delayed native callbacks remain scoped.
+    std::uint64_t surface=0;
+    OverlayPlacement placement;
+    bool document_only = false; // Materialized only by a document control node.
+    bool tab_navigation = false; // Multiline editors may reserve Tab for focus.
+    bool developer_only = false; // Hide in place without changing the bound value.
+    ScreenScope scope = ScreenScope::regular;
+    bool read_only = false; // Selectable/scrollable native text without editing.
 };
 const std::vector<Control>& console_screen();
 struct PageDefinition {
@@ -84,6 +125,7 @@ struct PageDefinition {
     const char* title;
     bool document=false;
     int tab_width=100;
+    bool developer_only=false;
 };
 const std::vector<PageDefinition>& pages();
 const char* window_title();
@@ -100,6 +142,7 @@ struct FieldState {
     // Increment for an explicit request to collapse selection at the text end.
     // Zero requests nothing; each native editor consumes a revision only once.
     std::uint64_t text_cursor_end_revision = 0;
+    TextTone text_tone = TextTone::normal;
 };
 enum class ServiceKind { open_file, save_file, prompt, clipboard, open_folder };
 struct ServiceRequest {

@@ -1,0 +1,26 @@
+{
+  "description": "Offline memoryless complex AWGN, production 16-QAM Gray mapper and max-log demapper, LDPC engine and interleaving. No audio tested.",
+  "qam": 16,
+  "es": 1,
+  "snr_definition": "Es/N0 with E[|complex noise|^2]=N0; each real/imag variance N0/2",
+  "ldpc_coded_bits": 64800,
+  "ldpc_max_iterations": 50,
+  "qam_llr_clip": 24,
+  "interleave_depth": 8,
+  "details": "Production per-frame permutation, capacity D8 rotation, and whitening; independently random source bytes per frame. No outer Reed-Solomon, padding, markers, OFDM, pilots, equalization, estimation error, physical-end handling, audio clocks, or non-AWGN channel.",
+  "criterion": "wrong_frames counts any post-LDPC source-byte mismatch to known source; no source integrity acceptance shortcut.",
+  "seed_generator": "std::mt19937_64; normal_distribution<double>; source bytes from low8bits of each generator word.",
+  "command": "/tmp/ldpc_qam16_margin RATE ESN0_DB CYCLES SEED (8 LDPC frames per cycle)",
+  "git_head": "e1e7179d2ec721964e3ad254e3d04bae12b8237a",
+  "sha256": {
+    "/tmp/ldpc_qam16_margin.cpp": "61ad3897f0a75663d08e64c48c731d4e6752835119c245b2a6bb330786ac4e2c",
+    "/tmp/ldpc_qam16_margin": "6e02121fb6059713bcf2412d488be60490885fd1ff72fae319f74d0ade49cf74",
+    "build/libdatapump_fast.a": "329540745d0967a6b8c729bd5d2b0e95390e6e8d75921947a16bbc74d8b8c6d1",
+    "src/fast/ldpc.cpp": "7450d46a42a4ea9975ee2a08a06c3e2c1dbc58d32910a8e30c4b1e505bba0ddf",
+    "src/fast/modem.cpp": "99e672ed6ed9aacbdf4b2763d48578214e2cd83716ad91deb466553b3b2630e2",
+    "src/fast/codec.cpp": "6108791f78d587c0cea50c0f3286bb31bf4f8f9d5700c334acbe105fffce9b43"
+  },
+  "sample_points": 20,
+  "total_frames": 336,
+  "total_benchmark_seconds": 96.37241843
+}

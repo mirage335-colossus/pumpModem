@@ -80,6 +80,17 @@ public:
         commit(std::move(decoded));
     }
 
+    // Select an exact transport bit string while preserving this editor's
+    // separate byte/text preview. The Compression page supplies its own bounded
+    // dictionary limit; Console prefix editing keeps its 128-bit limit below.
+    void select_raw_bits(std::span<const std::uint8_t> bits,std::size_t bit_limit) {
+        if(bits.empty() || bits.size()>std::min(bit_limit,payload_limit))
+            throw Error("Raw bit selection exceeds its bit limit");
+        if(std::any_of(bits.begin(),bits.end(),[](auto bit){return bit>1;}))
+            throw Error("Raw bit selection accepts only 0 and 1");
+        raw_bits_=Bytes(bits.begin(),bits.end());
+    }
+
     void edit_binary(std::string_view text) {
         Bytes prefix;
         prefix.reserve(prefix_limit);
