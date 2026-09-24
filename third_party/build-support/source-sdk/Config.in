@@ -1,0 +1,7 @@
+config BR2_PACKAGE_DATAPUMP_SDK
+	bool "DataPump desktop SDK"
+	select BR2_PACKAGE_LIBGLVND
+	select BR2_PACKAGE_LIBGLVND_DISPATCH_GL
+	help
+	  Build OpenGL link interfaces for Rev without building or shipping
+	  a graphics driver. The destination system supplies its own driver.

@@ -1,0 +1,166 @@
+{
+  "format": "datapump-acoustic-sounder-v1",
+  "sample_rate": 48000,
+  "pcm_format": "float32le",
+  "amplitude": 0.2,
+  "seed": 417,
+  "period_samples": 16384,
+  "prefix_samples": 8192,
+  "blocks": 8,
+  "repeats": 4,
+  "low_hz": 150.0,
+  "high_hz": 18000.0,
+  "transmit_seconds": 15.938,
+  "segments": [
+    {
+      "kind": "silence",
+      "start_sample": 0,
+      "samples": 36000
+    },
+    {
+      "kind": "sync",
+      "start_sample": 36000,
+      "samples": 14400
+    },
+    {
+      "kind": "silence",
+      "start_sample": 50400,
+      "samples": 16800
+    },
+    {
+      "kind": "periodic",
+      "start_sample": 67200,
+      "samples": 73728,
+      "block": 0,
+      "prefix_samples": 8192,
+      "period_samples": 16384,
+      "repeats": 4
+    },
+    {
+      "kind": "periodic",
+      "start_sample": 140928,
+      "samples": 73728,
+      "block": 1,
+      "prefix_samples": 8192,
+      "period_samples": 16384,
+      "repeats": 4
+    },
+    {
+      "kind": "periodic",
+      "start_sample": 214656,
+      "samples": 73728,
+      "block": 2,
+      "prefix_samples": 8192,
+      "period_samples": 16384,
+      "repeats": 4
+    },
+    {
+      "kind": "periodic",
+      "start_sample": 288384,
+      "samples": 73728,
+      "block": 3,
+      "prefix_samples": 8192,
+      "period_samples": 16384,
+      "repeats": 4
+    },
+    {
+      "kind": "silence",
+      "start_sample": 362112,
+      "samples": 7200
+    },
+    {
+      "kind": "sync",
+      "start_sample": 369312,
+      "samples": 14400
+    },
+    {
+      "kind": "silence",
+      "start_sample": 383712,
+      "samples": 16800
+    },
+    {
+      "kind": "periodic",
+      "start_sample": 400512,
+      "samples": 73728,
+      "block": 4,
+      "prefix_samples": 8192,
+      "period_samples": 16384,
+      "repeats": 4
+    },
+    {
+      "kind": "periodic",
+      "start_sample": 474240,
+      "samples": 73728,
+      "block": 5,
+      "prefix_samples": 8192,
+      "period_samples": 16384,
+      "repeats": 4
+    },
+    {
+      "kind": "periodic",
+      "start_sample": 547968,
+      "samples": 73728,
+      "block": 6,
+      "prefix_samples": 8192,
+      "period_samples": 16384,
+      "repeats": 4
+    },
+    {
+      "kind": "periodic",
+      "start_sample": 621696,
+      "samples": 73728,
+      "block": 7,
+      "prefix_samples": 8192,
+      "period_samples": 16384,
+      "repeats": 4
+    },
+    {
+      "kind": "silence",
+      "start_sample": 695424,
+      "samples": 7200
+    },
+    {
+      "kind": "sync",
+      "start_sample": 702624,
+      "samples": 14400
+    },
+    {
+      "kind": "silence",
+      "start_sample": 717024,
+      "samples": 48000
+    }
+  ],
+  "markers": [
+    {
+      "start_sample": 36000,
+      "samples": 14400
+    },
+    {
+      "start_sample": 369312,
+      "samples": 14400
+    },
+    {
+      "start_sample": 702624,
+      "samples": 14400
+    }
+  ],
+  "transmit_levels": {
+    "samples": 765024,
+    "rms": 0.04202947236577589,
+    "rms_dbfs": -27.528921241085808,
+    "peak": 0.20000000298023224,
+    "dc": 6.215473717929854e-07,
+    "near_full_scale_samples": 0,
+    "outside_unit_range_samples": 0
+  },
+  "active_period_levels": {
+    "samples": 131072,
+    "rms": 0.04422278439961701,
+    "rms_dbfs": -27.0870783281722,
+    "peak": 0.2,
+    "dc": -2.3505164286306834e-20,
+    "near_full_scale_samples": 0,
+    "outside_unit_range_samples": 0
+  },
+  "transmit_mono_sha256": "8ab3af176cc7e0f25ef8f0d70cb7f39bd8d07133becb3801cfc97dc76a4f5938"
+}

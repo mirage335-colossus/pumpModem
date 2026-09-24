@@ -21,13 +21,18 @@ README headings still say 1.4.4.
 
 Verified September 12, 2026: all **1,511 Git-tracked files** under `fltk/`
 match the commit archive byte for byte at identical relative paths.
-The five upstream files in [libdecor/build/](https://github.com/fltk/fltk/tree/a9b1113516ffd15fc7602a6d425a317df30f4720/libdecor/build)
+On September 22, 2026 the five upstream files in
+[libdecor/build/](https://github.com/fltk/fltk/tree/a9b1113516ffd15fc7602a6d425a317df30f4720/libdecor/build)
 (`Makefile`, `fl_libdecor-plugins.c`, `fl_libdecor.c`, `fl_libdecor.h`,
-`gtk-shell.xml`) are excluded from Git by the repository's `build*/` ignore
-rule. Restore these from the pinned tree before enabling Wayland.
+`gtk-shell.xml`) were restored to the source inventory after narrowing the
+root build-directory ignore rules. Each was compared byte-for-byte against
+the pinned upstream commit. The snapshot now includes all 1,516 files;
+Wayland remains disabled and no upstream source was modified.
 
 There are no Data Pump modifications to the vendored source. Build options live
-in [cmake/NativeGui.cmake](../cmake/NativeGui.cmake). The application uses the
+in [cmake/GuiFltk.cmake](../cmake/GuiFltk.cmake). That wrapper also marks local
+SDK includes as build-only for the unused upstream install exports, avoiding
+temporary header symlinks. The application uses the
 static base widget library;
 OpenGL, Wayland, Cairo, Pango, SVG loading, printing, and FLTK development tools
 are disabled. Linux uses X11/Xft (also usable through XWayland); Windows uses the

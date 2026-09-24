@@ -1,0 +1,7 @@
+{
+  "upstream_commit": "32357d8ad55a6a302c34e093759f0454e45cca56",
+  "verbatim_B6_struct_sha256": "c815032817f719d2eb1486c4e081ef075487b6540f97527755fdf2c25241a233",
+  "independent_upstream_codeword_sha256": "4260e4c155f2dcc15812133d4a08ca5331ff7dea55fb93f0255402f8617642eb",
+  "test_command": "build/test_fast_ldpc 4",
+  "test_exit_code": 0
+}

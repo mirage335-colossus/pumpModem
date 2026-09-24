@@ -17,6 +17,19 @@ and basic source documentation. Autotools `Makefile.am`/`Makefile.in` files
 are omitted. `UPSTREAM.sha256` records the copied files, independently of
 DataPump's own wrapper and this provenance note.
 
+The application compiles a generated receive-hardening overlay rather than
+modifying these checksum-pinned files. `cmake/XzReceiveHardening.cmake` verifies
+every upstream hash before copying the inventory into the build directory. It
+changes exactly three implementation files there: `src/liblzma/lz/lz_decoder.h`
+adds dependent bounds clipping to received dictionary distances and resulting
+copy offsets; `src/liblzma/lz/lz_decoder.c` initializes the small reset/fallback
+prefix including SIMD overread space; and `src/liblzma/lzma/lzma2_decoder.c`
+places a validation barrier before accepted received properties configure the
+literal decoder. The rest of the copied implementation is unchanged. Missing
+patch context is a configuration error. The overlay uses DataPump's documented
+`include/datapump/speculation.h`; no code is downloaded or generated from received
+data. See [scope and limitations](../../docs/receive-processing-hardening.md).
+
 Verified September 12, 2026: all 213 files in `UPSTREAM.sha256` match both
 the Git commit above and the checksum-pinned release archive byte for byte,
 at identical relative paths. This subset has no release-generated files
@@ -39,23 +52,22 @@ files carry LGPL-2.1-or-later notices and `COPYING.LGPLv2.1` is retained for
 source redistribution. The linked liblzma code is under the BSD Zero Clause
 License; see `COPYING.0BSD` and upstream's summary `COPYING`.
 
-DataPump uses only raw LZMA2 streams with preset 9 extreme search settings.
-The history window is `max(4096, min(original_byte_count, 64 MiB))` and contains
-only previously decoded message bytes. Both endpoints derive this setting
-from the original size, so neither an XZ container header, filter/dictionary
-identifier nor a preset dictionary is sent. LZMA2's own stream control bytes
-remain necessary to describe its compressed/uncompressed chunks.
-
-The single-threaded encoder has a separate default scratch cap of 768 MiB;
-the decoder has an 80 MiB cap. The runtime checks liblzma's requirements before
-initialization and enforces actual allocations with a bounded allocator.
-Small inputs use proportionally smaller history rather than allocating the
-full preset-9 window. Input, candidate output, and decoded message buffers
-remain subject to packet limits separately. Preset 9 extreme seeks a high
-compression ratio; it is not a guarantee of mathematically minimal output.
+The regular modem uses raw LZMA2 with a locally fixed 4 MiB dictionary, no
+original-length field, and preset 9 extreme encoder search settings. Encoder
+and decoder scratch caps are 64 MiB and 8 MiB, respectively, enforced by a
+bounded allocator. Fast uses an XZ container restricted to the compiled
+LZMA1/LZMA2 filters and CRC32, with a 64 MiB decoder-memory limit. Both paths
+decompress only after physical completion and enforce separate local output
+quotas. The earlier adaptive-dictionary/packet-size description is historical;
+the current [protocol](../../docs/protocol.md), [Fast format](../../docs/fast-mode.md)
+and source wrappers define the supported profiles. Preset 9 extreme does not
+guarantee mathematically minimal output.
 
 Updating the dependency requires reviewing the release, resolving its tag to
 the full commit hash, replacing this source subset from its pinned archive,
 comparing the subset against that commit, updating the commit/archive links
 and checksums, and running the codec, malformed-stream, packet, and
 relocated-package tests.
+The generated overlay must also be reviewed against the new dictionary
+invariants and validation sites; its context checks must not be bypassed merely
+to make a new upstream version build.

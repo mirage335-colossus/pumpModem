@@ -29,6 +29,8 @@ import Rev.Element.Resolved;
 export namespace Rev::Element {
 
     using namespace sentinel;
+    using namespace Rev::Core;
+    using namespace Rev::Appearance;
 
     struct Element {
 

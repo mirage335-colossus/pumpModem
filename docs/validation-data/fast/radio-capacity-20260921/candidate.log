@@ -1,0 +1,2 @@
+ssb input_snr_db=20 complete=0 intervals=64 ldpc_failed=1 evm=0.0682059 status=Uncorrectable capacity Reed-Solomon cycle
+radio capacity waveform failed with in-band AWGN

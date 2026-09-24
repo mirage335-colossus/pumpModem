@@ -1,30 +1,109 @@
 # Data Pump
 
+**Build:** `./build.sh` · **Test:** `./build.sh test contract` ·
+**Package:** `./build.sh package`. See the [build and maintenance guide](docs/building.md)
+for dependencies, stable profiles, focused tests and portable release limits.
+
 A C++20 audio modem for moving clipboard text, screenshots, and files between
 computers. It includes a compiled CLI, a native C++/FLTK desktop console, real
 waveform and sampled channel simulation, and a documented fixed-interval byte stream. Received source data uses bounded
-storage, including a temporary spool while reception continues; permanent saves
-are explicit. No network listener or routable addressing is implemented.
+RAM storage; reception creates no temporary files or disk cache. Saves are
+explicit. No network listener or routable addressing is implemented.
 
 **Status: working reference implementation, version 0.7.2.** The audio/stream/crypto
 pipeline works end to end and has automated regression tests. This is not yet
 the complete high-performance modem described in the supplied specification.
-In particular, near-capacity adaptive modulation, multi-signal radio scanning,
+In particular, automatic modulation/rate adaptation, multi-signal radio scanning,
 RF hopping, multi-day status reception, and hardware radio integrations remain
 unimplemented. See the [requirements matrix](docs/requirements.md) for precise
 coverage and boundaries. No unimplemented control is presented as functioning.
 
-The transport sends one bit per pattern symbol. Pattern evidence alone admits
+Regular mode sends one bit per pattern symbol. Pattern evidence alone admits
 timing, carrier and keystream candidates. Nonempty text of up to 16 source bytes and
 explicit bit drafts use raw transmission. Longer byte streams use a fixed 128-byte coding
 interval after each alignment marker, with no packet header, received length,
-or metadata parser. Legacy APSK and packet APIs have been removed; peers must use
+or metadata parser. Legacy APSK and packet APIs have been removed; regular peers must use
 the same local source/FEC profile. Short text uses the fixed bit dictionary.
 
 **Development requirement:** preserve tiny dictionary/raw-bit messages, fixed
 intervals and per-bit pending reception. Each bit may cost hours or longer;
 neither added framing nor waiting for a whole message is harmless. See the
 [message behavior contract and regression checks](docs/development.md).
+
+**Legacy Modem** adds a separate simplex radio-text console for BPSK31,
+BPSK125 and Olivia-4/2k. It has live receive/transmit text, a send draft,
+a waterfall and an editable carrier (1500 Hz by default). Its modulation,
+settings and regression-only fixed-SNR channel are independent of Robust and
+Fast. See [Legacy Modem](docs/legacy-modem.md).
+
+**Fast Modem** is an independent QAM/LDPC and classic APSK text/file-transfer
+interface, selected from the **Modem** dropdown beside **DATA PUMP**. It includes
+live waveform, waterfall and constellation plots, fixed 2,048-bit coded intervals,
+optional AES-256-CBC/HMAC, [XZ source compression](docs/fast-xz.md), and bounded
+source preparation. XZ decompression waits for physical completion; both
+peers must use the matching Fast source format. Regular waveform,
+encryption and short/pending-message behavior remain unchanged.
+
+The qualified high-SNR audio-cable profile uses **4,194,304-QAM, LDPC 8/9, four LDPC
+frames per cycle, approximately 0.3% RS parity/data, and a full marker every
+16 intervals**. It uses 17,647.0588 symbols/s, 2% rolloff and an 18 kHz shaped
+band, with output amplitude 0.30. Mono now defaults to the left channel; right
+mono and stereo remain selectable. Compact eight-bit source
+bytes, one integrity-protected continuation/final flag per cycle, and unambiguous
+final padding replace the classic nine-bit source cells. A 2,048-symbol preamble
+supports dense-QAM acquisition.
+
+In earlier raw-source trials, an exact live **50 MB transfer succeeded in
+21m 30.664s** on the connected
+headphone-to-microphone cable, including startup and an eight-second silence
+tail. All 6,980 LDPC frames converged, the complete source SHA-256 matched,
+and no clipping or capture overrun occurred. Calculated airtime for 50 MB
+of encoded source at that high-SNR setting is **21m 27.337s**, including the current preamble and 6.25 seconds of
+end silence. This single whole-file success does not establish an 80% success
+probability. Earlier 1,048,576-QAM / LDPC 9/10 development trials also transferred
+5 MB exactly. See [Fast operation and settings](docs/fast-mode.md), the
+[capacity codec specification](docs/fast-capacity-codec.md), and the
+[live capacity study](docs/fast-capacity-live-study.md) for measured limits and
+wire revisions.
+
+The CLI's **classic APSK** profile (`--format classic`) supports the earlier 256-APSK,
+convolutional 7/8, high-rate RS and depth-62 cable settings. Its roughly
+2h 01m calculated 50 MB airtime and 44.14 kbit/s sampled 2 MiB result are
+historical reference points, not cable capacity limits. The IC-7100 SSB and FM
+defaults now use 64-QAM/LDPC 3/4 across 300–2700 Hz, with approximately
+0.3% RS and compact source bytes. Estimated bulk throughput is 8.70 kbit/s,
+about 2.8× the former SSB and 5.3× the former FM public-file defaults.
+These radio settings passed sampled channel simulations, not live RF tests;
+see the [radio profile study](docs/fast-radio-capacity.md).
+The highest speakers/microphone preset uses a separate
+16-QAM/LDPC 3/4 OFDM waveform, providing
+38.80 kbit/s of steady source capacity. Higher QAM orders remain selectable;
+the classic acoustic profile is available through the CLI. The
+[acoustic routing diagnosis](docs/fast-acoustic-routing-diagnosis.md) explains
+the current default and measured decoding limits. The
+[earlier cable study](docs/fast-cable-live-study.md) documents those settings.
+The separate [physical SNR measurement](docs/cable-snr-live-study.md) found about
+79 dB on one input and 81.5 dB with both inputs averaged under best-case tone
+conditions; this is not a direct measurement of dense-QAM decoding margin.
+The [coding study](docs/fast-coding-study.md) records the preceding theoretical
+analysis and remaining work such as probabilistic shaping and adaptive loading.
+
+Fast now has **Expected SNR** and **Symbol rate** dropdowns. Expected SNR sets
+matching local waveform/coding defaults, starting at **36 dB for audio cable**
+and **3 dB for speakers/microphone**, with **−6 dB for speakers/mic · short**.
+The menu retains higher qualified settings
+and reaches down to 40 dB below each highest setting. Weak presets narrow their bandwidth; the displayed SNR stays referenced
+to the original channel bandwidth. Switching channel profiles restores the
+selected channel's default SNR and waveform settings. These are assumed operating targets, not automatic SNR
+measurements. See [SNR presets and rate selection](docs/fast-snr-presets.md).
+
+The CLI provides `fast-info`, `fast-tx`, `fast-rx` and `fast-listen`. Fast accepts
+`--text` or `--input`; encryption is off by default and enabled by `--keyfile`.
+Both peers select matching format, coding and protection settings. Public
+checksums detect corruption without authentication, and Fast has no LPI claim.
+Its historical SNR regression executable explicitly pins classic APSK and is
+built only for testing. General audio/radio qualification remains outstanding.
+The following regular-mode description and settings do not apply to Fast.
 
 Encrypted pattern chips use circular I/Q noise with private amplitude and phase,
 removing the fixed squared-carrier signature of the previous +/-1 mapping.
@@ -71,7 +150,7 @@ repair interior losses and a missing final coded bit without shifting later byte
 
 For interval-coded sources, the default codec emits raw LZMA2 with a fixed 4 MiB dictionary,
 including incompressible input, then pads the final data area with zeros.
-It transmits no original size. Corrected bytes enter a bounded spool; decompression
+It transmits no original size. Corrected bytes enter a bounded memory buffer; decompression
 runs only after iterative search establishes the physical stream end. A locally
 selected uncompressed profile uses fixed validity/byte cells to preserve exact
 bytes and trailing zeros. The bundled compression library needs no runtime download.
@@ -86,8 +165,48 @@ Marker recognition uses bounded fixed-cadence searches and a conservative `2^-84
 random-input evidence budget, independently of authentication. Unknown slots add
 no marker confidence. See the [fixed stream protocol](docs/protocol.md).
 
-The desktop has **Console**, **Modem flow**, **Transmission layout**, and
-**Compression / raw bits** tabs.
+The desktop has **Console**, **Link planner**, **Compression / raw bits**,
+**Modem flow**, and **Transmission layout** tabs, in that order. **Developer mode**,
+next to **Clear received**, starts unchecked. Check it to show the last three
+tabs and the Pattern / tone, Error correction, DSP workspace, RX targets,
+Pattern steps, Callsign, Grid and Repeatable controls. Hidden controls keep their
+positions and current values, including command-line overrides. Link planner
+compares bit duration, modeled one-bit reception and receiver CPU pace at the
+selected power, path loss, noise and oscillator settings.
+Beside **Simulation**, the desktop shows a modeled whole-message receive
+probability and estimated computation times for a fixed **Intel Core i9-13900H**
+and **RTX 4090 Laptop GPU** reference. No local benchmark runs. The GPU figure is
+a projection; simulation currently executes on the CPU. These rough estimates
+update with the draft and settings. A simulated carrier outside the receiver's
+frequency search shows an explanation instead of a numeric probability.
+Supported long-pattern estimates include the local differential detector and
+report Monte Carlo sampling uncertainty. Geometries outside the supported model
+range show a coverage reason instead of a percentage; see the
+[model and its assumptions](docs/simulation-estimates.md).
+The **LPI relative observation** advisory compares an unkeyed energy detector's
+total observation with the receiver's one-bit design reference: N:1 means N
+total wire-bit durations, or N-1 additional durations. Both listeners are
+normalized to 18 dB Es/N0 in one receiver symbol, an uncalibrated planning
+reference. Simulation/live link budgets and oscillator presets do not change
+the ratio at fixed waveform geometry. It uses 90% detection and 1% false alarms
+per known window, with explicit weak-signal assumptions; it is not a safe
+traffic limit or a claim that only one in N transmitted bits is accepted.
+With encryption off, including tone experiments, a warning marks the estimate
+as a hypothetical encrypted private pattern at the current timing and
+normalized reference.
+Actual public waveforms can be easier to detect. The estimate does not enable
+encryption or change the transmitted draft.
+The same model appears in CLI `estimate` and `analyze-link` JSON. See
+[LPI relative observation estimates](docs/lpi-estimates.md) for bandwidth,
+reference noise rise, examples and limitations.
+For extreme links, `pump analyze-link` compares bounded statistical detector
+experiments and extrapolated processing costs without generating PCM. See
+[fast weak-link planning](docs/weak-link-planning.md) for the 3 dBm/-200 dB
+case, example commands and the distinction from actual receiver success.
+The **Oscillator model** selector includes free-running crystal, hobbyist
+GPSDO/XO and GPSDO/TCXO without ovens, and GPSDO/OCXO models. The same profiles
+are available as `--oscillator` in CLI simulations and analysis; see
+[their assumptions](docs/oscillator-models.md).
 The inspection views show the two pattern codewords, their modeled distances,
 and exact bit/symbol counts. Long patterns use a bounded illustrative prefix;
 keyed previews use clearly labeled public example streams. These design plots
@@ -120,23 +239,32 @@ independently.
 The DSP workspace dropdown is an upper limit: 25%, 50% (default), or 75% of
 available RAM. It does not request that amount of history. Received messages
 and files have a separate 256 MiB quota. The GUI defaults to **Rate**
-`3.6 kHz`, **Carrier** `1.5 kHz`, and **TX SNR (dB-Hz)** `32`.
+`3.6 kHz`, **Carrier** `1.5 kHz`, **Short ≤16 B target SNR (dB-Hz)** `32`, and
+**Long / file target SNR (dB-Hz)** `55`. The short target applies to nonempty
+text of 1–16 source bytes inclusive and exact raw bits. Longer text and all
+attachments use the long target. Estimates, inspection and transmission follow
+the draft's source bytes; crossing the boundary does not restart reception.
 Rate is the nominal chip-rate planning parameter, not a measured occupied
 bandwidth: the default produces 1,800 chips/s and an ideal shaped spectrum of
 375–2,625 Hz, including the 25% RRC rolloff. Rate presets still include `18 kHz`.
 Changing Rate selects its default carrier: `1.5 kHz` for `3.6 kHz`, otherwise
 `max(1500, 0.75 × rate)` Hz. The Carrier dropdown offers only the current rate's
 default carrier; manual frequency entry remains available.
-The **RX targets (dB-Hz)** comma-list also starts at `32`. Changing TX SNR to
-a valid value replaces the RX list with that single matching target; the RX
+The **RX targets (dB-Hz)** comma-list starts at `32, 55`. Changing either TX SNR to
+a valid value replaces the RX list with both effective targets (deduplicated); the RX
 list can then be edited independently. Search varies this list while holding
 the selected rate, carrier, and pattern/tone mode fixed. Invalid RX input resets
 the entire list to `32`.
+In automatic modes, all GUI target entries check Clock/RAM fit and may adjust
+to a nearby usable value, preferring weaker targets. Fixed modes retain exact
+entries. Typing preserves the edit buffer; Enter or a preset displays the exact
+accepted value. The independent Planner target changes only its preview until
+explicitly applied. See [Link planner](docs/link-planner.md).
 
 Beside the gross bitrate, diagnostics show the **[Shannon-Hartley limit](https://disalw3.epfl.ch/teaching/signals_instruments_systems/ay_2025-26/lecture/SIS_25-26_W07_lecture.pdf#page=33)** for the
 selected TX target and nominal bandwidth. This is ideal Gaussian-noise channel
 capacity: `B * log2(1 + 10^(C/N0_dBHz / 10) / B)` bit/s, with `B` in Hz. At the
-GUI defaults (3.6 kHz, 32 dB-Hz), it is about **1.89 kbit/s**. Actual payload
+short-message defaults (3.6 kHz, 32 dB-Hz), it is about **1.89 kbit/s**. Actual payload
 throughput depends on the waveform and coding overhead. CLI `estimate` reports
 the same value as `shannon_capacity_bps`, using `--bw` and `--target-snr` (default
 32 dB-Hz, including manual modem profiles); values beyond the numeric range are
@@ -164,28 +292,58 @@ the software. If Python is available, CTest can also run optional CLI integratio
 tests.
 
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel
-ctest --test-dir build --output-on-failure
+./build.sh
+./build.sh test contract
 
-./build/datapump-gui
-./build/pump simulate --text 'CQ hello from Data Pump' --snr 12 --json
-./build/pump tx --input circuit.kicad_pcb --output transfer.wav
-./build/pump rx --input transfer.wav --save received.kicad_pcb
+./build/dev/datapump-gui
+./build/dev/pump simulate --text 'CQ hello from Data Pump' --snr 12 --json
+./build/dev/pump tx --input circuit.kicad_pcb --output transfer.wav
+./build/dev/pump rx --input transfer.wav --save received.kicad_pcb
 ```
 
-The last command refuses to overwrite an existing file. `rx --json` returns
-content as base64, exact recovered bits, validation flags and DSP diagnostics; without `--save`
-or `--json`, binary file content remains unsaved. Text defaults to stdout, so
-normal pipelines work. Public Reed–Solomon correction does not authenticate the
-sender.
+The last command refuses to overwrite an existing file. Received text and
+filenames allow only ASCII letters, digits, comma, period, `@`, space, `-`, `_`,
+`/`, `=`, and line-feed newlines (`LF`). Every other byte becomes `_`, including
+other controls and each byte of Unicode text. This restriction applies to stdout,
+pipelines and JSON, where newlines are escaped as `\n`. `rx --json`
+returns the restricted `data_text` field, exact recovered `raw_bits` as `0`/`1`,
+validation flags and DSP diagnostics. The former `data_base64` field is removed.
+Use explicit `--save PATH` to retrieve original source bytes; received content
+is otherwise never written to a file. Public Reed–Solomon correction does not
+authenticate the sender.
+
+After observed symbol absence completes a reception, unresolved interval data
+can use a separate hard-bit recovery search. Its default wall-clock budget is
+five minutes, with workers up to the available CPU cores. `rx`, `simulate` and
+`listen` accept `--recovery-seconds N` (0 disables this additional search),
+`--recovery-threads N` (0 selects the available cores), and `--recovery-bits N`
+(default 65,536 retained symbol slots). These are local receiver settings;
+transmit bits, markers, airtime, encryption and authentication are unchanged.
+The search receives hard bits and missing-slot positions, with no analog samples
+or symbol-confidence scores. It never changes a bit's established encryption
+coordinates or joins receptions across physical completion.
+
+JSON reports `recovery.state`, `attempts`, `total` and `elapsed_ms` separately
+from `stream_complete` and `content_validated`. A physically complete reception
+may still have an incomplete recovery search. Exhausting its time budget does
+not establish a unique candidate or expose speculative source content. Recovery
+remains bounded by the retained slots and selected search scope; it cannot
+recover every possible insertion, deletion or lost interval. The API retains
+unfinished work for a later recovery call while its result remains alive.
+`--recovery-errors N` (default 2, range 0–24) reserves RS capacity for additional
+erroneous bytes by enumerating more missing bits. This can substantially increase
+the search domain; a larger value is not a guarantee that the search will finish
+within its time budget. See [the exact recovery scope](docs/protocol.md#exhaustive-hard-bit-recovery).
+The GUI's Recovery menu in Console + Compression resumes an unfinished search
+for another configured budget or cancels its current run. Clearing received
+content discards these jobs; stopping or reconfiguring the session does too.
 
 ```sh
-printf 'clipboard text' | ./build/pump tx --input - --output message.wav
-./build/pump rx --input message.wav
-./build/pump tx --text 'hello' --device default
-./build/pump listen --json
-./build/pump listen --simulation '3dBm -120dB' --text 'hello' --json
+printf 'clipboard text' | ./build/dev/pump tx --input - --output message.wav
+./build/dev/pump rx --input message.wav
+./build/dev/pump tx --text 'hello' --device default
+./build/dev/pump listen --json
+./build/dev/pump listen --simulation '3dBm -120dB' --text 'hello' --json
 ```
 
 `listen` continuously receives from the operating system's default audio device;
@@ -198,11 +356,19 @@ transmitted by the automated tests. Physical audio transfer and Windows hardware
 operation still require device testing. Use a capture long enough to contain the
 complete rounded two-second hardware-settling prefix and payload.
 
-Transmit audio defaults to the right channel on stereo outputs and the sole
-channel on mono outputs. Use `--no-mono` to send the same audio to both stereo
-channels. The GUI's **Mono** toggle, below **Audio device**, controls the same
-routing and starts enabled. Mono-only devices remain usable with either setting;
-WAV output and simulation keep their existing single-channel waveform.
+Transmit audio defaults to the left channel on stereo outputs and the sole
+channel on mono outputs. Use `--right-mono` for the right output or `--no-mono`
+for both stereo outputs. All three GUIs offer **Left mono**, **Right mono**, and
+**Stereo**, with Left mono selected by default. Mono-only devices use their sole
+channel with every selection; WAV output and simulation keep their existing
+single-channel waveform.
+
+Ordinary desktop launches now open **Fast Modem** on **Speakers / mic · short**
+at **−6 dB expected SNR** and listen continuously. Its Console provides text/file
+composition, QR brightness, received signals with single-click text copying,
+and received attachments in memory;
+Developer mode reveals a separate Modem details tab. Fast compresses text and
+files with XZ. The dropdown order is Fast Modem, Robust Modem, Legacy Modem.
 
 ## Desktop console
 
@@ -234,14 +400,15 @@ producers. Build it separately with `-DDATAPUMP_GUI_BACKEND=rev`; see the
 software-OpenGL requirements and current release boundaries.
 
 The desktop application is a compiled executable linked to the same C++ transfer
-service as the CLI. FLTK and OpenSSL are linked statically by default. For a
+service as the CLI. FLTK is linked statically; portable release builds also
+request static OpenSSL. For a
 copyable installation, install or package a release build:
 
 ```sh
-cmake --install build --prefix "$PWD/build/DataPump-portable"
+./build.sh package
+cmake --install build/release --prefix "$PWD/build/DataPump-portable"
 ./build/DataPump-portable/bin/datapump-gui --self-check
 ./build/DataPump-portable/bin/datapump-gui
-cmake --build build --target package
 ```
 
 Copy that **entire directory** to another compatible computer and use its
@@ -273,6 +440,16 @@ Existing files are never overwritten. The waveform defaults to four carrier
 cycles; use the mouse wheel to zoom and double-click to reset. The waterfall
 retains every FFT bin through peak pooling and uses one labeled intensity scale for
 its entire history. Click it to clear the history and reset that scale.
+In simulation, the waterfall uses a 40 dB display range referenced to the
+default −117 dBm received signal, with the default −164 dBm/Hz receiver noise
+in dark blue and more contrast for faint peaks. The range is −50..−10 dB at
+6 kHz sampling and shifts with noise bandwidth per FFT bin at other sample
+rates. Short startup FFT windows receive a matching noise-bandwidth correction.
+Path loss and transmit power change the signal brightness; receiver
+noise density changes the background. Strong signals saturate at the top of
+this display scale without recoloring the noise.
+The caption identifies this simulation reference; hardware retains dBFS units.
+This display correction does not change the samples processed by the receiver.
 
 Color is enabled by default when supported: muted cyan data field values, waveform
 traces, and constellation points, softer gray text, and a subdued multihue waterfall
@@ -281,7 +458,7 @@ red to soft off-white. Every constellation point uses the same hue. Reference
 marks, status labels, and signed pattern diagrams stay grayscale. Run
 `datapump-gui --monochrome` for grayscale; `--color` re-enables color, and the last
 of these switches wins. Color changes presentation only. Grayscale uses the
-original measured waterfall intensities and original text contrast, not
+same measured waterfall intensity scale and original text contrast, not
 desaturated false color. If FLTK cannot select an RGB visual, it uses grayscale.
 
 The dropdown above the QR preview offers **Normal**, **Dim red**, **Dark red**,
@@ -329,6 +506,16 @@ previous message for editing or retransmission, preserving its repeatable
 identifier. Editing the recalled message generates a fresh identifier.
 The new draft remains available while transmission runs. Convenience fields and
 reception identities are local application state, not modem fields.
+
+If earlier hardware output used the selected key for a future symbol, the send
+button shows **TX lock 10m01s** (with the remaining time) and the airtime line
+explains the lock. **Force next transmission**, beside the previous-message
+button, sends the current valid draft once despite that lock and the separation
+wait. This deliberate override can repeat encryption and spreading sequences;
+use it for isolated tests or when you accept that risk. It does not erase the
+usage record or disable protection for later sends. Records remain in memory
+through cancellation and profile changes, and disappear when the program closes.
+No keyfile options or additional receiver searches are involved.
 
 Enter transmits audio; the send preference changes this to Ctrl+Enter. Normal
 transmission is the default. Selecting a simulation preset switches the same
@@ -384,11 +571,11 @@ local action. Filenames are bounded UTF-8 basenames, with no path separators.
 ## Shared keys and encrypted transfers
 
 ```sh
-./build/pump keygen --output shared.key --key-names 'Home,Portable,Emergency'
-./build/pump keys --keyfile shared.key
-./build/pump tx --text 'private clipboard' --keyfile shared.key \
+./build/dev/pump keygen --output shared.key --key-names 'Home,Portable,Emergency'
+./build/dev/pump keys --keyfile shared.key
+./build/dev/pump tx --text 'private clipboard' --keyfile shared.key \
   --time 1800000000 --output encrypted.wav
-./build/pump rx --input encrypted.wav --keyfile shared.key \
+./build/dev/pump rx --input encrypted.wav --keyfile shared.key \
   --time 1800000002 --search-seconds 2 --json
 ```
 
@@ -422,18 +609,18 @@ from someone holding the complete keyfile and required pad. See
 
 ```sh
 # Automatic tuning and exact airtime, without allocating audio.
-./build/pump estimate --text 'CQ hello' --bw 1200 --target-snr 40 --pattern auto-pattern
+./build/dev/pump estimate --text 'CQ hello' --bw 1200 --target-snr 40 --pattern auto-pattern
 
 # Optical transfer, UTF-8, up to500 Unicode characters.
-./build/pump qr --text 'clipboard text' --output clipboard.svg
-./build/pump qr --text 'clipboard text' --format pbm --output clipboard.pbm
+./build/dev/pump qr --text 'clipboard text' --output clipboard.svg
+./build/dev/pump qr --text 'clipboard text' --format pbm --output clipboard.pbm
 
 # Three payload symbols plus the hardware-settling prefix; no padding, MAC or FEC.
-./build/pump status-tx --bits 010 --output status.wav
-./build/pump status-rx --bits 010 --input status.wav
+./build/dev/pump status-tx --bits 010 --output status.wav
+./build/dev/pump status-rx --bits 010 --input status.wav
 
 # Search these receive targets only, with the selected bandwidth and pattern.
-./build/pump listen --receive-targets "40, 6, -6" --bw 1200 --pattern auto-pattern --json
+./build/dev/pump listen --receive-targets "40, 6, -6" --bw 1200 --pattern auto-pattern --json
 ```
 
 With automatic pattern settings, `status-rx` discovers the raw bit string from
@@ -442,7 +629,16 @@ string does not steer acquisition. Its JSON reports exact bits, a model score
 and `content_validated: false`. Manual sample-rate/carrier overrides use the same
 pattern transport.
 
-The reference modem accepts nominal bandwidths from 1 Hz through 30 MHz and
+Live `listen --json` events carry `signal_id`, `revision` and `superseded_ids`.
+Keep the latest revision for each signal, clear its prior interpretation when
+the revision increases, and remove identities listed in `superseded_ids`.
+A slower receive profile may revise a completed short interpretation back to
+pending; it completes only after that profile observes physical absence.
+`reception_update` events describe decoded interpretations, and their
+`reception_id` matches the completed payload's `id`. These are local presentation
+identities, not transmitted framing or authentication.
+
+The reference modem accepts nominal bandwidths from 0.01 Hz through 30 MHz and
 forced durations of 1..16,384 chips. `--target-snr` is the desired C/N0 in dB-Hz,
 defaulting to 32 (32 dB/1Hz). Large messages and attachments default to 60%
 Reed–Solomon parity overhead (`--fec 60`).
@@ -452,6 +648,17 @@ preserve their duration and report unsupported automatic confidence assumptions
 when they miss the applicable floor. Integration may extend
 past 16,384 chips, subject to numeric, workspace and acquisition limits. This
 is not measured receiver sensitivity or a capacity optimum.
+
+For weak-signal operation, see [integration, clock search and practical link
+budgets](docs/weak-signal.md). Rate is a bandwidth parameter, not payload bits/s.
+Long pattern searches include carrier and sample-clock alternatives; extra
+integration is useful only while their finite coverage and phase coherence hold.
+For sufficiently long patterns, an additional detector combines soft phase
+relationships between local windows, defaulting to 100 seconds rounded to at
+least 16 whole chips and requiring 256 complete windows. It still admits only
+complete payload symbols and preserves the exact raw/status wire bits.
+See [local differential evidence](docs/pattern-constellation.md#local-differential-evidence)
+for its bounded statistic and compute limitations.
 
 Hardware sample rates do not set the modem's bandwidth or symbol rate. Audio
 endpoints negotiate a supported clock and use a bounded band-limited converter
@@ -494,7 +701,7 @@ unsupported configuration is rejected before allocation.
 Simulation CPU work does grow with the number of samples, so long integrations
 and high sample rates can take substantial time and remain cancellable.
 Explicit batch WAV operations still use `--memory-mb` and can reject recordings
-that exceed that workspace. Corrected source intervals drain to a quota-limited temporary-file spool until
+that exceed that workspace. Corrected source intervals drain to a quota-limited memory buffer until
 physical completion; it is separate from the application receive cache.
 
 ## Development and portability
@@ -504,9 +711,7 @@ It records the required short-text/binary paths, physical-end boundary and
 pending GUI behavior, with focused regression commands.
 
 ```sh
-cmake -S . -B build-sanitize -DCMAKE_BUILD_TYPE=Debug -DDATAPUMP_SANITIZERS=ON
-cmake --build build-sanitize --parallel
-ASAN_OPTIONS=detect_leaks=0 ctest --test-dir build-sanitize --output-on-failure
+ASAN_OPTIONS=detect_leaks=0 ./build.sh sanitize contract
 ```
 
 Leak detection is disabled above for environments where ptrace prevents
@@ -532,7 +737,10 @@ For Windows, use a C++20 Visual Studio toolchain and OpenSSL 3 (for example the
 Windows code is maintained alongside Linux code but cannot be hardware-verified
 by the Linux test environment. MSVC builds embed a UTF-8 process manifest for
 Windows10 version1903 or newer; non-ASCII paths on older Windows are unsupported.
-`DATAPUMP_BUILD_GUI` and `DATAPUMP_PORTABLE` default to `ON`. CMake installation
+`DATAPUMP_BUILD_GUI` and `DATAPUMP_PORTABLE` default to `ON` for direct CMake
+configuration. The explicit `dev` preset disables portable collection; the
+`release` preset enables it. Application builds omit test executables; use
+`./build.sh test GROUP` or build `datapump-tests` before running CTest. CMake installation
 and CPack TGZ/ZIP archives include both native executables and collected runtime
 libraries. `-DDATAPUMP_GUI_BACKEND=fltk` selects the single compiled GUI backend;
 FLTK is the default, and `rev` selects the optional Rev profile described above.
@@ -564,6 +772,7 @@ not as a claim that every requested feature or assertion is implemented.
 
 Application code is dedicated to the public domain under [CC0 1.0 Universal](LICENSE).
 Copyright (c) 2026 mirage335. The vendored QR encoder retains its own
-MIT notice. Data Pump is based in part on the work of the FLTK project. Its
+MIT notice. Vendored DVB-S2/S2X LDPC tables retain their
+[permissive notice](third_party/ldpc/LICENSE). Data Pump is based in part on the work of the FLTK project. Its
 license and static-linking exception, OpenSSL notices, and collected runtime
 notices accompany the installation.

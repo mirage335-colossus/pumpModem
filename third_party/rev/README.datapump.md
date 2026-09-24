@@ -32,6 +32,13 @@ Local fix: `Elements/Text.ixx` also destroys its owned selection/cursor line pri
 Local compiler and Linux compatibility fixes:
 
 - Include `<algorithm>` in DirtyFlag and Element, and `<cstdint>` in WinEvent.
+- Give `sentinel::null` inline constexpr linkage so exported module defaults
+  can refer to it under GCC 15. Its negative-zero value and unset-bit convention
+  remain unchanged.
+- Make the graphics, core and appearance namespace dependencies explicit in
+  modules that previously depended on using-directives from other imports, and
+  include `<functional>` where imported callbacks instantiate standard-library
+  allocation and RTTI operations.
 - Complete the Linux NativeWindow methods already used by the shared Window:
   `nativeFrameless`, EWMH `setIcon`, and root-relative `getClientPos`.
 - Linux mouse events now carry physical screen coordinates (`x_root/y_root`),
@@ -39,10 +46,11 @@ Local compiler and Linux compatibility fixes:
   a second DPI division. Wheel events refresh their own pointer location before
   dispatch, and DPI changes invalidate layout through `onResize`.
 
-Build requirements: CMake 3.28+, Ninja, Clang 19 (verified), Python 3,
+Build requirements: CMake 3.28+, Ninja, GCC 15.3 or Clang 19 (verified), Python 3,
 OpenGL 4.4 or OpenGL 4.3 with `GL_ARB_buffer_storage`, GLEW, FreeType, and Linux X11/XRandR/Xext
-headers and libraries. GCC 14 currently hits an internal compiler error while
-serializing `Rev.NativeWindow`; use Clang for this pinned revision. Windows
+headers and libraries. The source SDK supplies GCC 15.3. GCC 14 currently hits
+an internal compiler error while serializing `Rev.NativeWindow`; use the SDK
+or Clang 19 for this pinned revision. Windows
 OpenGL/MSVC integration is included but has not been executed in the Linux
 verification environment. macOS/Metal is rejected explicitly by the adapter
 build until integrated and tested.

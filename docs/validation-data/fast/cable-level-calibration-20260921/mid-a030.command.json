@@ -1,0 +1,23 @@
+[
+  "build/fast_cable_probe",
+  "--profile",
+  "wire",
+  "--capacity",
+  "--stereo",
+  "--tail",
+  "7",
+  "--mode",
+  "raw",
+  "--intervals",
+  "64",
+  "--symbol-rate",
+  "1764.7058823529412",
+  "--amplitude",
+  "0.3",
+  "--capture-save",
+  "/tmp/cable-level-20260921/mid-a030.f32",
+  "--tx-bits-save",
+  "/tmp/cable-level-20260921/mid-a030.bits",
+  "--rx-symbols-save",
+  "/tmp/cable-level-20260921/mid-a030.iq"
+]

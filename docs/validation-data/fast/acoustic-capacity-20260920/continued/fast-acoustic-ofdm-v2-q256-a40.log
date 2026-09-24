@@ -1,0 +1,34 @@
+ALSA lib pcm_dsnoop.c:567:(snd_pcm_dsnoop_open) unable to open slave
+ALSA lib pcm_dmix.c:1000:(snd_pcm_dmix_open) unable to open slave
+captured_s=1.94004 acquired=0 intervals=0 evm=0 clock_ppm=0 physical_end=0
+ldpc_frames=0 ldpc_failed=0 verified_cycles=0 decode_failed=0
+captured_s=3.94535 acquired=0 intervals=0 evm=0 clock_ppm=0 physical_end=0
+ldpc_frames=0 ldpc_failed=0 verified_cycles=0 decode_failed=0
+captured_s=5.95175 acquired=1 intervals=20 evm=0.107872 clock_ppm=0.185617 physical_end=0
+ldpc_frames=0 ldpc_failed=0 verified_cycles=0 decode_failed=0
+captured_s=7.95602 acquired=1 intervals=102 evm=0.0961909 clock_ppm=0.123689 physical_end=0
+ldpc_frames=0 ldpc_failed=0 verified_cycles=0 decode_failed=0
+captured_s=8.5534 acquired=1 intervals=127 evm=0.148235 clock_ppm=0.0906433 physical_end=0
+ldpc_frames=4 ldpc_failed=4 verified_cycles=0 decode_failed=1
+captured_s=12.6706 acquired=1 intervals=264 evm=0.290968 clock_ppm=0.0593164 physical_end=0
+ldpc_frames=4 ldpc_failed=4 verified_cycles=0 decode_failed=1
+captured_s=14.676 acquired=1 intervals=335 evm=0.229514 clock_ppm=0.029625 physical_end=0
+ldpc_frames=4 ldpc_failed=4 verified_cycles=0 decode_failed=1
+captured_s=16.6826 acquired=1 intervals=401 evm=0.187281 clock_ppm=0.0630132 physical_end=0
+ldpc_frames=4 ldpc_failed=4 verified_cycles=0 decode_failed=1
+captured_s=18.6866 acquired=1 intervals=483 evm=0.201427 clock_ppm=0.0756499 physical_end=0
+ldpc_frames=4 ldpc_failed=4 verified_cycles=0 decode_failed=1
+captured_s=20.692 acquired=1 intervals=548 evm=0.489863 clock_ppm=0.0152222 physical_end=0
+ldpc_frames=4 ldpc_failed=4 verified_cycles=0 decode_failed=1
+captured_s=22.6974 acquired=1 intervals=630 evm=0.352394 clock_ppm=-0.0959694 physical_end=0
+ldpc_frames=4 ldpc_failed=4 verified_cycles=0 decode_failed=1
+captured_s=24.7027 acquired=1 intervals=696 evm=0.609542 clock_ppm=-0.0209755 physical_end=0
+ldpc_frames=4 ldpc_failed=4 verified_cycles=0 decode_failed=1
+captured_s=26.708 acquired=1 intervals=762 evm=0.188145 clock_ppm=0.00141394 physical_end=0
+ldpc_frames=4 ldpc_failed=4 verified_cycles=0 decode_failed=1
+captured_s=28.7136 acquired=1 intervals=762 evm=0.188145 clock_ppm=0.00141394 physical_end=0
+ldpc_frames=4 ldpc_failed=4 verified_cycles=0 decode_failed=1
+captured_s=30.7187 acquired=1 intervals=762 evm=0.188145 clock_ppm=0.00141394 physical_end=0
+ldpc_frames=4 ldpc_failed=4 verified_cycles=0 decode_failed=1
+captured_s=32.7242 acquired=1 intervals=762 evm=0.188145 clock_ppm=0.00141394 physical_end=1
+ldpc_frames=4 ldpc_failed=4 verified_cycles=0 decode_failed=1

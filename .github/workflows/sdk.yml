@@ -1,0 +1,348 @@
+name: Source SDK and Bookworm portability
+
+on:
+  push:
+    paths:
+      - '.github/workflows/sdk.yml'
+      - 'third_party/build-support/source-sdk/**'
+      - 'third_party/rev/**'
+      - 'src/gui/*rev*'
+      - 'tools/build-sdk.py'
+      - 'tools/prepare_rev.py'
+      - 'tools/package-native.cmake'
+      - 'tools/gui-smoke-timeout.cmake'
+      - 'tools/stage-sdk-runtime.cmake'
+      - 'tools/verify-*.cmake'
+      - 'cmake/**'
+      - 'CMakeLists.txt'
+      - 'CMakePresets.json'
+      - 'build.sh'
+      - 'tests/*sdk*'
+      - 'tests/*rev*'
+      - 'tests/packag*'
+      - 'tests/packaging_fixture/**'
+      - 'tests/test_build_wrapper.py'
+  pull_request:
+    paths:
+      - '.github/workflows/sdk.yml'
+      - 'third_party/build-support/source-sdk/**'
+      - 'third_party/rev/**'
+      - 'src/gui/*rev*'
+      - 'tools/build-sdk.py'
+      - 'tools/prepare_rev.py'
+      - 'tools/package-native.cmake'
+      - 'tools/gui-smoke-timeout.cmake'
+      - 'tools/stage-sdk-runtime.cmake'
+      - 'tools/verify-*.cmake'
+      - 'cmake/**'
+      - 'CMakeLists.txt'
+      - 'CMakePresets.json'
+      - 'build.sh'
+      - 'tests/*sdk*'
+      - 'tests/*rev*'
+      - 'tests/packag*'
+      - 'tests/packaging_fixture/**'
+      - 'tests/test_build_wrapper.py'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Optional existing release tag; select the same tag as the workflow ref to publish'
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: source-sdk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sdk:
+    name: Build reusable source SDK
+    runs-on: ubuntu-24.04
+    # Only SDK production needs the baseline bootstrap environment. Consumers
+    # use the resulting directory without a container, chroot, or root access.
+    container: debian:bookworm-slim
+    timeout-minutes: 360
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - name: Install bootstrap prerequisites
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential binutils file wget curl cpio unzip rsync bc perl python3 git ca-certificates patch xz-utils bzip2 zstd passwd util-linux debianutils
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Reuse immutable SDK and source archives
+        id: cache
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: third_party/build-support/cache/source-sdk/releases
+          key: source-sdk-bookworm-x86_64-v1-${{ hashFiles('tools/build-sdk.py', 'third_party/build-support/source-sdk/**') }}
+      - name: Prepare an ordinary build user
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          useradd --create-home sdkbuilder
+          chown -R sdkbuilder:sdkbuilder "$GITHUB_WORKSPACE"
+      - name: Fetch pinned sources explicitly
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: runuser -u sdkbuilder -- python3 tools/build-sdk.py fetch --jobs 2
+      - name: Preserve source archive and build from its offline replay
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          runuser -u sdkbuilder -- python3 tools/build-sdk.py sources --jobs 2
+          mkdir -p build/sdk-replay
+          set -- third_party/build-support/cache/source-sdk/releases/datapump-sdk-sources-*.tar.gz
+          test "$#" -eq 1
+          tar -xf "$1" -C build/sdk-replay
+          chown -R sdkbuilder:sdkbuilder build/sdk-replay
+          # The replay contains every selected source. Drop this CI-only
+          # duplicate to leave room for the compiler's cold build.
+          rm -rf third_party/build-support/cache/source-sdk/downloads third_party/build-support/cache/source-sdk/work
+          set -- build/sdk-replay/datapump-sdk-sources-*
+          test "$#" -eq 1
+          runuser -u sdkbuilder -- sh -c 'cd "$1"; exec python3 tools/build-sdk.py build --jobs 2' sh "$1"
+          cp "$1"/third_party/build-support/cache/source-sdk/releases/datapump-sdk-*-linux-x86_64.tar.gz third_party/build-support/cache/source-sdk/releases/
+          # Only the verified source/SDK archives are cached, not the multi-GB
+          # intermediate compiler tree. These are this job's generated paths.
+          rm -rf build/sdk-replay
+          cd third_party/build-support/cache/source-sdk/releases
+          sha256sum *.tar.gz > SHA256SUMS
+      - name: Check archived SDK after relocation
+        run: |
+          cd third_party/build-support/cache/source-sdk/releases
+          sha256sum --check SHA256SUMS
+          cd "$GITHUB_WORKSPACE"
+          set -- third_party/build-support/cache/source-sdk/releases/datapump-sdk-*-linux-x86_64.tar.gz
+          test "$#" -eq 1
+          python3 tools/build-sdk.py install --archive "$1" --destination "$GITHUB_WORKSPACE/build/sdk-qualified"
+          python3 tools/build-sdk.py verify "$GITHUB_WORKSPACE/build/sdk-qualified" --max-host-glibc 2.36
+      - name: Separate consumer SDK from preserved sources
+        run: |
+          mkdir -p build/sdk-upload/binary build/sdk-upload/sources
+          cp --reflink=auto third_party/build-support/cache/source-sdk/releases/datapump-sdk-*-linux-x86_64.tar.gz build/sdk-upload/binary/
+          cp --reflink=auto third_party/build-support/cache/source-sdk/releases/datapump-sdk-sources-*.tar.gz build/sdk-upload/sources/
+          cp third_party/build-support/cache/source-sdk/releases/SHA256SUMS build/sdk-upload/sources/SDK-SHA256SUMS.txt
+          cd build/sdk-upload/binary
+          sha256sum *.tar.gz > SHA256SUMS
+          cd ../sources
+          sha256sum *.tar.gz > SHA256SUMS
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: DataPump-source-sdk
+          path: build/sdk-upload/binary/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: DataPump-source-sdk-sources
+          path: build/sdk-upload/sources/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  application:
+    name: SDK build, ${{ matrix.backend }} on ${{ matrix.name }}
+    needs: sdk
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.image }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Bookworm
+            image: debian:bookworm-slim
+            backend: fltk
+          - name: Ubuntu-24.04
+            image: ubuntu:24.04
+            backend: rev
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      LP_NUM_THREADS: '2'
+    steps:
+      # No host compiler or development packages: the downloaded SDK supplies
+      # all application headers/libraries, GCC, CMake, Ninja and pkg-config.
+      - name: Install checkout and runtime test prerequisites
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git python3 file binutils make xvfb xauth fonts-dejavu-core fontconfig-config libgl1 libopengl0 libgl1-mesa-dri libxtst6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: DataPump-source-sdk
+          path: downloaded-sdk
+      - name: Install and verify the same SDK on this host
+        run: |
+          cd downloaded-sdk
+          sha256sum --check SHA256SUMS
+          cd "$GITHUB_WORKSPACE"
+          set -- downloaded-sdk/datapump-sdk-*-linux-x86_64.tar.gz
+          test "$#" -eq 1
+          python3 tools/build-sdk.py install --archive "$1" --destination "$GITHUB_WORKSPACE/build/sdk"
+          python3 tools/build-sdk.py verify "$GITHUB_WORKSPACE/build/sdk" --max-host-glibc 2.36
+      - name: Verify relocated SDK tools and their private runtimes
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+
+          root = (Path(os.environ['GITHUB_WORKSPACE']) / 'build/sdk').resolve()
+          manifest = json.loads((root / 'share/datapump-sdk/manifest.json').read_text())
+          runtimes = {'libstdc++.so.6', 'libgcc_s.so.1'}
+          for name in runtimes:
+              if not (root / 'lib' / name).is_file():
+                  raise SystemExit('SDK host runtime is missing: ' + name)
+          env = os.environ.copy()
+          for name in ('LD_LIBRARY_PATH', 'LD_PRELOAD', 'LD_AUDIT', 'LD_DEBUG'):
+              env.pop(name, None)
+          compiler = root / manifest['target']['cxx_compiler']
+          cc1plus = subprocess.check_output([str(compiler), '-print-prog-name=cc1plus'], env=env, text=True).strip()
+          python = root / 'bin/python3'
+          tools = [root / 'bin/cmake', root / 'bin/ninja', Path(cc1plus), python]
+          if (root / 'bin/patchelf').is_file():
+              tools.append(root / 'bin/patchelf')
+          for tool in tools:
+              if not tool.is_absolute() or not tool.is_file() or root not in tool.resolve().parents:
+                  raise SystemExit('SDK host tool is missing or outside its root: ' + str(tool))
+              result = subprocess.run(['ldd', str(tool)], env=env, text=True, capture_output=True, check=True)
+              if 'not found' in result.stdout:
+                  raise SystemExit('SDK host dependency is missing: ' + result.stdout)
+              for line in result.stdout.splitlines():
+                  fields = line.split()
+                  if fields and fields[0] in runtimes:
+                      expected = (root / 'lib' / fields[0]).resolve()
+                      if len(fields) < 3 or fields[1] != '=>' or Path(fields[2]).resolve() != expected:
+                          raise SystemExit('SDK tool selected a non-SDK C++ runtime: ' + str(tool) + '\n' + line)
+              print('Verified SDK host runtime resolution:', tool.relative_to(root))
+          python_paths = json.loads(subprocess.check_output([str(python), '-c',
+              'import argparse, json, pathlib, re, sys, sysconfig; print(json.dumps([sys.executable, sys.prefix, sys.base_prefix, sysconfig.get_path("stdlib")]))'], env=env, text=True))
+          for location in python_paths:
+              resolved = Path(location).resolve()
+              if resolved != root and root not in resolved.parents:
+                  raise SystemExit('SDK Python selected a path outside its installation: ' + location)
+          print('Verified relocated SDK Python and Rev resource-builder imports:', python_paths[0])
+          PY
+      - name: Build and verify portable application archives
+        run: |
+          ./build.sh package --sdk "$GITHUB_WORKSPACE/build/sdk" --backend '${{ matrix.backend }}' --build-dir build/sdk-application --jobs 2
+          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' build/sdk/bin/cmake -DARCHIVE_DIR="$PWD/build/sdk-application/releases" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=300 -DMAX_GLIBC=2.36 -P tools/verify-native-archives.cmake
+      - name: Run build and packaging isolation regressions
+        run: |
+          ./build.sh test build --sdk "$GITHUB_WORKSPACE/build/sdk" --backend '${{ matrix.backend }}' --build-dir build/sdk-application --jobs 2 -- -DDATAPUMP_PORTABLE=ON
+          ./build.sh test packaging --sdk "$GITHUB_WORKSPACE/build/sdk" --backend '${{ matrix.backend }}' --build-dir build/sdk-application --jobs 2 -- -DDATAPUMP_PORTABLE=ON
+      - name: Preserve wire and shared GUI contracts with the SDK toolchain
+        if: matrix.backend == 'fltk'
+        run: ./build.sh test contract --sdk "$GITHUB_WORKSPACE/build/sdk" --backend fltk --build-dir build/sdk-application --jobs 2 -- -DDATAPUMP_PORTABLE=ON
+      - name: Run Rev native conformance separately under a private display
+        if: matrix.backend == 'rev'
+        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' ./build.sh test native --sdk "$GITHUB_WORKSPACE/build/sdk" --backend rev --build-dir build/sdk-application --jobs 2 -- -DDATAPUMP_PORTABLE=ON
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: DataPump-SDK-${{ matrix.backend }}-Linux-x86_64-glibc-2.36
+          path: |
+            build/sdk-application/releases/*.tar.gz
+            build/sdk-application/releases/*.zip
+            build/sdk-application/releases/SHA256SUMS.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  compatibility:
+    name: Copied SDK-built ${{ matrix.backend }} on ${{ matrix.image }}
+    needs: application
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.image }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [fltk, rev]
+        image: [debian:bookworm-slim, ubuntu:24.04]
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      LP_NUM_THREADS: '2'
+    steps:
+      - name: Install runtime inspection and display tools only
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git cmake binutils xvfb xauth fonts-dejavu-core fontconfig-config libgl1 libopengl0 libgl1-mesa-dri libxtst6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: DataPump-SDK-${{ matrix.backend }}-Linux-x86_64-glibc-2.36
+          path: downloaded
+      - name: Verify the identical archives on this distribution
+        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/downloaded" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=300 -DMAX_GLIBC=2.36 -P tools/verify-native-archives.cmake
+
+  publish:
+    name: Attach SDK, sources and default application to existing release
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+    needs: [sdk, application, compatibility]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require an existing release at this exact source revision
+        run: |
+          git check-ref-format "refs/tags/$RELEASE_TAG"
+          test "$(git rev-parse --verify "refs/tags/${RELEASE_TAG}^{commit}")" = "$GITHUB_SHA"
+          gh release view --repo "$GITHUB_REPOSITORY" -- "$RELEASE_TAG"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: DataPump-source-sdk
+          path: publish/sdk
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: DataPump-source-sdk-sources
+          path: publish/sources
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: DataPump-SDK-fltk-Linux-x86_64-glibc-2.36
+          path: publish/application
+      - name: Assemble and verify the complete release inventory
+        run: |
+          cd publish/sdk
+          sha256sum --check SHA256SUMS
+          cd ../sources
+          sha256sum --check SHA256SUMS
+          cd "$GITHUB_WORKSPACE"
+          mkdir publish/release
+          cp publish/sdk/*.tar.gz publish/sources/*.tar.gz publish/sources/SDK-SHA256SUMS.txt publish/application/* publish/release/
+          cd publish/release
+          sha256sum --check SDK-SHA256SUMS.txt
+          sha256sum --check SHA256SUMS.txt
+      - name: Publish without replacing existing assets
+        run: |
+          gh release view --repo "$GITHUB_REPOSITORY" --json assets -- "$RELEASE_TAG" > publish/existing-release.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          assets = json.loads(Path('publish/existing-release.json').read_text())['assets']
+          existing = {asset['name'] for asset in assets}
+          requested = {path.name for path in Path('publish/release').iterdir()}
+          collisions = sorted(existing & requested)
+          if collisions:
+              raise SystemExit('Release assets already exist; none uploaded: ' + ', '.join(collisions))
+          PY
+          gh release upload --repo "$GITHUB_REPOSITORY" -- "$RELEASE_TAG" publish/release/*

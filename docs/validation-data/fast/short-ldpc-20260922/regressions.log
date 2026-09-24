@@ -1,0 +1,127 @@
+Internal ctest changing into directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+Test project /home/user/___quick/p/_cur/dataPump/pumpModem/build
+      Start  39: gui_fast
+      Start  27: fast_acoustic_short_convolutional
+ 1/46 Test  #39: gui_fast ......................................***Failed    0.24 sec
+Weak short profile rejected the supported stronger LDPC selection
+
+      Start 122: fast_snr
+ 2/46 Test  #27: fast_acoustic_short_convolutional .............   Passed   85.90 sec
+      Start  24: fast_low_rate
+ 3/46 Test  #24: fast_low_rate .................................   Passed   21.02 sec
+      Start  40: gui_fast_live
+ 4/46 Test  #40: gui_fast_live .................................   Passed   99.65 sec
+      Start  14: fast_transfer
+ 5/46 Test  #14: fast_transfer .................................   Passed   35.43 sec
+      Start  17: fast_qam
+ 6/46 Test  #17: fast_qam ......................................   Passed   18.81 sec
+      Start  29: fast_acoustic_short_snr_-6_keyed_attachment
+ 7/46 Test #122: fast_snr ......................................   Passed  269.12 sec
+      Start   8: fast_codec
+ 8/46 Test  #29: fast_acoustic_short_snr_-6_keyed_attachment ...   Passed   15.13 sec
+      Start  22: fast_radio
+ 9/46 Test  #22: fast_radio ....................................   Passed   11.55 sec
+      Start  31: fast_acoustic_short_snr_-3_keyed_attachment
+10/46 Test  #31: fast_acoustic_short_snr_-3_keyed_attachment ...   Passed   14.60 sec
+      Start  25: fast_pilot_presence
+11/46 Test   #8: fast_codec ....................................   Passed   34.87 sec
+      Start  13: fast_session
+12/46 Test  #25: fast_pilot_presence ...........................   Passed   16.83 sec
+      Start  11: fast_modem
+13/46 Test  #13: fast_session ..................................   Passed   35.58 sec
+      Start 103: gui_controller
+14/46 Test  #11: fast_modem ....................................   Passed   21.48 sec
+      Start  18: fast_acoustic
+15/46 Test #103: gui_controller ................................***Failed    4.74 sec
+keyfile write failed
+
+      Start 121: fast_cli
+16/46 Test #121: fast_cli ......................................***Failed    0.18 sec
+E
+======================================================================
+ERROR: setUpClass (__main__.FastCLI)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_fast_cli.py", line 34, in setUpClass
+    raise AssertionError(generated.stderr.decode(errors="replace"))
+AssertionError: pump: keyfile write failed
+
+
+----------------------------------------------------------------------
+Ran 0 tests in 0.102s
+
+FAILED (errors=1)
+
+      Start  21: fast_ofdm_presence
+17/46 Test  #18: fast_acoustic .................................   Passed    8.77 sec
+      Start   9: fast_compression
+18/46 Test  #21: fast_ofdm_presence ............................   Passed    7.13 sec
+      Start  30: fast_acoustic_short_snr_-3_public_text
+19/46 Test  #30: fast_acoustic_short_snr_-3_public_text ........   Passed    3.88 sec
+      Start  28: fast_acoustic_short_snr_-6_public_text
+20/46 Test  #28: fast_acoustic_short_snr_-6_public_text ........   Passed    4.41 sec
+      Start  19: fast_acoustic_short
+21/46 Test  #19: fast_acoustic_short ...........................   Passed    3.72 sec
+      Start  12: fast_files
+22/46 Test   #9: fast_compression ..............................   Passed   15.71 sec
+      Start  33: fast_acoustic_short_snr_0_keyed_attachment
+23/46 Test  #33: fast_acoustic_short_snr_0_keyed_attachment ....   Passed    1.27 sec
+      Start  16: fast_ldpc
+24/46 Test  #16: fast_ldpc .....................................   Passed    2.25 sec
+      Start 120: fast_cable_benchmark
+25/46 Test  #12: fast_files ....................................   Passed    4.87 sec
+      Start  36: fast_acoustic_short_snr_13_public_text
+26/46 Test  #36: fast_acoustic_short_snr_13_public_text ........   Passed    0.72 sec
+      Start  37: fast_acoustic_short_snr_13_keyed_attachment
+27/46 Test #120: fast_cable_benchmark ..........................   Passed    1.11 sec
+      Start  32: fast_acoustic_short_snr_0_public_text
+28/46 Test  #37: fast_acoustic_short_snr_13_keyed_attachment ...   Passed    0.76 sec
+      Start  35: fast_acoustic_short_snr_6_keyed_attachment
+29/46 Test  #32: fast_acoustic_short_snr_0_public_text .........   Passed    0.72 sec
+      Start  34: fast_acoustic_short_snr_6_public_text
+30/46 Test  #35: fast_acoustic_short_snr_6_keyed_attachment ....   Passed    0.71 sec
+      Start  47: stream_receive
+31/46 Test  #34: fast_acoustic_short_snr_6_public_text .........   Passed    0.70 sec
+      Start  15: fast_telemetry
+32/46 Test  #15: fast_telemetry ................................   Passed    0.93 sec
+      Start  26: fast_output_power
+33/46 Test  #26: fast_output_power .............................   Passed    0.27 sec
+      Start 111: gui_adapter_boundary
+34/46 Test #111: gui_adapter_boundary ..........................   Passed    0.57 sec
+      Start 109: gui_application
+35/46 Test  #47: stream_receive ................................   Passed    2.41 sec
+      Start  10: fast_attachment
+36/46 Test  #10: fast_attachment ...............................   Passed    0.12 sec
+      Start  23: fast_presets
+37/46 Test  #23: fast_presets ..................................   Passed    0.72 sec
+      Start  69: transfer
+38/46 Test  #69: transfer ......................................   Passed    0.27 sec
+      Start  38: fast_boundary
+39/46 Test  #38: fast_boundary .................................   Passed    0.03 sec
+      Start  96: gui_inspection
+40/46 Test #109: gui_application ...............................   Passed    1.87 sec
+      Start  44: stream_codec
+41/46 Test  #96: gui_inspection ................................   Passed    0.13 sec
+      Start 102: gui_binary_editor
+42/46 Test #102: gui_binary_editor .............................   Passed    0.05 sec
+      Start  49: compression_short
+43/46 Test  #44: stream_codec ..................................   Passed    0.08 sec
+      Start  46: attachment
+44/46 Test  #46: attachment ....................................   Passed    0.02 sec
+      Start  88: gui_link_boundary
+45/46 Test  #88: gui_link_boundary .............................   Passed    0.00 sec
+46/46 Test  #49: compression_short .............................   Passed    0.04 sec
+
+93% tests passed, 3 tests failed out of 46
+
+Label Time Summary:
+fast_regression    = 269.12 sec*proc (1 test)
+gui                = 107.24 sec*proc (8 tests)
+
+Total Test time (real) = 374.70 sec
+
+The following tests FAILED:
+	 39 - gui_fast (Failed)                                 gui
+	103 - gui_controller (Failed)                           gui
+	121 - fast_cli (Failed)
+Errors while running CTest

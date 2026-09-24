@@ -1,0 +1,366 @@
+#include "datapump/fast/ldpc.hpp"
+#include "../third_party/ldpc/tables.hpp"
+#include "../third_party/ldpc/short_tables.hpp"
+#include "../third_party/ldpc/wifi_tables.hpp"
+#include <openssl/evp.h>
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cmath>
+#include <future>
+#include <iomanip>
+#include <iostream>
+#include <limits>
+#include <random>
+#include <sstream>
+
+using namespace datapump;
+using namespace datapump::fast;
+namespace {
+void check(bool ok, const char* why) { if (!ok) throw std::runtime_error(why); }
+template<class F> void rejects(F&& f) {
+    try { f(); } catch (const Error&) { return; }
+    throw std::runtime_error("LDPC accepted invalid geometry/likelihood");
+}
+Bytes source(CodeRate rate,std::size_t frame_bits=ldpc::coded_bits) {
+    Bytes result(ldpc::data_bits(rate,frame_bits) / 8);
+    for (std::size_t i = 0; i < result.size(); ++i) result[i] = (i * 73 + i / 7 + 0x5a) & 255U;
+    return result;
+}
+std::string digest(const Bytes& bytes) {
+    std::array<unsigned char, 32> out{}; unsigned size = 0;
+    check(EVP_Digest(bytes.data(), bytes.size(), out.data(), &size, EVP_sha256(), nullptr) == 1 && size == 32,
+          "SHA-256 fixture digest");
+    std::ostringstream text;
+    for (auto byte : out) text << std::hex << std::setw(2) << std::setfill('0') << unsigned(byte);
+    return text.str();
+}
+template<class Table> bool independent_syndrome(const Bytes& bits) {
+    // Direct DVB accumulator equations, not the production graph construction
+    // or traversal. Also checks the last parity node and accumulator boundary.
+    constexpr int r = Table::N - Table::K, q = r / Table::M;
+    std::array<unsigned char, r> sums{};
+    int bit = 0, position = 0;
+    for (int d = 0; Table::DEG[d]; ++d) {
+        for (int group = 0; group < Table::LEN[d]; ++group) {
+            for (int within = 0; within < Table::M; ++within, ++bit)
+                for (int e = 0; e < Table::DEG[d]; ++e)
+                    sums[(Table::POS[position + e] + within * q) % r] ^= bits[bit];
+            position += Table::DEG[d];
+        }
+    }
+    for (int j = 0; j < r; ++j)
+        if ((sums[j] ^ bits[Table::K + j] ^ (j ? bits[Table::K + j - 1] : 0)) != 0) return false;
+    return true;
+}
+constexpr std::array rates{CodeRate::half, CodeRate::three_quarters, CodeRate::seven_ninths,
+                           CodeRate::eight_ninths, CodeRate::nine_tenths, CodeRate::two_thirds};
+void fixtures() {
+    // Frozen SHA-256 of 64800 unpacked 0/1 code bits from the independently
+    // compiled xdsopl encoder.hh at pinned commit 32357d8..., with source()'s
+    // byte pattern, positive upstream signs denoting zero and MSB-first input.
+    constexpr std::array expected{
+        "ae4a2202bd42e246e012b7f095abe6fcbd7c42def4e1f2414c29907e32079aea",
+        "5d505f18fa8929976fbddad7ea0f479a4dfa5a731b551ed123a54cd5dc0fe7f7",
+        "91bfdb7f3945900cbc08f59643a26930235bc36331052e66355e2d8b9899dbaf",
+        "ee760163d51f6d37ef6377e785951f419eec865f089a37a5e07b7588b1f3a94d",
+        "89e91cee15cbb4e8e01a8ac1de3cbad2b564e849416417dc62ee2b593220b0bb",
+        "4260e4c155f2dcc15812133d4a08ca5331ff7dea55fb93f0255402f8617642eb"};
+    constexpr std::array<std::size_t, 6> k{32400, 48600, 50400, 57600, 58320, 43200};
+    for (std::size_t r = 0; r < rates.size(); ++r) {
+        const auto rate = rates[r]; const auto bytes = source(rate);
+        check(ldpc::data_bits(rate) == k[r], "DVB K geometry");
+        const auto bits = ldpc::encode(bytes, rate);
+        check(digest(bits) == expected[r], "independent upstream codeword fixture");
+        check(ldpc::valid_codeword(bits, rate), "clean production syndrome");
+        const bool independent = r == 0 ? independent_syndrome<DVB_S2_TABLE_B4>(bits) :
+            r == 1 ? independent_syndrome<DVB_S2_TABLE_B7>(bits) :
+            r == 2 ? independent_syndrome<DVB_S2X_TABLE_B10>(bits) :
+            r == 3 ? independent_syndrome<DVB_S2_TABLE_B10>(bits) :
+            r == 4 ? independent_syndrome<DVB_S2_TABLE_B11>(bits) :
+                     independent_syndrome<DVB_S2_TABLE_B6>(bits);
+        check(independent, "independent parity equations");
+        std::vector<float> soft(bits.size());
+        for (std::size_t b = 0; b < bits.size(); ++b) soft[b] = bits[b] ? 14.F : -14.F;
+        auto decoded = ldpc::decode(soft, rate);
+        check(decoded.converged && decoded.iterations == 0 && decoded.bytes == bytes, "clean systematic decode");
+        for (auto bit : {std::size_t{0}, k[r] - 1, k[r], ldpc::coded_bits - 1}) {
+            auto wrong = bits; wrong[bit] ^= 1;
+            check(!ldpc::valid_codeword(wrong, rate), "syndrome detects flipped boundary bit");
+            soft[bit] = -soft[bit]; decoded = ldpc::decode(soft, rate); soft[bit] = -soft[bit];
+            check(decoded.converged && decoded.bytes == bytes, "single boundary error correction");
+        }
+        const Bytes zero(bytes.size());
+        const auto zero_word = ldpc::encode(zero, rate);
+        check(std::all_of(zero_word.begin(), zero_word.end(), [](auto b) { return b == 0; }),
+              "linear all-zero word");
+        std::fill(soft.begin(), soft.end(), -50.F);
+        decoded = ldpc::decode(soft, rate);
+        check(decoded.converged && decoded.bytes == zero, "observed zero word is distinct from zero evidence");
+    }
+}
+void interleaver() {
+    const auto bits = ldpc::encode(source(CodeRate::seven_ninths), CodeRate::seven_ninths);
+    const auto shuffled = ldpc::interleave(bits);
+    std::vector<float> soft(shuffled.begin(), shuffled.end());
+    const auto recovered = ldpc::deinterleave(soft);
+    std::vector<bool> seen(ldpc::coded_bits);
+    Bytes serialized; serialized.reserve(2 * ldpc::coded_bits);
+    for (std::size_t b = 0; b < bits.size(); ++b) {
+        const auto index = ldpc::interleave_index(b);
+        check(!seen[index], "permutation bijection"); seen[index] = true;
+        check(recovered[b] == bits[b], "permutation inversion");
+        serialized.push_back(static_cast<std::uint8_t>(index >> 8));
+        serialized.push_back(static_cast<std::uint8_t>(index));
+    }
+    // Wire-stability fixture generated with an independent Python uint32 loop.
+    check(ldpc::interleave_index(0) == 61579 && ldpc::interleave_index(64799) == 17783,
+          "frozen bit permutation");
+    check(digest(serialized) == "66d86cce87d998b41d6b992b5581cf1dc8987ddb4a59b561b46e4fce1e716255",
+          "independent complete permutation fixture");
+}
+void short_frames() {
+    constexpr auto n=ldpc::short_coded_bits;
+    constexpr std::array short_rates{CodeRate::half,CodeRate::two_thirds,CodeRate::three_quarters};
+    constexpr std::array<std::size_t,3> sizes{7200,10800,11880};
+    // Independently compiled pinned upstream encoder, full 16200 unpacked
+    // code bits. Reproduction: acoustic-short-20260921/ldpc-short-fixture.cpp.
+    constexpr std::array expected{
+        "9a2d76ba1fac4eba7b231c4cc05ece1feb36b0d9ca30f9c3441da20dc3831571",
+        "d63534b523ba3b1d36929ca092424920b11a1b94c34b2be9b6d0f1685121a8b4",
+        "29d9669c1679fe3bf3923f0551273a22d95b23d10f50379f99af5528ea0677f5"};
+    std::mt19937 random(0x16200);std::normal_distribution<double> gaussian;
+    for(std::size_t r=0;r<short_rates.size();++r) {
+        const auto rate=short_rates[r];const auto bytes=source(rate,n);
+        check(ldpc::data_bits(rate,n)==sizes[r],"short DVB information length is not its nominal rate times N");
+        const auto bits=ldpc::encode(bytes,rate,n);
+        check(bits.size()==n&&digest(bits)==expected[r],"independent upstream short codeword fixture");
+        check(ldpc::valid_codeword(bits,rate,n),"short clean production syndrome");
+        const bool independent=r==0?independent_syndrome<DVB_S2_TABLE_C4>(bits):
+            r==1?independent_syndrome<DVB_S2_TABLE_C6>(bits):independent_syndrome<DVB_S2_TABLE_C7>(bits);
+        check(independent,"independent short parity equations");
+        std::vector<float> soft(n);
+        for(std::size_t bit=0;bit<n;++bit)soft[bit]=bits[bit]?14.F:-14.F;
+        auto decoded=ldpc::decode(soft,rate,ldpc::default_iterations,n);
+        check(decoded.converged&&decoded.iterations==0&&decoded.bytes==bytes,"clean short systematic decode");
+        for(const auto bit:{std::size_t{0},sizes[r]-1,sizes[r],n-1}) {
+            auto wrong=bits;wrong[bit]^=1;
+            check(!ldpc::valid_codeword(wrong,rate,n),"short syndrome detects boundary errors");
+            soft[bit]=-soft[bit];decoded=ldpc::decode(soft,rate,ldpc::default_iterations,n);soft[bit]=-soft[bit];
+            check(decoded.converged&&decoded.bytes==bytes,"short boundary error correction");
+        }
+        const auto mixed=ldpc::interleave(bits,n);unsigned raw_errors=0;
+        constexpr double sigma=.4;
+        for(std::size_t bit=0;bit<n;++bit) {
+            soft[bit]=static_cast<float>(2*((mixed[bit]?1:-1)+sigma*gaussian(random))/(sigma*sigma));
+            raw_errors+=(soft[bit]>0)!=bool(mixed[bit]);
+        }
+        decoded=ldpc::decode(ldpc::deinterleave(soft,n),rate,ldpc::default_iterations,n);
+        check(raw_errors>0&&decoded.converged&&decoded.bytes==bytes,"seeded noisy short mixed frame");
+        std::cout<<"Short LDPC K="<<sizes[r]<<" raw_errors="<<raw_errors<<" iterations="<<decoded.iterations<<'\n';
+        const Bytes zero(bytes.size());const auto zero_word=ldpc::encode(zero,rate,n);
+        check(std::all_of(zero_word.begin(),zero_word.end(),[](auto b){return b==0;}),"short linear zero codeword");
+        std::fill(soft.begin(),soft.end(),-50.F);decoded=ldpc::decode(soft,rate,ldpc::default_iterations,n);
+        check(decoded.converged&&decoded.bytes==zero,"short observed zero codeword");
+        std::fill(soft.begin(),soft.end(),0.F);
+        check(!ldpc::decode(soft,rate,ldpc::default_iterations,n).converged,"short absent evidence cannot converge");
+    }
+    const auto bits=ldpc::encode(source(CodeRate::two_thirds,n),CodeRate::two_thirds,n);
+    const auto mixed=ldpc::interleave(bits,n);
+    const auto restored=ldpc::deinterleave(std::vector<float>(mixed.begin(),mixed.end()),n);
+    std::vector<bool> seen(n);Bytes serialized;serialized.reserve(n*2);
+    for(std::size_t bit=0;bit<n;++bit) {
+        const auto index=ldpc::interleave_index(bit,n);
+        check(index<n&&!seen[index]&&restored[bit]==bits[bit],"short permutation bijection and inverse");seen[index]=true;
+        serialized.push_back(static_cast<std::uint8_t>(index>>8));serialized.push_back(static_cast<std::uint8_t>(index));
+    }
+    // Independent Python uint32 xorshift/Fisher-Yates; each index is big endian.
+    check(ldpc::interleave_index(0,n)==12410&&ldpc::interleave_index(n-1,n)==1583&&
+        digest(serialized)=="0c13ce492c31036c52f4477af11bfa28f63a7f67533bee135410270dded85111",
+        "independent complete short permutation fixture");
+    for(const auto rate:{CodeRate::seven_eighths,CodeRate::seven_ninths,CodeRate::eight_ninths,CodeRate::nine_tenths})
+        rejects([&]{ldpc::data_bits(rate,n);});
+    for(const auto invalid:{std::size_t{0},n-1,n+1,ldpc::coded_bits+1}) {
+        rejects([&]{ldpc::data_bits(CodeRate::half,invalid);});
+        rejects([&]{ldpc::interleave_index(0,invalid);});
+    }
+    rejects([&]{ldpc::encode(source(CodeRate::half),CodeRate::half,n);});
+    rejects([&]{ldpc::encode(source(CodeRate::half,n),CodeRate::half);});
+    rejects([&]{ldpc::valid_codeword(bits,CodeRate::two_thirds);});
+    rejects([&]{ldpc::decode(std::vector<float>(ldpc::coded_bits),CodeRate::half,50,n);});
+    rejects([&]{ldpc::interleave_index(n,n);});
+    rejects([&]{ldpc::interleave(Bytes(ldpc::coded_bits),n);});
+    rejects([&]{ldpc::deinterleave(std::vector<float>(ldpc::coded_bits),n);});
+    std::vector<float> soft(n);
+    rejects([&]{ldpc::decode(soft,CodeRate::half,0,n);});
+    rejects([&]{ldpc::decode(soft,CodeRate::half,101,n);});
+    soft[0]=std::numeric_limits<float>::quiet_NaN();rejects([&]{ldpc::decode(soft,CodeRate::half,50,n);});
+    soft[0]=std::numeric_limits<float>::infinity();rejects([&]{ldpc::decode(soft,CodeRate::half,50,n);});
+    auto nonbits=bits;nonbits.back()=2;rejects([&]{ldpc::valid_codeword(nonbits,CodeRate::two_thirds,n);});
+    for(auto& value:soft)value=static_cast<float>(gaussian(random));
+    const auto unresolved=ldpc::decode(soft,CodeRate::half,2,n);
+    check(!unresolved.converged&&unresolved.iterations==2&&unresolved.bytes.size()==900,"bounded short noise-only failure");
+}
+void bpsk_noise(unsigned frames) {
+    std::mt19937 random(0x1d9c); std::normal_distribution<double> gaussian;
+    for (auto rate : rates) {
+        const auto began = std::chrono::steady_clock::now();
+        unsigned total_iterations = 0, raw_errors = 0;
+        for (unsigned frame = 0; frame < frames; ++frame) {
+            auto bytes = source(rate); for (auto& b : bytes) b = static_cast<std::uint8_t>(random());
+            const auto bits = ldpc::encode(bytes, rate);
+            const double sigma = .32; std::vector<float> soft(bits.size());
+            for (std::size_t i = 0; i < bits.size(); ++i) {
+                soft[i] = static_cast<float>(2 * ((bits[i] ? 1 : -1) + sigma * gaussian(random)) / (sigma * sigma));
+                raw_errors += (soft[i] > 0) != bool(bits[i]);
+            }
+            const auto decoded = ldpc::decode(soft, rate);
+            check(decoded.converged && decoded.bytes == bytes, "high-margin seeded noisy frame");
+            total_iterations += decoded.iterations;
+        }
+        const auto seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count();
+        std::cout << "LDPC K=" << ldpc::data_bits(rate) << " frames=" << frames
+                  << " raw_errors=" << raw_errors << " wrong_frames=0 mean_iterations="
+                  << double(total_iterations) / frames << " full_pipeline_ms/frame=" << 1000 * seconds / frames << '\n';
+    }
+}
+void qam_noise(unsigned order, CodeRate rate, double db) {
+    // Independent reflected-Gray square-QAM and separable exact log-sum LLRs.
+    // This verifies LDPC plus mixing against nonuniform QAM bit reliability.
+    const auto bytes = source(rate), code = ldpc::encode(bytes, rate), bits = ldpc::interleave(code);
+    const auto side = static_cast<unsigned>(std::sqrt(order));
+    const auto axis_bits = static_cast<unsigned>(std::log2(side)); const auto bits_per_symbol = 2 * axis_bits;
+    const double scale = std::sqrt(2. * (order - 1) / 3), n0 = std::pow(10., -db / 10), sigma = std::sqrt(n0 / 2);
+    std::mt19937 random(94731); std::normal_distribution<double> gaussian;
+    std::vector<float> soft(bits.size()); std::vector<double> likelihood(side);
+    unsigned raw_errors = 0;
+    for (std::size_t symbol = 0; symbol < bits.size(); symbol += bits_per_symbol) {
+        for (unsigned axis = 0; axis < 2; ++axis) {
+            unsigned gray = 0;
+            for (unsigned b = 0; b < axis_bits; ++b) {
+                const auto position = symbol + axis * axis_bits + b;
+                if (position < bits.size()) gray |= unsigned(bits[position]) << b;
+            }
+            unsigned binary = gray; for (unsigned shift = gray >> 1; shift; shift >>= 1) binary ^= shift;
+            const double received = (2. * binary - side + 1) / scale + sigma * gaussian(random);
+            double max_metric = -std::numeric_limits<double>::infinity();
+            for (unsigned v = 0; v < side; ++v) {
+                const auto delta = received - (2. * v - side + 1) / scale;
+                likelihood[v] = -delta * delta / n0; max_metric = std::max(max_metric, likelihood[v]);
+            }
+            for (auto& p : likelihood) p = std::exp(p - max_metric);
+            for (unsigned b = 0; b < axis_bits; ++b) {
+                const auto position = symbol + axis * axis_bits + b; if (position >= bits.size()) continue;
+                double p0 = 0, p1 = 0;
+                for (unsigned v = 0; v < side; ++v)
+                    ((v ^ (v >> 1)) & (1U << b) ? p1 : p0) += likelihood[v];
+                soft[position] = static_cast<float>(std::clamp(std::log(std::max(p1, 1e-100) / std::max(p0, 1e-100)), -50., 50.));
+                raw_errors += (soft[position] > 0) != bool(bits[position]);
+            }
+        }
+    }
+    const auto started = std::chrono::steady_clock::now();
+    const auto decoded = ldpc::decode(ldpc::deinterleave(soft), rate);
+    const auto seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+    std::cout << "QAM=" << order << " K=" << ldpc::data_bits(rate) << " EsN0=" << db
+              << " raw_errors=" << raw_errors << " iterations=" << decoded.iterations
+              << " decoder_ms=" << seconds * 1000 << '\n';
+    check(decoded.converged && decoded.bytes == bytes, "Gray QAM noisy frame");
+}
+template<std::size_t Rows> void small_matrix(const std::int8_t (&matrix)[Rows][24],
+        std::size_t n,CodeRate rate,const char* expected) {
+    const auto bytes=source(rate,n),bits=ldpc::encode(bytes,rate,n);
+    const auto z=n/24,k=(24-Rows)*z;
+    check(ldpc::data_bits(rate,n)==k&&bytes.size()==k/8,"QC information geometry");
+    check(digest(bits)==expected,"independent QC back-substitution wire fixture");
+    // Check the circulants directly, independent of the production sparse graph
+    // and Gaussian-elimination encoder. Frozen hashes use a second encoder.
+    for(std::size_t row=0;row<Rows;++row)for(std::size_t i=0;i<z;++i) {
+        unsigned sum=0;
+        for(std::size_t col=0;col<24;++col)if(matrix[row][col]>=0)
+            sum^=bits[col*z+(i+matrix[row][col])%z];
+        check(!sum,"independent QC parity equation");
+    }
+    for(auto i=bytes.size()*8;i<k;++i)check(!bits[i],"fixed byte-shortening zero positions");
+    const auto wire=ldpc::interleave(bits,n);
+    std::vector<float> soft(n);std::vector<bool> seen(n);
+    for(std::size_t i=0;i<n;++i) {
+        const auto index=ldpc::interleave_index(i,n);
+        check(index<n&&!seen[index],"small frame permutation is bijective");seen[index]=true;
+        soft[i]=wire[i]?12.F:-12.F;
+    }
+    soft.front()=0;soft.back()=-soft.back();
+    const auto decoded=ldpc::decode(ldpc::deinterleave(soft,n),rate,50,n);
+    check(decoded.converged&&decoded.bytes==bytes,"small frame flip and timed erasure repair");
+    check(!ldpc::decode(std::vector<float>(n),rate,50,n).converged,"known zeros cannot turn absent evidence into success");
+    auto corrupted=bits;corrupted[k-1]^=1;
+    check(!ldpc::valid_codeword(corrupted,rate,n),"small parity boundary corruption rejected");
+    rejects([&]{ldpc::encode(Bytes(bytes.size()+1),rate,n);});
+    rejects([&]{ldpc::decode(std::vector<float>(n-1),rate,50,n);});
+    rejects([&]{ldpc::data_bits(CodeRate::nine_tenths,n);});
+    soft[0]=std::numeric_limits<float>::quiet_NaN();
+    rejects([&]{ldpc::decode(soft,rate,50,n);});
+}
+void small_frames() {
+    using namespace datapump_wifi_ldpc;
+    small_matrix(H_648_1_2,648,CodeRate::half,"0f101c641a0b329617783ed70fab371f846b9aa28b0b920957907813eeb9c1cd");
+    small_matrix(H_648_2_3,648,CodeRate::two_thirds,"b7e2245f2135e78fc5bf7e576c4031a2eb2b0d3b49f442c287a297b835d7b457");
+    small_matrix(H_648_3_4,648,CodeRate::three_quarters,"c5b6739bad19f5139294196aaae013c238bca337373268fa31592a1fc2acc2af");
+    small_matrix(H_1296_1_2,1296,CodeRate::half,"7138c4eec0c43491a7f0a9df76647d65c4150131b7f561aa9315cff082c75910");
+    small_matrix(H_1296_2_3,1296,CodeRate::two_thirds,"e2e20c6df42a34e5e95aec00a12a79b98bcdb7c1139e5dd822e46266a6f1a185");
+    small_matrix(H_1296_3_4,1296,CodeRate::three_quarters,"259b459a3e5b6b9855d9e77cfccbdd85cf03331c5caf90b89c3d420eb1e12cce");
+    small_matrix(H_1944_1_2,1944,CodeRate::half,"162364fc1e935a4b987d563e90c8b6701837f252fe33f14176ab8de387227eef");
+    small_matrix(H_1944_2_3,1944,CodeRate::two_thirds,"c41d24b973f56cf87d0da238d063ea49bf6782ccdf0bd05de5fb54a96f7356e0");
+    small_matrix(H_1944_3_4,1944,CodeRate::three_quarters,"c26a607a1f46f1e52678de201d7b76d8394ac45c1cd46dbb1290b9458df57c95");
+}
+void invalid_and_bounded() {
+    const auto rate = CodeRate::seven_ninths;
+    rejects([&] { ldpc::data_bits(CodeRate::seven_eighths); });
+    rejects([&] { ldpc::encode(Bytes(1), rate); });
+    rejects([&] { ldpc::decode(std::vector<float>(1), rate); });
+    std::vector<float> soft(ldpc::coded_bits);
+    check(!ldpc::decode(soft, rate).converged, "zero evidence must not converge");
+    rejects([&] { ldpc::decode(soft, rate, 0); });
+    rejects([&] { ldpc::decode(soft, rate, 101); });
+    soft[0] = std::numeric_limits<float>::quiet_NaN(); rejects([&] { ldpc::decode(soft, rate); });
+    soft[0] = std::numeric_limits<float>::infinity(); rejects([&] { ldpc::decode(soft, rate); });
+    std::mt19937 random(4271); std::normal_distribution<float> noise;
+    for (auto& value : soft) value = noise(random);
+    const auto result = ldpc::decode(soft, rate, 2);
+    check(!result.converged && result.iterations == 2 && result.bytes.size() == ldpc::data_bits(rate) / 8,
+          "bounded noise failure retains hard posterior bytes");
+    rejects([&] { ldpc::interleave_index(ldpc::coded_bits); });
+    rejects([&] { ldpc::interleave(Bytes(7)); });
+    rejects([&] { ldpc::deinterleave(std::vector<float>(7)); });
+    auto nonbits = Bytes(ldpc::coded_bits); nonbits.back() = 2;
+    rejects([&] { ldpc::valid_codeword(nonbits, rate); });
+}
+void parallel_calls() {
+    std::array<std::future<void>, rates.size()> jobs;
+    for (std::size_t i = 0; i < jobs.size(); ++i) jobs[i] = std::async(std::launch::async, [i] {
+        const auto data = source(rates[i]), bits = ldpc::encode(data, rates[i]);
+        std::vector<float> soft(bits.size());
+        for (std::size_t b = 0; b < bits.size(); ++b) soft[b] = bits[b] ? 10.F : -10.F;
+        soft[319 + i] = -soft[319 + i];
+        const auto result = ldpc::decode(soft, rates[i]);
+        check(result.converged && result.bytes == data, "concurrent decoder scratch isolation");
+    });
+    for (auto& job : jobs) job.get();
+}
+}
+int main(int argc, char** argv) {
+    try {
+        const unsigned frames = argc == 2 ? static_cast<unsigned>(std::stoul(argv[1])) : 12;
+        check(frames > 0 && frames <= 10000, "bounded benchmark frame count");
+        fixtures(); interleaver(); short_frames(); small_frames(); invalid_and_bounded(); parallel_calls(); bpsk_noise(frames);
+        qam_noise(4, CodeRate::half, 2.);
+        qam_noise(16, CodeRate::half, 7.);
+        qam_noise(256, CodeRate::two_thirds, 20.);
+        qam_noise(4096, CodeRate::seven_ninths, 31.8);
+        qam_noise(16384, CodeRate::seven_ninths, 37.8);
+        qam_noise(16384, CodeRate::eight_ninths, 40.);
+        qam_noise(16384, CodeRate::nine_tenths, 42.);
+        qam_noise(65536, CodeRate::nine_tenths, 48.);
+        std::cout << "Fast LDPC tests passed\n";
+    } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
+}

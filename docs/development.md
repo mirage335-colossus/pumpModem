@@ -13,6 +13,26 @@ This is a maintenance contract for the existing implementation. The
 [migration plan](packetless-stream-plan.md) and older validation entries describe
 historical designs; they do not override these current requirements.
 
+Preserve the restricted received-byte presentation and the selected index and
+validation-boundary protections documented in
+[receive processing hardening](receive-processing-hardening.md). Keep ordinary
+input checks and trusted allocation extents alongside those mitigations. Changes
+to protected paths need functional and performance validation; neither new wire
+overhead nor process/VM isolation is part of this design.
+
+For independent Fast Modem throughput work, consult the
+[coding and capacity study](fast-coding-study.md), including its development
+priorities and evidence limits, the [physical cable study](fast-cable-live-study.md),
+and the [current Fast format](fast-mode.md).
+The [implemented capacity format](fast-capacity-codec.md) and
+[capacity cable experiments](fast-capacity-live-study.md) describe the independent
+Fast v2 development; its compact source flags and sparse framing do not apply to
+the regular transport paths below.
+Its proposed coding and marker changes do not alter this compatibility contract.
+The independent [acoustic OFDM format](fast-acoustic-ofdm.md) and
+[speaker/microphone live study](fast-acoustic-live-study.md) cover frequency
+equalization, training, physical completion and measured acoustic limits.
+
 ## Preserve all three transmit paths
 
 | Input | Required existing behavior |
@@ -29,16 +49,54 @@ adds no bits. Existing settling/filter/suppression waveforms are separate from
 payload bits. The saved FEC choice still applies when a draft becomes longer.
 
 Keep estimates, actual transmission, receive interpretation, GUI inspection and
-copy/paste consistent. At physical completion, eligible raw bits may also spell
-dictionary text (`001` can be shown as `e`); preserve the exact bits alongside
-that interpretation. This is not authentication. Do not add a mode flag to
-resolve the existing ambiguity or pad incomplete dictionary tokens into text.
+copy/paste consistent with the received-text boundary below. At physical
+completion, eligible raw bits may also spell dictionary text (`001` can be shown
+as `e`); preserve the exact bits alongside that interpretation. This is not
+authentication. Do not add a mode flag to resolve the existing ambiguity or pad
+incomplete dictionary tokens into text.
+
+## Restrict received text before presentation
+
+Robust, Fast and Legacy Modem must restrict received content before native GUI
+text, clipboard requests, CLI text output or transmit-draft processing. The
+default allowed bytes are exactly English ASCII `a-z`, `A-Z`, `0-9`, comma (`,`),
+period (`.`), at sign (`@`), space, hyphen (`-`), underscore (`_`), slash (`/`),
+equals (`=`), and line-feed newline (`LF`, `0x0a`). Replace every other source
+byte with one ASCII underscore. Text presentation must not decode received UTF-8
+or expose rejected bytes through lossless text escapes, Base64 output or an
+exact-byte stdout/pipe bypass. Received filenames follow
+the same default policy.
+
+The GUI may permit printable English ASCII `0x20` through `0x7e` only while both
+**Developer mode** and **Shellcode mode** are checked. Shellcode mode starts
+false, stays hidden unless Developer mode is checked, and is reset when
+Developer mode is turned off. LF remains allowed in both modes; all other
+controls and non-ASCII bytes remain placeholders. Withdrawing the exception
+also restricts received-derived drafts, retained previous-message text and
+their QR previews, and revokes pending
+copies authorized by the old setting. Stale edits must not restore forbidden
+received characters after that change.
+
+Received **Paste as message** installs this permitted presentation, not the
+original rejected bytes. Raw-bit paste preserves exact bits, but its dictionary
+interpretation and expected-text preview obey the same text policy. Keep original
+completed payloads in bounded receive memory for direct saving to an explicitly
+chosen file. Preserve exact diagnostic `0`/`1` paths, including single bits,
+leading zeros and partial bytes. Locally entered transmit text and its QR code
+retain their existing input behavior without either toggle; QR generators must
+not consume original received buffers.
+
+This presentation boundary changes neither wire bits nor transport/codec
+algorithms. Retain every framing, physical-completion and next-poll progress
+requirement below, including the independent regression vectors. See
+[security](security.md#received-text-boundary) and the
+[GUI contract](gui-contract.md#receive-character-policy-for-every-modem).
 
 ## Fixed framing and physical completion
 
 Received header lengths must not drive modem boundaries, memory allocation,
 acquisition or message completion. Keep fixed local geometry and bounded
-storage while receiving. Corrected source areas may spool internally, but all
+storage while receiving. Corrected source areas stay in bounded RAM (no temporary disk files), but all
 source decoding, decompression and attachment-prefix interpretation wait until
 physical completion. Even a complete codec stream or an underfilled interval
 cannot finish reception early. After physical completion, the existing source
@@ -55,8 +113,56 @@ physical completion. Simulation and recorded audio obey the same rule.
 
 Unknown slots keep their positions through masking, marker alignment and FEC.
 An unresolved interval must not disappear so its neighbors become apparently
-contiguous source input. Keep scratch, spooling and diagnostic retention bounded
+contiguous source input. Keep scratch, source buffers and diagnostic retention bounded
 without making total message length or symbol airtime a buffering prerequisite.
+
+Receiver-local differential windows do not create smaller payload symbols.
+They retain soft matched products in bounded state and may only contribute to
+an admission decision after the entire physical symbol has been scored.
+Their local duration is receiver configuration, independent of the complete
+bit duration. Detector-choice penalties, the finite-noise bound and the
+strongest-quarter guard must accompany their score. Never infer calibrated
+sensitivity from the older coherent/four-quarter probability model for this
+additional branch.
+
+Preserve the bounded post-end recovery for a missing or damaged leading marker:
+only a fully retained single interval with no timed unknown slots is eligible.
+Search every coded start within the first 200 positions using sufficient RS
+evidence; a matching marker suffix adds evidence but is never required. These
+positions follow the one-marker geometry and existing seven-bit slip allowance,
+not a computational budget. Check later retained positions for competing credible
+alignments as well; they can veto recovery but cannot become accepted starts.
+Use the configured FEC/key and actual symbol positions; keep the existing
+aggregate marker false-match bound. Commit only the unique corrected candidate,
+then interpret its source. Source syntax cannot select alignment, and public
+correction cannot claim authentication. This fallback must neither run before
+physical completion nor replace established or failed interval sources.
+
+Additional exhaustive recovery runs only after that same physical completion
+event. Keep its coordinator outside the symbol scorer and existing RS/crypto
+algorithms: it consumes retained hard 0/1 decisions, explicit missing-slot masks
+and their established symbol positions. Do not pass analog samples or symbol
+confidence into this layer, shift canonical cipher addresses, or join separate
+physical receptions. Its local work and storage settings do not alter any wire
+path or marker cadence.
+
+The default additional search budget is five wall-clock minutes per run, using
+up to the available CPU cores, with 65,536 separately retained hard-bit slots.
+Keep this retention distinct from the unchanged 4,096-bit diagnostic prefix.
+An exhausted retention quota leaves recovery unavailable; it must not silently
+omit intervals, manufacture source continuity or hide newly admitted pending
+bits. All worker scratch and retained hypotheses must remain locally bounded.
+
+Workers may enumerate missing-bit assignments and fixed-size alignment
+hypotheses, then call the unchanged RS decoder and full HMAC verifier. Preserve
+unknown status in resulting diagnostics: guessed bits are never observations.
+Account for all admitted hypotheses in the independent alignment-evidence bound;
+HMAC and source syntax cannot substitute for that calculation. Commit only a
+unique reconstruction after its competing alignments have been resolved.
+Cancellation or the end of a computation budget leaves the search unfinished
+and resumable, with no speculative decoded source exposed. Physical completion
+and recovery progress must be independently visible in CLI/GUI status. Recovery
+must not block the live receive path or pending progress for a later reception.
 
 ## Pending reception is part of the feature
 
@@ -89,18 +195,26 @@ and decoder could otherwise change the codebook together without a test failing.
 | --- | --- |
 | Original dictionary codes, every byte, canonical escapes, exact/truncated endpoints | `compression_short` |
 | Inclusive 16/17-byte split, FEC/compression/key combinations, exact airtime and raw bits | `transfer`, `stream_receive` |
-| Fixed interval geometry, zero/trailing-byte preservation, errors/erasures, source decode only after physical end | `stream_codec`, `stream_receive`, `attachment` |
+| Fixed interval geometry, zero/trailing-byte preservation, errors/erasures, bounded post-end RS alignment search and ambiguity rejection, source decode only after physical end | `stream_codec`, `stream_receive`, `attachment` |
+| Exhaustive hard-bit assignments, deterministic worker coverage, timeout/cancellation resumption, unchanged evidence and original missing-bit accounting | `recovery` |
 | Actual sampled four-hour symbols draining one bit at a time with bounded memory; absence vs EOF and partial silence | `pattern_correlator`; complementary FFT reception checks in `pattern_receiver` |
-| Pending prefixes and row identity, completed copy behavior, short/raw compose edits and transmission inspection | `gui_application`, `gui_controller`, `gui_inspection`, `gui_binary_editor` |
+| Bounded carrier/clock search, sub-Hz configuration, exact weak sampled reception and noise-only rejection | `pattern_search`, `tuning`, `simulation_estimate`, `weak_signal`; coupled-clock and streamed-template checks in `pattern_receiver` |
+| Whole-bit section fitting under phase and gain changes, conservative evidence, isolated-tail rejection, exact pending prefixes and bounded memory | `pattern_drift`, `pattern_fft_batch`, `pattern_correlator_batch` |
+| Local differential products, geometry boundaries, noise-only and isolated-fragment controls, scalar/batch equivalence, sampled full-bit admission and unchanged pending/completion behavior | `pattern_differential`, `receiver_differential`, `pattern_fft_batch`, `pattern_correlator_batch` |
+| Modeled reception versus independent sampled captures, phase/frequency/timing impairments, raw-bit draft success and physical completion | `receiver_probability`, `differential_probability`, `differential_receiver_probability`, `simulation_estimate` |
+| Competing RX target orders and geometries, immediate revisions, obsolete-content withdrawal, independent later receptions and bounded arbitration | `live_profiles`, `live_receptions`, `live`, `live_resources`, `cli` |
+| In-memory per-key TX lock, pulse lookahead, cancellation/profile changes, clock corrections and one-transmission override | `live_transmit_lock` |
+| Pending prefixes and row identity, restricted completed copy/paste, short/raw compose edits and transmission inspection | `gui_application`, `gui_controller`, `gui_inspection`, `gui_binary_editor` |
 
 From the repository root, build and run the focused headless coverage:
 
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel 2
-ctest --test-dir build --output-on-failure -j 2 \
-  -R '^(compression_short|transfer|stream_codec|stream_receive|attachment|pattern_correlator|pattern_receiver|gui_application|gui_controller|gui_inspection|gui_binary_editor)$'
+./build.sh test contract --jobs 2
 ```
+
+The `contract` CTest label and `datapump-tests-contract` build target select
+these same 30 suites (the CLI suite is included when Python is available).
+See [the build guide](building.md) for direct CMake commands and other groups.
 
 The long-symbol regression generates sampled PCM with four-hour coordinates; it
 does not wait four wall-clock hours. Shared GUI suites require no display and

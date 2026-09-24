@@ -25,7 +25,7 @@ frequency, clock and memory limits below remain material.
 
 The default CLI/internal configuration is mono 6,000 Hz PCM, a 1500 Hz carrier and
 1,200 Hz nominal rate parameter (`Config::bandwidth_hz`). For this parameter `B`
-from 1 Hz through 30 MHz, the legacy carrier recommendation is
+from 0.01 Hz through 30 MHz, the legacy carrier recommendation is
 `max(1500, 0.75B)`. With a selected carrier `fc`, automatic planning chooses
 `Fs = ceil(max(64, 4B, 4fc))`. The GUI defaults to `B=3600`, `fc=1500`, and
 14,400 internal samples/s, and exposes both Rate and Carrier controls.
@@ -261,23 +261,29 @@ physical microphone/speaker frequency response still need device-level validatio
 
 ## Automatic signal planning
 
-The CLI defaults to nominal rate 1,200 Hz and TX target C/N0 of 60 dB-Hz. The GUI
-defaults to Rate 3,600 Hz, Carrier 1,500 Hz and TX target C/N0 of 60 dB-Hz, and
-offers an 18 kHz rate preset. Its default shaped spectrum ideally spans
+The CLI defaults to nominal rate 1,200 Hz and TX target C/N0 of 32 dB-Hz. The GUI
+defaults to Rate 3,600 Hz, Carrier 1,500 Hz, short target 32 dB-Hz and long/file
+target 55 dB-Hz, and offers an 18 kHz rate preset. Its default shaped spectrum ideally spans
 375–2,625 Hz, including rolloff, for ordinary audio transfer between computers.
 This changes carrier placement and chip timing, not the keystream purposes,
 encryption, pulse shape or pattern-evidence synchronization rules. The selected
 rate, carrier and pattern/tone mode are fixed during receive
 search; encryption normally selects `auto-keystream`, with `auto-pattern`
 otherwise. The **RX targets (dB-Hz)** field and CLI `--receive-targets` accept
-a comma-separated list. The GUI RX list starts at `60`; changing TX SNR to a
-valid value replaces it with that single matching target. It can then be edited
-independently. The CLI receive list defaults to `60`.
+a comma-separated list. The GUI RX list starts at `32, 55`; changing either TX
+target to a valid value replaces it with both effective targets, deduplicated.
+It can then be edited independently. The CLI receive list defaults to `32`.
 
 Entries are trimmed and deduplicated. An empty, malformed,
 nonfinite, out-of-range (outside -200..200 dB-Hz), over-16-entry or over-512-byte
-list resets entirely to `60`. The GUI permits partial editing, then normalizes
+list resets entirely to `32`. The GUI permits partial editing, then normalizes
 after 750 ms of inactivity. RX targets never alter the scalar TX target.
+In automatic modes, all GUI target entries check Clock/RAM fit; an unusable
+value may move to a nearby checked fit, preferring weaker targets. Independent
+RX entries include their companion targets and active key/plaintext banks in
+that check. Fixed modes and CLI numeric inputs retain exact requested values.
+Typed GUI text remains editable; Enter or a preset displays the accepted values
+at full precision. See [Link planner](link-planner.md).
 
 The receiver resolves only this list, using the selected rate, carrier, clock
 and mode before selecting the pattern length and checking its confidence floor;
@@ -392,7 +398,7 @@ Immutable bit chunks drain continuously with a stable physical stream identity.
 Compact missing-run events avoid allocations proportional to a gap. Competing
 clock hypotheses cannot rewrite already delivered chunks. The collector keeps
 one interval and bounded marker overlap; corrected source areas enter a capped
-spool. Only physical completion permits source reconstruction/decompression.
+memory buffer. Only physical completion permits source reconstruction/decompression.
 RS or MAC success never closes a stream, and source decoding never feeds back
 into physical acquisition. `Received::raw_bits` is a bounded diagnostic prefix;
 `missing_symbols` reports unknown placeholders and `observed_bits` the full slot

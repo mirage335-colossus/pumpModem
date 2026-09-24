@@ -1,0 +1,18 @@
+Short LDPC K=7200 raw_errors=95 iterations=1
+Short LDPC K=10800 raw_errors=105 iterations=1
+Short LDPC K=11880 raw_errors=105 iterations=2
+LDPC K=32400 frames=12 raw_errors=679 wrong_frames=0 mean_iterations=1 full_pipeline_ms/frame=12.2597
+LDPC K=48600 frames=12 raw_errors=700 wrong_frames=0 mean_iterations=1 full_pipeline_ms/frame=11.2962
+LDPC K=50400 frames=12 raw_errors=711 wrong_frames=0 mean_iterations=1 full_pipeline_ms/frame=12.0033
+LDPC K=57600 frames=12 raw_errors=725 wrong_frames=0 mean_iterations=1 full_pipeline_ms/frame=10.0798
+LDPC K=58320 frames=12 raw_errors=687 wrong_frames=0 mean_iterations=1 full_pipeline_ms/frame=10.5091
+LDPC K=43200 frames=12 raw_errors=681 wrong_frames=0 mean_iterations=1 full_pipeline_ms/frame=11.1627
+QAM=4 K=32400 EsN0=2 raw_errors=6650 iterations=6 decoder_ms=75.5338
+QAM=16 K=32400 EsN0=7 raw_errors=7727 iterations=9 decoder_ms=110.762
+QAM=256 K=43200 EsN0=20 raw_errors=4219 iterations=6 decoder_ms=63.7515
+QAM=4096 K=50400 EsN0=31.8 raw_errors=3095 iterations=6 decoder_ms=76.0769
+QAM=16384 K=50400 EsN0=37.8 raw_errors=2662 iterations=5 decoder_ms=55.3944
+QAM=16384 K=57600 EsN0=40 raw_errors=1550 iterations=11 decoder_ms=93.5621
+QAM=16384 K=58320 EsN0=42 raw_errors=783 iterations=3 decoder_ms=24.7314
+QAM=65536 K=58320 EsN0=48 raw_errors=678 iterations=3 decoder_ms=23.0474
+Fast LDPC tests passed

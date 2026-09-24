@@ -1,0 +1,22 @@
+gmake: jobserver mkfifo: /tmp/GMfifo4: File exists
+[  0%] Checking regular/fast DSP isolation
+[ 60%] Built target liblzma
+-- Regular/fast DSP dependency boundary passed
+[ 60%] Built target datapump_fast_boundary
+[ 93%] Built target datapump
+[ 93%] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/acoustic_ofdm.cpp.o
+[ 93%] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/codec.cpp.o
+/home/user/___quick/p/_cur/dataPump/pumpModem/src/fast/acoustic_ofdm.cpp: In member function ‘void datapump::fast::acoustic_ofdm::Receiver::Impl::search()’:
+/home/user/___quick/p/_cur/dataPump/pumpModem/src/fast/acoustic_ofdm.cpp:223:9: warning: this ‘for’ clause does not guard... [-Wmisleading-indentation]
+  223 |         for(std::size_t i=0;i<work.size();++i)work[i]*=std::conj(reference_fft[i]);fft(work,true);
+      |         ^~~
+/home/user/___quick/p/_cur/dataPump/pumpModem/src/fast/acoustic_ofdm.cpp:223:84: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘for’
+  223 |         for(std::size_t i=0;i<work.size();++i)work[i]*=std::conj(reference_fft[i]);fft(work,true);
+      |                                                                                    ^~~
+[100%] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/file_transfer.cpp.o
+[100%] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/session.cpp.o
+[100%] Linking CXX static library libdatapump_fast.a
+[100%] Built target datapump_fast
+[100%] Building CXX object CMakeFiles/test_fast_codec.dir/tests/test_fast_codec.cpp.o
+[100%] Linking CXX executable test_fast_codec
+[100%] Built target test_fast_codec

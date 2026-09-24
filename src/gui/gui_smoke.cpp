@@ -1,6 +1,7 @@
 #include "gui_smoke.hpp"
 #include "bitmap_sources.hpp"
 #include "datapump/runtime.hpp"
+#include "datapump/received_text.hpp"
 #include <cmath>
 #include <fstream>
 #include <set>
@@ -103,7 +104,7 @@ struct Smoke::Impl {
     ui::ServiceRequest copy(Controller& controller,std::string_view expected) {
         require(controller.enabled(C::copy_signal),"Completed signal did not enable its clipboard action");
         controller.activate(C::copy_signal);const auto request=take(controller,ui::ServiceKind::clipboard);
-        require(request.value==expected,"Shared GUI clipboard request changed the received payload");
+        require(request.value==received_text(expected),"Shared GUI clipboard did not restrict received text");
         return request;
     }
     void check_fec(Controller& controller,FecMode mode) {
@@ -224,8 +225,10 @@ struct Smoke::Impl {
             const auto row=std::find_if(records.begin(),records.end(),[&](const auto& value){return value.id==std::to_string(signal.id);});
             require(row!=records.end(),"Signal collection lost its stable reception identity");
             const auto has=[&](const std::string& text){return std::any_of(row->cells.begin(),row->cells.end(),[&](const auto& cell){return cell.text==text;});};
+            // Received rows preserve permitted LF bytes; compare the complete
+            // text without the filename/label helper's whitespace flattening.
             require(has(std::to_string(static_cast<long long>(std::llround(signal.frequency_hz)))+" Hz")&&
-                    has(signal_status_label(signal))&&has(signal_preamble_label(signal))&&has(signal_data_label(signal))&&has(display_label(signal_display_text(signal))),
+                    has(signal_status_label(signal))&&has(signal_preamble_label(signal))&&has(signal_data_label(signal))&&has(signal_display_text(signal)),
                     "Signal record omitted frequency, status, preamble, data accuracy or complete received text");
             require(row->activatable==(signal.binary?signal.complete:(signal.validated||signal.complete&&signal.pattern_score)&&signal.text_message),
                     "Signal record activation disagreed with verified-text or completed-raw clipboard eligibility");
@@ -396,7 +399,7 @@ struct Smoke::Impl {
             require(controller.inbox().items().empty()&&controller.signals().lines().empty()&&controller.field(F::files).records.empty()&&
                     controller.field(F::signals).records.empty()&&!controller.enabled(C::save_file)&&!controller.enabled(C::copy_signal),
                     "Clearing received content left stale collection records or actions");
-            require(retained_copy.value==message,"Clearing reception invalidated a queued clipboard payload");
+            require(retained_copy.value==received_text(message),"Clearing reception invalidated a safe queued clipboard payload");
             controller.complete_service({retained_copy.id,false,{},{}});
             controller.complete_service({save.id,false,path_text(save_path),{}});
             {std::ifstream input(save_path,std::ios::binary);require(input&&read_bounded(input,1024)==file_bytes,"Clearing the inbox invalidated a pending save payload");}

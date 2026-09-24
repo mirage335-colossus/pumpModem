@@ -22,6 +22,8 @@ public:
     std::vector<std::complex<double>> take_chip_constellation();
     bool acquiring() const;
     bool synchronized() const;
+    // Actual detector availability after reserving the complete search bank.
+    bool drift_tolerant() const;
     std::size_t working_bytes() const;
     void set_workspace_bytes(std::size_t);
     Diagnostics diagnostics() const;

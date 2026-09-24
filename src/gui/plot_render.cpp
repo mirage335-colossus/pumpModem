@@ -48,12 +48,26 @@ bool valid_pattern_score(const PatternScore& point) {
     return std::isfinite(score.real()) && std::isfinite(score.imag()) && score.real() >= 0 && score.imag() >= 0 &&
         std::isfinite(point.admission_threshold) && point.admission_threshold > 0;
 }
-double pattern_score_position(double score, double threshold) {
-    // Fixed exponential compression: 0 -> 0, T -> 1/2, 2T -> 3/4.
-    // Strong outliers never squeeze the decision region. Beyond 64T the
-    // result already rounds to one; cap before division to avoid overflow.
-    const auto ratio = score / 64 >= threshold ? 64 : score / threshold;
-    return -std::expm1(-std::numbers::ln2 * ratio);
+double pattern_score_upper_log_ratio(const PatternScores& data) {
+    // Both axes share their upper range. Only scores above 2T are rescaled;
+    // a strong outlier cannot squeeze the noise or threshold regions.
+    double upper = 2 * std::numbers::ln2;
+    if (data.enabled) for (const auto& point : data.scores) {
+        if (!valid_pattern_score(point)) continue;
+        const auto score = std::max(point.evidence.real(), point.evidence.imag());
+        if (score > point.admission_threshold)
+            upper = std::max(upper, std::log(score) - std::log(point.admission_threshold));
+    }
+    return upper;
+}
+double pattern_score_position(double score, double threshold, double upper_log_ratio) {
+    // Plot native log scores, not a squashed probability-like value. Preserve
+    // noise variation below T, reserve a quarter axis for T..2T, and use the
+    // final region for the full retained strong-signal range with 5% headroom.
+    if (score <= threshold) return .5 * (score / threshold);
+    const auto log_ratio = std::log(score) - std::log(threshold);
+    if (log_ratio <= std::numbers::ln2) return .5 + .25 * log_ratio / std::numbers::ln2;
+    return .75 + .2 * (log_ratio - std::numbers::ln2) / (upper_log_ratio - std::numbers::ln2);
 }
 double pattern_distance(const inspection::PatternSpace& model, std::size_t a, std::size_t b) {
     if (a == b) return 0;
@@ -220,6 +234,7 @@ void PlotSnapshot::paint(const BitmapRequest& request, const BitmapSink& sink, b
                 return gray(0);
             });
         } else if constexpr (std::is_same_v<Type, PatternScores>) {
+            const auto upper_log_ratio = pattern_score_upper_log_ratio(data);
             const auto sx = std::min((width - 1) * .8, (height - 1) * .8 / request.sample_aspect_ratio);
             const auto sy = std::min((height - 1) * .8, (width - 1) * .8 * request.sample_aspect_ratio);
             const auto left = ((width - 1) - sx) / 2, bottom = ((height - 1) + sy) / 2;
@@ -234,8 +249,8 @@ void PlotSnapshot::paint(const BitmapRequest& request, const BitmapSink& sink, b
             std::vector<std::pair<int, int>> points;
             if (data.enabled) for (const auto score : data.scores) {
                 if (!valid_pattern_score(score)) continue;
-                const auto x = static_cast<int>(std::lround(left + pattern_score_position(score.evidence.real(), score.admission_threshold) * sx));
-                const auto y = static_cast<int>(std::lround(bottom - pattern_score_position(score.evidence.imag(), score.admission_threshold) * sy));
+                const auto x = static_cast<int>(std::lround(left + pattern_score_position(score.evidence.real(), score.admission_threshold, upper_log_ratio) * sx));
+                const auto y = static_cast<int>(std::lround(bottom - pattern_score_position(score.evidence.imag(), score.admission_threshold, upper_log_ratio) * sy));
                 for (int dy : {-1, 0}) for (int dx : {-1, 0}) points.emplace_back(y + dy, x + dx);
             }
             std::sort(points.begin(), points.end());
@@ -266,9 +281,15 @@ void PlotSnapshot::paint(const BitmapRequest& request, const BitmapSink& sink, b
             });
         } else if constexpr (std::is_same_v<Type, Waterfall>) {
             const auto& history = data.history.rows();
+            // Keep the recent one-row-per-pixel view in short plots. Beyond
+            // retention capacity, scale that same time window to the available
+            // height instead of leaving history in a fixed strip at the bottom.
+            // Missing startup history stays blank at the top at the same scale.
+            const auto visible_rows = std::min<std::size_t>(request.height, SpectrumHistory::capacity);
             rows(request, sink, color, [&](unsigned x, unsigned y) {
                 const auto source = data.overview ? static_cast<std::ptrdiff_t>(static_cast<std::size_t>(y) * history.size() / request.height) :
-                    static_cast<std::ptrdiff_t>(history.size()) - height + static_cast<int>(y);
+                    static_cast<std::ptrdiff_t>(history.size()) - static_cast<std::ptrdiff_t>(visible_rows) +
+                    static_cast<std::ptrdiff_t>(static_cast<std::size_t>(y) * visible_rows / request.height);
                 if (source < 0 || static_cast<std::size_t>(source) >= history.size()) return gray(0);
                 const auto& row = history[static_cast<std::size_t>(source)];
                 const auto first = static_cast<std::size_t>(x) * row.size() / request.width;
@@ -378,17 +399,20 @@ std::string PlotSnapshot::caption(unsigned width) const {
             const auto count = std::count_if(data.scores.begin(), data.scores.end(), valid_pattern_score);
             if (width < 320) {
                 if (!count) return "waiting for patterns";
-                return "P0 x / P1 y; solid T, dashed 2T";
+                return "P0 x/P1 y; log score T / 2T";
             }
             out << "Horizontal P0 / vertical P1: ";
             if (!count) out << "waiting for pattern candidates (ln evidence vs noise)";
             else {
-                out << "exponential scale; solid T = single-symbol threshold, dashed 2T";
+                out << "log-score scale; solid T = single-symbol threshold, dashed 2T = twice the log score";
                 out << " / " << count << " retained candidates";
                 out << "; diagonal = equal scores";
             }
         } else if constexpr (std::is_same_v<Type, Waterfall>) {
-            out << "0.." << data.history.max_hz() << " Hz / " << data.history.lower_db() << ".." << data.history.upper_db() << " dBFS peak";
+            out << "0.." << data.history.max_hz() << " Hz / ";
+            if (data.history.simulation_reference()) out << std::fixed << std::setprecision(1);
+            out << data.history.lower_db() << ".." << data.history.upper_db()
+                << (data.history.simulation_reference() ? " dB sim. ref." : " dBFS peak");
         } else if constexpr (std::is_same_v<Type, Qr>) {
             if (data.brightness == QrBrightness::off) return "QR preview off";
             return data.code ? "QR preview" : "No QR message";

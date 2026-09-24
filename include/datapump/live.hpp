@@ -1,4 +1,5 @@
 #pragma once
+#include "datapump/audio.hpp"
 #include "datapump/transfer.hpp"
 #include <chrono>
 #include <complex>
@@ -11,12 +12,20 @@
 namespace datapump::live {
 struct Settings {
     transfer::Options transfer;
+    // Optional transmit geometry for fixed-interval text and attachments.
+    // Short text (1–16 source bytes), explicit bits and tuning noise use the
+    // base modem. Both share its sample rate, carrier and bandwidth; selecting
+    // a message path never replaces the independently running receiver bank.
+    std::optional<modem::Config> long_message_modem;
     std::string device = "default";
-    // Right channel on stereo output, sole channel on mono output. When off,
-    // send the same signal to both stereo channels.
+    // Mono defaults to the left output. The boolean remains for existing callers.
     bool mono = true;
+    audio::ChannelMode channel_mode = audio::ChannelMode::left_mono;
     bool simulation = false;
     double simulation_snr_db = 18;
+    // Display-only offset for simulated spectra. The raw PCM, FFT values and
+    // receiver remain unchanged; an absent value retains the raw dBFS view.
+    std::optional<double> simulation_spectrum_gain_db;
     double simulation_clock_error_ppm = 100;
     double simulation_phase_noise_degrees_per_sqrt_second = .5;
     // Received content and pending event storage are independent of DSP work.
@@ -34,6 +43,9 @@ struct Settings {
         return !transfer.key && !transfer.modem.scramble && !transfer.modem.dsss;
     }
 };
+// Check exactly the settings accepted by Session without changing a live
+// receiver, opening audio hardware, or starting a transmission.
+void validate_settings(const Settings& settings);
 struct SignalUpdate {
     std::uint64_t id = 0; // Stable acquisition identity for replacing pending text.
     double frequency_hz = 0;
@@ -62,6 +74,13 @@ struct SignalUpdate {
     // Exact transport bits retained when a completed short dictionary stream
     // is presented as text; absent for pending observations and interval data.
     std::string raw_bits;
+    // A stronger physical hypothesis can revise an earlier interpretation,
+    // including one whose shorter profile had already observed its own end.
+    // Consumers replace older revisions and withdraw superseded rows/content.
+    std::uint64_t revision = 0;
+    std::vector<std::uint64_t> superseded_ids;
+    // Physical completion is independent of the bounded, post-end search.
+    transfer::RecoveryProgress recovery_progress;
 };
 enum class ConstellationSource { input, transmitted, received };
 struct PatternScoreObservation {
@@ -78,6 +97,9 @@ struct Snapshot {
     std::vector<float> waveform;
     std::vector<double> spectrum_db;
     double spectrum_bin_hz = 0;
+    // Captured with spectrum_db, including startup noise-bandwidth correction
+    // and replay. Always absent for hardware.
+    std::optional<double> simulation_spectrum_gain_db;
     std::vector<std::complex<double>> constellation;
     // Retained receiver hypotheses, not probabilities: real = pattern 0
     // evidence, imaginary = pattern 1 evidence, both against noise.
@@ -99,13 +121,26 @@ struct Snapshot {
     bool running = false;
     bool transmitting = false;
     bool transmitting_noise = false; // Continuous tuning noise; fraction has no endpoint.
+    // Local, in-memory hardware safeguards for the currently selected key.
+    // Short/raw and long-message profiles have different prefix durations.
+    double transmit_key_lock_seconds = 0;
+    double long_transmit_key_lock_seconds = 0;
+    double transmit_separation_seconds = 0;
     bool simulation = false;
     std::uint64_t sequence = 0;
     std::uint64_t samples_received = 0;
     std::size_t buffered_samples = 0;
     double virtual_seconds = 0;
     double transmission_seconds = 0;
+    // Fraction of transmitted audio generated/played, not receiver work.
     double transmission_fraction = 0;
+    // Finite simulation is still scoring received samples after TX audio ends.
+    // This never implies physical reception completion.
+    bool simulation_receiving_tail = false;
+    // Steady-clock wall time spent preparing/generating/scoring this simulation.
+    // Updates on snapshot polls even during a synchronous scoring call, freezes
+    // at completion/cancellation, and excludes the presentation replay.
+    double simulation_compute_seconds = 0;
     bool transmission_finished = true; // CPU/audio work complete; simulation presentation may still be active.
     bool transmission_cancelled = false;
     // Completed simulations present training, measured plots and provisional
@@ -120,6 +155,9 @@ struct Snapshot {
     std::uint32_t hardware_sample_rate = 0;
     double audio_passband_hz = 0;
     std::size_t dsp_buffered_bytes = 0;
+    // A separate bounded post-reception search pool; it never consumes the
+    // waveform/receiver workspace reserved by dsp_buffered_bytes.
+    std::size_t recovery_working_bytes = 0;
 };
 
 // Audio callbacks and modem work never run on the caller/UI thread. configure
@@ -145,17 +183,30 @@ public:
     // Apply output routing to the next playback without interrupting reception
     // or changing audio already being transmitted.
     void set_mono(bool mono);
-    void transmit(const Message& message);
+    void set_channel_mode(audio::ChannelMode channels);
+    // Release only idle hardware capture for another local engine. Refuses
+    // pending RX/TX; repeated polls acknowledge actual device closure. Does
+    // not cancel recovery, complete a reception, or change saved settings.
+    bool try_suspend_capture();
+    void resume_capture();
+    // Force applies only to this request, bypassing local key/quiet waits.
+    // It never clears previously recorded key use or changes the waveform.
+    void transmit(const Message& message, bool force = false);
     // One 0/1 per element, including leading zeros. Uses streaming APSK and
     // the selected data key, with no interval coding, preamble or FEC. Raw
     // simulations pass sampled audio to ordinary blind acquisition. Without
     // raw discovery framing, no timing/length-assisted raw result is emitted.
-    void transmit_bits(std::span<const std::uint8_t> bits);
+    void transmit_bits(std::span<const std::uint8_t> bits, bool force = false);
     // Continuous noise at the selected carrier/bandwidth and normal signal
     // level, with fresh temporary private streams. Does not encode a message
     // or use/register saved keys. Stop with cancel_transmit().
     void transmit_noise();
     void cancel_transmit();
+    // Resume a retained incomplete search with another configured time budget,
+    // or stop one search without interrupting reception or audio capture.
+    bool resume_recovery(std::uint64_t signal_id);
+    void cancel_recovery(std::uint64_t signal_id);
+    void clear_recoveries();
     Snapshot snapshot();
     void stop();
 private:

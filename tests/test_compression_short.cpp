@@ -63,6 +63,15 @@ void tests() {
             rejects([&]{compression::decode_short_bits(bad);},"non-bit values rejected at every position");
         }
     }
+    // Decoder table padding and local bit masks must never make malformed
+    // source elements into accepted symbols, including truncated prefixes.
+    for(unsigned value=2;value<256;++value) {
+        const auto invalid=static_cast<std::uint8_t>(value);
+        rejects([&]{compression::decode_short_bits(Bytes{invalid});},"non-bit single prefix rejected");
+        rejects([&]{compression::decode_short_bits(Bytes{1,1,invalid});},"non-bit dictionary selector rejected");
+        auto literal=bits("1111100000000");literal.back()=invalid;
+        rejects([&]{compression::decode_short_bits(literal);},"non-bit literal must not be masked into acceptance");
+    }
 }
 }
 int main(){try{tests();std::cout<<"exact short dictionary tests passed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

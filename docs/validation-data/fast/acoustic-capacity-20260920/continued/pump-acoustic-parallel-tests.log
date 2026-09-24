@@ -1,0 +1,5 @@
+acoustic LDPC scheduling scenario=0 depth=4 serial_ms=12.7999 scheduled_ms=12.4116 frames=8 iterations=0 failed_frames=0
+acoustic LDPC scheduling scenario=1 depth=4 serial_ms=156.941 scheduled_ms=61.623 frames=8 iterations=18 failed_frames=0
+acoustic LDPC scheduling scenario=2 depth=4 serial_ms=1836.32 scheduled_ms=658.386 frames=4 iterations=200 failed_frames=4
+acoustic LDPC scheduling scenario=3 depth=4 serial_ms=2.52214 scheduled_ms=2.78268 frames=2 iterations=0 failed_frames=0
+acoustic LDPC scheduling scenario=4 depth=16 serial_ms=122.554 scheduled_ms=111.969 frames=32 iterations=0 failed_frames=0

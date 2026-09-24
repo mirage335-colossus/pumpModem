@@ -7,6 +7,11 @@ there is no runtime toolkit switch.
 
 ## Build and run
 
+The normal wrapper route is `CC=clang-19 CXX=clang++-19 ./build.sh --backend rev`,
+with output in `build/rev`. Run `./build.sh test gui --backend rev` and, on a
+private display, `./build.sh test native --backend rev`. The direct CMake
+commands below remain supported for a separate custom tree.
+
 Rev requires CMake 3.28+, Ninja, a C++23 standard library, and a compiler with
 C++ module support. Clang 19 is the tested Linux toolchain. GCC 14 crashes while
 serializing an upstream module and is rejected with an actionable configuration
@@ -24,7 +29,7 @@ libxrandr-dev`. CMake never downloads dependencies.
 cmake -S . -B build-rev -G Ninja \
   -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19 \
   -DCMAKE_BUILD_TYPE=Release -DDATAPUMP_GUI_BACKEND=rev
-cmake --build build-rev --parallel
+cmake --build build-rev --target datapump-apps datapump-tests --parallel
 ctest --test-dir build-rev --output-on-failure
 ./build-rev/datapump-gui --self-check
 ./build-rev/datapump-gui
@@ -40,8 +45,8 @@ selection on the modem host. Existing files are never overwritten.
 `ui_contract.hpp` and `screen_console.cpp` describe ordered controls, stable IDs,
 application bindings, shared desktop slots and grouped command menus.
 `desktop_layout.hpp` supplies the same logical geometry to FLTK and Rev, including
-the persistent header/identity row and modem/status footer around the tab viewport.
-The shared default is 1180 by 866 logical pixels and the minimum is 1030 by 786.
+the persistent header, identity and simulation rows and modem/status footer around the tab viewport.
+The shared default is 1180 by 952 logical pixels and the minimum is 1030 by 872.
 Rev maps controls to Text, Button, Checkbox, Dropdown and Box elements. Lists and
 tabs compose those elements. FLTK uses the same declarations and shared
 application lifecycle with its own native widgets. `controller.cpp` owns drafts, validation, eligibility, exact binary
@@ -128,7 +133,7 @@ Mesa 25.0.7) in a private X11 virtual display. Before the shared desktop and ric
 inspection layout changes, a full smoke workflow followed by a 20-second hold
 at 1180 by 960 took 31 seconds wall time and 74 seconds user CPU time. This is a
 historical measurement of the earlier layout, not a benchmark of the current
-1180 by 866 desktop. The initial 25 Hz paint path used 211 seconds; skipping
+1180 by 909 desktop. The initial 25 Hz paint path used 211 seconds; skipping
 invisible rectangles and reusing glyph geometry reduced that to 161 seconds, and separating
 presentation cadence reduced it to 74. Modem polling and plot-history capture
 remain at 25 Hz while state/plot presentation runs at 10 Hz; native input can
@@ -228,6 +233,7 @@ assign Rev a license.
 Both native adapters expose only the shared `Application` facade and opaque
 `BitmapSource` handles. Document layout and gesture semantics are implemented
 once above the native boundary. The GUI-contract CI matrix builds both adapters
-and registers their native suites with `DATAPUMP_TEST_NATIVE_GUI=ON`; run them
-with `ctest --test-dir build-rev --output-on-failure -L gui` on a private display.
-Without that option, the native executables can still be run explicitly.
+and registers their native suites with `DATAPUMP_TEST_NATIVE_GUI=ON`; build
+`datapump-tests-gui` before running
+`ctest --test-dir build-rev --output-on-failure -L gui` on a private display.
+Without that option, native test targets can still be explicitly built and run.

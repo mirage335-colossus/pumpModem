@@ -12,6 +12,7 @@ removed.
 | Shared module | Responsibility |
 | --- | --- |
 | `application.hpp` | Backend-facing facade; controller, workers and bitmap producers are private to its implementation. |
+| `application.cpp`, `fast/controller.*`, `fast/screen.*`, `legacy/*` | Shared mode host and independent Fast/Legacy state and screens. Existing engines remain polled; native service routes retain owner/generation and idle audio ownership prevents overlap. Legacy owns its auto-listen/simplex text workflow. Regular waveform and pending-reception policy remain in the existing controller/service. |
 | `ui_contract.hpp` | Control, page, field, command, record and service vocabulary. |
 | `ui_document.hpp`, `bitmap.hpp` | Generic document nodes and opaque `BitmapSource` pixel handles, without domain factories. |
 | `control_binding.hpp` | Declaration-order control groups and menu identity by page or persistent scope, plus instance. |
@@ -32,6 +33,8 @@ removed.
 | `controller.cpp` | Authoritative drafts, validation, settings, workers, commands, key/file state, reception and eligibility. |
 | `record_presentations.hpp` | Signal/file records, including frequency, status, reception quality, text, tone and activation eligibility. |
 | `inspection_page.hpp` | Inspection section order, cards, tables, pagination and native text around plot snapshots. |
+| `link_planner_model.*`, `link_planner_page.*` | Bounded link previews, native planner controls and labels, logarithmic plot snapshots and model details. |
+| `launch_command.*` | Settings-only command parsing and formatting shared by GUI launch and the planner's copy/load editor; no process execution or shell expansion. |
 | `bitmap_sources.hpp`, `plot_render.cpp` | Shared snapshots, captions, error overlays, invalidation and pixel producers. |
 | `application.cpp` | Control/menu presentation and dispatch, validated edits/presets, launch parsing, lifecycle, submission/record dispatch, document caching and common self-check/smoke orchestration. |
 | `gui_smoke.cpp` | The same application workflow checks for both native backends and the headless harness. |
@@ -53,6 +56,23 @@ these checks.
 Adapters own native widget construction, text measurement, focus/caret behavior,
 scroll containers, menu escaping, event translation and platform services.
 Bitmap widgets receive opaque snapshots; they do not interpret measurements.
+
+Legacy's upper transcript is a generic `Control.read_only` multiline editor:
+it remains selectable and scrollable while rejecting edits and paste. The
+flag defaults to false, preserving all existing editors. Native adapters share
+the same Legacy declarations, text presentation and waterfall snapshots.
+
+The planner command editor is an ordinary document-only multiline control.
+Its shared declaration makes Enter insert a newline and Tab navigate to the
+next control. Retained native editors preserve selection, caret and uncommitted
+text across document updates. Adapters keep glyphs, selection, hit testing and
+caret reveal in the same scrolled coordinates and pass a wheel event to the
+containing document when the editor cannot scroll further.
+The controller stages imported settings, including the derived link channel,
+and preflights live-session validation before committing fields or configuration.
+Parsing and validation errors therefore preserve both the existing settings and
+the pasted command. Successful loads use the ordinary configuration path and
+do not submit the message.
 
 Full-window views use `OverlayDefinition.controls`, the same `Control` vocabulary
 and native factories as the desktop. Edit the QR view in `screen_overlay.hpp`:
@@ -154,7 +174,14 @@ changed immutable document; neither independently derives document structure or
 geometry. Native ownership, focus calls and measurements remain adapter code.
 
 The application polls reception and captures plot history at 25 Hz while native
-state/plot presentation runs at 10 Hz. Native input can repaint immediately.
+state/plot presentation runs at 10 Hz. Native input can repaint immediately. Received-text policy is applied in the shared
+controllers before field, record and service presentation. A shared
+`text_history_revision` invalidates native undo/redo when received draft
+provenance is cleared or its printable-ASCII exception is withdrawn. FLTK also
+consumes pending editor state before input events, so Undo cannot race the next
+presentation poll; Rev currently has no undo history. Clipboard requests carry a
+revocable lifetime token which the shared service queue checks before native
+dispatch.
 Pointer double-click timing, wheel command repetition and record keyboard
 selection/activation use shared policy. Adapters translate keys and pointer
 coordinates, then focus the returned native row and apply the shared reveal
@@ -239,6 +266,7 @@ display. Register display-dependent tests explicitly with
 `-DDATAPUMP_TEST_NATIVE_GUI=ON`, then run:
 
 ```sh
+cmake --build build-gui --target datapump-tests-gui --parallel 2
 LIBGL_ALWAYS_SOFTWARE=1 LP_NUM_THREADS=2 xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' \
   ctest --test-dir build-gui --output-on-failure -L gui
 ```
@@ -248,6 +276,11 @@ without a display. Native tests include clipboard, editor focus/selection,
 record history, document resizing and Rev coordinates at 1x and 2x. Windows
 runtime testing remains a separate platform requirement; Linux success does
 not establish Windows validation.
+
+For the canonical wrapper profiles, use `./build.sh test gui` for headless GUI
+coverage and `./build.sh test native` inside a private display for the native
+checks. Add `--backend rev` for Rev. Both commands build their prerequisites;
+ordinary application builds omit the native test executables.
 Successful smoke runs remove their automatically created temporary fixtures;
 failed-run evidence and explicitly selected `--smoke-dir` output are retained.
 

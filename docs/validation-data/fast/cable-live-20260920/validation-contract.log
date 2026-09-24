@@ -1,0 +1,68 @@
+Internal ctest changing into directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+Test project /home/user/___quick/p/_cur/dataPump/pumpModem/build
+      Start  20: stream_codec
+ 1/29 Test  #20: stream_codec ........................   Passed    0.06 sec
+      Start  21: recovery
+ 2/29 Test  #21: recovery ............................   Passed    0.15 sec
+      Start  22: attachment
+ 3/29 Test  #22: attachment ..........................   Passed    0.02 sec
+      Start  23: stream_receive
+ 4/29 Test  #23: stream_receive ......................   Passed    1.81 sec
+      Start  25: compression_short
+ 5/29 Test  #25: compression_short ...................   Passed    0.04 sec
+      Start  31: pattern_receiver
+ 6/29 Test  #31: pattern_receiver ....................   Passed   56.79 sec
+      Start  32: pattern_correlator
+ 7/29 Test  #32: pattern_correlator ..................   Passed    9.61 sec
+      Start  33: pattern_drift
+ 8/29 Test  #33: pattern_drift .......................   Passed    3.18 sec
+      Start  34: pattern_differential
+ 9/29 Test  #34: pattern_differential ................   Passed    0.09 sec
+      Start  35: receiver_differential
+10/29 Test  #35: receiver_differential ...............   Passed   18.62 sec
+      Start  36: pattern_fft_batch
+11/29 Test  #36: pattern_fft_batch ...................   Passed    2.94 sec
+      Start  37: pattern_correlator_batch
+12/29 Test  #37: pattern_correlator_batch ............   Passed    0.08 sec
+      Start  38: pattern_search
+13/29 Test  #38: pattern_search ......................   Passed    0.01 sec
+      Start  45: transfer
+14/29 Test  #45: transfer ............................   Passed    0.22 sec
+      Start  46: tuning
+15/29 Test  #46: tuning ..............................   Passed    0.86 sec
+      Start  47: simulation_estimate
+16/29 Test  #47: simulation_estimate .................   Passed   13.04 sec
+      Start  48: receiver_probability
+17/29 Test  #48: receiver_probability ................   Passed   24.56 sec
+      Start  49: differential_probability
+18/29 Test  #49: differential_probability ............   Passed   10.12 sec
+      Start  50: differential_receiver_probability
+19/29 Test  #50: differential_receiver_probability ...   Passed  1193.00 sec
+      Start  53: weak_signal
+20/29 Test  #53: weak_signal .........................   Passed  111.41 sec
+      Start  54: live
+21/29 Test  #54: live ................................   Passed   35.01 sec
+      Start  55: live_resources
+22/29 Test  #55: live_resources ......................   Passed    7.44 sec
+      Start  56: live_profiles
+23/29 Test  #56: live_profiles .......................   Passed  119.72 sec
+      Start  57: live_receptions
+24/29 Test  #57: live_receptions .....................   Passed    0.04 sec
+      Start  72: gui_inspection
+25/29 Test  #72: gui_inspection ......................   Passed    0.10 sec
+      Start  78: gui_binary_editor
+26/29 Test  #78: gui_binary_editor ...................   Passed    0.04 sec
+      Start  79: gui_controller
+27/29 Test  #79: gui_controller ......................   Passed   69.19 sec
+      Start  85: gui_application
+28/29 Test  #85: gui_application .....................   Passed    1.68 sec
+      Start 100: cli
+29/29 Test #100: cli .................................   Passed   24.92 sec
+
+100% tests passed, 0 tests failed out of 29
+
+Label Time Summary:
+calibration    = 1193.00 sec*proc (1 test)
+gui            =  71.00 sec*proc (4 tests)
+
+Total Test time (real) = 1704.77 sec

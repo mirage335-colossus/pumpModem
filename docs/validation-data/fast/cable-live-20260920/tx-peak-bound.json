@@ -1,0 +1,39 @@
+{
+  "scope": "Bound for generated PCM, before optional resampling or external gain",
+  "method": "abs(real(exp(i*phase)*sum(symbol*pulse))) <= max_symbol_radius*sum(abs(pulse))",
+  "continuous_phase_coverage": "Maximum of convex piecewise-linear absolute pulse sum occurs at a table knot",
+  "numerical_scope": "Double-precision evaluation; headroom recommendations leave substantial rounding margin",
+  "constellation": 256,
+  "pulse_span_symbols": 16,
+  "table_knots_per_symbol": 2048,
+  "results": [
+    {
+      "rolloff": 0.2,
+      "maximum_constellation_radius": 1.3285374699462638,
+      "maximum_absolute_pulse_sum": 1.9244648402938584,
+      "maximizing_fractional_symbol_phase": 0.5,
+      "generated_pcm_peak_bound_per_amplitude": 2.5567236499245434,
+      "unity_peak_amplitude_ceiling": 0.39112557199113523,
+      "amplitude_ceiling_for_peak_0_95": 0.37156929339157846,
+      "peak_bound_at_amplitude": {
+        "0.5": 1.2783618249622717,
+        "0.35": 0.8948532774735901,
+        "0.3": 0.767017094977363
+      }
+    },
+    {
+      "rolloff": 0.1,
+      "maximum_constellation_radius": 1.3285374699462638,
+      "maximum_absolute_pulse_sum": 2.310216271588216,
+      "maximizing_fractional_symbol_phase": 0.5,
+      "generated_pcm_peak_bound_per_amplitude": 3.069208880484499,
+      "unity_peak_amplitude_ceiling": 0.3258168599597373,
+      "amplitude_ceiling_for_peak_0_95": 0.3095260169617504,
+      "peak_bound_at_amplitude": {
+        "0.5": 1.5346044402422494,
+        "0.35": 1.0742231081695746,
+        "0.3": 0.9207626641453496
+      }
+    }
+  ]
+}

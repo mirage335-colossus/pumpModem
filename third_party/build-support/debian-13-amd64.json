@@ -1,0 +1,194 @@
+{
+  "purpose": "Optional offline Debian 13 amd64 native build headers and private display tools. Not a cross-compilation sysroot or application dependency download.",
+  "source": "Local Debian APT package indexes and official Debian package pages",
+  "packages": [
+    {
+      "name": "libx11-dev",
+      "version": "2:1.8.12-1",
+      "sha256": "530de60c9c6dadd997ae7d74eca2a41b25e849373a5ad5dcdb619aa05713d6e0",
+      "url": "https://deb.debian.org/debian/pool/main/libx/libx11/libx11-dev_1.8.12-1_amd64.deb",
+      "file": "libx11-dev_1.8.12-1_amd64.deb"
+    },
+    {
+      "name": "libxau-dev",
+      "version": "1:1.0.11-1",
+      "sha256": "1e29410af794a3d3790aab9fa0c1b0ec9324697502e982fce4dcdd4610ce3e8a",
+      "url": "https://deb.debian.org/debian/pool/main/libx/libxau/libxau-dev_1.0.11-1_amd64.deb",
+      "file": "libxau-dev_1.0.11-1_amd64.deb"
+    },
+    {
+      "name": "libxdmcp-dev",
+      "version": "1:1.1.5-1",
+      "sha256": "bc845297d20cf63388c6b248d9ee169a3890347cb1c29bcd9f771684bf17b528",
+      "url": "https://deb.debian.org/debian/pool/main/libx/libxdmcp/libxdmcp-dev_1.1.5-1_amd64.deb",
+      "file": "libxdmcp-dev_1.1.5-1_amd64.deb"
+    },
+    {
+      "name": "x11proto-dev",
+      "version": "2024.1-1",
+      "sha256": "6a6764500eb8171d3cd6d793c09902974f8ea87bd20c68d9eac5f1eeaf3fc407",
+      "url": "https://deb.debian.org/debian/pool/main/x/xorgproto/x11proto-dev_2024.1-1_all.deb",
+      "file": "x11proto-dev_2024.1-1_all.deb"
+    },
+    {
+      "name": "xtrans-dev",
+      "version": "1.4.0-1",
+      "sha256": "9ce1af9464faee0c679348dd11cdf63934c12e734a64e0903692b0cb5af38e06",
+      "url": "https://deb.debian.org/debian/pool/main/x/xtrans/xtrans-dev_1.4.0-1_all.deb",
+      "file": "xtrans-dev_1.4.0-1_all.deb"
+    },
+    {
+      "name": "libxft-dev",
+      "version": "2.3.6-1+b4",
+      "sha256": "98bdb10d271fa005b4f4b75721b1c57800353811157af036aed3e4501494ba66",
+      "url": "https://deb.debian.org/debian/pool/main/x/xft/libxft-dev_2.3.6-1+b4_amd64.deb",
+      "file": "libxft-dev_2.3.6-1+b4_amd64.deb"
+    },
+    {
+      "name": "libfreetype-dev",
+      "version": "2.13.3+dfsg-1+deb13u1",
+      "sha256": "f58107859d9fa44206e64cf35bdbd4febdec66a33e456ce2e5e3712f01b6c895",
+      "url": "https://deb.debian.org/debian/pool/main/f/freetype/libfreetype-dev_2.13.3+dfsg-1+deb13u1_amd64.deb",
+      "file": "libfreetype-dev_2.13.3+dfsg-1+deb13u1_amd64.deb"
+    },
+    {
+      "name": "libfontconfig-dev",
+      "version": "2.15.0-2.3",
+      "sha256": "e7c533d87da316da3b127d136c0d1f0238a936c4b0797cb5ab67ebac3cf7151e",
+      "url": "https://deb.debian.org/debian/pool/main/f/fontconfig/libfontconfig-dev_2.15.0-2.3_amd64.deb",
+      "file": "libfontconfig-dev_2.15.0-2.3_amd64.deb"
+    },
+    {
+      "name": "libxext-dev",
+      "version": "2:1.3.4-1+b3",
+      "sha256": "e6bd898976d762a6955ec465870e7f12a3b149f4c5b231b0687e293ed5726532",
+      "url": "https://deb.debian.org/debian/pool/main/libx/libxext/libxext-dev_1.3.4-1+b3_amd64.deb",
+      "file": "libxext-dev_1.3.4-1+b3_amd64.deb"
+    },
+    {
+      "name": "libxcursor-dev",
+      "version": "1:1.2.3-1",
+      "sha256": "57f2fc575496edc9f3dd286423494499d231a8b1cdb417bb8401f6b66b584a26",
+      "url": "https://deb.debian.org/debian/pool/main/libx/libxcursor/libxcursor-dev_1.2.3-1_amd64.deb",
+      "file": "libxcursor-dev_1.2.3-1_amd64.deb"
+    },
+    {
+      "name": "libxfixes-dev",
+      "version": "1:6.0.0-2+b4",
+      "sha256": "1070e0721765992c5355a9585f6eae9e0d11437a7d2b4a2c28123e6e5b0c0b2f",
+      "url": "https://deb.debian.org/debian/pool/main/libx/libxfixes/libxfixes-dev_6.0.0-2+b4_amd64.deb",
+      "file": "libxfixes-dev_6.0.0-2+b4_amd64.deb"
+    },
+    {
+      "name": "libxinerama-dev",
+      "version": "2:1.1.4-3+b4",
+      "sha256": "711206b2a759461fe27b86099c4b593cb80c1f558fa64dd92239706f8c2a43b3",
+      "url": "https://deb.debian.org/debian/pool/main/libx/libxinerama/libxinerama-dev_1.1.4-3+b4_amd64.deb",
+      "file": "libxinerama-dev_1.1.4-3+b4_amd64.deb"
+    },
+    {
+      "name": "libxrender-dev",
+      "version": "1:0.9.12-1",
+      "sha256": "55121741c44e03cbeb03dabb5721ded1341c987f055d7cae991de7431c9edfa6",
+      "url": "https://deb.debian.org/debian/pool/main/libx/libxrender/libxrender-dev_0.9.12-1_amd64.deb",
+      "file": "libxrender-dev_0.9.12-1_amd64.deb"
+    },
+    {
+      "name": "libxcb1-dev",
+      "version": "1.17.0-2+b1",
+      "sha256": "669949f8d5dff76616630d839b9047b76af553c62c376458094bd759f8fdb903",
+      "url": "https://deb.debian.org/debian/pool/main/libx/libxcb/libxcb1-dev_1.17.0-2+b1_amd64.deb",
+      "file": "libxcb1-dev_1.17.0-2+b1_amd64.deb"
+    },
+    {
+      "name": "xvfb",
+      "version": "2:21.1.16-1.3+deb13u3",
+      "sha256": "365da2b6c93339f34337c434a9489bb6411a240fa47b9f49693d3091745f28c2",
+      "url": "https://deb.debian.org/debian/pool/main/x/xorg-server/xvfb_21.1.16-1.3+deb13u3_amd64.deb",
+      "file": "xvfb_21.1.16-1.3+deb13u3_amd64.deb"
+    },
+    {
+      "name": "xserver-common",
+      "version": "2:21.1.16-1.3+deb13u3",
+      "sha256": "dc1d37303c103b23c40cd1ea694c5c6561e0e8dc1734a73c7a0ae0ef080e7fcc",
+      "url": "https://deb.debian.org/debian/pool/main/x/xorg-server/xserver-common_21.1.16-1.3+deb13u3_all.deb",
+      "file": "xserver-common_21.1.16-1.3+deb13u3_all.deb"
+    }
+  ],
+  "architecture": "amd64",
+  "multiarch": "x86_64-linux-gnu",
+  "runtime_libraries": [
+    {
+      "development": "libx11-dev",
+      "package": "libx11-6",
+      "link": "libX11.so",
+      "soname": "libX11.so.6"
+    },
+    {
+      "development": "libxau-dev",
+      "package": "libxau6",
+      "link": "libXau.so",
+      "soname": "libXau.so.6"
+    },
+    {
+      "development": "libxdmcp-dev",
+      "package": "libxdmcp6",
+      "link": "libXdmcp.so",
+      "soname": "libXdmcp.so.6"
+    },
+    {
+      "development": "libxext-dev",
+      "package": "libxext6",
+      "link": "libXext.so",
+      "soname": "libXext.so.6"
+    },
+    {
+      "development": "libxcursor-dev",
+      "package": "libxcursor1",
+      "link": "libXcursor.so",
+      "soname": "libXcursor.so.1"
+    },
+    {
+      "development": "libxfixes-dev",
+      "package": "libxfixes3",
+      "link": "libXfixes.so",
+      "soname": "libXfixes.so.3"
+    },
+    {
+      "development": "libxft-dev",
+      "package": "libxft2",
+      "link": "libXft.so",
+      "soname": "libXft.so.2"
+    },
+    {
+      "development": "libxinerama-dev",
+      "package": "libxinerama1",
+      "link": "libXinerama.so",
+      "soname": "libXinerama.so.1"
+    },
+    {
+      "development": "libxrender-dev",
+      "package": "libxrender1",
+      "link": "libXrender.so",
+      "soname": "libXrender.so.1"
+    },
+    {
+      "development": "libxcb1-dev",
+      "package": "libxcb1",
+      "link": "libxcb.so",
+      "soname": "libxcb.so.1"
+    },
+    {
+      "development": "libfreetype-dev",
+      "package": "libfreetype6",
+      "link": "libfreetype.so",
+      "soname": "libfreetype.so.6"
+    },
+    {
+      "development": "libfontconfig-dev",
+      "package": "libfontconfig1",
+      "link": "libfontconfig.so",
+      "soname": "libfontconfig.so.1"
+    }
+  ]
+}

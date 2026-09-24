@@ -1,0 +1,63 @@
+{
+  "analysis": "known-source Gray QAM residual",
+  "qualified": true,
+  "order": 4194304,
+  "bits_per_symbol": 22,
+  "intervals": 635,
+  "symbols_per_interval": 94,
+  "zero_label_padding_bits_per_interval": 20,
+  "summary": {
+    "symbols": 59690,
+    "signal_energy": 60407.14536789564,
+    "error_energy": 0.028116950277220824,
+    "known_evm": 0.0006822443534641855,
+    "known_evm_percent": 0.06822443534641855,
+    "known_signal_to_residual_db": 63.32120100087093,
+    "nearest_decision_evm": 0.00047384648179971107,
+    "nearest_label_mismatches": 22930,
+    "gain_real": 0.9999884490373941,
+    "gain_imag": -9.34734637922393e-06,
+    "gain_magnitude": 0.9999884490810811,
+    "gain_db": -0.00010033058640430842,
+    "phase_degrees": -0.0005355696835062114,
+    "after_global_complex_gain_evm": 0.0006820903959287046,
+    "after_global_complex_gain_signal_to_residual_db": 63.323161308879506,
+    "known_payload_bits": 1300480,
+    "known_payload_bit_errors": 25586,
+    "known_payload_ber": 0.01967427411417323
+  },
+  "heldout_global_gain": {
+    "split": "even intervals fit, odd intervals held out",
+    "fitted_real": 0.99999059007406,
+    "fitted_imag": -9.523565638121906e-06,
+    "symbols": 29798,
+    "evm": 0.0006878867841102914,
+    "signal_to_residual_db": 63.249660685353334
+  },
+  "probe": {
+    "exact": 1,
+    "decoded_complete": 1,
+    "raw_wrong_bits": null,
+    "raw_wrong_bits_counted": false,
+    "amplitude": 0.25,
+    "symbol_rate": 17647.05882,
+    "rolloff": 0.02
+  },
+  "gain_interpretation": "Residual scalar after production RX normalization/equalization, not hardware gain.",
+  "residual_interpretation": "Known-source residual includes noise, distortion, timing, phase and equalizer errors. It is not calibrated AWGN SNR.",
+  "global_fit_caveat": "Complex gain fitting removes common amplitude/phase error and can hide a label rotation; raw known-source EVM remains the primary metric.",
+  "inputs": {
+    "probe": {
+      "path": "/tmp/cable-level-20260921/wide-a025.json",
+      "sha256": "a8db217bedf62608f312d859aae960b432061b1c0e2fc5548baa1593850cffa9"
+    },
+    "tx_bits": {
+      "path": "/tmp/cable-level-20260921/wide-a025.bits",
+      "sha256": "0d563663492b2a2e9d7376714ac4c2ef6db3a154a4b70d3255a7f158f720614e"
+    },
+    "rx_symbols": {
+      "path": "/tmp/cable-level-20260921/wide-a025.iq",
+      "sha256": "85adf19f374c5faa5d71a45ed8d2e47f12b572aa158ffaa74cbc935a63b57ef8"
+    }
+  }
+}

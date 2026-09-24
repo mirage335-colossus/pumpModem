@@ -32,6 +32,19 @@ void fft(std::vector<std::complex<double>>& values) {
     }
 }
 }
+std::optional<double> spectrum_display_gain(std::optional<double> reference_gain_db,
+                                             std::size_t waveform_samples) {
+    if (!reference_gain_db || !waveform_samples || waveform_samples>=signal_window_size)
+        return reference_gain_db;
+    // signal_plots normalizes by the sum of window weights. Noise power is
+    // therefore proportional to sum(w*w)/sum(w)^2: 1/N for its one/two-sample
+    // rectangular windows, 1 for the three-sample Hann, and 1.5/(N-1) thereafter.
+    // Zero padding adds no observed samples and cannot narrow that bandwidth.
+    constexpr auto complete=1.5/static_cast<double>(signal_window_size-1);
+    const auto partial=waveform_samples<3?1./static_cast<double>(waveform_samples):
+        waveform_samples==3?1.:1.5/static_cast<double>(waveform_samples-1);
+    return *reference_gain_db+10*std::log10(complete/partial);
+}
 SignalPlots signal_plots(std::span<const float> samples,const modem::Config& config,std::uint64_t first_sample) {
     if (samples.size()>SignalWindow::sample_capacity(config)) throw Error("signal preview exceeds its frame window");
     SignalPlots result;

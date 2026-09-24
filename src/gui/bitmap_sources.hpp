@@ -19,7 +19,8 @@ public:
         const auto& snapshot = controller.snapshot();
         replaying_ = snapshot.simulation_replay;
         if (update.clear_waterfall) history_.clear();
-        if (update.append_waterfall) history_.push(snapshot.spectrum_db, snapshot.spectrum_bin_hz);
+        if (update.append_waterfall) history_.push(snapshot.spectrum_db, snapshot.spectrum_bin_hz,
+                                                 snapshot.simulation_spectrum_gain_db);
         const auto zoom = controller.waveform_zoom();
         if (update.update_plots || zoom_ != zoom)
             put(ui::Bitmap::waveform, plots::PlotSnapshot::waveform(snapshot.waveform, controller.settings().transfer.modem, zoom));
