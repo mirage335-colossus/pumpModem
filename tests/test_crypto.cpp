@@ -78,6 +78,59 @@ void test_streams() {
     check(all != Crypto(other_master).stream(StreamPurpose::Data, 1720000000, 0, 1024), "master keys overlap");
 }
 
+void test_preamble_domain() {
+    Bytes master(32);
+    for(std::size_t i=0;i<master.size();++i)master[i]=static_cast<std::uint8_t>(i);
+    const Crypto crypto(master);
+    constexpr std::uint64_t epoch=1720000000;
+    constexpr auto preamble=StreamDomain::Preamble;
+    constexpr auto final=std::numeric_limits<std::uint64_t>::max();
+    // Independent Python hashlib/hmac HKDF plus openssl enc AES-256-CTR:
+    // same frozen Data epoch key as test_streams, with only the high counter
+    // bytes replaced by ASCII "preamble". The final vector fixes all 64
+    // low counter bits, including the largest supported byte offset.
+    const auto beginning=from_hex("8338c986304db443a52d1127070e6003350b6900834a4384f7146632ddd3ddc3"
+                                  "22fbc085226fc6d659a8481cc9ad1c0d882899c85afbd6dba8582974ae27092b");
+    check(crypto.stream(StreamPurpose::Data,epoch,0,beginning.size(),preamble)==beginning,
+          "preamble counter format vector mismatch");
+    check(crypto.stream(StreamPurpose::Data,epoch,final-15,16,preamble)==
+          from_hex("73a09cfa4b394d4908a49a1fcf838baa"),"final preamble counter vector mismatch");
+    const auto data=crypto.stream(StreamPurpose::Data,epoch,0,1024,preamble);
+    for(auto purpose:{StreamPurpose::Data,StreamPurpose::Dsss,StreamPurpose::Scrambler,StreamPurpose::Fhss}) {
+        const auto payload=crypto.stream(purpose,epoch,0,1024);
+        check(payload==crypto.stream(purpose,epoch,0,1024,StreamDomain::Payload),
+              "explicit payload domain changed existing stream bytes");
+        const auto all=crypto.stream(purpose,epoch,0,1024,preamble);
+        check(all!=payload,"preamble and payload counter domains overlap");
+        check(all!=crypto.stream(purpose,epoch+1,0,1024,preamble),"preamble epoch keys overlap");
+        if(purpose!=StreamPurpose::Data)check(all!=data,"preamble purpose keys overlap");
+        for(auto offset:{0U,1U,15U,16U,17U,255U,511U}) {
+            const auto slice=crypto.stream(purpose,epoch,offset,127,preamble);
+            check(std::equal(slice.begin(),slice.end(),all.begin()+offset),"preamble random access mismatch");
+        }
+        Bytes chunks;
+        for(std::size_t offset=0,index=0;offset<all.size();++index) {
+            constexpr std::array<std::size_t,5> sizes{1,15,17,127,513};
+            const auto count=std::min(sizes[index%sizes.size()],all.size()-offset);
+            const auto slice=crypto.stream(purpose,epoch,offset,count,preamble);
+            chunks.insert(chunks.end(),slice.begin(),slice.end());offset+=count;
+        }
+        check(chunks==all,"preamble chunk boundaries changed bytes");
+        const auto tail=crypto.stream(purpose,epoch,final-30,31,preamble);
+        check(tail!=crypto.stream(purpose,epoch,final-30,31),"final offsets crossed preamble/payload domains");
+        for(std::uint64_t skip:{0ULL,1ULL,15ULL,16ULL,30ULL}) {
+            const auto slice=crypto.stream(purpose,epoch,final-30+skip,static_cast<std::size_t>(31-skip),preamble);
+            check(std::equal(slice.begin(),slice.end(),tail.begin()+static_cast<std::ptrdiff_t>(skip)),
+                  "final preamble byte offset lost random-access consistency");
+        }
+    }
+    check(crypto.stream(StreamPurpose::Data,epoch,final,0,preamble).empty(),"empty preamble stream failed");
+    rejects([&]{crypto.stream(StreamPurpose::Data,epoch,final,2,preamble);},"preamble byte offset wrapped");
+    rejects([&]{crypto.stream(StreamPurpose::Data,epoch,final-15,17,preamble);},"preamble final block overflow accepted");
+    rejects([&]{crypto.stream(StreamPurpose::Data,epoch,0,1,static_cast<StreamDomain>(99));},"invalid stream domain accepted");
+    rejects([&]{crypto.stream(StreamPurpose::Data,epoch,0,0,static_cast<StreamDomain>(99));},"empty stream ignored invalid domain");
+}
+
 void test_authentication() {
     Crypto crypto(Bytes(32, 0x72));
     const auto first = bytes("timestamp|metadata|message one");
@@ -188,6 +241,7 @@ void test_production_keyfile() {
 int main() {
     try {
         test_streams();
+        test_preamble_domain();
         test_authentication();
         test_keyfiles();
         test_production_keyfile();

@@ -4,6 +4,75 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Shared preamble keys and CTR pad — September 2026
+
+The preamble now uses the same Data key and the same enabled Scrambler/DSSS
+waveform keys and transmission epoch as the payload. Its only cryptographic
+distinction is the fixed eight-byte ASCII `preamble` pad in the high half of
+the AES-CTR counter; the low half contains the ordinary block offset. All
+preamble-specific HMAC key derivations have been removed. Those derivations
+were deterministic, and neither version generates random preamble keys.
+
+Frozen Crypto vectors check unchanged payload output and the preamble counter
+format at the beginning and end of the 64-bit byte-address range. All four
+stream purposes have domain, epoch, chunk and random-access coverage. The
+waveform checks recover the actual encrypted phase words against the selected
+Data key, then verify each spreading layer against its existing payload key
+with the preamble counter pad. Payload samples and positions remain unchanged;
+the existing prefix-only rejection, full-prefix and lost-prefix cases remain
+part of receiver validation.
+
+## Preamble Data encryption — September 2026
+
+Preamble noise bytes now pass through bytewise Data-purpose AES-CTR encryption
+before I/Q mapping, followed by every enabled Scrambler and DSSS layer. The
+selected key derives a dedicated hardware Data key; the prefix consumes no
+payload keystream positions. At most four fixed 512-byte caches are allocated,
+and the extra Data cache is included in the transmitter memory ceiling.
+
+An analytic-waveform test recovers the transmitted phase words and verifies
+their bytewise XOR against the dedicated Data stream across cache boundaries.
+Chunked output with all three private layers preserves the waveform and PCM
+headroom. A transmitter-only tone check verifies half-chip noise refreshes;
+it adds no tone reception test and reserves no payload constellation points.
+The receiver matrix retains its 32 existing cases and adds Data-only and
+Data-plus-Scrambler-plus-DSSS preambles. These cases clear the preamble Data
+seed at the receiver, reject prefix-only captures, and recover exact `001`
+with the prefix present or entirely removed.
+
+All 48 Release CTest suites passed in 165.38 seconds. The three focused
+ASan/UBSan suites (`pattern_code`, `pattern_receiver`, `pattern_transfer`)
+passed in 20.15 seconds with leak detection disabled. These software checks
+do not measure physical low probability of intercept or external AGC behavior.
+
+## Private hardware-noise preamble — September 2026
+
+Hardware settling now uses independent circular Gaussian-derived I/Q noise,
+with normalized mean power and bounded peaks. Any selected key supplies a
+private noise seed, including Data-only configurations. Every enabled Scrambler
+and DSSS layer also applies through a separate hardware derivation domain;
+both layers affect the prefix when both are selected. At most three fixed
+512-byte caches hold these streams, without consuming payload stream positions.
+
+PCM checks vary the key, epoch, noise seed and each spreading seed independently.
+They check both noise quadratures, peak headroom, mean power, chunk invariance,
+payload independence and unchanged payload samples after the prefix. Thirty-two
+receiver cases combine 64/128 chips, 100/1200 Hz, two epochs and all four
+spreading-layer combinations. Prefix-only captures produce no acquired burst;
+full and entirely removed prefixes both recover exact `001` under a 2 MiB
+receiver ceiling.
+
+Two nuisance-waveform regressions also prevent an admitted weak hypothesis or
+its unconfirmed tail from blocking a much stronger later pattern. The captured
+100 Hz CLI failure now recovers all 696 payload bits at sample 30,720 and
+validates `independent clock`, using only pattern evidence to choose timing.
+The final Release run passed all 48 CTest suites in 90.92 seconds. The three
+focused ASan/UBSan suites passed in 21.09 seconds with leak detection
+disabled. These finite software checks do not establish physical low
+probability of intercept. The noise's rectangular half-chip updates have a
+wider first-null spectrum than full-chip payload pulses; no enforced spectral
+mask or physical AGC measurement is claimed.
+
 ## Binary pattern transport — September 2026
 
 The hardware-settling follow-up rounds the five-second target to whole

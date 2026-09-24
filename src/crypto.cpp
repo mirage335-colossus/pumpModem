@@ -494,9 +494,11 @@ Crypto Crypto::random() {
 }
 
 Bytes Crypto::stream(StreamPurpose purpose, std::uint64_t timestamp,
-                      std::uint64_t offset, std::size_t count) const {
+                      std::uint64_t offset, std::size_t count, StreamDomain domain) const {
     const auto index = static_cast<std::size_t>(purpose);
     require(index < 4, "invalid keystream purpose");
+    require(domain == StreamDomain::Payload || domain == StreamDomain::Preamble,
+            "invalid keystream domain");
     require(count == 0 || count - 1 <= std::numeric_limits<std::uint64_t>::max() - offset,
             "keystream byte offset would overflow");
     if (count == 0) return {};
@@ -507,6 +509,10 @@ Bytes Crypto::stream(StreamPurpose purpose, std::uint64_t timestamp,
     put_u64(std::span(info).last(8), timestamp);
     auto key = hkdf(keys_[index], info);
     std::array<std::uint8_t, 16> counter{};
+    if(domain == StreamDomain::Preamble) {
+        constexpr std::string_view pad = "preamble";
+        std::copy(pad.begin(), pad.end(), counter.begin());
+    }
     put_u64(std::span(counter).last(8), offset / 16);
     CipherContext context(EVP_CIPHER_CTX_new(), EVP_CIPHER_CTX_free);
     require(context && EVP_EncryptInit_ex(context.get(), EVP_aes_256_ctr(), nullptr,

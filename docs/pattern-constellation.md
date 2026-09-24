@@ -20,17 +20,35 @@ get none. Empty payloads emit nothing.
 
 This prefix brings external automatic gain control, audio muting and similar
 hardware toward their transmit operating level before the first payload symbol.
-It uses an independent noise-like sign stream at the normal amplitude and chip
-rate, rather than sending legal payload codewords. It is neither a training
-sequence nor a synchronization marker, and the receiver never requires or fits
+It uses independent circular Gaussian-derived I/Q noise at the payload's mean
+power, with bounded peaks and updates approximately every half chip, rather
+than sending legal payload codewords. This avoids the duplicated, single-axis
+structure of full-chip random signs. The rectangular updates have a wider
+first-null spectrum than the payload pulses; no strict spectral mask is claimed.
+Tone modes use the same independent I/Q prefix, with phase and amplitude
+refreshed at approximately twice the nominal chip rate, independent of the
+longer payload-symbol duration. No phase/amplitude constellation points are
+reserved for settling. It is neither a training sequence nor a synchronization
+marker, and the receiver never requires or fits
 it to establish lock. A missing or distorted prefix does not change the payload
 format or the evidence needed to accept a symbol.
 
-The prefix stream has its own derivation domain, with a private seed when
-keyed pattern or DSSS spreading is active and a public seed otherwise. Its samples are
-reproducible for previews without reusing payload stream positions. The epoch
-is fixed at transmission start; payload Data and pattern positions still begin
-at zero. System-clock hypotheses account for the prefix's elapsed duration
+The prefix begins with public noise bytes, XOR-encrypted by the existing
+Data-purpose key and transmission epoch whenever an encryption key is selected,
+before their mapping into I/Q noise. This also applies with payload spreading
+disabled.
+Every enabled Scrambler and DSSS layer then applies its existing key and epoch;
+all layers remain active together. Each stream uses the fixed ASCII `preamble`
+pad in the high eight CTR counter bytes, separating prefix fragments from
+payload positions without deriving additional keys. With no
+Data key or spreading layer, the prefix is public. Its samples are
+reproducible for previews without reusing payload stream positions. At most
+four fixed 512-byte caches hold these streams. This avoids a predictable
+public preamble in keyed transmissions; it does not by itself demonstrate
+physical low probability of intercept. The epoch is fixed at transmission
+start, before the prefix; this does not change the time schedule, and payload
+Data and pattern positions still begin at zero. System-clock hypotheses
+account for the prefix's elapsed duration
 when predicting the first payload symbol. Estimates and transmission layouts
 include its airtime separately from meaningful bits and payload symbols.
 
