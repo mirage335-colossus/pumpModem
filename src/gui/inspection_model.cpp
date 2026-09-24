@@ -1,5 +1,4 @@
 #include "inspection_model.hpp"
-#include "datapump/compression.hpp"
 #include "../constellation.hpp"
 #include <algorithm>
 #include <cmath>
@@ -22,28 +21,26 @@ Constellation alphabet(unsigned bits,std::string title) {
     for(unsigned value=0;value<(1U<<bits);++value)result.points.push_back(modem::detail::mapped(value,bits,{1,0}));
     return result;
 }
-std::string compression_description(const PacketLayout& layout,const transfer::Options& options) {
-    if(layout.compressed)return std::string(layout.original_bytes<256?"Fixed byte prefix":"LZMA2 preset 9e")+
+std::string compression(const PacketLayout& layout,const transfer::Options& options) {
+    if(layout.compressed)return "Version "+count(layout.version)+(layout.version==2?" static prefix code":" dictionary code")+
         " ("+count(layout.original_bytes)+" to "+count(layout.payload_bytes)+" bytes)";
     if(!options.compression)return "Off (disabled)";
-    return layout.original_bytes?"Off (compressed candidate does not save bytes)":"Off (empty payload)";
+    if(layout.original_bytes>=256)return "Off (payload is at least 256 bytes)";
+    return layout.original_bytes?"Off (neither short code saves bytes)":"Off (empty payload)";
 }
 FlowLane packet_receiver(bool simulation,bool keyed,bool fec,bool compressed,bool counterpart=true) {
     return {simulation?"Receive • packet simulation":"Receive • continuous audio",{
         {simulation?"Channel observations":"Audio input + sample-rate conversion",simulation?
             "Integrate channel observations containing clock/frequency error, phase diffusion and AWGN. Hardware audio is bypassed.":
             "Convert the selected hardware clock to the internal modem clock, then project the carrier and despread each timing hypothesis."},
-        {simulation?"Already matched observations":"Full-pattern correlation",simulation?
-            "Accelerated simulation supplies whole-symbol matched channel statistics. It does not test blind chip timing acquisition.":
-            "Multiply complex chip projections by the candidate code and integrate before deciding a phase/amplitude symbol. No hard chip decisions are needed: correctly aligned signal adds coherently while independent noise does not. Wrong codes and code phases leave energy outside the legal pattern space."},
-        {"Timing, gain and initial phase","Fit the pattern constellation across timing and gain hypotheses, then try the first symbol's possible differential phases. A plausible compact header starts a bounded provisional decoder. Verify the complete short frame before committing to lock; other timing hypotheses keep searching."},
+        {"Timing and gain hypotheses","Search differential APSK timing and bounded gain fits. Each trial unmasks its bootstrap and checks RS/CRC before selection by header validation and residual quality. Selected gain stays fixed for the body; full-frame processing repeats the checks."},
         {"Parallel training diagnostic","An independent recorder measures matching portions of the five-second training signal; it is not a prerequisite for packet lock or byte recovery."},
         {"Remove public whitening","Reverse the public mask on the audio frame; the first 32 training-input bytes are excluded."},
         {"Private data-mask candidates","Try admitted receive keys and local epoch candidates independently of the selected transmit key; also handle allowed plaintext. Epoch is not an on-air field."},
-        {"Compact header","Try bounded header lengths and FEC modes. Validate packed flags, canonical ULEB128 body length and CRC16 after any enabled RS repair. No magic bytes are transmitted. Header CRC alone does not establish a short-frame lock."},
-        {"Body deinterleave + RS",std::string("The incoming header selects off/RS20/RS60. Restore coded rows and correct enabled shortened codewords. Messages below 16 original bytes have no RS anywhere. ")+(counterpart?(fec?"The proposed packet enables body FEC.":"The proposed packet has body FEC off."):"")},
+        {"Bootstrap RS + CRC","Correct RS(72,40), validate header fields and CRC32, then obtain the declared body length."},
+        {"Body deinterleave + RS",std::string("The incoming protected header selects off/RS20/RS60. Restore coded rows and correct enabled shortened codewords. ")+(counterpart?(fec?"The proposed packet enables body FEC.":"The proposed packet has body FEC off."):"")},
         {"Integrity + metadata",std::string("Use the incoming flags and candidate key to verify SHA-256 or epoch-bound HMAC-SHA256, then validate metadata. ")+(counterpart?(keyed?"The proposed packet uses keyed authentication.":"The proposed packet uses unkeyed integrity."):"")},
-        {"Decompress incoming content",std::string("The incoming header enables compression. After integrity validation, the body's original length selects fixed byte-prefix coding below 256 bytes or raw LZMA2 otherwise; no codec identifier is transmitted. ")+(counterpart?(compressed?"The proposed packet is compressed.":"The proposed packet is uncompressed."):"")},
+        {"Decompress incoming short code",std::string("The incoming protected header selects uncompressed/v1/v2 after integrity validation. ")+(counterpart?(compressed?"The proposed packet uses short-code compression.":"The proposed packet is uncompressed."):"")},
         {"Audio AGC","No audio AGC feedback loop is implemented. Bootstrap gain fitting is receiver calibration, not audio gain control.",InspectionState::unavailable},
         {"Convolutional / trellis decoding","Off: convolutional codes, Viterbi/trellis decoding and adaptive equalization are not implemented.",InspectionState::unavailable}
     }};
@@ -80,7 +77,6 @@ Inspection inspect(const InspectionRequest& request) {
         (config.dsss?"The independent DSSS stream adds sign flips. ":"Independent DSSS is off. ")+
         "Signs restart each symbol; extended integration repeats the code and may end in a partial chip. The chip factor is not the number of payload bits per symbol.";
     result.constellations.push_back(alphabet(bits,"Payload APSK alphabet"));
-    result.pattern_space=inspection::inspect_pattern_space(config,request.target_snr,config.scramble || config.dsss);
     const auto spread_detail=config.scramble?"Key-derived scrambler signs replace the base pattern; selected DSSS adds independent flips.":
         config.dsss?"Apply the configured base signs and independent key-derived DSSS flips.":
         config.spreading_mode==modem::SpreadingMode::tone?"All +1 chip signs; the same APSK carrier modulator is used.":"Apply the configured repeating fixed chip signs.";
@@ -123,60 +119,44 @@ Inspection inspect(const InspectionRequest& request) {
     result.packet_layout=layout;
     const auto bootstrap_bytes=layout.header_bytes+layout.header_parity_bytes;
     const auto body_coded=layout.body_bytes+layout.body_parity_bytes;
-    const auto packet_symbols=modem::payload_symbol_count(layout.wire_bytes,config);
-    const auto bootstrap_seconds=static_cast<double>(bootstrap_bytes*8)/bits*symbol_seconds;
-    const auto body_seconds=static_cast<double>(packet_symbols)*symbol_seconds-bootstrap_seconds;
-    const auto compression_detail=compression_description(layout,options);
+    const auto bootstrap_symbols=bootstrap_bytes*8/bits+(bootstrap_bytes*8%bits!=0);
+    const auto body_symbols=body_coded*8/bits+(body_coded*8%bits!=0);
+    const auto compression_detail=compression(layout,options);
     const auto fec=layout.fec!=FecMode::off;
     const auto fec_detail=fec?count(layout.block_count)+" shortened systematic GF(256) blocks; full blocks use "+
         count(layout.block_capacity)+" data + "+count(layout.full_block_parity)+" parity bytes. Last block: "+
         count(layout.last_block_data)+" data + "+count(layout.last_block_parity)+" parity bytes. Parity overhead is relative to data, not a correctable-error percentage.":
-        "No Reed-Solomon parity in the header or body; no column interleave.";
-    const auto header_fec=layout.header_parity_bytes?"RS("+count(bootstrap_bytes)+","+count(layout.header_bytes)+"):"+
-        count(layout.header_parity_bytes)+" parity bytes":"Off";
-    const auto header_detail=count(layout.header_bytes)+" header bytes: packed controls (1), canonical ULEB128 body length ("+
-        count(layout.header_bytes-3)+"), CRC16 (2). "+count(layout.header_parity_bytes)+
-        " RS parity bytes. No magic or separate symbol padding; header and data share the configured APSK rate.";
+        "No body parity or column interleave. The protected bootstrap still has 32 parity bytes.";
     result.title="Message / file packet";
     result.summary=count(layout.original_bytes)+" input bytes produce "+count(layout.wire_bytes)+" packet bytes, "+
-        count(packet_symbols)+" payload symbols and "+number(result.estimate.total_seconds)+" seconds including training.";
+        count(bootstrap_symbols+body_symbols)+" payload symbols and "+number(result.estimate.total_seconds)+" seconds including training.";
     result.preamble_description="32 training-input bytes map to 64 fixed four-bit APSK segments over exactly five seconds (12.8 segments/s), independently of payload baud. Training is not chip-spread. A selected key masks its bytes; the public whitening mask skips them.";
-    result.fields.insert(result.fields.end(),{{"Compression",compression_detail},
+    result.fields.insert(result.fields.end(),{{"Packet version",count(layout.version)},{"Compression",compression_detail},
         {"Message kind",request.message.kind==MessageKind::text?"Text":request.message.kind==MessageKind::file?"File":"Screenshot"},
         {"Repeat requested",request.message.repeatable?"Yes":"No"},
         {"Repeat eligibility",result.estimate.repeatable_allowed?"Within the configured incremental-content policy":"Exceeds the configured incremental-content policy"},
-        {"Body FEC",fec_name(layout.fec)},{"Bootstrap FEC",header_fec},
-        {"FEC selection",layout.original_bytes<16?"Automatically off below 16 original bytes":"Selected mode applies to header and body"},
+        {"Body FEC",fec_name(layout.fec)},{"Bootstrap FEC","RS(72,40):32 parity bytes"},
         {"Integrity",keyed?"32-byte epoch-bound HMAC-SHA256":"32-byte SHA-256"},
-        {"Bootstrap padding","0 bits (continuous packet)"},
-        {"Final symbol padding",count(packet_symbols*bits-layout.wire_bytes*8)+" bits"},
+        {"Bootstrap padding",count(bootstrap_symbols*bits-bootstrap_bytes*8)+" bits"},
+        {"Body padding",count(body_symbols*bits-body_coded*8)+" bits"},
         {"Wire bytes",count(layout.wire_bytes+32)+" including 32 training-input bytes"},
-        {"Original length",count(layout.original_bytes)+" bytes, stored as canonical ULEB128 in the body"},
-        {"Encoded payload length",count(layout.payload_bytes)+" bytes, inferred from body length and metadata"},
-        {"Compression rule","Original length below 256 bytes: fixed byte prefix; otherwise raw LZMA2. Enable only when smaller; no codec or codebook identifier."},
         {"Body ordering",fec?"Column-interleaved shortened RS rows; logical fields are not contiguous on air":"Metadata, encoded data, integrity tag"}});
-    if(layout.original_bytes>=256 && options.compression) {
-        const auto history=std::max<std::size_t>(4096,std::min<std::size_t>(layout.original_bytes,64U*1024U*1024U));
-        result.fields.insert(result.fields.end(),{{"Compression history",count(history)+" bytes, inferred from original length"},
-            {"Compression encoder workspace",count(compression::long_encoder_workspace(layout.original_bytes))+" bytes, separate from retained content"},
-            {"Compression decoder workspace",count(compression::long_decoder_workspace(layout.original_bytes))+" bytes, separate from retained content"}});
-    }
-    result.sections={{"Training","Fixed five-second physical training; 64 four-bit APSK segments. No spreading signs.",32,64,5.},
-        {"Compact bootstrap",header_detail,bootstrap_bytes,{},bootstrap_seconds},
-        {fec?"Interleaved coded body":"Uncoded body",fec_detail+" Continues in the same bitstream as the header. Only the final incomplete symbol is padded; no zero-byte tail is sent.",body_coded,{},body_seconds},
-        {"Logical metadata","23 fixed bytes: ID (16), ID/repeat CRC32 (4), three one-byte string lengths (3). Then canonical ULEB128 original length (1–5 bytes) and filename/callsign/grid strings. Values are omitted.",layout.metadata_bytes,{},{},true},
+    result.sections={{"Training","Fixed five-second physical training;64 four-bit APSK segments. No spreading signs.",32,64,5.},
+        {"Protected bootstrap","40-byte header (magic/version/FEC/flags/kind/lengths/CRC32) plus 32 mandatory RS parity bytes. Separate symbol boundary.",bootstrap_bytes,bootstrap_symbols,static_cast<double>(bootstrap_symbols)*symbol_seconds},
+        {fec?"Interleaved coded body":"Uncoded body",fec_detail+" Body uses its own symbol boundary; final zero pad bits are excluded from decoded bytes.",body_coded,body_symbols,static_cast<double>(body_symbols)*symbol_seconds},
+        {"Logical metadata","26 fixed bytes: 16-byte ID, 4-byte ID/repeat CRC, three length fields totaling 6 bytes; then filename/callsign/grid bytes. Values are omitted.",layout.metadata_bytes,{},{},true},
         {"Data [placeholder]",compression_detail+". Actual content is not retained in this view.",layout.payload_bytes,{},{},true},
-        {"Integrity tag",keyed?"Epoch-bound HMAC-SHA256 over the canonical variable header and uncoded metadata/data; excludes tag and parity.":"SHA-256 over the canonical variable header and uncoded metadata/data; excludes tag and parity.",layout.integrity_bytes,{},{},true},
+        {"Integrity tag",keyed?"Epoch-bound HMAC-SHA256 over the canonical 40-byte header and uncoded metadata/data; excludes tag and parity.":"SHA-256 over the canonical 40-byte header and uncoded metadata/data; excludes tag and parity.",layout.integrity_bytes,{},{},true},
         {fec?"Body RS parity":"Body RS parity • off",fec_detail,layout.body_parity_bytes,{},{},false,true}};
     result.lanes.push_back({"Transmit • packet",{{"Input","Selected message or file [data placeholder]; metadata values are omitted."},
-        {"Content compression",compression_detail+". Below 256 original bytes, use the fixed byte-only prefix code; longer input uses raw LZMA2 preset 9e. Keep the candidate only when smaller.",layout.compressed?InspectionState::active:InspectionState::off},
-        {"Header + logical body","Build packed controls, canonical ULEB128 body length and CRC16. The body has 23 fixed metadata bytes, canonical ULEB128 original length, metadata strings and encoded content. Payload length is implicit; no magic, version, codebook identifier or timestamp is transmitted."},
+        {"Short compression",compression_detail,layout.compressed?InspectionState::active:InspectionState::off},
+        {"Header + logical body","Build a 40-byte canonical header and 26-byte fixed metadata plus metadata strings and encoded content. Timestamp is not transmitted."},
         {"Integrity tag",keyed?"Append a 32-byte epoch-bound HMAC-SHA256 over canonical header and body.":"Append a 32-byte SHA-256 over canonical header and body."},
-        {"Bootstrap RS",header_detail,layout.header_parity_bytes?InspectionState::active:InspectionState::off},
+        {"Bootstrap RS","Always protect the 40-byte header with 32 parity bytes: RS(72,40)."},
         {"Body RS + interleave",fec_detail,fec?InspectionState::active:InspectionState::off},
         {"Training + private mask",keyed?"Prepend 32 training-input bytes, then encrypt the entire wire with the epoch's Data XOR stream.":"Prepend 32 training-input bytes; no private encryption is selected."},
         {"Public whitening","Apply the reversible public audio mask after private masking, skipping training. This is not encryption."},
-        {"APSK + chip signs","Training uses fixed four-bit symbols; the entire packet uses continuous configured-width groups without an internal padding boundary. "+std::string(spread_detail)},
+        {"APSK + chip signs","Training uses fixed four-bit symbols; bootstrap and body use separate configured-width groups. "+std::string(spread_detail)},
         {request.simulation?"Simulation channel":"Carrier + audio output",request.simulation?
             "Process integrated channel observations with clock/frequency error, phase diffusion and AWGN; bounded previews feed the plots.":
             "Generate at the internal modem clock; interpolate to the independently negotiated hardware clock."},

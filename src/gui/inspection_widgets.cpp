@@ -1,5 +1,4 @@
 #include "inspection_widgets.hpp"
-#include "theme_fltk.hpp"
 #include <FL/fl_draw.H>
 #include <algorithm>
 #include <cmath>
@@ -8,23 +7,22 @@
 
 namespace datapump::gui::widgets {
 namespace {
-const Fl_Color background=theme::fltk_color(theme::background);
-const Fl_Color surface=theme::fltk_color(theme::surface);
-const Fl_Color ink=theme::fltk_color(theme::text);
-const Fl_Color muted=theme::fltk_color(theme::muted);
-const Fl_Color accent=theme::fltk_color(theme::accent);
-const Fl_Color border=theme::fltk_color(theme::grid);
+const Fl_Color background=fl_rgb_color(242,246,249);
+const Fl_Color ink=fl_rgb_color(25,45,60);
+const Fl_Color muted=fl_rgb_color(79,100,115);
+const Fl_Color accent=fl_rgb_color(17,111,145);
+const Fl_Color border=fl_rgb_color(205,218,227);
 constexpr int gap=16;
 
 int text_height(const std::string& text,int width,int size,bool bold=false) {
     if(text.empty()) return 0;
-    fl_font(bold?theme::bold_font:theme::font,size);
+    fl_font(bold?FL_HELVETICA_BOLD:FL_HELVETICA,size);
     int measured_width=std::max(1,width),height=0;
     fl_measure(text.c_str(),measured_width,height,0);
     return height+2;
 }
 void label(const std::string& text,int x,int y,int width,int height,int size,Fl_Color color,bool bold=false) {
-    fl_color(color); fl_font(bold?theme::bold_font:theme::font,size);
+    fl_color(color); fl_font(bold?FL_HELVETICA_BOLD:FL_HELVETICA,size);
     fl_draw(text.c_str(),x,y,width,height,FL_ALIGN_LEFT|FL_ALIGN_TOP|FL_ALIGN_INSIDE|FL_ALIGN_WRAP,nullptr,0);
 }
 std::string duration(double seconds) {
@@ -65,7 +63,7 @@ struct Canvas {
         const int detail_height=text_height(detail,width-28,12);
         const int height=title_height+detail_height+32;
         if(paint) {
-            fl_color(surface); fl_rectf(x,y+cursor,width,height);
+            fl_color(FL_WHITE); fl_rectf(x,y+cursor,width,height);
             fl_color(border); fl_rect(x,y+cursor,width,height);
             label(title,x+14,y+cursor+12,width-28,title_height,13,ink,true);
             label(detail,x+14,y+cursor+18+title_height,width-28,detail_height,12,muted);
@@ -88,9 +86,9 @@ struct Canvas {
                 const int left=x+static_cast<int>(index)*(card_width+gap),top=y+cursor;
                 const bool active=step.state==InspectionState::active;
                 if(paint) {
-                    fl_color(surface); fl_rectf(left,top,card_width,row_height);
+                    fl_color(active?FL_WHITE:fl_rgb_color(233,239,243)); fl_rectf(left,top,card_width,row_height);
                     fl_color(border); fl_rect(left,top,card_width,row_height);
-                    fl_color(active?accent:border); fl_line(left,top,left+card_width-1,top);
+                    fl_color(active?accent:border); fl_rectf(left,top,card_width,3);
                     const auto status=active?"ACTIVE":step.state==InspectionState::off?"OFF":"UNIMPLEMENTED";
                     label(std::to_string(first+index+1)+"  /  "+status,left+14,top+13,card_width-28,18,10,active?accent:muted,true);
                     const int title_height=text_height(step.title,card_width-28,13,true);
@@ -120,9 +118,9 @@ struct Canvas {
                 const auto& section=*sections[first+index];
                 const int left=x+static_cast<int>(index)*(card_width+gap),top=y+cursor;
                 if(paint) {
-                    fl_color(surface); fl_rectf(left,top,card_width,row_height);
+                    fl_color(FL_WHITE); fl_rectf(left,top,card_width,row_height);
                     fl_color(border); fl_rect(left,top,card_width,row_height);
-                    fl_color(accent); fl_line(left,top,left+card_width-1,top);
+                    fl_color(accent); fl_rectf(left,top,card_width,4);
                     label(std::to_string(first+index+1),left+14,top+13,card_width-28,16,11,accent,true);
                     const int title_height=text_height(section.title,card_width-28,14,true);
                     const auto counts=quantities(section);
@@ -152,7 +150,7 @@ struct Canvas {
                 const auto& plot=constellations[first+index];
                 const int left=x+static_cast<int>(index)*(card_width+gap),top=y+cursor;
                 if(paint) {
-                    fl_color(surface); fl_rectf(left,top,card_width,row_height);
+                    fl_color(FL_WHITE); fl_rectf(left,top,card_width,row_height);
                     fl_color(border); fl_rect(left,top,card_width,row_height);
                     label(plot.title,left+14,top+12,card_width-28,header_height,13,ink,true);
                     const int cx=left+card_width/2,cy=top+header_height+28+plot_size/2;
@@ -170,14 +168,14 @@ struct Canvas {
                             rings.push_back(r); fl_arc(cx-r,cy-r,2*r,2*r,0,360);
                         }
                     }
-                    fl_font(theme::font,10); fl_color(muted);
+                    fl_font(FL_HELVETICA,10); fl_color(muted);
                     fl_draw("I",cx+plot_size/2-6,cy-5); fl_draw("Q",cx+5,cy-plot_size/2+10);
-                    fl_color(theme::data_color());
+                    fl_color(accent);
                     for(const auto point:plot.points) {
                         if(!std::isfinite(point.real())||!std::isfinite(point.imag())) continue;
                         const int px=cx+static_cast<int>(std::lround(point.real()*scale));
                         const int py=cy-static_cast<int>(std::lround(point.imag()*scale));
-                        fl_rectf(px-1,py-1,3,3);
+                        fl_pie(px-3,py-3,6,6,0,360);
                     }
                     label(plot.detail,left+14,top+header_height+plot_size+44,card_width-28,detail_height,12,muted);
                 }
@@ -191,7 +189,7 @@ struct Canvas {
             const auto& field=fields[index];
             const int height=std::max(text_height(field.name,name_width-24,12,true),text_height(field.value,width-name_width-24,12))+20;
             if(paint) {
-                fl_color(index%2==0?surface:background); fl_rectf(x,y+cursor,width,height);
+                fl_color(index%2==0?FL_WHITE:fl_rgb_color(232,240,245)); fl_rectf(x,y+cursor,width,height);
                 label(field.name,x+12,y+cursor+10,name_width-24,height-20,12,ink,true);
                 label(field.value,x+name_width+12,y+cursor+10,width-name_width-24,height-20,12,muted);
             }
@@ -203,10 +201,9 @@ struct Canvas {
         const auto total=data+parity;
         const int split=total?static_cast<int>(static_cast<double>(width)*static_cast<double>(data)/static_cast<double>(total)):width;
         if(paint) {
-            fl_color(surface); fl_rectf(x,y+cursor,split,40);
-            fl_color(border); fl_rectf(x+split,y+cursor,width-split,40);
+            fl_color(fl_rgb_color(208,232,241)); fl_rectf(x,y+cursor,split,40);
+            fl_color(fl_rgb_color(235,218,178)); fl_rectf(x+split,y+cursor,width-split,40);
             fl_color(border); fl_rect(x,y+cursor,width,40);
-            if(parity) { fl_color(muted); fl_line(x+split,y+cursor,x+split,y+cursor+39); }
             label(std::to_string(data)+" data bytes",x+12,y+cursor+12,std::max(1,split-24),20,12,ink,true);
             if(parity) label(std::to_string(parity)+" parity bytes",x+split+12,y+cursor+12,std::max(1,width-split-24),20,12,ink,true);
         }
@@ -230,10 +227,10 @@ struct Canvas {
 
 InspectionDiagram::InspectionDiagram(bool flow) : Fl_Widget(0,0,1,1),flow_(flow) {}
 void InspectionDiagram::set_model(std::shared_ptr<const Inspection> model) {
-    model_=std::move(model); pattern_view_.reset(); redraw();
+    model_=std::move(model); redraw();
 }
 void InspectionDiagram::set_pending(std::string message) {
-    model_.reset(); pattern_view_.reset(); pending_=std::move(message); redraw();
+    model_.reset(); pending_=std::move(message); redraw();
 }
 int InspectionDiagram::content_height(int width) const { return render(width,false); }
 int InspectionDiagram::render(int width,bool paint) const {
@@ -251,10 +248,6 @@ int InspectionDiagram::render(int width,bool paint) const {
             canvas.heading("Chosen phase / amplitude alphabets");
             canvas.paragraph("Ideal symbol points in differential-phase coordinates; live received measurements remain on the Console tab.");
             canvas.cursor+=12; canvas.constellations(model_->constellations);
-        }
-        if(model_->pattern_space) {
-            canvas.heading("Full pattern / scrambler symbol space");
-            canvas.cursor+=pattern_view_.render(*model_->pattern_space,canvas.x,canvas.y+canvas.cursor,canvas.width,paint);
         }
         canvas.note("Preamble symbols",model_->preamble_description);
         canvas.note("Pattern and integration",model_->chip_description);
@@ -287,9 +280,5 @@ void InspectionDiagram::draw() {
     fl_push_clip(x(),y(),w(),h());
     fl_color(background); fl_rectf(x(),y(),w(),h());
     render(w(),true); fl_pop_clip();
-}
-int InspectionDiagram::handle(int event) {
-    if(flow_ && model_ && model_->pattern_space && pattern_view_.handle(event)) { redraw(); return 1; }
-    return Fl_Widget::handle(event);
 }
 }

@@ -49,11 +49,7 @@ struct DecodedPacket {
     std::optional<PacketBitAccuracy> pre_fec_accuracy;
 };
 
-// Maximum extents for bounded acquisition probes, not on-air field sizes.
-inline constexpr std::size_t packet_header_size = 8;
-inline constexpr std::size_t packet_header_parity = 6;
-inline constexpr std::size_t packet_prefix_size = packet_header_size + packet_header_parity;
-inline constexpr std::size_t packet_min_prefix_size = 4;
+inline constexpr std::size_t packet_prefix_size = 72;
 Bytes encode_packet(const Message& message, const PacketOptions& options = {},
                     std::size_t max_memory = default_memory_limit);
 DecodedPacket decode_packet(const Bytes& wire, const PacketOptions& options = {},
@@ -61,6 +57,7 @@ DecodedPacket decode_packet(const Bytes& wire, const PacketOptions& options = {}
 // Numeric structure from the codec's protected header and actual shortened-RS
 // rules. Contains no payload, metadata values, integrity bytes or key material.
 struct PacketLayout {
+    std::uint8_t version=0;
     FecMode fec=FecMode::off;
     bool compressed=false,authenticated=false;
     std::size_t header_bytes=0,header_parity_bytes=0,metadata_bytes=0;
@@ -71,25 +68,16 @@ struct PacketLayout {
 };
 PacketLayout packet_layout(const Bytes& wire,
                            std::size_t max_memory = default_memory_limit);
-// Hypothetical empty-content baseline with the original message's effective
-// FEC retained for airtime accounting. No bytes or nonconforming tiny frame
-// are emitted; actual original/payload sizes in this numeric layout are zero.
-PacketLayout packet_empty_layout(const Message& message,FecMode requested_fec);
 // Incomplete prefixes return nullopt; invalid or oversized complete prefixes throw.
 // Trailing demodulator bytes do not contribute to the packet length.
-// Bounded hypothesis check on decrypted bytes. Incomplete probes remain
-// possible; a complete maximum probe must contain a valid repaired header.
+// Cheap necessary condition on the decrypted systematic header. False proves
+// that more than sixteen distinct bytes contradict mandatory constraints, so
+// RS(72,40) cannot recover a valid header under this memory bound. True does not
+// validate anything; incomplete headers conservatively return true.
 bool packet_bootstrap_possible(const Bytes& prefix,
                                std::size_t max_memory = default_memory_limit);
 std::optional<std::size_t> packet_frame_size(const Bytes& prefix,
                                            std::size_t max_memory = default_memory_limit);
-// Acquisition probe: invalid, incomplete, oversized and ambiguous headers
-// return nullopt without using exceptions for ordinary rejection. Allocation
-// failures still propagate. The strict packet_frame_size API remains above.
-std::optional<std::size_t> packet_probe_frame_size(const Bytes& prefix,
-                                                 std::size_t max_memory = default_memory_limit);
-std::optional<std::size_t> packet_header_extent(const Bytes& prefix,
-                                              std::size_t max_memory = default_memory_limit);
 bool safe_filename(const std::string& name);
 
 // A bounded best-effort view of a partial frame. Never authenticated or safe
@@ -102,5 +90,12 @@ namespace packet_codec {
 // Shortened systematic RS over GF(256), polynomial 0x11d, first root alpha^0 = 1.
 Bytes rs_encode(const Bytes& data, std::size_t parity_symbols);
 std::size_t rs_correct(Bytes& codeword, std::size_t parity_symbols);
+// The caller retains the original size; encoded bytes are MSB-first with zero padding.
+Bytes compress_short(const Bytes& input);
+Bytes decompress_short(const Bytes& encoded, std::size_t original_size);
+// Version 2 prefix code: common bytes use 3 bits, less common bytes and fixed
+// dictionary phrases use longer codes. Legacy decoding remains available.
+Bytes compress_short_v2(const Bytes& input);
+Bytes decompress_short_v2(const Bytes& encoded, std::size_t original_size);
 }
 }

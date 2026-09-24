@@ -1,6 +1,5 @@
 #include "live_widgets.hpp"
 #include "inspection_widgets.hpp"
-#include "theme_fltk.hpp"
 #include "datapump/audio.hpp"
 #include "datapump/live.hpp"
 #include "datapump/runtime.hpp"
@@ -157,7 +156,7 @@ public:
         bind(source_,[this] { dirty_estimate(); update_controls(); });
         binary_label_=label("Binary / 0 bits",13,true);
         file_label_=label("Files in memory",13,true);
-        editor_=new ComposeEditor; editor_->buffer(&compose_); editor_->textfont(gui::theme::font); editor_->textsize(16);
+        editor_=new ComposeEditor; editor_->buffer(&compose_); editor_->textfont(FL_HELVETICA); editor_->textsize(16);
         editor_->wrap_mode(Fl_Text_Display::WRAP_AT_BOUNDS,0);
         editor_->ctrl_enter=[this] { return send_key_->value()==1; };
         editor_->transmit=[this] { guarded([this] { transmit(); }); };
@@ -203,20 +202,15 @@ public:
         for (const auto* item:{"1 Hz","100 Hz","1.2 kHz","2.4 kHz","24 kHz","1 MHz","30 MHz"}) bandwidth_->add(item);
         bandwidth_->value("1.2 kHz");
         bandwidth_->tooltip("1 Hz to 30 MHz. Narrow audio modes use a 1500 Hz carrier. DSP clock fits bandwidth and carrier; MHz plans require simulation or a future SDR frontend.");
-        snr_=new Fl_Input_Choice(0,0,1,1,"Target equivalent 1 Hz tone SNR (dB)");
+        snr_=new Fl_Input_Choice(0,0,1,1,"Target SNR dB / 1 Hz");
         for (auto value:{"40","6","-6","-60"}) snr_->add(value);
         snr_->value("40");
-        snr_->tooltip("SNR that a stable, unmodulated tone with the same total received power as this data transmission\n"
-                      "would have in a 1 Hz effective noise bandwidth. The tone can be at any carrier frequency.\n"
-                      "For example, +1 dB here corresponds to -29 dB across a 1 kHz channel at the same received power.\n"
-                      "This is a planning assumption (C/N0), not a measured live SNR. Simulation presets set channel noise separately.");
         pattern_=new Fl_Choice(0,0,1,1,"Scrambler pattern / tone");
         for (auto mode:tuning::pattern_modes()) pattern_->add(pattern_label(mode).c_str());
         pattern_->value(1);
         fec_=new Fl_Choice(0,0,1,1,"Error correction"); fec_->add("Reed-Solomon 20%|Reed-Solomon 60%|Off"); fec_->value(0);
-        fec_->tooltip("Applies to header and body. Messages under 16 original bytes automatically use no Reed-Solomon coding.");
         fec_off_=new Fl_Output(0,0,1,1,"Error correction"); fec_off_->value("Off"); fec_off_->textsize(13);
-        fec_off_->tooltip("Raw binary and messages under 16 original bytes have no Reed-Solomon coding. The selection for longer messages is retained.");
+        fec_off_->tooltip("Raw binary has no error correction. Message / File retains its selected packet setting.");
         fec_off_->deactivate(); fec_off_->hide();
         for (auto widget:std::array<Fl_Widget*,5>{device_,bandwidth_,snr_,pattern_,fec_}) bind(widget,[this] { settings_changed(); });
         for (auto widget:{callsign_,grid_}) { widget->when(FL_WHEN_CHANGED); bind(widget,[this] { dirty_estimate(); }); }
@@ -240,7 +234,6 @@ public:
         window_->size_range(1030,786);
         window_->callback([](Fl_Widget*,void* context) { static_cast<App*>(context)->close(); },this);
         window_->on_resize=[this] { layout(); };
-        gui::theme::apply_widgets(*window_);
         layout(); encryption_changed();
         if (smoke_.enabled) compose_.text(smoke_text);
         qr_->text(buffer_text(compose_));
@@ -274,7 +267,7 @@ private:
     }
     Fl_Box* label(const char* text,int size,bool bold=false) {
         auto result=new Fl_Box(0,0,1,1,text); result->align(FL_ALIGN_LEFT|FL_ALIGN_INSIDE|FL_ALIGN_CLIP);
-        result->labelsize(size); result->labelfont(bold?gui::theme::bold_font:gui::theme::font); return result;
+        result->labelsize(size); if (bold) result->labelfont(FL_HELVETICA_BOLD); return result;
     }
     Fl_Input* input(const char* title,const char* value) {
         auto result=new Fl_Input(0,0,1,1,title); result->value(value); result->textsize(13); return result;
@@ -315,7 +308,7 @@ private:
         constellation_label_->resize(margin+waterfall_width+other_width+24,plots_y-23,other_width,21); constellation_->resize(margin+waterfall_width+other_width+24,plots_y,other_width,plot_h);
         const int controls_y=height-92;
         const int available=width-margin*2-40;
-        const int device_width=available*19/100,bw_width=available*14/100,snr_width=available*24/100,pattern_width=available*23/100;
+        const int device_width=available*22/100,bw_width=available*14/100,snr_width=available*16/100,pattern_width=available*28/100;
         int x=margin; device_->resize(x,controls_y,device_width,27); x+=device_width+10;
         bandwidth_->resize(x,controls_y,bw_width,27); x+=bw_width+10;
         snr_->resize(x,controls_y,snr_width,27); x+=snr_width+10;
@@ -442,7 +435,6 @@ private:
     }
     std::optional<std::filesystem::path> choose_path(bool create,const char* title,const char* suggested=".") {
         Fl_File_Chooser chooser(suggested,"*",create?Fl_File_Chooser::CREATE:Fl_File_Chooser::SINGLE,title);
-        chooser.textfont(gui::theme::font); chooser.textcolor(gui::theme::data_color(gui::theme::text));
         chooser.preview(0); chooser.show();
         while (chooser.shown()) Fl::wait();
         if (closing_ || !chooser.value()) return std::nullopt;
@@ -672,10 +664,7 @@ private:
         if (!binary && (!estimate_ || estimate_->repeatable_allowed || repeatable_->value())) repeatable_->activate(); else repeatable_->deactivate();
         if (!binary && attachment_) use_text_->activate(); else use_text_->deactivate();
         for (auto widget:std::array<Fl_Widget*,3>{callsign_,grid_,attach_}) binary?widget->deactivate():widget->activate();
-        const bool tiny=!binary && !file_loading_ && (attachment_?attachment_->size():static_cast<std::size_t>(compose_.length()))<16;
-        if (binary || tiny) {
-            fec_->deactivate(); fec_->hide(); fec_off_->value(binary?"Off":"Off (under 16 B)"); fec_off_->show();
-        }
+        if (binary) { fec_->deactivate(); fec_->hide(); fec_off_->show(); }
         else { fec_off_->hide(); fec_->show(); }
         busy?source_->deactivate():source_->activate();
         binary?binary_editor_->activate():binary_editor_->deactivate();
@@ -804,10 +793,6 @@ private:
         if (!inspection_ || !estimate_ || inspection_->binary!=binary || inspection_->lanes.empty() || inspection_->sections.empty() ||
             estimated_revision_!=revision_ || inspection_->estimate.total_seconds!=estimate_->total_seconds)
             throw Error("Diagram model did not match the current transmission estimate and source");
-        if (!inspection_->pattern_space || inspection_->pattern_space->code.size()!=current_settings_.transfer.modem.spreading_factor ||
-            inspection_->pattern_space->coefficients.size()!=(std::size_t{1}<<current_settings_.transfer.modem.constellation_bits) ||
-            inspection_->pattern_space->symbol_samples!=modem::symbol_sample_count(current_settings_.transfer.modem))
-            throw Error("Static pattern inspection lost the complete configured alphabet or integration duration");
         const auto field=std::find_if(inspection_->fields.begin(),inspection_->fields.end(),
             [](const auto& item) { return item.name=="Body FEC"; });
         if (field==inspection_->fields.end() || field->value!=fec)
@@ -895,7 +880,7 @@ private:
     }
     void finish_smoke() {
         smoke_select_view(smoke_.view);
-        if (smoke_.view==View::flow || smoke_.view==View::transmission) {
+        if (smoke_.view!=View::console) {
             auto* scroll=smoke_.view==View::flow?flow_scroll_:transmission_scroll_;
             auto* diagram=smoke_.view==View::flow?flow_diagram_:transmission_diagram_;
             const int bottom=std::max(0,diagram->h()-scroll->h()+16);
@@ -903,7 +888,7 @@ private:
         }
         smoke_passed_=true; smoke_finished_=Steady::now(); smoke_phase_=13;
         notice("GUI smoke passed: keyfiles, packet and binary transmission, diagrams, clipboard and live plots.",smoke_.hold_seconds+1);
-        std::cout<<"Continuous native GUI smoke passed: asynchronous production keyfile generation, automatic key selection, overwrite refusal, idle noise, pending-to-verified signals across separate GUI polls, normal TX, clipboard, exclusive save, chronological three-second whole-transmission simulation replay, pending replay replacement/cancellation without late reception, exact encrypted three-bit reception with measured constellation, pending-to-complete raw rows, exact raw clipboard copy, live packet/binary/FEC inspection models, three-tab switching, minimum/expanded diagram resizing and complete scrolling without receiver resets, and all plots returning to live reception."<<std::endl;
+        std::cout<<"Continuous native GUI smoke passed: asynchronous production keyfile generation, automatic key selection, overwrite refusal, idle noise, pending-to-verified signals across separate GUI polls, normal TX, clipboard, exclusive save, chronological three-second whole-transmission simulation replay, pending replay replacement/cancellation without late reception, exact encrypted three-bit reception with measured constellation, pending-to-complete raw rows, exact raw clipboard copy, live packet/binary/FEC inspection models, tab switching, minimum/expanded diagram resizing and complete scrolling without receiver resets, and all plots returning to live reception."<<std::endl;
     }
     void inspect_smoke_replay() {
         auto& replay=smoke_replay_;
@@ -1200,25 +1185,10 @@ private:
             Fl::paste(*clipboard_probe_,1); smoke_phase_=12;
         } else if (smoke_phase_==12 && clipboard_probe_->received) {
             if (*clipboard_probe_->received!="001") throw Error("Copying received binary bits changed leading zeros or bit count");
-            source_->value(0); source_->do_callback(); use_text_->do_callback();
-            compose_.text("help"); smoke_phase_=15;
-        } else if (smoke_phase_==15 && estimate_ && inspection_) {
-            smoke_inspection(false,"Off");
-            if (fec_->visible() || fec_->active() || !fec_off_->visible() ||
-                std::string(fec_off_->value())!="Off (under 16 B)" ||
-                !inspection_->packet_layout || inspection_->packet_layout->header_bytes!=4 ||
-                inspection_->packet_layout->header_parity_bytes || inspection_->packet_layout->body_parity_bytes)
-                throw Error("A one-word message retained Reed-Solomon coding or hid its automatic override");
             if (smoke_.view!=View::console && !smoke_.raw_view) {
-                compose_.text(smoke_text); smoke_phase_=14;
-            } else { source_->value(1); source_->do_callback(); smoke_phase_=16; }
-        } else if (smoke_phase_==16 && estimate_ && inspection_) {
-            smoke_inspection(true,"Off"); finish_smoke();
+                source_->value(0); source_->do_callback(); smoke_phase_=14;
+            } else finish_smoke();
         } else if (smoke_phase_==14 && estimate_ && inspection_) {
-            const auto compression=std::find_if(inspection_->fields.begin(),inspection_->fields.end(),
-                [](const auto& field) { return field.name=="Compression"; });
-            if(compression==inspection_->fields.end() || !compression->value.starts_with("LZMA2 preset 9e"))
-                throw Error("Long-message inspection did not select the fixed LZMA2 profile");
             smoke_inspection(false,"Reed-Solomon 20%"); finish_smoke();
         } else if (smoke_phase_==13 && std::chrono::duration<double>(Steady::now()-smoke_finished_).count()>=smoke_.hold_seconds) close();
     }
@@ -1332,14 +1302,12 @@ void self_check() {
 int main(int argc,char** argv) {
     try {
         SmokeOptions smoke;
-        bool use_color=false;
         for (int i=1;i<argc;++i) {
             const std::string argument=argv[i];
             if (argument=="--self-check") { self_check(); return 0; }
-            if (argument=="--version") { std::cout<<"Data Pump native GUI "<<DATAPUMP_VERSION<<" (backend: "<<DATAPUMP_GUI_BACKEND<<")\n"; return 0; }
-            if (argument=="--help") { std::cout<<"Data Pump continuous native console\nGUI backend: "<<DATAPUMP_GUI_BACKEND<<" (selected at build time)\nUsage: datapump-gui [--color] [--version] [--help] [--self-check] [--smoke-test [--smoke-dir DIRECTORY] [--smoke-hold SECONDS] [--smoke-timeout SECONDS] [--smoke-view console|flow|transmission] [--smoke-raw-view] [--smoke-scroll 0..1]]\n--color  Optional cyan data accents and false-color waterfall; default is grayscale.\n"; return 0; }
+            if (argument=="--version") { std::cout<<"Data Pump native GUI "<<DATAPUMP_VERSION<<'\n'; return 0; }
+            if (argument=="--help") { std::cout<<"Data Pump continuous native console\nUsage: datapump-gui [--self-check] [--smoke-test [--smoke-dir DIRECTORY] [--smoke-hold SECONDS] [--smoke-timeout SECONDS] [--smoke-view console|flow|transmission] [--smoke-raw-view] [--smoke-scroll 0..1]]\n"; return 0; }
             if (argument=="--smoke-test") smoke.enabled=true;
-            else if (argument=="--color") use_color=true;
             else if (argument=="--smoke-dir" && i+1<argc) smoke.directory=path_from_text(argv[++i]);
             else if (argument=="--smoke-hold" && i+1<argc) { smoke.hold_seconds=number(argv[++i],"Smoke hold"); if (smoke.hold_seconds<0 || smoke.hold_seconds>60) throw Error("Smoke hold must be 0..60 seconds"); }
             else if (argument=="--smoke-timeout" && i+1<argc) { smoke.timeout_seconds=number(argv[++i],"Smoke timeout"); if (smoke.timeout_seconds<10 || smoke.timeout_seconds>600) throw Error("Smoke timeout must be 10..600 seconds"); }
@@ -1358,9 +1326,7 @@ int main(int argc,char** argv) {
             else throw Error("Unknown or incomplete GUI argument: "+argument);
         }
         if (smoke.enabled && smoke.directory.empty()) smoke.directory=std::filesystem::temp_directory_path()/("datapump-native-smoke-"+std::to_string(Steady::now().time_since_epoch().count()));
-        // Optional color requires a supported RGB visual, never an OpenGL context.
-        // Fl_Double_Window supplies software buffering independently.
-        gui::theme::apply_palette(use_color && Fl::visual(FL_RGB));
+        Fl::scheme("gtk+"); Fl::visual(FL_DOUBLE|FL_RGB);
         App app(std::move(smoke)); return app.run();
     } catch (const std::exception& error) { std::cerr<<"datapump-gui: "<<error.what()<<'\n'; return 1; }
 }
