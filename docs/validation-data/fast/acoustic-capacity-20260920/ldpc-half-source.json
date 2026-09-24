@@ -1,0 +1,19 @@
+{
+  "upstream_commit": "32357d8ad55a6a302c34e093759f0454e45cca56",
+  "verbatim_B4_struct_sha256": "2a293f3a8f7f484e858ee5ab95c92c1c05c59e24848902ef35a7b0bdaf7b4088",
+  "source_sha256": {
+    "src/fast/ldpc.cpp": "6bee3c09e827c085038fffd9cc330cd330ddf13146cdbb266f951bdfda81b9aa",
+    "third_party/ldpc/tables.hpp": "b6b201a39d42930538ffc3b7bce01d826f72b3cf58fd0b86bab0e8f9354d8d17",
+    "tests/test_fast_ldpc.cpp": "81d871a2ba4e615add7881a60b2cd51799bba129a07fd66edc5a57191a5b25b7",
+    "docs/validation-data/fast/acoustic-capacity-20260920/ldpc-half-fixture.cpp": "880be8e40227cd92eeb749245114e98d1ceb4a2dfd3949c2c01a09332f9c51a4",
+    "include/datapump/fast/profile.hpp": "524b0646618af52ac5cbe233b0db5c5953815ad57c3f1ff88dc5df9a5bba29c4",
+    "src/fast/profile.cpp": "f54cc2b126f36dd4777a8c0b65aabc8561dc86231520af629929e089f4539a09",
+    "src/fast/cli.cpp": "8b8338d95902bdd503f235e29d12f250bbfda631139301f214804a7a7236127d",
+    "tests/test_fast_cli.py": "0df8b0694f4e98ae3989b5a7c2dca505dc7f961bf281d2d01a181635ee2fae61"
+  },
+  "independent_upstream_codeword_sha256": "ae4a2202bd42e246e012b7f095abe6fcbd7c42def4e1f2414c29907e32079aea",
+  "production_test_command": "/tmp/pump-test-fast-ldpc-half 12",
+  "production_test_exit_code": 0,
+  "cli_test_command": "python3 tests/test_fast_cli.py build/pump -v",
+  "cli_test_exit_code": 0
+}

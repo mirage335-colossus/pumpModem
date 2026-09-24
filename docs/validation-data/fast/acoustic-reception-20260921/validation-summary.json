@@ -1,0 +1,27 @@
+{
+  "base_commit": "91c41a6db001b5e85c1c29bdcd9e1fafc9ee10af",
+  "build": "Release GUI, CLI, probe and selected test executables passed",
+  "ctest_targets": [
+    "fast_acoustic",
+    "fast_files",
+    "fast_session",
+    "fast_transfer",
+    "fast_telemetry",
+    "fast_boundary",
+    "fast_cli",
+    "gui_fast",
+    "gui_fast_live",
+    "gui_controller",
+    "gui_application",
+    "gui_self_check"
+  ],
+  "ctest_passed": 12,
+  "ctest_failed": 0,
+  "ctest_seconds": 127.78,
+  "native_widget_adapter_driven": false,
+  "live_application_harness_uses_real_audio": true,
+  "original_user_failure_cause_uniquely_established": false,
+  "wire_format_changed": false,
+  "default_profile_changed": false,
+  "user_gui_restarted": false
+}

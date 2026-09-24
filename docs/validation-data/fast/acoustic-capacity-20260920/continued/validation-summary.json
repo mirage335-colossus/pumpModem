@@ -1,0 +1,18 @@
+{
+  "build": "cmake --build build -j 2",
+  "build_exit_code": 0,
+  "selected_ctest_targets": 43,
+  "initial_ctest_passed": 42,
+  "initial_failure": "fast_cli: old invalid-rate fixture still rejected newly supported LDPC 2/3",
+  "correction": "Invalid-rate example changed to unsupported 2/5; positive 2/3 and classic rejection checks retained.",
+  "cli_rerun_command": "python3 tests/test_fast_cli.py build/pump -v",
+  "cli_rerun_cases": 18,
+  "cli_rerun_exit_code": 0,
+  "final_selected_targets_passing": 43,
+  "acoustic_analysis_cases": 11,
+  "acoustic_analysis_exit_code": 0,
+  "live_seconds_approx": 1778.066,
+  "live_budget_seconds": 1800,
+  "full_50MB_acoustic_trial": false,
+  "runtime_audio_settings_changed": false
+}

@@ -1,0 +1,130 @@
+[
+  {
+    "depth": 1,
+    "estimated_samples": 62462747,
+    "estimated_seconds": 1301.3072291666667,
+    "estimated_source_bps": 307383.2151506241,
+    "rs_parity_data_ratio": 0.0033444816053511705,
+    "source_bytes_per_cycle": 7143
+  },
+  {
+    "depth": 2,
+    "estimated_samples": 62311820,
+    "estimated_seconds": 1298.1629166666667,
+    "estimated_source_bps": 308127.73563667375,
+    "rs_parity_data_ratio": 0.0030649205906937865,
+    "source_bytes_per_cycle": 14323
+  },
+  {
+    "depth": 3,
+    "estimated_samples": 61639659,
+    "estimated_seconds": 1284.1595625,
+    "estimated_source_bps": 311487.7712091172,
+    "rs_parity_data_ratio": 0.0031580902842281255,
+    "source_bytes_per_cycle": 21499
+  },
+  {
+    "depth": 4,
+    "estimated_samples": 61792186,
+    "estimated_seconds": 1287.3372083333334,
+    "estimated_source_bps": 310718.89898829604,
+    "rs_parity_data_ratio": 0.0030649205906937865,
+    "source_bytes_per_cycle": 28679
+  },
+  {
+    "depth": 5,
+    "estimated_samples": 61889045,
+    "estimated_seconds": 1289.3551041666667,
+    "estimated_source_bps": 310232.6106340791,
+    "rs_parity_data_ratio": 0.003009027081243731,
+    "source_bytes_per_cycle": 35859
+  },
+  {
+    "depth": 6,
+    "estimated_samples": 61613291,
+    "estimated_seconds": 1283.6102291666666,
+    "estimated_source_bps": 311621.07539426844,
+    "rs_parity_data_ratio": 0.0030649205906937865,
+    "source_bytes_per_cycle": 43035
+  },
+  {
+    "depth": 7,
+    "estimated_samples": 61714323,
+    "estimated_seconds": 1285.7150625,
+    "estimated_source_bps": 311110.92314826173,
+    "rs_parity_data_ratio": 0.0030249960197420793,
+    "source_bytes_per_cycle": 50215
+  },
+  {
+    "depth": 8,
+    "estimated_samples": 61827431,
+    "estimated_seconds": 1288.0714791666667,
+    "estimated_source_bps": 310541.77230815234,
+    "rs_parity_data_ratio": 0.0030649205906937865,
+    "source_bytes_per_cycle": 57391
+  },
+  {
+    "depth": 9,
+    "estimated_samples": 61666027,
+    "estimated_seconds": 1284.7088958333334,
+    "estimated_source_bps": 311354.5810240053,
+    "rs_parity_data_ratio": 0.0030338678719583926,
+    "source_bytes_per_cycle": 64571
+  },
+  {
+    "depth": 10,
+    "estimated_samples": 61695501,
+    "estimated_seconds": 1285.3229375,
+    "estimated_source_bps": 311205.8365487623,
+    "rs_parity_data_ratio": 0.003009027081243731,
+    "source_bytes_per_cycle": 71751
+  },
+  {
+    "depth": 11,
+    "estimated_samples": 61792186,
+    "estimated_seconds": 1287.3372083333334,
+    "estimated_source_bps": 310718.89898829604,
+    "rs_parity_data_ratio": 0.00303951367781155,
+    "source_bytes_per_cycle": 78927
+  },
+  {
+    "depth": 12,
+    "estimated_samples": 61666027,
+    "estimated_seconds": 1284.7088958333334,
+    "estimated_source_bps": 311354.5810240053,
+    "rs_parity_data_ratio": 0.003018342233573253,
+    "source_bytes_per_cycle": 86107
+  },
+  {
+    "depth": 13,
+    "estimated_samples": 61689288,
+    "estimated_seconds": 1285.1935,
+    "estimated_source_bps": 311237.1794597467,
+    "rs_parity_data_ratio": 0.0030004286326618087,
+    "source_bytes_per_cycle": 93287
+  },
+  {
+    "depth": 14,
+    "estimated_samples": 61637526,
+    "estimated_seconds": 1284.115125,
+    "estimated_source_bps": 311498.55041229265,
+    "rs_parity_data_ratio": 0.0030249960197420793,
+    "source_bytes_per_cycle": 100463
+  },
+  {
+    "depth": 15,
+    "estimated_samples": 61718762,
+    "estimated_seconds": 1285.8075416666666,
+    "estimated_source_bps": 311088.5471098724,
+    "rs_parity_data_ratio": 0.003009027081243731,
+    "source_bytes_per_cycle": 107643
+  },
+  {
+    "depth": 16,
+    "estimated_samples": 61776736,
+    "estimated_seconds": 1287.0153333333333,
+    "estimated_source_bps": 310796.6079658207,
+    "rs_parity_data_ratio": 0.003029986417302267,
+    "source_bytes_per_cycle": 114819
+  }
+]

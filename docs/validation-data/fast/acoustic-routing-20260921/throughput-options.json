@@ -1,0 +1,32 @@
+[
+  {
+    "qam": 16,
+    "ldpc": "3/4",
+    "steady_source_bps": 38797.27564102564,
+    "seconds_50MB_projected": 10342.664354166667
+  },
+  {
+    "qam": 64,
+    "ldpc": "3/4",
+    "steady_source_bps": 56040.509259259255,
+    "seconds_50MB_projected": 7166.216354166667
+  },
+  {
+    "qam": 64,
+    "ldpc": "2/3",
+    "steady_source_bps": 49809.027777777774,
+    "seconds_50MB_projected": 8057.864354166667
+  },
+  {
+    "qam": 64,
+    "ldpc": "1/2",
+    "steady_source_bps": 37346.06481481481,
+    "seconds_50MB_projected": 10739.720354166666
+  },
+  {
+    "qam": 16,
+    "ldpc": "8/9",
+    "steady_source_bps": 45986.3782051282,
+    "seconds_50MB_projected": 8735.240354166666
+  }
+]

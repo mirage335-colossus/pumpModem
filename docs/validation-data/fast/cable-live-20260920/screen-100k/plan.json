@@ -1,0 +1,203 @@
+{
+  "mode": "live",
+  "pump": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/pump",
+  "pump_sha256": "16839f3109dec8a4de3cb7a84f53a65f49a744d4adae7a5e6aaced051755964a",
+  "input_device": "default",
+  "output_device": "default",
+  "stereo": true,
+  "sample_rate": 48000,
+  "seed": 417,
+  "candidates": [
+    {
+      "apsk": 16,
+      "code_rate": "3/4",
+      "rs": "robust",
+      "interleave": 16
+    },
+    {
+      "apsk": 64,
+      "code_rate": "3/4",
+      "rs": "robust",
+      "interleave": 16
+    },
+    {
+      "apsk": 256,
+      "code_rate": "3/4",
+      "rs": "robust",
+      "interleave": 16
+    },
+    {
+      "apsk": 256,
+      "code_rate": "7/8",
+      "rs": "robust",
+      "interleave": 16
+    },
+    {
+      "apsk": 256,
+      "code_rate": "7/8",
+      "rs": "high-rate",
+      "interleave": 16
+    },
+    {
+      "apsk": 256,
+      "code_rate": "7/8",
+      "rs": "high-rate",
+      "interleave": 62
+    }
+  ],
+  "geometry": {
+    "apsk16-r3_4-robust-d16": {
+      "profile": "wire",
+      "sample_rate": 48000,
+      "symbol_rate": 15000,
+      "carrier_hz": 9300,
+      "occupied_bandwidth_hz": 18000,
+      "constellation": 16,
+      "shannon_snr_db_assumed": 30,
+      "shannon_capacity_bps": 179410,
+      "gross_bitrate": 60000,
+      "physical_interval_bits": 2048,
+      "interval_symbols": 640,
+      "cycle_intervals": 22,
+      "ciphertext_bytes": 176,
+      "encrypted": false,
+      "source_bytes_per_group": 192
+    },
+    "apsk64-r3_4-robust-d16": {
+      "profile": "wire",
+      "sample_rate": 48000,
+      "symbol_rate": 15000,
+      "carrier_hz": 9300,
+      "occupied_bandwidth_hz": 18000,
+      "constellation": 64,
+      "shannon_snr_db_assumed": 30,
+      "shannon_capacity_bps": 179410,
+      "gross_bitrate": 90000,
+      "physical_interval_bits": 2048,
+      "interval_symbols": 450,
+      "cycle_intervals": 22,
+      "ciphertext_bytes": 176,
+      "encrypted": false,
+      "source_bytes_per_group": 192
+    },
+    "apsk256-r3_4-robust-d16": {
+      "profile": "wire",
+      "sample_rate": 48000,
+      "symbol_rate": 15000,
+      "carrier_hz": 9300,
+      "occupied_bandwidth_hz": 18000,
+      "constellation": 256,
+      "shannon_snr_db_assumed": 30,
+      "shannon_capacity_bps": 179410,
+      "gross_bitrate": 120000,
+      "physical_interval_bits": 2048,
+      "interval_symbols": 352,
+      "cycle_intervals": 22,
+      "ciphertext_bytes": 176,
+      "encrypted": false,
+      "source_bytes_per_group": 192
+    },
+    "apsk256-r7_8-robust-d16": {
+      "profile": "wire",
+      "sample_rate": 48000,
+      "symbol_rate": 15000,
+      "carrier_hz": 9300,
+      "occupied_bandwidth_hz": 18000,
+      "constellation": 256,
+      "shannon_snr_db_assumed": 30,
+      "shannon_capacity_bps": 179410,
+      "gross_bitrate": 120000,
+      "physical_interval_bits": 2048,
+      "interval_symbols": 352,
+      "cycle_intervals": 19,
+      "ciphertext_bytes": 176,
+      "encrypted": false,
+      "source_bytes_per_group": 192
+    },
+    "apsk256-r7_8-high-rate-d16": {
+      "profile": "wire",
+      "sample_rate": 48000,
+      "symbol_rate": 15000,
+      "carrier_hz": 9300,
+      "occupied_bandwidth_hz": 18000,
+      "constellation": 256,
+      "shannon_snr_db_assumed": 30,
+      "shannon_capacity_bps": 179410,
+      "gross_bitrate": 120000,
+      "physical_interval_bits": 2048,
+      "interval_symbols": 352,
+      "cycle_intervals": 19,
+      "ciphertext_bytes": 192,
+      "encrypted": false,
+      "source_bytes_per_group": 208
+    },
+    "apsk256-r7_8-high-rate-d62": {
+      "profile": "wire",
+      "sample_rate": 48000,
+      "symbol_rate": 15000,
+      "carrier_hz": 9300,
+      "occupied_bandwidth_hz": 18000,
+      "constellation": 256,
+      "shannon_snr_db_assumed": 30,
+      "shannon_capacity_bps": 179410,
+      "gross_bitrate": 120000,
+      "physical_interval_bits": 2048,
+      "interval_symbols": 352,
+      "cycle_intervals": 71,
+      "ciphertext_bytes": 192,
+      "encrypted": false,
+      "source_bytes_per_group": 208
+    }
+  },
+  "trials": [
+    {
+      "candidate": "apsk16-r3_4-robust-d16",
+      "source_bytes": 100000,
+      "trials": 1,
+      "intervals": 836,
+      "seconds": 41.928875,
+      "source_bps": 19079.93000050681
+    },
+    {
+      "candidate": "apsk64-r3_4-robust-d16",
+      "source_bytes": 100000,
+      "trials": 1,
+      "intervals": 836,
+      "seconds": 31.339541666666666,
+      "source_bps": 25526.857045611974
+    },
+    {
+      "candidate": "apsk256-r3_4-robust-d16",
+      "source_bytes": 100000,
+      "trials": 1,
+      "intervals": 836,
+      "seconds": 25.8776875,
+      "source_bps": 30914.66345282978
+    },
+    {
+      "candidate": "apsk256-r7_8-robust-d16",
+      "source_bytes": 100000,
+      "trials": 1,
+      "intervals": 722,
+      "seconds": 23.202479166666667,
+      "source_bps": 34479.07416502726
+    },
+    {
+      "candidate": "apsk256-r7_8-high-rate-d16",
+      "source_bytes": 100000,
+      "trials": 1,
+      "intervals": 665,
+      "seconds": 21.864875,
+      "source_bps": 36588.363756938925
+    },
+    {
+      "candidate": "apsk256-r7_8-high-rate-d62",
+      "source_bytes": 100000,
+      "trials": 1,
+      "intervals": 710,
+      "seconds": 22.920875,
+      "source_bps": 34902.6815075777
+    }
+  ],
+  "minimum_playback_hours": 0.046426203703703706
+}

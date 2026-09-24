@@ -1,26 +1,34 @@
-# Audio modem reference, application version 0.7.0
+# Audio modem reference
 
-Version 0.7.0 uses shared differential 4/8/16/32/64-APSK waveforms for PCM and
-continuous operation. The selected profile carries two through six bits per
-payload symbol, with both amplitude and phase modulation. Audio peers require
-matching carrier and modem settings and the compact 0.7 packet format. Ordinary
-one-word messages have a four-byte bootstrap and no RS coding. Other short
-messages typically use six to nine bootstrap bytes when coding is enabled.
-Gain acquisition accounts for a short header that occupies only a subset of
-amplitude rings. Fixed training, three-second
-simulation presentation, the narrow-audio 1500 Hz carrier and public whitening
-are unchanged. Existing keyfiles need no migration.
+The default CLI and GUI transport carries one bit per independent pattern
+codeword. The pattern receiver discovers signal start, bit sequence and end
+from pattern evidence alone. It compares timing, carrier and keystream positions
+without a preamble, packet header, checksum or APSK residual lock condition.
+Nonempty text of up to 16 bytes sends its exact fixed-dictionary bits.
+Text longer than 16 bytes and attachments use fixed 128-byte intervals with
+locally selected FEC and source encoding, plus HMAC only when keyed. Explicit raw
+drafts send exactly their 0/1 bits, including partial bytes. Both unmarked paths
+bypass interval coding, markers, padding, FEC and MAC. See [protocol.md](protocol.md).
 
-This is a reference modem. It does not establish near-capacity throughput,
-calibrated radio sensitivity, a spectral mask, or low probability of intercept.
-The regression suite is described below; current execution results belong in
-[validation.md](validation.md).
+Pattern transport is the only supported waveform. Explicit
+`Config::pattern_symbols = false` or multi-bit APSK profiles are rejected.
+The old fixed training prefix, repeated spreading templates and final-symbol
+zero padding have been removed. Existing keyfiles remain usable, but peers
+must use the new private waveform.
+
+This is a reference implementation. Modeled pattern log evidence is not a
+calibrated probability, measured SNR, near-capacity throughput result, radio
+sensitivity measurement or proof of low probability of intercept. The finite
+frequency, clock and memory limits below remain material.
 
 ## Timing, training, and spreading
 
-The default internal configuration is mono 6,000 Hz PCM, a 1500 Hz carrier and
-1,200 Hz nominal bandwidth. For nominal bandwidth `B` from 1 Hz through 30 MHz,
-the planner selects `Fs = max(6000, ceil(4B))` and carrier `max(1500, 0.75B)`.
+The default CLI/internal configuration is mono 6,000 Hz PCM, a 1500 Hz carrier and
+1,200 Hz nominal rate parameter (`Config::bandwidth_hz`). For this parameter `B`
+from 0.01 Hz through 30 MHz, the legacy carrier recommendation is
+`max(1500, 0.75B)`. With a selected carrier `fc`, automatic planning chooses
+`Fs = ceil(max(64, 4B, 4fc))`. The GUI defaults to `B=3600`, `fc=1500`, and
+14,400 internal samples/s, and exposes both Rate and Carrier controls.
 Narrow audio remains around a usable carrier rather than falling below 300 Hz.
 The 6 kHz floor is needed for this real-PCM carrier representation; it does not
 raise the nominal chip or symbol rate. The 30 MHz plan still uses 120 million
@@ -30,91 +38,200 @@ The modem's nominal chip rate is bandwidth / 2.
 `symbol_seconds` is the bandwidth-derived duration (or explicit integration),
 independent of the hardware clock. `symbol_sample_count` rounds that duration
 up once to an internal PCM sample; exact airtime estimates include this rounding.
+Shaped transmissions also include the two finite filter tails described below.
+Every nonempty transmission then adds exactly three seconds of suppression noise;
+these durations do not change any payload-symbol duration.
 The nominal gross bit rate is selected bits per symbol divided by nominal symbol
-duration, before packet and training overhead. Audio conversion does not alter
+duration, before interval markers, integrity/parity and surrounding-noise overhead. Audio conversion does not alter
 these modem settings or rates.
 
-Bytes are sent most-significant bits first. Two-bit and three-bit profiles use
-two amplitude rings and two/four differential phases; four through six-bit
-profiles retain eight phases and use two/four/eight amplitude rings. Phase and
-amplitude indexes use Gray adjacency. For `R` rings, the radius increment is
-`sqrt(0.30625 / ((R+1)*(2*R+1)/6))`. Every equiprobable constellation therefore
-has mean complex power 0.30625 and real carrier power 0.153125; peak amplitude
-stays below one. The original four-bit map uses radii 0.35 and 0.7 and phase-step
-indexes `[0, 1, 3, 2, 7, 6, 4, 5]`. Phase continues across the training/payload
-boundary. PCM is the real component of the complex symbol times the carrier
-oscillator and configured chip sign.
+### Automatic-pattern hardware settling
 
-The variable bootstrap and remaining packet body form a continuous bitstream.
-Only the final symbol can contain unused pad bits, excluded from decoded bytes.
-There is no magic marker, internal symbol padding, end marker or transmitted
-zero-byte tail. `payload_symbol_count` is the ceiling of packet bits divided by
-bits per symbol. Repeatable airtime counts incremental symbols relative to a
-numeric empty-payload baseline with the same metadata and effective coding.
+A nonempty automatic-pattern transmission starts with a hardware-settling
+waveform lasting approximately two seconds, rounded to the nearest whole
+sample-quantized payload-symbol duration, with half-symbol ties rounded up.
+For symbol duration `T`, the prefix contains `floor(2 / T + 0.5)` intervals of
+length `T`; it is absent when `T` exceeds four seconds. The first payload symbol
+then follows at its normal duration, starting at payload stream position zero.
+An empty payload emits no prefix.
 
-The 32-byte known preamble always uses 64 independently timed 16-APSK training symbols. Its duration is five seconds,
-quantized to the sample grid, independently of payload symbol duration. A payload
-symbol longer than five seconds does not lengthen the preamble to one or more
-whole payload symbols. The transmitter and receiver use the same training
-schedule and transition to payload timing at its end. Training is outside the
-packet codec and is not Reed–Solomon protected or independently authenticated.
-The unencrypted training bytes are:
+The settling waveform uses independent circular Gaussian-derived I/Q noise,
+refreshed once per chip, at the payload's mean transmit power.
+Its radius is limited and normalized to keep peaks inside PCM headroom.
+Private payload and prefix use the same update cadence and noise mapping.
+Eligible pattern profiles apply the same pulse shaping continuously across the
+prefix and payload. The prefix helps external gain control and muting settle before
+fast payload symbols arrive, and is not made from the legal payload patterns.
+It supplies no training, header or acquisition condition: pattern evidence
+alone accepts the following symbols even when the prefix is lost or distorted.
+Any selected key XOR-encrypts the preamble noise bytes with its existing
+Data-purpose key and transmission epoch before I/Q mapping. Enabled Scrambler and DSSS bytes XOR in before that same
+mapping, using
+the same keys and epoch as their payload streams. The high eight CTR counter
+bytes contain the fixed ASCII pad `preamble`, separating prefix positions
+without generating or deriving extra keys. Tone mode uses the same noise
+prefix, refreshing phase and amplitude once per chip;
+it reserves no payload constellation points. Automatically timed hardware
+output schedules the first payload symbol on a whole system-clock second;
+playback starts earlier by the prefix and leading filter tail. The symbol's
+timestamp denotes that payload boundary. Explicit-timestamp captures and
+simulation retain deterministic timing, including their prefix offset.
+The output device is opened before choosing the scheduled start. Unmeasured
+device and output-buffer latency can still shift the physical audio boundary.
+Airtime estimates include the prefix, filter tails and suppression noise without adding meaningful
+payload bits. For shaped profiles the first payload position is
+`pattern_pulse_padding_samples(config) + training_sample_count(config)`.
 
-```text
-53 19 a7 e2 86 d4 3b 0f 65 92 ce 48 71 ad f0 26
-b8 4d 03 e7 9a 61 35 cf 28 d0 7e 94 ab 16 f3 59
-```
+### Trailing suppression noise
 
-The full preamble, framed packet and parity are encrypted together when a key is
-selected. The separate few-bit status API has no preamble.
+Every nonempty transmission, including raw bits and tone mode, appends exactly
+`3 * sample_rate` samples of independent circular noise after the payload's
+complete final filter tail. It is never rounded to a symbol boundary, even
+when a symbol lasts hours and the rounded settling prefix is absent. The
+noise is generated from fixed-size caches; no duration-sized tail buffer is
+allocated. Input bits, symbol epochs, Data positions and the original payload
+waveform remain unchanged. Low-level bare-capture tests may explicitly disable
+both surrounding noise sections with `surrounding_noise=false`.
 
-After private encryption, the audio transfer layer XORs the frame after its
-32-byte training prefix with a public whitening stream. This removes the strong
-amplitude/phase bias of structured headers without adding bytes or airtime.
-The protocol seed is the ASCII string `DataPump/audio/whitening/v0.5`, padded
-with zero bytes to 32 bytes, passed to `Crypto`. Use its `Scrambler` purpose,
-epoch zero and frame-relative byte offset; offset zero begins immediately after
-the training. The first 16 mask bytes are `fbd27bba1decfa41e9265d3cc2740276`.
-Both keyed and plain audio use this layer. Receiving removes whitening before
-private decryption, FEC and packet validation; XOR does not spread bit errors.
-Protected-bootstrap trials cache the combined mask once per candidate.
-`pack`/`unpack`, the raw-byte modem API, training and few-bit status are unchanged.
+The tail uses the same chip cadence, noise mapping and selected protections as
+the settling prefix, with the independent `Suppression` counter domain: its
+high eight bytes are ASCII `suppress`, rather than `preamble` or zero. Eligible
+profiles shape this noise with the same pulse, using virtual neighboring noise
+chips without overlapping the payload waveform. Ten-millisecond edge tapers
+are included within the exact three-second duration. Waveform previews include
+the tail, while payload constellation observations exclude it.
 
-Whitening is public and reversible. It does not add payload entropy, improve
-the modulation's intrinsic capacity, conceal repeated frames, or guarantee low
-probability of intercept. A finite short message need not visit every point,
-and the planner can select a smaller alphabet when its faster symbol rate wins.
-Point occupancy is also different from a white spectrum: this modem still uses
-rectangular pulses, whose sidelobes remain. Pulse shaping and its receiver
-filter must be designed together; see [Analog Devices AN-922](https://www.analog.com/en/resources/app-notes/an-922.html).
+The noise can mask weaker delayed copies of recently transmitted patterns.
+The three-second guard duration is selected for the Earth–Moon–Earth case. It
+is not a bound on possible acoustic or radio echoes, and stronger interference
+can still disrupt reception. The tail carries no valid payload pattern or end
+marker. Reception still ends only
+after completed unsuccessful pattern searches cover six seconds; suppression
+noise contributes to that absence only when those searches reject it.
 
-The named choices are:
+### Private waveform and remaining signal structure
+
+Private templates map eight mixed keystream bytes per chip to circular noise,
+with both amplitude and phase varying. The bounded Gaussian transform has unit
+expected complex power before the transmitter's amplitude scale. Its two bit
+alternatives retain a public internal-transition mask, so the same iterative
+pattern comparison works under unknown common gain and phase. FFT scoring uses
+actual template energy; the clock-window path fits its full Gram matrix.
+See [exact stream mapping](crypto.md#binary-pattern-chip-addressing).
+
+Previously private spreading only selected a real +/-1 multiplier of the carrier.
+Squaring the transmitted PCM canceled every private sign. That was a mapping
+defect, not a requirement of pattern-only acquisition. Circular private templates
+remove that invariant and the public constant-envelope payload signature.
+Band occupancy, regular chip timing, capped amplitudes and burst duration remain;
+no claim of absolute indistinguishability from noise is made.
+
+### Pattern codewords and named choices
+
+`PatternCode` supplies two distinguishable codewords for each one-bit symbol.
+Both public and private patterns use circular I/Q chips with varying amplitude
+and phase. The public pattern resets at a symbol boundary. Its short templates
+can produce sparse constellation plots because repetition adds no new chip
+values. In keyed pattern mode, each symbol selects the whole second at its
+scheduled start and holds that epoch for its entire pattern. Symbols beginning
+in one second consume successive counter positions; a symbol beginning in a
+later second selects that newer epoch. Long symbols skip intervening seconds,
+and crossing a second inside a pattern never changes that pattern's reference.
+Stable purpose roots let the receiver regenerate later symbols without the
+original message epoch. The second codeword mixes
+the first with a nonconstant balanced mask, preserving distinguishability under
+unknown carrier phase. A separate DSSS purpose remains independent. Pattern
+and Data streams share the symbol-start epoch and subsecond position. Streams
+are generated on demand with fixed-size caches. See
+[the exact integer schedule](crypto.md#binary-pattern-chip-addressing).
 
 | Mode | Behavior |
 | --- | --- |
-| `auto-keystream` | Automatic integration with keyed chip signs; falls back to `auto-pattern` without a key. |
-| `auto-pattern` | Automatic integration using the fixed pattern. |
-| `auto-tone` | Automatic integration with constant chip signs. |
-| `pattern-3`, `pattern-4`, `pattern-6`, `pattern-8`, `pattern-12`, `pattern-16` | The named number of fixed-pattern chips. |
-| `tone-1`, `tone-2`, `tone-3`, `tone-4`, `tone-8`, `tone-32`, `tone-128`, `tone-1024`, `tone-4096`, `tone-16384` | The named tone duration in chips, without pattern sign changes. |
+| `auto-keystream` | Automatic binary pattern integration with fresh keyed chips; falls back to public `auto-pattern` without a key. |
+| `auto-pattern` | Automatic integration of two rare codewords: public without a key, fresh keyed fragments with encryption. |
+| `auto-tone` | Automatic integration of two continuous tones. |
+| `pattern-3`, `pattern-4`, `pattern-6`, `pattern-8`, `pattern-12`, `pattern-16` | Preserve the named duration and fresh keyed fragments. Only `pattern-16` can meet the automatic floor, with sufficient in-band SNR. |
+| `tone-1`, `tone-2`, `tone-3`, `tone-4`, `tone-8`, `tone-32`, `tone-128`, `tone-1024`, `tone-4096`, `tone-16384` | Preserve the named tone duration in chips. |
 
-Automatic integration can exceed the duration of the largest named tone through
-`Config::integration_seconds`. Named factors remain useful explicit choices;
-they no longer impose a 16,384-chip ceiling on automatic duration. Finite numeric
-range and supported sample timing still limit representable configurations.
+Tone codewords use opposite quarter-turn progression per chip, producing
+frequencies at carrier ± chip_rate/4. Distinguishing tone identity requires
+carrier uncertainty smaller than chip_rate/4. A long tone can accumulate energy
+without becoming a rapidly changing pattern; tone acquisition has narrower
+frequency and clock conditions. Automatic tests need not force tone modes.
+Tone modes always disable Data encryption, Scrambler and DSSS. The GUI clears
+and disables key selection; CLI and transfer APIs ignore selected keys for
+tone transfers. These modes are for unencrypted communications or experiments
+and are not LPI modes.
 
-The fixed pattern and optional keyed signs multiply the data waveform. The
-bounded chip template contains at most 16,384 signs and repeats within each
-payload symbol; it is not an ever-growing per-frame chip stream. Scrambler
-and DSSS seeds come from separate purpose-specific crypto streams at the same
-candidate epoch. Tone omits the fixed-pattern/scrambler signs; an independently
-selected DSSS layer remains separate. The constellation preserves both amplitude
-and differential phase; plotting each observation on a unit circle would erase
-part of the transmitted information.
+Automatic integration can exceed the largest named factor through
+`Config::integration_seconds`. Duration is quantized once to a sample boundary,
+and a final partial chip is permitted. Pattern generation uses bounded storage;
+receiver timing coverage and numeric limits still bound usable integration.
 
-Pulse shapes are rectangular. Their sidelobes extend outside nominal bandwidth;
-there is no certified occupied-bandwidth mask. Carrier and nominal bandwidth
-must fit inside the internal DSP passband. The 24 kHz GUI preset uses a 96 kHz
+### Pulse shaping
+
+`Config::pulse_shaping` defaults to `true`. Pattern symbols lasting at least
+16 complete nominal chip times use a root-raised-cosine (RRC) pulse with 25%
+rolloff and a finite 16-chip span. Manual patterns shorter than this and all
+tone modes retain rectangular pulses. Setting the flag to `false` restores the
+previous waveform for comparison; both endpoints must match the flag and
+profile. No public acquisition marker or waveform-negotiation field is added.
+
+The chip rate and integration duration are unchanged. For a sample-quantized
+chip rate `R`, the ideal support is `1.25 * R`; at nominal bandwidth 1,200 Hz,
+`R = 600` chips/s and the target is about 750 Hz. Nominal bandwidth continues to
+control chip-rate planning and the reported C/N0 conversion, rather than
+claiming a measured occupied width. Continuous filtering joins the independent
+settling chips and every payload symbol. Eight chip times of zero extension at
+each burst edge emit the complete tails: 26.7 ms of fixed additional airtime
+at 600 chips/s. No extra payload symbols, chip addresses or keystream bytes are
+consumed. A partial final chip retains its original address and duration-weighted
+energy. Constellation observers still report the logical input chips before
+shaping; waveform and spectrum views show the actual shaped samples.
+
+Overlapping pulses can exceed the original chip peak limit. A circular radial
+limiter caps the analytic PCM radius at 0.992 after shaping, preserving rotational
+symmetry without a fixed power backoff. In a reproducible private 65,536-chip
+capture at 600 chips/s, limiting reduced power by 0.083 dB relative to its
+unlimited linear waveform, with 0.109% mean-squared waveform error relative to
+signal energy. Hann-windowed spectra measured approximately 742–746 Hz at
+26 dB below their spectral peak; spectral density beyond carrier ±400 Hz remained more
+than 33 dB below that peak. These are software measurements for that capture,
+not universal bounds or RF compliance measurements. The test suite checks
+actual limited PCM sidelobes, mean power, crest headroom and chip addressing.
+
+Receive templates use each candidate symbol's linear shaped contribution,
+evaluated against the original independent sample/bin observations. Actual
+template energies and Gram terms enter the fit; filtering does not manufacture
+additional independent noise observations or a new source of timing confidence.
+Unknown adjacent-symbol tails and the limiter residual remain model mismatch.
+Pattern evidence alone still controls acquisition, iterative timing refinement,
+continuation and burst boundaries; no prefix, decoded content, CRC or MAC
+supplies clock-lock confidence.
+
+The fast receiver's existing sample bins discard a small amount of shaped
+signal energy. In the equal-C/N0 private +26 dB-Hz comparison, its pattern scores
+were about 5% lower on average than with rectangular pulses. A marginal final
+bit fell below the unchanged acceptance threshold and remained unconfirmed;
+the raw-sample correlator recovered it. Thus unchanged payload rate does not
+imply identical noisy decisions or zero confidence cost. The receiver retains
+its conservative acceptance rules. See the [validation record](validation.md)
+for the tested cases and limits.
+
+Regular chip timing can remain observable through periodic second-order
+statistics even though the chips and radial limiter are circularly symmetric.
+The smoother spectrum reduces distant sidelobes; it does not establish
+indistinguishability from bandpass-filtered white noise or a measured adversary
+observation time. Keyless energy and correlation detectors can still respond
+to the signal. Encryption, HKDF purposes, CTR domains, byte mixing and fresh
+absolute chip positions are unchanged by shaping.
+
+There is no certified occupied-bandwidth mask. Eligible shaped patterns must
+fit their ideal RRC support above DC and below the internal Nyquist frequency;
+short rectangular patterns and tone modes retain the conservative nominal
+`carrier ± B/2` guard. Selecting such an unshaped mode may require raising a
+low carrier. Finite filter tails and limiter regrowth remain subject to the
+spectral qualifications above. The 24 kHz GUI preset uses a 96 kHz
 internal clock and a fitting carrier. That clock is not a sound-card requirement.
 A carrier need not complete an integer number of cycles in a chip.
 
@@ -144,278 +261,301 @@ physical microphone/speaker frequency response still need device-level validatio
 
 ## Automatic signal planning
 
-The CLI and GUI use automatic planning by default: a target C/N0 of 40 dB-Hz,
-with `auto-keystream` when a key is selected and `auto-pattern` otherwise.
-Explicit CLI `--spreading`, `--scramble`, `--dsss`, `--sample-rate` or `--carrier`
-controls select the manual configuration instead. Those controls cannot be
-combined with an explicit `--target-snr` or `--pattern` automatic plan.
-The simulator's `--snr` describes channel noise and does not select the transmit
-configuration.
+The CLI defaults to nominal rate 1,200 Hz and TX target C/N0 of 32 dB-Hz. The GUI
+defaults to Rate 3,600 Hz, Carrier 1,500 Hz, short target 32 dB-Hz and long/file
+target 55 dB-Hz, and offers an 18 kHz rate preset. Its default shaped spectrum ideally spans
+375–2,625 Hz, including rolloff, for ordinary audio transfer between computers.
+This changes carrier placement and chip timing, not the keystream purposes,
+encryption, pulse shape or pattern-evidence synchronization rules. The selected
+rate, carrier and pattern/tone mode are fixed during receive
+search; encryption normally selects `auto-keystream`, with `auto-pattern`
+otherwise. The **RX targets (dB-Hz)** field and CLI `--receive-targets` accept
+a comma-separated list. The GUI RX list starts at `32, 55`; changing either TX
+target to a valid value replaces it with both effective targets, deduplicated.
+It can then be edited independently. The CLI receive list defaults to `32`.
 
-`tuning::resolve` accepts bandwidth, target **C/N0 in dB-Hz**, a pattern mode and
-key availability. C/N0 is signal power divided by noise power in a 1 Hz reference
-bandwidth. For channel bandwidth `B`, `SNR_B = C/N0 - 10 log10(B)`.
+Entries are trimmed and deduplicated. An empty, malformed,
+nonfinite, out-of-range (outside -200..200 dB-Hz), over-16-entry or over-512-byte
+list resets entirely to `32`. The GUI permits partial editing, then normalizes
+after 750 ms of inactivity. RX targets never alter the scalar TX target.
+In automatic modes, all GUI target entries check Clock/RAM fit; an unusable
+value may move to a nearby checked fit, preferring weaker targets. Independent
+RX entries include their companion targets and active key/plaintext banks in
+that check. Fixed modes and CLI numeric inputs retain exact requested values.
+Typed GUI text remains editable; Enter or a preset displays the accepted values
+at full precision. See [Link planner](link-planner.md).
 
-The planner chooses an internal sample rate/carrier and evaluates all supported
-constellations. For each profile it estimates the integration needed for a
-geometry-based noise margin, then chooses the highest gross bit rate among the
-profiles meeting that margin. Larger amplitude alphabets increase density
-without narrowing the phase spacing beyond eight positions. Six bits per symbol
-still requires at least two symbols for an isolated byte; all profiles retain
-at least four distinct signals for short content.
+The receiver resolves only this list, using the selected rate, carrier, clock
+and mode before selecting the pattern length and checking its confidence floor;
+identical sample-quantized waveform profiles are searched once. Manual CLI
+`--spreading`, `--scramble`, `--dsss`, `--sample-rate` or `--carrier` selects
+explicit pattern configuration and cannot be combined with automatic planning
+or `--receive-targets`. Simulator `--snr` describes sample-power noise and does
+not choose the transmitted profile.
+
+`tuning::resolve` uses binary pattern symbols (`constellation_bits = 1`). It
+retains the modeled integrated-energy target of 18 dB and selects the smallest
+supported integration meeting both that target and an SNR-dependent chip floor:
+
+| Modeled SNR in the selected bandwidth | Minimum pattern chips | Gross rate at 12 kHz |
+| --- | ---: | ---: |
+| At least 30 dB | 16 | 375 bit/s |
+| At least 24 dB, below 30 dB | 32 | 187.5 bit/s |
+| Below 24 dB | 64 | At most 93.75 bit/s |
+
+These gates require high SNR relative to bandwidth, not simply a high C/N0
+number. A shortened profile must contain only whole sample-quantized chips;
+otherwise selection tries the next length up to the previous 64-chip floor.
+This prevents a new periodic short-chip hold at fractional bandwidths or custom
+clocks. The receive-profile bank checks its preserved actual clock as well.
+Private profiles with compact orthogonal receive bins reserve at least 32 chips
+to preserve boundary-bit recovery; the recommended 12 kHz profile uses the exact
+sample fit and remains eligible for 16 chips. Other profiles outside the bounded
+256-sample exact-fit range retain 64 chips.
+Automatic tone modes retain the 64-chip floor. Automatic factors are
+16 through 16,384, doubling at each step; longer integration uses an explicit
+duration. Forced modes preserve the requested length and report an unsupported
+target when the applicable chip floor or energy model is unmet.
 
 ```text
-angular_distance        = sqrt(2) * radius_increment * sin(pi / phase_count - pi / 64)
-distance                = min(radius_increment, angular_distance)
-target_Es/N0_dB          = 10 log10(2 * 3.2^2 * 0.30625 / distance^2)
-required_symbol_seconds = 10^((target_Es/N0_dB - C/N0) / 10)
-estimated_Es/N0_dB       = C/N0 + 10 log10(symbol_seconds)
-bit_rate                = selected_bits / symbol_seconds
+required_symbol_seconds = 10^((18 - C/N0_dBHz) / 10)
+estimated_Es/N0_dB       = C/N0_dBHz + 10 log10(symbol_seconds)
+bit_rate                = 1 / symbol_seconds
 ```
 
-This conservative geometric model uses the worst inner-ring angular distance,
-differential phase noise and a 3.2-sigma half-distance margin. It reserves
-2.8125 degrees of drift per symbol; the narrowest phase decision half-width is
-22.5 degrees. This is a design margin, not a carrier/clock tracking algorithm.
-For sufficiently long symbols even small frequency errors exceed it.
+C/N0 uses noise power in a 1 Hz reference bandwidth. For bandwidth B,
+`SNR_B = C/N0 - 10 log10(B)`. The 18 dB target and adaptive chip floors are
+engineering model choices, not an empirically calibrated false-alarm or missed-
+detection specification. Search multiplicity, correlated bins, channel model
+and adaptive timing selection must be included in future calibration. Long
+integration alone does not establish tolerance of clock drift or interference.
 
-Automatic modes choose finite pattern factors or longer integration as necessary.
-Weak C/N0 favors smaller constellations and shorter integration than a fixed dense
-profile would require. Forced modes preserve their selected duration and choose
-the fastest supported constellation that meets the margin; if none can, the
-planner retains the most robust profile and reports the unmet target. Numeric
-limits are checked. This is optimization over the implemented profile set, not a
-proof of capacity-optimal throughput or calibrated packet error rate.
+At 12 kHz and 80 dB-Hz, the selected 16-chip pattern improves gross throughput
+fourfold over the previous fixed floor through shorter supported patterns.
+Keystream generation and the transmitted chip distribution are unchanged.
+Short private symbols with nonorthogonal carrier bins now use the same exact
+real-PCM fit as short public symbols, retaining the cap of four real evidence
+dimensions per chip. Orthogonal private bins retain their compact search. This
+avoids losing short-pattern evidence by integrating across chip boundaries.
+Patterns below 16 chips remain manual: some pass clean PCM yet lose an endpoint
+under the sampled clock/phase channel. See [throughput limits and validation](throughput.md).
+This is still one bit per codeword; multi-kilobit bulk transfer needs additional
+validated waveform work. Peers using automatic tuning must use matching plans;
+an older fixed-64-chip automatic profile is not the new high-SNR profile.
 
-These estimates concern payload integration, not guaranteed acquisition or a
-measured error rate. In particular, making payload symbols arbitrarily long
-does not increase the energy in a fixed five-second preamble. Reception therefore
-uses pattern constellation evidence and the compact packet bootstrap for blind acquisition rather than requiring
-a training correlation threshold. It can acquire a long-symbol header even when
-training is obscured, subject to the finite timing bank and successful frame
-validation. Oscillator drift, fading and finite receiver hypotheses impose further
-limits. No thermal sensitivity or near-capacity claim follows from the planner.
+## Incremental pattern receiver and live audio
 
-## Incremental receiver and live audio
+`StreamingTransmitter` emits bounded PCM chunks, including the rounded
+hardware-settling prefix when nonzero. It does not allocate a whole prefix
+waveform or require the receiver to recognize it.
+`StreamingReceiver` wraps `PatternReceiver` for all supported configurations. The pattern
+receiver mixes input into a short complex baseband ring, uses FFT correlation
+for candidate timing windows and retains bounded `PatternEvidence` records.
+Each record includes sample interval, frequency, stream-symbol position, bit,
+best score and alternative score. It keeps a bounded set of candidate chains
+and recovered bits while evicting old waveform history after a few symbol
+lengths. Weak evidence may be discarded at the retention threshold.
 
-`StreamingTransmitter` emits bounded PCM chunks or complex symbol integrals.
-`StreamingReceiver` accepts chunks, retains bounded acquisition/integration state,
-and emits newly decoded bytes. It does not retain the whole audio duration or
-allocate one sample buffer per long symbol. Packet bytes are accumulated under a
-separate content budget and pass the ordinary bootstrap, FEC, metadata and final
-digest/MAC checks before becoming a received message.
+Evidence uses normalized complex projection onto each candidate pattern,
+with unknown complex amplitude and local energy normalization. Its score is
+in natural-log units derived from a white Gaussian model. It is not APSK
+point error, measured dB, a calibrated confidence percentage or authentication.
+Timing, carrier and keystream candidates are compared only using this pattern
+evidence. High individual evidence can admit a single symbol; weaker retained
+symbols can contribute to a chain. The default nominal search significance is
+`1e-10`, tightened from `1e-8`; each receiver also charges its finite search
+trials. This adds approximately 4.61 natural-log units to the admission gate
+at the same trial count. It reduces marginal false starts under the reference
+model without making a calibrated probability claim for correlated interference.
+Once admitted, a stream retains its symbol
+clock across missing slots. The only end rule is consecutive fully scored
+failed symbols whose received duration covers at least six seconds. One failed
+symbol suffices when its duration is six seconds or longer; shorter symbols
+must accumulate six seconds of consecutive failure. The duration is a fixed
+constant, not a profile setting. Long symbols are scored in full, without a
+partial-window timeout interrupting their integration.
 
-Acquisition searches a finite set of timing hypotheses at the configured carrier,
-using the pattern constellation's radial and differential-phase fit, followed by
-compact header checks. It does not require the five-second training bytes to
-be observable. Initial phase labels are tried explicitly; FEC Off no longer
-depends on RS repairing that ambiguity. For frames up to 2048 encoded bytes,
-header acceptance starts a bounded provisional decoder while other timing
-hypotheses keep searching. Only complete digest/MAC verification commits short-
-frame lock. Larger frames still acquire from their validated header and must
-pass full integrity before delivery. PCM mixing solves the I/Q Gram system so it does not assume
-an integer number of carrier cycles per integration.
-Dense profiles first screen amplitude-lattice residuals using three times the
-radial noise standard deviation at the planner's geometric margin. Bounded gain
-hypotheses consider every possible highest occupied ring; full protected-header
-validation and complete short-frame checks resolve the ambiguity when outer rings are absent. This keeps idle
-noise fitting inexpensive. The screen is designed for the stated AWGN margin;
-it is not a guarantee that every impulsively corrupted, otherwise RS-correctable
-waveform will be acquired.
-An additional differential phase/amplitude residual check includes the planner's
-allowed phase drift. Repeated decoded probes share bounded validation caches;
-they do not repeat RS and CRC work for every equivalent timing/gain hypothesis.
-Provisional short frames can supply measured constellation points and mutable
-text previews, but they cannot select the active key, enter the verified inbox,
-or become copyable/savable content. Candidate rejection clears its tentative
-text. The full packet's digest or MAC remains the delivery condition.
-Keyed continuous reception builds a bounded bank of loaded-key and candidate-
-epoch receivers. The default search is plus or minus six whole seconds; the live
-API accepts at most 60 seconds in either direction and 128 loaded keys, with the
-aggregate bank constrained by the DSP budget. A bank that exceeds that budget
-is rejected. This is not a whole-band search, unlimited timing search, arbitrary
-Doppler tracker, or proof of reliable multi-day acquisition.
+Unknown interior slots have no evidence, score or timing refinement and cannot
+select an unresolved private schedule. A later independently confident symbol
+confirms a surviving gap's extent. Unconfirmed trailing slots are trimmed on
+physical end. EOF, quota exhaustion, cancellation and replacement can interrupt
+processing and release resources but never emit a completed stream. Receiver
+epoch refresh retains admitted physical streams even before their first output
+chunk, or after a correlator drains its admitted bits. Short receptions therefore
+retain the full physical absence window. Continued
+silence cannot extend an expired stream; later independent evidence can acquire
+a new one.
 
-Tone acquisition uses up to 64 symbol phases; ordinary pattern acquisition uses
-up to 256. Keyed templates of 1,024 chips or more redistribute 224 origins between
-112 coarse phases and 112 finer positions within about two chips of the fixed
-training boundary; duplicate positions are merged. This recovers capture-aligned
-and nearby long encrypted starts without storing their PCM duration. Arbitrary
-unknown start times can still fall outside this finite chip-alignment search.
-Long blind integrations retain their admitted epoch bank for a bootstrap span;
-they do not accumulate an unlimited set of new wall-clock epochs.
+The internal `missing_pattern_bit` retains unknown positions. Data unmasking
+uses original symbol addresses; the marker collector excludes unknowns from
+confidence and supplies byte-erasure masks to the fixed RS interval decoder.
+After physical completion, an incomplete final codeword can be filled with
+erasures at its known 128-byte extent, including missing final parity bits.
+Neither its bytes nor its parity have to be perfect. There is no header, length
+probe or arbitrary endpoint search. See [fixed intervals](protocol.md).
 
-Streaming reception assumes carrier error is within the chosen integration's
-tolerance. The generic batch known-training decoder can estimate a small static
-carrier offset, but that search is not part of the blind streaming packet path.
-Accelerated simulation assumes matched chip despreading while modeling carrier
-and symbol-clock error; it cannot establish arbitrary long encrypted-pattern
-acquisition on real audio or demonstrate a tracking loop that is not implemented.
+Immutable bit chunks drain continuously with a stable physical stream identity.
+Compact missing-run events avoid allocations proportional to a gap. Competing
+clock hypotheses cannot rewrite already delivered chunks. The collector keeps
+one interval and bounded marker overlap; corrected source areas enter a capped
+memory buffer. Only physical completion permits source reconstruction/decompression.
+RS or MAC success never closes a stream, and source decoding never feeds back
+into physical acquisition. `Received::raw_bits` is a bounded diagnostic prefix;
+`missing_symbols` reports unknown placeholders and `observed_bits` the full slot
+count. Pending observations remain incomplete in both APIs and the GUI.
 
-`live::Session` owns continuous capture, preparation and decoding workers. Normal
-GUI startup opens the OS-default input; an optional device override is available.
-Actual playback pauses capture and resumes it afterward. Incoming audio arrives
-in small chunks; queues, acquisition state and current plots are bounded. The
-obsolete `receive_buffer_seconds` setting no longer determines an audio window.
-Cancellation is checked between processing chunks and driver buffer operations.
-A driver blocking inside an operating-system call remains outside that guarantee.
+The default frequency bank contains five offsets at 0, ±1/(4T), ±1/(2T),
+where T is symbol duration. The API permits an explicit bounded offset bank.
+FFT continuation compares the same observed symbol against this bank and
+accumulates carrier evidence across admitted symbols. The reported frequency
+follows the strongest accumulated grid evidence, so a disturbed first symbol
+cannot permanently label a later 1500 Hz stream as 1472 Hz. A persistent
+off-center signal retains its measured offset. The clock-window correlator
+likewise reports the strongest carrier evidence over comparable observations
+while preserving its immutable bit-owner identity. Overlapping carrier
+hypotheses within one symbol's frequency resolution (`1/T`) share stream
+ownership rather than publishing duplicate raw streams. The finite grid still
+limits frequency accuracy; these rules do not force the selected center.
 
-The waveform, windowed FFT and measured complex constellation feed live plots.
-Plot input is a continuous bounded sample window with an absolute sample origin;
-FFT windows and carrier phase do not restart at an audio callback boundary.
-Varying callback sizes or GUI scheduling therefore do not redefine the signal
-being measured. Rendering is paced to about 20 updates per second as CPU time
-allows; this is not a guarantee against an overloaded audio device or processor.
-Idle simulated noise follows the same 20 Hz cadence with bounded preview chunks.
-Queuing a transmission interrupts that wait; active transmissions run at CPU
-speed independently of their virtual airtime.
-The GUI consumes fresh symbol observations from the provisional or locked receiver. Their
-phase is measured relative to the preceding received symbol, and their amplitude
-is normalized by the receiver's estimated gain. This is the decoder's coordinate
-system; points remain measured values and are never snapped to symbol decisions.
-A bounded queue retains each point with its measured phase reference until the
-next GUI snapshot. Changing a timing or gain hypothesis does not republish older
-symbol times; overflow is counted rather than growing this queue indefinitely.
-Unlocked input supplies current noise/phase I/Q diagnostics. The source label
-distinguishes those input measurements from received or transmitted symbols.
-Axes and amplitude rings are display aids, not a calibration certificate. Decoder
-diagnostics and acquisition scores are evidence of processing, never packet
-authenticity.
+Keyed search tries a finite set of epochs and initial stream positions. Where
+symbol duration does not divide one second, its subsecond phase hypotheses
+follow the finite `gcd(symbol_samples, sample_rate)` lattice. Phases yielding
+the same symbol stream address share a template; confident symbols narrow the
+remaining interval. Weak noise does not select a different phase. The search
+transmits no epoch, symbol index or chip-block index. Timing resolution and
+coverage depend on the allocated transform. This is not a whole-band search,
+an arbitrary Doppler tracker or a guarantee of long-duration clock recovery.
 
-The signal browser's **Preamble** percentage is recognized training duration
-divided by the expected five-second training duration. Training always has 64
-segments (12.8 per second), even when the detected payload timing implies less
-than one payload symbol in five seconds. The receiver independently compares
-carrier projections with the expected training sequence, accounting for common
-gain and differential phase offset. It requires matching runs of at least eight
-segments; phase tolerance is 15 degrees and relative amplitude tolerance is 25%.
-This conservative evidence measure is distinct from correlation, sample-buffer
-coverage, or packet authentication. Blind bootstrap acquisition never creates
-preamble evidence from the regenerated prefix.
+Ordinary FFT acquisition requires workspace proportional to a few longest
+symbol windows. When that allocation exceeds the budget and a system-clock
+start hint is available, `PatternCorrelator` instead maintains bounded running
+fits over the entire requested timing/frequency/rate window. Half-chip timing
+coverage is checked before allocation; unaffordable coverage is explicitly
+rejected. No full-symbol waveform or keystream array is required by this fallback.
 
-Fixed projection history and bounded timestamped records preserve the measurement
-without storing an entire slow transmission. Missing or noisy training can give
-zero recognized coverage. Ambiguous timing, evicted history or observations too
-coarse to resolve training produce `--`. This diagnostic does not gate decoding.
+Live keyed profiles whose symbols last at least 60 seconds select
+`compact_clock_search` directly, even when a large FFT would fit. This retains
+the configured timing, carrier-frequency, clock-rate and subsecond-phase
+coverage. It uses 32-sample projection blocks and retains at most 32 diagnostic
+candidate records and 64 constellation points. Those limits trim diagnostic
+history; they do not remove running correlation hypotheses or lower confidence
+thresholds. Live admission also reserves 8 KiB per compact receiver for bounded
+control and diagnostic growth, in addition to its measured allocation.
+Public profiles retain continuous FFT discovery when it fits, since they share
+one repeating code rather than needing a separate receiver for every epoch.
 
-**Data … pre-FEC** measures exact bit agreement between the received systematic
-packet body and the corrected, fully verified body. It includes metadata, encoded
-content and the integrity tag, excluding bootstrap, parity and padding. Comparing
-the received and corrected bytes after deinterleaving counts actual bit changes,
-not eight assumed errors for every repaired byte. Compression changes the encoded
-denominator; XOR encryption and whitening preserve these bit differences.
-Partial or failed packets cannot establish this accuracy and remain `pending`.
-Simulation also withholds this measurement until the verified result is
-presented at the three-second deadline; advance computation does not expose it
-through a pending browser row.
+Tests cover a four-hour symbol prefix with bounded storage, noise rejection,
+and actual short-signal PCM recovery through the fallback. These checks establish
+bounded state and exercised decoding, not a completed four-hour weak-signal
+reception experiment. The default six-second epoch search supplies ±7 seconds
+of start uncertainty. This is uncertainty in alignment: each admitted fit can
+accumulate over the entire hours-long symbol. Completed low-confidence results
+are discarded; running fits contain only compact sums. Their count, including
+distinct phase-address groups, determines search storage. CPU cost also grows
+with timing and epoch hypotheses and is not
+established as real time for a large bank. Multi-hour operation requires a finite
+clock window, adequate DSP budget and sufficient oscillator stability.
 
-The waveform initially shows four carrier cycles from the latest buffer.
-A bounded 64-tap Blackman-windowed sinc reconstructs the line between measured
-samples, which remain visible as dots. It does not synthesize a presumed carrier.
-Up to 32 captured guard samples on each side avoid edge extrapolation when
-available. The mouse wheel changes the timebase and double-click restores it.
-Zoomed-out views draw each pixel's
-minimum/maximum samples, preserving peaks without skipping input. The waterfall
-uses peak pooling over every FFT bin, and one labeled 100 dB color range for all
-retained rows. Large simulated noise can raise that shared range; a settings
-change or click clears it. Different frequency axes never share a history.
-Unlocked receive I/Q diagnostics fit both carrier bases, including their cross
-term, so a window containing fractional carrier cycles does not introduce an
-artificial amplitude or phase ellipse.
+An unconfirmed live epoch retires after one symbol duration plus prefix and
+clock-window allowance. A confirmed receiver retires after the permitted
+failed-symbol gap and timing allowance; old noise epochs are not retained
+indefinitely. Idle public fallback windows are also rearmed, while ordinary
+FFT discovery remains continuous. This rearming does not provide complete
+coverage of arbitrary start times between windows.
 
-Actual playback similarly drains newly emitted payload symbols, excluding fixed
-training. Pending points survive plot publication until a GUI snapshot consumes
-them; each delivered batch replaces the previously displayed cloud. A slow
-consumer receives a bounded batch with a count of overflowed points through
-`Snapshot::constellation_dropped`, also shown as omitted points in the plot caption.
-Source changes do not mix raw I/Q and symbol
-coordinates. The modem's legacy history APIs still expose up to 2,048 raw recent
-symbols for other callers; the GUI uses the drain APIs instead. Labels show the
-selected APSK alphabet and the current observation count. No ideal or missing
-points are inserted. Symbol plots retain a nominal unit scale rather than
-stretching a lone inner ring to the outer edge.
-Positive rates too small for decimal display use scientific notation instead of
-rounding to `0.0 bit/s`.
+Compact storage is a per-receiver bound. The aggregate bank can retain many
+possible start seconds while a long symbol is still being observed, and it
+also scales with selected keys and profiles. Admission still reports incomplete
+coverage when the configured budget is exhausted. A four-hour duration alone
+neither requires a four-hour waveform buffer nor guarantees that every bank
+configuration fits or runs in real time.
 
-Pending ticker observations can change as additional bytes and parity arrive.
-They stay visibly provisional and cannot trigger clipboard copy or file save.
-Only complete validated text can be copied; validated files and screenshots
-appear in the separate RAM file list for explicit exclusive save. Ordered event
-serials preserve pending-before-final order. Simulation schedules these events
-alongside its plots: normal GUI polling shows pending reception before the
-verified result. If polling stalls, due events are delivered in chronological
-order on the next poll without extending the presentation to force a visible
-pause between them.
+On the tested 64-bit build, a compact private profile at 6,000 samples/s,
+1,500 Hz carrier and 1 Hz nominal bandwidth uses two-second chips. Its
+±7-second start window has 15 half-chip origins, five default frequency
+offsets and one zero-ppm clock rate: 75 timing/frequency hypotheses per epoch.
 
-## CPU-bounded simulation
+| Symbol duration | Measured streaming receiver | Live admission per epoch, including control reserve |
+| --- | ---: | ---: |
+| 4 hours, one subsecond phase | 44,480 bytes | 53,360 bytes |
+| 4 hours + 0.3 seconds, phase search enabled | 52,880 bytes | 61,760 bytes |
 
-The continuous simulator uses the same symbol mapping, training schedule,
-receiver decisions, packet correction and validation as the PCM path. It advances
-virtual media time by the processed symbol durations. It runs as fast as bounded
-DSP work permits, yielding between chunks; it does not sleep for the advertised
-on-air duration or allocate that duration as PCM. No fixed real-time multiplier
-is required. TX progress distinguishes virtual elapsed seconds from wall-clock
-CPU time, and completion/cancellation remain observable between GUI polls.
-The receiver's candidate epoch window is admitted before packet preparation and
-held through that simulated burst and its tail. A slow CPU or wall-clock jump
-does not expire its candidates. Idle reception and each subsequent burst admit
-current epochs again; the key search still includes all configured receive keys.
+About 14,430 simultaneous unconfirmed start epochs would therefore account for
+approximately 734 MiB or 850 MiB respectively per key/profile, before global
+audio, plots and other DSP reservations. These are bank-size estimates from
+measured per-receiver allocations, not measurements of a four-hour hardware
+run. Wider bands, additional rates or keys, fractional symbol phases and
+available RAM change admission; oscillator coherence and CPU throughput still
+require validation on the intended hardware.
 
-Complex integrated observations receive AWGN with the variance implied by
-sample-domain white noise and their sample counts. The channel also defaults to
-**100 ppm relative transmitter/receiver crystal error** and a separate Wiener
-phase-diffusion assumption of **0.5 degrees per square root second**. The crystal
-parameter represents the combined relative clock error, not two independent
-100 ppm oscillators. Positive error raises the received carrier and makes symbols
-arrive sooner:
+The GUI DSP workspace dropdown offers 25%, 50% (default), or 75% of available
+RAM, resolved at startup or when selected. Received messages/files retain a
+separate default 256 MiB quota. Candidate records, transform storage and active
+bit chains consume DSP budget; message byte limits do not silently truncate
+signal history. Search work still grows with sample rate, retained hypotheses
+and integrations. Increasing memory alone does not prove acquisition.
+
+## Sampled simulation
+
+The continuous simulator sends the transmitter's actual carrier and spreading
+waveform through a channel into the ordinary PCM receiver. The receiver starts
+unlocked, processes idle noise before transmission, and continues through burst
+boundaries without a transmitter-triggered reset. It receives no symbol
+boundaries, spreading decisions, payload size or transmitter epoch. Its candidate
+keys and epochs come from its own settings and clock and follow the same finite
+search and retention policy as audio reception.
+For one-shot `transfer::simulate`, `ChannelConfig::receiver_timestamp` optionally
+sets an independent receiver search center; the CLI exposes it as
+`--receiver-time SECONDS`, separately from transmitter `--time SECONDS`. Omission
+uses the explicitly configured transfer timestamp. An encrypted epoch outside
+the receiver's `--search-seconds` window is not supplied by the transmitter.
+
+The channel uses a seeded arbitrary initial carrier phase, a fractional sample
+startup offset, and a random idle interval before each burst. Its default
+**100 ppm relative transmitter/receiver crystal error** and separate Wiener
+phase-diffusion assumption of **0.5 degrees per square root second** model the
+relative oscillators of free-running computers. The crystal parameter represents
+the combined relative error. Positive error raises the received carrier and makes
+symbols arrive sooner:
 
 ```text
 clock_ratio       = 1 + clock_error_ppm * 1e-6
-receiver_endpoint = ceil(transmitted_samples / clock_ratio)
 carrier_error_Hz  = explicit_frequency_offset + carrier_Hz * (clock_ratio - 1)
 RMS_phase_change  = phase_noise_degrees_per_sqrt_second * sqrt(elapsed_seconds)
 ```
 
-The accelerated path joins Wiener phase endpoints with linear ramps over at most
-16 subintervals per observation. It integrates each carrier/phase ramp analytically
-using its sinc coherence loss, including when an observation spans billions of
-carrier cycles. A mean attenuation term accounts for unresolved Brownian-bridge
-variance. This is a bounded stochastic approximation, not an exact sampled
-phase-noise trace over arbitrarily long symbols. Timing boundaries accumulate
-clock error; the decoder is not given corrected boundaries or phase values.
+Receiver samples include AWGN and the altered carrier, sample timing and phase
+trajectory. Sample-clock error can reduce the actual spreading correlation; no
+matched-despreading statistic is handed to the receiver. The default receiver
+must discover pattern symbols and signal boundaries from these samples; all interval correction follows acquired pattern bits. Finite carrier and
+timing coverage means an impaired signal can still fail acquisition or
+validation. Longer integration alone cannot repair oscillator coherence loss.
+Use `--clock-error-ppm 0 --phase-noise 0` with CLI `simulate` or `listen` when
+intentionally testing ideal oscillator stability; startup remains unsynchronized.
 
-Observation bins cross training/payload boundaries without framing labels.
-Chip despreading remains matched in this statistical model, so clock-dependent
-chip-correlation loss is not fully reproduced. The receiver still searches
-phase/header hypotheses, but has no clock/phase tracking loop. Consequently,
-long weak-signal integration can fail through coherence loss even when an ideal
-oscillator AWGN loopback would succeed. Longer integration alone cannot repair
-that error. Use `--clock-error-ppm 0 --phase-noise 0` with CLI `simulate` or
-`listen` when intentionally measuring the ideal-oscillator case.
+Samples are processed in bounded chunks at CPU speed without sleeping for the
+advertised on-air duration or retaining the whole waveform. Retained waveform
+history spans a few symbols; CPU work scales with the number of samples. High sample rates
+and hour-long symbols can therefore take substantial time. Cancellation is
+checked between and within chunks. The model does not establish fading/multipath
+performance, nonlinear hardware behavior or interference rejection.
 
-The model avoids synthesizing every sample of a very long tone. It does not
-establish arbitrary PCM acquisition, fading/multipath performance, nonlinear
-hardware behavior or interference rejection. Plots use bounded signal/noise
-previews rather than a retained whole transmission.
 During computation, snapshots are captured at evenly spaced media positions from
-the start of fixed training to the end of the transmitted packet, including the
-protected header and encoded body. The normal timeline contains 60 frames. Each
+the start to the end of the transmitted signal, including any hardware-settling
+prefix and the three-second suppression tail. The normal timeline contains 60 frames. Each
 stores a compact 256-sample waveform, 257 peak-pooled spectrum bins, the fresh
-measured constellation for its interval and up to 4096 bytes of browser preview
-text. Its source and lock state are captured at that position, before the receiver's artificial
-end-of-capture tail; a later lock cannot be applied to an earlier frame.
-A bounded transmitter segment history reconstructs the actual local waveform,
-including carrier phase and spreading. The preview is time-warped and
-phase-rotated using the simulated channel trajectory; its independent display
-noise does not change decoder randomness.
+measured input I/Q and retained pattern evidence for its interval. Pattern
+acquisition does not switch the I/Q source. Reception continues through ordinary
+channel noise after the source stops; the final frame can include that tail and
+its newly completed evidence. Later evidence is never applied to an earlier frame.
+Waveform previews retain bounded recent receiver samples from the actual
+channel, including its noise, carrier phase and spreading.
 
-After CPU-bounded computation completes, the GUI plays the entire timeline over
+After sampled computation completes, the GUI plays the entire timeline over
 three wall-clock seconds. Preparation does not wait for simulated airtime.
 Every new frame updates waveform and constellation and adds one waterfall row.
-Decoded text and metadata are withheld until their scheduled preview positions;
-the browser first shows provisional reception. Complete verified text, received
-file entries and pre-FEC accuracy are released together at the three-second
-deadline. Failed decoding supplies no verified result. A prepared packet cannot
+Raw bits whose physical end was observed are released at the three-second deadline;
+decoded source bytes and pre-FEC accuracy use the same delivery point. Failed decoding supplies no recovered result. Prepared content cannot
 be copied or saved before its presentation completes.
 
 If GUI polling skips frames, their fresh points are merged into the next
@@ -423,10 +563,13 @@ delivered batch within the same source coordinates, subject to a
 bounded capacity and an explicit overflow count. Duplicate polls do not append
 duplicate rows. Due browser events are delivered in chronological order.
 Replay workspace uses at most one eighth of the configured DSP budget, capped
-at roughly 1.4 MiB. This includes roughly 38 KiB for the prepared result's
+at the storage needed for 60 frames at the selected signal rate. Each captured
+constellation covers at least 1/60 second of signal time; waveform and spectrum
+previews retain their fixed sizes. The reservation includes the prepared result's
 diagnostics and caption, plus the frames' plots, points and preview text. Smaller
-budgets reduce frame and point capacities. This bounded workspace is independent
-of simulated airtime; the prepared packet's content is charged to the separate
+budgets reduce the frame count while retaining each frame's complete measured
+constellation. This bounded workspace is independent
+of simulated airtime; the prepared source content is charged to the separate
 receive-content quota.
 
 Calls queued while simulation is still computing are presented consecutively,
@@ -439,8 +582,8 @@ stalled are counted as omitted. Due browser events and the final result are
 released in order; replay does not extend or place old points over live input.
 On completion or cancellation, waveform, waterfall and constellation all resume
 live input. Background simulated reception continues while replay is presented;
-the previous packet does not remain as a persistent constellation cloud.
-The packet is still decoded and validated; transmitted application bytes are not
+the previous stream does not remain as a persistent constellation cloud.
+The received source is still decoded and validated; transmitted application bytes are not
 inserted directly into the receive cache.
 
 Named presets interpret transmit power in dBm plus negative attenuation in dB:
@@ -464,97 +607,90 @@ presets may fail decoding.
 
 ## Raw binary transmission
 
+Nonempty text of up to 16 source bytes automatically uses the fixed short
+dictionary: common letters take 3–6 bits, other bytes take 13-bit literal escapes.
+It bypasses LZMA2, markers, interval padding, FEC and MAC.
+This threshold does not apply to attachments or change explicit bit drafts.
+
 The GUI's Binary editor is an alternative to its message/file source. It accepts
 `0` and `1`, preserves leading zeros and ignores whitespace. Its estimate and
 transmit paths use `transfer::estimate_binary` and `transfer::binary_transmitter`.
 `Session::transmit_bits` queues the same bounded streaming transmitter for audio
-or the accelerated simulation channel. Binary mode does not send callsign/grid
-metadata, an attachment, repeat requests, compression, fixed training, a packet
-header, integrity tag or error correction.
+or the sampled simulation channel. Binary mode does not send callsign/grid
+metadata, an attachment, repeat requests, compression, interval markers,
+integrity tags or error correction. The separate hardware-settling prefix
+uses the same rounded duration as other pattern transmissions, and the
+suppression tail adds exactly three seconds after the final filter samples.
 
-Each complete group uses the configured APSK constellation. A partial final group
-selects a smaller set of points from that constellation; it carries only the
-remaining bits. Airtime is the number of groups times the quantized symbol duration,
-without byte padding or a five-second preamble. Selected keys mask only the actual
-bits with the data stream and seed the normal scrambler/spreading configuration.
+In default pattern mode, each bit occupies exactly one complete pattern symbol,
+so a three-bit draft occupies three payload symbols with no byte padding. Any
+hardware-settling prefix and the suppression tail add airtime but no payload symbols or bits. Selected keys
+mask the actual data bits and seed independent pattern/DSSS streams. When a
+prefix is present, those same keys also mask its noise through the separate
+`preamble` CTR range. They mask the tail through the independent `suppress`
+range; neither section adds transmitted data bits.
 
-Raw signals have no packet bootstrap or authentication. Binary simulation uses
-`modem::BinaryReceiver` to integrate the channel's noisy complex observations and
-choose the nearest point in each symbol's APSK alphabet, including the final
-partial alphabet. The receiver knows the requested bit count, nominal burst start,
-unit channel gain and initial carrier reference. It never reads the transmitted
-bit values or the channel's hidden phase/noise trajectory. Subsequent symbols use
-the previous measured phase. A final symbol with at least 99% of its nominal
-sample duration can complete after the small clock-length mismatch; shorter
-captures remain incomplete. This is aligned reception, not blind beacon discovery
-or a new carrier/clock tracking loop.
-
-Only the receiver's decided bits are decrypted with the configured data stream,
-at their exact bit offsets. There is no Reed–Solomon, packet checksum, MAC, padding
-or correction pass. Noise can therefore change the received bit sequence; a raw
-result is never labeled verified or assigned a fabricated accuracy percentage.
-During the three-second replay the browser shows pending reception and newly
-decoded bits, while the constellation shows measured symbol points when available.
-The complete result arrives at the deadline, when plots return to live noise.
-Complete bit strings can be copied; raw signals do not enter the file/packet inbox.
-Browser previews retain at most 4096 bits and indicate a longer result's prefix,
-which cannot be copied as a complete signal. Automatic raw real-audio discovery
-is not implemented. The following CLI status API retains its separate DBPSK format.
+Raw signals have no interval coding or authentication. Simulation and audio
+feed their waveform to the same blind pattern receiver, without transmitting
+or passing the bit count, start sample or carrier phase as decoder metadata.
+Pattern evidence discovers the bits and burst end. Accepted bits are drained
+on each receive poll and displayed while pending, without waiting for a byte,
+1,024-bit chunk or stream end. The dictionary is interpreted only after physical
+completion, under a 16-byte output bound, retaining exact raw bits and making no
+validation claim. Completed raw bits can be
+copied even when the expected bit count is unknown. The aligned legacy
+`modem::BinaryReceiver` API has been removed.
 
 ## Batch PCM, WAV and few-bit status
 
-The legacy `transfer::transmit`/`receive`, `modem::simulate` and WAV interfaces
+Batch `transfer::transmit`/`receive`, `modem::simulate` and WAV interfaces
 operate on complete PCM vectors and retain their batch allocation checks.
-They use the shared 0.5 modem configuration; streaming support does not make an
+The transfer APIs use pattern-only acquisition; streaming support does not make an
 arbitrarily large WAV fit in memory. The sample-domain channel adds leading delay,
 AWGN, fixed frequency shift, relative sample-clock error and Wiener phase noise.
 It interpolates the analytic PCM waveform at the altered clock and applies phase
-noise sample by sample. This path exercises waveform timing and chip correlation
-that the accelerated matched-chip statistic simplifies.
+noise sample by sample. The continuous sampled channel exercises the same
+waveform timing and chip correlation without retaining a complete PCM vector.
 
-The generic raw-byte `modem::demodulate` API uses known-training timing and
-constant carrier-offset acquisition with the shared adaptive APSK quantizer. Normal
-packet `transfer::receive` and live reception use protected-bootstrap streaming
-acquisition instead. Thus obscured-training packet recovery does not imply that
-the generic raw-byte API can acquire arbitrary bytes without known training.
-The legacy batch feasibility check includes its complex acquisition workspace;
-streaming DSP feasibility is reported separately.
+Use `PatternReceiver`, `transfer::receive` or live reception for blind sample
+acquisition. The removed known-training demodulator cannot be used as a
+fallback. Batch PCM and streaming DSP feasibility are reported separately.
 
 WAV is little-endian RIFF PCM16 mono. Readers validate chunk/container lengths,
 sample and byte rates, format and allocation limits. Writes round and clip finite
 samples to PCM16. Clipping a loud noise waveform changes its SNR.
 
-The separate status API emits one DBPSK symbol per supplied 0/1 bit, without
-byte padding, preamble, header, authenticator or FEC. Known-status detection
-requires aligned samples. A status correlation is neither authenticated identity
-nor validated text/file reception. There is no automatic unknown-beacon monitor.
+Automatic `status-tx` sends one pattern symbol per supplied 0/1 bit through the
+same raw-bit transmitter. `status-rx` discovers the complete bit string through
+pattern evidence, then compares `--bits` afterward. JSON includes the exact raw
+bits/count, model score, physical `stream_complete` and `content_validated: false`.
+`known_bits_match` requires physical completion and every comparison bit to have
+been observed; a wrong comparison value does not alter acquisition. No status result authenticates the sender.
 
 ## Resource boundaries and verification
 
 `Options::content_limit` defaults to 256 MiB and limits application content.
-The GUI receive cache is independently bounded to 256 MiB. Packet coding scratch,
-framing/parity and copies have checked bounds derived from content size; this is
-not a hard cap on process RSS. `dsp_workspace_bytes` defaults to 64 MiB and budgets
-streaming sample queues and DSP state independently of content and duration.
-Increasing tone duration alone does not require a larger sample workspace.
+The GUI receive cache is independently bounded to 256 MiB. Interval/parity
+scratch is fixed; source input and output have local quotas and LZMA2 has a
+separate allocator cap. These are not a hard cap on process RSS. `dsp_workspace_bytes` defaults to 50% of available
+RAM and budgets streaming sample queues, retained pattern-symbol recordings and
+DSP state independently of the content quota. The GUI dropdown offers 25%, 50%
+and 75%; it shows the resolved byte ceiling, which stays fixed until the choice
+changes. Signal history is not subject to the 256 MiB received-content limit.
+Transmitter chunk storage does not grow with tone duration. Default FFT receive
+workspace grows with symbol length; its bounded clock-window fallback trades
+coverage and computation for duration-independent waveform storage. Unsupported
+clock-window coverage is rejected explicitly.
 
-`transfer::estimate` allocates encoded packet data, never an audio waveform. It
-reports content, full-packet and total durations, repeat eligibility, streaming
+`transfer::estimate` allocates encoded interval data, never an audio waveform. It
+reports source bytes, coded bytes, exact wire bits and payload/total durations, repeat eligibility, streaming
 `memory_supported`, and separate `batch_memory_supported`. The one-byte repeat
 exception does not waive content, workspace or numeric-range checks.
 
-`tests/test_regressions.cpp` covers 2.4 kHz 128/1024-tone transfers whose full PCM
-would exceed the DSP budget, a 24 kHz fractional-carrier raw PCM roundtrip,
-automatic integration beyond the old 16,384-chip ceiling, and fixed five-second
-training shorter than one payload symbol. Another raw PCM case replaces all
-five seconds of training with noise and requires acquisition of the following
-slow-symbol packet with body FEC off. Live tests cover ongoing noise,
-ordered provisional/final events, cancellation, content/DSP limits and receive
-resumption. These tests do not establish physical-device performance. Consult
-[validation.md](validation.md) for which builds and tests have actually run.
-
-Weak-channel regressions explicitly disable oscillator impairments when isolating
-the planner's AWGN integration assumption. Separate channel tests cover relative
-clock drift, phase diffusion, coherence loss, seeded replay and bounded previews.
-An ideal-oscillator weak-channel result does not establish the same sensitivity
-with the default 100 ppm crystal, on raw PCM, or on physical hardware.
+The regression suite covers pattern-only acquisition through missing or obscured
+settling, exact raw bits, encrypted intervals, independent sample clocks, bounded
+long-symbol searches, cancellation and tone policy. Private-template tests check
+both quadratures, variable amplitude, key/epoch separation, absence of the old
+squared-carrier invariant, and energy-normalized receive evidence. They do not
+establish physical-device interception resistance. Consult [validation.md](validation.md)
+for previously measured build and hardware boundaries.

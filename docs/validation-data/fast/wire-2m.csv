@@ -1,0 +1,2 @@
+profile,apsk,code_rate,source_bytes,seed,snr_db,acquired,physical_end,complete,exact,tx_intervals,rx_intervals,corrected_bytes,erased_bytes,evm,goodput_bps,signal_power,fullband_noise_variance,declared_bandwidth_hz,matched_enbw_hz,es_n0_db,modem_and_soft_workspace_bytes,spool_bytes,wall_seconds,cpu_seconds,realtime_ratio,max_rx_callback_seconds,callback_deadline_misses
+wire,256,0.875,2097152,417,60,1,1,1,1,15941,15941,0,0,0.00461881364,44139.9182,0.121549904,1.62066539e-07,18000,14978.9083,60.7918125,313944,4456960,33.8230624,33.674054,0.0887530835,0.022365183,838
