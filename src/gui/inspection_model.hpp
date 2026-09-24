@@ -1,6 +1,5 @@
 #pragma once
 #include "datapump/transfer.hpp"
-#include "datapump/lpi_estimate.hpp"
 #include "pattern_space.hpp"
 #include <complex>
 #include <optional>
@@ -31,8 +30,6 @@ struct Constellation {
 struct Inspection {
     std::string title,summary;
     bool binary=false;
-    // Empty GUI drafts use a single raw zero only for analytical estimates.
-    bool preview_only=false;
     std::vector<FlowLane> lanes;
     std::vector<StructureSection> sections;
     std::vector<Field> fields;
@@ -40,8 +37,6 @@ struct Inspection {
     std::optional<inspection::PatternSpace> pattern_space;
     std::string preamble_description,chip_description;
     transfer::Estimate estimate;
-    lpi::Estimate lpi_estimate;
-    std::string lpi_summary,lpi_description;
     std::optional<StreamLayout> stream_layout;
 };
 struct InspectionRequest {

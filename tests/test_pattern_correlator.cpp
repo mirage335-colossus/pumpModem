@@ -10,7 +10,6 @@
 #include <numeric>
 #include <random>
 #include <string>
-#include <tuple>
 
 using namespace datapump;
 namespace {
@@ -713,152 +712,6 @@ void bounded_hours_and_noise() {
     modem::PatternCorrelator cancelled(c,search,1024*1024);std::stop_source stop;stop.request_stop();
     rejects([&]{cancelled.push(noise,stop.get_token());},"streaming long search must honor cancellation");
 }
-void parallel_search_preserves_every_poll() {
-    const auto burst_fields=[](const modem::PatternBurst& b) {
-        return std::tie(b.bits,b.first_sample,b.end_sample,b.first_stream_symbol,b.frequency_hz,b.score,
-            b.complete,b.stream_phase_samples,b.stream_first_sample,b.stream_first_symbol,b.missing_slots,b.support_samples);
-    };
-    const auto evidence_fields=[](const modem::PatternEvidence& e) {
-        return std::tie(e.first_sample,e.end_sample,e.stream_symbol,e.frequency_hz,e.score,e.alternative_score,
-            e.bit,e.stream_phase_samples,e.admission_threshold);
-    };
-    for(const bool compact:{false,true})for(const bool shaped:{false,true})for(const std::size_t chunk:{37U,257U}) {
-        auto c=config();c.sample_rate=256;c.bandwidth_hz=64;c.carrier_hz=64;c.integration_seconds=.3;
-        c.pulse_shaping=shaped;c.stream_phase_samples=17;
-        constexpr std::size_t delay=16,workspace=1024*1024;
-        const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
-        const auto first=delay+static_cast<std::size_t>(modem::pattern_pulse_padding_samples(c));
-        auto samples=waveform({0,0,1,0,1,1},c,delay);
-        std::fill(samples.begin()+static_cast<std::ptrdiff_t>(first+2*symbol),
-                  samples.begin()+static_cast<std::ptrdiff_t>(first+3*symbol),0.F);
-        samples.resize(samples.size()+7*c.sample_rate);
-        modem::PatternSearch search;search.start_offset_seconds=static_cast<double>(first)/c.sample_rate;
-        search.start_uncertainty_seconds=.008;search.frequency_offsets_hz={0,-.5,.5};
-        search.clock_errors_ppm={0,500};search.search_stream_phases=true;search.worker_threads=1;
-        search.compact_clock_search=compact;
-        search.candidate_limit=128;search.bit_limit=128;
-        modem::PatternCorrelator serial(c,search,workspace);
-        search.worker_threads=4;modem::PatternCorrelator parallel(c,search,workspace);
-        const auto serial_bytes=serial.working_bytes();
-        bool accepted=false,missing=false,completed=false;
-        const auto compare=[&] {
-            check(burst_fields(serial.provisional())==burst_fields(parallel.provisional()),
-                  "parallel clock scoring changed provisional fields or exact scores");
-            check(serial.acquiring()==parallel.acquiring() && serial.synchronized()==parallel.synchronized(),
-                  "parallel clock scoring changed acquisition state at a poll");
-            const auto left=serial.candidates(),right=parallel.candidates();
-            check(left.size()==right.size(),"parallel clock scoring changed retained candidate count");
-            for(std::size_t i=0;i<left.size();++i)
-                check(evidence_fields(left[i])==evidence_fields(right[i]),
-                      "parallel clock scoring changed candidate order, arithmetic or trial thresholds");
-            const auto a=serial.diagnostics(),b=parallel.diagnostics();
-            check(a.sample_offset==b.sample_offset && a.bit_rate==b.bit_rate && a.pattern_score==b.pattern_score,
-                  "parallel clock scoring changed diagnostics at a poll");
-            check(serial.take_chip_constellation()==parallel.take_chip_constellation(),
-                  "parallel clock scoring changed constellation observations");
-            const auto x=serial.take_bursts(),y=parallel.take_bursts();
-            check(x.size()==y.size(),"parallel clock scoring changed pending event count");
-            for(std::size_t i=0;i<x.size();++i) {
-                check(burst_fields(x[i])==burst_fields(y[i]),"parallel clock scoring changed pending event order or fields");
-                accepted|=!x[i].bits.empty();missing|=x[i].missing_slots!=0 ||
-                    std::find(x[i].bits.begin(),x[i].bits.end(),modem::missing_pattern_bit)!=x[i].bits.end();
-                completed|=x[i].complete;
-            }
-            check(parallel.working_bytes()<=workspace,"parallel clock cache exceeded the workspace");
-        };
-        for(std::size_t offset=0;offset<samples.size();) {
-            const auto count=std::min(chunk,samples.size()-offset);
-            const auto input=std::span(samples).subspan(offset,count);
-            serial.push(input);parallel.push(input);offset+=count;compare();
-        }
-        check(accepted && missing && completed,"parallel equivalence fixture must include accepted bits, missing slots and physical completion");
-        serial.finish();parallel.finish();compare();
-        // Optional worker caches cannot make a previously affordable receiver
-        // state reject a smaller workspace, or conceal a cancelled operation.
-        search.worker_threads=4;modem::PatternCorrelator reduced(c,search,workspace);
-        reduced.set_workspace_bytes(serial_bytes);
-        check(reduced.working_bytes()==serial_bytes,"workspace reduction must evict optional private worker caches");
-        std::stop_source stopped;stopped.request_stop();
-        rejects([&]{reduced.push(samples,stopped.get_token());},"parallel clock scoring ignored cancellation");
-        check(reduced.candidates().empty() && reduced.take_bursts().empty(),"cancelled clock scoring published observations");
-    }
-}
-void parallel_long_tiles_preserve_boundaries() {
-    const auto burst_fields=[](const modem::PatternBurst& b) {
-        return std::tie(b.bits,b.first_sample,b.end_sample,b.first_stream_symbol,b.frequency_hz,b.score,
-            b.complete,b.stream_phase_samples,b.stream_first_sample,b.stream_first_symbol,b.missing_slots,b.support_samples);
-    };
-    const auto evidence_fields=[](const modem::PatternEvidence& e) {
-        return std::tie(e.first_sample,e.end_sample,e.stream_symbol,e.frequency_hz,e.score,e.alternative_score,
-            e.bit,e.stream_phase_samples,e.admission_threshold);
-    };
-    // These pushes contain dozens of unchanged 32/128-sample projection
-    // blocks before any decision can become available. One worker retains
-    // the scalar block order and is the independent arithmetic reference.
-    for(const bool compact:{false,true})for(const unsigned mode:{0U,1U,2U})for(const bool tight:{false,true}) {
-        auto c=config();c.sample_rate=256;c.bandwidth_hz=64;c.carrier_hz=64;c.integration_seconds=8.125;
-        c.pulse_shaping=mode==1;c.stream_phase_samples=32;
-        if(mode==2){c.spreading_mode=modem::SpreadingMode::tone;c.scramble=false;c.dsss=false;}
-        constexpr std::size_t delay=16,workspace=4*1024*1024;
-        const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
-        const auto first=delay+static_cast<std::size_t>(modem::pattern_pulse_padding_samples(c));
-        auto samples=waveform({0,0,1},c,delay);
-        modem::PatternSearch search;search.start_offset_seconds=static_cast<double>(first)/c.sample_rate;
-        search.start_uncertainty_seconds=.03;search.frequency_offsets_hz={0,-.01,.01};
-        search.clock_errors_ppm={-100,0,100};search.search_stream_phases=true;
-        search.compact_clock_search=compact;search.candidate_limit=128;search.bit_limit=16;
-        search.worker_threads=1;modem::PatternCorrelator scalar(c,search,workspace);
-        search.worker_threads=4;modem::PatternCorrelator tiled(c,search,workspace);
-        // Spare bytes cover short pending prefixes but cannot hold even two
-        // PatternCode caches. Optional batching must fall back without changing
-        // coverage, retention limits, admission or physical completion.
-        const auto budget=tight?std::max(scalar.working_bytes(),tiled.working_bytes())+512:workspace;
-        scalar.set_workspace_bytes(budget);tiled.set_workspace_bytes(budget);
-        bool accepted=false,completed=false;
-        const auto compare=[&] {
-            check(burst_fields(scalar.provisional())==burst_fields(tiled.provisional()),
-                  "long correlation tile changed provisional fields or exact scores");
-            check(scalar.acquiring()==tiled.acquiring() && scalar.synchronized()==tiled.synchronized(),
-                  "long correlation tile changed acquisition state at a poll");
-            const auto a=scalar.candidates(),b=tiled.candidates();
-            check(a.size()==b.size(),"long correlation tile changed retained evidence count");
-            for(std::size_t i=0;i<a.size();++i)
-                check(evidence_fields(a[i])==evidence_fields(b[i]),
-                      "long correlation tile changed evidence order, arithmetic or trial thresholds");
-            const auto x=scalar.diagnostics(),y=tiled.diagnostics();
-            check(x.sample_offset==y.sample_offset && x.bit_rate==y.bit_rate && x.pattern_score==y.pattern_score,
-                  "long correlation tile changed diagnostics");
-            check(scalar.take_chip_constellation()==tiled.take_chip_constellation(),
-                  "long correlation tile changed original-block constellation points");
-            const auto left=scalar.take_bursts(),right=tiled.take_bursts();
-            check(left.size()==right.size(),"long correlation tile changed pending event count");
-            for(std::size_t i=0;i<left.size();++i) {
-                check(burst_fields(left[i])==burst_fields(right[i]),
-                      "long correlation tile changed pending bits or event order");
-                accepted|=!left[i].bits.empty();completed|=left[i].complete;
-            }
-            check(scalar.working_bytes()<=budget && tiled.working_bytes()<=budget,
-                  "long correlation tile exceeded its workspace ceiling");
-        };
-        std::size_t position=0;
-        const auto push_until=[&](std::size_t end) {
-            while(position<end) {
-                const auto count=std::min<std::size_t>(4096,end-position);
-                const auto input=std::span(samples).subspan(position,count);
-                scalar.push(input);tiled.push(input);position+=count;compare();
-            }
-        };
-        // Poll on each side of an exact nominal symbol endpoint, including
-        // the first block whose fully observed absence may finish the stream.
-        for(std::size_t index=1;index<=4;++index) {
-            const auto end=first+index*symbol;
-            push_until(end-1);push_until(end);push_until(end+1);
-        }
-        push_until(samples.size());
-        check(accepted && completed,"long correlation tile fixture must admit bits and physically complete");
-        scalar.finish();tiled.finish();compare();
-    }
-}
 }
 int main(int argc,char** argv) {
     unsigned failures=0;
@@ -890,8 +743,6 @@ int main(int argc,char** argv) {
     run("four_hour_symbols_drain_individually",four_hour_symbols_drain_individually);
     run("compact_clock_search_preserves_evidence_and_bounds",compact_clock_search_preserves_evidence_and_bounds);
     run("bounded_hours_and_noise",bounded_hours_and_noise);
-    run("parallel_search_preserves_every_poll",parallel_search_preserves_every_poll);
-    run("parallel_long_tiles_preserve_boundaries",parallel_long_tiles_preserve_boundaries);
     run("independent_epoch",[]{independent_epoch_recovers_fractional_symbol_phase(false);independent_epoch_recovers_fractional_symbol_phase(false,true);independent_epoch_recovers_fractional_symbol_phase(true);});
     return failures?1:0;
 }

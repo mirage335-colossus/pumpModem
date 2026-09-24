@@ -23,6 +23,7 @@ constexpr std::array<std::string_view,19> names{
     "tone-1","tone-2","tone-3","tone-4","tone-8","tone-32","tone-128","tone-1024","tone-4096","tone-16384"};
 constexpr std::array<unsigned,19> lengths{0,0,0,3,4,6,8,12,16,1,2,3,4,8,32,128,1024,4096,16384};
 constexpr std::array<unsigned,11> automatic_lengths{16,32,64,128,256,512,1024,2048,4096,8192,16384};
+constexpr double pattern_target_symbol_snr_db=18;
 unsigned minimum_pattern_chips(const modem::Config& config,double target_snr_db_hz,bool tone) {
     // A high C/N0 is only a fast-link target relative to the selected band.
     // Preserve the previous weak-signal and tone plans. Shorter patterns need
@@ -70,13 +71,6 @@ constexpr std::array presets{
     SimulationPreset{"3dBm -200dB",true,3,-200},SimulationPreset{"3dBm -230dB",true,3,-230},
     SimulationPreset{"50dBm -200dB",true,50,-200},SimulationPreset{"50dBm -270dB",true,50,-270},
     SimulationPreset{"70dBm -250dB",true,70,-250}};
-constexpr std::array oscillator_models{
-    OscillatorPreset{"crystal","Free-running crystal",100,.5},
-    // Shared locked-link residual assumption; oscillator class changes the
-    // phase-diffusion stress model, not an inferred unlocked frequency budget.
-    OscillatorPreset{"gpsdo-xo","GPSDO: hobbyist XO (no oven)",.0001,.5},
-    OscillatorPreset{"gpsdo-tcxo","GPSDO: TCXO (no oven)",.0001,.05},
-    OscillatorPreset{"gpsdo-ocxo","GPSDO: OCXO",.0001,.005}};
 std::size_t index_of(PatternMode mode) {
     const auto found=std::find(modes.begin(),modes.end(),mode);
     if(found==modes.end()) throw Error("unknown pattern mode");
@@ -142,13 +136,13 @@ std::uint32_t recommended_sample_rate(double bandwidth_hz,std::optional<double> 
     return static_cast<std::uint32_t>(std::ceil(std::max({64.,4*bandwidth_hz,4*carrier})));
 }
 double recommended_carrier_hz(double bandwidth_hz) {
-    if(!std::isfinite(bandwidth_hz) || bandwidth_hz<minimum_bandwidth_hz || bandwidth_hz>maximum_bandwidth_hz)
-        throw Error("modem bandwidth must be 0.01..30000000 Hz");
+    if(!std::isfinite(bandwidth_hz) || bandwidth_hz<1 || bandwidth_hz>maximum_bandwidth_hz)
+        throw Error("modem bandwidth must be 1..30000000 Hz");
     return std::max(1500.,.75*bandwidth_hz);
 }
 double shannon_capacity_bps(double bandwidth_hz,double target_snr_db_hz) {
-    if(!std::isfinite(bandwidth_hz) || bandwidth_hz<minimum_bandwidth_hz || bandwidth_hz>maximum_bandwidth_hz)
-        throw Error("modem bandwidth must be 0.01..30000000 Hz");
+    if(!std::isfinite(bandwidth_hz) || bandwidth_hz<1 || bandwidth_hz>maximum_bandwidth_hz)
+        throw Error("modem bandwidth must be 1..30000000 Hz");
     if(!std::isfinite(target_snr_db_hz))throw Error("target C/N0 must be finite dB-Hz");
     const auto log_snr=target_snr_db_hz*(std::numbers::ln10/10)-std::log(bandwidth_hz);
     // log1p preserves weak-signal capacity; the positive branch avoids
@@ -266,13 +260,6 @@ SimulationPreset parse_simulation_preset(std::string_view name) {
     if(wanted=="off") return presets[0];
     for(const auto& preset:presets) if(normalized(preset.name)==wanted) return preset;
     throw Error("unknown simulation preset: "+std::string(name));
-}
-std::span<const OscillatorPreset> oscillator_presets(){return oscillator_models;}
-OscillatorPreset parse_oscillator_preset(std::string_view name) {
-    const auto wanted=normalized(name);
-    for(const auto& preset:oscillator_models)
-        if(normalized(preset.id)==wanted || normalized(preset.name)==wanted)return preset;
-    throw Error("unknown oscillator preset: "+std::string(name));
 }
 LinkBudget link_budget(const SimulationPreset& preset,double bandwidth_hz,std::uint32_t sample_rate,double noise_figure_db) {
     if(!preset.enabled) throw Error("simulation preset is disabled");

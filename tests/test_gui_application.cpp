@@ -16,133 +16,6 @@ const ui::Control& control(ui::Field field) {
     for(const auto& value:ui::console_screen())if(value.field==field)return value;
     throw Error("Missing shared control");
 }
-void fast_default_console() {
-    using F=ui::Field;using C=ui::Command;using P=ui::Page;
-    Application app({});
-    const auto visible=[&](P page) {const auto tabs=app.tab_layout(ui::default_width,ui::default_height);return std::any_of(tabs.begin(),tabs.end(),[&](const auto& tab){return tab.page==page&&tab.visible;});};
-    check(app.field(F::fast_mode).selected=="fast"&&app.field(F::fast_mode).options[0].id=="fast"&&
-          app.field(F::fast_mode).options[1].id=="robust"&&app.field(F::fast_mode).options[2].id=="legacy",
-          "Ordinary launch must default to Fast, then offer Robust and Legacy");
-    check(app.page()==P::console&&visible(P::console)&&!visible(P::fast_modem),
-          "Fast must open Console and hide modem details initially");
-    check(app.control(control(F::developer_mode)).visible&&app.control(control(F::fast_text)).visible&&
-          !app.control(control(F::fast_symbol_rate)).visible&&app.field(F::fast_mono).selected=="left"&&
-          app.field(F::fast_profile).selected=="acoustic"&&app.field(F::fast_expected_snr).selected=="3",
-          "Fast default surface or channel routing is incorrect");
-    check(control(F::fast_history).activate_on_select&&control(F::fast_history).activate_record==C::fast_copy_signal,
-          "A single signal selection must copy completed text");
-    for(const auto& declaration:ui::console_screen())if(declaration.scope==ui::ScreenScope::fast)
-        check(declaration.command!=C::fast_listen,"Continuous listening must not retain a Listen button");
-    check(!app.enabled(C::fast_cancel),"Idle Fast mode must not expose a pause-listening action");
-    const auto& brightness=control(F::fast_qr_brightness);
-    check(brightness.kind==ui::Kind::choice&&app.control(brightness).visible&&app.field(F::fast_qr_brightness).selected=="dark",
-          "Fast QR brightness must start at Dark and remain accessible");
-    app.edit(F::fast_text,"Fast QR brightness");
-    for(const auto* mode:{"normal","dim","dark","off"}) {
-        app.select(brightness,mode);
-        check(app.field(F::fast_qr_brightness).selected==mode&&app.field(F::qr_brightness).selected=="dark",
-              "Fast QR brightness changed the independent regular setting");
-    }
-    app.toggle(F::developer_mode,true);app.navigate(P::fast_modem);
-    app.select(control(F::fast_constellation),"16");
-    const auto selected=app.field(F::fast_constellation).selected;
-    check(app.page()==P::fast_modem&&app.control(control(F::fast_symbol_rate)).visible,
-          "Fast developer modem controls are inaccessible");
-    app.toggle(F::developer_mode,false);
-    check(app.page()==P::console&&!visible(P::fast_modem)&&app.field(F::fast_constellation).selected==selected,
-          "Hiding modem details discarded settings or failed to return to Console");
-    app.edit(F::fast_text,"Fast message");app.activate(C::fast_toggle_qr_expanded);
-    check(app.overlay()&&app.overlay()->controls[0].bitmap==ui::Bitmap::fast_qr,
-          "Fast message QR did not expand independently");
-    check(app.field(F::fast_qr_brightness).selected=="off","Expanding Fast QR discarded its brightness");
-    check(app.overlay_key({ui::Key::escape})&&!app.overlay(),"Escape did not dismiss Fast QR");
-    app.close();
-}
-void developer_mode_presentation() {
-    using F=ui::Field;using P=ui::Page;
-    Launch launch;
-    launch.settings=launch_command::parse("--pattern auto-tone --dsp-workspace 25% --rate 2400 --carrier 1500");
-    Application app(launch);
-    const auto& toggle=control(F::developer_mode);
-    check(toggle.kind==ui::Kind::toggle&&toggle.persistent&&app.control(toggle).visible&&
-          app.control(toggle).enabled&&!app.field(F::developer_mode).checked,
-          "Developer mode must start unchecked and remain available in the persistent header");
-    constexpr std::array advanced_fields{F::pattern,F::fec,F::dsp_workspace,F::receive_snr,
-        F::profile_reference,F::callsign,F::grid,F::repeatable};
-    for(const auto field:advanced_fields)
-        check(!app.control(control(field)).visible,"An advanced control is visible before developer mode is enabled");
-    for(const auto field:{F::message,F::binary,F::simulation,F::bandwidth,F::carrier,F::snr,F::long_snr})
-        check(app.control(control(field)).visible,"Developer mode hid an ordinary control");
-    check(app.field(F::pattern).selected=="auto-tone"&&app.field(F::dsp_workspace).selected=="ram-25"&&
-          app.field(F::bandwidth).text=="2.4 kHz",
-          "Hidden advanced controls failed to retain command-line overrides");
-    for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},
-                         ui::Rect{0,0,ui::default_width,ui::default_height}}) {
-        std::vector<ui::ControlLayout> hidden;
-        for(const auto& declaration:ui::console_screen())hidden.push_back(app.control_layout(declaration,size.w,size.h));
-        const auto tabs=app.tab_layout(size.w,size.h);
-        check(tabs.size()==ui::pages().size(),"Hiding developer tabs removed their retained layout entries");
-        for(const auto& tab:tabs)
-            check(tab.visible==(tab.page==P::console||tab.page==P::planner),
-                  "Default navigation must show only Console and Link planner");
-        const auto checkbox=app.control_layout(toggle,size.w,size.h).frame;
-        const auto clear=ui::DesktopLayout(size.w,size.h)[ui::Slot::clear];
-        check(checkbox.x+checkbox.w<clear.x&&checkbox.y==clear.y&&checkbox.h==clear.h,
-              "Developer mode is not immediately beside the left of Clear received");
-        app.toggle(toggle,true);
-        for(std::size_t i=0;i<ui::console_screen().size();++i)
-            check(app.control_layout(ui::console_screen()[i],size.w,size.h)==hidden[i],
-                  "Developer mode moved a control instead of hiding it in place");
-        const auto shown=app.tab_layout(size.w,size.h);
-        for(std::size_t i=0;i<tabs.size();++i)
-            check(shown[i].visible==(shown[i].page!=P::fast_modem)&&shown[i].page==tabs[i].page&&shown[i].frame==tabs[i].frame,
-                  "Developer mode moved or failed to restore a tab");
-        for(const auto field:advanced_fields)
-            check(app.control(control(field)).visible,"Developer mode failed to restore an advanced control");
-        app.toggle(toggle,false);
-    }
-    app.navigate(P::planner);
-    check(app.page()==P::planner&&app.control(toggle).visible,"Link planner or its persistent developer toggle became unavailable");
-    for(const auto page:{P::compression,P::flow,P::transmission}) {
-        app.navigate(page);check(app.page()==P::planner,"Stale navigation opened a hidden developer tab");
-        app.select_page(page);check(app.page()==P::planner,"Programmatic navigation exposed a hidden developer tab");
-        app.toggle(toggle,true);app.navigate(page);
-        check(app.page()==page,"Developer mode failed to make a requested tab reachable");
-        app.toggle(toggle,false);
-        check(app.page()==P::console,"Hiding the selected developer tab did not return to Console");
-        app.navigate(P::planner);
-    }
-    app.navigate(P::console);app.toggle(toggle,true);
-    app.edit(control(F::callsign),"N0CALL");app.edit(control(F::grid),"AA00");
-    app.edit(control(F::message),"An ordinary longer message");
-    app.select(control(F::fec),"off");app.toggle(control(F::repeatable),true);
-    const auto message=app.field(F::message).text,receive_targets=app.field(F::receive_snr).text;
-    const auto command=app.field(F::planner_command).text;
-    const auto flow=app.document(P::flow,900);
-    app.toggle(toggle,false);
-    app.edit(control(F::callsign),"OTHER");app.edit(control(F::grid),"BB11");
-    app.edit(control(F::receive_snr),"80");app.preset(control(F::receive_snr),"20");
-    app.select(control(F::pattern),"auto-pattern");app.select(control(F::fec),"rs60");
-    app.select(control(F::dsp_workspace),"ram-75");app.toggle(control(F::repeatable),false);
-    check(app.field(F::callsign).text=="N0CALL"&&app.field(F::grid).text=="AA00"&&
-          app.field(F::repeatable).checked&&app.field(F::message).text==message&&
-          app.field(F::receive_snr).text==receive_targets&&app.field(F::pattern).selected=="auto-tone"&&
-          app.field(F::fec).selected=="off"&&app.field(F::dsp_workspace).selected=="ram-25"&&
-          app.field(F::planner_command).text==command&&app.document(P::flow,900)==flow,
-          "Hiding advanced settings changed retained values or let stale callbacks edit them");
-    app.toggle(toggle,true);
-    check(app.field(F::message).text==message&&app.field(F::repeatable).checked&&
-          app.document(P::flow,900)==flow,"Revealing advanced controls rebuilt the draft or inspection");
-    app.toggle(control(F::repeatable),false);
-    app.edit(control(F::callsign),"");app.edit(control(F::grid),"");app.edit(control(F::message),"");
-    app.edit(control(F::binary),"001");
-    app.navigate(P::compression);app.toggle(toggle,false);
-    app.edit(control(F::short_bits),"010");
-    check(app.page()==P::console&&app.field(F::short_bits).text=="001"&&app.field(F::binary).text=="001",
-          "Hiding raw-bit inspection changed the exact draft or admitted its stale edit callback");
-    app.close();app.toggle(toggle,true);
-    check(!app.field(F::developer_mode).checked,"A closing application accepted a developer-mode callback");
-}
 void transmission_scope_records() {
     using F=ui::Field;
     const auto& declaration=control(F::transmit_scope);
@@ -287,41 +160,6 @@ void transmission_scope_reflow() {
             app.select(format,mode);
             check(capture_layout(size.w,size.h)==hidden&&!app.control(scope).visible&&app.control(format).visible,
                   "None or idle auto-hide did not immediately restore the expanded reception and plots");
-        }
-    }
-    app.close();
-}
-void simulation_header_reflow() {
-    using F=ui::Field;using S=ui::Slot;
-    Application app({});app.select(ui::Field::fast_mode,"robust");
-    for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},
-                         ui::Rect{0,0,ui::default_width,ui::default_height},ui::Rect{0,0,1920,1080}}) {
-        std::optional<ui::Rect> compact_page;
-        for(const auto* mode:{"no","yes","no"}) {
-            app.select(F::simulation,mode);
-            const bool simulated=std::string_view(mode)=="yes";
-            const ui::DesktopLayout expected(size.w,size.h,app.field(F::transmit_scope).visible,simulated);
-            const auto page=app.page_bounds(size.w,size.h),tabs=app.tabs_bounds(size.w,size.h);
-            check(page==expected[S::page]&&tabs.x==expected[S::tabs].x&&tabs.y==expected[S::tabs].y&&tabs.h==28,
-                  "The facade must place native pages and navigation using the same visible header rows");
-            const auto navigation=app.tab_layout(size.w,size.h);
-            check(navigation.size()==ui::pages().size(),"Simulation toggle changed the native tab set");
-            for(std::size_t index=0;index<navigation.size();++index)
-                check(navigation[index].page==ui::pages()[index].id&&navigation[index].frame.y==tabs.y&&
-                      navigation[index].frame.h==tabs.h,
-                      "Native tab placement must follow the facade's conditional header geometry");
-            for(const auto field:{F::message,F::short_bits,F::link_power,F::link_loss,F::link_noise,
-                                 F::simulation_cpu_time,F::simulation_gpu_time,F::device}) {
-                const auto& declaration=control(field);
-                check(app.control_layout(declaration,size.w,size.h).frame==expected[declaration.slot],
-                      "A native control used a different header allowance from its page viewport");
-            }
-            if(!simulated) {
-                if(compact_page)check(page==*compact_page,"Returning to Simulation No retained a blank computation row");
-                compact_page=page;
-            } else check(compact_page&&page.y==compact_page->y+ui::simulation_estimate_row_height&&
-                         page.h+ui::simulation_estimate_row_height==compact_page->h,
-                         "Simulation Yes must reserve only its computation-estimate row");
         }
     }
     app.close();
@@ -484,59 +322,6 @@ void revised_reception_records() {
         check(signals.lines().empty(),"A delayed superseded row was restored after its identity was merged");
     }
 }
-void recovery_reception_records() {
-    using transfer::RecoveryState;
-    Signals signals;
-    SignalLine line;line.id=94;line.revision=3;line.complete=true;line.binary=true;
-    line.text="01000001";line.received_bits=8;line.pattern_score=25;
-    for(const auto state:{RecoveryState::ready,RecoveryState::running,RecoveryState::incomplete,
-                          RecoveryState::cancelled,RecoveryState::unavailable,RecoveryState::ambiguous}) {
-        line.recovery_progress={state,2500000,9000000,std::chrono::milliseconds(10000)};
-        signals.update(line);
-        const auto rows=signal_records(signals);
-        check(rows.size()==1&&rows.front().id=="94"&&rows.front().cells[4].text==line.text&&
-              rows.front().cells[4].tone==ui::TextTone::muted&&!rows.front().activatable&&
-              rows.front().cells.back().text.find("Reception complete")!=std::string::npos&&
-              rows.front().cells.back().text.find("2500000 / 9000000 attempts")!=std::string::npos&&
-              signals.lines().front().complete&&!signals.lines().front().validated,
-              "Post-end recovery must keep one physically completed row with its exact pending bits and progress");
-        check(!signals.copy_id(0)&&!signals.copy_bits(0)&&signals.copy_raw_bits(0)==line.text&&
-              !signals.copy_bytes(0)&&!signals.copy_text(0),
-              "Unfinished recovery must allow exact physical raw bits without granting decoded-content copying");
-    }
-    line.recovery_progress.state=RecoveryState::exhausted;signals.update(line);
-    check(signals.copy_raw_bits(0)=="01000001"&&signals.copy_bytes(0)==Bytes{'A'}&&
-          signal_records(signals).front().cells.back().text.find("search exhausted")!=std::string::npos,
-          "Exhausted search must preserve explicitly raw completed observations");
-    line.recovery_progress.state=RecoveryState::recovered;signals.update(line);
-    check(signal_status_label(signals.lines().front())=="source invalid"&&!signals.copy_bytes(0)&&
-          signals.copy_raw_bits(0)==line.text,
-          "Corrected codewords with invalid source syntax must remain visibly unaccepted");
-    line.recovery_progress.state=RecoveryState::recovered;line.validated=true;line.binary=false;
-    line.text_message=true;line.reception_id="recovered-source";line.text="authenticated source";
-    signals.update(line);
-    check(signals.lines().size()==1&&signals.copy_id(0)=="recovered-source"&&signal_records(signals).front().activatable,
-          "Recovered source did not replace the existing pending row");
-    auto pending=line;pending.validated=false;pending.binary=true;pending.text="01000001";
-    pending.recovery_progress.state=RecoveryState::running;
-    signals.update(pending);
-    check(signals.copy_id(0)=="recovered-source","Delayed recovery progress replaced an accepted source");
-    ++pending.revision;pending.complete=false;pending.recovery_progress={};signals.update(pending);
-    signals.update(line);
-    check(!signals.lines().front().complete&&!signals.copy_id(0),
-          "A delayed recovered result replaced a stronger physical hypothesis");
-
-    for(const auto page:{ui::Page::console,ui::Page::compression}) {
-        unsigned actions=0;
-        for(const auto& control:ui::console_screen())if(control.page==page&&control.menu==ui::Menu::recovery) {
-            check(control.kind==ui::Kind::action&&std::string(control.menu_label)=="Recovery"&&
-                  (control.command==ui::Command::resume_recovery||control.command==ui::Command::cancel_recovery),
-                  "Recovery controls escaped the shared menu declarations");
-            ++actions;
-        }
-        check(actions==2,"Both received-signal pages need resume and cancel recovery controls");
-    }
-}
 void presentation() {
     Application app({.simulation=true});
     for(const auto field:{ui::Field::message,ui::Field::binary}) {
@@ -588,7 +373,6 @@ void control_bindings() {
 }
 void expanded_preview() {
     Application app({.simulation=true});
-    app.toggle(ui::Field::developer_mode,true);
     const auto& declarations=ui::console_screen();
     const auto& qr=*std::find_if(declarations.begin(),declarations.end(),[](const auto& c){return c.bitmap==ui::Bitmap::qr;});
     check(qr.click==ui::Command::toggle_qr_expanded&&!app.overlay(),"QR must start at its original size with a click toggle");
@@ -683,29 +467,23 @@ void declared_edits() {
 void rate_carrier_declarations() {
     using F=ui::Field;
     Application app({.simulation=true});
-    app.toggle(ui::Field::developer_mode,true);
     const auto& rate=control(F::bandwidth);const auto& carrier=control(F::carrier);
     check(std::string_view(rate.label)=="Rate" && std::string_view(carrier.label)=="Carrier" &&
           rate.kind==ui::Kind::text && carrier.kind==ui::Kind::text && rate.persistent && carrier.persistent &&
-          carrier.open_upward && app.field(carrier.field).options.size()==2 &&
-          app.field(carrier.field).options.front().id=="1.5 kHz" &&
-          app.field(carrier.field).options.back().id=="1.8 kHz",
+          carrier.open_upward && app.field(carrier.field).options.size()==1 &&
+          app.field(carrier.field).options.front().id=="1.5 kHz",
           "Rate and Carrier must be shared persistent editable dropdowns");
     for(const auto& page:ui::pages()) {
         app.select_page(page.id);app.preset(rate,"2.4 kHz");
-        check(app.field(F::carrier).text=="1.8 kHz" && app.field(F::carrier).options.size()==2 &&
-              app.field(F::carrier).options.front().id=="1.8 kHz" && app.field(F::carrier).options.back().id=="1.2 kHz",
-              "Rate preset did not offer its default and center Carrier on every page");
-        app.preset(carrier,"1.2 kHz");
-        check(app.field(F::carrier).text=="1.2 kHz","Center Carrier preset did not use the shared edit path");
+        check(app.field(F::carrier).text=="1.8 kHz" && app.field(F::carrier).options.size()==1 &&
+              app.field(F::carrier).options.front().id=="1.8 kHz",
+              "Rate preset did not offer only its default Carrier on every page");
         app.edit(carrier,"2150 Hz");
         check(app.field(F::carrier).text=="2150 Hz","Carrier dropdown did not accept a custom frequency");
         app.preset(carrier,"1.8 kHz");
         check(app.field(F::carrier).text=="1.8 kHz","Default Carrier preset did not use the shared edit path");
         app.preset(rate,"3.6 kHz");
         check(app.field(F::carrier).text=="1.5 kHz","HF rate preset did not restore its recommended carrier");
-        app.preset(carrier,"1.8 kHz");
-        check(app.field(F::carrier).text=="1.8 kHz","HF rate center Carrier was not selectable on every page");
         for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
             const auto rate_geometry=ui::control_layout(rate,app.field(rate.field),size.w,size.h);
             const auto carrier_geometry=ui::control_layout(carrier,app.field(carrier.field),size.w,size.h);
@@ -716,203 +494,33 @@ void rate_carrier_declarations() {
         }
     }
 }
-void target_snr_declarations() {
-    using F=ui::Field;
-    Application app({.simulation=true});
-    app.toggle(ui::Field::developer_mode,true);
-    const auto& short_target=control(F::snr);const auto& long_target=control(F::long_snr);
-    check(short_target.kind==ui::Kind::text && long_target.kind==ui::Kind::text &&
-          short_target.persistent && long_target.persistent &&
-          app.field(F::snr).text=="32" && app.field(F::long_snr).text=="55" &&
-          app.field(F::receive_snr).text=="32, 55",
-          "Both independent TX targets must be persistent editable dropdowns with matching default reception");
-    const auto& short_options=app.field(F::snr).options;
-    const auto& long_options=app.field(F::long_snr).options;
-    check(short_options.size()==long_options.size() &&
-          std::equal(short_options.begin(),short_options.end(),long_options.begin(),
-              [](const auto& a,const auto& b){return a.id==b.id&&a.label==b.label;}) &&
-          std::any_of(long_options.begin(),long_options.end(),[](const auto& option){return option.id=="55";}),
-          "Target dropdowns must share presets including the long-message default of 55");
-    for(const auto& page:ui::pages()) {
-        app.select_page(page.id);
-        check(app.control(short_target).visible && app.control(long_target).visible &&
-              app.control(short_target).enabled && app.control(long_target).enabled,
-              "A target dropdown disappeared on another application page");
-        app.preset(short_target,"20");app.preset(long_target,"55");
-        check(app.field(F::snr).text=="20" && app.field(F::long_snr).text=="55" &&
-              app.field(F::receive_snr).text=="20, 55",
-              "Native target preset callbacks changed the other dropdown or failed to update reception");
-        app.edit(short_target,"31.5");app.edit(long_target,"54.5");
-        check(app.field(F::snr).text=="31.5" && app.field(F::long_snr).text=="54.5" &&
-              app.field(F::receive_snr).text=="31.5, 54.5",
-              "Target dropdowns lost their independent custom-value editing");
-        for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
-            const auto a=ui::control_layout(short_target,app.field(F::snr),size.w,size.h);
-            const auto b=ui::control_layout(long_target,app.field(F::long_snr),size.w,size.h);
-            check(a.has_suggestions && b.has_suggestions && a.widget.w>=40 && b.widget.w>=40 &&
-                  (a.frame.x+a.frame.w<=b.frame.x || b.frame.x+b.frame.w<=a.frame.x ||
-                   a.frame.y+a.frame.h<=b.frame.y || b.frame.y+b.frame.h<=a.frame.y),
-                  "Target dropdown editors, labels or suggestion buttons overlap");
-        }
-    }
-    app.close();app.edit(long_target,"80");app.preset(short_target,"80");
-    check(app.field(F::snr).text=="31.5" && app.field(F::long_snr).text=="54.5",
-          "Stale target callbacks changed a closing application");
-}
-void fitted_target_editing() {
-    using F=ui::Field;
-    Application app({.simulation=true});
-    for(const auto field:{F::snr,F::long_snr}) {
-        const auto& declaration=control(field);
-        for(const auto* text:{"-","-6","-60","-60.","-60.5"}) {
-            app.edit(declaration,text);
-            check(app.field(field).text==text,"Fitting a weak target replaced a native keystroke buffer");
-        }
-        check(app.field(F::status).text.find("target SNR must be a number")==std::string::npos,
-              "A valid target retained the validation notice from an incomplete numeric prefix");
-        const auto adjusted=app.field(field).display_text;
-        const auto label=app.control(declaration).label;
-        check(!adjusted.empty()&&label.starts_with(field==F::snr?"Short ≤16 B · ":"Long / file · ")&&
-              label.ends_with(adjusted+" dB-Hz"),
-              "An adjusted target must show its effective value without replacing the edit buffer");
-        const auto receive_targets=app.field(F::receive_snr).text;
-        check(!app.submit(declaration,true,false)&&!app.submit(declaration,false,true)&&
-              app.field(field).text=="-60.5",
-              "Modified Enter unexpectedly committed the target edit");
-        check(app.submit(declaration,false,false)&&app.field(field).text!="-60.5"&&
-              app.field(field).display_text.empty()&&app.control(declaration).label==declaration.label&&
-              app.field(F::receive_snr).text==receive_targets,
-              "Plain Enter must display the exact fitted target without rebuilding the receive targets");
-        app.preset(declaration,"-60");
-        check(app.field(field).text!="-60"&&app.field(field).display_text.empty(),
-              "A target preset must immediately display its fitted value");
-
-        app.report_error("Keep this unrelated notice");
-        app.edit(declaration,"-60.5");
-        check(app.field(F::status).text=="Keep this unrelated notice",
-              "A valid target edit cleared an unrelated notice");
-        app.set_service_active(true);
-        app.preset(declaration,"20");app.submit(declaration,false,false);
-        check(app.field(field).text=="-60.5"&&!app.field(field).display_text.empty(),
-              "A blocked input surface committed or replaced a target edit");
-        app.set_service_active(false);
-        auto hidden=declaration;hidden.persistent=false;hidden.page=ui::Page::flow;
-        app.preset(hidden,"20");app.submit(hidden,false,false);
-        auto stale=declaration;stale.surface=999;
-        app.preset(stale,"20");app.submit(stale,false,false);
-        check(app.field(field).text=="-60.5"&&!app.field(field).display_text.empty(),
-              "A hidden page or stale overlay callback committed a target edit");
-    }
-    app.close();
-    for(const auto field:{F::snr,F::long_snr}) {
-        const auto& declaration=control(field);
-        app.preset(declaration,"20");app.submit(declaration,false,false);
-        check(app.field(field).text=="-60.5","A closing application committed a target edit");
-    }
-}
 void mono_declaration() {
     Application app({.simulation=true});
-    app.toggle(ui::Field::developer_mode,true);
     const auto& mono=control(ui::Field::mono);
-    check(mono.kind==ui::Kind::choice&&mono.persistent&&app.field(mono.field).selected=="left"&&
-          app.field(mono.field).options.size()==3,
-          "Audio routing must offer Left mono by default, Right mono and Stereo");
+    const std::string_view help=mono.help;
+    check(mono.kind==ui::Kind::toggle&&mono.persistent&&std::string_view(mono.label)=="Mono"&&
+          app.field(mono.field).checked&&help.find("right channel")!=help.npos&&
+          help.find("sole channel")!=help.npos&&help.find("both stereo channels")!=help.npos,
+          "Mono must be a default-on shared toggle explaining stereo and mono-device routing");
     for(const auto& page:ui::pages()) {
-        if(page.id==ui::Page::fast_modem)continue;
         app.select_page(page.id);
-        check(app.control(mono).visible&&app.control(mono).enabled,"Audio routing disappeared on another page");
-        for(const auto* id:{"stereo","right","left"}) {
-            app.select(mono,id);
-            check(app.field(mono.field).selected==id,"Declared channel choice did not reach the controller");
-        }
+        const auto presentation=app.control(mono);
+        check(presentation.visible&&presentation.enabled,"Mono routing disappeared or became unavailable on another page");
+        app.toggle(mono,false);
+        check(!app.field(mono.field).checked,"Declared Mono off callback did not reach the shared controller");
+        app.toggle(mono,true);
+        check(app.field(mono.field).checked,"Declared Mono on callback did not reach the shared controller");
         for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
             const auto geometry=ui::control_layout(mono,app.field(mono.field),size.w,size.h);
             const auto diagnostics=ui::control_layout(control(ui::Field::diagnostics),app.field(ui::Field::diagnostics),size.w,size.h);
-            check(!geometry.has_label&&geometry.widget.w>=150&&geometry.widget.h>=22&&
+            check(!geometry.has_label&&geometry.widget.w>=74&&geometry.widget.h>=22&&
                   geometry.frame.x+geometry.frame.w<diagnostics.frame.x,
-                  "Audio channel dropdown overlaps diagnostics");
+                  "Mono's native checkbox label or diagnostic text lost its reserved space");
         }
     }
-    app.close();app.select(mono,"stereo");
-    check(!app.control(mono).enabled&&app.field(mono.field).selected=="left",
-          "A stale audio channel callback reconfigured a closing application");
-}
-void oscillator_declaration() {
-    using F=ui::Field;
-    Application app({.simulation=true});
-    app.toggle(ui::Field::developer_mode,true);
-    const auto& oscillator=control(F::simulation_oscillator);
-    const auto& detail=control(F::simulation_oscillator_detail);
-    const std::string_view help=oscillator.help;
-    check(oscillator.kind==ui::Kind::choice&&oscillator.persistent&&
-          detail.kind==ui::Kind::label&&detail.persistent&&
-          app.field(oscillator.field).selected=="crystal"&&
-          help.find("effective TX/RX")!=help.npos&&help.find("no oven")!=help.npos&&
-          help.find("GPS lock does not imply phase coherence")!=help.npos&&
-          help.find("does not discipline audio hardware")!=help.npos,
-          "Oscillator scenarios need a persistent shared choice with explicit residual-model limitations");
-    for(const auto& page:ui::pages()) {
-        app.select_page(page.id);
-        check(app.control(oscillator).visible&&app.control(oscillator).enabled&&
-              app.control(detail).visible==(page.id!=ui::Page::planner),
-              "Oscillator detail must yield its planner space only to the native preview-target editor");
-        app.select(oscillator,"gpsdo-xo");
-        check(app.field(oscillator.field).selected=="gpsdo-xo"&&
-              app.field(detail.field).text.find("Clock mismatch 0.0001 ppm")!=std::string::npos&&
-              app.field(detail.field).text.find("Phase diffusion 0.5 deg / sqrt(s)")!=std::string::npos,
-              "Hobbyist GPSDO selection lost its non-oven clock and phase assumptions through the facade");
-        app.select(oscillator,"gpsdo-ocxo");
-        check(app.field(oscillator.field).selected=="gpsdo-ocxo"&&
-              app.field(detail.field).text.find("Clock mismatch 0.0001 ppm")!=std::string::npos&&
-              app.field(detail.field).text.find("Phase diffusion 0.005 deg / sqrt(s)")!=std::string::npos,
-              "OCXO model values did not update through shared native choice dispatch");
-        for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
-            const auto choice_geometry=app.control_layout(oscillator,size.w,size.h);
-            const auto detail_geometry=app.control_layout(detail,size.w,size.h);
-            check(choice_geometry.has_label&&choice_geometry.widget.w>=320&&
-                  choice_geometry.frame.x+choice_geometry.frame.w<detail_geometry.frame.x&&
-                  detail_geometry.frame.w>=668&&detail_geometry.frame.h>=20&&
-                  app.field(detail.field).text.find("GPS lock")==std::string::npos&&
-                  app.field(detail.field).text.find('\n')==std::string::npos,
-                  "Oscillator choice and selected model values overlap or clip in native layout");
-        }
-    }
-    app.close();app.select(oscillator,"crystal");
-    check(!app.control(oscillator).enabled&&app.field(oscillator.field).selected=="gpsdo-ocxo",
-          "A stale oscillator callback changed a closing facade");
-}
-void lpi_declaration() {
-    using F=ui::Field;
-    Application app({.simulation=true});
-    app.toggle(ui::Field::developer_mode,true);
-    const auto& advisory=control(F::lpi_estimate);
-    const std::string_view help=advisory.help;
-    check(advisory.kind==ui::Kind::label&&advisory.persistent&&advisory.font_size==12&&
-          help.find("90% detection and 1% false alarm per known window")!=help.npos&&
-          help.find("not a measurement or calibrated reception threshold")!=help.npos&&
-          help.find("18 dB Es/N0 pattern design reference")!=help.npos&&
-          help.find("one accepted bit out of N")!=help.npos&&
-          help.find("Simulation on/off, power and oscillator presets do not affect this estimate")!=help.npos&&
-          help.find("hypothetical encrypted private pattern")!=help.npos&&
-          help.find("warning remains when a number is unavailable")!=help.npos&&
-          help.find("No key or waveform setting is changed")!=help.npos&&
-          help.find("does not reduce power or interference")!=help.npos,
-          "LPI advisory needs a persistent shared label with explicit relative reference and observer assumptions");
-    for(const auto& page:ui::pages()) {
-        app.select_page(page.id);
-        check(app.control(advisory).visible==(page.id!=ui::Page::planner),
-              "Current-draft LPI advisory must stay on existing pages and yield to the planner's own reference");
-        for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
-            const auto geometry=app.control_layout(advisory,size.w,size.h);
-            const auto oscillator=app.control_layout(control(F::simulation_oscillator_detail),size.w,size.h);
-            const ui::DesktopLayout layout(size.w,size.h);
-            check(geometry.has_label&&geometry.label==geometry.widget&&geometry.widget.w==oscillator.widget.w&&
-                  geometry.widget.x==oscillator.widget.x&&geometry.widget.h>=20&&
-                  geometry.frame.y>oscillator.frame.y+oscillator.frame.h&&
-                  geometry.frame.y+geometry.frame.h<layout[ui::Slot::tabs].y,
-                  "Compact LPI label must share the clock-detail column and remain clear of the tabs");
-        }
-    }
+    app.close();app.toggle(mono,false);
+    check(!app.control(mono).enabled&&app.field(mono.field).checked,
+          "A stale declared Mono callback reconfigured a closing application");
 }
 void declared_submission() {
     Application app({.simulation=true});
@@ -929,7 +537,6 @@ void declared_submission() {
 }
 void declared_native_input() {
     Application app({.simulation=true});
-    app.toggle(ui::Field::developer_mode,true);
     auto choice=control(ui::Field::send_key);
     app.select(choice,"ctrl-enter");
     check(app.field(choice.field).selected=="ctrl-enter","Declared choice did not select its stable option ID");
@@ -992,7 +599,6 @@ void declared_native_input() {
 }
 void stale_page_input() {
     Application app({.simulation=true});
-    app.toggle(ui::Field::developer_mode,true);
     auto editor=control(ui::Field::message),choice=control(ui::Field::send_key),toggle=control(ui::Field::repeatable);
     editor.persistent=choice.persistent=toggle.persistent=false;
     editor.submit=ui::Command::clear_received;editor.submit_mode=ui::Field::count;
@@ -1086,11 +692,10 @@ std::string document_text(const ui::DocumentNode& node) {
 }
 void typed_short_text_inspection() {
     using F=ui::Field;using P=ui::Page;
-    Application app({});app.select(ui::Field::fast_mode,"robust"); // Production defaults; no audio session is needed to inspect a draft.
-    app.toggle(ui::Field::developer_mode,true);
+    Application app({}); // Production defaults; no audio session is needed to inspect a draft.
     const auto& message=control(F::message);
     check(app.field(F::bandwidth).text=="3.6 kHz" && app.field(F::carrier).text=="1.5 kHz" &&
-          app.field(F::snr).text=="32" && app.field(F::long_snr).text=="55" && app.field(F::receive_snr).text=="32, 55" &&
+          app.field(F::snr).text=="32" && app.field(F::receive_snr).text=="32" &&
           app.field(F::pattern).selected=="auto-pattern" && app.field(F::fec).selected=="rs60" &&
           !app.field(F::repeatable).checked,"Production defaults changed the short message fixture");
     const auto await_layout=[&] {
@@ -1146,10 +751,10 @@ void compression_declarations() {
           "Compression view must be a declared native-control page");
     Application app({.simulation=true});
     check(!app.document(ui::Page::compression,900),"Compression controls acquired a duplicate document");
-    std::set<ui::Field> fields;std::set<ui::Command> commands;
+    std::set<ui::Field> fields;std::set<ui::Command> commands;std::vector<const ui::Control*> controls;
     bool explains_code=false;
     for(const auto& c:ui::console_screen())if(c.page==ui::Page::compression) {
-        fields.insert(c.field);commands.insert(c.command);
+        controls.push_back(&c);fields.insert(c.field);commands.insert(c.command);
         check(!c.persistent&&c.slot!=ui::Slot::none,"Compression binding lost shared page geometry");
         if(c.field==ui::Field::short_bits)
             check(c.kind==ui::Kind::text&&c.multiline&&c.byte_limit==2*transfer::short_message_bits&&c.submit==ui::Command::transmit_short_bits&&
@@ -1172,14 +777,8 @@ void compression_declarations() {
         check(commands.contains(command),"Compression page lost a required action");
     for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
         std::vector<ui::Rect> occupied;
-        // A named menu has one native control and several action declarations.
-        // Check the same grouped surfaces that both native adapters construct.
-        for(const auto& group:ui::control_groups(ui::console_screen())) {
-            const auto* c=group.control;if(c->page!=ui::Page::compression)continue;
+        for(const auto* c:controls) {
             const auto geometry=ui::control_layout(*c,{},size.w,size.h);
-            for(const auto* item:group.menu_items)
-                check(ui::control_layout(*item,{},size.w,size.h).frame==geometry.frame,
-                      "Compression menu items disagree about their shared native control geometry");
             auto frame=geometry.frame;
             if(geometry.has_label&&c->kind!=ui::Kind::label) {
                 frame.h+=frame.y-geometry.label.y;frame.y=geometry.label.y;
@@ -1203,7 +802,6 @@ void noise_declarations_and_dispatch() {
         return *found;
     };
     Application app({.simulation=true});
-    app.toggle(ui::Field::developer_mode,true);
     for(const auto page:{P::console,P::compression}) {
         const auto& noise=declaration(C::transmit_noise,page);
         const auto& send=declaration(page==P::console?C::transmit:C::transmit_short_bits,page);
@@ -1251,6 +849,6 @@ void noise_declarations_and_dispatch() {
 }
 }
 int main() {
-    try {fast_default_console();developer_mode_presentation();transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();fitted_target_editing();mono_declaration();oscillator_declaration();lpi_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();noise_declarations_and_dispatch();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {transmission_scope_records();transmission_scope_reflow();records();progressive_pending_records();revised_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();mono_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();noise_declarations_and_dispatch();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }
