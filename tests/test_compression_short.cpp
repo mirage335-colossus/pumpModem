@@ -51,5 +51,51 @@ void strict_validation() {
     rejects([]{compression::encode_short(Bytes{0},1);},"encoder ignored its output bound");
     rejects([]{compression::decode_short({},std::numeric_limits<std::size_t>::max());},"decoder allocates an impossible declared length");
 }
+void exact_bit_codes() {
+    constexpr std::array<std::uint8_t,5> three_bit{' ','e','t','a','o'};
+    for(unsigned code=0;code<three_bit.size();++code) {
+        const Bytes input{three_bit[code]};
+        const Bytes expected{static_cast<std::uint8_t>((code>>2)&1U),
+                             static_cast<std::uint8_t>((code>>1)&1U),
+                             static_cast<std::uint8_t>(code&1U)};
+        check(compression::encode_short_bits(input,3)==expected,"three-bit character gained framing or padding");
+        check(compression::decode_short_bits(expected,1)==input,"three-bit character needs an original length");
+    }
+    check(compression::encode_short_bits({},0).empty() && compression::decode_short_bits({},0).empty(),
+          "empty exact-bit stream gained overhead");
+    const Bytes leading_zeros{' ',' ','e',' '};
+    check(compression::decode_short_bits(compression::encode_short_bits(leading_zeros))==leading_zeros,
+          "exact-bit code loses leading or trailing zero tokens");
+    for(unsigned byte=0;byte<256;++byte) {
+        const Bytes input{static_cast<std::uint8_t>(byte)};
+        const auto bits=compression::encode_short_bits(input);
+        check(compression::decode_short_bits(bits,1)==input,"exact-bit code does not represent every byte");
+        const auto packed=compression::encode_short(input);
+        for(std::size_t bit=0;bit<bits.size();++bit)
+            check(bits[bit]==((packed[bit/8]>>(7-bit%8))&1U),"exact-bit and packed codebooks differ");
+        for(std::size_t size=1;size<bits.size();++size)
+            rejects([&]{compression::decode_short_bits(std::span(bits).first(size));},
+                    "incomplete exact-bit token accepted");
+    }
+    std::mt19937 random(733);
+    for(std::size_t size=1;size<256;++size) {
+        Bytes input(size);for(auto& byte:input)byte=static_cast<std::uint8_t>(random());
+        const auto bits=compression::encode_short_bits(input);
+        check(compression::decode_short_bits(bits,size)==input,"exact-bit stream roundtrip failed");
+    }
 }
-int main(){try{fixed_byte_codes();roundtrips_and_prefixes();strict_validation();std::cout<<"short compression tests passed\n";}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
+void exact_bit_validation() {
+    rejects([]{compression::encode_short_bits(Bytes{'e'},2);},"exact-bit encoder ignored bit-element bound");
+    rejects([]{compression::encode_short_bits(Bytes{0},12);},"exact-bit encoder ignored literal extent");
+    check(compression::encode_short_bits(Bytes{0},13).size()==13,"literal extent includes padding");
+    rejects([]{compression::decode_short_bits(Bytes{0,0,2});},"non-bit input accepted");
+    rejects([]{compression::decode_short_bits(Bytes{0,0,0,255});},"non-bit tail accepted");
+    rejects([]{compression::decode_short_bits(Bytes{0,0,1,0});},"partial token after valid code accepted");
+    rejects([]{compression::decode_short_bits(Bytes{1,1,1,1,1,0,1,1,0,0,1,0,1});},
+            "exact-bit decoder accepted noncanonical escaped e");
+    rejects([]{compression::decode_short_bits(Bytes{0,0,0},0);},"zero decoder output bound ignored");
+    rejects([]{compression::decode_short_bits(Bytes(9,0),2);},"decoder output bound ignored");
+    check(compression::decode_short_bits(Bytes(9,0),3)==Bytes(3,' '),"exact decoder output bound loses a token");
+}
+}
+int main(){try{fixed_byte_codes();roundtrips_and_prefixes();strict_validation();exact_bit_codes();exact_bit_validation();std::cout<<"short compression tests passed\n";}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

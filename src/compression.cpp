@@ -21,19 +21,28 @@ constexpr auto codes=[] {
     return result;
 }();
 
+enum class BitStorage { packed, individual };
 class Reader {
     std::span<const std::uint8_t> input_;
     std::size_t position_=0,bit_count_=0;
+    BitStorage storage_;
     unsigned read(unsigned count) {
         unsigned value=0;
         for(unsigned bit=0;bit<count;++bit,++position_)
-            value=(value<<1)|((input_[position_/8]>>(7-position_%8))&1U);
+            value=(value<<1)|(storage_==BitStorage::individual?input_[position_]:
+                             ((input_[position_/8]>>(7-position_%8))&1U));
         return value;
     }
 public:
-    explicit Reader(std::span<const std::uint8_t> input):input_(input) {
-        if(input.size()>std::numeric_limits<std::size_t>::max()/8)throw Error("short prefix input length overflow");
-        bit_count_=input.size()*8;
+    explicit Reader(std::span<const std::uint8_t> input,BitStorage storage=BitStorage::packed):input_(input),storage_(storage) {
+        if(storage_==BitStorage::individual) {
+            if(std::any_of(input.begin(),input.end(),[](auto bit){return bit>1;}))
+                throw Error("short prefix input elements must be zero or one");
+            bit_count_=input.size();
+        } else {
+            if(input.size()>std::numeric_limits<std::size_t>::max()/8)throw Error("short prefix input length overflow");
+            bit_count_=input.size()*8;
+        }
     }
     std::size_t remaining()const{return bit_count_-position_;}
     std::optional<std::uint8_t> next() {
@@ -62,6 +71,36 @@ public:
             throw Error("nonzero short prefix padding");
     }
 };
+}
+
+Bytes encode_short_bits(std::span<const std::uint8_t> input,std::size_t output_limit) {
+    output_limit=std::min(output_limit,Bytes{}.max_size());
+    std::size_t bit_count=0;
+    for(const auto byte:input) {
+        if(codes[byte].length>output_limit-bit_count)
+            throw Error("short prefix bit output exceeds limit");
+        bit_count+=codes[byte].length;
+    }
+    Bytes result(bit_count);std::size_t position=0;
+    for(const auto byte:input) {
+        const auto code=codes[byte];
+        for(unsigned bit=0;bit<code.length;++bit)
+            result[position++]=static_cast<std::uint8_t>((code.value>>(code.length-bit-1))&1U);
+    }
+    return result;
+}
+
+Bytes decode_short_bits(std::span<const std::uint8_t> bits,std::size_t output_limit) {
+    Reader reader(bits,BitStorage::individual);
+    output_limit=std::min(output_limit,Bytes{}.max_size());
+    Bytes result;result.reserve(std::min(output_limit,bits.size()/3));
+    while(reader.remaining()) {
+        if(result.size()==output_limit)throw Error("short prefix decoded output exceeds limit");
+        const auto byte=reader.next();
+        if(!byte)throw Error("truncated short prefix bit token");
+        result.push_back(*byte);
+    }
+    return result;
 }
 
 Bytes encode_short(std::span<const std::uint8_t> input,std::size_t output_limit) {

@@ -1,5 +1,6 @@
 #include "datapump/channel.hpp"
 #include "datapump/packet.hpp"
+#include "datapump/transfer.hpp"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -71,99 +72,128 @@ void phase_diffusion(){
 }
 void pcm_clock(){
     const auto cfg=config();auto impairment=ideal();impairment.clock_error_ppm=100;
+    m::SampledSimulationChannel timing(cfg,impairment);
+    const auto startup=timing.startup_offset_samples(),phase=timing.carrier_phase_radians();
     std::vector<float> source(cfg.sample_rate*2);
     for(std::size_t i=0;i<source.size();++i)source[i]=static_cast<float>(.7*std::cos(tau*cfg.carrier_hz*static_cast<double>(i)/cfg.sample_rate));
     const auto output=m::simulate(source,cfg,impairment);
-    require(output.size()==static_cast<std::size_t>(std::ceil(source.size()/1.0001L)),"PCM clock drift did not change capture duration");
+    require(output.size()==static_cast<std::size_t>(std::ceil(startup+source.size()/1.0001L)),"PCM clock drift and free-running startup did not change capture duration");
     double error=0;std::complex<double> received{};
-    for(std::size_t i=32;i+32<output.size();++i){
-        const auto expected=.7*std::cos(tau*cfg.carrier_hz*1.0001*static_cast<double>(i)/cfg.sample_rate);
+    const auto begin=static_cast<std::size_t>(std::ceil(startup))+32,length=output.size()-32-begin;
+    for(std::size_t i=begin;i+32<output.size();++i){
+        const auto expected=.7*std::cos(phase+tau*cfg.carrier_hz*1.0001*static_cast<double>(i)/cfg.sample_rate);
         error+=std::pow(output[i]-expected,2);
         received+=2.*output[i]*std::polar(1.,-tau*cfg.carrier_hz*static_cast<double>(i)/cfg.sample_rate);
     }
-    require(std::sqrt(error/static_cast<double>(output.size()-64))<.002,"PCM interpolation lost crystal-shifted carrier");
-    const auto expectation=.7*integral(.15,32,output.size()-64,cfg.sample_rate);
-    require(std::abs(received/static_cast<double>(output.size()-64)-expectation)<.002,"PCM and accelerated carrier integrations disagree");
+    require(std::sqrt(error/static_cast<double>(length))<.002,"PCM interpolation lost crystal-shifted carrier");
+    const auto expectation=.7*std::polar(1.,phase)*integral(.15,begin,length,cfg.sample_rate);
+    require(std::abs(received/static_cast<double>(length)-expectation)<.002,"PCM and accelerated carrier integrations disagree");
     impairment.phase_noise_degrees_per_sqrt_second=4;
     const auto noisy=m::simulate(source,cfg,impairment);
     require(noisy==m::simulate(source,cfg,impairment),"PCM phase diffusion is not reproducible");
     require(noisy!=output,"PCM phase diffusion did not affect the carrier");
 }
-void packet_and_preview(){
-    auto cfg=config();cfg.sample_rate=9600;cfg.bandwidth_hz=2400;cfg.carrier_hz=1800;cfg.constellation_bits=6;
-    Message message;message.id[0]=83;message.data={'1','0','0','p','p','m'};
-    PacketOptions options;options.fec=FecMode::rs60;
-    auto wire=m::preamble(cfg);const auto frame=encode_packet(message,options);wire.insert(wire.end(),frame.begin(),frame.end());
-    m::StreamingTransmitter source(wire,cfg);
-    m::StreamingReceiver receiver(cfg,m::preamble(cfg));
-    m::ChannelConfig model;model.snr_db=35;model.seed=517;m::SimulationChannel channel(cfg,model),without_plots(cfg,model);
-    Bytes received;unsigned observations=0;
-    while(const auto observation=source.next_symbol()){
-        const auto output=channel.process(*observation),control=without_plots.process(*observation);
-        require(output.has_value()==control.has_value(),"plotting changed channel timing");
-        if(output){require(output->value==control->value,"plotting changed channel noise");const auto part=receiver.push_symbols(std::span(&*output,1));received.insert(received.end(),part.begin(),part.end());}
-        if(++observations%257==0){
-            std::array<float,2048> first{},second{};channel.preview_last(source,first);channel.preview_last(source,second);
-            require(first==second,"same simulation review frame changed between polls");
-            for(const auto sample:first)require(std::isfinite(sample),"nonfinite simulation preview");
-        }
+std::vector<float> capture(m::SampledSimulationChannel& channel,m::StreamingTransmitter& source,std::size_t block){
+    std::vector<float> result,buffer(block);
+    while(const auto count=channel.read(source,buffer))result.insert(result.end(),buffer.begin(),buffer.begin()+static_cast<std::ptrdiff_t>(count));
+    return result;
+}
+void analytic_source_matches_hardware_pcm(){
+    auto cfg=config();cfg.spreading_factor=4;
+    cfg.scramble=true;cfg.dsss=true;cfg.spreading_seed[0]=43;cfg.dsss_seed[0]=97;
+    auto wire=m::preamble(cfg);for(unsigned i=0;i<129;++i)wire.push_back(static_cast<std::uint8_t>(i*37));
+    m::StreamingTransmitter hardware(wire,cfg),analytic(wire,cfg);
+    std::array<float,797> real{};std::array<std::complex<double>,797> complex{};
+    std::size_t iteration=0;
+    while(!hardware.finished()){
+        const auto block=++iteration%3?real.size():std::size_t{19};
+        const auto count=hardware.read(std::span(real).first(block));
+        require(analytic.read_analytic(std::span(complex).first(block))==count,"analytic source changed waveform duration");
+        for(std::size_t i=0;i<count;++i)
+            require(real[i]==static_cast<float>(complex[i].real()),"simulation analytic source disagreed with hardware PCM across training or keyed spreading");
     }
-    const auto tail=receiver.finish();received.insert(received.end(),tail.begin(),tail.end());
-    require(received.size()>=wire.size(),"ordinary100ppm packet did not acquire");
-    const auto decoded=decode_packet(Bytes(received.begin()+32,received.begin()+static_cast<std::ptrdiff_t>(wire.size())),options);
-    require(decoded.message.data==message.data,"ordinary100ppm packet changed content");
-    std::array<float,2048> impaired{},raw{};channel.preview_last(source,impaired);source.preview_last(raw);
-    require(impaired!=raw,"simulation review omitted oscillator impairments");
+    require(analytic.finished(),"analytic source retained an unsent waveform tail");
+}
+void sampled_startup_and_carrier(){
+    auto cfg=config();cfg.integration_seconds=.4;
+    double previous_start=0,previous_phase=0;
+    for(unsigned seed=1;seed<=8;++seed){
+        auto model=ideal();model.seed=seed;model.clock_error_ppm=seed%2?100:-10000;model.frequency_offset_hz=.37;
+        m::SampledSimulationChannel channel(cfg,model);
+        const auto start=channel.startup_offset_samples(),phase=channel.carrier_phase_radians();
+        require(start>=.05*cfg.sample_rate && start<=.3*cfg.sample_rate+1,"sampled startup was not independent of waveform timing");
+        require(std::abs(start-std::round(start))>=.049,"sampled startup was rounded to the receiver clock");
+        require(start!=previous_start && phase!=previous_phase,"different seeds retained shared start timing or phase");
+        previous_start=start;previous_phase=phase;
+        m::StreamingTransmitter source(m::RawBits{{0,0,0,0}},cfg);
+        const auto output=capture(channel,source,137);
+        const auto rate=1+model.clock_error_ppm*1e-6;
+        require(output.size()==static_cast<std::size_t>(std::ceil(start+source.total_samples()/static_cast<long double>(rate))),"sampled duration was rounded per source chunk");
+        require(std::all_of(output.begin(),output.end(),[](float value){return std::isfinite(value);}),"sampled private prefix and pattern PCM must stay finite");
+        require(channel.received_samples()==output.size(),"sampled receiver time did not match PCM count");
+        require(channel.transmitted_samples()==source.total_samples(),"sampled transmitter progress did not reach the received source endpoint");
+        require(channel.working_bytes()<=m::SampledSimulationChannel::workspace_bound,"sampled channel exceeded its fixed workspace");
+    }
+}
+void sampled_chunking_and_idle(){
+    auto cfg=config();cfg.integration_seconds=.02;
+    auto model=ideal();model.snr_db=14;model.phase_noise_degrees_per_sqrt_second=8;model.clock_error_ppm=100;model.delay_samples=73;
+    m::SampledSimulationChannel whole(cfg,model),chunked(cfg,model);
+    auto bits=m::RawBits{{1,0,0,0,1,1,0,1,0,1,0,0,1,1,1,0}};
+    m::StreamingTransmitter a(bits,cfg),b(bits,cfg);
+    require(capture(whole,a,4096)==capture(chunked,b,1),"sampled channel randomness or resampling depended on read block size");
+    std::array<float,997> first{},second{};
+    const auto before=whole.received_samples();
+    whole.read_noise(first);
+    chunked.read_noise(std::span(second).first(13));chunked.read_noise(std::span(second).subspan(13,573));chunked.read_noise(std::span(second).subspan(586));
+    require(first==second,"idle noise depended on block size or restarted its generator");
+    require(whole.received_samples()==before+first.size(),"idle noise did not advance receiver time");
+    require(whole.carrier_phase_radians()==chunked.carrier_phase_radians(),"idle phase evolution depended on block size");
+    const auto phase=whole.carrier_phase_radians(),startup=whole.startup_offset_samples();
+    whole.begin_burst();chunked.begin_burst();
+    require(whole.carrier_phase_radians()==phase && whole.received_samples()==before+first.size(),"new burst reset receiver time or oscillator");
+    require(whole.startup_offset_samples()!=startup,"new burst reused its synchronized start boundary");
+    // Replacing a transmitter at the same address must still start a new
+    // explicitly prepared burst, without resetting the physical channel.
+    a=m::StreamingTransmitter(bits,cfg);b=m::StreamingTransmitter(bits,cfg);
+    require(capture(whole,a,3)==capture(chunked,b,4096),"later burst acquired source identity or chunk synchronization");
+    std::stop_source stop;stop.request_stop();
+    rejects([&]{whole.read_noise(first,stop.get_token());},"cancelled sampled idle read was accepted");
+}
+void packet_and_preview(){
+    transfer::Options options;options.timestamp=1800000000;options.search_seconds=0;
+    options.modem=config();options.modem.sample_rate=9600;options.modem.bandwidth_hz=2400;
+    options.modem.carrier_hz=1800;options.modem.spreading_factor=64;
+    Message message;message.kind=MessageKind::file;message.filename="channel.bin";
+    message.id[0]=83;message.data=Bytes(16,0x5c);
+    auto source=transfer::message_transmitter(message,options),control=transfer::message_transmitter(message,options);
+    m::ChannelConfig model;model.snr_db=35;model.seed=517;
+    m::SampledSimulationChannel channel(options.modem,model),without_plots(options.modem,model);
+    std::vector<float> samples;std::array<float,1024> a{},b{},preview{};
+    while(const auto count=channel.read(*source,a)) {
+        require(without_plots.read(*control,b)==count,"plotting changed channel timing");
+        require(std::equal(a.begin(),a.begin()+static_cast<std::ptrdiff_t>(count),b.begin()),"plotting changed channel waveform or noise");
+        samples.insert(samples.end(),a.begin(),a.begin()+static_cast<std::ptrdiff_t>(count));
+        source->preview_last(preview);
+        require(std::all_of(preview.begin(),preview.end(),[](float value){return std::isfinite(value);}),"nonfinite simulation preview");
+    }
+    const auto decoded=transfer::receive(samples,options);
+    require(decoded.packet_validated && decoded.packet.message.data==message.data,"ordinary 100 ppm pattern packet changed content");
 }
 void preview_interpolation_edges(){
-    const auto cfg=config();auto wire=m::preamble(cfg);wire.resize(wire.size()+1024,0);
-    for(const auto ppm:{-10000.,100.,10000.}){
+    const auto cfg=config();const Bytes wire(32,0xa5);
+    for(const auto ppm:{-10000.,100.,10000.}) {
         auto model=ideal();model.clock_error_ppm=ppm;
         m::StreamingTransmitter source(wire,cfg);m::SimulationChannel channel(cfg,model);
-        while(const auto observation=source.next_symbol())channel.process(*observation);
-        std::array<std::complex<double>,m::StreamingTransmitter::analytic_preview_limit> analytic{};
-        source.preview_last_analytic(analytic);
-        const auto baseband=analytic.back()*std::polar(1.,-tau*cfg.carrier_hz*static_cast<double>(source.samples_emitted()-1)/cfg.sample_rate);
-        std::array<float,2048> preview{};channel.preview_last(source,preview);
-        const auto start=channel.preview_end_samples()-preview.size();
-        double maximum_error=0;
-        for(std::size_t i=0;i<preview.size();++i){
-            const auto phase=tau*cfg.carrier_hz*(1+ppm*1e-6)*static_cast<double>(start+i)/cfg.sample_rate;
-            maximum_error=std::max(maximum_error,std::abs(preview[i]-(baseband*std::polar(1.,phase)).real()));
-        }
-        require(maximum_error<.002,"simulation preview interpolation discarded valid edge samples");
+        std::array<float,257> chunk{};
+        while(const auto count=source.read(chunk))channel.process({{},count});
+        std::array<float,2048> a{},b{};channel.preview_last(source,a);channel.preview_last(source,b);
+        require(a==b,"preview reconstruction depends on polling");
+        require(std::all_of(a.begin(),a.end(),[](float value){return std::isfinite(value);}),"interpolation edge produced nonfinite samples");
+        require(std::any_of(a.begin(),a.end(),[](float value){return std::abs(value)>.01F;}),"preview discarded the surviving patterned signal");
     }
 }
-void sdr_and_missing_training(){
-    for(const bool omit_training:{false,true}){
-        auto cfg=config();cfg.sample_rate=120000000;cfg.bandwidth_hz=30000000;cfg.carrier_hz=22500000;cfg.constellation_bits=6;
-        Message message;message.id[0]=0x43;message.data={'S','D','R'};
-        const auto frame=encode_packet(message);auto wire=m::preamble(cfg);wire.insert(wire.end(),frame.begin(),frame.end());
-        m::StreamingTransmitter source(wire,cfg);std::size_t validation_calls=0;
-        m::StreamingReceiver receiver(cfg,m::preamble(cfg),8*1024*1024,[&](const Bytes& prefix){
-            ++validation_calls;
-            return packet_probe_frame_size(prefix);
-        });
-        m::ChannelConfig model;model.snr_db=40;m::SimulationChannel channel(cfg,model);
-        std::size_t observations=0;Bytes received;
-        while(const auto observation=source.next_symbol()){
-            ++observations;
-            const auto output=channel.process(*observation);
-            if(omit_training && source.samples_emitted()<=m::training_sample_count(cfg))continue;
-            if(output){const auto bytes=receiver.push_symbols(std::span(&*output,1));received.insert(received.end(),bytes.begin(),bytes.end());}
-        }
-        const auto tail=receiver.finish();received.insert(received.end(),tail.begin(),tail.end());
-        require(observations<10000,"SDR-rate training expanded into sample-rate-sized simulation work");
-        // Eight timing origins and at most eight gain hypotheses for64APSK.
-        // Each training segment replaces at most96 retained header symbols,
-        // then one identical-window rejection enables the constant-run skip.
-        const auto search_bound=64*8*(96+1)*8+observations*8*8;
-        require(validation_calls<=search_bound,"SDR-rate training exceeded its segment/window bootstrap-search work bound");
-        require(received.size()>=wire.size(),"100ppm high-bandwidth or missing-training packet did not acquire");
-        const auto decoded=decode_packet(Bytes(received.begin()+32,received.begin()+static_cast<std::ptrdiff_t>(wire.size())));
-        require(decoded.message.data==message.data,"high-bandwidth impaired packet changed content");
-    }
-}
+
 void invalid(){
     const auto cfg=config();auto model=ideal();model.clock_error_ppm=std::numeric_limits<double>::quiet_NaN();
     rejects([&]{m::SimulationChannel channel(cfg,model);},"NaNclockaccepted");
@@ -175,4 +205,4 @@ void invalid(){
     require(m::ChannelConfig{}.clock_error_ppm==100 && m::ChannelConfig{}.phase_noise_degrees_per_sqrt_second==.5,"simulationdefaultsarenotbadcrystalmodel");
 }
 }
-int main(){try{clock_and_carrier();long_coherence();phase_diffusion();pcm_clock();packet_and_preview();preview_interpolation_edges();sdr_and_missing_training();invalid();std::cout<<"channel tests passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
+int main(){try{clock_and_carrier();long_coherence();phase_diffusion();pcm_clock();analytic_source_matches_hardware_pcm();sampled_startup_and_carrier();sampled_chunking_and_idle();packet_and_preview();preview_interpolation_edges();invalid();std::cout<<"channel tests passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

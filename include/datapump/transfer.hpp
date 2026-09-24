@@ -2,7 +2,9 @@
 #include "datapump/crypto.hpp"
 #include "datapump/modem.hpp"
 #include "datapump/packet.hpp"
+#include "datapump/runtime.hpp"
 #include "datapump/streaming_modem.hpp"
+#include "datapump/tuning.hpp"
 #include <functional>
 #include <optional>
 #include <span>
@@ -19,12 +21,17 @@ struct RepeatPolicy {
 struct Options {
     modem::Config modem;
     std::size_t content_limit = default_memory_limit;
-    std::size_t dsp_workspace_bytes = 64 * 1024 * 1024;
+    std::size_t dsp_workspace_bytes = runtime::default_dsp_workspace_bytes();
     FecMode fec = FecMode::rs20;
     bool compression = true;
     std::optional<Crypto> key;
     std::uint64_t timestamp = 0;
     unsigned search_seconds = 6;
+    // Manual callers retain their explicit modem profile. Automatic GUI/CLI
+    // receive searches resolve only these targets at the selected band/mode.
+    bool automatic_receive_profiles = false;
+    std::vector<double> receive_targets_db_hz{tuning::default_receive_target_db_hz};
+    tuning::PatternMode receive_pattern_mode = tuning::PatternMode::auto_pattern;
     RepeatPolicy repeat_policy;
 };
 struct Estimate {
@@ -44,14 +51,23 @@ Estimate estimate(const Message& message, const Options& options);
 // Optional numeric layout comes from that same encoded packet, avoiding a
 // second full content encoding when presenting a transmission inspection.
 Estimate estimate(const Message& message, const Options& options, PacketLayout* layout);
-// Raw binary has no training, framing, compression, FEC or authentication.
+// Raw binary has no framing, compression, FEC or authentication. Pattern mode
+// can add a hardware-settling prefix that carries no meaningful bits.
 // Input elements are individual 0/1 bits. Byte estimates are ceil(bits/8)
-// storage equivalents; only the supplied meaningful bits are modulated.
+// storage equivalents; payload time excludes that prefix, total time includes it.
 Estimate estimate_binary(std::span<const std::uint8_t> bits, const Options& options);
-// Uses the selected APSK modem and seeded spreading. A selected key masks
+// Uses the one-bit pattern modem. A selected non-tone key masks
 // MSB-first bits with its data stream at options.timestamp; no tag is added.
 std::unique_ptr<modem::StreamingTransmitter> binary_transmitter(
     std::span<const std::uint8_t> bits, const Options& options);
+// Pattern transport: short text uses the fixed dictionary's exact bits;
+// larger messages/files use packet bytes as a downstream content grammar.
+Bytes message_bits(const Message&, const Options&);
+// Intentional pattern transmission: insert periodic byte-boundary recovery
+// bits for compact messages/files, then Data-mask the entire bitstream.
+// Raw binary and short dictionary text carry no recovery markers.
+Bytes message_wire_bits(const Message&, const Options&);
+std::unique_ptr<modem::StreamingTransmitter> message_transmitter(const Message&, const Options&);
 // Symmetric raw data-stream masking, including fragments starting mid-byte.
 // Without a key the bits are unchanged. Does not authenticate decoded guesses.
 void xor_binary_bits(std::span<std::uint8_t> bits, const Options& options,
@@ -60,7 +76,11 @@ struct Received {
     DecodedPacket packet;
     modem::Diagnostics diagnostics;
     std::uint64_t timestamp = 0;
+    Bytes raw_bits{}; // Exact observed bits under the raw Data-mask convention.
+    bool packet_validated = true;
 };
+Received interpret_pattern(modem::PatternBurst, const Options&, std::uint64_t timestamp,
+                           modem::Diagnostics = {});
 using Progress = std::function<void(std::uint64_t)>;
 
 // Separate codec scratch from the amount of application content admitted.
@@ -70,24 +90,6 @@ std::size_t packet_workspace_limit(std::size_t content_limit);
 // Callbacks own their key material and remain valid after Options is destroyed.
 PacketOptions packet_options(const Options& options, std::uint64_t timestamp);
 modem::Config seeded_config(const Options& options, std::uint64_t timestamp);
-// Public, reversible audio-frame whitening; this is not encryption. Offsets
-// include the fixed 32-byte training prefix, which is left untouched. Apply
-// after encryption on TX and before decryption on RX, with no added bytes.
-void xor_audio_whitening(std::span<std::uint8_t> bytes, std::uint64_t wire_offset = 0);
-// Combined public whitening/private data-stream mask for the bounded bootstrap
-// and provisional whole-frame checks. Cache once per receiver; no per-trial
-// crypto setup. The mask is not transmitted and adds no frame bytes.
-inline constexpr std::size_t audio_validation_limit = 2048;
-inline constexpr std::size_t audio_validation_workspace = audio_validation_limit + 4096;
-Bytes audio_bootstrap_mask(const Options& options, std::uint64_t timestamp);
-struct AudioValidators {
-    modem::BootstrapValidator bootstrap;
-    modem::PacketValidator packet;
-};
-// Both callbacks own their key/mask and inspect bytes following training.
-// Bootstrap returns the declared whole-frame extent; packet requires full
-// integrity/authentication and checks the admitted original-content limit.
-AudioValidators audio_validators(const Options& options, std::uint64_t timestamp);
 Bytes pack(const Message& message, const Options& options);
 Bytes transmission_wire(const Message& message, const Options& options);
 DecodedPacket unpack(const Bytes& wire, const Options& options);

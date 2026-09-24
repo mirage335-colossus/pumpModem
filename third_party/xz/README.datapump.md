@@ -3,6 +3,10 @@
 This software includes code from XZ Utils <https://tukaani.org/xz/>.
 
 - Upstream release: **XZ Utils 5.8.4**, released September 9, 2026.
+- Repository: <https://github.com/tukaani-project/xz.git>
+- Git commit: [`d3e650e63c110e830fd5391e7f8b45df0b91d3da`](https://github.com/tukaani-project/xz/commit/d3e650e63c110e830fd5391e7f8b45df0b91d3da)
+  (peeled `v5.8.4^{commit}`, not the annotated tag object).
+- Immutable source tree: <https://github.com/tukaani-project/xz/tree/d3e650e63c110e830fd5391e7f8b45df0b91d3da>
 - Source archive: <https://github.com/tukaani-project/xz/releases/download/v5.8.4/xz-5.8.4.tar.gz>
 - Archive SHA-256: `0014c7886930454fe8bd4228665b51af55eeae560ea135c9c4cd33f55b2591d9`
 - Release: <https://github.com/tukaani-project/xz/releases/tag/v5.8.4>
@@ -12,6 +16,12 @@ The copied upstream files are unchanged. This subset contains `src/liblzma`,
 and basic source documentation. Autotools `Makefile.am`/`Makefile.in` files
 are omitted. `UPSTREAM.sha256` records the copied files, independently of
 DataPump's own wrapper and this provenance note.
+
+Verified September 12, 2026: all 213 files in `UPSTREAM.sha256` match both
+the Git commit above and the checksum-pinned release archive byte for byte,
+at identical relative paths. This subset has no release-generated files
+absent from Git. Recheck the local inventory with
+`cmake -P tests/vendored_lzma.cmake` from the DataPump repository root.
 
 `cmake/VendoredLzma.cmake` builds the library statically with the project's C
 compiler, including native MSVC and its static runtime. Only LZMA1/LZMA2
@@ -44,6 +54,8 @@ full preset-9 window. Input, candidate output, and decoded message buffers
 remain subject to packet limits separately. Preset 9 extreme seeks a high
 compression ratio; it is not a guarantee of mathematically minimal output.
 
-Updating the dependency requires reviewing the release, replacing this source
-subset from its pinned archive, updating the archive and file checksums, and
-running the codec, malformed-stream, packet, and relocated-package tests.
+Updating the dependency requires reviewing the release, resolving its tag to
+the full commit hash, replacing this source subset from its pinned archive,
+comparing the subset against that commit, updating the commit/archive links
+and checksums, and running the codec, malformed-stream, packet, and
+relocated-package tests.

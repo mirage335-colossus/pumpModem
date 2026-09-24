@@ -1,3 +1,4 @@
+#include <algorithm>
 #include "../src/signal_view.hpp"
 #include "datapump/streaming_modem.hpp"
 #include "datapump/resampler.hpp"
@@ -17,8 +18,8 @@ std::vector<float> tone(std::uint64_t start, std::size_t size, const modem::Conf
 }
 void actual_default_clock_carrier() {
     modem::Config config; config.sample_rate=4800; config.carrier_hz=900;
-    // Zero symbols retain the inner16APSK radius and phase, so the actual
-    // transmitter must deliver a pure carrier through its training/data edge.
+    // Preserve the actual noise prefix and private I/Q chip waveform in plots.
+    config.scramble=true;config.dsss=true;config.spreading_seed[0]=41;config.dsss_seed[0]=79;
     modem::StreamingTransmitter source(Bytes(256,0),config);
     live::detail::SignalWindow window;
     std::array<float,317> block{};
@@ -35,25 +36,17 @@ void actual_default_clock_carrier() {
     check(first.waveform.size()*config.carrier_hz/config.sample_rate==384,
           "carrier fixture must contain enough cycles to alias if drawn directly into a narrow pane");
     const auto verify=[&](const live::detail::SignalPlots& frame) {
-        const auto start=window.samples_seen()-frame.waveform.size();
-        for(std::size_t i=0;i<frame.waveform.size();++i) {
-            const auto expected=.35*std::cos(2*std::numbers::pi*config.carrier_hz*static_cast<double>(start+i)/config.sample_rate);
-            check(std::abs(frame.waveform[i]-expected)<1e-6,"actual transmitted carrier was clipped, flattened or phase-reset in the plot data");
-        }
-        check(std::abs(frame.spectrum[384]-20*std::log10(.35))<.001,"actual carrier FFT level changed with its sampled phase");
-        // A square wave would add odd harmonics; at this DSP clock the third
-        // and fifth harmonics alias to2100Hz and300Hz respectively.
-        for(const auto bin:{128U,768U,896U})
-            check(frame.spectrum[bin]<frame.spectrum[384]-70,"plot signal data added harmonics to a clean carrier");
-        for(const auto point:frame.constellation)
-            check(std::abs(point-std::complex<double>{.35,0})<1e-6,"successive default-clock frames changed carrier phase/amplitude");
+        std::vector<float> expected(frame.waveform.size());source.preview_last(expected);
+        for(std::size_t i=0;i<frame.waveform.size();++i)
+            check(std::abs(frame.waveform[i]-expected[i])<1e-6,"actual private waveform was clipped, flattened or phase-reset in plot data");
+        check(std::any_of(frame.waveform.begin(),frame.waveform.end(),[](float value){return std::abs(value)>.1F;}),"plot lost the transmitted waveform");
     };
     verify(first);
     append(source.samples_emitted()+137);
     const auto second=window.frame(config);
     verify(second);
     check(first.waveform!=second.waveform,"carrier fixture did not advance to a distinct sampled phase");
-    check(std::abs(first.spectrum[384]-second.spectrum[384])<.001,"continuous carrier changed waterfall power between frames");
+
 }
 void fractional_carrier_capture() {
     modem::Config config;config.sample_rate=6000;config.carrier_hz=1573;config.bandwidth_hz=1100;

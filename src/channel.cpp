@@ -23,6 +23,131 @@ double preview_normal(std::uint64_t seed,std::uint64_t sample) {
            std::cos(static_cast<double>(tau)*uniform(mix(seed^sample^0xd1b54a32d192ed03ULL)));
 }
 }
+struct SampledSimulationChannel::Impl {
+    static constexpr std::size_t taps=16,phases=256;
+    Config config;
+    ChannelConfig channel;
+    long double rate=1,startup=0;
+    std::uint64_t received=0,origin=0,total=0,buffer_start=0;
+    std::size_t buffer_count=0;
+    StreamingTransmitter* source=nullptr;
+    bool complete=false;
+    Complex oscillator{},step{},burst_rotation{};
+    double diffusion=0,sigma=0;
+    std::mt19937_64 startup_random,phase_random,noise_random;
+    std::normal_distribution<double> phase_normal{0,1},noise_normal{0,1};
+    std::array<Complex,1024> buffer{};
+    std::array<std::array<double,taps>,phases+1> coefficients{};
+    Impl(Config value,ChannelConfig impairment):config(value),channel(impairment),
+        startup_random(impairment.seed^0x8ebc6af09c88c6e3ULL),
+        phase_random(impairment.seed^0xa0761d6478bd642fULL),noise_random(impairment.seed) {
+        static_assert(sizeof(Impl)+sizeof(SampledSimulationChannel)<=SampledSimulationChannel::workspace_bound);
+        validate(config);validate_channel(config,channel);
+        rate=1+static_cast<long double>(channel.clock_error_ppm)*1e-6L;
+        diffusion=channel.phase_noise_degrees_per_sqrt_second*std::numbers::pi/180/std::sqrt(config.sample_rate);
+        sigma=std::sqrt(nominal_signal_power*std::pow(10.,-channel.snr_db/10));
+        oscillator=phase_rotation(tau*(uniform()-.5L));
+        step=phase_rotation(tau*channel.frequency_offset_hz/config.sample_rate);
+        // Interpolated polyphase Blackman-windowed sinc coefficients avoid
+        // per-tap trigonometry while retaining fractional sample boundaries.
+        for(std::size_t phase=0;phase<=phases;++phase) {
+            double sum=0;
+            for(std::size_t tap=0;tap<taps;++tap) {
+                const auto distance=static_cast<double>(phase)/phases-static_cast<double>(tap)+7;
+                const auto window=.42+.5*std::cos(std::numbers::pi*distance/8)+.08*std::cos(std::numbers::pi*distance/4);
+                const auto coefficient=sinc(std::numbers::pi*distance)*window;
+                coefficients[phase][tap]=coefficient;sum+=coefficient;
+            }
+            for(auto& coefficient:coefficients[phase])coefficient/=sum;
+        }
+        begin();
+    }
+    double uniform() {return (static_cast<double>(startup_random()>>11)+.5)/9007199254740992.;}
+    void begin() {
+        origin=received;source=nullptr;total=0;buffer_start=0;buffer_count=0;complete=false;
+        startup=channel.delay_samples+std::floor((.05L+.25L*uniform())*config.sample_rate)+.05L+.9L*uniform();
+        // Analytic source PCM begins at source sample zero for every burst.
+        // Restore the carrier phase accrued before that waveform began.
+        burst_rotation=phase_rotation(tau*config.carrier_hz*rate*(static_cast<long double>(origin)+startup)/config.sample_rate);
+    }
+    void advance() {
+        if(received==std::numeric_limits<std::uint64_t>::max())throw Error("sampled simulation receiver counter overflow");
+        ++received;oscillator*=step;
+        if(diffusion)oscillator*=phase_rotation(diffusion*phase_normal(phase_random));
+        if((received&4095U)==0)oscillator/=std::abs(oscillator);
+    }
+    double noise() {return sigma?noise_normal(noise_random)*sigma:0.;}
+    Complex interpolate(StreamingTransmitter& transmitter,long double position,std::stop_token stop) {
+        const auto center=static_cast<std::uint64_t>(std::floor(position));
+        const auto low=center>7?center-7:0;
+        const auto high=center+std::min<std::uint64_t>(total-1-center,8);
+        if(high>=buffer_start+buffer_count) {
+            const auto discard=static_cast<std::size_t>(std::min<std::uint64_t>(buffer_count,low-buffer_start));
+            std::move(buffer.begin()+static_cast<std::ptrdiff_t>(discard),buffer.begin()+static_cast<std::ptrdiff_t>(buffer_count),buffer.begin());
+            buffer_start+=discard;buffer_count-=discard;
+            buffer_count+=transmitter.read_analytic(std::span(buffer).subspan(buffer_count),stop);
+            if(high>=buffer_start+buffer_count)throw Error("sampled simulation source ended before its advertised duration");
+        }
+        const auto fractional=static_cast<double>(position-center)*phases;
+        const auto phase=std::min(phases-1,static_cast<std::size_t>(fractional));
+        const auto blend=fractional-static_cast<double>(phase);
+        Complex value{};
+        for(std::size_t tap=0;tap<taps;++tap) {
+            if((tap<7 && center<7-tap) || (tap>=7 && total-center<=tap-7))continue;
+            const auto index=tap<7?center-(7-tap):center+(tap-7);
+            const auto coefficient=coefficients[phase][tap]+blend*(coefficients[phase+1][tap]-coefficients[phase][tap]);
+            value+=buffer[static_cast<std::size_t>(index-buffer_start)]*coefficient;
+        }
+        return value;
+    }
+};
+SampledSimulationChannel::SampledSimulationChannel(Config config,ChannelConfig channel):impl_(std::make_unique<Impl>(config,channel)){}
+SampledSimulationChannel::~SampledSimulationChannel()=default;
+SampledSimulationChannel::SampledSimulationChannel(SampledSimulationChannel&&)noexcept=default;
+SampledSimulationChannel& SampledSimulationChannel::operator=(SampledSimulationChannel&&)noexcept=default;
+void SampledSimulationChannel::begin_burst(){impl_->begin();}
+std::uint64_t SampledSimulationChannel::received_samples()const{return impl_->received;}
+std::uint64_t SampledSimulationChannel::transmitted_samples()const {
+    const auto& s=*impl_;
+    const auto position=(static_cast<long double>(s.received-s.origin)-s.startup)*s.rate;
+    return position<=0?0:position>=s.total?s.total:static_cast<std::uint64_t>(position);
+}
+std::size_t SampledSimulationChannel::working_bytes()const{return sizeof(Impl)+sizeof(*this);}
+double SampledSimulationChannel::startup_offset_samples()const{return static_cast<double>(impl_->startup);}
+double SampledSimulationChannel::carrier_phase_radians()const {
+    const auto& s=*impl_;
+    return std::arg(s.oscillator*phase_rotation(tau*s.config.carrier_hz*s.rate*s.received/s.config.sample_rate));
+}
+std::size_t SampledSimulationChannel::read(StreamingTransmitter& source,std::span<float> output,std::stop_token stop) {
+    auto& s=*impl_;
+    if(stop.stop_requested())throw Error("modem operation cancelled");
+    if(output.empty() || s.complete)return 0;
+    if(!s.source) {
+        if(source.samples_emitted())throw Error("sampled simulation requires a fresh transmitter for each burst");
+        s.source=&source;s.total=source.total_samples();
+        const auto duration=std::ceil(s.startup+static_cast<long double>(s.total)/s.rate);
+        if(duration>=static_cast<long double>(std::numeric_limits<std::uint64_t>::max()-s.origin))
+            throw Error("sampled simulation duration exceeds the receiver counter");
+    } else if(s.source!=&source || source.samples_emitted()!=s.buffer_start+s.buffer_count)
+        throw Error("sampled simulation source changed without begin_burst");
+    std::size_t written=0;
+    while(written<output.size()) {
+        if((written&4095U)==0 && stop.stop_requested())throw Error("modem operation cancelled");
+        const auto position=(static_cast<long double>(s.received-s.origin)-s.startup)*s.rate;
+        if(position>=s.total){s.complete=true;break;}
+        const auto value=position<0?Complex{}:s.interpolate(source,position,stop)*s.oscillator*s.burst_rotation;
+        output[written++]=static_cast<float>(value.real()+s.noise());s.advance();
+    }
+    return written;
+}
+void SampledSimulationChannel::read_noise(std::span<float> output,std::stop_token stop) {
+    auto& s=*impl_;
+    if(stop.stop_requested())throw Error("modem operation cancelled");
+    for(std::size_t i=0;i<output.size();++i) {
+        if((i&4095U)==0 && stop.stop_requested())throw Error("modem operation cancelled");
+        output[i]=static_cast<float>(s.noise());s.advance();
+    }
+}
 struct SimulationChannel::Impl {
     Config config;
     ChannelConfig channel;

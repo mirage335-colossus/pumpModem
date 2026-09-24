@@ -10,6 +10,7 @@
 namespace datapump {
 
 enum class StreamPurpose : std::uint8_t { Data, Dsss, Scrambler, Fhss };
+enum class StreamDomain : std::uint8_t { Payload, Preamble };
 
 // A 256-bit shared secret with independently derived stream and MAC keys.
 // The timestamp is the same whole-second epoch for every modem layer;
@@ -22,8 +23,12 @@ public:
     Crypto& operator=(const Crypto&);
 
     static Crypto random();
+    // Domains share the existing purpose/epoch key. The high counter bytes
+    // are zero for Payload and ASCII "preamble" for Preamble; the low bytes
+    // encode the block offset. Byte offsets cannot carry into the domain.
     Bytes stream(StreamPurpose purpose, std::uint64_t timestamp,
-                 std::uint64_t offset, std::size_t count) const;
+                 std::uint64_t offset, std::size_t count,
+                 StreamDomain domain = StreamDomain::Payload) const;
     Bytes xor_data(std::span<const std::uint8_t> data, std::uint64_t timestamp,
                    std::uint64_t offset = 0) const;
 

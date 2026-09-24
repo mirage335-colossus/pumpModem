@@ -1,6 +1,7 @@
 #pragma once
 
 #include "datapump/packet.hpp"
+#include "utf8_policy.hpp"
 #include <chrono>
 #include <deque>
 #include <filesystem>
@@ -10,12 +11,9 @@
 #include <vector>
 
 namespace datapump::gui {
-enum class TransmitSource { message_file, binary };
 // Each returned byte is one exact bit, in entry order. Whitespace separates
 // groups but never pads, truncates or removes leading zero bits.
 Bytes parse_binary_bits(std::string_view text);
-// The explicit source owns dispatch; inactive binary text is never parsed.
-std::optional<Bytes> selected_binary_bits(TransmitSource source, std::string_view text);
 
 // The UI inserts only successfully decoded packets. Diagnostic sample buffers
 // are displayed separately and are never retained for every received message.
@@ -71,8 +69,7 @@ std::string format_bit_rate(double bits_per_second);
 // validates printable UTF-8, uniqueness and its production format limits.
 std::vector<std::string> key_entry_names(std::string_view text);
 // Numbered literal labels distinguish named keys from the unencrypted sentinel.
-// Only ampersands are escaped for FLTK's label renderer; callers must bypass
-// its menu-path parser when installing these labels.
+// Labels are literal UTF-8. Native menu escaping belongs in the adapter.
 std::vector<std::string> key_choice_labels(std::span<const std::string> names);
 // An absolute, percent-encoded file URI for the native directory launcher.
 // No command string is constructed and no keyfile content is exposed.
@@ -91,13 +88,20 @@ struct SignalLine {
     bool complete = false;
     std::size_t received_bits = 0;
     std::size_t expected_bits = 0;
+    std::optional<double> pattern_score;
+    // Exact retained transport bits for decoded pattern text, independently
+    // of its message bytes. Empty means the original bits are unavailable.
+    std::string raw_bits;
 };
+bool signal_byte_aligned(const SignalLine& line);
+std::string signal_display_text(const SignalLine& line);
 std::string signal_status_label(const SignalLine& line);
 std::string signal_preamble_label(const SignalLine& line);
 std::string signal_data_label(const SignalLine& line);
 // Pending decoder observations can be replaced as more symbols/parity arrive.
 // Verified packets have clipboard lookup identities. Complete raw binary
-// observations have a separate bit-string path with no packet/authentication ID.
+// observations use a text/byte view when byte-aligned and an exact bit-string
+// path otherwise. Neither raw view has a packet/authentication ID.
 class Signals {
 public:
     void update(SignalLine line);
@@ -105,13 +109,13 @@ public:
     const std::deque<SignalLine>& lines() const noexcept { return lines_; }
     std::optional<std::string> copy_id(std::size_t index) const;
     std::optional<std::string> copy_bits(std::size_t index) const;
+    std::optional<std::string> copy_raw_bits(std::size_t index) const;
+    std::optional<std::string> copy_text(std::size_t index) const;
+    std::optional<Bytes> copy_bytes(std::size_t index) const;
 private:
     std::deque<SignalLine> lines_;
 };
 
-// Clipboard text is UTF-8, with no embedded zero byte. Binary messages can
-// always be saved explicitly, but are never silently coerced to text.
-bool valid_clipboard_text(std::span<const std::uint8_t> bytes) noexcept;
 std::string id_label(const Message& message);
 std::string display_label(std::string_view text);
 }
