@@ -54,6 +54,17 @@ struct PatternBurst {
 // time end the stream. One failed symbol suffices when it lasts >=6s.
 inline constexpr std::uint64_t pattern_absence_seconds = 6;
 struct PatternSearch {
+    // Long pattern symbols also fit four fixed sections with independent
+    // complex gains. Full-symbol evidence includes the extra noise degrees
+    // and detector-choice penalty; the waveform and completion rule stay fixed.
+    // False retains the coherent reference detector for comparisons.
+    bool drift_tolerant = true;
+    // Long patterns additionally compare independent pairs of local matched
+    // windows. Their duration is independent of the full symbol, rounded up
+    // to whole chips and at least sixteen chips; 256 complete windows are
+    // required. Zero retains the historical coherent/four-section comparison.
+    // This is receiver-local configuration and never changes the waveform.
+    double differential_window_seconds = 100;
     // A finite, explicit frequency bank. Empty preserves the five-bin local
     // search unless expand_clock_search is enabled by the application.
     std::vector<double> frequency_offsets_hz;
@@ -125,7 +136,7 @@ public:
     // Shared per-sample carrier projection for a bank with one carrier/clock.
     // projected[i] is raw[i] * exp(-j*carrier_phase[i]); an arbitrary fixed
     // projection phase is fitted by the pattern score. Both spans must match.
-    // Sample-resolution Gram fits reconstruct the carrier from raw samples
+    // Sample-resolution and local differential Gram fits reconstruct the carrier from raw samples
     // to keep their real basis matrix independent of that arbitrary rotation.
     void push(std::span<const float>,std::span<const std::complex<double>> projected,std::stop_token = {});
     // Flush available decisions as incomplete; capture EOF is not stream end.
@@ -145,6 +156,8 @@ public:
     // The application requested expansion but only the original local
     // five-frequency search fitted its workspace. This is reduced coverage.
     bool local_clock_fallback() const;
+    // Whether the additional section detector fits this profile and budget.
+    bool drift_tolerant() const;
     std::size_t working_bytes() const;
     // Reject a reduction that cannot retain current state. Future candidate
     // growth is capped within the new ceiling; excess payload throws Error.

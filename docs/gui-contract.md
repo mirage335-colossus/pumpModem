@@ -25,11 +25,52 @@ screen fitting and host file-chooser internals remain toolkit mechanisms.
 
 ## Controls and state
 
+**Developer mode** is a persistent checkbox immediately left of **Clear received**
+and starts unchecked. It hides Pattern / tone, Error correction, DSP workspace,
+RX targets, Pattern steps, Callsign, Grid and Repeatable in place, together with
+the Compression / raw bits, Modem flow and Transmission layout tabs. Showing or
+hiding these controls preserves their geometry and values, including launch
+overrides, and does not reconfigure the modem or edit the draft. Turning it off
+on a hidden tab returns to Console; Link planner remains available. Visibility
+is shared presentation policy, and native adapters consume the tab visibility
+alongside its unchanged rectangle. Smoke workflows enable the advanced view
+explicitly so their all-page checks remain intact.
+
 **Link planner** is the second tab, immediately after **Console**. It previews a
-target independently of the live transmit/receive targets, with **Time per bit**, **Observer / receiver
-time**, send time and an earliest completion estimate. The two logarithmic
-graphs follow actual sampled automatic-profile steps. Native buttons edit the
-target through a numeric prompt, step it by one dB, select the −8/+23 examples,
+target independently of the live transmit/receive targets, with **Time per bit**,
+**Observer / receiver time**, send time and an earliest completion estimate.
+The time graph combines solid logarithmic time on the left axis with dashed
+**RX 1 bit** probability on a linear 0–100% right axis. The RX curve keeps power,
+path, noise and oscillator settings fixed. Tiny rounding gaps may use an
+independently checked usable target within 0.001 dB; wider unsupported gaps break
+the curve. Intermediate values interpolate bounded model samples. The curves' crossing has
+no detection-threshold or optimum meaning. The separate observer graph retains
+its logarithmic ratio scale and existing normalized LPI calculation.
+Both graphs follow actual sampled automatic-profile steps.
+
+The native **Target SNR (dB-Hz)** editable dropdown sits in the page's **Stronger /
+Weaker** controls row and scrolls with the document. It offers the same target
+presets as the transmit controls and changes only the preview. The numeric
+oscillator notes remain hidden while this tab is selected.
+At normal window widths, target controls, the compact native multiline
+**Launch command** editor and the CPU graph form three top-aligned columns.
+**Load** sits beneath the editor. Narrower pages move the command and graph
+below the target controls, then stack them when needed.
+The generated command exports the current link budget, oscillator,
+waveform, rate, carrier, DSP allowance and independent preview target. Its
+common `--target-snr` sets both short and long targets; the parser also accepts
+explicit `--short-target-snr` and `--long-target-snr` overrides without changing
+the common preview target.
+Editing or pasting does not apply settings. **Load** parses settings without
+executing a process or shell expression, validates the complete proposed state,
+then applies it with **Simulation: No**. Omitted options preserve current values.
+Malformed or incompatible settings leave the existing settings and pasted text
+unchanged. A successful load preserves the draft and starts no transmission.
+Routine polls and draft edits preserve the command buffer; relevant accepted
+GUI setting changes regenerate it. Enter inserts a newline; Tab moves focus to
+**Load**. Native selection, clipboard, caret visibility and scrolling work
+within the editor as well as within its containing document.
+Native buttons move to a stronger or weaker usable target, select the −8/+23 examples,
 or select the one-bit/second, one-day/bit and combined clock/RAM search edges.
 Milestones are derived from the current rate, carrier, pattern and key geometry;
 fixed modes omit target-dependent boundaries. The selected receiver check uses
@@ -38,6 +79,12 @@ The clock/RAM milestone must satisfy both carrier coverage and wide-search
 workspace availability under the selected RAM percentage, including 75%.
 Its reason identifies the limiting condition. Band edges use plain decimal
 Hz or kHz; ordinary audio frequencies never use scientific notation.
+**Stronger** and **Weaker** select targets that pass both checks, normally about
+one dB apart, skipping clock/RAM gaps. A final usable edge remains reachable
+when it is less than one dB away. Buttons are disabled when no usable target is
+found in that direction. Exact target precision survives selection and Apply;
+rounded labels must not change sample timing. The hidden model details explain
+why adjacent symbol lengths can have very different RAM requirements.
 
 The initial preview is one exact raw bit at −8 dB-Hz. **Use current draft** uses
 the accepted transfer estimate's exact wire-bit count, including the short
@@ -48,26 +95,69 @@ overhead; completion additionally requires complete absent symbols covering six
 seconds. The displayed finish time excludes processing delay.
 
 **Use target for short messages** and **Use target for long messages** explicitly
-apply the preview through the existing target/RX-list update. All other planner
-actions preserve the draft and modem geometry. Shared power/path/noise edits
+apply the preview through the existing target/RX-list update. Preview and
+navigation actions preserve the draft and modem geometry; **Load** applies its
+validated settings while retaining the draft. Shared power/path/noise edits
 update estimates without restarting reception in live mode. Preview
 recalculation is bounded in sample count and independent of transmission time;
 it generates no waveform, runs no receiver and starts no worker or transmission.
 Immutable documents and plots are cached across unchanged presentation polls.
 
-The planner opens with a verdict comparing the actual link budget to the
-selected target and checking clock/RAM support. Its power/path/noise input
-controls appear once, in the shared top bar. The **Simulation** dropdown offers
+In automatic modes, edits to every target dropdown select an exact clock/RAM
+fit at all target levels, preferring the nearest checked weaker target and
+falling back stronger if needed. Already fitting values remain exact. Transmit
+entries include the other effective transmit target and the same deduplicated
+plaintext/key families as the configured RX estimate, leaving the other target
+unchanged. Each independently edited RX-list entry is checked with its companion
+targets and those same banks; the final complete list must fit. Planner target
+checks one matching receive profile and never changes live TX/RX settings.
+If no fitting candidate is found, the affected settings or preview become
+unavailable and stale estimates are cleared. Fixed modes keep exact entries and
+unchanged fixed waveform geometry. CPU pace and RX probability do not choose
+the clock/RAM fit.
+Typing retains the user's edit buffer; an adjusted label shows the effective
+value. Presets and plain Enter commit full precision without retuning or
+rebuilding the draft. Matched RX targets use effective values, not edit buffers.
+RX and Planner edits retain their own buffers until commitment. Explicit
+planner Apply preserves the preview's full precision.
+
+The planner opens with the preview's RX estimate or a clock/RAM limit, beside a
+receiver CPU estimate, followed by budget margin and whole-bit phase loss.
+The CPU indicator uses receiver-only processing divided by incoming audio time
+for a one-bit preview, including complete-symbol absence. It excludes synthetic
+channel generation and uses the fixed i9-13900H reference: green below 0.5,
+yellow from 0.5 to below 1, and red at 1 or above. Unsupported clock/RAM geometry
+withholds the indicator. The estimate is not measured CPU utilization and does
+not guarantee per-bit latency. Expanded details separately compare complete
+one-bit simulation CPU time, including channel generation, with bit duration.
+This indicator remains visible in both simulation modes and does not alter RX
+probability or the LPI warning.
+A compact CPU plot appears beside the command editor, on the right, sharing the
+time graph's target-SNR horizontal range. Its logarithmic vertical scale shows
+receiver processing seconds per audio second, with an explicit equal-pace
+reference line. It models one bit at fixed link/clock settings regardless of the
+draft; the selected point equals the headline ratio. Clock/RAM failures leave
+gaps, with the same checked 0.001 dB rounding-gap substitutions as the RX curve.
+
+The headline probability assumes every wire bit
+correct before FEC and one matching RX profile; top-bar RX confidence retains
+the actual configured draft and receive-bank model. Eligible long patterns also
+can use four section fits with separate gain and phase when RAM permits. Their
+**RX estimate** includes both detectors, shared noise and competing bit patterns.
+The coherent-only comparison and model limitations remain in expanded details;
+**RX reference** is reserved for a limited fallback model. Its power/path/noise
+input controls appear once, in the shared top bar. The **Simulation** dropdown offers
 only **Yes / No**, and the editable budget dropdowns stay visible in both modes.
-CPU/GPU computation estimates appear only with **Yes**; RX success is estimated
-in either mode. The CPU/GPU row collapses with **No**, moving the tabs and page
+Simulation CPU/GPU computation times appear only with **Yes**; reception and the
+planner's receiver CPU indicator are estimated in either mode. The simulation
+CPU/GPU row collapses with **No**, moving the tabs and page
 up without moving the top-bar inputs or bottom modem settings. Power presets
 run from 100 W to 1 µW.
 Typing preserves the entered text; incomplete or invalid values show **Check
 link inputs** instead of a stale RX or planner result. Valid edits and presets
 restore estimates using the shared accepted budget.
-The initial budget is +3 dBm, 170 dB loss and −164 dBm/Hz
-noise, yielding −167 dBm received and −3 dB-Hz actual C/N0. These inputs affect
+The initial budget is +3 dBm, 120 dB loss and −164 dBm/Hz
+noise, yielding −117 dBm received and +47 dB-Hz actual C/N0. These inputs affect
 the actual budget separately from the target-driven timing and the existing
 normalized observer comparison. Propagation names do not supply unverified
 path-loss presets. **Model limits and references** retains the SSB/FT8 and rough
@@ -101,7 +191,7 @@ holds the audio percentage unchanged. Once TX audio ends, the mode line says
 **Checking reception after transmission** while complete-symbol absence is
 processed. Completion or cancellation freezes the elapsed value; a new run or
 reconfiguration resets it. Replay time is separate. None of these presentation
-states declares a received message complete. **RX success (noise model)** is
+states declares a received message complete. **RX estimate** is
 conditional on completed receiver computation, not a measured success rate or
 the probability of finishing within a deadline.
 
@@ -117,7 +207,8 @@ The persistent **Oscillator model** dropdown below the Simulation estimates
 offers **Free-running crystal** (the unchanged default), **GPSDO: hobbyist XO
 (no oven)**, **GPSDO: TCXO (no oven)** and **GPSDO: OCXO**. A neighboring label
 shows the selected effective TX/RX clock mismatch in ppm and phase diffusion
-in degrees per square-root second. These are illustrative residual scenarios,
+in degrees per square-root second on other tabs; Link planner hides that detail
+and places its independent target editor inside the page. These are illustrative residual scenarios,
 not measured specifications for products: GPS lock does not establish phase
 coherence, and low-cost non-oven oscillators retain more short-term instability
 than the OCXO scenario. The settings do not control physical clock hardware.
@@ -201,6 +292,9 @@ The **RX targets (dB-Hz)** comma-list initially matches both TX defaults, `32, 5
 Changing either TX SNR to a valid value replaces the RX list with both targets,
 deduplicated when equal. The RX list can then be edited independently without
 changing either TX SNR.
+In automatic modes it fits each entry against clock/RAM coverage with the other
+receive banks, without changing either transmit target. Enter or a preset
+displays the exact accepted list; a typing buffer can show an adjustment label.
 It trims and deduplicates valid entries, and resets the entire list to `32` on
 invalid input. Its 512-byte edit limit and 750 ms normalization delay allow
 comma/minus drafts while keeping native adapters free of parser logic. Receive
@@ -454,7 +548,15 @@ When space is exhausted, shared editor, preset and bitmap subrectangles stay
 nonnegative. Empty native allocations are not drawn and cannot take keyboard focus
 or request synthetic bitmap pixels.
 
-`ui::DocumentNode` is a generic tree of columns, rows, text, actions and bitmaps.
+`ui::DocumentNode` is a generic tree of columns, rows, text, controls, actions
+and bitmaps. `DocumentKind::control` carries a native text/preset or choice
+control declaration in the node's optional `control` member;
+`document_control_supported` rejects other kinds and named menus. Actions and
+bitmaps retain their existing document nodes. A `document_only` control is omitted
+from the desktop factories and hosted by its document instead; it retains the
+shared edit, preset, submit and validation rules. Native editors scroll and clip
+with that document, and unchanged presentation updates preserve their edit
+buffer and keyboard focus.
 Nodes carry widths, optional fixed heights, margins/padding, semantic tone/fill,
 emphasis, borders and equal-row-height intent. `document_layout.hpp` computes
 all document rectangles. Toolkit callbacks measure glyph height; adapters apply

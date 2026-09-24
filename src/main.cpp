@@ -48,7 +48,7 @@ const char* usage="Data Pump " DATAPUMP_VERSION R"HELP( — civilian audio text 
 Usage: pump COMMAND [OPTIONS]
   simulate     Free-running sampled channel and blind receiver acquisition
   listen       Continuous live receiver (or noise/loopback with --simulation)
-  estimate     Exact airtime and relative LPI model (one-bit RX reference)
+  estimate     Exact airtime and relative LPI model (one-bit RX estimate)
   analyze-link Bounded statistical link analysis as JSON; no PCM or decoder
   tx           Encode text/file to WAV (--output) or live audio (--device)
   rx           Decode a WAV (--input) or record live audio (--device --seconds)
@@ -695,6 +695,36 @@ void analyze_link(const Args& a,transfer::Options options) {
         <<",\"frequency_hypotheses_cap\":"<<modem::maximum_pattern_frequency_hypotheses
         <<",\"full_200ppm_frequency_hypotheses\":";json_number(full_frequency_count);
     std::cout<<",\"modeled_symbol_snr_db\":";json_number(current.modeled_symbol_snr_db);
+    std::cout<<",\"coherent_reference_only\":"<<(current.coherent_reference_only?"true":"false")
+        <<",\"drift_model_available\":"<<(current.drift_model_available?"true":"false")
+        <<",\"coherent_success_probability\":";
+    if(current.confidence_available&&current.drift_model_available)json_number(current.coherent_success_probability);
+    else std::cout<<"null";
+    std::cout
+        <<",\"drift_sections\":"<<current.drift_sections<<",\"drift_section_seconds\":";
+    json_number(current.drift_section_seconds);
+    std::cout<<",\"differential_windows\":"<<current.differential_windows<<",\"differential_window_seconds\":";
+    json_number(current.differential_window_seconds);
+    std::cout<<",\"differential_model_available\":"<<(current.differential_model_available?"true":"false")
+        <<",\"differential_added_detection_probability\":";
+    if(current.differential_model_available)json_number(current.differential_added_detection_probability);else std::cout<<"null";
+    std::cout<<",\"probability_trials\":"<<current.probability_trials
+        <<",\"probability_search_approximation\":"<<(current.probability_search_approximation?"true":"false")
+        <<",\"probability_carrier_candidates\":"<<current.probability_carrier_candidates
+        <<",\"probability_model_limit\":\""<<json_escape(current.probability_model_limit)<<"\""
+        <<",\"one_bit_success_probability\":";
+    if(current.one_bit_confidence_available)json_number(current.one_bit_success_probability);else std::cout<<"null";
+    std::cout<<",\"one_bit_confidence_available\":"<<(current.one_bit_confidence_available?"true":"false");
+    std::cout<<",\"one_bit_probability_sampling_low\":";
+    if(current.probability_trials)json_number(current.one_bit_probability_low);else std::cout<<"null";
+    std::cout<<",\"one_bit_probability_sampling_high\":";
+    if(current.probability_trials)json_number(current.one_bit_probability_high);else std::cout<<"null";
+    std::cout<<",\"success_probability_sampling_low\":";
+    if(current.probability_interval_available)json_number(current.success_probability_low);else std::cout<<"null";
+    std::cout<<",\"success_probability_sampling_high\":";
+    if(current.probability_interval_available)json_number(current.success_probability_high);else std::cout<<"null";
+    std::cout<<",\"phase_coherence_loss_db\":";json_number(current.phase_coherence_loss_db);
+    std::cout<<",\"section_phase_coherence_loss_db\":";json_number(current.section_phase_coherence_loss_db);
     std::cout<<",\"cpu_reference\":\""<<simulation::reference_cpu<<"\",\"gpu_reference\":\""<<simulation::reference_gpu
         <<"\",\"gpu_hypothetical\":"<<(current.gpu_hypothetical?"true":"false")<<",\"cpu_seconds\":";
     json_number(current.cpu_seconds);std::cout<<",\"gpu_seconds\":";json_number(current.gpu_seconds);

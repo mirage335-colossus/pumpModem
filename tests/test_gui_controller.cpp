@@ -4,6 +4,7 @@
 #include "../src/gui/transmit_scope.hpp"
 #include "datapump/compression.hpp"
 #include "datapump/runtime.hpp"
+#include "datapump/simulation_estimate.hpp"
 #include <filesystem>
 #include <iostream>
 #include <set>
@@ -27,6 +28,16 @@ void prepare(Controller& controller) {
         controller.poll(); std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     check(controller.estimate().has_value(),"Payload estimate was not prepared");
+}
+void apply_exact_target(Controller& controller,const std::string& target) {
+    // Deliberately unsupported geometry remains available through explicit
+    // planner Apply; dropdown edits now select a nearby clock/RAM fit.
+    controller.activate(ui::Command::planner_target);
+    const auto requests=controller.take_services();
+    check(requests.size()==1,"Exact target fixture needs the planner prompt");
+    controller.complete_service({requests.front().id,false,target,{}});
+    controller.activate(ui::Command::planner_apply_short);
+    check(controller.field(ui::Field::snr).text==target,"Explicit target fixture changed its numerical anchor");
 }
 void simulation_estimate_controls() {
     using F=ui::Field;
@@ -59,6 +70,8 @@ void simulation_estimate_controls() {
     controller.select(F::simulation,std::string(tuning::simulation_presets().back().name));prepare(controller);
     check(text(F::simulation_confidence)!=strong_probability,
           "Simulation probability did not respond to the weak channel preset");
+    check(controller.field(F::simulation_confidence).text_tone==ui::TextTone::negative,
+          "A weak numeric RX estimate below 80% must be red");
     controller.select(F::simulation,std::string(tuning::simulation_presets().front().name));
     check(!controller.settings().simulation,"Simulation No did not stop sampled simulation");
     // RX probability remains a link model when sampled simulation is off.
@@ -68,6 +81,8 @@ void simulation_estimate_controls() {
           "Simulation No must retain RX confidence for the configured link");
     controller.select(F::simulation,std::string(tuning::simulation_presets()[2].name));
     controller.edit(F::bandwidth,"invalid");
+    check(controller.field(F::simulation_confidence).text_tone==ui::TextTone::normal,
+          "Invalid settings retained the previous RX estimate warning color");
     check(text(F::simulation_confidence).ends_with("Invalid settings")&&
           text(F::simulation_cpu_time).ends_with("Invalid settings"),
           "Invalid settings left a previous numeric simulation estimate visible");
@@ -89,17 +104,21 @@ void simulation_estimate_controls() {
     check(text(F::simulation_confidence).find('%')!=std::string::npos,
           "Returning to supported carrier coverage did not restore the modeled percentage");
     controller.edit(F::bandwidth,"100 Hz");
-    controller.edit(F::snr,"-61");
+    apply_exact_target(controller,"-61");
     controller.select(F::simulation,"3dBm -170dB");prepare(controller);
     check(text(F::simulation_confidence).ends_with("Carrier outside RX search"),
           "100 Hz with a -61 target must not show the old low numeric probability");
+    check(controller.field(F::simulation_confidence).text_tone==ui::TextTone::normal,
+          "Unavailable numeric RX estimate retained the warning color");
     const auto preset_snr=controller.settings().simulation_snr_db;
     controller.edit(F::snr,"140");prepare(controller);
     check(controller.settings().simulation_snr_db==preset_snr,
           "Changing the TX design target must not change simulated channel SNR");
     controller.select(F::simulation,"3dBm -120dB");prepare(controller);
-    check(text(F::simulation_confidence).ends_with(">99.9%"),
+    check(text(F::simulation_confidence).ends_with(">99%"),
           "Covered strong 100 Hz channel must not treat target 140 as an admission threshold");
+    check(controller.field(F::simulation_confidence).text_tone==ui::TextTone::normal,
+          "An RX estimate above 80% must retain the normal foreground");
 }
 void empty_composer_preview() {
     using F=ui::Field;using C=ui::Command;
@@ -188,7 +207,7 @@ void oscillator_controls() {
     check(controller.revision()==revision&&controller.field(F::simulation_oscillator).selected==accepted,
           "Unknown oscillator IDs changed accepted simulation settings");
     controller.select(F::simulation_oscillator,"crystal");
-    controller.edit(F::bandwidth,"100 Hz");controller.edit(F::snr,"-30");prepare(controller);
+    controller.edit(F::bandwidth,"100 Hz");apply_exact_target(controller,"-30");prepare(controller);
     check(controller.field(F::simulation_confidence).text.ends_with("Carrier outside RX search"),
           "Long-symbol oscillator fixture must expose the default clock's uncovered carrier");
     controller.select(F::simulation_oscillator,"gpsdo-ocxo");prepare(controller);
@@ -233,6 +252,23 @@ void lpi_estimate_controls() {
           controller.estimate()->wire_bits==3&&!controller.settings().transfer.key&&
           !controller.settings().transfer.modem.scramble&&!controller.settings().transfer.modem.dsss,
           "Unkeyed GUI must show a warned relative estimate while preserving its public waveform and exact short endpoint");
+    check(controller.field(F::lpi_estimate).text_tone==ui::TextTone::normal,
+          "An available observer ratio above 8x must retain the normal foreground");
+    controller.edit(F::snr,"23");prepare(controller);
+    check(controller.inspection()->lpi_estimate.status==lpi::Status::available&&
+          controller.inspection()->lpi_estimate.equivalent_symbols<8&&
+          controller.field(F::lpi_estimate).text_tone==ui::TextTone::negative,
+          "An available observer ratio below 8x must be red even when hypothetical");
+    controller.edit(F::short_bits,"001x");
+    check(controller.field(F::lpi_estimate).text_tone==ui::TextTone::negative&&text().ends_with("Unavailable"),
+          "Unavailable observer estimate must be red");
+    controller.edit(F::message,"e");prepare(controller);
+    check(controller.field(F::lpi_estimate).text_tone==ui::TextTone::negative,
+          "A restored low observer estimate lost its warning color");
+    controller.edit(F::snr,"0");
+    check(controller.field(F::lpi_estimate).text_tone==ui::TextTone::normal&&text().ends_with("Calculating..."),
+          "Pending observer estimate retained the previous warning color");
+    prepare(controller);
     struct TemporaryKeyring {
         std::filesystem::path path=std::filesystem::temp_directory_path()/
             ("datapump-lpi-keys-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
@@ -287,9 +323,11 @@ void lpi_estimate_controls() {
     check(controller.estimate().has_value(),"RX target edits did not prepare an estimate");
     same_advisory(*reference);
     controller.edit(F::short_bits,"001x");
-    check(text().ends_with("Unavailable"),"Invalid raw draft retained the previous LPI number");
+    check(text().ends_with("Unavailable")&&controller.field(F::lpi_estimate).text_tone==ui::TextTone::negative,
+          "Invalid raw draft must replace the previous LPI number with a red unavailable status");
     controller.edit(F::message,"e");controller.edit(F::bandwidth,"invalid");
-    check(text().ends_with("Invalid settings"),"Invalid modem settings retained the previous LPI number");
+    check(text().ends_with("Invalid settings")&&controller.field(F::lpi_estimate).text_tone==ui::TextTone::negative,
+          "Invalid modem settings must replace the previous LPI number with a red status");
     controller.edit(F::bandwidth,"3.6 kHz");
     controller.select(F::simulation,std::string(tuning::simulation_presets().front().name));prepare(controller);
     check(!controller.settings().simulation,"Simulation-off selection did not reach settings");
@@ -307,17 +345,17 @@ void lpi_estimate_controls() {
     same_advisory(*long_reference);
     controller.edit(F::long_snr,"55");prepare(controller);
     check(controller.inspection()->lpi_estimate.status==lpi::Status::outside_weak_signal_model&&
-          text().find("×")==std::string::npos,
-          "Short symbol geometry outside the normalized weak-signal model must withdraw unsupported numbers");
+          text().find("×")==std::string::npos&&controller.field(F::lpi_estimate).text_tone==ui::TextTone::negative,
+          "Short symbol geometry outside the normalized weak-signal model must show a red status without unsupported numbers");
     controller.select(F::key,"none");prepare(controller);
     check(controller.inspection()->lpi_estimate.status==lpi::Status::outside_weak_signal_model&&
           controller.inspection()->lpi_estimate.hypothetical_encryption&&
           text().find("hypothetical")!=std::string::npos&&
-          !controller.settings().transfer.key,
+          !controller.settings().transfer.key&&controller.field(F::lpi_estimate).text_tone==ui::TextTone::negative,
           "Turning encryption off must restore the hypothetical warning even outside the relative weak-signal model");
     controller.edit(F::long_snr,"0");prepare(controller);
     check(controller.inspection()->lpi_estimate.status==lpi::Status::available&&
-          text().find("hypothetical")!=std::string::npos,
+          text().find("hypothetical")!=std::string::npos&&controller.field(F::lpi_estimate).text_tone==ui::TextTone::normal,
           "Public experiments must retain numerical relative estimates after encryption is turned off");
     controller.select(F::key,"key:LPI estimate");prepare(controller);
     check(!controller.inspection()->lpi_estimate.hypothetical_encryption&&text().find("hypothetical")==std::string::npos,
@@ -733,7 +771,8 @@ void shannon_capacity_display() {
     expect_capacity("5.17 kbit/s");
     controller.edit(F::snr,"unfinished");
     expect_capacity("5.17 kbit/s"); // Invalid drafts preserve the active settings.
-    controller.edit(F::snr,"-60");
+    controller.edit(F::snr,"40"); // Planner Apply requires valid modem settings.
+    apply_exact_target(controller,"-60");
     expect_capacity("1.44e-06 bit/s");
     controller.close();
 }
@@ -1677,25 +1716,52 @@ void receive_target_controls() {
     check(controller.field(F::receive_snr).text=="40,","a partial comma-list edit must remain editable before normalization");
     controller.edit(F::receive_snr," 40, +6, -6, 40 ");
     std::this_thread::sleep_for(std::chrono::milliseconds(775));controller.poll();
-    check(controller.field(F::receive_snr).text=="40, 6, -6" &&
-          controller.settings().transfer.receive_targets_db_hz==std::vector<double>({40,6,-6}),"receive target field must canonicalize a valid list");
+    const auto accepted_targets=controller.settings().transfer.receive_targets_db_hz;
+    const bool adjusted_list=accepted_targets.size()==3&&accepted_targets.front()==40&&
+          accepted_targets[1]!=6&&
+          controller.field(F::receive_snr).text==" 40, +6, -6, 40 "&&
+          !controller.field(F::receive_snr).display_text.empty();
+    if(!adjusted_list)throw Error("The short-profile clock gap near 6 dB must snap without overwriting the typed RX list: "+
+        controller.field(F::receive_snr).text+" / "+controller.field(F::receive_snr).display_text+" / "+
+        controller.field(F::status).text);
+    auto options=controller.settings().transfer;
+    auto input=controller.link_plan()->inputs;input.options=options;input.target_db_hz=-6;
+    const std::array companions{accepted_targets[0],accepted_targets[1]};
+    const auto expected_last=planner::nearest_fit_target(input,companions,planner::ReceiveBanks{true,0});
+    check(expected_last&&*expected_last==accepted_targets.back(),
+          "The RX list must use the nearest checked target under its actual RAM allowance and companion bank");
+    const auto profiles=tuning::receive_profiles(options.modem,accepted_targets,options.receive_pattern_mode,false);
+    modem::ChannelConfig channel;channel.clock_error_ppm=controller.settings().simulation_clock_error_ppm;
+    for(const auto& profile:profiles) {
+        options.modem=profile;
+        const auto receiver=simulation::estimate(transfer::estimate_binary(Bytes{0},options),options,true,channel,profiles,1,false);
+        check(receiver.carrier_in_search&&receiver.receiver_workspace_supported,
+              "Every advertised RX target must independently fit clock search and the shared receiver workspace");
+    }
+    controller.commit_target(F::receive_snr);
+    check(tuning::parse_receive_targets(controller.field(F::receive_snr).text).values==accepted_targets&&
+          controller.field(F::receive_snr).display_text.empty(),
+          "Enter must reveal the complete exact accepted RX list");
     check(controller.field(F::snr).text=="32" && controller.settings().transfer.modem.spreading_factor==tx.spreading_factor &&
           controller.settings().transfer.modem.integration_seconds==tx.integration_seconds,"receive search targets must not change the transmitted profile");
     controller.edit(F::bandwidth,"18 kHz");
     check(controller.settings().transfer.modem.bandwidth_hz==18000 &&
-          controller.settings().transfer.receive_targets_db_hz==std::vector<double>({40,6,-6}),
+          controller.settings().transfer.receive_targets_db_hz==accepted_targets,
           "bandwidth changes must preserve custom receive targets");
     controller.edit(F::receive_snr,"20,");
     controller.edit(F::snr,"-23");
-    check(controller.field(F::receive_snr).text=="-23, 55" &&
-          controller.settings().transfer.receive_targets_db_hz==std::vector<double>({-23,55}),
+    const auto fitted_targets=controller.settings().transfer.receive_targets_db_hz;
+    const auto fitted_text=controller.field(F::receive_snr).text;
+    check(fitted_targets.size()==2&&fitted_targets[1]==55&&
+          fitted_targets[0]!=55&&controller.field(F::snr).text=="-23"&&
+          tuning::parse_receive_targets(fitted_text).values==fitted_targets,
           "changing short TX SNR must immediately replace pending receive edits with both matching targets");
     std::this_thread::sleep_for(std::chrono::milliseconds(775));controller.poll();
-    check(controller.settings().transfer.receive_targets_db_hz==std::vector<double>({-23,55}),
+    check(controller.settings().transfer.receive_targets_db_hz==fitted_targets,
           "a pending receive edit must not overwrite the target selected by TX SNR");
     controller.edit(F::snr,"-");
-    check(controller.field(F::receive_snr).text=="-23, 55" &&
-          controller.settings().transfer.receive_targets_db_hz==std::vector<double>({-23,55}),
+    check(controller.field(F::receive_snr).text==fitted_text &&
+          controller.settings().transfer.receive_targets_db_hz==fitted_targets,
           "an incomplete TX SNR edit must preserve the last valid receive target");
     controller.edit(F::snr,"80");
     check(controller.field(F::receive_snr).text=="80, 55" &&

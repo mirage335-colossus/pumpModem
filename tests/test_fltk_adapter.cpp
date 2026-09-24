@@ -1,6 +1,7 @@
 #define DATAPUMP_FLTK_ADAPTER_TEST
 #include "../src/gui/backend_fltk.cpp"
 #include "gui_extension_fixture.hpp"
+#include "estimate_warning_fixture.hpp"
 #include "overlay_fixture.hpp"
 #include <cstring>
 #include <FL/Fl_Image_Surface.H>
@@ -322,8 +323,94 @@ void prompts() {
         "Native chooser buttons did not consume shared service wording");
     file_services.cancel();Fl::check();require(!Fl::modal(),"Cancelling the title lifetime fixture retained its chooser");
 }
+void estimate_warning_colors() {
+    for(bool color:{false,true}) {
+        theme::apply_palette(color);
+        Launch launch;launch.color=color;launch.simulation=true;NativeApp app(launch);Fl::check();
+        auto* window=Fl::first_window();require(window,"Estimate color fixture has no native window");
+        test::estimate_warning_fields(app.application,[] {Fl::wait(.01);},[&](ui::Field field,ui::TextTone tone) {
+            const auto& state=app.application.field(field);
+            auto* label=find_label(*window,state.text);
+            const auto deadline=Clock::now()+std::chrono::seconds(2);
+            while((!label||label->labelcolor()!=text_color(tone))&&Clock::now()<deadline) {
+                Fl::wait(.01);label=find_label(*window,state.text);
+            }
+            require(state.text_tone==tone&&label&&label->labelcolor()==text_color(tone),
+                "FLTK estimate label ignored or retained a shared warning tone");
+        });
+        app.application.close();while(!app.application.finished())Fl::wait(.005);
+    }
+    theme::apply_palette();
+}
+void developer_mode_visibility() {
+    Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
+    auto* window=Fl::first_window();require(window,"Developer mode fixture has no native window");
+    auto* toggle=dynamic_cast<NativeCheckbox*>(find_button(*window,"Developer mode"));
+    auto* clear=find_button(*window,"Clear received");
+    require(toggle&&clear&&toggle->visible_r()&&!toggle->value(),"Developer mode did not start as an unchecked native toggle");
+    const auto refresh=[] {
+        const auto until=Clock::now()+std::chrono::milliseconds(130);
+        while(Clock::now()<until)Fl::wait(.005);
+    };
+    const auto frame=[](const Fl_Widget* widget) {return ui::Rect{widget->x(),widget->y(),widget->w(),widget->h()};};
+    const auto set_mode=[&](bool checked) {toggle->value(checked);toggle->do_callback();refresh();};
+    for(const auto& size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
+        window->size(size.first,size.second);refresh();
+        require(toggle->x()+toggle->w()<clear->x()&&toggle->y()==clear->y(),
+            "Developer mode is not immediately left of Clear received");
+        std::vector<std::pair<Fl_Widget*,ui::Rect>> preserved;
+        std::vector<NativeControlGroup*> advanced;
+        const std::function<void(Fl_Group&)> collect=[&](Fl_Group& group) {
+            for(int i=0;i<group.children();++i) {
+                auto* child=group.child(i);
+                if(auto* control=dynamic_cast<NativeControlGroup*>(child)) {
+                    for(const auto& declaration:ui::console_screen())if(declaration.persistent&&
+                        app.application.control_layout(declaration,window->w(),window->h()).frame==frame(control)) {
+                        preserved.push_back({control,frame(control)});
+                        if(declaration.developer_only)advanced.push_back(control);
+                        break;
+                    }
+                }
+                if(auto* nested=dynamic_cast<Fl_Group*>(child))collect(*nested);
+            }
+        };
+        collect(*window);require(!advanced.empty(),"Developer mode fixture found no advanced native controls");
+        for(const auto& definition:ui::pages()) {
+            auto* button=find_button(*window,definition.title);require(button,"Developer mode fixture lost a native tab");
+            preserved.push_back({button,frame(button)});
+        }
+        for(bool checked:{false,true,false,true,false}) {
+            set_mode(checked);
+            require(app.application.field(ui::Field::developer_mode).checked==checked&&toggle->visible_r(),
+                "Native developer mode callback failed or hid its own toggle");
+            for(auto* control:advanced)require(static_cast<bool>(control->visible_r())==checked,
+                "Developer mode did not hide/show an entire advanced control in place");
+            for(const auto& definition:ui::pages()) {
+                auto* button=find_button(*window,definition.title);
+                require(static_cast<bool>(button->visible_r())==(checked||!definition.developer_only),
+                    "Developer mode did not update native tab visibility without resizing");
+                if(!button->visible_r()) {
+                    require(!button->take_focus(),"Hidden advanced tab retained keyboard focus eligibility");
+                    button->do_callback();require(app.application.page()==ui::Page::console,
+                        "A stale native callback selected a hidden advanced tab");
+                }
+            }
+            for(const auto& [widget,bounds]:preserved)require(frame(widget)==bounds,
+                "Toggling developer mode moved an existing native control or tab");
+        }
+        for(const auto& definition:ui::pages())if(definition.developer_only) {
+            set_mode(true);auto* button=find_button(*window,definition.title);button->do_callback();refresh();
+            require(app.application.page()==definition.id,"An enabled advanced native tab could not be selected");
+            set_mode(false);
+            require(app.application.page()==ui::Page::console&&find_button(*window,"Console")->value()&&
+                !button->value()&&!button->visible_r(),"Hiding the selected advanced tab did not display Console");
+        }
+    }
+    app.application.close();while(!app.application.finished())Fl::wait(.005);
+}
 void tab_clicks() {
     Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
+    app.application.toggle(ui::Field::developer_mode,true);
     auto* window=Fl::first_window();require(window,"Tab fixture has no native window");
     const auto key=Fl::e_keysym,x=Fl::e_x,y=Fl::e_y,state=Fl::e_state;
     const auto refresh=[] {
@@ -375,6 +462,7 @@ void tab_clicks() {
 }
 void repeatable_clicks() {
     Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
+    app.application.toggle(ui::Field::developer_mode,true);
     auto* window=Fl::first_window();require(window,"Repeatable fixture has no native window");
     auto* toggle=dynamic_cast<NativeCheckbox*>(find_button(*window,"Repeatable"));
     require(toggle,"Repeatable fixture has no native checkbox");
@@ -802,6 +890,104 @@ void extension_controls() {
     require(std::string(toggle->label())==app.application.control(declarations[3]).label,"Native toggle retained a stale shared label");
     app.application.close();while(!app.application.finished())Fl::wait(.005);
 }
+void inline_document_editor() {
+    Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
+    auto* window=Fl::first_window();require(window,"Inline control fixture has no native window");
+    const auto refresh=[] {
+        const auto until=Clock::now()+std::chrono::milliseconds(140);
+        while(Clock::now()<until)Fl::wait(.005);
+    };
+    app.application.select_page(ui::Page::planner);refresh();
+    NativeInput* editor=nullptr;NativeEditor* command_editor=nullptr;NativeMenuButton* presets=nullptr;FltkDocumentView* document=nullptr;
+    const std::function<void(Fl_Group&)> find=[&](Fl_Group& group) {
+        if(auto* view=dynamic_cast<FltkDocumentView*>(&group);view&&view->visible_r())document=view;
+        for(int i=0;i<group.children();++i) {
+            auto* child=group.child(i);
+            if(document&&document->contains(child)) {
+                if(auto* input=dynamic_cast<NativeInput*>(child))editor=input;
+                if(auto* menu=dynamic_cast<NativeMenuButton*>(child);menu&&menu->visible_r())presets=menu;
+                if(auto* command=dynamic_cast<NativeEditor*>(child))command_editor=command;
+            }
+            if(auto* nested=dynamic_cast<Fl_Group*>(child))find(*nested);
+        }
+    };
+    find(*window);
+    require(document&&editor&&presets&&presets->size()>2&&editor->visible_r(),
+        "Scrollable planner did not construct its ordinary native editor and preset dropdown");
+    require(editor->y()>=app.application.page_bounds(window->w(),window->h()).y&&editor->take_focus(),
+        "Inline editor remained in the persistent header or could not take focus");
+    const auto key=Fl::e_keysym,state=Fl::e_state,length=Fl::e_length;auto* event_text=Fl::e_text;
+    char tab_text[]={'\t',0};
+    const auto tab=[&](bool reverse) {
+        Fl::e_keysym=FL_Tab;Fl::e_state=reverse?FL_SHIFT:0;Fl::e_text=tab_text;Fl::e_length=1;Fl::handle(FL_KEYDOWN,window);
+    };
+    tab(false);require(Fl::focus()==presets,"Inline Tab did not move from editor to presets");
+    tab(false);require(Fl::focus()==find_button(*document,"Stronger"),"Inline Tab skipped the adjacent Stronger action");
+    tab(false);require(Fl::focus()==find_button(*document,"Weaker"),"Inline Tab skipped the adjacent Weaker action");
+    tab(true);tab(true);tab(true);require(Fl::focus()==editor,"Inline reverse Tab did not restore document visual order");
+    Fl::e_keysym=key;Fl::e_state=state;Fl::e_text=event_text;Fl::e_length=length;
+    const auto* original=editor;editor->value("-");editor->do_callback();refresh();
+    find(*window);
+    require(editor==original&&Fl::focus()==editor&&std::string(editor->value())=="-"&&
+        app.application.field(ui::Field::planner_target).text=="-",
+        "Invalid typed prefix was replaced or lost focus during a document rebuild");
+    editor->value("-18");editor->insert_position(2,1);editor->do_callback();refresh();
+    require(Fl::focus()==editor&&editor->insert_position()==2&&editor->mark()==1&&std::string(editor->value())=="-18",
+        "Ordinary inline typing lost its cursor, selection or edit buffer");
+    require(editor->submit(false,false),"Inline editor did not preserve ordinary Enter submission");refresh();
+    require(std::string(editor->value())==app.application.field(ui::Field::planner_target).text&&
+        app.application.field(ui::Field::planner_target).display_text.empty(),
+        "Inline Enter did not display the exact accepted target");
+    const auto before=std::string(editor->value());
+    presets->picked(presets->menu()+2);refresh();
+    require(std::string(editor->value())!=before&&app.application.field(ui::Field::planner_target).display_text.empty(),
+        "Inline preset failed to edit and commit through the ordinary native control callback");
+    editor->take_focus();const int old_y=editor->y();
+    app.application.dispatch(ui::Command::planner_toggle_details);refresh();find(*window);
+    require(editor==original&&Fl::focus()==editor,"Adding document details replaced the inline editor or stole focus");
+    auto* scroll=dynamic_cast<Fl_Scroll*>(document->parent()->parent());require(scroll,"Inline editor has no native scroll host");
+    scroll->scroll_to(0,230);refresh();
+    require(editor->y()<old_y&&!editor->visible_r()&&Fl::focus()!=editor&&!editor->take_focus(),
+        "Scrolling the inline editor out of the viewport retained visible input or keyboard focus");
+    scroll->scroll_to(0,0);refresh();
+    require(editor->visible_r()&&editor->take_focus(),"Scrolling the inline editor back did not restore input");
+    require(command_editor&&command_editor->visible_r()&&command_editor->byte_limit==8192&&command_editor->tab_nav(),
+        "Launch command is not a native multiline editor with ordinary focus navigation");
+    app.application.edit(ui::Field::message,"e");refresh();
+    const auto original_rate=app.application.field(ui::Field::bandwidth).text;
+    const auto original_target=app.application.field(ui::Field::snr).text;
+    std::string lines="./datapump-gui --unsupported-setting 1";
+    for(unsigned line=0;line<24;++line)lines+="\n--line "+std::to_string(line);
+    command_editor->buffer()->select(0,command_editor->buffer()->length());
+    require(command_editor->paste(lines),"Multiline native command paste was rejected");refresh();
+    require(buffer_text(*command_editor->buffer())==lines&&app.application.field(ui::Field::planner_command).text==lines,
+        "Native command paste changed wrapped/newline content or failed to retain the buffer");
+    command_editor->take_focus();command_editor->insert_position(command_editor->buffer()->length());command_editor->show_insert_position();refresh();
+    int px=0,py=0;
+    require(command_editor->position_to_xy(command_editor->buffer()->length(),&px,&py)&&
+            !command_editor->position_to_xy(0,&px,&py),"Launch command editor did not scroll to its final line");
+    command_editor->scroll(1,0);refresh();
+    require(command_editor->position_to_xy(0,&px,&py),"Launch command editor could not scroll back to its first line");
+    command_editor->insert_position(command_editor->buffer()->length());command_editor->show_insert_position();
+    const auto enter_key=Fl::e_keysym,enter_state=Fl::e_state,enter_length=Fl::e_length;auto* enter_text=Fl::e_text;
+    char newline[]={'\n',0};Fl::e_keysym=FL_Enter;Fl::e_state=0;Fl::e_text=newline;Fl::e_length=1;
+    command_editor->handle(FL_KEYDOWN);
+    Fl::e_keysym=enter_key;Fl::e_state=enter_state;Fl::e_text=enter_text;Fl::e_length=enter_length;refresh();
+    require(buffer_text(*command_editor->buffer())==lines+"\n"&&!app.application.enabled(ui::Command::cancel)&&
+            app.application.field(ui::Field::message).text=="e"&&app.application.field(ui::Field::bandwidth).text==original_rate&&
+            app.application.field(ui::Field::snr).text==original_target,
+        "Enter in Launch command transmitted, applied settings or failed to insert a newline");
+    auto* load=find_button(*document,"Load");require(load&&load->visible_r(),"Launch command has no native Load action");
+    load->do_callback();refresh();
+    require(app.application.field(ui::Field::planner_command).text==lines+"\n"&&
+            app.application.field(ui::Field::status).text.find("unsupported-setting")!=std::string::npos&&
+            app.application.field(ui::Field::bandwidth).text==original_rate&&!app.application.enabled(ui::Command::cancel),
+        "Native Load failed to validate the retained command without starting transmission");
+    app.application.select_page(ui::Page::console);refresh();
+    require(!editor->visible_r()&&Fl::focus()!=editor,"Hiding the document page retained native editor focus");
+    app.application.close();while(!app.application.finished())Fl::wait(.005);
+}
+
 void policy_lifecycle() {
     auto declarations=datapump::gui::test::policy_lifecycle_controls();
     Launch launch;launch.simulation=true;NativeApp app(launch,declarations);Fl::check();
@@ -853,8 +1039,8 @@ void layout_lifecycle() {
     NativeInput* editor=nullptr;NativeBitmap* bitmap=nullptr;
     const std::function<void(Fl_Group&)> locate=[&](Fl_Group& parent) {
         for(int i=0;i<parent.children();++i) {
-            if(auto* input=dynamic_cast<NativeInput*>(parent.child(i)))editor=input;
-            if(auto* image=dynamic_cast<NativeBitmap*>(parent.child(i)))bitmap=image;
+            if(auto* input=dynamic_cast<NativeInput*>(parent.child(i));input&&input->visible_r())editor=input;
+            if(auto* image=dynamic_cast<NativeBitmap*>(parent.child(i));image&&image->visible_r())bitmap=image;
             if(auto* group=dynamic_cast<Fl_Group*>(parent.child(i)))locate(*group);
         }
     };
@@ -890,6 +1076,7 @@ void document_geometry(Fl_Group& parent) {
 }
 void popup_polling_and_document_layout() {
     Launch launch;launch.simulation=true;NativeApp app(launch);auto* window=Fl::first_window();require(window,"Popup polling fixture has no native window");
+    app.application.toggle(ui::Field::developer_mode,true);
     for(const auto& size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
         window->size(size.first,size.second);
         for(const auto& page:ui::pages())if(page.document) {
@@ -935,6 +1122,7 @@ public:
 void compression_page_labels() {
     Launch launch;launch.simulation=true;launch.page=ui::Page::compression;
     NativeApp app(launch);Fl::check();
+    app.application.toggle(ui::Field::developer_mode,true);app.application.select_page(ui::Page::compression);
     auto* window=Fl::first_window();require(window,"Compression fixture has no native window");
     window->resize(window->x(),window->y(),ui::min_width,ui::min_height);
     for(const auto* draft:{"","010","0010","01010"}) {
@@ -1058,6 +1246,6 @@ void clipboard() {
 }
 }
 int main() {
-    try {theme::apply_palette();palette_roles();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();tab_clicks();repeatable_clicks();expanded_bitmap_clicks();expanded_bitmap_hover_repaint();shared_overlay_controls();extension_controls();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();compression_page_labels();std::cout<<"FLTK generic adapter checks passed: menus, tab clicks, repeatable clicks, expanded bitmaps, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins, compression labels and shared extensions.\n";return 0;}
+    try {theme::apply_palette();palette_roles();estimate_warning_colors();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();developer_mode_visibility();tab_clicks();repeatable_clicks();expanded_bitmap_clicks();expanded_bitmap_hover_repaint();shared_overlay_controls();extension_controls();inline_document_editor();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();compression_page_labels();std::cout<<"FLTK generic adapter checks passed: menus, tab clicks, repeatable clicks, expanded bitmaps, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins, compression labels and shared extensions.\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

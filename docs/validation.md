@@ -4,6 +4,358 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Joint differential reception probability — 19 September 2026
+
+The selected estimate now samples all eligible detector branches jointly. It
+calls the production differential accumulator on correlated noisy local fits,
+shares observations with coherent/four-quarter fits, and retains their guards,
+choice penalties, competing-bit margin and whole-symbol energy denominator.
+It accounts for finite template power, shaped transmitter limiting, projection
+averaging, separate alternative-template norms and finite carrier selection.
+The compact receiver now uses its actual threshold accounting rather than
+being charged for FFT-only initial private stream templates.
+
+The model runs 4096 fixed draws for the selected estimate and 512 per curve
+location. The CLI and shared GUI expose detector geometry, actual trial count,
+95% sampling intervals, carrier-search approximation and explicit coverage
+limits. Curve caching separates the selected estimate from lower-precision
+curve points. Intervals exclude model error and physical-link uncertainty;
+headline probabilities no longer imply tenths-of-a-percent reliability.
+
+The main independent production-receiver matrix retains 15 conditions with
+64 captures each. Thirteen one-bit conditions (832 captures) span public/private
+patterns, stable phase, 10/25/40 degrees/sqrt(second) phase diffusion, weak
+signals and detection transitions. At 64 samples/second each 512-second bit
+contains 512 local one-second windows of sixteen chips; local duration is
+scaled for repeated PCM testing. No channel noise seed or phase trajectory is
+shared with the probability model. The compact receiver runs actual waveform
+acquisition, exact-bit delivery and whole-symbol absence completion.
+Predictions have RMS error **0.0289727** and maximum error **0.0695801** against the
+observed proportions. Predeclared per-case `0.10 + 3*binomial_SE` and RMS `0.07`
+gates remain unchanged. The two stronger drifting conditions recover 128/128
+captures with the differential branch versus 92/128 with the older detectors
+on the same audio: 36 additional recoveries. The two multi-bit conditions
+(128 more captures) retain the explicit limitation described below.
+
+Two additional full-receiver shaped conditions retain a separate RMS gate,
+so they cannot dilute the original matrix's error target. Their natural
+carrier-edge geometry uses the default one-frequency bank and compact engine;
+512 eight-second windows each contain 128 chips, satisfying the local
+real-quadrature covariance guard. Both use 28 dB nominal Es/N0 and
+8.838835 degrees/sqrt(second) diffusion:
+
+| Full shaped receiver case | Predicted | Observed |
+| --- | ---: | ---: |
+| Public pattern | 0.626953 | 41/64 = 0.640625 |
+| Private pattern | 0.633301 | 38/64 = 0.593750 |
+
+Shaped RMS error is **0.0295904**, maximum **0.0395508**. All per-case and
+aggregate gates pass. Including the two tracking-limit cases, null/key controls
+and default-duration captures below, the full new receiver suite completes
+**1,124 PCM captures**, plus 128 comparisons using the older detector on the
+same audio. The main matrix took 289 seconds and the two shaped cases 765
+seconds in this run; four captures run concurrently with separate receiver
+states. The CTest `calibration` label identifies this longer suite.
+
+Independent shaped real-PCM statistic tests use 128 captures each, actual
+radially limited transmission, sampled Brownian phase/noise, real Gram fits,
+and production detector scoring. They do not run adaptive acquisition:
+
+| Shaped statistic case | Predicted | Observed |
+| --- | ---: | ---: |
+| Stable, nominal Es/N0 = 40 linear | 0.782471 | 97/128 = 0.757813 |
+| 25 degrees/sqrt(second), nominal Es/N0 = 500 linear | 0.815674 | 106/128 = 0.828125 |
+
+Accounting for the actual finite shaped waveform reduced the stable-case
+prediction error from 0.0886 to 0.0247. Independent noncentral-beta coherent
+limits, zero-signal controls, weak noisy products, a useful drifting regime,
+finite-trial interval endpoints and bounded unsupported geometry also pass.
+
+The held-out compact `001` captures exposed an additional limitation rather
+than supporting the old independent-bit formula: the earliest admitted timing
+lane can retain a stream even when a later, closer lane is stronger. One
+private case produced 54/64 exact completed receptions against a roughly 99.9%
+independent-bit prediction. The new model explicitly withholds the aggregate
+compact differential multi-bit percentage while retaining the first-bit
+estimate. Both multi-bit fixtures and their physical-completion checks remain;
+no numeric-error tolerance was relaxed to admit this discrepancy.
+
+All 32 additional noise-only/wrong-key controls rejected unrelated input.
+Four sampled 14.2-hour bits using the actual default 100-second windows also
+completed with exact bits and a full absent symbol: public captures assert the
+FFT path and private captures assert the compact path. These four are engine
+and duration coverage, not a population reliability estimate. Existing FFT
+batch/local-score parity and receiver differential regression suites also pass.
+
+The exact reported GPSDO-TCXO command (0 dBm, 200 dB loss, -164 dBm/Hz,
+0.01 Hz, target -44.25748830262745, 1500 Hz carrier) was reproduced through the
+shared GUI controller and CLI. It selects 1,024 local windows of 3,200 seconds
+and a 3,276,800-second bit (37.93 days). The joint model is active; all 4096
+draws admit the bit, with a 99.9063–100% sampling interval and a labeled
+17-candidate approximation to the 4,097-frequency bank. The local branch
+supplies no unique recoveries in this mild-diffusion scenario; the older fits
+already succeed. The earlier -38.092699609758306 target selects 409,600 seconds
+and only 128 local windows, correctly retaining the older detector model.
+Neither path is gated by an OCXO requirement. CPU-time figures remain the
+existing unbenchmarked reference-work heuristic. In particular, the additional
+shaped compact PCM captures perform expensive interpolation across timing
+lanes; their wall-clock cost is not calibrated by the probability model.
+
+The Release build, development-contract receiver/transport regressions,
+estimator, CLI and shared GUI tests passed. Initial shared-GUI failures were
+expectations about the previous unavailable model and shared availability/
+curve-precision fields; the corrected semantic tests pass without changing
+physical receiver assertions. `git diff --check` passes.
+
+These are synthetic-channel and matched-statistic checks. The wide coupled
+FFT bank in the 37.93-day example is not empirically calibrated by short
+compact captures. Local covariance/phase/geometry guards bound model coverage;
+full adaptive search, physical oscillator behavior, VLF noise, antenna
+performance and RF propagation are not established by these tests. No wire
+format, transmitter, receiver admission, bit progress or physical completion
+behavior changed.
+
+## Local differential receiver — 19 September 2026
+
+Added a differential detector to both the streaming correlator and FFT
+acquisition/tracking paths. Compact receivers enable its optional state when
+workspace permits; FFT receivers include its scratch in their required budget.
+It matches local windows and
+accumulates soft products of disjoint neighboring pairs. The default window
+is 100 seconds, rounded upward to whole chips and at least sixteen chips;
+256 complete windows are required. Local duration is independent of complete
+bit duration. The previous coherent and four-quarter detectors remain in the
+comparison, with an additional detector-selection penalty. Transmitted samples,
+wire bits, pending publication and full-symbol physical absence are unchanged.
+
+Real-sample quadratures are whitened using their deterministic local Gram
+matrix. Eight fixed product-phase directions use a conditional Gaussian-noise
+tail bound, and the strongest positive quarter contribution is removed to
+prevent evidence confined to one fixed quarter from supplying a whole bit.
+This is a reference
+noise bound, not a calibrated false-alarm guarantee for a physical front end.
+
+The Release build and six detector-focused suites passed. The broader selection
+also passed all 33 suites covering the development contract, receiver,
+estimator, CLI and shared GUI. Its first run passed 32; the planner regression
+still expected the older probability model for eligible local comparisons.
+After updating that expectation, its rerun passed. The existing weak/strong
+link and exact-bit-count probability checks remain at shorter supported
+geometry, with the original phase-loss stress retained.
+
+Sampled public and
+private `001` captures with 32 phase rotations per bit plus a varying phase
+component decode through both receiver paths at approximately -6.8 and -6.7 dB
+sample SNR; the same captures fail the old coherent/four-quarter comparison.
+Coverage includes seeded noise, wrong keys, unrelated carriers, isolated
+quarters, EOF, partial symbols, immediate bit publication, complete absent
+symbols, scalar/worker/chunk consistency, and releasing optional local state
+without changing already accumulated legacy evidence. Compact constructor
+checks show equal allocated state for 100-hour and 1,000-hour symbols.
+
+Independent numerical tests cover weak individual matched windows, thousands
+of seeded circular-noise trials, extreme Gram scaling, geometry/overflow,
+skipped windows, and direct/FFT equivalence with nonorthogonal projections,
+clock offsets and partial final windows. The 100-hour CLI analysis reports
+3,600 local windows of 100 seconds and a null current-receiver probability.
+The planner deliberately withholds its old probability model when the new
+branch is eligible; timing, search, phase and compute diagnostics remain.
+
+Wide FFT acquisition can cost substantially more because it evaluates many
+local templates. Small start batches use direct matching; compact accumulation
+retains constant state per hypothesis. Compute estimates include the extra
+work. These checks use generated PCM and mathematical fixtures; no 100-hour RF
+link, hardware oscillator or native display workflow was measured.
+
+## Developer mode visibility — 18 September 2026
+
+Added an initially unchecked Developer mode checkbox immediately left of Clear
+received. The eight advanced controls and three inspection tabs are hidden in
+place. The application retains their values, command-line overrides and layout;
+switching the view does not edit the draft, invalidate inspection or reconfigure
+reception. Disabling it on an advanced tab selects Console. Both adapters consume
+shared tab visibility and continue to reject callbacks from hidden controls.
+
+Release builds completed for FLTK and Rev. All 25 focused development-contract
+tests passed, including independent short-wire vectors, physical-end checks and
+pending reception regressions. All 28 headless GUI checks passed after updating
+advanced-view fixtures to enable the toggle explicitly and clearing the draft
+before the new exact-raw-bit preservation check. New shared coverage checks
+default visibility, preserved geometry/settings, CLI overrides, stale callbacks
+and page fallback; existing assertions remain intact.
+
+Native FLTK workflow, adapter and document conformance passed on a private Xvfb
+display. The document fixture now waits up to one second for its first paint
+before checking the same exact framebuffer dimensions; its immediate X11 poll
+could return before mapping finished. Rev adapter, platform and 1×/2× coordinate
+conformance also passed, with advanced-control fixtures explicitly enabling
+developer mode.
+The adapters exercise real checkbox/tab callbacks, hidden focus eligibility,
+active-tab fallback and unchanged native bounds. Final FLTK screenshots were
+visually checked with the mode off and on at both 1180×1048 and 1030×968; the
+checkbox fits the header and the hidden controls leave their allocated spaces.
+These are Linux display checks; Windows and physical audio links were not run.
+
+Rev's full production workflow did not complete within its existing test budget.
+A concurrent run missed the phase-11 replay fraction (0.830509); an isolated
+rerun passed that stage, then timed out at phase 17 after 300.55 seconds while
+transmitting sampled audio to an independent receiver. The 300-second budget,
+replay assertions and modem runtime remain unchanged. This limits end-to-end
+Rev workflow validation, despite the passing feature and native conformance
+checks above.
+
+## Receiver probability and GPSDO assumptions — 18 September 2026
+
+The planner and top bar now model both implemented long-pattern detector
+branches. The bounded statistical calculation shares noise between competing
+bits, retains unfitted signal in the observed-energy denominator, subtracts the
+strongest section, and applies the actual rank and detector-choice penalties.
+It approximates finite carrier refinement, fractional start timing, projection
+loss and the standalone confirmation required for every long bit. The coherent
+comparison uses the same draft and correction assumptions. Search-only planner
+probes bypass the probability calculation. No wire, receiver, physical-end,
+pending-progress or LPI calculation changed.
+
+The GPSDO presets now share an illustrative 0.0001 ppm relative frequency
+residual. Their separate phase-diffusion values remain 0.5, 0.05 and 0.005
+degrees/sqrt(second). This removes the previous unsupported assumption that
+locked frequency accuracy differs by 1,000 times solely with oscillator class.
+The presets are sensitivity scenarios, not device specifications; GPS phase
+corrections remain outside the channel model. Hard Clock/RAM coverage is tested
+independently of phase diffusion. See [oscillator models](oscillator-models.md).
+
+The new `receiver_probability` regression uses 20 conditions and 64 independent
+sampled channel captures per condition (1,280 captures), with 128 additional
+coherent-only receiver comparisons on the same audio. It spans public/private
+patterns, 64/256-chip symbols, stable and wandering phase, frequency/sample-clock
+offsets, shaped/unshaped waveforms, and exact one-bit and `001` messages. Every
+case uses production sampled-channel generation and receiver admission, and
+requires observed whole-symbol absence and exact received bits. Tests retain
+their predeclared per-case discrepancy and 0.18 RMS limits; no gate was relaxed
+to accommodate the new model.
+
+Across these 20 scenarios, RMS discrepancy was 0.07214 and maximum discrepancy
+0.14893 (probability units). Selected results at a 128 Hz sample rate and
+16-second bit duration:
+
+| Scenario | Modeled success | Sampled success |
+| --- | ---: | ---: |
+| Public, stable, 18 dB Es/N0, 256 chips | 81.2% | 57/64 |
+| Private, stable, 18 dB Es/N0, 256 chips | 69.1% | 49/64 |
+| Public, 60 degrees/sqrt(second), 26 dB Es/N0 | 91.1% | 59/64 |
+| Private, same drift and energy | 88.1% | 56/64 |
+| Public `001`, 30 degrees/sqrt(second), 20 dB Es/N0 | 40.1% | 35/64 |
+| Private `001`, 60 degrees/sqrt(second), 26 dB Es/N0 | 58.0% | 43/64 |
+| Shaped private, same drift and energy, one bit | 93.2% | 60/64 |
+
+For the two 60-degree one-bit cases, section-enabled reception recovered 115/128
+captures versus 87/128 with the coherent-only receiver. These comparisons use
+independently sampled phase trajectories rather than the earlier handcrafted
+phase/gain fixture. They validate a useful statistical approximation, not
+hardware reliability or extreme false-alarm tails.
+
+Additional temporary probes checked the live compact policy with a real test
+key (64-second symbols, 26 dB Es/N0): stable reception was 64/64 versus modeled
+100%, and 30-degree diffusion gave 60/64 versus 79.9%. A public 2,049-sample
+symbol forces one-sample projections: at the same energy, stable reception was
+53/64 versus 77.5%, and 30-degree diffusion gave 6/64 versus 2.0%. This supports
+keeping physical noise dimensions distinct from capped evidence dimensions.
+Permanent direct tests also cover detector-choice cost, shared competing-bit
+noise, finite frequency refinement, unfitted-energy ceilings, and the absence
+of an artificial phase-coherence floor at extreme durations.
+
+Selected planner computations took roughly 58–96 ms in a local probe, with
+search-only navigation around 10 ms. The estimator uses 4,096 fixed statistical
+draws (approximately 5 MiB shared storage), a small cache and bounded quadrature;
+its work does not grow with represented symbol duration. These timings are
+local observations, not UI latency guarantees or simulated decoder timings.
+
+Validation completed with GCC/FLTK and Clang 19/Rev Release builds. GCC passed
+the 29 selected contract, LPI, correlation and shared-GUI suites, plus the new
+sampled probability regression. Twelve targeted Clang/Rev suites passed.
+During final checking, a seed-derivation change incorrectly demanded transfer
+credentials for an already seeded private modem configuration. The permanent
+matrix caught it; the estimator now derives a transfer seed only when a key is
+provided, and both compiler builds passed the affected probability and
+simulation-estimate suites again after the fix. No acceptance gate changed.
+
+The updated `simulation_estimate` suite passed AddressSanitizer and
+UndefinedBehaviorSanitizer. LeakSanitizer first failed because this sandbox's
+tracing environment prevents its operation; the successful rerun used
+`ASAN_OPTIONS=detect_leaks=0`, so this is not a leak-check result. These checks
+do not establish native-window rendering or physical-radio performance.
+
+## Bounded phase and gain tolerance — 18 September 2026
+
+Long pattern reception adds four fixed section fits alongside the original
+coherent match. Each quarter needs at least sixteen complete chips, and the bit
+must last at least sixteen seconds. Section boundaries use symbol coordinates,
+including the tested clock hypothesis, rather than input chunks. The score
+removes the strongest quarter's explained energy so a filter tail cannot
+supply a whole bit, uses a conservative four-coefficient noise tail, and charges
+`ln(2)` for choosing between two detectors. The compact branch caps repeated
+samples within a chip at the existing FFT evidence scale. This is a bounded
+channel-fit improvement, not arbitrary phase tracking over a days-long symbol.
+
+The compact receiver retains one active section and fixed summaries per
+hypothesis. It reserves this state when selecting the bank, materializes it
+at the first quarter boundary, and retains the coherent detector if the extra
+state cannot fit. FFT sections reuse product scratch and stream templates;
+small start batches directly reuse generated samples. Runtime getters identify
+the selected detector. The planner and top bar label eligible numerical
+probabilities **RX reference** because the added gain is not calibrated. Compute
+estimates include the new work and scratch. LPI formulas, waveform generation,
+dictionary/raw endpoints, framing and physical completion rules are unchanged.
+
+The GCC Release build succeeded. The existing `pattern_receiver`,
+`pattern_correlator` and `simulation_estimate` suites passed together in
+120.28 seconds while a full build ran concurrently. They include sampled
+four-hour progress, compact 64 KiB idle bounds, full clock-bank coverage,
+coupled-clock decoding and whole-symbol absence. Initial checks exposed a
+compact carrier-evidence regression, extra memory pressure and an FFT filter
+tail admitted as a fourth bit; these were corrected without relaxing those
+regressions. Original optional-template-cache coverage remains explicit with
+the coherent detector, alongside a new assertion that section scoring streams
+its templates.
+
+The new `pattern_drift`, `pattern_fft_batch` and `pattern_correlator_batch`
+suites passed together in 5.93 seconds. Sampled phase-flip and phase-wander
+fixtures at approximately −8.3 dB measured sample SNR recover exact `001` on
+both receivers while the coherent baseline fails. Coverage includes gain
+steps, unrelated carriers and keys, noise-only input, isolated quarters and
+tails, whole-symbol absence versus EOF, chunk/worker invariance, budget fallback,
+and unchanged ineligible scores. Direct/FFT comparisons cover public/private,
+shaped/plain, real/complex observations and clock offsets; independent binomial
+tails check the section evidence calculation.
+
+Thirty other selected GCC suites passed in the 341.51-second contract run.
+Its new CLI assertion initially assumed identical quarter lengths; integer
+sample boundaries can differ by one sample. After checking the exact longest
+quarter instead, `cli` passed all 25 cases in 32.65 seconds. Together these
+runs cover 37 distinct suites, including every development-contract suite and
+the LPI, waveform and shared GUI regressions.
+
+On the small identical-PCM fixture, FFT time changed from 20.81 to 34.62 ms and
+peak workspace from 193,747 to 173,267 bytes; compact time changed from 86.53
+to 107.54 ms and workspace from 49,006 to 49,806 bytes. These are diagnostic
+measurements under concurrent build/test load, not calibrated throughput.
+An additional warmed public FFT probe measured approximately 3.4–3.7 times
+the coherent runtime on the same exact decoded `001` input.
+Full acquisition has about four times the uncached template FFT work; tracking
+and tiny direct batches have different costs. Compact retained state remains
+independent of symbol duration.
+
+The three new/focused DSP suites also passed ASan, UBSan and LeakSanitizer
+in 40.10 seconds with leak detection enabled. The sandbox prevented the initial
+LeakSanitizer process inspection; the automatically approved unsandboxed rerun
+passed without errors or leaks.
+
+The final GCC/FLTK and Clang/Rev Release builds succeeded. All 17 selected
+Clang/Rev DSP, estimator, LPI and shared GUI suites passed in 153.01 seconds.
+`git diff --check` passed. Native window rendering and physical radio links
+were not tested; the sampled fixtures do not calibrate sensitivity for arbitrary
+oscillators, interference or channel trajectories.
+
 ## Relative LPI observation against one receiver bit — 17 September 2026
 
 The advisory now compares total observer bit durations with the receiver's
@@ -3471,3 +3823,343 @@ After rebuilding the fixture, FLTK adapter conformance passed in 47.17 seconds.
 `git diff --check` passed. Full native transmission workflows and physical audio
 were not rerun for this presentation change; the previously recorded Rev
 workflow timeout remains a validation limit.
+
+### Sample-sensitive Clock/RAM navigation (2026-09-18)
+
+Link planner's Stronger and Weaker actions now select checked clock/RAM fits,
+normally about one dB apart, with a final-edge step when less than one dB
+remains. The native target prompt and explicit application retain full numeric
+precision. The main view has one short navigation hint; sample averaging and
+the effect of rounded target labels are explained in the hidden model details.
+
+The independent 1 Hz / 1500 Hz hobby-GPSDO fixture uses 4 GiB DSP RAM. Exact
+−47 dB resolves to 18,973,665,962 samples and two-sample projection bins: clock
+coverage fits, but RAM does not. The nearby 18,973,662,000-sample symbol uses
+6,000-sample bins and fits both checks. Moving one sample to either side loses
+that fit. These checks use the existing analytical receiver estimator; they
+do not transmit a waveform or establish successful reception.
+
+The search now checks projection-divisor alignments, clock-search caps,
+automatic-profile transitions and FFT geometry events alongside a bounded
+target sweep. Each offered endpoint is independently resolved and checked;
+neither clock coverage nor memory use is assumed to be globally monotonic.
+At 16 GiB, the 20,479,999,500-sample endpoint exposes an additional fitting
+1,500-sample projection grid beyond the old 6,000-sample-aligned edge.
+
+Both Release builds succeeded. An isolated 145-case probe covered practical
+rates, all four oscillator presets, keyed and tone modes, profile transitions,
+and the full bank-event case at 1 Hz / 1250 Hz. Every offered target passed an
+independent profile resolution and receiver-estimator check, with finite bounds
+and the correct navigation direction. The matrix took 1.93 seconds; its slowest
+planner build took 35.6 ms on this host. Separate 0.01 Hz probes took about
+40 ms. These are observed timings, not performance guarantees.
+
+Native FLTK inspection at 1 Hz/GPSDO and the current 50% RAM allowance showed
+the exact −47 dB RAM failure, a fitting Weaker selection, and the disabled
+Weaker action at the discovered edge. The Clock/RAM milestone selected the same
+precise value. Default and minimum window sizes remained legible without
+overlap; minimum size scrolls to the milestones. The private display and
+temporary capture harness were stopped afterward.
+
+The initial Rev GUI run passed 15/16 suites; its new no-fit fixture used a
+one-byte DSP budget, below the transfer API's 256 KiB minimum, so planning was
+correctly unavailable before the intended RAM check. The fixture now uses a
+valid 1 MiB budget and independently checks the fastest profile's RAM failure;
+the one-byte input separately verifies rejection. The corrected planner suite
+passed on GCC and Clang/Rev (3.48 seconds for the Rev CTest run). No production
+behavior or existing compatibility assertion was changed for this correction.
+
+The first broader GCC run was externally interrupted with SIGTERM after the
+weak-signal suite passed; no cause was established. Its complete rerun passed
+34/34 suites in 232.21 seconds, including all 21 development-contract suites
+and 17 GUI suites (with four overlapping suites). The controller suite passed
+in 64.12 seconds. Together with the corrected planner rerun, all 16 selected Rev
+GUI suites passed. `git diff --check` passed. Full native transmission workflows
+and physical audio were not rerun; the previously recorded Rev workflow timeout
+remains an existing validation limit.
+
+
+### Fitted target entry and phase-aware planner reception (2026-09-18)
+
+Automatic short/long target entry below −20 dB-Hz now keeps an already fitting
+value or chooses a checked nearby Clock/RAM fit, preferring weaker targets.
+The check includes the unchanged companion target and deduplicated public/key
+receive banks. Typed text remains editable while the label shows the effective
+value; Enter and presets commit full precision without retuning. Explicit
+planner Apply and manual RX lists keep their exact-input behavior. Tests cover
+weaker and stronger fallback, sample-counter overflow recovery, shared bank
+budgets, typing/commit eligibility, and unchanged exact short/raw wire counts.
+
+Link planner now displays the preview's modeled RX probability and the existing
+whole-symbol phase-coherence penalty. The estimator's probability formula and
+production receiver are unchanged. Tests independently check the 2/e coherent
+energy reference, zero-diffusion loss, transition cadences around 0.01 Hz,
+GPSDO-model loss, and the distinction between a RAM fit and actual link power.
+The preview uses one matching receiver and requires every wire bit correct;
+the top-bar estimate retains the actual draft, receive bank and FEC model.
+
+Both complete Release builds succeeded (GCC/FLTK and Clang/Rev). The initial
+34-suite GCC run passed 33 suites; the numerical-anchor controller fixture
+attempted planner Apply while deliberately invalid modem text was still active.
+It now restores the original valid target before applying the exact anchor;
+the invalid-edit preservation assertion and numerical anchor remain unchanged.
+The corrected controller suite passed in 64.78 seconds. The final 16 other GCC
+GUI suites passed in 9.77 seconds. Together, all 21 development-contract suites
+and all 17 selected GUI suites passed, with four suites shared between them.
+
+The final Rev selection passed 16/17 suites before its planner test's literal
+expectation was updated to the refined explanation of relative-phase section
+comparisons. That corrected planner rerun passed in 5.50 seconds; all 16 selected
+Rev GUI suites and the simulation-estimate suite therefore passed. The existing
+bitmap size-comparison compiler warning remains unrelated to these edits.
+
+Native FLTK checks exercised real −60.5 keystrokes, Enter and preset callbacks.
+The edit buffer stayed intact; commits displayed the exact fitted target. A
+stale numeric-prefix validation notice found during inspection was fixed and
+verified to clear after successful configuration while preserving unrelated
+notices. At 1 Hz/GPSDO and this host's 50% RAM allowance, planner previews showed
+above 99.9% RX at 170 dB path loss and below 0.1% at 214 dB, with phase loss near
+18 dB visible in both. These are model outputs, not sampled reception results.
+Default and minimum layouts were inspected; the private display exited normally.
+
+A read-only receiver audit confirmed that the explicit adjacent-phase products
+feed constellation diagnostics only. Production detection fits one common
+complex amplitude/phase across a complete symbol; constant phase is tolerated,
+but within-symbol phase wander is not independently tracked. The experimental
+segmented detector sums section energies and does not test differential or
+phase-state combining. Its results cannot establish a limit on those methods.
+No multi-day PCM reception, physical RF link or full native transmission workflow
+was tested. The previously recorded Rev workflow timeout remains a validation
+limit. `git diff --check` passed.
+
+### All-target fitting, RX curve and CPU pace (2026-09-18)
+
+All automatic-mode GUI target editors now select checked Clock/RAM fits,
+including short/long TX, manual RX lists and the independent native Planner
+dropdown. TX and RX edits account for their companion targets and active
+receive banks. Tests retain typed text until commit, verify accepted targets
+against receiver support, and preserve exact wire counts and preview isolation.
+The RX-list regression now checks the independently resolved usable targets
+under its actual RAM budget instead of requiring the previously literal 6 dB
+target, which can fall outside clock search. Fixed-mode geometry is unchanged.
+
+The time graph overlays one-bit reception probability with its own percentage
+axis. Tests check its probabilities independently, distinguish unavailable
+regions from zero probability, retain a connected transition at 2 and 8 GiB,
+and check draft independence and stable sampling across repaints, changed
+keys/noise/phase/RAM and cache eviction. Costly sampling is bounded to twelve
+additional evaluations; a checked fit within 0.001 dB can replace a tiny raw
+rounding gap. Rendering tests cover all pixel formats, clipped damage, visible
+isolated points and unbridged unsupported intervals.
+
+The CPU indicator compares receiver-only work with incoming audio, including
+the required fully scored absence tail, on the existing i9-13900H reference.
+It reports processing seconds per audio second with green/yellow/red text and
+colors. Expanded details retain total one-bit simulation CPU time. Tests verify
+excluded synthetic-channel work, receive-bank scaling, tracking cost and draft
+independence. Existing total CPU/GPU estimates, reception probability formulas,
+LPI estimates, receiver scoring and framing are unchanged.
+
+Both complete Release builds passed. The GCC shared GUI/estimate selection
+passed 27/27 suites in 87.31 seconds; Clang/Rev passed 26/26 in 29.86 seconds.
+Native FLTK adapter/document conformance passed 2/2; Rev adapter/platform and
+1×/2× coordinate conformance passed 4/4 in 64.16 seconds. Default and minimum
+windows were inspected in both backends: the target dropdown and CPU status
+fit, and the RX transition is clearly visible beside the time curve. The
+minimum window uses the existing document scroll. These are model and GUI
+checks, not local CPU calibration or physical RF performance measurements.
+
+The remaining 20 development-contract suites passed in 233.66 seconds;
+together with the shared GUI/estimate selection, all 25 listed contract suites
+passed, including independent short-wire vectors, four-hour sampled symbols,
+physical completion and pending-prefix regressions. After clarifying the CPU
+line as processing seconds per audio second, both builds and planner suites
+passed again (15.51 seconds GCC, 17.73 seconds Rev), and all four window captures
+were refreshed and checked. No physical audio/RF or full native transmission
+workflow was rerun. `git diff --check` passed.
+
+### Inline planner target and CPU graph (2026-09-18)
+
+The Planner target now belongs to the scrollable planner document, in the same
+row as Stronger/Weaker. A shared native text/choice control node reuses each
+backend's ordinary bindings. Controls retain identity, edit buffers and cursor
+selection across replacement or reordering; clipping clears input focus, and
+removed controls release their native allocations outside active callbacks.
+Native tests cover presets, Enter, forward/reverse Tab, hidden pages, viewport
+and ancestor clipping, removal, and stale callbacks. A successful planner edit
+now clears its own previous input error immediately without clearing a newer
+unrelated notice.
+
+A compact CPU graph sits beside the controls, using exactly the time graph's
+target range. Its logarithmic ordinate is receiver processing seconds per
+audio second, with a marked equal-pace limit and the selected preview point.
+It reuses existing one-bit workload calculations without additional probability
+trials. Tests independently check plotted CPU values, draft/cache invariance,
+unsupported gaps, shared layout, all pixel formats and clipped damage repaint.
+The CPU curve uses the existing reference processor model; no local benchmark
+or receiver/LPI formula was introduced.
+
+Both complete Release builds passed. GCC's shared GUI/estimate selection
+passed 27/27 suites in 79.62 seconds. After the final label, vocabulary and
+notice-recovery changes, its 11 affected shared suites passed in 14.86 seconds.
+The FLTK heading-lifecycle fixture was corrected to find its visible extension
+editor rather than the newly present hidden planner editor. A native clipping
+regression also exposed a focus edge when attaching a retained editor beneath
+an already hidden ancestor; the renderer now clears that ineligible focus.
+The assertions were retained. Synthetic Tab events now provide their own text
+instead of reusing stale event data; actual keyboard navigation was also tested.
+
+The final Clang/Rev shared selection passed 26/26 suites in 32.56 seconds.
+Final FLTK native adapter/document conformance passed 2/2 in 45.36 seconds.
+Rev's native adapter suite passed with the inline-editor probes; platform and
+1×/2× coordinate conformance passed 3/3 in 16.64 seconds. Real keyboard probes
+also exercised partial typing, Enter, presets, forward/reverse Tab and scrolling.
+Default/minimum layouts were visually inspected in both backends. The target
+and step buttons align, the CPU graph fits beside them, and the existing
+document scroll exposes lower graphs at smaller window sizes.
+
+A final real-menu check exposed hover help overlapping the Rev preset popup.
+Opening a popup now hides that help; the rebuilt native adapter suite and a
+real hover-to-popup check both passed. Final default/minimum captures were
+checked in both backends. No physical audio/RF or full native transmission
+workflow was rerun for these view/control changes. `git diff --check` passed.
+
+### Planner launch-command editor (2026-09-18)
+
+The planner now includes a bounded multiline command editor beside
+Stronger/Weaker and an explicit Load action. Startup and pasted settings share
+one parser and canonical formatter. Commands use a relative executable name
+for the host, retain exact numerical targets, and carry the link budget,
+oscillator, waveform, rate, carrier and DSP percentage. The generated common
+target uses the planner preview for both transmit profiles. Explicit short and
+long overrides affect only their respective profiles. Pasting does not execute
+a command, change settings or submit the draft; Load validates and applies the
+settings with Simulation No. Ordinary polling retains uncommitted command text.
+
+Controller checks cover generated-command round trips, quoted Windows paths,
+partial imports, all requested settings, startup compatibility, malformed input,
+and exact raw draft preservation. Full live-setting validation runs before any
+field is committed: tests start a simulated session and verify that an
+unsupported live bandwidth or channel level cannot partially replace settings.
+The new validation entry point delegates to the existing live normalization;
+receiver scoring, LPI calculations and all wire formats remain unchanged.
+
+Native multiline controls retain caret/selection and use ordinary clipboard
+operations. FLTK reserves Tab for navigation in the command field. Rev's
+document-only multiline editor now scrolls glyphs, caret, selection and pointer
+hit testing together, with bounded extents and wheel handoff at the edge.
+Existing message editors retain their established behavior. Shared layout
+checks cover widths from 220 through 1200 logical units, including command/Load
+wrapping at narrow widths and the compact CPU graph below-right.
+
+Both complete Release builds passed. The initial six GCC GUI suites passed in
+73.50 seconds; 16 further shared GUI/estimate suites passed in 15.54 seconds.
+The remaining 23 development-contract suites passed in 281.46 seconds; together
+with gui_application and gui_controller, all 25 listed compatibility suites
+passed. Rev's selected shared checks passed except an initially stale parser
+binary; after rebuilding, parser and settings suites passed 2/2 on both
+compilers. Parser cases include malformed signs, quotes, missing/unknown flags,
+numeric bounds, frequency units and exact formatting.
+
+Final parser/settings checks, including independent preview versus explicit
+short/long overrides, passed 2/2 in 1.03 seconds with GCC and 1.28 seconds with
+Clang/Rev. Rev native adapter/platform and 1×/2× coordinate conformance passed
+4/4 in 92.87 seconds. Native fixtures explicitly wait for FLTK's deferred
+scroll layout and supply an ordinary single-click interval for Rev hit testing;
+their visibility, editing and scrolling assertions remain intact.
+
+Final FLTK adapter conformance passed in 45.24 seconds. The unchanged document
+suite passed five focused repetitions after one transient immediate-paint
+assertion in the combined run (it had also passed the preceding two runs).
+No document-renderer change or relaxed assertion was introduced. Both final
+production binaries and all affected tests were rebuilt; `git diff --check`
+passed.
+
+Real windows in both backends verified copy/cut/paste, multiline editing,
+Enter without transmission, Tab to Load, successful load with Simulation No,
+normalization, and invalid-command recovery. Default and minimum windows were
+inspected with the editor beside the target controls and no overlap. These are
+GUI/model checks; no physical audio/RF or full native transmission workflow was
+rerun for this settings feature.
+
+### Compact planner command placement (2026-09-18)
+
+The shared planner layout now aligns target controls, a 220–280 logical-pixel
+command column and the CPU graph in one row at normal window sizes. Load sits
+below the scrolling editor. Narrow documents pair the command and graph below
+the controls, then stack them. Text size, command parsing, native editor behavior
+and all modem models are unchanged.
+
+Both GUI binaries rebuilt successfully. Existing planner geometry/plot and
+launch-settings regressions passed 2/2 with GCC in 12.90 seconds and 2/2 with
+Clang/Rev in 14.66 seconds. Layout assertions cover 220–1200 logical-pixel
+documents, including compact-column alignment and non-overlap.
+`git diff --check` passed. Protocol suites were not repeated for this
+placement-only change.
+
+Default and minimum windows were inspected in both backends: the three columns
+fit, Load stays beneath the command, and the existing Apply buttons wrap when
+needed. Native clipboard round trips, multiline Enter and Tab-to-Load focus
+were also checked after the placement change.
+
+### RX and observer warning colors; audio-link default (2026-09-19)
+
+Available RX estimates below 80% and observer/receiver ratios below 8× now
+use the shared red foreground in the planner and current-draft labels. Checks
+use the unrounded estimates, so exactly 80% and 8× retain their usual color.
+Pending, invalid and unavailable labels clear old warning tones; monochrome
+keeps its established foreground. Both native adapters consume the same field
+tone. The normal launch path-loss default is 120 dB; explicit launch settings
+and the native smoke's established 60 dB fixture retain their behavior.
+
+Planner regressions cover threshold boundaries, narrow/wide layouts, one/all-bit
+estimates, limited RX references and hidden explanatory text. Historical 170 dB
+numerical and probability-curve fixtures remain explicit, preserving their
+independent anchors. Controller checks cover warning restoration and withdrawal.
+A shared native fixture checks actual low, unavailable and high estimate labels
+in color and monochrome on both backends.
+
+Both complete Release builds passed. GCC's 28 shared GUI suites passed in
+91.21 seconds; the selected 11 Clang/Rev shared suites passed in 106.63 seconds.
+The remaining 21 development-contract suites passed in 290.03 seconds; with
+the four shared GUI compatibility suites, all 25 required suites passed.
+FLTK adapter/document conformance passed 2/2 in 53.16 seconds. Rev adapter,
+platform and 1×/2× coordinate conformance passed 4/4 in 137.79 seconds, each on
+a private X display. Default-size and minimum-size planner windows were captured
+in both backends; the low RX percentage and observer ratio display in red
+without overlap.
+
+The hidden details and linked documentation describe a plausible reduction in
+audible repetition with longer public patterns, including unencrypted use.
+The 8× preference is not presented as a validated acoustic threshold or a
+prediction of annoyance or interference complaints. No physical audio/RF or
+controlled listening experiment was run for this presentation/default change.
+`git diff --check` passed.
+
+The subsequent wording refinement distinguishes perceived abruptness and
+finite-pattern envelope/spectral structure from symbol-boundary repetition.
+It also distinguishes statistical resemblance to noise from the observer's
+ability to predict a public template. At the default geometry, both the
+1,024-chip (4.33×) and 2,048-chip (8.52×) profiles already use the same pulse
+shaping; the ratio assumes noise-like signals rather than testing their
+randomness. Only explanatory text and its presentation assertions changed.
+Both GUI binaries rebuilt, and the focused planner suite passed with GCC in
+12.36 seconds and Clang/Rev in 14.51 seconds. No waveform, model calculation,
+threshold, transport or receiver behavior changed in this refinement.
+
+### Observer estimate error colors (2026-09-19)
+
+Observer/receiver results outside the model range, unavailable results and
+invalid-settings/error states now use red in the planner and current-draft
+readout. Calculating remains neutral; valid ratios at or above 8× restore the
+usual foreground. RX unavailable-state colors are unchanged.
+
+Both GUI binaries rebuilt. Planner, controller and application checks passed
+3/3 with GCC in 70.39 seconds and 3/3 with Clang/Rev in 74.51 seconds. Coverage
+includes nonfinite planner ratios, encrypted/public out-of-range estimates,
+invalid drafts/settings, pending state and restoration of a valid estimate.
+The shared native fixture checks error and recovery colors in both color and
+monochrome. FLTK adapter conformance passed in 49.90 seconds and Rev adapter
+conformance passed in 68.57 seconds, each on a private X display.
+`git diff --check` passed. This changes presentation only; modem behavior and
+estimate calculations are unchanged.

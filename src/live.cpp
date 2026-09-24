@@ -1615,6 +1615,7 @@ struct Session::Impl {
 Session::Session(EpochClock epoch_clock, ReplayClock replay_clock)
     : impl_(std::make_unique<Impl>(std::move(epoch_clock), std::move(replay_clock))) {}
 Session::~Session() = default;
+void validate_settings(const Settings& settings) { (void)normalized(settings); }
 void Session::start(const Settings& settings) { impl_->configure(settings); }
 void Session::configure(const Settings& settings) { impl_->configure(settings); }
 void Session::set_mono(bool mono) {

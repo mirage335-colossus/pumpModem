@@ -6,6 +6,7 @@
 #include "datapump/symbol_schedule.hpp"
 #include "search_parallel.hpp"
 #include "pattern_fft_batch.hpp"
+#include "pattern_drift.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -43,6 +44,12 @@ struct PatternReceiver::Impl {
     std::unique_ptr<PatternCorrelator> fallback;
     std::size_t budget=0,fixed_reservation=0,configured_bit_limit=0,bin_samples=0,length=0,transform=0,hop=0;
     std::vector<Complex> ring,work,spectrum,product,reference;
+    std::vector<detail::FftDriftAccumulator> drift_scratch;
+    std::vector<detail::DifferentialAccumulator> differential_scratch;
+    std::vector<detail::FftSearchScore> drift_scores;
+    unsigned drift_sections=1;
+    std::uint64_t differential_window=0;
+    double projection_image_ratio=0;
     std::vector<double> energy_prefix;
     std::vector<std::array<std::vector<Complex>,2>> templates;
     std::vector<std::array<double,2>> template_energy;
@@ -110,6 +117,11 @@ struct PatternReceiver::Impl {
         :config(c),search(std::move(options)),code(c,c.stream_epoch),budget(bytes) {
         validate(c);
         shaped=pattern_pulse_enabled(c);
+        drift_sections=detail::drift_section_count(c,search.drift_tolerant);
+        if(!std::isfinite(search.differential_window_seconds) || search.differential_window_seconds<0)
+            throw Error("invalid differential integration window");
+        if(drift_sections>1)differential_window=detail::differential_window_samples(code.symbol_samples(),
+            code.chip_samples(),c.sample_rate,search.differential_window_seconds);
         if(!c.pattern_symbols)throw Error("pattern receiver requires binary pattern transport");
         if(!std::isfinite(search.false_alarm_probability) || search.false_alarm_probability<=0 || search.false_alarm_probability>=1 ||
            !std::isfinite(search.retain_score) || search.retain_score<0 ||
@@ -180,6 +192,7 @@ struct PatternReceiver::Impl {
             bin_samples=1;
         sample_fit=bin_samples==1 && (symbols<=256 || (!c.scramble && !c.dsss));
         const auto image=bin_image(bin_samples);
+        projection_image_ratio=detail::pattern_projection_image_ratio(bin_samples,c.carrier_hz,c.sample_rate);
         const auto small=static_cast<double>(bin_samples)-image;
         real_rank=small<=1e-10*static_cast<double>(bin_samples);
         if(!real_rank)noise_condition=(static_cast<double>(bin_samples)+image)/small;
@@ -225,7 +238,10 @@ struct PatternReceiver::Impl {
             static_cast<long double>(search.frequency_offsets_hz.size())*sizeof(decltype(template_square)::value_type)+
             static_cast<long double>(search.frequency_offsets_hz.capacity()+search.clock_errors_ppm.capacity())*sizeof(double)+
             4096*sizeof(Complex)+code.working_bytes()+sizeof(PatternReceiver);
-        if(required>bytes || (search.prefer_streamed_templates && search.couple_clock_to_carrier)) {
+        if(drift_sections>1)required+=static_cast<long double>(hop)*
+            (sizeof(detail::FftDriftAccumulator)+sizeof(detail::FftSearchScore));
+        if(differential_window)required+=static_cast<long double>(hop)*sizeof(detail::DifferentialAccumulator);
+        if(required>bytes || drift_sections>1 || (search.prefer_streamed_templates && search.couple_clock_to_carrier)) {
             const auto without_rows=required-2.L*search.frequency_offsets_hz.size()*transform*sizeof(Complex);
             // A wide bank needs every hypothesis, but not every transformed
             // template at once. Generate rows in bounded worker scratch (or
@@ -261,6 +277,8 @@ struct PatternReceiver::Impl {
         search.bit_limit=std::min(search.bit_limit,(bytes-fixed_reservation)/(2*search.track_limit+2));
         if(!search.bit_limit)throw Error("pattern workspace cannot retain bit candidates");
         ring.resize(4*length+2*hop);work.resize(transform);spectrum.resize(transform);product.resize(transform);reference.resize(transform);
+        if(drift_sections>1){drift_scratch.resize(hop);drift_scores.resize(hop);}
+        if(differential_window)differential_scratch.resize(hop);
         energy_prefix.resize(transform+1);templates.resize(search.frequency_offsets_hz.size());
         if(required_tracking_reference)tracking_reference.resize(length);
         template_energy.resize(templates.size());
@@ -363,6 +381,8 @@ struct PatternReceiver::Impl {
         geometry.carrier_hz=config.carrier_hz;geometry.evidence_count=evidence_count(length);
         geometry.noise_condition=noise_condition;geometry.real_rank=real_rank;geometry.sample_fit=sample_fit;
         geometry.extended_clock_window=search.couple_clock_to_carrier;
+        geometry.drift_sections=drift_sections;
+        geometry.differential_window_samples=differential_window;
         return geometry;
     }
     void prepare_scoring(std::stop_token stop) {
@@ -375,9 +395,11 @@ struct PatternReceiver::Impl {
         const auto workers=detail::search_concurrency(search.worker_threads);
         if(workers<2)return;
         const auto jobs=search.initial_stream_symbols*templates.size()*(phase_upper?3:1);
-        const bool needs_code=cached_templates.empty() && !reuse_single_template();
+        const bool needs_code=drift_sections>1 || (cached_templates.empty() && !reuse_single_template());
         const auto worker_bytes=sizeof(detail::FftSearchWorkspace)+
-            (needs_code?code.working_bytes():0)+transform*sizeof(Complex);
+            (needs_code?code.working_bytes():0)+transform*sizeof(Complex)+
+            (drift_sections>1?hop*sizeof(detail::FftDriftAccumulator):0)+
+            (differential_window?hop*sizeof(detail::DifferentialAccumulator):0);
         const auto job_bytes=sizeof(detail::FftSearchJob)+sizeof(detail::FftPreparedTemplate)+
             hop*sizeof(detail::FftSearchScore);
         long double retained=static_cast<long double>(fixed_reservation)+cache_reservation+latest.bits.capacity();
@@ -413,7 +435,8 @@ struct PatternReceiver::Impl {
         if(cache_nominal)storage.nominal_reference.resize(length);
         scoring_jobs.resize(count);scoring_templates.resize(count);
         scoring_outputs.resize(count*hop);scoring_workspaces.reserve(worker_count);
-        for(std::size_t i=0;i<worker_count;++i)scoring_workspaces.emplace_back(config,transform,needs_code);
+        for(std::size_t i=0;i<worker_count;++i)scoring_workspaces.emplace_back(config,transform,needs_code,
+            drift_sections>1?hop:0,differential_window?hop:0);
         scoring_reservation=scoring.capacity()*sizeof(ScoringStorage)+scoring_jobs.capacity()*sizeof(detail::FftSearchJob)+
             scoring_templates.capacity()*sizeof(detail::FftPreparedTemplate)+
             scoring_outputs.capacity()*sizeof(detail::FftSearchScore)+
@@ -469,7 +492,7 @@ struct PatternReceiver::Impl {
         ~ScoringScope() {state.drop_scoring();}
     };
     bool reuse_single_template() const {
-        return !streamed_templates && search.initial_stream_symbols==1 &&
+        return drift_sections<=1 && !streamed_templates && search.initial_stream_symbols==1 &&
             (!search.search_stream_phases || !phase_upper || (!config.scramble&&!config.dsss));
     }
     bool cache_fits(std::size_t bytes,std::size_t extra)const {
@@ -558,9 +581,76 @@ struct PatternReceiver::Impl {
         if(history.size()==search.candidate_limit)history.erase(history.begin());
         history.push_back(item);
     }
+    std::array<std::size_t,5> drift_edges(std::size_t frequency) const {
+        std::array<std::size_t,5> edges{};edges.back()=length;
+        for(unsigned section=1;section<drift_sections;++section) {
+            const auto boundary=static_cast<long double>(detail::drift_boundary(section,code.symbol_samples(),drift_sections));
+            const auto bin=std::ceil((boundary/clock_ratio(frequency)-(bin_samples-1)/2.L)/bin_samples);
+            edges[section]=static_cast<std::size_t>(std::clamp(bin,static_cast<long double>(edges[section-1]),static_cast<long double>(length)));
+        }
+        return edges;
+    }
+    struct SectionFits {
+        std::array<std::array<Complex,2>,4> dot{},square{};
+        std::array<std::array<double,2>,4> norm{};
+        void add(unsigned section,unsigned bit,Complex observed,Complex pattern,Complex carrier,bool exact_real) {
+            dot[section][bit]+=observed*std::conj(pattern);norm[section][bit]+=std::norm(pattern);
+            if(exact_real)square[section][bit]+=pattern*pattern*carrier;
+        }
+        double explained(unsigned bit,double condition,bool exact_real) const {
+            double total=0,strongest=0;
+            for(unsigned section=0;section<4;++section) {
+                const auto energy=detail::pattern_explained(dot[section][bit],norm[section][bit],condition,exact_real,square[section][bit]);
+                total+=energy;strongest=std::max(strongest,energy);
+            }
+            return total-strongest;
+        }
+    };
+    struct DifferentialFits {
+        std::array<detail::DifferentialAccumulator,2> accumulated;
+        std::array<Complex,2> dot{},square{};
+        std::array<double,2> norm{};
+        std::uint64_t window=0,total=0,index=0;
+        std::size_t bin_samples=0,length=0,end=0;
+        double ratio=1,image_ratio=0;
+        bool complete=false;
+        std::size_t boundary(std::uint64_t position)const {
+            const auto bin=std::ceil((static_cast<long double>(position)/ratio-(bin_samples-1)/2.L)/bin_samples);
+            // One beyond the available bins keeps a truncated final local
+            // window unfinished, instead of publishing a partial fit.
+            return static_cast<std::size_t>(std::clamp(bin,0.L,static_cast<long double>(length)+1));
+        }
+        DifferentialFits(const Impl& owner,std::size_t frequency,std::size_t skip)
+            :window(owner.differential_window),total(owner.code.symbol_samples()),bin_samples(owner.bin_samples),
+             length(owner.length),ratio(owner.clock_ratio(frequency)),image_ratio(owner.projection_image_ratio) {
+            if(!window || skip==length)return;
+            const auto source=(static_cast<long double>(skip)*bin_samples+(bin_samples-1)/2.L)*ratio;
+            index=static_cast<std::uint64_t>(source/window);
+            if(index>=total/window)return;
+            complete=skip==boundary(index*window);
+            end=boundary((index+1)*window);
+        }
+        void add(unsigned bit,Complex observed,Complex pattern,Complex carrier) {
+            if(!window || !complete || index>=total/window)return;
+            dot[bit]+=observed*std::conj(pattern);norm[bit]+=std::norm(pattern);
+            square[bit]+=pattern*pattern*carrier;
+        }
+        void finish_bin(std::size_t next) {
+            if(!window || !end || index>=total/window || next<end)return;
+            if(complete)for(unsigned bit=0;bit<2;++bit)
+                accumulated[bit].add(detail::pattern_differential_whiten(dot[bit],norm[bit],square[bit],image_ratio),
+                                     index,total,window);
+            dot={};square={};norm={};complete=true;
+            if(++index<total/window)end=boundary((index+1)*window);
+        }
+        double combine(double existing,unsigned bit)const {
+            return detail::combine_differential_evidence(existing,accumulated[bit].score(),window!=0);
+        }
+    };
     PatternEvidence measure(std::uint64_t start,std::uint64_t index,std::size_t f,std::uint64_t observed_before,
                             std::span<const Complex> carrier_phases) {
         std::array<Complex,2> dot{},square{};std::array<double,2> norm{};double energy=0;
+        SectionFits sections;const auto edges=drift_edges(f);unsigned section=0;
         // Timing refinements of one stream symbol fit the same templates.
         // Reuse their exact values; only the received window and carrier Gram
         // phase change. Without optional cache space, the idle acquisition
@@ -575,18 +665,28 @@ struct PatternReceiver::Impl {
             tracking_reference_index=index;tracking_reference_frequency=f;tracking_reference_valid=true;
         }
         const auto skip=static_cast<std::size_t>(observed_before>start?std::min<std::uint64_t>(length,observed_before-start):0);
+        DifferentialFits differential(*this,f,skip);
         for(std::size_t i=skip;i<length;++i) {
+            if(drift_sections>1)while(section+1<drift_sections && i>=edges[section+1])++section;
             const auto value=at(start+i);energy+=std::norm(value);
-            const auto carrier=sample_fit?carrier_phases[i]:Complex{};
+            const auto carrier=sample_fit || differential_window?carrier_phases[i]:Complex{};
             for(unsigned b=0;b<2;++b) {
                 const auto pattern=tracking_reference.empty()?product[2*i+b]:tracking_reference[i][b];
                 dot[b]+=value*std::conj(pattern);norm[b]+=std::norm(pattern);
                 if(sample_fit)square[b]+=pattern*pattern*carrier;
+                if(drift_sections>1)sections.add(section,b,value,pattern,carrier,sample_fit);
+                differential.add(b,value,pattern,carrier);
             }
+            differential.finish_bin(i+1);
         }
         const auto count=evidence_count(length-skip);
-        const auto zero=pattern_evidence(dot[0],energy,norm[0],count,noise_condition,real_rank,sample_fit,square[0]),
+        auto zero=pattern_evidence(dot[0],energy,norm[0],count,noise_condition,real_rank,sample_fit,square[0]),
             one=pattern_evidence(dot[1],energy,norm[1],count,noise_condition,real_rank,sample_fit,square[1]);
+        if(drift_sections>1) {
+            zero=detail::combine_drift_evidence(zero,detail::drift_evidence(sections.explained(0,noise_condition,sample_fit),energy,count,drift_sections,real_rank),drift_sections);
+            one=detail::combine_drift_evidence(one,detail::drift_evidence(sections.explained(1,noise_condition,sample_fit),energy,count,drift_sections,real_rank),drift_sections);
+        }
+        zero=differential.combine(zero,0);one=differential.combine(one,1);
         PatternEvidence result{start*bin_samples,(start+length)*bin_samples,index,
             config.carrier_hz+search.frequency_offsets_hz[f],std::max(zero,one),std::min(zero,one),one>zero?1U:0U,active_stream_phase};
         result.frequency_hypothesis=f;return result;
@@ -595,23 +695,34 @@ struct PatternReceiver::Impl {
                                         std::size_t f,std::uint64_t observed_before,
                                         std::span<const Complex> carrier_phases,std::stop_token stop)const {
         std::array<Complex,2> dot{},square{};std::array<double,2> norm{};double energy=0;
+        SectionFits sections;const auto edges=drift_edges(f);unsigned section=0;
         const auto skip=static_cast<std::size_t>(observed_before>start?std::min<std::uint64_t>(length,observed_before-start):0);
+        DifferentialFits differential(*this,f,skip);
         // Preserve measure()'s sample/bit accumulation order, but generate a
         // template pair immediately before using it. Each worker owns only a
         // bounded PatternCode cache, not a symbol-sized reference or FFT row.
         for(std::size_t i=skip;i<length;++i) {
             if((i&4095U)==0)cancelled(stop);
+            if(drift_sections>1)while(section+1<drift_sections && i>=edges[section+1])++section;
             const auto value=at(start+i);energy+=std::norm(value);
-            const auto carrier=sample_fit?carrier_phases[i]:Complex{};
+            const auto carrier=sample_fit || differential_window?carrier_phases[i]:Complex{};
             for(unsigned b=0;b<2;++b) {
                 const auto reference_value=template_value(pattern,i,index,b,f);
                 dot[b]+=value*std::conj(reference_value);norm[b]+=std::norm(reference_value);
                 if(sample_fit)square[b]+=reference_value*reference_value*carrier;
+                if(drift_sections>1)sections.add(section,b,value,reference_value,carrier,sample_fit);
+                differential.add(b,value,reference_value,carrier);
             }
+            differential.finish_bin(i+1);
         }
         const auto count=evidence_count(length-skip);
-        return {pattern_evidence(dot[0],energy,norm[0],count,noise_condition,real_rank,sample_fit,square[0]),
-                pattern_evidence(dot[1],energy,norm[1],count,noise_condition,real_rank,sample_fit,square[1])};
+        std::array result{pattern_evidence(dot[0],energy,norm[0],count,noise_condition,real_rank,sample_fit,square[0]),
+                          pattern_evidence(dot[1],energy,norm[1],count,noise_condition,real_rank,sample_fit,square[1])};
+        if(drift_sections>1)for(unsigned bit=0;bit<2;++bit)
+            result[bit]=detail::combine_drift_evidence(result[bit],detail::drift_evidence(
+                sections.explained(bit,noise_condition,sample_fit),energy,count,drift_sections,real_rank),drift_sections);
+        for(unsigned bit=0;bit<2;++bit)result[bit]=differential.combine(result[bit],bit);
+        return result;
     }
     void publish(Track& track,bool complete,bool flush=false,bool draining=false) {
         track.burst.score=track.confirmed_score;
@@ -681,9 +792,9 @@ struct PatternReceiver::Impl {
                 // Acquisition is finished while tracks run. Its work buffer
                 // fits all five overlapping timing windows, whose exact
                 // carrier Gram phases also repeat across frequency fits.
-                if(sample_fit)for(std::size_t i=0;i<length+high-low;++i)work[i]=carrier_square(low+i);
+                if(sample_fit || differential_window)for(std::size_t i=0;i<length+high-low;++i)work[i]=carrier_square(low+i);
                 const auto carrier_phases=[&](std::uint64_t start) {
-                    return sample_fit?std::span<const Complex>(work).subspan(static_cast<std::size_t>(start-low),length):
+                    return sample_fit || differential_window?std::span<const Complex>(work).subspan(static_cast<std::size_t>(start-low),length):
                         std::span<const Complex>{};
                 };
                 for(std::size_t g=0;g<group_count;++g) {
@@ -1002,6 +1113,8 @@ struct PatternReceiver::Impl {
         batch.geometry=scoring_geometry();
         batch.nominal_reference=storage.nominal_reference;
         batch.spectrum=spectrum;batch.carrier_square=work;batch.energy_prefix=energy_prefix;
+        if(drift_sections>1)batch.observations=work;
+        batch.first_bin=next_start;
         batch.starts=count;batch.score_stride=hop;
         const auto flush=[&] {
             batch.prepared=std::span<const detail::FftPreparedTemplate>(scoring_templates).first(queued);
@@ -1041,6 +1154,26 @@ struct PatternReceiver::Impl {
             }
         }
         if(queued)flush();
+    }
+    void score_drift_serial(std::size_t count,std::stop_token stop) {
+        detail::FftSearchBatch batch;
+        batch.geometry=scoring_geometry();batch.spectrum=spectrum;batch.observations=work;
+        batch.energy_prefix=energy_prefix;batch.starts=count;batch.first_bin=next_start;
+        if(tracking_reference.empty())tracking_reference_valid=false;
+        for(std::size_t index=0;index<search.initial_stream_symbols;++index) {
+            std::size_t group_count=0;
+            const auto groups=phase_groups(index,search.search_stream_phases?0:config.stream_phase_samples,phase_upper,group_count);
+            for(std::size_t g=0;g<group_count;++g) {
+                stream_phase(groups[g].lower);
+                for(std::size_t f=0;f<templates.size();++f) {
+                    detail::FftSearchJob job{index,groups[g].lower,f,search.frequency_offsets_hz[f]};
+                    job.clock_ratio=clock_ratio(f);
+                    detail::execute_drift_search_job(batch,job,drift_scores,product,drift_scratch,code,stop,differential_scratch);
+                    for(std::size_t j=0;j<count;++j)
+                        collect_score(drift_scores[j].zero,drift_scores[j].one,j,index,groups[g].lower,f);
+                }
+            }
+        }
     }
     void process(std::stop_token stop,bool final=false) {
         // The first long-symbol pass needs only a small range of fully
@@ -1090,9 +1223,10 @@ struct PatternReceiver::Impl {
             // identical carrier Gram phase shared by every bit/frequency/
             // stream hypothesis at a start, without new allocations or a
             // phase recurrence that would change the numerical calculation.
-            if(sample_fit)for(std::size_t j=0;j<count;++j)work[j]=carrier_square(next_start+j);
+            if(sample_fit && drift_sections<=1)for(std::size_t j=0;j<count;++j)work[j]=carrier_square(next_start+j);
             peaks.clear();
             if(!scoring.empty())score_parallel(count,stop);
+            else if(drift_sections>1)score_drift_serial(count,stop);
             else {
             // Serial acquisition reuses the fallback tracking-cache buffer.
             // A later measure must rebuild it before any timing refinement.
@@ -1178,6 +1312,8 @@ struct PatternReceiver::Impl {
         std::size_t total=sizeof(Impl)+sizeof(PatternReceiver)+code.working_bytes();
         for(const auto* v:{&ring,&work,&spectrum,&product,&reference,&points})total+=v->capacity()*sizeof(Complex);
         total+=energy_prefix.capacity()*sizeof(double)+(history.capacity()+peaks.capacity())*sizeof(PatternEvidence)+
+            drift_scratch.capacity()*sizeof(detail::FftDriftAccumulator)+drift_scores.capacity()*sizeof(detail::FftSearchScore)+
+            differential_scratch.capacity()*sizeof(detail::DifferentialAccumulator)+
             tracks.capacity()*sizeof(Track)+bursts.capacity()*sizeof(PatternBurst)+completed.capacity()*sizeof(Completed)+
             templates.capacity()*sizeof(decltype(templates)::value_type)+
             template_energy.capacity()*sizeof(decltype(template_energy)::value_type)+
@@ -1253,10 +1389,10 @@ void PatternReceiver::push(std::span<const float> input,std::span<const std::com
     auto& s=*impl_;cancelled(stop);if(s.finished)throw Error("pattern capture already finished");
     if(input.size()!=projected.size())throw Error("shared pattern projection length mismatch");
     if(s.fallback){s.fallback->push(input,stop);return;}
-    if(s.sample_fit) {
-        // The real Gram fit needs a known carrier phase convention. Shared
+    if(s.sample_fit || s.differential_window) {
+        // Exact Gram whitening needs a known carrier phase convention. Shared
         // projections may have an arbitrary fixed rotation, so reconstruct
-        // these short/sample-resolution observations from their raw samples.
+        // the observations from their raw samples.
         for(const auto value:projected)
             if(!std::isfinite(value.real())||!std::isfinite(value.imag()))
                 throw Error("pattern input contains a nonfinite sample");
@@ -1300,6 +1436,7 @@ bool PatternReceiver::acquiring()const{return impl_->fallback?impl_->fallback->a
 bool PatternReceiver::synchronized()const{return impl_->fallback?impl_->fallback->synchronized():std::any_of(impl_->tracks.begin(),impl_->tracks.end(),[](const auto& track){return track.admitted;});}
 bool PatternReceiver::clock_windowed()const{return static_cast<bool>(impl_->fallback);}
 bool PatternReceiver::local_clock_fallback()const{return impl_->local_search_fallback;}
+bool PatternReceiver::drift_tolerant()const{return impl_->fallback?impl_->fallback->drift_tolerant():impl_->drift_sections>1;}
 std::size_t PatternReceiver::working_bytes()const {
     return impl_->working_bytes();
 }

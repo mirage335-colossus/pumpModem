@@ -1,6 +1,7 @@
 #pragma once
 
 #include "datapump/pattern_code.hpp"
+#include "pattern_differential.hpp"
 #include <array>
 #include <limits>
 #include <type_traits>
@@ -35,6 +36,8 @@ struct FftSearchGeometry {
     std::uint64_t bins_per_symbol = 0, bin_samples = 0;
     double carrier_hz = 0, evidence_count = 0, noise_condition = 1;
     std::uint32_t real_rank = 0, sample_fit = 0, extended_clock_window = 0;
+    std::uint32_t drift_sections = 1;
+    std::uint64_t differential_window_samples = 0;
 };
 static_assert(std::is_trivially_copyable_v<FftSearchJob> && std::is_standard_layout_v<FftSearchJob>);
 static_assert(std::is_trivially_copyable_v<FftSearchScore> && std::is_standard_layout_v<FftSearchScore>);
@@ -52,12 +55,19 @@ struct FftSearchBatch {
     ~FftSearchBatch();
     FftSearchGeometry geometry;
     std::span<const FftComplex> spectrum, carrier_square;
+    // Original disjoint projection bins permit a direct first-window pass.
+    std::span<const FftComplex> observations;
+    std::uint64_t first_bin = 0;
     std::span<const double> energy_prefix;
     std::span<const FftPreparedTemplate> prepared;
     // Optional public nominal-clock samples before carrier rotation. Coupled
     // clock alternatives still generate their own time-scaled waveform.
     std::span<const std::array<FftComplex,2>> nominal_reference;
     std::size_t starts = 0, score_stride = 0;
+};
+struct FftDriftAccumulator {
+    FftComplex dot{};
+    double explained = 0, strongest = 0;
 };
 
 // CPU-private storage scales with CPU workers, not the logical hypothesis
@@ -68,7 +78,10 @@ struct FftSearchBatch {
 struct FftSearchWorkspace {
     std::unique_ptr<PatternCode> code;
     std::vector<FftComplex> product;
-    FftSearchWorkspace(const Config&,std::size_t transform,bool needs_code);
+    std::vector<FftDriftAccumulator> drift;
+    std::vector<DifferentialAccumulator> differential;
+    FftSearchWorkspace(const Config&,std::size_t transform,bool needs_code,std::size_t drift_starts=0,
+                       std::size_t differential_starts=0);
     std::size_t working_bytes() const;
 };
 
@@ -80,6 +93,13 @@ void execute_fft_search_cpu(const FftSearchBatch&,std::span<const FftSearchJob>,
                             std::span<FftSearchScore>,std::span<FftSearchWorkspace>,
                             std::stop_token = {});
 
+// A serial receiver uses its already-budgeted transform and start scratch.
+// No allocation, admission or partial-symbol publication occurs here.
+void execute_drift_search_job(const FftSearchBatch&,const FftSearchJob&,
+                             std::span<FftSearchScore>,std::span<FftComplex> product,
+                             std::span<FftDriftAccumulator>,PatternCode&,std::stop_token = {},
+                             std::span<DifferentialAccumulator> = {});
+
 // Build exactly the unmodulated public-pattern values used by nominal-clock
 // jobs. The caller owns and budgets the complete supplied reference span.
 void prepare_fft_nominal_reference(const FftSearchGeometry&,PatternCode&,
@@ -89,5 +109,13 @@ void pattern_fft(std::span<FftComplex>,bool inverse,std::stop_token);
 double pattern_evidence(FftComplex dot,double energy,double template_energy,double count,
                         double condition,bool real_rank,bool exact_real,
                         FftComplex template_square = {});
+double pattern_explained(FftComplex dot,double template_energy,double condition,
+                        bool exact_real,FftComplex template_square = {});
+
+// Whitening uses the exact quadrature covariance of the disjoint real-sample
+// projection bins. The common input-noise variance cancels in the detector.
+double pattern_projection_image_ratio(std::uint64_t bin_samples,double carrier_hz,std::uint32_t sample_rate);
+FftComplex pattern_differential_whiten(FftComplex dot,double template_energy,
+                                      FftComplex template_square,double projection_image_ratio);
 
 } // namespace datapump::modem::detail

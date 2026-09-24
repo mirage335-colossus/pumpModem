@@ -16,6 +16,91 @@ const ui::Control& control(ui::Field field) {
     for(const auto& value:ui::console_screen())if(value.field==field)return value;
     throw Error("Missing shared control");
 }
+void developer_mode_presentation() {
+    using F=ui::Field;using P=ui::Page;
+    Launch launch;
+    launch.settings=launch_command::parse("--pattern auto-tone --dsp-workspace 25% --rate 2400 --carrier 1500");
+    Application app(launch);
+    const auto& toggle=control(F::developer_mode);
+    check(toggle.kind==ui::Kind::toggle&&toggle.persistent&&app.control(toggle).visible&&
+          app.control(toggle).enabled&&!app.field(F::developer_mode).checked,
+          "Developer mode must start unchecked and remain available in the persistent header");
+    constexpr std::array advanced_fields{F::pattern,F::fec,F::dsp_workspace,F::receive_snr,
+        F::profile_reference,F::callsign,F::grid,F::repeatable};
+    for(const auto field:advanced_fields)
+        check(!app.control(control(field)).visible,"An advanced control is visible before developer mode is enabled");
+    for(const auto field:{F::message,F::binary,F::simulation,F::bandwidth,F::carrier,F::snr,F::long_snr})
+        check(app.control(control(field)).visible,"Developer mode hid an ordinary control");
+    check(app.field(F::pattern).selected=="auto-tone"&&app.field(F::dsp_workspace).selected=="ram-25"&&
+          app.field(F::bandwidth).text=="2.4 kHz",
+          "Hidden advanced controls failed to retain command-line overrides");
+    for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},
+                         ui::Rect{0,0,ui::default_width,ui::default_height}}) {
+        std::vector<ui::ControlLayout> hidden;
+        for(const auto& declaration:ui::console_screen())hidden.push_back(app.control_layout(declaration,size.w,size.h));
+        const auto tabs=app.tab_layout(size.w,size.h);
+        check(tabs.size()==ui::pages().size(),"Hiding developer tabs removed their retained layout entries");
+        for(const auto& tab:tabs)
+            check(tab.visible==(tab.page==P::console||tab.page==P::planner),
+                  "Default navigation must show only Console and Link planner");
+        const auto checkbox=app.control_layout(toggle,size.w,size.h).frame;
+        const auto clear=ui::DesktopLayout(size.w,size.h)[ui::Slot::clear];
+        check(checkbox.x+checkbox.w<clear.x&&checkbox.y==clear.y&&checkbox.h==clear.h,
+              "Developer mode is not immediately beside the left of Clear received");
+        app.toggle(toggle,true);
+        for(std::size_t i=0;i<ui::console_screen().size();++i)
+            check(app.control_layout(ui::console_screen()[i],size.w,size.h)==hidden[i],
+                  "Developer mode moved a control instead of hiding it in place");
+        const auto shown=app.tab_layout(size.w,size.h);
+        for(std::size_t i=0;i<tabs.size();++i)
+            check(shown[i].visible&&shown[i].page==tabs[i].page&&shown[i].frame==tabs[i].frame,
+                  "Developer mode moved or failed to restore a tab");
+        for(const auto field:advanced_fields)
+            check(app.control(control(field)).visible,"Developer mode failed to restore an advanced control");
+        app.toggle(toggle,false);
+    }
+    app.navigate(P::planner);
+    check(app.page()==P::planner&&app.control(toggle).visible,"Link planner or its persistent developer toggle became unavailable");
+    for(const auto page:{P::compression,P::flow,P::transmission}) {
+        app.navigate(page);check(app.page()==P::planner,"Stale navigation opened a hidden developer tab");
+        app.select_page(page);check(app.page()==P::planner,"Programmatic navigation exposed a hidden developer tab");
+        app.toggle(toggle,true);app.navigate(page);
+        check(app.page()==page,"Developer mode failed to make a requested tab reachable");
+        app.toggle(toggle,false);
+        check(app.page()==P::console,"Hiding the selected developer tab did not return to Console");
+        app.navigate(P::planner);
+    }
+    app.navigate(P::console);app.toggle(toggle,true);
+    app.edit(control(F::callsign),"N0CALL");app.edit(control(F::grid),"AA00");
+    app.edit(control(F::message),"An ordinary longer message");
+    app.select(control(F::fec),"off");app.toggle(control(F::repeatable),true);
+    const auto message=app.field(F::message).text,receive_targets=app.field(F::receive_snr).text;
+    const auto command=app.field(F::planner_command).text;
+    const auto flow=app.document(P::flow,900);
+    app.toggle(toggle,false);
+    app.edit(control(F::callsign),"OTHER");app.edit(control(F::grid),"BB11");
+    app.edit(control(F::receive_snr),"80");app.preset(control(F::receive_snr),"20");
+    app.select(control(F::pattern),"auto-pattern");app.select(control(F::fec),"rs60");
+    app.select(control(F::dsp_workspace),"ram-75");app.toggle(control(F::repeatable),false);
+    check(app.field(F::callsign).text=="N0CALL"&&app.field(F::grid).text=="AA00"&&
+          app.field(F::repeatable).checked&&app.field(F::message).text==message&&
+          app.field(F::receive_snr).text==receive_targets&&app.field(F::pattern).selected=="auto-tone"&&
+          app.field(F::fec).selected=="off"&&app.field(F::dsp_workspace).selected=="ram-25"&&
+          app.field(F::planner_command).text==command&&app.document(P::flow,900)==flow,
+          "Hiding advanced settings changed retained values or let stale callbacks edit them");
+    app.toggle(toggle,true);
+    check(app.field(F::message).text==message&&app.field(F::repeatable).checked&&
+          app.document(P::flow,900)==flow,"Revealing advanced controls rebuilt the draft or inspection");
+    app.toggle(control(F::repeatable),false);
+    app.edit(control(F::callsign),"");app.edit(control(F::grid),"");app.edit(control(F::message),"");
+    app.edit(control(F::binary),"001");
+    app.navigate(P::compression);app.toggle(toggle,false);
+    app.edit(control(F::short_bits),"010");
+    check(app.page()==P::console&&app.field(F::short_bits).text=="001"&&app.field(F::binary).text=="001",
+          "Hiding raw-bit inspection changed the exact draft or admitted its stale edit callback");
+    app.close();app.toggle(toggle,true);
+    check(!app.field(F::developer_mode).checked,"A closing application accepted a developer-mode callback");
+}
 void transmission_scope_records() {
     using F=ui::Field;
     const auto& declaration=control(F::transmit_scope);
@@ -461,6 +546,7 @@ void control_bindings() {
 }
 void expanded_preview() {
     Application app({.simulation=true});
+    app.toggle(ui::Field::developer_mode,true);
     const auto& declarations=ui::console_screen();
     const auto& qr=*std::find_if(declarations.begin(),declarations.end(),[](const auto& c){return c.bitmap==ui::Bitmap::qr;});
     check(qr.click==ui::Command::toggle_qr_expanded&&!app.overlay(),"QR must start at its original size with a click toggle");
@@ -555,6 +641,7 @@ void declared_edits() {
 void rate_carrier_declarations() {
     using F=ui::Field;
     Application app({.simulation=true});
+    app.toggle(ui::Field::developer_mode,true);
     const auto& rate=control(F::bandwidth);const auto& carrier=control(F::carrier);
     check(std::string_view(rate.label)=="Rate" && std::string_view(carrier.label)=="Carrier" &&
           rate.kind==ui::Kind::text && carrier.kind==ui::Kind::text && rate.persistent && carrier.persistent &&
@@ -590,6 +677,7 @@ void rate_carrier_declarations() {
 void target_snr_declarations() {
     using F=ui::Field;
     Application app({.simulation=true});
+    app.toggle(ui::Field::developer_mode,true);
     const auto& short_target=control(F::snr);const auto& long_target=control(F::long_snr);
     check(short_target.kind==ui::Kind::text && long_target.kind==ui::Kind::text &&
           short_target.persistent && long_target.persistent &&
@@ -629,8 +717,60 @@ void target_snr_declarations() {
     check(app.field(F::snr).text=="31.5" && app.field(F::long_snr).text=="54.5",
           "Stale target callbacks changed a closing application");
 }
+void fitted_target_editing() {
+    using F=ui::Field;
+    Application app({.simulation=true});
+    for(const auto field:{F::snr,F::long_snr}) {
+        const auto& declaration=control(field);
+        for(const auto* text:{"-","-6","-60","-60.","-60.5"}) {
+            app.edit(declaration,text);
+            check(app.field(field).text==text,"Fitting a weak target replaced a native keystroke buffer");
+        }
+        check(app.field(F::status).text.find("target SNR must be a number")==std::string::npos,
+              "A valid target retained the validation notice from an incomplete numeric prefix");
+        const auto adjusted=app.field(field).display_text;
+        const auto label=app.control(declaration).label;
+        check(!adjusted.empty()&&label.starts_with(field==F::snr?"Short ≤16 B · ":"Long / file · ")&&
+              label.ends_with(adjusted+" dB-Hz"),
+              "An adjusted target must show its effective value without replacing the edit buffer");
+        const auto receive_targets=app.field(F::receive_snr).text;
+        check(!app.submit(declaration,true,false)&&!app.submit(declaration,false,true)&&
+              app.field(field).text=="-60.5",
+              "Modified Enter unexpectedly committed the target edit");
+        check(app.submit(declaration,false,false)&&app.field(field).text!="-60.5"&&
+              app.field(field).display_text.empty()&&app.control(declaration).label==declaration.label&&
+              app.field(F::receive_snr).text==receive_targets,
+              "Plain Enter must display the exact fitted target without rebuilding the receive targets");
+        app.preset(declaration,"-60");
+        check(app.field(field).text!="-60"&&app.field(field).display_text.empty(),
+              "A target preset must immediately display its fitted value");
+
+        app.report_error("Keep this unrelated notice");
+        app.edit(declaration,"-60.5");
+        check(app.field(F::status).text=="Keep this unrelated notice",
+              "A valid target edit cleared an unrelated notice");
+        app.set_service_active(true);
+        app.preset(declaration,"20");app.submit(declaration,false,false);
+        check(app.field(field).text=="-60.5"&&!app.field(field).display_text.empty(),
+              "A blocked input surface committed or replaced a target edit");
+        app.set_service_active(false);
+        auto hidden=declaration;hidden.persistent=false;hidden.page=ui::Page::flow;
+        app.preset(hidden,"20");app.submit(hidden,false,false);
+        auto stale=declaration;stale.surface=999;
+        app.preset(stale,"20");app.submit(stale,false,false);
+        check(app.field(field).text=="-60.5"&&!app.field(field).display_text.empty(),
+              "A hidden page or stale overlay callback committed a target edit");
+    }
+    app.close();
+    for(const auto field:{F::snr,F::long_snr}) {
+        const auto& declaration=control(field);
+        app.preset(declaration,"20");app.submit(declaration,false,false);
+        check(app.field(field).text=="-60.5","A closing application committed a target edit");
+    }
+}
 void mono_declaration() {
     Application app({.simulation=true});
+    app.toggle(ui::Field::developer_mode,true);
     const auto& mono=control(ui::Field::mono);
     const std::string_view help=mono.help;
     check(mono.kind==ui::Kind::toggle&&mono.persistent&&std::string_view(mono.label)=="Mono"&&
@@ -660,6 +800,7 @@ void mono_declaration() {
 void oscillator_declaration() {
     using F=ui::Field;
     Application app({.simulation=true});
+    app.toggle(ui::Field::developer_mode,true);
     const auto& oscillator=control(F::simulation_oscillator);
     const auto& detail=control(F::simulation_oscillator_detail);
     const std::string_view help=oscillator.help;
@@ -672,11 +813,12 @@ void oscillator_declaration() {
           "Oscillator scenarios need a persistent shared choice with explicit residual-model limitations");
     for(const auto& page:ui::pages()) {
         app.select_page(page.id);
-        check(app.control(oscillator).visible&&app.control(oscillator).enabled&&app.control(detail).visible,
-              "Oscillator scenario or its numeric explanation disappeared on another page");
+        check(app.control(oscillator).visible&&app.control(oscillator).enabled&&
+              app.control(detail).visible==(page.id!=ui::Page::planner),
+              "Oscillator detail must yield its planner space only to the native preview-target editor");
         app.select(oscillator,"gpsdo-xo");
         check(app.field(oscillator.field).selected=="gpsdo-xo"&&
-              app.field(detail.field).text.find("Clock mismatch 0.1 ppm")!=std::string::npos&&
+              app.field(detail.field).text.find("Clock mismatch 0.0001 ppm")!=std::string::npos&&
               app.field(detail.field).text.find("Phase diffusion 0.5 deg / sqrt(s)")!=std::string::npos,
               "Hobbyist GPSDO selection lost its non-oven clock and phase assumptions through the facade");
         app.select(oscillator,"gpsdo-ocxo");
@@ -702,6 +844,7 @@ void oscillator_declaration() {
 void lpi_declaration() {
     using F=ui::Field;
     Application app({.simulation=true});
+    app.toggle(ui::Field::developer_mode,true);
     const auto& advisory=control(F::lpi_estimate);
     const std::string_view help=advisory.help;
     check(advisory.kind==ui::Kind::label&&advisory.persistent&&advisory.font_size==12&&
@@ -746,6 +889,7 @@ void declared_submission() {
 }
 void declared_native_input() {
     Application app({.simulation=true});
+    app.toggle(ui::Field::developer_mode,true);
     auto choice=control(ui::Field::send_key);
     app.select(choice,"ctrl-enter");
     check(app.field(choice.field).selected=="ctrl-enter","Declared choice did not select its stable option ID");
@@ -808,6 +952,7 @@ void declared_native_input() {
 }
 void stale_page_input() {
     Application app({.simulation=true});
+    app.toggle(ui::Field::developer_mode,true);
     auto editor=control(ui::Field::message),choice=control(ui::Field::send_key),toggle=control(ui::Field::repeatable);
     editor.persistent=choice.persistent=toggle.persistent=false;
     editor.submit=ui::Command::clear_received;editor.submit_mode=ui::Field::count;
@@ -902,6 +1047,7 @@ std::string document_text(const ui::DocumentNode& node) {
 void typed_short_text_inspection() {
     using F=ui::Field;using P=ui::Page;
     Application app({}); // Production defaults; no audio session is needed to inspect a draft.
+    app.toggle(ui::Field::developer_mode,true);
     const auto& message=control(F::message);
     check(app.field(F::bandwidth).text=="3.6 kHz" && app.field(F::carrier).text=="1.5 kHz" &&
           app.field(F::snr).text=="32" && app.field(F::long_snr).text=="55" && app.field(F::receive_snr).text=="32, 55" &&
@@ -1017,6 +1163,7 @@ void noise_declarations_and_dispatch() {
         return *found;
     };
     Application app({.simulation=true});
+    app.toggle(ui::Field::developer_mode,true);
     for(const auto page:{P::console,P::compression}) {
         const auto& noise=declaration(C::transmit_noise,page);
         const auto& send=declaration(page==P::console?C::transmit:C::transmit_short_bits,page);
@@ -1064,6 +1211,6 @@ void noise_declarations_and_dispatch() {
 }
 }
 int main() {
-    try {transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();mono_declaration();oscillator_declaration();lpi_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();noise_declarations_and_dispatch();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {developer_mode_presentation();transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();fitted_target_editing();mono_declaration();oscillator_declaration();lpi_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();noise_declarations_and_dispatch();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

@@ -1282,6 +1282,9 @@ void application_local_fallback_preserves_original_search() {
 
     auto narrow=config(128,true);narrow.bandwidth_hz=1;
     auto cached=automatic;cached.compact_clock_search=false;cached.allow_local_clock_fallback=false;
+    // Retain coverage of the original optional full-row cache. Drift scoring
+    // always streams section templates, even with spare workspace.
+    cached.drift_tolerant=false;
     modem::PatternReceiver cached_bank(narrow,64*1024*1024,cached);
     cached.prefer_streamed_templates=true;
     modem::PatternReceiver shared_bank(narrow,64*1024*1024,cached);
@@ -1289,6 +1292,11 @@ void application_local_fallback_preserves_original_search() {
           "sharing template memory must retain complete expanded FFT coverage");
     check(shared_bank.working_bytes()<2*1024*1024 && cached_bank.working_bytes()>8*1024*1024,
           "multi-bank streaming preference did not leave cached-row RAM for peer receivers");
+    cached.drift_tolerant=true;cached.prefer_streamed_templates=false;
+    modem::PatternReceiver section_bank(narrow,64*1024*1024,cached);
+    check(!section_bank.clock_windowed()&&!section_bank.local_clock_fallback()&&
+          section_bank.working_bytes()<2*1024*1024,
+          "drift section scoring must retain full clock coverage without allocating full template rows");
 }
 }
 int main(int argc,char** argv) {

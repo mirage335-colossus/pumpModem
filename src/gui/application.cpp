@@ -17,7 +17,7 @@
 namespace datapump::gui {
 using Clock=std::chrono::steady_clock;
 struct Application::Impl {
-    explicit Impl(const Launch& launch):controller({launch.simulation||launch.smoke,launch.smoke}) {}
+    explicit Impl(const Launch& launch):controller({launch.simulation||launch.smoke,launch.smoke,launch.settings}) {}
     Controller controller;
     BitmapSources bitmaps;
     Clock::time_point next=Clock::now(),next_presentation=next,started=next,completed=next;
@@ -27,6 +27,7 @@ struct Application::Impl {
     std::shared_ptr<const ui::OverlayDefinition> overlay;
     std::uint64_t overlay_generation=0;
     bool service_active=false;
+    ui::FieldState developer_mode;
     ui::Page page=ui::Page::console;
     struct Document {
         std::shared_ptr<const Inspection> model;
@@ -41,11 +42,13 @@ struct Application::Impl {
         std::shared_ptr<const planner::Model> model;
         std::shared_ptr<const ui::DocumentNode> root;
         int width=0;
-        bool details=false,draft=false,closing=false,can_apply=false;
+        bool details=false,draft=false,closing=false,can_apply=false,can_load=false;
     } planner_document;
 };
 Application::Application(Launch options):launch(std::move(options)),impl_(std::make_unique<Impl>(launch)) {
-    impl_->page=launch.page;
+    // Smoke runs exercise every page; ordinary launches start with the simpler view.
+    impl_->developer_mode.checked=launch.smoke;
+    select_page(launch.page);
 }
 Application::~Application()=default;
 void Application::start() {
@@ -90,9 +93,13 @@ void Application::edit(const ui::Control& declaration,std::string text) {
     edit(declaration.field,std::move(text));
 }
 void Application::preset(const ui::Control& declaration,const std::string& id) {
+    if(declaration.kind!=ui::Kind::text||!accepts_input(declaration))return;
     const auto& options=control(declaration).state.options;
     const auto found=std::find_if(options.begin(),options.end(),[&](const auto& option){return option.id==id&&option.enabled;});
-    if(found!=options.end())edit(declaration,found->id);
+    if(found!=options.end()) {
+        edit(declaration,found->id);
+        impl_->controller.commit_target(declaration.field);
+    }
 }
 void Application::select(ui::Field field,std::string id) {
     if(!closing()&&field!=ui::Field::count&&this->field(field).visible)impl_->controller.select(field,std::move(id));
@@ -102,7 +109,13 @@ void Application::select(const ui::Control& declaration,std::string id) {
         select(declaration.field,std::move(id));
 }
 void Application::toggle(ui::Field field,bool value) {
-    if(!closing()&&field!=ui::Field::count&&this->field(field).visible)impl_->controller.toggle(field,value);
+    if(closing()||field==ui::Field::count||!this->field(field).visible)return;
+    if(field==ui::Field::developer_mode) {
+        if(impl_->developer_mode.checked==value)return;
+        impl_->developer_mode.checked=value;
+        if(!page_visible(page()))select_page(ui::Page::console);
+        ++impl_->presentation_revision;
+    } else impl_->controller.toggle(field,value);
 }
 void Application::toggle(const ui::Control& declaration,bool value) {
     if(declaration.kind==ui::Kind::toggle&&accepts_input(declaration))toggle(declaration.field,value);
@@ -168,7 +181,14 @@ ui::Rect Application::tabs_bounds(int width,int height) const {
     return ui::tabs_rect(width,height,field(ui::Field::simulation_cpu_time).visible);
 }
 std::vector<ui::TabLayout> Application::tab_layout(int width,int height) const {
-    return ui::tab_layout(width,height,ui::pages(),field(ui::Field::simulation_cpu_time).visible);
+    auto result=ui::tab_layout(width,height,ui::pages(),field(ui::Field::simulation_cpu_time).visible);
+    for(auto& tab:result)tab.visible=page_visible(tab.page);
+    return result;
+}
+bool Application::page_visible(ui::Page page) const {
+    const auto& definitions=ui::pages();
+    const auto found=std::find_if(definitions.begin(),definitions.end(),[&](const auto& item){return item.id==page;});
+    return found!=definitions.end()&&(!found->developer_only||impl_->developer_mode.checked);
 }
 bool Application::accepts_input(const ui::Control& declaration) const {
     if(!accepts_surface(declaration.surface)||(!declaration.surface&&!declaration.persistent&&declaration.page!=page()))return false;
@@ -179,14 +199,26 @@ ControlPresentation Application::control(const ui::Control& declaration) const {
     static const ui::FieldState empty;
     const auto& state=declaration.field==ui::Field::count?empty:field(declaration.field);
     ControlPresentation view{state,declaration.label,state.enabled,state.visible};
+    if(declaration.developer_only&&!impl_->developer_mode.checked)view.visible=false;
+    if(!declaration.surface&&!declaration.persistent&&!page_visible(declaration.page))view.visible=false;
     // The planner owns its concise LPI reference and single model warning.
     // The current-draft advisory remains unchanged on the other pages.
     if(!declaration.surface&&declaration.field==ui::Field::lpi_estimate&&page()==ui::Page::planner)view.visible=false;
+    if(!declaration.surface&&declaration.field==ui::Field::simulation_oscillator_detail&&page()==ui::Page::planner)view.visible=false;
+    if(!declaration.surface&&(declaration.field==ui::Field::planner_target||declaration.field==ui::Field::planner_command))
+        view.visible=page()==ui::Page::planner;
     if(declaration.surface) {
         view.visible=view.visible&&impl_->overlay&&impl_->overlay->generation==declaration.surface;
     }
     view.enabled=view.enabled&&accepts_surface(declaration.surface);
     if(declaration.kind==ui::Kind::label&&declaration.field!=ui::Field::count)view.label=state.text;
+    if(declaration.kind==ui::Kind::text&&!state.display_text.empty()) {
+        const auto effective=(state.display_text.size()>6?"":"using ")+state.display_text+" dB-Hz";
+        if(declaration.field==ui::Field::snr)view.label="Short ≤16 B · "+effective;
+        else if(declaration.field==ui::Field::long_snr)view.label="Long / file · "+effective;
+        else if(declaration.field==ui::Field::planner_target)view.label="Target · "+effective;
+        else if(declaration.field==ui::Field::receive_snr)view.label="RX targets · adjusted; Enter to show";
+    }
     if(declaration.kind==ui::Kind::action) {
         const auto current=command_label(declaration.command);
         if(!current.empty())view.label=current;
@@ -207,7 +239,9 @@ MenuPresentation Application::menu(std::span<const ui::Control* const> items) co
 void Application::select_menu(std::span<const ui::Control* const> items,const std::string& id) {
     for(std::size_t i=0;i<items.size();++i)if(id==std::to_string(i)) {activate(*items[i]);return;}
 }
-const ui::FieldState& Application::field(ui::Field field) const { return impl_->controller.field(field); }
+const ui::FieldState& Application::field(ui::Field field) const {
+    return field==ui::Field::developer_mode?impl_->developer_mode:impl_->controller.field(field);
+}
 bool Application::enabled(ui::Command command) const {
     if(command==ui::Command::toggle_qr_expanded)return !closing()&&page()==ui::Page::console;
     if(command==ui::Command::dismiss_overlay)return !closing()&&bool(impl_->overlay);
@@ -220,7 +254,7 @@ void Application::report_error(std::string message) { impl_->controller.report_e
 std::uint64_t Application::revision() const { return impl_->controller.revision()+impl_->presentation_revision; }
 std::uint64_t Application::poll_count() const { return impl_->poll_count; }
 void Application::select_page(ui::Page page) {
-    if(std::any_of(ui::pages().begin(),ui::pages().end(),[&](const auto& value){return value.id==page;})) {
+    if(page_visible(page)) {
         if(impl_->page!=page&&impl_->overlay&&impl_->overlay->policy.dismiss_on_page_change)dismiss_overlay();
         impl_->page=page;
     }
@@ -228,6 +262,11 @@ void Application::select_page(ui::Page page) {
 ui::Page Application::page() const { return impl_->page; }
 bool Application::smoke_passed() const { return impl_->passed; }
 bool Application::submit(const ui::Control& control,bool ctrl,bool shift) {
+    if(control.kind==ui::Kind::text&&(control.field==ui::Field::snr||control.field==ui::Field::long_snr||
+        control.field==ui::Field::receive_snr||control.field==ui::Field::planner_target)&&!ctrl&&!shift) {
+        if(accepts_input(control))impl_->controller.commit_target(control.field);
+        return true;
+    }
     if(control.submit==ui::Command::none||shift)return false;
     const bool wants_ctrl=control.submit_mode!=ui::Field::count&&impl_->controller.field(control.submit_mode).selected=="ctrl-enter";
     if(ctrl!=wants_ctrl)return false;
@@ -261,15 +300,16 @@ std::shared_ptr<const ui::DocumentNode> Application::document(ui::Page page,int 
         const auto model=impl_->controller.link_plan();
         const bool details=impl_->controller.planner_details(),draft=impl_->controller.planner_uses_draft();
         const bool closing=impl_->controller.closing(),can_apply=impl_->controller.enabled(ui::Command::planner_apply_short);
+        const bool can_load=impl_->controller.enabled(ui::Command::planner_load_command);
         if(!cached.root||cached.model!=model||cached.width!=width||cached.details!=details||
-            cached.draft!=draft||cached.closing!=closing||cached.can_apply!=can_apply) {
+            cached.draft!=draft||cached.closing!=closing||cached.can_apply!=can_apply||cached.can_load!=can_load) {
             auto root=planner_page::build(*model,static_cast<float>(width),details,draft);
             std::function<void(ui::DocumentNode&)> enable=[&](auto& node) {
                 if(node.kind==ui::DocumentKind::action)node.enabled=node.enabled&&impl_->controller.enabled(node.command);
                 for(auto& child:node.children)enable(child);
             };
             enable(root);
-            cached={model,std::make_shared<const ui::DocumentNode>(std::move(root)),width,details,draft,closing,can_apply};
+            cached={model,std::make_shared<const ui::DocumentNode>(std::move(root)),width,details,draft,closing,can_apply,can_load};
         }
         return cached.root;
     }
@@ -303,9 +343,10 @@ void gui_self_check() {
 int gui_main(int argc,char** argv,const char* backend,const std::function<int(Launch)>& run) {
     try {
         Launch launch;
+        std::vector<std::string> settings_arguments;
         for(int i=1;i<argc;++i) {
             const std::string arg=argv[i];
-            if(arg=="--help") {std::cout<<"Data Pump continuous console\nGUI backend: "<<backend<<" (selected at build time)\nUsage: datapump-gui [--color|--monochrome] [--simulation] [--self-check] [--smoke-test]\nSmoke options: --smoke-dir PATH --smoke-hold SECONDS --smoke-timeout SECONDS --smoke-view NAME --smoke-scroll 0..1\n";return 0;}
+            if(arg=="--help") {std::cout<<"Data Pump continuous console\nGUI backend: "<<backend<<" (selected at build time)\nUsage: datapump-gui [--color|--monochrome] [--simulation] [--self-check] [--smoke-test]\nLink settings: --tx-dbm DBM --path-loss-db DB --noise-dbm-hz DBM/Hz\n  --oscillator ID --target-snr DB-Hz --rate HZ --carrier HZ --dsp-workspace 25%|50%|75%\n  --auto-pattern or --pattern MODE; --bw is an alias for --rate\n  --target-snr sets preview, short and long targets; --short-target-snr / --long-target-snr override them\nSmoke options: --smoke-dir PATH --smoke-hold SECONDS --smoke-timeout SECONDS --smoke-view NAME --smoke-scroll 0..1\n";return 0;}
             if(arg=="--version") {std::cout<<"Data Pump "<<DATAPUMP_VERSION<<" GUI backend: "<<backend<<'\n';return 0;}
             if(arg=="--self-check") {gui_self_check();return 0;}
             if(arg=="--color")launch.color=true;
@@ -325,8 +366,14 @@ int gui_main(int argc,char** argv,const char* backend,const std::function<int(La
                 const auto page=std::find_if(ui::pages().begin(),ui::pages().end(),[&](const auto& p){return name==p.name;});
                 if(page==ui::pages().end())throw Error("Unknown smoke view");
                 launch.page=page->id;
-            } else throw Error("Unknown or incomplete option: "+arg);
+            } else {
+                if(!arg.starts_with("--"))throw Error("Unknown or incomplete option: "+arg);
+                settings_arguments.push_back(arg);
+                if(arg!="--auto-pattern"&&arg.find('=')==std::string::npos&&i+1<argc)
+                    settings_arguments.emplace_back(argv[++i]);
+            }
         }
+        if(!settings_arguments.empty())launch.settings=launch_command::parse_arguments(settings_arguments);
         return run(launch);
     }catch(const std::exception& error){std::cerr<<"Data Pump "<<backend<<": "<<error.what()<<'\n';return 1;}
 }

@@ -116,7 +116,7 @@ void stale_generations() {
     check(!app.overlay(),"Scoped command dispatch rejected the current overlay generation");
 }
 void keyboard_and_layers() {
-    Application app({.simulation=true});app.show_overlay(test::overlay_fixture());
+    Application app({.simulation=true});app.toggle(ui::Field::developer_mode,true);app.show_overlay(test::overlay_fixture());
     const auto initial=app.overlay();auto layers=app.overlay_layers();
     check(!layers.show_background&&!layers.enable_background&&layers.show_overlay&&layers.enable_overlay&&layers.present_services,
           "Default overlay layering did not isolate the composed view");

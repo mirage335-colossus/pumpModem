@@ -26,6 +26,10 @@ intervals and per-bit pending reception. Each bit may cost hours or longer;
 neither added framing nor waiting for a whole message is harmless. See the
 [message behavior contract and regression checks](docs/development.md).
 
+A separate [fast-mode design and code-path audit](docs/fast-mode-plan.md) proposes
+APSK file transfer with fixed 256-byte physical intervals and an independent GUI
+mode. It is a plan, not an implemented feature; regular-mode behavior is unchanged.
+
 Encrypted pattern chips use circular I/Q noise with private amplitude and phase,
 removing the fixed squared-carrier signature of the previous +/-1 mapping.
 The receiver still acquires from pattern evidence alone, with template-energy
@@ -86,14 +90,23 @@ Marker recognition uses bounded fixed-cadence searches and a conservative `2^-84
 random-input evidence budget, independently of authentication. Unknown slots add
 no marker confidence. See the [fixed stream protocol](docs/protocol.md).
 
-The desktop has **Console**, **Modem flow**, **Transmission layout**, and
-**Compression / raw bits** tabs.
+The desktop has **Console**, **Link planner**, **Compression / raw bits**,
+**Modem flow**, and **Transmission layout** tabs, in that order. **Developer mode**,
+next to **Clear received**, starts unchecked. Check it to show the last three
+tabs and the Pattern / tone, Error correction, DSP workspace, RX targets,
+Pattern steps, Callsign, Grid and Repeatable controls. Hidden controls keep their
+positions and current values, including command-line overrides. Link planner
+compares bit duration, modeled one-bit reception and receiver CPU pace at the
+selected power, path loss, noise and oscillator settings.
 Beside **Simulation**, the desktop shows a modeled whole-message receive
 probability and estimated computation times for a fixed **Intel Core i9-13900H**
 and **RTX 4090 Laptop GPU** reference. No local benchmark runs. The GPU figure is
 a projection; simulation currently executes on the CPU. These rough estimates
 update with the draft and settings. A simulated carrier outside the receiver's
-frequency search shows an explanation instead of a numeric probability; see the
+frequency search shows an explanation instead of a numeric probability.
+Supported long-pattern estimates include the local differential detector and
+report Monte Carlo sampling uncertainty. Geometries outside the supported model
+range show a coverage reason instead of a percentage; see the
 [model and its assumptions](docs/simulation-estimates.md).
 The **LPI relative observation** advisory compares an unkeyed energy detector's
 total observation with the receiver's one-bit design reference: N:1 means N
@@ -163,10 +176,15 @@ Changing Rate selects its default carrier: `1.5 kHz` for `3.6 kHz`, otherwise
 `max(1500, 0.75 × rate)` Hz. The Carrier dropdown offers only the current rate's
 default carrier; manual frequency entry remains available.
 The **RX targets (dB-Hz)** comma-list starts at `32, 55`. Changing either TX SNR to
-a valid value replaces the RX list with both targets (deduplicated); the RX
+a valid value replaces the RX list with both effective targets (deduplicated); the RX
 list can then be edited independently. Search varies this list while holding
 the selected rate, carrier, and pattern/tone mode fixed. Invalid RX input resets
 the entire list to `32`.
+In automatic modes, all GUI target entries check Clock/RAM fit and may adjust
+to a nearby usable value, preferring weaker targets. Fixed modes retain exact
+entries. Typing preserves the edit buffer; Enter or a preset displays the exact
+accepted value. The independent Planner target changes only its preview until
+explicitly applied. See [Link planner](docs/link-planner.md).
 
 Beside the gross bitrate, diagnostics show the **[Shannon-Hartley limit](https://disalw3.epfl.ch/teaching/signals_instruments_systems/ay_2025-26/lecture/SIS_25-26_W07_lecture.pdf#page=33)** for the
 selected TX target and nominal bandwidth. This is ideal Gaussian-noise channel
@@ -527,6 +545,12 @@ For weak-signal operation, see [integration, clock search and practical link
 budgets](docs/weak-signal.md). Rate is a bandwidth parameter, not payload bits/s.
 Long pattern searches include carrier and sample-clock alternatives; extra
 integration is useful only while their finite coverage and phase coherence hold.
+For sufficiently long patterns, an additional detector combines soft phase
+relationships between local windows, defaulting to 100 seconds rounded to at
+least 16 whole chips and requiring 256 complete windows. It still admits only
+complete payload symbols and preserves the exact raw/status wire bits.
+See [local differential evidence](docs/pattern-constellation.md#local-differential-evidence)
+for its bounded statistic and compute limitations.
 
 Hardware sample rates do not set the modem's bandwidth or symbol rate. Audio
 endpoints negotiate a supported clock and use a bounded band-limited converter

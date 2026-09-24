@@ -5,6 +5,10 @@ running the receiver, or benchmarking the computer. It combines exact wire
 size and airtime with the existing fixed-laptop compute model and a bounded
 Monte Carlo experiment on matched-correlation statistics. Work depends on the
 requested trial count, not the number of audio samples or coherent segments.
+The production receiver keeps its coherent match, four-section fit, and an
+additional local differential detector for sufficiently long patterns. The
+experiments below describe separate reference detectors with user-chosen
+segment lengths; they are not measurements of those implementations.
 
 The [1.2 kHz case study](1200hz-weak-link-planning.md) compares the requested
 3 dBm/-170 dB mode with -200 dB and -230 dB, including a conditional day-long
@@ -62,6 +66,77 @@ diffusion tenfold to 0.05 degrees/sqrt(second) raises that uninterrupted model
 to 99.65% (99.51–99.75%). This comparison shows why oscillator stability and
 tracking matter at least as much as making the configured bandwidth smaller.
 
+## Relative phase across shorter sections
+
+Loss of whole-symbol coherence does not erase every useful phase transition.
+A differential receiver can compare neighboring matched sections; a receiver
+that models phase drift can use relationships between several nearby sections.
+Neither approach requires a reliable decision on each individual transition.
+These are different statistics from both whole-symbol correlation and a sum
+of section energies. The latter discards relationships
+between section phases, so its results do not bound a differential receiver.
+See the primary study of
+[differential combining for weak GPS acquisition](https://www.sciencedirect.com/science/article/abs/pii/S0165168406002696).
+
+For illustration, the hobby-GPSDO phase model (0.5 degrees/√second) produces
+5 degrees RMS random phase change over 100 seconds. That is small relative to
+a 180-degree reversal, even though absolute phase can wander greatly over days.
+At actual C/N0 of −47 dB-Hz, however, a 100-second section has only −27 dB
+Es/N0. Accumulation must account for that noise, residual carrier error, timing,
+competing patterns and the search's false-alarm budget. Clock stability alone
+does not give a reception probability. GPS discipline improves long-term time
+and frequency accuracy; short-interval stability also depends on the local
+oscillator and control loop ([NIST](https://www.nist.gov/publications/measurement-transient-environmental-effects-gps-disciplined-clocks)).
+
+The production receiver retains that whole-symbol match and also fits four
+fixed quarters for patterns lasting at least 16 seconds with at least 16
+complete chips per quarter. Each quarter has its own unknown amplitude and
+phase. The receiver combines explained energy across the complete bit while
+excluding the strongest quarter, requiring support beyond an isolated burst.
+It accounts for the extra fit coefficients and pays an `ln(2)` evidence penalty for choosing
+between the coherent and section scores. This tolerates channel changes between
+quarters while retaining the known transitions inside each one. The waveform,
+wire count and full-symbol completion rule are unchanged. See the
+[score and compute model](simulation-estimates.md#probability-model).
+Compact receivers keep the coherent path if the added section state cannot fit
+their RAM allowance.
+
+Four sections still require useful coherence within each quarter. With the
+0.5-degree/√second model, a quarter of a 37-day bit has roughly 447 degrees RMS
+phase movement. The additional differential branch instead obtains local soft
+matches in 100-second windows, rounded upward to whole chips with at least
+16 chips per window. It is eligible only with at least 256 complete windows.
+It combines disjoint neighboring products across the complete symbol, charges
+its phase-direction search and detector choice, and removes an isolated
+strongest-quarter contribution. No local window requires a hard decision.
+The implementation and evidence assumptions are described in
+[local differential evidence](pattern-constellation.md#local-differential-evidence).
+The local `PatternSearch.differential_window_seconds` setting can change that
+duration; zero disables only the differential branch.
+
+Local products still need enough integrated signal and useful phase
+relationships. They do not make 100 seconds universally optimal or establish
+a particular hours-per-bit sensitivity. Arbitrary phase/clock trajectories
+remain outside the finite search. The live constellation shows phase
+differences and current amplitude for display; its plotted values are not
+decoder inputs.
+
+Power changes can reduce a coherent match without the vector cancellation that
+phase changes can cause. The new separate section gains accommodate some of
+these variations, but neither detector permits arbitrary independent gain and
+phase at every chip: that would absorb the transitions distinguishing the bits.
+Numeric **RX estimate** values for four-quarter patterns below differential
+eligibility model the coherent and quarter branches,
+including correlated noise, finite pattern correlation, the strongest-quarter
+removal and detector-choice penalty. The coherent-only comparison remains in
+expanded details. These bounded statistical trials do not reproduce the full
+adaptive receiver search; a limited fallback is labeled **RX reference**.
+For supported differential-eligible patterns, the estimator jointly samples
+local soft products and the two older scores, including shared noise, guards
+and choice penalties. Unsupported local geometry retains an explicit coverage
+reason. Trial counts and sampling intervals do not include model error; the
+reference experiment's percentages are still separate from this receiver model.
+
 ## Run an analysis
 
 ```sh
@@ -87,7 +162,9 @@ preset does not establish that the receiver can decode it.
 The GUI's **Oscillator model** dropdown and CLI `--oscillator` option select
 free-running crystal, hobbyist GPSDO/XO without an oven, GPSDO/TCXO without an
 oven, or GPSDO/OCXO impairments. They change both the sampled channel and the
-estimates. See [oscillator models](oscillator-models.md) for the illustrative
+estimates. All three GPSDO choices share the 0.0001 ppm locked-link frequency
+assumption; their phase-diffusion scenarios differ. The channel does not model
+GPS phase corrections. See [oscillator models](oscillator-models.md) for the illustrative
 values and the distinction between GPS frequency accuracy and phase stability.
 An individual `--clock-error-ppm` or `--phase-noise` value overrides that part
 of the selected model. The examples and table above use the unchanged
@@ -117,12 +194,21 @@ produce identical draws across compiler libraries.
   `tracking_seconds` is the modeled serial continuation component included in
   both CPU/GPU totals, and `tracking_symbol_windows` includes fully scored
   absence. Competing/noise tracks and reacquisition are not upper-bounded.
+  Below differential eligibility, four-quarter patterns use the existing
+  combined model where supported. Differential-eligible patterns use the joint
+  local model within its documented coverage. The JSON reports detector status,
+  actual trial count, sampling intervals, carrier-search approximation and any
+  coverage limit; compute includes the many-window scoring work. Compact
+  differential multi-bit tracking currently has no validated draft probability;
+  its independently modeled first-bit estimate remains available.
 - `ideal_coherent` assumes perfect phase stability and zero residual carrier
   error across the whole symbol.
 - `coherent_phase_model` applies the selected phase diffusion and residual
   frequency over the whole symbol.
 - `segmented_phase_model` accumulates energy from shorter coherent segments.
-  This is a proposed detector experiment, not a newly implemented receive path.
+  Its arbitrary segment count, prescribed template correlation and statistical
+  threshold remain a separate experiment, not a simulation of the production
+  four-section or differential detector.
 
 The experiments condition on matched symbol timing and sample-clock rate.
 Their duration is the nominal transmitted symbol duration.
@@ -210,7 +296,9 @@ waveform-dependent Gram matrices and the modem's adaptive decisions.
 [ESA's acquisition discussion](https://gssc.esa.int/navipedia/index.php/Baseband_Processing)
 describes the coherent/noncoherent integration tradeoff and squaring loss.
 
-The next production step would require segmented acquisition and accumulation
-across candidate clock/drift trajectories, followed by sampled receiver and
-noise-only validation. This planning command does not change transmission,
-symbol admission, pending-bit progress or physical completion.
+The implemented four-section and local differential fits have distinct
+bounded scores and resource requirements. Adaptive sections and explicit
+clock/drift trajectories need their own scoring, resource limits and sampled
+signal/noise validation. This planning command
+does not change transmission, symbol admission, pending-bit progress or
+physical completion.
