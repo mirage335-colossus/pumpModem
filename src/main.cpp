@@ -1,8 +1,13 @@
 #include "datapump/audio.hpp"
+#include "datapump/fast/cli.hpp"
 #include "datapump/channel.hpp"
+#include "datapump/correlation_experiment.hpp"
 #include <array>
 #include "datapump/crypto.hpp"
 #include "datapump/modem.hpp"
+#include "datapump/pattern_search.hpp"
+#include "datapump/simulation_estimate.hpp"
+#include "datapump/lpi_estimate.hpp"
 #include "datapump/stream_codec.hpp"
 #include "datapump/qr.hpp"
 #include "datapump/runtime.hpp"
@@ -22,6 +27,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <numbers>
 #include <optional>
 #include <set>
 #include <sstream>
@@ -43,7 +49,8 @@ const char* usage="Data Pump " DATAPUMP_VERSION R"HELP( — civilian audio text 
 Usage: pump COMMAND [OPTIONS]
   simulate     Free-running sampled channel and blind receiver acquisition
   listen       Continuous live receiver (or noise/loopback with --simulation)
-  estimate     Calculate exact message airtime without creating a waveform
+  estimate     Exact airtime and relative LPI model (one-bit RX estimate)
+  analyze-link Bounded statistical link analysis as JSON; no PCM or decoder
   tx           Encode text/file to WAV (--output) or live audio (--device)
   rx           Decode a WAV (--input) or record live audio (--device --seconds)
   keygen       Create an owner-only 128 MiB symmetric keyfile (--output)
@@ -52,6 +59,10 @@ Usage: pump COMMAND [OPTIONS]
   status-tx    Transmit exact few-bit callsign to WAV, without stream overhead
   status-rx    Discover raw pattern bits in WAV, then compare --bits; no MAC
   qr           Generate optical transfer QR Level L (--format svg|pbm)
+  fast-info    Separate fast APSK profiles and fixed-interval geometry
+  fast-tx      Stream encrypted files to WAV or audio (--help for fast options)
+  fast-rx      Receive an encrypted fast WAV; physical absence required
+  fast-listen  Receive an encrypted fast stream from live audio
 
 Input/output:
   --text TEXT           Text to send (otherwise --input FILE or - for stdin)
@@ -64,7 +75,8 @@ Input/output:
   --callsign TEXT --grid TEXT --repeatable
 
 Modem:
-  --bw HZ               Nominal bandwidth, default1200 (also 1.2kHz etc.)
+  --bw HZ               Nominal bandwidth, 0.01..30000000 Hz; default1200
+                        Decimal Hz and units such as 1.2kHz are accepted
   --sample-rate HZ      Internal DSP clock, 64..120000000; default max(6000,4*bw)
   --carrier HZ          Default max(1500,0.75*bw); explicit overrides stay available
   --spreading N         Manual 4-bit APSK chips/symbol, 1..16384 (disables auto)
@@ -85,6 +97,10 @@ Modem:
   --pad PATH            Required external >1GiB pad when bound to keyfile
   --time SECONDS        Local epoch; default current UNIX second
   --search-seconds N    RX epoch trials ±N seconds, nearest first; default6
+  --recovery-seconds N  Post-end hard-bit recovery budget, default300; 0 disables
+  --recovery-threads N  Recovery workers, default0 uses available CPU cores
+  --recovery-bits N     Separate retained hard-bit slots, default65536
+  --recovery-errors N   Reserve RS capacity for additional byte errors, default2
   --progress            Emit timing-search progress to stderr
 
 Audio/simulation:
@@ -96,9 +112,25 @@ Audio/simulation:
   --snr DB              Simulator measured signal/noise power ratio; default20
   --simulation PRESET   e.g. "3dBm -120dB": TX power and channel attenuation
   --seed N --delay-samples N --frequency-offset HZ
-  --clock-error-ppm N   Relative crystal error; default100 (0 for ideal clock)
-  --phase-noise N       Phase diffusion, degrees/sqrt(second); default0.5
+  --oscillator MODEL    crystal (default), gpsdo-xo, gpsdo-tcxo, gpsdo-ocxo
+                        Illustrative residual clock/phase models; no hardware control
+  --clock-error-ppm N   Override model's relative clock error; crystal default100
+  --phase-noise N       Override diffusion, degrees/sqrt(second); crystal default0.5
   --receiver-time N     Independent receive epoch for simulate (default --time)
+
+Statistical link analysis (analyze-link only):
+  --tx-dbm N --attenuation-db N  Custom link; attenuation is nonpositive
+                        Both are required unless --simulation selects a preset
+  --noise-figure-db N   Receiver noise figure; default10 dB
+  --symbol-seconds N    Override analyzed symbol duration; otherwise use TX plan
+  --coherent-seconds N  Maximum coherent segment; default3600 seconds
+  --trials N           Monte Carlo trials per reference model; 1..1000000, default10000
+  --hypotheses N        Total searched alternatives, including both bits; default1000000
+  --false-alarm P       Global reference false-alarm budget; default0.000001
+  --residual-frequency-hz N  Error after hypothetical acquisition; default0
+  --template-correlation N   Assumed normalized template correlation; default0
+                        Uses --text, --input or exact --bits; never decodes them
+                        Without --receive-targets, current RX is assumed to match TX
 
 Very slow status:
   --bits 010            Exact known callsign bits (1..4096), no MAC or FEC
@@ -111,6 +143,7 @@ Examples:
   pump rx --input transfer.wav --save received.png
   pump tx --text "hello" --device default
   pump rx --device default --seconds 30 --json
+  pump analyze-link --text a --bw 100 --target-snr -36 --tx-dbm 3 --attenuation-db -200
 GUI: datapump-gui
 )HELP";
 
@@ -123,7 +156,10 @@ public:
         const std::set<std::string> valued={"text","input","output","save","kind","filename","callsign","grid",
             "bw","sample-rate","carrier","spreading","fec","memory-mb","keyfile","pad","time","search-seconds",
             "device","device-type","seconds","tx-delay","snr","seed","delay-samples","frequency-offset","bits","format",
-            "target-snr","receive-targets","pattern","simulation","key-name","key-names","cache-mb","dsp-mb","clock-error-ppm","phase-noise","receiver-time"};
+            "target-snr","receive-targets","pattern","simulation","oscillator","key-name","key-names","cache-mb","dsp-mb","clock-error-ppm","phase-noise","receiver-time",
+            "recovery-seconds","recovery-threads","recovery-bits","recovery-errors",
+            "tx-dbm","attenuation-db","noise-figure-db","symbol-seconds","coherent-seconds",
+            "trials","hypotheses","false-alarm","residual-frequency-hz","template-correlation"};
         for(int i=1;i<argc;++i) {
             std::string arg=argv[i];
             if(arg=="--tx" || arg=="--rx") {if(!command.empty()) throw Error("choose one command");command=arg.substr(2);continue;}
@@ -176,13 +212,33 @@ public:
         if(command!="rx") reject({"save"},"is only valid for rx");
         if(command!="tx" && command!="rx" && command!="status-tx" && command!="listen") reject({"device"},"is only valid for live audio commands");
         if(command!="keygen") reject({"key-names"},"is only valid for keygen");
-        if(command!="simulate" && command!="listen") reject({"simulation"},"is only valid for simulate/listen");
-        if(command!="simulate" && command!="listen") reject({"clock-error-ppm","phase-noise"},"is only valid for simulate/listen");
+        if(command!="simulate" && command!="listen" && command!="analyze-link") reject({"simulation"},"is only valid for simulate/listen/analyze-link");
+        if(command!="simulate" && command!="listen" && command!="analyze-link") reject({"oscillator","clock-error-ppm","phase-noise"},"is only valid for simulate/listen/analyze-link");
+        if(command!="analyze-link")
+            reject({"tx-dbm","attenuation-db","noise-figure-db","symbol-seconds","coherent-seconds","trials",
+                "hypotheses","false-alarm","residual-frequency-hz","template-correlation"},"is only valid for analyze-link");
+        if(command=="analyze-link") {
+            reject({"snr","output","tx-delay","seconds","format"},"is not an analyze-link option");
+            if(!has("bits") && !has("text") && !has("input"))
+                throw Error("analyze-link requires --text, --input or --bits");
+            if(has("bits"))reject({"text","input","kind","filename","callsign","grid","repeatable"},"cannot accompany exact --bits");
+            if(has("simulation"))reject({"tx-dbm","attenuation-db"},"cannot accompany a simulation preset");
+            else if(!has("tx-dbm") || !has("attenuation-db"))
+                throw Error("analyze-link requires both --tx-dbm and --attenuation-db, or --simulation");
+        }
         if(command!="simulate") reject({"receiver-time"},"is only valid for simulate");
+        if(command!="rx" && command!="simulate" && command!="listen")
+            reject({"recovery-seconds","recovery-threads","recovery-bits","recovery-errors"},"is only valid for rx/simulate/listen");
         if(command=="listen") reject({"snr","frequency-offset","delay-samples","output","tx-delay"},"is not a listen option; choose a simulation preset for its continuous channel");
         if(command=="tx" && has("output") && has("device")) throw Error("choose one TX destination: --output or --device");
     }
 };
+tuning::OscillatorPreset oscillator_config(const Args& a) {
+    auto result=tuning::parse_oscillator_preset(a.get("oscillator","crystal"));
+    result.clock_error_ppm=a.number("clock-error-ppm",result.clock_error_ppm);
+    result.phase_noise_degrees_per_sqrt_second=a.number("phase-noise",result.phase_noise_degrees_per_sqrt_second);
+    return result;
+}
 bool stdout_terminal() {
 #ifdef _WIN32
     return _isatty(_fileno(stdout))!=0;
@@ -286,6 +342,19 @@ transfer::Options transfer_options(const Args& a,const modem::Config& c,const st
     const auto window=a.integer("search-seconds",6);
     if(window>32768) throw Error("clock drift search exceeds32768 seconds");
     options.search_seconds=static_cast<unsigned>(window);
+    const auto recovery_seconds=a.integer("recovery-seconds",300);
+    const auto recovery_threads=a.integer("recovery-threads",0);
+    const auto recovery_bits=a.integer("recovery-bits",65536);
+    const auto recovery_errors=a.integer("recovery-errors",2);
+    if(recovery_seconds>86400)throw Error("recovery-seconds must be 0..86400");
+    if(recovery_threads>1024)throw Error("recovery-threads must be 0..1024");
+    if(recovery_bits<1024 || recovery_bits>1048576)throw Error("recovery-bits must be 1024..1048576");
+    if(recovery_errors>24)throw Error("recovery-errors must be 0..24");
+    options.recovery_options.enabled=recovery_seconds!=0;
+    options.recovery_options.budget=std::chrono::milliseconds(recovery_seconds*1000);
+    options.recovery_options.workers=static_cast<unsigned>(recovery_threads);
+    options.recovery_options.retained_bits=static_cast<std::size_t>(recovery_bits);
+    options.recovery_options.extra_errors=static_cast<unsigned>(recovery_errors);
     if(a.has("receive-targets") && !automatic_tuning(a))throw Error("receive-targets requires automatic tuning");
     options.automatic_receive_profiles=automatic_tuning(a);
     options.receive_pattern_mode=tuning::parse_pattern_mode(a.get("pattern",k?"auto-keystream":"auto-pattern"));
@@ -369,8 +438,40 @@ void report_fec_region(const FecRegionStats& stats) {
         <<",\"missing_bits\":"<<stats.missing_bits<<",\"corrected_bytes\":"<<stats.corrected_bytes
         <<",\"erased_bytes\":"<<stats.erased_bytes<<",\"repaired_bytes\":"<<stats.repaired_bytes<<'}';
 }
+void report_signal_identity(const live::SignalUpdate& signal) {
+    std::cout<<",\"signal_id\":"<<signal.id<<",\"revision\":"<<signal.revision<<",\"superseded_ids\":[";
+    for(std::size_t i=0;i<signal.superseded_ids.size();++i)
+        std::cout<<(i?",":"")<<signal.superseded_ids[i];
+    std::cout<<']';
+}
+std::string_view recovery_state_name(transfer::RecoveryState state) {
+    switch(state) {
+    case transfer::RecoveryState::none:return "none";
+    case transfer::RecoveryState::ready:return "ready";
+    case transfer::RecoveryState::running:return "running";
+    case transfer::RecoveryState::incomplete:return "incomplete";
+    case transfer::RecoveryState::recovered:return "recovered";
+    case transfer::RecoveryState::exhausted:return "exhausted";
+    case transfer::RecoveryState::ambiguous:return "ambiguous";
+    case transfer::RecoveryState::cancelled:return "cancelled";
+    case transfer::RecoveryState::unavailable:return "unavailable";
+    }
+    return "unavailable";
+}
+void report_recovery_json(const transfer::RecoveryProgress& recovery) {
+    std::cout<<",\"recovery\":{\"state\":\""<<recovery_state_name(recovery.state)
+        <<"\",\"attempts\":"<<recovery.attempts<<",\"total\":"<<recovery.total
+        <<",\"elapsed_ms\":"<<recovery.elapsed.count()<<'}';
+}
+void report_recovery_status(bool complete,const transfer::RecoveryProgress& recovery) {
+    std::cerr<<"Reception "<<(complete?"complete":"incomplete")<<"; recovery "
+        <<recovery_state_name(recovery.state)<<" ("<<recovery.attempts<<'/'<<recovery.total
+        <<" attempts, "<<recovery.elapsed.count()<<" ms).\n";
+    if(recovery.state==transfer::RecoveryState::incomplete || recovery.state==transfer::RecoveryState::cancelled)
+        std::cerr<<"Recovery search is unfinished; no unique recovered source has been established.\n";
+}
 void report(const Args& a,const StreamContent& stream,const modem::Diagnostics& d={},std::uint64_t timestamp=0,
-            bool content_validated=true,bool stream_complete=false,std::span<const std::uint8_t> raw_bits={},std::size_t missing_symbols=0,std::size_t observed_bits=0,std::string_view error={},bool short_text_decoded=false) {
+            bool content_validated=true,bool stream_complete=false,std::span<const std::uint8_t> raw_bits={},std::size_t missing_symbols=0,std::size_t observed_bits=0,std::string_view error={},bool short_text_decoded=false,const live::SignalUpdate* signal=nullptr,const transfer::RecoveryProgress* recovery=nullptr) {
     const auto& m=stream.message;
     if(a.has("save")) {
         if(!stream_complete || !(content_validated || short_text_decoded))
@@ -405,7 +506,10 @@ void report(const Args& a,const StreamContent& stream,const modem::Diagnostics& 
         for(std::size_t i=0;i<d.waveform.size();++i) std::cout<<(i?",":"")<<d.waveform[i];
         std::cout<<"],\"constellation\":[";
         for(std::size_t i=0;i<d.constellation.size();++i) std::cout<<(i?",":"")<<'['<<d.constellation[i].real()<<','<<d.constellation[i].imag()<<']';
-        std::cout<<"]}}\n";
+        std::cout<<"]}";
+        if(recovery)report_recovery_json(*recovery);
+        if(signal)report_signal_identity(*signal);
+        std::cout<<"}\n";
     } else if(!a.has("save")) {
         if(!content_validated && m.data.empty() && !raw_bits.empty()) {
             for(auto bit:raw_bits)std::cout<<(bit?'1':'0');
@@ -422,9 +526,11 @@ void report(const Args& a,const StreamContent& stream,const modem::Diagnostics& 
     }
     if(missing_symbols && !a.has("json"))
         std::cerr<<"Raw bits include "<<missing_symbols<<(missing_symbols==1?" zero placeholder for a missing symbol.\n":" zero placeholders for missing symbols.\n");
+    if(recovery && recovery->state!=transfer::RecoveryState::none && !a.has("json"))
+        report_recovery_status(stream_complete,*recovery);
 }
-void report_received(const Args& a,const transfer::Received& received) {
-    report(a,received.content,received.diagnostics,received.timestamp,received.content_validated,received.stream_complete,received.raw_bits,received.missing_symbols,received.observed_bits,received.error,received.short_text_decoded);
+void report_received(const Args& a,const transfer::Received& received,const live::SignalUpdate* signal=nullptr) {
+    report(a,received.content,received.diagnostics,received.timestamp,received.content_validated,received.stream_complete,received.raw_bits,received.missing_symbols,received.observed_bits,received.error,received.short_text_decoded,signal,&received.recovery_progress);
 }
 Bytes status_bits(const Args& a,const std::optional<Crypto>& k,std::uint64_t time) {
     auto input=a.get("bits");if(input.empty() || input.size()>4096) throw Error("status requires1..4096 known binary --bits");
@@ -432,6 +538,217 @@ Bytes status_bits(const Args& a,const std::optional<Crypto>& k,std::uint64_t tim
     for(char c:input) {if(c!='0' && c!='1')throw Error("status bits must contain only0 and1");bits.push_back(static_cast<std::uint8_t>(c-'0'));}
     if(k) {auto stream=k->stream(StreamPurpose::Data,time,0,(bits.size()+7)/8);for(std::size_t i=0;i<bits.size();++i)bits[i]^=static_cast<std::uint8_t>((stream[i/8]>>(7-i%8))&1);}
     return bits;
+}
+void json_number(long double value) {
+    if(std::isfinite(value))std::cout<<value;else std::cout<<"null";
+}
+void report_lpi(const transfer::Estimate& transmission,const transfer::Options& options) {
+    const auto model=lpi::estimate(transmission,options);
+    const bool available=model.status==lpi::Status::available;
+    const char* status=available?"available":
+        model.status==lpi::Status::outside_weak_signal_model?"outside_weak_signal_model":"numeric_limit";
+    std::cout<<"{\"model\":\"relative_weak_signal_radiometer\",\"status\":\""<<status
+        <<"\",\"cn0_basis\":\"receiver_one_symbol_reference\""
+        <<",\"hypothetical_encryption\":"<<(model.hypothetical_encryption?"true":"false")
+        <<",\"warning\":";
+    if(model.hypothetical_encryption)
+        std::cout<<"\"Encryption is off: hypothetical private patterns at the current timing; actual public or tone transmission may be detected sooner.\"";
+    else std::cout<<"null";
+    std::cout<<",\"burst_exposure_basis\":\"current_draft_airtime_at_receiver_reference\""
+        <<",\"equal_received_cn0\":true,\"known_band_window_and_noise\":true"
+        <<",\"receiver_reference_symbol_snr_db\":"<<lpi::receiver_reference_symbol_snr_db
+        <<",\"receiver_reference_is_calibrated\":false"
+        <<",\"safe_traffic_limit\":false,\"detection_probability\":"<<lpi::detection_probability
+        <<",\"false_alarm_probability_per_window\":"<<lpi::false_alarm_probability
+        <<",\"reference_cn0_db_hz\":";json_number(model.reference_cn0_db_hz);
+    std::cout<<",\"observation_bandwidth_hz\":";json_number(model.observation_bandwidth_hz);
+    std::cout<<",\"in_band_snr_db\":";json_number(model.in_band_snr_db);
+    std::cout<<",\"noise_rise_db\":";json_number(model.noise_rise_db);
+    std::cout<<",\"symbol_seconds\":";json_number(model.symbol_seconds);
+    std::cout<<",\"detection_seconds\":";
+    if(available)json_number(model.detection_seconds);else std::cout<<"null";
+    std::cout<<",\"equivalent_wire_symbols\":";
+    if(available)json_number(model.equivalent_symbols);else std::cout<<"null";
+    std::cout<<",\"observation_ratio\":";
+    if(available)json_number(model.equivalent_symbols);else std::cout<<"null";
+    std::cout<<",\"additional_wire_symbols\":";
+    if(available)json_number(model.additional_symbols);else std::cout<<"null";
+    std::cout<<",\"burst_exposure_ratio\":";
+    if(available)json_number(model.burst_exposure_ratio);else std::cout<<"null";
+    std::cout<<'}';
+}
+void report_correlation_experiment(const simulation::CorrelationExperimentResult& result,double chip_seconds) {
+    std::cout<<"{\"segments\":"<<result.segments<<",\"segment_seconds\":";json_number(result.segment_seconds);
+    std::cout<<",\"expected_coherence\":";json_number(result.expected_coherence);
+    std::cout<<",\"expected_signal_energy\":";json_number(result.expected_signal_energy);
+    std::cout<<",\"noncentrality\":";json_number(2.L*result.expected_signal_energy);
+    std::cout<<",\"threshold\":";json_number(result.threshold);
+    std::cout<<",\"template_correlation\":";json_number(result.template_correlation);
+    std::cout<<",\"chips_per_segment\":";json_number(result.segment_seconds/chip_seconds);
+    std::cout<<",\"trials\":"<<result.trials<<",\"detected_correct\":"<<result.detected_correct
+        <<",\"noise_pair_above\":"<<result.noise_pair_above<<",\"correct_detection_probability\":";
+    json_number(result.correct_probability);
+    std::cout<<",\"correct_detection_probability_low\":";json_number(result.correct_probability_low);
+    std::cout<<",\"correct_detection_probability_high\":";json_number(result.correct_probability_high);
+    std::cout<<",\"signal_statistic_mean\":";json_number(result.signal_statistic_mean);
+    std::cout<<",\"signal_statistic_variance\":";json_number(result.signal_statistic_variance);
+    std::cout<<",\"phase_mean_energy_approximation\":"<<(result.phase_mean_energy_approximation?"true":"false")<<'}';
+}
+void analyze_link(const Args& a,transfer::Options options) {
+    if(a.has("symbol-seconds")) {
+        options.modem.integration_seconds=a.number("symbol-seconds",0);
+        if(options.modem.integration_seconds<=0)throw Error("symbol-seconds must be positive");
+        modem::validate(options.modem);
+    }
+    const bool matching_profile=!a.has("receive-targets");
+    if(matching_profile)options.automatic_receive_profiles=false;
+    const auto& c=options.modem;
+    auto preset=a.has("simulation")?tuning::parse_simulation_preset(a.get("simulation")):
+        tuning::SimulationPreset{"custom",true,a.number("tx-dbm",0),a.number("attenuation-db",0)};
+    const auto noise_figure=a.number("noise-figure-db",10);
+    const auto link=tuning::link_budget(preset,c.bandwidth_hz,c.sample_rate,noise_figure);
+    modem::ChannelConfig channel;
+    channel.snr_db=link.sample_snr_db;channel.seed=a.integer("seed",1);
+    channel.delay_samples=a.integer("delay-samples",137);
+    channel.frequency_offset_hz=a.number("frequency-offset",0);
+    const auto oscillator=oscillator_config(a);
+    channel.clock_error_ppm=oscillator.clock_error_ppm;
+    channel.phase_noise_degrees_per_sqrt_second=oscillator.phase_noise_degrees_per_sqrt_second;
+    modem::validate_channel(c,channel);
+    const auto trials=a.integer("trials",10000);
+    if(!trials || trials>1000000)throw Error("trials must be 1..1000000");
+    const auto segment_seconds=a.number("coherent-seconds",3600);
+    if(segment_seconds<=0 || segment_seconds>1e18)throw Error("coherent-seconds must be positive and at most 1e18");
+    simulation::CorrelationExperimentParameters experiment;
+    experiment.cn0_db_hz=link.snr_db_hz;
+    experiment.symbol_seconds=static_cast<double>(modem::symbol_sample_count(c))/c.sample_rate;
+    experiment.segment_seconds=experiment.symbol_seconds;
+    experiment.trials=static_cast<std::size_t>(trials);experiment.seed=channel.seed;
+    experiment.search_hypotheses=a.number("hypotheses",1e6);
+    experiment.false_alarm_probability=a.number("false-alarm",1e-6);
+    experiment.template_correlation=a.number("template-correlation",0);
+    experiment.phase_noise_degrees_per_sqrt_second=0;
+    const auto ideal=simulation::correlation_experiment(experiment);
+    experiment.phase_noise_degrees_per_sqrt_second=channel.phase_noise_degrees_per_sqrt_second;
+    experiment.residual_frequency_hz=a.number("residual-frequency-hz",0);
+    const auto coherent=simulation::correlation_experiment(experiment);
+    experiment.segment_seconds=std::min(experiment.symbol_seconds,segment_seconds);
+    const auto segmented=simulation::correlation_experiment(experiment);
+    transfer::Estimate transmission;
+    bool raw=true;
+    if(a.has("bits"))transmission=transfer::estimate_binary(status_bits(a,{},options.timestamp),options);
+    else {
+        const auto outgoing=message(a);raw=transfer::uses_raw_message(outgoing);
+        transmission=transfer::estimate(outgoing,options);
+    }
+    const auto profiles=options.automatic_receive_profiles?tuning::receive_profiles(c,
+        options.receive_targets_db_hz,options.receive_pattern_mode,options.key.has_value()):std::vector<modem::Config>{c};
+    const auto current=simulation::estimate(transmission,options,raw,channel,profiles);
+    const auto geometry=modem::default_pattern_frequency_search(c);
+    const auto phase=static_cast<long double>(channel.phase_noise_degrees_per_sqrt_second)*std::numbers::pi_v<long double>/180;
+    const auto rho=std::pow(10.L,static_cast<long double>(link.snr_db_hz)/10);
+    const auto full_half_width=static_cast<long double>(c.carrier_hz)*modem::default_clock_uncertainty_ppm/1e6L;
+    const auto full_frequency_count=1+2*std::ceil(full_half_width*experiment.symbol_seconds/.25L);
+    std::cout<<std::setprecision(std::numeric_limits<double>::max_digits10)
+        <<"{\"analysis\":\"matched_correlation_reference\",\"production_decoder_run\":false,\"pcm_generated\":false"
+        <<",\"conditional_on_matched_timing_and_clock\":true"
+        <<",\"prescribed_template_correlation_not_measured\":true"
+        <<",\"monte_carlo_intervals\":\"model_only_95_percent_Wilson\""
+        <<",\"oscillator_model\":{\"preset\":\""<<oscillator.id<<"\",\"illustrative\":true,\"overridden\":"
+        <<((a.has("clock-error-ppm")||a.has("phase-noise"))?"true":"false")<<'}'
+        <<",\"receive_profile_assumption\":\""<<(matching_profile?"matching_transmit_profile":"explicit_receive_targets")<<'"'
+        <<",\"link\":{\"transmit_dbm\":";json_number(preset.transmit_dbm);
+    std::cout<<",\"attenuation_db\":";json_number(preset.attenuation_db);
+    std::cout<<",\"noise_figure_db\":";json_number(noise_figure);
+    std::cout<<",\"noise_density_dbm_hz\":";json_number(-174.L+noise_figure);
+    std::cout<<",\"received_power_dbm\":";json_number(link.received_power_dbm);
+    std::cout<<",\"cn0_db_hz\":";json_number(link.snr_db_hz);
+    std::cout<<",\"snr_100hz_db\":";json_number(link.snr_db_hz-20.L);
+    std::cout<<",\"selected_band_snr_db\":";json_number(link.snr_db);
+    std::cout<<",\"ideal_18db_symbol_seconds\":";json_number(std::pow(10.L,(18.L-link.snr_db_hz)/10));
+    // Linear Es/N0 for zero residual carrier error; zero diffusion has no
+    // finite asymptote, represented by JSON null rather than infinity.
+    std::cout<<",\"zero_residual_coherent_energy_asymptote_linear\":";
+    if(phase>0)json_number(4*rho/(phase*phase));else std::cout<<"null";
+    std::cout<<"},\"transmission\":{\"wire_bits\":"<<transmission.wire_bits
+        <<",\"coded_bytes\":"<<transmission.coded_bytes<<",\"content_bytes\":"<<transmission.content_bytes
+        <<",\"raw_wire_path\":"<<(raw?"true":"false")<<",\"waveform_samples\":"<<transmission.waveform_samples
+        <<",\"sample_rate\":"<<c.sample_rate<<",\"bandwidth_hz\":";json_number(c.bandwidth_hz);
+    std::cout<<",\"carrier_hz\":";json_number(c.carrier_hz);
+    std::cout<<",\"tx_target_cn0_db_hz\":";json_number(a.number("target-snr",32));
+    std::cout<<",\"symbol_duration_source\":\""<<(a.has("symbol-seconds")?"explicit_override":"configured_tx_plan")<<'"';
+    std::cout<<",\"symbol_seconds\":";json_number(experiment.symbol_seconds);
+    std::cout<<",\"coded_seconds\":";json_number(transmission.coded_seconds);
+    std::cout<<",\"content_seconds\":";json_number(transmission.content_seconds);
+    std::cout<<",\"waveform_seconds\":";json_number(transmission.total_seconds);
+    std::cout<<",\"simulated_seconds\":";json_number(current.simulated_seconds);
+    std::cout<<"},\"current_receiver\":{\"profile_matches\":"<<(current.profile_matches?"true":"false")
+        <<",\"receiver_profiles\":"<<current.receiver_profiles
+        <<",\"carrier_in_search\":"<<(current.carrier_in_search?"true":"false")
+        <<",\"workspace_supported\":"<<(current.receiver_workspace_supported?"true":"false")
+        <<",\"confidence_available\":"<<(current.confidence_available?"true":"false")
+        <<",\"success_probability\":";
+    if(current.confidence_available)json_number(current.success_probability);else std::cout<<"null";
+    std::cout<<",\"clock_error_ppm\":";json_number(channel.clock_error_ppm);
+    std::cout<<",\"frequency_offset_hz\":";json_number(channel.frequency_offset_hz);
+    std::cout<<",\"actual_carrier_offset_hz\":";json_number(current.carrier_offset_hz);
+    std::cout<<",\"requested_search_half_width_hz\":";json_number(current.carrier_search_half_width_hz);
+    std::cout<<",\"frequency_step_hz\":";json_number(geometry.step_hz);
+    std::cout<<",\"clock_error_for_quarter_chip_ppm\":";
+    json_number(1e6L*.25L*modem::pattern_chip_samples(c)/c.sample_rate/experiment.symbol_seconds);
+    std::cout<<",\"frequency_hypotheses\":"<<geometry.count
+        <<",\"frequency_hypotheses_cap\":"<<modem::maximum_pattern_frequency_hypotheses
+        <<",\"full_200ppm_frequency_hypotheses\":";json_number(full_frequency_count);
+    std::cout<<",\"modeled_symbol_snr_db\":";json_number(current.modeled_symbol_snr_db);
+    std::cout<<",\"coherent_reference_only\":"<<(current.coherent_reference_only?"true":"false")
+        <<",\"drift_model_available\":"<<(current.drift_model_available?"true":"false")
+        <<",\"coherent_success_probability\":";
+    if(current.confidence_available&&current.drift_model_available)json_number(current.coherent_success_probability);
+    else std::cout<<"null";
+    std::cout
+        <<",\"drift_sections\":"<<current.drift_sections<<",\"drift_section_seconds\":";
+    json_number(current.drift_section_seconds);
+    std::cout<<",\"differential_windows\":"<<current.differential_windows<<",\"differential_window_seconds\":";
+    json_number(current.differential_window_seconds);
+    std::cout<<",\"differential_model_available\":"<<(current.differential_model_available?"true":"false")
+        <<",\"differential_added_detection_probability\":";
+    if(current.differential_model_available)json_number(current.differential_added_detection_probability);else std::cout<<"null";
+    std::cout<<",\"probability_trials\":"<<current.probability_trials
+        <<",\"probability_search_approximation\":"<<(current.probability_search_approximation?"true":"false")
+        <<",\"probability_carrier_candidates\":"<<current.probability_carrier_candidates
+        <<",\"probability_model_limit\":\""<<json_escape(current.probability_model_limit)<<"\""
+        <<",\"one_bit_success_probability\":";
+    if(current.one_bit_confidence_available)json_number(current.one_bit_success_probability);else std::cout<<"null";
+    std::cout<<",\"one_bit_confidence_available\":"<<(current.one_bit_confidence_available?"true":"false");
+    std::cout<<",\"one_bit_probability_sampling_low\":";
+    if(current.probability_trials)json_number(current.one_bit_probability_low);else std::cout<<"null";
+    std::cout<<",\"one_bit_probability_sampling_high\":";
+    if(current.probability_trials)json_number(current.one_bit_probability_high);else std::cout<<"null";
+    std::cout<<",\"success_probability_sampling_low\":";
+    if(current.probability_interval_available)json_number(current.success_probability_low);else std::cout<<"null";
+    std::cout<<",\"success_probability_sampling_high\":";
+    if(current.probability_interval_available)json_number(current.success_probability_high);else std::cout<<"null";
+    std::cout<<",\"phase_coherence_loss_db\":";json_number(current.phase_coherence_loss_db);
+    std::cout<<",\"section_phase_coherence_loss_db\":";json_number(current.section_phase_coherence_loss_db);
+    std::cout<<",\"cpu_reference\":\""<<simulation::reference_cpu<<"\",\"gpu_reference\":\""<<simulation::reference_gpu
+        <<"\",\"gpu_hypothetical\":"<<(current.gpu_hypothetical?"true":"false")<<",\"cpu_seconds\":";
+    json_number(current.cpu_seconds);std::cout<<",\"gpu_seconds\":";json_number(current.gpu_seconds);
+    std::cout<<",\"tracking_seconds\":";json_number(current.tracking_seconds);
+    std::cout<<",\"tracking_symbol_windows\":";json_number(current.tracking_symbol_windows);
+    std::cout<<"},\"lpi\":";report_lpi(transmission,options);
+    std::cout<<",\"reference_assumptions\":{\"search_hypotheses\":";json_number(experiment.search_hypotheses);
+    std::cout<<",\"false_alarm_probability\":";json_number(experiment.false_alarm_probability);
+    std::cout<<",\"noise_pair_union_bound\":";
+    json_number(2.L*experiment.false_alarm_probability/experiment.search_hypotheses);
+    std::cout<<",\"residual_frequency_hz\":";json_number(experiment.residual_frequency_hz);
+    std::cout<<",\"phase_noise_degrees_per_sqrt_second\":";json_number(experiment.phase_noise_degrees_per_sqrt_second);
+    std::cout<<",\"requested_coherent_seconds\":";json_number(segment_seconds);
+    std::cout<<",\"template_correlation\":";json_number(experiment.template_correlation);
+    std::cout<<",\"seed\":"<<experiment.seed<<"},\"experiments\":{\"ideal_coherent\":";
+    const auto chip_seconds=static_cast<double>(modem::pattern_chip_samples(c))/c.sample_rate;
+    report_correlation_experiment(ideal,chip_seconds);std::cout<<",\"coherent_phase_model\":";
+    report_correlation_experiment(coherent,chip_seconds);std::cout<<",\"segmented_phase_model\":";
+    report_correlation_experiment(segmented,chip_seconds);std::cout<<"}}\n";
 }
 volatile std::sig_atomic_t interrupted=0;
 void interrupt_handler(int) {interrupted=1;}
@@ -450,8 +767,9 @@ void listen(const Args& a,const transfer::Options& options) {
             options.modem.bandwidth_hz,options.modem.sample_rate).sample_snr_db;
     }
     settings.simulation_seed=a.integer("seed",1);
-    settings.simulation_clock_error_ppm=a.number("clock-error-ppm",100);
-    settings.simulation_phase_noise_degrees_per_sqrt_second=a.number("phase-noise",.5);
+    const auto oscillator=oscillator_config(a);
+    settings.simulation_clock_error_ppm=oscillator.clock_error_ppm;
+    settings.simulation_phase_noise_degrees_per_sqrt_second=oscillator.phase_noise_degrees_per_sqrt_second;
     if(options.modem.spreading_mode!=modem::SpreadingMode::tone && a.has("keyfile") && !a.has("key-name")) {
         for(const auto& entry:load_keyring(a.get("keyfile"),a.has("pad")?
             std::optional<std::filesystem::path>(a.get("pad")):std::nullopt)) settings.receive_keys.push_back(entry.key);
@@ -486,17 +804,44 @@ void listen(const Args& a,const transfer::Options& options) {
             for(const auto& signal:snapshot.signals) if(!signal.binary && !signal.validated && !signal.complete) {
                 const Bytes text(signal.text.begin(),signal.text.end());
                 std::cout<<"{\"event\":\"preview\",\"validated\":false,\"frequency_hz\":"<<signal.frequency_hz
-                    <<",\"data_base64\":\""<<base64_encode(text)<<"\"}\n";
+                    <<",\"data_base64\":\""<<base64_encode(text)<<'"';
+                report_signal_identity(signal);std::cout<<"}\n";
             }
         }
-        if(a.has("json"))for(const auto& signal:snapshot.signals)if(signal.binary) {
-            std::cout<<"{\"event\":\"raw_bits\",\"content_validated\":false,\"authenticated\":false,\"signal_id\":"<<signal.id
-                <<",\"complete\":"<<(signal.complete?"true":"false")<<",\"raw_bits\":\""
-                <<json_escape(signal.text)<<"\",\"raw_bit_count\":"<<signal.received_bits<<",\"pattern_score\":";
-            if(signal.pattern_score && std::isfinite(*signal.pattern_score))std::cout<<*signal.pattern_score;else std::cout<<"null";
-            std::cout<<",\"pattern_score_units\":\"model log evidence\"}\n";
+        if(a.has("json"))for(const auto& signal:snapshot.signals) {
+            if(signal.binary) {
+                std::cout<<"{\"event\":\"raw_bits\",\"content_validated\":false,\"authenticated\":false";
+                report_signal_identity(signal);
+                std::cout<<",\"complete\":"<<(signal.complete?"true":"false")<<",\"raw_bits\":\""
+                    <<json_escape(signal.text)<<"\",\"raw_bit_count\":"<<signal.received_bits<<",\"pattern_score\":";
+                if(signal.pattern_score && std::isfinite(*signal.pattern_score))std::cout<<*signal.pattern_score;else std::cout<<"null";
+                std::cout<<",\"pattern_score_units\":\"model log evidence\"";
+                report_recovery_json(signal.recovery_progress);std::cout<<"}\n";
+            } else {
+                // Every profile revision is observable without --progress,
+                // including retractions of previously completed interpretations.
+                std::cout<<"{\"event\":\"reception_update\"";report_signal_identity(signal);
+                std::cout<<",\"complete\":"<<(signal.complete?"true":"false")
+                    <<",\"content_validated\":"<<(signal.validated?"true":"false")
+                    <<",\"reception_id\":\""<<json_escape(signal.reception_id)<<'"';
+                report_recovery_json(signal.recovery_progress);std::cout<<"}\n";
+            }
         }
-        for(const auto& received:snapshot.received) report_received(a,received);
+        else for(const auto& signal:snapshot.signals) {
+            const auto state=signal.recovery_progress.state;
+            if(state!=transfer::RecoveryState::none && state!=transfer::RecoveryState::running &&
+               !(state==transfer::RecoveryState::recovered && signal.validated)) {
+                std::cerr<<"Signal "<<signal.id<<": ";
+                report_recovery_status(signal.complete,signal.recovery_progress);
+            }
+        }
+        for(const auto& received:snapshot.received) {
+            const auto reception_id=id_string(received.content.message);
+            const auto signal=std::find_if(snapshot.signals.rbegin(),snapshot.signals.rend(),[&](const auto& event) {
+                return event.complete&&event.reception_id==reception_id;
+            });
+            report_received(a,received,signal==snapshot.signals.rend()?nullptr:&*signal);
+        }
         std::cout.flush();
         if(!snapshot.running && !snapshot.error.empty()) throw Error(snapshot.error);
         if(seconds>0 && std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count()>=seconds) break;
@@ -511,6 +856,7 @@ int main(int argc,char** argv) {
 #ifdef _WIN32
         _setmode(_fileno(stdin),_O_BINARY);_setmode(_fileno(stdout),_O_BINARY);
 #endif
+        if(argc>1&&std::string_view(argv[1]).starts_with("fast-"))return fast::cli_main(argc,argv);
         Args a(argc,argv);
         if(a.has("version")) {std::cout<<"Data Pump "<<DATAPUMP_VERSION<<'\n';return 0;}
         if(a.has("help") || a.command.empty()) {std::cout<<usage;return 0;}
@@ -544,13 +890,14 @@ int main(int argc,char** argv) {
             for(const auto& d:audio::devices()) std::cout<<d.id<<'\t'<<d.description<<'\n';
             return 0;
         }
-        const std::set<std::string> commands={"tx","rx","simulate","status-tx","status-rx","estimate","listen"};
+        const std::set<std::string> commands={"tx","rx","simulate","status-tx","status-rx","estimate","listen","analyze-link"};
         if(!commands.contains(a.command)) throw Error("unknown command: "+a.command);
         auto c=config(a);auto timestamp=epoch(a);
         auto k=c.spreading_mode==modem::SpreadingMode::tone?std::optional<Crypto>{}:key(a);
         if(c.spreading_mode==modem::SpreadingMode::tone && a.has("keyfile"))
             std::cerr<<"Tone mode is unencrypted; key selection is disabled.\n";
         auto settings=transfer_options(a,c,k,timestamp);
+        if(a.command=="analyze-link") {analyze_link(a,settings);return 0;}
         transfer::Progress progress;
         if(a.has("progress")) progress=[](std::uint64_t candidate) {std::cerr<<"Searching epoch "<<candidate<<'\n';};
         if(a.command=="estimate") {
@@ -575,6 +922,7 @@ int main(int argc,char** argv) {
                     <<",\"symbol_seconds\":"<<modem::symbol_seconds(c)
                     <<",\"target_supported\":"<<(plan.target_supported?"true":"false");
             }
+            std::cout<<",\"lpi\":";report_lpi(result,settings);
             std::cout<<"}\n";
             return 0;
         }
@@ -646,8 +994,9 @@ int main(int argc,char** argv) {
         }
         channel.delay_samples=a.integer("delay-samples",137);
         channel.frequency_offset_hz=a.number("frequency-offset",0);
-        channel.clock_error_ppm=a.number("clock-error-ppm",100);
-        channel.phase_noise_degrees_per_sqrt_second=a.number("phase-noise",.5);
+        const auto oscillator=oscillator_config(a);
+        channel.clock_error_ppm=oscillator.clock_error_ppm;
+        channel.phase_noise_degrees_per_sqrt_second=oscillator.phase_noise_degrees_per_sqrt_second;
         if(a.has("receiver-time")) channel.receiver_timestamp=a.integer("receiver-time",timestamp);
         const auto outgoing=message(a);
         transfer::Received result;

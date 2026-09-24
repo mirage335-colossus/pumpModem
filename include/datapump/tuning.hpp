@@ -18,6 +18,9 @@ std::string_view pattern_mode_name(PatternMode mode);
 std::span<const PatternMode> pattern_modes();
 bool tone_mode(PatternMode mode);
 inline constexpr double default_receive_target_db_hz = 32;
+// Existing one-symbol integration design reference, not a measured admission
+// threshold or a calibrated probability of receiving one bit.
+inline constexpr double pattern_target_symbol_snr_db = 18;
 inline constexpr std::size_t maximum_receive_targets = 16;
 inline constexpr std::size_t maximum_receive_target_text = 512;
 struct ReceiveTargets {
@@ -39,7 +42,8 @@ struct Plan {
 };
 // target_snr_db_hz is C/N0: signal power / noise power in a 1 Hz bandwidth.
 // Results are integration estimates, not empirical sensitivity guarantees.
-inline constexpr double maximum_bandwidth_hz = 30000000;
+inline constexpr double minimum_bandwidth_hz = modem::minimum_bandwidth_hz;
+inline constexpr double maximum_bandwidth_hz = modem::maximum_bandwidth_hz;
 // Ideal AWGN Shannon-Hartley channel capacity in bits/s. The target is C/N0
 // in dB-Hz, so in-band linear SNR is 10^(target_snr_db_hz/10)/bandwidth_hz.
 // This theoretical ceiling is independent of modem framing and coding.
@@ -72,6 +76,17 @@ struct SimulationPreset {
 };
 std::span<const SimulationPreset> simulation_presets();
 SimulationPreset parse_simulation_preset(std::string_view name);
+// Illustrative residual clock error and Wiener phase diffusion for simulation,
+// not measured device specifications. GPS discipline alone does not establish
+// short-term phase stability; the underlying oscillator and loop also matter.
+struct OscillatorPreset {
+    std::string_view id;
+    std::string_view name;
+    double clock_error_ppm = 100;
+    double phase_noise_degrees_per_sqrt_second = .5;
+};
+std::span<const OscillatorPreset> oscillator_presets();
+OscillatorPreset parse_oscillator_preset(std::string_view name);
 struct LinkBudget {
     double received_power_dbm = 0;
     double noise_power_dbm = 0; // In the configured channel bandwidth.

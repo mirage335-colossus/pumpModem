@@ -1,0 +1,116 @@
+gmake: jobserver mkfifo: /tmp/GMfifo4: File exists
+[  0%] Checking regular/fast DSP isolation
+[ 56%] Built target liblzma
+-- Regular/fast DSP dependency boundary passed
+[ 56%] Built target datapump_fast_boundary
+[ 87%] Built target datapump
+[ 93%] Built target datapump_fast
+[100%] Built target pump
+[  0%] Checking Legacy modem isolation
+[ 18%] Built target liblzma
+[ 18%] Built target datapump_legacy_boundary
+[ 18%] Checking regular/fast DSP isolation
+[ 78%] Built target fltk
+[ 78%] Checking the shared GUI/native adapter boundary
+-- Regular/fast DSP dependency boundary passed
+[ 78%] Built target datapump_fast_boundary
+[ 88%] Built target datapump
+[ 92%] Built target datapump_legacy
+[ 92%] Built target datapump_fast
+[ 92%] Built target datapump_gui_boundary
+[ 98%] Built target datapump_gui_application
+[100%] Built target datapump-gui
+[  0%] Checking regular/fast DSP isolation
+[ 60%] Built target liblzma
+-- Regular/fast DSP dependency boundary passed
+[ 60%] Built target datapump_fast_boundary
+[ 93%] Built target datapump
+[100%] Built target datapump_fast
+[100%] Built target fast_cable_probe
+[  0%] Checking regular/fast DSP isolation
+[ 60%] Built target liblzma
+-- Regular/fast DSP dependency boundary passed
+[ 60%] Built target datapump_fast_boundary
+[ 93%] Built target datapump
+[100%] Built target datapump_fast
+[100%] Built target test_fast_acoustic
+[  0%] Checking regular/fast DSP isolation
+[ 56%] Built target liblzma
+-- Regular/fast DSP dependency boundary passed
+[ 56%] Built target datapump_fast_boundary
+[ 87%] Built target datapump
+[ 93%] Built target datapump_fast
+[100%] Built target test_fast_files
+[  0%] Checking regular/fast DSP isolation
+[ 60%] Built target liblzma
+-- Regular/fast DSP dependency boundary passed
+[ 60%] Built target datapump_fast_boundary
+[ 93%] Built target datapump
+[100%] Built target datapump_fast
+[100%] Built target test_fast_session
+[  0%] Checking regular/fast DSP isolation
+[ 56%] Built target liblzma
+-- Regular/fast DSP dependency boundary passed
+[ 56%] Built target datapump_fast_boundary
+[ 87%] Built target datapump
+[ 93%] Built target datapump_fast
+[100%] Built target test_fast_transfer
+[  0%] Checking regular/fast DSP isolation
+[ 60%] Built target liblzma
+-- Regular/fast DSP dependency boundary passed
+[ 60%] Built target datapump_fast_boundary
+[ 93%] Built target datapump
+[100%] Built target datapump_fast
+[100%] Built target test_fast_telemetry
+[  0%] Checking regular/fast DSP isolation
+[  0%] Checking Legacy modem isolation
+[ 45%] Built target liblzma
+-- Regular/fast DSP dependency boundary passed
+[ 45%] Built target datapump_legacy_boundary
+[ 45%] Built target datapump_fast_boundary
+[ 45%] Checking the shared GUI/native adapter boundary
+[ 70%] Built target datapump
+[ 80%] Built target datapump_fast
+[ 80%] Built target datapump_legacy
+[ 80%] Built target datapump_gui_boundary
+[ 95%] Built target datapump_gui_application
+[100%] Built target test_gui_fast
+[  0%] Checking regular/fast DSP isolation
+[  0%] Checking Legacy modem isolation
+[ 47%] Built target liblzma
+-- Regular/fast DSP dependency boundary passed
+[ 47%] Built target datapump_legacy_boundary
+[ 47%] Built target datapump_fast_boundary
+[ 47%] Checking the shared GUI/native adapter boundary
+[ 73%] Built target datapump
+[ 78%] Built target datapump_fast
+[ 84%] Built target datapump_legacy
+[ 84%] Built target datapump_gui_boundary
+[100%] Built target datapump_gui_application
+[100%] Built target test_gui_fast_live
+[  0%] Checking Legacy modem isolation
+[  0%] Checking regular/fast DSP isolation
+[ 47%] Built target liblzma
+-- Regular/fast DSP dependency boundary passed
+[ 47%] Built target datapump_legacy_boundary
+[ 47%] Built target datapump_fast_boundary
+[ 47%] Checking the shared GUI/native adapter boundary
+[ 73%] Built target datapump
+[ 84%] Built target datapump_fast
+[ 84%] Built target datapump_legacy
+[ 84%] Built target datapump_gui_boundary
+[100%] Built target datapump_gui_application
+[100%] Built target test_gui_controller
+[  0%] Checking regular/fast DSP isolation
+[  0%] Checking Legacy modem isolation
+[ 45%] Built target liblzma
+-- Regular/fast DSP dependency boundary passed
+[ 45%] Built target datapump_legacy_boundary
+[ 45%] Built target datapump_fast_boundary
+[ 45%] Checking the shared GUI/native adapter boundary
+[ 70%] Built target datapump
+[ 75%] Built target datapump_fast
+[ 80%] Built target datapump_legacy
+[ 80%] Built target datapump_gui_boundary
+[ 95%] Built target datapump_gui_application
+[100%] Built target test_gui_application

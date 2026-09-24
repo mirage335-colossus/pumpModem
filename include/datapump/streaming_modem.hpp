@@ -105,6 +105,7 @@ public:
     std::vector<PatternEvidence> pattern_candidates() const;
     std::vector<PatternEvidence> pattern_candidates(std::size_t limit) const;
     bool clock_windowed() const;
+    bool local_clock_fallback() const;
     Diagnostics diagnostics() const;
     // Physical chip observations for provisional and synchronized pattern fits.
     // Switching tentative fits does not replay already published samples.

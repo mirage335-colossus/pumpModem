@@ -1,0 +1,48 @@
+{
+  "mode": "live",
+  "pump": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/pump",
+  "pump_sha256": "eb967b4c35c8e9d692d9893a8a467e5c89de7300a949c4b68f5daa21125c2ae6",
+  "input_device": "default",
+  "output_device": "default",
+  "stereo": true,
+  "sample_rate": 48000,
+  "seed": 417,
+  "candidates": [
+    {
+      "apsk": 256,
+      "code_rate": "7/8",
+      "rs": "high-rate",
+      "interleave": 62
+    }
+  ],
+  "geometry": {
+    "apsk256-r7_8-high-rate-d62": {
+      "profile": "wire",
+      "sample_rate": 48000,
+      "symbol_rate": 15000,
+      "carrier_hz": 9300,
+      "occupied_bandwidth_hz": 18000,
+      "constellation": 256,
+      "shannon_snr_db_assumed": 30,
+      "shannon_capacity_bps": 179410,
+      "gross_bitrate": 120000,
+      "physical_interval_bits": 2048,
+      "interval_symbols": 352,
+      "cycle_intervals": 71,
+      "ciphertext_bytes": 192,
+      "encrypted": false,
+      "source_bytes_per_group": 208
+    }
+  },
+  "trials": [
+    {
+      "candidate": "apsk256-r7_8-high-rate-d62",
+      "source_bytes": 5000000,
+      "trials": 1,
+      "intervals": 31098,
+      "seconds": 736.0259375,
+      "source_bps": 54345.91087355532
+    }
+  ],
+  "minimum_playback_hours": 0.20445164930555557
+}

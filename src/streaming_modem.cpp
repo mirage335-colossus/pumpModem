@@ -177,6 +177,7 @@ StreamingReceiver::StreamingReceiver(StreamingReceiver&&) noexcept=default;
 StreamingReceiver& StreamingReceiver::operator=(StreamingReceiver&&) noexcept=default;
 bool StreamingReceiver::synchronized()const{return impl_->pattern.synchronized();}
 bool StreamingReceiver::clock_windowed()const{return impl_->pattern.clock_windowed();}
+bool StreamingReceiver::local_clock_fallback()const{return impl_->pattern.local_clock_fallback();}
 bool StreamingReceiver::acquiring()const{return impl_->pattern.acquiring();}
 Diagnostics StreamingReceiver::diagnostics()const{return impl_->pattern.diagnostics();}
 ConstellationBatch StreamingReceiver::take_payload_constellation(){return {impl_->pattern.take_chip_constellation(),0};}

@@ -1,0 +1,26 @@
+[
+  {
+    "path": "src/fast/acoustic_ofdm.cpp",
+    "sha256": "6cafdc940b992e70adab499f9bb90ade35edbbbd524651c472846e1e6520a452"
+  },
+  {
+    "path": "tests/test_fast_acoustic.cpp",
+    "sha256": "26490d4965aaebf0eacff5935301025ef936739e6720ea6d1e2a0c409a3a304c"
+  },
+  {
+    "path": "tests/test_gui_fast_live.cpp",
+    "sha256": "13537bfd06115f1b36cc1ecc281fd889fd51877d444c722159bca8bc7f05206d"
+  },
+  {
+    "path": "tools/fast_cable_probe.cpp",
+    "sha256": "1a01d6145cd24800cb03554e88c97a2d9fec10e446e46723885a3a537ec058c7"
+  },
+  {
+    "path": "include/datapump/fast/profile.hpp",
+    "sha256": "bc96cc19ca8963142e042be2ac77d33302842d25bb126c17096b46c8d048c563"
+  },
+  {
+    "path": "src/fast/profile.cpp",
+    "sha256": "050159b3f978344efa070b1dc412f8311c3b8ee62fdffbdf490cbe959e348681"
+  }
+]

@@ -9,6 +9,13 @@
 
 namespace datapump::gui::plots {
 enum class QrBrightness { normal, dim, dark, off };
+struct PatternScore {
+    // Natural-log evidence against noise: P0 horizontal, P1 vertical.
+    std::complex<double> evidence;
+    // Single-symbol admission reference captured when this window was scored.
+    double admission_threshold = 0;
+    bool operator==(const PatternScore&) const = default;
+};
 
 // Immutable, toolkit-independent source data. Repaint and disjoint damage use
 // exactly the same snapshot and full sample grid. paint emits one bounded row
@@ -19,9 +26,9 @@ public:
     PlotSnapshot();
     static PlotSnapshot waveform(std::vector<float> samples, modem::Config config, double zoom = 1);
     static PlotSnapshot constellation(std::vector<std::complex<double>> points, bool symbols = false);
-    // Each pair contains nonnegative natural-log evidence against noise:
-    // real is the score for binary pattern 0, imaginary for binary pattern 1.
-    static PlotSnapshot pattern_scores(std::vector<std::complex<double>> scores, bool enabled = true);
+    // Preserve native log-score variation below T and reserve a logarithmic
+    // upper range for strong signals. T and 2T are fixed score references.
+    static PlotSnapshot pattern_scores(std::vector<PatternScore> scores, bool enabled = true);
     static PlotSnapshot waterfall(SpectrumHistory history, bool overview = false);
     static PlotSnapshot qr(std::optional<QrCode> code, QrBrightness brightness = QrBrightness::dark);
     static PlotSnapshot pattern_chips(inspection::PatternSpace model, std::size_t first = 0, std::size_t count = 32);

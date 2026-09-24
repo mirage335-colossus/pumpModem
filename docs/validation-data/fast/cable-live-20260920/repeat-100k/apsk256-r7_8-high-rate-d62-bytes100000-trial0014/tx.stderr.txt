@@ -1,0 +1,1 @@
+ALSA lib pcm_dmix.c:1000:(snd_pcm_dmix_open) unable to open slave

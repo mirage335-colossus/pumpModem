@@ -3,6 +3,7 @@
 #include "datapump/modem.hpp"
 #include "datapump/stream_codec.hpp"
 #include "datapump/runtime.hpp"
+#include "datapump/recovery.hpp"
 #include "datapump/streaming_modem.hpp"
 #include "datapump/tuning.hpp"
 #include <functional>
@@ -35,6 +36,8 @@ struct Options {
     std::vector<double> receive_targets_db_hz{tuning::default_receive_target_db_hz};
     tuning::PatternMode receive_pattern_mode = tuning::PatternMode::auto_pattern;
     RepeatPolicy repeat_policy;
+    // Receiver-only hard-bit search after physical completion. No wire fields.
+    RecoveryOptions recovery_options;
 };
 struct Estimate {
     std::size_t coded_bytes = 0;
@@ -79,6 +82,7 @@ std::unique_ptr<modem::StreamingTransmitter> message_transmitter(const Message&,
 // Without a key the bits are unchanged. Does not authenticate decoded guesses.
 void xor_binary_bits(std::span<std::uint8_t> bits, const Options& options,
                      std::size_t bit_offset = 0);
+struct RecoverySource;
 struct Received {
     StreamContent content;
     modem::Diagnostics diagnostics;
@@ -90,11 +94,19 @@ struct Received {
     // This is neither interval validation nor authentication; raw bits remain.
     bool short_text_decoded = false;
     std::string error;
+    RecoveryProgress recovery_progress;
+    // A completed physical capture may still need CPU recovery. Copies share
+    // a resumable job; callers must not run the same job concurrently.
+    std::shared_ptr<RecoveryJob> recovery;
+    std::shared_ptr<const RecoverySource> recovery_source;
 };
+// Runs/resumes a physically completed capture off the live/UI thread. Source
+// decoding follows only a unique completed search. Incomplete work stays opaque.
+Received recover_received(Received, std::stop_token stop = {});
 // Consumes immutable bounded physical chunks. Only a physical complete event
 // can seal storage and invoke the application source decoder.
 struct ReceiveStorageQuota {
-    std::size_t limit=0, used=0; // Owned by one serialized receiver bank.
+    std::size_t limit=0, used=0, reserved=0; // Owned by one serialized receiver bank.
 };
 class StreamReceiver {
 public:
@@ -105,6 +117,7 @@ public:
     StreamReceiver& operator=(StreamReceiver&&) noexcept;
     Received push(modem::PatternBurst, modem::Diagnostics = {});
     std::size_t working_bytes() const;
+    std::size_t source_buffer_bytes() const;
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
@@ -114,7 +127,7 @@ Received interpret_pattern(modem::PatternBurst, const Options&, std::uint64_t ti
 using Progress = std::function<void(std::uint64_t)>;
 
 // Separate codec scratch from the amount of application content admitted.
-// Bounds the encoded source spool independently of the decoded output quota.
+// Bounds the encoded source memory independently of the decoded output quota.
 std::size_t source_storage_limit(std::size_t content_limit);
 // Capacity for unpacked 0/1 elements, including leading and periodic recovery words.
 // Checked separately from packed codec bytes; actual TX/RX allocations must
@@ -130,7 +143,9 @@ std::vector<float> transmit(const Message& message, const Options& options,
 // Progress runs synchronously on the caller's thread, before each candidate.
 // Cancellation is checked between candidates and throughout modulation, FFT,
 // and acquisition loops. Individual bounded stream correction/library calls
-// and allocations run to completion. Cancelled work raises datapump::Error.
+// and allocations run to completion. Cancellation during acquisition raises
+// datapump::Error; cancellation after physical completion retains an unfinished
+// recovery job in the returned Received so it can be resumed explicitly.
 Received receive(std::span<const float> samples, const Options& options,
                  Progress progress = {}, std::stop_token stop = {});
 Received simulate(const Message& message, const Options& options,

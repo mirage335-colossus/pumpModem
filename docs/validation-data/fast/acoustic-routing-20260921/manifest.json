@@ -1,0 +1,664 @@
+{
+  "base_git_commit": "caa20047ce6909cbcd7e8cd2b4c46bd4fd196329",
+  "notes": "Raw audio and exact transmitted bits remain outside this repository. Fresh encoder salt prevents waveform regeneration from source seed alone. Archive captures current diagnostic source snapshots; receiver variants are offline controls, not retained runtime changes.",
+  "retained_inputs": {
+    "/tmp/acoustic-routing-95-q64-stereo.f32": {
+      "bytes": 9260836,
+      "sha256": "bb19a13465a19133c679304d067138f609384a8ad6a5ac5189371830ae13be12"
+    },
+    "/tmp/acoustic-routing-95-q64-stereo-bits.u8": {
+      "bytes": 2080768,
+      "sha256": "70f30af70718914b4638291f6d06fec463d3d5e5656827d8f0a786e9d3d6f276"
+    },
+    "/tmp/acoustic-routing-95-q64-mono.f32": {
+      "bytes": 9260840,
+      "sha256": "24c399cf2301d31b1bf470d0d2710e9bb35ed0f5710975cdc5961da7769d7d0b"
+    },
+    "/tmp/acoustic-routing-95-q64-mono-bits.u8": {
+      "bytes": 2080768,
+      "sha256": "3eaadaf19947bd68d36c087ba814bbcd5b345aff4a0c441b7a1d1e4565f9f41a"
+    },
+    "/tmp/acoustic-routing-95-q16-mono.f32": {
+      "bytes": 11620096,
+      "sha256": "ed987bf3867bba0efa34e12ba7fd17fd71b4f62052135cb7ce8b0f587aca6b2f"
+    },
+    "/tmp/acoustic-routing-95-q16-mono-bits.u8": {
+      "bytes": 2080768,
+      "sha256": "b2ee456c3c08274aa432abb40cc92fec7e51b80a22077fe5a109a7d4c09fcc88"
+    },
+    "/tmp/acoustic-routing-95-q16-stereo.f32": {
+      "bytes": 11620368,
+      "sha256": "25dd6171d321d0fdf807440fa26c4574190987353a9eed3e9188002ba0f3197a"
+    },
+    "/tmp/acoustic-routing-95-q16-stereo-bits.u8": {
+      "bytes": 2080768,
+      "sha256": "3c726faf86da3f0b54e57f4a2c4d32a66b38dfaaff41713a204562b1121df1c8"
+    },
+    "/tmp/acoustic-routing-95-q16-mono-500k.f32": {
+      "bytes": 26955560,
+      "sha256": "3305b626fad053eb8b8a5d37f9c6dbf2b754fd48cf7c166c5aabd5c785f105b6"
+    },
+    "/tmp/acoustic-routing-95-q16-mono-500k-bits.u8": {
+      "bytes": 6242304,
+      "sha256": "9828dc0729699cb5594defcfa269809f2835a8e9241e4c91d211aa0631dc5f73"
+    },
+    "/tmp/acoustic-routing-95-q64-mono-repeat.f32": {
+      "bytes": 9260832,
+      "sha256": "77a0f2e3813b2ca0d9cb66586c8c46ca49a8f5efd976e0c6529e43b79db08be7"
+    },
+    "/tmp/acoustic-routing-95-q64-mono-repeat-bits.u8": {
+      "bytes": 2080768,
+      "sha256": "fc1771888834ef1337532753f43d6056905b0fc3350593ae7b84488f0dc158fa"
+    },
+    "/tmp/acoustic-routing-95-q64-mono-a20.f32": {
+      "bytes": 9260808,
+      "sha256": "259d0098d6dee090940fb6a2ece7d3f52d03232939cb274fe4795be3a9cfdee0"
+    },
+    "/tmp/acoustic-routing-95-q64-mono-a20-bits.u8": {
+      "bytes": 2080768,
+      "sha256": "ca8e2a2158f601d0063b63526e12ed09dccfafd883797db4ba59a982d8ba5d8b"
+    },
+    "/tmp/acoustic-routing-95-q64-r23-mono-a20.f32": {
+      "bytes": 9260840,
+      "sha256": "4b0e2db827af15dc8b474fd7b60d6b7da1c7dfcbef37218fb997fc10ab7be072"
+    },
+    "/tmp/acoustic-routing-95-q64-r23-mono-a20-bits.u8": {
+      "bytes": 2080768,
+      "sha256": "8e464ae4e2c087f88469102377806c0ac1dd6b501ecc7276e712915c27dc2c36"
+    }
+  },
+  "archive_files": {
+    "acoustic-routing-95-q64-stereo-known-information.json": {
+      "bytes": 4094,
+      "sha256": "7b17db2c487704c267c170597cb7f07f81ac90d173928e1106c4a262efaf3403"
+    },
+    "acoustic-routing-95-q64-stereo-known-bands.csv": {
+      "bytes": 6829,
+      "sha256": "adcd87989fdb7dc13982521bd2cf577f62e9a12280f1027d8df499c33957936a"
+    },
+    "acoustic-routing-95-q64-stereo-known-planes.csv": {
+      "bytes": 614,
+      "sha256": "b7fe7c27403eaa47fc939ac235fb7241634356b5491675d689268eec72394dbe"
+    },
+    "acoustic-routing-95-q64-stereo-known-frames.csv": {
+      "bytes": 2670,
+      "sha256": "4cdf00c42bca011522470d197f02487a6a8390d9e02c47930b96811441a4a9ca"
+    },
+    "acoustic-routing-95-q64-stereo-known-cycles.csv": {
+      "bytes": 452,
+      "sha256": "3bf88c5f154db1139f28c908465fb33a06a1259fe73c4426929b4b6f31ae85a3"
+    },
+    "acoustic-routing-95-q64-stereo-known-blocks.csv": {
+      "bytes": 5843,
+      "sha256": "544dad060fd754d05c17c6d8a186a4fbccdd37036b940cbb9d07f5010c16a564"
+    },
+    "acoustic-routing-95-q64-stereo-known.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "acoustic-routing-95-q64-stereo-known.json": {
+      "bytes": 75,
+      "sha256": "febb5aad5e06e41d6656ad5e77ae8c4f097896eae60e6764af99d2def6135f97"
+    },
+    "acoustic-routing-95-q64-stereo.log": {
+      "bytes": 3728,
+      "sha256": "1426babbd8a2c450059b9ab361ce7b69ada68606a7151a07a5c7527727444ef9"
+    },
+    "acoustic-routing-95-q64-stereo.json": {
+      "bytes": 2546,
+      "sha256": "862feb3133aad3c53a5552c12fe9941d2771e8574bd3031b0915f74f6136e578"
+    },
+    "acoustic-routing-95-q64-mono-known-information.json": {
+      "bytes": 4088,
+      "sha256": "22611571ec62a70428b0ae978cfecbe73e4c3eb3b31eb9e4e1d946b55b4649c1"
+    },
+    "acoustic-routing-95-q64-mono-known-bands.csv": {
+      "bytes": 6837,
+      "sha256": "cb86e6fc888065b0a903ca4c0f60fe92172df7f407fdf4ce794d50d110e9091d"
+    },
+    "acoustic-routing-95-q64-mono-known-planes.csv": {
+      "bytes": 614,
+      "sha256": "c7dd3c5ed0de02b02a76aef63e0a0b868e8d453397db99415696c9d7d99342a4"
+    },
+    "acoustic-routing-95-q64-mono-known-frames.csv": {
+      "bytes": 2666,
+      "sha256": "092f206942a930f879c1c328f741239a3f3942ff84aaa504d54c9ce4ef8419ca"
+    },
+    "acoustic-routing-95-q64-mono-known-cycles.csv": {
+      "bytes": 450,
+      "sha256": "4c280de33087eab99c4a46298005954ac864d5b58a1fa1499855ec1fe90caea2"
+    },
+    "acoustic-routing-95-q64-mono-known-blocks.csv": {
+      "bytes": 5805,
+      "sha256": "2b5e41d840259330681b19d78b8d1c3a46d21f654a4985c0d2e8e6ab982e3a51"
+    },
+    "acoustic-routing-95-q64-mono-known.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "acoustic-routing-95-q64-mono-known.json": {
+      "bytes": 75,
+      "sha256": "febb5aad5e06e41d6656ad5e77ae8c4f097896eae60e6764af99d2def6135f97"
+    },
+    "acoustic-routing-95-q64-mono.log": {
+      "bytes": 3720,
+      "sha256": "816292069d317d90f472d54fe4d1ddb52e2ea816e23474419122b40b2653583a"
+    },
+    "acoustic-routing-95-q64-mono.json": {
+      "bytes": 2455,
+      "sha256": "0790587a59a77280a5bda2348ddd6639f4f56274d2a56257a474a014f549e903"
+    },
+    "acoustic-routing-95-q16-mono-known-information.json": {
+      "bytes": 3422,
+      "sha256": "9ebf3b01fada3aa99b27ba6126bb2d955a70c0287a6a7bf2b7d713b2eed5101c"
+    },
+    "acoustic-routing-95-q16-mono-known-bands.csv": {
+      "bytes": 6729,
+      "sha256": "0d8e5b9fef2db7b9db6d84266559b440bfe9f82c7abd3f02d044e27f73bf3cf0"
+    },
+    "acoustic-routing-95-q16-mono-known-planes.csv": {
+      "bytes": 451,
+      "sha256": "84e9c378542efeb8b6334e8d6a867e804bf95a2aea86a63d14dcc8ea534d3894"
+    },
+    "acoustic-routing-95-q16-mono-known-frames.csv": {
+      "bytes": 2687,
+      "sha256": "e254041acc0525f6d4b2341e00c0826008ab3d73a79c12b3cab27dbdd6d6cb71"
+    },
+    "acoustic-routing-95-q16-mono-known-cycles.csv": {
+      "bytes": 446,
+      "sha256": "32af7f77e55c208f1cc571eb13d56b8955af7f5a96536e65e8dd126647404391"
+    },
+    "acoustic-routing-95-q16-mono-known-blocks.csv": {
+      "bytes": 8682,
+      "sha256": "3aafcb1fd071304b43ebfb63ddaf205672bfd96dc46fd27632baab1c209e49f7"
+    },
+    "acoustic-routing-95-q16-mono-known.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "acoustic-routing-95-q16-mono-known.json": {
+      "bytes": 75,
+      "sha256": "ad5b7e207b49036f2a66389911f8dcb39262ce9fb9874c4ee95cfc19f4b011c8"
+    },
+    "acoustic-routing-95-q16-mono.log": {
+      "bytes": 4677,
+      "sha256": "814c2ffaf4cacf41c48f40927c7136ac53ff61fe9311b75afde428ee2973a1e5"
+    },
+    "acoustic-routing-95-q16-mono.json": {
+      "bytes": 2570,
+      "sha256": "501cbc664361a6e9602bbaf8a7f2b0d64204e9e42a8a792dfb6a441b15a8e782"
+    },
+    "acoustic-routing-95-q16-stereo-known-information.json": {
+      "bytes": 3423,
+      "sha256": "c04796ffb90228e13f4fc5ecc477e82f9ef07728d8eec21c2202325fbcbc78b6"
+    },
+    "acoustic-routing-95-q16-stereo-known-bands.csv": {
+      "bytes": 6844,
+      "sha256": "8c28e881c9dc680eb8b7e70397c34af1567bc09ef5b757f67bad5463838b50ed"
+    },
+    "acoustic-routing-95-q16-stereo-known-planes.csv": {
+      "bytes": 447,
+      "sha256": "8115da94b40f7452f60e5e9ff108b86a07af14d791adf8228f73f3053120aa2e"
+    },
+    "acoustic-routing-95-q16-stereo-known-frames.csv": {
+      "bytes": 2678,
+      "sha256": "090dc1ad15e2d2bd2bf4f61d21ab0e449fa9d965963584ba370481e240d56fa4"
+    },
+    "acoustic-routing-95-q16-stereo-known-cycles.csv": {
+      "bytes": 450,
+      "sha256": "924c53c0e436bafd8a9697fcde921479490dad3e3a33fa94296cb659e031a342"
+    },
+    "acoustic-routing-95-q16-stereo-known-blocks.csv": {
+      "bytes": 8650,
+      "sha256": "dc95ceef2002183303bb15ba330ce374ead4566b7eb8764c07b532a413e4b10e"
+    },
+    "acoustic-routing-95-q16-stereo-known.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "acoustic-routing-95-q16-stereo-known.json": {
+      "bytes": 75,
+      "sha256": "ad5b7e207b49036f2a66389911f8dcb39262ce9fb9874c4ee95cfc19f4b011c8"
+    },
+    "acoustic-routing-95-q16-stereo.log": {
+      "bytes": 4641,
+      "sha256": "e049aee498e166934b1dad3c66092957900fbe59f4fb3ab6f953e983834c3921"
+    },
+    "acoustic-routing-95-q16-stereo.json": {
+      "bytes": 2558,
+      "sha256": "78fd0426ee410468afcdd5062d0c2caa64101eb5c0f0bb54ad09cdd1d75790d9"
+    },
+    "retained-audio-and-bits.json": {
+      "bytes": 1349,
+      "sha256": "a80bd898097044278d8c5cf90b1913acfc2170647e66865d8d960a085016fb7b"
+    },
+    "throughput-options.json": {
+      "bytes": 681,
+      "sha256": "aad4ece596080ec68da91ac79ed008c738f5775b6f3fa4bc95439e603e81e5f9"
+    },
+    "README.md": {
+      "bytes": 8819,
+      "sha256": "ae5ebcc1e419a683090722ecd53abf528e77440fd43aa29d0855df7215eef728"
+    },
+    "plot-information.py": {
+      "bytes": 2513,
+      "sha256": "74e3b11974969175857eb376567ec6fef7efd6a104a450af77c14003c4069ffd"
+    },
+    "coded-bit-information.svg": {
+      "bytes": 8834,
+      "sha256": "57ab14ad18d269e9b7e1ec151a975396ba9654436e5d2ff90ac735f50b0b01f1"
+    },
+    "helper-consistency.json": {
+      "bytes": 1859,
+      "sha256": "62935e56934d163010859d316c33bb81420f561fedc18667e716ab47de48b86e"
+    },
+    "measurements/acoustic-routing-95-q64-stereo.json": {
+      "bytes": 2546,
+      "sha256": "862feb3133aad3c53a5552c12fe9941d2771e8574bd3031b0915f74f6136e578"
+    },
+    "measurements/acoustic-routing-95-q64-stereo.log": {
+      "bytes": 3728,
+      "sha256": "1426babbd8a2c450059b9ab361ce7b69ada68606a7151a07a5c7527727444ef9"
+    },
+    "measurements/acoustic-routing-95-q64-mono.json": {
+      "bytes": 2455,
+      "sha256": "0790587a59a77280a5bda2348ddd6639f4f56274d2a56257a474a014f549e903"
+    },
+    "measurements/acoustic-routing-95-q64-mono.log": {
+      "bytes": 3720,
+      "sha256": "816292069d317d90f472d54fe4d1ddb52e2ea816e23474419122b40b2653583a"
+    },
+    "measurements/acoustic-routing-95-q16-mono.json": {
+      "bytes": 2570,
+      "sha256": "501cbc664361a6e9602bbaf8a7f2b0d64204e9e42a8a792dfb6a441b15a8e782"
+    },
+    "measurements/acoustic-routing-95-q16-mono.log": {
+      "bytes": 4677,
+      "sha256": "814c2ffaf4cacf41c48f40927c7136ac53ff61fe9311b75afde428ee2973a1e5"
+    },
+    "measurements/acoustic-routing-95-q16-stereo.json": {
+      "bytes": 2558,
+      "sha256": "78fd0426ee410468afcdd5062d0c2caa64101eb5c0f0bb54ad09cdd1d75790d9"
+    },
+    "measurements/acoustic-routing-95-q16-stereo.log": {
+      "bytes": 4641,
+      "sha256": "e049aee498e166934b1dad3c66092957900fbe59f4fb3ab6f953e983834c3921"
+    },
+    "measurements/acoustic-routing-95-q16-mono-500k.json": {
+      "bytes": 2558,
+      "sha256": "e411a9f143fe09b923edc7c48390faac0e9ff49524f4cb96818bba191488210a"
+    },
+    "measurements/acoustic-routing-95-q16-mono-500k.log": {
+      "bytes": 10943,
+      "sha256": "038892b5a822dd9d71898cd10df993f895dedd900a3dcb38ad76386355ba0333"
+    },
+    "measurements/acoustic-routing-95-q64-mono-repeat.json": {
+      "bytes": 2463,
+      "sha256": "23afed4efe7ccd99c946948f4218f0020875915d179bfb975e4d3e64d570ecb8"
+    },
+    "measurements/acoustic-routing-95-q64-mono-repeat.log": {
+      "bytes": 3570,
+      "sha256": "da792d4fab03585b3e447282b16fe4ca80867cf30fa2051898bc43af411ebbfc"
+    },
+    "measurements/acoustic-routing-95-q64-mono-a20.json": {
+      "bytes": 2460,
+      "sha256": "e48caa9d45a858f876802e86178bfb4c5d1f4ed94c6945b6606a1a05ef99cc5a"
+    },
+    "measurements/acoustic-routing-95-q64-mono-a20.log": {
+      "bytes": 3562,
+      "sha256": "23e7467ffd8f4a1b550942af7ad4450cbc9adb69c7d6ec5bb0c2e71e14030ae7"
+    },
+    "measurements/acoustic-routing-95-q64-r23-mono-a20.json": {
+      "bytes": 2467,
+      "sha256": "881dee85b0a534670b71f5304bc426dd31dd8855a954282d9cde0e1f23eda401"
+    },
+    "measurements/acoustic-routing-95-q64-r23-mono-a20.log": {
+      "bytes": 3550,
+      "sha256": "aef661072fc6e9642596a8b35a77272c811b58fdc05ad2368a47dceff1dd7880"
+    },
+    "analysis/acoustic-routing-95-q64-stereo-known.json": {
+      "bytes": 75,
+      "sha256": "febb5aad5e06e41d6656ad5e77ae8c4f097896eae60e6764af99d2def6135f97"
+    },
+    "analysis/acoustic-routing-95-q64-stereo-known-blocks.csv": {
+      "bytes": 5843,
+      "sha256": "544dad060fd754d05c17c6d8a186a4fbccdd37036b940cbb9d07f5010c16a564"
+    },
+    "analysis/acoustic-routing-95-q64-stereo-known-cycles.csv": {
+      "bytes": 452,
+      "sha256": "3bf88c5f154db1139f28c908465fb33a06a1259fe73c4426929b4b6f31ae85a3"
+    },
+    "analysis/acoustic-routing-95-q64-stereo-known-frames.csv": {
+      "bytes": 2670,
+      "sha256": "4cdf00c42bca011522470d197f02487a6a8390d9e02c47930b96811441a4a9ca"
+    },
+    "analysis/acoustic-routing-95-q64-stereo-known-planes.csv": {
+      "bytes": 614,
+      "sha256": "b7fe7c27403eaa47fc939ac235fb7241634356b5491675d689268eec72394dbe"
+    },
+    "analysis/acoustic-routing-95-q64-stereo-known-bands.csv": {
+      "bytes": 6829,
+      "sha256": "adcd87989fdb7dc13982521bd2cf577f62e9a12280f1027d8df499c33957936a"
+    },
+    "analysis/acoustic-routing-95-q64-stereo-known-information.json": {
+      "bytes": 4094,
+      "sha256": "7b17db2c487704c267c170597cb7f07f81ac90d173928e1106c4a262efaf3403"
+    },
+    "analysis/acoustic-routing-95-q64-mono-known.json": {
+      "bytes": 75,
+      "sha256": "febb5aad5e06e41d6656ad5e77ae8c4f097896eae60e6764af99d2def6135f97"
+    },
+    "analysis/acoustic-routing-95-q64-mono-known-blocks.csv": {
+      "bytes": 5805,
+      "sha256": "2b5e41d840259330681b19d78b8d1c3a46d21f654a4985c0d2e8e6ab982e3a51"
+    },
+    "analysis/acoustic-routing-95-q64-mono-known-cycles.csv": {
+      "bytes": 450,
+      "sha256": "4c280de33087eab99c4a46298005954ac864d5b58a1fa1499855ec1fe90caea2"
+    },
+    "analysis/acoustic-routing-95-q64-mono-known-frames.csv": {
+      "bytes": 2666,
+      "sha256": "092f206942a930f879c1c328f741239a3f3942ff84aaa504d54c9ce4ef8419ca"
+    },
+    "analysis/acoustic-routing-95-q64-mono-known-planes.csv": {
+      "bytes": 614,
+      "sha256": "c7dd3c5ed0de02b02a76aef63e0a0b868e8d453397db99415696c9d7d99342a4"
+    },
+    "analysis/acoustic-routing-95-q64-mono-known-bands.csv": {
+      "bytes": 6837,
+      "sha256": "cb86e6fc888065b0a903ca4c0f60fe92172df7f407fdf4ce794d50d110e9091d"
+    },
+    "analysis/acoustic-routing-95-q64-mono-known-information.json": {
+      "bytes": 4088,
+      "sha256": "22611571ec62a70428b0ae978cfecbe73e4c3eb3b31eb9e4e1d946b55b4649c1"
+    },
+    "analysis/acoustic-routing-95-q16-mono-known.json": {
+      "bytes": 75,
+      "sha256": "ad5b7e207b49036f2a66389911f8dcb39262ce9fb9874c4ee95cfc19f4b011c8"
+    },
+    "analysis/acoustic-routing-95-q16-mono-known-blocks.csv": {
+      "bytes": 8682,
+      "sha256": "3aafcb1fd071304b43ebfb63ddaf205672bfd96dc46fd27632baab1c209e49f7"
+    },
+    "analysis/acoustic-routing-95-q16-mono-known-cycles.csv": {
+      "bytes": 446,
+      "sha256": "32af7f77e55c208f1cc571eb13d56b8955af7f5a96536e65e8dd126647404391"
+    },
+    "analysis/acoustic-routing-95-q16-mono-known-frames.csv": {
+      "bytes": 2687,
+      "sha256": "e254041acc0525f6d4b2341e00c0826008ab3d73a79c12b3cab27dbdd6d6cb71"
+    },
+    "analysis/acoustic-routing-95-q16-mono-known-planes.csv": {
+      "bytes": 451,
+      "sha256": "84e9c378542efeb8b6334e8d6a867e804bf95a2aea86a63d14dcc8ea534d3894"
+    },
+    "analysis/acoustic-routing-95-q16-mono-known-bands.csv": {
+      "bytes": 6729,
+      "sha256": "0d8e5b9fef2db7b9db6d84266559b440bfe9f82c7abd3f02d044e27f73bf3cf0"
+    },
+    "analysis/acoustic-routing-95-q16-mono-known-information.json": {
+      "bytes": 3422,
+      "sha256": "9ebf3b01fada3aa99b27ba6126bb2d955a70c0287a6a7bf2b7d713b2eed5101c"
+    },
+    "analysis/acoustic-routing-95-q16-stereo-known.json": {
+      "bytes": 75,
+      "sha256": "ad5b7e207b49036f2a66389911f8dcb39262ce9fb9874c4ee95cfc19f4b011c8"
+    },
+    "analysis/acoustic-routing-95-q16-stereo-known-blocks.csv": {
+      "bytes": 8650,
+      "sha256": "dc95ceef2002183303bb15ba330ce374ead4566b7eb8764c07b532a413e4b10e"
+    },
+    "analysis/acoustic-routing-95-q16-stereo-known-cycles.csv": {
+      "bytes": 450,
+      "sha256": "924c53c0e436bafd8a9697fcde921479490dad3e3a33fa94296cb659e031a342"
+    },
+    "analysis/acoustic-routing-95-q16-stereo-known-frames.csv": {
+      "bytes": 2678,
+      "sha256": "090dc1ad15e2d2bd2bf4f61d21ab0e449fa9d965963584ba370481e240d56fa4"
+    },
+    "analysis/acoustic-routing-95-q16-stereo-known-planes.csv": {
+      "bytes": 447,
+      "sha256": "8115da94b40f7452f60e5e9ff108b86a07af14d791adf8228f73f3053120aa2e"
+    },
+    "analysis/acoustic-routing-95-q16-stereo-known-bands.csv": {
+      "bytes": 6844,
+      "sha256": "8c28e881c9dc680eb8b7e70397c34af1567bc09ef5b757f67bad5463838b50ed"
+    },
+    "analysis/acoustic-routing-95-q16-stereo-known-information.json": {
+      "bytes": 3423,
+      "sha256": "c04796ffb90228e13f4fc5ecc477e82f9ef07728d8eec21c2202325fbcbc78b6"
+    },
+    "analysis/acoustic-routing-95-q64-mono-repeat-known.json": {
+      "bytes": 75,
+      "sha256": "febb5aad5e06e41d6656ad5e77ae8c4f097896eae60e6764af99d2def6135f97"
+    },
+    "analysis/acoustic-routing-95-q64-mono-repeat-known-blocks.csv": {
+      "bytes": 5814,
+      "sha256": "4e090fc7cbbbfba059e07dd19f5fbba8fdb0a10300da707d78d0387f65525b24"
+    },
+    "analysis/acoustic-routing-95-q64-mono-repeat-known-cycles.csv": {
+      "bytes": 451,
+      "sha256": "f7af77785f5ea24e6da1afb225d05660f8e414d210a7db4ad614e29b40df04cc"
+    },
+    "analysis/acoustic-routing-95-q64-mono-repeat-known-frames.csv": {
+      "bytes": 2658,
+      "sha256": "93b56a4eee3225fbdab2f9875a68e0928a31432e599e2d1e06f7fedf29629103"
+    },
+    "analysis/acoustic-routing-95-q64-mono-repeat-known-planes.csv": {
+      "bytes": 614,
+      "sha256": "efc7364658e7038247e429623c8cbd97c6f23189e1b7ed9c7dcdced7ed448df3"
+    },
+    "analysis/acoustic-routing-95-q64-mono-repeat-known-bands.csv": {
+      "bytes": 6806,
+      "sha256": "a21a2c0f4026387d79ebbce0fafe8f851620e995f4d61be54719259d070b237d"
+    },
+    "analysis/acoustic-routing-95-q64-mono-repeat-known-information.json": {
+      "bytes": 4088,
+      "sha256": "559705685cedacf73d6be77a0e218597375a6247434704a3d1149b71fa681394"
+    },
+    "analysis/acoustic-routing-95-q64-mono-a20-known.json": {
+      "bytes": 75,
+      "sha256": "febb5aad5e06e41d6656ad5e77ae8c4f097896eae60e6764af99d2def6135f97"
+    },
+    "analysis/acoustic-routing-95-q64-mono-a20-known-blocks.csv": {
+      "bytes": 5804,
+      "sha256": "b8560d7e38384bc47c6a87edefaa87b9491d69b9dbc127ebfad04fa7f7941b93"
+    },
+    "analysis/acoustic-routing-95-q64-mono-a20-known-cycles.csv": {
+      "bytes": 447,
+      "sha256": "c3554c9df90d73d82e980988070f8665d50799f96871564be9676ff96a4129a9"
+    },
+    "analysis/acoustic-routing-95-q64-mono-a20-known-frames.csv": {
+      "bytes": 2673,
+      "sha256": "a3902d94526837b80e77bfe62f168ed52463faef2683c468c0cfd03eb61d5a4a"
+    },
+    "analysis/acoustic-routing-95-q64-mono-a20-known-planes.csv": {
+      "bytes": 617,
+      "sha256": "eacd610c588e53fe471fa7a432e5ff0dce2d7e16391008ccb36c8eadf4b9f611"
+    },
+    "analysis/acoustic-routing-95-q64-mono-a20-known-bands.csv": {
+      "bytes": 6830,
+      "sha256": "485fd5181b51fa3677d380fcbcc96f83c5b06b4f4526571df3db55f2b002098e"
+    },
+    "analysis/acoustic-routing-95-q64-mono-a20-known-information.json": {
+      "bytes": 4090,
+      "sha256": "4e6f121f4205beeb571ae6f8046cb20733923aedaf6479e2d41d4b07b98de53a"
+    },
+    "analysis/acoustic-routing-95-q64-r23-mono-a20-known.json": {
+      "bytes": 75,
+      "sha256": "febb5aad5e06e41d6656ad5e77ae8c4f097896eae60e6764af99d2def6135f97"
+    },
+    "analysis/acoustic-routing-95-q64-r23-mono-a20-known-blocks.csv": {
+      "bytes": 5794,
+      "sha256": "64d9259b6329598be6bf5c53b78cc7d825650dc52e77e9cb786022877e4c4b1a"
+    },
+    "analysis/acoustic-routing-95-q64-r23-mono-a20-known-cycles.csv": {
+      "bytes": 451,
+      "sha256": "c33d74b3a5db7783e5bac206bdbad347d242a1974d60bdb26a61089531be3fdd"
+    },
+    "analysis/acoustic-routing-95-q64-r23-mono-a20-known-frames.csv": {
+      "bytes": 2677,
+      "sha256": "955d5cdab724b5f212cae22caeb1f59c3b8c6d37975fb9ea47974bac59e33c36"
+    },
+    "analysis/acoustic-routing-95-q64-r23-mono-a20-known-planes.csv": {
+      "bytes": 613,
+      "sha256": "dc5557de1c21a480835e8239f8f0f654145c5539d858657e3b7dee0902fb2b88"
+    },
+    "analysis/acoustic-routing-95-q64-r23-mono-a20-known-bands.csv": {
+      "bytes": 6804,
+      "sha256": "40f3b034f42095ce7956baffb2f65159576596fb588856afc8f292dcfdfcc0cc"
+    },
+    "analysis/acoustic-routing-95-q64-r23-mono-a20-known-information.json": {
+      "bytes": 4095,
+      "sha256": "57012d15785fb1bab892692a44ac6f46bb2cff627842cb69912fd08de30761cc"
+    },
+    "controls/acoustic-routing-95-q64-mono-frozen.json": {
+      "bytes": 2313,
+      "sha256": "4a0ea6925aedc958f1d384d68f63daf9a75d9ff65d8c9fa273f655d1a358d9af"
+    },
+    "controls/acoustic-routing-95-q64-mono-frozen.log": {
+      "bytes": 152,
+      "sha256": "5474a1a380c1f5d4af751b6297abe51089f10958cb39eb916f6efa7bb5c35cb2"
+    },
+    "controls/acoustic-routing-95-q64-mono-frozen-known.json": {
+      "bytes": 75,
+      "sha256": "febb5aad5e06e41d6656ad5e77ae8c4f097896eae60e6764af99d2def6135f97"
+    },
+    "controls/acoustic-routing-95-q64-mono-frozen-known-cycles.csv": {
+      "bytes": 454,
+      "sha256": "7ce042909f06e03557c1dacf2e3b0ab8d4b5d0c3d3c93c0f8a9e09eee5b3b366"
+    },
+    "controls/acoustic-routing-95-q64-mono-frozen-known-frames.csv": {
+      "bytes": 2685,
+      "sha256": "7bfc50b9c749da96860c6e8aa002d9c861925f1800bc59c534b3e2321a3f285e"
+    },
+    "controls/acoustic-routing-95-q64-mono-frozen-known-blocks.csv": {
+      "bytes": 5818,
+      "sha256": "245f6ec53127cefff2843f90e0bc3e700b2221be2294575eed96000a91a207d2"
+    },
+    "controls/acoustic-routing-95-q64-mono-full-refresh.json": {
+      "bytes": 2314,
+      "sha256": "f02e0bdce53995b2ebaabfc0d69a86f5b9ab36d84579106ec5113c974ceebd3d"
+    },
+    "controls/acoustic-routing-95-q64-mono-full-refresh.log": {
+      "bytes": 150,
+      "sha256": "dabbd09ccb1158e7fb5e78d9a08843812bce408815c583801ef35a3adfe20c0f"
+    },
+    "controls/acoustic-routing-95-q64-mono-full-refresh-known.json": {
+      "bytes": 75,
+      "sha256": "febb5aad5e06e41d6656ad5e77ae8c4f097896eae60e6764af99d2def6135f97"
+    },
+    "controls/acoustic-routing-95-q64-mono-full-refresh-known-cycles.csv": {
+      "bytes": 451,
+      "sha256": "e0a3dcebba7e71aaa0d7f55bc4bb6f988cdf46c3912841559cce12807e513f60"
+    },
+    "controls/acoustic-routing-95-q64-mono-full-refresh-known-frames.csv": {
+      "bytes": 2669,
+      "sha256": "c349e35525e344f875d3b510768c0a32426a35d4cb6ebc4e6a8009a4a38fabbf"
+    },
+    "controls/acoustic-routing-95-q64-mono-full-refresh-known-blocks.csv": {
+      "bytes": 5828,
+      "sha256": "40d516f77ca42b2ba4f28f11c5b5b75e9132d85c8e6190f004e17bde342ce398"
+    },
+    "controls/acoustic-routing-95-q64-mono-crossvalidate.csv": {
+      "bytes": 34511,
+      "sha256": "63f2bb670546fda94cf86e50b377b9b58ae6fef06fe0100bb0b1c403979796d3"
+    },
+    "controls/acoustic-routing-95-q64-stereo-crossvalidate.csv": {
+      "bytes": 35058,
+      "sha256": "b23c1c5d2624ce3d85caccb53b0eb6805a3422e6cd9d923064c7997e62722ac2"
+    },
+    "sources/acoustic_ofdm-baseline.cpp": {
+      "bytes": 27259,
+      "sha256": "6cafdc940b992e70adab499f9bb90ade35edbbbd524651c472846e1e6520a452"
+    },
+    "sources/acoustic_ofdm-frozen.cpp": {
+      "bytes": 27192,
+      "sha256": "1ece30da8289aa221ba56b6699ab4e9801d3961ae6b006e3c986a74dc7c32e45"
+    },
+    "sources/acoustic_ofdm-full-refresh.cpp": {
+      "bytes": 27308,
+      "sha256": "38d4d8bb0d992e5eaa39b3f92b8c2b395f34e345b878123409e1429d50d39bf8"
+    },
+    "sources/acoustic_known_symbols.cpp": {
+      "bytes": 8030,
+      "sha256": "d532124f5a027b48f501307e3e7ecefa84bcb72784415e22fcf93338c42e9baf"
+    },
+    "sources/fast_cable_probe.cpp": {
+      "bytes": 27761,
+      "sha256": "1a01d6145cd24800cb03554e88c97a2d9fec10e446e46723885a3a537ec058c7"
+    },
+    "sources/acoustic_channel_crossvalidate.cpp": {
+      "bytes": 3604,
+      "sha256": "86ef56eab49279a51155550f27f9b6569b85971edaebb97fd6d1a1879bf10659"
+    },
+    "sources/summarize_acoustic_information.py": {
+      "bytes": 3095,
+      "sha256": "ae6a29518dd8a96ffc76ff5d66885f455b2bfbf30c4daefbd2cbf0bc7ccc8926"
+    },
+    "sources/acoustic-gui-live-debug.cpp": {
+      "bytes": 2720,
+      "sha256": "3524aa8158097cebee1f0d05b6e180923378973f920ca3f0a866fe124d5797ae"
+    },
+    "sources/acoustic-routing-gui-live-run.py": {
+      "bytes": 986,
+      "sha256": "fd506ef13e05671d0c2b648b2e3454e8308051c55aecceba75c0f85ec7be9e4d"
+    },
+    "checks/acoustic-routing-final-tests.log": {
+      "bytes": 2364,
+      "sha256": "af20cea216eb09a7b7648ee5caf45a435b28477cf450d4d1d8820576109ba204"
+    },
+    "checks/acoustic-routing-final-build.log": {
+      "bytes": 6217,
+      "sha256": "08bc957b12302e19751e67d62a10189a5bf3f9e93aaaafe7a70104c7052fae3f"
+    },
+    "checks/acoustic-routing-final-tools-build.log": {
+      "bytes": 679,
+      "sha256": "410e7152f7aa5397137e52ac2080adeab4cb619c6ff5dd7b6a49818b7aa043b7"
+    },
+    "checks/changed-runtime-sha256.json": {
+      "bytes": 695,
+      "sha256": "52379a01a6608be7fc2956df806438397ee1f18561754e0c51e63808196c2579"
+    },
+    "checks/acoustic-routing-final-rev-build.log": {
+      "bytes": 3140,
+      "sha256": "c8d4e15e14b905c77923202d56849483bcd231bf01018193a35ffd8143274317"
+    },
+    "checks/acoustic-routing-final-rev-self-check.log": {
+      "bytes": 61,
+      "sha256": "7798e2f51c5e817ab83b7012aaf7dc2d0978ee83da228fc8110afed0875c5d44"
+    },
+    "checks/rebuilt-binaries-sha256.json": {
+      "bytes": 473,
+      "sha256": "a9869a22ec4688877cfc95e8c8870fd2c6c050a6742b93854b0db370637b969c"
+    },
+    "gui/result.json": {
+      "bytes": 76,
+      "sha256": "b4b6ada0028e7a9fd4271f187e5d9abeca6ca3c3ce3460f0f5967dd1d2540d08"
+    },
+    "gui/tx.log": {
+      "bytes": 11450,
+      "sha256": "6e75c6f92f925cfa923ffc872d4e2ef03a1115e4fa4af50a81583631cd41bc2d"
+    },
+    "gui/rx.log": {
+      "bytes": 11638,
+      "sha256": "e501cb525765ce572df3bfbccbb87749e964161ae6c5cca687d225b4da27a465"
+    },
+    "gui/received.txt": {
+      "bytes": 60,
+      "sha256": "8ed85aeda29a941e4bc961f19e5df6cef7fdcb2c0bb92e9d631cbeb9ab0f954f"
+    },
+    "validation/acoustic-routing-final-tests.log": {
+      "bytes": 2364,
+      "sha256": "af20cea216eb09a7b7648ee5caf45a435b28477cf450d4d1d8820576109ba204"
+    },
+    "validation/acoustic-routing-known-build.log": {
+      "bytes": 769,
+      "sha256": "7704b49ee3adcf8604c3096db6072db5c082ce72e0d12dc2fc44cd8a29114374"
+    },
+    "validation/acoustic-refresh-restored-build.log": {
+      "bytes": 1998,
+      "sha256": "4365d4405c4575a6e760aac722581a81f5b4bcd6602d413d018472dda5606897"
+    }
+  }
+}

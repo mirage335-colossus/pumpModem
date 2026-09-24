@@ -1,0 +1,52 @@
+[
+  {
+    "path": "/tmp/acoustic-rx-debug-75.f32",
+    "bytes": 9260832,
+    "sha256": "d9dedf461b086b5c817c7a85f219f9784e3a39f76794186df49dcba18a262150"
+  },
+  {
+    "path": "/tmp/acoustic-rx-debug-75-bits.u8",
+    "bytes": 2080768,
+    "sha256": "7c29c51f1c02f300f5d5190dcece444dacabc3684be0740672a7ae6472348d80"
+  },
+  {
+    "path": "/tmp/acoustic-rx-gain-ramp.f32",
+    "bytes": 9260828,
+    "sha256": "61e5e21f6192167975579d8e7b86fbb89e434fbd7489beca681f22ed8e7f6438"
+  },
+  {
+    "path": "/tmp/acoustic-rx-gain-ramp-bits.u8",
+    "bytes": 2080768,
+    "sha256": "6c898edc26b8c675edc376c4c623a6f6c9cf453a59e55de3485140d37dc31271"
+  },
+  {
+    "path": "/tmp/acoustic-rx-before-fix-probe",
+    "bytes": 1296520,
+    "sha256": "98930a3d57f11d44e3cb21a43aeeef5e76533289d616e7f7b1de85f7adc2ad26"
+  },
+  {
+    "path": "/tmp/acoustic-rx-final-gain-500k.f32",
+    "bytes": 19877664,
+    "sha256": "5b72ce8f0a97dfc19c72780f1403a3946a423e1985fa525d42e04da8802f1941"
+  },
+  {
+    "path": "/tmp/acoustic-rx-final-gain-500k-bits.u8",
+    "bytes": 6242304,
+    "sha256": "9425a8e1ff314b155746d4ead08f85b07dda6c0789581d6f30dc5ae8e97ee80b"
+  },
+  {
+    "path": "/tmp/libdatapump_fast-before-variance-rebase.a",
+    "bytes": 1424218,
+    "sha256": "01c169a0e179be5693e81730b26bc9bbf0d23845364ccd3f47d63603144f9b3f"
+  },
+  {
+    "path": "/tmp/ofdm_weighted_regression_before",
+    "bytes": 1211496,
+    "sha256": "b87a8f98dfd35854811b0cffe7d847c062e815052f3547af0fb8c54e82b40abd"
+  },
+  {
+    "path": "/tmp/ofdm_weighted_regression_after",
+    "bytes": 1211496,
+    "sha256": "ce7f1b39029c7b314f7c7d92d8703872d24d24588e8d7278c339013b22342600"
+  }
+]

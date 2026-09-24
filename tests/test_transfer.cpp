@@ -171,7 +171,8 @@ void content_limits_and_streaming_storage() {
     for(std::size_t offset=0;offset<wire.size();) {
         const auto count=std::min<std::size_t>(1216,wire.size()-offset);
         result=receiver.push(chunk(std::span(wire).subspan(offset,count),offset));offset+=count;
-        maximum=std::max(maximum,receiver.working_bytes());
+        maximum=std::max(maximum,receiver.working_bytes()-receiver.source_buffer_bytes());
+        check(receiver.source_buffer_bytes()<=transfer::source_storage_limit(value.content_limit),"received RAM buffer exceeds source quota");
         check(result.raw_bits.size()<=4096 && result.content.message.data.empty(),"pending source and diagnostics remain bounded");
     }
     check(maximum<65536,"core interval working state must not scale with source bytes");

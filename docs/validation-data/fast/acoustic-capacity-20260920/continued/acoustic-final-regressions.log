@@ -1,0 +1,122 @@
+Internal ctest changing into directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+Test project /home/user/___quick/p/_cur/dataPump/pumpModem/build
+      Start  53: differential_receiver_probability
+      Start 101: fast_snr
+ 1/43 Test #101: fast_snr ............................   Passed  357.45 sec
+      Start  12: fast_transfer
+ 2/43 Test  #12: fast_transfer .......................   Passed   49.15 sec
+      Start  15: fast_qam
+ 3/43 Test  #15: fast_qam ............................   Passed   26.73 sec
+      Start  56: weak_signal
+ 4/43 Test  #56: weak_signal .........................   Passed  167.58 sec
+      Start  59: live_profiles
+ 5/43 Test  #59: live_profiles .......................   Passed  136.44 sec
+      Start  38: receiver_differential
+ 6/43 Test  #38: receiver_differential ...............   Passed   27.13 sec
+      Start  51: receiver_probability
+ 7/43 Test  #51: receiver_probability ................   Passed   37.30 sec
+      Start   9: fast_modem
+ 8/43 Test   #9: fast_modem ..........................   Passed   22.71 sec
+      Start  52: differential_probability
+ 9/43 Test  #52: differential_probability ............   Passed   10.38 sec
+      Start 100: fast_cli
+10/43 Test #100: fast_cli ............................***Failed   32.66 sec
+.........F........
+======================================================================
+FAIL: test_help_and_invalid_local_options (__main__.FastCLI.test_help_and_invalid_local_options) (option='code-rate', value='2/3')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_fast_cli.py", line 258, in test_help_and_invalid_local_options
+    self.run_pump("fast-info", "--" + option, value, ok=False)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_fast_cli.py", line 214, in run_pump
+    self.assertEqual(result.returncode, 0 if ok else 2,
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                     result.stderr.decode(errors="replace") + result.stdout.decode(errors="replace"))
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 2 : {"profile":"wire","sample_rate":48000,"symbol_rate":17647.058823529413,"format":"capacity","code_rate":"2/3","carrier_hz":9300,"occupied_bandwidth_hz":18000,"constellation":4194304,"amplitude":0.29999999999999999,"mono":false,"shannon_snr_db_assumed":30,"shannon_capacity_bps":179410.07265904787,"shannon_capacity_at_40db_bps":239181.41955312982,"shannon_capacity_at_60db_bps":358768.26021633286,"gross_bitrate":388235.29411764711,"physical_interval_bits":2048,"interval_symbols":162,"cycle_intervals":127,"ciphertext_bytes":21472,"encrypted":false,"source_bytes_per_group":21500,"source_bytes_per_cycle":21499,"ldpc_blocks_per_cycle":4,"rs_parity_bytes":68,"rs_parity_data_ratio":0.0031580902842281255,"marker_spacing_intervals":16,"pilot_spacing_symbols":256,"waveform":"single-carrier"}
+
+
+----------------------------------------------------------------------
+Ran 18 tests in 32.565s
+
+FAILED (failures=1)
+
+      Start  34: pattern_receiver
+11/43 Test  #34: pattern_receiver ....................   Passed   89.88 sec
+      Start  11: fast_session
+12/43 Test  #11: fast_session ........................   Passed   14.53 sec
+      Start   8: fast_codec
+13/43 Test   #8: fast_codec ..........................   Passed   18.54 sec
+      Start  82: gui_controller
+14/43 Test  #82: gui_controller ......................   Passed   75.25 sec
+      Start  14: fast_ldpc
+15/43 Test  #14: fast_ldpc ...........................   Passed    2.60 sec
+      Start  57: live
+16/43 Test  #57: live ................................   Passed   53.32 sec
+      Start  50: simulation_estimate
+17/43 Test  #50: simulation_estimate .................   Passed   19.82 sec
+      Start  10: fast_files
+18/43 Test  #10: fast_files ..........................   Passed    5.07 sec
+      Start  99: fast_cable_benchmark
+19/43 Test  #99: fast_cable_benchmark ................   Passed    1.08 sec
+      Start 103: cli
+20/43 Test #103: cli .................................   Passed   33.97 sec
+      Start  18: gui_fast
+21/43 Test  #18: gui_fast ............................   Passed    2.23 sec
+      Start  36: pattern_drift
+22/43 Test  #36: pattern_drift .......................   Passed    5.11 sec
+      Start  39: pattern_fft_batch
+23/43 Test  #39: pattern_fft_batch ...................   Passed    4.38 sec
+      Start  58: live_resources
+24/43 Test  #58: live_resources ......................   Passed   10.75 sec
+      Start  35: pattern_correlator
+25/43 Test  #35: pattern_correlator ..................   Passed   13.62 sec
+      Start  13: fast_telemetry
+26/43 Test  #13: fast_telemetry ......................   Passed    0.99 sec
+      Start  26: stream_receive
+27/43 Test  #26: stream_receive ......................   Passed    2.71 sec
+      Start  49: tuning
+28/43 Test  #49: tuning ..............................   Passed    1.26 sec
+      Start  88: gui_application
+29/43 Test  #88: gui_application .....................   Passed    1.82 sec
+      Start  37: pattern_differential
+30/43 Test  #37: pattern_differential ................   Passed    0.09 sec
+      Start  24: recovery
+31/43 Test  #24: recovery ............................   Passed    0.19 sec
+      Start  40: pattern_correlator_batch
+32/43 Test  #40: pattern_correlator_batch ............   Passed    0.08 sec
+      Start  48: transfer
+33/43 Test  #48: transfer ............................   Passed    0.24 sec
+      Start  17: fast_boundary
+34/43 Test  #17: fast_boundary .......................   Passed    0.03 sec
+      Start  75: gui_inspection
+35/43 Test  #75: gui_inspection ......................   Passed    0.12 sec
+      Start  23: stream_codec
+36/43 Test  #23: stream_codec ........................   Passed    0.07 sec
+      Start  28: compression_short
+37/43 Test  #28: compression_short ...................   Passed    0.05 sec
+      Start  60: live_receptions
+38/43 Test  #60: live_receptions .....................   Passed    0.00 sec
+      Start  81: gui_binary_editor
+39/43 Test  #81: gui_binary_editor ...................   Passed    0.04 sec
+      Start  25: attachment
+40/43 Test  #25: attachment ..........................   Passed    0.01 sec
+      Start  41: pattern_search
+41/43 Test  #41: pattern_search ......................   Passed    0.01 sec
+      Start  16: fast_acoustic
+42/43 Test  #16: fast_acoustic .......................   Passed    5.95 sec
+43/43 Test  #53: differential_receiver_probability ...   Passed  1259.49 sec
+
+98% tests passed, 1 tests failed out of 43
+
+Label Time Summary:
+calibration        = 1259.49 sec*proc (1 test)
+fast_regression    = 357.45 sec*proc (1 test)
+gui                =  79.46 sec*proc (5 tests)
+
+Total Test time (real) = 1259.49 sec
+
+The following tests FAILED:
+	100 - fast_cli (Failed)
+Errors while running CTest
