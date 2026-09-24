@@ -1,6 +1,4 @@
 #include "../src/gui/plot_data.hpp"
-#include "datapump/streaming_modem.hpp"
-#include <cmath>
 #include <iostream>
 #include <numbers>
 

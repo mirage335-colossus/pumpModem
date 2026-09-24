@@ -3,17 +3,13 @@
 #include "datapump/channel.hpp"
 #include "datapump/runtime.hpp"
 #include "datapump/streaming_modem.hpp"
-#include "datapump/pattern_pulse.hpp"
-#include "datapump/symbol_schedule.hpp"
 #include "signal_view.hpp"
-#include "transmit_timing.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
 #include <deque>
 #include <limits>
-#include <map>
 #include <mutex>
 #include <numbers>
 #include <optional>
@@ -30,40 +26,34 @@ constexpr std::size_t maximum_events = 64;
 constexpr std::size_t replay_frames = 60;
 constexpr std::size_t replay_wave_samples = 256;
 constexpr std::size_t replay_bins = 257;
-constexpr std::size_t minimum_constellation_limit = 2048;
-std::size_t constellation_limit(const modem::Config& config) {
-    return std::max({minimum_constellation_limit, detail::SignalWindow::constellation_capacity(config),
-                     modem::StreamingTransmitter::constellation_history_capacity(config)});
-}
-constexpr std::size_t pattern_score_limit = Snapshot::pattern_score_limit;
+constexpr std::size_t constellation_limit = 2048;
 constexpr auto replay_duration = std::chrono::seconds(3);
 constexpr std::size_t replay_text_limit = 4096;
 struct ReplayFrame {
     std::vector<float> waveform, spectrum;
-    std::vector<std::complex<float>> constellation, pattern_scores;
+    std::vector<std::complex<float>> constellation;
     ConstellationSource source = ConstellationSource::input;
     double fraction = 0;
     std::uint64_t dropped = 0;
 };
 constexpr std::size_t replay_frame_base = sizeof(ReplayFrame) +
     (replay_wave_samples + replay_bins) * sizeof(float) +
-    pattern_score_limit * sizeof(std::complex<float>) +
     sizeof(std::optional<SignalUpdate>) + replay_text_limit + 64;
-// One verified stream is moved into the receive-content cache at the deadline.
+// One verified packet is moved into the receive-content cache at the deadline.
 // Its payload uses the content quota; its diagnostics and caption use DSP space.
 constexpr std::size_t replay_result_workspace = sizeof(transfer::Received) +
-    sizeof(SignalUpdate) + 2*replay_text_limit + 64 + minimum_constellation_limit * sizeof(std::complex<double>);
+    sizeof(SignalUpdate) + replay_text_limit + 64 + constellation_limit * sizeof(std::complex<double>);
 std::size_t replay_workspace(const Settings& value) {
     return value.simulation ? std::min(value.dsp_workspace_bytes / 8,
-        replay_result_workspace + replay_frames * (replay_frame_base + constellation_limit(value.transfer.modem) * sizeof(std::complex<float>))) : 0;
+        replay_result_workspace + replay_frames * (replay_frame_base + constellation_limit * sizeof(std::complex<float>))) : 0;
 }
 double epoch_now() {
     return std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
-std::string reception_id(const Message& message) {
+std::string packet_id(const Message& message) {
     constexpr char digits[] = "0123456789abcdef";
     std::string result;
-    for (const auto byte : message.local_id) { result += digits[byte >> 4]; result += digits[byte & 15]; }
+    for (const auto byte : message.id) { result += digits[byte >> 4]; result += digits[byte & 15]; }
     return result;
 }
 std::string display_text(const Message& message) {
@@ -73,27 +63,25 @@ std::string display_text(const Message& message) {
     const auto size = std::min<std::size_t>(message.data.size(), 4096);
     return terminal_text(std::span<const std::uint8_t>(message.data).first(size));
 }
+constexpr std::size_t default_workspace = 64 * 1024 * 1024;
 constexpr std::size_t minimum_workspace = 512 * 1024;
-std::size_t plot_workspace(const Settings& value) { return plot_size * (sizeof(float) + sizeof(double)) +
-                                       constellation_limit(value.transfer.modem) * 3 * sizeof(std::complex<double>) +
-                                       detail::SignalWindow::sample_capacity(value.transfer.modem) * 2 * sizeof(float) +
-                                       pattern_score_limit * (4 * sizeof(std::complex<double>) + sizeof(modem::PatternEvidence)) +
-                                       sizeof(detail::SignalWindow) + modem::SampledSimulationChannel::workspace_bound +
-                                       plot_size * (sizeof(float)+sizeof(std::complex<double>)) +
+std::size_t plot_workspace(const Settings& value) { return plot_size * (sizeof(float) + sizeof(double) + 3 * sizeof(std::complex<double>)) +
+                                       sizeof(detail::SignalWindow) + modem::SimulationChannel::workspace_bound +
+                                       512 * sizeof(modem::SymbolObservation) +
                                        replay_workspace(value); }
 std::size_t audio_reserve(const Settings& value) {
     return value.simulation ? 0 : std::min<std::size_t>(5 * 1024 * 1024, value.dsp_workspace_bytes / 8);
 }
 std::size_t bank_capacity(const Settings& value) {
-    // Simulation feeds sampled audio directly; it never allocates
+    // Simulation feeds integrated observations directly; it never allocates
     // the asynchronous hardware capture queue.
     const auto capture_queue = value.simulation ? 0 : value.dsp_workspace_bytes / 8;
     const auto reserved = capture_queue + value.dsp_workspace_bytes / 4 + plot_workspace(value) + audio_reserve(value);
     if (reserved >= value.dsp_workspace_bytes) throw Error("DSP workspace cannot hold the audio and plot buffers");
     return value.dsp_workspace_bytes - reserved;
 }
-std::size_t source_budget(std::size_t content) {
-    return transfer::source_storage_limit(content);
+std::size_t packet_budget(std::size_t content) {
+    return transfer::packet_workspace_limit(content);
 }
 modem::ChannelConfig channel_config(const Settings& settings) {
     modem::ChannelConfig channel;
@@ -105,23 +93,14 @@ modem::ChannelConfig channel_config(const Settings& settings) {
 }
 Settings normalized(Settings value) {
     if (value.content_limit == default_memory_limit) value.content_limit = value.transfer.content_limit;
-    if (value.dsp_workspace_bytes == runtime::default_dsp_workspace_bytes()) value.dsp_workspace_bytes = value.transfer.dsp_workspace_bytes;
+    if (value.dsp_workspace_bytes == default_workspace) value.dsp_workspace_bytes = value.transfer.dsp_workspace_bytes;
     value.transfer.content_limit = value.content_limit;
     value.transfer.dsp_workspace_bytes = value.dsp_workspace_bytes;
-    if (value.transfer.modem.spreading_mode == modem::SpreadingMode::tone) {
-        value.transfer.key.reset(); value.receive_keys.clear();
-        value.transfer.modem.data_key.reset();
-        value.transfer.modem.scramble = value.transfer.modem.dsss = false;
-        value.transfer.modem.spreading_seed.fill(0); value.transfer.modem.dsss_seed.fill(0);
-        if (value.transfer.automatic_receive_profiles && value.transfer.receive_pattern_mode != tuning::PatternMode::auto_tone &&
-            value.transfer.receive_pattern_mode < tuning::PatternMode::tone_1)
-            value.transfer.receive_pattern_mode = tuning::PatternMode::auto_tone;
-    } else if (value.transfer.key) value.transfer.modem.scramble = true;
     modem::validate(value.transfer.modem);
     if (!value.simulation && value.transfer.modem.bandwidth_hz > 192000)
         throw Error("This bandwidth requires an SDR frontend; this build supports audio hardware and simulation. Enable simulation for the selected band.");
     if (!value.content_limit) throw Error("received content cache must have a positive capacity");
-    (void)source_budget(value.content_limit);
+    (void)packet_budget(value.content_limit);
     if (value.dsp_workspace_bytes < minimum_workspace) throw Error("streaming DSP workspace must be at least 512 KiB");
     (void)bank_capacity(value);
     if (!std::isfinite(value.simulation_snr_db) || std::abs(value.simulation_snr_db) > 200)
@@ -140,7 +119,7 @@ void count_dropped(std::uint64_t& total, std::uint64_t count) {
     total += std::min(count, std::numeric_limits<std::uint64_t>::max() - total);
 }
 void append_points(modem::ConstellationBatch& target, modem::ConstellationBatch batch,
-                   std::size_t limit) {
+                   std::size_t limit = constellation_limit) {
     count_dropped(target.dropped, batch.dropped);
     if (batch.points.size() > limit) {
         count_dropped(target.dropped, batch.points.size() - limit);
@@ -158,55 +137,50 @@ void append_points(modem::ConstellationBatch& target, modem::ConstellationBatch 
 struct Session::Impl {
     struct Prepared {
         std::unique_ptr<modem::StreamingTransmitter> transmitter;
-        std::function<void(Prepared&)> prepare_hardware;
-        std::optional<std::uint64_t> protected_epoch;
         bool binary = false;
-        double pattern_score = -1;
-        std::uint64_t stream_signal_id = 0;
+        std::unique_ptr<modem::BinaryReceiver> binary_receiver;
+        transfer::Options binary_options;
+        std::string binary_text;
+        std::size_t binary_received_bits = 0, binary_expected_bits = 0;
+        std::uint64_t binary_signal_id = 0;
+        bool binary_finished = false;
         std::uint64_t generation = 0, serial = 0;
-        std::uint64_t transmitted_samples = 0;
+        std::uint64_t admission_epoch = 0;
         std::uint64_t tail_remaining = 0;
         bool tail_started = false;
         std::vector<ReplayFrame> replay;
         std::vector<std::optional<SignalUpdate>> signals;
         std::optional<SignalUpdate> verified;
+        std::optional<SignalUpdate> binary_result;
         std::optional<transfer::Received> received;
         std::size_t replay_count = 0, point_limit = 0;
-        std::vector<std::complex<double>> pattern_scores;
+        modem::ConstellationBatch interval_points;
+        bool interval_locked = false;
         std::stop_token stop;
     };
     struct AudioBlock { std::vector<float> samples; std::uint64_t revision; };
     struct Receiver {
         transfer::Options options;
         Bytes key_tag;
-        std::uint64_t epoch = 0;
-        double admitted_at = 0;
-        double last_confident_at = 0;
-        std::uint64_t last_confident_end = 0;
-        struct Presentation { std::uint64_t signal_id=0; bool content_reported=false; };
-        // Candidate chunks may interleave. Keep each physical identity until
-        // its actual completion, with the same bound as the content collector.
-        std::map<std::pair<std::uint64_t,std::uint64_t>,Presentation> presentations;
+        std::uint64_t epoch = 0, signal_id = 0;
         std::unique_ptr<modem::StreamingReceiver> modem;
-        std::unique_ptr<transfer::StreamReceiver> content;
+        Bytes frame;
+        std::size_t wire_offset = 0, last_preview_size = 0;
+        std::optional<std::size_t> expected_size;
+        std::string last_preview;
     };
     struct Bank {
-        std::shared_ptr<transfer::ReceiveStorageQuota> source_quota;
         std::vector<Receiver> receivers;
+        std::optional<std::size_t> active;
         std::size_t working_bytes = 0;
         double created_at = 0;
-        bool limited = false;
-        std::complex<double> mixer{1,0};
+        std::optional<std::uint64_t> admission_epoch;
     };
     static std::size_t receiver_workspace(const Receiver& receiver) {
-        // Reserve bounded diagnostic growth and control storage before
+        // The decoder retains up to 2048 diagnostic points after locking.
+        // Reserve that bounded growth and callback/control storage before
         // admitting a receiver, rather than reporting only its idle allocation.
-        const auto& config=receiver.options.modem;
-        const auto compact=receiver.options.key && modem::symbol_sample_count(config)>=60ULL*config.sample_rate;
-        const auto margin=compact?8192:65536;
-        return receiver.modem->working_bytes() + margin + sizeof(Receiver) +
-            receiver.presentations.size()*(sizeof(decltype(receiver.presentations)::value_type)+4*sizeof(void*)) +
-            (receiver.content?receiver.content->working_bytes():0);
+        return receiver.modem->working_bytes() + 65536 + sizeof(Receiver);
     }
     EpochClock epoch_clock;
     ReplayClock replay_clock;
@@ -215,9 +189,7 @@ struct Session::Impl {
     Settings settings;
     Snapshot current;
     std::uint64_t generation = 0, decoder_generation = 0, tx_serial = 0, receive_revision = 0, next_signal = 1, next_event = 1;
-    std::uint64_t last_pattern_transmit_epoch = 0;
     bool tx_busy = false;
-    Clock::time_point next_hardware_send{};
     using Transmission = std::variant<Message, Bytes>;
     std::deque<Transmission> queued;
     std::shared_ptr<Prepared> ready;
@@ -229,6 +201,7 @@ struct Session::Impl {
     std::vector<ReplayFrame> replay;
     std::vector<std::optional<SignalUpdate>> replay_signals;
     std::optional<SignalUpdate> replay_verified;
+    std::optional<SignalUpdate> replay_binary_result;
     std::optional<transfer::Received> replay_received;
     std::size_t replay_signal_cursor = 0, staged_received_bytes = 0;
     std::uint64_t replay_signal_id = 0;
@@ -237,6 +210,7 @@ struct Session::Impl {
     std::optional<std::size_t> delivered_replay_frame;
     std::size_t first_visible_replay_frame = 0;
     double replay_bin_hz = 0;
+    std::vector<std::pair<std::string, std::uint64_t>> signal_ids;
     std::stop_source capture_stop, tx_stop, decode_stop;
     std::jthread source, encoder, decoder;
 
@@ -260,7 +234,7 @@ struct Session::Impl {
         return now;
     }
     std::string idle_status() const {
-        return settings.simulation ? "Simulated independent radios; sampled audio, clock error and phase noise" : "Listening to audio input";
+        return settings.simulation ? "Simulated channel; accelerated time, clock error and phase noise" : "Listening to audio input";
     }
     void clear_replay(bool discard_pending = true) {
         if (discard_pending && replay_signal_id)
@@ -268,12 +242,11 @@ struct Session::Impl {
                 return !event.validated && event.id == replay_signal_id;
             });
         replay = {}; delivered_replay_frame.reset(); first_visible_replay_frame = 0;
-        replay_signals = {}; replay_verified.reset(); replay_received.reset();
+        replay_signals = {}; replay_verified.reset(); replay_binary_result.reset(); replay_received.reset();
         replay_signal_cursor = staged_received_bytes = 0; replay_signal_id = 0;
         current.simulation_replay = false;
         current.replay_frame_index = current.replay_frame_count = 0;
         current.simulation_sample_fraction = 0;
-        current.pattern_scores.clear();
     }
     // Called with mutex held, after validation. Invalid input must leave a
     // currently presented simulation and its pending result untouched.
@@ -295,7 +268,7 @@ struct Session::Impl {
         if (batch.points.empty() && !batch.dropped) return;
         if (pending_source != source_kind) pending_points = {};
         pending_source = source_kind;
-        append_points(pending_points, std::move(batch), constellation_limit(settings.transfer.modem));
+        append_points(pending_points, std::move(batch));
     }
     void advance_replay(Clock::time_point now) {
         if (replay.empty()) return;
@@ -306,23 +279,17 @@ struct Session::Impl {
             static_cast<std::size_t>(static_cast<std::uint64_t>(elapsed_ns) * replay.size() / 3000000000ULL) + 1);
         while (replay_signal_cursor < due) {
             auto& event = replay_signals[replay_signal_cursor++];
-            if (event && !(finished && replay_verified && event->id==replay_verified->id))
-                append_signal(std::move(*event));
+            if (event) append_signal(std::move(*event));
             event.reset();
         }
         if (elapsed >= replay_duration) {
-            if (replay_verified) {
-                // A stalled consumer needs the final state once, rather than
-                // every unpresented prefix followed by that same final state.
-                const auto id=replay_verified->id;
-                std::erase_if(current.signals,[&](const auto& event){return event.id==id;});
+            if (replay_verified && replay_received) {
                 append_signal(std::move(*replay_verified));
-            }
-            if (replay_received) {
                 staged_received_bytes = 0;
-                admit_received(replay_received->content.message.data.size(), settings.content_limit);
+                admit_received(replay_received->packet.message.data.size(), settings.content_limit);
                 current.received.push_back(std::move(*replay_received));
             }
+            if (replay_binary_result) append_signal(std::move(*replay_binary_result));
             // A stalled UI must not extend the replay or paint old symbol
             // coordinates over live input. Account for undelivered points.
             const auto first = delivered_replay_frame ? *delivered_replay_frame + 1 : 0;
@@ -355,12 +322,9 @@ struct Session::Impl {
             if (replay[i].source != frame.source) { visible = {}; continue; }
             modem::ConstellationBatch points; points.dropped = replay[i].dropped;
             for (const auto point : replay[i].constellation) points.points.emplace_back(point.real(), point.imag());
-            append_points(visible, std::move(points), constellation_limit(settings.transfer.modem));
+            append_points(visible, std::move(points));
         }
         result.constellation = std::move(visible.points); result.constellation_dropped = visible.dropped;
-        // Each frame already contains a bounded history; replacing it keeps
-        // repeated polls stable and never leaks later evidence into replay.
-        result.pattern_scores.assign(frame.pattern_scores.begin(), frame.pattern_scores.end());
     }
     void halt() {
         std::lock_guard lock(mutex);
@@ -383,6 +347,7 @@ struct Session::Impl {
         input_bytes = receiver_bytes = received_bytes = audio_bytes = 0;
         clear_replay(); pending_points = {};
         replay_omitted = 0;
+        signal_ids.clear();
         current = {}; current.running = true; current.simulation = settings.simulation;
         current.status = idle_status(); changed.notify_all();
     }
@@ -410,29 +375,19 @@ struct Session::Impl {
     }
     void publish(const detail::SignalWindow& window, const modem::Config& config, std::uint64_t version,
                  Clock::time_point& last_plot, bool force = false,
-                 modem::StreamingTransmitter* transmitter = nullptr, std::uint64_t serial = 0,
-                 const std::vector<std::complex<double>>* pattern_scores = nullptr) {
+                 modem::StreamingTransmitter* transmitter = nullptr, std::uint64_t serial = 0) {
         if (!force && Clock::now() - last_plot < std::chrono::milliseconds(50)) return;
         auto measured = window.frame(config);
         auto transmitted = transmitter ? transmitter->take_payload_constellation() : modem::ConstellationBatch{};
-        auto transmitted_history = transmitter ? transmitter->payload_constellation() :
-            std::vector<std::complex<double>>{};
         std::lock_guard lock(mutex);
         if (!current.running || generation != version) return;
         if (transmitter && tx_serial != serial) return;
-        if (pattern_scores && tx_serial != serial) return;
         current.waveform = std::move(measured.waveform); current.spectrum_db = std::move(measured.spectrum);
-        if (pattern_scores) current.pattern_scores = *pattern_scores;
         current.constellation = std::move(measured.constellation);
         current.constellation_source = ConstellationSource::input;
         current.constellation_dropped = 0;
         if (transmitter) {
-            // Keep actual emitted chips across display intervals. Narrow bands
-            // can produce only one new chip in several GUI updates. Until the
-            // payload begins, the measured settling waveform remains visible.
-            if (!transmitted_history.empty())
-                current.constellation = std::move(transmitted_history);
-            current.pattern_scores.clear();
+            current.constellation.clear();
             current.constellation_source = ConstellationSource::transmitted;
             queue_points(std::move(transmitted), ConstellationSource::transmitted);
         }
@@ -444,8 +399,12 @@ struct Session::Impl {
         const auto divisor = wave.replay_count - 1, index = wave.replay.size();
         return (samples / divisor) * index + (samples % divisor * index + divisor - 1) / divisor;
     }
-    void collect_replay(Prepared& wave, const modem::Config& config, const detail::SignalWindow& window) {
-        auto measured = window.frame(config);
+    void collect_replay(Prepared& wave, const modem::Config& config, const modem::SimulationChannel& channel) {
+        std::vector<float> preview(plot_size);
+        channel.preview_last(*wave.transmitter, preview);
+        const auto sample_end = channel.preview_end_samples();
+        const auto valid = static_cast<std::size_t>(std::min<std::uint64_t>(sample_end, preview.size()));
+        auto measured = signal_plots(std::span(preview).last(valid), config, sample_end - valid);
         ReplayFrame frame;
         const auto keep = std::min(replay_wave_samples, measured.waveform.size());
         frame.waveform.assign(measured.waveform.end() - static_cast<std::ptrdiff_t>(keep), measured.waveform.end());
@@ -456,16 +415,16 @@ struct Session::Impl {
             frame.spectrum[i] = static_cast<float>(*std::max_element(measured.spectrum.begin() + static_cast<std::ptrdiff_t>(begin),
                                             measured.spectrum.begin() + static_cast<std::ptrdiff_t>(end)));
         }
+        frame.source = wave.interval_locked ? ConstellationSource::received : ConstellationSource::input;
+        if (!wave.interval_locked) wave.interval_points.points = std::move(measured.constellation);
         modem::ConstellationBatch bounded;
-        append_points(bounded, {std::move(measured.constellation), 0}, wave.point_limit);
+        append_points(bounded, std::move(wave.interval_points), wave.point_limit);
         frame.constellation.reserve(bounded.points.size());
         for (const auto point : bounded.points) frame.constellation.emplace_back(static_cast<float>(point.real()), static_cast<float>(point.imag()));
-        frame.pattern_scores.reserve(wave.pattern_scores.size());
-        for (const auto point : wave.pattern_scores) frame.pattern_scores.emplace_back(static_cast<float>(point.real()), static_cast<float>(point.imag()));
         frame.dropped = bounded.dropped;
-        frame.fraction = static_cast<double>(static_cast<long double>(wave.transmitted_samples) /
+        frame.fraction = static_cast<double>(static_cast<long double>(wave.transmitter->samples_emitted()) /
                                             wave.transmitter->total_samples());
-        wave.replay.push_back(std::move(frame));
+        wave.replay.push_back(std::move(frame)); wave.interval_points = {}; wave.interval_locked = false;
     }
     void enqueue_audio(std::span<const float> samples, std::uint64_t version) {
         std::lock_guard lock(mutex);
@@ -489,10 +448,12 @@ struct Session::Impl {
         current.buffered_samples = 0; changed.notify_all();
     }
     Bank make_bank(const Settings& value) { return make_bank(value, Bank{}); }
+    Bank make_bank(const Settings& value, std::uint64_t admission_epoch) {
+        Bank bank;
+        bank.admission_epoch = admission_epoch;
+        return make_bank(value, std::move(bank));
+    }
     Bank make_bank(const Settings& value, Bank bank) {
-        bank.limited=false;
-        if(!bank.source_quota)bank.source_quota=std::make_shared<transfer::ReceiveStorageQuota>(
-            transfer::ReceiveStorageQuota{transfer::source_storage_limit(value.content_limit),0});
         std::vector<std::optional<Crypto>> keys;
         std::vector<Bytes> fingerprints;
         if (value.permits_plaintext()) keys.emplace_back();
@@ -504,109 +465,84 @@ struct Session::Impl {
         };
         if (value.transfer.key) add(*value.transfer.key);
         for (const auto& key : value.receive_keys) add(key);
-        const auto now = current_epoch();
+        const auto now = bank.admission_epoch ? static_cast<double>(*bank.admission_epoch) : current_epoch();
         const auto center = value.transfer.timestamp ? value.transfer.timestamp : static_cast<std::uint64_t>(now);
+        const auto limit = packet_budget(value.content_limit);
         for (const auto& key : keys) {
-            const auto profiles=value.transfer.automatic_receive_profiles?
-                tuning::receive_profiles(value.transfer.modem,value.transfer.receive_targets_db_hz,value.transfer.receive_pattern_mode,key.has_value()):
-                std::vector<modem::Config>{value.transfer.modem};
-            for(const auto& profile:profiles) {
-            auto epochs = key ? drift_candidates(center, value.transfer.search_seconds, true) : std::vector<std::uint64_t>{center};
-            if(key && !value.transfer.timestamp && value.simulation) {
-                // A listener can start after hardware settling has begun. Its
-                // clock-error window still describes clock uncertainty; the
-                // older transmit epochs below cover the physical prefix.
-                const auto settling=static_cast<unsigned>(std::ceil(
-                    (static_cast<double>(modem::training_sample_count(profile))+
-                     static_cast<double>(modem::pattern_pulse_padding_samples(profile)))/profile.sample_rate));
-                for(unsigned age=value.transfer.search_seconds+1;age<=value.transfer.search_seconds+settling;++age)
-                    if(center>=age)epochs.push_back(center-age);
-            }
+            const auto epochs = key ? drift_candidates(center, value.transfer.search_seconds, true) : std::vector<std::uint64_t>{center};
             for (const auto epoch : epochs) {
                 const auto tag = key ? key->mac(Bytes{'D','P','-','R','X','-','B','A','N','K'}) : Bytes{};
                 const auto existing = std::find_if(bank.receivers.begin(), bank.receivers.end(), [&](const auto& receiver) {
-                    const auto& c=receiver.options.modem;
-                    return receiver.key_tag == tag && (tag.empty() || receiver.epoch == epoch) &&
-                        c.spreading_factor==profile.spreading_factor && c.integration_seconds==profile.integration_seconds &&
-                        c.scramble==profile.scramble && c.spreading_mode==profile.spreading_mode &&
-                        c.pulse_shaping==profile.pulse_shaping;
+                    return receiver.key_tag == tag && (tag.empty() || receiver.epoch == epoch);
                 });
                 if (existing != bank.receivers.end()) continue;
                 const auto capacity = bank_capacity(value);
-                const auto compact=key && modem::symbol_sample_count(profile)>=60ULL*profile.sample_rate;
-                const auto control_margin = (compact?8192:65536) + sizeof(Receiver);
-                if(bank.working_bytes>=capacity || capacity-bank.working_bytes<=control_margin) {
-                    bank.limited=true;continue;
-                }
+                constexpr auto control_margin = sizeof(Receiver) + 4096;
+                if (bank.working_bytes >= capacity || capacity - bank.working_bytes <= control_margin)
+                    throw Error("key and epoch receiver bank exceeds the configured DSP workspace");
                 Receiver receiver;
-                receiver.options = value.transfer; receiver.options.modem=profile;receiver.options.key = key; receiver.epoch = epoch;
-                receiver.admitted_at=now;
+                receiver.options = value.transfer; receiver.options.key = key; receiver.epoch = epoch;
                 receiver.key_tag = tag;
                 const auto config = transfer::seeded_config(receiver.options, epoch);
-                try {
-                    modem::PatternSearch search;
-
-                    search.compact_clock_search=compact;
-                    search.search_stream_phases=key.has_value();
-                    search.bit_limit=transfer::pattern_bit_limit(value.content_limit);
-                    search.start_offset_seconds=static_cast<double>(epoch)-(value.transfer.timestamp?static_cast<double>(value.transfer.timestamp):now);
-                    if(value.simulation || value.transfer.timestamp)
-                        *search.start_offset_seconds+=(static_cast<double>(modem::training_sample_count(config))+
-                            static_cast<double>(modem::pattern_pulse_padding_samples(config)))/config.sample_rate;
-                    search.start_uncertainty_seconds=value.transfer.search_seconds+1.;
-                    receiver.modem = std::make_unique<modem::StreamingReceiver>(config,
-                        std::min(value.dsp_workspace_bytes / 2, capacity - bank.working_bytes - control_margin),search);
-                } catch(const Error&) {
-                    bank.limited=true;continue;
-                }
-                receiver.content=std::make_unique<transfer::StreamReceiver>(receiver.options,receiver.epoch,bank.source_quota);
+                auto expected = modem::preamble(config);
+                if (key) expected = key->xor_data(expected, epoch);
+                // Every bootstrap trial uses the same stream position. Derive
+                // its mask once, so blind noise acquisition does not repeat
+                // HKDF and AES setup for every symbol timing hypothesis.
+                const auto bootstrap_mask = transfer::audio_bootstrap_mask(receiver.options, epoch);
+                auto validator = [bootstrap_mask, limit](const Bytes& prefix) {
+                    try {
+                        auto plain = prefix;
+                        if (!bootstrap_mask.empty()) {
+                            if (plain.size() > bootstrap_mask.size()) return false;
+                            for (std::size_t i = 0; i < plain.size(); ++i) plain[i] ^= bootstrap_mask[i];
+                        }
+                        if (!packet_bootstrap_possible(plain, limit)) return false;
+                        return packet_frame_size(plain, limit).has_value();
+                    } catch (const Error&) { return false; }
+                };
+                receiver.modem = std::make_unique<modem::StreamingReceiver>(config, std::move(expected),
+                    std::min(value.dsp_workspace_bytes / 2, capacity - bank.working_bytes - control_margin),
+                    std::move(validator));
                 bank.working_bytes += receiver_workspace(receiver);
                 if (bank.working_bytes > bank_capacity(value))
                     throw Error("key and epoch receiver bank exceeds the configured DSP workspace");
                 bank.receivers.push_back(std::move(receiver));
             }
-            }
         }
         bank.created_at = now;
-        if(bank.receivers.empty())throw Error("no receive profile fits the configured DSP workspace");
         return bank;
     }
     void refresh_bank(Bank& bank, const Settings& value) {
-        // Receiver epoch admission is independent of transmit preparation.
-        // Both hardware and simulation retain only observed acquisition state.
-        if(value.transfer.timestamp && std::none_of(bank.receivers.begin(),bank.receivers.end(),[](const auto& receiver){
-            return receiver.key_tag.empty() && receiver.modem->clock_windowed();
-        }))return;
+        // A simulated burst advances media time by DSP work, independently of
+        // CPU speed or wall-clock jumps. Retain its admitted key/epoch search
+        // until its tail completes; ordinary/idle receivers still refresh.
+        if (bank.admission_epoch || value.transfer.timestamp) return;
         const auto now = current_epoch();
-        if (std::floor(now)==std::floor(bank.created_at)) return;
-        std::erase_if(bank.receivers,[&](const auto& receiver){
-            // Short streams can hold fewer than one output chunk throughout
-            // the physical absence window. Their admitted clock must survive
-            // epoch refresh even before any chunk updates last_confident_end.
-            if(receiver.modem->synchronized())return false;
-            const auto& config=receiver.options.modem;
-            const auto symbol=static_cast<double>(modem::symbol_sample_count(config))/config.sample_rate;
-            const auto prefix=(static_cast<double>(modem::training_sample_count(config))+
-                static_cast<double>(modem::pattern_pulse_padding_samples(config)))/config.sample_rate;
-            const auto allowance=value.transfer.search_seconds+1.;
-            // Rejecting a completed search no longer removes the only key for
-            // a whole message: subsequent symbol-start seconds are independent.
-            // Unconfirmed epochs need one complete symbol plus clock coverage.
-            // Retire confirmed receivers only after their physical search has
-            // ended the stream using the fixed complete-symbol absence rule.
-            if(receiver.last_confident_end) {
-                return now>receiver.last_confident_at+6.+allowance;
-            }
-            if(receiver.key_tag.empty())
-                return receiver.modem->clock_windowed() && now>receiver.admitted_at+prefix+symbol+allowance;
-            return !value.transfer.timestamp && now>static_cast<double>(receiver.epoch)+prefix+symbol+allowance;
+        if (now - bank.created_at < 1) return;
+        if (std::any_of(bank.receivers.begin(), bank.receivers.end(), [](const auto& receiver) {
+            return receiver.modem->synchronized();
+        })) return;
+        const auto bootstrap_seconds = 5 + static_cast<double>(modem::payload_symbol_count(packet_prefix_size, value.transfer.modem)) *
+                                           modem::symbol_seconds(value.transfer.modem);
+        // A noise-hidden start cannot supply a trustworthy epoch. Long blind
+        // integrations retain a finite admitted bank for one bootstrap span;
+        // they cannot admit every wall-clock epoch without unbounded state.
+        if (bootstrap_seconds > 30 && now - bank.created_at < bootstrap_seconds) return;
+        const auto oldest = now - value.transfer.search_seconds - 1;
+        std::erase_if(bank.receivers, [&](const auto& receiver) {
+            return !receiver.key_tag.empty() && static_cast<double>(receiver.epoch) < oldest &&
+                   now > static_cast<double>(receiver.epoch) + bootstrap_seconds + 1;
         });
-        bank.working_bytes=0;for(const auto& receiver:bank.receivers)bank.working_bytes+=receiver_workspace(receiver);
-        bank=make_bank(value,std::move(bank));
+        bank.working_bytes = 0;
+        for (const auto& receiver : bank.receivers) bank.working_bytes += receiver_workspace(receiver);
+        // Reuse admitted states in place. A fresh parallel bank would briefly
+        // double the declared DSP allocation during every epoch refresh.
+        bank = make_bank(value, std::move(bank));
     }
     void append_signal(SignalUpdate event) {
         if (current.signals.size() == maximum_events) {
-            const auto completed = [](const auto& item) { return item.validated || item.complete; };
+            const auto completed = [](const auto& item) { return item.validated || (item.binary && item.complete); };
             const auto pending = std::find_if(current.signals.begin(), current.signals.end(),
                                              [&](const auto& item) { return !completed(item); });
             if (pending == current.signals.end() && !completed(event)) return;
@@ -618,24 +554,60 @@ struct Session::Impl {
         event.sequence = next_event++; event.virtual_seconds = current.virtual_seconds;
         if (!wave) { append_signal(std::move(event)); return; }
         event.text = std::string(event.text.data(), std::min(event.text.size(), replay_text_limit));
-        if (event.validated || event.complete) { wave->verified = std::move(event); return; }
+        if (event.validated) { wave->verified = std::move(event); return; }
         // One most recent pending observation per presentation interval.
-        // Floor quantization keeps even a late observation visible for the last
+        // Floor quantization keeps even a late bootstrap visible for the last
         // interval before validation; a stalled UI never extends the deadline.
-        const auto fraction = static_cast<long double>(wave->transmitted_samples) / wave->transmitter->total_samples();
-        // Frame zero represents input before this transmission began; even an
-        // early confident prefix belongs to a later presentation interval.
-        const auto index = std::min(wave->signals.size() - 1, std::max<std::size_t>(1,
-            wave->binary ? wave->replay.size() :
-                static_cast<std::size_t>(fraction * static_cast<long double>(wave->signals.size()))));
+        const auto fraction = static_cast<long double>(wave->transmitter->samples_emitted()) / wave->transmitter->total_samples();
+        const auto index = std::min(wave->signals.size() - 1, wave->binary ? wave->replay.size() :
+            static_cast<std::size_t>(fraction * static_cast<long double>(wave->signals.size())));
         wave->signals[index] = std::move(event);
+    }
+    SignalUpdate binary_signal(const Prepared& wave, const Settings& value, bool finished) const {
+        SignalUpdate event;
+        event.id = wave.binary_signal_id;
+        event.frequency_hz = value.transfer.modem.carrier_hz;
+        event.binary = true;
+        event.received_bits = wave.binary_received_bits;
+        event.expected_bits = wave.binary_expected_bits;
+        event.complete = finished && event.received_bits == event.expected_bits;
+        event.text = wave.binary_text.empty() ? "Receiving binary..." : wave.binary_text;
+        return event;
+    }
+    void receive_binary(Prepared& wave, const Settings& value,
+                        std::span<const modem::SymbolObservation> observations) {
+        if (wave.binary_finished) return;
+        auto bits = wave.binary_receiver->push_symbols(observations, wave.stop);
+        const bool finished = wave.transmitter->finished() && !wave.binary_finished;
+        if (finished) {
+            auto tail = wave.binary_receiver->finish(wave.stop);
+            bits.insert(bits.end(), tail.begin(), tail.end());
+            wave.binary_finished = true;
+        }
+        // Only the receiver's decisions are decrypted. Neither the original
+        // bit sequence nor transmitter symbols enter this receive path.
+        transfer::xor_binary_bits(bits, wave.binary_options, wave.binary_received_bits);
+        for (const auto bit : bits) if (wave.binary_text.size() < replay_text_limit)
+            wave.binary_text += static_cast<char>('0' + bit);
+        wave.binary_received_bits += bits.size();
+        auto points = wave.binary_receiver->take_payload_constellation();
+        wave.interval_locked = wave.interval_locked || !points.points.empty();
+        append_points(wave.interval_points, std::move(points));
+        std::lock_guard lock(mutex);
+        if (!current.running || generation != wave.generation || tx_serial != wave.serial || wave.stop.stop_requested()) return;
+        if (!bits.empty()) add_signal(binary_signal(wave, value, false), &wave);
+        if (finished) {
+            auto event = binary_signal(wave, value, true);
+            event.sequence = next_event++; event.virtual_seconds = current.virtual_seconds;
+            wave.binary_result = std::move(event);
+        }
     }
     void make_receive_room(std::size_t bytes, std::size_t limit) {
         if (staged_received_bytes > limit || bytes > limit - staged_received_bytes)
             throw Error("incoming content exceeds remaining receive cache capacity");
         while (!current.received.empty() &&
                (current.received.size() >= maximum_events || received_bytes > limit - staged_received_bytes - bytes)) {
-            received_bytes -= current.received.front().content.message.data.size();
+            received_bytes -= current.received.front().packet.message.data.size();
             current.received.erase(current.received.begin());
         }
     }
@@ -643,171 +615,131 @@ struct Session::Impl {
         make_receive_room(bytes, limit);
         received_bytes += bytes;
     }
-    template<class Feed> void feed_bank(Bank& bank, const Settings& value, std::uint64_t version,
-                                        std::stop_token stop, Feed feed, Prepared* simulation_wave = nullptr) {
-        // Admit the receiver's current clock epoch before consuming this PCM
-        // block. A short burst can finish within one block after a second rolls
-        // over; refreshing afterward can miss every chip of the new stream.
-        refresh_bank(bank,value);
-        const auto capacity = bank_capacity(value);
-        std::vector<std::complex<double>> pattern_scores;
-        double best_pattern_score = -1;
-        for (auto& receiver : bank.receivers) {
-            if (stop.stop_requested()) return;
-            auto accounted = receiver_workspace(receiver);
-            const auto update_workspace = [&] {
-                const auto actual = receiver_workspace(receiver);
-                bank.working_bytes = bank.working_bytes - accounted + actual;
-                accounted = actual;
-            };
-            try {
-                const auto overhead = accounted - receiver.modem->working_bytes();
-                const auto other = bank.working_bytes - accounted;
-                if (other > capacity || overhead > capacity - other)
-                    throw Error("key and epoch receiver bank exceeds the configured DSP workspace");
-                // Idle keys reserve their actual state. The receiver being
-                // fed can use all remaining shared space for recording and
-                // replay, while later keys see its measured growth.
-                receiver.modem->set_workspace_bytes(capacity - other - overhead);
-                feed(*receiver.modem);
-                update_workspace();
-                {
-                    const auto candidates = receiver.modem->pattern_candidates(pattern_score_limit);
-                    const auto best = std::max_element(candidates.begin(), candidates.end(),
-                        [](const auto& a, const auto& b) { return a.score < b.score; });
-                    if (best != candidates.end() && best->score > best_pattern_score) {
-                        best_pattern_score = best->score;
-                        pattern_scores.clear(); pattern_scores.reserve(candidates.size());
-                        for (const auto& candidate : candidates)
-                            pattern_scores.emplace_back(candidate.bit ? candidate.alternative_score : candidate.score,
-                                                        candidate.bit ? candidate.score : candidate.alternative_score);
+    std::uint64_t signal_for(const std::string& id) {
+        const auto found = std::find_if(signal_ids.begin(), signal_ids.end(), [&](const auto& item) { return item.first == id; });
+        if (found != signal_ids.end()) return found->second;
+        if (signal_ids.size() == maximum_events) signal_ids.erase(signal_ids.begin());
+        const auto result = next_signal++; signal_ids.emplace_back(id, result); return result;
+    }
+    bool received_wire(Receiver& receiver, Bytes wire, const Settings& value, std::uint64_t version, Prepared* wave) {
+        if (wave && wave->received) return true;
+        if (wire.empty()) return false;
+        const auto training_bytes = modem::preamble(receiver.options.modem).size();
+        const auto old_offset = receiver.wire_offset;
+        receiver.wire_offset += wire.size();
+        transfer::xor_audio_whitening(wire, old_offset);
+        if (receiver.options.key) wire = receiver.options.key->xor_data(wire, receiver.epoch, old_offset);
+        const auto skip = old_offset < training_bytes ? std::min(wire.size(), training_bytes - old_offset) : 0;
+        const auto limit = packet_budget(value.content_limit);
+        if (receiver.frame.size() + wire.size() - skip > limit) throw Error("incoming content exceeds receive cache capacity");
+        receiver.frame.insert(receiver.frame.end(), wire.begin() + static_cast<std::ptrdiff_t>(skip), wire.end());
+        if (receiver.frame.size() < packet_prefix_size) return false;
+        if (!receiver.expected_size) receiver.expected_size = packet_frame_size(receiver.frame, limit);
+        const auto expected_size = receiver.expected_size;
+        if (!expected_size) return false;
+        if (wave && !receiver.signal_id) {
+            std::lock_guard lock(mutex);
+            if (!current.running || generation != version || wave->serial != tx_serial || wave->stop.stop_requested()) return true;
+            receiver.signal_id = next_signal++;
+            const auto diagnostics = receiver.modem->diagnostics();
+            const auto preamble_percent = diagnostics.preamble_reception ?
+                std::optional<double>(100 * diagnostics.preamble_reception->received_fraction()) : std::nullopt;
+            add_signal({receiver.signal_id, value.transfer.modem.carrier_hz, "Receiving...", false, {},
+                        diagnostics.snr_db, receiver.frame.size(), *expected_size, 0, 0, preamble_percent, std::nullopt}, wave);
+        }
+        if (receiver.frame.size() - receiver.last_preview_size >= 16 || receiver.frame.size() >= *expected_size) {
+            receiver.last_preview_size = receiver.frame.size();
+            const auto preview = preview_packet_partial(receiver.frame, limit);
+            if (preview) {
+                auto text = display_text(preview->message);
+                if (!text.empty() && text != receiver.last_preview) {
+                    std::lock_guard lock(mutex);
+                    if (current.running && generation == version &&
+                        (!wave || (wave->serial == tx_serial && !wave->stop.stop_requested()))) {
+                        if (!receiver.signal_id) receiver.signal_id = signal_for(packet_id(preview->message));
+                        const auto diagnostics=receiver.modem->diagnostics();
+                        const auto preamble_percent=diagnostics.preamble_reception?
+                            std::optional<double>(100*diagnostics.preamble_reception->received_fraction()):std::nullopt;
+                        add_signal({receiver.signal_id, value.transfer.modem.carrier_hz, text, false, packet_id(preview->message),
+                                    diagnostics.snr_db, receiver.frame.size(), *expected_size,0,0,preamble_percent,std::nullopt}, wave);
+                        receiver.last_preview = std::move(text);
                     }
                 }
-                {
-                    auto bursts=receiver.modem->take_pattern_bursts();
-                    for(auto& burst:bursts) {
-                        if(burst.bits.empty() && !burst.missing_slots && !burst.complete)continue;
-                        const auto score=burst.score,frequency=burst.frequency_hz;
-                        const auto physical_id=std::pair{burst.stream_first_sample,burst.stream_first_symbol};
-                        if(burst.end_sample>receiver.last_confident_end) {
-                            receiver.last_confident_end=burst.end_sample;receiver.last_confident_at=current_epoch();
-                        }
-                        auto result=receiver.content->push(std::move(burst),receiver.modem->diagnostics());
-                        update_workspace();
-                        if(bank.working_bytes>capacity)throw Error("receive content diagnostics exceed the configured DSP workspace");
-                        auto presentation=receiver.presentations.find(physical_id);
-                        if(presentation==receiver.presentations.end()) {
-                            if(receiver.presentations.size()>=16) {bank.limited=true;continue;}
-                            presentation=receiver.presentations.emplace(physical_id,Receiver::Presentation{}).first;
-                        }
-                        auto& display=presentation->second;
-                        std::string bits;bits.reserve(result.raw_bits.size());
-                        for(auto bit:result.raw_bits)bits.push_back(bit?'1':'0');
-                        std::lock_guard lock(mutex);
-                        if(!current.running || generation!=version || (simulation_wave && simulation_wave->stop.stop_requested()))return;
-                        const auto complete=result.stream_complete;
-                        const auto filtered=simulation_wave && !result.content_validated &&
-                            ((simulation_wave->verified && simulation_wave->verified->validated) || score<simulation_wave->pattern_score);
-                        if(!filtered) {
-                            if(!display.signal_id)display.signal_id=simulation_wave && simulation_wave->stream_signal_id?
-                                simulation_wave->stream_signal_id:next_signal++;
-                            if(simulation_wave){simulation_wave->stream_signal_id=display.signal_id;simulation_wave->pattern_score=score;}
-                            SignalUpdate event;event.id=display.signal_id;event.frequency_hz=frequency;
-                            event.text=std::move(bits);event.binary=true;event.complete=result.stream_complete;
-                            event.received_bits=result.observed_bits;event.pattern_score=score;event.missing_symbols=result.missing_symbols;
-                            if(result.content_validated) {
-                                event.text=display_text(result.content.message);event.binary=false;event.validated=true;
-                                event.reception_id=reception_id(result.content.message);event.pre_fec_accuracy=result.content.pre_fec_accuracy;event.fec_stats=result.content.fec_stats;
-                            }
-                            if(result.short_text_decoded) {
-                                event.raw_bits=std::move(event.text);
-                                event.text.assign(result.content.message.data.begin(),result.content.message.data.end());
-                                event.binary=false;
-                            }
-                            add_signal(std::move(event),simulation_wave);
-                            if((result.content_validated || result.short_text_decoded) && !display.content_reported) {
-                                const auto bytes=result.content.message.data.size();
-                                if(simulation_wave) {
-                                    simulation_wave->received.reset();staged_received_bytes=0;
-                                    make_receive_room(bytes,value.content_limit);staged_received_bytes=bytes;
-                                    simulation_wave->received=std::move(result);
-                                } else {admit_received(bytes,value.content_limit);current.received.push_back(std::move(result));}
-                                display.content_reported=true;
-                            }
-                        }
-                        if(complete)receiver.presentations.erase(presentation);
-                        update_workspace();
-                        if(bank.working_bytes>capacity)throw Error("receive presentation state exceeds the configured DSP workspace");
-                    }
-                    continue;
-                }
-            } catch (const Error& error) {
-                update_workspace();
-                if (stop.stop_requested()) return;
-                {
-                    {
-                        std::lock_guard lock(mutex);
-                        if(current.running && generation==version)current.error=error.what();
-                    }
-                    bank.limited=true;
-                    modem::PatternSearch search;search.bit_limit=transfer::pattern_bit_limit(value.content_limit);
-
-                    search.compact_clock_search=receiver.options.key &&
-                        modem::symbol_sample_count(receiver.options.modem)>=60ULL*receiver.options.modem.sample_rate;
-                    search.search_stream_phases=receiver.options.key.has_value();
-                    search.start_offset_seconds=static_cast<double>(receiver.epoch)-current_epoch();
-                    if(value.simulation || value.transfer.timestamp)
-                        *search.start_offset_seconds+=(static_cast<double>(modem::training_sample_count(receiver.options.modem))+
-                            static_cast<double>(modem::pattern_pulse_padding_samples(receiver.options.modem)))/receiver.options.modem.sample_rate;
-                    search.start_uncertainty_seconds=value.transfer.search_seconds+1.;
-                    const auto other=bank.working_bytes-accounted,overhead=accounted-receiver.modem->working_bytes();
-                    if(other>capacity || overhead>capacity-other)throw;
-                    const auto remaining=capacity-other-overhead;
-                    receiver.modem.reset();
-                    receiver.modem=std::make_unique<modem::StreamingReceiver>(transfer::seeded_config(receiver.options,receiver.epoch),remaining,search);
-                    receiver.content=std::make_unique<transfer::StreamReceiver>(receiver.options,receiver.epoch,bank.source_quota);
-                    receiver.admitted_at=current_epoch();
-                    receiver.last_confident_at=0;receiver.last_confident_end=0;
-                    receiver.presentations.clear();
-                }
-                update_workspace();
             }
         }
+        if (receiver.frame.size() < *expected_size) return false;
+        auto packet = decode_packet(receiver.frame, transfer::packet_options(receiver.options, receiver.epoch), limit);
+        auto diagnostics = receiver.modem->diagnostics();
+        std::lock_guard lock(mutex);
+        if (!current.running || generation != version ||
+            (wave && (wave->serial != tx_serial || wave->stop.stop_requested()))) return true;
+        if (wave && wave->received) return true;
+        if (packet.message.data.size() > value.content_limit) {
+            current.status = "Validated packet exceeds received-content cache capacity";
+            return true;
+        }
+        if (!wave && packet.message.data.size() > value.content_limit - staged_received_bytes) return true;
+        if (!receiver.signal_id) receiver.signal_id = signal_for(packet_id(packet.message));
+        const auto preamble_percent=diagnostics.preamble_reception?
+            std::optional<double>(100*diagnostics.preamble_reception->received_fraction()):std::nullopt;
+        add_signal({receiver.signal_id, value.transfer.modem.carrier_hz, display_text(packet.message), true, packet_id(packet.message),
+                    diagnostics.snr_db, packet.consumed_bytes, packet.consumed_bytes,0,0,preamble_percent,packet.pre_fec_accuracy}, wave);
+        const auto bytes = packet.message.data.size();
+        if (wave) {
+            make_receive_room(bytes, value.content_limit);
+            staged_received_bytes = bytes;
+            wave->received = transfer::Received{std::move(packet), std::move(diagnostics), receiver.epoch};
+        } else {
+            admit_received(bytes, value.content_limit);
+            current.received.push_back({std::move(packet), std::move(diagnostics), receiver.epoch});
+        }
+        signal_ids.clear();
+        return true;
+    }
+    template<class Feed> void feed_bank(Bank& bank, const Settings& value, std::uint64_t version,
+                                        std::stop_token stop, Feed feed, Prepared* simulation_wave = nullptr) {
+        bool complete = false;
+        bool locked = false;
+        modem::ConstellationBatch points;
+        const auto first = bank.active.value_or(0);
+        const auto last = bank.active ? first + 1 : bank.receivers.size();
+        for (std::size_t index = first; index < last; ++index) {
+            auto& receiver = bank.receivers[index];
+            if (stop.stop_requested()) return;
+            try {
+                auto wire = feed(*receiver.modem);
+                if (receiver.modem->synchronized()) {
+                    locked = true;
+                    append_points(points, receiver.modem->take_payload_constellation());
+                }
+                if (received_wire(receiver, std::move(wire), value, version, simulation_wave)) { complete = true; break; }
+                if (receiver.modem->synchronized()) { bank.active = index; break; }
+            } catch (const Error&) {
+                if (stop.stop_requested()) return;
+                receiver.modem->reset(); receiver.frame.clear(); receiver.wire_offset = receiver.last_preview_size = 0;
+                receiver.expected_size.reset(); receiver.signal_id = 0; receiver.last_preview.clear();
+                if (bank.active) { complete = true; break; }
+            }
+        }
+        if (complete) {
+            const auto admission_epoch = bank.admission_epoch;
+            bank = {};
+            bank.admission_epoch = admission_epoch;
+            bank = make_bank(value, std::move(bank));
+        } else refresh_bank(bank, value);
         std::lock_guard lock(mutex);
         if (current.running && generation == version) {
             if (simulation_wave) {
-                simulation_wave->pattern_scores = std::move(pattern_scores);
-            } else if (value.simulation || !tx_busy) {
-                if (current.pattern_scores != pattern_scores) {
-                    current.pattern_scores = std::move(pattern_scores); ++current.sequence;
-                }
-            }
+                append_points(simulation_wave->interval_points, std::move(points));
+                simulation_wave->interval_locked = simulation_wave->interval_locked || locked;
+            } else queue_points(std::move(points), ConstellationSource::received);
             receiver_bytes = bank.working_bytes;
-            if(bank.limited)current.status="Pattern search is limited by the configured DSP workspace";
-            else if(current.status=="Pattern search is limited by the configured DSP workspace")current.status=idle_status();
             current.dsp_buffered_bytes = receiver_bytes + input_bytes + decoding_bytes + audio_bytes + plot_workspace(value) + (tx_busy ? value.dsp_workspace_bytes / 4 : 0);
-        }
-    }
-    void feed_samples(Bank& bank,std::span<const float> samples,const Settings& value,std::uint64_t version,
-                      std::stop_token stop,Prepared* wave=nullptr) {
-        std::array<std::complex<double>,plot_size> projected{};
-        const auto rotation=std::polar(1.,-2*std::numbers::pi*value.transfer.modem.carrier_hz/value.transfer.modem.sample_rate);
-        for(std::size_t offset=0;offset<samples.size();) {
-            const auto count=std::min(projected.size(),samples.size()-offset);
-            for(std::size_t i=0;i<count;++i) {
-                projected[i]=static_cast<double>(samples[offset+i])*bank.mixer;bank.mixer*=rotation;
-            }
-            bank.mixer/=std::abs(bank.mixer);
-            const auto raw=samples.subspan(offset,count);const auto mixed=std::span(projected).first(count);
-            feed_bank(bank,value,version,stop,[&](auto& receiver){return receiver.push(raw,mixed,stop);},wave);
-            offset+=count;
         }
     }
     void complete_tx(Prepared& wave, const std::string& error = {}) {
         std::lock_guard lock(mutex);
         if (wave.generation != generation || wave.serial != tx_serial) return;
-        if(!settings.simulation)next_hardware_send=Clock::now()+std::chrono::duration_cast<Clock::duration>(
-            std::chrono::duration<double>(static_cast<double>(modem::pattern_absence_samples(settings.transfer.modem))/settings.transfer.modem.sample_rate+1.));
         tx_busy = false; current.transmitting = settings.simulation ? false : !queued.empty();
         current.transmission_finished = settings.simulation || queued.empty(); current.transmission_cancelled = wave.stop.stop_requested();
         current.status = idle_status();
@@ -818,13 +750,15 @@ struct Session::Impl {
                 replay = std::move(wave.replay); delivered_replay_frame.reset(); first_visible_replay_frame = 0;
                 replay_signals = std::move(wave.signals); replay_signal_cursor = 0;
                 replay_verified = std::move(wave.verified); replay_received = std::move(wave.received);
+                replay_binary_result = std::move(wave.binary_result);
                 if (replay_verified) replay_signal_id = replay_verified->id;
+                else if (replay_binary_result) replay_signal_id = replay_binary_result->id;
                 else for (const auto& event : replay_signals) if (event) { replay_signal_id = event->id; break; }
                 replay_bin_hz = static_cast<double>(settings.transfer.modem.sample_rate) / (plot_size / 4);
                 replay_started = replay_clock(); current.simulation_replay = true;
                 current.replay_frame_count = replay.size();
                 current.status = wave.binary ? "Simulation; three seconds of raw binary signal" :
-                    "Simulation; three seconds of sampled signal and reception";
+                    "Simulation; three seconds of training, reception and decoded messages";
                 ++current.sequence;
             }
         }
@@ -833,27 +767,20 @@ struct Session::Impl {
     void progress(const Prepared& wave, const Settings& value) {
         std::lock_guard lock(mutex);
         if (generation != wave.generation || tx_serial != wave.serial) return;
-        current.transmission_seconds = static_cast<double>(value.simulation ? wave.transmitted_samples : wave.transmitter->samples_emitted()) / value.transfer.modem.sample_rate;
-        current.transmission_fraction = static_cast<double>(value.simulation ? wave.transmitted_samples : wave.transmitter->samples_emitted()) /
+        current.transmission_seconds = static_cast<double>(wave.transmitter->samples_emitted()) / value.transfer.modem.sample_rate;
+        current.transmission_fraction = static_cast<double>(wave.transmitter->samples_emitted()) /
                                         static_cast<double>(wave.transmitter->total_samples());
-    }
-    void retain_emitted_epoch(const Prepared& wave, const Settings& value) {
-        if(!wave.protected_epoch)return;
-        const auto& config=value.transfer.modem;
-        const auto prefix=modem::training_sample_count(config)+modem::pattern_pulse_padding_samples(config);
-        const auto end=wave.transmitter->total_samples()-modem::pattern_pulse_padding_samples(config)-modem::suppression_sample_count(config);
-        const auto emitted=std::min(end,wave.transmitter->samples_emitted());
-        if(emitted<=prefix)return;
-        const auto symbol=(emitted-prefix-1)/modem::symbol_sample_count(config);
-        const auto address=modem::symbol_stream_address(*wave.protected_epoch,0,symbol,
-            modem::symbol_sample_count(config),config.sample_rate);
-        std::lock_guard lock(mutex);
-        last_pattern_transmit_epoch=std::max(last_pattern_transmit_epoch,address.epoch);
+        if (value.simulation && wave.binary) {
+            receiver_bytes = wave.binary_receiver->working_bytes();
+            current.dsp_buffered_bytes = receiver_bytes + plot_workspace(value) + value.dsp_workspace_bytes / 4;
+        }
     }
     void source_loop(std::stop_token stop) {
         std::uint64_t local_generation = 0;
+        std::mt19937_64 random;
+        std::normal_distribution<double> normal;
         std::optional<Bank> simulation_bank;
-        std::unique_ptr<modem::SampledSimulationChannel> simulation_channel;
+        std::unique_ptr<modem::SimulationChannel> simulation_channel;
         std::shared_ptr<Prepared> wave;
         detail::SignalWindow plot_window;
         unsigned idle_fraction = 0;
@@ -869,86 +796,107 @@ struct Session::Impl {
                 value = settings; version = generation; processing_token = decode_stop.get_token();
                 if (local_generation != version) {
                     local_generation = version; wave.reset(); simulation_bank.reset(); simulation_channel.reset();
-                    last_plot = {};
-                    plot_window = detail::SignalWindow(value.transfer.modem);
+                    random.seed(value.simulation_seed);
+                    normal.reset(); last_plot = {};
+                    plot_window.reset();
                     idle_fraction = 0;
                 }
                 if (wave && wave->stop.stop_requested()) {
                     wave.reset();
+                    simulation_bank.reset(); simulation_channel.reset();
                 }
                 if (!wave && ready) {
                     wave = std::move(ready); new_burst = true; pending_points = {};
-                    if (!value.simulation) plot_window.reset();
-                    current.status = value.simulation ? "Transmitting sampled audio to an independent receiver" : "Transmitting; audio input paused";
+                    plot_window.reset();
+                    current.status = value.simulation ? "Transmitting through noise and oscillator impairments; accelerated time" : "Transmitting; audio input paused";
+                }
+                if (value.simulation && !wave && tx_busy) {
+                    // Packet preparation consumes CPU, not fictitious channel
+                    // time. Its real epoch stays anchored for the whole burst.
+                    changed.wait_for(lock, stop, std::chrono::milliseconds(5), [this, version] {
+                        return !current.running || generation != version || ready || !tx_busy;
+                    });
+                    continue;
                 }
                 capture_stop = std::stop_source{}; capture_token = capture_stop.get_token();
             }
             try {
                 if (value.simulation) {
-                    // The receiving computer runs continuously. TX control can
-                    // start a waveform, but cannot reset, seed or align RX.
-                    if (!simulation_bank) simulation_bank = make_bank(value);
-                    if (!simulation_channel) simulation_channel = std::make_unique<modem::SampledSimulationChannel>(
-                        value.transfer.modem, channel_config(value));
-                    if (new_burst) simulation_channel->begin_burst();
-                    std::array<float, plot_size> samples{};
+                    // The accelerated channel explicitly assumes admitted
+                    // burst timing. Admission uses only receiver settings and
+                    // the current clock, never the transmitter's key or wire.
+                    if (new_burst) {
+                        // Release old allocations before constructing their
+                        // replacements within the same DSP reservation.
+                        simulation_bank.reset();
+                        simulation_channel.reset();
+                        if (!wave->binary) simulation_bank = make_bank(value, wave->admission_epoch);
+                        simulation_channel = std::make_unique<modem::SimulationChannel>(value.transfer.modem, channel_config(value));
+                    }
+                    if (!simulation_bank && (!wave || !wave->binary)) simulation_bank = make_bank(value);
+                    const auto sigma = std::sqrt(modem::nominal_signal_power / std::pow(10.0, value.simulation_snr_db / 10));
+                    std::vector<float> preview(plot_size);
                     if (wave) {
-                        // First replay frame records the independently running
-                        // receiver before any newly transmitted samples arrive.
-                        if (wave->replay.empty()) collect_replay(*wave, value.transfer.modem, plot_window);
-                        std::size_t count = 0;
-                        if (!wave->tail_started) {
-                            const auto target = wave->replay.size() < wave->replay_count ? replay_target(*wave) :
-                                wave->transmitter->total_samples();
-                            const auto remaining = target > wave->transmitted_samples ? target - wave->transmitted_samples : 1;
-                            const auto capacity = static_cast<std::size_t>(std::min<std::uint64_t>(samples.size(), remaining));
-                            count = simulation_channel->read(*wave->transmitter, std::span(samples).first(capacity), wave->stop);
-                            wave->transmitted_samples = simulation_channel->transmitted_samples();
-                            if (!count) {
-                                wave->tail_started = true;
-                                wave->tail_remaining = modem::pattern_absence_samples(value.transfer.modem)+value.transfer.modem.sample_rate+2*modem::pattern_pulse_padding_samples(value.transfer.modem);
+                        std::vector<modem::SymbolObservation> observations;
+                        observations.reserve(512);
+                        std::uint64_t samples = 0;
+                        bool capture_frame = false;
+                        for (std::size_t i = 0; i < 512; ++i) {
+                            auto clean = wave->transmitter->next_symbol(wave->stop);
+                            if (!clean) {
+                                if (!wave->tail_started) {
+                                    wave->tail_started = true;
+                                    wave->tail_remaining = wave->binary ? 0 : modem::symbol_sample_count(value.transfer.modem);
+                                }
+                                if (!wave->tail_remaining) break;
+                                const auto quantum = std::max<std::uint64_t>(1, modem::symbol_sample_count(value.transfer.modem) / 32);
+                                const auto count = std::min(quantum, wave->tail_remaining);
+                                clean = modem::SymbolObservation{{}, count}; wave->tail_remaining -= count;
+                            }
+                            auto received = wave->tail_started ? std::optional{simulation_channel->noise(clean->sample_count)} : simulation_channel->process(*clean);
+                            if (received) { samples += received->sample_count; observations.push_back(*received); }
+                            if (!wave->tail_started && wave->replay.size() < wave->replay_count &&
+                                wave->transmitter->samples_emitted() >= replay_target(*wave)) {
+                                capture_frame = true; break;
                             }
                         }
-                        if (wave->tail_started && wave->tail_remaining) {
-                            count = static_cast<std::size_t>(std::min<std::uint64_t>(samples.size(), wave->tail_remaining));
-                            simulation_channel->read_noise(std::span(samples).first(count));
-                            wave->tail_remaining -= count;
-                        }
-                        const auto input_samples = std::span(samples).first(count);
-                        account(count, version); progress(*wave, value);
-                        plot_window.push(input_samples);
-                        feed_samples(*simulation_bank,input_samples,value,version,wave->stop,wave.get());
-                        publish(plot_window, value.transfer.modem, version, last_plot, false,
-                                nullptr, wave->serial, &wave->pattern_scores);
-                        if (!wave->tail_started && wave->replay.size() < wave->replay_count &&
-                            wave->replay.size()+1 < wave->replay_count &&
-                            wave->transmitted_samples >= replay_target(*wave))
-                            collect_replay(*wave, value.transfer.modem, plot_window);
+                        account(samples, version); progress(*wave, value);
+                        if (wave->binary) receive_binary(*wave, value, observations);
+                        else feed_bank(*simulation_bank, value, version, processing_token, [&](auto& receiver) {
+                            return receiver.push_symbols(observations, processing_token);
+                        }, wave.get());
+                        // Decode through this exact media position before
+                        // recording its lock and fresh symbol observations.
+                        if (capture_frame) collect_replay(*wave, value.transfer.modem, *simulation_channel);
                         if (wave->tail_started && !wave->tail_remaining) {
-                            // Short pattern bursts can be scored only after
-                            // trailing samples complete a receiver window.
-                            // Reserve their final replay frame for that evidence.
-                            if (wave->replay.size() < wave->replay_count)
-                                collect_replay(*wave, value.transfer.modem, plot_window);
                             complete_tx(*wave); wave.reset();
+                            // Burst observations and idle PCM use different
+                            // integration domains; begin fresh acquisition
+                            // before returning to continuous idle reception.
+                            simulation_bank.reset(); simulation_channel.reset();
                         }
+                        // The media clock advances only by processed quanta;
+                        // yielding here keeps control/GUI threads responsive.
                         std::this_thread::yield();
                     } else {
-                        // Idle media continues during stream preparation and
-                        // replay. Noise and burst audio use the same RX clock.
+                        // Idle noise only needs to feed the display cadence.
+                        // Avoid burning a core simulating hours of empty air;
+                        // a queued transmission wakes this wait immediately.
                         idle_fraction += value.transfer.modem.sample_rate % 20;
                         const auto count = std::min<std::size_t>(plot_size,
                             value.transfer.modem.sample_rate / 20 + idle_fraction / 20);
                         idle_fraction %= 20;
-                        auto idle = std::span(samples).first(count);
-                        simulation_channel->read_noise(idle);
+                        auto idle = std::span(preview).first(count);
+                        for (auto& sample : idle) sample = static_cast<float>(normal(random) * sigma);
                         account(idle.size(), version);
                         plot_window.push(idle);
                         publish(plot_window, value.transfer.modem, version, last_plot);
-                        feed_samples(*simulation_bank,idle,value,version,processing_token);
+                        feed_bank(*simulation_bank, value, version, processing_token, [&](auto& receiver) {
+                            return receiver.push(idle, processing_token);
+                        });
                         std::unique_lock lock(mutex);
                         changed.wait_for(lock, stop, std::chrono::milliseconds(50), [this, version] {
-                            return !current.running || generation != version || ready;
+                            return !current.running || generation != version || ready || tx_busy;
                         });
                     }
                     continue;
@@ -956,27 +904,13 @@ struct Session::Impl {
                 if (wave) {
                     discontinuity();
                     audio::playback(value.transfer.modem.sample_rate, value.device, [&](std::span<float> output) {
-                        const auto before=wave->transmitter->samples_emitted();
                         const auto count = wave->transmitter->read(output, wave->stop);
-                        retain_emitted_epoch(*wave,value);
-                        account(count, version);
+                        account(count, version); progress(*wave, value);
                         plot_window.push(output.first(count));
-                        const auto payload_start=modem::training_sample_count(value.transfer.modem)+
-                            modem::pattern_pulse_padding_samples(value.transfer.modem);
-                        const auto first_payload=before<=payload_start && wave->transmitter->samples_emitted()>payload_start;
                         publish(plot_window, value.transfer.modem, version, last_plot,
-                                first_payload || wave->transmitter->finished(), wave->transmitter.get(), wave->serial);
-                        // Publish the first actual payload chips before progress
-                        // can describe a post-settling constellation to the UI.
-                        progress(*wave, value);
+                                wave->transmitter->finished(), wave->transmitter.get(), wave->serial);
                         return count;
-                    }, wave->stop, [&](const auto& format) {
-                        audio_format(format, version);
-                        if(wave->prepare_hardware) {
-                            wave->prepare_hardware(*wave);
-                            wave->prepare_hardware={};
-                        }
-                    });
+                    }, wave->stop, [&](const auto& format) { audio_format(format, version); });
                     discontinuity(); complete_tx(*wave); wave.reset(); plot_window.reset(); continue;
                 }
                 {
@@ -992,8 +926,8 @@ struct Session::Impl {
                     return current.running && generation == version && !ready;
                 }, capture_token, [&](const auto& format) { audio_format(format, version); });
             } catch (const std::exception& exception) {
+                simulation_bank.reset();
                 const auto cancelled_transmission = wave && wave->stop.stop_requested();
-                if (!cancelled_transmission) simulation_bank.reset();
                 if (wave) { complete_tx(*wave, wave->stop.stop_requested() ? "" : exception.what()); wave.reset(); }
                 std::unique_lock lock(mutex);
                 if (current.running && generation == version && !capture_token.stop_requested() && !processing_token.stop_requested() && !cancelled_transmission) {
@@ -1021,84 +955,54 @@ struct Session::Impl {
                 tx_busy = true; current.transmitting = true; current.transmission_finished = false;
                 current.transmission_fraction = current.transmission_seconds = 0;
                 current.status = std::holds_alternative<Bytes>(transmission) ? "Preparing raw binary signal" :
-                    "Preparing fixed-interval stream";
+                    "Preparing packet; no complete waveform allocation";
             }
             try {
-                // Only the transmitter reads its send epoch here. The
-                // running receiver admits its own candidates independently.
-                if(!value.simulation) {
-                    // Both explicit epochs and automatically scheduled sends
-                    // leave an observed absence interval after the last send.
-                    std::unique_lock lock(mutex);
-                    changed.wait_until(lock,token,next_hardware_send,[&]{return token.stop_requested();});
-                    if(token.stop_requested() || stop.stop_requested())continue;
-                }
-                const bool scheduled_hardware=!value.simulation && !value.transfer.timestamp;
-                if (!value.transfer.timestamp && !scheduled_hardware) {
-                    value.transfer.timestamp=static_cast<std::uint64_t>(current_epoch());
-                    if(value.transfer.key) {
-                        // No transmitted nonce: wait for a fresh local time
-                        // coordinate instead of repeating this device's CTR
-                        // positions in two bursts in the same whole second.
-                        std::uint64_t previous;
-                        {std::lock_guard lock(mutex);previous=last_pattern_transmit_epoch;}
-                        while(value.transfer.timestamp<=previous && !token.stop_requested() && !stop.stop_requested()) {
-                            std::unique_lock lock(mutex);
-                            changed.wait_for(lock,stop,std::chrono::milliseconds(50),[&]{return token.stop_requested();});
-                            value.transfer.timestamp=static_cast<std::uint64_t>(current_epoch());
-                        }
-                        if(token.stop_requested() || stop.stop_requested())continue;
-                        {std::lock_guard lock(mutex);last_pattern_transmit_epoch=std::max(last_pattern_transmit_epoch,value.transfer.timestamp);}
-                    }
-                }
+                // Admit the receiver clock before packet preparation consumes
+                // CPU time. This does not inspect the selected key or frame;
+                // the normal multi-key candidate radius remains unchanged.
+                const auto admission_epoch = static_cast<std::uint64_t>(current_epoch());
+                if (!value.transfer.timestamp) value.transfer.timestamp = admission_epoch;
                 auto prepared = std::make_shared<Prepared>();
                 prepared->generation = version; prepared->serial = serial; prepared->stop = token;
+                prepared->admission_epoch = admission_epoch;
                 prepared->binary = std::holds_alternative<Bytes>(transmission);
-                if (scheduled_hardware) {
-                    prepared->prepare_hardware=[this,transmission=std::move(transmission),options=value.transfer](Prepared& wave) mutable {
-                        options.modem.stream_phase_samples=0;
-                        std::uint64_t minimum=0;
-                        if(options.key) {
-                            std::lock_guard lock(mutex);
-                            if(last_pattern_transmit_epoch==std::numeric_limits<std::uint64_t>::max())
-                                throw Error("transmit epoch exhausted");
-                            minimum=last_pattern_transmit_epoch+1;
-                        }
-                        auto scheduled=datapump::detail::schedule_transmission(options.modem,[&](std::uint64_t epoch) {
-                            options.timestamp=epoch;
-                            return wave.binary?transfer::binary_transmitter(std::get<Bytes>(transmission),options):
-                                transfer::message_transmitter(std::get<Message>(transmission),options);
-                        },[this]{return current_epoch();},wave.stop,minimum);
-                        if(options.key) {
-                            std::lock_guard lock(mutex);last_pattern_transmit_epoch=std::max(last_pattern_transmit_epoch,scheduled.epoch);
-                            wave.protected_epoch=scheduled.epoch;
-                        }
-                        wave.transmitter=std::move(scheduled.transmitter);
-                        datapump::detail::wait_for_playback(scheduled.playback_epoch,[this]{return current_epoch();},wave.stop);
-                    };
-                } else if (prepared->binary) {
+                if (prepared->binary) {
                     const auto& bits = std::get<Bytes>(transmission);
                     prepared->transmitter = transfer::binary_transmitter(bits, value.transfer);
+                    if (value.simulation) {
+                        // Unframed simulation supplies burst length and nominal
+                        // start timing, but never the transmitted bit values.
+                        // Key and epoch come from the admitted session settings.
+                        prepared->binary_options = value.transfer;
+                        prepared->binary_expected_bits = bits.size();
+                        prepared->binary_receiver = std::make_unique<modem::BinaryReceiver>(
+                            transfer::seeded_config(value.transfer, value.transfer.timestamp), bits.size(), bank_capacity(value));
+                    }
                 } else {
+                    auto wire = transfer::transmission_wire(std::get<Message>(transmission), value.transfer);
                     if (token.stop_requested()) continue;
-                    prepared->transmitter = transfer::message_transmitter(std::get<Message>(transmission), value.transfer);
+                    const auto config = transfer::seeded_config(value.transfer, value.transfer.timestamp);
+                    prepared->transmitter = std::make_unique<modem::StreamingTransmitter>(std::move(wire), config,
+                                                                                        value.dsp_workspace_bytes / 4);
                 }
                 if (value.simulation) {
                     const auto reserved = replay_workspace(value);
                     if (reserved <= replay_result_workspace) throw Error("DSP workspace cannot hold simulation results");
                     const auto budget = reserved - replay_result_workspace;
-                    // Keep a complete measured constellation in each frame;
-                    // reduce replay cadence when its rate-sized points need
-                    // more room, instead of clipping it to the old PCM tail.
-                    prepared->point_limit = std::max<std::size_t>(32, detail::SignalWindow::constellation_capacity(value.transfer.modem));
-                    prepared->replay_count = std::min(replay_frames,
-                        budget / (replay_frame_base + prepared->point_limit * sizeof(std::complex<float>)));
+                    prepared->replay_count = std::min(replay_frames, budget / (replay_frame_base + 32 * sizeof(std::complex<float>)));
                     if (prepared->replay_count < 2) throw Error("DSP workspace cannot hold a simulation replay");
+                    prepared->point_limit = std::min(constellation_limit,
+                        (budget / prepared->replay_count - replay_frame_base) / sizeof(std::complex<float>));
                     prepared->replay.reserve(prepared->replay_count);
                     prepared->signals.resize(prepared->replay_count);
                 }
                 std::lock_guard lock(mutex);
                 if (!current.running || generation != version || tx_serial != serial || token.stop_requested()) continue;
+                if (prepared->binary && value.simulation) {
+                    prepared->binary_signal_id = next_signal++;
+                    add_signal(binary_signal(*prepared, value, false), prepared.get());
+                }
                 ready = std::move(prepared); if (!value.simulation) capture_stop.request_stop(); changed.notify_all();
             } catch (const std::exception& exception) {
                 std::lock_guard lock(mutex);
@@ -1134,7 +1038,7 @@ struct Session::Impl {
             }
             try {
                 if (!bank) bank = make_bank(value);
-                feed_samples(*bank,block.samples,value,version,token);
+                feed_bank(*bank, value, version, token, [&](auto& receiver) { return receiver.push(block.samples, token); });
             } catch (const std::exception& exception) {
                 std::lock_guard lock(mutex);
                 if (current.running && generation == version && !token.stop_requested()) current.error = exception.what();
@@ -1185,11 +1089,9 @@ Snapshot Session::snapshot() {
     auto signals = std::move(impl_->current.signals); auto received = std::move(impl_->current.received);
     impl_->current.signals.clear(); impl_->current.received.clear(); impl_->received_bytes = 0;
     if (!impl_->pending_points.points.empty() || impl_->pending_points.dropped) {
-        // Publication owns the bounded display history. The fresh-point batch
-        // only accounts for observations omitted before the UI consumed them.
+        impl_->current.constellation = std::move(impl_->pending_points.points);
         impl_->current.constellation_dropped = impl_->pending_points.dropped;
-        if (impl_->current.constellation_source != impl_->pending_source)
-            count_dropped(impl_->current.constellation_dropped, impl_->pending_points.points.size());
+        impl_->current.constellation_source = impl_->pending_source;
         impl_->pending_points = {}; ++impl_->current.sequence;
     }
     auto result = impl_->current; result.signals = std::move(signals); result.received = std::move(received);
