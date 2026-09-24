@@ -55,10 +55,7 @@ inline void relabel_extension_controls(std::span<ui::Control> controls) {
 inline std::vector<ui::Control> layout_lifecycle_controls() {
     ui::Control text{ui::Kind::text,ui::Field::callsign};text.instance=51;
     ui::Control bitmap{ui::Kind::bitmap};bitmap.bitmap=ui::Bitmap::waveform;
-    // This exercises retained bitmap chrome, not the full console's bottom
-    // plot allocation. Its compact slot stays drawable on hosted 1024x768
-    // desktops, which are shorter than the application's normal minimum.
-    bitmap.slot=ui::Slot::qr;bitmap.instance=52;
+    bitmap.slot=ui::Slot::waveform;bitmap.instance=52;
     return {text,bitmap};
 }
 inline void layout_lifecycle_stage(std::span<ui::Control> controls,unsigned stage) {
@@ -94,9 +91,6 @@ inline void policy_lifecycle_stage(std::span<ui::Control> controls,unsigned stag
     gestures.wheel_up=active?ui::Command::zoom_in:ui::Command::none;
     gestures.wheel_down=active?ui::Command::zoom_out:ui::Command::none;
     gestures.help=active?"Updated gesture help":"";
-}
-inline void read_only_stage(std::span<ui::Control> controls,bool value) {
-    controls[0].read_only=value;controls[1].read_only=value;
 }
 struct BitmapProbe {std::vector<BitmapRequest> requests;};
 // Arbitrary opaque rectangles, including padded strides and blocks taller than

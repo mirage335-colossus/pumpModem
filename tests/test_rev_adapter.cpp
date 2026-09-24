@@ -1,40 +1,17 @@
 #define DATAPUMP_REV_ADAPTER_TEST
 #include <glew/glew.h>
 #include "gui_extension_fixture.hpp"
-#include "estimate_warning_fixture.hpp"
 #include "document_geometry_fixture.hpp"
-#include "overlay_fixture.hpp"
 import Rev.Graphics.FrameBuffer;
 #include "../src/gui/backend_rev.cpp"
 
 namespace {
-int run_native_probes(std::string_view selected={}) {
+int run_native_probes() {
     // Native conformance is independent of the production workflow, matching
     // FLTK's test runner. CTest runs all shared smoke assertions separately on
     // the real datapump-gui executable through gui_workflow.
     Launch launch;launch.color=false;launch.simulation=true;launch.page=ui::pages().front().id;
     configure_theme(launch.color);std::vector<void*> windows;
-    if(selected=="--inline-document") {
-        RevApp probe(windows,launch);probe.verify_inline_document_editor();return 0;
-    }
-    if(selected=="--layout-lifecycle") {
-        auto controls=test::layout_lifecycle_controls();
-        RevApp probe(windows,launch,controls);probe.verify_layout_lifecycle(controls);return 0;
-    }
-    if(selected=="--estimate-colors") {
-        for(bool color:{false,true}) {
-            launch.color=color;configure_theme(color);
-            RevApp probe(windows,launch);probe.verify_estimate_warning_colors();
-        }
-        return 0;
-    }
-    if(!selected.empty())throw std::runtime_error("Unknown Rev adapter probe");
-    {
-        RevApp probe(windows,launch);probe.verify_fast_mode_visibility();probe.verify_developer_mode_visibility();
-    }
-    {
-        RevApp probe(windows,launch);probe.verify_document_editor_scrolling();probe.verify_launch_command_editor();probe.verify_inline_document_editor();
-    }
     {
         auto declarations=test::extension_controls();
         RevApp probe(windows,launch,declarations);probe.verify_extension_contract();
@@ -50,22 +27,18 @@ int run_native_probes(std::string_view selected={}) {
     }
     {
         RevApp probe(windows,launch);
-        probe.application.toggle(ui::Field::developer_mode,true);probe.apply();
-        probe.verify_palette_roles();probe.verify_editor_contract();probe.verify_clipboard_shortcuts();probe.verify_choice_contract();probe.verify_record_contract();probe.verify_prompt_focus();probe.verify_native_resize();probe.verify_overlay_composition();probe.verify_estimate_warning_colors();
+        probe.verify_palette_roles();probe.verify_editor_contract();probe.verify_clipboard_shortcuts();probe.verify_choice_contract();probe.verify_record_contract();probe.verify_prompt_focus();probe.verify_native_resize();
     }
     {
         launch.color=true;configure_theme(launch.color);
-        RevApp probe(windows,launch);probe.application.toggle(ui::Field::developer_mode,true);probe.apply();probe.verify_palette_roles();probe.verify_estimate_warning_colors();
+        RevApp probe(windows,launch);probe.verify_palette_roles();
     }
     if(!windows.empty())throw std::runtime_error("Rev native probes retained a window after conformance checks");
     std::cout<<"Rev native adapter probes passed: declarative extensions, UTF-8 editing, choices, records, scrolling and modal focus.\n";
     return 0;
 }
 }
-int main(int argc,char** argv) {
-    try {
-        if(argc>2)throw std::runtime_error("Expected one optional Rev adapter probe");
-        return run_native_probes(argc==2?argv[1]:"");
-    }
+int main() {
+    try {return run_native_probes();}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

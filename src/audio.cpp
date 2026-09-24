@@ -5,18 +5,16 @@
 #include <cmath>
 #include <cstdlib>
 #include <memory>
+#include <string_view>
 #include <thread>
 #include <chrono>
 #include <cerrno>
-#include <string_view>
 #ifdef _WIN32
 #define NOMINMAX
 #include <windows.h>
 #include <mmsystem.h>
 #else
-#include "alsa_plugin_path.hpp"
 #include <dlfcn.h>
-#include <mutex>
 #endif
 
 namespace datapump::audio {
@@ -44,17 +42,6 @@ std::vector<std::uint32_t> rate_candidates(std::uint32_t logical_rate) {
 }
 void report_format(std::uint32_t logical,std::uint32_t hardware,std::size_t workspace,const StreamFormatCallback& callback) {
     if(callback)callback({logical,hardware,(logical==hardware?.5:.42)*std::min(logical,hardware),workspace});
-}
-void playback_pcm(std::span<const float> samples,std::span<std::int16_t> output,unsigned channels,ChannelMode mode,double gain) {
-    for(std::size_t i=0;i<samples.size();++i) {
-        if(!std::isfinite(samples[i]))throw Error("nonfinite transmit sample");
-        // Preserve the original float arithmetic exactly at the default 100%.
-        const auto sample=gain==1.0
-            ? static_cast<std::int16_t>(std::clamp(samples[i],-1.0f,1.0f)*32767)
-            : static_cast<std::int16_t>(std::clamp(static_cast<double>(samples[i])*gain,-1.0,1.0)*32767);
-        output[i*channels]=channels==2 && mode==ChannelMode::right_mono?0:sample;
-        if(channels==2)output[i*channels+1]=mode==ChannelMode::left_mono?0:sample;
-    }
 }
 class PlaybackSource {
     const PlaybackCallback& next_;
@@ -111,62 +98,6 @@ public:
 }
 #ifndef _WIN32
 namespace {
-// Preserve card/device/subdevice identity when switching between shared ALSA
-// plugins and raw hardware. Do not reinterpret another plugin's arguments as
-// hardware coordinates (for example HDMI's DEV can denote a logical output).
-bool hardware_arguments(std::string_view arguments) {
-    if(arguments.empty())return false;
-    unsigned positional=0;
-    std::array<bool,3> present{};
-    while(!arguments.empty()) {
-        const auto comma=arguments.find(',');
-        auto token=arguments.substr(0,comma);
-        const auto equals=token.find('=');
-        unsigned field=positional;
-        if(equals!=std::string_view::npos) {
-            const auto name=token.substr(0,equals);
-            if(name!="CARD" && name!="DEV" && name!="SUBDEV")return false;
-            field=name=="CARD"?0u:name=="DEV"?1u:2u;token.remove_prefix(equals+1);
-        } else ++positional;
-        if(field>=present.size() || present[field])return false;
-        present[field]=true;
-        if(token.empty())return false;
-        // ALSA uses -1 for any hardware subdevice; other indices are unsigned.
-        if(field==2 && token=="-1")token.remove_prefix(1);
-        for(const unsigned char c:token) {
-            const bool digit=c>='0' && c<='9';
-            if(!digit && !(field==0 && ((c>='A'&&c<='Z') || (c>='a'&&c<='z') || c=='_' || c=='-')))return false;
-        }
-        if(comma==std::string_view::npos)return true;
-        arguments.remove_prefix(comma+1);
-        if(arguments.empty())return false;
-    }
-    return true;
-}
-std::string selected_endpoint(const std::string& device,bool recording,bool exclusive) {
-    const auto requested=device.empty()?std::string("default"):device;
-    if(requested=="default")return exclusive?"hw":requested;
-    const auto colon=requested.find(':');
-    const auto kind=requested.substr(0,colon);
-    const auto arguments=colon==std::string::npos?std::string{}:requested.substr(colon+1);
-    const bool hardware=kind=="hw" || kind=="plughw" || kind=="default" || kind=="sysdefault" || kind=="dmix" || kind=="dsnoop";
-    if(hardware) {
-        if(colon!=std::string::npos && !hardware_arguments(arguments))
-            throw Error("cannot select audio sharing for '"+requested+"'; choose a hw/plughw card with CARD, DEV and optional SUBDEV arguments");
-        const auto suffix=arguments.empty()?std::string{}:":"+arguments;
-        if(exclusive)return "hw"+suffix;
-        // plug adapts mono/stereo to a shared endpoint; set_params still
-        // disables automatic ALSA rate conversion as for other endpoints.
-        return std::string("plug:SLAVE='")+(recording?"dsnoop":"dmix")+suffix+"'";
-    }
-    if(exclusive)
-        throw Error("exclusive audio cannot resolve hardware for '"+requested+"'; choose default or an explicit hw/plughw card");
-    if(kind=="front" || kind=="rear" || kind=="center_lfe" || kind=="side" || kind=="hdmi" || kind=="iec958" || kind.starts_with("surround"))
-        throw Error("shared audio cannot resolve hardware for '"+requested+"'; choose default, PipeWire/PulseAudio, or an explicit hw/plughw card");
-    // An explicitly configured alias owns its routing policy, just as default
-    // does. Never fall back from a missing/busy alias to another endpoint.
-    return requested;
-}
 // ALSA is resolved at runtime. File/simulation operation needs no audio library.
 struct Alsa {
     void* library=nullptr;
@@ -196,108 +127,70 @@ struct Alsa {
             symbol(hint,"snd_device_name_hint");symbol(get_hint,"snd_device_name_get_hint");
             symbol(free_hint,"snd_device_name_free_hint");
             symbol(wait,"snd_pcm_wait");
-            // Configure before any ALSA call can cache its plugin directory.
-            // All audio workers share this initialization; user configuration
-            // and plugins supplied beside libasound retain their precedence.
-            static std::once_flag plugin_directory;
-            std::call_once(plugin_directory,[&] {
-                Dl_info location{};
-                if(!dladdr(reinterpret_cast<void*>(open),&location) || !location.dli_fname)return;
-                const auto directory=detail::alsa_plugin_directory(std::getenv("ALSA_PLUGIN_DIR"),
-                    location.dli_fname,detail::host_alsa_plugin_directories());
-                if(!directory.empty() && setenv("ALSA_PLUGIN_DIR",directory.c_str(),0)!=0)
-                    throw Error("cannot configure the host ALSA plugin directory");
-            });
         } catch(...) {dlclose(library);throw;}
     }
     ~Alsa(){dlclose(library);}
 };
-std::vector<std::string> shared_server_endpoints(Alsa& api,int direction,std::stop_token stop,std::string& diagnostic) {
-    check_cancelled(stop);
-    struct Hints {
-        Alsa& api;void** values=nullptr;
-        ~Hints(){if(values)api.free_hint(values);}
-    } hints{api};
-    const auto error=api.hint(-1,"pcm",&hints.values);
-    check_cancelled(stop);
-    if(error<0) {
-        diagnostic="cannot enumerate shared audio routes: "+std::error_code(-error,std::generic_category()).message();
-        return {};
-    }
-    std::array<bool,2> advertised{};
-    constexpr std::array<const char*,2> servers{"pipewire","pulse"};
-    for(void** hint=hints.values;hint && *hint;++hint) {
-        check_cancelled(stop);
-        std::unique_ptr<char,decltype(&std::free)> name(api.get_hint(*hint,"NAME"),std::free);
-        std::unique_ptr<char,decltype(&std::free)> io(api.get_hint(*hint,"IOID"),std::free);
-        check_cancelled(stop);
-        if(!name || (io && std::string_view(io.get())!=(direction?"Input":"Output")))continue;
-        for(std::size_t i=0;i<servers.size();++i)
-            if(std::string_view(name.get())==servers[i])advertised[i]=true;
-    }
-    std::vector<std::string> result;
-    for(std::size_t i=0;i<servers.size();++i)if(advertised[i])result.emplace_back(servers[i]);
-    return result;
-}
 struct Stream {
     Alsa& api; Alsa::PCM* pcm=nullptr;
     std::uint32_t hardware_rate=0;
-    unsigned channels=1;
-    Stream(Alsa& a,const std::string& device,int direction,std::uint32_t rate,std::stop_token stop,bool nonblocking=false):api(a) {
-        // A throwing constructor has no Stream destructor. Keep the in-flight
-        // handle guarded until configuration and cancellation checks complete.
-        struct CloseOnFailure {
-            Alsa& api;Alsa::PCM*& pcm;bool committed=false;
-            ~CloseOnFailure(){if(!committed && pcm)api.close(pcm);}
-        } cleanup{api,pcm};
-        check_cancelled(stop);
+    Stream(Alsa& a,const std::string& device,int direction,std::uint32_t rate,bool nonblocking=false):api(a) {
         const auto rates=rate_candidates(rate);
         const auto requested=device.empty()?std::string("default"):device;
         std::string attempted;
-        int last_error=0;
         const auto try_device=[&](const std::string& name) {
             for(const auto candidate:rates) {
-                // Stereo lets us route transmit PCM explicitly. Mono-only
-                // endpoints still work, while capture retains one channel.
-                for(unsigned candidate_channels=direction?1:2;candidate_channels>0;--candidate_channels) {
-                    check_cancelled(stop);
-                    if(!attempted.empty())attempted+=", ";
-                    attempted+=name+"@"+std::to_string(candidate)+"Hz/"+std::to_string(candidate_channels)+"ch";
-                    last_error=api.open(&pcm,name.c_str(),direction,nonblocking?1:0);
-                    if(last_error<0)pcm=nullptr;
-                    check_cancelled(stop);
-                    if(last_error<0) {
-                        attempted+=": "+std::error_code(-last_error,std::generic_category()).message();
-                        return false;
-                    }
-                    // Let the application own rate conversion: an accepted ALSA
-                    // rate is the selected endpoint's clock, not a modem setting.
-                    last_error=api.set_params(pcm,2,3,candidate_channels,candidate,0,100000);
-                    check_cancelled(stop);
-                    if(last_error>=0) {
-                        hardware_rate=candidate;channels=candidate_channels;return true;
-                    }
-                    api.close(pcm);pcm=nullptr;
-                    attempted+=": "+std::error_code(-last_error,std::generic_category()).message();
-                }
+                if(!attempted.empty())attempted+=", ";
+                attempted+=name+"@"+std::to_string(candidate)+"Hz";
+                if(api.open(&pcm,name.c_str(),direction,nonblocking?1:0)<0){pcm=nullptr;return false;}
+                // Let the application own rate conversion: an accepted ALSA
+                // rate is the selected endpoint's clock, not a modem setting.
+                if(api.set_params(pcm,2,3,1,candidate,0,100000)>=0) {hardware_rate=candidate;return true;}
+                api.close(pcm);pcm=nullptr;
             }
             return false;
         };
-        if(try_device(requested)){cleanup.committed=true;return;}
-        auto message="cannot open audio device '"+requested+"': "+
-            std::error_code(-last_error,std::generic_category()).message();
+        if(try_device(requested))return;
         if(requested=="default") {
-            // Only automatic default selection may try known shared sound
-            // servers. Advertised card, hardware and custom aliases are never
-            // fallback candidates; explicit and exclusive routes stay exact.
-            std::string diagnostic;
-            const auto servers=shared_server_endpoints(api,direction,stop,diagnostic);
-            for(const auto& server:servers)
-                if(try_device(server)){cleanup.committed=true;return;}
-            if(!diagnostic.empty())message+=". "+diagnostic;
-            message+=". Configure the system's shared audio route (PipeWire/PulseAudio or ALSA dmix/dsnoop), or select an explicit Audio device";
+            void** hints=nullptr;
+            if(api.hint(-1,"pcm",&hints)>=0) {
+                const auto release=[&](void** value){if(value)api.free_hint(value);};
+                std::unique_ptr<void*,decltype(release)> guard(hints,release);
+                struct Endpoint {std::string name;bool duplex;};
+                std::vector<Endpoint> defaults,system_defaults,converters;
+                const auto card=[](std::string_view name) {
+                    const auto start=name.find("CARD=");
+                    if(start==std::string_view::npos)return std::string{};
+                    const auto end=name.find(',',start);
+                    return std::string(name.substr(start,end==std::string_view::npos?end:end-start));
+                };
+                for(auto** hint=hints;hint && *hint;++hint) {
+                    std::unique_ptr<char,decltype(&std::free)> name(api.get_hint(*hint,"NAME"),std::free);
+                    std::unique_ptr<char,decltype(&std::free)> io(api.get_hint(*hint,"IOID"),std::free);
+                    const bool duplex=!io || std::string_view(io.get()).empty();
+                    if(!name || (!duplex && std::string_view(io.get())!=(direction?"Input":"Output")))continue;
+                    const std::string value=name.get();
+                    auto* group=value.starts_with("default:")?&defaults:value.starts_with("sysdefault:")?&system_defaults:value.starts_with("plughw:")?&converters:nullptr;
+                    if(group && std::none_of(group->begin(),group->end(),[&](const auto& endpoint){return endpoint.name==value;}))
+                        group->push_back({value,duplex});
+                }
+                // A modem needs both directions. Prefer the same duplex card
+                // over an earlier output-only HDMI default. Within that card,
+                // conversion may be necessary for the 96 kHz bandwidth preset.
+                for(const bool duplex:{true,false}) {
+                    for(const auto& endpoint:defaults)if(endpoint.duplex==duplex && try_device(endpoint.name))return;
+                    for(const auto& endpoint:system_defaults)if(endpoint.duplex==duplex && try_device(endpoint.name))return;
+                    for(const auto& endpoint:converters) {
+                        const auto candidate=card(endpoint.name);
+                        const auto matches=[&](const Endpoint& id){return id.duplex==duplex && card(id.name)==candidate;};
+                        if(!candidate.empty() && (std::any_of(defaults.begin(),defaults.end(),matches) ||
+                           std::any_of(system_defaults.begin(),system_defaults.end(),matches)))
+                            if(try_device(endpoint.name))return;
+                    }
+                }
+            }
         }
-        throw Error(message+" (tried "+attempted+")");
+        throw Error("cannot open audio device at "+std::to_string(rate)+" Hz (tried "+attempted+")");
     }
     ~Stream(){if(pcm) api.close(pcm);}
 };
@@ -314,13 +207,13 @@ std::vector<Device> devices() {
     if(hints) api.free_hint(hints);
     return result;
 }
-static void playback_device(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop,StreamFormatCallback on_format,ChannelMode channels,double gain) {
+void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop,StreamFormatCallback on_format) {
     check_cancelled(stop);
     if(!next_samples)throw Error("playback callback is required");
-    Alsa api; Stream stream(api,device,0,rate,stop);
+    Alsa api; Stream stream(api,device,0,rate);
     PlaybackSource source(rate,stream.hardware_rate,next_samples,stop);
-    const auto chunk_limit=std::min<std::size_t>(4096,stream.hardware_rate/20);
-    std::vector<std::int16_t> block(chunk_limit*stream.channels);
+    std::vector<std::int16_t> block(4096);
+    const auto chunk_limit=std::min<std::size_t>(block.size(),stream.hardware_rate/20);
     std::vector<float> samples(chunk_limit);
     report_format(rate,stream.hardware_rate,source.workspace_bytes()+block.capacity()*sizeof(std::int16_t)+samples.capacity()*sizeof(float),on_format);
     unsigned failures=0;
@@ -329,11 +222,14 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
         const auto count=source.read(samples);
         if(count>samples.size())throw Error("playback callback returned invalid sample count");
         if(!count)break;
-        playback_pcm(std::span<const float>(samples.data(),count),block,stream.channels,channels,gain);
+        for(std::size_t i=0;i<count;++i) {
+            if(!std::isfinite(samples[i])) throw Error("nonfinite transmit sample");
+            block[i]=static_cast<std::int16_t>(std::clamp(samples[i],-1.0f,1.0f)*32767);
+        }
         std::size_t offset=0;
         while(offset<count) {
             check_cancelled(stop);
-            const auto n=api.write(stream.pcm,block.data()+offset*stream.channels,count-offset);
+            const auto n=api.write(stream.pcm,block.data()+offset,count-offset);
             check_cancelled(stop);
             if(n<0) {if(++failures>8 || api.recover(stream.pcm,static_cast<int>(n),1)<0) throw Error("audio playback failed");}
             else if(n==0 || static_cast<std::size_t>(n)>count-offset) throw Error("audio playback returned invalid sample count");
@@ -357,10 +253,10 @@ std::vector<float> record(double seconds,std::uint32_t rate,const std::string& d
     },stop,std::move(on_format));
     return samples;
 }
-static void capture_device(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop,StreamFormatCallback on_format) {
+void capture(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop,StreamFormatCallback on_format) {
     check_cancelled(stop);
     if(!on_chunk) throw Error("capture callback is required");
-    Alsa api; Stream stream(api,device,1,rate,stop,true);
+    Alsa api; Stream stream(api,device,1,rate,true);
     CaptureSink sink(rate,stream.hardware_rate,on_chunk,stop);
     std::vector<std::int16_t> block(4096);
     const auto chunk_limit=std::min<std::size_t>(block.size(),stream.hardware_rate/20);
@@ -389,11 +285,10 @@ static void capture_device(std::uint32_t rate,const std::string& device,const Ca
 }
 #else
 namespace {
-std::string selected_endpoint(const std::string& device,bool,bool) {return device;}
-WAVEFORMATEX format(std::uint32_t rate,unsigned channels) {
+WAVEFORMATEX format(std::uint32_t rate) {
     if(rate<8000 || rate>384000) throw Error("invalid audio sample rate");
-    WAVEFORMATEX f{};f.wFormatTag=WAVE_FORMAT_PCM;f.nChannels=static_cast<WORD>(channels);f.nSamplesPerSec=rate;
-    f.wBitsPerSample=16;f.nBlockAlign=static_cast<WORD>(channels*2);f.nAvgBytesPerSec=rate*f.nBlockAlign;return f;
+    WAVEFORMATEX f{};f.wFormatTag=WAVE_FORMAT_PCM;f.nChannels=1;f.nSamplesPerSec=rate;
+    f.wBitsPerSample=16;f.nBlockAlign=2;f.nAvgBytesPerSec=rate*2;return f;
 }
 UINT device_id(const std::string& device) {
     if(device.empty() || device=="default") return WAVE_MAPPER;
@@ -409,13 +304,12 @@ void mm_check(MMRESULT result,const char* message) {
 // Ordinary completion checks cleanup calls; exception unwinding retries cleanup
 // without allowing a second exception to obscure the original device failure.
 struct WaveSession {
-    static constexpr std::size_t block_frames=4096;
+    static constexpr std::size_t block_samples=4096;
     HWAVEOUT output=nullptr;
     HWAVEIN input=nullptr;
     HANDLE event=nullptr;
     std::uint32_t hardware_rate=0;
-    unsigned channels=1;
-    std::array<std::array<std::int16_t,block_frames*2>,2> pcm{};
+    std::array<std::array<std::int16_t,block_samples>,2> pcm{};
     std::array<WAVEHDR,2> headers{};
     std::array<bool,2> prepared{};
     WaveSession(bool recording,std::uint32_t rate,const std::string& device) {
@@ -425,16 +319,14 @@ struct WaveSession {
         if(!event) throw Error("cannot create audio completion event");
         const auto callback=reinterpret_cast<DWORD_PTR>(event);
         for(const auto candidate:rates) {
-            for(unsigned candidate_channels=recording?1:2;candidate_channels>0;--candidate_channels) {
-                const auto f=format(candidate,candidate_channels);
-                // Keep rate conversion at our bounded PCM boundary. Otherwise ACM
-                // may accept an unsupported candidate by converting it silently.
-                constexpr DWORD flags=CALLBACK_EVENT|WAVE_FORMAT_DIRECT;
-                const auto result=recording ? waveInOpen(&input,id,&f,callback,0,flags)
-                                            : waveOutOpen(&output,id,&f,callback,0,flags);
-                if(result==MMSYSERR_NOERROR){hardware_rate=candidate;channels=candidate_channels;return;}
-                input=nullptr;output=nullptr;
-            }
+            const auto f=format(candidate);
+            // Keep rate conversion at our bounded PCM boundary. Otherwise ACM
+            // may accept an unsupported candidate by converting it silently.
+            constexpr DWORD flags=CALLBACK_EVENT|WAVE_FORMAT_DIRECT;
+            const auto result=recording ? waveInOpen(&input,id,&f,callback,0,flags)
+                                        : waveOutOpen(&output,id,&f,callback,0,flags);
+            if(result==MMSYSERR_NOERROR){hardware_rate=candidate;return;}
+            input=nullptr;output=nullptr;
         }
         CloseHandle(event);event=nullptr;
         throw Error(recording ? "cannot open waveIn device at a supported sample rate" : "cannot open waveOut device at a supported sample rate");
@@ -456,7 +348,7 @@ struct WaveSession {
         for(std::size_t i=0;i<headers.size();++i) {
             auto& header=headers[i];
             header.lpData=reinterpret_cast<LPSTR>(pcm[i].data());
-            header.dwBufferLength=static_cast<DWORD>(block_frames*channels*sizeof(std::int16_t));
+            header.dwBufferLength=static_cast<DWORD>(pcm[i].size()*sizeof(std::int16_t));
             mm_check(output ? waveOutPrepareHeader(output,&header,sizeof(WAVEHDR))
                             : waveInPrepareHeader(input,&header,sizeof(WAVEHDR)),
                      "audio buffer preparation failed");
@@ -502,14 +394,14 @@ std::vector<Device> devices() {
         if(waveOutGetDevCapsA(i,&caps,sizeof(caps))==MMSYSERR_NOERROR) result.push_back({std::to_string(i),std::string("Output: ")+caps.szPname});}
     return result;
 }
-static void playback_device(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop,StreamFormatCallback on_format,ChannelMode channels,double gain) {
+void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop,StreamFormatCallback on_format) {
     check_cancelled(stop);
     if(!next_samples)throw Error("playback callback is required");
     WaveSession session(false,rate,device);
     PlaybackSource source(rate,session.hardware_rate,next_samples,stop);
     session.prepare();
     mm_check(waveOutPause(session.output),"waveOut pause failed");
-    std::vector<float> samples(std::min<std::size_t>(WaveSession::block_frames,session.hardware_rate/20));
+    std::vector<float> samples(std::min<std::size_t>(WaveSession::block_samples,session.hardware_rate/20));
     report_format(rate,session.hardware_rate,source.workspace_bytes()+sizeof(session)+samples.capacity()*sizeof(float),on_format);
     bool finished=false,started=false;
     std::array<bool,2> queued{};
@@ -520,9 +412,12 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
         check_cancelled(stop);
         if(count>samples.size())throw Error("playback callback returned invalid sample count");
         if(!count){finished=true;return;}
-        playback_pcm(std::span<const float>(samples.data(),count),session.pcm[slot],session.channels,channels,gain);
+        for(std::size_t i=0;i<count;++i) {
+            if(!std::isfinite(samples[i]))throw Error("nonfinite transmit sample");
+            session.pcm[slot][i]=static_cast<std::int16_t>(std::clamp(samples[i],-1.0f,1.0f)*32767);
+        }
         auto& header=session.headers[slot];
-        header.dwBufferLength=static_cast<DWORD>(count*session.channels*sizeof(std::int16_t));
+        header.dwBufferLength=static_cast<DWORD>(count*sizeof(std::int16_t));
         // The other buffer may finish while the producer computes this block.
         // Detect that gap after generation, before publishing more PCM.
         if(started && queued[1-slot] && (session.headers[1-slot].dwFlags&WHDR_DONE))
@@ -558,13 +453,13 @@ std::vector<float> record(double seconds,std::uint32_t rate,const std::string& d
     },stop,std::move(on_format));
     return result;
 }
-static void capture_device(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop,StreamFormatCallback on_format) {
+void capture(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop,StreamFormatCallback on_format) {
     check_cancelled(stop);
     if(!on_chunk) throw Error("capture callback is required");
     WaveSession session(true,rate,device);
     CaptureSink sink(rate,session.hardware_rate,on_chunk,stop);
     session.prepare();
-    const auto chunk_samples=std::min<std::size_t>(WaveSession::block_frames,session.hardware_rate/20);
+    const auto chunk_samples=std::min<std::size_t>(WaveSession::block_samples,session.hardware_rate/20);
     std::vector<float> converted(chunk_samples);
     report_format(rate,session.hardware_rate,sink.workspace_bytes()+sizeof(session)+converted.capacity()*sizeof(float),on_format);
     for(auto& header:session.headers) {
@@ -592,27 +487,7 @@ static void capture_device(std::uint32_t rate,const std::string& device,const Ca
 }
 
 #endif
-void capture(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop,StreamFormatCallback on_format) {
-    capture_device(rate,device,on_chunk,stop,std::move(on_format));
-}
-void capture(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop,StreamFormatCallback on_format,Options options) {
-    check_cancelled(stop);validate_options(options);
-    capture_device(rate,selected_endpoint(device,true,options.exclusive),on_chunk,stop,std::move(on_format));
-}
-void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop,StreamFormatCallback on_format,ChannelMode channels) {
-    playback_device(rate,device,next_samples,stop,std::move(on_format),channels,1.0);
-}
-void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop,StreamFormatCallback on_format,ChannelMode channels,Options options) {
-    check_cancelled(stop);validate_options(options);
-    playback_device(rate,selected_endpoint(device,false,options.exclusive),next_samples,stop,std::move(on_format),channels,options.transmit_gain);
-}
-void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop,StreamFormatCallback on_format,bool mono) {
-    playback(rate,device,next_samples,stop,std::move(on_format),output_channels(mono));
-}
-void play(std::span<const float> samples,std::uint32_t rate,const std::string& device,std::stop_token stop,StreamFormatCallback on_format,bool mono) {
-    play(samples,rate,device,stop,std::move(on_format),output_channels(mono));
-}
-void play(std::span<const float> samples,std::uint32_t rate,const std::string& device,std::stop_token stop,StreamFormatCallback on_format,ChannelMode channels) {
+void play(std::span<const float> samples,std::uint32_t rate,const std::string& device,std::stop_token stop,StreamFormatCallback on_format) {
     check_cancelled(stop);
     for(const auto sample:samples)if(!std::isfinite(sample))throw Error("nonfinite transmit sample");
     std::size_t offset=0;
@@ -620,28 +495,6 @@ void play(std::span<const float> samples,std::uint32_t rate,const std::string& d
         const auto count=std::min(chunk.size(),samples.size()-offset);
         std::copy_n(samples.begin()+static_cast<std::ptrdiff_t>(offset),count,chunk.begin());
         offset+=count;return count;
-    },stop,std::move(on_format),channels);
-}
-void play(std::span<const float> samples,std::uint32_t rate,const std::string& device,std::stop_token stop,StreamFormatCallback on_format,ChannelMode channels,Options options) {
-    check_cancelled(stop);validate_options(options);
-    for(const auto sample:samples)if(!std::isfinite(sample))throw Error("nonfinite transmit sample");
-    std::size_t offset=0;
-    playback(rate,device,[&](std::span<float> chunk) {
-        const auto count=std::min(chunk.size(),samples.size()-offset);
-        std::copy_n(samples.begin()+static_cast<std::ptrdiff_t>(offset),count,chunk.begin());
-        offset+=count;return count;
-    },stop,std::move(on_format),channels,options);
-}
-std::vector<float> record(double seconds,std::uint32_t rate,const std::string& device,std::size_t memory_limit,std::stop_token stop,StreamFormatCallback on_format,Options options) {
-    check_cancelled(stop);validate_options(options);
-    std::vector<float> samples(sample_count(seconds,rate,memory_limit));
-    if(samples.empty())return samples;
-    std::size_t offset=0;
-    capture(rate,device,[&](std::span<const float> chunk) {
-        const auto count=std::min(chunk.size(),samples.size()-offset);
-        std::copy_n(chunk.begin(),count,samples.begin()+static_cast<std::ptrdiff_t>(offset));
-        offset+=count;return offset<samples.size();
-    },stop,std::move(on_format),options);
-    return samples;
+    },stop,std::move(on_format));
 }
 }

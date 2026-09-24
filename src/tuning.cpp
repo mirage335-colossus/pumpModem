@@ -1,4 +1,5 @@
 #include "datapump/tuning.hpp"
+#include "constellation.hpp"
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -6,10 +7,7 @@
 #include <cmath>
 #include <iomanip>
 #include <limits>
-#include <numbers>
-#include <numeric>
 #include <sstream>
-#include <utility>
 
 namespace datapump::tuning {
 namespace {
@@ -22,47 +20,8 @@ constexpr std::array<std::string_view,19> names{
     "auto-keystream","auto-pattern","auto-tone","pattern-3","pattern-4","pattern-6","pattern-8","pattern-12","pattern-16",
     "tone-1","tone-2","tone-3","tone-4","tone-8","tone-32","tone-128","tone-1024","tone-4096","tone-16384"};
 constexpr std::array<unsigned,19> lengths{0,0,0,3,4,6,8,12,16,1,2,3,4,8,32,128,1024,4096,16384};
-constexpr std::array<unsigned,11> automatic_lengths{16,32,64,128,256,512,1024,2048,4096,8192,16384};
-unsigned minimum_pattern_chips(const modem::Config& config,double target_snr_db_hz,bool tone) {
-    // A high C/N0 is only a fast-link target relative to the selected band.
-    // Preserve the previous weak-signal and tone plans. Shorter patterns need
-    // substantial in-band headroom as well as integrated energy: clean PCM
-    // alone overstates their tolerance of fractional timing and clock error.
-    // These conservative engineering floors do not replace RX evidence tests.
-    const auto band_snr=target_snr_db_hz-10*std::log10(config.bandwidth_hz);
-    unsigned minimum=!tone && band_snr>=30?16:!tone && band_snr>=24?32:64;
-    // A partial final chip would introduce a new periodic short-hold cadence
-    // when the symbol is shortened. Keep the previous integration floor if
-    // neither short profile consists entirely of whole sample-quantized chips.
-    const auto chip=static_cast<std::uint64_t>(std::ceil(2.*config.sample_rate/config.bandwidth_hz));
-    auto candidate=config;candidate.integration_seconds=0;
-    while(minimum<64) {
-        candidate.spreading_factor=minimum;
-        const auto samples=modem::symbol_sample_count(candidate);
-        if(samples%chip==0) {
-            // Keep the compact private receive path when its carrier bases
-            // are orthogonal. Endpoint/channel probes require 32 chips on
-            // that path, even when total signal energy is ample.
-            bool compact_private=false;
-            if(config.scramble || config.dsss) {
-                const auto bin=std::gcd(std::gcd(chip,samples),std::max<std::uint64_t>(1,chip/2));
-                const auto omega=2*std::numbers::pi*config.carrier_hz/config.sample_rate;
-                const auto sine=std::sin(omega);
-                const auto image=std::abs(sine)>1e-12?
-                    std::abs(std::sin(static_cast<double>(bin)*omega)/sine):static_cast<double>(bin);
-                compact_private=image<=1e-10*static_cast<double>(bin);
-            }
-            // Only the bounded exact-sample path and the orthogonal private
-            // path have short-pattern channel coverage. Preserve the old
-            // floor for other long-sample geometries.
-            if(samples>256 && !compact_private)return 64;
-            if(minimum==16 && compact_private) {minimum=32;continue;}
-            break;
-        }
-        minimum*=2;
-    }
-    return minimum;
-}
+constexpr std::array<unsigned,9> automatic_lengths{64,128,256,512,1024,2048,4096,8192,16384};
+constexpr double pattern_target_symbol_snr_db=18;
 constexpr std::array presets{
     SimulationPreset{"no",false,0,0},SimulationPreset{"3dBm -6dB",true,3,-6},
     SimulationPreset{"3dBm -60dB",true,3,-60},SimulationPreset{"3dBm -90dB",true,3,-90},
@@ -70,13 +29,6 @@ constexpr std::array presets{
     SimulationPreset{"3dBm -200dB",true,3,-200},SimulationPreset{"3dBm -230dB",true,3,-230},
     SimulationPreset{"50dBm -200dB",true,50,-200},SimulationPreset{"50dBm -270dB",true,50,-270},
     SimulationPreset{"70dBm -250dB",true,70,-250}};
-constexpr std::array oscillator_models{
-    OscillatorPreset{"crystal","Free-running crystal",100,.5},
-    // Shared locked-link residual assumption; oscillator class changes the
-    // phase-diffusion stress model, not an inferred unlocked frequency budget.
-    OscillatorPreset{"gpsdo-xo","GPSDO: hobbyist XO (no oven)",.0001,.5},
-    OscillatorPreset{"gpsdo-tcxo","GPSDO: TCXO (no oven)",.0001,.05},
-    OscillatorPreset{"gpsdo-ocxo","GPSDO: OCXO",.0001,.005}};
 std::size_t index_of(PatternMode mode) {
     const auto found=std::find(modes.begin(),modes.end(),mode);
     if(found==modes.end()) throw Error("unknown pattern mode");
@@ -94,7 +46,6 @@ std::string normalized(std::string_view name) {
 }
 std::span<const PatternMode> pattern_modes(){return modes;}
 std::string_view pattern_mode_name(PatternMode mode){return names[index_of(mode)];}
-bool tone_mode(PatternMode mode){return mode==PatternMode::auto_tone || index_of(mode)>=9;}
 PatternMode parse_pattern_mode(std::string_view name) {
     const auto found=std::find(names.begin(),names.end(),name);
     if(found==names.end()) throw Error("unknown pattern mode: "+std::string(name));
@@ -135,64 +86,53 @@ ReceiveTargets parse_receive_targets(std::string_view text) {
     }
     return result;
 }
-std::uint32_t recommended_sample_rate(double bandwidth_hz,std::optional<double> carrier_hz) {
-    const auto carrier=carrier_hz.value_or(recommended_carrier_hz(bandwidth_hz));
-    if(!std::isfinite(carrier) || carrier<=0 || carrier>30000000)
-        throw Error("modem carrier must be finite, positive and at most 30000000 Hz");
-    return static_cast<std::uint32_t>(std::ceil(std::max({64.,4*bandwidth_hz,4*carrier})));
+double constellation_target_symbol_snr_db(unsigned bits) {
+    if(bits<2 || bits>6)throw Error("constellation must carry 2..6 bits per symbol");
+    const double spacing=modem::detail::radius_step(bits);
+    const double phases=1U<<modem::detail::phase_bits(bits);
+    // Use the worst inner-ring angular separation, including the extra noise
+    // of differential phase detection, and reserve 2.8125 degrees for phase
+    // drift per symbol. A 3.2-sigma half-distance is an engineering design
+    // margin, not a claim of calibrated packet error rate.
+    const double angular=std::sqrt(2.)*spacing*std::sin(std::numbers::pi/phases-std::numbers::pi/64);
+    const double distance=std::min(spacing,angular);
+    return 10*std::log10(2*3.2*3.2*.30625/(distance*distance));
+}
+std::uint32_t recommended_sample_rate(double bandwidth_hz) {
+    const auto carrier=recommended_carrier_hz(bandwidth_hz);
+    return static_cast<std::uint32_t>(std::ceil(std::max(4*bandwidth_hz,4*carrier)));
 }
 double recommended_carrier_hz(double bandwidth_hz) {
-    if(!std::isfinite(bandwidth_hz) || bandwidth_hz<minimum_bandwidth_hz || bandwidth_hz>maximum_bandwidth_hz)
-        throw Error("modem bandwidth must be 0.01..30000000 Hz");
+    if(!std::isfinite(bandwidth_hz) || bandwidth_hz<1 || bandwidth_hz>maximum_bandwidth_hz)
+        throw Error("modem bandwidth must be 1..30000000 Hz");
     return std::max(1500.,.75*bandwidth_hz);
 }
-double shannon_capacity_bps(double bandwidth_hz,double target_snr_db_hz) {
-    if(!std::isfinite(bandwidth_hz) || bandwidth_hz<minimum_bandwidth_hz || bandwidth_hz>maximum_bandwidth_hz)
-        throw Error("modem bandwidth must be 0.01..30000000 Hz");
-    if(!std::isfinite(target_snr_db_hz))throw Error("target C/N0 must be finite dB-Hz");
-    const auto log_snr=target_snr_db_hz*(std::numbers::ln10/10)-std::log(bandwidth_hz);
-    // log1p preserves weak-signal capacity; the positive branch avoids
-    // overflowing the linear SNR when the finite dB-Hz target is very large.
-    const auto capacity_per_hz=log_snr>0?
-        log_snr+std::log1p(std::exp(-log_snr)):std::log1p(std::exp(log_snr));
-    return (bandwidth_hz/std::numbers::ln2)*capacity_per_hz;
-}
-namespace {
-Plan resolve_config(modem::Config config,double target_snr_db_hz,PatternMode mode,bool encryption) {
-    // Check clock/rate before minimum_pattern_chips performs sample arithmetic.
-    (void)recommended_carrier_hz(config.bandwidth_hz);
-    if(config.sample_rate<64 || config.sample_rate>120000000)
-        throw Error("internal sample rate must be 64..120000000 Hz");
-    if(!std::isfinite(config.carrier_hz) || config.carrier_hz<=0)
-        throw Error("modem carrier must be finite and positive");
+Plan resolve(double bandwidth_hz,double target_snr_db_hz,PatternMode mode,bool encryption) {
+    const auto sample_rate=recommended_sample_rate(bandwidth_hz);
     if(!std::isfinite(target_snr_db_hz)) throw Error("target C/N0 must be finite dB-Hz");
     const auto index=index_of(mode);
     Plan plan;
     auto& base=plan.config;
-    base=std::move(config);
     base.pattern_symbols=true;
     base.constellation_bits=1;
-    base.spreading_factor=64;
-    base.integration_seconds=0;
-    const bool tone=tone_mode(mode);
+    base.bandwidth_hz=bandwidth_hz;
+    // Real passband PCM must sample the carrier even when the message band is
+    // very narrow. Audio endpoints negotiate their hardware clock separately.
+    base.sample_rate=sample_rate;
+    base.carrier_hz=recommended_carrier_hz(bandwidth_hz);
+    const bool tone=mode==PatternMode::auto_tone || index>=9;
     base.spreading_mode=tone?modem::SpreadingMode::tone:modem::SpreadingMode::pattern;
     // The pattern itself must identify a keyed signal. Public templates with
     // only a Data mask give every receive key the same acquisition evidence.
     base.scramble=!tone && encryption;
-    if(tone) {
-        base.dsss=false;base.data_key.reset();
-        base.spreading_seed.fill(0);base.dsss_seed.fill(0);
-    }
-    const double chip_seconds=2/base.bandwidth_hz;
-    const auto minimum_chips=minimum_pattern_chips(base,target_snr_db_hz,tone);
+    const double chip_seconds=2/bandwidth_hz;
     plan.target_symbol_snr_db=pattern_target_symbol_snr_db;
     const double exponent=(plan.target_symbol_snr_db-target_snr_db_hz)/10-std::log10(chip_seconds);
     plan.required_spreading=exponent>std::log10(std::numeric_limits<double>::max())?
         std::numeric_limits<double>::infinity():std::max(1.,std::pow(10.,exponent));
     if(lengths[index])base.spreading_factor=lengths[index];
     else {
-        const auto found=std::lower_bound(automatic_lengths.begin(),automatic_lengths.end(),
-            std::max(plan.required_spreading,static_cast<double>(minimum_chips)));
+        const auto found=std::lower_bound(automatic_lengths.begin(),automatic_lengths.end(),plan.required_spreading);
         base.spreading_factor=found==automatic_lengths.end()?automatic_lengths.back():*found;
         if(found==automatic_lengths.end()) {
             base.integration_seconds=std::pow(10.,(plan.target_symbol_snr_db-target_snr_db_hz)/10);
@@ -203,35 +143,18 @@ Plan resolve_config(modem::Config config,double target_snr_db_hz,PatternMode mod
     const double seconds=modem::symbol_seconds(base);
     plan.estimated_processing_gain_db=10*std::log10(seconds/chip_seconds);
     plan.estimated_symbol_snr_db=target_snr_db_hz+10*std::log10(seconds);
-    plan.target_supported=base.spreading_factor>=minimum_chips &&
+    plan.target_supported=base.spreading_factor>=automatic_lengths.front() &&
         plan.estimated_symbol_snr_db+1e-10>=plan.target_symbol_snr_db;
     std::ostringstream explanation;
-    explanation<<"Two pattern codewords (1 raw bit/symbol), "
-        <<base.spreading_factor<<" nominal chips and "<<std::setprecision(6)<<seconds
-        <<" seconds/symbol; modeled Es/N0 "<<std::fixed<<std::setprecision(1)
-        <<plan.estimated_symbol_snr_db<<" dB, target "<<plan.target_symbol_snr_db<<" dB. "
-        <<"Automatic selection reserves at least "<<minimum_chips<<" chips at this rate and C/N0. "
-        <<"Pattern floors are 16 chips at 30 dB in-band SNR, 32 at 24 dB, otherwise 64; tones retain 64. "
-        <<"Short automatic profiles also require whole chips to preserve the update cadence. ";
-    explanation<<"Private profiles with compact orthogonal receive bins reserve at least 32 chips. ";
-    explanation<<"Other profiles beyond the 256-sample exact-fit range retain 64 chips. ";
+    explanation<<std::fixed<<std::setprecision(1)<<"Two sparse pattern symbols (1 raw bit/symbol), "
+        <<base.spreading_factor<<" nominal chips and "<<seconds
+        <<" seconds/symbol; modeled Es/N0 "<<plan.estimated_symbol_snr_db<<" dB, target "<<plan.target_symbol_snr_db<<" dB. "
+        <<"Automatic selection reserves at least 64 chips for pattern evidence. ";
     if(!plan.target_supported)explanation<<"The forced length is preserved but does not meet the standalone pattern confidence target. ";
-    if(tone)explanation<<"Tone modes are unencrypted and do not provide Low-Probability-of-Intercept protection. ";
     if(mode==PatternMode::auto_keystream && !encryption)explanation<<"Without a key, auto-pattern is used. ";
-    explanation<<"The 18 dB integration target is an initial model, not calibrated detection sensitivity or a false-alarm guarantee. Acquisition uses received pattern evidence. Both endpoints derive the profile from matching rate, carrier, C/N0 and pattern settings.";
+    explanation<<"The 18 dB integration target is an initial model, not calibrated detection sensitivity or a false-alarm guarantee. Acquisition uses received pattern evidence, never APSK geometry. Both endpoints derive the profile from matching bandwidth, C/N0 and pattern settings.";
     plan.explanation=explanation.str();
     return plan;
-}
-}
-Plan resolve(double bandwidth_hz,double target_snr_db_hz,PatternMode mode,bool encryption,
-             std::optional<double> carrier_hz) {
-    modem::Config config;
-    config.bandwidth_hz=bandwidth_hz;
-    config.carrier_hz=carrier_hz.value_or(recommended_carrier_hz(bandwidth_hz));
-    // Real passband PCM must sample the actual carrier independently of the
-    // hardware audio clock, including explicit high-frequency carriers.
-    config.sample_rate=recommended_sample_rate(bandwidth_hz,config.carrier_hz);
-    return resolve_config(std::move(config),target_snr_db_hz,mode,encryption);
 }
 std::vector<modem::Config> receive_profiles(double bandwidth_hz,std::span<const double> targets_db_hz,
                                            PatternMode mode,bool encryption) {
@@ -245,15 +168,17 @@ std::vector<modem::Config> receive_profiles(const modem::Config& base,std::span<
     std::vector<modem::Config> profiles;
     for(const auto target:targets_db_hz) {
         if(!std::isfinite(target) || target < -200 || target > 200)throw Error("receive target must be finite -200..200 dB-Hz");
-        // Decide the integration floor using the caller's actual carrier,
-        // clock and DSSS geometry, rather than a temporary default profile.
-        auto config=resolve_config(base,target,mode,encryption).config;
+        const auto plan=resolve(base.bandwidth_hz,target,mode,encryption).config;
+        auto config=base;
+        config.pattern_symbols=plan.pattern_symbols;config.constellation_bits=plan.constellation_bits;
+        config.spreading_factor=plan.spreading_factor;config.integration_seconds=plan.integration_seconds;
+        config.spreading_mode=plan.spreading_mode;config.scramble=plan.scramble;
+        modem::validate(config);
         const auto duplicate=std::any_of(profiles.begin(),profiles.end(),[&](const auto& prior) {
             return prior.sample_rate==config.sample_rate && prior.carrier_hz==config.carrier_hz &&
                 prior.bandwidth_hz==config.bandwidth_hz && prior.constellation_bits==config.constellation_bits &&
                 prior.pattern_symbols==config.pattern_symbols && prior.spreading_factor==config.spreading_factor &&
                 modem::symbol_sample_count(prior)==modem::symbol_sample_count(config) && prior.spreading_mode==config.spreading_mode &&
-                prior.pulse_shaping==config.pulse_shaping &&
                 prior.scramble==config.scramble && prior.dsss==config.dsss;
         });
         if(!duplicate)profiles.push_back(std::move(config));
@@ -266,13 +191,6 @@ SimulationPreset parse_simulation_preset(std::string_view name) {
     if(wanted=="off") return presets[0];
     for(const auto& preset:presets) if(normalized(preset.name)==wanted) return preset;
     throw Error("unknown simulation preset: "+std::string(name));
-}
-std::span<const OscillatorPreset> oscillator_presets(){return oscillator_models;}
-OscillatorPreset parse_oscillator_preset(std::string_view name) {
-    const auto wanted=normalized(name);
-    for(const auto& preset:oscillator_models)
-        if(normalized(preset.id)==wanted || normalized(preset.name)==wanted)return preset;
-    throw Error("unknown oscillator preset: "+std::string(name));
 }
 LinkBudget link_budget(const SimulationPreset& preset,double bandwidth_hz,std::uint32_t sample_rate,double noise_figure_db) {
     if(!preset.enabled) throw Error("simulation preset is disabled");

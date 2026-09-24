@@ -1,7 +1,6 @@
 #pragma once
 
 #include "datapump/types.hpp"
-#include "datapump/received_text.hpp"
 #include "utf8_policy.hpp"
 #include <algorithm>
 #include <optional>
@@ -81,20 +80,7 @@ public:
         commit(std::move(decoded));
     }
 
-    // Select an exact transport bit string while preserving this editor's
-    // separate byte/text preview. The Compression page supplies its own bounded
-    // dictionary limit; Console prefix editing keeps its 128-bit limit below.
-    void select_raw_bits(std::span<const std::uint8_t> bits,std::size_t bit_limit) {
-        if(bits.empty() || bits.size()>std::min(bit_limit,payload_limit))
-            throw Error("Raw bit selection exceeds its bit limit");
-        if(std::any_of(bits.begin(),bits.end(),[](auto bit){return bit>1;}))
-            throw Error("Raw bit selection accepts only 0 and 1");
-        raw_bits_=Bytes(bits.begin(),bits.end());
-    }
-
-    // Received-derived edits keep exact bits separately and filter decoded
-    // bytes before any UTF-8/escape rendering. Local drafts retain their editor.
-    void edit_binary(std::string_view text, std::optional<bool> received_policy = {}) {
+    void edit_binary(std::string_view text) {
         Bytes prefix;
         prefix.reserve(prefix_limit);
         Bytes exact_bits;
@@ -115,15 +101,15 @@ public:
             }
         }
         if (bytes_.size() <= prefix_limit || raw_bits_) {
-            if (exact_bits.empty()) { commit({},received_policy); return; }
-            if (bits % 8 == 0) commit(std::move(prefix),received_policy);
+            if (exact_bits.empty()) { commit({}); return; }
+            if (bits % 8 == 0) commit(std::move(prefix));
             raw_bits_ = std::move(exact_bits);
             return;
         }
         if (bits % 8) throw Error("Complete each binary byte with 8 bits");
         const auto suffix = std::min(prefix_limit, bytes_.size());
         prefix.insert(prefix.end(), bytes_.begin() + static_cast<std::ptrdiff_t>(suffix), bytes_.end());
-        commit(std::move(prefix),received_policy);
+        commit(std::move(prefix));
     }
 
 private:
@@ -149,13 +135,8 @@ private:
         return count;
     }
 
-    void commit(Bytes bytes, std::optional<bool> received_policy = {}) {
+    void commit(Bytes bytes) {
         if (bytes.size() > payload_limit) throw Error("Message exceeds the 1 MiB byte limit");
-        if(received_policy) {
-            text_=received_text(bytes,*received_policy);
-            bytes_.assign(text_.begin(),text_.end());
-            escaped_=false;raw_bits_.reset();return;
-        }
         bool escaped = false;
         for (std::size_t index = 0; index < bytes.size();) {
             const auto count = displayable_length(bytes, index);

@@ -1,5 +1,4 @@
 #include "datapump/runtime.hpp"
-#include "datapump/received_text.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -79,7 +78,7 @@ void ReceiveCache::put(ReceivedItem item) {
     std::lock_guard lock(mutex_);
     auto old=std::find_if(items_.begin(),items_.end(),[&](const auto& x){return x.id==item.id;});
     if(old!=items_.end()) {used_-=old->data.size(); items_.erase(old);}
-    // Bound metadata too, including an unlimited stream of empty entries.
+    // Bound metadata too, including an unlimited stream of empty packets.
     while(!items_.empty() && (used_>capacity_-item.data.size() || items_.size()>=4096)) {
         used_-=items_.front().data.size(); items_.pop_front();
     }
@@ -161,9 +160,27 @@ std::string base64_encode(std::span<const std::uint8_t> bytes) {
     return result;
 }
 std::string terminal_text(std::span<const std::uint8_t> bytes) {
-    return received_text(bytes);
+    std::string result;
+    const char* hex="0123456789abcdef";
+    for(std::size_t i=0;i<bytes.size();) {
+        const auto byte=bytes[i];
+        if((byte>=32 && byte<=126) || byte=='\n' || byte=='\t') {
+            result+=static_cast<char>(byte);++i;continue;
+        }
+        unsigned count=byte>=0xc2 && byte<=0xdf?2:byte>=0xe0 && byte<=0xef?3:byte>=0xf0 && byte<=0xf4?4:0;
+        std::uint32_t codepoint=count?byte&((1U<<(7-count))-1):0;
+        bool valid=count && bytes.size()-i>=count;
+        for(unsigned j=1;valid && j<count;++j) {
+            if((bytes[i+j]&0xc0)!=0x80) valid=false;
+            else codepoint=(codepoint<<6)|(bytes[i+j]&0x3f);
+        }
+        const bool overlong=(count==2 && codepoint<0x80) || (count==3 && codepoint<0x800) || (count==4 && codepoint<0x10000);
+        if(valid && !overlong && codepoint>=0xa0 && codepoint<=0x10ffff && !(codepoint>=0xd800 && codepoint<=0xdfff)) {
+            result.append(reinterpret_cast<const char*>(bytes.data()+i),count);i+=count;
+        } else {result+="\\x";result+=hex[byte>>4];result+=hex[byte&15];++i;}
+    }
+    return result;
 }
-
 Bytes read_bounded(std::istream& input,std::size_t limit) {
     Bytes result; std::array<char,16384> chunk{};
     while(input) {
@@ -180,8 +197,7 @@ void write_new_file(const std::string& path,std::span<const std::uint8_t> bytes)
     auto closer=[](FILE* file){std::fclose(file);};
     std::unique_ptr<FILE,decltype(closer)> f(std::fopen(path.c_str(),"wbx"),closer);
     if(!f) throw Error("cannot create output (it may already exist): "+path);
-    datapump_speculation_barrier();
-    if((!bytes.empty() && std::fwrite(bytes.data(),1,bytes.size(),f.get())!=bytes.size()) || std::fflush(f.get())!=0)
+    if(std::fwrite(bytes.data(),1,bytes.size(),f.get())!=bytes.size() || std::fflush(f.get())!=0)
         throw Error("output write failed: "+path);
 }
 }

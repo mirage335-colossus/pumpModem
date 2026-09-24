@@ -5,7 +5,6 @@ module;
 #include <vector>
 #include <string>
 #include <map>
-#include <functional>
 #include <rev_utf8.hpp>
 
 #include <managed.hpp>
@@ -27,9 +26,6 @@ import Rev.Graphics.Pipeline;
 import Rev.Graphics.Shader;
 
 export namespace Rev::Primitives {
-
-    using namespace Rev::Core;
-    using namespace Rev::Graphics;
 
     Core::Resource Arial_ttf = File("Rev/resources/Fonts/Arial/Arial.ttf");
 

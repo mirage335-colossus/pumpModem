@@ -28,9 +28,6 @@ import Rev.Primitive.Lines;
 
 export namespace Rev::Element {
 
-    using namespace Rev::Core;
-    using namespace Rev::Appearance;
-
     namespace TextStyles {
         
         Style TextDefaults = {

@@ -13,8 +13,6 @@ import Rev.Element.Text;
 import Rev.Element.ControlTheme;
 
 export namespace Rev::Element {
-    using namespace Rev::Appearance;
-
     struct Button : public Box {
         enum class Variant { Primary, Secondary };
 

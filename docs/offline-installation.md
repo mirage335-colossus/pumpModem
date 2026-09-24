@@ -19,24 +19,22 @@ compilation, installation, or packaging.
 From the repository root, using the build dependencies listed in the README:
 
 ```sh
-./build.sh test contract
-./build.sh package
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
 
-cmake --install build/release --prefix "$PWD/build/DataPump-portable"
+cmake --install build --prefix "$PWD/build/DataPump-portable"
 ./build/DataPump-portable/bin/datapump-gui --self-check
 ./build/DataPump-portable/bin/datapump-gui
+
+cmake --build build --target package
 ```
 
-The package command uses a separate portable Release tree, builds only application
-prerequisites, and verifies both TGZ and ZIP archives with the existing inventory,
-relocation and ABI checks. It does not require Python for FLTK. To demonstrate
-that explicitly, append `-- -DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE`.
-
-For direct CMake use, configure `cmake --preset release`, build with
-`cmake --build --preset release`, then create archives with
-`cmake --build build/release --target package`. When using a test-enabled
-configuration, build `datapump-tests` before CTest; normal builds now omit tests.
-See [build profiles and test groups](building.md).
+The Python switch demonstrates that the default FLTK build needs no Python.
+Omit it if you want CTest to run additional Python CLI integration tests when an
+interpreter is already available. Those tests are developer tooling and are not
+installed.
 
 The optional `-DDATAPUMP_GUI_BACKEND=rev` profile requires Python at build time
 to embed resources, plus its C++23/OpenGL toolchain. Its runtime still needs no
@@ -68,7 +66,7 @@ installation. The README's Visual Studio/vcpkg configuration uses the
 `x64-windows-static` triplet. After configuring:
 
 ```powershell
-cmake --build build --config Release --target datapump-apps datapump-tests --parallel
+cmake --build build --config Release --parallel
 ctest --test-dir build -C Release --output-on-failure
 cmake --install build --config Release --prefix "$PWD/DataPump-portable"
 & ./DataPump-portable/bin/datapump-gui.exe --self-check
@@ -80,20 +78,10 @@ Keep build toolchains and dependency source/development packages locally if you
 also need to rebuild offline. Transferring an existing working installation does
 not require those build tools or source packages.
 
-Normal bundles include dependency provenance, build configuration and all
-required notices. Historical validation captures stay in the source repository;
-use `-DDATAPUMP_INSTALL_VALIDATION_DATA=ON` to include them in an offline evidence
-bundle. References into `docs/validation-data` in developer documents require
-that option or a matching source checkout.
-
 ## Copy and run
 
 Copy the entire `DataPump-portable` directory, or extract a CPack TGZ/ZIP archive
-on the destination, anywhere your account can write. Keep `bin/`, `lib/` and
-`share/` together. The bundle's `lib/` is private to this installation: do not
-copy its contents into `/lib` or `/usr/lib`. No administrator access, system
-library installation or `ldconfig` command is needed. Preserve executable
-permissions on Linux. The layout is:
+on the destination. Preserve executable permissions on Linux. The layout is:
 
 | Location | Contents |
 | --- | --- |
@@ -155,23 +143,12 @@ when packaging, live audio can use an existing compatible system ALSA library;
 otherwise it reports that audio is unavailable. WAV transfer and simulation
 remain available without audio hardware. Windows uses its native WinMM service.
 
-On Linux, sharing audio with another instance or application depends on the
-selected ALSA endpoint. The `default` endpoint follows the host's audio
-configuration; Data Pump reports an open/configuration failure instead of
-silently switching to a hardware device. Use a shared desktop audio route,
-such as a working PulseAudio or PipeWire ALSA endpoint, when other applications
-need the same device. Explicit `hw:` or `plughw:` endpoints can reserve a device
-for one client. The bundle's private libraries do not provide an audio server
-or change the host's device-sharing policy.
-
 ## Verify a copied installation
 
 `bin/datapump-gui --self-check` runs native application checks without opening a
 window. Opening the application verifies display integration; `--smoke-test`
 exercises its native GUI workflow and needs a desktop display. Neither test
 transmits live audio.
-Successful simulation and GUI smoke checks do not verify physical audio-device
-access or sharing between applications.
 
 On Linux, inventory verification can also use the operating system's checksum
 tool from inside the copied directory:

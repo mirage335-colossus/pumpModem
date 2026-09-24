@@ -19,8 +19,6 @@ import Rev.Primitive.Rectangle;
 
 export namespace Rev::Element {
 
-    using namespace Rev::Core;
-
     using namespace Rev::Primitives;
     using namespace Rev::Appearance;
 

@@ -19,8 +19,6 @@ import Rev.Primitive.Svg;
 
 export namespace Rev::Element {
 
-    using namespace Rev::Core;
-
     using namespace Rev::Appearance;
 
     struct Svg : public Element {

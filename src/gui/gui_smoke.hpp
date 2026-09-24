@@ -1,6 +1,5 @@
 #pragma once
 #include "controller.hpp"
-#include "gui_smoke_budget.hpp"
 #include <chrono>
 #include <filesystem>
 #include <memory>

@@ -7,23 +7,12 @@ there is no runtime toolkit switch.
 
 ## Build and run
 
-The normal wrapper route is `CC=clang-19 CXX=clang++-19 ./build.sh --backend rev`,
-with output in `build/rev`. Run `./build.sh test gui --backend rev` and, on a
-private display, `./build.sh test native --backend rev`. The direct CMake
-commands below remain supported for a separate custom tree.
-
-Rev requires CMake 3.28+, Ninja 1.11+, and a C++23 compiler with
-C++ module support. Clang 19 and the source SDK's GCC 15.3 have passed Linux
-application builds. GCC 14 crashes while serializing an upstream module and is
-rejected with an actionable configuration error. Windows/MSVC build and display
-qualification are recorded separately for each candidate; a successful compile
-alone does not establish display compatibility. macOS/Metal is not integrated.
+Rev requires CMake 3.28+, Ninja, a C++23 standard library, and a compiler with
+C++ module support. Clang 19 is the tested Linux toolchain. GCC 14 crashes while
+serializing an upstream module and is rejected with an actionable configuration
+error. GCC 15+ and the Windows/MSVC path still require platform testing; their
+build paths do not establish a tested release. macOS/Metal is not integrated.
 FLTK and CLI-only builds retain their C++20 requirements.
-
-Manual portable releases now build separate FLTK and Rev archives for each
-supported platform. See [release documentation](releases.md) and the
-version-specific [validation record](validation.md) for actual build and
-certification outcomes; backend availability alone is not certification.
 
 Linux needs OpenSSL 3, OpenGL, GLEW, FreeType, and X11/Xrandr/Xext development
 files. Python 3 embeds the pinned shaders, SVG icons and monospaced DejaVu font
@@ -35,7 +24,7 @@ libxrandr-dev`. CMake never downloads dependencies.
 cmake -S . -B build-rev -G Ninja \
   -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19 \
   -DCMAKE_BUILD_TYPE=Release -DDATAPUMP_GUI_BACKEND=rev
-cmake --build build-rev --target datapump-apps datapump-tests --parallel
+cmake --build build-rev --parallel
 ctest --test-dir build-rev --output-on-failure
 ./build-rev/datapump-gui --self-check
 ./build-rev/datapump-gui
@@ -51,8 +40,8 @@ selection on the modem host. Existing files are never overwritten.
 `ui_contract.hpp` and `screen_console.cpp` describe ordered controls, stable IDs,
 application bindings, shared desktop slots and grouped command menus.
 `desktop_layout.hpp` supplies the same logical geometry to FLTK and Rev, including
-the persistent header, identity and simulation rows and modem/status footer around the tab viewport.
-The shared default is 1180 by 952 logical pixels and the minimum is 1030 by 872.
+the persistent header/identity row and modem/status footer around the tab viewport.
+The shared default is 1180 by 866 logical pixels and the minimum is 1030 by 786.
 Rev maps controls to Text, Button, Checkbox, Dropdown and Box elements. Lists and
 tabs compose those elements. FLTK uses the same declarations and shared
 application lifecycle with its own native widgets. `controller.cpp` owns drafts, validation, eligibility, exact binary
@@ -64,23 +53,13 @@ follow new arrivals only when already at the tail. Native clipboard and
 asynchronous prompt services stay inside the adapter.
 Pending Save requests retain their payload across inbox eviction.
 
-Both adapters use the same fixed 128-coded-byte intervals and locally selected
-source/FEC profile. Public content has no digest; encrypted intervals carry
-HMAC-SHA256 bound to their canonical symbol addresses. Only a physical end from
-six seconds of fully scored failed symbols allows source decoding and admission
-to the inbox. A long symbol is scored in full before it can cause that end.
-Raw display prefixes are bounded to 4096 bits; a shortened prefix is not eligible
-for an exact whole-reception copy. Received names and cache identifiers are
-local, with no filename, identifier or length header on the wire. See the
-[protocol](protocol.md) and [security boundaries](security.md).
-
 `inspection_page.hpp` builds the inspection document from the shared `Inspection`
 model. `document_layout.hpp` computes its document rectangles from native glyph
 measurements; `backend_rev_document.hpp` applies those rectangles and renders headings, numbered step/section
 cards, notes, navigation and parameter rows with native Rev elements. Modem flow
 follows the FLTK section order: processing lanes, chosen alphabets, full pattern
 inspection, then preamble and integration notes. Transmission separates on-air
-and logical source sections, shows proportional fixed-interval data/parity bars and
+and logical packet sections, shows proportional data/parity codeword bars and
 coding notes, and places the parameter table last. Card columns respond to the
 page width; native text measurement supplies their heights. The pages scroll
 inside the same tab viewport as FLTK. Their section structure is shared policy;
@@ -134,20 +113,12 @@ same assertions. Poll and presentation frequencies are UI scheduling targets;
 slow rendering can still delay them. Replay intentionally accounts for skipped
 points and returns to live input at its deadline rather than extending playback.
 
-Rev display cadence is advisory. A smoke run that observes too few display
-frames or misses the displayed-progress target emits `WARNING REV_REPLAY_CADENCE`
-with measured details instead of failing. The release's `warning.log` makes
-this known presentation limitation visible. This policy does not relax missing
-physical observations, pending-message identity, source/bitmap consistency or
-content/completion assertions, and it does not change rendering or playback
-timing. Do not repeat expensive tests just to eliminate the cadence warning.
-
 The implementation was exercised on Mesa llvmpipe (LLVM 19.1.7, OpenGL 4.5,
 Mesa 25.0.7) in a private X11 virtual display. Before the shared desktop and rich
 inspection layout changes, a full smoke workflow followed by a 20-second hold
 at 1180 by 960 took 31 seconds wall time and 74 seconds user CPU time. This is a
 historical measurement of the earlier layout, not a benchmark of the current
-1180 by 909 desktop. The initial 25 Hz paint path used 211 seconds; skipping
+1180 by 866 desktop. The initial 25 Hz paint path used 211 seconds; skipping
 invisible rectangles and reusing glyph geometry reduced that to 161 seconds, and separating
 presentation cadence reduced it to 74. Modem polling and plot-history capture
 remain at 25 Hz while state/plot presentation runs at 10 Hz; native input can
@@ -247,7 +218,6 @@ assign Rev a license.
 Both native adapters expose only the shared `Application` facade and opaque
 `BitmapSource` handles. Document layout and gesture semantics are implemented
 once above the native boundary. The GUI-contract CI matrix builds both adapters
-and registers their native suites with `DATAPUMP_TEST_NATIVE_GUI=ON`; build
-`datapump-tests-gui` before running
-`ctest --test-dir build-rev --output-on-failure -L gui` on a private display.
-Without that option, native test targets can still be explicitly built and run.
+and registers their native suites with `DATAPUMP_TEST_NATIVE_GUI=ON`; run them
+with `ctest --test-dir build-rev --output-on-failure -L gui` on a private display.
+Without that option, the native executables can still be run explicitly.

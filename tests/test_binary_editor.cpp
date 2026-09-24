@@ -131,43 +131,14 @@ void exact_raw_drafts() {
 }
 }
 
-void bounded_dictionary_selection() {
-    BinaryEditor editor(Bytes(16,'A'));const auto preview=editor.text();
-    Bytes bits(208,1);bits.front()=0;
-    editor.select_raw_bits(bits,208);
-    check(editor.raw_bits()==bits && editor.text()==preview && editor.bytes()==Bytes(16,'A'),
-          "Extended raw selection changed its independent dictionary preview or padded bits");
-    rejects_unchanged(editor,[&]{editor.select_raw_bits(Bytes(209,0),208);},"Raw selection exceeded its declared bound");
-    rejects_unchanged(editor,[&]{editor.select_raw_bits(Bytes{0,2,1},208);},"Nonbinary raw selection was accepted");
-    rejects_unchanged(editor,[&]{editor.select_raw_bits({},208);},"Empty raw selection was accepted");
-    rejects_unchanged(editor,[&]{editor.edit_binary(std::string(129,'0'));},"Console prefix editing exceeded its own 128-bit bound");
-}
-
-void received_binary_edits() {
-    constexpr std::string_view allowed="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,.@ -_/=\n";
-    for(bool shellcode:{false,true})for(unsigned first=0;first<256;first+=16) {
-        std::string bits,expected;
-        Bytes raw;
-        for(unsigned value=first;value<first+16;++value) {
-            const bool permitted=shellcode?value=='\n'||(value>=32&&value<=126):
-                allowed.find(static_cast<char>(value))!=allowed.npos;
-            expected+=permitted?static_cast<char>(value):'_';
-            for(unsigned n=8;n;--n) {bits+=(value>>(n-1))&1?'1':'0';raw.push_back((value>>(n-1))&1);}
-        }
-        BinaryEditor editor;editor.edit_binary(bits,shellcode);
-        check(editor.text()==expected&&editor.bytes()==bytes(expected)&&!editor.escaped()&&editor.raw_bits()==raw,
-              "Received binary editing must preserve exact bits with only permitted ASCII and LF in the text view");
-    }
-}
 int main() {
     try {
-        received_binary_edits();
         synchronized_prefix();
         preserved_suffix();
         escaped_roundtrip();
         invalid_drafts();
         payload_limit();
-        exact_raw_drafts();bounded_dictionary_selection();
+        exact_raw_drafts();
         std::cout << "Binary editor synchronization and lossless byte editing passed\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
