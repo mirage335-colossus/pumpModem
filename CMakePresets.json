@@ -1,25 +1,78 @@
 {
   "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
   "configurePresets": [
     {
+      "name": "defaults",
+      "hidden": true,
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "BUILD_TESTING": "ON",
+        "DATAPUMP_BUILD_GUI": "ON",
+        "DATAPUMP_GUI_BACKEND": "fltk",
+        "DATAPUMP_PORTABLE": "OFF",
+        "DATAPUMP_SANITIZERS": "OFF",
+        "DATAPUMP_TEST_NATIVE_GUI": "OFF",
+        "DATAPUMP_COMPILER_CACHE": "ON",
+        "OPENSSL_USE_STATIC_LIBS": "OFF"
+      }
+    },
+    {
+      "name": "dev",
+      "displayName": "Incremental development (FLTK, focused tests available)",
+      "inherits": "defaults",
+      "binaryDir": "${sourceDir}/build/dev"
+    },
+    {
       "name": "release",
-      "displayName": "Release",
-      "binaryDir": "${sourceDir}/build",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+      "displayName": "Portable release (FLTK, application targets only)",
+      "inherits": "defaults",
+      "binaryDir": "${sourceDir}/build/release",
+      "cacheVariables": {
+        "BUILD_TESTING": "OFF", "DATAPUMP_PORTABLE": "ON", "OPENSSL_USE_STATIC_LIBS": "ON"
+      }
     },
     {
       "name": "sanitize",
-      "displayName": "Debug with address and undefined-behavior checks",
-      "binaryDir": "${sourceDir}/build-sanitize",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "DATAPUMP_SANITIZERS": "ON" }
+      "displayName": "Headless address and undefined-behavior checks",
+      "inherits": "defaults",
+      "binaryDir": "${sourceDir}/build/sanitize",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "DATAPUMP_BUILD_GUI": "OFF",
+        "DATAPUMP_SANITIZERS": "ON"
+      }
+    },
+    {
+      "name": "rev",
+      "displayName": "Optional Rev backend (requires a compatible toolchain)",
+      "inherits": "defaults",
+      "binaryDir": "${sourceDir}/build/rev",
+      "cacheVariables": { "DATAPUMP_GUI_BACKEND": "rev" }
     }
   ],
   "buildPresets": [
-    { "name": "release", "configurePreset": "release" },
-    { "name": "sanitize", "configurePreset": "sanitize" }
+    { "name": "dev", "configurePreset": "dev", "targets": ["datapump-apps"] },
+    { "name": "release", "configurePreset": "release", "targets": ["datapump-apps"] },
+    { "name": "sanitize", "configurePreset": "sanitize", "targets": ["datapump-apps"] },
+    { "name": "rev", "configurePreset": "rev", "targets": ["datapump-apps"] }
   ],
   "testPresets": [
-    { "name": "release", "configurePreset": "release", "output": { "outputOnFailure": true } },
-    { "name": "sanitize", "configurePreset": "sanitize", "output": { "outputOnFailure": true } }
+    {
+      "name": "dev", "configurePreset": "dev",
+      "output": { "outputOnFailure": true },
+      "filter": { "exclude": { "label": "native_gui" } }
+    },
+    {
+      "name": "sanitize", "configurePreset": "sanitize",
+      "output": { "outputOnFailure": true },
+      "filter": { "exclude": { "label": "native_gui" } }
+    },
+    {
+      "name": "rev", "configurePreset": "rev",
+      "output": { "outputOnFailure": true },
+      "filter": { "exclude": { "label": "native_gui" } }
+    }
   ]
 }

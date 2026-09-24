@@ -1,0 +1,5 @@
+OFDM RMS 0.08882782651, peak 0.4004768133, samples 147456
+Ordinary single carrier RMS 0.08876339666, peak 0.2542103231, relative power -0.0063024577 dB, samples 98304
+Narrow single carrier RMS 0.08876274091, peak 0.2681914866, relative power -0.006366626011 dB, samples 2689952
+Fast acoustic output-power continuity passed
+elapsed_seconds=0.180

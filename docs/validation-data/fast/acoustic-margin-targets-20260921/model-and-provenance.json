@@ -1,0 +1,122 @@
+{
+  "base_git_commit": "40948f418ed6050626999a18a17f30317d7f6886",
+  "reference_esn0_db": 13.0658,
+  "reference_reason": "Weakest default-profile recorded frame GMI matched to ideal uniform 16-QAM AWGN information; not a measured physical fade reference. See the LDPC rate-margin study and acoustic routing known-information files.",
+  "steady_source_kbps": 38.797,
+  "constant_gap_db": 1.5490195998574325,
+  "model_formula": "R_kbps=(38.797/3)*log2(1+10**((13.0658-total_margin_db-1.5490195998574325)/10))",
+  "model_limits": "Illustrative constant-gap AWGN payload planning, holding current OFDM overhead fixed. Does not prove future low-rate LDPC performance, account for necessary marker redesign, or establish live fade, distortion, or file margin.",
+  "model": [
+    {
+      "total_margin_db": 6,
+      "allowed_esn0_db": 7.065799999999999,
+      "constant_gap_model_kbps": 28.31696387539282,
+      "loss_percent": 27.012490977671412,
+      "ideal_same_overhead_ceiling_kbps": 33.702432617943536
+    },
+    {
+      "total_margin_db": 10,
+      "allowed_esn0_db": 3.0657999999999994,
+      "constant_gap_model_kbps": 16.47343599488851,
+      "loss_percent": 57.53940769933625,
+      "ideal_same_overhead_ceiling_kbps": 20.656554616607977
+    },
+    {
+      "total_margin_db": 16,
+      "allowed_esn0_db": -2.9342000000000006,
+      "constant_gap_model_kbps": 5.68448599062948,
+      "loss_percent": 85.34813003420501,
+      "ideal_same_overhead_ceiling_kbps": 7.674543648139337
+    },
+    {
+      "total_margin_db": 20,
+      "allowed_esn0_db": -6.934200000000001,
+      "constant_gap_model_kbps": 2.474093921341721,
+      "loss_percent": 93.62297620604242,
+      "ideal_same_overhead_ceiling_kbps": 3.441599102886549
+    },
+    {
+      "total_margin_db": 23,
+      "allowed_esn0_db": -9.9342,
+      "constant_gap_model_kbps": 1.2809598598925835,
+      "loss_percent": 96.69830177618738,
+      "ideal_same_overhead_ceiling_kbps": 1.804117173872802
+    },
+    {
+      "total_margin_db": 26,
+      "allowed_esn0_db": -12.9342,
+      "constant_gap_model_kbps": 0.652991250173013,
+      "loss_percent": 98.31690272399152,
+      "ideal_same_overhead_ceiling_kbps": 0.9259968202939408
+    }
+  ],
+  "current_modes_50MB": [
+    {
+      "qam": 16,
+      "rate": "3/4",
+      "source_bps": 38674.75403848479,
+      "seconds_for_50MB": 10342.664354166667
+    },
+    {
+      "qam": 16,
+      "rate": "2/3",
+      "source_bps": 34392.03375745774,
+      "seconds_for_50MB": 11630.600354166667
+    },
+    {
+      "qam": 16,
+      "rate": "1/2",
+      "source_bps": 25799.14071205142,
+      "seconds_for_50MB": 15504.392354166666
+    },
+    {
+      "qam": 4,
+      "rate": "3/4",
+      "source_bps": 20128.81601451873,
+      "seconds_for_50MB": 19872.008354166668
+    },
+    {
+      "qam": 4,
+      "rate": "2/3",
+      "source_bps": 17898.04600142919,
+      "seconds_for_50MB": 22348.808354166667
+    },
+    {
+      "qam": 4,
+      "rate": "1/2",
+      "source_bps": 13423.535755528654,
+      "seconds_for_50MB": 29798.408354166666
+    }
+  ],
+  "screen_limits": "24 frames per point with production LDPC, mapper, max-log demapper, interleaving and whitening. Independent complex AWGN, known noise variance. No OFDM waveform, pilots, synchronization, RS, files, audio or fade-margin trial.",
+  "files": {
+    "docs/validation-data/fast/acoustic-margin-targets-20260921/ldpc_qam_margin_modes.cpp": {
+      "bytes": 3568,
+      "sha256": "fb8372c1f436885f87126b9b9272826fedf79440d544a5fd7bc93f13da1e98a4"
+    },
+    "docs/validation-data/fast/acoustic-margin-targets-20260921/decoder-screen.csv": {
+      "bytes": 424,
+      "sha256": "16736af0cd315c71e04a451d9db533ffb4a5f27acc3af6e624d9c8ea0c255c27"
+    },
+    "src/fast/ldpc.cpp": {
+      "bytes": 9073,
+      "sha256": "7450d46a42a4ea9975ee2a08a06c3e2c1dbc58d32910a8e30c4b1e505bba0ddf"
+    },
+    "src/fast/modem.cpp": {
+      "bytes": 43802,
+      "sha256": "99e672ed6ed9aacbdf4b2763d48578214e2cd83716ad91deb466553b3b2630e2"
+    },
+    "src/fast/acoustic_ofdm.cpp": {
+      "bytes": 27259,
+      "sha256": "6cafdc940b992e70adab499f9bb90ade35edbbbd524651c472846e1e6520a452"
+    },
+    "src/fast/codec.cpp": {
+      "bytes": 45626,
+      "sha256": "0eb43969fa8624bda558cc7ad23b72be63dd75a31c5bc677760a0d0c47372309"
+    },
+    "build/libdatapump_fast.a": {
+      "bytes": 1444168,
+      "sha256": "0fe989a866e302e894d355bd88ef29260d0db972b533f261a58e50d5ddd8c72d"
+    }
+  }
+}

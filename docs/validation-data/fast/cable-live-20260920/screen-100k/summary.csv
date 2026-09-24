@@ -1,0 +1,7 @@
+candidate,source_bytes,attempted_trials,setup_failures,exact_transfers,empirical_success_probability,success_probability_95pct_lower_one_sided,success_probability_95pct_upper_one_sided,meets_80pct_at_95pct_confidence,verified_bytes_per_wall_second
+apsk16-r3_4-robust-d16,100000,1,0,1,1.0,0.05,1.0,False,2298.9213791632583
+apsk64-r3_4-robust-d16,100000,1,0,1,1.0,0.05,1.0,False,3036.778657580704
+apsk256-r3_4-robust-d16,100000,1,0,1,1.0,0.05,1.0,False,3639.929703024788
+apsk256-r7_8-robust-d16,100000,1,0,1,1.0,0.05,1.0,False,4037.470258736799
+apsk256-r7_8-high-rate-d16,100000,1,0,1,1.0,0.05,1.0,False,4271.458433485085
+apsk256-r7_8-high-rate-d62,100000,1,0,1,1.0,0.05,1.0,False,4079.828156228497

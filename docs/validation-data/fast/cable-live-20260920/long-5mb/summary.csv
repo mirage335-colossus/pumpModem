@@ -1,0 +1,2 @@
+candidate,source_bytes,attempted_trials,setup_failures,exact_transfers,empirical_success_probability,success_probability_95pct_lower_one_sided,success_probability_95pct_upper_one_sided,meets_80pct_at_95pct_confidence,verified_bytes_per_wall_second
+apsk256-r7_8-high-rate-d62,5000000,1,0,1,1.0,0.05,1.0,False,6778.437451360289

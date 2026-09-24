@@ -1,0 +1,90 @@
+{
+  "reproduction": "Reconstructed pinned commands, not a shell-history transcript; calculations use original full-precision live reports.",
+  "conditions": "Direct float32 noiseless TX-to-RX excludes S16 conversion, hardware filtering, sample-clock mismatch and external noise. Error-power ratios are indicative, not a calibrated independent-noise decomposition. Wideband uses a shorter, different raw fixture than its live codec run.",
+  "interpretation": "Squared coherence describes projection of the aligned known-error vectors onto each other; it does not establish a general hardware SNR. Subtracting the aligned offline residual is a diagnostic using known transmitted data, not a receiver correction.",
+  "measurements": [
+    {
+      "band": "wide",
+      "baud": 17647.05882,
+      "intervals": 64,
+      "offline_known_residual_db": 72.74691940587834,
+      "live_known_residual_db": 64.5916985283145,
+      "offline_known_evm": 0.0002304910305590238,
+      "offline_raw_bit_errors": 15,
+      "offline_known_payload_bit_errors": 15,
+      "wall_seconds": 2.01165199,
+      "illustrative_offline_to_live_error_power_ratio": 0.15292479685124258,
+      "identical_tx_bits": false,
+      "input_sha256": {
+        "offline": {
+          "probe": "4a1168b144c7f26411622bdfb1496e0ee775c1c2fd9dd6e8ceef1cfbdea79b2e",
+          "bits": "6b49e443a3b9aeda162cd6bec604092603e404cacce9503a729b3936d76d7d7c",
+          "iq": "e3fd3fdc3190adceb414c71d52eab06f16132b055414bad23c4dcf1283dbde9d"
+        },
+        "live": {
+          "probe": "54a426506add907ac1eac7475e7901d4405bb7d363d466a698eedc1e7247fb73",
+          "bits": "ef39e8ee7ba8fb6d1566216bbb2608474ae12d060be84bbb64cd7b6746aa0cae",
+          "iq": "8de36ca49b70237f8e7468e7b4baba512589bc361aa1937afe143d80f29bde04"
+        }
+      }
+    },
+    {
+      "band": "mid",
+      "baud": 1764.70588,
+      "intervals": 64,
+      "offline_known_residual_db": 72.54265010005034,
+      "live_known_residual_db": 70.98604171828367,
+      "offline_known_evm": 0.00023597581515824272,
+      "offline_raw_bit_errors": 14,
+      "offline_known_payload_bit_errors": 14,
+      "wall_seconds": 24.37920041,
+      "illustrative_offline_to_live_error_power_ratio": 0.6987779009208126,
+      "identical_tx_bits": true,
+      "input_sha256": {
+        "offline": {
+          "probe": "b28a2189fb9273b9ca41c006d4fee6cf28aa3ea45e45fa239efd692125939c56",
+          "bits": "6b49e443a3b9aeda162cd6bec604092603e404cacce9503a729b3936d76d7d7c",
+          "iq": "50d3b2e6204548afa1310e83acb87a3251bd3d3b8d2626753a6ea228642758a6"
+        },
+        "live": {
+          "probe": "689a56a8b3feeeb0cc0b2081fb841bd4336d4591a31e26c13ea628a886f32e1f",
+          "bits": "6b49e443a3b9aeda162cd6bec604092603e404cacce9503a729b3936d76d7d7c",
+          "iq": "d6a6107e2e15cc5881cc2eac29223202b704bf958ad36760934e96bdf506e1c5"
+        }
+      },
+      "known_error_squared_coherence": 0.7131487029233862,
+      "known_error_projection_gain_real": 1.0099617986291232,
+      "known_error_projection_gain_imag": 0.02329779103161866,
+      "live_minus_noiseless_error_ratio_db": 76.40268652243446
+    },
+    {
+      "band": "narrow",
+      "baud": 176.470588,
+      "intervals": 16,
+      "offline_known_residual_db": 70.54092229088289,
+      "live_known_residual_db": 70.35128525392247,
+      "offline_known_evm": 0.0002971350509080259,
+      "offline_raw_bit_errors": 9,
+      "offline_known_payload_bit_errors": 9,
+      "wall_seconds": 4.12764066,
+      "illustrative_offline_to_live_error_power_ratio": 0.9572740724467336,
+      "identical_tx_bits": true,
+      "input_sha256": {
+        "offline": {
+          "probe": "09b7837e1ade8896061061eca2ebb2d4890e9147608488684d45dac81487258c",
+          "bits": "7471fdd7c306c8907d620b2c67b8123306e7a669989cee6a2499c871780f34bc",
+          "iq": "05f6e09ae93ad9bee32aa7167d36047d391d320f9030c0e6dbef37f681791898"
+        },
+        "live": {
+          "probe": "4758a18781caf8900a51edb3b777eb84531b72baba0b54b1e79ea066645e089b",
+          "bits": "7471fdd7c306c8907d620b2c67b8123306e7a669989cee6a2499c871780f34bc",
+          "iq": "312e78a02161b23839b9c15740a3607c6edc6e5d0c68eb49b18578c64f5aa940"
+        }
+      },
+      "known_error_squared_coherence": 0.9712496391144718,
+      "known_error_projection_gain_real": 1.0072595946568477,
+      "known_error_projection_gain_imag": 0.005238878621875858,
+      "live_minus_noiseless_error_ratio_db": 85.75327810725717
+    }
+  ]
+}

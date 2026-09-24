@@ -1,8 +1,10 @@
 #pragma once
 #include "datapump/modem.hpp"
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace datapump::tuning {
 enum class PatternMode {
@@ -14,6 +16,21 @@ enum class PatternMode {
 PatternMode parse_pattern_mode(std::string_view name);
 std::string_view pattern_mode_name(PatternMode mode);
 std::span<const PatternMode> pattern_modes();
+bool tone_mode(PatternMode mode);
+inline constexpr double default_receive_target_db_hz = 32;
+// Existing one-symbol integration design reference, not a measured admission
+// threshold or a calibrated probability of receiving one bit.
+inline constexpr double pattern_target_symbol_snr_db = 18;
+inline constexpr std::size_t maximum_receive_targets = 16;
+inline constexpr std::size_t maximum_receive_target_text = 512;
+struct ReceiveTargets {
+    std::vector<double> values{default_receive_target_db_hz};
+    std::string canonical = "32";
+    bool reset = false;
+};
+// One invalid token resets the complete list. Accept at most 16 finite
+// decimal targets in -200..200 dB-Hz and preserve first-occurrence order.
+ReceiveTargets parse_receive_targets(std::string_view text);
 struct Plan {
     modem::Config config;
     double estimated_processing_gain_db = 0;
@@ -25,16 +42,32 @@ struct Plan {
 };
 // target_snr_db_hz is C/N0: signal power / noise power in a 1 Hz bandwidth.
 // Results are integration estimates, not empirical sensitivity guarantees.
-// Conservative differential phase/amplitude geometry target, not measured BER.
-double constellation_target_symbol_snr_db(unsigned bits);
-inline constexpr double maximum_bandwidth_hz = 30000000;
-// Internal real-PCM clock: four samples per hertz of occupied bandwidth, with
-// only the 64 Hz floor needed to sample the fixed five-second training frame.
-// Hardware/SDR clocks are negotiated independently at the endpoint boundary.
-std::uint32_t recommended_sample_rate(double bandwidth_hz);
+inline constexpr double minimum_bandwidth_hz = modem::minimum_bandwidth_hz;
+inline constexpr double maximum_bandwidth_hz = modem::maximum_bandwidth_hz;
+// Ideal AWGN Shannon-Hartley channel capacity in bits/s. The target is C/N0
+// in dB-Hz, so in-band linear SNR is 10^(target_snr_db_hz/10)/bandwidth_hz.
+// This theoretical ceiling is independent of modem framing and coding.
+double shannon_capacity_bps(double bandwidth_hz, double target_snr_db_hz);
+// Automatic real-PCM plans center narrow audio bands at 1500 Hz. Wider bands
+// retain the 0.75 * bandwidth carrier. The logical clock covers both the band
+// and carrier with four samples per hertz, keeping the nominal upper edge in
+// the resampler's flat passband. Hardware clocks are negotiated independently.
+// An explicit carrier changes the internal clock as needed; omitted carriers
+// preserve the existing automatic recommendation.
+std::uint32_t recommended_sample_rate(double bandwidth_hz,
+    std::optional<double> carrier_hz = std::nullopt);
 double recommended_carrier_hz(double bandwidth_hz);
 Plan resolve(double bandwidth_hz, double target_snr_db_hz, PatternMode mode,
-             bool encryption);
+             bool encryption, std::optional<double> carrier_hz = std::nullopt);
+// Selected bandwidth and pattern mode stay fixed. Targets resolving to the
+// same waveform profile share one receiver hypothesis.
+std::vector<modem::Config> receive_profiles(double bandwidth_hz,
+    std::span<const double> targets_db_hz, PatternMode mode, bool encryption);
+// Preserve the caller's carrier, sample clock, DSSS settings, seeds, epoch and
+// resource limit while replacing only the selected pattern integration plan.
+// Tone profiles always clear Data encryption, Scrambler and DSSS material.
+std::vector<modem::Config> receive_profiles(const modem::Config& base,
+    std::span<const double> targets_db_hz, PatternMode mode, bool encryption);
 struct SimulationPreset {
     std::string_view name;
     bool enabled = false;
@@ -43,6 +76,17 @@ struct SimulationPreset {
 };
 std::span<const SimulationPreset> simulation_presets();
 SimulationPreset parse_simulation_preset(std::string_view name);
+// Illustrative residual clock error and Wiener phase diffusion for simulation,
+// not measured device specifications. GPS discipline alone does not establish
+// short-term phase stability; the underlying oscillator and loop also matter.
+struct OscillatorPreset {
+    std::string_view id;
+    std::string_view name;
+    double clock_error_ppm = 100;
+    double phase_noise_degrees_per_sqrt_second = .5;
+};
+std::span<const OscillatorPreset> oscillator_presets();
+OscillatorPreset parse_oscillator_preset(std::string_view name);
 struct LinkBudget {
     double received_power_dbm = 0;
     double noise_power_dbm = 0; // In the configured channel bandwidth.

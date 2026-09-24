@@ -1,491 +1,203 @@
 #include "datapump/streaming_modem.hpp"
-#include "datapump/crypto.hpp"
-#include "datapump/packet.hpp"
-#include "datapump/tuning.hpp"
-#include "constellation.hpp"
+#include "datapump/pattern_code.hpp"
+#include <openssl/crypto.h>
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
-#include <numbers>
 
 namespace datapump::modem {
 namespace {
 using Complex=std::complex<double>;
-constexpr double tau=2*std::numbers::pi;
 void cancelled(std::stop_token stop) {if(stop.stop_requested())throw Error("modem operation cancelled");}
-std::uint64_t chip_count(const Config& c) {
-    return static_cast<std::uint64_t>(std::ceil(2.*c.sample_rate/c.bandwidth_hz));
-}
-std::vector<int> pattern(const Config& c) {
-    const auto count=c.spreading_factor;
-    std::vector<int> result(count,1);
-    constexpr std::array<int,8> fixed{1,1,-1,1,-1,-1,1,-1};
-    if(c.spreading_mode==SpreadingMode::pattern && count>1)
-        for(std::size_t i=0;i<count;++i)result[i]=fixed[i%fixed.size()];
-    if(c.scramble) {
-        Crypto key(c.spreading_seed);const auto bytes=key.stream(StreamPurpose::Scrambler,0,0,(count+7)/8);
-        for(std::size_t i=0;i<count;++i)result[i]=((bytes[i/8]>>(i%8))&1)?-1:1;
-    }
-    if(c.dsss) {
-        Crypto key(c.dsss_seed);const auto bytes=key.stream(StreamPurpose::Dsss,0,0,(count+7)/8);
-        for(std::size_t i=0;i<count;++i)if((bytes[i/8]>>(i%8))&1)result[i]=-result[i];
-    }
-    return result;
-}
-bool packet_bootstrap(const Bytes& prefix) {
-    try {return packet_bootstrap_possible(prefix) && packet_frame_size(prefix).has_value();}catch(const Error&){return false;}
-}
-struct Candidate {
-    std::uint64_t end=0,start=0;
-    Complex sum{};
-    std::vector<Complex> points;
-    std::vector<double> ordered_radii;
-    unsigned bits=4;
-    std::size_t count=0,cursor=0;
-    std::size_t repeated_points=0;
-    Complex last_point{};
-    Complex previous{1,0};
-    double gain=1;
-    std::array<double,8> gain_hypotheses{};
-    unsigned gain_count=0;
-    double residual_limit=0;
-    unsigned partial=0;
-    unsigned partial_bits=0;
-    bool valid=false;
-    Bytes validated_header;
-    Bytes last_failed_header;
-    std::vector<Complex> following;
-    double quality=std::numeric_limits<double>::infinity();
-    void retain(Complex value) {
-        repeated_points=value==last_point?std::min(repeated_points+1,points.size()):1;
-        last_point=value;
-        auto length=count;
-        if(length==points.size()) {
-            const auto old=std::lower_bound(ordered_radii.begin(),ordered_radii.end(),(bits>=5?std::abs(points[cursor]):std::norm(points[cursor])));
-            std::move(old+1,ordered_radii.end(),old);--length;
-        }
-        const auto amplitude=bits>=5?std::abs(value):std::norm(value);
-        const auto sorted_end=ordered_radii.begin()+static_cast<std::ptrdiff_t>(length);
-        const auto position=std::lower_bound(ordered_radii.begin(),sorted_end,amplitude);
-        std::move_backward(position,sorted_end,sorted_end+1);*position=amplitude;
-        points[cursor]=value;if(++cursor==points.size())cursor=0;count=std::min(count+1,points.size());
-    }
-    Complex at(std::size_t i)const{const auto index=cursor+i;return points[index<points.size()?index:index-points.size()];}
-    void estimate_gain() {
-        gain_count=0;
-        if(detail::rings(bits)==2) {
-            gain=(std::sqrt(ordered_radii[points.size()/4])/.35+std::sqrt(ordered_radii[points.size()*3/4])/.7)/2;
-            if(std::isfinite(gain) && gain>=1e-12)gain_hypotheses[gain_count++]=gain;
-            return;
-        }
-        const auto spacing=detail::radius_step(bits);
-        const auto levels=detail::rings(bits);
-        const auto radii=std::span(ordered_radii);
-        if(!std::isfinite(radii.back()) || radii.back()<1e-12)return;
-        // At the planner's geometric Es/N0 margin the radial noise standard
-        // deviation is sqrt(E/(2*Es/N0)). Admit three times that RMS residual
-        // before expensive bootstrap decoding; pure noise has no such lattice.
-        // Try every possible highest occupied ring, so absent outer rings do
-        // not imply a transmitter-side gain assumption. Bootstrap validation
-        // resolves remaining gain aliases (e.g. only even rings occupied).
-        std::array<std::pair<double,double>,8> plausible{};unsigned plausible_count=0;
-        for(unsigned highest=1;highest<=levels;++highest) {
-            double candidate=radii.back()/(spacing*highest);
-            double initial_residual=0;const auto initial_inverse=1/(spacing*candidate);
-            for(const auto actual:radii) {
-                const auto scaled=actual*initial_inverse;
-                const auto ring=static_cast<double>(static_cast<unsigned>(std::clamp(scaled+.5,1.,static_cast<double>(levels))));
-                initial_residual+=(scaled-ring)*(scaled-ring);
-            }
-            if(initial_residual>residual_limit*static_cast<double>(radii.size()))continue;
-            for(unsigned iteration=0;iteration<2;++iteration) {
-                double numerator=0,denominator=0;
-                const auto inverse=1/(spacing*candidate);
-                for(const auto actual:radii) {
-                    const auto ring=static_cast<double>(static_cast<unsigned>(std::clamp(actual*inverse+.5,1.,static_cast<double>(levels))));
-                    numerator+=actual*ring;denominator+=ring*ring;
-                }
-                candidate=numerator/(spacing*denominator);
-                if(!std::isfinite(candidate) || candidate<1e-12)break;
-                // The first refinement removes the observed-maximum's noise
-                // bias; reject incompatible lattices before another fit pass.
-                double residual=0;const auto refined_inverse=1/(spacing*candidate);
-                for(const auto actual:radii) {
-                    const auto scaled=actual*refined_inverse;
-                    const auto ring=static_cast<double>(static_cast<unsigned>(std::clamp(scaled+.5,1.,static_cast<double>(levels))));
-                    residual+=(scaled-ring)*(scaled-ring);
-                }
-                residual/=static_cast<double>(radii.size());
-                if(residual>residual_limit)break;
-                if(iteration==1) {
-                    if(plausible_count==plausible.size())throw Error("gain hypothesis capacity exceeded");
-                    const std::pair<double,double> fit{residual,candidate};
-                    // At most eight entries: insert directly in residual order
-                    // instead of invoking a general-purpose introsort.
-                    auto slot=plausible_count;
-                    while(slot>0 && fit<plausible[slot-1]) {
-                        plausible[slot]=plausible[slot-1];--slot;
-                    }
-                    plausible[slot]=fit;++plausible_count;
-                }
-            }
-        }
-        for(unsigned i=0;i<plausible_count;++i) {
-            const auto candidate=plausible[i].second;
-            bool duplicate=false;
-            for(unsigned j=0;j<gain_count;++j)duplicate=duplicate || std::abs(candidate-gain_hypotheses[j])<1e-4*candidate;
-            if(!duplicate)gain_hypotheses[gain_count++]=candidate;
-        }
-    }
-    Bytes header(const BootstrapValidator& validator) {
-        estimate_gain();
-        for(unsigned hypothesis=0;hypothesis<gain_count;++hypothesis) {
-            gain=gain_hypotheses[hypothesis];
-            Bytes bytes;bytes.reserve(packet_prefix_size);
-            Complex prior{1,0};unsigned pending=0,available=0;
-            for(std::size_t i=0;i<points.size();++i) {
-                const auto value=at(i);const auto decoded=detail::decision(value,prior,gain,bits);
-                prior=value;pending=(pending<<bits)|decoded;available+=bits;
-                if(available>=8){available-=8;bytes.push_back(static_cast<std::uint8_t>(pending>>available));}
-            }
-            if(bytes==last_failed_header)continue;
-            bool accepted=false;try{accepted=validator(bytes);}catch(const Error&){}
-            if(accepted){previous=at(points.size()-1);return bytes;}
-            last_failed_header=std::move(bytes);
-        }
-        return {};
-    }
-    void measure_quality() {
-        double residual=0,power=0;
-        for(std::size_t i=2;i<points.size();++i) {
-            const auto value=at(i),prior=at(i-1);const auto decoded=detail::decision(value,prior,gain,bits);
-            const auto ideal=gain*detail::mapped(decoded,bits,prior);
-            residual+=std::norm(value-ideal);power+=std::norm(value);
-        }
-        quality=residual/std::max(power,1e-20);
-    }
-};
 }
 
 struct StreamingTransmitter::Impl {
-    Bytes wire;
-    Config config;
-    std::vector<int> code;
-    std::uint64_t position=0,total=0,training=0,symbol=0,chip=0,segment_start=0,segment_end=0;
-    std::size_t symbol_index=0,payload_symbols=0,bootstrap_count=0;
-    Complex phase{1,0},point{};
-    struct Segment {std::uint64_t begin=0,end=0;Complex value{};};
-    // At least four samples/symbol: cover every symbol intersecting the
-    // analytic preview and its interpolation margins, including boundaries.
-    std::array<Segment,StreamingTransmitter::analytic_preview_limit/4+2> history{};
-    std::size_t history_begin=0,history_count=0;
-    bool pcm=false,analytical=false;
-    Impl(Bytes bytes,Config value,std::size_t workspace):wire(std::move(bytes)),config(value) {
+    std::unique_ptr<PatternTransmitter> pattern;
+    std::unique_ptr<NoiseTransmitter> noise;
+    TransmitTrace trace;
+    std::uint64_t chips_per_symbol=1;
+    std::vector<Complex> constellation;
+    std::size_t constellation_begin=0,constellation_count=0,pending_count=0;
+    std::uint64_t dropped=0;
+    std::size_t initialize_constellation(const Config& config,std::size_t workspace) {
+        const auto count=StreamingTransmitter::constellation_history_capacity(config);
+        const auto fixed=sizeof(StreamingTransmitter)+sizeof(Impl)+trace.working_bytes();
+        if(fixed>workspace || count>(workspace-fixed)/sizeof(Complex))
+            throw Error("pattern transmitter workspace is too small");
+        constellation.resize(count);
+        const auto bytes=fixed+constellation.capacity()*sizeof(Complex);
+        if(bytes>workspace)throw Error("pattern transmitter workspace is too small");
+        return workspace-bytes;
+    }
+    Impl(Bytes wire,Config config,std::size_t workspace) {
         validate(config);
-        if(wire.size()<32)throw Error("APSK wire requires the 32-byte training prefix");
-        if(workspace<65536+config.spreading_factor*sizeof(int))throw Error("streaming transmitter workspace is too small");
-        code=pattern(config);training=training_sample_count(config);symbol=symbol_sample_count(config);chip=chip_count(config);
-        payload_symbols=payload_symbol_count(wire.size()-32,config);
-        bootstrap_count=(std::min(wire.size()-32,packet_prefix_size)*8+config.constellation_bits-1)/config.constellation_bits;
-        if(payload_symbols>(std::numeric_limits<std::uint64_t>::max()-training)/symbol)throw Error("transmission duration exceeds 64-bit sample counter");
-        total=training+static_cast<std::uint64_t>(payload_symbols)*symbol;
-        advance();
+        const auto remaining=initialize_constellation(config,workspace);
+        if(wire.size()>std::numeric_limits<std::size_t>::max()/8 ||
+           wire.capacity()>remaining || wire.size()>(remaining-wire.capacity())/8)
+            throw Error("pattern transmitter workspace is too small");
+        config.memory_limit=remaining;
+        Bytes bits;bits.reserve(wire.size()*8);
+        for(const auto byte:wire)for(unsigned bit=0;bit<8;++bit)
+            bits.push_back(static_cast<std::uint8_t>((byte>>(7-bit))&1U));
+        pattern=std::make_unique<PatternTransmitter>(std::move(bits),config,config.stream_epoch);
+        if(pattern->working_bytes()>remaining)throw Error("pattern transmitter workspace is too small");
     }
-    void advance() {
-        const auto index=symbol_index++;
-        if(index>=64+payload_symbols){segment_end=total;return;}
-        unsigned bits=4,value=0;
-        if(index<64)value=detail::read_bits(std::span(wire).first(32),index*4,4);
-        else {
-            bits=config.constellation_bits;const auto payload_index=index-64;
-            if(payload_index<bootstrap_count)
-                value=detail::read_bits(std::span(wire).subspan(32,std::min(wire.size()-32,packet_prefix_size)),payload_index*bits,bits);
-            else value=detail::read_bits(std::span(wire).subspan(32+packet_prefix_size),(payload_index-bootstrap_count)*bits,bits);
+    Impl(RawBits input,Config config,std::size_t workspace,TransmitTrace capture):trace(std::move(capture)) {
+        validate(config);
+        if(input.bits.empty())throw Error("raw binary transmission requires at least one bit");
+        if(trace.active) {
+            trace.total_wire_bits=input.bits.size();trace.generated_bits=0;trace.generated_chips=0;trace.revision=1;
+            trace.tone=config.spreading_mode==SpreadingMode::tone;
+            trace.pattern_available=!trace.tone;trace.pattern_private=config.scramble;trace.dsss=config.dsss;
+            trace.wire_bits.assign(input.bits.begin(),input.bits.begin()+static_cast<std::ptrdiff_t>(
+                std::min(input.bits.size(),TransmitTrace::bit_limit)));
         }
-        point=detail::mapped(value,bits,phase);phase=point/std::abs(point);
-        segment_start=segment_end;
-        segment_end=index<64?training*static_cast<std::uint64_t>(index+1)/64:segment_end+symbol;
-        if(history_count==history.size()){history_begin=(history_begin+1)%history.size();--history_count;}
-        history[(history_begin+history_count++)%history.size()]={segment_start,segment_end,point};
-        const auto oldest=position>StreamingTransmitter::analytic_preview_limit?position-StreamingTransmitter::analytic_preview_limit:0;
-        while(history_count>1 && history[history_begin].end<=oldest) {
-            history_begin=(history_begin+1)%history.size();--history_count;
-        }
+        chips_per_symbol=pattern_chips_per_symbol(config);
+        const auto remaining=initialize_constellation(config,workspace);
+        if(input.bits.capacity()>remaining)throw Error("pattern transmitter workspace is too small");
+        config.memory_limit=remaining;
+        pattern=std::make_unique<PatternTransmitter>(std::move(input.bits),config,config.stream_epoch,0,true,trace.active);
+        if(pattern->working_bytes()>remaining)throw Error("pattern transmitter workspace is too small");
     }
-    int sign(std::uint64_t sample)const {
-        return sample<training?1:code[static_cast<std::size_t>(((sample-segment_start)/chip)%code.size())];
+    Impl(Noise,Config config,std::size_t workspace) {
+        const auto remaining=initialize_constellation(config,workspace);
+        config.memory_limit=remaining;
+        noise=std::make_unique<NoiseTransmitter>(config);
+        if(noise->working_bytes()>remaining)throw Error("noise transmitter workspace is too small");
+    }
+    void retain_constellation(Complex value) {
+        if(trace.active) {
+            ++trace.generated_chips;
+            trace.generated_bits=static_cast<std::size_t>((trace.generated_chips-1)/chips_per_symbol+1);
+            ++trace.revision;
+        }
+        if(constellation_count==constellation.size()) {
+            constellation_begin=(constellation_begin+1)%constellation.size();--constellation_count;
+        }
+        constellation[(constellation_begin+constellation_count++)%constellation.size()]=value;
+        if(pending_count<constellation.size())++pending_count;
+        else if(dropped<std::numeric_limits<std::uint64_t>::max())++dropped;
     }
 };
+std::size_t StreamingTransmitter::constellation_history_capacity(const Config& config) {
+    const auto chip=pattern_chip_samples(config),symbol=symbol_sample_count(config);
+    const auto chips=symbol/chip+(symbol%chip!=0);
+    const auto samples=config.sample_rate/constellation_frame_rate+(config.sample_rate%constellation_frame_rate!=0);
+    const auto remainder=samples%symbol;
+    // Every complete symbol contributes all of its chips. A leftover span
+    // can straddle a shortened final chip, and its first chip may have begun
+    // before the frame. Keep both boundary observations as well.
+    const auto partial=remainder?std::min(chips,remainder/chip+(remainder%chip!=0)+1):0;
+    return std::max(constellation_history_limit,static_cast<std::size_t>((samples/symbol)*chips+partial+1));
+}
 StreamingTransmitter::StreamingTransmitter(Bytes wire,Config c,std::size_t workspace):impl_(std::make_unique<Impl>(std::move(wire),c,workspace)){}
+StreamingTransmitter::StreamingTransmitter(RawBits bits,Config c,std::size_t workspace,TransmitTrace trace):
+    impl_(std::make_unique<Impl>(std::move(bits),c,workspace,std::move(trace))){}
+StreamingTransmitter::StreamingTransmitter(Noise,Config c,std::size_t workspace) {
+    c.data_key.reset();
+    OPENSSL_cleanse(c.spreading_seed.data(),c.spreading_seed.size());
+    OPENSSL_cleanse(c.dsss_seed.data(),c.dsss_seed.size());
+    c.spreading_mode=SpreadingMode::pattern;
+    impl_=std::make_unique<Impl>(Noise{},c,workspace);
+}
 StreamingTransmitter::~StreamingTransmitter()=default;
 StreamingTransmitter::StreamingTransmitter(StreamingTransmitter&&) noexcept=default;
 StreamingTransmitter& StreamingTransmitter::operator=(StreamingTransmitter&&) noexcept=default;
-bool StreamingTransmitter::finished()const{return impl_->position==impl_->total;}
-std::uint64_t StreamingTransmitter::total_samples()const{return impl_->total;}
-std::uint64_t StreamingTransmitter::samples_emitted()const{return impl_->position;}
+bool StreamingTransmitter::finished()const{return impl_->noise?impl_->noise->finished():impl_->pattern->finished();}
+std::uint64_t StreamingTransmitter::total_samples()const{return impl_->noise?impl_->noise->total_samples():impl_->pattern->total_samples();}
+std::uint64_t StreamingTransmitter::samples_emitted()const{return impl_->noise?impl_->noise->samples_emitted():impl_->pattern->samples_emitted();}
+std::size_t StreamingTransmitter::working_bytes()const{return sizeof(StreamingTransmitter)+sizeof(Impl)+
+    impl_->constellation.capacity()*sizeof(Complex)+(impl_->noise?impl_->noise->working_bytes():impl_->pattern->working_bytes())+
+    impl_->trace.working_bytes();}
+std::vector<Complex> StreamingTransmitter::payload_constellation()const {
+    const auto& s=*impl_;std::vector<Complex> result;result.reserve(s.constellation_count);
+    for(std::size_t i=0;i<s.constellation_count;++i)result.push_back(s.constellation[(s.constellation_begin+i)%s.constellation.size()]);
+    return result;
+}
+ConstellationBatch StreamingTransmitter::take_payload_constellation() {
+    auto& s=*impl_;ConstellationBatch result;result.points.reserve(s.pending_count);result.dropped=s.dropped;
+    for(std::size_t i=s.constellation_count-s.pending_count;i<s.constellation_count;++i)
+        result.points.push_back(s.constellation[(s.constellation_begin+i)%s.constellation.size()]);
+    s.pending_count=0;s.dropped=0;return result;
+}
+TransmitTrace StreamingTransmitter::transmit_trace()const {
+    auto result=impl_->trace;
+    const auto count=std::min(result.generated_bits,TransmitTrace::bit_limit);
+    for(auto* bits:{&result.wire_plain_bits,&result.wire_bits,&result.data_key_bits})
+        if(bits->size()>count)bits->resize(count);
+    if(impl_->pattern)impl_->pattern->copy_transmit_trace(result,result.generated_chips);
+    return result;
+}
 std::size_t StreamingTransmitter::read(std::span<float> output,std::stop_token stop) {
-    auto& s=*impl_;cancelled(stop);if(s.analytical)throw Error("cannot mix PCM and integrated reads on one transmitter");s.pcm=true;
-    const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(output.size(),s.total-s.position));
-    const auto start_angle=std::remainder(static_cast<long double>(s.position)*tau*s.config.carrier_hz/s.config.sample_rate,static_cast<long double>(tau));
-    Complex oscillator=std::polar(1.,static_cast<double>(start_angle));const auto step=std::polar(1.,tau*s.config.carrier_hz/s.config.sample_rate);
-    for(std::size_t i=0;i<count;++i,++s.position) {
-        if((i&4095U)==0)cancelled(stop);
-        while(s.position>=s.segment_end && s.position<s.total)s.advance();
-        output[i]=static_cast<float>((s.point*oscillator).real()*s.sign(s.position));
-        oscillator*=step;
-    }
-    return count;
+    auto& s=*impl_;cancelled(stop);
+    const auto observer=[&](Complex point){s.retain_constellation(point);};
+    return s.noise?s.noise->read(output,stop,observer):s.pattern->read(output,stop,observer);
+}
+std::size_t StreamingTransmitter::read_analytic(std::span<Complex> output,std::stop_token stop) {
+    auto& s=*impl_;cancelled(stop);
+    const auto observer=[&](Complex point){s.retain_constellation(point);};
+    return s.noise?s.noise->read_analytic(output,stop,observer):s.pattern->read_analytic(output,stop,observer);
 }
 std::optional<SymbolObservation> StreamingTransmitter::next_symbol(std::stop_token stop) {
-    auto& s=*impl_;cancelled(stop);if(s.pcm)throw Error("cannot mix integrated and PCM reads on one transmitter");s.analytical=true;
-    if(finished())return std::nullopt;
-    // Training has64 fixed waveform segments, regardless of the payload clock.
-    // Integrate each segment directly so a future SDR clock does not require
-    // hundreds of millions of synthetic preamble observations. Payload bins
-    // still cross symbol boundaries and carry no framing labels to the decoder.
-    while(s.position>=s.segment_end)s.advance();
-    const auto quantum=std::max<std::uint64_t>(1,s.symbol/32);
-    const auto count=s.position<s.training?s.segment_end-s.position:std::min(quantum,s.total-s.position);
-    auto remaining=count;Complex integrated{};
-    while(remaining) {
-        cancelled(stop);while(s.position>=s.segment_end)s.advance();
-        const auto part=std::min(remaining,s.segment_end-s.position);
-        integrated+=s.point*static_cast<double>(part);s.position+=part;remaining-=part;
-    }
-    return SymbolObservation{integrated/static_cast<double>(count),count};
+    cancelled(stop);
+    throw Error("pattern reception requires physical PCM or analytic samples, not despread symbol observations");
 }
 void StreamingTransmitter::preview_last(std::span<float> output)const {
     if(output.size()>2048)throw Error("streaming preview is limited to 2048 samples");
-    std::array<Complex,2048> analytic{};
-    preview_last_analytic(std::span(analytic).first(output.size()));
+    std::array<Complex,2048> analytic{};preview_last_analytic(std::span(analytic).first(output.size()));
     for(std::size_t i=0;i<output.size();++i)output[i]=static_cast<float>(analytic[i].real());
 }
 void StreamingTransmitter::preview_last_analytic(std::span<Complex> output)const {
-    const auto& s=*impl_;
     if(output.size()>analytic_preview_limit)throw Error("analytic streaming preview exceeds its bounded history");
-    const auto count=std::min<std::uint64_t>(output.size(),s.position);
-    const auto leading=output.size()-static_cast<std::size_t>(count);
-    std::fill(output.begin(),output.end(),Complex{});
-    if(!count)return;
-    const auto start=s.position-count;
-    const auto angle=std::remainder(static_cast<long double>(start)*tau*s.config.carrier_hz/s.config.sample_rate,static_cast<long double>(tau));
-    Complex oscillator=std::polar(1.,static_cast<double>(angle));
-    const auto rotation=std::polar(1.,tau*s.config.carrier_hz/s.config.sample_rate);
-    std::size_t entry=0;
-    for(std::uint64_t i=0;i<count;++i) {
-        const auto position=start+i;
-        while(entry+1<s.history_count && s.history[(s.history_begin+entry)%s.history.size()].end<=position)++entry;
-        const auto& segment=s.history[(s.history_begin+entry)%s.history.size()];
-        if(position>=segment.begin && position<segment.end) {
-            const auto sign=position<s.training?1:s.code[static_cast<std::size_t>(((position-segment.begin)/s.chip)%s.code.size())];
-            output[leading+static_cast<std::size_t>(i)]=segment.value*oscillator*static_cast<double>(sign);
-        }
-        oscillator*=rotation;
-    }
+    if(impl_->noise)impl_->noise->preview_last_analytic(output);
+    else impl_->pattern->preview_last_analytic(output);
 }
 
 struct StreamingReceiver::Impl {
+    static Config dsp_config(Config config,std::size_t budget) {
+        validate(config);
+        if(budget<=sizeof(Impl))throw Error("pattern receiver workspace is too small");
+        config.memory_limit=budget-sizeof(Impl);
+        return config;
+    }
     Config config;
-    Bytes expected;
-    BootstrapValidator validator;
-    std::vector<int> code;
-    std::vector<Candidate> candidates;
-    std::uint64_t position=0,symbol=0,chip=0,training=0,earliest=0;
-    std::size_t selected=0,workspace=0,bootstrap_symbols=0;
-    bool synced=false;
-    bool finished=false;
-    std::uint64_t selection_deadline=0;
-    Diagnostics diagnostic;
-    std::size_t constellation_cursor=0;
-    Complex oscillator{1,0};
-    double xc=0,xs=0,cc=0,ss=0,cs=0;
-    std::uint64_t pcm_count=0;
-    Impl(Config c,Bytes pre,std::size_t budget,BootstrapValidator check):config(c),expected(std::move(pre)),validator(std::move(check)),workspace(budget) {
-        validate(c);if(expected.size()!=32)throw Error("APSK expects a 32-byte training prefix");
-        bootstrap_symbols=(packet_prefix_size*8+c.constellation_bits-1)/c.constellation_bits;
-        if(!validator)validator=packet_bootstrap;
-        symbol=symbol_sample_count(c);training=training_sample_count(c);chip=chip_count(c);
-        if(symbol>(std::numeric_limits<std::uint64_t>::max()-training)/bootstrap_symbols)throw Error("bootstrap acquisition exceeds 64-bit sample counter");
-        // Bootstrap validation is the synchronization evidence. A capture can
-        // start after training, and crystal error changes its received length.
-        earliest=0;
-        const bool fine=(c.scramble || c.dsss) && c.spreading_factor>=1024 && symbol>4*chip;
-        const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(symbol,fine?224:c.spreading_mode==SpreadingMode::tone&&!c.dsss?64:256));
-        if(count*(sizeof(Candidate)+packet_prefix_size+bootstrap_symbols*(sizeof(Complex)+sizeof(double)))+c.spreading_factor*sizeof(int)+65536>budget)throw Error("streaming receiver workspace is too small");
-        code=pattern(c);
-        std::vector<std::uint64_t> origins;origins.reserve(count);
-        const auto coarse=fine?count/2:count;
-        for(std::size_t i=0;i<coarse;++i)origins.push_back((symbol/coarse)*i+((symbol%coarse)*i)/coarse);
-        if(fine) {
-            // Preserve a finite coarse blind bank, while spending half the
-            // existing budget on sample-level origins near the known fixed
-            // training duration. This covers capture-aligned and nearby starts
-            // even when a long keyed template has extremely narrow chip peaks.
-            const auto anchor=static_cast<std::int64_t>(training%symbol);
-            const auto slots=count-coarse;
-            for(std::size_t i=0;i<slots;++i) {
-                const auto delta=(static_cast<std::int64_t>(i)-static_cast<std::int64_t>(slots/2))*static_cast<std::int64_t>(4*chip)/static_cast<std::int64_t>(slots);
-                auto origin=anchor+delta;
-                if(origin<0)origin+=static_cast<std::int64_t>(symbol);
-                if(origin>=static_cast<std::int64_t>(symbol))origin-=static_cast<std::int64_t>(symbol);
-                origins.push_back(static_cast<std::uint64_t>(origin));
-            }
-        }
-        std::sort(origins.begin(),origins.end());origins.erase(std::unique(origins.begin(),origins.end()),origins.end());
-        candidates.resize(origins.size());
-        for(std::size_t i=0;i<candidates.size();++i) {
-            candidates[i].start=origins[i];candidates[i].end=origins[i]+symbol;
-            candidates[i].points.resize(bootstrap_symbols);candidates[i].ordered_radii.resize(bootstrap_symbols);candidates[i].bits=c.constellation_bits;
-            candidates[i].last_failed_header.reserve(packet_prefix_size);
-            if(c.constellation_bits>=5) {
-                const auto spacing=detail::radius_step(c.constellation_bits);
-                const auto esn0=std::pow(10.,tuning::constellation_target_symbol_snr_db(c.constellation_bits)/10);
-                candidates[i].residual_limit=9*.30625/(2*esn0*spacing*spacing);
-            }
-        }
-        diagnostic.bit_rate=bit_rate(c);diagnostic.constellation.reserve(2048);
-    }
-    void retain_constellation(Complex point) {
-        if(diagnostic.constellation.size()<2048)diagnostic.constellation.push_back(point);
-        else {
-            diagnostic.constellation[constellation_cursor]=point;
-            if(++constellation_cursor==diagnostic.constellation.size())constellation_cursor=0;
-        }
-    }
-    void completed(std::size_t index,Complex point,Bytes& output) {
-        auto& candidate=candidates[index];
-        if(synced) {
-            const auto value=detail::decision(point,candidate.previous,candidate.gain,config.constellation_bits);candidate.previous=point;
-            candidate.partial=(candidate.partial<<config.constellation_bits)|value;candidate.partial_bits+=config.constellation_bits;
-            if(candidate.partial_bits>=8){candidate.partial_bits-=8;output.push_back(static_cast<std::uint8_t>(candidate.partial>>candidate.partial_bits));}
-            retain_constellation(point/candidate.gain);
-            return;
-        }
-        if(candidate.valid) {candidate.following.push_back(point);return;}
-        candidate.retain(point);
-        if(candidate.count<bootstrap_symbols || candidate.end<earliest)return;
-        const auto header=candidate.header(validator);if(header.empty())return;
-        candidate.measure_quality();
-        candidate.valid=true;candidate.validated_header=header;
-        if(!selection_deadline) {
-            if(symbol>std::numeric_limits<std::uint64_t>::max()-candidate.end)throw Error("receiver selection counter overflow");
-            selection_deadline=candidate.end+symbol;
-        }
-    }
-    void select(Bytes& output) {
-        double best=std::numeric_limits<double>::infinity();
-        for(std::size_t index=0;index<candidates.size();++index)
-            if(candidates[index].valid && candidates[index].quality<best){best=candidates[index].quality;selected=index;}
-        auto& candidate=candidates[selected];
-        synced=true;
-        const auto payload_start=candidate.start-symbol*(bootstrap_symbols+candidate.following.size());
-        diagnostic.sample_offset=static_cast<std::size_t>(payload_start>training?payload_start-training:0);
-        output.insert(output.end(),expected.begin(),expected.end());output.insert(output.end(),candidate.validated_header.begin(),candidate.validated_header.end());
-        double power=0,error=0;Complex prior{1,0};
-        for(std::size_t i=0;i<bootstrap_symbols;++i) {
-            const auto value=candidate.at(i)/candidate.gain;
-            const auto bits=detail::decision(value,prior,1,config.constellation_bits);const auto ideal=detail::mapped(bits,config.constellation_bits,prior);
-            power+=std::norm(ideal);error+=std::norm(value-ideal);prior=value;
-            retain_constellation(value);
-        }
-        diagnostic.snr_db=10*std::log10(power/std::max(error,1e-20));
-        diagnostic.preamble_correlation=0; // Acquisition evidence is bootstrap validation, not training.
-        const auto following=std::move(candidate.following);
-        for(const auto point:following)completed(selected,point,output);
-    }
-    Bytes feed(SymbolObservation observation,bool matched,std::stop_token stop) {
-        cancelled(stop);if(!observation.sample_count || !std::isfinite(observation.value.real()) || !std::isfinite(observation.value.imag()))throw Error("invalid integrated observation");
-        if(observation.sample_count>std::numeric_limits<std::uint64_t>::max()-position)throw Error("receiver sample counter overflow");
-        const auto finish=position+observation.sample_count;Bytes output;
-        const auto first=synced?selected:0,last=synced?selected+1:candidates.size();
-        for(std::size_t index=first;index<last;++index) {
-            if((index&15U)==0)cancelled(stop);
-            auto& candidate=candidates[index];auto cursor=std::max(position,candidate.start);
-            while(cursor<finish) {
-                cancelled(stop);
-                const auto end=std::min(finish,candidate.end);
-                double sign=1;
-                if(!matched)sign=code[static_cast<std::size_t>(((cursor-candidate.start)/chip)%code.size())];
-                candidate.sum+=observation.value*(static_cast<double>(end-cursor)*sign);cursor=end;
-                if(!std::isfinite(candidate.sum.real()) || !std::isfinite(candidate.sum.imag()))throw Error("integrated sample magnitude overflow");
-                if(cursor==candidate.end) {
-                    const auto value=candidate.sum/static_cast<double>(symbol);candidate.sum={};
-                    completed(index,value,output);
-                    candidate.start=candidate.end;
-                    if(symbol>std::numeric_limits<std::uint64_t>::max()-candidate.end)throw Error("receiver symbol counter overflow");
-                    candidate.end+=symbol;
-                    if(synced && selected!=index)break;
-                    if(matched && !synced && !candidate.valid && candidate.repeated_points==bootstrap_symbols) {
-                        // A complete identical-point bootstrap has just failed
-                        // validation. Every further full-symbol window inside
-                        // this same constant observation is identical, so skip
-                        // those windows without repeating the same search.
-                        const auto advance=((finish-cursor)/symbol)*symbol;
-                        if(advance>std::numeric_limits<std::uint64_t>::max()-candidate.end)throw Error("receiver symbol counter overflow");
-                        candidate.start+=advance;candidate.end+=advance;cursor+=advance;
-                    }
-                }
-            }
-            if(synced)break;
-        }
-        position=finish;
-        if(!synced && selection_deadline && position>=selection_deadline)select(output);
-        return output;
+    PatternSearch search;
+    std::size_t workspace;
+    PatternReceiver pattern;
+    Impl(Config c,std::size_t budget,PatternSearch value):config(dsp_config(c,budget)),search(std::move(value)),workspace(budget),
+        pattern(config,budget-sizeof(Impl),search) {
+        validate(c);
+        if(budget<=sizeof(Impl))throw Error("pattern receiver workspace is too small");
     }
 };
-StreamingReceiver::StreamingReceiver(Config c,Bytes pre,std::size_t workspace,BootstrapValidator validator):impl_(std::make_unique<Impl>(c,std::move(pre),workspace,std::move(validator))){}
+StreamingReceiver::StreamingReceiver(Config c,std::size_t workspace,PatternSearch search):impl_(std::make_unique<Impl>(c,workspace,std::move(search))){}
 StreamingReceiver::~StreamingReceiver()=default;
 StreamingReceiver::StreamingReceiver(StreamingReceiver&&) noexcept=default;
 StreamingReceiver& StreamingReceiver::operator=(StreamingReceiver&&) noexcept=default;
-bool StreamingReceiver::synchronized()const{return impl_->synced;}
-Diagnostics StreamingReceiver::diagnostics()const{
-    auto result=impl_->diagnostic;
-    if(impl_->constellation_cursor)
-        std::rotate(result.constellation.begin(),result.constellation.begin()+static_cast<std::ptrdiff_t>(impl_->constellation_cursor),result.constellation.end());
-    return result;
+bool StreamingReceiver::synchronized()const{return impl_->pattern.synchronized();}
+bool StreamingReceiver::clock_windowed()const{return impl_->pattern.clock_windowed();}
+bool StreamingReceiver::local_clock_fallback()const{return impl_->pattern.local_clock_fallback();}
+bool StreamingReceiver::acquiring()const{return impl_->pattern.acquiring();}
+Diagnostics StreamingReceiver::diagnostics()const{return impl_->pattern.diagnostics();}
+ConstellationBatch StreamingReceiver::take_payload_constellation(){return {impl_->pattern.take_chip_constellation(),0};}
+std::size_t StreamingReceiver::working_bytes()const{return sizeof(StreamingReceiver)+sizeof(Impl)+impl_->pattern.working_bytes();}
+void StreamingReceiver::set_workspace_bytes(std::size_t bytes) {
+    if(bytes<working_bytes())throw Error("DSP workspace is smaller than retained receiver history");
+    impl_->pattern.set_workspace_bytes(bytes-sizeof(Impl));impl_->workspace=bytes;
 }
-std::size_t StreamingReceiver::working_bytes()const{
-    std::size_t bytes=sizeof(Impl)+impl_->candidates.capacity()*sizeof(Candidate)+impl_->code.capacity()*sizeof(int)+impl_->diagnostic.constellation.capacity()*sizeof(Complex)+impl_->expected.capacity();
-    for(const auto& candidate:impl_->candidates)bytes+=candidate.validated_header.capacity()+candidate.last_failed_header.capacity()+(candidate.following.capacity()+candidate.points.capacity())*sizeof(Complex)+candidate.ordered_radii.capacity()*sizeof(double);
-    return bytes;
+void StreamingReceiver::reset(){auto& s=*impl_;auto fresh=std::make_unique<Impl>(s.config,s.workspace,s.search);impl_=std::move(fresh);}
+Bytes StreamingReceiver::push_symbols(std::span<const SymbolObservation>,std::stop_token stop) {
+    cancelled(stop);throw Error("pattern acquisition requires measured PCM, not despread symbol observations");
 }
-void StreamingReceiver::reset(){auto& s=*impl_;auto fresh=std::make_unique<Impl>(s.config,s.expected,s.workspace,s.validator);impl_=std::move(fresh);}
-Bytes StreamingReceiver::push_symbols(std::span<const SymbolObservation> observations,std::stop_token stop) {
-    if(impl_->finished)throw Error("capture already finished; reset before appending input");
-    Bytes output;for(const auto& observation:observations){auto bytes=impl_->feed(observation,true,stop);output.insert(output.end(),bytes.begin(),bytes.end());}return output;
-}
-Bytes StreamingReceiver::push(std::span<const float> samples,std::stop_token stop) {
-    auto& s=*impl_;Bytes output;
-    if(s.finished)throw Error("capture already finished; reset before appending input");
-    // Solve the real I/Q Gram system instead of assuming an integer number of
-    // carrier cycles per integration. Chunk boundaries do not reset the sums.
-    const auto quantum=std::max<std::uint64_t>(4,std::min<std::uint64_t>(s.chip/4,256));
-    const auto step=std::polar(1.,tau*s.config.carrier_hz/s.config.sample_rate);
-    for(std::size_t i=0;i<samples.size();++i) {
-        if((i&4095U)==0)cancelled(stop);
-        if(!std::isfinite(samples[i]))throw Error("non-finite audio sample");
-        const auto c=s.oscillator.real(),q=-s.oscillator.imag();s.oscillator*=step;
-        s.xc+=samples[i]*c;s.xs+=samples[i]*q;s.cc+=c*c;s.ss+=q*q;s.cs+=c*q;
-        if(++s.pcm_count<quantum)continue;
-        const auto determinant=s.cc*s.ss-s.cs*s.cs;
-        const Complex value=determinant>1e-12?Complex{(s.xc*s.ss-s.xs*s.cs)/determinant,(s.xs*s.cc-s.xc*s.cs)/determinant}:Complex{};
-        auto bytes=s.feed({value,s.pcm_count},false,stop);output.insert(output.end(),bytes.begin(),bytes.end());
-        s.xc=s.xs=s.cc=s.ss=s.cs=0;s.pcm_count=0;
-    }
-    return output;
-}
-Bytes StreamingReceiver::finish(std::stop_token stop) {
-    auto& s=*impl_;cancelled(stop);if(s.finished)return {};
-    Bytes output;
-    if(s.pcm_count) {
-        const auto determinant=s.cc*s.ss-s.cs*s.cs;
-        const Complex value=determinant>1e-12?Complex{(s.xc*s.ss-s.xs*s.cs)/determinant,(s.xs*s.cc-s.xc*s.cs)/determinant}:Complex{};
-        output=s.feed({value,s.pcm_count},false,stop);s.pcm_count=0;
-    }
-    const auto tail=s.feed({{},s.symbol},true,stop);output.insert(output.end(),tail.begin(),tail.end());s.finished=true;
-    return output;
-}
+Bytes StreamingReceiver::push(std::span<const float> samples,std::stop_token stop){impl_->pattern.push(samples,stop);return {};}
+Bytes StreamingReceiver::push(std::span<const float> samples,std::span<const Complex> projected,std::stop_token stop){impl_->pattern.push(samples,projected,stop);return {};}
+PatternBurst StreamingReceiver::provisional_pattern()const{return impl_->pattern.provisional();}
+std::vector<PatternBurst> StreamingReceiver::take_pattern_bursts(){return impl_->pattern.take_bursts();}
+std::vector<PatternEvidence> StreamingReceiver::pattern_candidates()const{return impl_->pattern.candidates();}
+std::vector<PatternEvidence> StreamingReceiver::pattern_candidates(std::size_t limit)const{return impl_->pattern.candidates(limit);}
+Bytes StreamingReceiver::finish(std::stop_token stop){impl_->pattern.finish(stop);return {};}
+
 SymbolObservation add_awgn(SymbolObservation observation,double sample_snr_db,std::mt19937_64& random) {
     if(!observation.sample_count || !std::isfinite(sample_snr_db) || sample_snr_db < -300 || sample_snr_db > 300)throw Error("invalid integrated AWGN configuration");
     const auto sigma=std::sqrt(2*nominal_signal_power*std::pow(10.,-sample_snr_db/10)/static_cast<double>(observation.sample_count));

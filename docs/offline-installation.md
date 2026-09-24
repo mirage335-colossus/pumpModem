@@ -5,8 +5,11 @@ environments, and package downloads are absent from the application installation
 A working installation can be copied as one directory to another compatible
 computer and run immediately.
 
-The complete FLTK 1.4.5 source is pinned in `third_party/fltk`; the QR encoder is
-also vendored. CMake uses these local sources and an already installed C++
+The complete FLTK 1.4.5 source is pinned in `third_party/fltk`; the QR encoder and
+the XZ 5.8.4 liblzma source subset are also vendored. liblzma is compiled into
+the application statically, so the destination needs no compression package or
+liblzma DLL. Its license and source provenance are included in each bundle.
+CMake uses these local sources and an already installed C/C++
 toolchain, OpenSSL development files, and desktop development libraries. There is
 no `FetchContent`, runtime bootstrap, or dependency download during configuration,
 compilation, installation, or packaging.
@@ -16,22 +19,29 @@ compilation, installation, or packaging.
 From the repository root, using the build dependencies listed in the README:
 
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE
-cmake --build build --parallel
-ctest --test-dir build --output-on-failure
+./build.sh test contract
+./build.sh package
 
-cmake --install build --prefix "$PWD/build/DataPump-portable"
+cmake --install build/release --prefix "$PWD/build/DataPump-portable"
 ./build/DataPump-portable/bin/datapump-gui --self-check
 ./build/DataPump-portable/bin/datapump-gui
-
-cmake --build build --target package
 ```
 
-The Python switch demonstrates that the complete native build needs no Python.
-Omit it if you want CTest to run additional Python CLI integration tests when an
-interpreter is already available. Those tests are developer tooling and are not
-installed.
+The package command uses a separate portable Release tree, builds only application
+prerequisites, and verifies both TGZ and ZIP archives with the existing inventory,
+relocation and ABI checks. It does not require Python for FLTK. To demonstrate
+that explicitly, append `-- -DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE`.
+
+For direct CMake use, configure `cmake --preset release`, build with
+`cmake --build --preset release`, then create archives with
+`cmake --build build/release --target package`. When using a test-enabled
+configuration, build `datapump-tests` before CTest; normal builds now omit tests.
+See [build profiles and test groups](building.md).
+
+The optional `-DDATAPUMP_GUI_BACKEND=rev` profile requires Python at build time
+to embed resources, plus its C++23/OpenGL toolchain. Its runtime still needs no
+Python or source assets. Follow [Rev backend](rev-backend.md) for that build;
+host OpenGL loaders and drivers are excluded from its collected libraries.
 
 Both `DATAPUMP_BUILD_GUI` and `DATAPUMP_PORTABLE` default to `ON`. Setting the GUI
 option to `OFF` creates a CLI-only package. Setting the portable option to `OFF`
@@ -58,7 +68,7 @@ installation. The README's Visual Studio/vcpkg configuration uses the
 `x64-windows-static` triplet. After configuring:
 
 ```powershell
-cmake --build build --config Release --parallel
+cmake --build build --config Release --target datapump-apps datapump-tests --parallel
 ctest --test-dir build -C Release --output-on-failure
 cmake --install build --config Release --prefix "$PWD/DataPump-portable"
 & ./DataPump-portable/bin/datapump-gui.exe --self-check
@@ -69,6 +79,12 @@ cmake --build build --config Release --target package
 Keep build toolchains and dependency source/development packages locally if you
 also need to rebuild offline. Transferring an existing working installation does
 not require those build tools or source packages.
+
+Normal bundles include dependency provenance, build configuration and all
+required notices. Historical validation captures stay in the source repository;
+use `-DDATAPUMP_INSTALL_VALIDATION_DATA=ON` to include them in an offline evidence
+bundle. References into `docs/validation-data` in developer documents require
+that option or a matching source checkout.
 
 ## Copy and run
 

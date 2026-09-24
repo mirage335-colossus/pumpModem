@@ -1,0 +1,26 @@
+[
+  {
+    "key": "measurement_9",
+    "analysis_measurement_index": 9,
+    "capture_start_sample": 696948,
+    "capture_end_sample": 792948,
+    "capture_channels": [
+      "left",
+      "right"
+    ],
+    "analysis_channel": "arithmetic mean of left and right",
+    "sha256": "3269a93c382fba8f7ed1a280420b4ba570bcc08c0a65e750b0dda11cd03df919"
+  },
+  {
+    "key": "measurement_21",
+    "analysis_measurement_index": 21,
+    "capture_start_sample": 1388148,
+    "capture_end_sample": 1484148,
+    "capture_channels": [
+      "left",
+      "right"
+    ],
+    "analysis_channel": "arithmetic mean of left and right",
+    "sha256": "dd2c5abfc739001f5ed559d9a969501ed53e923f2711dc29bb37000633cb94c3"
+  }
+]

@@ -1,14 +1,75 @@
 #include "datapump/runtime.hpp"
+#include "datapump/received_text.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <istream>
 #include <limits>
 #include <memory>
 #include <openssl/evp.h>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#elif defined(__unix__) || defined(__APPLE__)
+#include <unistd.h>
+#endif
 
 namespace datapump {
+namespace runtime {
+std::size_t available_memory_bytes() {
+    std::uint64_t available=0;
+#ifdef _WIN32
+    MEMORYSTATUSEX memory{};memory.dwLength=sizeof(memory);
+    if(GlobalMemoryStatusEx(&memory))available=std::min(memory.ullAvailPhys,memory.ullAvailVirtual);
+#elif defined(__linux__)
+    std::ifstream memory("/proc/meminfo");std::string name,line;std::uint64_t kib=0;
+    while(memory>>name>>kib) {
+        if(name=="MemAvailable:"){available=kib*1024;break;}
+        std::getline(memory,line);
+    }
+#endif
+#if defined(_SC_AVPHYS_PAGES) && defined(_SC_PAGESIZE)
+    if(!available) {
+        const auto pages=sysconf(_SC_AVPHYS_PAGES),page_size=sysconf(_SC_PAGESIZE);
+        if(pages>0 && page_size>0)available=static_cast<std::uint64_t>(pages)*static_cast<std::uint64_t>(page_size);
+    }
+#endif
+    // Retain a conservative fallback on hosts without an available-RAM API.
+    if(!available)available=128ULL*1024*1024;
+#ifdef __linux__
+    // Cgroup v2 can expose much less RAM to a process than /proc/meminfo.
+    // Check the mounted root and each process ancestor, including parent caps.
+    const std::filesystem::path root="/sys/fs/cgroup";
+    const auto constrain=[&](const std::filesystem::path& directory) {
+        std::uint64_t limit=0,used=0;
+        std::ifstream maximum(directory/"memory.max"),current(directory/"memory.current");
+        if(maximum>>limit && current>>used)available=std::min(available,limit>used?limit-used:0);
+    };
+    constrain(root);
+    std::ifstream groups("/proc/self/cgroup");std::string group;
+    while(std::getline(groups,group))if(group.starts_with("0::/")) {
+        const auto relative=std::filesystem::path(group.substr(4)).lexically_normal();
+        if(std::any_of(relative.begin(),relative.end(),[](const auto& part){return part=="..";}))break;
+        for(auto directory=root/relative;directory!=root && directory!=directory.root_path();directory=directory.parent_path())constrain(directory);
+        break;
+    }
+#endif
+    return static_cast<std::size_t>(std::min<std::uint64_t>(available,std::numeric_limits<std::size_t>::max()));
+}
+std::size_t dsp_workspace_budget(unsigned percent) {
+    if(!percent || percent>100)throw Error("DSP workspace percentage must be 1..100");
+    const auto available=available_memory_bytes();
+    return (available/100)*percent+((available%100)*percent)/100;
+}
+std::size_t default_dsp_workspace_bytes() {
+    static const auto budget=dsp_workspace_budget();return budget;
+}
+}
 ReceiveCache::ReceiveCache(std::size_t capacity):capacity_(capacity) {
     if(capacity==0) throw Error("cache capacity must be positive");
 }
@@ -18,7 +79,7 @@ void ReceiveCache::put(ReceivedItem item) {
     std::lock_guard lock(mutex_);
     auto old=std::find_if(items_.begin(),items_.end(),[&](const auto& x){return x.id==item.id;});
     if(old!=items_.end()) {used_-=old->data.size(); items_.erase(old);}
-    // Bound metadata too, including an unlimited stream of empty packets.
+    // Bound metadata too, including an unlimited stream of empty entries.
     while(!items_.empty() && (used_>capacity_-item.data.size() || items_.size()>=4096)) {
         used_-=items_.front().data.size(); items_.pop_front();
     }
@@ -100,27 +161,9 @@ std::string base64_encode(std::span<const std::uint8_t> bytes) {
     return result;
 }
 std::string terminal_text(std::span<const std::uint8_t> bytes) {
-    std::string result;
-    const char* hex="0123456789abcdef";
-    for(std::size_t i=0;i<bytes.size();) {
-        const auto byte=bytes[i];
-        if((byte>=32 && byte<=126) || byte=='\n' || byte=='\t') {
-            result+=static_cast<char>(byte);++i;continue;
-        }
-        unsigned count=byte>=0xc2 && byte<=0xdf?2:byte>=0xe0 && byte<=0xef?3:byte>=0xf0 && byte<=0xf4?4:0;
-        std::uint32_t codepoint=count?byte&((1U<<(7-count))-1):0;
-        bool valid=count && bytes.size()-i>=count;
-        for(unsigned j=1;valid && j<count;++j) {
-            if((bytes[i+j]&0xc0)!=0x80) valid=false;
-            else codepoint=(codepoint<<6)|(bytes[i+j]&0x3f);
-        }
-        const bool overlong=(count==2 && codepoint<0x80) || (count==3 && codepoint<0x800) || (count==4 && codepoint<0x10000);
-        if(valid && !overlong && codepoint>=0xa0 && codepoint<=0x10ffff && !(codepoint>=0xd800 && codepoint<=0xdfff)) {
-            result.append(reinterpret_cast<const char*>(bytes.data()+i),count);i+=count;
-        } else {result+="\\x";result+=hex[byte>>4];result+=hex[byte&15];++i;}
-    }
-    return result;
+    return received_text(bytes);
 }
+
 Bytes read_bounded(std::istream& input,std::size_t limit) {
     Bytes result; std::array<char,16384> chunk{};
     while(input) {
@@ -137,7 +180,8 @@ void write_new_file(const std::string& path,std::span<const std::uint8_t> bytes)
     auto closer=[](FILE* file){std::fclose(file);};
     std::unique_ptr<FILE,decltype(closer)> f(std::fopen(path.c_str(),"wbx"),closer);
     if(!f) throw Error("cannot create output (it may already exist): "+path);
-    if(std::fwrite(bytes.data(),1,bytes.size(),f.get())!=bytes.size() || std::fflush(f.get())!=0)
+    datapump_speculation_barrier();
+    if((!bytes.empty() && std::fwrite(bytes.data(),1,bytes.size(),f.get())!=bytes.size()) || std::fflush(f.get())!=0)
         throw Error("output write failed: "+path);
 }
 }

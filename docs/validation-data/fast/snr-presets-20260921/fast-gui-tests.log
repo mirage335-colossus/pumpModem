@@ -1,0 +1,61 @@
+Internal ctest changing into directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+Test project /home/user/___quick/p/_cur/dataPump/pumpModem/build
+      Start  12: fast_transfer
+      Start  15: fast_qam
+      Start  17: fast_radio
+ 1/26 Test  #17: fast_radio .......................   Passed   19.13 sec
+      Start  22: gui_fast_live
+ 2/26 Test  #15: fast_qam .........................   Passed   35.32 sec
+      Start  94: gui_boundary_regression
+ 3/26 Test  #94: gui_boundary_regression ..........   Passed   18.78 sec
+      Start  16: fast_acoustic
+ 4/26 Test  #12: fast_transfer ....................   Passed   57.86 sec
+      Start  11: fast_session
+ 5/26 Test  #16: fast_acoustic ....................   Passed   10.76 sec
+      Start   9: fast_modem
+ 6/26 Test  #22: gui_fast_live ....................   Passed   56.36 sec
+      Start   8: fast_codec
+ 7/26 Test  #11: fast_session .....................   Passed   21.60 sec
+      Start  85: gui_controller
+ 8/26 Test   #9: fast_modem .......................   Passed   25.60 sec
+      Start 103: fast_cli
+ 9/26 Test   #8: fast_codec .......................   Passed   50.11 sec
+      Start  14: fast_ldpc
+10/26 Test #103: fast_cli .........................   Passed   36.47 sec
+      Start  10: fast_files
+11/26 Test  #14: fast_ldpc ........................   Passed    2.78 sec
+      Start  96: gui_self_check
+12/26 Test  #10: fast_files .......................   Passed    5.72 sec
+      Start  93: gui_adapter_boundary
+13/26 Test  #93: gui_adapter_boundary .............   Passed    0.61 sec
+      Start  13: fast_telemetry
+14/26 Test  #13: fast_telemetry ...................   Passed    1.07 sec
+      Start  21: gui_fast
+15/26 Test  #21: gui_fast .........................   Passed    2.36 sec
+      Start  91: gui_application
+16/26 Test  #91: gui_application ..................   Passed    1.90 sec
+      Start  18: fast_presets
+17/26 Test  #18: fast_presets .....................   Passed    0.06 sec
+      Start  20: fast_boundary
+18/26 Test  #20: fast_boundary ....................   Passed    0.05 sec
+      Start  78: gui_inspection
+19/26 Test  #78: gui_inspection ...................   Passed    0.21 sec
+      Start  74: gui_bindings
+20/26 Test  #74: gui_bindings .....................   Passed    0.00 sec
+      Start  84: gui_binary_editor
+21/26 Test  #84: gui_binary_editor ................   Passed    0.07 sec
+      Start  69: gui_contract
+22/26 Test  #69: gui_contract .....................   Passed    0.00 sec
+      Start  68: gui_layout
+23/26 Test  #68: gui_layout .......................   Passed    0.00 sec
+      Start  19: fast_low_rate
+24/26 Test  #96: gui_self_check ...................   Passed   21.43 sec
+25/26 Test  #85: gui_controller ...................   Passed   83.02 sec
+26/26 Test  #19: fast_low_rate ....................   Passed   29.83 sec
+
+100% tests passed, 0 tests failed out of 26
+
+Label Time Summary:
+gui    = 184.72 sec*proc (12 tests)
+
+Total Test time (real) = 168.82 sec

@@ -1,0 +1,176 @@
+{
+  "base_git_commit": "e1e7179d2ec721964e3ad254e3d04bae12b8237a",
+  "method": "Offline replays of unchanged real default-device recordings; no new live audio emitted. Source/binary hashes identify the uncommitted fix. Raw input hashes match the earlier routing archive.",
+  "sources_and_binaries": {
+    "include/datapump/fast/codec.hpp": {
+      "bytes": 6103,
+      "sha256": "6b47505b19957e698be89f8b3a3a0c8c203db21e39afadda2ff61458a8988630"
+    },
+    "include/datapump/fast/session.hpp": {
+      "bytes": 2237,
+      "sha256": "3387c7c7f1b34fd733651c622a087ae225cfa7517a6bacc8fa4a047bcf57c438"
+    },
+    "src/fast/codec.cpp": {
+      "bytes": 45626,
+      "sha256": "0eb43969fa8624bda558cc7ad23b72be63dd75a31c5bc677760a0d0c47372309"
+    },
+    "src/fast/session.cpp": {
+      "bytes": 12787,
+      "sha256": "e44c7be9d88699f7d79bfa0770865a0a572a52c3adc748a6814aa4aaa3bfae86"
+    },
+    "src/fast/file_transfer.cpp": {
+      "bytes": 12296,
+      "sha256": "51eb29bfa3243deed31b2eddb03fc70b677adc8276aedef0cacaee19061a9621"
+    },
+    "src/fast/cli.cpp": {
+      "bytes": 18386,
+      "sha256": "fa78d46e93814a653de685bdbad5e1f335a2786cbcf95ca8210e0f88b4c91b31"
+    },
+    "src/fast/modem.cpp": {
+      "bytes": 43802,
+      "sha256": "99e672ed6ed9aacbdf4b2763d48578214e2cd83716ad91deb466553b3b2630e2"
+    },
+    "src/fast/acoustic_ofdm.cpp": {
+      "bytes": 27259,
+      "sha256": "6cafdc940b992e70adab499f9bb90ade35edbbbd524651c472846e1e6520a452"
+    },
+    "src/fast/ldpc.cpp": {
+      "bytes": 9073,
+      "sha256": "7450d46a42a4ea9975ee2a08a06c3e2c1dbc58d32910a8e30c4b1e505bba0ddf"
+    },
+    "src/gui/fast/presentation.hpp": {
+      "bytes": 1898,
+      "sha256": "f8554122060710fc06f20eac8cca9780bb78fa1b13bfc0e08b5dee66bcdd147b"
+    },
+    "tools/fast_cable_probe.cpp": {
+      "bytes": 28108,
+      "sha256": "5445227d47f3a127ea52fe29bdcbd47ab2f19bb35a9d14718a9997a153e4faa4"
+    },
+    "tests/test_fast_codec.cpp": {
+      "bytes": 72011,
+      "sha256": "247995fc42f7ccb6ce0dd01472a77ebd4a0cbe8fc40fac2c485729ae1d4e9832"
+    },
+    "tests/test_fast_session.cpp": {
+      "bytes": 13275,
+      "sha256": "9d9ecbc44a57be6564b83d04780941859e24f183eb7edd817a21a03f42c543ca"
+    },
+    "tests/test_gui_fast.cpp": {
+      "bytes": 30516,
+      "sha256": "78e69506add1e6a320246fc812a9439ad6113fb4f6a953a6349c298262642384"
+    },
+    "tests/test_fast_cli.py": {
+      "bytes": 26477,
+      "sha256": "845f9048868695792a74fd4c394d0325aa777eed6c656bef1309b7addf53ba09"
+    },
+    "build/fast_cable_probe": {
+      "bytes": 1306184,
+      "sha256": "7837daa1104eedd2eee37c56121e447ce0aefe282f691384f91c480c1626bd29"
+    },
+    "build/test_fast_codec": {
+      "bytes": 1375464,
+      "sha256": "bde03b40c28ea4fc210a7e0742dc1340e51a9034c03ee34880aa93226da7aa67"
+    },
+    "build/test_fast_session": {
+      "bytes": 2438464,
+      "sha256": "11f3f3417b3a457e35e1768bc65bfe51205f987d470855f895b754b1dfb19adb"
+    },
+    "build/pump": {
+      "bytes": 2887784,
+      "sha256": "f2b40ce86385eae09892a0cd3831d230442af73eeb93a0561b4c7330e9517b47"
+    },
+    "build/datapump-gui": {
+      "bytes": 5443088,
+      "sha256": "834c67e2ad4cc4b35a058fff9deee6b0c26fad0a02d5ca1a04d92b01b8a7b691"
+    },
+    "build-rev/datapump-gui": {
+      "bytes": 10555312,
+      "sha256": "4a287174ae964bced4433b8f6a9575642872da876a2b1528df8dbc26db9fcc37"
+    }
+  },
+  "retained_inputs": {
+    "/tmp/acoustic-routing-95-q64-mono-a20.f32": {
+      "bytes": 9260808,
+      "sha256": "259d0098d6dee090940fb6a2ece7d3f52d03232939cb274fe4795be3a9cfdee0"
+    },
+    "/tmp/acoustic-routing-95-q64-mono.f32": {
+      "bytes": 9260840,
+      "sha256": "24c399cf2301d31b1bf470d0d2710e9bb35ed0f5710975cdc5961da7769d7d0b"
+    },
+    "/tmp/acoustic-routing-95-q64-mono-repeat.f32": {
+      "bytes": 9260832,
+      "sha256": "77a0f2e3813b2ca0d9cb66586c8c46ca49a8f5efd976e0c6529e43b79db08be7"
+    },
+    "/tmp/acoustic-routing-95-q16-mono-500k.f32": {
+      "bytes": 26955560,
+      "sha256": "3305b626fad053eb8b8a5d37f9c6dbf2b754fd48cf7c166c5aabd5c785f105b6"
+    }
+  },
+  "replay_outputs": {
+    "replay-a20.json": {
+      "bytes": 2423,
+      "sha256": "03def23ec6bbb42cc06057647d08ee3293fe178fd683921a982434f0c08dae0b"
+    },
+    "replay-a20.log": {
+      "bytes": 185,
+      "sha256": "fa4e16da784bf26ada65bc911c38b104bc1b65f88dfbaf14e2d37ed0776f0928"
+    },
+    "replay-q64.json": {
+      "bytes": 2415,
+      "sha256": "89e8c83e39ab4818457ce5cb599809d9d2a4cd2ae25726366331a5841c4765a1"
+    },
+    "replay-q64.log": {
+      "bytes": 376,
+      "sha256": "4f4abeab8d6196de91c084d8904bd06f4630a6a564b0dd28e90646db1384e4a9"
+    },
+    "replay-bootstrap.json": {
+      "bytes": 2411,
+      "sha256": "e5054114044bd0b257a8a98cd81c95d175b7e8d05acb1acf6243367066855cc4"
+    },
+    "replay-bootstrap.log": {
+      "bytes": 186,
+      "sha256": "4ee3247f65b24bb5fbf2a3ba008833697a54549fdef13456c692666d549db38a"
+    },
+    "replay-q16-500k.json": {
+      "bytes": 2520,
+      "sha256": "d9161cff05f9ed0b01372cb793119477450deb00cc18ca4b534be7ad12fd767a"
+    },
+    "replay-q16-500k.log": {
+      "bytes": 189,
+      "sha256": "fcd41a4058d7ad94bdf6a28f28fb41a72d650a655b5046abbb0da609ce7196af"
+    }
+  },
+  "validation_logs": {
+    "checks/build.log": {
+      "bytes": 5247,
+      "sha256": "8a4d00731f774add23de76f1a48ff409dc50a4422aa735acfa7dc5432fa255d0"
+    },
+    "checks/codec-build.log": {
+      "bytes": 1653,
+      "sha256": "07a8d42f3f4c3b1f9dfec1b97129a432334ff6691ec6820277c488b92b1298b3"
+    },
+    "checks/codec-tests.log": {
+      "bytes": 376,
+      "sha256": "d03b4dcbb55ed9479115e175def29a0426034bd62e8b7f2db6acea68458c0533"
+    },
+    "checks/focused-tests.log": {
+      "bytes": 483,
+      "sha256": "c94333c77fcd16f98e71b39ba3f5a3839c3948e15ac4c8493cdd87922072d5af"
+    },
+    "checks/probe-build.log": {
+      "bytes": 447,
+      "sha256": "3249535897b85cee86a1d8b617e5e53ed082598db976d2bf4a0a2fc02007f64c"
+    },
+    "checks/rev-build.log": {
+      "bytes": 1467,
+      "sha256": "6ff89e41e87539fa685a8ded9bb432cdd91a00d2a96209198abbd8ae1d707387"
+    },
+    "checks/rev-self-check.log": {
+      "bytes": 61,
+      "sha256": "7798e2f51c5e817ab83b7012aaf7dc2d0978ee83da228fc8110afed0875c5d44"
+    },
+    "checks/tests.log": {
+      "bytes": 2364,
+      "sha256": "fc50c27a18e075de34f24149558e8e1bf65c44a44c4d23ba70e1a8cf0ccbc2bb"
+    }
+  }
+}

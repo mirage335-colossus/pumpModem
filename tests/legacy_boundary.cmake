@@ -1,0 +1,31 @@
+# Legacy is a separate radio-text implementation; old DSP and transport never
+# import it, and its production sources cannot import old DSP or simulation.
+file(GLOB_RECURSE legacy_sources "${ROOT}/src/legacy/*" "${ROOT}/include/datapump/legacy/*")
+foreach(source IN LISTS legacy_sources)
+  file(READ "${source}" text)
+  string(REGEX MATCHALL "#[ \t]*include[ \t]*[\"<][^\">]+[\">]" includes "${text}")
+  foreach(include IN LISTS includes)
+    string(REGEX REPLACE ".*[\"<]([^\">]+)[\">]" "\\1" dependency "${include}")
+    if(dependency MATCHES "^[A-Za-z_]+$")
+      continue() # Standard-library headers have no path or extension.
+    endif()
+    if(NOT dependency MATCHES "^datapump/legacy/[A-Za-z_]+\\.hpp$"
+       AND NOT dependency STREQUAL "datapump/audio.hpp"
+       AND NOT dependency STREQUAL "olivia_codec.hpp")
+      message(FATAL_ERROR "Legacy source imports a non-Legacy dependency: ${source}: ${include}")
+    endif()
+  endforeach()
+  if(text MATCHES "datapump::(fast|modem|transfer|live|crypto)|SampledSimulationChannel|simulation_estimate")
+    message(FATAL_ERROR "Legacy source depends on another modem/model: ${source}")
+  endif()
+endforeach()
+file(GLOB_RECURSE old_sources "${ROOT}/src/*.cpp" "${ROOT}/src/*.hpp" "${ROOT}/include/datapump/*.hpp")
+foreach(source IN LISTS old_sources)
+  if(source MATCHES "/legacy/" OR source MATCHES "/gui/")
+    continue()
+  endif()
+  file(READ "${source}" text)
+  if(text MATCHES "#[ \t]*include[ \t]*[\"<][^\">]*legacy/")
+    message(FATAL_ERROR "Existing modem imports Legacy: ${source}")
+  endif()
+endforeach()

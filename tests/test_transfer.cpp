@@ -1,283 +1,375 @@
 #include "datapump/transfer.hpp"
+#include "datapump/compression.hpp"
+#include "datapump/boundary_sync.hpp"
+#include "datapump/pattern_pulse.hpp"
+#include "datapump/pattern_code.hpp"
+#include "datapump/symbol_schedule.hpp"
+#include "../src/transmit_timing.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <random>
 #include <stdexcept>
-#include <string>
-
 using namespace datapump;
 namespace {
-void check(bool condition, const char* description) {
-    if (!condition) throw std::runtime_error(description);
+void check(bool value,const char* message){if(!value)throw std::runtime_error(message);}
+template<class F> void rejects(F action,const char* message){try{action();}catch(const Error&){return;}throw std::runtime_error(message);}
+transfer::Options options(bool encrypted=false) {
+    transfer::Options value;value.modem.sample_rate=8000;value.modem.bandwidth_hz=1000;
+    value.modem.carrier_hz=1500;value.modem.spreading_factor=16;value.modem.pulse_shaping=false;
+    value.search_seconds=0;value.timestamp=1800000000;value.content_limit=1024*1024;
+    if(encrypted)value.key.emplace(Bytes(32,0x37));return value;
 }
-template<class Function> void rejects(Function function, const char* description) {
-    try { function(); } catch (const Error&) { return; }
-    throw std::runtime_error(description);
+Message sample(std::size_t count=44) {
+    Message result;result.data.resize(count);
+    for(std::size_t i=0;i<count;++i)result.data[i]=static_cast<std::uint8_t>(i*73+19);
+    if(count)result.data.back()=0;
+    result.kind=MessageKind::file;result.filename="local-only.bin";result.callsign="N0CALL";result.grid="AA00aa";result.local_id[0]=17;
+    return result;
 }
-Message sample() {
-    Message message;
-    const std::string text = "CQ received shared service \xc3\xa9 \xf0\x9f\x8c\x8d";
-    message.data.assign(text.begin(), text.end());
-    message.callsign = "N0CALL";
-    message.grid = "AA00aa";
-    message.repeatable = true;
-    for (std::size_t i = 0; i < message.id.size(); ++i) message.id[i] = static_cast<std::uint8_t>(i + 1);
-    return message;
+modem::PatternBurst chunk(std::span<const std::uint8_t> bits,std::size_t offset,bool complete=false) {
+    modem::PatternBurst burst;burst.bits.assign(bits.begin(),bits.end());burst.first_stream_symbol=offset;
+    burst.first_sample=100+offset*64;burst.end_sample=burst.first_sample+bits.size()*64;
+    burst.stream_first_sample=100;burst.stream_first_symbol=0;burst.score=100;burst.complete=complete;return burst;
 }
-transfer::Options options(bool encrypted = false) {
-    transfer::Options value;
-    value.modem.sample_rate = 8000;
-    value.modem.bandwidth_hz = 1000;
-    value.modem.carrier_hz = 1500;
-    value.timestamp = 1800000000;
-    if (encrypted) value.key.emplace(Bytes(32, 0x37));
-    return value;
+transfer::Received consume(const Bytes& wire,const transfer::Options& value,bool complete=true,std::size_t stride=137) {
+    transfer::StreamReceiver receiver(value,value.timestamp);transfer::Received result;
+    for(std::size_t offset=0;offset<wire.size();) {
+        const auto count=std::min(stride,wire.size()-offset);
+        result=receiver.push(chunk(std::span(wire).subspan(offset,count),offset));offset+=count;
+        check(!result.stream_complete && !result.content_validated && result.content.message.data.empty(),"codec/source output must wait for physical end");
+    }
+    if(complete)result=receiver.push(chunk({},wire.size(),true));return result;
 }
-void test_callback_lifetime_and_epoch_binding() {
-    const auto make_callbacks = [] {
-        auto local = options(true);
-        return transfer::packet_options(local, local.timestamp);
+void fixed_pipeline_and_local_metadata() {
+    const auto sent=sample();
+    for(bool encrypted:{false,true})for(auto fec:{FecMode::off,FecMode::rs20,FecMode::rs60})for(bool compressed:{false,true}) {
+        auto value=options(encrypted);value.fec=fec;value.compression=compressed;
+        StreamLayout layout;const auto estimate=transfer::estimate(sent,value,&layout);
+        const auto wire=transfer::message_wire_bits(sent,value);
+        check(wire.size()==layout.intervals*(192+1024) && layout.wire_bytes==layout.intervals*128,"fixed interval and marker geometry");
+        check(estimate.coded_bytes==layout.wire_bytes && estimate.waveform_samples>wire.size(),"stream layout and estimate agree");
+        const auto received=consume(wire,value);
+        if(!received.content_validated)throw std::runtime_error("fixed pipeline: "+received.error);
+        check(received.stream_complete && received.content.message.data==sent.data,"stream source bytes roundtrip");
+        check(received.content.authenticated==encrypted,"only encrypted streams authenticate");
+        check(received.content.message.kind==MessageKind::file && received.content.message.filename==sent.filename &&
+              received.content.message.callsign.empty() && received.content.message.grid.empty(),
+              "application attachment names must survive without restoring modem metadata headers");
+        check(received.content.message.local_id!=sent.local_id,"receiver identity is local, not transmitted");
+    }
+    auto tiny=sample(1);const auto value=options();
+    check(transfer::message_wire_bits(tiny,value).size()==1216,"tiny attachment must retain its fixed format and filename");
+}
+void short_text_uses_exact_dictionary_bits() {
+    for(const auto length:{1U,3U,15U,16U,17U})for(bool encrypted:{false,true})
+        for(auto fec:{FecMode::off,FecMode::rs20,FecMode::rs60})for(bool compressed:{false,true}) {
+        auto value=options(encrypted);value.fec=fec;value.compression=compressed;value.content_limit=length;
+        auto sent=sample(length);sent.kind=MessageKind::text;
+        const auto plain=compression::encode_short_bits(sent.data);
+        StreamLayout layout;layout.intervals=99;
+        const auto estimate=transfer::estimate(sent,value,&layout);
+        const auto wire=transfer::message_wire_bits(sent,value);
+        if(length==17) {
+            check(!transfer::uses_raw_message(sent) && wire.size()%1216==0 && layout.intervals>0,
+                  "text beyond 16 bytes must use complete fixed intervals");
+            check(consume(wire,value).content_validated,"17-byte text retains source decoding");
+            continue;
+        }
+        check(transfer::uses_raw_message(sent) && transfer::message_bits(sent,value)==plain &&
+              wire.size()==plain.size() && estimate.wire_bits==plain.size() && estimate.coded_bytes==(plain.size()+7)/8,
+              "short text preserves its exact dictionary endpoint without markers or byte padding");
+        check(!layout.intervals && layout.compressed && !layout.authenticated && layout.fec==FecMode::off &&
+              layout.source_bytes==length && layout.encoded_source_bytes==(plain.size()+7)/8 && layout.wire_bytes==(plain.size()+7)/8 &&
+              !layout.parity_bytes_per_interval && !layout.integrity_bytes_per_interval,
+              "short text layout must expose dictionary compression without FEC or MAC");
+        auto masking=value;masking.content_limit=plain.size();auto expected=plain;transfer::xor_binary_bits(expected,masking);
+        check(wire==expected,"selected key may mask short data but adds no tag or framing");
+        auto actual=transfer::message_transmitter(sent,value);
+        auto binary=transfer::binary_transmitter(plain,masking);
+        check(actual->total_samples()==estimate.waveform_samples && actual->total_samples()==binary->total_samples(),
+              "short text uses exactly the raw-bit waveform duration");
+        const auto received=consume(wire,value,true,1);
+        check(received.stream_complete && received.raw_bits==plain && received.observed_bits==plain.size() &&
+              !received.content_validated && !received.content.authenticated && received.short_text_decoded &&
+              received.content.message.data==sent.data && received.content.message.filename.empty(),
+              "short dictionary text must decode after physical end while retaining exact bits without validation or attachment claims");
+        sent.data.push_back(0);
+        rejects([&]{transfer::message_wire_bits(sent,value);},"raw text still obeys the source byte quota");
+    }
+    Message empty;
+    check(!transfer::uses_raw_message(empty),"empty input must not create an empty raw transmission");
+    Message letter;letter.data={'e'};
+    check(transfer::message_wire_bits(letter,options())==Bytes({0,0,1}) &&
+          transfer::estimate(letter,options()).wire_bits==3,"historical e dictionary entry must use exactly three symbols");
+    rejects([&]{transfer::transmission_wire(letter,options());},"packed byte API must reject a partial dictionary byte without padding or writing out of bounds");
+    // Independent historical codewords, including two literal escapes.
+    const std::string greeting="quick brown";
+    const std::string coded="1111101110001" "110101" "1010" "110110" "1111101101011"
+                            "000" "111100" "110010" "100" "111001" "1011";
+    Message short_greeting;short_greeting.data.assign(greeting.begin(),greeting.end());
+    Bytes exact;for(const char bit:coded)exact.push_back(static_cast<std::uint8_t>(bit-'0'));
+    for(const auto duration:{0.,60.,3600.}) {
+        auto slow=options();slow.modem.integration_seconds=duration;
+        const auto estimate=transfer::estimate(short_greeting,slow);
+        check(exact.size()==70 && transfer::message_wire_bits(short_greeting,slow)==exact && estimate.wire_bits==70,
+              "quick brown must send exactly 70 dictionary bits at ordinary, minute and hour symbol durations");
+        check(transfer::message_transmitter(short_greeting,slow)->total_samples()==
+              transfer::binary_transmitter(exact,slow)->total_samples(),
+              "short text must have exactly the same waveform extent as its explicit compressed bits");
+    }
+    for(const Bytes bits:{Bytes{0,0},Bytes{0,1},Bytes{1,0},Bytes{1,1},Bytes{0,1,0}}) {
+        const auto received=consume(bits,options(),true,1);
+        check(received.raw_bits==bits && received.observed_bits==bits.size() && received.stream_complete,
+              "two- and three-bit raw messages must retain their exact endpoint");
+        check(bits.size()==3 ? received.short_text_decoded && received.content.message.data==Bytes{'t'} :
+              !received.short_text_decoded && received.content.message.data.empty(),
+              "010 must decode as t; two-bit messages must stay raw without invented dictionary characters");
+    }
+}
+void keys_and_unknown_slots() {
+    const auto sent=sample(230);
+    for(bool encrypted:{false,true}) {
+        auto value=options(encrypted);value.compression=false;value.fec=FecMode::rs20;
+        const auto wire=transfer::message_wire_bits(sent,value);
+        auto damaged=wire;damaged[192+17]=modem::missing_pattern_bit;
+        auto repaired=consume(damaged,value);
+        check(repaired.content_validated && repaired.content.message.data==sent.data && repaired.missing_symbols==1,"timed unknown retains exact cipher/FEC slot");
+        const auto total_data_bits=wire.size()/1216*interval_data_bytes(value.fec,encrypted)*8;
+        check(repaired.content.pre_fec_accuracy && repaired.content.pre_fec_accuracy->missing_data_bits==1 &&
+              repaired.content.pre_fec_accuracy->received_data_bits==total_data_bits-1 &&
+              !repaired.content.pre_fec_accuracy->corrected_data_bits,
+              "one missing source bit must preserve every other measured bit across interval drains");
+        damaged[192+18]^=1;damaged[1216+192+41]^=1;damaged[192+1023]^=1;
+        repaired=consume(damaged,value);
+        check(repaired.content_validated && repaired.content.message.data==sent.data &&
+              repaired.content.pre_fec_accuracy->received_data_bits==total_data_bits-1 &&
+              repaired.content.pre_fec_accuracy->corrected_data_bits==2 &&
+              repaired.content.pre_fec_accuracy->missing_data_bits==1 &&
+              repaired.content.fec_stats.data.repaired_bytes==2 && repaired.content.fec_stats.data.erased_bytes==1 &&
+              repaired.content.fec_stats.parity.corrected_bits==1 && repaired.content.fec_stats.parity.repaired_bytes==1,
+              "known data errors and parity repairs must remain visible alongside partial erasures");
+        damaged=wire;damaged.pop_back();repaired=consume(damaged,value);
+        check(repaired.content_validated && repaired.content.message.data==sent.data,"lost final parity bit recovers at fixed extent after end");
+        check(repaired.content.pre_fec_accuracy && repaired.content.pre_fec_accuracy->received_data_bits==total_data_bits &&
+              !repaired.content.pre_fec_accuracy->corrected_data_bits && !repaired.content.pre_fec_accuracy->missing_data_bits &&
+              repaired.content.fec_stats.parity.missing_bits==1 && repaired.content.fec_stats.parity.repaired_bytes==1,
+              "missing parity must report an RS repair without reducing known data accuracy");
+        if(encrypted) {
+            auto wrong=value;wrong.key.emplace(Bytes(32,0x73));check(!consume(wire,wrong).content_validated,"wrong key rejected");
+            wrong=value;++wrong.timestamp;check(!consume(wire,wrong).content_validated,"wrong canonical epoch rejected");
+            wrong=value;wrong.compression=true;check(!consume(wire,wrong).content_validated,"source profile bound to MAC");
+        }
+    }
+}
+void content_limits_and_streaming_storage() {
+    auto value=options();value.compression=false;value.content_limit=65536;
+    const auto sent=sample(value.content_limit);const auto wire=transfer::message_wire_bits(sent,value);
+    transfer::StreamReceiver receiver(value,value.timestamp);transfer::Received result;std::size_t maximum=0;
+    for(std::size_t offset=0;offset<wire.size();) {
+        const auto count=std::min<std::size_t>(1216,wire.size()-offset);
+        result=receiver.push(chunk(std::span(wire).subspan(offset,count),offset));offset+=count;
+        maximum=std::max(maximum,receiver.working_bytes()-receiver.source_buffer_bytes());
+        check(receiver.source_buffer_bytes()<=transfer::source_storage_limit(value.content_limit),"received RAM buffer exceeds source quota");
+        check(result.raw_bits.size()<=4096 && result.content.message.data.empty(),"pending source and diagnostics remain bounded");
+    }
+    check(maximum<65536,"core interval working state must not scale with source bytes");
+    result=receiver.push(chunk({},wire.size(),true));
+    check(result.content_validated && result.content.message.data==sent.data,"content quota supports its full advertised capacity");
+    auto too_large=sent;too_large.data.push_back(0);
+    rejects([&]{transfer::message_wire_bits(too_large,value);},"one source byte beyond local limit rejected");
+    auto small=value;small.content_limit=1;const auto limited=consume(wire,small);
+    check(limited.stream_complete && !limited.content_validated && !limited.error.empty(),"quota failure cannot become content or prevent end status");
+    const auto pending=consume(transfer::message_wire_bits(sample(),options()),options(),false);
+    check(!pending.stream_complete && pending.content.message.data.empty(),"missing physical end never invokes the source codec");
+}
+void exact_raw_masking_and_scheduling() {
+    const Bytes bits{0,0,0,1,0,1,1,0,0,1,0};
+    for(bool encrypted:{false,true}) {
+        auto value=options(encrypted);value.modem.dsss=encrypted;
+        const auto estimate=transfer::estimate_binary(bits,value);
+        const auto payload=bits.size()*modem::symbol_sample_count(value.modem);
+        const auto total=payload+modem::training_sample_count(value.modem)+2*modem::pattern_pulse_padding_samples(value.modem)+modem::suppression_sample_count(value.modem);
+        check(estimate.waveform_samples==total && estimate.coded_bytes==2,"raw path preserves exact unpadded bits");
+        auto masked=bits;transfer::xor_binary_bits(masked,value);const auto encrypted_bits=masked;
+        for(std::size_t offset=0;offset<masked.size();) {
+            const auto count=std::min<std::size_t>(3,masked.size()-offset);
+            transfer::xor_binary_bits(std::span(masked).subspan(offset,count),value,offset);offset+=count;
+        }
+        check(masked==bits,"fragment masking preserves absolute slot addresses");
+        auto actual=transfer::binary_transmitter(bits,value);
+        modem::StreamingTransmitter expected(modem::RawBits{encrypted_bits},transfer::seeded_config(value,value.timestamp));
+        std::array<float,317> a{},b{};
+        while(const auto count=actual->read(a))check(expected.read(b)==count && std::equal(a.begin(),a.begin()+static_cast<std::ptrdiff_t>(count),b.begin()),"raw factory changes no meaningful bits");
+    }
+    rejects([&]{transfer::binary_transmitter(Bytes{0,2},options());},"nonbinary raw symbols rejected");
+    Bytes bit{0};rejects([&]{transfer::xor_binary_bits(bit,options(true),std::numeric_limits<std::size_t>::max());},"cipher offset overflow rejected");
+    auto value=options(true);double now=1800000000.375;unsigned builds=0;
+    const auto prefix=(static_cast<double>(modem::training_sample_count(value.modem))+static_cast<double>(modem::pattern_pulse_padding_samples(value.modem)))/value.modem.sample_rate;
+    const auto scheduled=detail::schedule_transmission(value.modem,[&](std::uint64_t epoch){++builds;value.timestamp=epoch;now+=builds==1?2.:.125;return transfer::binary_transmitter(Bytes{0,1},value);},[&]{return now;});
+    check(builds==2 && scheduled.playback_epoch>now && std::abs(scheduled.playback_epoch+prefix-static_cast<double>(scheduled.epoch))<1e-6,"prepared source retains its actual scheduled epoch");
+}
+void protection_and_cancellation() {
+    auto value=options(true);value.modem.dsss=true;const auto config=transfer::seeded_config(value,value.timestamp);
+    check(config.scramble && config.data_key && config.spreading_seed!=config.dsss_seed,"private patterns retain purpose separation");
+    const auto sent=sample();const auto wire=transfer::message_wire_bits(sent,value);
+    auto clear=wire;transfer::xor_binary_bits(clear,value);check(clear!=wire,"whole marker/data/RS stream is masked");
+    auto tone=value;tone.modem.spreading_mode=modem::SpreadingMode::tone;
+    auto plain=tone;plain.key.reset();plain.modem.dsss=false;plain.modem.scramble=false;plain.modem.data_key.reset();
+    check(transfer::message_wire_bits(sent,tone)==transfer::message_wire_bits(sent,plain),"tone has no hidden encryption or MAC");
+    std::stop_source stop;stop.request_stop();modem::ChannelConfig channel;
+    rejects([&]{transfer::transmit(sent,value,stop.get_token());},"cancelled transmission stops");
+    rejects([&]{transfer::receive({},value,{},stop.get_token());},"cancelled reception stops");
+    rejects([&]{transfer::simulate(sent,value,channel,{},stop.get_token());},"cancelled simulation stops");
+}
+void transmission_generation_trace() {
+    const auto advance=[](modem::StreamingTransmitter& tx,std::uint64_t end) {
+        std::array<float,317> samples{};
+        while(tx.samples_emitted()<end) {
+            const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(samples.size(),end-tx.samples_emitted()));
+            check(tx.read(std::span(samples).first(count))==count,"trace fixture must reach requested sample");
+        }
     };
-    const auto callbacks = make_callbacks();
-    const Bytes input{0, 1, 2, 3, 0xff};
-    const auto tag = callbacks.authenticator(input);
-    check(callbacks.verifier(input, tag), "callbacks survive destruction of source options");
-    auto changed = input;
-    changed[0] ^= 1;
-    check(!callbacks.verifier(changed, tag), "MAC rejects chosen plaintext changes");
-    auto value = options(true);
-    const auto later = transfer::packet_options(value, value.timestamp + 1);
-    check(!later.verifier(input, tag), "MAC binds the shared transmission epoch");
-    value.key.emplace(Bytes(32, 0x73));
-    check(!transfer::packet_options(value, value.timestamp).verifier(input, tag), "MAC rejects a different key");
-}
-void test_shared_packet_pipeline() {
-    const auto message = sample();
-    for (const bool encrypted : {false, true}) {
-        auto value = options(encrypted);
-        const auto wire = transfer::pack(message, value);
-        const auto decoded = transfer::unpack(wire, value);
-        check(decoded.message.data == message.data && decoded.message.id == message.id, "packet pipeline roundtrip");
-        check(decoded.authenticated == encrypted, "packet authentication reporting");
-        auto wrong_epoch = value;
-        ++wrong_epoch.timestamp;
-        if (encrypted) rejects([&] { transfer::unpack(wire, wrong_epoch); }, "packet wrong epoch rejected");
+    constexpr std::array<std::uint8_t,32> public_seed{
+        'D','a','t','a','P','u','m','p','/','p','a','t','t','e','r','n',
+        '/','b','i','n','a','r','y','/','v','1',0,0,0,0,0,0};
+    for(bool encrypted:{false,true})for(bool shaped:{false,true}) {
+        auto value=options(encrypted);value.modem.dsss=encrypted;value.modem.pulse_shaping=shaped;
+        Message message;message.data={'e'};
+        auto tx=transfer::message_transmitter(message,value);
+        const auto initial=tx->transmit_trace();
+        check(initial.active && initial.short_text && initial.source==message.data &&
+              initial.compressed_bits==Bytes({0,0,1}) && initial.total_wire_bits==3,
+              "trace must retain actual short dictionary output and exact bit endpoint");
+        check(initial.wire_bits.empty() && initial.pattern_input.empty(),"construction cannot publish future payload generation");
+        std::array<float,2048> preview{};tx->preview_last(preview);
+        check(tx->transmit_trace().revision==initial.revision,"preview cannot populate generation trace");
+        const auto prefix=modem::training_sample_count(value.modem)+modem::pattern_pulse_padding_samples(value.modem);
+        advance(*tx,prefix);
+        check(tx->transmit_trace().wire_bits.empty() && tx->transmit_trace().pattern_input.empty(),
+              "settling and pulse-shaping lookahead cannot publish future payload chips");
+        advance(*tx,prefix+1);
+        const auto first=tx->transmit_trace();
+        check(first.generated_bits==1 && first.wire_bits.size()==1 && first.generated_chips==1 &&
+              first.pattern_input.size()==8 && first.pattern_output.size()==8,
+              "first generated chip exposes one exact wire bit and its actual eight mapping bytes");
+        tx->preview_last(preview);
+        const auto previewed=tx->transmit_trace();
+        check(previewed.revision==first.revision && previewed.pattern_output==first.pattern_output,
+              "waveform preview cannot alter the published actual trace");
+        const auto config=transfer::seeded_config(value,value.timestamp);
+        const auto seed=encrypted?config.spreading_seed:public_seed;
+        const auto expected_pattern=Crypto(seed).stream(StreamPurpose::Scrambler,encrypted?value.timestamp:0,0,8);
+        check(first.pattern_input==expected_pattern,"pattern bytes must come from the selected actual public/private generator");
+        const auto expected_dsss=encrypted?Crypto(config.dsss_seed).stream(StreamPurpose::Dsss,value.timestamp,0,8):Bytes{};
+        check(first.dsss_key==expected_dsss && first.pattern_key==(encrypted?expected_pattern:Bytes{}),
+              "private replacement and DSSS purposes must preserve their actual generation bytes");
+        for(std::size_t i=0;i<8;++i)check(first.pattern_output[i]==
+            static_cast<std::uint8_t>(first.pattern_input[i]^(encrypted?expected_dsss[i]:0)),
+            "mapped stream must equal its actual input XOR actual DSSS bytes");
+        advance(*tx,prefix+modem::pattern_chip_samples(config)+1);
+        check(tx->transmit_trace().generated_chips==2 && tx->transmit_trace().generated_bits==1 &&
+              tx->transmit_trace().pattern_input.size()==8,
+              "later chips within the same symbol cannot populate future symbol-start samples");
+        advance(*tx,prefix+modem::symbol_sample_count(value.modem)+1);
+        check(tx->transmit_trace().generated_bits==2 && tx->transmit_trace().wire_bits.size()==2 &&
+              tx->transmit_trace().pattern_input.size()==16 && first.wire_bits.size()==1,
+              "trace snapshots preserve partial prefixes and only begun symbol-start mapping groups");
+        advance(*tx,tx->total_samples());
+        const auto done=tx->transmit_trace();
+        check(done.generated_bits==3 && done.wire_bits.size()==3 && done.wire_plain_bits==Bytes({0,0,1}) &&
+              done.pattern_input.size()==24,"suppression cannot add payload bits or invented symbol-start mapping groups");
+        const auto chips=modem::pattern_chips_per_symbol(config);
+        for(std::size_t symbol=0;symbol<3;++symbol) {
+            const auto address=modem::symbol_stream_address(value.timestamp,config.stream_phase_samples,
+                symbol,modem::symbol_sample_count(config),config.sample_rate);
+            const auto position=encrypted?modem::symbol_stream_chip(address,chips,0):0;
+            const auto pattern=Crypto(seed).stream(StreamPurpose::Scrambler,encrypted?address.epoch:0,position*8,8);
+            const auto key=encrypted?Crypto(config.dsss_seed).stream(StreamPurpose::Dsss,address.epoch,position*8,8):Bytes(8,0);
+            for(std::size_t byte=0;byte<8;++byte) {
+                const auto index=symbol*8+byte;
+                check(done.pattern_input[index]==pattern[byte] && done.pattern_output[index]==(pattern[byte]^key[byte]),
+                      "each displayed group must be actual first-chip mapping bytes at its symbol's scheduled stream address");
+                if(encrypted)check(done.pattern_key[index]==pattern[byte] && done.dsss_key[index]==key[byte],
+                    "sampled private replacement and DSSS bytes must explain the exact mapper XOR");
+            }
+        }
+        check(std::equal(done.pattern_input.begin(),done.pattern_input.begin()+8,done.pattern_input.begin()+8)!=encrypted &&
+              std::equal(done.pattern_output.begin(),done.pattern_output.begin()+8,done.pattern_output.begin()+8)!=encrypted,
+              "sampled public symbol-start bytes must visibly repeat while keyed symbol-start bytes change");
+        for(std::size_t i=0;i<3;++i)check(done.wire_bits[i]==
+            static_cast<std::uint8_t>(done.wire_plain_bits[i]^(encrypted?done.data_key_bits[i]:0)),
+            "short raw endpoint must retain the actual Data XOR operands");
+        auto traced=transfer::message_transmitter(message,value);
+        modem::StreamingTransmitter reference(modem::RawBits{transfer::message_wire_bits(message,value)},config);
+        std::array<float,317> actual{},expected{};
+        while(const auto count=traced->read(actual))check(reference.read(expected)==count &&
+            std::equal(actual.begin(),actual.begin()+static_cast<std::ptrdiff_t>(count),expected.begin()),
+            "actual trace capture must preserve public/private, DSSS and pulse-shaped waveform samples");
     }
-    auto oversize = message;
-    oversize.data.resize(65537);
-    rejects([&] { transfer::pack(oversize, options()); }, "repeatable airtime enforced by shared service");
-    rejects([&] { transfer::transmit(oversize, options()); }, "repeatable airtime enforced for audio");
-    auto small = options();
-    small.modem.memory_limit = 1024;
-    check(transfer::unpack(transfer::pack(message,small),small).message.data==message.data,
-          "packet content is independent of the legacy PCM memory budget");
-    small.content_limit=1;
-    rejects([&] { transfer::pack(message, small); }, "shared packet content budget");
-    rejects([&] { transfer::unpack(transfer::pack(message, options()), small); }, "decoded content budget");
-}
-void test_airtime_estimates_and_repeat_policy() {
-    auto value=options();
-    const auto message=sample();
-    const auto estimate=transfer::estimate(message,value);
-    const auto samples=transfer::transmit(message,value);
-    check(estimate.waveform_samples==samples.size(),"estimate has exact quantized sample count");
-    check(std::abs(estimate.total_seconds-static_cast<double>(samples.size())/value.modem.sample_rate)<1e-9,
-          "estimated airtime matches actual modulation");
-    check(estimate.packet_bytes==transfer::pack(message,value).size(),"estimated encoded packet length");
-    auto empty=message;empty.data.clear();
-    const auto overhead=transfer::estimate(empty,value);
-    check(estimate.content_bytes==estimate.packet_bytes-overhead.packet_bytes,"repeat accounting excludes all fixed framing and metadata");
-    check(estimate.content_seconds<estimate.packet_seconds && estimate.packet_seconds<estimate.total_seconds,
-          "content packet and total airtimes kept distinct");
-    check(estimate.memory_supported && estimate.repeatable_allowed,"ordinary transfer estimate supported");
-    auto tiny_dsp=value;tiny_dsp.dsp_workspace_bytes=256*1024;tiny_dsp.modem.spreading_factor=16;
-    auto tiny_message=message;tiny_message.repeatable=false;tiny_message.data={'x'};
-    const auto independent=transfer::estimate(tiny_message,tiny_dsp);
-    check(!independent.memory_supported && independent.batch_memory_supported,
-          "batch PCM feasibility is independent of streaming receiver workspace");
-    check(!transfer::transmit(tiny_message,tiny_dsp).empty(),"independently feasible batch actually transmits");
-    auto slow=value;slow.modem.spreading_factor=16384;
-    auto beacon=message;beacon.data={1};
-    const auto beacon_estimate=transfer::estimate(beacon,slow);
-    check(beacon_estimate.content_seconds>2 && beacon_estimate.repeatable_allowed,"one-byte repeatability floor for slow beacons");
-    check(beacon_estimate.memory_supported && !beacon_estimate.batch_memory_supported,
-          "slow streaming remains feasible independently of unbufferable PCM duration");
-    transfer::pack(beacon,slow);
-    beacon.data={1,2};
-    check(!transfer::estimate(beacon,slow).repeatable_allowed,"larger slow messages exceed content airtime cap");
-    rejects([&]{transfer::pack(beacon,slow);},"repeatable service applies content airtime cap");
-    auto fast=value;
-    fast.modem.sample_rate=384000;fast.modem.bandwidth_hz=192000;fast.modem.carrier_hz=96000;
-    fast.fec=FecMode::off;fast.repeat_policy.maximum_seconds=4;
-    auto large=message;large.data.resize(65537);
-    check(transfer::estimate(large,fast).repeatable_allowed,"over 64KiB allowed when configured content airtime fits");
-    check(!transfer::pack(large,fast).empty(),"removed arbitrary byte cap");
-    auto boundary_options=value;
-    boundary_options.fec=FecMode::off;
-    boundary_options.compression=false;
-    auto boundary=message;boundary.data.resize(500);
-    const auto exact_limit=transfer::estimate(boundary,boundary_options);
-    check(exact_limit.content_seconds==2 && exact_limit.repeatable_allowed,"inclusive two-second content boundary");
-    boundary.data.push_back(0);
-    check(!transfer::estimate(boundary,boundary_options).repeatable_allowed,"one byte over airtime boundary rejected");
-    boundary.kind=MessageKind::file;
-    boundary.filename=std::string(220,'x');
-    boundary.data.resize(10);
-    boundary_options.modem.spreading_factor=2;
-    const auto metadata=transfer::estimate(boundary,boundary_options);
-    check(metadata.packet_seconds>2 && metadata.content_seconds<2 && metadata.repeatable_allowed,
-          "large fixed metadata does not consume repeatable content allowance");
-    boundary_options.repeat_policy.maximum_seconds=std::numeric_limits<double>::quiet_NaN();
-    rejects([&]{transfer::estimate(boundary,boundary_options);},"invalid airtime policy rejected");
-}
-void test_complete_frame_encryption_and_spreading() {
-    auto value = options(true);
-    value.modem.scramble = true;
-    value.modem.dsss = true;
-    value.modem.spreading_factor = 4;
-    const auto config = transfer::seeded_config(value, value.timestamp);
-    check(config.spreading_seed != config.dsss_seed, "independent spreading purpose keys");
-    check(config.spreading_seed == transfer::seeded_config(value, value.timestamp).spreading_seed, "deterministic spreading seed");
-    check(config.spreading_seed != transfer::seeded_config(value, value.timestamp + 1).spreading_seed, "epoch changes spreading seed");
-    auto plaintext = modem::preamble(config);
-    const auto frame = encode_packet(sample(), transfer::packet_options(value, value.timestamp), config.memory_limit);
-    plaintext.insert(plaintext.end(), frame.begin(), frame.end());
-    const auto expected = modem::modulate(value.key->xor_data(plaintext, value.timestamp), config);
-    check(transfer::transmit(sample(), value) == expected, "entire preamble frame and FEC encrypted once");
-    const auto received = transfer::receive(expected, value);
-    check(received.packet.message.data == sample().data && received.packet.authenticated, "encrypted spread waveform roundtrip");
-}
-void test_adaptive_symbol_airtime_and_padding() {
-    for (const auto bits : {2U, 3U, 4U, 5U, 6U}) {
-        auto value = options();
-        value.modem.constellation_bits = bits;
-        value.fec = FecMode::off;
-        value.compression = false;
-        auto payload = sample();
-        payload.repeatable = false;
-        payload.data = {0x4d};
-        const auto estimated = transfer::estimate(payload, value);
-        const auto samples = transfer::transmit(payload, value);
-        check(estimated.waveform_samples == samples.size(), "adaptive symbol padding is included in sample estimates");
-        check(std::abs(estimated.total_seconds - static_cast<double>(samples.size()) / value.modem.sample_rate) < 1e-10,
-              "adaptive airtime estimate matches actual PCM duration");
-        auto empty = payload;
-        empty.data.clear();
-        const auto overhead = transfer::estimate(empty, value);
-        check(std::abs(estimated.content_seconds - (estimated.packet_seconds - overhead.packet_seconds)) < 1e-10,
-              "repeat allowance counts incremental symbols including final padding");
-        const auto received = transfer::receive(samples, value);
-        check(received.packet.message.data == payload.data, "short payload is exact across all adaptive constellation sizes");
+    auto value=options(true);
+    Message message;message.data=Bytes(80,'a');
+    auto tx=transfer::message_transmitter(message,value);
+    const auto config=transfer::seeded_config(value,value.timestamp);
+    const auto plain=boundary_sync::insert(transfer::message_bits(message,value),transfer::pattern_bit_limit(value.content_limit));
+    auto expected=plain;
+    for(std::size_t i=0;i<expected.size();++i) {
+        const auto address=modem::symbol_stream_address(value.timestamp,value.modem.stream_phase_samples,
+            i,modem::symbol_sample_count(value.modem),value.modem.sample_rate);
+        const auto key=value.key->stream(StreamPurpose::Data,address.epoch,address.ordinal/8,1);
+        expected[i]^=(key[0]>>(7-address.ordinal%8))&1U;
     }
-}
-void test_timing_search_and_progress() {
-    const auto sender = options(true);
-    const auto samples = transfer::transmit(sample(), sender);
-    for (const int delta : {-2, 2}) {
-        auto receiver = sender;
-        receiver.timestamp = static_cast<std::uint64_t>(static_cast<std::int64_t>(sender.timestamp) + delta);
-        receiver.search_seconds = 2;
-        std::vector<std::uint64_t> visited;
-        const auto result = transfer::receive(samples, receiver, [&](auto timestamp) { visited.push_back(timestamp); });
-        check(result.timestamp == sender.timestamp && result.packet.message.data == sample().data, "search recovers both epoch drift directions");
-        check(visited.front() == receiver.timestamp && visited.back() == sender.timestamp, "progress identifies actual attempted candidates");
-        check(visited.size() <= 5, "bounded clock search");
-    }
-    auto wrong = sender;
-    wrong.timestamp += 3;
-    wrong.search_seconds = 2;
-    rejects([&] { transfer::receive(samples, wrong); }, "outside clock window fails");
-    wrong = sender;
-    wrong.key.emplace(Bytes(32, 0x99));
-    wrong.search_seconds = 0;
-    rejects([&] { transfer::receive(samples, wrong); }, "wrong key fails");
-}
-void test_simulation_validation_and_cancellation() {
-    auto value = options();
-    modem::ChannelConfig channel;
-    channel.snr_db = 18;
-    channel.seed = 0x1234;
-    channel.delay_samples = 137;
-    const auto result = transfer::simulate(sample(), value, channel);
-    check(result.packet.message.data == sample().data, "shared noisy simulation");
-    check(result.diagnostics.bit_rate > 0 && !result.diagnostics.waveform.empty(), "simulation returns GUI diagnostics");
-    auto invalid = value;
-    invalid.modem.scramble = true;
-    rejects([&] { transfer::transmit(sample(), invalid); }, "scrambling requires a key");
-    invalid = value;
-    invalid.modem.dsss = true;
-    rejects([&] { transfer::seeded_config(invalid, invalid.timestamp); }, "DSSS requires a key");
-    invalid = value;
-    invalid.search_seconds = 121;
-    rejects([&] { transfer::receive({}, invalid); }, "unencrypted search bound");
-    invalid = options(true);
-    invalid.search_seconds = 32769;
-    rejects([&] { transfer::receive({}, invalid); }, "encrypted search bound");
-    std::stop_source cancelled;
-    cancelled.request_stop();
-    rejects([&] { transfer::transmit(sample(), value, cancelled.get_token()); }, "cancel before modulation");
-    rejects([&] { transfer::receive({}, value, {}, cancelled.get_token()); }, "cancel before reception");
-    rejects([&] { transfer::simulate(sample(), value, channel, {}, cancelled.get_token()); }, "cancel before simulation");
-    std::stop_source during_progress;
-    unsigned visits = 0;
-    rejects([&] { transfer::receive({}, options(true), [&](auto) { ++visits; during_progress.request_stop(); }, during_progress.get_token()); },
-            "cancel from progress callback");
-    check(visits == 1, "cancellation stops further candidate attempts");
-}
-void test_valid_packet_ignores_trailing_capture() {
-    auto value=options();
-    value.modem.sample_rate=96000;
-    value.modem.bandwidth_hz=24000;
-    value.modem.carrier_hz=13000;
-    value.content_limit=1;
-    value.fec=FecMode::off;
-    auto sent=sample();sent.data={'x'};
-    auto samples=transfer::transmit(sent,value);
-    samples.resize(samples.size()+12*value.modem.sample_rate,0);
-    const auto result=transfer::receive(samples,value);
-    check(result.packet.message.data==sent.data,"valid short packet survives a long trailing capture without caching noise or preamble");
-}
-void test_simulation_oscillator_limit() {
-    auto value=options();value.modem.spreading_mode=modem::SpreadingMode::tone;value.modem.integration_seconds=3600;
-    auto message=sample();message.repeatable=false;message.data={'x'};
-    modem::ChannelConfig ideal;ideal.snr_db=30;ideal.clock_error_ppm=0;ideal.phase_noise_degrees_per_sqrt_second=0;
-    check(transfer::simulate(message,value,ideal).packet.message.data==message.data,
-          "hour-long ideal symbols must remain CPU-bounded and decodable");
-    const modem::ChannelConfig crystal;
-    rejects([&]{transfer::simulate(message,value,crystal);},
-            "receiver without oscillator tracking claimed to decode incoherent100ppm hour-long symbols");
-    auto invalid=ideal;invalid.clock_error_ppm=std::numeric_limits<double>::infinity();
-    rejects([&]{transfer::simulate(message,value,invalid);},"simulation accepted infinite clock error");
-}
-void test_full_content_capacity_with_independent_scratch() {
-    auto value=options();value.content_limit=1024*1024;
-    auto sent=sample();sent.repeatable=false;sent.data.resize(value.content_limit,0x73);
-    for(const auto mode:{FecMode::off,FecMode::rs20,FecMode::rs60}) {
-        value.fec=mode;
-        const auto result=transfer::unpack(transfer::pack(sent,value),value);
-        check(result.message.data==sent.data,"full advertised content capacity remains usable with every FEC mode");
-    }
-    sent.data.push_back(0);
-    rejects([&]{transfer::pack(sent,value);},"one byte beyond actual content capacity rejected");
+    check(expected==transfer::message_wire_bits(message,value),
+          "every fixed marker, source, MAC and parity bit must receive Data encryption before the modem");
+    modem::StreamingTransmitter reference(modem::RawBits{expected},config);
+    std::array<float,317> actual{},other{};
+    while(const auto count=tx->read(actual))
+        check(reference.read(other)==count && std::equal(actual.begin(),actual.begin()+static_cast<std::ptrdiff_t>(count),other.begin()),
+              "trace collection must not change any final waveform sample");
+    const auto trace=tx->transmit_trace();
+    check(trace.source.size()==64 && trace.compressed_bits.size()==256 && trace.wire_bits.size()==256 &&
+          trace.wire_plain_bits.size()==256 && trace.data_key_bits.size()==256 && trace.pattern_input.size()==32 &&
+          trace.working_bytes()<=modem::TransmitTrace::dynamic_storage_limit,"all retained trace rows have fixed memory bounds");
+    check(std::equal(trace.wire_plain_bits.begin(),trace.wire_plain_bits.end(),plain.begin()) &&
+          std::equal(trace.wire_bits.begin(),trace.wire_bits.end(),expected.begin()),
+          "trace must display the actual encrypted marker prefix passed to the modem");
+    for(std::size_t i=0;i<trace.wire_bits.size();++i)
+        check(trace.wire_bits[i]==(trace.wire_plain_bits[i]^trace.data_key_bits[i]),
+              "fixed-interval trace must account for every actual Data XOR bit");
+    auto raw=transfer::binary_transmitter(Bytes{0,0,1,0,1},options());
+    advance(*raw,raw->total_samples());
+    const auto raw_trace=raw->transmit_trace();
+    check(raw_trace.raw && !raw_trace.source_available && !raw_trace.compressed_available &&
+          raw_trace.wire_bits==Bytes({0,0,1,0,1}) && raw_trace.data_key_bits.empty(),
+          "explicit raw trace preserves all leading and partial-byte bits without invented source rows");
+    value.modem.integration_seconds=4*3600;
+    auto slow=transfer::binary_transmitter(Bytes{0,0,1},value);
+    const auto memory=slow->working_bytes();advance(*slow,1);
+    check(slow->transmit_trace().wire_bits.size()==1 && slow->transmit_trace().pattern_input.size()==8,
+          "hours-long symbols expose their first generation bit without waiting for a byte or full symbol");
+    advance(*slow,317);
+    check(slow->transmit_trace().wire_bits.size()==1 && slow->working_bytes()==memory,
+          "slow bit generation cannot fabricate later bits or allocate duration-sized trace storage");
+    value.modem.spreading_mode=modem::SpreadingMode::tone;value.modem.integration_seconds=0;
+    auto tone=transfer::binary_transmitter(Bytes{0},value);advance(*tone,1);
+    check(tone->transmit_trace().tone && !tone->transmit_trace().pattern_available &&
+          tone->transmit_trace().pattern_input.empty() && tone->transmit_trace().data_key_bits.empty(),
+          "tone trace must report absent pattern bytes and effective encryption settings");
+    auto tight=options(true);const Bytes large_raw(65536,0);
+    modem::StreamingTransmitter untraced(modem::RawBits{large_raw},transfer::seeded_config(tight,tight.timestamp));
+    tight.dsp_workspace_bytes=4*untraced.working_bytes();
+    const auto rejected=transfer::estimate_binary(large_raw,tight);
+    check(!rejected.memory_supported,"workspace admission must include generation trace beyond the untraced modem state");
+    rejects([&]{transfer::binary_transmitter(large_raw,tight);},
+            "transmission trace must honor the configured workspace rather than silently exceed it");
+    tight.dsp_workspace_bytes+=4*(modem::TransmitTrace::dynamic_storage_limit+4096);
+    const auto admitted=transfer::estimate_binary(large_raw,tight);
+    auto fits=transfer::binary_transmitter(large_raw,tight);
+    check(admitted.memory_supported && fits->working_bytes()<=tight.dsp_workspace_bytes/4 &&
+          admitted.waveform_samples==rejected.waveform_samples && admitted.wire_bits==rejected.wire_bits,
+          "trace-aware memory admission must allow the actual bounded TX without changing airtime or wire geometry");
 }
 }
-int main() {
-    try {
-        test_callback_lifetime_and_epoch_binding();
-        test_shared_packet_pipeline();
-        test_airtime_estimates_and_repeat_policy();
-        test_complete_frame_encryption_and_spreading();
-        test_adaptive_symbol_airtime_and_padding();
-        test_timing_search_and_progress();
-        test_simulation_validation_and_cancellation();
-        test_valid_packet_ignores_trailing_capture();
-        test_simulation_oscillator_limit();
-        test_full_content_capacity_with_independent_scratch();
-        std::cout << "transfer tests passed\n";
-        return 0;
-    } catch (const std::exception& error) {
-        std::cerr << "transfer tests failed: " << error.what() << '\n';
-        return 1;
-    }
-}
+int main(){try{fixed_pipeline_and_local_metadata();short_text_uses_exact_dictionary_bits();keys_and_unknown_slots();content_limits_and_streaming_storage();exact_raw_masking_and_scheduling();protection_and_cancellation();transmission_generation_trace();std::cout<<"stream transfer passed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

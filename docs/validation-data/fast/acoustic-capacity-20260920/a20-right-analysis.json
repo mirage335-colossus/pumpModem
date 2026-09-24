@@ -1,0 +1,1735 @@
+{
+  "capture_path": "/tmp/fast-acoustic-sounder-a20-right/capture-stereo.f32",
+  "capture_sha256": "dff2134b3a1d657a31bd1a3a0e53c6c6112edfb8546ba85fd525511fbebb1639",
+  "channels": 2,
+  "measurements": {
+    "channel_0": {
+      "analysis": "independent_phase_crossfit_acoustic_sounder",
+      "sample_rate": 48000,
+      "qualified": true,
+      "qualification_reasons": [],
+      "capture_levels": {
+        "samples": 846720,
+        "rms": 0.03823268988721107,
+        "rms_dbfs": -28.35130291637755,
+        "peak": 0.3694509267807007,
+        "dc": 0.005217417358552428,
+        "near_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "active_capture_levels": {
+        "samples": 524288,
+        "rms": 0.01683227347651779,
+        "rms_dbfs": -35.477144428405225,
+        "peak": 0.07862546078684404,
+        "dc": 2.583450489125616e-20,
+        "near_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "silence_levels": {
+        "samples": 55200,
+        "rms": 0.008466315190705578,
+        "rms_dbfs": -41.44611134602329,
+        "peak": 0.034915276352234126,
+        "dc": 0.001767928261487788,
+        "near_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "silence_segment_levels": [
+        {
+          "samples": 21600,
+          "rms": 0.009856046297566064,
+          "rms_dbfs": -40.12594530259818,
+          "peak": 0.034915276352234126,
+          "dc": 0.005365396369537983,
+          "near_full_scale_samples": 0,
+          "outside_unit_range_samples": 0
+        },
+        {
+          "samples": 33600,
+          "rms": 0.007437023690941085,
+          "rms_dbfs": -42.572016700951956,
+          "peak": 0.02472177095931352,
+          "dc": -0.000544729807973052,
+          "near_full_scale_samples": 0,
+          "outside_unit_range_samples": 0
+        }
+      ],
+      "delay_samples": 34368.5660425351,
+      "delay_seconds": 0.7160117925528147,
+      "capture_samples_per_source_sample": 0.9999998857542659,
+      "clock_error_ppm": -0.11424573409524186,
+      "marker_scores": [
+        0.462123187177897,
+        0.46535347935114446,
+        0.45946295544675875
+      ],
+      "marker_delay_residual_samples": [
+        -0.005377819310524501,
+        0.010755638068076223,
+        -0.0053778194123879075
+      ],
+      "period_seconds": 0.3413333333333333,
+      "cyclic_prefix_seconds": 0.17066666666666666,
+      "independent_phase_blocks": 8,
+      "repeats_per_block": 4,
+      "heldout_method": "Even phase blocks fit odd blocks and vice versa; no per-test response/phase fit. Repeat differences and independent silence PSD remain separate.",
+      "noise_model": "Maximum of smoothed held-out prediction residual, unbiased within-block repeat residual, and independent silence PSD. Includes channel motion, distortion, clock/interpolation error and finite training noise.",
+      "gain_delay_variation_diagnostic": {
+        "method": "Opposite random-phase-fold H remains fixed. Repeats 0,2,... fit one complex gain and delay within +/-2 samples; repeats 1,3,... alone evaluate it. This diagnostic does not change primary capacity/noise estimates, and cannot uniquely separate nonlinearity from motion.",
+        "fitted_real_parameters_per_block": 3,
+        "blocks": [
+          {
+            "block": 0,
+            "gain_magnitude": 0.9959187868114503,
+            "phase_rad": 0.004600841269057984,
+            "delay_samples": -0.023320215234700417,
+            "delay_fit_at_search_boundary": false
+          },
+          {
+            "block": 1,
+            "gain_magnitude": 0.995670208786942,
+            "phase_rad": 0.0011860556889333714,
+            "delay_samples": -0.01445107144501023,
+            "delay_fit_at_search_boundary": false
+          },
+          {
+            "block": 2,
+            "gain_magnitude": 0.9975690487721491,
+            "phase_rad": -0.00018322213546334893,
+            "delay_samples": -0.0316100184749318,
+            "delay_fit_at_search_boundary": false
+          },
+          {
+            "block": 3,
+            "gain_magnitude": 0.9995148865992642,
+            "phase_rad": -0.0007242356446178057,
+            "delay_samples": -0.012509838777949072,
+            "delay_fit_at_search_boundary": false
+          },
+          {
+            "block": 4,
+            "gain_magnitude": 0.9991529056131757,
+            "phase_rad": -0.0017936497561009852,
+            "delay_samples": 0.0006429618718268158,
+            "delay_fit_at_search_boundary": false
+          },
+          {
+            "block": 5,
+            "gain_magnitude": 0.9998020798680722,
+            "phase_rad": -0.0032607009076791264,
+            "delay_samples": 0.024938792486479486,
+            "delay_fit_at_search_boundary": false
+          },
+          {
+            "block": 6,
+            "gain_magnitude": 1.0031725475962878,
+            "phase_rad": -0.00021945370498636216,
+            "delay_samples": 0.02290790987223601,
+            "delay_fit_at_search_boundary": false
+          },
+          {
+            "block": 7,
+            "gain_magnitude": 0.9992394724835955,
+            "phase_rad": 0.002166149326565385,
+            "delay_samples": 0.03165363243124036,
+            "delay_fit_at_search_boundary": false
+          }
+        ]
+      },
+      "capacity_caveat": "Conditional stationary linear/Gaussian-equivalent model at tested RMS; not a confidence bound, Shannon measurement, modem rate, or success probability. Water filling assumes unchanged residual under different power loading.",
+      "impulse": {
+        "reference": "Time zero is strongest band-limited path after global delay/clock removal; circular window, not absolute acoustic distance.",
+        "quantile_seconds": {
+          "0.005": -6.25e-05,
+          "0.05": 0.0,
+          "0.5": 0.0003958333333333333,
+          "0.95": 0.029125,
+          "0.995": 0.13760416666666667
+        },
+        "energy_90_percent_span_seconds": 0.029125,
+        "energy_99_percent_span_seconds": 0.13766666666666666,
+        "energy_outside_20ms_fraction": 0.057484194542892754,
+        "fold_uncertainty_total_to_response_energy_ratio": 0.0012382828978626252,
+        "late_cells_above_fold_noise_floor": 231,
+        "latest_positive_late_cell_seconds": 0.25515625000000003,
+        "late_cells_above_floor_energy_fraction": 0.05647108010231392,
+        "cyclic_prefix_energy": [
+          {
+            "prefix_samples": 2048,
+            "prefix_seconds": 0.042666666666666665,
+            "window": "centered",
+            "raw_tapered_energy_outside_fraction": 0.05562489605141483,
+            "signed_coherent_energy_outside_fraction": 0.05505493194675024
+          },
+          {
+            "prefix_samples": 2048,
+            "prefix_seconds": 0.042666666666666665,
+            "window": "after_peak_with_1ms_precursor",
+            "raw_tapered_energy_outside_fraction": 0.04316989988523746,
+            "signed_coherent_energy_outside_fraction": 0.04259017441862876
+          },
+          {
+            "prefix_samples": 4096,
+            "prefix_seconds": 0.08533333333333333,
+            "window": "centered",
+            "raw_tapered_energy_outside_fraction": 0.04212327755484287,
+            "signed_coherent_energy_outside_fraction": 0.04161563646992555
+          },
+          {
+            "prefix_samples": 4096,
+            "prefix_seconds": 0.08533333333333333,
+            "window": "after_peak_with_1ms_precursor",
+            "raw_tapered_energy_outside_fraction": 0.015252485028100138,
+            "signed_coherent_energy_outside_fraction": 0.01473360233771716
+          }
+        ],
+        "cyclic_prefix_energy_method": "300 Hz cosine tapers at both excited-band edges; squared mean-fold impulse minus squared half-fold difference estimates coherent energy without clipping negative samples. Finite-period alias and band limitation remain; not a confidence bound.",
+        "noise_floor_method": "1 ms cells; coherent excess = squared mean-fold impulse minus squared half-fold difference. Listed late cells exceed 4x estimated fold-noise energy and one millionth of total impulse energy. Heuristic detectability, not a confidence interval.",
+        "window_seconds": 0.3413333333333333,
+        "caveat": "Band limitation and noisy H broaden impulse energy; paths exceeding the cyclic prefix/period can alias. This is not a certified reverberation time."
+      },
+      "blocks": [
+        {
+          "block": 0,
+          "fold": "even",
+          "capture_levels": {
+            "samples": 65536,
+            "rms": 0.016535433987344673,
+            "rms_dbfs": -35.6316880430242,
+            "peak": 0.07862546078684404,
+            "dc": 4.743384504624082e-20,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "transmit_levels": {
+            "samples": 16384,
+            "rms": 0.04422278440613184,
+            "rms_dbfs": -27.087078326892605,
+            "peak": 0.18981178104413415,
+            "dc": 0.0,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "repeat_difference_rms": 0.007294102367131571
+        },
+        {
+          "block": 1,
+          "fold": "odd",
+          "capture_levels": {
+            "samples": 65536,
+            "rms": 0.01650269326125252,
+            "rms_dbfs": -35.6489034514196,
+            "peak": 0.06814596074397887,
+            "dc": 2.0328790734103208e-19,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "transmit_levels": {
+            "samples": 16384,
+            "rms": 0.04422278439594323,
+            "rms_dbfs": -27.087078328893774,
+            "peak": 0.18093183635030177,
+            "dc": -7.826584432629735e-19,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "repeat_difference_rms": 0.007031853352375346
+        },
+        {
+          "block": 2,
+          "fold": "even",
+          "capture_levels": {
+            "samples": 65536,
+            "rms": 0.016693916462914227,
+            "rms_dbfs": -35.5488352811572,
+            "peak": 0.06540668845580005,
+            "dc": -3.7269449679189215e-20,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "transmit_levels": {
+            "samples": 16384,
+            "rms": 0.044222784377630796,
+            "rms_dbfs": -27.087078332490556,
+            "peak": 0.169539183362509,
+            "dc": 1.3552527156068805e-20,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "repeat_difference_rms": 0.007188808058966113
+        },
+        {
+          "block": 3,
+          "fold": "odd",
+          "capture_levels": {
+            "samples": 65536,
+            "rms": 0.016925233036765148,
+            "rms_dbfs": -35.42930685949217,
+            "peak": 0.07793263633566547,
+            "dc": -1.3552527156068805e-20,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "transmit_levels": {
+            "samples": 16384,
+            "rms": 0.04422278439157139,
+            "rms_dbfs": -27.087078329752458,
+            "peak": 0.18559582530745683,
+            "dc": 0.0,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "repeat_difference_rms": 0.008457393632405868
+        },
+        {
+          "block": 4,
+          "fold": "even",
+          "capture_levels": {
+            "samples": 65536,
+            "rms": 0.017355441213123532,
+            "rms_dbfs": -35.211286822808205,
+            "peak": 0.07349312375231613,
+            "dc": -2.574980159653073e-19,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "transmit_levels": {
+            "samples": 16384,
+            "rms": 0.044222784384166096,
+            "rms_dbfs": -27.087078331206946,
+            "peak": 0.17942065002069582,
+            "dc": -2.6291902682773483e-18,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "repeat_difference_rms": 0.00903471089976445
+        },
+        {
+          "block": 5,
+          "fold": "odd",
+          "capture_levels": {
+            "samples": 65536,
+            "rms": 0.01700252992403129,
+            "rms_dbfs": -35.389729042671696,
+            "peak": 0.07311481211033552,
+            "dc": 1.6263032587282567e-19,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "transmit_levels": {
+            "samples": 16384,
+            "rms": 0.0442227844014353,
+            "rms_dbfs": -27.087078327815064,
+            "peak": 0.18025049567564175,
+            "dc": 6.386628422297425e-19,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "repeat_difference_rms": 0.008255725898960169
+        },
+        {
+          "block": 6,
+          "fold": "even",
+          "capture_levels": {
+            "samples": 65536,
+            "rms": 0.016777428635606183,
+            "rms_dbfs": -35.505491996415316,
+            "peak": 0.07042969684583489,
+            "dc": 0.0,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "transmit_levels": {
+            "samples": 16384,
+            "rms": 0.04422278438987178,
+            "rms_dbfs": -27.08707833008628,
+            "peak": 0.17423465846362649,
+            "dc": 8.707498697774207e-19,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "repeat_difference_rms": 0.0076411168874094045
+        },
+        {
+          "block": 7,
+          "fold": "odd",
+          "capture_levels": {
+            "samples": 65536,
+            "rms": 0.016849752096670775,
+            "rms_dbfs": -35.468129686760776,
+            "peak": 0.06922381893509913,
+            "dc": 1.0164395367051604e-19,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "transmit_levels": {
+            "samples": 16384,
+            "rms": 0.044222784396735104,
+            "rms_dbfs": -27.08707832873824,
+            "peak": 0.2000000029769183,
+            "dc": 1.90074193363865e-18,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "repeat_difference_rms": 0.008454857328435393
+        }
+      ],
+      "bands": [
+        {
+          "qualified": true,
+          "bandwidth_hz": 3700.1953125,
+          "source_power_fs2": 0.00040538188663818004,
+          "uniform_power_bps": 19658.294226518632,
+          "measured_loading_bps": 19658.294226280825,
+          "water_filling_bps": 19918.906735626162,
+          "water_filling_used_power_fs2": 0.0004053818866381801,
+          "water_filling_active_hz": 3500.9765625,
+          "low_hz": 300.0,
+          "high_hz": 4000.0,
+          "signal_to_heldout_residual_db": 13.284628014609927,
+          "median_coherence": 0.9820583980250903,
+          "coherence_10th_percentile": 0.8176468521287843
+        },
+        {
+          "qualified": true,
+          "bandwidth_hz": 7699.21875,
+          "source_power_fs2": 0.0008435024528483891,
+          "uniform_power_bps": 44570.93886761575,
+          "measured_loading_bps": 44570.938867311765,
+          "water_filling_bps": 44841.173501542246,
+          "water_filling_used_power_fs2": 0.0008435024528483892,
+          "water_filling_active_hz": 7500.0,
+          "low_hz": 300.0,
+          "high_hz": 8000.0,
+          "signal_to_heldout_residual_db": 14.237442697868563,
+          "median_coherence": 0.9854674229619099,
+          "coherence_10th_percentile": 0.9039394325924394
+        },
+        {
+          "qualified": true,
+          "bandwidth_hz": 11701.171875,
+          "source_power_fs2": 0.0012819439865433995,
+          "uniform_power_bps": 68891.81540863749,
+          "measured_loading_bps": 68891.8154082791,
+          "water_filling_bps": 69165.34316234717,
+          "water_filling_used_power_fs2": 0.0012819439865433995,
+          "water_filling_active_hz": 11501.953125,
+          "low_hz": 300.0,
+          "high_hz": 12000.0,
+          "signal_to_heldout_residual_db": 14.96059223314104,
+          "median_coherence": 0.9859490982173161,
+          "coherence_10th_percentile": 0.9130016918216461
+        },
+        {
+          "qualified": true,
+          "bandwidth_hz": 17701.171875,
+          "source_power_fs2": 0.0019392853196214782,
+          "uniform_power_bps": 99038.90625595029,
+          "measured_loading_bps": 99038.90625556708,
+          "water_filling_bps": 99329.76919142535,
+          "water_filling_used_power_fs2": 0.0019392853196214782,
+          "water_filling_active_hz": 17501.953125,
+          "low_hz": 300.0,
+          "high_hz": 18000.0,
+          "signal_to_heldout_residual_db": 15.043596787746587,
+          "median_coherence": 0.9823452946055065,
+          "coherence_10th_percentile": 0.9039139039815808
+        },
+        {
+          "qualified": true,
+          "bandwidth_hz": 17850.5859375,
+          "source_power_fs2": 0.0019556546594640765,
+          "uniform_power_bps": 99041.32400342371,
+          "measured_loading_bps": 99041.32400298142,
+          "water_filling_bps": 99534.66506264516,
+          "water_filling_used_power_fs2": 0.0019556546594640765,
+          "water_filling_active_hz": 17501.953125,
+          "low_hz": 150.0,
+          "high_hz": 18000.0,
+          "signal_to_heldout_residual_db": 13.183855066458888,
+          "median_coherence": 0.9821353243656024,
+          "coherence_10th_percentile": 0.8967989332975097
+        }
+      ],
+      "subbands": [
+        {
+          "low_hz": 300,
+          "high_hz": 2000,
+          "signal_to_heldout_residual_db": 11.699805571738695,
+          "median_bin_signal_to_residual_db": 14.336359677708375,
+          "tenth_percentile_bin_signal_to_residual_db": -8.633268753047874,
+          "median_gain_db": -6.168567177938348,
+          "median_coherence": 0.9647659590320184,
+          "heldout_residual_power_fs2": 4.212317741991156e-06,
+          "repeat_residual_power_fs2": 4.26285142496158e-06,
+          "separate_silence_power_fs2": 4.352596753376888e-06,
+          "independent_gain_delay_test_baseline_power_fs2": 4.202549165239631e-06,
+          "independent_gain_delay_test_adjusted_power_fs2": 4.199928916084694e-06
+        },
+        {
+          "low_hz": 2000,
+          "high_hz": 4000,
+          "signal_to_heldout_residual_db": 19.376606014897945,
+          "median_bin_signal_to_residual_db": 18.843696527743358,
+          "tenth_percentile_bin_signal_to_residual_db": 14.129364832953762,
+          "median_gain_db": -8.72011785637709,
+          "median_coherence": 0.9880632682163951,
+          "heldout_residual_power_fs2": 4.4991799062455086e-07,
+          "repeat_residual_power_fs2": 4.183769089302122e-07,
+          "separate_silence_power_fs2": 3.8393380996426577e-07,
+          "independent_gain_delay_test_baseline_power_fs2": 4.46023770412151e-07,
+          "independent_gain_delay_test_adjusted_power_fs2": 4.431530945761045e-07
+        },
+        {
+          "low_hz": 4000,
+          "high_hz": 8000,
+          "signal_to_heldout_residual_db": 20.15923591093454,
+          "median_bin_signal_to_residual_db": 18.918533159927513,
+          "tenth_percentile_bin_signal_to_residual_db": 13.919855608320024,
+          "median_gain_db": -12.089382870950555,
+          "median_coherence": 0.9880173985580555,
+          "heldout_residual_power_fs2": 3.4229165777775836e-07,
+          "repeat_residual_power_fs2": 2.948293506188119e-07,
+          "separate_silence_power_fs2": 2.6902905787659703e-07,
+          "independent_gain_delay_test_baseline_power_fs2": 3.3881646399109773e-07,
+          "independent_gain_delay_test_adjusted_power_fs2": 3.293474617441059e-07
+        },
+        {
+          "low_hz": 8000,
+          "high_hz": 12000,
+          "signal_to_heldout_residual_db": 19.746316633007815,
+          "median_bin_signal_to_residual_db": 18.707913879700314,
+          "tenth_percentile_bin_signal_to_residual_db": 13.496261920608898,
+          "median_gain_db": -11.974653014146327,
+          "median_coherence": 0.9865933890364763,
+          "heldout_residual_power_fs2": 4.13570541034974e-07,
+          "repeat_residual_power_fs2": 2.95256050755353e-07,
+          "separate_silence_power_fs2": 2.397032640097745e-07,
+          "independent_gain_delay_test_baseline_power_fs2": 4.1232124845890546e-07,
+          "independent_gain_delay_test_adjusted_power_fs2": 3.791789477531296e-07
+        },
+        {
+          "low_hz": 12000,
+          "high_hz": 18000,
+          "signal_to_heldout_residual_db": 15.461454481440969,
+          "median_bin_signal_to_residual_db": 15.241638514016117,
+          "tenth_percentile_bin_signal_to_residual_db": 9.747455582404616,
+          "median_gain_db": -14.008603467005816,
+          "median_coherence": 0.9731087421668012,
+          "heldout_residual_power_fs2": 1.0956116397325242e-06,
+          "repeat_residual_power_fs2": 8.796136253362221e-07,
+          "separate_silence_power_fs2": 8.409299755026744e-07,
+          "independent_gain_delay_test_baseline_power_fs2": 1.1061547823730744e-06,
+          "independent_gain_delay_test_adjusted_power_fs2": 1.022322034945874e-06
+        }
+      ],
+      "strongest_response_regions": [
+        {
+          "frequency_hz": 958.0078125,
+          "gain_db": 2.379057752940172,
+          "coherence": 0.9958202943311009
+        },
+        {
+          "frequency_hz": 1895.5078125,
+          "gain_db": -2.93017945877624,
+          "coherence": 0.9835530050971096
+        },
+        {
+          "frequency_hz": 2443.359375,
+          "gain_db": -3.318382215446502,
+          "coherence": 0.9954024781815474
+        },
+        {
+          "frequency_hz": 1294.921875,
+          "gain_db": -3.811752604863148,
+          "coherence": 0.9888337678157996
+        },
+        {
+          "frequency_hz": 5220.703125,
+          "gain_db": -4.246416402313736,
+          "coherence": 0.9981536575062084
+        }
+      ],
+      "weakest_response_regions": [
+        {
+          "frequency_hz": 319.3359375,
+          "gain_db": -32.2667905113604,
+          "coherence": 0.013567294576628669
+        },
+        {
+          "frequency_hz": 13535.15625,
+          "gain_db": -28.35994987847147,
+          "coherence": 0.5723861485187921
+        },
+        {
+          "frequency_hz": 5745.1171875,
+          "gain_db": -27.042472544140313,
+          "coherence": 0.482267362108513
+        },
+        {
+          "frequency_hz": 15477.5390625,
+          "gain_db": -22.157494660248922,
+          "coherence": 0.6484627155110776
+        },
+        {
+          "frequency_hz": 10456.0546875,
+          "gain_db": -21.083702398907953,
+          "coherence": 0.9490656587991134
+        }
+      ]
+    },
+    "channel_1": {
+      "analysis": "independent_phase_crossfit_acoustic_sounder",
+      "sample_rate": 48000,
+      "qualified": true,
+      "qualification_reasons": [],
+      "capture_levels": {
+        "samples": 846720,
+        "rms": 0.036938785212420076,
+        "rms_dbfs": -28.65034782177998,
+        "peak": 0.30418264865875244,
+        "dc": 0.0041449526523381405,
+        "near_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "active_capture_levels": {
+        "samples": 524288,
+        "rms": 0.016600128851881283,
+        "rms_dbfs": -35.59777081818222,
+        "peak": 0.07447224383865074,
+        "dc": -1.2705494208814505e-21,
+        "near_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "silence_levels": {
+        "samples": 55200,
+        "rms": 0.010559354672519559,
+        "rms_dbfs": -39.527252451816125,
+        "peak": 0.03831623848950844,
+        "dc": -0.003432720263758454,
+        "near_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "silence_segment_levels": [
+        {
+          "samples": 21600,
+          "rms": 0.011829777755802464,
+          "rms_dbfs": -38.5404682863683,
+          "peak": 0.03831623848950844,
+          "dc": -0.008053040447441177,
+          "near_full_scale_samples": 0,
+          "outside_unit_range_samples": 0
+        },
+        {
+          "samples": 33600,
+          "rms": 0.009654778829812305,
+          "rms_dbfs": -40.305153410435906,
+          "peak": 0.03322333229691554,
+          "dc": -0.00046251443139099023,
+          "near_full_scale_samples": 0,
+          "outside_unit_range_samples": 0
+        }
+      ],
+      "delay_samples": 34365.643045717894,
+      "delay_seconds": 0.7159508967857895,
+      "capture_samples_per_source_sample": 0.999999977242115,
+      "clock_error_ppm": -0.02275788502092979,
+      "marker_scores": [
+        0.4737573332625422,
+        0.4757070957525042,
+        0.4751120527612257
+      ],
+      "marker_delay_residual_samples": [
+        0.0005781869404017925,
+        -0.0011563742300495505,
+        0.0005781869404017925
+      ],
+      "period_seconds": 0.3413333333333333,
+      "cyclic_prefix_seconds": 0.17066666666666666,
+      "independent_phase_blocks": 8,
+      "repeats_per_block": 4,
+      "heldout_method": "Even phase blocks fit odd blocks and vice versa; no per-test response/phase fit. Repeat differences and independent silence PSD remain separate.",
+      "noise_model": "Maximum of smoothed held-out prediction residual, unbiased within-block repeat residual, and independent silence PSD. Includes channel motion, distortion, clock/interpolation error and finite training noise.",
+      "gain_delay_variation_diagnostic": {
+        "method": "Opposite random-phase-fold H remains fixed. Repeats 0,2,... fit one complex gain and delay within +/-2 samples; repeats 1,3,... alone evaluate it. This diagnostic does not change primary capacity/noise estimates, and cannot uniquely separate nonlinearity from motion.",
+        "fitted_real_parameters_per_block": 3,
+        "blocks": [
+          {
+            "block": 0,
+            "gain_magnitude": 0.9938744058565585,
+            "phase_rad": 0.00802746014816795,
+            "delay_samples": 0.007699629702321971,
+            "delay_fit_at_search_boundary": false
+          },
+          {
+            "block": 1,
+            "gain_magnitude": 0.9953126924772232,
+            "phase_rad": 0.003422627542691314,
+            "delay_samples": 0.0005464075634783153,
+            "delay_fit_at_search_boundary": false
+          },
+          {
+            "block": 2,
+            "gain_magnitude": 0.9989968855989106,
+            "phase_rad": 0.008172076452529872,
+            "delay_samples": -0.008292174552893198,
+            "delay_fit_at_search_boundary": false
+          },
+          {
+            "block": 3,
+            "gain_magnitude": 0.9982158347246247,
+            "phase_rad": -0.005426201858818302,
+            "delay_samples": -0.01793119140500854,
+            "delay_fit_at_search_boundary": false
+          },
+          {
+            "block": 4,
+            "gain_magnitude": 0.9996325404638887,
+            "phase_rad": -0.0015330313815310112,
+            "delay_samples": 0.0010633897458613795,
+            "delay_fit_at_search_boundary": false
+          },
+          {
+            "block": 5,
+            "gain_magnitude": 1.0013560235253318,
+            "phase_rad": -0.004613625793888715,
+            "delay_samples": 0.00678740120523095,
+            "delay_fit_at_search_boundary": false
+          },
+          {
+            "block": 6,
+            "gain_magnitude": 1.0024349596420945,
+            "phase_rad": -0.0019537464502599475,
+            "delay_samples": 0.010944924347404092,
+            "delay_fit_at_search_boundary": false
+          },
+          {
+            "block": 7,
+            "gain_magnitude": 0.9984038048181589,
+            "phase_rad": -0.0024604943671347754,
+            "delay_samples": 0.0014179658770107476,
+            "delay_fit_at_search_boundary": false
+          }
+        ]
+      },
+      "capacity_caveat": "Conditional stationary linear/Gaussian-equivalent model at tested RMS; not a confidence bound, Shannon measurement, modem rate, or success probability. Water filling assumes unchanged residual under different power loading.",
+      "impulse": {
+        "reference": "Time zero is strongest band-limited path after global delay/clock removal; circular window, not absolute acoustic distance.",
+        "quantile_seconds": {
+          "0.005": -8.333333333333333e-05,
+          "0.05": -2.0833333333333333e-05,
+          "0.5": 0.0003541666666666667,
+          "0.95": 0.01872916666666667,
+          "0.995": 0.134
+        },
+        "energy_90_percent_span_seconds": 0.018750000000000003,
+        "energy_99_percent_span_seconds": 0.13408333333333333,
+        "energy_outside_20ms_fraction": 0.049112232046311974,
+        "fold_uncertainty_total_to_response_energy_ratio": 0.0012412989494718567,
+        "late_cells_above_fold_noise_floor": 226,
+        "latest_positive_late_cell_seconds": 0.25415625000000003,
+        "late_cells_above_floor_energy_fraction": 0.04803921046803914,
+        "cyclic_prefix_energy": [
+          {
+            "prefix_samples": 2048,
+            "prefix_seconds": 0.042666666666666665,
+            "window": "centered",
+            "raw_tapered_energy_outside_fraction": 0.0474096483582059,
+            "signed_coherent_energy_outside_fraction": 0.046718554191033636
+          },
+          {
+            "prefix_samples": 2048,
+            "prefix_seconds": 0.042666666666666665,
+            "window": "after_peak_with_1ms_precursor",
+            "raw_tapered_energy_outside_fraction": 0.037290766073407026,
+            "signed_coherent_energy_outside_fraction": 0.03659247198052508
+          },
+          {
+            "prefix_samples": 4096,
+            "prefix_seconds": 0.08533333333333333,
+            "window": "centered",
+            "raw_tapered_energy_outside_fraction": 0.0363215431035022,
+            "signed_coherent_energy_outside_fraction": 0.03571265096114644
+          },
+          {
+            "prefix_samples": 4096,
+            "prefix_seconds": 0.08533333333333333,
+            "window": "after_peak_with_1ms_precursor",
+            "raw_tapered_energy_outside_fraction": 0.014185732155797891,
+            "signed_coherent_energy_outside_fraction": 0.01360694271118952
+          }
+        ],
+        "cyclic_prefix_energy_method": "300 Hz cosine tapers at both excited-band edges; squared mean-fold impulse minus squared half-fold difference estimates coherent energy without clipping negative samples. Finite-period alias and band limitation remain; not a confidence bound.",
+        "noise_floor_method": "1 ms cells; coherent excess = squared mean-fold impulse minus squared half-fold difference. Listed late cells exceed 4x estimated fold-noise energy and one millionth of total impulse energy. Heuristic detectability, not a confidence interval.",
+        "window_seconds": 0.3413333333333333,
+        "caveat": "Band limitation and noisy H broaden impulse energy; paths exceeding the cyclic prefix/period can alias. This is not a certified reverberation time."
+      },
+      "blocks": [
+        {
+          "block": 0,
+          "fold": "even",
+          "capture_levels": {
+            "samples": 65536,
+            "rms": 0.01598720686039394,
+            "rms_dbfs": -35.92454811228987,
+            "peak": 0.07447224383865074,
+            "dc": -8.470329472543003e-20,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "transmit_levels": {
+            "samples": 16384,
+            "rms": 0.04422278440613184,
+            "rms_dbfs": -27.087078326892605,
+            "peak": 0.18981178104413415,
+            "dc": 0.0,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "repeat_difference_rms": 0.006404048021365977
+        },
+        {
+          "block": 1,
+          "fold": "odd",
+          "capture_levels": {
+            "samples": 65536,
+            "rms": 0.016181208207012496,
+            "rms_dbfs": -35.81978107839531,
+            "peak": 0.07173336227564314,
+            "dc": 6.776263578034403e-21,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "transmit_levels": {
+            "samples": 16384,
+            "rms": 0.04422278439594323,
+            "rms_dbfs": -27.087078328893774,
+            "peak": 0.18093183635030177,
+            "dc": -7.826584432629735e-19,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "repeat_difference_rms": 0.007332136428819151
+        },
+        {
+          "block": 2,
+          "fold": "even",
+          "capture_levels": {
+            "samples": 65536,
+            "rms": 0.016584726082937314,
+            "rms_dbfs": -35.60583393981034,
+            "peak": 0.0719108105237119,
+            "dc": -1.1519648082658485e-19,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "transmit_levels": {
+            "samples": 16384,
+            "rms": 0.044222784377630796,
+            "rms_dbfs": -27.087078332490556,
+            "peak": 0.169539183362509,
+            "dc": 1.3552527156068805e-20,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "repeat_difference_rms": 0.007801823791447906
+        },
+        {
+          "block": 3,
+          "fold": "odd",
+          "capture_levels": {
+            "samples": 65536,
+            "rms": 0.01667728584357639,
+            "rms_dbfs": -35.55749255006906,
+            "peak": 0.06705481551736993,
+            "dc": 6.098637220230962e-20,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "transmit_levels": {
+            "samples": 16384,
+            "rms": 0.04422278439157139,
+            "rms_dbfs": -27.087078329752458,
+            "peak": 0.18559582530745683,
+            "dc": 0.0,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "repeat_difference_rms": 0.008810060504357498
+        },
+        {
+          "block": 4,
+          "fold": "even",
+          "capture_levels": {
+            "samples": 65536,
+            "rms": 0.017152100662453748,
+            "rms_dbfs": -35.31365366374378,
+            "peak": 0.07021563831804824,
+            "dc": -8.131516293641283e-20,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "transmit_levels": {
+            "samples": 16384,
+            "rms": 0.044222784384166096,
+            "rms_dbfs": -27.087078331206946,
+            "peak": 0.17942065002069582,
+            "dc": -2.6291902682773483e-18,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "repeat_difference_rms": 0.009579244668530626
+        },
+        {
+          "block": 5,
+          "fold": "odd",
+          "capture_levels": {
+            "samples": 65536,
+            "rms": 0.016845943229803158,
+            "rms_dbfs": -35.470093343962596,
+            "peak": 0.06983727461992201,
+            "dc": -2.439454888092385e-19,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "transmit_levels": {
+            "samples": 16384,
+            "rms": 0.0442227844014353,
+            "rms_dbfs": -27.087078327815064,
+            "peak": 0.18025049567564175,
+            "dc": 6.386628422297425e-19,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "repeat_difference_rms": 0.009123082723456027
+        },
+        {
+          "block": 6,
+          "fold": "even",
+          "capture_levels": {
+            "samples": 65536,
+            "rms": 0.016509370134921767,
+            "rms_dbfs": -35.645389912267966,
+            "peak": 0.07411578691157454,
+            "dc": 2.981555974335137e-19,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "transmit_levels": {
+            "samples": 16384,
+            "rms": 0.04422278438987178,
+            "rms_dbfs": -27.08707833008628,
+            "peak": 0.17423465846362649,
+            "dc": 8.707498697774207e-19,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "repeat_difference_rms": 0.00789208751770227
+        },
+        {
+          "block": 7,
+          "fold": "odd",
+          "capture_levels": {
+            "samples": 65536,
+            "rms": 0.01683351644528905,
+            "rms_dbfs": -35.476503047965274,
+            "peak": 0.06984891200853367,
+            "dc": 1.4907779871675686e-19,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "transmit_levels": {
+            "samples": 16384,
+            "rms": 0.044222784396735104,
+            "rms_dbfs": -27.08707832873824,
+            "peak": 0.2000000029769183,
+            "dc": 1.90074193363865e-18,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "repeat_difference_rms": 0.008708386984783243
+        }
+      ],
+      "bands": [
+        {
+          "qualified": true,
+          "bandwidth_hz": 3700.1953125,
+          "source_power_fs2": 0.00040538188663818004,
+          "uniform_power_bps": 20220.68518624831,
+          "measured_loading_bps": 20220.685186016995,
+          "water_filling_bps": 20478.19852191289,
+          "water_filling_used_power_fs2": 0.0004053818866381801,
+          "water_filling_active_hz": 3503.90625,
+          "low_hz": 300.0,
+          "high_hz": 4000.0,
+          "signal_to_heldout_residual_db": 13.891950563936252,
+          "median_coherence": 0.9852082714636641,
+          "coherence_10th_percentile": 0.8420039695469568
+        },
+        {
+          "qualified": true,
+          "bandwidth_hz": 7699.21875,
+          "source_power_fs2": 0.0008435024528483891,
+          "uniform_power_bps": 45330.56743189699,
+          "measured_loading_bps": 45330.5674315835,
+          "water_filling_bps": 45596.56466068168,
+          "water_filling_used_power_fs2": 0.0008435024528483889,
+          "water_filling_active_hz": 7500.0,
+          "low_hz": 300.0,
+          "high_hz": 8000.0,
+          "signal_to_heldout_residual_db": 14.699939323344315,
+          "median_coherence": 0.9861744601237418,
+          "coherence_10th_percentile": 0.9180601622429226
+        },
+        {
+          "qualified": true,
+          "bandwidth_hz": 11701.171875,
+          "source_power_fs2": 0.0012819439865433995,
+          "uniform_power_bps": 71373.58920165244,
+          "measured_loading_bps": 71373.58920131893,
+          "water_filling_bps": 71643.00623914824,
+          "water_filling_used_power_fs2": 0.0012819439865433995,
+          "water_filling_active_hz": 11501.953125,
+          "low_hz": 300.0,
+          "high_hz": 12000.0,
+          "signal_to_heldout_residual_db": 15.4552935470963,
+          "median_coherence": 0.9877978933530293,
+          "coherence_10th_percentile": 0.9297148394864361
+        },
+        {
+          "qualified": true,
+          "bandwidth_hz": 17701.171875,
+          "source_power_fs2": 0.0019392853196214782,
+          "uniform_power_bps": 99195.14697931927,
+          "measured_loading_bps": 99195.14697931225,
+          "water_filling_bps": 99630.93126496473,
+          "water_filling_used_power_fs2": 0.0019392853196214786,
+          "water_filling_active_hz": 17343.75,
+          "low_hz": 300.0,
+          "high_hz": 18000.0,
+          "signal_to_heldout_residual_db": 14.777866112609725,
+          "median_coherence": 0.9820710481954431,
+          "coherence_10th_percentile": 0.8971959555258168
+        },
+        {
+          "qualified": true,
+          "bandwidth_hz": 17850.5859375,
+          "source_power_fs2": 0.0019556546594640765,
+          "uniform_power_bps": 99198.58022971964,
+          "measured_loading_bps": 99198.58022965267,
+          "water_filling_bps": 99833.88551170647,
+          "water_filling_used_power_fs2": 0.0019556546594640765,
+          "water_filling_active_hz": 17343.75,
+          "low_hz": 150.0,
+          "high_hz": 18000.0,
+          "signal_to_heldout_residual_db": 12.926032740352401,
+          "median_coherence": 0.9818296139248668,
+          "coherence_10th_percentile": 0.88878715071085
+        }
+      ],
+      "subbands": [
+        {
+          "low_hz": 300,
+          "high_hz": 2000,
+          "signal_to_heldout_residual_db": 12.401487373058032,
+          "median_bin_signal_to_residual_db": 14.226267019617335,
+          "tenth_percentile_bin_signal_to_residual_db": -6.685062050820318,
+          "median_gain_db": -5.143510978922309,
+          "median_coherence": 0.9661826389315005,
+          "heldout_residual_power_fs2": 4.143726800764588e-06,
+          "repeat_residual_power_fs2": 4.1561389489867825e-06,
+          "separate_silence_power_fs2": 3.825379273174393e-06,
+          "independent_gain_delay_test_baseline_power_fs2": 4.1525100904223455e-06,
+          "independent_gain_delay_test_adjusted_power_fs2": 4.148051813333853e-06
+        },
+        {
+          "low_hz": 2000,
+          "high_hz": 4000,
+          "signal_to_heldout_residual_db": 18.828058286171828,
+          "median_bin_signal_to_residual_db": 19.555330419661594,
+          "tenth_percentile_bin_signal_to_residual_db": 13.795426160159792,
+          "median_gain_db": -6.666724470770654,
+          "median_coherence": 0.9899673968949478,
+          "heldout_residual_power_fs2": 5.643904198603347e-07,
+          "repeat_residual_power_fs2": 5.346873506189436e-07,
+          "separate_silence_power_fs2": 5.145174805098251e-07,
+          "independent_gain_delay_test_baseline_power_fs2": 5.672112713284115e-07,
+          "independent_gain_delay_test_adjusted_power_fs2": 5.661807006807987e-07
+        },
+        {
+          "low_hz": 4000,
+          "high_hz": 8000,
+          "signal_to_heldout_residual_db": 20.436958614362226,
+          "median_bin_signal_to_residual_db": 18.705708255603707,
+          "tenth_percentile_bin_signal_to_residual_db": 14.305958890881108,
+          "median_gain_db": -13.451932595399072,
+          "median_coherence": 0.9871613334229403,
+          "heldout_residual_power_fs2": 2.96242593418668e-07,
+          "repeat_residual_power_fs2": 2.6511535248823133e-07,
+          "separate_silence_power_fs2": 2.444261775216964e-07,
+          "independent_gain_delay_test_baseline_power_fs2": 2.9320504155490995e-07,
+          "independent_gain_delay_test_adjusted_power_fs2": 2.925431450454453e-07
+        },
+        {
+          "low_hz": 8000,
+          "high_hz": 12000,
+          "signal_to_heldout_residual_db": 21.139453555512855,
+          "median_bin_signal_to_residual_db": 19.892182038608574,
+          "tenth_percentile_bin_signal_to_residual_db": 14.072909909014106,
+          "median_gain_db": -11.793915895451399,
+          "median_coherence": 0.9905062019871076,
+          "heldout_residual_power_fs2": 3.050831927428386e-07,
+          "repeat_residual_power_fs2": 2.36761643838964e-07,
+          "separate_silence_power_fs2": 2.0422647020441192e-07,
+          "independent_gain_delay_test_baseline_power_fs2": 3.0625163538878387e-07,
+          "independent_gain_delay_test_adjusted_power_fs2": 3.02154394288588e-07
+        },
+        {
+          "low_hz": 12000,
+          "high_hz": 18000,
+          "signal_to_heldout_residual_db": 10.688313102886182,
+          "median_bin_signal_to_residual_db": 14.302993382395675,
+          "tenth_percentile_bin_signal_to_residual_db": 8.350734123291087,
+          "median_gain_db": -16.372355161744412,
+          "median_coherence": 0.9667476843783416,
+          "heldout_residual_power_fs2": 1.4720130236944738e-06,
+          "repeat_residual_power_fs2": 1.2952000258612848e-06,
+          "separate_silence_power_fs2": 1.2799372004823995e-06,
+          "independent_gain_delay_test_baseline_power_fs2": 1.476563130220909e-06,
+          "independent_gain_delay_test_adjusted_power_fs2": 1.4683729271917443e-06
+        }
+      ],
+      "strongest_response_regions": [
+        {
+          "frequency_hz": 952.1484375,
+          "gain_db": 1.6640104930092896,
+          "coherence": 0.9954764974782178
+        },
+        {
+          "frequency_hz": 1869.140625,
+          "gain_db": 0.05883920642383974,
+          "coherence": 0.9930823715799839
+        },
+        {
+          "frequency_hz": 1567.3828125,
+          "gain_db": -1.7553795755022343,
+          "coherence": 0.9852157350200822
+        },
+        {
+          "frequency_hz": 2739.2578125,
+          "gain_db": -3.9503934952172033,
+          "coherence": 0.9983921158076506
+        },
+        {
+          "frequency_hz": 3788.0859375,
+          "gain_db": -3.951178271739213,
+          "coherence": 0.9975339538506147
+        }
+      ],
+      "weakest_response_regions": [
+        {
+          "frequency_hz": 316.40625,
+          "gain_db": -30.84878774824044,
+          "coherence": 0.013904928778609134
+        },
+        {
+          "frequency_hz": 12524.4140625,
+          "gain_db": -26.972325768589897,
+          "coherence": 0.6004026091890907
+        },
+        {
+          "frequency_hz": 16722.65625,
+          "gain_db": -24.96749292571089,
+          "coherence": 0.1925228431738363
+        },
+        {
+          "frequency_hz": 14364.2578125,
+          "gain_db": -24.410734398513938,
+          "coherence": 0.6461421302378906
+        },
+        {
+          "frequency_hz": 15459.9609375,
+          "gain_db": -22.784512565795787,
+          "coherence": 0.9374592021631125
+        }
+      ]
+    },
+    "arithmetic_mean": {
+      "analysis": "independent_phase_crossfit_acoustic_sounder",
+      "sample_rate": 48000,
+      "qualified": true,
+      "qualification_reasons": [],
+      "capture_levels": {
+        "samples": 846720,
+        "rms": 0.035883304458756815,
+        "rms_dbfs": -28.90215140056177,
+        "peak": 0.33473896980285645,
+        "dc": 0.004681185005445284,
+        "near_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "active_capture_levels": {
+        "samples": 524288,
+        "rms": 0.013516240628076775,
+        "rms_dbfs": -37.38288170267248,
+        "peak": 0.06696441751654397,
+        "dc": 3.006966962752766e-20,
+        "near_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "silence_levels": {
+        "samples": 55200,
+        "rms": 0.007453337093381226,
+        "rms_dbfs": -42.55298472826035,
+        "peak": 0.02844892621527615,
+        "dc": -0.0008322500642067671,
+        "near_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "silence_segment_levels": [
+        {
+          "samples": 21600,
+          "rms": 0.0070528775820126064,
+          "rms_dbfs": -43.032673084253034,
+          "peak": 0.02844892621527615,
+          "dc": -0.0013430064481515724,
+          "near_full_scale_samples": 0,
+          "outside_unit_range_samples": 0
+        },
+        {
+          "samples": 33600,
+          "rms": 0.0076997849615263545,
+          "rms_dbfs": -42.2704280714246,
+          "peak": 0.028130731939069852,
+          "dc": -0.0005039066745279637,
+          "near_full_scale_samples": 0,
+          "outside_unit_range_samples": 0
+        }
+      ],
+      "delay_samples": 34367.917103457876,
+      "delay_seconds": 0.7159982729887058,
+      "capture_samples_per_source_sample": 0.9999999384849538,
+      "clock_error_ppm": -0.06151504616802583,
+      "marker_scores": [
+        0.4562565845627036,
+        0.456029703385057,
+        0.4529384070885101
+      ],
+      "marker_delay_residual_samples": [
+        -0.010295451327692717,
+        0.02059090236434713,
+        -0.0102954515023157
+      ],
+      "period_seconds": 0.3413333333333333,
+      "cyclic_prefix_seconds": 0.17066666666666666,
+      "independent_phase_blocks": 8,
+      "repeats_per_block": 4,
+      "heldout_method": "Even phase blocks fit odd blocks and vice versa; no per-test response/phase fit. Repeat differences and independent silence PSD remain separate.",
+      "noise_model": "Maximum of smoothed held-out prediction residual, unbiased within-block repeat residual, and independent silence PSD. Includes channel motion, distortion, clock/interpolation error and finite training noise.",
+      "gain_delay_variation_diagnostic": {
+        "method": "Opposite random-phase-fold H remains fixed. Repeats 0,2,... fit one complex gain and delay within +/-2 samples; repeats 1,3,... alone evaluate it. This diagnostic does not change primary capacity/noise estimates, and cannot uniquely separate nonlinearity from motion.",
+        "fitted_real_parameters_per_block": 3,
+        "blocks": [
+          {
+            "block": 0,
+            "gain_magnitude": 0.9943684486990505,
+            "phase_rad": 0.0076177837559918095,
+            "delay_samples": -0.0046973272939458575,
+            "delay_fit_at_search_boundary": false
+          },
+          {
+            "block": 1,
+            "gain_magnitude": 0.9962929784858959,
+            "phase_rad": 0.0022148689598658565,
+            "delay_samples": -0.004935078442673403,
+            "delay_fit_at_search_boundary": false
+          },
+          {
+            "block": 2,
+            "gain_magnitude": 0.99804975072674,
+            "phase_rad": 0.00638178338978713,
+            "delay_samples": -0.017651786519680537,
+            "delay_fit_at_search_boundary": false
+          },
+          {
+            "block": 3,
+            "gain_magnitude": 0.9989667964523362,
+            "phase_rad": -0.004035876142205007,
+            "delay_samples": -0.016328801232050993,
+            "delay_fit_at_search_boundary": false
+          },
+          {
+            "block": 4,
+            "gain_magnitude": 0.9988979334379224,
+            "phase_rad": -0.0004933430194717912,
+            "delay_samples": 0.003208951240083543,
+            "delay_fit_at_search_boundary": false
+          },
+          {
+            "block": 5,
+            "gain_magnitude": 1.0001862354021374,
+            "phase_rad": -0.00570132513888842,
+            "delay_samples": 0.013360887738535773,
+            "delay_fit_at_search_boundary": false
+          },
+          {
+            "block": 6,
+            "gain_magnitude": 1.0005378082056275,
+            "phase_rad": -0.0012777977612648942,
+            "delay_samples": 0.016450167433220714,
+            "delay_fit_at_search_boundary": false
+          },
+          {
+            "block": 7,
+            "gain_magnitude": 0.9983310609091898,
+            "phase_rad": -0.001018434678913559,
+            "delay_samples": 0.013755112772318168,
+            "delay_fit_at_search_boundary": false
+          }
+        ]
+      },
+      "capacity_caveat": "Conditional stationary linear/Gaussian-equivalent model at tested RMS; not a confidence bound, Shannon measurement, modem rate, or success probability. Water filling assumes unchanged residual under different power loading.",
+      "impulse": {
+        "reference": "Time zero is strongest band-limited path after global delay/clock removal; circular window, not absolute acoustic distance.",
+        "quantile_seconds": {
+          "0.005": -2.0833333333333333e-05,
+          "0.05": 0.0,
+          "0.5": 0.0005416666666666666,
+          "0.95": 0.028541666666666667,
+          "0.995": 0.14260416666666667
+        },
+        "energy_90_percent_span_seconds": 0.028541666666666667,
+        "energy_99_percent_span_seconds": 0.142625,
+        "energy_outside_20ms_fraction": 0.057590930641774146,
+        "fold_uncertainty_total_to_response_energy_ratio": 0.001426434053086426,
+        "late_cells_above_fold_noise_floor": 229,
+        "latest_positive_late_cell_seconds": 0.25415625000000003,
+        "late_cells_above_floor_energy_fraction": 0.056639774570028716,
+        "cyclic_prefix_energy": [
+          {
+            "prefix_samples": 2048,
+            "prefix_seconds": 0.042666666666666665,
+            "window": "centered",
+            "raw_tapered_energy_outside_fraction": 0.055330298351569704,
+            "signed_coherent_energy_outside_fraction": 0.054646391071714186
+          },
+          {
+            "prefix_samples": 2048,
+            "prefix_seconds": 0.042666666666666665,
+            "window": "after_peak_with_1ms_precursor",
+            "raw_tapered_energy_outside_fraction": 0.04387525543513803,
+            "signed_coherent_energy_outside_fraction": 0.04318421071022097
+          },
+          {
+            "prefix_samples": 4096,
+            "prefix_seconds": 0.08533333333333333,
+            "window": "centered",
+            "raw_tapered_energy_outside_fraction": 0.042459744613782074,
+            "signed_coherent_energy_outside_fraction": 0.04184389949788091
+          },
+          {
+            "prefix_samples": 4096,
+            "prefix_seconds": 0.08533333333333333,
+            "window": "after_peak_with_1ms_precursor",
+            "raw_tapered_energy_outside_fraction": 0.015915161870255653,
+            "signed_coherent_energy_outside_fraction": 0.01530162319397343
+          }
+        ],
+        "cyclic_prefix_energy_method": "300 Hz cosine tapers at both excited-band edges; squared mean-fold impulse minus squared half-fold difference estimates coherent energy without clipping negative samples. Finite-period alias and band limitation remain; not a confidence bound.",
+        "noise_floor_method": "1 ms cells; coherent excess = squared mean-fold impulse minus squared half-fold difference. Listed late cells exceed 4x estimated fold-noise energy and one millionth of total impulse energy. Heuristic detectability, not a confidence interval.",
+        "window_seconds": 0.3413333333333333,
+        "caveat": "Band limitation and noisy H broaden impulse energy; paths exceeding the cyclic prefix/period can alias. This is not a certified reverberation time."
+      },
+      "blocks": [
+        {
+          "block": 0,
+          "fold": "even",
+          "capture_levels": {
+            "samples": 65536,
+            "rms": 0.013051599347830274,
+            "rms_dbfs": -37.68672532915299,
+            "peak": 0.06696441751654397,
+            "dc": 1.4568966692773966e-19,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "transmit_levels": {
+            "samples": 16384,
+            "rms": 0.04422278440613184,
+            "rms_dbfs": -27.087078326892605,
+            "peak": 0.18981178104413415,
+            "dc": 0.0,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "repeat_difference_rms": 0.006006045544236763
+        },
+        {
+          "block": 1,
+          "fold": "odd",
+          "capture_levels": {
+            "samples": 65536,
+            "rms": 0.01309024552542163,
+            "rms_dbfs": -37.66104415174153,
+            "peak": 0.057348420322517704,
+            "dc": 3.3881317890172014e-20,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "transmit_levels": {
+            "samples": 16384,
+            "rms": 0.04422278439594323,
+            "rms_dbfs": -27.087078328893774,
+            "peak": 0.18093183635030177,
+            "dc": -7.826584432629735e-19,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "repeat_difference_rms": 0.006379797505733662
+        },
+        {
+          "block": 2,
+          "fold": "even",
+          "capture_levels": {
+            "samples": 65536,
+            "rms": 0.013450303829409397,
+            "rms_dbfs": -37.42535810513392,
+            "peak": 0.05528713157374394,
+            "dc": 2.710505431213761e-20,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "transmit_levels": {
+            "samples": 16384,
+            "rms": 0.044222784377630796,
+            "rms_dbfs": -27.087078332490556,
+            "peak": 0.169539183362509,
+            "dc": 1.3552527156068805e-20,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "repeat_difference_rms": 0.006716944253949908
+        },
+        {
+          "block": 3,
+          "fold": "odd",
+          "capture_levels": {
+            "samples": 65536,
+            "rms": 0.013629593103877964,
+            "rms_dbfs": -37.31034218686964,
+            "peak": 0.05596684502702853,
+            "dc": -5.421010862427522e-20,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "transmit_levels": {
+            "samples": 16384,
+            "rms": 0.04422278439157139,
+            "rms_dbfs": -27.087078329752458,
+            "peak": 0.18559582530745683,
+            "dc": 0.0,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "repeat_difference_rms": 0.007860713138409803
+        },
+        {
+          "block": 4,
+          "fold": "even",
+          "capture_levels": {
+            "samples": 65536,
+            "rms": 0.01415420239646593,
+            "rms_dbfs": -36.982291970800254,
+            "peak": 0.06586803826559073,
+            "dc": 7.453889935837843e-20,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "transmit_levels": {
+            "samples": 16384,
+            "rms": 0.044222784384166096,
+            "rms_dbfs": -27.087078331206946,
+            "peak": 0.17942065002069582,
+            "dc": -2.6291902682773483e-18,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "repeat_difference_rms": 0.008607732155740814
+        },
+        {
+          "block": 5,
+          "fold": "odd",
+          "capture_levels": {
+            "samples": 65536,
+            "rms": 0.013690491216278515,
+            "rms_dbfs": -37.271619381086545,
+            "peak": 0.05682805627971846,
+            "dc": 2.710505431213761e-20,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "transmit_levels": {
+            "samples": 16384,
+            "rms": 0.0442227844014353,
+            "rms_dbfs": -27.087078327815064,
+            "peak": 0.18025049567564175,
+            "dc": 6.386628422297425e-19,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "repeat_difference_rms": 0.0077751806624841956
+        },
+        {
+          "block": 6,
+          "fold": "even",
+          "capture_levels": {
+            "samples": 65536,
+            "rms": 0.013402582603514528,
+            "rms_dbfs": -37.45623014854818,
+            "peak": 0.05723518190932233,
+            "dc": -1.0842021724855044e-19,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "transmit_levels": {
+            "samples": 16384,
+            "rms": 0.04422278438987178,
+            "rms_dbfs": -27.08707833008628,
+            "peak": 0.17423465846362649,
+            "dc": 8.707498697774207e-19,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "repeat_difference_rms": 0.0070314900317275586
+        },
+        {
+          "block": 7,
+          "fold": "odd",
+          "capture_levels": {
+            "samples": 65536,
+            "rms": 0.013628448749899125,
+            "rms_dbfs": -37.31107149328323,
+            "peak": 0.05488598107784031,
+            "dc": 9.486769009248164e-20,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "transmit_levels": {
+            "samples": 16384,
+            "rms": 0.044222784396735104,
+            "rms_dbfs": -27.08707832873824,
+            "peak": 0.2000000029769183,
+            "dc": 1.90074193363865e-18,
+            "near_full_scale_samples": 0,
+            "outside_unit_range_samples": 0
+          },
+          "repeat_difference_rms": 0.00784663288055927
+        }
+      ],
+      "bands": [
+        {
+          "qualified": true,
+          "bandwidth_hz": 3700.1953125,
+          "source_power_fs2": 0.00040538188663818004,
+          "uniform_power_bps": 20111.286213928586,
+          "measured_loading_bps": 20111.286213714233,
+          "water_filling_bps": 20364.686839044705,
+          "water_filling_used_power_fs2": 0.00040538188663817994,
+          "water_filling_active_hz": 3503.90625,
+          "low_hz": 300.0,
+          "high_hz": 4000.0,
+          "signal_to_heldout_residual_db": 13.40308488586106,
+          "median_coherence": 0.9836292996455291,
+          "coherence_10th_percentile": 0.8613192576985741
+        },
+        {
+          "qualified": true,
+          "bandwidth_hz": 7699.21875,
+          "source_power_fs2": 0.0008435024528483891,
+          "uniform_power_bps": 40773.943913397474,
+          "measured_loading_bps": 40773.94391315907,
+          "water_filling_bps": 41034.041280677484,
+          "water_filling_used_power_fs2": 0.0008435024528483891,
+          "water_filling_active_hz": 7502.9296875,
+          "low_hz": 300.0,
+          "high_hz": 8000.0,
+          "signal_to_heldout_residual_db": 13.551634464861786,
+          "median_coherence": 0.978508814393244,
+          "coherence_10th_percentile": 0.8635930493091591
+        },
+        {
+          "qualified": true,
+          "bandwidth_hz": 11701.171875,
+          "source_power_fs2": 0.0012819439865433995,
+          "uniform_power_bps": 65591.60350878075,
+          "measured_loading_bps": 65591.60350853424,
+          "water_filling_bps": 65855.97973778371,
+          "water_filling_used_power_fs2": 0.0012819439865433995,
+          "water_filling_active_hz": 11504.8828125,
+          "low_hz": 300.0,
+          "high_hz": 12000.0,
+          "signal_to_heldout_residual_db": 14.157226093931467,
+          "median_coherence": 0.9815455812407075,
+          "coherence_10th_percentile": 0.8880210764074773
+        },
+        {
+          "qualified": true,
+          "bandwidth_hz": 17701.171875,
+          "source_power_fs2": 0.0019392853196214782,
+          "uniform_power_bps": 92724.03108054391,
+          "measured_loading_bps": 92724.03108024214,
+          "water_filling_bps": 93056.3662845947,
+          "water_filling_used_power_fs2": 0.0019392853196214786,
+          "water_filling_active_hz": 17499.0234375,
+          "low_hz": 300.0,
+          "high_hz": 18000.0,
+          "signal_to_heldout_residual_db": 14.111977947807004,
+          "median_coherence": 0.9777654004038785,
+          "coherence_10th_percentile": 0.8266046723450559
+        },
+        {
+          "qualified": true,
+          "bandwidth_hz": 17850.5859375,
+          "source_power_fs2": 0.0019556546594640765,
+          "uniform_power_bps": 92727.1099271176,
+          "measured_loading_bps": 92727.10992675625,
+          "water_filling_bps": 93257.77851344229,
+          "water_filling_used_power_fs2": 0.0019556546594640773,
+          "water_filling_active_hz": 17499.0234375,
+          "low_hz": 150.0,
+          "high_hz": 18000.0,
+          "signal_to_heldout_residual_db": 12.11546464474458,
+          "median_coherence": 0.9774920198536642,
+          "coherence_10th_percentile": 0.8092736434655812
+        }
+      ],
+      "subbands": [
+        {
+          "low_hz": 300,
+          "high_hz": 2000,
+          "signal_to_heldout_residual_db": 12.323857081293099,
+          "median_bin_signal_to_residual_db": 15.266832441500227,
+          "tenth_percentile_bin_signal_to_residual_db": -7.039460090322169,
+          "median_gain_db": -5.409836452941543,
+          "median_coherence": 0.9710954344437943,
+          "heldout_residual_power_fs2": 3.6461651883889675e-06,
+          "repeat_residual_power_fs2": 3.699205650008513e-06,
+          "separate_silence_power_fs2": 3.5652833652859538e-06,
+          "independent_gain_delay_test_baseline_power_fs2": 3.648432583289206e-06,
+          "independent_gain_delay_test_adjusted_power_fs2": 3.644589016934939e-06
+        },
+        {
+          "low_hz": 2000,
+          "high_hz": 4000,
+          "signal_to_heldout_residual_db": 18.886365900108995,
+          "median_bin_signal_to_residual_db": 18.803882711341206,
+          "tenth_percentile_bin_signal_to_residual_db": 14.489543744961512,
+          "median_gain_db": -10.279401611440932,
+          "median_coherence": 0.9880375664931712,
+          "heldout_residual_power_fs2": 3.227988140857477e-07,
+          "repeat_residual_power_fs2": 3.04731341118704e-07,
+          "separate_silence_power_fs2": 2.8705248538131526e-07,
+          "independent_gain_delay_test_baseline_power_fs2": 3.23671676336162e-07,
+          "independent_gain_delay_test_adjusted_power_fs2": 3.2255326486078825e-07
+        },
+        {
+          "low_hz": 4000,
+          "high_hz": 8000,
+          "signal_to_heldout_residual_db": 16.369033565995892,
+          "median_bin_signal_to_residual_db": 15.793978678808728,
+          "tenth_percentile_bin_signal_to_residual_db": 10.613879235861997,
+          "median_gain_db": -18.801092004643905,
+          "median_coherence": 0.9737931580334395,
+          "heldout_residual_power_fs2": 1.540504908337331e-07,
+          "repeat_residual_power_fs2": 1.3678615094693763e-07,
+          "separate_silence_power_fs2": 1.256398207328553e-07,
+          "independent_gain_delay_test_baseline_power_fs2": 1.5277051359019683e-07,
+          "independent_gain_delay_test_adjusted_power_fs2": 1.521788801646828e-07
+        },
+        {
+          "low_hz": 8000,
+          "high_hz": 12000,
+          "signal_to_heldout_residual_db": 20.230506629308103,
+          "median_bin_signal_to_residual_db": 18.35207387244114,
+          "tenth_percentile_bin_signal_to_residual_db": 13.615223675404282,
+          "median_gain_db": -15.325070833753585,
+          "median_coherence": 0.9873542856510718,
+          "heldout_residual_power_fs2": 1.8621379424504358e-07,
+          "repeat_residual_power_fs2": 1.398059296604356e-07,
+          "separate_silence_power_fs2": 1.1580185364885757e-07,
+          "independent_gain_delay_test_baseline_power_fs2": 1.8574039287193224e-07,
+          "independent_gain_delay_test_adjusted_power_fs2": 1.7984371659008503e-07
+        },
+        {
+          "low_hz": 12000,
+          "high_hz": 18000,
+          "signal_to_heldout_residual_db": 13.709998274010161,
+          "median_bin_signal_to_residual_db": 14.459183129337006,
+          "tenth_percentile_bin_signal_to_residual_db": 5.716577697475672,
+          "median_gain_db": -18.05707306837363,
+          "median_coherence": 0.9675233128177652,
+          "heldout_residual_power_fs2": 5.17587446491218e-07,
+          "repeat_residual_power_fs2": 4.4253937168997264e-07,
+          "separate_silence_power_fs2": 4.405379346896037e-07,
+          "independent_gain_delay_test_baseline_power_fs2": 5.181845515240045e-07,
+          "independent_gain_delay_test_adjusted_power_fs2": 5.069478134556525e-07
+        }
+      ],
+      "strongest_response_regions": [
+        {
+          "frequency_hz": 955.078125,
+          "gain_db": 1.8368719058650942,
+          "coherence": 0.9968325755933155
+        },
+        {
+          "frequency_hz": 1886.71875,
+          "gain_db": -1.7951850588383176,
+          "coherence": 0.9977745186464914
+        },
+        {
+          "frequency_hz": 1271.484375,
+          "gain_db": -4.905898424150191,
+          "coherence": 0.9832562396113463
+        },
+        {
+          "frequency_hz": 2323.2421875,
+          "gain_db": -4.920488172805829,
+          "coherence": 0.9925591194136187
+        },
+        {
+          "frequency_hz": 1584.9609375,
+          "gain_db": -5.102354758058654,
+          "coherence": 0.9896895248464797
+        }
+      ],
+      "weakest_response_regions": [
+        {
+          "frequency_hz": 15665.0390625,
+          "gain_db": -32.390413905472066,
+          "coherence": 0.5114266676215834
+        },
+        {
+          "frequency_hz": 17610.3515625,
+          "gain_db": -31.447845796432734,
+          "coherence": 0.46068653000103904
+        },
+        {
+          "frequency_hz": 319.3359375,
+          "gain_db": -31.427449567596526,
+          "coherence": 0.02731282441497494
+        },
+        {
+          "frequency_hz": 7028.3203125,
+          "gain_db": -29.28386815634251,
+          "coherence": 0.6202497093510999
+        },
+        {
+          "frequency_hz": 13804.6875,
+          "gain_db": -28.821656384569003,
+          "coherence": 0.7652079415529702
+        }
+      ]
+    }
+  }
+}
