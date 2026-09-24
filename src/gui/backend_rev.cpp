@@ -159,9 +159,6 @@ struct CheckboxView : re::Checkbox {
 struct Editor : theme::RevText {
     std::size_t limit;
     bool multiline;
-    bool scroll_content=false,reveal_caret=false,read_only=false;
-    int displayed_cursor=-1;
-    float viewport_width=-1,viewport_height=-1;
     std::uint64_t cursor_end_revision=0;
     RevPlatform& platform;
     std::function<void(std::string)> changed;
@@ -169,47 +166,14 @@ struct Editor : theme::RevText {
     std::function<bool(Rev::Element::Event&)> submit_event;
     std::function<void(std::string)> error;
     std::shared_ptr<bool> alive=std::make_shared<bool>(true);
-    Editor(re::Element* parent, bool multi, std::size_t bytes, RevPlatform& services,bool scrolling=false)
-        : theme::RevText(parent,"",{&editStyle,&editFocus,&theme::rev_disabled_text,&theme::rev_disabled_control}),limit(bytes),multiline(multi),scroll_content(scrolling),platform(services) {
+    Editor(re::Element* parent, bool multi, std::size_t bytes, RevPlatform& services)
+        : theme::RevText(parent,"",{&editStyle,&editFocus,&theme::rev_disabled_text,&theme::rev_disabled_control}),limit(bytes),multiline(multi),platform(services) {
         editable=true;selectable=true;tabStop=true;
         if(multi)style->text.wrap=Wrap::BreakWord;
     }
     ~Editor() override {*alive=false;}
     void computePrimitives(re::Event& event) override {
         re::Text::computePrimitives(event);
-        if(scroll_content) {
-            const float inner_width=std::max(0.0f,resolved.getInner(Axis::Horizontal));
-            const float inner_height=std::max(0.0f,resolved.getInner(Axis::Vertical));
-            const bool resized=inner_width!=viewport_width||inner_height!=viewport_height;
-            viewport_width=inner_width;viewport_height=inner_height;
-            const float maximum_x=std::max(0.0f,width+1-inner_width);
-            const float maximum_y=std::max(0.0f,height-inner_height);
-            resolved.scroll.x=std::clamp(resolved.scroll.x,0.0f,maximum_x);
-            resolved.scroll.y=std::clamp(resolved.scroll.y,0.0f,maximum_y);
-            if((targetFlags.focus||(read_only&&reveal_caret))&&inner_width>0&&inner_height>0&&!text->lines.empty()&&
-               (reveal_caret||displayed_cursor!=cursor||resized)) {
-                const auto& row=text->lines[cursorLineIndex()];
-                const float caret_x=cursorOffsetOnLine(row),caret_y=row.rect.y-rect.y-resolved.pad.t.val;
-                const auto reveal=[](float scroll,float at,float extent,float viewport,float maximum) {
-                    if(at<scroll)scroll=at;
-                    else if(at+extent>scroll+viewport)scroll=at+extent-viewport;
-                    return std::clamp(scroll,0.0f,maximum);
-                };
-                resolved.scroll.x=reveal(resolved.scroll.x,caret_x,1,inner_width,maximum_x);
-                resolved.scroll.y=reveal(resolved.scroll.y,caret_y,row.rect.h,inner_height,maximum_y);
-            }
-            reveal_caret=false;displayed_cursor=cursor;
-            // Childless Rev text has no resolved scroll extent. Keep native
-            // glyphs, caret, selection and pointer hit testing in one space.
-            layout.rect={rect.x+resolved.pad.l.val-resolved.scroll.x,
-                rect.y+resolved.pad.t.val-resolved.scroll.y,width,height};
-            text->xPos-=resolved.scroll.x;text->yPos-=resolved.scroll.y;
-            for(auto& row:text->lines) {row.rect.x-=resolved.scroll.x;row.rect.y-=resolved.scroll.y;}
-            for(auto& strip:line->lines)for(auto& point:strip.points) {
-                point.x-=resolved.scroll.x;point.y-=resolved.scroll.y;
-            }
-            text->compute();
-        }
         // Rev exposes caret and selection strips as native line primitives.
         // Keep its glyph geometry while replacing its built-in blue highlight.
         for(auto& strip:line->lines) {
@@ -227,11 +191,10 @@ struct Editor : theme::RevText {
         selectAnchor=boundary(value,selectAnchor);selectEnd=boundary(value,selectEnd);
     }
     void apply(const std::string& value,std::uint64_t revision=0) {
-        if(content.get()!=value){content=value;clamp_positions();reveal_caret=true;}
+        if(content.get()!=value){content=value;clamp_positions();}
         if(revision&&revision!=cursor_end_revision) {
             cursor_end_revision=revision;resetVerticalCursor();
             cursor=selectAnchor=selectEnd=static_cast<int>(value.size());
-            reveal_caret=true;
         }
     }
     bool replace(const std::string& input) {
@@ -241,24 +204,9 @@ struct Editor : theme::RevText {
         if(!edit)return false;
         resetVerticalCursor();
         content=edit.text;cursor=edit.cursor;selectAnchor=selectEnd=cursor;
-        reveal_caret=true;
         if(changed) changed(edit.text);
         if(shared && shared->event) refresh(*shared->event);
         return true;
-    }
-    void mouseWheel(re::Event& event) override {
-        if(!scroll_content)return re::Text::mouseWheel(event);
-        if(targetFlags.disabled)return;
-        const auto wheel=event.mouse.wheel;
-        const float dx=event.keyboard.shift&&wheel.x==0?wheel.y:wheel.x;
-        const float dy=event.keyboard.shift&&wheel.x==0?0:wheel.y;
-        const float x=std::clamp(resolved.scroll.x-dx*re::Element::scrollSpeed,0.0f,
-            std::max(0.0f,width+1-std::max(0.0f,resolved.getInner(Axis::Horizontal))));
-        const float y=std::clamp(resolved.scroll.y-dy*re::Element::scrollSpeed,0.0f,
-            std::max(0.0f,height-std::max(0.0f,resolved.getInner(Axis::Vertical))));
-        if(x==resolved.scroll.x&&y==resolved.scroll.y)return;
-        resolved.scroll.x=x;resolved.scroll.y=y;reveal_caret=false;displayed_cursor=cursor;
-        refresh(event);event.propagate=false;
     }
     void textInput(re::Event& e) override {
         if(!targetFlags.focus || !editable || targetFlags.disabled) return;
@@ -274,10 +222,8 @@ struct Editor : theme::RevText {
         else if(error)error(result.error);
     }
     void keyDown(re::Event& e) override {
-        if(!targetFlags.focus || (!editable&&!read_only) || targetFlags.disabled) return;
+        if(!targetFlags.focus || !editable || targetFlags.disabled) return;
         clamp_positions();
-        if(read_only&&(e.keyboard.enter||e.keyboard.backspace||e.keyboard.del||
-            (e.keyboard.ctrl&&(e.keyboard.key=="v"||e.keyboard.key=="x")))) {e.propagate=false;return;}
         if(!e.keyboard.arrows.up && !e.keyboard.arrows.down)resetVerticalCursor();
         if(e.keyboard.ctrl && (e.keyboard.key=="c" || e.keyboard.key=="x")) {
             int left=std::min(selectAnchor,selectEnd),right=std::max(selectAnchor,selectEnd);
@@ -313,13 +259,7 @@ struct Editor : theme::RevText {
             if(e.keyboard.arrows.left) next=boundary(value,cursor-1);
             else if(next<static_cast<int>(value.size())) {++next;while(next<static_cast<int>(value.size()) && (static_cast<unsigned char>(value[static_cast<std::size_t>(next)])&0xc0)==0x80) ++next;}
             cursor=next;selectEnd=cursor;if(!e.keyboard.shift) selectAnchor=cursor;
-        } else {
-            const bool navigate=read_only&&(e.keyboard.arrows.up||e.keyboard.arrows.down||e.keyboard.key=="home"||e.keyboard.key=="end");
-            if(navigate)editable=true;
-            re::Text::keyDown(e);
-            if(navigate)editable=false;
-            clamp_positions();
-        }
+        } else {re::Text::keyDown(e);clamp_positions();}
         refresh(e);e.propagate=false;
     }
 };
@@ -610,9 +550,6 @@ public:
     std::optional<ui::Page> displayed_page;
     std::map<ui::Page,RevDocumentView*> documents;
     std::vector<Binding> bindings;
-    struct DocumentControlHost;
-    std::shared_ptr<bool> document_registry_alive=std::make_shared<bool>(true);
-    std::vector<DocumentControlHost*> document_control_bindings;
     std::span<const ui::Control> declarations;
     std::function<void(ui::Command)> command_observer;
     std::unique_ptr<OverlayView> overlay_view;
@@ -634,87 +571,6 @@ public:
             return function(std::forward<decltype(args)>(args)...);
         };
     }
-    struct DocumentControlHost final : RevDocumentControl {
-        RevApp& app;
-        ui::Control control;
-        std::array<std::string,4> text;
-        std::vector<Binding> bindings;
-        std::shared_ptr<bool> alive=std::make_shared<bool>(true);
-        std::weak_ptr<bool> registry_alive;
-        std::unique_ptr<theme::RevBox> root;
-        DocumentControlHost(RevApp& owner,re::Element* parent,const ui::Control& declaration)
-            :app(owner),control(declaration),registry_alive(owner.document_registry_alive),
-             root(std::make_unique<theme::RevBox>(parent)) {
-            retain(declaration);
-            root->style->overflow=Overflow::Hide;root->style->zIndex=1;
-            app.create_controls(std::span(&control,1),bindings,root.get(),{},alive);
-            app.document_control_bindings.push_back(this);
-        }
-        ~DocumentControlHost() override {
-            *alive=false;
-            if(const auto registry=registry_alive.lock();registry&&*registry) {
-                for(auto& binding:bindings)if(app.help_owner==binding.element)app.hide_help(true);
-                std::erase(app.document_control_bindings,this);
-            }
-        }
-        re::Element* element() const override {return root.get();}
-        bool busy() const override {return app.native_callback_depth!=0;}
-        void retain(const ui::Control& declaration) {
-            text={declaration.label,declaration.menu_label,declaration.help,declaration.empty_text};
-            control=declaration;control.label=text[0].c_str();control.menu_label=text[1].c_str();
-            control.help=text[2].c_str();control.empty_text=text[3].c_str();
-        }
-        void apply(const ui::Control& declaration,const ui::DocumentPresentation::Placement& placement) override {
-            retain(declaration);
-            const auto& clip=placement.clip;const auto& absolute=placement.absolute;
-            place(root.get(),{clip.x,clip.y,clip.width,clip.height});
-            root->style->visibility=placement.allocated?Visibility::Visible:Visibility::Hidden;
-            root->setDisabled(!placement.enabled);
-            const auto state=app.application.control(control);
-            const auto geometry=ui::document_control_layout(control,state.state,
-                {absolute.x-clip.x,absolute.y-clip.y,absolute.width,absolute.height});
-            app.apply_controls(bindings,std::span(&control,1),&geometry);
-            app.layout_controls(bindings,std::span(&control,1),&geometry,
-                {static_cast<int>(std::round(root->parent->rect.x))+clip.x,
-                 static_cast<int>(std::round(root->parent->rect.y))+clip.y,0,0});
-            const auto visible=[&](ui::Rect box) {
-                return box.w>0&&box.h>0&&box.x<clip.width&&box.y<clip.height&&
-                    static_cast<long long>(box.x)+box.w>0&&static_cast<long long>(box.y)+box.h>0;
-            };
-            *alive=placement.enabled&&state.visible&&state.enabled&&
-                (visible(geometry.widget)||(geometry.has_suggestions&&visible(geometry.suggestions)));
-            for(auto& binding:bindings) {
-                const auto hide_clipped=[&](re::Element* widget,ui::Rect box) {
-                    if(!widget)return;
-                    widget->setDisabled(!state.enabled||!placement.enabled||!visible(box));
-                    if(visible(box))return;
-                    widget->style->visibility=Visibility::Hidden;
-                    if(auto* focused=app.focused_control();descendant(focused,widget))app.focus_control(nullptr);
-                };
-                for(auto* widget:std::initializer_list<re::Element*>{binding.editor,binding.choice,binding.toggle,
-                        binding.button,binding.list,binding.bitmap,binding.menu})hide_clipped(widget,geometry.widget);
-                hide_clipped(binding.suggestions,geometry.suggestions);
-                if(!placement.enabled)if(auto* focused=app.focused_control();descendant(focused,root.get()))app.focus_control(nullptr);
-            }
-            if(!*alive)close_popups();
-        }
-        static bool descendant(re::Element* element,re::Element* ancestor) {
-            for(;element;element=element->parent) {
-                if(element==ancestor)return true;
-                if(element==element->parent)break;
-            }
-            return false;
-        }
-        void close_popups() {
-            for(auto& binding:bindings)for(auto* choice:{binding.choice,binding.suggestions,binding.menu})
-                if(choice)choice->closeMenu();
-        }
-        void hide() override {
-            *alive=false;root->style->visibility=Visibility::Hidden;root->setDisabled(true);close_popups();
-            if(auto* focused=app.focused_control();descendant(focused,root.get()))app.focus_control(nullptr);
-            for(auto& binding:bindings)if(app.help_owner==binding.element)app.hide_help(true);
-        }
-    };
     std::vector<void*>* group;
     ui::ServiceQueue services;
     re::Box* dialog=nullptr;
@@ -727,7 +583,6 @@ public:
     std::optional<ui::ServiceResult> dialog_result;
     bool service_probe=false;
     bool smoke_layout_pending=false;
-    DesktopLayoutState desktop_layout;
     RevApp(std::vector<void*>& windows,Launch options,std::span<const ui::Control> controls=ui::console_screen())
         :Rev::Window(windows,{.name=ui::window_title(),.size={ui::default_width,ui::default_height,{ui::min_width,ui::min_height},{0,0}}}),
          application(options),launch(application.launch),declarations(controls),group(&windows) {
@@ -757,10 +612,7 @@ public:
             if(definition.document) {documents[definition.id]=new RevDocumentView(page,launch.color,
                 [this](re::Element* parent,const BitmapSource& source)->re::Element* {
                     auto* view=new BitmapView(parent,launch.color,[this]{return details.scale;});view->set(source);return view;
-                },[this](ui::Command command){dispatch(command);},
-                [this](re::Element* parent,const ui::Control& control) {
-                    return std::make_unique<DocumentControlHost>(*this,parent,control);
-                });
+                },[this](ui::Command command){dispatch(command);});
                 documents[definition.id]->style->padding={.left=Px(ui::document_side_padding),.right=Px(ui::document_side_padding),.top=Px(ui::document_top_padding),.bottom=Px(ui::document_bottom_padding)};
             }
         }
@@ -774,7 +626,7 @@ public:
         create_controls(declarations,bindings);
         select_page(launch.page);application.start();apply();layout_desktop();show();refresh(event);
     }
-    ~RevApp() override {*document_registry_alive=false;application.close();}
+    ~RevApp() override {application.close();}
     void draw(re::Event& e) override {
         if(!native_callback_depth&&!retired_overlays.empty()) {
             retired_overlays.clear();shared->layoutDirty=true;
@@ -857,11 +709,8 @@ public:
         else if(keyboard.del)key=ui::Key::del;
         return {key,static_cast<bool>(keyboard.ctrl),static_cast<bool>(keyboard.shift),static_cast<bool>(keyboard.alt)};
     }
-    std::vector<std::span<Binding>> binding_sets() {
-        std::vector<std::span<Binding>> result{std::span<Binding>(bindings)};
-        if(overlay_view)result.emplace_back(overlay_view->bindings);
-        for(auto* host:document_control_bindings)result.emplace_back(host->bindings);
-        return result;
+    std::array<std::span<Binding>,2> binding_sets() {
+        return {std::span<Binding>(bindings),overlay_view?std::span<Binding>(overlay_view->bindings):std::span<Binding>()};
     }
     ChoiceView* active_popup() {
         for(auto set:binding_sets())for(auto& binding:set)
@@ -891,10 +740,6 @@ public:
             std::function<void(re::Element*)> collect=[&](re::Element* element) {
                 if(!allows_input(element)) return;
                 if(element->tabStop) stops.push_back(element);
-                if(auto* document=dynamic_cast<RevDocumentView*>(element)) {
-                    for(auto* child:document->tab_elements())collect(child);
-                    return;
-                }
                 for(auto* child:element->children)collect(child);
             };
             collect(dialog?static_cast<re::Element*>(dialog):static_cast<re::Element*>(this));
@@ -932,7 +777,7 @@ public:
         Rev::Window::keyDown(e);
     }
     void select_page(ui::Page page) {
-        application.select_page(page);page=application.page();if(displayed_page&&*displayed_page==page)return;
+        application.select_page(page);if(displayed_page&&*displayed_page==page)return;
         hide_help(true);
         if(displayed_page)for(auto& binding:bindings)
             if(binding.list&&!binding.control.persistent&&binding.control.page==*displayed_page)binding.list->retain_for_page_change();
@@ -992,9 +837,6 @@ public:
         help_owner=nullptr;help_text->style->visibility=Visibility::Hidden;
     }
     void update_help() {
-        // Native dropdowns own the foreground while open. Cancel the old
-        // hover so its tooltip cannot cover options or reappear on selection.
-        if(active_popup()){hide_help(true);return;}
         const bool visible=help_owner&&!dialog&&help_timing.visible(help_now());
         help_text->style->visibility=visible?Visibility::Visible:Visibility::Hidden;
         if(!visible)return;
@@ -1003,14 +845,13 @@ public:
             static_cast<int>(help_owner->rect.w),static_cast<int>(help_owner->rect.h)},details.size.width,details.size.height,height));
     }
     void show_help(const char* text,re::Element* owner) {
-        if(dialog||application.closing()||active_popup())return;
+        if(dialog||application.closing())return;
         help_text->content=text;help_owner=owner;help_timing.enter(help_now());update_help();refresh(event);
     }
     void create_controls(std::span<const ui::Control> controls,std::vector<Binding>& target,
             re::Element* parent=nullptr,std::shared_ptr<const ui::OverlayDefinition> lifetime={},std::shared_ptr<bool> alive={}) {
         for(const auto& declaration:ui::control_groups(controls)) {
             const auto& c=*declaration.control;
-            if(c.document_only&&!parent)continue;
             Binding b{c};
             b.element=new theme::RevBox(parent?parent:(c.persistent?surface:pages.at(c.page)),{&column});
             auto* container=b.element;
@@ -1029,7 +870,7 @@ public:
                 switch(c.kind) {
                 case ui::Kind::label:break;
                 case ui::Kind::text:
-                    b.editor=new Editor(container,c.multiline,c.byte_limit,platform,c.document_only&&c.multiline);
+                    b.editor=new Editor(container,c.multiline,c.byte_limit,platform);
                     b.editor->changed=callback(lifetime,alive,[this,control=&c](std::string text){application.edit(*control,std::move(text));});
                     b.editor->error=callback(lifetime,alive,[this](std::string error){application.report_error(std::move(error));});
                     b.editor->submit_event=callback(lifetime,alive,[this,control=&c](re::Event& event){return application.submit(*control,event.keyboard.ctrl,event.keyboard.shift);});
@@ -1082,11 +923,10 @@ public:
         }
     }
     void layout_desktop() {
-        const auto viewport=application.page_bounds(details.size.width,details.size.height);
-        const auto tab_bounds=application.tabs_bounds(details.size.width,details.size.height);
-        const auto tab_layout=application.tab_layout(details.size.width,details.size.height);
+        const auto viewport=ui::page_rect(details.size.width,details.size.height);
+        const auto tab_bounds=ui::tabs_rect(details.size.width,details.size.height);
         place(navigation,tab_bounds);
-        for(const auto& tab:tab_layout) {
+        for(const auto& tab:ui::tab_layout(details.size.width,details.size.height)) {
             auto frame=tab.frame;frame.x-=tab_bounds.x;frame.y-=tab_bounds.y;
             place(tabs.at(tab.page),frame);place(pages.at(tab.page),viewport);
         }
@@ -1095,25 +935,16 @@ public:
             place(overlay_view->element.get(),{0,0,details.size.width,details.size.height});
             layout_controls(overlay_view->bindings,overlay_view->definition->controls);
         }
-        update_documents();desktop_layout.applied_layout(viewport,tab_bounds,tab_layout);
-        shared->layoutDirty=true;refresh(event);
+        update_documents();shared->layoutDirty=true;refresh(event);
     }
-    BindingPresentation control_view(const Binding& binding,std::span<const ui::Control> controls,
-            const ui::ControlLayout* geometry=nullptr) {
-        if(!geometry)return binding_presentation(application,binding.control,binding.menu_items,
-            details.size.width,details.size.height,controls);
-        auto menu=binding.menu_items.empty()?std::nullopt:std::optional{application.menu(binding.menu_items)};
-        return resolve_binding(binding.control,application.control(binding.control),*geometry,std::move(menu));
-    }
-    void layout_controls(std::vector<Binding>& target,std::span<const ui::Control> controls,
-            const ui::ControlLayout* document_geometry=nullptr,ui::Rect document_origin={}) {
-        const auto viewport=application.page_bounds(details.size.width,details.size.height);
+    void layout_controls(std::vector<Binding>& target,std::span<const ui::Control> controls) {
+        const auto viewport=ui::page_rect(details.size.width,details.size.height);
         for(auto& binding:target) {
             const auto& c=binding.control;
-            const auto view=control_view(binding,controls,document_geometry);
+            const auto view=binding_presentation(application,c,binding.menu_items,details.size.width,details.size.height,controls);
             const auto& geometry=view.geometry;
             binding.presentation.applied_layout(geometry,c.font_size);
-            auto frame=geometry.frame;if(!document_geometry&&!c.surface&&!c.persistent){frame.x-=viewport.x;frame.y-=viewport.y;}place(binding.element,frame);
+            auto frame=geometry.frame;if(!c.surface&&!c.persistent){frame.x-=viewport.x;frame.y-=viewport.y;}place(binding.element,frame);
             binding.element->style->visibility=view.visible?Visibility::Visible:Visibility::Hidden;
             for(auto* widget:std::initializer_list<re::Element*>{binding.editor,binding.choice,binding.toggle,binding.button,binding.list,binding.bitmap,binding.menu})
                 if(widget)widget->style->visibility=view.widget_visible?Visibility::Visible:Visibility::Hidden;
@@ -1121,7 +952,6 @@ public:
             const auto local=[&](ui::Rect rect){rect.x-=geometry.frame.x;rect.y-=geometry.frame.y;return rect;};
             const auto popup=[&](ChoiceView* choice,ui::Rect screen) {
                 choice->font_size=c.font_size;
-                if(document_geometry){screen.x+=document_origin.x;screen.y+=document_origin.y;}
                 const auto layout=ui::popup_layout(screen,details.size.width,geometry.popup_upward);
                 if(choice->params.openUpward!=layout.open_upward) {
                     choice->optionsContainer->styles.remove(choice->params.openUpward?&re::ControlTheme::OptionsContainerUpward:&re::ControlTheme::OptionsContainer);
@@ -1149,7 +979,7 @@ public:
         }
     }
     void update_documents() {
-        const auto viewport=application.page_bounds(details.size.width,details.size.height);
+        const auto viewport=ui::page_rect(details.size.width,details.size.height);
         for(const auto& [page,view]:documents)view->apply(application.document(page,ui::document_content_width(viewport.w)));
     }
     void sync_overlay() {
@@ -1191,43 +1021,26 @@ public:
     }
     void apply() {
         application.set_service_active(dialog!=nullptr);sync_overlay();apply_layers();
-        select_page(application.page());
-        for(const auto& tab:application.tab_layout(details.size.width,details.size.height)) {
-            auto* button=tabs.at(tab.page);const auto visibility=tab.visible?Visibility::Visible:Visibility::Hidden;
-            if(button->style->visibility!=visibility) {
-                button->style->visibility=visibility;button->dirty.style=true;shared->layoutDirty=true;
-            }
-        }
-        bool relayout=desktop_layout.needs_layout(application.page_bounds(details.size.width,details.size.height),
-            application.tabs_bounds(details.size.width,details.size.height),
-            application.tab_layout(details.size.width,details.size.height));
-        relayout=apply_controls(bindings,declarations)||relayout;
+        bool relayout=apply_controls(bindings,declarations);
         if(overlay_view)relayout=apply_controls(overlay_view->bindings,overlay_view->definition->controls)||relayout;
         if(relayout)layout_desktop();
         update_plots();update_documents();services.synchronize(application.take_services(),application.closing());process_services();
         application.set_service_active(dialog!=nullptr);apply_layers();refresh(event);
     }
-    bool apply_controls(std::vector<Binding>& target,std::span<const ui::Control> controls,
-            const ui::ControlLayout* document_geometry=nullptr) {
+    bool apply_controls(std::vector<Binding>& target,std::span<const ui::Control> controls) {
         bool relayout=false;
         for(auto& b:target) {
-            const auto view=control_view(b,controls,document_geometry);
+            const auto view=binding_presentation(application,b.control,b.menu_items,details.size.width,details.size.height,controls);
             const auto& value=view.control.state;
             relayout=relayout||b.presentation.needs_layout(view.geometry,b.control.font_size);
-            if(b.label) {
-                b.label->content=view.control.label;
-                if(b.control.kind==ui::Kind::label)
-                    b.label->style->text.color=theme::rev_color(theme::text_rgb(value.text_tone,launch.color,view.enabled));
-            }
+            if(b.label)b.label->content=view.control.label;
             if(b.toggle)b.toggle->label->content=view.control.label;
             b.element->style->visibility=view.visible?Visibility::Visible:Visibility::Hidden;b.element->setDisabled(!view.enabled);
             if(help_owner==b.element) {
                 if(!b.control.help[0]||!view.visible||!view.enabled)hide_help(true);
                 else help_text->content=b.control.help;
             }
-            if(b.editor){b.editor->limit=b.control.byte_limit;b.editor->read_only=b.control.read_only;
-                b.editor->scroll_content=b.control.multiline&&(b.control.document_only||b.control.read_only||b.control.follow_tail);
-                b.editor->apply(value.text,value.text_cursor_end_revision);b.editor->editable=view.enabled&&!b.control.read_only;b.editor->setDisabled(!view.enabled);}
+            if(b.editor){b.editor->limit=b.control.byte_limit;b.editor->apply(value.text,value.text_cursor_end_revision);b.editor->editable=view.enabled;b.editor->setDisabled(!view.enabled);}
             if(b.presentation.update_options(view.options)) {
                 for(auto* menu:{b.choice,b.suggestions,b.menu})if(menu) {
                     menu->params.options.clear();

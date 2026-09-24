@@ -1,462 +1,4 @@
 // Included inside RevApp only by the native conformance executable.
-    void verify_fast_mode_visibility() {
-        const auto require=[](bool value,const char* message) {if(!value)throw std::runtime_error(message);};
-        const auto settle=[&] {apply();for(unsigned frame=0;frame<3;++frame)native_frame();};
-        const auto by_field=[&](ui::Field field) -> Binding& {
-            const auto found=std::find_if(bindings.begin(),bindings.end(),[&](const auto& b){return b.control.field==field;});
-            if(found==bindings.end())throw std::runtime_error("Rev Fast field was not materialized");
-            return *found;
-        };
-        auto* selector=by_field(ui::Field::fast_mode).choice;
-        auto* encryption=by_field(ui::Field::fast_encryption).toggle;
-
-        require(selector&&encryption&&by_field(ui::Field::fast_text).editor,"Rev Fast native controls missing");
-        require(selector->params.options.size()==3&&selector->params.options[0].name=="Fast Modem"&&
-            selector->params.options[0].value=="fast"&&selector->params.options[1].name=="Robust Modem"&&
-            selector->params.options[1].value=="robust"&&selector->params.value=="robust"&&
-            application.field(ui::Field::fast_mode).selected=="robust","Rev modem selector did not default to the declared Robust Modem choice");
-        application.toggle(ui::Field::fast_mode,true);
-        application.select(ui::Field::fast_mode,"invalid-mode");
-        require(application.field(ui::Field::fast_mode).selected=="robust","Rev obsolete toggle or invalid selection changed the modem");
-        application.edit(ui::Field::binary,"001");settle();
-        const auto resize=[&](int width,int height) {
-            const int physical_width=static_cast<int>(std::ceil(width*details.scale));
-            const int physical_height=static_cast<int>(std::ceil(height*details.scale));
-            window->setSize(physical_width,physical_height);onResize(physical_width,physical_height);
-            const auto deadline=Clock::now()+std::chrono::seconds(2);
-            do {
-                Rev::NativeWindow::pumpEvents();
-                if(window->size.w==physical_width&&window->size.h==physical_height&&details.size.width==width&&details.size.height==height)break;
-                std::this_thread::sleep_for(std::chrono::milliseconds(4));
-            }while(Clock::now()<deadline);
-            require(details.size.width==width&&details.size.height==height,"Rev modem fixture did not reach the requested viewport");
-            settle();
-        };
-        for(const auto size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
-            resize(size.first,size.second);
-            for(bool fast:{true,false}) {
-                re::Event click;selector->params.value=fast?"fast":"robust";selector->onChange(click);settle();
-                require(application.field(ui::Field::fast_mode).selected==(fast?"fast":"robust")&&allows_input(selector),
-                    "Rev modem selector callback failed or hid itself");
-                application.toggle(ui::Field::fast_mode,!fast);
-                require(application.field(ui::Field::fast_mode).selected==(fast?"fast":"robust"),"Rev obsolete toggle changed the selected modem");
-                if(fast) {
-                    require(!encryption->value&&application.enabled(ui::Command::fast_listen)&&application.field(ui::Field::fast_source).selected=="text"&&
-                        !by_field(ui::Field::fast_text).element->resolved.hidden&&by_field(ui::Field::fast_file).element->resolved.hidden,
-                        "Rev Fast did not default to plain text and keyless receive");
-                    require(!tabs.at(ui::Page::console)->resolved.hidden&&tabs.at(ui::Page::fast_modem)->resolved.hidden,"Rev Fast default tabs are incorrect");
-                    auto* brightness=by_field(ui::Field::fast_qr_brightness).choice;
-                    require(brightness&&allows_input(brightness),"Rev Fast QR brightness is unavailable");
-                    for(const auto* value:{"normal","dim","dark","off"}) {
-                        brightness->params.value=value;brightness->onChange(click);settle();
-                        require(application.field(ui::Field::fast_qr_brightness).selected==value,
-                            "Rev Fast QR choice did not update its independent brightness");
-                    }
-                    for(const auto& binding:bindings)if(binding.control.scope==ui::ScreenScope::fast)
-                        require(binding.control.command!=ui::Command::fast_listen,"Rev Fast retained a listening control");
-                    application.toggle(ui::Field::developer_mode,true);application.select_page(ui::Page::fast_modem);settle();
-                    for(const auto* channel:{"wire","acoustic","ssb","fm","acoustic-short"}) {
-                        application.select(ui::Field::fast_profile,channel);settle();
-                        for(const auto field:{ui::Field::fast_profile,ui::Field::fast_expected_snr,ui::Field::fast_symbol_rate,ui::Field::fast_mono}) {
-                            auto* choice=by_field(field).choice;
-                            require(choice&&allows_input(choice)&&choice->dropdownText,
-                                "Rev Fast profile/SNR/rate/channel dropdown is hidden, disabled or lacks its value");
-                            auto* text=choice->dropdownText;text->layoutText();
-                            require(text->width<=text->rect.w&&text->height<=text->rect.h,
-                                "Rev Fast profile/SNR/rate/channel value clips at the minimum window size");
-                        }
-                        const auto nominal=application.field(ui::Field::fast_expected_snr).options.at(1).id;
-                        const auto low=application.field(ui::Field::fast_expected_snr).options.back().id;
-                        for(const auto& target:{nominal,low,std::string(channel==std::string_view("acoustic-short")?"-6":"manual"),std::string("manual")}) {
-                            application.select(ui::Field::fast_expected_snr,target);settle();
-                            auto* text=by_field(ui::Field::fast_detail).label;
-                            require(text,"Rev Fast detail lacks its native label");text->layoutText();
-                            require(text->width<=text->rect.w&&text->height<=text->rect.h,
-                                "Rev Fast profile detail clips at the minimum window size");
-                        }
-                        application.select(ui::Field::fast_expected_snr,nominal);settle();
-                    }
-                    application.select(ui::Field::fast_profile,"wire");application.toggle(ui::Field::developer_mode,false);settle();
-                    require(application.page()==ui::Page::console,"Rev hiding details did not return to Console");
-                    unsigned plot_count=0;
-                    for(const auto& binding:bindings)if(binding.control.scope==ui::ScreenScope::fast&&binding.control.kind==ui::Kind::bitmap&&binding.control.bitmap!=ui::Bitmap::fast_qr) {
-                        ++plot_count;
-                        require(binding.bitmap&&!binding.element->resolved.hidden&&binding.bitmap->width&&binding.bitmap->height&&
-                            binding.bitmap->video->texture,"Rev Fast signal plot did not materialize and upload pixels");
-                        require(binding.label&&binding.caption,"Rev Fast plot omitted native title or caption roles");
-                        const auto presentation=application.bitmap(binding.control,binding.bitmap->width);
-                        require(!presentation.title.empty()&&!presentation.caption.empty(),"Rev Fast bitmap lost its shared title or idle caption");
-                        std::size_t painted=0;
-                        binding.bitmap->snapshot.paint(full_bitmap_request(128,48,false,true),[&](unsigned x,unsigned y,PixelBlock pixels) {
-                            validate_pixel_block(pixels);
-                            require(x+pixels.width<=128&&y+pixels.height<=48,"Rev Fast bitmap painted beyond its requested native dimensions");
-                            painted+=static_cast<std::size_t>(pixels.width)*pixels.height;
-                        });
-                        require(painted==128*48,"Rev Fast idle bitmap did not paint a complete native image");
-                    }
-                    require(plot_count==3,"Rev Fast did not materialize all three native signal plots");
-                    application.edit(ui::Field::fast_text,"Rev fast café\nSecond line");settle();
-                    encryption->checkbox->click(click);settle();
-                    require(!application.enabled(ui::Command::fast_listen)&&!application.enabled(ui::Command::fast_transmit),
-                        "Rev encrypted actions accepted a missing key");
-                    encryption->checkbox->click(click);settle();
-                    application.select(ui::Field::fast_source,"file");settle();
-                    require(by_field(ui::Field::fast_text).element->resolved.hidden&&!by_field(ui::Field::fast_file).element->resolved.hidden&&
-                        application.command_label(ui::Command::fast_transmit)=="Transmit file","Rev file choice did not replace text controls");
-                    for(const auto& binding:bindings)if(binding.control.scope==ui::ScreenScope::fast&&binding.bitmap)
-                        require(!binding.element->resolved.hidden,"Rev File view hid a Fast signal plot");
-                    application.edit(ui::Field::fast_file,"/tmp/rev-fast-source.bin");
-                    application.activate(ui::Command::fast_use_text);settle();
-                    require(application.field(ui::Field::fast_text).text=="Rev fast café\nSecond line"&&
-                        application.field(ui::Field::fast_file).text=="/tmp/rev-fast-source.bin"&&application.command_label(ui::Command::fast_transmit)=="Transmit text",
-                        "Rev source switching discarded independent drafts");
-                }
-                for(auto& b:bindings) {
-                    if(b.control.scope==ui::ScreenScope::fast) {
-                        require(b.element->resolved.hidden==!application.control(b.control).visible,"Rev Fast surface did not reconcile conditional control visibility");
-                        if(fast&&!b.element->resolved.hidden)require(b.element->rect.x>=0&&b.element->rect.y>=0&&
-                            b.element->rect.x+b.element->rect.w<=details.size.width&&b.element->rect.y+b.element->rect.h<=details.size.height,
-                            "Rev Fast native control escaped its viewport");
-                        else if(!fast&&b.button) {re::Event stale;b.button->click(stale);}
-                    } else if(fast&&b.control.scope==ui::ScreenScope::regular)
-                        require(b.element->resolved.hidden,"Rev Fast retained a regular native control");
-                }
-                if(fast)for(const auto& [id,button]:tabs)require(button->resolved.hidden==(id!=ui::Page::console),"Rev Fast tab visibility is inconsistent");
-                require(application.field(ui::Field::binary).text=="001"&&application.take_services().empty(),
-                    "Rev mode switching or stale callbacks changed the regular source or opened a service");
-            }
-        }
-        resize(ui::default_width,ui::default_height);
-        re::Event legacy_selection;selector->params.value="legacy";selector->onChange(legacy_selection);settle();
-        auto* transcript=by_field(ui::Field::legacy_transcript).editor;
-        auto* draft=by_field(ui::Field::legacy_text).editor;
-        require(transcript&&draft&&transcript->read_only&&!transcript->editable&&transcript->selectable&&
-            !transcript->targetFlags.disabled&&transcript->scroll_content&&draft->editable&&
-            !by_field(ui::Field::legacy_transcript).element->resolved.hidden&&by_field(ui::Field::legacy_carrier).editor->content.get()=="1500",
-            "Rev Legacy text terminal did not retain selectable read-only received text");
-        const auto submit_legacy=[&](bool ctrl,bool shift) {
-            re::Event enter;enter.keyboard.enter.id=1;
-            enter.keyboard.ctrl.id=ctrl?1:0;enter.keyboard.shift.id=shift?1:0;
-            return draft->submit_event(enter);
-        };
-        require(draft->submit_event&&draft->content.get().empty()&&!submit_legacy(false,false)&&
-            !submit_legacy(false,true)&&!submit_legacy(true,true)&&submit_legacy(true,false)&&
-            application.field(ui::Field::legacy_text).text.empty(),
-            "Rev Legacy draft did not reserve only Ctrl+Enter for transmission");
-        transcript->apply("Received text\nSent text");
-        require(!transcript->replace("unwanted")&&transcript->content.get()=="Received text\nSent text","Rev Legacy transcript accepted editing");
-        for(const auto& binding:bindings)if(binding.control.scope==ui::ScreenScope::regular||binding.control.scope==ui::ScreenScope::fast)
-            require(binding.element->resolved.hidden,"Rev Legacy exposed another modem's native controls");
-        selector->params.value="robust";selector->onChange(legacy_selection);settle();
-    }
-    void verify_developer_mode_visibility() {
-        const auto require=[](bool condition,const char* message) {if(!condition)throw std::runtime_error(message);};
-        const auto settle=[&] {apply();for(unsigned frame=0;frame<3;++frame)native_frame();};
-        settle();
-        auto toggle_binding=std::find_if(bindings.begin(),bindings.end(),[](const auto& binding) {
-            return binding.control.field==ui::Field::developer_mode;
-        });
-        auto clear_binding=std::find_if(bindings.begin(),bindings.end(),[](const auto& binding) {
-            return binding.control.command==ui::Command::clear_received;
-        });
-        require(toggle_binding!=bindings.end()&&toggle_binding->toggle&&clear_binding!=bindings.end(),
-            "Rev developer mode fixture lacks its toggle or Clear received button");
-        auto* toggle=toggle_binding->toggle;
-        require(!toggle->value&&allows_input(toggle),"Rev developer mode did not start unchecked and available");
-        require(toggle->rect.x+toggle->rect.w<clear_binding->element->rect.x&&toggle->rect.y==clear_binding->element->rect.y,
-            "Rev developer mode is not immediately left of Clear received");
-        const auto frame=[](const re::Element* element) {
-            return std::array<float,4>{element->rect.x,element->rect.y,element->rect.w,element->rect.h};
-        };
-        const auto geometry=[](re::Element* element) {
-            return std::array<float,4>{element->style->position.left.val,element->style->position.top.val,
-                element->style->size.width.val,element->style->size.height.val};
-        };
-        const auto shared_geometry=[&] {
-            const auto expected=[](ui::Rect rect) {
-                return std::array<float,4>{static_cast<float>(rect.x),static_cast<float>(rect.y),
-                    static_cast<float>(rect.w),static_cast<float>(rect.h)};
-            };
-            const auto viewport=application.page_bounds(details.size.width,details.size.height);
-            const auto tab_bounds=application.tabs_bounds(details.size.width,details.size.height);
-            require(geometry(navigation)==expected(tab_bounds),"Rev modem switch retained stale tab container geometry");
-            for(const auto& [id,page]:pages)require(geometry(page)==expected(viewport),
-                "Rev modem switch retained a stale page viewport");
-            for(const auto& tab:application.tab_layout(details.size.width,details.size.height)) {
-                auto local=tab.frame;local.x-=tab_bounds.x;local.y-=tab_bounds.y;
-                auto* button=tabs.at(tab.page);
-                require(geometry(button)==expected(local)&&button->resolved.hidden==!tab.visible,
-                    "Rev modem switch retained stale tab placement or visibility");
-                if(tab.visible)require(frame(button)==expected(tab.frame),
-                    "Rev visible tabs overlap after a modem or developer mode change");
-            }
-            verify_layout();
-        };
-        std::vector<std::pair<re::Element*,std::array<float,4>>> preserved;
-        for(auto& binding:bindings)if(binding.control.persistent)preserved.push_back({binding.element,geometry(binding.element)});
-        for(const auto& [id,button]:tabs)preserved.push_back({button,geometry(button)});
-        const auto set_mode=[&](bool checked) {
-            if(toggle->value!=checked) {re::Event click;toggle->checkbox->click(click);}
-            settle();
-        };
-        const auto selector_binding=std::find_if(bindings.begin(),bindings.end(),[](const auto& binding) {
-            return binding.control.field==ui::Field::fast_mode;
-        });
-        require(selector_binding!=bindings.end()&&selector_binding->choice,"Rev modem transition fixture lacks its selector");
-        auto* selector=selector_binding->choice;
-        // Exercise mode-only geometry changes at a fixed window size. No
-        // unrelated edit or resize may repair the retained desktop first.
-        for(bool checked:{false,true}) {
-            set_mode(checked);
-            for(const auto* mode:{"fast","robust"}) {
-                re::Event change;selector->params.value=mode;selector->onChange(change);settle();shared_geometry();
-            }
-        }
-        set_mode(false);
-        set_mode(true);
-        std::vector<std::pair<re::Element*,std::array<float,4>>> visible_bounds;
-        for(const auto& [element,bounds]:preserved)if(!element->resolved.hidden)visible_bounds.push_back({element,frame(element)});
-        set_mode(false);
-        for(bool checked:{false,true,false,true,false}) {
-            set_mode(checked);shared_geometry();
-            require(application.field(ui::Field::developer_mode).checked==checked&&allows_input(toggle),
-                "Rev developer mode callback failed or hid its own toggle");
-            for(const auto& binding:bindings)if(binding.control.developer_only&&binding.control.persistent)
-                require(binding.element->resolved.hidden==!checked,
-                    "Rev developer mode did not hide/show an entire advanced control in place");
-            for(const auto& definition:ui::pages()) {
-                auto* button=tabs.at(definition.id);
-                require(button->resolved.hidden==(definition.id==ui::Page::fast_modem||(!checked&&definition.developer_only)),
-                    "Rev developer mode did not refresh native tab visibility without resizing");
-                if(button->resolved.hidden) {
-                    require(!allows_input(button),"Rev hidden advanced tab retained keyboard input eligibility");
-                    re::Event click;button->click(click);
-                    require(application.page()==ui::Page::console&&displayed_page==ui::Page::console,
-                        "Rev stale native callback selected a hidden advanced tab");
-                }
-            }
-            for(const auto& [element,bounds]:preserved)require(geometry(element)==bounds,
-                "Rev toggling developer mode moved an existing native control or tab");
-            for(const auto& [element,bounds]:visible_bounds)if(!element->resolved.hidden)require(frame(element)==bounds,
-                "Rev developer mode changed the rendered position of a visible control or tab");
-        }
-        for(const auto& definition:ui::pages())if(definition.developer_only&&definition.id!=ui::Page::fast_modem) {
-            set_mode(true);re::Event click;tabs.at(definition.id)->click(click);settle();
-            require(application.page()==definition.id&&displayed_page==definition.id,
-                "Rev enabled advanced tab could not be selected");
-            focus_control(tabs.at(definition.id));set_mode(false);
-            require(application.page()==ui::Page::console&&displayed_page==ui::Page::console&&
-                !pages.at(ui::Page::console)->resolved.hidden&&pages.at(definition.id)->resolved.hidden&&
-                !tabs.at(definition.id)->targetFlags.focus,
-                "Rev hiding the selected advanced tab did not display Console and clear hidden focus");
-        }
-        select_page(ui::Page::compression);settle();
-        require(application.page()==ui::Page::console&&displayed_page==ui::Page::console,
-            "Rev displayed a requested page rejected by the shared application");
-    }
-    void verify_document_editor_scrolling() {
-        auto editor=std::make_unique<Editor>(this,true,8192,platform,true);
-        place(editor.get(),{40,280,210,56});editor->style->text.size=11_px;
-        const std::string value="zero\none\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nlast";
-        editor->apply(value);focus_control(editor.get());
-        const auto settle=[&] {for(unsigned frame=0;frame<3;++frame)native_frame();};
-        settle();
-        if(editor->height<=editor->resolved.getInner(Axis::Vertical)||editor->resolved.scroll.y!=0)
-            throw std::runtime_error("Rev document editor did not retain a scrollable multiline extent at its first line");
-        re::Event wheel;wheel.mouse.wheel.y=-120;editor->mouseWheel(wheel);settle();
-        const float offset=editor->resolved.scroll.y;
-        if(wheel.propagate||offset<=0||editor->text->lines.front().rect.y>=editor->rect.y)
-            throw std::runtime_error("Rev document editor wheel did not move native glyph geometry");
-        settle();
-        if(editor->resolved.scroll.y!=offset)
-            throw std::runtime_error("Rev document editor repaint undid an intentional wheel scroll");
-        const float top=editor->rect.y+editor->resolved.pad.t.val;
-        const auto visible=std::find_if(editor->text->lines.begin(),editor->text->lines.end(),[&](const auto& row) {
-            return row.rect.y>=top&&row.rect.y+row.rect.h<=editor->rect.y+editor->rect.h-editor->resolved.pad.b.val;
-        });
-        if(visible==editor->text->lines.end())throw std::runtime_error("Rev document editor has no visible scrolled text line");
-        const auto expected=static_cast<int>(visible->start);
-        re::Event click;click.mouse.lb.pressTimeDiff=1000;
-        click.mouse.pos={visible->rect.x,visible->rect.y+visible->rect.h*.5f};
-        editor->mouseDown(click);settle();
-        if(editor->cursor!=expected||expected==0)
-            throw std::runtime_error("Rev document editor hit testing did not follow the scrolled line: expected="+
-                std::to_string(expected)+" actual="+std::to_string(editor->cursor)+" scroll="+
-                std::to_string(editor->resolved.scroll.y)+" point="+std::to_string(click.mouse.pos.x)+","+
-                std::to_string(click.mouse.pos.y));
-        editor->apply(value,1);settle();
-        const auto caret_visible=[&] {
-            if(editor->line->lines.empty())return false;
-            const auto& caret=editor->line->lines.front();
-            return caret.points.size()==2&&caret.points.front().x>=editor->rect.x+editor->resolved.pad.l.val-1&&
-                caret.points.front().x<=editor->rect.x+editor->rect.w-editor->resolved.pad.r.val+1&&
-                caret.points.front().y>=editor->rect.y+editor->resolved.pad.t.val-1&&
-                caret.points.back().y<=editor->rect.y+editor->rect.h-editor->resolved.pad.b.val+1;
-        };
-        if(editor->cursor!=static_cast<int>(value.size())||editor->resolved.scroll.y<=offset||!caret_visible())
-            throw std::runtime_error("Rev document editor did not reveal its ending caret with the final line");
-        wheel.propagate=true;wheel.mouse.wheel.y=10000;editor->mouseWheel(wheel);settle();
-        if(wheel.propagate||editor->resolved.scroll.y!=0)
-            throw std::runtime_error("Rev document editor could not scroll back to its first line");
-        wheel.propagate=true;editor->mouseWheel(wheel);
-        if(!wheel.propagate)throw std::runtime_error("Rev document editor swallowed wheel input at its scroll boundary");
-        editor->apply("short");settle();
-        if(editor->resolved.scroll.x||editor->resolved.scroll.y)
-            throw std::runtime_error("Rev document editor retained scroll beyond shortened content");
-        editor->style->text.wrap=Wrap::False;
-        const std::string wide(100,'W');editor->apply(wide,2);settle();
-        if(editor->resolved.scroll.x<=0||!caret_visible())
-            throw std::runtime_error("Rev document editor did not reveal an unwrapped horizontal caret");
-        const auto& row=editor->text->lines.front();
-        if(editor->getCursorPos({editor->rect.x+editor->resolved.pad.l.val,row.rect.y+row.rect.h*.5f})<=0)
-            throw std::runtime_error("Rev document editor horizontal hit testing ignored its scroll offset");
-        wheel.propagate=true;wheel.keyboard.shift.id=1;wheel.mouse.wheel.y=10000;editor->mouseWheel(wheel);settle();
-        if(wheel.propagate||editor->resolved.scroll.x!=0)
-            throw std::runtime_error("Rev document editor Shift+wheel did not reveal its horizontal start");
-        focus_control(nullptr);editor.reset();native_frame();
-    }
-    void verify_launch_command_editor() {
-        select_page(ui::Page::planner);
-        const auto settle=[&] {for(unsigned frame=0;frame<4;++frame){apply();native_frame();}};
-        settle();
-        const auto find_host=[&]() -> DocumentControlHost* {
-            for(auto* host:document_control_bindings)if(host->control.field==ui::Field::planner_command)return host;
-            throw std::runtime_error("Rev launch command has no retained native editor");
-        };
-        auto* host=find_host();auto* editor=host->bindings.front().editor;
-        if(!editor||!editor->multiline||!editor->scroll_content||editor->limit!=8192||
-           !host->control.tab_navigation||!allows_input(editor))
-            throw std::runtime_error("Rev launch command lacks native multiline scrolling or focus navigation");
-        application.edit(ui::Field::message,"e");settle();
-        const auto old_rate=application.field(ui::Field::bandwidth).text;
-        const auto old_target=application.field(ui::Field::snr).text;
-        std::string pasted="--unsupported-setting 1";
-        for(unsigned line=0;line<12;++line)pasted+="\n--line "+std::to_string(line);
-        focus_control(editor);editor->selectAll();
-        if(!editor->replace(pasted))throw std::runtime_error("Rev launch command paste was rejected");
-        settle();
-        if(find_host()!=host||editor->content.get()!=pasted||
-           application.field(ui::Field::planner_command).text!=pasted||editor->resolved.scroll.y<=0)
-            throw std::runtime_error("Rev launch command lost its pasted text, host or ending caret scroll");
-        editor->cursor=7;editor->selectAnchor=3;editor->selectEnd=7;settle();
-        application.dispatch(ui::Command::planner_toggle_details);settle();
-        if(find_host()!=host||!editor->targetFlags.focus||editor->cursor!=7||editor->selectAnchor!=3||editor->selectEnd!=7)
-            throw std::runtime_error("Rev launch command document refresh lost native selection or focus");
-        editor->cursor=editor->selectAnchor=editor->selectEnd=static_cast<int>(pasted.size());
-        re::Event enter;enter.keyboard.enter.id=1;editor->keyDown(enter);settle();
-        if(editor->content.get()!=pasted+"\n"||application.field(ui::Field::bandwidth).text!=old_rate||
-           application.field(ui::Field::snr).text!=old_target||application.field(ui::Field::message).text!="e"||
-           application.enabled(ui::Command::cancel))
-            throw std::runtime_error("Rev command Enter applied settings, transmitted or failed to insert a newline");
-        auto* document=documents.at(ui::Page::planner);const auto& order=document->tab_elements();
-        const auto position=std::find(order.begin(),order.end(),host->element());
-        if(position==order.end()||std::next(position)==order.end())
-            throw std::runtime_error("Rev command editor has no following Load action in native Tab order");
-        re::Event tab;tab.keyboard.tab.id=1;keyDown(tab);
-        if(!(*std::next(position))->targetFlags.focus)
-            throw std::runtime_error("Rev command Tab did not reach its following Load action");
-        application.dispatch(ui::Command::planner_load_command);settle();
-        if(application.field(ui::Field::planner_command).text!=pasted+"\n"||
-           application.field(ui::Field::status).text.find("unsupported-setting")==std::string::npos||
-           application.field(ui::Field::bandwidth).text!=old_rate||application.enabled(ui::Command::cancel))
-            throw std::runtime_error("Rev command Load did not preserve malformed input and existing settings");
-    }
-    void verify_inline_document_editor() {
-        select_page(ui::Page::planner);
-        const auto settle=[&] {
-            for(unsigned frame=0;frame<4;++frame){apply();native_frame();}
-        };
-        settle();
-        const auto find_host=[&]() -> DocumentControlHost* {
-            for(auto* host:document_control_bindings)if(host->control.field==ui::Field::planner_target)return host;
-            throw std::runtime_error("Rev inline document fixture has no retained planner control");
-        };
-        auto* host=find_host();auto* editor=host->bindings.front().editor;
-        auto* presets=host->bindings.front().suggestions;auto* document=documents.at(ui::Page::planner);
-        if(!editor||!presets||presets->params.options.size()<3||!allows_input(editor)||
-           editor->rect.y<application.page_bounds(details.size.width,details.size.height).y||
-           document->tab_elements().empty()||document->tab_elements().front()!=host->element())
-            throw std::runtime_error("Rev inline editor/presets did not use the first document control position: editor="+
-                std::to_string(editor!=nullptr)+" presets="+std::to_string(presets?presets->params.options.size():0)+
-                " input="+std::to_string(editor&&allows_input(editor))+" y="+std::to_string(editor?editor->rect.y:0)+
-                " page_y="+std::to_string(application.page_bounds(details.size.width,details.size.height).y)+
-                " tab_first="+std::to_string(!document->tab_elements().empty()&&document->tab_elements().front()==host->element()));
-        if(std::any_of(bindings.begin(),bindings.end(),[](const auto& binding){return binding.control.field==ui::Field::planner_target;}))
-            throw std::runtime_error("Rev document-only editor was duplicated in the persistent desktop");
-        show_help(host->control.help,host->bindings.front().element);help_timing.enter(help_now()-2);update_help();native_frame();
-        if(help_text->resolved.hidden)throw std::runtime_error("Rev inline popup tooltip fixture did not become visible");
-        presets->openMenu();update_help();native_frame();
-        if(!presets->open||!help_text->resolved.hidden||help_owner)
-            throw std::runtime_error("Rev native preset menu remained obscured by its previous hover tooltip");
-        presets->closeMenu();native_frame();
-        focus_control(editor);editor->apply("-");editor->changed("-");settle();
-        if(find_host()!=host||host->bindings.front().editor!=editor||!editor->targetFlags.focus||
-           editor->content.get()!="-"||application.field(ui::Field::planner_target).text!="-")
-            throw std::runtime_error("Rev invalid inline prefix replaced the native editor or lost focus/text");
-        editor->apply("-18");editor->cursor=2;editor->selectAnchor=1;editor->selectEnd=2;editor->changed("-18");settle();
-        if(!editor->targetFlags.focus||editor->cursor!=2||editor->selectAnchor!=1||editor->selectEnd!=2)
-            throw std::runtime_error("Rev document replacement changed the inline editor caret or selection");
-        re::Event enter;enter.keyboard.enter.id=1;
-        if(!editor->submit_event(enter))throw std::runtime_error("Rev inline editor did not retain Enter submission");
-        settle();
-        if(editor->content.get()!=application.field(ui::Field::planner_target).text||
-           !application.field(ui::Field::planner_target).display_text.empty())
-            throw std::runtime_error("Rev inline Enter failed to display the accepted target");
-        const auto before=editor->content.get();
-        const auto option=std::find_if(presets->params.options.begin(),presets->params.options.end(),
-            [&](const auto& item){return item.value!=before;});
-        if(option==presets->params.options.end())throw std::runtime_error("Rev inline preset fixture has no alternate value");
-        presets->params.value=option->value;re::Event picked;presets->onChange(picked);settle();
-        if(editor->content.get()==before||!application.field(ui::Field::planner_target).display_text.empty())
-            throw std::runtime_error("Rev inline preset did not edit and commit through its normal binding");
-        focus_control(editor);re::Event tab;tab.keyboard.tab.id=1;keyDown(tab);
-        if(!presets->dropdown->targetFlags.focus)throw std::runtime_error("Rev inline editor Tab order skipped its preset control");
-        if(document->tab_elements().size()<3)throw std::runtime_error("Rev inline document lacks the adjacent target actions");
-        tab.propagate=true;keyDown(tab);
-        if(!document->tab_elements()[1]->targetFlags.focus)throw std::runtime_error("Rev inline preset Tab order skipped the next document action");
-        tab.propagate=true;keyDown(tab);
-        if(!document->tab_elements()[2]->targetFlags.focus)throw std::runtime_error("Rev document actions did not retain their visual Tab order");
-        tab.keyboard.shift.id=1;tab.propagate=true;keyDown(tab);tab.propagate=true;keyDown(tab);
-        if(!presets->dropdown->targetFlags.focus)throw std::runtime_error("Rev reverse Tab order skipped the inline preset control");
-        focus_control(editor);application.dispatch(ui::Command::planner_toggle_details);settle();
-        if(find_host()!=host||!editor->targetFlags.focus)
-            throw std::runtime_error("Rev document details replaced the inline editor or stole focus");
-        const auto old_y=editor->rect.y;auto* page=pages.at(ui::Page::planner);
-        page->resolved.scroll.y=230;shared->layoutDirty=true;settle();
-        if(editor->rect.y>=old_y||allows_input(editor)||editor->targetFlags.focus)
-            throw std::runtime_error("Rev scrolled-out inline editor remained interactive or focused");
-        page->resolved.scroll.y=0;shared->layoutDirty=true;settle();focus_control(editor);
-        if(!allows_input(editor)||!editor->targetFlags.focus)
-            throw std::runtime_error("Rev scrolling back did not restore the retained inline editor");
-        // A visible label must not leave its completely clipped editor active.
-        ui::DocumentNode clipped;clipped.height=ui::label_height;
-        ui::DocumentNode input;input.kind=ui::DocumentKind::control;input.height=45;input.control=host->control;
-        clipped.children.push_back(input);document->apply(std::make_shared<const ui::DocumentNode>(clipped));
-        for(unsigned frame=0;frame<3;++frame){document->update();native_frame();}
-        if(allows_input(editor)||editor->targetFlags.focus)
-            throw std::runtime_error("Rev label-only document clip retained editable input or focus");
-        settle();host=find_host();editor=host->bindings.front().editor;focus_control(editor);
-        const auto stale_edit=editor->changed;const auto saved=application.field(ui::Field::planner_target).text;
-        const auto previous_count=document_control_bindings.size();
-        const auto owned_count=static_cast<std::size_t>(std::count_if(document_control_bindings.begin(),document_control_bindings.end(),
-            [&](const auto* retained){return retained->element()->parent==document;}));
-        auto empty=std::make_shared<const ui::DocumentNode>();
-        {
-            NativeCallback callback(native_callback_depth);document->apply(empty);
-            if(document_control_bindings.size()!=previous_count||allows_input(editor)||editor->targetFlags.focus)
-                throw std::runtime_error("Rev document retirement destroyed an active callback or retained input");
-        }
-        document->apply(empty);
-        if(!owned_count||document_control_bindings.size()+owned_count!=previous_count)
-            throw std::runtime_error("Rev absent document control was not reclaimed and unregistered");
-        stale_edit("-99");
-        if(application.field(ui::Field::planner_target).text!=saved)
-            throw std::runtime_error("Rev retired document control accepted a queued edit");
-        settle();editor=find_host()->bindings.front().editor;focus_control(editor);
-        select_page(ui::Page::console);settle();
-        if(allows_input(editor)||editor->targetFlags.focus)
-            throw std::runtime_error("Rev hidden document page retained inline editor input or focus");
-    }
     void native_frame() {
         // refresh queues an OS paint; an immediate pump can observe no event
         // until that request has completed its native round trip. Preserve the
@@ -470,20 +12,6 @@
             if(Clock::now()>=deadline)throw std::runtime_error("Rev native probe timed out awaiting its requested paint");
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
-    }
-    void verify_estimate_warning_colors() {
-        test::estimate_warning_fields(application,[&] {
-            application.tick();apply();native_frame();std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        },[&](ui::Field field,ui::TextTone tone) {
-            const auto binding=std::find_if(bindings.begin(),bindings.end(),[&](const auto& item){return item.control.field==field;});
-            if(application.field(field).text_tone!=tone||binding==bindings.end()||!binding->label)
-                throw std::runtime_error("Rev estimate warning fixture has no matching shared label");
-            const auto color=theme::text_rgb(tone,launch.color);
-            const Rev::Core::Color expected{color.red/255.0f,color.green/255.0f,color.blue/255.0f,1};
-            const auto actual=binding->label->resolved.style.text.color;
-            if(actual.r!=expected.r||actual.g!=expected.g||actual.b!=expected.b||actual.a!=expected.a)
-                throw std::runtime_error("Rev estimate label ignored or retained a shared warning tone");
-        });
     }
     void verify_palette_roles() {
         native_frame();
@@ -637,14 +165,6 @@
             if(active&&(help_owner!=gestures||help_text->content.get()!=controls[3].help))
                 throw std::runtime_error("Rev retained control ignored newly declared help");
             if(!active&&help_owner==gestures)throw std::runtime_error("Rev retained removed shared help");
-        }
-        for(bool readonly:{true,false}) {
-            test::read_only_stage(controls,readonly);apply();
-            for(unsigned frame=0;frame<3;++frame)native_frame();
-            input->apply("");editor->apply("");
-            if(input->targetFlags.disabled||editor->targetFlags.disabled||input->editable==readonly||editor->editable==readonly||
-               input->replace("a")==readonly||editor->replace("a")==readonly)
-                throw std::runtime_error("Rev retained editors ignored selectable read-only policy");
         }
         command_observer={};list->activate={};
         auto* toggle=bindings[4].toggle;
@@ -1228,11 +748,6 @@
     }
     void verify_overlay_composition() {
         const auto page=application.page();const auto windows=group->size();auto* native_window=window;
-        const auto target=std::find_if(ui::pages().rbegin(),ui::pages().rend(),[&](const auto& definition) {
-            return definition.id!=page&&!tabs.at(definition.id)->resolved.hidden;
-        });
-        if(target==ui::pages().rend())throw std::runtime_error("Rev overlay fixture lacks another visible navigation tab");
-        const auto background_page=target->id;
         const auto callsign=application.field(ui::Field::callsign).text;
         const auto brightness=application.field(ui::Field::qr_brightness).selected;
         const bool repeatable=application.field(ui::Field::repeatable).checked;
@@ -1298,7 +813,7 @@
         re::Event remapped;remapped.keyboard.escape.id=1;keyDown(remapped);
         if(!application.overlay())throw std::runtime_error("Rev hard-coded Escape instead of using the shared overlay key map");
         dispatch(ui::Command::dismiss_overlay);
-        re::Event tab_click;tabs.at(background_page)->click(tab_click);
+        re::Event tab_click;tabs.at(ui::pages().back().id)->click(tab_click);
         if(!application.overlay()||application.page()!=page)throw std::runtime_error("Rev blocked overlay leaked desktop document or tab actions");
         service_probe=true;services.enqueue({{710,ui::ServiceKind::prompt,"Deferred shared overlay prompt",""}});process_services();
         if(dialog||services.current())throw std::runtime_error("Rev overlay ignored shared service deferral");
@@ -1322,7 +837,7 @@
         auto unblocked=fixture();unblocked.policy.hide_background=false;unblocked.policy.block_background=false;
         unblocked.policy.restore_focus=false;unblocked.policy.dismiss_on_page_change=false;
         application.show_overlay(std::move(unblocked));apply();native_overlay_frame();
-        const auto next=background_page;re::Event navigate;tabs.at(next)->click(navigate);apply();native_overlay_frame();
+        const auto next=ui::pages().back().id;re::Event navigate;tabs.at(next)->click(navigate);apply();native_overlay_frame();
         if(application.page()!=next||!application.overlay()||surface->targetFlags.disabled||overlay_view->element->interceptHits)
             throw std::runtime_error("Rev overlay ignored shared background eligibility or page persistence");
         focus_control(overlay_binding(703).editor);dispatch(ui::Command::dismiss_overlay);apply();native_frame();
@@ -1387,12 +902,7 @@
             if(overlay_view->element->parent!=this||overlay_view->element->shared!=shared||overlay_view->element->rect.x!=0||overlay_view->element->rect.y!=0||
                overlay_view->element->rect.w!=details.size.width||overlay_view->element->rect.h!=details.size.height||
                overlay_bitmap().bitmap->width!=static_cast<unsigned>(width)||overlay_bitmap().bitmap->height!=static_cast<unsigned>(height))
-                throw std::runtime_error("Rev expanded bitmap does not fill the existing app client area: overlay="+
-                    std::to_string(overlay_view->element->rect.x)+","+std::to_string(overlay_view->element->rect.y)+","+
-                    std::to_string(overlay_view->element->rect.w)+","+std::to_string(overlay_view->element->rect.h)+
-                    " client="+std::to_string(details.size.width)+","+std::to_string(details.size.height)+
-                    " bitmap="+std::to_string(overlay_bitmap().bitmap->width)+","+std::to_string(overlay_bitmap().bitmap->height)+
-                    " expected="+std::to_string(width)+","+std::to_string(height));
+                throw std::runtime_error("Rev expanded bitmap does not fill the existing app client area");
         };
         const auto verify_visible_pixels=[&](const char* phase) {
             auto& binding=overlay_bitmap();auto* bitmap=binding.bitmap;
@@ -1529,14 +1039,8 @@
                 " actual logical="+std::to_string(details.size.width)+","+std::to_string(details.size.height)+" native="+std::to_string(window->size.w)+","+std::to_string(window->size.h)+
                 " scale="+std::to_string(details.scale)+" nativeScale="+std::to_string(window->scale));
             apply();scroll_page(1);native_frame();verify_layout();
-            for(const auto& binding:bindings)if(binding.control.field==ui::Field::mono&&!binding.element->resolved.hidden) {
-                if(!binding.choice||!binding.choice->dropdownText)throw std::runtime_error("Rev audio channels did not materialize as a native choice");
-                auto* text=binding.choice->dropdownText;text->layoutText();
-                if(text->width>text->rect.w||text->height>text->rect.h)
-                    throw std::runtime_error("Rev audio channel choice clips at the resized viewport");
-            }
         };
-        for(const auto& page:ui::pages())if(!tabs.at(page.id)->resolved.hidden) {
+        for(const auto& page:ui::pages()) {
             select_page(page.id);resize(ui::min_width,ui::min_height);resize(ui::default_width,ui::default_height);
         }
         select_page(initial_page);apply();native_frame();verify_layout();verify_expanded_bitmap();
