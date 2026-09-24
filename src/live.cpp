@@ -32,7 +32,6 @@ constexpr std::size_t replay_text_limit = 4096;
 struct ReplayFrame {
     std::vector<float> waveform, spectrum;
     std::vector<std::complex<float>> constellation;
-    std::optional<double> carrier_snr_db_hz;
     ConstellationSource source = ConstellationSource::input;
     double fraction = 0;
     std::uint64_t dropped = 0;
@@ -66,17 +65,7 @@ std::string display_text(const Message& message) {
 }
 constexpr std::size_t default_workspace = 64 * 1024 * 1024;
 constexpr std::size_t minimum_workspace = 512 * 1024;
-// The previous snapshot and pending decoder points remain allocated while
-// the next input/replay frame is measured. The estimator's peak retains an
-// ordered input copy (or channel preview), output PCM, Hann weights, both
-// FFT arrays and the output spectrum. Its residual is released before the
-// smaller measured constellation is populated.
-constexpr std::size_t retained_plot_workspace = plot_size * sizeof(float) +
-    (plot_size / 2 + 1) * sizeof(double) + 2 * constellation_limit * sizeof(std::complex<double>);
-constexpr std::size_t measured_plot_workspace = plot_size *
-    (2 * sizeof(float) + sizeof(double) + 2 * sizeof(std::complex<double>)) +
-    (plot_size / 2 + 1) * sizeof(double);
-std::size_t plot_workspace(const Settings& value) { return retained_plot_workspace + measured_plot_workspace +
+std::size_t plot_workspace(const Settings& value) { return plot_size * (sizeof(float) + sizeof(double) + 3 * sizeof(std::complex<double>)) +
                                        sizeof(detail::SignalWindow) + modem::SimulationChannel::workspace_bound +
                                        512 * sizeof(modem::SymbolObservation) +
                                        replay_workspace(value); }
@@ -328,7 +317,6 @@ struct Session::Impl {
         result.simulation_replay = true; result.replay_frame_index = index; result.replay_frame_count = replay.size();
         result.simulation_sample_fraction = frame.fraction;
         result.waveform = frame.waveform; result.spectrum_db.assign(frame.spectrum.begin(), frame.spectrum.end());
-        result.carrier_snr_db_hz = frame.carrier_snr_db_hz;
         result.spectrum_bin_hz = replay_bin_hz; result.constellation_source = frame.source;
         modem::ConstellationBatch visible;
         // Delayed UI polls consume intervening points together, not a long
@@ -346,7 +334,6 @@ struct Session::Impl {
         current.running = current.transmitting = false;
         current.transmission_finished = true; current.transmission_cancelled = true;
         current.status = "Stopped";
-        current.carrier_snr_db_hz.reset();
         clear_replay(); pending_points = {};
         replay_omitted = 0;
         ++generation; ++tx_serial; ++receive_revision;
@@ -399,7 +386,6 @@ struct Session::Impl {
         if (!current.running || generation != version) return;
         if (transmitter && tx_serial != serial) return;
         current.waveform = std::move(measured.waveform); current.spectrum_db = std::move(measured.spectrum);
-        current.carrier_snr_db_hz = transmitter ? std::nullopt : measured.carrier_snr_db_hz;
         current.constellation = std::move(measured.constellation);
         current.constellation_source = ConstellationSource::input;
         current.constellation_dropped = 0;
@@ -423,7 +409,6 @@ struct Session::Impl {
         const auto valid = static_cast<std::size_t>(std::min<std::uint64_t>(sample_end, preview.size()));
         auto measured = signal_plots(std::span(preview).last(valid), config, sample_end - valid);
         ReplayFrame frame;
-        frame.carrier_snr_db_hz = measured.carrier_snr_db_hz;
         const auto keep = std::min(replay_wave_samples, measured.waveform.size());
         frame.waveform.assign(measured.waveform.end() - static_cast<std::ptrdiff_t>(keep), measured.waveform.end());
         frame.spectrum.resize(replay_bins);
@@ -879,7 +864,6 @@ struct Session::Impl {
                 if (!wave && ready) {
                     wave = std::move(ready); new_burst = true; pending_points = {};
                     plot_window.reset();
-                    current.carrier_snr_db_hz.reset();
                     current.status = value.simulation ? "Transmitting through noise and oscillator impairments; accelerated time" : "Transmitting; audio input paused";
                 }
                 if (value.simulation && !wave && tx_busy) {
@@ -1003,7 +987,6 @@ struct Session::Impl {
                 if (wave) { complete_tx(*wave, wave->stop.stop_requested() ? "" : exception.what()); wave.reset(); }
                 std::unique_lock lock(mutex);
                 if (current.running && generation == version && !capture_token.stop_requested() && !processing_token.stop_requested() && !cancelled_transmission) {
-                    current.carrier_snr_db_hz.reset();
                     current.error = exception.what(); current.status = value.simulation ? "Simulation paused after channel error" : "Audio input unavailable; retrying";
                     changed.wait_for(lock, stop, std::chrono::seconds(2), [this, version] {
                         return !current.running || generation != version || ready;

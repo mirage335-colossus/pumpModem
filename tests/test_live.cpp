@@ -8,9 +8,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
-#include <numbers>
 #include <optional>
-#include <random>
 #include <stdexcept>
 #include <thread>
 
@@ -18,35 +16,17 @@ using namespace datapump;
 using namespace std::chrono_literals;
 namespace live_test_audio {
 std::atomic<std::uint64_t> played_samples{0};
-std::atomic<bool> tone_enabled{true}, tone_paused{false}, tone_failure{false};
 }
 // Link-time audio adapter: exercise Session's actual playback/capture branch
 // without a host sound card. Simulation must never call this adapter.
 namespace datapump::audio {
 void capture(std::uint32_t rate,const std::string& device,const CaptureCallback& callback,
              std::stop_token stop,StreamFormatCallback format) {
-    const bool tone=device=="live-test-tone";
-    if(device!="live-test-audio" && !tone)throw Error("unexpected audio capture in live test");
+    if(device!="live-test-audio")throw Error("unexpected audio capture in live test");
     if(format)format({rate,rate,.42*rate,4096});
-    std::vector<float> samples(std::max<std::uint32_t>(1,rate/20));
-    std::mt19937_64 random(43);
-    std::normal_distribution<double> noise(0,.03);
-    std::uint64_t position=0;
+    const std::vector<float> silence(std::max<std::uint32_t>(1,rate/20));
     while(!stop.stop_requested()) {
-        if(tone) {
-            if(live_test_audio::tone_failure)throw Error("test audio input disconnected");
-            if(!live_test_audio::tone_enabled) {
-                live_test_audio::tone_paused=true;
-                std::this_thread::sleep_for(2ms);
-                continue;
-            }
-            live_test_audio::tone_paused=false;
-            for(auto& sample:samples) {
-                sample=static_cast<float>(.2*std::cos(2*std::numbers::pi*1500*static_cast<double>(position)/rate)+noise(random));
-                ++position;
-            }
-        }
-        if(!callback(samples))return;
+        if(!callback(silence))return;
         std::this_thread::sleep_for(2ms);
     }
 }
@@ -197,95 +177,6 @@ void test_idle_noise_and_plots() {
     session.stop();
     check(!session.snapshot().running, "stop is immediately observable");
 }
-void test_audio_carrier_snr_and_reset() {
-    struct ToneControl {
-        ~ToneControl() {
-            live_test_audio::tone_enabled=true;
-            live_test_audio::tone_failure=false;
-            live_test_audio::tone_paused=false;
-        }
-    } control;
-    live::Session session;
-    check(!session.snapshot().carrier_snr_db_hz,"a stopped session cannot report unmeasured carrier SNR");
-    auto value=settings(); value.simulation=false; value.device="live-test-tone";
-    session.start(value);
-    const auto measured=wait_for(session,[](const auto& snapshot) {
-        return snapshot.waveform.size()==2048 && snapshot.carrier_snr_db_hz.has_value();
-    });
-    // Real-input PCM: .2 peak carrier plus white noise with sigma .03.
-    // Noise density is variance divided by the one-sided Nyquist bandwidth.
-    const double expected=10*std::log10((.2*.2/2)/(.03*.03/(value.transfer.modem.sample_rate/2.)));
-    check(std::abs(*measured.carrier_snr_db_hz-expected)<3,
-          "live carrier SNR must use the captured tone and noise density in a one-hertz reference bandwidth");
-    live_test_audio::tone_enabled=false;
-    wait_for(session,[](const auto&) { return live_test_audio::tone_paused.load(); });
-    value.transfer.modem.carrier_hz=1800;
-    session.configure(value);
-    const auto retuned=session.snapshot();
-    check(!retuned.carrier_snr_db_hz && retuned.samples_received==0,
-          "retuning immediately discards the previous carrier's measurement before new input arrives");
-    value.transfer.modem.carrier_hz=1500;
-    session.configure(value);
-    live_test_audio::tone_enabled=true;
-    wait_for(session,[](const auto& snapshot) { return snapshot.carrier_snr_db_hz.has_value(); });
-    live_test_audio::tone_failure=true;
-    const auto deadline=std::chrono::steady_clock::now()+3s;
-    live::Snapshot disconnected;
-    do {
-        disconnected=session.snapshot();
-        if(!disconnected.error.empty())break;
-        std::this_thread::sleep_for(10ms);
-    } while(std::chrono::steady_clock::now()<deadline);
-    check(disconnected.error=="test audio input disconnected" && !disconnected.carrier_snr_db_hz,
-          "an audio input failure immediately clears the last measured carrier SNR");
-    live_test_audio::tone_failure=false;
-    session.configure(value);
-    wait_for(session,[](const auto& snapshot) { return snapshot.carrier_snr_db_hz.has_value(); });
-    session.stop();
-    check(!session.snapshot().carrier_snr_db_hz,"stopping clears a valid carrier SNR without waiting for another callback");
-}
-void test_carrier_snr_follows_simulation_replay() {
-    std::atomic<std::int64_t> replay_milliseconds{0};
-    live::Session session({},[&] {
-        return std::chrono::steady_clock::time_point{}+std::chrono::milliseconds(replay_milliseconds.load());
-    });
-    auto value=settings();
-    value.transfer.modem.spreading_mode=modem::SpreadingMode::tone;
-    value.transfer.modem.spreading_factor=16384;
-    std::array<double,2> measured{};
-    for(std::size_t index=0;index<measured.size();++index) {
-        const auto start=static_cast<std::int64_t>(index*3000);
-        replay_milliseconds=start;
-        value.simulation_snr_db=20*static_cast<double>(index);
-        session.configure(value);
-        session.transmit_bits(Bytes{0,0,1});
-        wait_for(session,[](const auto& snapshot) {
-            return snapshot.transmission_finished && snapshot.simulation_replay;
-        });
-        replay_milliseconds=start+1500;
-        const auto middle=session.snapshot();
-        check(middle.simulation_replay && middle.carrier_snr_db_hz.has_value(),
-              "a long simulated carrier must have a measured SNR on its displayed replay frame");
-        measured[index]=*middle.carrier_snr_db_hz;
-        check(measured[index]>value.simulation_snr_db+20,
-              "replay carrier SNR uses the measured one-hertz reference, not the configured sample SNR");
-        const auto background=wait_for(session,[&](const auto& snapshot) {
-            return snapshot.samples_received>middle.samples_received;
-        });
-        check(background.carrier_snr_db_hz==middle.carrier_snr_db_hz &&
-              background.replay_frame_index==middle.replay_frame_index,
-              "fresh background input cannot overwrite the SNR of a held replay frame");
-        replay_milliseconds=start+2000;
-        const auto next=session.snapshot();
-        check(next.replay_frame_index>middle.replay_frame_index && next.carrier_snr_db_hz.has_value() &&
-              next.carrier_snr_db_hz!=middle.carrier_snr_db_hz,
-              "each replay frame carries its own changing measured channel SNR");
-        replay_milliseconds=start+3000;
-        check(!session.snapshot().simulation_replay,"carrier SNR replay ends on the same three-second deadline as its plots");
-    }
-    check(std::abs((measured[1]-measured[0])-20)<3,
-          "the replay carrier measurement follows the actual twenty-decibel change in channel noise");
-}
 void test_audio_tx_publishes_fresh_payload_constellation() {
     live::Session session;
     auto value=settings();value.simulation=false;value.device="live-test-audio";
@@ -303,7 +194,6 @@ void test_audio_tx_publishes_fresh_payload_constellation() {
         check(std::min(std::abs(std::abs(point)-.35),std::abs(std::abs(point)-.7))<1e-8,
               "real audio TX shows actual mapped symbol amplitudes");
     check(active.received.empty() && !active.simulation_replay,"TX symbols are not represented as received simulation data");
-    check(!active.carrier_snr_db_hz,"locally generated playback samples cannot be reported as received carrier SNR");
     wait_for(session,[](const auto& snapshot){return snapshot.transmission_finished;});
     const auto listening=wait_for(session,[](const auto& snapshot){return snapshot.constellation_source==live::ConstellationSource::input;});
     check(!listening.transmitting && !listening.simulation_replay,"real audio returns to live input after playback");
@@ -328,7 +218,6 @@ void test_audio_tx_empty_symbol_intervals_and_cancel() {
     });
     check(between.transmission_fraction < 1 && !between.simulation_replay,
           "empty transmitted-symbol frame belongs to an unfinished real-audio transmission");
-    check(!between.carrier_snr_db_hz,"local playback remains unavailable as received SNR between long symbols");
     session.cancel_transmit();
     const auto cancelled = session.snapshot();
     check(!cancelled.transmitting && cancelled.transmission_cancelled && cancelled.constellation.empty() &&
@@ -458,11 +347,8 @@ void test_binary_simulation_replay_validation_and_cancel() {
     observe_pending(middle);
     replay_milliseconds = 2999;
     const auto last = session.snapshot();
-    check(last.simulation_replay && last.simulation_sample_fraction > .99 &&
-          last.replay_frame_index + 1 == last.replay_frame_count &&
-          last.constellation_source == live::ConstellationSource::received && !last.constellation.empty(),
-          "raw simulation exposes measured received symbols in its final frame through 2999ms");
-    const auto terminal_points = last.constellation.size() + last.constellation_dropped;
+    check(last.simulation_replay && last.simulation_sample_fraction > .99,
+          "raw simulation remains visible through the full three-second presentation");
     observe_pending(last);
     check(saw_pending_bits, "sample-derived binary bits must be visible as pending before replay completion");
     replay_milliseconds = 3000;
@@ -520,42 +406,6 @@ void test_binary_simulation_replay_validation_and_cancel() {
     const auto recovered = std::find_if(replacement.signals.begin(), replacement.signals.end(), [](const auto& signal) { return signal.complete; });
     check(recovered != replacement.signals.end() && recovered->text == "10" && recovered->id != replaced_id,
           "replacement presents its own recovered bits at its own three-second deadline");
-
-    // Repeat the same three-bit configuration with a GUI that misses only the
-    // final replay frame. The symbols measured above independently
-    // establish what must now be accounted for as undisplayed at the deadline.
-    const auto stalled_started_at = replay_milliseconds.load();
-    session.transmit_bits(bits);
-    const auto stalled_start = wait_for(session, [&](const auto& snapshot) {
-        check_binary_signals(snapshot, bits.size());
-        return snapshot.transmission_finished && snapshot.simulation_replay &&
-               snapshot.transmission_id != replacement.transmission_id;
-    });
-    check(stalled_start.replay_frame_count == first.replay_frame_count && terminal_points > 0,
-          "raw stalled-GUI fixture retains the same measured terminal frame");
-    // A single physical symbol may provide fewer than sixty replay frames.
-    // Stop at the last whole millisecond before its terminal interval begins.
-    const auto before_terminal = (3000 * (stalled_start.replay_frame_count - 1) - 1) / stalled_start.replay_frame_count;
-    replay_milliseconds = stalled_started_at + static_cast<std::int64_t>(before_terminal);
-    const auto before_stall = session.snapshot();
-    check_binary_signals(before_stall, bits.size());
-    check(before_stall.simulation_replay && before_stall.replay_frame_index + 2 == before_stall.replay_frame_count &&
-          before_stall.constellation_source == live::ConstellationSource::input,
-          "raw stalled-GUI fixture leaves received symbols in the unvisited final frame");
-    replay_milliseconds = stalled_started_at + 3000;
-    const auto after_stall = session.snapshot();
-    check_binary_signals(after_stall, bits.size());
-    check(!after_stall.simulation_replay && after_stall.replay_frame_count == 0 &&
-          after_stall.constellation_source == live::ConstellationSource::input && after_stall.received.empty(),
-          "missing the final raw frame still returns immediately to live input at exactly three seconds");
-    check(after_stall.constellation_dropped >= terminal_points,
-          "raw replay expiry accounts for measured symbols in its unvisited terminal frame");
-    const auto stalled_bits = std::find_if(after_stall.signals.begin(), after_stall.signals.end(), [](const auto& signal) { return signal.complete; });
-    check(stalled_bits != after_stall.signals.end() && stalled_bits->text == "001" && stalled_bits->received_bits == bits.size(),
-          "missing the final raw frame preserves exact sample-derived completion bits");
-    const auto stalled_again = session.snapshot();
-    check(stalled_again.signals.empty() && stalled_again.received.empty(),
-          "raw missed-frame completion is delivered exactly once");
 }
 void test_keyed_binary_reception_preserves_partial_symbols() {
     const Bytes bits{0, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0};
@@ -1277,8 +1127,6 @@ int main() {
             try { test(); } catch (const std::exception& error) { throw std::runtime_error(std::string(name) + ": " + error.what()); }
         };
         run("idle noise and plots", test_idle_noise_and_plots);
-        run("actual audio carrier SNR and reset", test_audio_carrier_snr_and_reset);
-        run("carrier SNR follows simulation replay", test_carrier_snr_follows_simulation_replay);
         run("actual audio TX constellation", test_audio_tx_publishes_fresh_payload_constellation);
         run("actual audio empty symbols and cancel", test_audio_tx_empty_symbol_intervals_and_cancel);
         run("binary audio exact bit length", test_binary_audio_preserves_exact_bit_length);

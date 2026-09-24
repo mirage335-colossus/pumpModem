@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
-#include <optional>
 #include <string>
 #include <vector>
 
@@ -60,10 +59,6 @@ struct Snapshot {
     std::vector<float> waveform;
     std::vector<double> spectrum_db;
     double spectrum_bin_hz = 0;
-    // Measured input carrier power / noise density (C/N0), referenced to a
-    // 1 Hz bandwidth so it is comparable to the target tone SNR setting.
-    // Unavailable until sufficient input exists, and during local playback.
-    std::optional<double> carrier_snr_db_hz;
     std::vector<std::complex<double>> constellation;
     ConstellationSource constellation_source = ConstellationSource::input;
     std::vector<SignalUpdate> signals;

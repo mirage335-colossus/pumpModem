@@ -122,12 +122,6 @@ complete five-second training sequence and packet.
 
 ## Desktop console
 
-FLTK remains the default GUI. An optional Rev backend uses the pinned upstream
-`clean` branch, shared semantic controls/controller and the same bitmap plot
-producers. Build it separately with `-DDATAPUMP_GUI_BACKEND=rev`; see the
-[Rev build and validation notes](docs/rev-backend.md) for its C++23 toolchain,
-software-OpenGL requirements and current release boundaries.
-
 The desktop application is a compiled executable linked to the same C++ transfer
 service as the CLI. FLTK and OpenSSL are linked statically by default. For a
 copyable installation, install or package a release build:
@@ -162,15 +156,6 @@ Existing files are never overwritten. The waveform defaults to four carrier
 cycles; use the mouse wheel to zoom and double-click to reset. The waterfall
 retains every FFT bin through peak pooling and uses one labeled intensity scale for
 its entire history. Click it to clear the history and reset that scale.
-
-The carrier readout below **Target tone SNR (dB-Hz)** estimates the current tone
-at the configured carrier against nearby noise. Both values use a 1 Hz noise
-reference (C/N0), so a steady received tone provides a guide for the target.
-The `~` marks an estimate; `--` means no usable measurement is available,
-including tones too weak or changing too quickly for the short capture.
-Modulation and nearby interference affect the estimate. Local transmit audio is
-excluded, and simulation replay follows its displayed noisy samples. The readout
-does not change the target setting.
 
 Color is enabled by default when supported: muted cyan data field values, waveform
 traces, and constellation points, softer gray text, and a subdued multihue waterfall
@@ -368,12 +353,10 @@ Windows10 version1903 or newer; non-ASCII paths on older Windows are unsupported
 `DATAPUMP_BUILD_GUI` and `DATAPUMP_PORTABLE` default to `ON`. CMake installation
 and CPack TGZ/ZIP archives include both native executables and collected runtime
 libraries. `-DDATAPUMP_GUI_BACKEND=fltk` selects the single compiled GUI backend;
-FLTK is the default, and `rev` selects the optional Rev profile described above.
-Unsupported or multiple
+FLTK is currently the default and only implemented choice. Unsupported or multiple
 selections fail configuration. `datapump-gui --version` reports the compiled
 backend. Use `-DDATAPUMP_BUILD_GUI=OFF` for a CLI-only build, or
-`-DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE` to disable optional Python tests in a
-FLTK/CLI build. Rev requires Python for resource embedding during the build.
+`-DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE` to disable the optional Python tests.
 See [offline installation](docs/offline-installation.md) for copy and verification
 commands.
 
@@ -382,10 +365,10 @@ color where supported, and explicit status labels. `--monochrome` selects the
 grayscale presentation without changing control types or per-element settings.
 See the
 [minimal GUI contract](docs/gui-contract.md) and [architecture review](docs/gui-architecture.md)
-for the shared widget interface and extension workflow. FLTK and Rev both use
-the same declarations, controller, record and document presentation, layout and
-bitmap producers. Features using these primitives are added in shared code and
-reach both backends; adapters handle native widgets, drawing and platform services.
+for the semantic widget interface and staged migration plan, and the
+[Rev assessment](docs/gui-rev-assessment.md) for the selected next adapter to
+prove that abstraction. Rev and the full declarative interface remain planned
+work; FLTK is the only implemented backend.
 
 The source is separated into packet coding, cryptography, DSP/WAV, audio devices,
 runtime policy, a shared transfer service, CLI orchestration, and GUI state. See [protocol](docs/protocol.md),

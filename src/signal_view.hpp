@@ -1,7 +1,6 @@
 #pragma once
 #include "datapump/modem.hpp"
 #include <array>
-#include <optional>
 
 namespace datapump::live::detail {
 inline constexpr std::size_t signal_window_size=2048;
@@ -9,9 +8,6 @@ struct SignalPlots {
     std::vector<float> waveform;
     std::vector<double> spectrum;
     std::vector<std::complex<double>> constellation;
-    // Narrow carrier power / local one-sided noise density, referenced to 1 Hz.
-    // No value when the capture cannot resolve a tone or a noise reference.
-    std::optional<double> carrier_snr_db_hz;
 };
 SignalPlots signal_plots(std::span<const float> samples,const modem::Config& config,
                          std::uint64_t first_sample=0);

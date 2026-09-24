@@ -87,13 +87,6 @@ PlotUpdate PlotReplayPolicy::observe(std::uint64_t sequence, std::uint64_t trans
     replaying_ = replay;
     return {update, update, beginning};
 }
-std::string carrier_snr_label(std::optional<double> snr_db_hz) {
-    if(!snr_db_hz || !std::isfinite(*snr_db_hz)) return "Carrier: -- dB-Hz";
-    std::ostringstream text;
-    text.imbue(std::locale::classic());
-    text<<"Carrier: ~"<<std::fixed<<std::setprecision(1)<<*snr_db_hz<<" dB-Hz";
-    return text.str();
-}
 std::string format_bit_rate(double rate) {
     if (!std::isfinite(rate) || rate < 0) return "Unavailable";
     const char* unit = "bit/s";
@@ -122,7 +115,12 @@ std::vector<std::string> key_choice_labels(std::span<const std::string> names) {
     std::vector<std::string> labels{"None"};
     labels.reserve(names.size()+1);
     for(std::size_t index=0;index<names.size();++index) {
-        labels.push_back(std::to_string(index+1)+". "+display_label(names[index]));
+        std::string label=std::to_string(index+1)+". ";
+        for(const char c:display_label(names[index])) {
+            if(c=='&')label+='&';
+            label+=c;
+        }
+        labels.push_back(std::move(label));
     }
     return labels;
 }
@@ -206,6 +204,28 @@ std::optional<std::string> Signals::copy_bits(std::size_t index) const {
     return line.text;
 }
 
+bool valid_clipboard_text(std::span<const std::uint8_t> bytes) noexcept {
+    for (std::size_t i = 0; i < bytes.size();) {
+        const auto first = bytes[i++];
+        if (!first) return false;
+        if (first < 0x80) continue;
+        unsigned continuation;
+        std::uint32_t value;
+        std::uint32_t minimum;
+        if (first >= 0xc2 && first <= 0xdf) { continuation=1; value=first&0x1f; minimum=0x80; }
+        else if (first >= 0xe0 && first <= 0xef) { continuation=2; value=first&0x0f; minimum=0x800; }
+        else if (first >= 0xf0 && first <= 0xf4) { continuation=3; value=first&7; minimum=0x10000; }
+        else return false;
+        if (continuation > bytes.size() - i) return false;
+        for (unsigned n=0; n<continuation; ++n) {
+            const auto next=bytes[i++];
+            if ((next&0xc0) != 0x80) return false;
+            value=(value<<6)|(next&0x3f);
+        }
+        if (value<minimum || value>0x10ffff || (value>=0xd800 && value<=0xdfff)) return false;
+    }
+    return true;
+}
 std::string id_label(const Message& message) {
     constexpr char digits[]="0123456789abcdef";
     std::string result;

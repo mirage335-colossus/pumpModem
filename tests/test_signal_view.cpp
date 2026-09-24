@@ -4,9 +4,7 @@
 #include <array>
 #include <cmath>
 #include <iostream>
-#include <limits>
 #include <numbers>
-#include <random>
 
 using namespace datapump;
 namespace {
@@ -16,115 +14,6 @@ std::vector<float> tone(std::uint64_t start, std::size_t size, const modem::Conf
     for (std::size_t i=0;i<size;++i)
         result[i]=static_cast<float>(.7*std::cos(2*std::numbers::pi*config.carrier_hz*static_cast<double>(start+i)/config.sample_rate+.31));
     return result;
-}
-std::vector<float> noisy_tone(const modem::Config& config,double amplitude,double sigma,std::uint64_t seed,
-                              std::size_t size=live::detail::signal_window_size) {
-    std::mt19937_64 random(seed);
-    std::normal_distribution<double> noise(0,sigma);
-    std::vector<float> samples(size);
-    for(std::size_t i=0;i<size;++i)
-        samples[i]=static_cast<float>(amplitude*std::cos(2*std::numbers::pi*config.carrier_hz*
-            static_cast<double>(i)/config.sample_rate+.31)+noise(random));
-    return samples;
-}
-void carrier_snr_calibration() {
-    // Real AWGN has one-sided PSD 2*sigma^2/Fs. Compare known carrier
-    // power against that density, independently of FFT bin width and ENBW.
-    for(const auto rate:{4800U,6000U,8000U,44100U,48000U}) {
-        for(const double fraction:{0.,.37,.5}) {
-            modem::Config config;config.sample_rate=rate;
-            config.carrier_hz=(471+fraction)*rate/live::detail::signal_window_size;
-            for(const double expected:{30.,45.,65.}) {
-                constexpr double amplitude=.3;
-                const double sigma=amplitude*.5*std::sqrt(rate*std::pow(10.,-expected/10));
-                double total=0;
-                for(std::uint64_t seed=1;seed<=64;++seed) {
-                    const auto frame=live::detail::signal_plots(noisy_tone(config,amplitude,sigma,seed),config);
-                    check(frame.carrier_snr_db_hz.has_value(),"resolvable noisy carrier has no C/N0 measurement");
-                    total+=*frame.carrier_snr_db_hz;
-                }
-                if(std::abs(total/64-expected)>=.7)
-                    throw Error("carrier C/N0 calibration: Fs="+std::to_string(rate)+" fraction="+std::to_string(fraction)+
-                        " expected="+std::to_string(expected)+" measured="+std::to_string(total/64));
-            }
-        }
-    }
-    modem::Config config;config.sample_rate=6000;config.carrier_hz=1573;
-    double previous=0;
-    for(const double amplitude:{.1,.2,.4}) {
-        const auto samples=noisy_tone(config,amplitude,.04,719);
-        const auto baseline=live::detail::signal_plots(samples,config).carrier_snr_db_hz;
-        check(baseline.has_value(),"tone fixture C/N0 is unresolved");
-        if(previous) check(std::abs(*baseline-previous-20*std::log10(2.))<.3,
-                           "carrier measurement did not track increased signal power");
-        previous=*baseline;
-        for(const double gain:{1e-5,-1.,1000.}) {
-            auto scaled=samples;
-            for(auto& sample:scaled) sample=static_cast<float>(sample*gain);
-            const auto measured=live::detail::signal_plots(scaled,config).carrier_snr_db_hz;
-            check(measured && std::abs(*measured-*baseline)<.001,"carrier C/N0 changes with input gain");
-        }
-        auto shifted=samples;
-        for(auto& sample:shifted) sample+=3.f;
-        const auto measured=live::detail::signal_plots(shifted,config).carrier_snr_db_hz;
-        check(measured && std::abs(*measured-*baseline)<.001,"DC offset contaminates the carrier measurement");
-    }
-    // A partially filled window uses its true Hann ENBW, not its padded size.
-    for(const auto size:{256U,512U,1024U}) {
-        double total=0;
-        for(std::uint64_t seed=1;seed<=32;++seed) {
-            const auto measured=live::detail::signal_plots(noisy_tone(config,.2,.03,seed,size),config).carrier_snr_db_hz;
-            check(measured.has_value(),"usable partial window lost its carrier reference");
-            total+=*measured;
-        }
-        const double expected=10*std::log10((.2*.2/2)/(2*.03*.03/config.sample_rate));
-        check(std::abs(total/32-expected)<.7,"zero padding changed the C/N0 calibration");
-    }
-}
-void unavailable_carrier_snr() {
-    modem::Config config;config.sample_rate=6000;config.carrier_hz=1573;
-    const auto unavailable=[&](const std::vector<float>& samples,const modem::Config& settings) {
-        check(!live::detail::signal_plots(samples,settings).carrier_snr_db_hz,
-              "unmeasurable input manufactured a carrier C/N0 reference");
-    };
-    unavailable({},config);
-    unavailable(std::vector<float>(2048),config);
-    unavailable(std::vector<float>(2048,.5f),config);
-    unavailable(noisy_tone(config,.2,.03,1,255),config);
-    unavailable(tone(0,2048,config),config);
-    for(std::uint64_t seed=1;seed<=64;++seed)
-        unavailable(noisy_tone(config,0,.1,seed),config);
-    auto elsewhere=config;elsewhere.carrier_hz=712;
-    unavailable(noisy_tone(elsewhere,.7,.03,1),config);
-    auto samples=noisy_tone(config,.2,.03,1);
-    for(const auto bad:{std::numeric_limits<float>::quiet_NaN(),std::numeric_limits<float>::infinity()}) {
-        auto invalid=samples;invalid[391]=bad;unavailable(invalid,config);
-    }
-    auto invalid=config;invalid.sample_rate=0;unavailable(samples,invalid);
-    for(const double bad:{0.,-1.,3000.,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()}) {
-        invalid=config;invalid.carrier_hz=bad;unavailable(samples,invalid);
-    }
-    for(const double bad:{0.,-1.,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()}) {
-        invalid=config;invalid.bandwidth_hz=bad;unavailable(samples,invalid);
-    }
-    invalid=config;invalid.carrier_hz=1;unavailable(samples,invalid);
-    invalid=config;invalid.carrier_hz=2999;unavailable(samples,invalid);
-}
-void carrier_snr_fragmentation() {
-    modem::Config config;config.sample_rate=6000;config.carrier_hz=1573;
-    const auto samples=noisy_tone(config,.2,.03,71,9317);
-    live::detail::SignalWindow whole,fragments;
-    whole.push(samples);
-    for(std::size_t offset=0;offset<samples.size();) {
-        const auto count=std::min(samples.size()-offset,1+(offset*37)%511);
-        fragments.push(std::span(samples).subspan(offset,count));offset+=count;
-        static_cast<void>(fragments.frame(config));
-    }
-    const auto measured=whole.frame(config).carrier_snr_db_hz;
-    check(measured && measured==fragments.frame(config).carrier_snr_db_hz,
-          "carrier C/N0 depends on capture fragmentation or UI polling cadence");
-    fragments.reset();
-    check(!fragments.frame(config).carrier_snr_db_hz,"reset retained a stale carrier measurement");
 }
 void actual_default_clock_carrier() {
     modem::Config config; config.sample_rate=4800; config.carrier_hz=900;
@@ -196,9 +85,6 @@ void fractional_carrier_capture() {
 }
 int main() {
     try {
-        carrier_snr_calibration();
-        unavailable_carrier_snr();
-        carrier_snr_fragmentation();
         fractional_carrier_capture();
         actual_default_clock_carrier();
         modem::Config config; config.sample_rate=8000; config.bandwidth_hz=1000; config.carrier_hz=1500;

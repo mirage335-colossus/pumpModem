@@ -1,7 +1,6 @@
 #pragma once
 
 #include "datapump/packet.hpp"
-#include "utf8_policy.hpp"
 #include <chrono>
 #include <deque>
 #include <filesystem>
@@ -68,12 +67,12 @@ private:
     bool replaying_ = false;
 };
 std::string format_bit_rate(double bits_per_second);
-std::string carrier_snr_label(std::optional<double> snr_db_hz);
 // Names are comma-separated in the generation dialog. The keyfile codec
 // validates printable UTF-8, uniqueness and its production format limits.
 std::vector<std::string> key_entry_names(std::string_view text);
 // Numbered literal labels distinguish named keys from the unencrypted sentinel.
-// Labels are literal UTF-8. Native menu escaping belongs in the adapter.
+// Only ampersands are escaped for FLTK's label renderer; callers must bypass
+// its menu-path parser when installing these labels.
 std::vector<std::string> key_choice_labels(std::span<const std::string> names);
 // An absolute, percent-encoded file URI for the native directory launcher.
 // No command string is constructed and no keyfile content is exposed.
@@ -110,6 +109,9 @@ private:
     std::deque<SignalLine> lines_;
 };
 
+// Clipboard text is UTF-8, with no embedded zero byte. Binary messages can
+// always be saved explicitly, but are never silently coerced to text.
+bool valid_clipboard_text(std::span<const std::uint8_t> bytes) noexcept;
 std::string id_label(const Message& message);
 std::string display_label(std::string_view text);
 }
