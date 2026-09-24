@@ -15,15 +15,65 @@ routes retain their configuration; explicit hardware cards use dmix/dsnoop with
 Exclusive off. Failed shared opens never select raw hardware. WinMM does not
 provide exclusive access, so its toggle is disabled.
 
-The native application builds locally. Focused controller/layout checks pass,
-along with the ALSA and Windows driver fixtures, Fast/Legacy session tests and
-Legacy live/controller lifecycle checks. Independent PCM vectors and old/new
-comparisons cover unity output, attenuation, boost/clipping, channel routing and
-resampling. Shared-open fixtures exercise simultaneous capture and busy raw
-endpoints; controller fixtures retain reception during volume changes and close
-capture before device/access changes. Full candidate validation is pending and
-will be recorded below after the required workflows finish. No physical
-two-process audio test or new portable release is claimed by these fixtures.
+Candidate `262d2579e5230ce0acf6a7b9f3875d199d4c5173` builds locally. All 11
+focused audio/session fixtures pass, as do the controller/layout checks.
+Independent PCM vectors and old/new comparisons cover unity output, attenuation,
+boost/clipping, channel routing and resampling. Shared-open fixtures exercise
+simultaneous capture and busy raw endpoints; controller fixtures retain reception
+during volume changes and close capture before device/access changes.
+
+Both complete local native groups pass: FLTK 3/3 and Rev 5/5, including native
+control callbacks, clipboard and Rev 1x/2x coordinate checks. They ran serially on
+private Xvfb displays with software rendering capped at two threads and the
+documented 600-second workflow allowance. The initial sandboxed FLTK attempt
+could not connect to its virtual display; rerunning with display access passed
+without a source change. Rev reported the accepted `REV_REPLAY_CADENCE` advisory
+(3.021 seconds, 7 frames, 6 changes), while physical/pending/source correctness
+checks passed. Local logs and the retained `warning.log` are under
+`build/audio-controls-validation/`.
+
+Full [base-SDK validation](https://github.com/mirage335-colossus/pumpModem/actions/runs/35935696207)
+passes on that exact candidate with `devfast=false` and the default H runners:
+both application builds and all four copied-archive combinations (FLTK/Rev on
+Debian Bookworm/Ubuntu 24.04). The FLTK SDK build passes all 30 preservation
+contract tests, build regressions 17/17 and packaging 4/4; Rev additionally passes
+its five native checks. Five surfaced Rev cadence advisories from these jobs
+are retained with run/job provenance in `remote-warning.log` beside
+the local logs. The prepared durable base SDK was reused.
+
+Full [native/platform CI](https://github.com/mirage335-colossus/pumpModem/actions/runs/35935692761)
+also uses that candidate, `devfast=false` and the default H runners. Linux Release
+passes 125/125 tests, CLI/native workflow, relocation and archive checks. Windows
+FLTK Release passes 121/121 tests, empty-PATH GUI/relocation and both archives.
+Both Release platforms pass `fast_session` and `gui_fast_live`. Instrumented
+Debug passes 120/120 selected regression tests in 3061.71 seconds; only those
+two real-time cases are omitted under the existing sanitizer scope, not counted
+as passes.
+
+The separate Debug native desktop smoke fails at its cumulative 600-second
+limit in phase 17, while computing the fourth sampled transmission before its
+replacement replay. No sanitizer diagnostic surfaced in that failing step.
+This smoke uses simulation, bypasses hardware gain/device routing and disables
+device enumeration; that narrows the diagnosis but does not turn its timeout
+into a pass. Debug CLI and the dependent copied-native Ubuntu 22.04/24.04 jobs
+were skipped after the failure. **Overall native CI remains failed.** The full
+Debug log is retained as `build/audio-controls-validation/native-debug.log`.
+No timeout, assertion or sanitizer exclusion was changed to accommodate it.
+
+A focused local diagnostic links the unchanged shared `Smoke` choreography to
+the instrumented libraries, with the same inputs, bitmaps, 40 ms polling and
+600-second allowance, but without a native window. It completes the text and
+attachment checks, then times out in phase 15 after 600.011 seconds while the
+third sampled transmission is advancing (4.275 media seconds, 12.173 compute
+seconds). The first two transmissions take about 420 and 158 compute seconds.
+This demonstrates forward progress and reproduces the cumulative budget limit
+without native drawing; it is a failed diagnostic, not native qualification or
+proof of the hosted timeout's entire cause. The diagnostic source, executable
+and progress log are retained beside the other local evidence. Simulation
+performance remains outside this audio-controls change.
+
+No physical two-process audio test or new portable release is claimed by these
+software checks.
 
 ## CI cleanup and Windows graphics coverage — 23 September 2026
 
