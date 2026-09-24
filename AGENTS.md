@@ -32,8 +32,13 @@ captures have their own documented provenance. Keep all checks below intact.
   Debug job unless `sanitizer_realtime=true` is explicitly requested. Their
   real-time audio budgets are sensitive to sanitizer overhead; this is omitted
   instrumented coverage, not proof of a hardware-only problem or a test pass.
-  Keep both mandatory in Release and retain their existing assertions. Other
-  sanitizer failures remain fatal; do not extend this exclusion to new failures.
+  Keep both mandatory in Release and retain their existing assertions. The
+  separate instrumented native GUI smoke may report an exhausted cumulative
+  workload budget as **incomplete coverage with a warning** only for its typed
+  budget result with recent sampled-transmission progress. That is not a pass.
+  Stalls, assertions, sanitizer reports and other failures remain fatal; do not
+  extend this exception to other tests. Release, SDK, packaging and certification
+  keep the complete native smoke mandatory and its nonzero outcomes fatal.
   Local tests remain available unchanged. See [sanitizer throughput scope](docs/building.md#sanitizer-throughput-scope).
 - Reuse the exact prepared Linux SDK and Windows dependency recipes from the
   durable `base` release where applicable in ordinary release, certification

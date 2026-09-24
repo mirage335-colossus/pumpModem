@@ -56,7 +56,7 @@ on:
       diagnostic:
         description: 'Focused check used only with devfast=true'
         type: choice
-        options: [legacy, certification, windows-certification, windows-rev, graphics, arm-rev-package, arm-rev-smoke, runner-capacity, arm-runner-capacity]
+        options: [legacy, certification, windows-certification, windows-rev, graphics, arm-rev-package, arm-rev-smoke, sanitizer-gui, runner-capacity, arm-runner-capacity]
         default: legacy
       diagnostic_release:
         description: 'Published release tag for graphics diagnostics only; no binaries are rebuilt'
@@ -86,6 +86,7 @@ jobs:
           python3 tests/test_build_dependencies.py
           python3 tests/test_source_sdk.py
           python3 tests/test_sdk_build.py
+          python3 tests/test_gui_smoke_runner.py
       - name: Record the remaining candidate gate
         run: echo 'Automatic checks are focused feedback only. Completed runtime changes require explicit ci.yml devfast=false, applicable SDK qualification, and release certification when publishing.' >> "$GITHUB_STEP_SUMMARY"
 
@@ -181,7 +182,7 @@ jobs:
         run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' ctest --test-dir build-gui --output-on-failure -L gui
 
   linux:
-    if: github.event_name == 'workflow_dispatch' && !inputs.devfast
+    if: github.event_name == 'workflow_dispatch' && (!inputs.devfast || inputs.diagnostic == 'sanitizer-gui')
     name: Linux ${{ matrix.build_type }} (glibc 2.35)
     runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
     # Compile every application and collected library against this baseline,
@@ -193,16 +194,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - build_type: Release
-            sanitizers: "OFF"
-            portable: "ON"
-          - build_type: Debug
-            sanitizers: "ON"
-            portable: "OFF"
+        include: ${{ fromJSON(inputs.devfast && '[{"build_type":"Debug","sanitizers":"ON","portable":"OFF"}]' || '[{"build_type":"Release","sanitizers":"OFF","portable":"ON"},{"build_type":"Debug","sanitizers":"ON","portable":"OFF"}]') }}
     env:
       DEBIAN_FRONTEND: noninteractive
-      ASAN_OPTIONS: detect_leaks=0
+      ASAN_OPTIONS: detect_leaks=0:halt_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
       CC: gcc-11
       CXX: g++-11
     steps:
@@ -227,8 +223,23 @@ jobs:
           -DDATAPUMP_PORTABLE=${{ matrix.portable }}
           -DDART_TESTING_TIMEOUT=3600
           -DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE
-      - run: cmake --build build --target datapump-apps datapump-tests --parallel "$(nproc)"
+      - name: Build the selected checks
+        env:
+          FOCUSED_GUI: ${{ inputs.devfast }}
+        run: |
+          if [ "$FOCUSED_GUI" = true ]; then
+            cmake --build build --target datapump-apps test_gui_smoke_budget test_gui_launch_command --parallel "$(nproc)"
+          else
+            cmake --build build --target datapump-apps datapump-tests --parallel "$(nproc)"
+          fi
+      - name: Check the focused smoke budget policy
+        if: inputs.devfast
+        run: |
+          python3 tests/test_gui_smoke_runner.py
+          ctest --test-dir build --output-on-failure --no-tests=error -R '^(gui_smoke_budget|gui_launch_command)$'
+          echo 'Focused instrumented GUI workflow and CLI diagnostic only; unrelated regression and calibration are not repeated. This is not full native qualification.' >> "$GITHUB_STEP_SUMMARY"
       - name: Run native tests with explicit sanitizer throughput scope
+        if: '!inputs.devfast'
         env:
           DATAPUMP_SANITIZERS: ${{ matrix.sanitizers }}
           SANITIZER_REALTIME: ${{ inputs.sanitizer_realtime }}
@@ -243,7 +254,23 @@ jobs:
           fi
           ctest --test-dir build --output-on-failure --parallel 2 "$@"
       - name: Exercise native desktop workflow
-        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' ./build/datapump-gui --smoke-test --smoke-timeout 600
+        id: desktop
+        env:
+          DATAPUMP_SANITIZERS: ${{ matrix.sanitizers }}
+        run: |
+          set --
+          if [ "$DATAPUMP_SANITIZERS" = ON ]; then
+            set -- --allow-budget-exhaustion
+          fi
+          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' python3 tools/run-gui-smoke.py "$@" --log "build/gui-smoke-${{ matrix.build_type }}-${{ github.run_attempt }}.log" --summary "$GITHUB_STEP_SUMMARY" -- ./build/datapump-gui --smoke-test --smoke-timeout 600
+      - name: Retain native desktop result
+        if: always() && (steps.desktop.outcome == 'success' || steps.desktop.outcome == 'failure')
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: GUI-smoke-Linux-${{ matrix.build_type }}-attempt-${{ github.run_attempt }}
+          path: build/gui-smoke-*.log
+          if-no-files-found: error
+          retention-days: 7
       - name: Developer CLI regressions (Python is not packaged)
         run: python3 tests/test_cli.py build/pump
       - name: Verify relocated native GUI and package inventory

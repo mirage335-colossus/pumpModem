@@ -56,6 +56,7 @@ struct Smoke::Impl {
     double timeout;
     Clock::time_point started=Clock::now(),cancelled_at;
     Phase phase=Phase::initialize;
+    smoke_detail::SampledWorkProgress work_progress;
     bool done=false,launched_binary=false,saw_idle_change=false,key_reception=false,owns_directory=false;
     std::uint64_t polls=0,completed_replay=0,key_samples=0,cancel_samples=0;
     std::uint64_t noise_revision=0;
@@ -234,11 +235,14 @@ struct Smoke::Impl {
     }
     void step(Controller& controller,const BitmapSources* bitmaps) {
         if(done)return;
-        if(std::chrono::duration<double>(Clock::now()-started).count()>timeout)
-            throw Error("Shared GUI smoke timed out in phase "+std::to_string(static_cast<int>(phase))+": "+controller.field(F::status).text);
         ++polls;
         require(controller.settings().simulation,"Shared GUI smoke attempted hardware audio");
         const auto& snapshot=controller.snapshot();
+        const smoke_detail::SampledWork work{
+            snapshot.transmission_id,snapshot.samples_received,snapshot.transmission_fraction,snapshot.transmission_seconds,
+            snapshot.simulation,snapshot.transmitting,snapshot.transmitting_noise,snapshot.simulation_replay,
+            snapshot.simulation_receiving_tail,snapshot.transmission_finished,!snapshot.error.empty()};
+        work_progress.observe(work,Clock::now());
         inspect_replay(controller,bitmaps);inspect_streams(controller);inspect_records(controller);
         if(!snapshot.waveform.empty()) {
             if(!idle_waveform.empty()&&idle_waveform!=snapshot.waveform)saw_idle_change=true;
@@ -489,12 +493,22 @@ struct Smoke::Impl {
             require(verified_ids.size()==2&&interrupted.size()==2,"Smoke did not complete stream, raw-bit, replacement and cancellation workflows");
             done=true;break;
         }
+        // Complete all ordinary and phase-specific assertions first. Reaching
+        // the overall workload allowance cannot hide a simultaneous failure.
+        const auto now=Clock::now();
+        const auto elapsed=std::chrono::duration<double>(now-started).count();
+        if(!done&&elapsed>timeout) {
+            if(work_progress.advancing(now))
+                throw SmokeBudgetExhausted(static_cast<int>(phase),elapsed,timeout,work,*work_progress.progress_age(now));
+            throw Error("Shared GUI smoke timed out in phase "+std::to_string(static_cast<int>(phase))+": "+controller.field(F::status).text);
+        }
     }
 };
 Smoke::Smoke(std::filesystem::path directory,double timeout):impl_(std::make_unique<Impl>(std::move(directory),timeout)) {}
 Smoke::~Smoke()=default;
 void Smoke::step(Controller& controller,const BitmapSources* bitmaps) {
     try { impl_->step(controller,bitmaps); }
+    catch(const SmokeBudgetExhausted&) {throw;}
     catch(const std::exception& error) {
         throw Error("Shared GUI smoke phase "+std::to_string(static_cast<int>(impl_->phase))+": "+error.what());
     }

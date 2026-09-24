@@ -1,5 +1,6 @@
 #include "application.hpp"
 #include "launch_command.hpp"
+#include "gui_smoke_budget.hpp"
 #include "datapump/tuning.hpp"
 #include <cmath>
 #include <iostream>
@@ -90,6 +91,30 @@ void startup() {
             check(invoke(arguments,[&](Launch){++called;return 0;})==1,"invalid startup must fail before launching a backend");
     }
     check(called==2&&!errors.str().empty(),"invalid startup invoked a backend or lacked an error");
+    errors.str({});errors.clear();
+    {
+        struct Restore {std::streambuf* previous;~Restore(){std::cerr.rdbuf(previous);}} restore{std::cerr.rdbuf(errors.rdbuf())};
+        const smoke_detail::SampledWork work{13,2928175,.032,4.275,true,true,false,false,false,false,false};
+        const auto exhausted=[&](Launch) -> int {throw SmokeBudgetExhausted(17,600.011,600,work,.001);};
+        check(invoke({"--smoke-test","--smoke-timeout","600"},exhausted)==smoke_budget_exit_code,
+            "Typed advancing-work exhaustion did not retain its dedicated nonzero exit");
+        check(errors.str()==std::string(smoke_budget_marker)+
+            "phase=17 elapsed=600.011000 budget=600.000000 tx_id=13 fraction=0.032000 media_seconds=4.275000 samples=2928175 tail=0 progress_age=0.001000 result=incomplete\n",
+            "Smoke startup did not emit exactly one structured incomplete diagnostic");
+        errors.str({});errors.clear();
+        check(invoke({},exhausted)==1&&errors.str().starts_with("Data Pump test: ")&&
+            errors.str().find(smoke_budget_marker)==std::string::npos,
+            "Ordinary startup acquired a smoke-only advisory result");
+        errors.str({});errors.clear();
+        check(invoke({"--smoke-test"},[](Launch) -> int {
+            throw datapump::Error("Shared GUI smoke timed out in phase 17: stalled work");
+        })==1&&errors.str().starts_with("Data Pump test: "),
+            "An ordinary timeout was misclassified as a typed workload result");
+        errors.str({});errors.clear();
+        check(invoke({"--smoke-test"},[](Launch) -> int {throw std::runtime_error("Assertion failed");})==1&&
+            errors.str()=="Data Pump test: Assertion failed\n",
+            "A correctness failure was downgraded to a workload result");
+    }
 }
 }
 int main() {

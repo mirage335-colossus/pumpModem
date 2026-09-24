@@ -121,7 +121,7 @@ bool Application::tick() {
             impl_->controller.resume_capture();impl_->audio_suspended=false;
         }
         ++impl_->poll_count;
-        if(impl_->smoke) {
+        if(impl_->smoke&&!closing()) {
             impl_->smoke->step(impl_->controller, &impl_->bitmaps);
             if(!impl_->passed&&impl_->smoke->done()) {
                 impl_->passed=true;impl_->completed=now;select_page(launch.page);
@@ -535,6 +535,7 @@ void gui_self_check() {
     std::cout<<"Data Pump shared GUI self-check passed; no display required.\n";
 }
 int gui_main(int argc,char** argv,const char* backend,const std::function<int(Launch)>& run) {
+    bool smoke_requested=false;
     try {
         Launch launch;
         std::vector<std::string> settings_arguments;
@@ -568,7 +569,11 @@ int gui_main(int argc,char** argv,const char* backend,const std::function<int(La
             }
         }
         if(!settings_arguments.empty())launch.settings=launch_command::parse_arguments(settings_arguments);
+        smoke_requested=launch.smoke;
         return run(launch);
+    }catch(const SmokeBudgetExhausted& error) {
+        if(!smoke_requested) {std::cerr<<"Data Pump "<<backend<<": "<<error.what()<<'\n';return 1;}
+        std::cerr<<smoke_budget_marker<<error.what()<<'\n';return smoke_budget_exit_code;
     }catch(const std::exception& error){std::cerr<<"Data Pump "<<backend<<": "<<error.what()<<'\n';return 1;}
 }
 }

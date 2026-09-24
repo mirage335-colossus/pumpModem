@@ -4,6 +4,32 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Instrumented GUI workload budget — 23 September 2026
+
+The sampled GUI smoke now distinguishes exhausted cumulative CPU-work allowance
+from a failed assertion or stalled workflow. Its dedicated nonzero result (75)
+requires recent, monotone generated media or physical-tail sample progress from
+the same active transmission. Idle samples and elapsed compute time cannot
+qualify; observed errors or counter regressions disqualify that transmission.
+Every existing phase assertion runs before the budget classifier, and shutdown
+does not restart smoke actions.
+
+Only native CI's instrumented Debug runner accepts the exact structured result
+as **incomplete coverage with a warning**. Other diagnostics, sanitizer reports,
+signals, external timeouts and stalls remain failures. Release, SDK, package and
+certification commands continue to reject the nonzero result. Per-attempt logs,
+source/run provenance and the incomplete outcome are retained without replacing
+earlier evidence. The historical failed run below remains failed.
+
+The focused `sanitizer-gui` dispatch runs the same complete Debug native workflow
+and CLI checks without repeating unrelated calibration or other platforms. The
+runner's 14 offline policy tests pass, including strict-mode rejection, malformed
+and swallowed markers, extra errors, sanitizer reports and preserved logs.
+The C++ progress-policy fixture also passes ASan/UBSan. The complete shared GUI
+group passes 37/37 in 108.93 seconds, and the build-helper group passes 18/18 in
+10.29 seconds. Actionlint and whitespace checks pass. Native and CI results for
+the final policy candidate will be recorded after completion.
+
 ## Audio device sharing and transmit volume — 23 September 2026
 
 The GUI candidate adds per-modem playback volume (0.01–175%, default 100%), an

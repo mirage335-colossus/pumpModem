@@ -1300,8 +1300,29 @@ void noise_declarations_and_dispatch() {
           "Shared Stop noise failed to restore controls and preserve the invalid draft");
     app.close();check(!app.enabled(C::transmit_noise),"Closed application retained an active noise action");
 }
+void smoke_shutdown_does_not_resume_workflow() {
+    const auto directory=std::filesystem::temp_directory_path()/
+        ("datapump-smoke-shutdown-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    struct Cleanup {
+        std::filesystem::path path;
+        ~Cleanup(){std::error_code ignored;std::filesystem::remove_all(path,ignored);}
+    } cleanup{directory};
+    // Internal fixture only: the public CLI still accepts only 10..600 seconds.
+    Application app({.simulation=true,.smoke=true,.timeout=0,.smoke_directory=directory});
+    app.edit(ui::Field::message,"Preserved shutdown draft");
+    const auto draft=app.field(ui::Field::message).text;
+    app.start();app.close();
+    app.tick();
+    check(app.closing()&&!app.smoke_passed()&&app.field(ui::Field::message).text==draft&&app.take_services().empty(),
+        "Shutdown ran smoke actions, changed the draft, or claimed incomplete smoke passed");
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(2);
+    while(!app.finished()&&std::chrono::steady_clock::now()<deadline) {
+        app.tick();std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    check(app.finished(),"Closed smoke fixture did not finish teardown");
+}
 }
 int main() {
-    try {fast_default_console();developer_mode_presentation();transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();fitted_target_editing();mono_declaration();oscillator_declaration();lpi_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();force_transmit_declaration();noise_declarations_and_dispatch();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {fast_default_console();developer_mode_presentation();transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();fitted_target_editing();mono_declaration();oscillator_declaration();lpi_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();force_transmit_declaration();noise_declarations_and_dispatch();smoke_shutdown_does_not_resume_workflow();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

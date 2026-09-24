@@ -354,6 +354,36 @@ Failures remain fatal when requested. Keep the production FIFO, physical-end and
 pending-content assertions intact; do not classify unrelated sanitizer findings
 as performance warnings.
 
+The separate instrumented native GUI smoke has a cumulative workload allowance,
+not a real-time receiver requirement. If that allowance expires while the same
+finite sampled transmission is demonstrably advancing, the application returns
+75 with `INCOMPLETE GUI_SMOKE_BUDGET:` and progress evidence. All existing smoke
+assertions run before this classification. A stalled transmission, idle noise,
+polling or advancing wall-clock compute time cannot establish progress. The
+recent-progress window is 30 seconds; errors and non-transmission waits keep
+their ordinary failure result.
+
+Only native CI's Debug step opts into treating this exact result as a warning
+with **incomplete instrumented GUI coverage**. Its log is retained as a workflow
+artifact and its summary identifies the missing coverage; it is not a smoke
+pass. The wrapper rejects sanitizer diagnostics, crashes, external process
+timeouts and other failures. ASan/UBSan also halt on errors in that job. Release,
+SDK, packaging and certification remain strict, including for exit 75. This
+exception does not apply to calibration or other test timeouts.
+
+To repeat the entire affected instrumented GUI workflow and CLI checks without
+repeating unrelated calibration or platform suites, use:
+
+```sh
+gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=sanitizer-gui
+```
+
+This uses the same Debug compiler, sanitizer flags, H runner and 600-second
+smoke allowance as full native CI. It additionally checks the budget classifier
+and strict runner policy with bounded fixtures. A successful diagnostic with an
+incomplete warning is not full native qualification. Ordinary automatic CI
+remains limited to the existing lightweight checks.
+
 ## Focused development diagnostics
 
 The manual `devfast` checkbox in native CI (`ci.yml`), SDK qualification
