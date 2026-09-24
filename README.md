@@ -3,85 +3,28 @@
 A C++20 audio modem for moving clipboard text, screenshots, and files between
 computers. It includes a compiled CLI, a native C++/FLTK desktop console, real
 waveform and sampled channel simulation, and a documented fixed-interval byte stream. Received source data uses bounded
-RAM storage; reception creates no temporary files or disk cache. Saves are
-explicit. No network listener or routable addressing is implemented.
+storage, including a temporary spool while reception continues; permanent saves
+are explicit. No network listener or routable addressing is implemented.
 
 **Status: working reference implementation, version 0.7.2.** The audio/stream/crypto
 pipeline works end to end and has automated regression tests. This is not yet
 the complete high-performance modem described in the supplied specification.
-In particular, automatic modulation/rate adaptation, multi-signal radio scanning,
+In particular, near-capacity adaptive modulation, multi-signal radio scanning,
 RF hopping, multi-day status reception, and hardware radio integrations remain
 unimplemented. See the [requirements matrix](docs/requirements.md) for precise
 coverage and boundaries. No unimplemented control is presented as functioning.
 
-Regular mode sends one bit per pattern symbol. Pattern evidence alone admits
+The transport sends one bit per pattern symbol. Pattern evidence alone admits
 timing, carrier and keystream candidates. Nonempty text of up to 16 source bytes and
 explicit bit drafts use raw transmission. Longer byte streams use a fixed 128-byte coding
 interval after each alignment marker, with no packet header, received length,
-or metadata parser. Legacy APSK and packet APIs have been removed; regular peers must use
+or metadata parser. Legacy APSK and packet APIs have been removed; peers must use
 the same local source/FEC profile. Short text uses the fixed bit dictionary.
 
 **Development requirement:** preserve tiny dictionary/raw-bit messages, fixed
 intervals and per-bit pending reception. Each bit may cost hours or longer;
 neither added framing nor waiting for a whole message is harmless. See the
 [message behavior contract and regression checks](docs/development.md).
-
-**Legacy Modem** adds a separate simplex radio-text console for BPSK31,
-BPSK125 and Olivia-4/2k. It has live receive/transmit text, a send draft,
-a waterfall and an editable carrier (1500 Hz by default). Its modulation,
-settings and regression-only fixed-SNR channel are independent of Robust and
-Fast. See [Legacy Modem](docs/legacy-modem.md).
-
-**Fast Modem** is an independent QAM/LDPC and classic APSK text/file-transfer
-interface, selected from the **Modem** dropdown beside **DATA PUMP**. It includes
-live waveform, waterfall and constellation plots, fixed 2,048-bit coded intervals,
-optional AES-256-CBC/HMAC, and bounded streaming source storage. Regular waveform,
-encryption and short/pending-message behavior remain unchanged.
-
-The default audio-cable profile now uses **4,194,304-QAM, LDPC 8/9, four LDPC
-frames per cycle, approximately 0.3% RS parity/data, and a full marker every
-16 intervals**. It uses 17,647.0588 symbols/s, 2% rolloff and an 18 kHz shaped
-band, with output amplitude 0.30 on both channels. Compact eight-bit source
-bytes, one integrity-protected continuation/final flag per cycle, and unambiguous
-final padding replace the classic nine-bit source cells. A 2,048-symbol preamble
-supports dense-QAM acquisition.
-
-An exact live **50 MB transfer succeeded in 21m 30.664s** on the connected
-headphone-to-microphone cable, including startup and an eight-second silence
-tail. All 6,980 LDPC frames converged, the complete source SHA-256 matched,
-and no clipping or capture overrun occurred. Calculated public-source 50 MB
-airtime is **21m 27.337s**, including the current preamble and 6.25 seconds of
-end silence. This single whole-file success does not establish an 80% success
-probability. Earlier 1,048,576-QAM / LDPC 9/10 development trials also transferred
-5 MB exactly. See [Fast operation and settings](docs/fast-mode.md), the
-[capacity codec specification](docs/fast-capacity-codec.md), and the
-[live capacity study](docs/fast-capacity-live-study.md) for measured limits and
-wire revisions.
-
-The preserved **classic APSK** profile supports the earlier 256-APSK,
-convolutional 7/8, high-rate RS and depth-62 cable settings. Its roughly
-2h 01m calculated 50 MB airtime and 44.14 kbit/s sampled 2 MiB result are
-historical reference points, not cable capacity limits. SSB and FM retain their
-classic coding and waveforms. Speakers/microphone now defaults to a separate
-16-QAM/LDPC 3/4 OFDM waveform with right-channel-only output, providing
-38.80 kbit/s of steady source capacity. Higher QAM orders and the classic
-acoustic profile remain selectable. The
-[acoustic routing diagnosis](docs/fast-acoustic-routing-diagnosis.md) explains
-the current default and measured decoding limits. The
-[earlier cable study](docs/fast-cable-live-study.md) documents those settings.
-The separate [physical SNR measurement](docs/cable-snr-live-study.md) found about
-79 dB on one input and 81.5 dB with both inputs averaged under best-case tone
-conditions; this is not a direct measurement of dense-QAM decoding margin.
-The [coding study](docs/fast-coding-study.md) records the preceding theoretical
-analysis and remaining work such as probabilistic shaping and adaptive loading.
-
-The CLI provides `fast-info`, `fast-tx`, `fast-rx` and `fast-listen`. Fast accepts
-`--text` or `--input`; encryption is off by default and enabled by `--keyfile`.
-Both peers select matching format, coding and protection settings. Public
-checksums detect corruption without authentication, and Fast has no LPI claim.
-Its historical SNR regression executable explicitly pins classic APSK and is
-built only for testing. General audio/radio qualification remains outstanding.
-The following regular-mode description and settings do not apply to Fast.
 
 Encrypted pattern chips use circular I/Q noise with private amplitude and phase,
 removing the fixed squared-carrier signature of the previous +/-1 mapping.
@@ -128,7 +71,7 @@ repair interior losses and a missing final coded bit without shifting later byte
 
 For interval-coded sources, the default codec emits raw LZMA2 with a fixed 4 MiB dictionary,
 including incompressible input, then pads the final data area with zeros.
-It transmits no original size. Corrected bytes enter a bounded memory buffer; decompression
+It transmits no original size. Corrected bytes enter a bounded spool; decompression
 runs only after iterative search establishes the physical stream end. A locally
 selected uncompressed profile uses fixed validity/byte cells to preserve exact
 bytes and trailing zeros. The bundled compression library needs no runtime download.
@@ -143,48 +86,8 @@ Marker recognition uses bounded fixed-cadence searches and a conservative `2^-84
 random-input evidence budget, independently of authentication. Unknown slots add
 no marker confidence. See the [fixed stream protocol](docs/protocol.md).
 
-The desktop has **Console**, **Link planner**, **Compression / raw bits**,
-**Modem flow**, and **Transmission layout** tabs, in that order. **Developer mode**,
-next to **Clear received**, starts unchecked. Check it to show the last three
-tabs and the Pattern / tone, Error correction, DSP workspace, RX targets,
-Pattern steps, Callsign, Grid and Repeatable controls. Hidden controls keep their
-positions and current values, including command-line overrides. Link planner
-compares bit duration, modeled one-bit reception and receiver CPU pace at the
-selected power, path loss, noise and oscillator settings.
-Beside **Simulation**, the desktop shows a modeled whole-message receive
-probability and estimated computation times for a fixed **Intel Core i9-13900H**
-and **RTX 4090 Laptop GPU** reference. No local benchmark runs. The GPU figure is
-a projection; simulation currently executes on the CPU. These rough estimates
-update with the draft and settings. A simulated carrier outside the receiver's
-frequency search shows an explanation instead of a numeric probability.
-Supported long-pattern estimates include the local differential detector and
-report Monte Carlo sampling uncertainty. Geometries outside the supported model
-range show a coverage reason instead of a percentage; see the
-[model and its assumptions](docs/simulation-estimates.md).
-The **LPI relative observation** advisory compares an unkeyed energy detector's
-total observation with the receiver's one-bit design reference: N:1 means N
-total wire-bit durations, or N-1 additional durations. Both listeners are
-normalized to 18 dB Es/N0 in one receiver symbol, an uncalibrated planning
-reference. Simulation/live link budgets and oscillator presets do not change
-the ratio at fixed waveform geometry. It uses 90% detection and 1% false alarms
-per known window, with explicit weak-signal assumptions; it is not a safe
-traffic limit or a claim that only one in N transmitted bits is accepted.
-With encryption off, including tone experiments, a warning marks the estimate
-as a hypothetical encrypted private pattern at the current timing and
-normalized reference.
-Actual public waveforms can be easier to detect. The estimate does not enable
-encryption or change the transmitted draft.
-The same model appears in CLI `estimate` and `analyze-link` JSON. See
-[LPI relative observation estimates](docs/lpi-estimates.md) for bandwidth,
-reference noise rise, examples and limitations.
-For extreme links, `pump analyze-link` compares bounded statistical detector
-experiments and extrapolated processing costs without generating PCM. See
-[fast weak-link planning](docs/weak-link-planning.md) for the 3 dBm/-200 dB
-case, example commands and the distinction from actual receiver success.
-The **Oscillator model** selector includes free-running crystal, hobbyist
-GPSDO/XO and GPSDO/TCXO without ovens, and GPSDO/OCXO models. The same profiles
-are available as `--oscillator` in CLI simulations and analysis; see
-[their assumptions](docs/oscillator-models.md).
+The desktop has **Console**, **Modem flow**, **Transmission layout**, and
+**Compression / raw bits** tabs.
 The inspection views show the two pattern codewords, their modeled distances,
 and exact bit/symbol counts. Long patterns use a bounded illustrative prefix;
 keyed previews use clearly labeled public example streams. These design plots
@@ -217,32 +120,23 @@ independently.
 The DSP workspace dropdown is an upper limit: 25%, 50% (default), or 75% of
 available RAM. It does not request that amount of history. Received messages
 and files have a separate 256 MiB quota. The GUI defaults to **Rate**
-`3.6 kHz`, **Carrier** `1.5 kHz`, **Short ≤16 B target SNR (dB-Hz)** `32`, and
-**Long / file target SNR (dB-Hz)** `55`. The short target applies to nonempty
-text of 1–16 source bytes inclusive and exact raw bits. Longer text and all
-attachments use the long target. Estimates, inspection and transmission follow
-the draft's source bytes; crossing the boundary does not restart reception.
+`3.6 kHz`, **Carrier** `1.5 kHz`, and **TX SNR (dB-Hz)** `32`.
 Rate is the nominal chip-rate planning parameter, not a measured occupied
 bandwidth: the default produces 1,800 chips/s and an ideal shaped spectrum of
 375–2,625 Hz, including the 25% RRC rolloff. Rate presets still include `18 kHz`.
 Changing Rate selects its default carrier: `1.5 kHz` for `3.6 kHz`, otherwise
 `max(1500, 0.75 × rate)` Hz. The Carrier dropdown offers only the current rate's
 default carrier; manual frequency entry remains available.
-The **RX targets (dB-Hz)** comma-list starts at `32, 55`. Changing either TX SNR to
-a valid value replaces the RX list with both effective targets (deduplicated); the RX
+The **RX targets (dB-Hz)** comma-list also starts at `32`. Changing TX SNR to
+a valid value replaces the RX list with that single matching target; the RX
 list can then be edited independently. Search varies this list while holding
 the selected rate, carrier, and pattern/tone mode fixed. Invalid RX input resets
 the entire list to `32`.
-In automatic modes, all GUI target entries check Clock/RAM fit and may adjust
-to a nearby usable value, preferring weaker targets. Fixed modes retain exact
-entries. Typing preserves the edit buffer; Enter or a preset displays the exact
-accepted value. The independent Planner target changes only its preview until
-explicitly applied. See [Link planner](docs/link-planner.md).
 
 Beside the gross bitrate, diagnostics show the **[Shannon-Hartley limit](https://disalw3.epfl.ch/teaching/signals_instruments_systems/ay_2025-26/lecture/SIS_25-26_W07_lecture.pdf#page=33)** for the
 selected TX target and nominal bandwidth. This is ideal Gaussian-noise channel
 capacity: `B * log2(1 + 10^(C/N0_dBHz / 10) / B)` bit/s, with `B` in Hz. At the
-short-message defaults (3.6 kHz, 32 dB-Hz), it is about **1.89 kbit/s**. Actual payload
+GUI defaults (3.6 kHz, 32 dB-Hz), it is about **1.89 kbit/s**. Actual payload
 throughput depends on the waveform and coding overhead. CLI `estimate` reports
 the same value as `shannon_capacity_bps`, using `--bw` and `--target-snr` (default
 32 dB-Hz, including manual modem profiles); values beyond the numeric range are
@@ -285,32 +179,6 @@ content as base64, exact recovered bits, validation flags and DSP diagnostics; w
 or `--json`, binary file content remains unsaved. Text defaults to stdout, so
 normal pipelines work. Public Reed–Solomon correction does not authenticate the
 sender.
-
-After observed symbol absence completes a reception, unresolved interval data
-can use a separate hard-bit recovery search. Its default wall-clock budget is
-five minutes, with workers up to the available CPU cores. `rx`, `simulate` and
-`listen` accept `--recovery-seconds N` (0 disables this additional search),
-`--recovery-threads N` (0 selects the available cores), and `--recovery-bits N`
-(default 65,536 retained symbol slots). These are local receiver settings;
-transmit bits, markers, airtime, encryption and authentication are unchanged.
-The search receives hard bits and missing-slot positions, with no analog samples
-or symbol-confidence scores. It never changes a bit's established encryption
-coordinates or joins receptions across physical completion.
-
-JSON reports `recovery.state`, `attempts`, `total` and `elapsed_ms` separately
-from `stream_complete` and `content_validated`. A physically complete reception
-may still have an incomplete recovery search. Exhausting its time budget does
-not establish a unique candidate or expose speculative source content. Recovery
-remains bounded by the retained slots and selected search scope; it cannot
-recover every possible insertion, deletion or lost interval. The API retains
-unfinished work for a later recovery call while its result remains alive.
-`--recovery-errors N` (default 2, range 0–24) reserves RS capacity for additional
-erroneous bytes by enumerating more missing bits. This can substantially increase
-the search domain; a larger value is not a guarantee that the search will finish
-within its time budget. See [the exact recovery scope](docs/protocol.md#exhaustive-hard-bit-recovery).
-The GUI's Recovery menu in Console + Compression resumes an unfinished search
-for another configured budget or cancels its current run. Clearing received
-content discards these jobs; stopping or reconfiguring the session does too.
 
 ```sh
 printf 'clipboard text' | ./build/pump tx --input - --output message.wav
@@ -574,16 +442,7 @@ string does not steer acquisition. Its JSON reports exact bits, a model score
 and `content_validated: false`. Manual sample-rate/carrier overrides use the same
 pattern transport.
 
-Live `listen --json` events carry `signal_id`, `revision` and `superseded_ids`.
-Keep the latest revision for each signal, clear its prior interpretation when
-the revision increases, and remove identities listed in `superseded_ids`.
-A slower receive profile may revise a completed short interpretation back to
-pending; it completes only after that profile observes physical absence.
-`reception_update` events describe decoded interpretations, and their
-`reception_id` matches the completed payload's `id`. These are local presentation
-identities, not transmitted framing or authentication.
-
-The reference modem accepts nominal bandwidths from 0.01 Hz through 30 MHz and
+The reference modem accepts nominal bandwidths from 1 Hz through 30 MHz and
 forced durations of 1..16,384 chips. `--target-snr` is the desired C/N0 in dB-Hz,
 defaulting to 32 (32 dB/1Hz). Large messages and attachments default to 60%
 Reed–Solomon parity overhead (`--fec 60`).
@@ -593,17 +452,6 @@ preserve their duration and report unsupported automatic confidence assumptions
 when they miss the applicable floor. Integration may extend
 past 16,384 chips, subject to numeric, workspace and acquisition limits. This
 is not measured receiver sensitivity or a capacity optimum.
-
-For weak-signal operation, see [integration, clock search and practical link
-budgets](docs/weak-signal.md). Rate is a bandwidth parameter, not payload bits/s.
-Long pattern searches include carrier and sample-clock alternatives; extra
-integration is useful only while their finite coverage and phase coherence hold.
-For sufficiently long patterns, an additional detector combines soft phase
-relationships between local windows, defaulting to 100 seconds rounded to at
-least 16 whole chips and requiring 256 complete windows. It still admits only
-complete payload symbols and preserves the exact raw/status wire bits.
-See [local differential evidence](docs/pattern-constellation.md#local-differential-evidence)
-for its bounded statistic and compute limitations.
 
 Hardware sample rates do not set the modem's bandwidth or symbol rate. Audio
 endpoints negotiate a supported clock and use a bounded band-limited converter
@@ -646,7 +494,7 @@ unsupported configuration is rejected before allocation.
 Simulation CPU work does grow with the number of samples, so long integrations
 and high sample rates can take substantial time and remain cancellable.
 Explicit batch WAV operations still use `--memory-mb` and can reject recordings
-that exceed that workspace. Corrected source intervals drain to a quota-limited memory buffer until
+that exceed that workspace. Corrected source intervals drain to a quota-limited temporary-file spool until
 physical completion; it is separate from the application receive cache.
 
 ## Development and portability
@@ -716,7 +564,6 @@ not as a claim that every requested feature or assertion is implemented.
 
 Application code is dedicated to the public domain under [CC0 1.0 Universal](LICENSE).
 Copyright (c) 2026 mirage335. The vendored QR encoder retains its own
-MIT notice. Vendored DVB-S2/S2X LDPC tables retain their
-[permissive notice](third_party/ldpc/LICENSE). Data Pump is based in part on the work of the FLTK project. Its
+MIT notice. Data Pump is based in part on the work of the FLTK project. Its
 license and static-linking exception, OpenSSL notices, and collected runtime
 notices accompany the installation.

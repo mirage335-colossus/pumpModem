@@ -26,8 +26,7 @@ public:
     PlotSnapshot();
     static PlotSnapshot waveform(std::vector<float> samples, modem::Config config, double zoom = 1);
     static PlotSnapshot constellation(std::vector<std::complex<double>> points, bool symbols = false);
-    // Preserve native log-score variation below T and reserve a logarithmic
-    // upper range for strong signals. T and 2T are fixed score references.
+    // Exponential axes keep the threshold and twice-threshold at fixed positions.
     static PlotSnapshot pattern_scores(std::vector<PatternScore> scores, bool enabled = true);
     static PlotSnapshot waterfall(SpectrumHistory history, bool overview = false);
     static PlotSnapshot qr(std::optional<QrCode> code, QrBrightness brightness = QrBrightness::dark);

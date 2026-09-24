@@ -1,5 +1,4 @@
 #include "datapump/pattern_receiver.hpp"
-#include "datapump/pattern_correlator.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/channel.hpp"
@@ -13,7 +12,6 @@
 #include <numeric>
 #include <random>
 #include <string>
-#include <tuple>
 
 using namespace datapump;
 namespace {
@@ -66,7 +64,6 @@ Reception receive(const std::vector<float>& samples,const modem::Config& c,
                result.bursts.back().first_stream_symbol+result.bursts.back().bits.size()==burst.first_stream_symbol) {
                 auto& prior=result.bursts.back();prior.bits.insert(prior.bits.end(),burst.bits.begin(),burst.bits.end());
                 prior.complete=burst.complete;prior.end_sample=burst.end_sample;prior.score=burst.score;prior.stream_phase_samples=burst.stream_phase_samples;
-                prior.support_samples=burst.support_samples;
                 prior.frequency_hz=burst.frequency_hz;
             } else result.bursts.push_back(std::move(burst));
         }
@@ -97,202 +94,6 @@ const modem::PatternBurst& exact(const Reception& result,const Bytes& bits) {
         throw Error("detected bits differ from exact payload: "+observed);
     }
     return result.bursts.front();
-}
-bool same_burst(const modem::PatternBurst& a,const modem::PatternBurst& b) {
-    return std::tie(a.bits,a.first_sample,a.end_sample,a.first_stream_symbol,a.frequency_hz,a.score,
-                    a.complete,a.stream_phase_samples,a.stream_first_sample,a.stream_first_symbol,
-                    a.missing_slots,a.support_samples)==
-           std::tie(b.bits,b.first_sample,b.end_sample,b.first_stream_symbol,b.frequency_hz,b.score,
-                    b.complete,b.stream_phase_samples,b.stream_first_sample,b.stream_first_symbol,
-                    b.missing_slots,b.support_samples);
-}
-bool same_evidence(const modem::PatternEvidence& a,const modem::PatternEvidence& b) {
-    return std::tie(a.first_sample,a.end_sample,a.stream_symbol,a.frequency_hz,a.score,a.alternative_score,
-                    a.bit,a.stream_phase_samples,a.admission_threshold,a.frequency_hypothesis)==
-           std::tie(b.first_sample,b.end_sample,b.stream_symbol,b.frequency_hz,b.score,b.alternative_score,
-                    b.bit,b.stream_phase_samples,b.admission_threshold,b.frequency_hypothesis);
-}
-struct ComparedProgress {
-    Bytes bits;
-    std::size_t pending_polls=0,complete_events=0,candidates=0;
-    std::size_t completed_at=0;
-};
-ComparedProgress compare_parallel_progress(const std::vector<float>& samples,const modem::Config& c,
-                                          modem::PatternSearch search,unsigned workers,bool shrink=false,
-                                          bool finish_capture=true) {
-    constexpr std::size_t workspace=2*1024*1024,reduced=256*1024;
-    search.candidate_limit=31;search.track_limit=4;search.bit_limit=128;
-    search.worker_threads=1;modem::PatternReceiver serial(c,workspace,search);
-    search.worker_threads=workers;modem::PatternReceiver parallel(c,workspace,search);
-    ComparedProgress result;
-    std::size_t budget=workspace;
-    const auto poll=[&](std::size_t position) {
-        check(serial.working_bytes()<=budget && parallel.working_bytes()<=budget,
-              "parallel search exceeded the current workspace ceiling");
-        if(serial.working_bytes()!=parallel.working_bytes())
-            throw Error("worker count changed idle memory available to competing receive searches at "+
-                        std::to_string(position)+" samples (serial "+std::to_string(serial.working_bytes())+
-                        ", parallel "+std::to_string(parallel.working_bytes())+", "+std::to_string(workers)+
-                        " workers, "+std::to_string(c.spreading_factor)+" chips, "+std::to_string(c.sample_rate)+
-                        " Hz, private "+std::to_string(c.scramble)+", phase bank "+std::to_string(search.search_stream_phases)+")");
-        check(serial.acquiring()==parallel.acquiring() && serial.synchronized()==parallel.synchronized() &&
-              serial.clock_windowed()==parallel.clock_windowed(),
-              "worker count changed search status at a progress poll");
-        check(same_burst(serial.provisional(),parallel.provisional()),
-              "worker count changed an exact provisional prefix or its evidence");
-        for(const auto limit:{search.candidate_limit,std::size_t{3}}) {
-            const auto a=serial.candidates(limit),b=parallel.candidates(limit);
-            check(a.size()==b.size() && std::equal(a.begin(),a.end(),b.begin(),same_evidence),
-                  "worker count changed ordered candidate fields or admission thresholds");
-            result.candidates=std::max(result.candidates,a.size());
-        }
-        const auto a=serial.diagnostics(),b=parallel.diagnostics();
-        check(std::tie(a.sample_offset,a.preamble_correlation,a.snr_db,a.bit_rate,a.constellation,a.waveform,a.pattern_score)==
-              std::tie(b.sample_offset,b.preamble_correlation,b.snr_db,b.bit_rate,b.constellation,b.waveform,b.pattern_score) &&
-              a.preamble_reception.has_value()==b.preamble_reception.has_value(),
-              "worker count changed diagnostic values at a progress poll");
-        if(a.preamble_reception) {
-            const auto& x=*a.preamble_reception;const auto& y=*b.preamble_reception;
-            check(std::tie(x.expected_samples,x.observed_samples,x.matched_samples)==
-                  std::tie(y.expected_samples,y.observed_samples,y.matched_samples),
-                  "worker count changed observed preamble coverage");
-        }
-        const auto first=serial.take_bursts(),second=parallel.take_bursts();
-        check(first.size()==second.size() && std::equal(first.begin(),first.end(),second.begin(),same_burst),
-              "worker count delayed a pending bit or changed a burst event");
-        for(const auto& event:first) {
-            result.bits.insert(result.bits.end(),event.bits.begin(),event.bits.end());
-            result.bits.insert(result.bits.end(),event.missing_slots,modem::missing_pattern_bit);
-            if(!event.complete && (!event.bits.empty() || event.missing_slots))++result.pending_polls;
-            if(event.complete){++result.complete_events;result.completed_at=position;}
-        }
-        check(serial.take_chip_constellation()==parallel.take_chip_constellation(),
-              "worker count changed drainable chip points at a progress poll");
-    };
-    poll(0);
-    constexpr std::array<std::size_t,5> chunks{1,137,19,503,71};
-    for(std::size_t position=0,chunk=0;position<samples.size();++chunk) {
-        const auto count=std::min(chunks[chunk%chunks.size()],samples.size()-position);
-        const auto block=std::span(samples).subspan(position,count);
-        serial.push(block);parallel.push(block);position+=count;
-        poll(position);
-        if(shrink && budget==workspace && position>samples.size()/3) {
-            serial.set_workspace_bytes(reduced);parallel.set_workspace_bytes(reduced);budget=reduced;
-            poll(position);
-        }
-    }
-    if(finish_capture) {
-        serial.finish();parallel.finish();poll(samples.size());
-        serial.finish();parallel.finish();poll(samples.size());
-    }
-    return result;
-}
-void parallel_search_exact_progress() {
-    for(const unsigned workers:{3U,0U}) {
-        for(const bool keyed:{false,true}) {
-            const auto c=config(64,keyed);const auto symbol=modem::symbol_sample_count(c);
-            const auto step=.25*c.sample_rate/static_cast<double>(symbol);
-            modem::PatternSearch search;
-            // Duplicate offsets produce exact score ties. Search order must
-            // still select the same start/stream address and evidence record.
-            search.frequency_offsets_hz={0,0,-step,step,-step};
-            const auto result=compare_parallel_progress(waveform(c,{0,0,1},137,3*symbol,.73,.03),
-                                                        c,search,workers,true);
-            check(result.bits==Bytes({0,0,1}) && result.pending_polls>0 && result.candidates>0,
-                  "parallel comparison must exercise leading zeros, partial bytes and pending evidence");
-            check(result.complete_events==0,"parallel search treated EOF as physical completion");
-            std::vector<float> quiet(4*symbol);
-            search.retain_score=0;
-            const auto tied=compare_parallel_progress(quiet,c,search,workers);
-            check(tied.bits.empty() && tied.complete_events==0,
-                  "parallel tied background manufactured payload or completion");
-            std::mt19937_64 random(731);std::normal_distribution<float> noise;
-            for(auto& sample:quiet)sample=noise(random);
-            const auto background=compare_parallel_progress(quiet,c,search,workers);
-            check(background.bits.empty(),"parallel noise-only comparison admitted a payload");
-        }
-        auto short_private=config(16,true);short_private.dsss=true;short_private.dsss_seed[11]=139;
-        short_private.sample_rate=48000;short_private.bandwidth_hz=12000;short_private.carrier_hz=9000;
-        const auto short_symbol=modem::symbol_sample_count(short_private);
-        const auto short_result=compare_parallel_progress(waveform(short_private,{0,0,1},137,3*short_symbol,.31,.001),
-                                                          short_private,{},workers,true);
-        check(short_result.bits==Bytes({0,0,1}),"parallel sample-resolution private fit lost exact short bits");
-
-        for(const bool split_initial_phases:{false,true}) {
-            auto phase=config(split_initial_phases?128:16,true);phase.pulse_shaping=false;
-            if(split_initial_phases)phase.integration_seconds=.7;
-            else {phase.sample_rate=8000;phase.bandwidth_hz=1000;}
-            const auto symbol=modem::symbol_sample_count(phase);
-            const auto step=std::gcd(symbol,static_cast<std::uint64_t>(phase.sample_rate));
-            phase.stream_phase_samples=(std::min(symbol,static_cast<std::uint64_t>(phase.sample_rate))-1)/step*step;
-            Bytes bits{0,0,1,0,1,1,0,1,0,1,1,0,1,0,0,1};const auto block=bits;
-            if(!split_initial_phases)for(unsigned i=0;i<2;++i)bits.insert(bits.end(),block.begin(),block.end());
-            const auto samples=waveform(phase,bits,137,3*symbol,.37,.01);phase.stream_phase_samples=0;
-            modem::PatternSearch search;search.search_stream_phases=true;
-            const auto phased=compare_parallel_progress(samples,phase,search,workers);
-            check(phased.bits==bits,"parallel phase bank changed timestamp-dependent private bits");
-        }
-    }
-}
-void parallel_search_physical_absence() {
-    auto c=config(32,true);c.pulse_shaping=false;
-    c.sample_rate=256;c.bandwidth_hz=64;c.carrier_hz=64;c.integration_seconds=1;
-    const Bytes bits{0,0,1};const auto symbol=modem::symbol_sample_count(c);
-    constexpr std::size_t delay=17;
-    const auto samples=waveform(c,bits,delay,12*c.sample_rate,.37);
-    for(const unsigned workers:{3U,0U}) {
-        const auto result=compare_parallel_progress(samples,c,{},workers,true);
-        check(result.bits==bits && result.pending_polls>=2 && result.complete_events==1,
-              "parallel search must expose pending partial bytes and exactly one physical completion");
-        check(result.completed_at>=delay+bits.size()*symbol+modem::pattern_absence_samples(c),
-              "parallel search completed before six seconds of fully scored absence");
-    }
-}
-void parallel_long_continuation_exact_progress() {
-    const Bytes expected{0,0,1};
-    constexpr std::size_t delay=16;
-    for(const bool keyed:{false,true}) {
-        auto transmitted=config(64,keyed);
-        transmitted.sample_rate=64;transmitted.bandwidth_hz=8;transmitted.carrier_hz=16;
-        // A quarter-second remainder lets later private symbols separate
-        // subsecond start phases that shared the first symbol's stream epoch.
-        transmitted.integration_seconds=keyed?40.25:40;
-        transmitted.stream_phase_samples=keyed?48:0;
-        const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(transmitted));
-        const auto samples=waveform(transmitted,expected,delay,3*symbol,.73,.003);
-        auto received=transmitted;received.stream_phase_samples=0;
-        modem::PatternSearch search;
-        const auto step=.25*received.sample_rate/static_cast<double>(symbol);
-        // Keep exact ties and both nominal-clock and coupled-clock fits in
-        // their original order. One worker must produce byte-for-byte equal
-        // decisions, diagnostics and evidence to parallel continuation.
-        search.frequency_offsets_hz={0,0,-step,step,0,-step,step};
-        search.couple_clock_to_carrier=true;search.uncoupled_frequency_count=4;
-        search.search_stream_phases=keyed;
-        // Public serial scoring and parallel scoring must agree even when
-        // streamed rows can use an optional shared nominal waveform cache.
-        search.prefer_streamed_templates=!keyed;
-        modem::PatternReceiver path(received,2*1024*1024,search);
-        check(!path.clock_windowed(),"long parallel fixture must exercise compact FFT tracking references");
-        const auto payload_end=delay+expected.size()*symbol;
-        const std::vector<float> partial(samples.begin(),samples.begin()+
-            static_cast<std::ptrdiff_t>(payload_end+symbol/2));
-        for(const unsigned workers:{3U,0U}) {
-            try {
-                const auto pending=compare_parallel_progress(partial,received,search,workers,false,false);
-                check(pending.bits==expected && pending.pending_polls==expected.size() && pending.complete_events==0,
-                      "parallel long continuation lost per-symbol pending bits or completed on a partial absent symbol");
-                const auto complete=compare_parallel_progress(samples,received,search,workers,false,false);
-                check(complete.bits==expected && complete.pending_polls==expected.size() && complete.complete_events==1,
-                      "parallel long continuation failed exact pending bits and one physical completion without EOF");
-                check(complete.completed_at>=payload_end+symbol,
-                      "parallel long continuation ended before a complete absent symbol was observed");
-            } catch(const Error& error) {
-                throw Error(std::string(keyed?"private changing phase":"public mixed clock bank")+" / "+
-                            std::to_string(workers)+" workers: "+error.what());
-            }
-        }
-    }
 }
 void exact_blind_bits() {
     constexpr std::array<std::size_t,6> chunks{1,7,131,19,503,47};
@@ -453,97 +254,8 @@ void changing_chunks_and_late_start() {
     const std::array<std::size_t,1> whole{samples.size()};const std::array<std::size_t,5> changing{17,1,233,3,1024};
     const auto a=receive(samples,c,whole),b=receive(samples,c,changing);
     const auto& first=exact(a,{0,0,1});const auto& second=exact(b,{0,0,1});
-    check(first.first_sample==second.first_sample && first.end_sample==second.end_sample && first.score==second.score &&
-          first.support_samples==second.support_samples && first.support_samples>0 &&
-          first.support_samples<=3*static_cast<double>(symbol),
+    check(first.first_sample==second.first_sample && first.end_sample==second.end_sample && first.score==second.score,
           "PCM push chunk boundaries changed acquisition evidence");
-}
-void continuous_long_fft_progress() {
-    auto c=config(64);c.sample_rate=64;c.bandwidth_hz=8;c.carrier_hz=16;c.integration_seconds=40;
-    const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
-    const Bytes expected{0,0,1};
-    constexpr std::size_t workspace=2*1024*1024;
-    constexpr std::array<std::size_t,1> regular{64};
-    constexpr std::array<std::size_t,5> changing{7,137,1,31,83};
-    for(const bool shared:{false,true})for(const auto delay:{std::size_t{16},3*symbol+16})
-    for(const auto chunks:{std::span<const std::size_t>(regular),std::span<const std::size_t>(changing)}) {
-        try {
-            modem::PatternSearch search;
-            search.worker_threads=1;search.candidate_limit=32;search.track_limit=4;search.bit_limit=128;
-            // At forty seconds the compact FFT is shorter than twice the
-            // symbol. Continuing each accepted symbol therefore also checks
-            // the separately retained tracking reference.
-            modem::PatternReceiver receiver(c,workspace,search);
-            check(!receiver.clock_windowed(),"continuous long fixture must exercise the full FFT receiver");
-            const auto samples=waveform(c,expected,delay,3*symbol,.73,.003);
-            std::vector<std::complex<double>> projected(samples.size());
-            for(std::size_t i=0;i<samples.size();++i)
-                projected[i]=static_cast<double>(samples[i])*std::polar(1.,.37-2*std::numbers::pi*c.carrier_hz*i/c.sample_rate);
-            Bytes observed;
-            std::optional<std::uint64_t> first_sample;
-            std::size_t position=0,chunk=0,pending=0,complete=0;
-            const auto poll=[&] {
-                check(receiver.working_bytes()<=workspace,"continuous long FFT receiver exceeded its workspace");
-                for(const auto& event:receiver.take_bursts()) {
-                    check(!event.missing_slots,"clean continuous long FFT receiver manufactured an unknown slot");
-                    if(!first_sample)first_sample=event.stream_first_sample;
-                    check(event.stream_first_sample==*first_sample,"continuous long FFT receiver changed stream identity");
-                    observed.insert(observed.end(),event.bits.begin(),event.bits.end());
-                    if(!event.bits.empty()) {
-                        check(!event.complete,"continuous long FFT receiver withheld a payload bit until completion");
-                        ++pending;
-                    }
-                    if(event.complete) {
-                        check(position>=delay+(expected.size()+1)*symbol,
-                              "continuous long FFT receiver completed before a fully observed absent symbol");
-                        ++complete;
-                    }
-                }
-                check(observed.size()<=expected.size() && std::equal(observed.begin(),observed.end(),expected.begin()),
-                      "continuous long FFT receiver changed the exact pending bit prefix");
-            };
-            const auto advance=[&](std::size_t endpoint) {
-                while(position<endpoint) {
-                    const auto count=std::min(chunks[chunk++%chunks.size()],endpoint-position);
-                    const auto raw=std::span(samples).subspan(position,count);
-                    if(shared)receiver.push(raw,std::span(projected).subspan(position,count));
-                    else receiver.push(raw);
-                    position+=count;poll();
-                }
-            };
-            for(std::size_t count=1;count<=expected.size();++count) {
-                advance(delay+count*symbol+symbol/2);
-                check(observed==Bytes(expected.begin(),expected.begin()+static_cast<std::ptrdiff_t>(count)) &&
-                      pending==count && complete==0,
-                      "continuous long FFT receiver hid an accepted bit behind a later symbol or FFT block");
-            }
-            advance(delay+(expected.size()+1)*symbol-1);
-            check(complete==0,"six seconds of silence completed a still-partial long absent symbol");
-            advance(samples.size());
-            check(observed==expected && pending==expected.size() && complete==1,
-                  "continuous long FFT receiver did not emit exact bits and one physical completion without EOF");
-            check(receiver.take_bursts().empty(),"continuous long FFT progress polling duplicated events");
-
-            modem::PatternReceiver background(c,workspace,search);
-            std::mt19937_64 random(731);std::normal_distribution<float> noise;
-            std::vector<float> quiet(samples.size());
-            for(auto& sample:quiet)sample=noise(random);
-            for(std::size_t i=0;i<quiet.size();++i)
-                projected[i]=static_cast<double>(quiet[i])*std::polar(1.,.37-2*std::numbers::pi*c.carrier_hz*i/c.sample_rate);
-            for(std::size_t offset=0,index=0;offset<quiet.size();++index) {
-                const auto count=std::min(chunks[index%chunks.size()],quiet.size()-offset);
-                const auto raw=std::span(quiet).subspan(offset,count);
-                if(shared)background.push(raw,std::span(projected).subspan(offset,count));
-                else background.push(raw);
-                offset+=count;
-                check(background.take_bursts().empty(),"continuous long FFT acquisition admitted noise-only input");
-                check(background.working_bytes()<=workspace,"continuous long noise search exceeded its workspace");
-            }
-        } catch(const Error& error) {
-            throw Error(std::string(shared?"shared projection":"raw PCM")+" / delay "+std::to_string(delay)+
-                        " / "+std::to_string(chunks.size())+" chunk sizes: "+error.what());
-        }
-    }
 }
 void carrier_evidence_recovers_after_distorted_start() {
     auto c=config(16);c.sample_rate=14400;c.bandwidth_hz=3600;c.carrier_hz=1500;c.spreading_seed.fill(0);
@@ -839,115 +551,6 @@ void independent_sampled_channel() {
         catch(const Error& error){throw Error(std::string(keyed?"keyed ":"public ")+std::to_string(length)+": "+error.what());}
     }
 }
-void coupled_clock_progress_and_absence() {
-    // Independent sampled clocks change both carrier and chip timing. These
-    // +/-200-ppm cases cover the application clock range; the deliberately
-    // wide +/-8000-ppm hypotheses stress both signs of timing correction.
-    auto c=config(128);c.sample_rate=64;c.carrier_hz=16;c.bandwidth_hz=4;c.pulse_shaping=false;
-    const Bytes expected{0,0,1,0,1,1,0,1,0};
-    constexpr std::size_t workspace=2*1024*1024;
-    std::string failures;
-    for(const auto ppm:{-200.,200.,-8000.,8000.}) {
-        c.spreading_factor=std::abs(ppm)<=200?512:128;
-        const auto symbol=modem::symbol_sample_count(c);
-        modem::StreamingTransmitter transmitter(modem::RawBits{expected},c);
-        modem::ChannelConfig impairment;impairment.clock_error_ppm=ppm;
-        impairment.phase_noise_degrees_per_sqrt_second=0;impairment.snr_db=30;impairment.seed=731;
-        modem::SampledSimulationChannel channel(c,impairment);
-        std::array<float,173> block{};std::vector<float> samples;
-        while(const auto count=channel.read(transmitter,block))
-            samples.insert(samples.end(),block.begin(),block.begin()+static_cast<std::ptrdiff_t>(count));
-        const auto capture_end=samples.size();
-        samples.resize(capture_end+3*symbol);
-        channel.read_noise(std::span(samples).subspan(capture_end));
-        const auto partial_end=capture_end+symbol/2;
-        for(const bool compact_hint:{false,true})for(const bool duplicate_nominal:{false,true}) {
-            modem::PatternSearch search;search.couple_clock_to_carrier=true;
-            const auto offset=c.carrier_hz*std::abs(ppm)*1e-6;
-            search.frequency_offsets_hz={-offset,offset};
-            if(duplicate_nominal) {
-                search.uncoupled_frequency_count=2;
-                search.frequency_offsets_hz.insert(search.frequency_offsets_hz.end(),{-offset,offset});
-            }
-            search.start_offset_seconds=0;search.start_uncertainty_seconds=.5;
-            search.compact_clock_search=compact_hint;search.worker_threads=1;
-            search.chunk_bits=64;search.bit_limit=64;search.track_limit=8;search.candidate_limit=128;
-            if(ppm==-200 && !compact_hint && !duplicate_nominal) {
-                rejects([&]{modem::PatternCorrelator receiver(c,search,workspace);},
-                        "direct clock correlator accepted a coupled bank without global carrier competition");
-                auto automatic=search;automatic.frequency_offsets_hz.clear();
-                automatic.couple_clock_to_carrier=false;automatic.expand_clock_search=true;
-                rejects([&]{modem::PatternCorrelator receiver(c,automatic,workspace);},
-                        "direct clock correlator silently narrowed an expanded automatic carrier search");
-            }
-            const auto exercise=[&](std::size_t end,bool complete_expected) {
-                modem::PatternReceiver receiver(c,workspace,search);
-                check(!receiver.clock_windowed(),
-                      "coupled-clock search must compare all carrier fits before publishing even with a compact hint");
-                Bytes bits;std::optional<std::pair<std::uint64_t,std::uint64_t>> identity;
-                std::size_t completions=0,bit_polls=0,position=0;
-                std::uint64_t accepted_end=0;
-                const auto poll=[&] {
-                    check(receiver.working_bytes()<=workspace,"coupled carrier/clock bank exceeded its workspace");
-                    const auto pending=receiver.provisional();
-                    auto events=receiver.take_bursts();
-                    bool has_bits=false;
-                    for(const auto& event:events) {
-                        const auto current=std::pair{event.stream_first_sample,event.stream_first_symbol};
-                        if(!identity)identity=current;
-                        check(current==*identity,"nominal and coupled carrier alternatives duplicated one physical stream");
-                        check(event.missing_slots==0,"coupled-clock control lost a scored symbol");
-                        has_bits|=!event.bits.empty();
-                        bits.insert(bits.end(),event.bits.begin(),event.bits.end());
-                        if(!event.bits.empty())accepted_end=event.end_sample;
-                        if(bits.size()>expected.size() || !std::equal(bits.begin(),bits.end(),expected.begin())) {
-                            std::string actual;for(const auto bit:bits)actual+=bit?'1':'0';
-                            throw Error("coupled-clock progress changed or repeated an exact raw prefix: "+actual+
-                                " at sample "+std::to_string(position)+" / carrier "+std::to_string(event.frequency_hz)+
-                                " / first slot "+std::to_string(event.first_stream_symbol));
-                        }
-                        if(event.complete) {
-                            ++completions;
-                            // Start-grid uncertainty may place the admitted
-                            // clock before the oracle source boundary. Every
-                            // searched clock must still observe a whole failed
-                            // slot after its own last accepted symbol.
-                            check(position>=accepted_end+static_cast<std::uint64_t>(
-                                      std::floor(symbol/(1+std::abs(ppm)*1e-6))),
-                                  "coupled-clock reception completed before a whole absent symbol was observed");
-                        }
-                    }
-                    if(has_bits) {
-                        if(!bit_polls)check(bits.size()<8,"coupled-clock publication waited behind a complete byte");
-                        ++bit_polls;
-                    }
-                    // A provisional accepted prefix must appear on this poll,
-                    // regardless of the much larger storage chunk limit.
-                    if(!pending.bits.empty())
-                        check(bits.size()>=pending.first_stream_symbol+pending.bits.size(),
-                              "coupled-clock acceptance was hidden behind a storage chunk");
-                    check(!receiver.synchronized() || receiver.provisional().bits.empty() || completions,
-                          "coupled-clock progress poll left accepted data undrained");
-                    check(receiver.take_bursts().empty(),"coupled-clock drain repeated an accepted bit");
-                };
-                for(;position<end;) {
-                    const auto count=std::min<std::size_t>(17,end-position);
-                    receiver.push(std::span(samples).subspan(position,count));position+=count;poll();
-                    if(position<partial_end)check(completions==0,"partial silence completed a coupled-clock stream");
-                }
-                receiver.finish();poll();receiver.finish();poll();
-                check(bits==expected && bit_polls>=2,"coupled clocks must expose every exact bit across pending polls");
-                check(completions==(complete_expected?1U:0U),
-                      "coupled-clock EOF or fully observed absence produced the wrong completion state");
-            };
-            try {exercise(partial_end,false);exercise(samples.size(),true);}
-            catch(const Error& error) {failures+=std::to_string(ppm)+" ppm / "+
-                (compact_hint?"FFT with compact hint":"FFT")+" / "+
-                (duplicate_nominal?"mixed bank":"coupled bank")+": "+error.what()+"\n";}
-        }
-    }
-    if(!failures.empty())throw Error(failures);
-}
 void high_snr_sampled_channel() {
     // At 12 kHz bandwidth these sample SNRs correspond to 30 and 24 dB
     // in-band SNR. Seed 13 previously exposed lost first/final bits at eight
@@ -1082,8 +685,7 @@ void short_template_cache_workspace() {
               actual.front().first_sample==expected.front().first_sample &&
               actual.front().end_sample==expected.front().end_sample &&
               actual.front().frequency_hz==expected.front().frequency_hz &&
-              actual.front().score==expected.front().score &&
-              actual.front().support_samples==expected.front().support_samples,
+              actual.front().score==expected.front().score,
               "cache availability or eviction changed exact pattern decisions or confidence");
         const auto a=cached.candidates(),b=receiver->candidates();
         check(a.size()==b.size(),"cache availability changed retained search coverage");
@@ -1170,134 +772,6 @@ void hardware_settling_is_not_payload() {
         verify(bandwidth,chips,epoch,mode);
     for(const auto mode:{0U,3U})verify(100.,64,1800000174ULL,mode,true);
 }
-void streamed_template_rows_preserve_exact_search() {
-    const auto c=config(128,true);
-    modem::PatternSearch search;search.initial_stream_symbols=1;
-    search.candidate_limit=31;search.track_limit=4;search.bit_limit=128;
-    const auto duration=modem::symbol_seconds(c);
-    for(int i=-64;i<=64;++i)search.frequency_offsets_hz.push_back(i/(256.*duration));
-    constexpr std::array<std::size_t,3> limits{8*1024*1024,512*1024,512*1024};
-    constexpr std::array<std::size_t,3> workers{1,1,3};
-    std::array<std::unique_ptr<modem::PatternReceiver>,3> receivers;
-    for(std::size_t i=0;i<receivers.size();++i) {
-        search.worker_threads=workers[i];
-        receivers[i]=std::make_unique<modem::PatternReceiver>(c,limits[i],search);
-        check(!receivers[i]->clock_windowed(),"streamed templates must retain FFT search without a clock hint");
-        check(receivers[i]->working_bytes()<=limits[i],"template construction exceeded its memory limit");
-    }
-    check(receivers[0]->working_bytes()>limits[1],"fixture must require streaming at its reduced memory limit");
-    const Bytes expected{0,1,1};
-    const auto samples=waveform(c,expected,73,static_cast<std::size_t>(modem::pattern_absence_samples(c)+2*modem::symbol_sample_count(c)),.37,.03);
-    Bytes observed;std::size_t complete=0;
-    const auto poll=[&] {
-        const auto reference_bursts=receivers[0]->take_bursts();
-        const auto reference_candidates=receivers[0]->candidates();
-        for(std::size_t i=1;i<receivers.size();++i) {
-            check(receivers[i]->working_bytes()<=limits[i],"streamed FFT search exceeded its current memory limit");
-            const auto bursts=receivers[i]->take_bursts();
-            check(bursts.size()==reference_bursts.size(),"streamed templates changed the next progress poll");
-            for(std::size_t j=0;j<bursts.size();++j)
-                check(same_burst(bursts[j],reference_bursts[j]),"streamed templates changed bits, timing or physical completion");
-            const auto candidates=receivers[i]->candidates();
-            check(candidates.size()==reference_candidates.size(),"streamed templates changed hypothesis retention");
-            for(std::size_t j=0;j<candidates.size();++j)
-                check(same_evidence(candidates[j],reference_candidates[j]),"streamed templates changed scores or trial penalties");
-        }
-        for(const auto& burst:reference_bursts) {
-            observed.insert(observed.end(),burst.bits.begin(),burst.bits.end());complete+=burst.complete;
-        }
-    };
-    for(std::size_t offset=0;offset<samples.size();) {
-        const auto count=std::min<std::size_t>(257,samples.size()-offset);
-        for(auto& receiver:receivers)receiver->push(std::span(samples).subspan(offset,count));
-        offset+=count;poll();
-    }
-    for(auto& receiver:receivers)receiver->finish();poll();
-    check(observed==expected && complete==1,"streamed FFT fixture must recover exact bits and one observed physical end");
-
-    auto narrow=c;narrow.bandwidth_hz=1;
-    modem::PatternSearch expanded;expanded.expand_clock_search=true;expanded.compact_clock_search=true;
-    expanded.start_offset_seconds=0;expanded.start_uncertainty_seconds=7;expanded.worker_threads=1;
-    constexpr std::size_t private_limit=2*1024*1024;
-    modem::PatternReceiver private_bank(narrow,private_limit,expanded);
-    check(!private_bank.clock_windowed(),"private expanded clock bank must compare complete FFT hypotheses despite compact hint");
-    check(private_bank.working_bytes()<=private_limit,"private expanded FFT metadata exceeded its bounded workspace");
-    std::array<float,64> short_noise{};private_bank.push(short_noise);private_bank.finish();
-    check(private_bank.take_bursts().empty(),"short private capture and EOF must not fabricate a fully scored symbol");
-    rejects([&]{modem::PatternReceiver unaffordable(narrow,64*1024,expanded);},
-            "unaffordable expanded FFT search silently fell back to premature clock-lane admission");
-}
-void application_local_fallback_preserves_original_search() {
-    auto c=config(16384,true);c.sample_rate=4000;c.carrier_hz=1000;c.bandwidth_hz=1000;c.pulse_shaping=false;
-    modem::PatternSearch automatic;automatic.expand_clock_search=true;
-    automatic.start_offset_seconds=.002;automatic.start_uncertainty_seconds=0;
-    automatic.worker_threads=1;automatic.candidate_limit=31;automatic.track_limit=4;automatic.bit_limit=128;
-    constexpr std::size_t limit=1024*1024;
-    rejects([&]{modem::PatternReceiver strict(c,limit,automatic);},
-            "low-level expanded search must still reject insufficient FFT core memory");
-    automatic.allow_local_clock_fallback=true;
-    modem::PatternReceiver fallback(c,limit,automatic);
-    check(fallback.clock_windowed() && fallback.local_clock_fallback(),
-          "application fallback must identify its reduced nominal-clock coverage");
-    check(fallback.working_bytes()<=limit,"application local fallback exceeded its memory ceiling");
-    auto explicit_coupled=automatic;explicit_coupled.frequency_offsets_hz={0,.15};explicit_coupled.couple_clock_to_carrier=true;
-    rejects([&]{modem::PatternReceiver strict(c,limit,explicit_coupled);},
-            "application opt-in must not shrink explicit coupled frequency banks");
-    auto no_window=automatic;no_window.start_offset_seconds.reset();
-    rejects([&]{modem::PatternReceiver strict(c,limit,no_window);},
-            "application fallback must not invent a system-clock search window");
-    auto nondefault_clock=automatic;nondefault_clock.clock_errors_ppm={100};
-    rejects([&]{modem::PatternReceiver strict(c,limit,nondefault_clock);},
-            "application fallback must not discard explicit clock-rate hypotheses");
-
-    auto local=automatic;local.expand_clock_search=false;local.allow_local_clock_fallback=false;
-    local.compact_clock_search=automatic.compact_clock_search;
-    const auto step=.25/modem::symbol_seconds(c);
-    local.frequency_offsets_hz={0,-step,step,-2*step,2*step};
-    modem::PatternReceiver original(c,limit,local);
-    check(!original.local_clock_fallback(),"explicit local search must not be presented as an automatic fallback");
-    const Bytes expected{0,1,1};
-    const auto samples=waveform(c,expected,8,static_cast<std::size_t>(modem::pattern_absence_samples(c)+16),.37,.01);
-    Bytes observed;std::size_t complete=0;
-    const auto poll=[&] {
-        const auto reference=original.take_bursts(),reduced=fallback.take_bursts();
-        check(reference.size()==reduced.size(),"application fallback changed original local progress timing");
-        for(std::size_t i=0;i<reference.size();++i) {
-            check(same_burst(reference[i],reduced[i]),"application fallback changed the original five-bin decisions");
-            observed.insert(observed.end(),reduced[i].bits.begin(),reduced[i].bits.end());complete+=reduced[i].complete;
-        }
-        const auto a=original.candidates(),b=fallback.candidates();
-        check(a.size()==b.size(),"application fallback lost original local hypotheses");
-        for(std::size_t i=0;i<a.size();++i)
-            check(same_evidence(a[i],b[i]),"application fallback changed local evidence or trial penalties");
-        check(fallback.working_bytes()<=limit,"application fallback grew beyond its memory ceiling");
-    };
-    for(std::size_t offset=0;offset<samples.size();) {
-        const auto count=std::min<std::size_t>(2048,samples.size()-offset);
-        const auto block=std::span(samples).subspan(offset,count);
-        original.push(block);fallback.push(block);offset+=count;poll();
-    }
-    original.finish();fallback.finish();poll();
-    check(observed==expected && complete==1,"application local fallback lost exact bits or observed physical completion");
-
-    auto narrow=config(128,true);narrow.bandwidth_hz=1;
-    auto cached=automatic;cached.compact_clock_search=false;cached.allow_local_clock_fallback=false;
-    // Retain coverage of the original optional full-row cache. Drift scoring
-    // always streams section templates, even with spare workspace.
-    cached.drift_tolerant=false;
-    modem::PatternReceiver cached_bank(narrow,64*1024*1024,cached);
-    cached.prefer_streamed_templates=true;
-    modem::PatternReceiver shared_bank(narrow,64*1024*1024,cached);
-    check(!shared_bank.clock_windowed() && !shared_bank.local_clock_fallback(),
-          "sharing template memory must retain complete expanded FFT coverage");
-    check(shared_bank.working_bytes()<2*1024*1024 && cached_bank.working_bytes()>8*1024*1024,
-          "multi-bank streaming preference did not leave cached-row RAM for peer receivers");
-    cached.drift_tolerant=true;cached.prefer_streamed_templates=false;
-    modem::PatternReceiver section_bank(narrow,64*1024*1024,cached);
-    check(!section_bank.clock_windowed()&&!section_bank.local_clock_fallback()&&
-          section_bank.working_bytes()<2*1024*1024,
-          "drift section scoring must retain full clock coverage without allocating full template rows");
-}
 }
 int main(int argc,char** argv) {
     unsigned failures=0;
@@ -1307,7 +781,6 @@ int main(int argc,char** argv) {
         catch(const std::exception& error){++failures;std::cerr<<name<<": "<<error.what()<<'\n';}
     };
     run("exact blind bits",exact_blind_bits);run("chunk invariance and late start",changing_chunks_and_late_start);
-    run("continuous long FFT progress",continuous_long_fft_progress);
     run("carrier evidence after distorted startup",carrier_evidence_recovers_after_distorted_start);
     run("short pattern sample timing",short_pattern_sample_timing);
     run("short pattern wrong keys and noise",short_pattern_wrong_key_and_noise);
@@ -1325,18 +798,12 @@ int main(int argc,char** argv) {
     run("default gap timeout ends active message",default_gap_timeout_ends_active_message);
     run("independent epoch phase acquisition",independently_started_epoch_recovers_phase);
     run("independent sampled crystal and phase",independent_sampled_channel);
-    run("coupled clock progress and absence",coupled_clock_progress_and_absence);
     run("high-SNR sampled private and public patterns",high_snr_sampled_channel);
     run("orthogonal private pattern bins",orthogonal_private_pattern_bins);
     run("shared projection and workspace updates",shared_projection_and_workspace_update);
     run("short pattern shared projection phase",short_pattern_shared_projection_phase);
     run("short template cache workspace and exact equivalence",short_template_cache_workspace);
-    run("parallel search exact progress",parallel_search_exact_progress);
-    run("parallel search physical absence",parallel_search_physical_absence);
-    run("parallel long continuation exact progress",parallel_long_continuation_exact_progress);
     run("bounded long clock-window fallback",long_clock_window_fallback);
-    run("streamed template rows preserve exact search",streamed_template_rows_preserve_exact_search);
-    run("application local fallback preserves original search",application_local_fallback_preserves_original_search);
     run("hardware settling remains outside payload",hardware_settling_is_not_payload);
     return failures?1:0;
 }

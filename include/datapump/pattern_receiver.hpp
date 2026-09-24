@@ -1,16 +1,8 @@
 #pragma once
 #include "datapump/modem.hpp"
-#include <algorithm>
 #include <memory>
 
 namespace datapump::modem {
-// Cross-profile presentation weight for one admitted symbol. Native scores
-// have different conservative bounds on different DSP paths; cap each symbol
-// separately so a strong prefix cannot lend its surplus to a weak later fit.
-// This weight changes neither symbol admission nor physical completion.
-inline double pattern_symbol_support(double known_samples,double log_evidence,std::uint64_t chip_samples) {
-    return std::min(known_samples,std::max(0.,log_evidence)*static_cast<double>(chip_samples));
-}
 // Scores use natural-log evidence against an ideal circular-Gaussian reference.
 // Real-PCM covariance and adaptive searches require empirical calibration;
 // neither a lifetime false-alarm guarantee nor authentication is implied.
@@ -23,9 +15,6 @@ struct PatternEvidence {
     // units. Diagnostic only: alternative margins and chain evidence also gate
     // admission, and later search trials can raise this reference.
     double admission_threshold = 0;
-    // Local search identity distinguishes equal-carrier clock alternatives.
-    // Not a transmitted address or a source interpretation.
-    std::size_t frequency_hypothesis = 0;
 };
 // Internal unknown-slot value; transfer interpretation replaces it with a
 // plaintext zero after advancing the Data mask through the same symbol slot.
@@ -46,49 +35,14 @@ struct PatternBurst {
     // Compact all-unknown run, mutually exclusive with bits. It is emitted
     // only after a later found symbol confirms the run's observed extent.
     std::size_t missing_slots = 0;
-    // Cumulative per-symbol supported media samples for confirmed decisions.
-    // Missing positions add zero; draining chunks never resets this total.
-    double support_samples = 0;
 };
 // Completed failed-symbol observations covering this much received-media
 // time end the stream. One failed symbol suffices when it lasts >=6s.
 inline constexpr std::uint64_t pattern_absence_seconds = 6;
 struct PatternSearch {
-    // Long pattern symbols also fit four fixed sections with independent
-    // complex gains. Full-symbol evidence includes the extra noise degrees
-    // and detector-choice penalty; the waveform and completion rule stay fixed.
-    // False retains the coherent reference detector for comparisons.
-    bool drift_tolerant = true;
-    // Long patterns additionally compare independent pairs of local matched
-    // windows. Their duration is independent of the full symbol, rounded up
-    // to whole chips and at least sixteen chips; 256 complete windows are
-    // required. Zero retains the historical coherent/four-section comparison.
-    // This is receiver-local configuration and never changes the waveform.
-    double differential_window_seconds = 100;
-    // A finite, explicit frequency bank. Empty preserves the five-bin local
-    // search unless expand_clock_search is enabled by the application.
+    // A finite, explicit frequency bank. Empty selects five offsets separated
+    // by 1/(4 symbol duration). No carrier/constellation lock precedes scoring.
     std::vector<double> frequency_offsets_hz;
-    // Search long pattern symbols across bounded +/-200 ppm carrier error,
-    // with nominal and coupled sample-clock alternatives. See pattern_search.hpp.
-    // The low-level local-search default remains usable in tiny DSP budgets.
-    bool expand_clock_search = false;
-    // Application policy: retain all expanded hypotheses while generating
-    // their transformed rows in bounded scratch, leaving RAM for peer banks.
-    bool prefer_streamed_templates = false;
-    // Application-only opt-in for an automatic expanded request. If its FFT
-    // core cannot fit, retain the original five nominal-clock hypotheses and
-    // the full configured start window. Explicit banks remain strict.
-    bool allow_local_clock_fallback = false;
-    // Each carrier hypothesis also scales pattern time by 1 + offset/carrier.
-    // Automatically enabled for an expanded default pattern bank with the
-    // default {0} clock-rate list. Explicit frequency banks remain independent.
-    // Requires FFT competition across carrier alternatives; a compact-path
-    // preference cannot replace this evidence comparison. Insufficient FFT
-    // workspace rejects the search rather than switching to per-lane admission.
-    bool couple_clock_to_carrier = false;
-    // Internal partition of an automatic bank: nominal-clock alternatives
-    // precede coupled alternatives. Zero couples every explicit hypothesis.
-    std::size_t uncoupled_frequency_count = 0;
     // Nominal per-search significance, before finite-search trial penalties.
     // Correlated interference still needs independent pattern evidence.
     double false_alarm_probability = 1e-10;
@@ -117,10 +71,6 @@ struct PatternSearch {
     std::optional<double> start_offset_seconds;
     double start_uncertainty_seconds = 0;
     std::vector<double> clock_errors_ppm{0};
-    // Scoring workers: zero uses all but one CPU available to this process
-    // (at least one). One selects serial scoring. Search coverage and ordered
-    // admission are unchanged; spare workspace bounds parallel scratch.
-    std::size_t worker_threads = 0;
 };
 // Whole-symbol sampled absence needed by the fixed six-second policy.
 // Callers add their finite acquisition/lookahead margin when generating tails.
@@ -136,7 +86,7 @@ public:
     // Shared per-sample carrier projection for a bank with one carrier/clock.
     // projected[i] is raw[i] * exp(-j*carrier_phase[i]); an arbitrary fixed
     // projection phase is fitted by the pattern score. Both spans must match.
-    // Sample-resolution and local differential Gram fits reconstruct the carrier from raw samples
+    // Sample-resolution Gram fits reconstruct the carrier from raw samples
     // to keep their real basis matrix independent of that arbitrary rotation.
     void push(std::span<const float>,std::span<const std::complex<double>> projected,std::stop_token = {});
     // Flush available decisions as incomplete; capture EOF is not stream end.
@@ -153,11 +103,6 @@ public:
     bool synchronized() const;
     // True when acquisition covers an explicit finite system-clock window.
     bool clock_windowed() const;
-    // The application requested expansion but only the original local
-    // five-frequency search fitted its workspace. This is reduced coverage.
-    bool local_clock_fallback() const;
-    // Whether the additional section detector fits this profile and budget.
-    bool drift_tolerant() const;
     std::size_t working_bytes() const;
     // Reject a reduction that cannot retain current state. Future candidate
     // growth is capped within the new ceiling; excess payload throws Error.
