@@ -19,19 +19,6 @@ default 4. SVG consists exclusively of locally generated rectangles/path
 geometry and never interpolates the input text into markup. PBM needs no image
 library to produce or display in a compatible GUI toolkit.
 
-The GUI dropdown above the QR preview controls its brightness and selects Dark
-red on every startup (Dark gray in monochrome). Dim red and Dark red reduce the
-background and four-module quiet zone to dark red; monochrome output uses gray
-instead. Off hides the preview on black while keeping the message. The selection
-remains in effect when the message changes. Choose Normal for the original
-black-on-white rendering when scanning. This presentation setting does not change
-the module matrix or the black-and-white SVG/PBM exports.
-
-Click the QR preview to fill the app window with a larger, sharply rendered code.
-The window keeps its size and title bar, and the code follows window resizing.
-Click it again or press Escape to restore the original preview and controls.
-The expanded view keeps the selected brightness and follows message changes.
-
 The optical representation is plaintext: it does not automatically add modem
 encryption, authentication, or content trust. It transports the exact supplied
 UTF-8 bytes through a standard QR reader. Users decide how to handle the
@@ -40,20 +27,17 @@ decoded text.
 ## Vendored implementation
 
 The encoder is Project Nayuki's MIT-licensed C++ QR generator, release **v1.8.0**.
-The tag resolves to upstream commit
-[`720f62bddb7226106071d4728c292cb1df519ceb`](https://github.com/nayuki/QR-Code-generator/commit/720f62bddb7226106071d4728c292cb1df519ceb).
 Its source and header are kept unchanged in `third_party/qrcodegen`, with the
 license alongside them. It uses only the C++ standard library and adds no
 runtime dependency. The wrapper implements input validation and output
 rendering; it does not implement another QR Reed-Solomon variant.
 
-Both files were verified byte-for-byte against that commit. Immutable upstream
-sources and SHA-256 checksums:
+Upstream files and recorded SHA256 checksums:
 
 | Source | SHA256 |
 | --- | --- |
-| [qrcodegen.hpp](https://github.com/nayuki/QR-Code-generator/blob/720f62bddb7226106071d4728c292cb1df519ceb/cpp/qrcodegen.hpp) | `b779c3b156cf7a57ce789d6fee4fc991ccc2913774d26c909d22bb8f26b2a793` |
-| [qrcodegen.cpp](https://github.com/nayuki/QR-Code-generator/blob/720f62bddb7226106071d4728c292cb1df519ceb/cpp/qrcodegen.cpp) | `1f3b3fcdac6954c32cf583ccd02ec9b5901f756a38c461acedc70be4a77d3757` |
+| [qrcodegen.hpp v1.8.0](https://github.com/nayuki/QR-Code-generator/blob/v1.8.0/cpp/qrcodegen.hpp) | `b779c3b156cf7a57ce789d6fee4fc991ccc2913774d26c909d22bb8f26b2a793` |
+| [qrcodegen.cpp v1.8.0](https://github.com/nayuki/QR-Code-generator/blob/v1.8.0/cpp/qrcodegen.cpp) | `1f3b3fcdac6954c32cf583ccd02ec9b5901f756a38c461acedc70be4a77d3757` |
 
 Tests exercise UTF-8 and capacity boundaries, embedded zeros, finder/quiet-zone
 geometry, SVG safety, PBM pixel parity, and a frozen module matrix computed by

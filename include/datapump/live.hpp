@@ -1,6 +1,5 @@
 #pragma once
 #include "datapump/transfer.hpp"
-#include <chrono>
 #include <complex>
 #include <cstdint>
 #include <functional>
@@ -12,24 +11,21 @@ namespace datapump::live {
 struct Settings {
     transfer::Options transfer;
     std::string device = "default";
-    // Right channel on stereo output, sole channel on mono output. When off,
-    // send the same signal to both stereo channels.
-    bool mono = true;
     bool simulation = false;
     double simulation_snr_db = 18;
     double simulation_clock_error_ppm = 100;
     double simulation_phase_noise_degrees_per_sqrt_second = .5;
     // Received content and pending event storage are independent of DSP work.
     std::size_t content_limit = default_memory_limit;
-    std::size_t dsp_workspace_bytes = transfer.dsp_workspace_bytes;
+    std::size_t dsp_workspace_bytes = 64 * 1024 * 1024;
     // Compatibility fields: streaming capture no longer retains a duration
     // window, and simulated media progresses as fast as bounded DSP permits.
     double receive_buffer_seconds = 30;
     std::uint64_t simulation_seed = 1;
     double simulation_speed = 1;
     std::vector<Crypto> receive_keys;
-    // Selecting a transmit key restricts reception to matching keyed streams.
-    // Pattern-only raw results carry no separate authentication tag.
+    // Selecting a transmit key also requires authenticated reception. An
+    // unkeyed channel may search loaded keys in addition to plain packets.
     bool permits_plaintext() const noexcept {
         return !transfer.key && !transfer.modem.scramble && !transfer.modem.dsss;
     }
@@ -39,63 +35,24 @@ struct SignalUpdate {
     double frequency_hz = 0;
     std::string text;
     bool validated = false;
-    std::string reception_id;
+    std::string packet_id;
     double snr_db = 0;
     std::size_t received_bytes = 0;
     std::size_t expected_bytes = 0;
     std::uint64_t sequence = 0;
     double virtual_seconds = 0;
-    // Unknown until receiver evidence is available; never inferred from the
-    // synthetic training prefix returned by blind bootstrap acquisition.
-    std::optional<double> preamble_received_percent = std::nullopt;
-    // Available only after physical completion and interval/source validation.
-    std::optional<StreamBitAccuracy> pre_fec_accuracy = std::nullopt;
-    // Raw bits contain decoded observations and zero placeholders for timed
-    // gaps, without a source checksum/MAC or error correction.
-    bool binary = false;
-    bool complete = false;
-    std::size_t received_bits = 0;
-    std::size_t expected_bits = 0;
-    std::optional<double> pattern_score = std::nullopt;
-    std::size_t missing_symbols = 0; // Unobserved symbol slots.
-    StreamFecStats fec_stats;
-    // Exact transport bits retained when a completed short dictionary stream
-    // is presented as text; absent for pending observations and interval data.
-    std::string raw_bits;
-};
-enum class ConstellationSource { input, transmitted, received };
-struct PatternScoreObservation {
-    std::uint64_t id = 0;
-    std::chrono::steady_clock::time_point observed_at{};
-    bool operator==(const PatternScoreObservation&) const = default;
 };
 struct Snapshot {
-    static constexpr std::size_t pattern_score_limit = 128;
-    static constexpr auto pattern_score_lifetime = std::chrono::seconds(6);
     std::vector<float> waveform;
     std::vector<double> spectrum_db;
     double spectrum_bin_hz = 0;
     std::vector<std::complex<double>> constellation;
-    // Retained receiver hypotheses, not probabilities: real = pattern 0
-    // evidence, imaginary = pattern 1 evidence, both against noise.
-    std::vector<std::complex<double>> pattern_scores;
-    // Stable identities and first-observed presentation times, parallel to
-    // pattern_scores. Repeated retained hypotheses do not refresh their age.
-    std::vector<PatternScoreObservation> pattern_score_observations;
-    // Highest observation allocated at this live/replay position, including
-    // candidates from receivers not selected for the displayed plot.
-    std::uint64_t pattern_score_observation_id = 0;
-    ConstellationSource constellation_source = ConstellationSource::input;
     std::vector<SignalUpdate> signals;
     std::vector<transfer::Received> received;
-    // Bounded capture from the actual transmitter. Replay uses its matching
-    // generation frame; idle snapshots retain the last transmission capture.
-    modem::TransmitTrace transmit_trace;
     std::string status;
     std::string error;
     bool running = false;
     bool transmitting = false;
-    bool transmitting_noise = false; // Continuous tuning noise; fraction has no endpoint.
     bool simulation = false;
     std::uint64_t sequence = 0;
     std::uint64_t samples_received = 0;
@@ -103,17 +60,16 @@ struct Snapshot {
     double virtual_seconds = 0;
     double transmission_seconds = 0;
     double transmission_fraction = 0;
-    bool transmission_finished = true; // CPU/audio work complete; simulation presentation may still be active.
+    bool transmission_finished = true;
     bool transmission_cancelled = false;
-    // Completed simulations present training, measured plots and provisional
-    // reception over three wall-clock seconds. Verified signals and received
-    // content are delivered once at the deadline, then plots return live.
+    // Completed simulations retain a payload-midpoint view for two wall-clock
+    // seconds. All plots, including the constellation, then return to live RX.
     std::uint64_t transmission_id = 0;
-    bool simulation_replay = false;
-    std::size_t replay_frame_index = 0;
-    std::size_t replay_frame_count = 0;
+    bool simulation_review = false;
+    bool constellation_retained = false;
     double simulation_sample_fraction = 0;
-    std::uint64_t constellation_dropped = 0;
+    std::vector<std::vector<double>> simulation_waterfall;
+    double simulation_waterfall_bin_hz = 0;
     std::uint32_t hardware_sample_rate = 0;
     double audio_passband_hz = 0;
     std::size_t dsp_buffered_bytes = 0;
@@ -129,29 +85,14 @@ public:
     // thread-safe and return finite, nonnegative values within uint64 range.
     // Plot cadence and cancellation deadlines always use the steady clock.
     using EpochClock = std::function<double()>;
-    // Independent monotonic presentation clock; never changes modem timing,
-    // key admission, audio pacing or the CPU-bounded simulation trajectory.
-    using ReplayClock = std::function<std::chrono::steady_clock::time_point()>;
-    explicit Session(EpochClock epoch_clock = {}, ReplayClock replay_clock = {});
+    explicit Session(EpochClock epoch_clock = {});
     ~Session();
     Session(const Session&) = delete;
     Session& operator=(const Session&) = delete;
     void start(const Settings& settings);
     void configure(const Settings& settings);
     void update(const Settings& settings) { configure(settings); }
-    // Apply output routing to the next playback without interrupting reception
-    // or changing audio already being transmitted.
-    void set_mono(bool mono);
     void transmit(const Message& message);
-    // One 0/1 per element, including leading zeros. Uses streaming APSK and
-    // the selected data key, with no interval coding, preamble or FEC. Raw
-    // simulations pass sampled audio to ordinary blind acquisition. Without
-    // raw discovery framing, no timing/length-assisted raw result is emitted.
-    void transmit_bits(std::span<const std::uint8_t> bits);
-    // Continuous noise at the selected carrier/bandwidth and normal signal
-    // level, with fresh temporary private streams. Does not encode a message
-    // or use/register saved keys. Stop with cancel_transmit().
-    void transmit_noise();
     void cancel_transmit();
     Snapshot snapshot();
     void stop();

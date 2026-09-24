@@ -1,467 +1,281 @@
 #include "datapump/streaming_modem.hpp"
-#include "datapump/pattern_code.hpp"
-#include "datapump/pattern_pulse.hpp"
-#include "datapump/transfer.hpp"
-#include <algorithm>
-#include <array>
+#include "datapump/packet.hpp"
+#include "datapump/crypto.hpp"
+#include "datapump/tuning.hpp"
+#include "../src/constellation.hpp"
 #include <cmath>
 #include <iostream>
-#include <map>
-#include <numbers>
 #include <stdexcept>
+#include <chrono>
+#include <thread>
 using namespace datapump;
-using Complex=std::complex<double>;
-
-struct ReceivedStreams {
-    std::map<std::pair<std::uint64_t,std::uint64_t>,modem::PatternBurst> streams;
-    void append(const modem::PatternBurst& chunk) {
-        const auto id=std::pair{chunk.stream_first_sample,chunk.stream_first_symbol};
-        auto [it,added]=streams.try_emplace(id);
-        auto& stream=it->second;
-        if(added)stream.first_stream_symbol=chunk.first_stream_symbol;
-        if(stream.complete || chunk.first_stream_symbol!=stream.first_stream_symbol+stream.bits.size())
-            throw std::runtime_error("incremental raw chunks repeated or shifted a received symbol");
-        stream.bits.insert(stream.bits.end(),chunk.missing_slots,modem::missing_pattern_bit);
-        stream.bits.insert(stream.bits.end(),chunk.bits.begin(),chunk.bits.end());
-        stream.complete=chunk.complete;
-    }
-    modem::PatternBurst longest() const {
-        modem::PatternBurst result;
-        for(const auto& [id,stream]:streams)if(stream.bits.size()>result.bits.size())result=stream;
-        return result;
-    }
-};
-
-void generated_bits_use_the_ordinary_modem() {
-    for(const bool shaped:{false,true}) {
-        transfer::Options options;
-        options.timestamp=1800000123;
-        options.key.emplace(Bytes(32,0x59));
-        options.modem.scramble=true;options.modem.dsss=true;
-        options.modem.pulse_shaping=shaped;
-        options.modem.bandwidth_hz=1100;
-        options.modem.integration_seconds=.071; // Partial chips, multiple symbols per epoch.
-        options.modem.stream_phase_samples=5573;
-        auto config=transfer::seeded_config(options,options.timestamp);
-        Bytes bits(93,0);
-        transfer::xor_binary_bits(bits,options);
-        modem::PatternTransmitter ordinary(bits,config,options.timestamp);
-        modem::PatternTransmitter generated(config,
-            modem::PatternTransmitter::MaskedZeroBits{bits.size()},options.timestamp);
-        if(ordinary.total_samples()!=generated.total_samples())
-            throw std::runtime_error("lazy Data bits changed ordinary settling, symbol or suppression duration");
-        std::vector<Complex> expected(ordinary.total_samples());
-        std::vector<Complex> expected_chips,actual_chips;
-        ordinary.read_analytic(expected,{},[&](Complex value){expected_chips.push_back(value);});
-        std::array<Complex,317> chunk{};
-        constexpr std::array<std::size_t,5> sizes{1,7,317,13,129};
-        std::size_t position=0,iteration=0;
-        while(!generated.finished()) {
-            const auto count=generated.read_analytic(std::span(chunk).first(sizes[iteration++%sizes.size()]),{},
-                [&](Complex value){actual_chips.push_back(value);});
-            for(std::size_t i=0;i<count;++i)
-                if(std::abs(chunk[i]-expected[position+i])>1e-9)
-                    throw std::runtime_error("lazy noise bits differ from the ordinary Data mask and pattern encoder");
-            position+=count;
-        }
-        if(position!=expected.size() || actual_chips!=expected_chips)
-            throw std::runtime_error("lazy input changed ordinary chip observations or endpoints");
-    }
-    modem::Config unkeyed;
-    bool rejected=false;
-    try { modem::PatternTransmitter source(unkeyed,modem::PatternTransmitter::MaskedZeroBits{1}); }
-    catch(const Error&) { rejected=true; }
-    if(!rejected)throw std::runtime_error("lazy zero input must never bypass its required Data stream");
-}
-
-void continuous_private_noise() {
+void live_constellation_window() {
     modem::Config config;
-    config.spreading_factor=128;
-    // All ordinary message masks start disabled, but tuning still has fresh
-    // private streams. The public API accepts no deterministic noise key.
-    modem::StreamingTransmitter source(modem::Noise{},config),other(modem::Noise{},config);
-    const auto bytes=source.working_bytes();
-    const auto chip=modem::pattern_chip_samples(config);
-    const auto symbol=modem::symbol_sample_count(config);
-    const auto padding=modem::pattern_pulse_padding_samples(config);
-    const auto payload=modem::training_sample_count(config)+padding;
-    const auto endpoint=payload+8192*chip;
-    if(source.total_samples()>modem::NoiseTransmitter::sample_target || source.total_samples()<endpoint || source.finished())
-        throw std::runtime_error("noise must reserve a bounded continuous duration without buffering its bits");
-    std::array<Complex,317> a{},b{},preview{};
-    source.preview_last_analytic(preview);
-    if(std::any_of(preview.begin(),preview.end(),[](Complex value){return value!=Complex{};}))
-        throw std::runtime_error("new noise preview must be empty");
-    source.read_analytic(a);other.read_analytic(b);
-    if(a==b)throw std::runtime_error("two tuning starts reused the same private waveform");
-    std::vector<Complex> samples(a.begin(),a.end()),points;
-    auto initial=source.take_payload_constellation();
-    points.insert(points.end(),initial.points.begin(),initial.points.end());
-    constexpr std::array<std::size_t,5> sizes{1,7,317,13,129};
-    std::array<float,317> real{};
-    std::size_t iteration=0;
-    while(source.samples_emitted()<endpoint) {
-        const auto before=source.samples_emitted();
-        const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(sizes[iteration%sizes.size()],endpoint-before));
-        if(iteration++%2)source.read(std::span(real).first(count));
-        else source.read_analytic(std::span(a).first(count));
-        source.preview_last_analytic(std::span(preview).first(count));
-        for(std::size_t i=0;i<count;++i) {
-            if(iteration%2==0 ? std::abs(real[i]-static_cast<float>(preview[i].real()))>1e-6F :
-                               std::abs(a[i]-preview[i])>1e-9)
-                throw std::runtime_error("mixed reads or previews changed the continuous noise waveform");
-            samples.push_back(preview[i]);
-        }
-        if(source.read_analytic(std::span<Complex>{}) || source.samples_emitted()!=before+count)
-            throw std::runtime_error("empty read or preview advanced noise transmission");
-        const auto batch=source.take_payload_constellation();
-        if(batch.dropped)throw std::runtime_error("incremental noise polling lost physical chips");
-        points.insert(points.end(),batch.points.begin(),batch.points.end());
-        source.preview_last_analytic(std::span(preview).first(count));
-        if(!source.take_payload_constellation().points.empty())
-            throw std::runtime_error("preview replayed transmitted noise chips");
+    Message message;message.id[0]=0x71;message.data={'l','i','v','e'};
+    auto wire=modem::preamble(config);const auto frame=encode_packet(message);wire.insert(wire.end(),frame.begin(),frame.end());
+    modem::StreamingTransmitter source(wire,config);modem::StreamingReceiver receiver(config,modem::preamble(config));
+    while(const auto observation=source.next_symbol())receiver.push_symbols(std::span(&*observation,1));
+    if(!receiver.synchronized())throw std::runtime_error("live constellation fixture failed acquisition");
+    const modem::SymbolObservation outer{{.7,0},modem::symbol_sample_count(config)};
+    for(unsigned i=0;i<2200;++i)receiver.push_symbols(std::span(&outer,1));
+    const modem::SymbolObservation inner{{.35,0},modem::symbol_sample_count(config)};
+    for(unsigned i=0;i<2200;++i)receiver.push_symbols(std::span(&inner,1));
+    const auto diagnostic=receiver.diagnostics();
+    if(diagnostic.constellation.size()!=2048)throw std::runtime_error("live constellation lost its bounded accumulation");
+    for(const auto point:diagnostic.constellation)
+        if(std::abs(point-std::complex<double>{.35,0})>1e-8)throw std::runtime_error("live constellation retained old amplitude samples after its window advanced");
+    const modem::SymbolObservation newest{{.63,.11},modem::symbol_sample_count(config)};
+    receiver.push_symbols(std::span(&newest,1));
+    const auto latest=receiver.diagnostics();
+    if(std::abs(latest.constellation.back()-newest.value)>1e-8 || std::abs(latest.constellation.front()-inner.value)>1e-8)
+        throw std::runtime_error("live constellation accumulation is not chronological");
+    if(receiver.working_bytes()>8*1024*1024)throw std::runtime_error("live constellation ring exceeded receiver workspace");
+}
+void long_keyed_pcm() {
+    modem::Config config;config.sample_rate=8000;config.spreading_factor=1024;
+    config.scramble=true;config.spreading_seed[0]=29;
+    config.memory_limit=1024; // Legacy waveform storage is deliberately unavailable.
+    Message message;message.id[0]=31;message.data={'C','Q'};
+    PacketOptions options;options.fec=FecMode::off;
+    const Crypto key(Bytes(32,0x49));constexpr std::uint64_t epoch=1800000000;
+    options.authenticator=[key](const Bytes& bytes){return key.mac(bytes);};
+    options.verifier=[key](const Bytes& bytes,const Bytes& tag){return key.verify(bytes,tag);};
+    const auto frame=encode_packet(message,options);
+    auto plain=modem::preamble(config);plain.insert(plain.end(),frame.begin(),frame.end());
+    auto wire=key.xor_data(plain,epoch);
+    const Bytes expected(wire.begin(),wire.begin()+32);
+    const auto mask=key.stream(StreamPurpose::Data,epoch,32,packet_prefix_size);
+    modem::StreamingTransmitter source(wire,config);
+    modem::StreamingReceiver receiver(config,expected,8*1024*1024,[mask](const Bytes& prefix){
+        auto header=prefix;for(std::size_t i=0;i<header.size();++i)header[i]^=mask[i];
+        try{return packet_bootstrap_possible(header) && packet_frame_size(header).has_value();}catch(const Error&){return false;}
+    });
+    receiver.push(std::array<float,17>{});
+    std::array<float,317> block{};Bytes received;
+    std::mt19937_64 random(8192);
+    std::normal_distribution<float> noise(0,static_cast<float>(std::sqrt(modem::nominal_signal_power*std::pow(10.,.5))));
+    while(!source.finished()) {
+        const auto begin=source.samples_emitted();
+        const auto count=source.read(block);
+        // Training provides no acquisition assistance for this fixture.
+        for(std::size_t i=0;i<count;++i)if(begin+i<modem::training_sample_count(config))block[i]=0;
+        for(std::size_t i=0;i<count;++i)block[i]+=noise(random);
+        const auto bytes=receiver.push(std::span(block).first(count));received.insert(received.end(),bytes.begin(),bytes.end());
+        if(receiver.working_bytes()>8*1024*1024)throw std::runtime_error("long keyed PCM exceeded workspace");
     }
-    if(points.size()!=8192 || source.working_bytes()!=bytes || source.transmit_trace().active || source.finished())
-        throw std::runtime_error("noise buffering, message trace or chip bookkeeping changed while streaming");
-    for(const auto lag:std::array<std::uint64_t,3>{symbol/chip,64,4096})
-        if(std::equal(points.begin(),points.begin()+64,points.begin()+static_cast<std::ptrdiff_t>(lag)))
-            throw std::runtime_error("noise repeated a symbol or finite stream cache");
-    Complex mean{},square{};double power=0;
-    for(const auto point:points) { mean+=point;square+=point*point;power+=std::norm(point); }
-    if(std::abs(mean)/points.size()>.06 || std::abs(square)/power>.08 ||
-       std::abs(power/points.size()/(2*modem::nominal_signal_power)-1)>.08)
-        throw std::runtime_error("private tuning patterns changed ordinary power or introduced a coherent carrier");
-    double waveform_power=0;
-    for(std::size_t i=payload;i<samples.size();++i) {
-        if(std::abs(samples[i])>modem::pattern_pcm_radius_limit+1e-10)
-            throw std::runtime_error("noise exceeded ordinary PCM headroom");
-        samples[i]*=std::polar(1.,-2*std::numbers::pi*static_cast<double>(i)*config.carrier_hz/config.sample_rate);
-        waveform_power+=std::norm(samples[i]);
-    }
-    if(std::abs(waveform_power/(samples.size()-payload)/(2*modem::nominal_signal_power)-1)>.08)
-        throw std::runtime_error("shaped tuning noise changed ordinary mean transmitted power");
-    const auto spectral_power=[&](double frequency) {
-        constexpr std::size_t window=2048;
-        double result=0;
-        const auto step=std::polar(1.,-2*std::numbers::pi*frequency/config.sample_rate);
-        for(std::size_t first=payload;first+window<=samples.size();first+=window/2) {
-            Complex sum{},oscillator{1,0};
-            for(std::size_t i=0;i<window;++i) {
-                const auto weight=.5-.5*std::cos(2*std::numbers::pi*static_cast<double>(i)/(window-1));
-                sum+=weight*samples[first+i]*oscillator;oscillator*=step;
+    const auto tail=receiver.finish();received.insert(received.end(),tail.begin(),tail.end());
+    if(received.size()<plain.size())throw std::runtime_error("delayed long keyed PCM failed blind acquisition");
+    received=key.xor_data(received,epoch);
+    const auto packet=decode_packet(Bytes(received.begin()+32,received.end()),options);
+    if(packet.message.data!=message.data || !packet.authenticated)throw std::runtime_error("long keyed PCM changed authenticated bytes");
+}
+void adaptive_roundtrips() {
+    for(unsigned bits=2;bits<=6;++bits)for(unsigned trial=0;trial<(bits>=5?10U:2U);++trial) {
+        modem::Config config;config.constellation_bits=bits;config.spreading_factor=32;
+        config.spreading_mode=modem::SpreadingMode::tone;
+        Message message;message.kind=MessageKind::file;message.filename="data.bin";message.id[0]=static_cast<std::uint8_t>(bits);
+        std::mt19937_64 random(61+bits+trial*19);
+        for(unsigned i=0;i<103;++i)message.data.push_back(static_cast<std::uint8_t>(random()));
+        PacketOptions options;options.fec=trial<2?FecMode::off:FecMode::rs60;
+        auto frame=encode_packet(message,options);
+        // Exact lattice points carrying up to16 corrupted bootstrap bytes
+        // remain within its Reed-Solomon correction radius.
+        if(trial>=8)for(unsigned i=0;i<16;++i)frame[i]^=static_cast<std::uint8_t>(91+i);
+        auto plain=modem::preamble(config);plain.insert(plain.end(),frame.begin(),frame.end());
+        const Crypto key(Bytes(32,0x53));constexpr std::uint64_t epoch=1800000000;
+        const auto wire=trial?key.xor_data(plain,epoch):plain;
+        const Bytes expected(wire.begin(),wire.begin()+32);
+        const auto mask=key.stream(StreamPurpose::Data,epoch,32,packet_prefix_size);
+        modem::StreamingTransmitter source(wire,config);
+        modem::StreamingReceiver receiver(config,expected,8*1024*1024,[&](const Bytes& prefix){
+            auto header=prefix;if(trial)for(std::size_t i=0;i<header.size();++i)header[i]^=mask[i];
+            try{return packet_bootstrap_possible(header) && packet_frame_size(header).has_value();}catch(const Error&){return false;}
+        });
+        const auto sample_snr=tuning::constellation_target_symbol_snr_db(bits)+(trial>=2 && trial<8?0:8)-10*std::log10(modem::symbol_seconds(config)*config.sample_rate/2);
+        const double gain=trial?.62:1.35;Bytes received;
+        while(auto observation=source.next_symbol()) {
+            if(source.samples_emitted()<=modem::training_sample_count(config))observation->value={};
+            if(trial>=2) {
+                const auto phase=std::numbers::pi/64*(static_cast<double>(source.samples_emitted())-.5*static_cast<double>(observation->sample_count))/static_cast<double>(modem::symbol_sample_count(config));
+                observation->value*=std::polar(1.,std::remainder(phase,2*std::numbers::pi));
             }
-            result+=std::norm(sum);
+            *observation=modem::add_awgn(*observation,sample_snr,random);observation->value*=gain;
+            const auto bytes=receiver.push_symbols(std::span(&*observation,1));received.insert(received.end(),bytes.begin(),bytes.end());
+            if(receiver.working_bytes()>8*1024*1024)throw std::runtime_error("adaptive acquisition exceeded bounded workspace");
         }
-        return result;
-    };
-    double inband=0;
-    for(double frequency:{-200.,-100.,0.,100.,200.})inband+=spectral_power(frequency)/5;
-    for(double frequency:{-1000.,-550.,-400.,400.,550.,1000.})
-        if(spectral_power(frequency)>inband*.005)
-            throw std::runtime_error("tuning noise increased ordinary shaped-pattern sidelobes");
-    modem::StreamingTransmitter exact(modem::Noise{},config,bytes);
-    bool rejected=false;
-    try { modem::StreamingTransmitter too_small(modem::Noise{},config,bytes-1); }
-    catch(const Error&) { rejected=true; }
-    if(!rejected || exact.working_bytes()!=bytes)
-        throw std::runtime_error("noise workspace limit ignored retained private stream state");
-    std::stop_source stop;stop.request_stop();rejected=false;
-    const auto before=source.samples_emitted();
-    try { source.read_analytic(a,stop.get_token()); }catch(const Error&) { rejected=true; }
-    if(!rejected || source.samples_emitted()!=before || source.finished())
-        throw std::runtime_error("noise cancellation must stop promptly without inventing a completed stream");
-
+        const auto tail=receiver.finish();received.insert(received.end(),tail.begin(),tail.end());
+        if(received.size()<plain.size())throw std::runtime_error("adaptive "+std::to_string(bits)+"-bit acquisition failed");
+        if(trial)received=key.xor_data(received,epoch);
+        const auto result=decode_packet(Bytes(received.begin()+32,received.begin()+static_cast<std::ptrdiff_t>(plain.size())),options);
+        if(result.message.data!=message.data)throw std::runtime_error("adaptive constellation changed payload");
+        const auto expected_samples=modem::training_sample_count(config)+modem::payload_symbol_count(frame.size(),config)*modem::symbol_sample_count(config);
+        if(source.total_samples()!=expected_samples)throw std::runtime_error("adaptive symbol padding changed estimated airtime");
+    }
+}
+void dense_missing_outer_ring() {
+    // Pinned from a search of actual AES epoch streams. The protected
+    // bootstrap occupies only rings1..7, although the complete64APSK
+    // constellation has eight rings; gain acquisition must still succeed.
+    modem::Config config;config.constellation_bits=6;config.spreading_mode=modem::SpreadingMode::tone;
+    Message message;message.id[0]=81;
+    for(unsigned i=0;i<29;++i)message.data.push_back(static_cast<std::uint8_t>(i*17+91));
+    PacketOptions options;options.fec=FecMode::off;
+    const auto frame=encode_packet(message,options);
+    auto plain=modem::preamble(config);plain.insert(plain.end(),frame.begin(),frame.end());
+    const Crypto key(Bytes(32,0x53));constexpr std::uint64_t epoch=1801378970;
+    const auto wire=key.xor_data(plain,epoch);const Bytes expected(wire.begin(),wire.begin()+32);
+    const auto encoded_header=std::span(wire).subspan(32,packet_prefix_size);
+    unsigned maximum=0;
+    for(unsigned symbol=0;symbol<96;++symbol)
+        maximum=std::max(maximum,1+modem::detail::gray_decode(modem::detail::read_bits(encoded_header,symbol*6,6)>>3));
+    if(maximum!=7)throw std::runtime_error("missing outer-ring fixture no longer exercises the intended lattice");
+    const auto mask=key.stream(StreamPurpose::Data,epoch,32,packet_prefix_size);
+    modem::StreamingTransmitter source(wire,config);
+    modem::StreamingReceiver receiver(config,expected,8*1024*1024,[&](const Bytes& prefix){
+        auto header=prefix;for(std::size_t i=0;i<header.size();++i)header[i]^=mask[i];
+        try{return packet_bootstrap_possible(header) && packet_frame_size(header).has_value();}catch(const Error&){return false;}
+    });
+    Bytes received;
+    while(auto observation=source.next_symbol()) {
+        if(source.samples_emitted()<=modem::training_sample_count(config))observation->value={};
+        observation->value*=.62;
+        const auto bytes=receiver.push_symbols(std::span(&*observation,1));received.insert(received.end(),bytes.begin(),bytes.end());
+    }
+    const auto tail=receiver.finish();received.insert(received.end(),tail.begin(),tail.end());
+    if(received.size()<plain.size())throw std::runtime_error("missing outer-ring bootstrap did not acquire");
+    received=key.xor_data(received,epoch);
+    if(decode_packet(Bytes(received.begin()+32,received.begin()+static_cast<std::ptrdiff_t>(plain.size())),options).message.data!=message.data)
+        throw std::runtime_error("missing outer-ring bootstrap selected an incorrect gain");
+}
+void dense_gain_aliases() {
+    // Artificial XOR-stream fixtures exercise rare but valid occupied-ring
+    // subsets. Several gain hypotheses have an equally clean amplitude
+    // lattice; the protected bootstrap must decide which gain is correct.
+    modem::Config config;config.constellation_bits=6;config.spreading_factor=32;
     config.spreading_mode=modem::SpreadingMode::tone;
-    config.data_key.emplace(Bytes(32,0x37));config.spreading_seed.fill(0xa5);config.dsss_seed.fill(0x59);
-    config.integration_seconds=4*3600;
-    const auto original=config.data_key->stream(StreamPurpose::Data,0,0,32);
-    modem::StreamingTransmitter long_noise(modem::Noise{},config);
-    long_noise.read_analytic(a);
-    if(long_noise.working_bytes()>128*1024 || long_noise.samples_emitted()!=a.size() ||
-       long_noise.take_payload_constellation().points.empty() ||
-       original!=config.data_key->stream(StreamPurpose::Data,0,0,32) ||
-       config.spreading_seed.front()!=0xa5 || config.dsss_seed.front()!=0x59)
-        throw std::runtime_error("long-symbol tuning blocked chip output or changed selected message keys");
-    config.integration_seconds=static_cast<double>(modem::NoiseTransmitter::sample_target)/config.sample_rate;
-    rejected=false;
-    try { modem::StreamingTransmitter excessive(modem::Noise{},config); }catch(const Error&) { rejected=true; }
-    if(!rejected)throw std::runtime_error("noise must reject a symbol beyond its safe continuous duration");
-}
-
-void exact_suppression_noise() {
-    for(const auto mode:{modem::SpreadingMode::pattern,modem::SpreadingMode::tone})
-    for(const bool shaped:{false,true})for(const bool keyed:{false,true}) {
-        if(mode==modem::SpreadingMode::tone && keyed)continue;
-        modem::Config config;
-        config.sample_rate=512;config.carrier_hz=128;config.bandwidth_hz=128;
-        config.integration_seconds=1;config.spreading_mode=mode;config.pulse_shaping=shaped;
-        config.scramble=keyed;config.dsss=keyed;config.spreading_seed[0]=13;config.dsss_seed[0]=29;
-        config.stream_epoch=1800000031;
-        if(keyed)config.data_key.emplace(Bytes(32,0x57));
-        const Bytes wire{0xa5},bits{1,0,1,0,0,1,0,1};
-        modem::StreamingTransmitter packed(wire,config),raw(modem::RawBits{bits},config);
-        const auto training=modem::training_sample_count(config),padding=modem::pattern_pulse_padding_samples(config);
-        const auto noise=modem::suppression_sample_count(config);
-        const auto content=training+2*padding+bits.size()*modem::symbol_sample_count(config);
-        if(noise!=3*config.sample_rate || packed.total_samples()!=content+noise || raw.total_samples()!=content+noise ||
-           modem::waveform_sample_count(wire.size(),config)!=content+noise)
-            throw std::runtime_error("all nonempty input forms need exactly three seconds of trailing noise");
-        std::vector<Complex> a(packed.total_samples()),b(a.size());
-        packed.read_analytic(a);raw.read_analytic(b);
-        if(a!=b || a[content]!=Complex{} || a.back()!=Complex{})
-            throw std::runtime_error("raw and byte inputs must share tapered suppression noise");
-        double energy=0;Complex circularity{};
-        for(std::size_t i=content;i<a.size();++i) {
-            const auto value=a[i]*std::polar(1.,-2*std::numbers::pi*i*config.carrier_hz/config.sample_rate);
-            energy+=std::norm(value);circularity+=value*value;
-            if(std::norm(value)>=1)throw std::runtime_error("suppression noise exceeded PCM headroom");
-        }
-        if(energy/noise<modem::nominal_signal_power || energy/noise>3*modem::nominal_signal_power ||
-           std::abs(circularity)/energy>.4)
-            throw std::runtime_error("suppression must contain independent circular noise at useful power");
-        modem::PatternTransmitter bare(bits,config,config.stream_epoch,0,false);
-        std::vector<Complex> reference(bare.total_samples());bare.read_analytic(reference);
-        const auto rotation=std::polar(1.,2*std::numbers::pi*training*config.carrier_hz/config.sample_rate);
-        for(std::size_t i=2*padding;i<reference.size();++i)
-            if(std::abs(a[training+i]-reference[i]*rotation)>1e-9)
-                throw std::runtime_error("surrounding noise changed payload or its final filter samples");
-        if(std::equal(a.begin()+static_cast<std::ptrdiff_t>(content),a.end(),a.begin()))
-            throw std::runtime_error("suppression reused the preamble waveform");
-    }
-    modem::Config long_config;
-    long_config.sample_rate=64;long_config.carrier_hz=16;long_config.bandwidth_hz=32;
-    long_config.integration_seconds=3600;long_config.pulse_shaping=false;
-    modem::PatternTransmitter long_source({0},long_config);
-    const auto content=modem::symbol_sample_count(long_config);
-    if(modem::training_sample_count(long_config) || long_source.total_samples()!=content+192 ||
-       long_source.working_bytes()>16384)
-        throw std::runtime_error("hour-long symbols must retain a three-second tail with bounded state");
-    std::array<Complex,317> block{};
-    while(long_source.samples_emitted()<content) {
-        const auto count=std::min<std::uint64_t>(block.size(),content-long_source.samples_emitted());
-        long_source.read_analytic(std::span(block).first(static_cast<std::size_t>(count)));
-    }
-    const auto count=long_source.read_analytic(block);
-    if(count!=192 || !long_source.finished() ||
-       std::none_of(block.begin(),block.begin()+192,[](auto value){return value!=Complex{};}))
-        throw std::runtime_error("long-symbol tail was rounded, omitted or replaced by silence");
-}
-
-void suppression_hides_delayed_echo() {
-    modem::Config config;
-    config.sample_rate=512;config.carrier_hz=128;config.bandwidth_hz=128;
-    config.integration_seconds=1;config.pulse_shaping=false;
-    const Bytes bits{1,0,0,1,1,0,1,0};
-    modem::StreamingTransmitter source(modem::RawBits{bits},config);
-    const auto training=modem::training_sample_count(config);
-    std::vector<float> audio(source.total_samples());source.read(audio);
-    // A weaker copy delayed by the complete three-second guard. Supply actual
-    // received samples through the echo's end and the six-second absence.
-    const std::size_t delay=3*config.sample_rate;
-    modem::PatternSearch search;search.frequency_offsets_hz={0};search.initial_stream_symbols=1;
-    for(const bool suppress:{false,true}) {
-        std::vector<float> received(audio.size()-training+delay+7*config.sample_rate);
-        const auto emitted=suppress?audio.size():audio.size()-modem::suppression_sample_count(config);
-        for(std::size_t i=0;i<emitted;++i) {
-            if(i>=training)received[i-training]+=audio[i];
-            if(i+delay>=training)received[i-training+delay]+=.2F*audio[i];
-        }
-        modem::PatternReceiver receiver(config,8*1024*1024,search);
-        ReceivedStreams streams;
-        const auto harvest=[&] {
-            for(const auto& burst:receiver.take_bursts())streams.append(burst);
-        };
-        for(std::size_t offset=0;offset<received.size();) {
-            const auto count=std::min<std::size_t>(317,received.size()-offset);
-            receiver.push(std::span(received).subspan(offset,count));offset+=count;harvest();
-        }
-        receiver.finish();harvest();
-        const auto decoded=streams.longest();
-        if(suppress?(decoded.bits!=bits || !decoded.complete):(decoded.bits.size()<=bits.size()))
-            throw std::runtime_error(suppress?"three-second delayed echo or suppression noise added decoded payload bits":
-                "echo control must expose delayed symbols without suppression noise");
-    }
-}
-
-void pattern_transmit_constellation() {
-    for(const auto mode:{modem::SpreadingMode::pattern,modem::SpreadingMode::tone})
-    for(unsigned layers=0;layers<(mode==modem::SpreadingMode::pattern?4U:1U);++layers)
-    for(const bool raw:{false,true}) {
-        modem::Config config;
-        config.spreading_mode=mode;config.dsss=(layers&2U)!=0;config.dsss_seed[0]=73;
-        config.scramble=(layers&1U)!=0;
-        config.stream_epoch=1800000031;config.integration_seconds=.0054;
-        const auto chip=modem::pattern_chip_samples(config),symbol=modem::symbol_sample_count(config);
-        if(symbol%chip==0)throw std::runtime_error("pattern constellation fixture needs partial final chips");
-        Bytes wire(65),bits;
-        for(std::size_t i=0;i<wire.size();++i) {
-            wire[i]=static_cast<std::uint8_t>(i*79+37);
-            for(unsigned bit=0;bit<8;++bit)bits.push_back(static_cast<std::uint8_t>((wire[i]>>(7-bit))&1U));
-        }
-        auto create=[&] {
-            return raw?modem::StreamingTransmitter(modem::RawBits{bits},config):modem::StreamingTransmitter(wire,config);
-        };
-        auto source=create(),pcm=create(),overflow=create();
-        if(!source.payload_constellation().empty() || !source.take_payload_constellation().points.empty())
-            throw std::runtime_error("unstarted pattern TX invented constellation points");
-        const auto training=modem::training_sample_count(config);
-        std::vector<Complex> settling(training);std::vector<float> settling_pcm(training);
-        source.read_analytic(settling);pcm.read(settling_pcm);
-        if(!source.payload_constellation().empty() || !pcm.take_payload_constellation().points.empty())
-            throw std::runtime_error("hardware settling audio polluted payload chip constellation");
-        auto matches=[](const auto& first,const auto& second) {
-            if(first.size()!=second.size())return false;
-            for(std::size_t i=0;i<first.size();++i)if(std::abs(first[i]-second[i])>1e-10)return false;
-            return true;
-        };
-        std::vector<Complex> expected;
-        std::array<Complex,317> block{};std::array<float,317> pcm_block{};
-        constexpr std::array<std::size_t,5> requests{1,3,317,10,71};std::size_t iteration=0;
-        while(!source.finished()) {
-            const auto start=source.samples_emitted();const auto requested=requests[iteration++%requests.size()];
-            const auto count=source.read_analytic(std::span(block).first(requested));
-            if(pcm.read(std::span(pcm_block).first(requested))!=count)throw std::runtime_error("pattern PCM sample count differs");
-            std::vector<Complex> expected_batch;
-            for(std::size_t i=0;i<count;++i) {
-                if(std::abs(pcm_block[i]-static_cast<float>(block[i].real()))>1e-6F)
-                    throw std::runtime_error("pattern constellation observation altered transmitted PCM");
-                const auto position=start+i;
-                if(position<training+bits.size()*symbol && (position-training)%symbol%chip==0) {
-                    // Recover baseband directly from the emitted analytic
-                    // waveform, independently of the chip observer's values.
-                    const auto angle=2*std::numbers::pi*static_cast<double>(position)*config.carrier_hz/config.sample_rate;
-                    expected_batch.push_back(block[i]*std::polar(1.,-angle));
-                }
+    PacketOptions options;options.fec=FecMode::off;
+    for(unsigned maximum=2;maximum<=7;++maximum)for(unsigned variant=0;variant<2;++variant) {
+        Message message;message.id[0]=static_cast<std::uint8_t>(variant);
+        for(unsigned i=0;i<29;++i)message.data.push_back(static_cast<std::uint8_t>(i*17+variant));
+        const auto frame=encode_packet(message,options);Bytes coded(frame.begin(),frame.begin()+packet_prefix_size);
+        for(unsigned symbol=0;symbol<96;++symbol) {
+            auto value=modem::detail::read_bits(coded,symbol*6,6);
+            const auto ring=modem::detail::gray_decode(value>>3)%maximum;
+            value=(value&7)|((ring^(ring>>1))<<3);
+            for(unsigned position=0;position<6;++position) {
+                const auto bit=symbol*6+position;
+                coded[bit/8]=static_cast<std::uint8_t>((coded[bit/8]&~(1U<<(7-bit%8)))|(((value>>(5-position))&1U)<<(7-bit%8)));
             }
-            const auto batch=source.take_payload_constellation(),pcm_batch=pcm.take_payload_constellation();
-            if(batch.dropped || pcm_batch.dropped || !matches(batch.points,expected_batch) || !matches(pcm_batch.points,expected_batch))
-                throw std::runtime_error("pattern TX constellation missed, duplicated or rotated actual emitted chip I/Q");
-            expected.insert(expected.end(),expected_batch.begin(),expected_batch.end());
-            std::array<Complex,17> preview{};source.preview_last_analytic(preview);
-            if(!source.take_payload_constellation().points.empty() || !pcm.take_payload_constellation().points.empty())
-                throw std::runtime_error("pattern constellation drain or waveform preview replayed chips");
         }
-        const auto limit=modem::StreamingTransmitter::constellation_history_limit;
-        if(expected.size()!=bits.size()*modem::pattern_chips_per_symbol(config) || expected.size()<=limit)
-            throw std::runtime_error("pattern constellation did not retain each partial final chip");
-        while(!overflow.finished())overflow.read(pcm_block);
-        const auto batch=overflow.take_payload_constellation();
-        const std::vector<Complex> newest(expected.end()-limit,expected.end());
-        if(batch.dropped!=expected.size()-limit || !matches(batch.points,newest) ||
-           !matches(source.payload_constellation(),newest) || !matches(overflow.payload_constellation(),newest))
-            throw std::runtime_error("pattern constellation lost chronological history or exact overflow count");
-        source.read_analytic(block);overflow.read(pcm_block);
-        const auto empty=overflow.take_payload_constellation();
-        if(!empty.points.empty() || empty.dropped || !source.take_payload_constellation().points.empty())
-            throw std::runtime_error("finished pattern transmitter replayed constellation points");
-        if(source.working_bytes()>128*1024)throw std::runtime_error("pattern constellation exceeded fixed DSP workspace");
+        Bytes mask(packet_prefix_size);
+        for(std::size_t i=0;i<mask.size();++i)mask[i]=coded[i]^frame[i];
+        auto wire=modem::preamble(config);wire.insert(wire.end(),coded.begin(),coded.end());wire.insert(wire.end(),frame.begin()+packet_prefix_size,frame.end());
+        modem::StreamingTransmitter source(wire,config);
+        modem::StreamingReceiver receiver(config,modem::preamble(config),8*1024*1024,[&](const Bytes& prefix){
+            auto header=prefix;for(std::size_t i=0;i<header.size();++i)header[i]^=mask[i];
+            try{return packet_bootstrap_possible(header) && packet_frame_size(header).has_value();}catch(const Error&){return false;}
+        });
+        Bytes received;
+        while(auto observation=source.next_symbol()) {
+            if(source.samples_emitted()<=modem::training_sample_count(config))observation->value={};
+            observation->value*=1.35;
+            const auto bytes=receiver.push_symbols(std::span(&*observation,1));received.insert(received.end(),bytes.begin(),bytes.end());
+        }
+        const auto tail=receiver.finish();received.insert(received.end(),tail.begin(),tail.end());
+        if(received.size()<wire.size())throw std::runtime_error("sparse amplitude lattice failed bootstrap acquisition");
+        for(std::size_t i=0;i<mask.size();++i)received[32+i]^=mask[i];
+        if(decode_packet(Bytes(received.begin()+32,received.begin()+static_cast<std::ptrdiff_t>(wire.size())),options).message.data!=message.data)
+            throw std::runtime_error("bootstrap chose an aliased amplitude gain");
     }
 }
-
-void frame_wide_transmit_constellation() {
-    modem::Config config;
-    config.sample_rate=1200003;config.bandwidth_hz=300000;config.carrier_hz=450000;
-    config.integration_seconds=11;config.scramble=true;config.spreading_seed[0]=37;
-    // The rounded hardware prefix is empty for this long-symbol fixture, so
-    // it can exercise wideband history without rendering two seconds of PCM.
-    if(modem::training_sample_count(config))throw std::runtime_error("frame history fixture unexpectedly has a preamble");
-    const auto frame=config.sample_rate/modem::StreamingTransmitter::constellation_frame_rate+
-        (config.sample_rate%modem::StreamingTransmitter::constellation_frame_rate!=0);
-    const auto chip=modem::pattern_chip_samples(config);
-    const auto capacity=modem::StreamingTransmitter::constellation_history_capacity(config);
-    const auto padding=modem::pattern_pulse_padding_samples(config);
-    const auto endpoint=padding+4*frame+chip/2;
-    const auto total_chips=(endpoint-padding)/chip+((endpoint-padding)%chip!=0);
-    const auto first_frame_chip=(endpoint-padding-frame)/chip;
-    if(total_chips-first_frame_chip<=modem::StreamingTransmitter::constellation_history_limit)
-        throw std::runtime_error("wideband fixture must exceed the old chip history");
-    modem::StreamingTransmitter fragmented(modem::RawBits{Bytes{0,1}},config),whole(modem::RawBits{Bytes{0,1}},config);
-    std::vector<float> pcm(endpoint);
-    if(whole.read(pcm)!=pcm.size())throw std::runtime_error("frame history PCM fixture ended early");
-    modem::PatternCode code(config);
-    std::vector<Complex> expected;
-    for(std::uint64_t i=0;i<total_chips;++i)
-        expected.push_back(std::sqrt(2*modem::nominal_signal_power)*code.value(i,0));
-    std::array<Complex,317> output{};
-    constexpr std::array<std::size_t,5> requests{1,3,317,10,71};
-    std::size_t iteration=0,observed=0;
-    while(fragmented.samples_emitted()<endpoint) {
-        const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(requests[iteration++%requests.size()],
-            endpoint-fragmented.samples_emitted()));
-        fragmented.read_analytic(std::span(output).first(count));
-        const auto batch=fragmented.take_payload_constellation();
-        if(batch.dropped || observed+batch.points.size()>expected.size() ||
-           !std::equal(batch.points.begin(),batch.points.end(),expected.begin()+static_cast<std::ptrdiff_t>(observed)))
-            throw std::runtime_error("wideband callback fragmentation lost or repeated chip observations");
-        observed+=batch.points.size();
-    }
-    const auto history=whole.payload_constellation();
-    if(observed!=expected.size() || history.size()!=capacity || history!=fragmented.payload_constellation() ||
-       !std::equal(history.begin(),history.end(),expected.end()-static_cast<std::ptrdiff_t>(capacity)))
-        throw std::runtime_error("wideband history did not preserve its chronological frame capacity");
-    const auto frame_points=static_cast<std::size_t>(total_chips-first_frame_chip);
-    if(frame_points>history.size() || !std::equal(history.end()-static_cast<std::ptrdiff_t>(frame_points),history.end(),
-                                               expected.begin()+static_cast<std::ptrdiff_t>(first_frame_chip)))
-        throw std::runtime_error("wideband history lost the chip overlapping the start of the bitmap frame");
-    const auto pending=whole.take_payload_constellation();
-    if(pending.points!=history || pending.dropped!=expected.size()-capacity || !whole.take_payload_constellation().points.empty())
-        throw std::runtime_error("wideband bounded history reported incorrect omitted points");
-    const auto bytes=whole.working_bytes();
-    if(bytes<capacity*sizeof(Complex))throw std::runtime_error("wideband history allocation is absent from DSP accounting");
-    modem::StreamingTransmitter exact(modem::RawBits{Bytes{0,1}},config,bytes);
-    bool rejected=false;
-    try{modem::StreamingTransmitter too_small(modem::RawBits{Bytes{0,1}},config,bytes-1);}
-    catch(const Error&){rejected=true;}
-    if(!rejected || exact.working_bytes()!=bytes)throw std::runtime_error("wideband history did not enforce its exact workspace budget");
-
-    // Short final chips can put more physical points in a frame than a
-    // bandwidth-only estimate. Check every possible frame boundary phase.
-    config.integration_seconds=10.5/config.sample_rate;
-    const auto symbol=modem::symbol_sample_count(config),chips=modem::pattern_chips_per_symbol(config);
-    const auto partial_capacity=modem::StreamingTransmitter::constellation_history_capacity(config);
-    if(symbol%chip==0)throw std::runtime_error("frame boundary fixture needs shortened final chips");
-    for(std::uint64_t start=0;start<symbol;++start) {
-        const auto end=start+frame;
-        const auto first=start/symbol*chips+start%symbol/chip;
-        const auto last=end/symbol*chips+(end%symbol)/chip+((end%symbol)%chip!=0);
-        if(last-first>partial_capacity)throw std::runtime_error("short final chips exceed the reserved bitmap frame history");
+void recent_pcm_preview() {
+    for(unsigned mode=0;mode<3;++mode) {
+        modem::Config config;config.constellation_bits=6;
+        if(mode==0){config.sample_rate=48000;config.bandwidth_hz=24000;config.carrier_hz=12000;config.spreading_mode=modem::SpreadingMode::tone;}
+        if(mode==1){config.spreading_factor=3;config.scramble=true;config.dsss=true;config.spreading_seed[0]=51;config.dsss_seed[0]=29;}
+        if(mode==2){config.spreading_factor=32;config.integration_seconds=2.5;config.scramble=true;config.spreading_seed[0]=75;}
+        auto wire=modem::preamble(config);
+        for(unsigned i=0;i<(mode==2?10U:1800U);++i)wire.push_back(static_cast<std::uint8_t>(i*71+19));
+        modem::StreamingTransmitter analytical(wire,config),pcm(wire,config);
+        std::array<float,2048> recent{},actual{},direct{};
+        const auto training=modem::training_sample_count(config);
+        for(const auto target:{std::uint64_t{7},training-17,training+317,training+13000,analytical.total_samples()}) {
+            while(analytical.samples_emitted()<target && !analytical.finished())analytical.next_symbol();
+            while(pcm.samples_emitted()<analytical.samples_emitted()) {
+                std::array<float,317> block{};
+                const auto requested=static_cast<std::size_t>(std::min<std::uint64_t>(block.size(),analytical.samples_emitted()-pcm.samples_emitted()));
+                const auto count=pcm.read(std::span(block).first(requested));
+                std::move(recent.begin()+static_cast<std::ptrdiff_t>(count),recent.end(),recent.begin());
+                std::copy_n(block.begin(),count,recent.end()-static_cast<std::ptrdiff_t>(count));
+            }
+            analytical.preview_last(actual);pcm.preview_last(direct);
+            for(std::size_t i=0;i<recent.size();++i)
+                if(std::abs(actual[i]-recent[i])>2e-5F || std::abs(direct[i]-recent[i])>2e-5F)
+                    throw std::runtime_error("preview does not reconstruct recent transmitted PCM for mode "+std::to_string(mode));
+        }
     }
 }
-
 int main() {
     try {
-        generated_bits_use_the_ordinary_modem();
-        continuous_private_noise();
-        exact_suppression_noise();
-        suppression_hides_delayed_echo();
-        pattern_transmit_constellation();
-        frame_wide_transmit_constellation();
-        modem::Config config;config.memory_limit=1024; // Batch PCM ceiling does not limit explicit streaming DSP.
-        const Bytes bits{0,0,1,1,0,1,0,1,1};
-        modem::StreamingTransmitter source(modem::RawBits{bits},config);
-        if(source.total_samples()!=modem::training_sample_count(config)+2*modem::pattern_pulse_padding_samples(config)+
-            bits.size()*modem::symbol_sample_count(config)+modem::suppression_sample_count(config))
-            throw std::runtime_error("raw waveform length differs from exact bits, settling and pulse tails");
-        bool rejected=false;try{source.next_symbol();}catch(const Error&){rejected=true;}
-        if(!rejected)throw std::runtime_error("pattern transmitter exposed symbol oracle");
-        std::vector<float> settling(modem::training_sample_count(config)+modem::pattern_pulse_padding_samples(config));source.read(settling);
-        modem::PatternSearch search;search.frequency_offsets_hz={0};search.initial_stream_symbols=1;
-        modem::StreamingReceiver receiver(config,8*1024*1024,search);
-        std::array<float,317> samples{};ReceivedStreams received;
-        const auto harvest=[&]{for(const auto& burst:receiver.take_pattern_bursts())received.append(burst);};
-        while(const auto count=source.read(samples)){receiver.push(std::span(samples).first(count));harvest();}
-        std::vector<float> silence(2*modem::symbol_sample_count(config));receiver.push(silence);harvest();
-        receiver.finish();harvest();
-        if(received.longest().bits!=bits)throw std::runtime_error("pattern streaming PCM did not recover exact unpadded bits");
-        const auto before=receiver.working_bytes();receiver.set_workspace_bytes(before+1024*1024);
-        receiver.reset();
-        if(receiver.synchronized() || receiver.acquiring())throw std::runtime_error("receiver reset retained acquisition state");
-        std::stop_source stop;stop.request_stop();rejected=false;
-        try{source.read(samples,stop.get_token());}catch(const Error&){rejected=true;}
-        if(!rejected)throw std::runtime_error("streaming cancellation ignored");
-        config.pattern_symbols=false;config.constellation_bits=6;rejected=false;
-        try{modem::StreamingTransmitter obsolete(Bytes(33),config);}catch(const Error&){rejected=true;}
-        if(!rejected)throw std::runtime_error("obsolete APSK transmitter accepted");
-        std::cout<<"streaming pattern modem tests passed\n";return 0;
-    }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
+        modem::Config config;
+        config.spreading_mode=modem::SpreadingMode::tone;
+        config.spreading_factor=1024;
+        Message message; message.id[0]=41; message.data=Bytes(128,0x73);
+        const auto frame=encode_packet(message);
+        auto wire=modem::preamble(config);wire.insert(wire.end(),frame.begin(),frame.end());
+        modem::StreamingTransmitter source(wire,config);
+        modem::StreamingReceiver receiver(config,modem::preamble(config),8*1024*1024,
+            [](const Bytes& prefix){try{return packet_frame_size(prefix).has_value();}catch(const Error&){return false;}});
+        Bytes recovered;
+        std::mt19937_64 random(71);
+        bool inner=false,outer=false;
+        while(auto observation=source.next_symbol()) {
+            const double radius=std::abs(observation->value);
+            inner=inner || std::abs(radius-.35)<1e-8;
+            outer=outer || std::abs(radius-.7)<1e-8;
+            if(source.samples_emitted()<=modem::training_sample_count(config)) observation->value={0,0};
+            auto noisy=modem::add_awgn(*observation,-15,random);
+            const auto bytes=receiver.push_symbols(std::span(&noisy,1));
+            recovered.insert(recovered.end(),bytes.begin(),bytes.end());
+            if(receiver.working_bytes()>8*1024*1024)throw std::runtime_error("unbounded receive DSP");
+        }
+        const auto tail=receiver.finish();
+        recovered.insert(recovered.end(),tail.begin(),tail.end());
+        if(!receiver.finish().empty())throw std::runtime_error("capture finish is not idempotent");
+        bool appended=false;try{receiver.push({});}catch(const Error&){appended=true;}
+        if(!appended)throw std::runtime_error("finished capture accepted further input");
+        std::stop_source stopped;stopped.request_stop();
+        bool cancelled=false;try{receiver.finish(stopped.get_token());}catch(const Error& error){cancelled=std::string_view(error.what())=="modem operation cancelled";}
+        if(!cancelled)throw std::runtime_error("streaming cancellation was ignored");
+        if(!inner || !outer)throw std::runtime_error("16APSK needs two amplitude rings");
+        if(recovered.size()<32+frame.size())throw std::runtime_error("blind acquisition did not recover complete frame");
+        const Bytes payload(recovered.begin()+32,recovered.end());
+        if(decode_packet(payload).message.data!=message.data)throw std::runtime_error("streaming payload mismatch");
+        if(modem::training_sample_count(config)!=5*config.sample_rate)throw std::runtime_error("preamble is not exactly five seconds");
+        modem::Config short_config;
+        short_config.spreading_mode=modem::SpreadingMode::tone;
+        modem::StreamingReceiver waiting(short_config,modem::preamble(short_config));
+        std::stop_source interrupt;
+        std::jthread request_stop([&]{std::this_thread::sleep_for(std::chrono::milliseconds(20));interrupt.request_stop();});
+        const auto before=std::chrono::steady_clock::now();
+        const modem::SymbolObservation enormous_idle{{},std::uint64_t{1}<<48};
+        bool interrupted=false;Bytes idle_output;
+        try{idle_output=waiting.push_symbols(std::span(&enormous_idle,1),interrupt.get_token());}
+        catch(const Error& error){interrupted=std::string_view(error.what())=="modem operation cancelled";}
+        if(!idle_output.empty() || waiting.synchronized() || std::chrono::steady_clock::now()-before>std::chrono::seconds(2))
+            throw std::runtime_error("constant idle observation was not skipped or cancelled promptly");
+        if(!interrupted) {
+            interrupt.request_stop();
+            try{waiting.push_symbols(std::span(&enormous_idle,1),interrupt.get_token());}
+            catch(const Error& error){interrupted=std::string_view(error.what())=="modem operation cancelled";}
+            if(!interrupted)throw std::runtime_error("fast idle acquisition ignored requested cancellation");
+        }
+        long_keyed_pcm();
+        adaptive_roundtrips();
+        dense_missing_outer_ring();
+        dense_gain_aliases();
+        recent_pcm_preview();
+        live_constellation_window();
+        std::cout<<"streaming modem tests passed\n";
+    } catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }
