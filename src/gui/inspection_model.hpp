@@ -1,5 +1,6 @@
 #pragma once
 #include "datapump/transfer.hpp"
+#include "datapump/lpi_estimate.hpp"
 #include "pattern_space.hpp"
 #include <complex>
 #include <optional>
@@ -17,8 +18,8 @@ struct StructureSection {
     std::string title,detail;
     std::optional<std::size_t> bytes,symbols;
     std::optional<double> duration_seconds;
-    // These components describe the body before column interleaving; they
-    // are not additional contiguous fields after the on-air sequence.
+    // Logical components describe fields within the fixed coded intervals;
+    // they add no separate airtime to the physical sequence.
     bool logical=false;
     bool coding=false;
 };
@@ -30,6 +31,8 @@ struct Constellation {
 struct Inspection {
     std::string title,summary;
     bool binary=false;
+    // Empty GUI drafts use a single raw zero only for analytical estimates.
+    bool preview_only=false;
     std::vector<FlowLane> lanes;
     std::vector<StructureSection> sections;
     std::vector<Field> fields;
@@ -37,7 +40,9 @@ struct Inspection {
     std::optional<inspection::PatternSpace> pattern_space;
     std::string preamble_description,chip_description;
     transfer::Estimate estimate;
-    std::optional<PacketLayout> packet_layout;
+    lpi::Estimate lpi_estimate;
+    std::string lpi_summary,lpi_description;
+    std::optional<StreamLayout> stream_layout;
 };
 struct InspectionRequest {
     Message message;
@@ -48,8 +53,8 @@ struct InspectionRequest {
     bool simulation=false;
     std::string device;
 };
-// Run alongside the transmission estimate worker. Encodes a bounded packet to
-// inspect its actual layout; never generates a waveform or retains its data,
-// metadata strings, key bytes, masks, or encoded packet in the returned model.
+// Run alongside the transmission estimate worker. Encodes a bounded source to
+// inspect its fixed interval layout; never generates a waveform or retains
+// source data, metadata strings, key bytes, masks, or coded bytes in the model.
 Inspection inspect(const InspectionRequest& request);
 }

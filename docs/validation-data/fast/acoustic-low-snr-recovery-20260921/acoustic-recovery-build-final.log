@@ -1,0 +1,161 @@
+[  0%] Checking Legacy modem isolation
+[  0%] Checking regular/fast DSP isolation
+-- Regular/fast DSP dependency boundary passed
+[  0%] Built target datapump_legacy_boundary
+[  0%] Built target datapump_fast_boundary
+[  0%] Checking the shared GUI/native adapter boundary
+[  9%] Built target liblzma
+[ 10%] Built target test_gui_layout
+[ 10%] Built target test_gui_contract
+[ 10%] Built target test_document_layout
+[ 12%] Built target test_gui_interactions
+[ 12%] Built target test_gui_services
+[ 48%] Built target fltk
+[ 48%] Built target test_gui_bindings
+[ 48%] Built target test_record_reconciliation
+[ 50%] Built target test_document_presentation
+[ 50%] Built target test_gui_chrome
+[ 51%] Built target test_rev_utf8
+[ 51%] Built target alsa_stub
+[ 52%] Built target test_windows_audio
+[ 53%] Built target test_alsa_audio
+[ 54%] Built target datapump_gui_boundary
+[ 59%] Built target datapump
+[ 59%] Built target test_crypto
+[ 60%] Built target datapump_legacy
+[ 60%] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/modem.cpp.o
+[ 62%] Built target test_keyring
+[ 62%] Built target test_stream_codec
+[ 62%] Built target test_attachment
+[ 63%] Built target test_recovery
+[ 65%] Built target test_stream_receive
+[ 65%] Built target test_boundary_sync
+[ 67%] Built target test_compression_short
+[ 67%] Built target test_compression_lzma
+[ 67%] Built target test_streaming_modem
+[ 67%] Built target test_modem
+[ 68%] Built target test_pattern_code
+[ 68%] Built target test_noise_receive
+[ 69%] Built target test_pattern_correlator
+[ 69%] Built target test_pattern_receiver
+[ 70%] Built target test_pattern_drift
+[ 70%] Built target test_pattern_differential
+[ 71%] Built target test_receiver_differential
+[ 71%] Built target test_pattern_fft_batch
+[ 71%] Built target test_pattern_correlator_batch
+[ 71%] Built target test_pattern_search
+[ 71%] Built target test_search_parallel
+[ 71%] Built target test_pulse_shaping
+[ 73%] Built target test_pattern_transfer
+[ 73%] Built target test_regressions
+[ 73%] Built target test_qr
+[ 73%] Built target test_runtime
+[ 74%] Built target test_tuning
+[ 74%] Built target test_transfer
+[ 74%] Built target test_receiver_probability
+[ 74%] Built target test_simulation_estimate
+[ 75%] Built target test_differential_probability
+[ 75%] Built target test_differential_receiver_probability
+[ 76%] Built target test_lpi_estimate
+[ 76%] Built target test_correlation_experiment
+[ 76%] Built target test_weak_signal
+[ 76%] Built target test_live
+[ 78%] Built target test_live_resources
+[ 78%] Built target test_live_profiles
+[ 78%] Built target test_resampler
+[ 78%] Built target test_live_receptions
+[ 79%] Built target test_signal_view
+[ 79%] Built target test_audio_rates
+[ 80%] Built target test_channel
+[ 80%] Built target test_inspection
+[ 80%] Built target test_gui_plots
+[ 80%] Built target test_pattern_space
+[ 81%] Built target test_inspection_page
+[ 81%] Built target test_gui_bitmaps
+[ 81%] Built target test_profile_reference
+[ 81%] Built target test_binary_editor
+[ 81%] Built target test_legacy_psk
+[ 81%] Built target test_gui_native
+[ 82%] Built target test_legacy_olivia
+[ 82%] Built target test_legacy_session
+[ 82%] Built target test_legacy_simulation
+[ 82%] Linking CXX static library libdatapump_fast.a
+[ 85%] Built target datapump_fast
+[ 85%] Linking CXX executable test_fast_codec
+[ 85%] Linking CXX executable pump
+[ 89%] Built target datapump_gui_application
+[ 89%] Building CXX object CMakeFiles/test_fast_modem.dir/tests/test_fast_modem.cpp.o
+[ 89%] Built target test_fast_codec
+[ 89%] Building CXX object CMakeFiles/test_fast_files.dir/tests/test_fast_files.cpp.o
+[ 90%] Built target pump
+[ 90%] Building CXX object CMakeFiles/test_fast_session.dir/tests/test_fast_session.cpp.o
+[ 91%] Linking CXX executable test_fast_modem
+[ 91%] Built target test_fast_modem
+[ 91%] Building CXX object CMakeFiles/test_fast_transfer.dir/tests/test_fast_transfer.cpp.o
+[ 92%] Linking CXX executable test_fast_files
+[ 92%] Linking CXX executable test_fast_session
+[ 92%] Built target test_fast_files
+[ 92%] Linking CXX executable test_fast_telemetry
+[ 92%] Built target test_fast_session
+[ 92%] Linking CXX executable test_fast_ldpc
+[ 93%] Built target test_fast_telemetry
+[ 93%] Linking CXX executable test_fast_qam
+[ 93%] Built target test_fast_ldpc
+[ 95%] Built target test_fast_qam
+[ 95%] Linking CXX executable test_fast_acoustic
+[ 95%] Linking CXX executable test_fast_radio
+[ 95%] Built target test_fast_acoustic
+[ 95%] Built target test_fast_radio
+[ 95%] Building CXX object CMakeFiles/test_fast_presets.dir/tests/test_fast_presets.cpp.o
+[ 95%] Linking CXX executable test_fast_low_rate
+[ 95%] Built target test_fast_low_rate
+[ 95%] Building CXX object CMakeFiles/test_fast_pilot_presence.dir/tests/test_fast_pilot_presence.cpp.o
+[ 95%] Linking CXX executable test_fast_transfer
+[ 95%] Built target test_fast_transfer
+[ 95%] Building CXX object CMakeFiles/test_fast_output_power.dir/tests/test_fast_output_power.cpp.o
+[ 95%] Linking CXX executable test_fast_presets
+[ 95%] Built target test_fast_presets
+[ 95%] Linking CXX executable fast_regression
+[ 95%] Linking CXX executable test_fast_pilot_presence
+[ 95%] Linking CXX executable test_fast_output_power
+[ 95%] Built target fast_regression
+[ 95%] Built target test_fast_pilot_presence
+[ 95%] Linking CXX executable test_gui_fast
+[ 95%] Built target test_fast_output_power
+[ 95%] Linking CXX executable test_gui_fast_live
+[ 96%] Linking CXX executable test_gui_link_boundary
+[ 96%] Built target test_gui_link_boundary
+[ 96%] Built target test_gui_fast_live
+[ 96%] Linking CXX executable test_gui_controller
+[ 96%] Linking CXX executable test_gui_link_planner
+[ 96%] Built target test_gui_fast
+[ 96%] Linking CXX executable test_link_planner_curves
+[ 97%] Built target test_gui_controller
+[ 97%] Linking CXX executable test_gui_launch_command
+[ 97%] Built target test_link_planner_curves
+[ 97%] Built target test_gui_link_planner
+[ 97%] Linking CXX executable test_gui_launch_settings
+[ 97%] Linking CXX executable test_gui_application
+[ 97%] Built target test_gui_launch_command
+[ 97%] Built target test_gui_launch_settings
+[ 97%] Linking CXX executable test_gui_overlay
+[ 97%] Built target test_gui_application
+[ 97%] Linking CXX executable datapump-gui
+[ 97%] Linking CXX executable test_fltk_adapter
+[ 98%] Built target test_gui_overlay
+[ 98%] Linking CXX executable test_fltk_document
+[ 98%] Built target datapump-gui
+[ 98%] Linking CXX executable test_gui_legacy
+[ 98%] Built target test_fltk_adapter
+[ 98%] Linking CXX executable test_gui_legacy_live
+[100%] Built target test_fltk_document
+[100%] Built target test_gui_legacy_live
+[100%] Built target test_gui_legacy
+[  0%] Checking regular/fast DSP isolation
+[ 53%] Built target liblzma
+-- Regular/fast DSP dependency boundary passed
+[ 53%] Built target datapump_fast_boundary
+[ 86%] Built target datapump
+[100%] Built target datapump_fast
+[100%] Linking CXX executable fast_cable_probe
+[100%] Built target fast_cable_probe

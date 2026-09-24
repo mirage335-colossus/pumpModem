@@ -1,0 +1,1 @@
+expected=3 echo=0.5 qam=4 code=2/3 D=8 TX_seconds=85.248 source_intervals=508 acquired=12.4587 completed=29.2693 premature=1 RX_intervals=76 raw_errors=3703 raw_erasures=33672 exact=0 ldpc_frames=0 ldpc_failed=0 failed_cycles=0 status=Fast stream ended within fixed coding geometry

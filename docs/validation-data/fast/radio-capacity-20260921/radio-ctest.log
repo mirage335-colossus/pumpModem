@@ -1,0 +1,8 @@
+Internal ctest changing into directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+Test project /home/user/___quick/p/_cur/dataPump/pumpModem/build
+    Start 17: fast_radio
+1/1 Test #17: fast_radio .......................   Passed   10.30 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =  10.31 sec

@@ -27,6 +27,14 @@ remains in effect when the message changes. Choose Normal for the original
 black-on-white rendering when scanning. This presentation setting does not change
 the module matrix or the black-and-white SVG/PBM exports.
 
+The preview spans the message editor and transmit-action rows: 115 logical
+pixels square at the default window size, and at least 87 at the minimum size.
+It retains whole-pixel modules and the complete four-module quiet zone.
+Click the QR preview to fill the app window with a larger, sharply rendered code.
+The window keeps its size and title bar, and the code follows window resizing.
+Click it again or press Escape to restore the original preview and controls.
+The expanded view keeps the selected brightness and follows message changes.
+
 The optical representation is plaintext: it does not automatically add modem
 encryption, authentication, or content trust. It transports the exact supplied
 UTF-8 bytes through a standard QR reader. Users decide how to handle the

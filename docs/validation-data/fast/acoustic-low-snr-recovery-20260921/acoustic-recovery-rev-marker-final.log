@@ -1,0 +1,13 @@
+[0/2] Re-checking globbed directories...
+[1/12] Checking Legacy modem isolation
+[2/12] Checking regular/fast DSP isolation
+-- Regular/fast DSP dependency boundary passed
+[3/12] Checking the shared GUI/native adapter boundary
+[4/12] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/profile.cpp.o
+[5/12] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/modem.cpp.o
+[6/12] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/codec.cpp.o
+[7/12] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/acoustic_ofdm.cpp.o
+[8/12] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/session.cpp.o
+[9/12] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/file_transfer.cpp.o
+[10/12] Linking CXX static library libdatapump_fast.a
+[11/12] Linking CXX executable datapump-gui

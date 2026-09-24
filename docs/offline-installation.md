@@ -31,10 +31,15 @@ cmake --install build --prefix "$PWD/build/DataPump-portable"
 cmake --build build --target package
 ```
 
-The Python switch demonstrates that the complete native build needs no Python.
+The Python switch demonstrates that the default FLTK build needs no Python.
 Omit it if you want CTest to run additional Python CLI integration tests when an
 interpreter is already available. Those tests are developer tooling and are not
 installed.
+
+The optional `-DDATAPUMP_GUI_BACKEND=rev` profile requires Python at build time
+to embed resources, plus its C++23/OpenGL toolchain. Its runtime still needs no
+Python or source assets. Follow [Rev backend](rev-backend.md) for that build;
+host OpenGL loaders and drivers are excluded from its collected libraries.
 
 Both `DATAPUMP_BUILD_GUI` and `DATAPUMP_PORTABLE` default to `ON`. Setting the GUI
 option to `OFF` creates a CLI-only package. Setting the portable option to `OFF`

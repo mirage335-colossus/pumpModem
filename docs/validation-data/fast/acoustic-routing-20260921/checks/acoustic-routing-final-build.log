@@ -1,0 +1,144 @@
+gmake: jobserver mkfifo: /tmp/GMfifo4: File exists
+[  0%] Checking Legacy modem isolation
+[ 10%] Built target liblzma
+[ 10%] Built target datapump_legacy_boundary
+[ 10%] Checking regular/fast DSP isolation
+[ 10%] Checking the shared GUI/native adapter boundary
+-- Regular/fast DSP dependency boundary passed
+[ 10%] Built target datapump_fast_boundary
+[ 47%] Built target fltk
+[ 47%] Built target test_gui_layout
+[ 47%] Built target test_gui_contract
+[ 47%] Built target test_document_layout
+[ 47%] Built target test_gui_interactions
+[ 47%] Built target test_gui_services
+[ 47%] Built target test_gui_bindings
+[ 47%] Built target test_record_reconciliation
+[ 48%] Built target test_document_presentation
+[ 50%] Built target test_gui_chrome
+[ 51%] Built target test_rev_utf8
+[ 51%] Built target datapump_gui_boundary
+[ 51%] Built target alsa_stub
+[ 52%] Built target test_windows_audio
+[ 58%] Built target datapump
+[ 59%] Built target test_alsa_audio
+[ 60%] Built target datapump_legacy
+[ 60%] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/profile.cpp.o
+[ 60%] Built target test_crypto
+[ 60%] Built target test_keyring
+[ 60%] Built target test_stream_codec
+[ 62%] Built target test_recovery
+[ 62%] Built target test_attachment
+[ 63%] Built target test_stream_receive
+[ 63%] Built target test_boundary_sync
+[ 63%] Built target test_compression_short
+[ 64%] Built target test_compression_lzma
+[ 64%] Built target test_modem
+[ 64%] Built target test_streaming_modem
+[ 64%] Built target test_noise_receive
+[ 65%] Built target test_pattern_code
+[ 65%] Built target test_pattern_receiver
+[ 65%] Built target test_pattern_correlator
+[ 67%] Built target test_pattern_drift
+[ 67%] Built target test_pattern_differential
+[ 68%] Built target test_receiver_differential
+[ 68%] Built target test_pattern_fft_batch
+[ 68%] Built target test_pattern_correlator_batch
+[ 69%] Built target test_pattern_search
+[ 69%] Built target test_search_parallel
+[ 69%] Built target test_pulse_shaping
+[ 69%] Built target test_pattern_transfer
+[ 69%] Built target test_regressions
+[ 69%] Built target test_runtime
+[ 69%] Built target test_qr
+[ 69%] Built target test_transfer
+[ 70%] Built target test_tuning
+[ 70%] Built target test_simulation_estimate
+[ 70%] Built target test_receiver_probability
+[ 70%] Linking CXX static library libdatapump_fast.a
+[ 71%] Built target test_differential_probability
+[ 71%] Built target test_differential_receiver_probability
+[ 73%] Built target test_lpi_estimate
+[ 74%] Built target datapump_fast
+[ 74%] Built target test_correlation_experiment
+[ 74%] Built target test_weak_signal
+[ 74%] Built target test_live
+[ 74%] Built target test_live_resources
+[ 75%] Built target test_live_profiles
+[ 75%] Built target test_live_receptions
+[ 75%] Built target test_resampler
+[ 75%] Built target test_audio_rates
+[ 76%] Built target test_signal_view
+[ 76%] Built target test_channel
+[ 78%] Built target test_inspection
+[ 78%] Built target test_pattern_space
+[ 79%] Built target test_gui_plots
+[ 79%] Built target test_gui_bitmaps
+[ 79%] Built target test_inspection_page
+[ 80%] Built target test_binary_editor
+[ 81%] Built target test_profile_reference
+[ 81%] Built target test_gui_native
+[ 81%] Building CXX object CMakeFiles/pump.dir/src/fast/cli.cpp.o
+[ 81%] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/fast/controller.cpp.o
+[ 81%] Linking CXX executable pump
+[ 82%] Built target pump
+[ 82%] Built target test_legacy_psk
+[ 84%] Built target test_legacy_olivia
+[ 84%] Built target test_legacy_session
+[ 85%] Built target test_legacy_simulation
+[ 85%] Linking CXX executable test_fast_codec
+[ 85%] Built target test_fast_codec
+[ 85%] Linking CXX executable test_fast_modem
+[ 85%] Built target test_fast_modem
+[ 86%] Building CXX object CMakeFiles/test_fast_files.dir/tests/test_fast_files.cpp.o
+[ 86%] Linking CXX static library libdatapump_gui_application.a
+[ 90%] Built target datapump_gui_application
+[ 90%] Building CXX object CMakeFiles/test_fast_session.dir/tests/test_fast_session.cpp.o
+[ 90%] Linking CXX executable test_fast_files
+[ 90%] Built target test_fast_files
+[ 90%] Linking CXX executable test_fast_transfer
+[ 90%] Linking CXX executable test_fast_session
+[ 91%] Built target test_fast_transfer
+[ 91%] Linking CXX executable test_fast_telemetry
+[ 91%] Built target test_fast_session
+[ 91%] Linking CXX executable test_fast_ldpc
+[ 91%] Built target test_fast_telemetry
+[ 91%] Built target test_fast_ldpc
+[ 91%] Linking CXX executable test_fast_qam
+[ 91%] Linking CXX executable test_fast_acoustic
+[ 92%] Built target test_fast_qam
+[ 92%] Built target test_fast_acoustic
+[ 92%] Linking CXX executable fast_regression
+[ 93%] Building CXX object CMakeFiles/test_gui_fast.dir/tests/test_gui_fast.cpp.o
+[ 93%] Built target fast_regression
+[ 93%] Building CXX object CMakeFiles/test_gui_fast_live.dir/tests/test_gui_fast_live.cpp.o
+[ 93%] Linking CXX executable test_gui_fast_live
+[ 93%] Built target test_gui_fast_live
+[ 93%] Linking CXX executable test_gui_link_boundary
+[ 93%] Built target test_gui_link_boundary
+[ 93%] Linking CXX executable test_gui_controller
+[ 93%] Built target test_gui_controller
+[ 95%] Linking CXX executable test_gui_link_planner
+[ 95%] Linking CXX executable test_gui_fast
+[ 95%] Built target test_gui_link_planner
+[ 95%] Linking CXX executable test_link_planner_curves
+[ 95%] Built target test_gui_fast
+[ 95%] Linking CXX executable test_gui_launch_command
+[ 95%] Built target test_link_planner_curves
+[ 95%] Linking CXX executable test_gui_launch_settings
+[ 96%] Built target test_gui_launch_command
+[ 97%] Linking CXX executable test_gui_application
+[ 97%] Built target test_gui_launch_settings
+[ 97%] Linking CXX executable test_gui_overlay
+[ 97%] Built target test_gui_application
+[ 98%] Linking CXX executable datapump-gui
+[ 98%] Built target test_gui_overlay
+[ 98%] Linking CXX executable test_fltk_adapter
+[ 98%] Built target datapump-gui
+[ 98%] Linking CXX executable test_fltk_document
+[ 98%] Built target test_fltk_adapter
+[ 98%] Built target test_fltk_document
+[100%] Linking CXX executable test_gui_legacy
+[100%] Linking CXX executable test_gui_legacy_live
+[100%] Built target test_gui_legacy_live
+[100%] Built target test_gui_legacy

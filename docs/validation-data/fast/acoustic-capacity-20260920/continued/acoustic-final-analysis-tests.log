@@ -1,0 +1,16 @@
+test_independent_monte_carlo_observations (test_acoustic_bicm_analysis.BicmAnalysisTests.test_independent_monte_carlo_observations) ... ok
+test_low_noise_and_low_signal_limits (test_acoustic_bicm_analysis.BicmAnalysisTests.test_low_noise_and_low_signal_limits) ... ok
+test_pooled_loading_shares_information_without_exceeding_bound (test_acoustic_bicm_analysis.BicmAnalysisTests.test_pooled_loading_shares_information_without_exceeding_bound) ... ok
+test_quadrature_convergence_and_gaussian_upper_bound (test_acoustic_bicm_analysis.BicmAnalysisTests.test_quadrature_convergence_and_gaussian_upper_bound) ... ok
+test_capacity_uniform_awgn_and_water_filling_power (test_acoustic_channel_analysis.AcousticAnalysisTests.test_capacity_uniform_awgn_and_water_filling_power) ... ok
+test_clipping_and_invalid_values_do_not_qualify (test_acoustic_channel_analysis.AcousticAnalysisTests.test_clipping_and_invalid_values_do_not_qualify) ... ok
+test_clock_drift_estimated_from_independent_markers (test_acoustic_channel_analysis.AcousticAnalysisTests.test_clock_drift_estimated_from_independent_markers) ... ok
+test_flat_channel_gain_noise_normalization_and_json (test_acoustic_channel_analysis.AcousticAnalysisTests.test_flat_channel_gain_noise_normalization_and_json) ... ok
+test_gain_motion_model_is_scored_on_other_repeats (test_acoustic_channel_analysis.AcousticAnalysisTests.test_gain_motion_model_is_scored_on_other_repeats) ... ok
+test_independent_phases_retain_coherent_nonlinearity (test_acoustic_channel_analysis.AcousticAnalysisTests.test_independent_phases_retain_coherent_nonlinearity) ... ok
+test_two_delayed_echoes_remain_in_impulse (test_acoustic_channel_analysis.AcousticAnalysisTests.test_two_delayed_echoes_remain_in_impulse) ... ok
+
+----------------------------------------------------------------------
+Ran 11 tests in 5.746s
+
+OK

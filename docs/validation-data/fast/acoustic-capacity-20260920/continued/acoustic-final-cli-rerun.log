@@ -1,0 +1,23 @@
+test_acoustic_ofdm_geometry_validation (__main__.FastCLI.test_acoustic_ofdm_geometry_validation) ... ok
+test_capacity_bulk_default (__main__.FastCLI.test_capacity_bulk_default) ... ok
+test_capacity_dense_qam_s16_wav (__main__.FastCLI.test_capacity_dense_qam_s16_wav) ... ok
+test_capacity_rs_ratio_excludes_alignment_byte (__main__.FastCLI.test_capacity_rs_ratio_excludes_alignment_byte) ... ok
+test_capacity_source_and_geometry (__main__.FastCLI.test_capacity_source_and_geometry) ... ok
+test_classic_bulk_defaults (__main__.FastCLI.test_classic_bulk_defaults) ... ok
+test_encryption_mismatch_never_falls_back (__main__.FastCLI.test_encryption_mismatch_never_falls_back) ... ok
+test_explicit_acoustic_capacity_profile (__main__.FastCLI.test_explicit_acoustic_capacity_profile) ... ok
+test_explicit_plaintext_tx_without_preview (__main__.FastCLI.test_explicit_plaintext_tx_without_preview) ... ok
+test_help_and_invalid_local_options (__main__.FastCLI.test_help_and_invalid_local_options) ... ok
+test_local_output_routing (__main__.FastCLI.test_local_output_routing) ... ok
+test_never_overwrite_outputs (__main__.FastCLI.test_never_overwrite_outputs) ... ok
+test_plaintext_file_and_ignored_key_options (__main__.FastCLI.test_plaintext_file_and_ignored_key_options) ... ok
+test_profiles_and_fixed_geometry (__main__.FastCLI.test_profiles_and_fixed_geometry) ... ok
+test_streamed_encrypted_wav_and_explicit_save (__main__.FastCLI.test_streamed_encrypted_wav_and_explicit_save) ... ok
+test_text_utf8_newlines_and_empty_text_in_both_modes (__main__.FastCLI.test_text_utf8_newlines_and_empty_text_in_both_modes) ... ok
+test_valid_container_eof_does_not_complete (__main__.FastCLI.test_valid_container_eof_does_not_complete) ... ok
+test_wrong_key_never_saves (__main__.FastCLI.test_wrong_key_never_saves) ... ok
+
+----------------------------------------------------------------------
+Ran 18 tests in 34.596s
+
+OK

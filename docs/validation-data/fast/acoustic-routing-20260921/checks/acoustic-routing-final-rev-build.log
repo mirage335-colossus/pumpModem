@@ -1,0 +1,41 @@
+[0/2] Re-checking globbed directories...
+[1/2] Re-running CMake...
+-- Could NOT find Gettext (missing: GETTEXT_MSGMERGE_EXECUTABLE GETTEXT_MSGFMT_EXECUTABLE) 
+Staged 46 Rev modules and embedded 18 resources
+-- DataPump GUI backend: rev
+-- Configuring done (2.6s)
+-- Generating done (0.1s)
+-- Build files have been written to: /home/user/___quick/p/_cur/dataPump/pumpModem/build-rev
+[0/4] Re-checking globbed directories...
+[1/72] Checking Legacy modem isolation
+[2/72] Checking regular/fast DSP isolation
+-- Regular/fast DSP dependency boundary passed
+[3/72] Checking the shared GUI/native adapter boundary
+[4/72] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/profile.cpp.o
+[5/72] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/modem.cpp.o
+[6/72] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/codec.cpp.o
+[7/72] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/acoustic_ofdm.cpp.o
+[8/72] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/session.cpp.o
+[9/72] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/file_transfer.cpp.o
+[10/72] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/telemetry.cpp.o
+[11/72] Generating CXX dyndep file CMakeFiles/datapump_rev.dir/CXX.dd
+[12/24] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/ldpc.cpp.o
+[13/24] Linking CXX static library libdatapump_fast.a
+[14/24] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/fast/screen.cpp.o
+[15/24] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/fast/controller.cpp.o
+In file included from /home/user/___quick/p/_cur/dataPump/pumpModem/src/gui/fast/controller.cpp:1:
+In file included from /home/user/___quick/p/_cur/dataPump/pumpModem/src/gui/fast/controller.hpp:3:
+/home/user/___quick/p/_cur/dataPump/pumpModem/src/gui/fast/../bitmap.hpp:59:19: warning: result of comparison of constant 6148914691236517205 with expression of type 'unsigned int' is always false [-Wtautological-constant-out-of-range-compare]
+   59 |         if (width > std::numeric_limits<std::size_t>::max() / 3) throw std::length_error("bitmap row too large");
+      |             ~~~~~ ^ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+1 warning generated.
+[16/24] Generating CXX dyndep file CMakeFiles/datapump-gui.dir/CXX.dd
+[17/22] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/fast/plots.cpp.o
+In file included from /home/user/___quick/p/_cur/dataPump/pumpModem/src/gui/fast/plots.cpp:1:
+In file included from /home/user/___quick/p/_cur/dataPump/pumpModem/src/gui/fast/plots.hpp:2:
+/home/user/___quick/p/_cur/dataPump/pumpModem/src/gui/fast/../bitmap.hpp:59:19: warning: result of comparison of constant 6148914691236517205 with expression of type 'unsigned int' is always false [-Wtautological-constant-out-of-range-compare]
+   59 |         if (width > std::numeric_limits<std::size_t>::max() / 3) throw std::length_error("bitmap row too large");
+      |             ~~~~~ ^ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+1 warning generated.
+[18/22] Linking CXX static library libdatapump_gui_application.a
+[19/22] Linking CXX executable datapump-gui
