@@ -1,0 +1,1413 @@
+{
+  "archived_snapshots": [
+    {
+      "archive_commit": "77cd4d08559b02e5cf32b4826f9a0943c2cf3a6b",
+      "tree": "029e9a14f8047f3217b881168406c6b53e897e3f"
+    },
+    {
+      "archive_commit": "834183861bf2cb0ba4d42806ba45abf66ebf8e22",
+      "tree": "0e7a75691c6d0b0b835dda59595bf53ccf0a4cf2"
+    },
+    {
+      "archive_commit": "0b17405c40083d061a79f9b8c2540763c54f8f35",
+      "tree": "14db31da71714517cf1aadca8a47119d68791182"
+    },
+    {
+      "archive_commit": "63c1373e3b9b70a06e57ea287ec2ddc9da00d123",
+      "tree": "16cc90887b7b31e5f52c5f92f3773cd1cf0ac1e3"
+    },
+    {
+      "archive_commit": "99b5b16c7cb03860c55a57d22558f536a684f063",
+      "tree": "207f047ac99ac5f3d2b3e08a98b710fb8174b585"
+    },
+    {
+      "archive_commit": "7546c6ec144a4e94bab0390bcddfe17d0a200691",
+      "tree": "226fd9144aa00f2862b12591aef1e40324e55ce9"
+    },
+    {
+      "archive_commit": "ea653ca6154f90865a1b1fe6249fc50e97697ff9",
+      "tree": "24ccda2923ca19c8bc35b832524bbde29f813c4d"
+    },
+    {
+      "archive_commit": "71c6e8f497bd6b628bc45f683480a1ec5724af65",
+      "tree": "2796a9399ab9eaa1f44ad17c72e5e15fc236899a"
+    },
+    {
+      "archive_commit": "4c2e2e33745c95931b68b2a0f22070893f8d964c",
+      "tree": "2ae4707f24d84b3bb85280365eefc019e0efccc5"
+    },
+    {
+      "archive_commit": "983df32f766b0b85fb49a5a4407782c2e9a3ba17",
+      "tree": "31231b61a0ace514707fa198c5490ea33b12b73f"
+    },
+    {
+      "archive_commit": "1a93a83839cdba825ca7df0ce9544e2848701e93",
+      "tree": "414d0aea2d016bf55f1010795c6c77176f5bc735"
+    },
+    {
+      "archive_commit": "62cd034747ca5b4400893f1901cf3c1cd78ad1f5",
+      "tree": "58f60cad7a690e30a28286493a9f609fef4b2386"
+    },
+    {
+      "archive_commit": "b823f93b42fb5ebf31cf14eda5f9192f85a64a72",
+      "tree": "5ce8066bc4d25036bc62bd5906a6f11eb70a193c"
+    },
+    {
+      "archive_commit": "6dce5eae79be338834539931842090c4d97a9939",
+      "tree": "70ec24d5b240908b6222171e795148f71682c217"
+    },
+    {
+      "archive_commit": "3eb0d2ddab3aa7cddc137e2d9f15ee1d8dbb5f9f",
+      "tree": "7140a127dc224ef5ca95e6b225d0ca2dde607d32"
+    },
+    {
+      "archive_commit": "d9dec9497170f4cb1e4094f5f7b30da4fe802145",
+      "tree": "7488b7a14e54cbdaa638fe87ecee4b7fdbbc8750"
+    },
+    {
+      "archive_commit": "4357dbeea6c02b39c6d3e0293cdadd4580e173b0",
+      "tree": "7856d92a6138a8f6762a0a89910368f17b8ceffe"
+    },
+    {
+      "archive_commit": "638823150f143ee22d0c48baaed292d2dca63f70",
+      "tree": "7e2e92fcc9dd08f0451451c75186d270e23f6514"
+    },
+    {
+      "archive_commit": "424834004c1e0293d5b0bc8483207a7a04ed6b47",
+      "tree": "7e4e69aabc14c92c1df3764872bcd8f08a7906c8"
+    },
+    {
+      "archive_commit": "e90959d413e86941919417f71b48e7a683223180",
+      "tree": "845edb56d764034b1d7399d57925f80bdebfbc0b"
+    },
+    {
+      "archive_commit": "1d90fac0c282c817263e1216261af5471ca3ec81",
+      "tree": "87aadcd744eee340bb5260550ee03a35c1b7c009"
+    },
+    {
+      "archive_commit": "e79011224be5ab29506b743885144414881abd30",
+      "tree": "88ffbfbfe94e712689ad8bc1b55051ecd01a3f27"
+    },
+    {
+      "archive_commit": "249a6e7ccf277d46e06f3752df8f355090cfd0a2",
+      "tree": "8c472a72859401bd555ad6041283e0742568b7b4"
+    },
+    {
+      "archive_commit": "ef3f1c2566795557e072b13497538f5828fdb665",
+      "tree": "92545fcef6d97e52182f70460a596d2810b258dc"
+    },
+    {
+      "archive_commit": "85d666e13ac9271163fa82559515c8683651d487",
+      "tree": "a1c4bca6c88b2fb750d5aaf4aa2bc95c4e182ede"
+    },
+    {
+      "archive_commit": "cf09b85a6a4c4d190781760d2a1e40bc4a4b2a3b",
+      "tree": "a21b0e742a95a3d82e37e6d2382c98d1dee35774"
+    },
+    {
+      "archive_commit": "7f5616e37601849f820e50d6eafab87143cf0c78",
+      "tree": "a63f79158e2f0b8bdcc264ac2b4c6f883c55f5a9"
+    },
+    {
+      "archive_commit": "83dd791495ef8666ea492704b1019814c454b5b5",
+      "tree": "afa2991ad2a52abbe5fcaf2009d6b824ff1674ae"
+    },
+    {
+      "archive_commit": "d29a1d972c1d4b4cd49413ae351ec9d154847432",
+      "tree": "b3738769f5658bdc49d9ce2f04a6849caad244bc"
+    },
+    {
+      "archive_commit": "a7436e922be41b2046c52f9dbb7d2ee58bc85bb6",
+      "tree": "bae0ff2c7f0abf1f839a2ea39aa422caa3159311"
+    },
+    {
+      "archive_commit": "e6ed848839bbd9333b7f3a8bd6cefb26ca1ccc8d",
+      "tree": "be29da8f66e9366ee6b35c00650e673cc0fc37be"
+    },
+    {
+      "archive_commit": "c582b10b1ecc866ba9ee2e699f941220ee9a9010",
+      "tree": "cca8a1abf69168d54cecd32f3fd70f527e622a80"
+    },
+    {
+      "archive_commit": "81b88d7cd32641c43fe61a26082d91a123a70586",
+      "tree": "dee7a76bcbe59b64a96caac4a0bb83edf0975e6b"
+    },
+    {
+      "archive_commit": "cdd5eaf09f298c7ba860615c89012cba416a2f71",
+      "tree": "e607c7f9ed61af22b7611e3df48354183f5e1360"
+    }
+  ],
+  "audit_date": "2026-09-24",
+  "auxiliary_trees": [
+    {
+      "classification": "published history tree",
+      "reachable_from_published_refs": true,
+      "refs": [
+        "refs/codex/turn-diffs/checkpoints/46034c1e9fce72080461d3264889985b7688aeedcbea4d0cee5c2301a4a58d28/50ec675b6d64228997ee253c08f81e92e73c047b831309275a046c61de5d79d1/1789810412503/5ce4dd56-8014-4e25-87d1-2b3e38ea983c",
+        "refs/codex/turn-diffs/checkpoints/89d30bc834d17031b7717b4a14000b18a3e4e43cf1fe338d3ff59dbaeb6a282d/aa5d2d8937a35e9eafd4d6cbbb7e8d3471f45908ba9a62f734ff31cdb86ee4a0/1789809270149/58ce4830-911e-49aa-9d33-6e7c7e9a821c"
+      ],
+      "tree": "0bdce7945cae40275600ff410fe61eacd0f4deeb",
+      "unique_blob_count": 0
+    },
+    {
+      "classification": "published history tree",
+      "reachable_from_published_refs": true,
+      "refs": [
+        "refs/codex/turn-diffs/checkpoints/d57af7e8203635685a7f1868c2e9e5e0/9c3456fdb30593e29efc32478e60f027/1790112716156/b577bb0d-8c5c-4aed-893f-067274bb3832"
+      ],
+      "tree": "0e68e05133275c050c43b36b390b5417f1ffa66e",
+      "unique_blob_count": 0
+    },
+    {
+      "classification": "published history tree",
+      "reachable_from_published_refs": true,
+      "refs": [
+        "refs/codex/turn-diffs/checkpoints/228cbc990811ae1c806a551c2829f2068091474d122c093a097c7a725f55a7bf/8a1d4e6c31e071ecb06068c2ca048195fe26a550c27eb6414848c2d8e07e0044/1789798234754/824c4246-a88e-4796-a141-539d073e3153",
+        "refs/codex/turn-diffs/checkpoints/373d011b030649e961e79b9edbf9a4fb1e43b82007aa544a4bc9b11ddb4ae8fb/105319110e09d766fa5a30876bce6ae414be2b23cdc277dbf1296898b6b12b03/1789799526038/bb84e354-7a2d-47dc-b9b9-019119b96fd2"
+      ],
+      "tree": "14683283360d04998847dc4b1cc7addcf924563a",
+      "unique_blob_count": 0
+    },
+    {
+      "classification": "published history tree",
+      "reachable_from_published_refs": true,
+      "refs": [
+        "refs/codex/turn-diffs/checkpoints/eaa9ea73824724900c6cc8dacdb5b909/f62b98ea3e31c29379db8c2953646c51/1790103764939/c0c83205-7afd-46d1-ac01-1b74a87156d1"
+      ],
+      "tree": "258b25127571e3119b80315948c0b05434304af3",
+      "unique_blob_count": 0
+    },
+    {
+      "classification": "published history tree",
+      "reachable_from_published_refs": true,
+      "refs": [
+        "refs/codex/turn-diffs/checkpoints/f99a97251417ad79168243e9f0160078/bf7fcaf93378a088d7c0ae3300ed6b69/1790086189462/f8b71b31-64e6-4cc9-b5ca-dd838c28adfa"
+      ],
+      "tree": "3ad3dfe28c650fec7e054bf745109ec0a205270d",
+      "unique_blob_count": 0
+    },
+    {
+      "classification": "published history tree",
+      "reachable_from_published_refs": true,
+      "refs": [
+        "refs/codex/turn-diffs/checkpoints/3d9533a0d71a6ba60d5338270156f7b34ded438e89cf68b97912269130f91250/3c127ac717f439deabb118b50cdf214d895fa08006b88218d66a4ffa1f61e79a/1789824150116/b99248b8-048d-464c-8188-ab97d3f78949"
+      ],
+      "tree": "54d06660048b20ed989e7d9fd801d8bfb33a3252",
+      "unique_blob_count": 0
+    },
+    {
+      "classification": "published history tree",
+      "reachable_from_published_refs": true,
+      "refs": [
+        "refs/codex/turn-diffs/checkpoints/fd2f6245c1f432354aaaa1dc324e901f/ffcabe33ad0c1c68e5e04861535bbc58/1790216471189/264d3282-e724-4dd7-a115-5317f56999cc"
+      ],
+      "tree": "559b4e461bea91f4b343ad57de896a96d6ea11d4",
+      "unique_blob_count": 0
+    },
+    {
+      "classification": "published history tree",
+      "reachable_from_published_refs": true,
+      "refs": [
+        "refs/codex/turn-diffs/checkpoints/70f60f5c959aa21892027c83d8a4be2182703afd7fe4da2fa29a2c6459f9d333/681922d224760b3906c3d69cd105ef92c56b5d7bb80a99ebab12470d387fa2ba/1789785718243/c1963245-07b8-4c9f-8299-e1d165bce144"
+      ],
+      "tree": "61df54c1a97bc299655c399b630b642d86c0a1bd",
+      "unique_blob_count": 0
+    },
+    {
+      "classification": "published history tree",
+      "reachable_from_published_refs": true,
+      "refs": [
+        "refs/codex/turn-diffs/captures/1790233831306/dd59e30a-29a9-4e02-b69b-c84db4164a77/base",
+        "refs/codex/turn-diffs/checkpoints/6de4a7d1ef040cb28fc4e40262c66cb1/f38c9c3baddc976d304b13d8af6e75e3/1790222614938/27bd6dc3-5788-4227-a6db-2c21e004daff"
+      ],
+      "tree": "72819dfaab893cbf14fc44f508367bf5fdb592b3",
+      "unique_blob_count": 0
+    },
+    {
+      "classification": "published history tree",
+      "reachable_from_published_refs": true,
+      "refs": [
+        "refs/codex/turn-diffs/checkpoints/c18dd8f74ee456ef46b8766eaaa042a3/059905d4319dff3194e4cf832d2dee0b/1790079012380/2cb92868-9c65-4f52-a6d6-31e2e5e30003"
+      ],
+      "tree": "90b2129a674c3e04fc2a49e75bed13b774ca12b8",
+      "unique_blob_count": 0
+    },
+    {
+      "classification": "published history tree",
+      "reachable_from_published_refs": true,
+      "refs": [
+        "refs/codex/turn-diffs/checkpoints/46133ca301bf61254197fa1651a164b902428adcc6f1fc0d52994064d594e992/d5871ec6e5ea5e7d0188d9c5ed503b0c97c52cb2f44dce285ddc278b56aee555/1789634303761/b732d491-2d7e-40f1-b4a8-dc307595523b",
+        "refs/codex/turn-diffs/checkpoints/7084c79ed6e3574dbeccdca8918c2cb7c334315def7cc49ac7790641e1ab7645/403da5802eec70cdccb997943120c51abedcc2164ec3272dcf08d66fb1b3ae91/1789629591613/d79ee1a5-3a44-41d5-a94c-72616b90b8a6",
+        "refs/codex/turn-diffs/checkpoints/c32c69c367ee6a25ed2f6fd4def3b04fc56174374959354dd7fa9998523537e8/a5c5f16161a17f1684e51d7c2068f649755a49930e5a28e4fa3b88d24d8f0b5c/1789629264132/1d9b0190-8e70-4c25-ac74-8276e9898acb"
+      ],
+      "tree": "9eaaf22633f69810255983d68a168e93f0d6e677",
+      "unique_blob_count": 0
+    },
+    {
+      "classification": "published history tree",
+      "reachable_from_published_refs": true,
+      "refs": [
+        "refs/codex/turn-diffs/checkpoints/63e069d5815820fcfa8853efb8ecdaf0/69b181c97431ee7f447bff99d5a3968c/1790153976706/c5aa0b5e-8950-4eee-b891-084f4fdbfa3e"
+      ],
+      "tree": "a52f8b0d2a2d433ea34d1158037751301d7161a7",
+      "unique_blob_count": 0
+    },
+    {
+      "classification": "published history tree",
+      "reachable_from_published_refs": true,
+      "refs": [
+        "refs/codex/turn-diffs/checkpoints/982c1bbbbf226cb445d0591acc5ded15/13c93c4fa07c07d3c90eb3d14049283d/1790206060435/07df4f4f-dfdc-406a-b6f7-d203404d443f"
+      ],
+      "tree": "ab81cfb351bcdf6482ff07dbeb6780bae165324c",
+      "unique_blob_count": 0
+    },
+    {
+      "classification": "published history tree",
+      "reachable_from_published_refs": true,
+      "refs": [
+        "refs/codex/turn-diffs/checkpoints/3d969675f066b31c4751a26cb2315d21f35cada2e32cd699333ad19b20249db3/9d245a4077684de481443720f57bd9983df47ae4e3634dd3ed1cd2a8c5f9ca53/1789988373685/1789a823-e836-4ba8-9f78-b43ba432c935"
+      ],
+      "tree": "ac641412b4ccf6133453a661158848ef4f09f832",
+      "unique_blob_count": 0
+    },
+    {
+      "classification": "checkpoint snapshot arrangement; every file blob already published",
+      "reachable_from_published_refs": false,
+      "refs": [
+        "refs/codex/turn-diffs/checkpoints/1b95179f15676b6d01bfb97aafba8207500a0c57ca9670049881c62f04cc414d/288ac6180e09ec1cc5105a03a9fe1dbbd09881f4f1a43c719c9f59799ce9a18e/1790064066715/657344ec-4281-4d56-97e0-cda5650e30e9"
+      ],
+      "tree": "afa2991ad2a52abbe5fcaf2009d6b824ff1674ae",
+      "unique_blob_count": 0
+    },
+    {
+      "classification": "published history tree",
+      "reachable_from_published_refs": true,
+      "refs": [
+        "refs/codex/turn-diffs/checkpoints/5c4b3787275760309603abb76c94ddfdb0f86f240dced09484463835f2bd7d59/b4989a7e780dc0468481fedf66a25e7b27fb17f27ccf541afbb9fceac9a399b7/1789780406807/94f68042-d46f-43cb-9124-975289f20494"
+      ],
+      "tree": "b28fe634e8a4a5c4dbc7b65a5bb548c2a501e019",
+      "unique_blob_count": 0
+    },
+    {
+      "classification": "published history tree",
+      "reachable_from_published_refs": true,
+      "refs": [
+        "refs/codex/turn-diffs/checkpoints/73157793ca09fe7b397b3d7759359e5ae4a9cf0e5d9bf55a2f7a8e7f69b78a6a/197a62777a5702fd6b4d7b3f3165e427e3d286bb10cd0481ccf1036528c5ba10/1789819329768/98923025-4789-49cd-965c-7c57a7b665ca"
+      ],
+      "tree": "b57b2f5239bac1cadae7cfb483d0f68bd3a630ab",
+      "unique_blob_count": 0
+    },
+    {
+      "classification": "published history tree",
+      "reachable_from_published_refs": true,
+      "refs": [
+        "refs/codex/turn-diffs/checkpoints/3b9c7026737bc2fe79c6eb4e0996fa26ab80fbdfc1484d10ee8550b6b99acce4/3a0ac0062824db1cbf9d1d10499f010235b8e597d18f39ce5729cc7d6ba43b31/1789696488848/34df8348-18f9-4277-a18c-984f23d10425",
+        "refs/codex/turn-diffs/checkpoints/b1f69fc5c8f5251ff5d2f626efe8706cd688942bb3b4a70e295eafd9bb7b46bb/a27e63d0d358df5d228be4963cd1687f50bcb43cd1fa88e4b5b7eb90fbd49038/1789692563219/d5ae21de-f92a-409f-938f-729f419aaf4d",
+        "refs/codex/turn-diffs/checkpoints/dd6fe2b546dd6d42e215812ea11d187db4d3f9eece2f98584797fdce90613af4/bbc773cc3194fe8895aa5e55b749382ac66fe21d8b72fddfbeead8b6078201e6/1789696298092/f0c52f7b-9c0b-44bf-b7ef-94791385efbe"
+      ],
+      "tree": "be343d7fbcad8da6e3dad05def31f81a44ad9195",
+      "unique_blob_count": 0
+    },
+    {
+      "classification": "published history tree",
+      "reachable_from_published_refs": true,
+      "refs": [
+        "refs/codex/turn-diffs/checkpoints/489d3f62e2ad0f7225ec99ccd3e22c8499750511b855af3fb32f7b91617ff4b9/5d7a828064330627daad8fc8aa2677cd6d5a01a9d815bed80dd18a78691b95b9/1789976554959/ce3a3904-f1d0-450d-a6b2-a2a0c641ddf0"
+      ],
+      "tree": "c1cfc2bf3edf14ef36a47572736784cd84f53ab5",
+      "unique_blob_count": 0
+    },
+    {
+      "classification": "published history tree",
+      "reachable_from_published_refs": true,
+      "refs": [
+        "refs/codex/turn-diffs/checkpoints/80cd2461575ea920fe3eb36faab6335cc3309c8515e42c817d84fa0e6640899f/2eb423ef414fa4dffe983f09db0c37f0d0ff39280c5ba0a2046829116e076b27/1789863250620/6fe3ac0e-76d2-4b66-8c41-50bbcfbe4d38"
+      ],
+      "tree": "c2842f28c594bf7fae128ec4423ef908e39c2aad",
+      "unique_blob_count": 0
+    },
+    {
+      "classification": "published history tree",
+      "reachable_from_published_refs": true,
+      "refs": [
+        "refs/codex/turn-diffs/checkpoints/d067a3878ecd35453fe18e33daf180a4/aa995ad3ebec458a0f3dbe3de43b331e/1790123060835/59c9919e-8dfd-446a-8224-f930d688578f"
+      ],
+      "tree": "c63bd2f4063fff970d6a6b8bdcd0b3cdaa92f7df",
+      "unique_blob_count": 0
+    },
+    {
+      "classification": "published history tree",
+      "reachable_from_published_refs": true,
+      "refs": [
+        "refs/codex/turn-diffs/checkpoints/47d8f479c58325367d0696f0c172dbe451779ee764afb18bbd2486dbdc8cd821/8a5559d36cd95dab6748e0cd58042f33672ed0d00535d72eda398e3423f309a3/1789826748643/15a26fb2-72cd-48f7-9d9b-05af8c67dbe5",
+        "refs/codex/turn-diffs/checkpoints/7aad2dfd034defc2d5e1c88e1669f5b270a7ccd37ba7289bc0ab535f88a9ca28/c8283e6c442866aefa54107d82fdcd849c144a49cee252e1fad381256528de92/1789825628514/b54dc5ac-25bd-4e5d-a80d-0cc843ed1c1b"
+      ],
+      "tree": "ca7e1ba58eed51ffe0a049bad30f90b7c7f3358a",
+      "unique_blob_count": 0
+    },
+    {
+      "classification": "published history tree",
+      "reachable_from_published_refs": true,
+      "refs": [
+        "refs/codex/turn-diffs/checkpoints/70640651b3ad65367bd3d46e1132e15d5235f0fc5a9062f99d4bd63ba0e2dbd2/668885b0e6631ad262ade8e9c4258610dd6ff244738146a2bd66c557dced2c80/1789643639400/29605313-8749-4ab4-b400-c980a8ec259c"
+      ],
+      "tree": "caa7a169911f246215b23db34c8c8d2e46d15070",
+      "unique_blob_count": 0
+    },
+    {
+      "classification": "published history tree",
+      "reachable_from_published_refs": true,
+      "refs": [
+        "refs/codex/turn-diffs/checkpoints/8a52bd515926aa7b55a5efae6cc3788384bf2cca16ee35eea9167d56b8b01c81/6de83c112f13d95ccc51c46c2f88985bcec47befc99e13ed141ea942eec4f86c/1789832302620/238766d5-dc3e-42d5-8fb4-4d03396d766b"
+      ],
+      "tree": "d1e7b40cf8fe5f598575ea0ab1ee8854bf022dda",
+      "unique_blob_count": 0
+    },
+    {
+      "classification": "published history tree",
+      "reachable_from_published_refs": true,
+      "refs": [
+        "refs/codex/turn-diffs/checkpoints/ea6f9c346e6af0350ab18dfc705fe99c915f66b31bcfff44dab7aad83b25dd6f/ac93aa0305626101426a4e933b994fc0791a90c87ce81dc73a6e7b78a754e598/1789780105895/70a9345d-65d6-4aec-8c22-a654a2f3d0e2"
+      ],
+      "tree": "d4a7685b983bf4c64f22dd382e9ceaa1e4a1d317",
+      "unique_blob_count": 0
+    },
+    {
+      "classification": "published history tree",
+      "reachable_from_published_refs": true,
+      "refs": [
+        "refs/codex/turn-diffs/checkpoints/d3ccbbe1badfbec872fee6909e75b76dcf8891248d69bc3cec292d2fed15ca40/453639947839d5cde93ad7a4f9ba7c04934e12b17e332d2a7472d6beda85e8a6/1789855266106/42fbe336-ecfc-4ad0-9a24-bf23ed695401"
+      ],
+      "tree": "d6cdab8ee46d212323495084b42977147abdfd05",
+      "unique_blob_count": 0
+    },
+    {
+      "classification": "published history tree",
+      "reachable_from_published_refs": true,
+      "refs": [
+        "refs/codex/turn-diffs/checkpoints/6782d95b702d53f43922d525274251a5faf74bd6b5cc27ff31fafbadbc68a394/ae63b3888b0d78a587041ab1ce87f7a49a316d230b6b42476501977fbdc2d6bb/1790062586513/f064a792-b4db-46d8-b5e7-1a2663f7b3bc"
+      ],
+      "tree": "e58b89bb52c3025555615941efda566744cbea2e",
+      "unique_blob_count": 0
+    },
+    {
+      "classification": "published history tree",
+      "reachable_from_published_refs": true,
+      "refs": [
+        "refs/codex/turn-diffs/checkpoints/1236d8f6228ae0fd874adafea94790635c89f92ef031ca976c836e177c550b43/cb8b2f72ee439cce685e7b8cb16daced67c0caaf21fa01a64eef1e7edc60f995/1790064407206/f5ca34c5-e58d-44d6-9ba4-1d8951f4f990",
+        "refs/codex/turn-diffs/checkpoints/1eb17ea4f6b60e7495597b173f2779ce/77013f372e046d3acd376aa47e0f67b9/1790066953865/f1dc963b-d32c-4c55-8a53-2164490617d7"
+      ],
+      "tree": "f3f811348b24ac2f1e3ca4e5fd1d8df13ec00758",
+      "unique_blob_count": 0
+    }
+  ],
+  "base_commit": "8ab506dc2492e49c347ce154cbeee3f7871f3aff",
+  "branch": "codex/archive-2026-09-24",
+  "counts": {
+    "auxiliary_refs": 37,
+    "auxiliary_trees": 28,
+    "auxiliary_trees_not_in_published_history": 1,
+    "distinct_unique_snapshot_paths": 76,
+    "loose_blobs": 3,
+    "snapshot_trees_with_unique_blobs": 30,
+    "top_level_snapshot_trees": 33,
+    "unique_snapshot_blobs": 156,
+    "unprotected_reflog_commits": 0,
+    "unreachable_blobs": 159,
+    "unreachable_commits": 0,
+    "unreachable_trees": 136
+  },
+  "ignored_files_review": {
+    "excluded": "build/ and historical build-* trees plus ignored dependency material under third_party/; retained locally",
+    "nested_repos": "no submodules or nested .git locations outside build trees",
+    "outside_build_and_third_party": "Python __pycache__ bytecode only in gui/, tests/, tools/; no ignored authored source found there"
+  },
+  "loose_blobs": [
+    {
+      "blob": "28253f5d8caacd32a2827b86b71a7448c6f84677",
+      "bytes": 8653,
+      "classification": "C++ GUI screen console draft; 93.4% text similarity to historical blob 55abf6c18b420cea7762096346414efac22f0356",
+      "inferred_path": "src/gui/screen_console.cpp",
+      "recommended_archive_path": "loose-blobs/28253f5d8caacd32a2827b86b71a7448c6f84677-screen_console.cpp"
+    },
+    {
+      "blob": "8739e2c76a4cff74d6416ec85aec151926d11239",
+      "bytes": 6501,
+      "classification": "C++ GUI smoke/controller test draft; exact original path uncertain, 80.5% text similarity to historical tests/test_gui_controller.cpp blob 898152b3dc8ea541b5229735974c73e7448109a4",
+      "inferred_path": "tests/test_gui_controller.cpp",
+      "recommended_archive_path": "loose-blobs/8739e2c76a4cff74d6416ec85aec151926d11239-gui_test.cpp"
+    },
+    {
+      "blob": "99ad0af5ef85d9f659cb2dfe532ae0f6a6e9bf27",
+      "bytes": 24614,
+      "classification": "README documentation draft; 99.0% text similarity to historical blob 093a43ecdcf951384533966b738b87f90c9ee351",
+      "inferred_path": "README.md",
+      "recommended_archive_path": "loose-blobs/99ad0af5ef85d9f659cb2dfe532ae0f6a6e9bf27-README.md"
+    }
+  ],
+  "recommendation": "Preserve all 33 snapshot trees plus the one auxiliary tree missing from published history via archival commits; preserve the three loose blobs in the archive index tree. Keep current checkout and branch unchanged.",
+  "repository": "/home/user/___quick/p/_cur/dataPump/pumpModem",
+  "secrets_review": {
+    "checks": [
+      "PEM/OpenSSH private key headers",
+      "AWS access key shapes",
+      "GitHub token shapes",
+      "OpenAI API key shapes",
+      "long literal api_key/api_token/access_token/client_secret/password assignments"
+    ],
+    "limitation": "bounded pattern review, not proof of absence of every possible secret",
+    "result": "no matches",
+    "scope": "all 159 unreachable file blobs; all other archive snapshot file contents already present in ordinary branch/tag history"
+  },
+  "snapshot_trees": [
+    {
+      "classification": "repository snapshot arrangement using already-published file contents",
+      "contains_unique_blobs": false,
+      "tree": "029e9a14f8047f3217b881168406c6b53e897e3f",
+      "unique_blob_count": 0,
+      "unique_blobs": []
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "0e7a75691c6d0b0b835dda59595bf53ccf0a4cf2",
+      "unique_blob_count": 4,
+      "unique_blobs": [
+        {
+          "blob": "d7c035f3a99e3b6cef4c00b79e8811230675cc6f",
+          "path": "include/datapump/fast/ldpc.hpp"
+        },
+        {
+          "blob": "c3ec186a9388fdb7f1af8ac281b64f210ae6fe57",
+          "path": "src/fast/ldpc.cpp"
+        },
+        {
+          "blob": "9851d67fb271b39baf5bde50629a0faa69ed1a88",
+          "path": "src/fast/preset.cpp"
+        },
+        {
+          "blob": "1b87e88b3758fde1eed2adcd02c242ff03dd9baf",
+          "path": "tests/test_fast_acoustic_short.cpp"
+        }
+      ]
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "14db31da71714517cf1aadca8a47119d68791182",
+      "unique_blob_count": 5,
+      "unique_blobs": [
+        {
+          "blob": "844225d342630972419b07c030ed63735109b3bc",
+          "path": "docs/development.md"
+        },
+        {
+          "blob": "b99d1709c3f57ca509a042d134a3f7885a69fca9",
+          "path": "docs/protocol.md"
+        },
+        {
+          "blob": "0d12994707ba6d3697e0df89de9f2548b361c133",
+          "path": "docs/validation.md"
+        },
+        {
+          "blob": "b5ebf6680db88799492a72b0170ba07713414bdc",
+          "path": "src/transfer.cpp"
+        },
+        {
+          "blob": "7f0a927fb0afac5ecc43cfe620b479d2ceab289a",
+          "path": "tests/test_stream_receive.cpp"
+        }
+      ]
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "16cc90887b7b31e5f52c5f92f3773cd1cf0ac1e3",
+      "unique_blob_count": 4,
+      "unique_blobs": [
+        {
+          "blob": "d7c035f3a99e3b6cef4c00b79e8811230675cc6f",
+          "path": "include/datapump/fast/ldpc.hpp"
+        },
+        {
+          "blob": "c3ec186a9388fdb7f1af8ac281b64f210ae6fe57",
+          "path": "src/fast/ldpc.cpp"
+        },
+        {
+          "blob": "36944b8437ca2e964fc4cde43f5b60fb8b70e94b",
+          "path": "src/fast/preset.cpp"
+        },
+        {
+          "blob": "1b87e88b3758fde1eed2adcd02c242ff03dd9baf",
+          "path": "tests/test_fast_acoustic_short.cpp"
+        }
+      ]
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "207f047ac99ac5f3d2b3e08a98b710fb8174b585",
+      "unique_blob_count": 1,
+      "unique_blobs": [
+        {
+          "blob": "aaf47497bdfe1ddd2c18e6a381d5dd6611e19afd",
+          "path": "docs/gui-contract.md"
+        }
+      ]
+    },
+    {
+      "classification": "repository snapshot arrangement using already-published file contents",
+      "contains_unique_blobs": false,
+      "tree": "226fd9144aa00f2862b12591aef1e40324e55ce9",
+      "unique_blob_count": 0,
+      "unique_blobs": []
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "24ccda2923ca19c8bc35b832524bbde29f813c4d",
+      "unique_blob_count": 7,
+      "unique_blobs": [
+        {
+          "blob": "7c8049f4f96cf3b58f8a2f8adb828929c7e42ab5",
+          "path": "docs/gui-contract.md"
+        },
+        {
+          "blob": "101a810d67162625312a615d47866cdcaedf2693",
+          "path": "docs/validation.md"
+        },
+        {
+          "blob": "659a97c8fc904c374071dccb1a58b063bb33b03e",
+          "path": "src/gui/plot_render.cpp"
+        },
+        {
+          "blob": "4e6aba43e165835474ef0e426cccd7d6e29e882a",
+          "path": "src/gui/plot_render.hpp"
+        },
+        {
+          "blob": "637400b6ccb77e277f0860f1eea21f552fe847e1",
+          "path": "src/gui/screen_console.cpp"
+        },
+        {
+          "blob": "2aa55e17414a4100171286b80d8f57e59fa1b5a8",
+          "path": "tests/test_gui_bitmaps.cpp"
+        },
+        {
+          "blob": "fc052686795ff1748eb72ad93d3f7d897cf6bb5e",
+          "path": "tests/test_gui_controller.cpp"
+        }
+      ]
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "2796a9399ab9eaa1f44ad17c72e5e15fc236899a",
+      "unique_blob_count": 1,
+      "unique_blobs": [
+        {
+          "blob": "1adbb0831838bdd7a4106782c54903201623f124",
+          "path": "COMPILE"
+        }
+      ]
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "2ae4707f24d84b3bb85280365eefc019e0efccc5",
+      "unique_blob_count": 6,
+      "unique_blobs": [
+        {
+          "blob": "b550e256fe01cc7ad50fc8b126e48a10ec16dd68",
+          "path": "include/datapump/live.hpp"
+        },
+        {
+          "blob": "f7aba0569b162b5e479c27fba8fa49d56464257c",
+          "path": "src/live.cpp"
+        },
+        {
+          "blob": "1c27dcf236e3a12757b1d841b87eca384eb8f916",
+          "path": "src/signal_view.cpp"
+        },
+        {
+          "blob": "2e6eaef9828dea23f68c41fb02d623fe84b4431e",
+          "path": "src/signal_view.hpp"
+        },
+        {
+          "blob": "c9082c7c097fa60eb2180f9852bd5d7150b3ef12",
+          "path": "tests/test_live.cpp"
+        },
+        {
+          "blob": "309761fcc8a576a5f0cded5cccf22c3b54681eef",
+          "path": "tests/test_signal_view.cpp"
+        }
+      ]
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "31231b61a0ace514707fa198c5490ea33b12b73f",
+      "unique_blob_count": 6,
+      "unique_blobs": [
+        {
+          "blob": "efbe846f3fcd9af57c03f51ccc036946a582d548",
+          "path": "docs/gui-contract.md"
+        },
+        {
+          "blob": "b2b90c1de5b1ec562b3bd059619e3c1aa4c50a5f",
+          "path": "docs/link-planner.md"
+        },
+        {
+          "blob": "a937c5723a16ad559d558c06cc6301f6d279aa41",
+          "path": "docs/validation.md"
+        },
+        {
+          "blob": "6ca765203d902f14fdff651ecc1516987f87f612",
+          "path": "src/gui/controller.cpp"
+        },
+        {
+          "blob": "b6394810c9dc9aeb9a858154c69ffb9cbe14a512",
+          "path": "src/gui/link_planner_page.cpp"
+        },
+        {
+          "blob": "2a79fab204d7cbc56308c1524105b6f24daabb91",
+          "path": "tests/test_gui_link_planner.cpp"
+        }
+      ]
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "414d0aea2d016bf55f1010795c6c77176f5bc735",
+      "unique_blob_count": 2,
+      "unique_blobs": [
+        {
+          "blob": "f2502b7c81e31702a70b74f9f89d980af16cfe0f",
+          "path": "README.md"
+        },
+        {
+          "blob": "4a3aeea812df5c8662ab33ae459f8b5191522e76",
+          "path": "docs/fast-mode-plan.md"
+        }
+      ]
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "58f60cad7a690e30a28286493a9f609fef4b2386",
+      "unique_blob_count": 3,
+      "unique_blobs": [
+        {
+          "blob": "5863fe599b1ebbac4a20e6d67b39631b73d14448",
+          "path": "docs/pattern-constellation.md"
+        },
+        {
+          "blob": "a51fd00defe6e1cd23cc471c05603de3812dba8b",
+          "path": "src/gui/pattern_constellation.hpp"
+        },
+        {
+          "blob": "becb78cdad7e805f6bd4c60fc696d4b4e760a01e",
+          "path": "src/gui/pattern_plot.hpp"
+        }
+      ]
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "5ce8066bc4d25036bc62bd5906a6f11eb70a193c",
+      "unique_blob_count": 1,
+      "unique_blobs": [
+        {
+          "blob": "28b72a7af27de72896e46d4f343aaf95a30360c3",
+          "path": "src/gui/screen_console.cpp"
+        }
+      ]
+    },
+    {
+      "classification": "repository snapshot arrangement using already-published file contents",
+      "contains_unique_blobs": false,
+      "tree": "70ec24d5b240908b6222171e795148f71682c217",
+      "unique_blob_count": 0,
+      "unique_blobs": []
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "7140a127dc224ef5ca95e6b225d0ca2dde607d32",
+      "unique_blob_count": 25,
+      "unique_blobs": [
+        {
+          "blob": "3f625a90142303d7e917952b3693809ffcbcd741",
+          "path": "CMakeLists.txt"
+        },
+        {
+          "blob": "9787bca303038bbf79bb48609e6d1e62ea7f1170",
+          "path": "README.md"
+        },
+        {
+          "blob": "a93bfcb318f5741b20f01eee0921b2a2fd58458d",
+          "path": "cmake/VendoredLzma.cmake"
+        },
+        {
+          "blob": "7fdf2f6395752fea73830697858a771b9b9c2b3f",
+          "path": "docs/inspection.md"
+        },
+        {
+          "blob": "8d21bd655a4019aa7c4350bd63bd3e767c7fdcc9",
+          "path": "docs/modem.md"
+        },
+        {
+          "blob": "b803e4cc5ba717a69022e3c17800f23898d20998",
+          "path": "docs/protocol.md"
+        },
+        {
+          "blob": "a3a94e2b68b376f319da949abd04dfc7af5245bf",
+          "path": "docs/requirements.md"
+        },
+        {
+          "blob": "ab54bf762417c578593c3e9df34d621a8fa5ec43",
+          "path": "docs/validation.md"
+        },
+        {
+          "blob": "e9e0582266f3da6c876cefe27af7657a259b4efe",
+          "path": "include/datapump/packet.hpp"
+        },
+        {
+          "blob": "13b51a536f8a2886c780fb72cae788301a94ef2d",
+          "path": "include/datapump/transfer.hpp"
+        },
+        {
+          "blob": "7ba364e7c14cb38e8d6bb2cbb906a2a181d9e9fd",
+          "path": "src/gui/inspection_model.cpp"
+        },
+        {
+          "blob": "92c4231ccc59a1e1aefa0ec06a1ed6be34784508",
+          "path": "src/gui/main.cpp"
+        },
+        {
+          "blob": "3a4a374fcacec68ea27f4bea8c8223d18a95b6be",
+          "path": "src/main.cpp"
+        },
+        {
+          "blob": "2c884bbd33b3162d2ac1c9585e3fe34e25c3eedc",
+          "path": "src/modem.cpp"
+        },
+        {
+          "blob": "a59030c53315c21f1a7db92204ea6a2306bdbd86",
+          "path": "src/packet.cpp"
+        },
+        {
+          "blob": "9f755f8f0fc9a5c8d19961db4df3d7e2e9fea99f",
+          "path": "src/pump.manifest"
+        },
+        {
+          "blob": "50a3e261cdee97538b5a4ac27b4864c702bfb8b4",
+          "path": "src/streaming_modem.cpp"
+        },
+        {
+          "blob": "9aff5567d348ba978b45717c9aaecffd32c166b9",
+          "path": "src/transfer.cpp"
+        },
+        {
+          "blob": "c31a4a35eaada0dedd219848e3e945ccf447fb5d",
+          "path": "tests/test_cli.py"
+        },
+        {
+          "blob": "289d23999d610b825f026bee917048bbf24ac92f",
+          "path": "tests/test_inspection.cpp"
+        },
+        {
+          "blob": "74968748d2a4ba87602dc8be346cbc55e8226c8e",
+          "path": "tests/test_modem.cpp"
+        },
+        {
+          "blob": "1ea97f74e1802f485d33785f90529cba7c74a4b6",
+          "path": "tests/test_packet.cpp"
+        },
+        {
+          "blob": "57bf8e97b8cc299a43b6b02063cff5fe537254fb",
+          "path": "tests/test_packet_format.cpp"
+        },
+        {
+          "blob": "9cebc5c48dbc5529fadb0bc2be32e31a53a62dee",
+          "path": "tests/test_streaming_modem.cpp"
+        },
+        {
+          "blob": "6a1edac7c8a27f80091721e96b32150e14aa3071",
+          "path": "tests/test_transfer.cpp"
+        }
+      ]
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "7488b7a14e54cbdaa638fe87ecee4b7fdbbc8750",
+      "unique_blob_count": 4,
+      "unique_blobs": [
+        {
+          "blob": "95c2c875f51d9d478ca38e69b6c2ec7d26904c51",
+          "path": "README.md"
+        },
+        {
+          "blob": "fa0bfbd4a5799446cb9c7d9b1d9b13935e7d41d5",
+          "path": "third_party/FLTK-SOURCE.md"
+        },
+        {
+          "blob": "4aba75c01c3bc85f6aac369a29b1ef9c8770bc73",
+          "path": "third_party/README.md"
+        },
+        {
+          "blob": "f12425411aa540531d1e20b32ed6b8a1f089070d",
+          "path": "third_party/qrcodegen/README.datapump.md"
+        }
+      ]
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "7856d92a6138a8f6762a0a89910368f17b8ceffe",
+      "unique_blob_count": 1,
+      "unique_blobs": [
+        {
+          "blob": "366a9dd05217dc704accffb855d7a076df0cced0",
+          "path": "src/gui/controller.cpp"
+        }
+      ]
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "7e2e92fcc9dd08f0451451c75186d270e23f6514",
+      "unique_blob_count": 4,
+      "unique_blobs": [
+        {
+          "blob": "64ba306ded1234ebf7646f3cc91c9b0853a69624",
+          "path": "README.md"
+        },
+        {
+          "blob": "d06ca9a43671e66143d947d8861baed8446d6d89",
+          "path": "docs/gui-architecture.md"
+        },
+        {
+          "blob": "0ba3fec525f9e0922d757d8cc5afcbcc31326b18",
+          "path": "docs/gui-contract.md"
+        },
+        {
+          "blob": "d3f6476110450ef09e44b62a52654f2bc3c34630",
+          "path": "docs/gui-rev-assessment.md"
+        }
+      ]
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "7e4e69aabc14c92c1df3764872bcd8f08a7906c8",
+      "unique_blob_count": 7,
+      "unique_blobs": [
+        {
+          "blob": "3a165f44db8c92e8ef2a81dd92d910afc0223657",
+          "path": "docs/gui-contract.md"
+        },
+        {
+          "blob": "37e7b5dacffcc38f9d1c4905a5e36113f53d8d98",
+          "path": "docs/validation.md"
+        },
+        {
+          "blob": "d654d5160fd75978884ab54e96040e09968d8e12",
+          "path": "src/gui/plot_render.cpp"
+        },
+        {
+          "blob": "ad18876bc645ea464647690fde19ab602616c172",
+          "path": "src/gui/plot_render.hpp"
+        },
+        {
+          "blob": "3ff60bc87a81fbbf4ef2fe9db53a2924e1178795",
+          "path": "src/gui/screen_console.cpp"
+        },
+        {
+          "blob": "fb28f47f6b9e12944bf8fa05f26004c9608b0aab",
+          "path": "tests/test_gui_bitmaps.cpp"
+        },
+        {
+          "blob": "2095fb97d36264ac98add25b938ec7ab48392785",
+          "path": "tests/test_gui_controller.cpp"
+        }
+      ]
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "845edb56d764034b1d7399d57925f80bdebfbc0b",
+      "unique_blob_count": 5,
+      "unique_blobs": [
+        {
+          "blob": "731aaffcb17d2efbead2aa14fe3d38d7026de12f",
+          "path": "README.md"
+        },
+        {
+          "blob": "0fc2c32f5b68843ef2b76e8fc75b5bf4d7d14356",
+          "path": "docs/gui-architecture.md"
+        },
+        {
+          "blob": "c0f76b6572b7e0c134c167beaf73720dcd63a806",
+          "path": "docs/gui-contract.md"
+        },
+        {
+          "blob": "f0a8ab85052627dcdba618cd3486ccf9499a8a55",
+          "path": "docs/validation.md"
+        },
+        {
+          "blob": "fc0a1cdb334e9f47533f0c9741d5b59a272fda34",
+          "path": "src/gui/main.cpp"
+        }
+      ]
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "87aadcd744eee340bb5260550ee03a35c1b7c009",
+      "unique_blob_count": 16,
+      "unique_blobs": [
+        {
+          "blob": "a062c16fd1d6afcfc88cfdfa63781d7b87c84ecc",
+          "path": "CMakeLists.txt"
+        },
+        {
+          "blob": "2324b4de82d8b9c78dd449a9cfc3c042f76e3887",
+          "path": "README.md"
+        },
+        {
+          "blob": "89b7aec716f5437e917063b286e88a1471fab151",
+          "path": "docs/inspection.md"
+        },
+        {
+          "blob": "e88a876e8b7df913616d8f9c310cfbe9efc779f4",
+          "path": "docs/protocol.md"
+        },
+        {
+          "blob": "27392079f0bc6cd3cc10dfff8f7a392f3b90e7fc",
+          "path": "docs/requirements.md"
+        },
+        {
+          "blob": "90b9b500904f21836eb675f105eb2348c2475805",
+          "path": "docs/validation.md"
+        },
+        {
+          "blob": "c392a88492a7d3701a586b86aa08d1e917a4edd8",
+          "path": "include/datapump/packet.hpp"
+        },
+        {
+          "blob": "13b51a536f8a2886c780fb72cae788301a94ef2d",
+          "path": "include/datapump/transfer.hpp"
+        },
+        {
+          "blob": "ad66b461ab18f4d58581fefab00a4121ca0bd60e",
+          "path": "src/gui/inspection_model.cpp"
+        },
+        {
+          "blob": "826c3b96955c285bc0d0dc97a14d8e0277b96dbb",
+          "path": "src/gui/main.cpp"
+        },
+        {
+          "blob": "879594cd82956a59dd89c8a8a5975e7733811e41",
+          "path": "src/main.cpp"
+        },
+        {
+          "blob": "280095fde8455987221286cbb0c03e9b887490a0",
+          "path": "src/packet.cpp"
+        },
+        {
+          "blob": "9b2681084dbd600335c93cb61034f46dc0cdd3a1",
+          "path": "src/pump.manifest"
+        },
+        {
+          "blob": "9aff5567d348ba978b45717c9aaecffd32c166b9",
+          "path": "src/transfer.cpp"
+        },
+        {
+          "blob": "85664663bddff76ed64cdca1b9720138c9a0b5c4",
+          "path": "tests/test_cli.py"
+        },
+        {
+          "blob": "b4ae3178249c2c9171a63f28321490c55a8088e8",
+          "path": "tests/test_inspection.cpp"
+        }
+      ]
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "88ffbfbfe94e712689ad8bc1b55051ecd01a3f27",
+      "unique_blob_count": 5,
+      "unique_blobs": [
+        {
+          "blob": "6f7f1e7d3bb799bc57f7ef568305b48a67acf701",
+          "path": "docs/simulation-estimates.md"
+        },
+        {
+          "blob": "40f876a1499a9c57dd21bb05a9d0c4957916c86d",
+          "path": "docs/validation.md"
+        },
+        {
+          "blob": "7faf17e50f553e9561a936745b37152a33d20862",
+          "path": "src/gui/screen_console.cpp"
+        },
+        {
+          "blob": "dddc5f6af7be3244fc292e40d493959f11d345b8",
+          "path": "tests/test_gui_controller.cpp"
+        },
+        {
+          "blob": "3c2e7dd776ed198fb5044c7a594d7bbcf5da9b43",
+          "path": "tests/test_simulation_estimate.cpp"
+        }
+      ]
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "8c472a72859401bd555ad6041283e0742568b7b4",
+      "unique_blob_count": 2,
+      "unique_blobs": [
+        {
+          "blob": "e1b96d7b04b647ffe28d04729e1824e697fd0496",
+          "path": "docs/requirements.md"
+        },
+        {
+          "blob": "28b72a7af27de72896e46d4f343aaf95a30360c3",
+          "path": "src/gui/screen_console.cpp"
+        }
+      ]
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "92545fcef6d97e52182f70460a596d2810b258dc",
+      "unique_blob_count": 1,
+      "unique_blobs": [
+        {
+          "blob": "9060ee7858722ae9fbb285258ee29f60a4ab13d6",
+          "path": "docs/fast-ldpc-rate-margin.md"
+        }
+      ]
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "a1c4bca6c88b2fb750d5aaf4aa2bc95c4e182ede",
+      "unique_blob_count": 16,
+      "unique_blobs": [
+        {
+          "blob": "8c4ee96b8fef66adaf150c393c2c06896a62967e",
+          "path": "README.md"
+        },
+        {
+          "blob": "b550e256fe01cc7ad50fc8b126e48a10ec16dd68",
+          "path": "include/datapump/live.hpp"
+        },
+        {
+          "blob": "8b312ebdd49734f4ffb5f2d521c91967c723257a",
+          "path": "src/gui/controller.cpp"
+        },
+        {
+          "blob": "040a89d4973559c2b5408e22671cf39e212b67d1",
+          "path": "src/gui/desktop_layout.hpp"
+        },
+        {
+          "blob": "eb23bd9a1ba9b31e4c158e92ecdc607ee40f0948",
+          "path": "src/gui/screen_console.cpp"
+        },
+        {
+          "blob": "ea6249b0bf60f3152593987c84c82421eb222f53",
+          "path": "src/gui/state.cpp"
+        },
+        {
+          "blob": "0931d851139787812a4b49ade30dd68366d2f591",
+          "path": "src/gui/state.hpp"
+        },
+        {
+          "blob": "4d543de1ea6d14a7bbf7e20a9ffe9b14dbf93c65",
+          "path": "src/gui/ui_contract.hpp"
+        },
+        {
+          "blob": "f7aba0569b162b5e479c27fba8fa49d56464257c",
+          "path": "src/live.cpp"
+        },
+        {
+          "blob": "1c27dcf236e3a12757b1d841b87eca384eb8f916",
+          "path": "src/signal_view.cpp"
+        },
+        {
+          "blob": "2e6eaef9828dea23f68c41fb02d623fe84b4431e",
+          "path": "src/signal_view.hpp"
+        },
+        {
+          "blob": "970bd53199ba77f4dd8dbf12da3cee1a0a3b6271",
+          "path": "tests/test_gui_application.cpp"
+        },
+        {
+          "blob": "16afa4598cd1719f1c00911858717ed41a8bec6c",
+          "path": "tests/test_gui_controller.cpp"
+        },
+        {
+          "blob": "03779431d7247ff0e87424904af0d6555d2e9936",
+          "path": "tests/test_gui_layout.cpp"
+        },
+        {
+          "blob": "c9082c7c097fa60eb2180f9852bd5d7150b3ef12",
+          "path": "tests/test_live.cpp"
+        },
+        {
+          "blob": "309761fcc8a576a5f0cded5cccf22c3b54681eef",
+          "path": "tests/test_signal_view.cpp"
+        }
+      ]
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "a21b0e742a95a3d82e37e6d2382c98d1dee35774",
+      "unique_blob_count": 4,
+      "unique_blobs": [
+        {
+          "blob": "3ae9d71266c7b6eec3854bd5cd6f45d68238c663",
+          "path": "README.md"
+        },
+        {
+          "blob": "e30fc4b4497c28b76f8c79eec9680610a5ef7fc5",
+          "path": "docs/gui-architecture.md"
+        },
+        {
+          "blob": "e4e200db74977231854b405c653b3a37a068ff07",
+          "path": "docs/gui-contract.md"
+        },
+        {
+          "blob": "f4a9e9cae4fe208af1f85b61bb96c4a7a65527a4",
+          "path": "docs/gui-rev-assessment.md"
+        }
+      ]
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "a63f79158e2f0b8bdcc264ac2b4c6f883c55f5a9",
+      "unique_blob_count": 3,
+      "unique_blobs": [
+        {
+          "blob": "d7c035f3a99e3b6cef4c00b79e8811230675cc6f",
+          "path": "include/datapump/fast/ldpc.hpp"
+        },
+        {
+          "blob": "c3ec186a9388fdb7f1af8ac281b64f210ae6fe57",
+          "path": "src/fast/ldpc.cpp"
+        },
+        {
+          "blob": "1b87e88b3758fde1eed2adcd02c242ff03dd9baf",
+          "path": "tests/test_fast_acoustic_short.cpp"
+        }
+      ]
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "b3738769f5658bdc49d9ce2f04a6849caad244bc",
+      "unique_blob_count": 2,
+      "unique_blobs": [
+        {
+          "blob": "b1caab7a73eafff4361197d88423d328ac624391",
+          "path": "docs/validation.md"
+        },
+        {
+          "blob": "28b72a7af27de72896e46d4f343aaf95a30360c3",
+          "path": "src/gui/screen_console.cpp"
+        }
+      ]
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "bae0ff2c7f0abf1f839a2ea39aa422caa3159311",
+      "unique_blob_count": 24,
+      "unique_blobs": [
+        {
+          "blob": "d969253363cd37eded68bea4421e0537263cc6b9",
+          "path": ".github/workflows/ci.yml"
+        },
+        {
+          "blob": "05394869fab4835a6f395cff62e6941698f393e5",
+          "path": "CMakeLists.txt"
+        },
+        {
+          "blob": "efaa67426e66007c9a3aecf3711df0c5ca168887",
+          "path": "README.md"
+        },
+        {
+          "blob": "232d83745aee326b48085d4516e4c3e0e53f5a91",
+          "path": "docs/disclaimer.md"
+        },
+        {
+          "blob": "1f3be16bbdda9941fbc8f172b9e059d4639f13ef",
+          "path": "docs/modem.md"
+        },
+        {
+          "blob": "d838fd87bee851dca4750f9ee30ad7ce0d5a311d",
+          "path": "docs/protocol.md"
+        },
+        {
+          "blob": "0581095d08807adf5a971282a7e60cff37046a9b",
+          "path": "docs/requirements.md"
+        },
+        {
+          "blob": "92af1abcecd4d31e07536b64912fa23a99c13fc9",
+          "path": "docs/security-review.md"
+        },
+        {
+          "blob": "0341afaf4e3b81605e7fe59b805edaac71a8cd9d",
+          "path": "docs/security.md"
+        },
+        {
+          "blob": "2cfc140efd40d85398665e59e9c52e28b0d66c83",
+          "path": "docs/validation.md"
+        },
+        {
+          "blob": "926274b28862fd34ea9cbc8f034f4ac247b3ab00",
+          "path": "include/datapump/live.hpp"
+        },
+        {
+          "blob": "12d9122243325293c001657252b161d8b6dd47b3",
+          "path": "include/datapump/streaming_modem.hpp"
+        },
+        {
+          "blob": "352f2970e92d85ed0aa2f67a6ce96e6d4bb59939",
+          "path": "src/gui/main.cpp"
+        },
+        {
+          "blob": "e14f71d11acc45ae67f039d930324bf2f8732ac0",
+          "path": "src/live.cpp"
+        },
+        {
+          "blob": "45497c6b24d7ea1ce663f18a7a3b996211dcce14",
+          "path": "src/main.cpp"
+        },
+        {
+          "blob": "54c095440cfb9a55b26791dc39231ac7809a5bf4",
+          "path": "src/pump.manifest"
+        },
+        {
+          "blob": "c8118078795956b2807a55bc4732e82e5cacfc9c",
+          "path": "src/streaming_modem.cpp"
+        },
+        {
+          "blob": "78e8b6fde47d64564552620344799ec7f89680e4",
+          "path": "src/transfer.cpp"
+        },
+        {
+          "blob": "7018ffebd417c1270917865b843e85bda4537fed",
+          "path": "tests/test_cli.py"
+        },
+        {
+          "blob": "516304ac33ca89d8ec127ee604c27ddfb520b717",
+          "path": "tests/test_live.cpp"
+        },
+        {
+          "blob": "c3c0393a81c059b2f0914c075d7cd7f12536d5c8",
+          "path": "tests/test_signal_view.cpp"
+        },
+        {
+          "blob": "f93f631e6239b5339bc0c3552a83c30a5b876a03",
+          "path": "tests/test_streaming_modem.cpp"
+        },
+        {
+          "blob": "48b0ca81021ce407d1e7c4b1171784073cdf7e48",
+          "path": "tests/test_transfer.cpp"
+        },
+        {
+          "blob": "f13a79d07ed0742a56e51e58988f20d4d9536d27",
+          "path": "tools/benchmark_receiver.cpp"
+        }
+      ]
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "be29da8f66e9366ee6b35c00650e673cc0fc37be",
+      "unique_blob_count": 9,
+      "unique_blobs": [
+        {
+          "blob": "f415fb88dbe313d5dd715b0703a8e5ece284860b",
+          "path": "README.md"
+        },
+        {
+          "blob": "8c136f3af7dde417975db53c5e043f7e5b544d2f",
+          "path": "docs/validation.md"
+        },
+        {
+          "blob": "90045bde81cbbd15879f7739e8ab4e98c539b88f",
+          "path": "include/datapump/live.hpp"
+        },
+        {
+          "blob": "4ce675f8148d02ea44be522ebd2e1dfba1925e28",
+          "path": "src/gui/plot_data.hpp"
+        },
+        {
+          "blob": "925f75019dc3ac0615c046958e37d09a662a4cde",
+          "path": "src/gui/plot_render.cpp"
+        },
+        {
+          "blob": "ce6bb050d90813378db7ec0387eaac99ce44551b",
+          "path": "src/gui/screen_console.cpp"
+        },
+        {
+          "blob": "02a20897ae092730709865dd5c474e39a89a37ff",
+          "path": "src/live.cpp"
+        },
+        {
+          "blob": "bdb2f844ea52623f8daae1550dfdaaf49f6031f7",
+          "path": "tests/test_gui_bitmaps.cpp"
+        },
+        {
+          "blob": "94b6c85657533777db6aa2bedaa80760bd96b797",
+          "path": "tests/test_live_resources.cpp"
+        }
+      ]
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "cca8a1abf69168d54cecd32f3fd70f527e622a80",
+      "unique_blob_count": 2,
+      "unique_blobs": [
+        {
+          "blob": "486f4220f163569b807b1b5dc7d3aa7a35680df3",
+          "path": "src/pattern_code.cpp"
+        },
+        {
+          "blob": "54d5035384f10de1d69545fb7b59114f0db77673",
+          "path": "tests/test_pattern_receiver.cpp"
+        }
+      ]
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "dee7a76bcbe59b64a96caac4a0bb83edf0975e6b",
+      "unique_blob_count": 1,
+      "unique_blobs": [
+        {
+          "blob": "88a38405aca5288a7c0a8ddf5c296204825a2ab7",
+          "path": "docs/validation.md"
+        }
+      ]
+    },
+    {
+      "classification": "uncommitted repository snapshot with historical draft source/documentation/test files",
+      "contains_unique_blobs": true,
+      "tree": "e607c7f9ed61af22b7611e3df48354183f5e1360",
+      "unique_blob_count": 1,
+      "unique_blobs": [
+        {
+          "blob": "f619eb866d7a98e13ffd0e4fcdb86467770cd87e",
+          "path": "docs/gui-contract.md"
+        }
+      ]
+    }
+  ]
+}
