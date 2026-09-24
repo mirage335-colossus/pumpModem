@@ -1,7 +1,8 @@
 #include "datapump/modem.hpp"
 #include "datapump/streaming_modem.hpp"
+#include "datapump/pattern_code.hpp"
+#include "datapump/pattern_pulse.hpp"
 #include "datapump/crypto.hpp"
-#include "constellation.hpp"
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -18,7 +19,6 @@ namespace datapump::modem {
 namespace {
 using Complex = std::complex<double>;
 constexpr double tau = 2 * std::numbers::pi;
-constexpr double amplitude = 0.7;
 
 void check(bool ok, const char* message) { if (!ok) throw Error(message); }
 void check_cancelled(const std::stop_token& stop) {
@@ -40,41 +40,12 @@ void budget(std::size_t limit, std::initializer_list<std::pair<std::size_t,std::
 std::size_t chip_samples(const Config& c) {
     return static_cast<std::size_t>(std::ceil(2.*c.sample_rate/c.bandwidth_hz));
 }
-std::size_t symbol_samples(const Config& c) { return chip_samples(c) * c.spreading_factor; }
 void finite_samples(std::span<const float> samples, std::size_t limit, std::stop_token stop = {}) {
     product(samples.size(), sizeof(float), limit);
     for (std::size_t i = 0; i < samples.size(); ++i) {
         periodic_cancel(i, stop);
         check(std::isfinite(samples[i]), "non-finite audio sample");
     }
-}
-std::vector<int> signs(std::size_t chips, const Config& c, std::stop_token stop = {}) {
-    check_cancelled(stop);
-    product(chips, sizeof(int) + 1, c.memory_limit);
-    std::vector<int> out(chips, 1);
-    if (c.scramble) {
-        Crypto crypto(c.spreading_seed);
-        auto stream = crypto.stream(StreamPurpose::Scrambler, 0, 0, (chips + 7) / 8);
-        for (std::size_t i = 0; i < chips; ++i) {
-            periodic_cancel(i, stop);
-            out[i] = ((stream[i / 8] >> (i % 8)) & 1) ? -1 : 1;
-        }
-    } else if (c.spreading_factor > 1 && c.spreading_mode == SpreadingMode::pattern) {
-        constexpr std::array<int, 8> pattern{1, 1, -1, 1, -1, -1, 1, -1};
-        for (std::size_t i = 0; i < chips; ++i) {
-            periodic_cancel(i, stop);
-            out[i] = pattern[(i % c.spreading_factor) % pattern.size()];
-        }
-    }
-    if (c.dsss) {
-        Crypto crypto(c.dsss_seed);
-        auto stream = crypto.stream(StreamPurpose::Dsss, 0, 0, (chips + 7) / 8);
-        for (std::size_t i = 0; i < chips; ++i) {
-            periodic_cancel(i, stop);
-            if ((stream[i / 8] >> (i % 8)) & 1) out[i] = -out[i];
-        }
-    }
-    return out;
 }
 void fft(std::vector<Complex>& data, bool inverse, std::stop_token stop = {}) {
     check_cancelled(stop);
@@ -111,105 +82,6 @@ std::size_t fft_size(std::size_t minimum, std::size_t limit, std::size_t bytes_p
     product(n, bytes_per_item, limit);
     return n;
 }
-// Generic raw-byte callers can acquire the known five-second training. Packet
-// services instead use StreamingReceiver's protected bootstrap blind search.
-DecodeResult known_training(std::span<const float> samples,const Config& c,
-                            std::span<const std::uint8_t> pre,std::stop_token stop) {
-    check(pre.size()==32,"16APSK expects a 32-byte training prefix");
-    const auto training=static_cast<std::size_t>(training_sample_count(c));
-    check(samples.size()>=training,"capture is shorter than training");
-    budget(c.memory_limit,{{samples.size(),sizeof(float)},{samples.size()+1,sizeof(Complex)},
-                           {8*1024*1024,1}});
-    std::array<Complex,64> expected{};
-    Complex phase{1,0};
-    for(std::size_t i=0;i<expected.size();++i) {
-        const auto bits=static_cast<unsigned>((pre[i/2]>>((i&1)?0:4))&15);
-        phase*=std::polar(1.,tau*detail::phase_steps[bits&7]/8);
-        expected[i]=phase*((bits&8)? .7:.35);
-    }
-    std::vector<Complex> prefix(samples.size()+1);
-    const auto mix=[&](double frequency) {
-        Complex oscillator{1,0};const auto step=std::polar(1.,-tau*frequency/c.sample_rate);
-        for(std::size_t i=0;i<samples.size();++i) {
-            periodic_cancel(i,stop);prefix[i+1]=prefix[i]+2.*static_cast<double>(samples[i])*oscillator;oscillator*=step;
-        }
-    };
-    mix(c.carrier_hz);
-    const auto points=[&](std::size_t offset) {
-        std::array<Complex,64> result{};
-        for(std::size_t i=0;i<result.size();++i) {
-            const auto begin=offset+training*i/64,end=offset+training*(i+1)/64;
-            result[i]=(prefix[end]-prefix[begin])/static_cast<double>(end-begin);
-        }
-        return result;
-    };
-    const auto differential=[&](std::size_t offset) {
-        const auto values=points(offset);Complex correlation{};double power=0;
-        for(std::size_t i=1;i<values.size();++i) {
-            const auto actual=values[i]*std::conj(values[i-1]);
-            const auto reference=expected[i]*std::conj(expected[i-1]);
-            correlation+=actual*std::conj(reference);power+=std::abs(actual*reference);
-        }
-        return std::pair{power>1e-20?std::abs(correlation)/power:0.,correlation};
-    };
-    std::size_t offset=0;double best=0;
-    const auto step=std::max<std::size_t>(1,training/64/32);
-    for(std::size_t candidate=0;candidate<=samples.size()-training;candidate+=step) {
-        check_cancelled(stop);const auto score=differential(candidate).first;
-        if(score>best){best=score;offset=candidate;}
-    }
-    check(best>.82,"known 16APSK training does not validate");
-    const auto frequency_offset=std::arg(differential(offset).second)*c.sample_rate/(tau*static_cast<double>(training)/64);
-    mix(c.carrier_hz+frequency_offset);
-    const auto coherent=[&](std::size_t candidate) {
-        const auto values=points(candidate);Complex dot{};double signal=0,reference=0;
-        for(std::size_t i=0;i<values.size();++i) {dot+=values[i]*std::conj(expected[i]);signal+=std::norm(values[i]);reference+=std::norm(expected[i]);}
-        return std::pair{signal>1e-20?std::abs(dot)/std::sqrt(signal*reference):0.,dot/reference};
-    };
-    const auto lower=offset>2*step?offset-2*step:0,upper=std::min(samples.size()-training,offset+2*step);
-    double strongest=0;
-    for(std::size_t candidate=lower;candidate<=upper;++candidate) {
-        periodic_cancel(candidate,stop);const auto score=coherent(candidate);
-        if(std::abs(score.second)>strongest){strongest=std::abs(score.second);offset=candidate;}
-    }
-    best=coherent(offset).first;
-    check(best>.85,"known 16APSK training coherence is too low");
-    const auto gain=std::abs(coherent(offset).second);
-    const auto training_points=points(offset);
-    Complex previous=training_points.back();
-    const auto duration=static_cast<std::size_t>(symbol_sample_count(c)),chip=chip_samples(c);
-    const auto code=signs(c.spreading_factor,c,stop);
-    DecodeResult result;result.bytes.assign(pre.begin(),pre.end());
-    result.diagnostics.sample_offset=offset;result.diagnostics.bit_rate=bit_rate(c);
-    result.diagnostics.preamble_correlation=best;
-    const auto start=offset+training;
-    const auto remaining=samples.size()-start;
-    const auto count=remaining/duration+(remaining%duration!=0);
-    auto oscillator=std::polar(1.,tau*(c.carrier_hz+frequency_offset)*static_cast<double>(start)/c.sample_rate);
-    const auto rotation=std::polar(1.,tau*(c.carrier_hz+frequency_offset)/c.sample_rate);
-    double power=0,error=0;unsigned partial=0,partial_bits=0;
-    for(std::size_t symbol=0;symbol<count;++symbol) {
-        check_cancelled(stop);double xc=0,xs=0,cc=0,ss=0,cs=0;
-        for(std::size_t i=0;i<duration;++i) {
-            periodic_cancel(i,stop);const double cosine=oscillator.real(),sine=oscillator.imag();
-            const auto position=start+symbol*duration+i;
-            const auto sample=position<samples.size()?static_cast<double>(samples[position])*code[(i/chip)%code.size()]:0.;
-            xc+=sample*cosine;xs+=sample*sine;cc+=cosine*cosine;ss+=sine*sine;cs+=cosine*sine;oscillator*=rotation;
-        }
-        const double determinant=cc*ss-cs*cs;
-        check(determinant>1e-12,"carrier quadratures are singular");
-        const Complex point{(xc*ss-xs*cs)/determinant,-(xs*cc-xc*cs)/determinant};
-        const auto bits=detail::decision(point,previous,gain,c.constellation_bits);
-        const auto ideal=gain*detail::mapped(bits,c.constellation_bits,previous);
-        power+=std::norm(ideal);error+=std::norm(point-ideal);previous=point;
-        partial=(partial<<c.constellation_bits)|bits;partial_bits+=c.constellation_bits;
-        if(partial_bits>=8){partial_bits-=8;result.bytes.push_back(static_cast<std::uint8_t>(partial>>partial_bits));}
-        if(result.diagnostics.constellation.size()<2048)result.diagnostics.constellation.push_back(point/gain);
-    }
-    result.diagnostics.snr_db=10*std::log10(std::max(power,1e-20)/std::max(error,1e-20));
-    return result;
-}
-
 void put16(std::ostream& out, std::uint16_t value) {
     const char b[2]{static_cast<char>(value), static_cast<char>(value >> 8)}; out.write(b,2);
 }
@@ -228,20 +100,31 @@ void discard(std::istream& in, std::size_t count) {
 }
 }
 void validate(const Config& c) {
-    check(c.constellation_bits>=2 && c.constellation_bits<=6,"constellation must carry 2..6 bits per symbol");
+    check(c.pattern_symbols && c.constellation_bits==1,
+          "APSK transport has been removed; use one-bit pattern transport");
     check(c.sample_rate >= 64 && c.sample_rate <= 120000000, "internal sample rate must be 64..120000000 Hz");
+    check(c.stream_phase_samples < c.sample_rate, "symbol stream phase must be within its whole second");
     check(std::isfinite(c.bandwidth_hz) && c.bandwidth_hz >= 1 && c.bandwidth_hz <= 30000000 && c.bandwidth_hz <= c.sample_rate / 2.0,
           "bandwidth must be finite and within 1 Hz..30 MHz and internal Nyquist");
-    check(std::isfinite(c.carrier_hz) && c.carrier_hz >= c.bandwidth_hz / 2 &&
-          c.carrier_hz + c.bandwidth_hz / 2 <= c.sample_rate / 2.0,
-          "carrier and bandwidth must fit inside internal DSP passband");
-    check(std::isfinite(c.training_seconds) && c.training_seconds == 5,
-          "normal training duration is fixed at 5 seconds");
+    check(std::isfinite(c.training_seconds) && c.training_seconds == 2,
+          "normal training duration is fixed at 2 seconds");
     check(std::isfinite(c.integration_seconds) && c.integration_seconds>=0,"invalid integration duration");
-    (void)symbol_sample_count(c);
     check(c.spreading_factor >= 1 && c.spreading_factor <= 16384, "spreading factor must be 1..16384");
     check(c.spreading_mode == SpreadingMode::pattern || c.spreading_mode == SpreadingMode::tone,"unknown spreading mode");
-    check(c.spreading_mode != SpreadingMode::tone || !c.scramble,"tone mode cannot enable pattern keystream scrambling");
+    const auto samples=symbol_sample_count(c);
+    const auto chip=chip_samples(c);
+    // Do not call pattern_pulse_enabled here: its chip helper validates this
+    // same configuration. Use the identical complete-chip eligibility rule.
+    const bool shaped=c.pulse_shaping && c.spreading_mode==SpreadingMode::pattern &&
+        samples/chip>=2*pattern_pulse_half_span;
+    // This is the intended RRC support including rolloff, not a certified
+    // emission mask. Finite pulse truncation and limiting still leave tails.
+    const auto half_band=shaped ? (1+pattern_pulse_rolloff)*c.sample_rate/(2.*static_cast<double>(chip)) : c.bandwidth_hz/2;
+    check(std::isfinite(c.carrier_hz) && c.carrier_hz>=half_band &&
+          c.carrier_hz+half_band<=c.sample_rate/2.,
+          "carrier and waveform must fit above DC and below internal Nyquist; raise the carrier for short unshaped patterns or tone modes");
+    check(c.spreading_mode != SpreadingMode::tone || (!c.scramble && !c.dsss && !c.data_key),
+          "tone mode is unencrypted and cannot enable Data, Scrambler or DSSS keystreams");
     check(c.memory_limit >= 1024, "modem memory limit must be at least 1024 bytes");
     check(chip_samples(c) >= 4, "chip sampling is too fast");
     product(chip_samples(c), c.spreading_factor, std::numeric_limits<std::size_t>::max());
@@ -263,33 +146,44 @@ std::uint64_t symbol_sample_count(const Config& c) {
     check(samples>=4 && samples<static_cast<long double>(std::numeric_limits<std::uint64_t>::max()),"symbol duration exceeds 64-bit sample counter");
     return static_cast<std::uint64_t>(samples);
 }
-std::uint64_t training_sample_count(const Config& c) { return static_cast<std::uint64_t>(c.sample_rate)*5; }
+std::uint64_t training_sample_count(const Config& c) {
+    const auto target=static_cast<std::uint64_t>(c.sample_rate)*2;
+    const auto symbol=symbol_sample_count(c);
+    const auto count=target/symbol+(target%symbol>=symbol/2+symbol%2);
+    check(count<=std::numeric_limits<std::uint64_t>::max()/symbol,"hardware preamble duration overflow");
+    return count*symbol;
+}
+std::uint64_t suppression_sample_count(const Config& c) {
+    return static_cast<std::uint64_t>(c.sample_rate)*3;
+}
 double symbol_seconds(const Config& c) { validate(c); return c.integration_seconds>0?c.integration_seconds:2.*c.spreading_factor/c.bandwidth_hz; }
 double bit_rate(const Config& c) { return c.constellation_bits/symbol_seconds(c); }
 std::size_t payload_symbol_count(std::size_t payload_bytes,const Config& c) {
-    check(c.constellation_bits>=2 && c.constellation_bits<=6,"constellation must carry 2..6 bits per symbol");
-    const auto symbols=[&](std::size_t count) {
-        const auto bits=product(count,8,std::numeric_limits<std::size_t>::max()-c.constellation_bits+1);
-        return (bits+c.constellation_bits-1)/c.constellation_bits;
-    };
-    // A symbol may straddle the variable header/body boundary. Only the final
-    // symbol can contain unused bits, never an internal byte-alignment gap.
-    return symbols(payload_bytes);
+    validate(c);
+    return product(payload_bytes,8,std::numeric_limits<std::size_t>::max());
 }
 std::size_t waveform_sample_count(std::size_t wire_bytes,const Config& c) {
-    validate(c);check(wire_bytes>=32,"16APSK wire requires the 32-byte training prefix");
-    const auto count=payload_symbol_count(wire_bytes-32,c);
+    validate(c);
+    check(wire_bytes>0,"waveform requires at least one payload byte");
+    const auto count=payload_symbol_count(wire_bytes,c);
     const auto duration=symbol_sample_count(c);
     check(duration<=std::numeric_limits<std::size_t>::max(),"symbol duration exceeds platform sample counter");
     const auto payload=product(count,static_cast<std::size_t>(duration),std::numeric_limits<std::size_t>::max());
+    const auto padding=pattern_pulse_padding_samples(c);
     const auto training=training_sample_count(c);
     check(payload<=std::numeric_limits<std::size_t>::max()-training,"modem sample count overflow");
-    return payload+static_cast<std::size_t>(training);
+    const auto content=payload+static_cast<std::size_t>(training);
+    check(padding<=(std::numeric_limits<std::size_t>::max()-content)/2,"pulse tail sample count overflow");
+    const auto shaped=content+2*static_cast<std::size_t>(padding);
+    const auto suppression=suppression_sample_count(c);
+    check(suppression<=std::numeric_limits<std::size_t>::max()-shaped,"suppression sample count overflow");
+    return shaped+static_cast<std::size_t>(suppression);
 }
 bool memory_supported(std::size_t wire_bytes,std::size_t preamble_bytes,const Config& c) {
     validate(c);
     try {
-        check(preamble_bytes==32 && wire_bytes>=32,"invalid estimated training length");
+        check(preamble_bytes==0 && wire_bytes>0,
+              "invalid estimated training length");
         const auto samples=waveform_sample_count(wire_bytes,c);
         budget(c.memory_limit,{{samples,sizeof(float)+sizeof(Complex)},{wire_bytes,2},{8*1024*1024,1}});
         return true;
@@ -297,8 +191,9 @@ bool memory_supported(std::size_t wire_bytes,std::size_t preamble_bytes,const Co
 }
 Bytes preamble(const Config& c) {
     validate(c);
-    return {0x53,0x19,0xa7,0xe2,0x86,0xd4,0x3b,0x0f,0x65,0x92,0xce,0x48,0x71,0xad,0xf0,0x26,
-            0xb8,0x4d,0x03,0xe7,0x9a,0x61,0x35,0xcf,0x28,0xd0,0x7e,0x94,0xab,0x16,0xf3,0x59};
+    // Hardware settling is generated directly by PatternTransmitter under
+    // the same selected protections, using its separate preamble counters.
+    return {};
 }
 std::vector<float> modulate(std::span<const std::uint8_t> bytes, const Config& c, std::stop_token stop) {
     check_cancelled(stop); validate(c);
@@ -311,29 +206,27 @@ std::vector<float> modulate(std::span<const std::uint8_t> bytes, const Config& c
     return result;
 }
 DecodeResult demodulate(std::span<const float> samples, const Config& c,
-                        std::span<const std::uint8_t> expected_preamble, std::stop_token stop) {
+                        std::span<const std::uint8_t>, std::stop_token stop) {
     check_cancelled(stop); validate(c); finite_samples(samples,c.memory_limit,stop);
-    auto result=known_training(samples,c,expected_preamble,stop);
-    for(std::size_t i=0,stride=std::max<std::size_t>(1,samples.size()/2048);i<samples.size() && result.diagnostics.waveform.size()<2048;i+=stride)
-        result.diagnostics.waveform.push_back(samples[i]);
-    return result;
+    throw Error("binary patterns require PatternReceiver blind sample acquisition");
 }
 std::vector<float> simulate(std::span<const float> samples, const Config& c, const ChannelConfig& channel) {
     validate(c); finite_samples(samples, c.memory_limit);
     validate_channel(c,channel);
     const auto rate=1+static_cast<long double>(channel.clock_error_ppm)*1e-6L;
-    const auto receiver_count=std::ceil(static_cast<long double>(samples.size())/rate);
+    std::mt19937_64 startup_random(channel.seed^0x8ebc6af09c88c6e3ULL);
+    const auto uniform=[&]{return (static_cast<double>(startup_random()>>11)+.5)/9007199254740992.;};
+    const auto initial_phase=static_cast<long double>(tau)*(uniform()-.5L);
+    const auto startup=channel.delay_samples+std::floor((.05L+.25L*uniform())*c.sample_rate)+.05L+.9L*uniform();
+    const auto receiver_count=std::ceil(startup+static_cast<long double>(samples.size())/rate);
     check(receiver_count<=c.memory_limit/sizeof(float),"simulation duration exceeds memory limit");
     const auto count=static_cast<std::size_t>(receiver_count);
-    check(channel.delay_samples <= c.memory_limit / sizeof(float) - count, "simulation delay exceeds memory limit");
-    budget(c.memory_limit, {{samples.size(),sizeof(float)}, {count+channel.delay_samples,sizeof(float)}});
-    std::vector<float> out(count + channel.delay_samples);
+    budget(c.memory_limit, {{samples.size(),sizeof(float)}, {count,sizeof(float)}});
+    std::vector<float> out(count);
     double power = 0;
     for (auto v : samples) power += static_cast<double>(v) * v;
     power = samples.empty() ? 0 : power / static_cast<double>(samples.size());
-    if (channel.frequency_offset_hz==0 && channel.clock_error_ppm==0 && channel.phase_noise_degrees_per_sqrt_second==0)
-        std::copy(samples.begin(), samples.end(), out.begin() + channel.delay_samples);
-    else if (!samples.empty()) {
+    if (!samples.empty()) {
         const auto n = fft_size(samples.size(), c.memory_limit, sizeof(Complex));
         budget(c.memory_limit, {{samples.size(),sizeof(float)}, {out.size(),sizeof(float)}, {n,sizeof(Complex)}});
         std::vector<Complex> analytic(n);
@@ -346,7 +239,8 @@ std::vector<float> simulate(std::span<const float> samples, const Config& c, con
         const auto diffusion=channel.phase_noise_degrees_per_sqrt_second*std::numbers::pi/180/std::sqrt(c.sample_rate);
         std::normal_distribution<double> phase_step(0,1);double phase=0;
         for (std::size_t i = 0; i < count; ++i) {
-            const auto position=static_cast<long double>(i)*rate;
+            const auto position=(static_cast<long double>(i)-startup)*rate;
+            if(position<0) {if(diffusion)phase+=phase_step(phase_random)*diffusion;continue;}
             const auto center=static_cast<std::int64_t>(std::floor(position));
             Complex value{};double weight=0;
             if(std::abs(position-center)<1e-10)value=analytic[static_cast<std::size_t>(center)];
@@ -359,8 +253,9 @@ std::vector<float> simulate(std::span<const float> samples, const Config& c, con
                 if(tap>=0 && tap<static_cast<std::int64_t>(samples.size()))value+=analytic[static_cast<std::size_t>(tap)]*coefficient;
             }
             if(weight)value/=weight;
-            const auto angle=std::remainder(static_cast<long double>(tau)*channel.frequency_offset_hz*i/c.sample_rate+phase,static_cast<long double>(tau));
-            out[i+channel.delay_samples]=static_cast<float>((value*std::polar(1.,static_cast<double>(angle))).real());
+            const auto angle=std::remainder(initial_phase+static_cast<long double>(tau)*
+                (channel.frequency_offset_hz*static_cast<long double>(i)+c.carrier_hz*rate*startup)/c.sample_rate+phase,static_cast<long double>(tau));
+            out[i]=static_cast<float>((value*std::polar(1.,static_cast<double>(angle))).real());
             if(diffusion)phase+=phase_step(phase_random)*diffusion;
         }
     }
@@ -425,29 +320,28 @@ Wav read_wav(std::istream& in, std::size_t limit) {
 }
 std::vector<float> modulate_status(std::span<const std::uint8_t> bits, const Config& c) {
     validate(c);
-    const auto duration = symbol_samples(c), chip = chip_samples(c);
-    const auto count = product(bits.size(),duration,c.memory_limit / (sizeof(float)+1));
-    budget(c.memory_limit, {{count,sizeof(float)}, {bits.size()*c.spreading_factor,sizeof(int)+1}});
-    const auto code = signs(bits.size()*c.spreading_factor,c);
-    std::vector<float> out(count);
-    Complex phase{1,0}, oscillator{1,0};
-    const auto step = std::polar(1.0,tau*c.carrier_hz/c.sample_rate);
-    for (std::size_t j=0; j<bits.size(); ++j) {
-        check(bits[j] <= 1,"status bits must be 0 or 1");
-        if (bits[j]) phase = -phase;
-        for (std::size_t k=0; k<duration; ++k) {
-            out[j*duration+k] = static_cast<float>(amplitude*(phase*oscillator).real()*code[j*c.spreading_factor+k/chip]);
-            oscillator *= step;
-        }
-    }
-    return out;
+    PatternTransmitter source(Bytes(bits.begin(),bits.end()),c,c.stream_epoch);
+    check(source.total_samples()<=c.memory_limit/sizeof(float),"pattern waveform exceeds memory limit");
+    const auto count=static_cast<std::size_t>(source.total_samples());
+    budget(c.memory_limit,{{count,sizeof(float)},{source.working_bytes(),1}});
+    std::vector<float> output(count);
+    for(std::size_t position=0;position<output.size();)
+        position+=source.read(std::span(output).subspan(position,std::min<std::size_t>(4096,output.size()-position)));
+    return output;
 }
 double detect_status(std::span<const float> samples, std::span<const std::uint8_t> bits, const Config& c) {
     validate(c); finite_samples(samples,c.memory_limit);
     check(!bits.empty(),"known status bits are required");
-    const auto expected_count = product(bits.size(),symbol_samples(c),c.memory_limit/sizeof(float));
-    budget(c.memory_limit, {{samples.size(),sizeof(float)}, {expected_count,sizeof(float)},
-                             {bits.size()*c.spreading_factor,sizeof(int)+1}});
+    const auto duration=symbol_sample_count(c);
+    check(duration<=std::numeric_limits<std::size_t>::max(),"status symbol duration exceeds platform sample counter");
+    const auto payload_count = product(bits.size(),static_cast<std::size_t>(duration),c.memory_limit/sizeof(float));
+    const auto training=training_sample_count(c);
+    check(training<=c.memory_limit/sizeof(float)-payload_count,"status waveform exceeds memory limit");
+    const auto padding=pattern_pulse_padding_samples(c);
+    const auto content_count=payload_count+static_cast<std::size_t>(training);
+    check(padding<=(c.memory_limit/sizeof(float)-content_count)/2,"status pulse tails exceed memory limit");
+    const auto expected_count=content_count+2*static_cast<std::size_t>(padding);
+    budget(c.memory_limit,{{samples.size(),sizeof(float)},{expected_count,sizeof(float)},{bits.size(),1},{16384,1}});
     const auto reference = modulate_status(bits,c);
     check(samples.size() == reference.size(),"status detector requires exactly the known symbol duration");
     double dot=0, signal=0, expected=0;

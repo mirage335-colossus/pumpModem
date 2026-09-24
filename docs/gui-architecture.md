@@ -1,228 +1,257 @@
-# GUI architecture review
+# GUI architecture
 
-The recommended approach is an application-specific semantic interface, built
-around the existing FLTK controls first. Keep one compiled backend, reusable
-application state/actions, a short screen definition, and shared bitmap plot
-producers. Match the grayscale instrument-panel presentation and optional color
-accents across adapters through widget styling. Do not implement a general-purpose
-widget toolkit.
+FLTK and Rev are native adapters for one shared GUI application. Both link
+`datapump_gui_application`, defined once in `cmake/GuiShared.cmake`. Neither
+adapter constructs a second application controller, chooses modem settings,
+formats signal data, or defines inspection sections. The former FLTK
+`main.cpp`, live widgets and procedural inspection implementation have been
+removed.
 
-The build selector and FLTK style, including default color when supported and a
-`--monochrome` override, are implemented.
-Controller extraction, the declarative screen API, pure bitmap plots and their
-transfer API, and alternative adapters are proposed work. The current FLTK
-widgets still contain custom drawing and plot interaction.
+## Ownership
 
-## What the project already separates
-
-| Existing code | Reuse |
+| Shared module | Responsibility |
 | --- | --- |
-| `include/datapump/live.hpp`, `src/live.cpp` | Session commands, audio/modem workers, event and plot snapshots. No GUI objects. |
-| `src/gui/state.hpp/.cpp` | Inbox, signal records, exact binary input, transmission cooldown, replay policy. |
-| `src/gui/inspection_model.hpp/.cpp` | Structured processing lanes, fields, sections, constellations, and transmission estimates. |
-| `src/gui/plot_data.hpp` | Width-bounded waveform reconstruction, peak-preserving reduction, common-scale spectrum history. |
-| `include/datapump/tuning.hpp`, `src/tuning.cpp` | Shared modem planning and presets. |
+| `application.hpp` | Backend-facing facade; controller, workers and bitmap producers are private to its implementation. |
+| `ui_contract.hpp` | Control, page, field, command, record and service vocabulary. |
+| `ui_document.hpp`, `bitmap.hpp` | Generic document nodes and opaque `BitmapSource` pixel handles, without domain factories. |
+| `control_binding.hpp` | Declaration-order control groups and menu identity by page or persistent scope, plus instance. |
+| `binding_state.hpp` | Resolved native control roles, effective option availability, deferred option identity, complete layout invalidation and bitmap revision retention. |
+| `document_layout.hpp` | Document flow, remaining widths, margins, padding, clipping and nested equal heights; adapters supply native glyph measurements only. |
+| `document_actions.hpp` | Document action identity, inherited availability and eligibility for restoring focus after a document replacement. |
+| `document_presentation.hpp` | Immutable document ownership, rendered child traversal, action association and local/absolute placement with inherited allocation and availability. |
+| `control_interactions.hpp`, `record_interactions.hpp` | Pointer double-click identity, wheel command repetition, record keyboard navigation, selection and activation eligibility. |
+| `overlay.hpp`, `screen_overlay.hpp` | Shared overlay composition, key bindings, background access, service priority and focus-restoration policy; the expanded QR definition. |
+| `record_scroll.hpp` | Record tail detection, scroll retention across data and viewport changes, and revealing selected rows. |
+| `record_reconciliation.hpp` | Retained record identity, order, changed/added/removed rows, selection and availability. Native lists keep widget handles and glyph measurements. |
+| `service_queue.hpp` | Serial platform-service requests, completion identity, declared input validation and cancellation of current/queued work during shutdown. |
+| `chrome_layout.hpp` | Dialog wording/input shape and geometry, popup sizing preferences, tooltip metrics/placement, checkbox and empty-record geometry. |
+| `text_policy.hpp`, `utf8_policy.hpp` | Atomic UTF-8 replacement proposals, caret/selection boundaries and declaration-specific byte limits. |
+| `theme.hpp`, `presentation_palette.hpp` | Shared widget states (border, hover, focus, selection, disabled and dialog colors), semantic text/document tones and fills. |
+| `screen_console.cpp` | Window/page titles, controls, bindings, menus, help, submit/activation/gesture policies. |
+| `desktop_layout.hpp`, `control_layout.hpp` | Desktop geometry, label/editor/preset/caption placement, and record cell/content extents in logical units. |
+| `controller.cpp` | Authoritative drafts, validation, settings, workers, commands, key/file state, reception and eligibility. |
+| `record_presentations.hpp` | Signal/file records, including frequency, status, reception quality, text, tone and activation eligibility. |
+| `inspection_page.hpp` | Inspection section order, cards, tables, pagination and native text around plot snapshots. |
+| `bitmap_sources.hpp`, `plot_render.cpp` | Shared snapshots, captions, error overlays, invalidation and pixel producers. |
+| `application.cpp` | Control/menu presentation and dispatch, validated edits/presets, launch parsing, lifecycle, submission/record dispatch, document caching and common self-check/smoke orchestration. |
+| `gui_smoke.cpp` | The same application workflow checks for both native backends and the headless harness. |
 
-The main coupling is in `src/gui/main.cpp`: about 1,360 lines originally combined
-widget creation, fixed coordinates, settings, input buffers, async preparation,
-reception updates, platform services, and several hundred lines of smoke tests.
-`settings()` and `message()` read widgets directly. `update_controls()` combines
-application eligibility with toolkit calls. Merely wrapping widget construction
-would leave application state dependent on FLTK.
+`backend_fltk.cpp` and `backend_rev.cpp` iterate the same control/page definitions
+and apply the same controller state and computed rectangles. Their document
+renderers consume `ui::DocumentNode` without knowing what an inspection model is.
+Adapters call `Application` through fields, commands, service messages and
+presentation snapshots; no public controller or bitmap-producer access is
+available.
+`Application::control()` resolves labels and availability for every control kind;
+`Application::menu()` filters hidden entries and preserves their declaration IDs.
+Menu selection, action activation and presets return through shared dispatch,
+which rechecks eligibility and applies the control's edit constraints.
+Choice/list selection, toggles and gestures also return with their declaration;
+the facade rechecks visibility and availability at dispatch time. Gesture commands
+must occur in that declaration. Native state from an earlier frame cannot bypass
+these checks.
+Adapters own native widget construction, text measurement, focus/caret behavior,
+scroll containers, menu escaping, event translation and platform services.
+Bitmap widgets receive opaque snapshots; they do not interpret measurements.
 
-## Small, independently compiled modules
+Full-window views use `OverlayDefinition.controls`, the same `Control` vocabulary
+and native factories as the desktop. Edit the QR view in `screen_overlay.hpp`:
+add a choice, editor, action, list, label or bitmap; set its placement and ordinary
+bindings; and change `OverlayPolicy` for dismissal keys, keyboard routing,
+background access or service priority. These changes require no backend edits.
+The default QR view still contains just the QR bitmap and its error caption.
+Its Escape binding and keyboard policy are shared data.
 
-Proposed ownership:
+`Application::show_overlay()` owns an immutable definition and stamps every
+control with a new surface generation. Native callbacks retain that definition;
+the facade rejects input from a closed or replaced generation, including after
+the same view is reopened. Native page and document actions use `navigate()` and
+`dispatch()` so covered desktop content cannot bypass the same input policy.
+`activate()` and `select_page()` remain programmatic shared-workflow entry points.
+Native services report their active state; overlay policy can defer queued
+services, while an already active service retains priority.
 
-| Module | Responsibility |
-| --- | --- |
-| `ui_contract.hpp` | Small IDs, control records, typed values/events, pixel blocks. No toolkit, crypto, or modem headers. |
-| `screen_console.cpp`, `screen_inspection.cpp` | Ordered declarations and bindings; inherit the shared style. |
-| `controller.hpp/.cpp` | Authoritative values, commands, validation, selection policies, availability, and notices. |
-| `preparation.cpp` | Existing debounce, workers, cancellation, and revisioned results. |
-| `plot_render.cpp` | Shared monochrome raster generation and optional private point/segment helpers. |
-| `backend_fltk.cpp` | Existing native widgets, event translation, presentation, and bitmap transfer. |
-| `gui_options.cpp` | Launch settings using shared parsers and validation. |
-| `gui_smoke.cpp` | Existing workflow checks separated from production control flow. |
+Native overlay code handles widget ownership, popup lifetimes, painting and
+focus mechanics. Both adapters consume `overlay_layers()` and `overlay_key()`;
+neither defines its own Escape command or assumes that an expanded view is only
+a bitmap. `tests/overlay_fixture.hpp` supplies an identical bitmap, brightness
+choice, editor, action and grouped menu to both native suites, including a
+replacement that changes layout and key/service policy. `gui_overlay` verifies
+the shared contract and stale-callback rejection without a toolkit.
 
-Use plain compiled records and a few functions; avoid a deeply templated builder,
-runtime markup interpreter, arbitrary property map, or dynamically loaded plugin
-ABI. Put sizeable drawing implementations in `.cpp` files rather than headers.
-This makes screen edits local, limits recompilation, and lets AI read the small
-contract plus one screen and its relevant action instead of the whole GUI.
+Both toolkits retain native text and controls. A signal row is not rasterized
+into a bitmap or flattened into one string. Stable record IDs preserve selection
+and widget identity when old signals are removed or records are reordered.
+Incoming records follow the newest row while the reader is already at the tail;
+reviewing history keeps the reader's scroll position. Both adapters use shared
+record scroll policy with native viewport and scroll measurements. Signal
+frequency, status, preamble/data measurements, message text, completion tone,
+help, empty state and copy actions are shared presentation policy.
+One shared record extent calculation reserves fixed cells and expands flexible
+cells to fit native glyph measurements. Both adapters expose the resulting width
+through the list's horizontal scroll container.
 
-One event sink and one source of authoritative state are sufficient. Creation is
-retained; updates change existing controls without resetting focus, selection,
-editor scroll, or cursor. An adapter owns its widget mapping and suppresses
-callbacks during programmatic updates. Display changes must never restart the
-receiver. All workflow validation stays in the controller.
+## Adding functionality once
 
-Use the existing toolkit to implement Choice, Text, Tabs, and other semantic
-controls. Compose existing facilities inside an adapter when an exact widget is
-missing. Only a primitive-only target that cannot use a suitable library needs a
-private miniature widget implementation. The common screen has no hit testing,
-popup drawing, text caret handling, or backend branches.
+1. Add the application's field/command binding and its state/action mapping in
+   `ui_contract.hpp` and `controller.cpp` when needed.
+2. Add or edit the control declaration in `screen_console.cpp`. Put its label,
+   help, submission, activation and optional native gestures there. Use a shared
+   desktop slot, or the generic ordered-row layout for a new arrangement.
+3. For richer content, add record cells in `record_presentations.hpp` or generic
+   document nodes in `inspection_page.hpp`. Put new image production and captions
+   in shared bitmap code.
+4. Test the shared behavior and run the same workflow in both backend builds.
 
-## Behavior that must survive extraction
+These edits require no adapter changes when they use existing primitives. A new
+primitive requires generic support in each adapter once. Ordinary combinations
+of existing metadata, including multiline presets, gestures on any control,
+enabled choices with effective labels and padded bitmap documents, are covered
+by common conformance fixtures. Toolkit bugs, platform
+services and native rendering differences likewise remain adapter work.
 
-- Preserve inactive message/binary editors. Only the selected source is parsed
-  or transmitted; exact bits and leading zeros are meaningful.
-- Keep editable draft field text separate from the last valid modem settings.
-  Invalid edits stay visible with feedback and disable relevant actions without
-  resetting the running receiver or silently restoring old text.
-- Keep raw completed bits distinct from verified packets and their copy/save
-  eligibility. Monochrome appearance retains explicit status labels.
-- Move FLTK ampersand/menu escaping out of `key_choice_labels()` in shared state
-  and into the adapter. Keys and list items need stable identity independent of
-  labels and menu indices.
-- Make key/file defaults explicit controller policy. Today key loading selects
-  the first entry; file refresh preserves selection or selects the newest item.
-- Replace the current key-load-failure acknowledgement by reselecting an unchanged
-  menu item with a named action. This avoids forcing every widget implementation
-  to detect gestures that its normal change event does not report.
-- Preserve the current 120 ms estimate debounce and rejection of stale results.
-  Layout, tab changes, or applying state must not emit settings changes.
-- Request file selection, prompts, clipboard, and folder opening through small
-  platform services. Use request IDs and later result events rather than requiring
-  nested event loops. An SSH path belongs to the modem host.
-- Retain the payload behind a pending Save request even if reception evicts it
-  from the inbox. The current save path copies it before entering a modal chooser;
-  a future immutable handle can retain that protection with fewer copies.
+A `Control` stores behavior as named commands and ordinary metadata. Adapters
+never switch on a particular application field, command, bitmap or page. A
+Choice's optional `display_text` reports an effective value without changing its
+saved selected ID, for example FEC being off for explicit raw-bit input. Key labels
+are literal UTF-8; FLTK-specific escaping stays in its menu adapter.
+`control_binding.hpp` groups a menu only with declarations in the same scope and
+with the same `instance`: ordinary menus belong to a page, while persistent
+menus share one scope regardless of their declarations' page values. Layout uses
+the same grouping, so additional menu entries do not allocate another widget or
+consume row space. Reusing a menu ID on another page or instance needs no adapter
+special case.
+Ordinary controls already in the declaration span use their actual declaration
+identity for layout, so unbound labels and repeated bindings retain separate row
+positions. A copied declaration uses its binding, instance and complete menu/
+persistent/page scope. Give copied repeated bindings distinct instances.
 
-## Plot and inspection migration
+Native control geometry is refreshed from `ControlLayout` as a complete value.
+Label appearance/disappearance, row movement, footer allocation and bitmap
+caption mode changes reach retained controls in both adapters. Native layout
+invalidation does not enumerate a separate subset of shared geometry rules.
+`BindingState` also owns the options actually shown by a native popup. A toolkit
+may defer replacing them while its nested menu loop is running; callback indices
+still resolve against those displayed IDs. Both adapters consume one resolved
+binding presentation for visibility, optional areas and effective option state.
+Tab positions also come from shared declaration-order geometry.
+Document content widths share their margins and minimum; adapters supply only
+space consumed by a native scrollbar. Both windows use the shared initial and
+minimum dimensions without a separate application maximum in one backend.
 
-The bitmap contract describes pixels, not UI widgets. The current `LivePlot`,
-`Waterfall`, and `PatternSpaceView` still handle mouse gestures. Pattern-space
-pagination even changes during painting and draws its own navigation buttons.
-Expose zoom/reset/clear/pagination as ordinary controls and make rendering a pure
-operation over a stable snapshot before using tiled repaint.
+Native appearance values live in `theme::WidgetRole`; changing border, hover,
+focus, disabled, selection or dialog roles updates both adapters' mappings.
+`chrome_layout.hpp` supplies application-owned prompt content, button wording,
+dialog rectangles and popup/tooltip preferences. Native glyph measurement and
+host screen fitting remain toolkit work. FLTK's native file chooser owns its
+browse controls; the adapter supplies the shared request and action labels.
 
-Inspection already supplies structured content. Present its prose and tables
-through ordinary labels/lists, and rasterize only actual plots. Rasterizing the
-entire inspection page would unnecessarily duplicate text rendering and make
-terminal adaptation harder.
+Both record widgets use `RecordReconciliation` to decide which IDs are retained,
+inserted, removed, changed or reordered. Both document renderers use
+`DocumentPresentation` for rendered structure, inherited availability, action
+association and placement. FLTK can retain native widgets while Rev rebuilds a
+changed immutable document; neither independently derives document structure or
+geometry. Native ownership, focus calls and measurements remain adapter code.
 
-Point and straight-segment helpers can produce the early-computing appearance
-inside `plot_render.cpp`; the backend still receives only pixel rectangles.
-Waterfalls remain rows of intensity samples. All adapters use the same measured
-scales and sign conventions. Terminal output maps plot samples into cells with
-explicitly reduced fidelity, while controls remain native terminal text.
+The application polls reception and captures plot history at 25 Hz while native
+state/plot presentation runs at 10 Hz. Native input can repaint immediately.
+Pointer double-click timing, wheel command repetition and record keyboard
+selection/activation use shared policy. Adapters translate keys and pointer
+coordinates, then focus the returned native row and apply the shared reveal
+position. Text tones for records, captions and documents, along with document
+fills, resolve to RGB in `presentation_palette.hpp`; native code only converts
+those values for drawing.
+Both use immutable document and bitmap identities so unchanged polling does not
+rebuild text trees or upload textures. Moving between pages and resizing cannot
+restart reception. File/prompt/clipboard services use request IDs and deferred
+results; a pending Save retains its bytes independently of inbox changes.
+`service_queue.hpp` serializes service requests and matches completion IDs for
+both backends. The request also owns its input byte limit. Prompt editors use
+shared atomic text validation and every successful input completion is validated
+again by the queue, including native file chooser replies. Prompts remain
+single-line; OS paths may contain line breaks. Changing these constraints is
+shared contract work. Closing the application cancels active and queued requests;
+adapters close native dialogs and cannot start another queued service.
 
-The grayscale basis uses shared intensity roles, monospaced fonts, flat
-borders, stationary short signal rows, small white constellation marks, and a reusable
-one-byte-per-pixel waterfall buffer. Signed pattern cells use a bipolar grayscale
-and revised legends so removing hue does not remove sign. The Normal QR setting
-retains its original contrast.
-Native widgets continue to handle input and editing.
+## Verification and maintenance guardrails
 
-Color is enabled by default when supported. `--monochrome` selects grayscale;
-`--color` re-enables color, and the last of these switches wins. Color gives data
-field values, waveform traces, and every constellation point the same fixed muted
-cyan tint, and softens neutral text through the adapter's text role. The original
-grayscale roles and scalar intensities remain unchanged. Reference marks, status,
-and signed pattern diagrams remain grayscale. The waterfall uses a
-fixed muted multihue lookup table over the same Gray8 intensities: black, dark blue,
-blue, cyan, green, yellow, orange, red, then soft off-white. FLTK converts requested
-image rows through a callback, retaining the Gray8 buffer without a second full
-RGB framebuffer.
+`gui_adapter_boundary` recursively checks native entry points and their local
+header dependencies against the public contract/native helper boundary. It
+rejects domain headers, application-ID decisions in native adapters, toolkit
+headers in the public contract, native calls from shared feature code, and
+obsolete parallel GUI sources. Native RGB literals are rejected so palette
+values must come from shared roles. Generic public helpers are checked for hidden
+application-ID decisions too. Its regression suite introduces domain includes,
+field/command/menu references, aliases and `using enum` imports, whitespace-split
+references, and toolkit dependencies in public or shared feature code; each
+forbidden dependency must be rejected. Legal sentinel aliases remain accepted.
+The check runs before building `datapump_gui_application`, including builds with
+`BUILD_TESTING=OFF`. It discovers nested sources and alternate C++ extensions,
+normalizes comments and continued lines, resolves aliases across helper headers,
+and rejects nonliteral dependencies and backend conditionals in shared features.
+Public headers accept only approved GUI headers and standard-library includes.
+This is a source architecture lint, not a general C++ parser or security boundary.
+The application library links the modem implementation privately; adapters no
+longer inherit its include directories. `gui_link_boundary` compiles the public
+contract using that actual link dependency and rejects exposed modem headers.
+`gui_contract` separately compiles the public interface
+without modem or toolkit include/link dependencies and checks that controller,
+producer and model access are unavailable, along with shared tone/fill values.
 
-The QR preview has a separate brightness selection: Normal, Dim, Dark, or Off.
-Dark is selected on every startup. Dim and Dark use backgrounds of RGB (64, 0, 0)
-and (32, 0, 0) when color is enabled, or grayscale levels 64 and 32 otherwise.
-Off paints the preview black. The choice persists across text edits without
-changing the encoded matrix, module geometry, or other widgets. Normal restores
-the original white background and gray border; dim previews omit the border to
-avoid a bright frame.
+`tests/gui_extension_fixture.hpp` and `tests/document_geometry_fixture.hpp` supply
+ordinary extensions unchanged to both native suites. They exercise added
+controls/actions, multiline presets with byte limits, filtered menus with
+separate page/instance scopes, effective choice labels, generic gestures,
+record cells, relative document widths/margins, wrapped actions and opaque bitmap
+rectangles with padded strides and multiple formats. `gui_document_layout` and
+`gui_interactions` test geometry and event policy without a toolkit, including
+record arrow navigation, disabled rows, Space/Enter, double-click identity and
+activation-on-selection, along with record tail following, history retention and
+selection visibility. `gui_application` covers control/menu presentation,
+dispatch, stale submission callbacks, preset validation and persistent menu
+grouping. Native tests verify that those descriptions reach real widgets,
+refresh existing control labels and dispatch callbacks.
+Additional cases cover stale choice/toggle/gesture callbacks, shared UTF-8 edit
+proposals, record widths, zero/large stretch weights, exhausted control space,
+and document action focus and availability after tree changes.
+`gui_services` tests service ordering, completion identity, declared limits,
+UTF-8 validation and shutdown cancellation without a toolkit. Both native suites
+also exercise the same limited prompt edits and shared layout lifecycle fixture.
+`gui_bindings`, `gui_record_reconciliation`, `gui_document_presentation` and
+`gui_chrome` cover retained option identity during deferred native updates,
+complete cache invalidation, stable record changes, rendered document traversal,
+and shared service/control geometry and tooltip timing. Native probes check
+the resulting popup widths, dialog rectangles, checkboxes and resolved colors,
+including selection, hover and inherited disabled states.
+Rev also checks rendered pixels when leaving deeply nested clips, so later
+document siblings and persistent controls remain visible while overflow stays
+clipped.
+Rev's native probes are compiled only into `test_rev_adapter`; production GUI
+sources no longer include domain-bearing test fixtures. Both native conformance
+executables run their widget probes separately from `gui_workflow`, which runs
+the complete shared smoke through the production executable. This keeps the
+workflow's initial state and clock independent of native probe duration, and
+avoids maintaining a second workflow lifecycle in an adapter's test code.
 
-Color rendering and the QR brightness choice use existing control kinds. The
-proposed bitmap contract retains mandatory Gray8/Mono1 and adds only optional
-packed RGB24. Its target capability defaults to false; shared producers emit
-RGB24 only when color is enabled and supported. Other targets keep the original
-gray/mono representation instead of desaturating false color. Use bounded rows
-or tiles for RGB's extra transfer bytes; no palette management API is needed.
+The CI GUI-contract matrix builds **both FLTK and Rev** and runs the same shared
+suite and simulation workflow, plus their native conformance tests on a private
+display. Register display-dependent tests explicitly with
+`-DDATAPUMP_TEST_NATIVE_GUI=ON`, then run:
 
-Long signal rows retain their existing scrolling so pending/unverified content
-remains readable. Verified text and completed bits can still be copied in full.
-A semantic detail view or scrollable text control should replace this overflow
-presentation during extraction; the current signal widget has no detail view.
+```sh
+LIBGL_ALWAYS_SOFTWARE=1 LP_NUM_THREADS=2 xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' \
+  ctest --test-dir build-gui --output-on-failure -L gui
+```
 
-## Responsiveness and memory
+The option defaults to OFF so ordinary CTest and CLI-only builds remain usable
+without a display. Native tests include clipboard, editor focus/selection,
+record history, document resizing and Rev coordinates at 1x and 2x. Windows
+runtime testing remains a separate platform requirement; Linux success does
+not establish Windows validation.
+Successful smoke runs remove their automatically created temporary fixtures;
+failed-run evidence and explicitly selected `--smoke-dir` output are retained.
 
-`Session::snapshot()` currently drains reception events and copies current plot
-vectors under its mutex. The GUI polls every 40 ms. Throttling the entire poll
-because plots are hidden or slow would also delay received content. Keep event
-consumption independent of drawing cadence; eventually expose sequence-aware or
-immutable plot snapshots to avoid redundant copies.
-
-Each of the two LivePlot objects currently copies both waveform and constellation
-arrays although it needs only one. Share retained data, defer hidden rasterization,
-and reuse buffers. Preserve min/max envelopes and bounded reconstruction instead
-of dropping arbitrary samples. A changed shared waterfall scale must recolor its
-history consistently.
-
-The spectrum history currently holds up to 256 by 160 doubles, about 320 KiB
-before container overhead. Tile output alone does not make that an MCU-sized
-model. History dimensions, content limits, and plot cadence need explicit profile
-budgets. Waterfall scrolling can also change most display cells despite only one
-new input row, so bound terminal output and coalesce obsolete plot frames while
-preserving application events.
-
-An MCU graphics backend does not port the modem engine: C++20 threads, OpenSSL,
-the default 64 MiB DSP budget, and 128 MiB production key generation remain
-separate constraints. A display client for a modem host is a distinct future
-transport project, not part of this UI refactoring.
-
-## Backend choice and build cost
-
-Keep `DATAPUMP_GUI_BACKEND=fltk` as the default for current Linux/Windows desktop
-packages. The toolkit is vendored, compiled without GL/Cairo/Pango/Wayland, and
-already exercised by native and relocation tests. This Linux profile requires
-X11 or XWayland; it is not a bare-framebuffer or Wayland-only solution.
-[FLTK's platform documentation](https://www.fltk.org/doc-1.4/intro.html) supports
-the broader portability rationale; the particular configuration is this project's.
-
-`cmake/NativeGui.cmake` configures only the selected adapter. `GuiFltk.cmake` owns
-FLTK source/link settings and its license. Empty, multiple, and unimplemented
-backend selections fail configuration. `DATAPUMP_BUILD_GUI=OFF` removes GUI
-dependencies while retaining backend-independent model tests. `--help` and
-`--version` report the compiled backend; no runtime registry is needed.
-
-The most informative second adapter is ncurses, built in a separate directory:
-it tests widget semantics and keyboard operation under SSH without relying on
-pixel equality. Its [menus](https://invisible-island.net/ncurses/man/menu.3x.html)
-and [forms](https://invisible-island.net/ncurses/man/form.3x.html) supply existing
-selection/editing behavior. Future framebuffer/MCU profiles can use LVGL; SDL
-must be paired with an existing widget library. HTML uses DOM controls, with a
-separate choice of hosting and communication mechanism.
-
-A future wxWidgets build may need its own packaging dependency policy:
-`tools/verify-linux-abi.cmake` currently rejects GTK/GLib for the FLTK package.
-Do not weaken that existing check for an adapter that is not being compiled.
-
-[Rev is another desktop candidate](gui-rev-assessment.md), reviewed at a pinned
-upstream commit. Its retained controls and styling fit much of the proposed
-contract, but its graphics-context requirements, build/resource integration,
-multiline UTF-8 editing, and dependency provenance need resolution. It also needs
-the controller and bitmap extraction described here. It is not an implemented
-backend or a replacement for the proposed ncurses SSH profile.
-
-## Implementation sequence and acceptance
-
-1. Implement one-backend configuration and shared presentation roles with optional
-   color (done).
-2. Extract authoritative state, workers, and platform requests while preserving
-   the existing FLTK workflows and tests.
-3. Replace procedural construction/layout with small screen declarations and
-   native-widget mappings; separate smoke orchestration from production code.
-4. Convert interactive plot controls to semantic controls, then extract pure
-   pixel producers with equivalent complete-image and tiled output.
-5. Implement ncurses in a separate build and refine the small contract only
-   where real adapter differences require it. Freeze the contract after this.
-
-Keep current model, policy, waveform, acquisition, replay, and exact-bit tests.
-Add focused checks for silent updates, stable item identity, explicit selection
-defaults, stale async results, retained save payloads, and pure pixel replay as
-those seams are extracted. Preserve Linux virtual-display smoke workflows,
-Windows GUI/relocation checks, and packaged self-check. Reuse the core library
-and compile only the selected adapter; verify ordinary screen edits do not
-recompile DSP/crypto or require reading adapter internals.
+See [GUI contract](gui-contract.md) for the vocabulary and
+[Rev backend](rev-backend.md) for its pinned source, toolchain and software-GL
+requirements. FLTK remains the default and uses software drawing without an
+application OpenGL context. Each build selects exactly one adapter.
