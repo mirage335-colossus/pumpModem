@@ -27,17 +27,49 @@ their requested rates. All four combinations completed with no samples read or
 written. This verifies shared opening/negotiation, not a physical modem link or
 sustained multi-instance audio quality.
 
+The same no-sample probe also passes with the existing SDK ALSA runtime copy
+preloaded (`4fe489187fce3c4f5e80f1afc734704db6670b2d9793790fe80f6be5312b3ea7`).
+Its initial default-route configuration errors remain in the retained log;
+the shared fallback negotiates both pairs at every tested rate. This checks
+that library against this host's plugins, not an entire published bundle.
+
+An additional two-second streaming probe ran two input/output pairs concurrently
+at 8 and 48 kHz. Each stream processed exactly 16,000 or 96,000 samples, in
+2.04–2.21 seconds, without an audio API error. Playback contained only zeros;
+captured samples were discarded, retaining only counts/timing. This is brief
+host integration evidence, not long-duration or physical modem qualification.
+
 The application builds, the shared GUI group passes 37/37 (112.78 seconds), and
 ALSA, WinMM, audio-rate and resampling contracts pass 4/4 (20.86 seconds). The
 ALSA fixture covers failed-open and failed-format fallback, route priority and
 direction, explicit/exclusive isolation, cancellation and cleanup, concurrent
 shared streams, and unchanged unity PCM. The focused FLTK adapter check passes
-with the new default/minimum-size Legacy assertions. The first CTest attempt
-had native registration disabled by the shared-GUI profile and ran no tests;
+with the new default/minimum-size Legacy assertions, as does the matching Rev
+adapter check. The first CTest attempt had native registration disabled by the
+shared-GUI profile and ran no tests;
 the built adapter binary was then run directly on a private Xvfb display.
-Full native CI and the matching Rev adapter check remain in progress. Retained
-local evidence lives in `build/default-audio-validation/`. This is a source fix,
-not a published or certified replacement for earlier portable binaries.
+The ALSA contract also passes with ASan/UBSan and leak detection enabled (3.14
+seconds). Its first sandboxed attempt stopped at LeakSanitizer's ptrace
+restriction; the unchanged test passed outside that environment.
+
+The [automatic main checks](https://github.com/mirage335-colossus/pumpModem/actions/runs/35949268880)
+pass on `c632a08c56adbd633ccf63581b48ff094a631341` (offline build helpers and
+Linux/Windows Legacy). The [full native run](https://github.com/mirage335-colossus/pumpModem/actions/runs/35949269251)
+also passes, including both complete GUI jobs (FLTK 40/40 plus 18 build helpers; Rev 43/43)
+and Linux Release (126/126 regressions in 935.07 seconds, native desktop, CLI,
+relocation and both portable archives). Windows also passes 122/122 regressions
+in 1780.50 seconds, native GUI/relocation and both archives. Instrumented Debug
+passes 121/121 selected regressions in 2420.52 seconds, its complete native
+desktop workflow and 29/29 CLI checks. Its smoke artifact explicitly records
+`passed`; no incomplete-budget exception was used on this run. The existing
+Debug-only omissions of `fast_session` and `gui_fast_live` remain omitted
+instrumented coverage; both pass in Release. Both archive formats also pass
+copied-binary compatibility, isolated runtime-path and native workflow checks
+on Ubuntu 22.04 and 24.04. Retained local evidence lives in
+`build/default-audio-validation/`. No SDK recipe, toolchain or package collector
+changed; previous SDK qualification remains evidence for those unchanged paths.
+This is a source fix, not a published or certified replacement for earlier
+portable binaries.
 
 ## Instrumented GUI workload budget — 23 September 2026
 
