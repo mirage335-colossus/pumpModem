@@ -84,28 +84,6 @@ void snr_planning() {
     rejects([]{tuning::resolve(30000001,6,tuning::PatternMode::auto_pattern,false);},"unsupported modem bandwidth");
     rejects([]{tuning::resolve(1200,std::numeric_limits<double>::quiet_NaN(),tuning::PatternMode::auto_pattern,false);},"invalid target SNR");
 }
-void shannon_capacity() {
-    // Fixed reference values use C/N0 targets, not in-band dB. At 1 kHz,
-    // 30 dB-Hz means equal signal and in-band noise powers: exactly 1 bit/s/Hz.
-    near(tuning::shannon_capacity_bps(1,0),1,"one-hertz zero-dB capacity");
-    near(tuning::shannon_capacity_bps(1000,30),1000,"C/N0 must be converted to in-band SNR");
-    near(tuning::shannon_capacity_bps(1000,40),3459.4316186372973,"ten-dB in-band capacity");
-    near(tuning::shannon_capacity_bps(1000,20),137.5035237499349,"negative in-band dB capacity");
-    near(tuning::shannon_capacity_bps(1000,60),9967.226258835993,"strong-signal capacity");
-    near(tuning::shannon_capacity_bps(10000,60),66582.11482751794,"bandwidth changes noise power at fixed C/N0");
-    // Relative comparison prevents the ordinary absolute tolerance from
-    // accepting zero at targets where adding linear SNR to one rounds to one.
-    near(tuning::shannon_capacity_bps(30000000,-200)/1.4426950408889634e-20,1,
-         "weak-signal capacity must retain precision");
-    near(tuning::shannon_capacity_bps(1000,4000)/1318805.4536702829,1,
-         "strong finite targets must not overflow while converting dB");
-    for(const auto bandwidth:{0.,.5,30000001.,std::numeric_limits<double>::quiet_NaN(),
-                              std::numeric_limits<double>::infinity()})
-        rejects([&]{tuning::shannon_capacity_bps(bandwidth,60);},"invalid capacity bandwidth accepted");
-    for(const auto target:{std::numeric_limits<double>::quiet_NaN(),
-                           std::numeric_limits<double>::infinity(),-std::numeric_limits<double>::infinity()})
-        rejects([&]{tuning::shannon_capacity_bps(1000,target);},"nonfinite capacity target accepted");
-}
 void bandwidth_derived_clocks() {
     for(const double bandwidth:{1.,16.,100.,100.25,1200.,1499.,1499.25,1500.,1501.,1703.,1800.,2000.,2000.25,2400.,24000.,192000.,1000000.,30000000.}) {
         const auto plan=tuning::resolve(bandwidth,150,tuning::PatternMode::auto_pattern,false);
@@ -277,7 +255,7 @@ void receive_target_lists() {
           "receive list parsing must trim, deduplicate and canonicalize without changing order");
     for(const auto* input:{"", "40,", ",40", "40,,6", "40, nonsense", "nan", "inf", "1e999", "201", "-201", "40 dB", "0x40", "+-6"}) {
         const auto rejected=tuning::parse_receive_targets(input);
-        check(rejected.reset && rejected.values==std::vector<double>{32} && rejected.canonical=="32",
+        check(rejected.reset && rejected.values==std::vector<double>{40} && rejected.canonical=="40",
               "one invalid target must reset the entire receive list");
     }
     check(tuning::parse_receive_targets(std::string(513,' ')).reset,"receive target text exceeds its bounded parser");
@@ -350,11 +328,11 @@ void receive_target_lists() {
     check(!forced.target_supported && forced.config.spreading_factor==8 && forced.config.pattern_symbols,
           "forced short patterns must remain available with unsupported standalone confidence");
     const transfer::Options defaults;
-    check(defaults.receive_targets_db_hz==std::vector<double>{32} && !defaults.automatic_receive_profiles,
+    check(defaults.receive_targets_db_hz==std::vector<double>{40} && !defaults.automatic_receive_profiles,
           "manual API configurations must preserve their explicit profile by default");
 }
 }
 int main() {
-    try {modes_and_patterns();snr_planning();shannon_capacity();receive_target_lists();automatic_pattern_rates();bandwidth_derived_clocks();explicit_carrier_planning();audio_passband_pattern_roundtrips();physical_simulation_presets();sizing_and_validation();std::cout<<"tuning tests passed\n";return 0;}
+    try {modes_and_patterns();snr_planning();receive_target_lists();automatic_pattern_rates();bandwidth_derived_clocks();explicit_carrier_planning();audio_passband_pattern_roundtrips();physical_simulation_presets();sizing_and_validation();std::cout<<"tuning tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"tuning tests failed: "<<error.what()<<'\n';return 1;}
 }

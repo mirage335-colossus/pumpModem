@@ -1,9 +1,7 @@
 #include "../src/gui/gui_smoke.hpp"
 #include "../src/gui/bitmap_sources.hpp"
 #include "../src/gui/binary_editor.hpp"
-#include "../src/gui/transmit_scope.hpp"
 #include "datapump/compression.hpp"
-#include "datapump/runtime.hpp"
 #include <filesystem>
 #include <iostream>
 #include <set>
@@ -28,165 +26,12 @@ void prepare(Controller& controller) {
     }
     check(controller.estimate().has_value(),"Payload estimate was not prepared");
 }
-void noise_start_stop(Controller& controller) {
-    using F=ui::Field;using C=ui::Command;
-    const auto draft=controller.field(F::message).text,binary=controller.field(F::binary).text;
-    const auto short_bits=controller.field(F::short_bits).text,key=controller.field(F::key).selected;
-    const auto key_path=controller.field(F::key_path).text,message_label=controller.field(F::message_label).text;
-    const auto bytes=controller.message_bytes();const auto inspection=controller.inspection();
-    const auto revision=controller.revision();const auto cursor=controller.field(F::message).text_cursor_end_revision;
-    const auto signals=controller.field(F::signals).records,files=controller.field(F::files).records;
-    const auto inbox_size=controller.inbox().items().size();
-    const auto previous=controller.enabled(C::paste_previous),attachment=controller.enabled(C::use_text);
-    const auto settings=controller.settings();
-    check(controller.enabled(C::transmit_noise),"Valid noise transmission was coupled to a draft or key selection");
-    controller.activate(C::transmit_noise);
-    check(!controller.enabled(C::transmit_noise)&&!controller.enabled(C::transmit)&&
-          controller.enabled(C::cancel)&&controller.command_label(C::cancel)=="Stop noise",
-          "Queued noise did not immediately disable competing sends and expose Stop noise");
-    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
-    do { controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5)); }
-    while((!controller.snapshot().transmitting_noise||controller.snapshot().transmission_seconds<=0)&&
-          std::chrono::steady_clock::now()<deadline);
-    check(controller.snapshot().transmitting&&controller.snapshot().transmitting_noise&&
-          controller.snapshot().transmission_seconds>0&&controller.snapshot().transmission_fraction==0&&
-          controller.field(F::mode).text.find("noise / ")!=std::string::npos&&
-          controller.field(F::mode).text.find("elapsed")!=std::string::npos&&
-          controller.field(F::mode).text.find('%')==std::string::npos,
-          "Continuous noise did not show active elapsed progress without a finite percentage");
-    check(controller.field(F::transmit_scope_format).selected=="hex-auto-hide"&&
-          !controller.field(F::transmit_scope).visible&&!controller.field(F::transmit_scope_caption).visible,
-          "Automatic noise preview exposed an empty message capture instead of leaving room for live plots");
-    for(const auto* format:{"hex","bits"}) {
-        controller.select(F::transmit_scope_format,format);
-        check(controller.field(F::transmit_scope).visible&&controller.field(F::transmit_scope_caption).visible&&
-              controller.field(F::transmit_scope_caption).text.find("Tuning noise / ordinary encrypted modulation")!=std::string::npos&&
-              !controller.snapshot().transmit_trace.active&&
-              controller.field(F::transmit_scope).records==transmit_scope_records({},std::string_view(format)=="bits"),
-              "Manual noise preview claimed to wait for transmission or showed a retained message capture");
-    }
-    controller.select(F::transmit_scope_format,"hex-auto-hide");
-    check(!controller.field(F::transmit_scope).visible,
-          "Returning to automatic preview kept the unused noise capture open");
-    const auto transmission=controller.snapshot().transmission_id;
-    controller.activate(C::transmit_noise);controller.poll();
-    check(controller.snapshot().transmission_id==transmission,
-          "Repeated noise activation restarted the keystreams or replaced the transmission");
-    controller.activate(C::cancel);
-    const auto stop_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
-    do { controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5)); }
-    while((controller.snapshot().transmitting||!controller.snapshot().transmission_finished)&&
-          std::chrono::steady_clock::now()<stop_deadline);
-    check(controller.snapshot().transmission_finished&&!controller.snapshot().transmitting&&
-          !controller.snapshot().transmitting_noise&&!controller.snapshot().simulation_replay&&
-          controller.enabled(C::transmit_noise)&&!controller.enabled(C::cancel)&&
-          controller.command_label(C::cancel)=="Cancel TX",
-          "Stopping noise did not return to reception without a simulation replay");
-    check(controller.field(F::message).text==draft&&controller.field(F::binary).text==binary&&
-          controller.field(F::short_bits).text==short_bits&&controller.message_bytes()==bytes&&
-          controller.field(F::message_label).text==message_label&&controller.revision()==revision&&
-          controller.field(F::message).text_cursor_end_revision==cursor&&
-          (!inspection||controller.inspection()==inspection)&&
-          controller.enabled(C::paste_previous)==previous&&controller.enabled(C::use_text)==attachment,
-          "Noise changed the draft, attachment, previous-message state or prepared inspection");
-    check(controller.field(F::key).selected==key&&controller.field(F::key_path).text==key_path&&
-          controller.settings().transfer.key.has_value()==settings.transfer.key.has_value()&&
-          controller.settings().receive_keys.size()==settings.receive_keys.size()&&
-          controller.settings().transfer.modem.carrier_hz==settings.transfer.modem.carrier_hz&&
-          controller.settings().transfer.modem.spreading_mode==settings.transfer.modem.spreading_mode&&
-          controller.settings().mono==settings.mono,
-          "Temporary noise keys or waveform selection replaced saved modem settings");
-    for(const auto purpose:{StreamPurpose::Data,StreamPurpose::Dsss,StreamPurpose::Scrambler,StreamPurpose::Fhss}) {
-        if(settings.transfer.key)
-            check(controller.settings().transfer.key->stream(purpose,0,0,32)==settings.transfer.key->stream(purpose,0,0,32),
-                  "Noise replaced a selected message keystream");
-        for(std::size_t index=0;index<settings.receive_keys.size();++index)
-            check(controller.settings().receive_keys[index].stream(purpose,0,0,32)==settings.receive_keys[index].stream(purpose,0,0,32),
-                  "Noise replaced a configured receive key");
-    }
-    check(controller.field(F::signals).records==signals&&controller.field(F::files).records==files&&
-          controller.inbox().items().size()==inbox_size,
-          "Noise replaced received history or created an apparent local message");
-}
-void noise_transmission_controls() {
-    using F=ui::Field;using C=ui::Command;
-    Controller controller({true,true});
-    check(controller.field(F::message).text.empty()&&!controller.estimate()&&controller.enabled(C::transmit_noise),
-          "Empty unestimated composer disabled tuning noise");
-    controller.activate(C::transmit_noise);
-    check(controller.enabled(C::transmit_noise)&&!controller.enabled(C::cancel)&&
-          controller.command_label(C::cancel)=="Cancel TX",
-          "Rejected noise start left the controller busy");
-    controller.edit(F::bandwidth,"invalid");
-    check(!controller.enabled(C::transmit_noise),"Invalid modem settings allowed noise output");
-    controller.edit(F::bandwidth,"3.6 kHz");
-    controller.edit(F::binary,"invalid");
-    check(!controller.estimate()&&!controller.enabled(C::transmit)&&controller.enabled(C::transmit_noise),
-          "An invalid data draft disabled independent noise output");
-    controller.start();noise_start_stop(controller);
-    controller.edit(F::message,"Keep this draft");prepare(controller);noise_start_stop(controller);
-    struct TemporaryAttachment {
-        std::filesystem::path path=std::filesystem::temp_directory_path()/
-            ("datapump-noise-attachment-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-        ~TemporaryAttachment(){std::error_code ignored;std::filesystem::remove(path,ignored);}
-    } fixture;
-    write_new_file(fixture.path.string(),Bytes{'n','o','i','s','e'});
-    controller.activate(C::attach_file);auto requests=controller.take_services();
-    check(requests.size()==1,"Noise fixture did not request its attachment chooser");
-    controller.complete_service({requests.front().id,false,fixture.path.string(),{}});
-    prepare(controller);
-    check(controller.enabled(C::use_text)&&!controller.field(F::message).enabled,
-          "Noise fixture attachment did not load");
-    noise_start_stop(controller);controller.activate(C::use_text);
-    check(controller.field(F::message).text=="Keep this draft","Noise discarded the attachment's text draft");
-    controller.activate(C::open_keyfile);requests=controller.take_services();
-    check(requests.size()==1,"Noise fixture did not request its key chooser");
-    controller.complete_service({requests.front().id,false,fixture.path.string()+".missing-key",{}});
-    check(!controller.enabled(C::transmit_noise),"Noise began while a key load could reconfigure the session");
-    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
-    while(!controller.enabled(C::acknowledge_key_failure)&&std::chrono::steady_clock::now()<deadline) {
-        controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
-    }
-    check(controller.enabled(C::acknowledge_key_failure)&&!controller.enabled(C::transmit)&&
-          controller.enabled(C::transmit_noise),"Failed message keys disabled independent temporary noise keys");
-    noise_start_stop(controller);
-    check(controller.enabled(C::acknowledge_key_failure),"Noise silently acknowledged a keyfile failure");
-    controller.close();check(!controller.enabled(C::transmit_noise),"Closing left tuning noise available");
-}
-std::size_t check_pending_snapshot(Controller& controller) {
-    using F=ui::Field;using C=ui::Command;
-    // A poll can consume several updates for the same acquisition. Its newest
-    // accepted prefix must already be visible when that poll returns.
-    std::set<std::uint64_t> checked;
-    std::size_t pending_count=0;
-    const auto& updates=controller.snapshot().signals;
-    for(auto update=updates.rbegin();update!=updates.rend();++update) {
-        if(!checked.insert(update->id).second||update->complete||update->validated||update->text.empty())continue;
-        ++pending_count;
-        const auto& lines=controller.signals().lines();
-        const auto line=std::find_if(lines.begin(),lines.end(),[&](const auto& value){return value.id==update->id;});
-        const auto& rows=controller.field(F::signals).records;
-        const auto row=std::find_if(rows.begin(),rows.end(),[&](const auto& value){return value.id==std::to_string(update->id);});
-        check(line!=lines.end()&&row!=rows.end(),"An accepted incoming prefix was withheld from the GUI until completion");
-        check(update->binary&&line->binary&&!line->complete&&!line->validated&&
-              line->received_bits==update->received_bits&&line->expected_bits==update->expected_bits&&
-              line->text==update->text&&row->cells[4].text==update->text&&
-              row->cells[1].text=="binary pending"&&row->cells[4].tone==ui::TextTone::muted&&!row->activatable,
-              "The same controller poll must show the latest pending bits without byte batching or premature source/dictionary decoding");
-        controller.select(F::signals,row->id);
-        check(!controller.enabled(C::copy_signal)&&!controller.enabled(C::copy_raw_signal)&&
-              !controller.enabled(C::paste_signal)&&!controller.enabled(C::paste_raw_signal),
-              "Selecting visible pending bits must not enable completed-message actions");
-    }
-    return pending_count;
-}
 void rate_carrier_controls() {
     using F=ui::Field;using C=ui::Command;
     Controller controller({true,true});
     check(controller.field(F::bandwidth).text=="3.6 kHz" && controller.field(F::carrier).text=="1.5 kHz" &&
-          controller.settings().transfer.modem.bandwidth_hz==3600 && controller.settings().transfer.modem.carrier_hz==1500 &&
-          controller.field(F::snr).text=="32" && controller.settings().transfer.fec==FecMode::rs60,
-          "GUI defaults must use the 3.6 kHz rate, 1.5 kHz audio carrier, 32 dB-Hz target and 60% FEC");
+          controller.settings().transfer.modem.bandwidth_hz==3600 && controller.settings().transfer.modem.carrier_hz==1500,
+          "GUI defaults must use the 3.6 kHz rate and 1.5 kHz audio carrier");
     controller.edit(F::carrier,"1650 Hz");
     check(controller.settings().transfer.modem.carrier_hz==1650,
           "A custom audio carrier did not reach the modem configuration");
@@ -224,119 +69,6 @@ void rate_carrier_controls() {
     check(controller.settings().transfer.modem.carrier_hz==2700 &&
           controller.settings().transfer.modem.spreading_mode==modem::SpreadingMode::tone,
           "Raising the carrier did not recover the selected tone profile");
-}
-void shannon_capacity_display() {
-    using F=ui::Field;
-    Controller controller({true,true});
-    controller.start();
-    const auto expect_capacity=[&](std::string_view expected) {
-        controller.poll();
-        const auto& diagnostics=controller.field(F::diagnostics).text;
-        check(diagnostics.starts_with(format_bit_rate(modem::bit_rate(controller.settings().transfer.modem))+" | Shannon-Hartley limit "),
-              "The theoretical capacity must appear alongside the existing gross modem bitrate");
-        check(diagnostics.find(std::string("Shannon-Hartley limit ")+std::string(expected)+" |")!=std::string::npos,
-              "The Shannon-Hartley display does not match the accepted TX target and nominal bandwidth");
-    };
-    expect_capacity("1.89 kbit/s"); // Default: 3,600 Hz, 32 dB-Hz.
-    controller.edit(F::bandwidth,"1 kHz");controller.edit(F::snr,"30");
-    expect_capacity("1 kbit/s"); // C/N0 = 1,000 Hz, hence S/N = 1.
-    controller.edit(F::bandwidth,"2 kHz");
-    expect_capacity("1.17 kbit/s");
-    controller.edit(F::snr,"40");
-    expect_capacity("5.17 kbit/s");
-    controller.edit(F::receive_snr,"60,80");
-    controller.select(F::simulation,"3dBm -90dB");
-    expect_capacity("5.17 kbit/s");
-    controller.edit(F::snr,"unfinished");
-    expect_capacity("5.17 kbit/s"); // Invalid drafts preserve the active settings.
-    controller.edit(F::snr,"-60");
-    expect_capacity("1.44e-06 bit/s");
-    controller.close();
-}
-void profile_reference_display() {
-    using F=ui::Field;
-    Controller controller({true,true});
-    const auto active=[&]() -> std::string {
-        std::string label;unsigned count=0;
-        for(const auto& row:controller.field(F::profile_reference).records)
-            for(const auto& cell:row.cells)if(cell.bold) {label=cell.text;++count;}
-        check(count==1,"Profile reference must highlight exactly one configured duration");
-        return label;
-    };
-    controller.edit(F::snr,"30");
-    check(active().find("128complex")!=std::string::npos&&active().find("14.06bit/s")!=std::string::npos,
-          "Reference did not show the actual 128-chip profile near the 30 dB-Hz transition");
-    const auto before=controller.field(F::profile_reference).records;
-    controller.edit(F::snr,"26");
-    check(active().find("512complex")!=std::string::npos&&
-          controller.field(F::profile_reference).records!=before,
-          "Reference did not follow the active integration step");
-    controller.edit(F::bandwidth,"1.2 kHz");
-    check(active().find("128complex")!=std::string::npos,
-          "Reference retained stale boundaries after the rate changed");
-    controller.select(F::pattern,"pattern-8");
-    check(controller.field(F::profile_reference).records.size()==1&&active().find("8complex")!=std::string::npos,
-          "Forced profiles must show their actual length instead of automatic boundaries");
-    controller.edit(F::snr,"unfinished");
-    check(controller.field(F::profile_reference).records.empty(),"Invalid settings retained an apparently current profile reference");
-}
-void mono_controls() {
-    using F=ui::Field;using C=ui::Command;
-    Controller controller({true,true});
-    check(controller.field(F::mono).checked&&controller.field(F::mono).enabled&&controller.settings().mono,
-          "Mono audio routing must be enabled by default in the shared GUI and live settings");
-    controller.edit(F::binary,"001");prepare(controller);
-    const auto prepared_revision=controller.revision();
-    const auto prepared_inspection=controller.inspection();
-    controller.toggle(F::mono,false);
-    check(!controller.field(F::mono).checked&&!controller.settings().mono&&
-          controller.revision()==prepared_revision&&controller.inspection()==prepared_inspection&&
-          controller.estimate()&&controller.estimate()->wire_bits==3&&controller.enabled(C::transmit),
-          "Turning Mono off must configure stereo transmission without invalidating the prepared message");
-    const auto revision=controller.revision();
-    controller.toggle(F::mono,false);
-    check(controller.revision()==revision,"An unchanged Mono callback reconfigured the modem");
-    controller.edit(F::device,"test-device");controller.edit(F::snr,"40");
-    check(!controller.field(F::mono).checked&&!controller.settings().mono,
-          "Changing the device or modem settings discarded the audio routing choice");
-    controller.toggle(F::mono,true);
-    check(controller.field(F::mono).checked&&controller.settings().mono,
-          "Turning Mono back on did not restore single-channel transmission");
-    prepare(controller);controller.start();
-    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
-    while(controller.snapshot().samples_received<controller.settings().transfer.modem.sample_rate/5&&
-          std::chrono::steady_clock::now()<deadline) {
-        controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
-    }
-    check(controller.snapshot().samples_received>=controller.settings().transfer.modem.sample_rate/5,
-          "Continuous simulated reception did not advance its sample clock");
-    const auto live_revision=controller.revision();
-    const auto live_inspection=controller.inspection();
-    const auto estimated_airtime=controller.estimate()->total_seconds;
-    controller.plot_update();
-    for(const bool mono:{false,true}) {
-        const auto samples=controller.snapshot().samples_received;
-        const auto seconds=controller.snapshot().virtual_seconds;
-        controller.toggle(F::mono,mono);controller.poll();
-        check(controller.field(F::mono).checked==mono&&controller.settings().mono==mono&&
-              controller.snapshot().running&&controller.snapshot().samples_received>=samples&&
-              controller.snapshot().virtual_seconds>=seconds,
-              "Changing audio output routing reset or interrupted the running receiver clock");
-        check(controller.revision()==live_revision&&controller.inspection()==live_inspection&&
-              controller.estimate()&&controller.estimate()->wire_bits==3&&
-              controller.estimate()->total_seconds==estimated_airtime&&controller.enabled(C::transmit)&&
-              !controller.plot_update().clear_waterfall,
-              "Changing audio output routing invalidated the prepared message or cleared receiver plots");
-    }
-    controller.activate(C::transmit);
-    check(!controller.field(F::mono).enabled&&!controller.field(F::device).enabled,
-          "Audio routing remained editable while transmitting");
-    controller.toggle(F::mono,false);
-    check(controller.field(F::mono).checked&&controller.settings().mono,
-          "A disabled Mono callback changed the active transmission routing");
-    controller.close();controller.toggle(F::mono,false);
-    check(!controller.field(F::mono).enabled&&controller.field(F::mono).checked&&controller.settings().mono,
-          "A stale Mono callback changed a closing session");
 }
 void tone_mode_controls() {
     using F=ui::Field;
@@ -383,7 +115,6 @@ void tone_key_controls() {
     load();
     check(controller.settings().transfer.key && controller.settings().receive_keys.size()==1,
           "Production keyfile did not activate private transmission and reception");
-    controller.start();noise_start_stop(controller);
     for(const auto mode:tuning::pattern_modes()) {
         const std::string name(tuning::pattern_mode_name(mode));
         if(!tuning::tone_mode(mode))continue;
@@ -844,18 +575,15 @@ BitmapImage render(const plots::PlotSnapshot& source) {
 }
 void fixed_text_reception() {
     using F=ui::Field;using C=ui::Command;
-    const std::string expected="A fixed interval!";
+    const std::string expected="A fixed interval";
     Controller controller({true,true});controller.edit(F::message,expected);prepare(controller);
     check(controller.inspection()->stream_layout && controller.estimate()->coded_bytes==128,
-          "17-byte message uses the single fixed coded interval");
+          "16-byte message uses the single fixed coded interval");
     controller.start();controller.activate(C::transmit);
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(25);
-    std::size_t pending_count=0;
     while(controller.inbox().items().empty() && std::chrono::steady_clock::now()<deadline) {
-        controller.poll();pending_count+=check_pending_snapshot(controller);
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    check(pending_count>0,"Fixed interval reception must publish pending bits before source validation and completion");
     check(controller.inbox().items().size()==1 && controller.inbox().items().front().message.data==Bytes(expected.begin(),expected.end()),
           "fixed source reception preserves text");
     check(controller.inbox().file_items().empty(),"Ordinary source text became a received file");
@@ -869,52 +597,15 @@ void fixed_text_reception() {
     controller.complete_service({requests.front().id,false,{},{}});
     controller.activate(C::paste_signal);
     check(controller.message_bytes()==Bytes(expected.begin(),expected.end()),"paste uses source bytes rather than coded data");
-    prepare(controller);noise_start_stop(controller);
-    controller.activate(C::paste_previous);
-    check(controller.message_bytes()==Bytes(expected.begin(),expected.end()),"Noise replaced the previous transmitted message");
     controller.close();
 }
 
 void receive_pattern_text(Controller& controller,const std::string& expected) {
-    check(!controller.snapshot().transmit_trace.active,
-          "A prepared draft became an actual generation trace before transmission");
-    const auto expected_wire=controller.inspection()->binary?
-        parse_binary_bits(controller.field(ui::Field::binary).text):compression::encode_short_bits(controller.message_bytes());
     controller.start();controller.activate(ui::Command::transmit);
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(15);
     bool received=false;
-    bool generated_seen=false;
-    std::size_t pending_count=0;
     while(std::chrono::steady_clock::now()<deadline) {
         controller.poll();
-        const auto& trace=controller.snapshot().transmit_trace;
-        check(controller.field(ui::Field::transmit_scope).records==transmit_scope_records(trace),
-              "A progress poll deferred generation scope updates or substituted estimated bytes");
-        const bool active=controller.snapshot().transmitting||controller.snapshot().simulation_replay;
-        check(controller.field(ui::Field::transmit_scope).visible==active&&
-              controller.field(ui::Field::transmit_scope_caption).visible==active,
-              "Auto-hide scope did not follow transmission and replay on the same progress poll");
-        if(trace.active&&!trace.wire_bits.empty()) {
-            if(!generated_seen&&active) {
-                const auto transmission_id=controller.snapshot().transmission_id;
-                const auto captured=controller.field(ui::Field::transmit_scope).records;
-                controller.select(ui::Field::transmit_scope_format,"none");
-                check(!controller.field(ui::Field::transmit_scope).visible&&
-                      !controller.field(ui::Field::transmit_scope_caption).visible&&
-                      controller.field(ui::Field::transmit_scope_format).enabled,
-                      "None must hide an active preview while leaving the display choice available");
-                controller.select(ui::Field::transmit_scope_format,"hex-auto-hide");
-                check(controller.field(ui::Field::transmit_scope).visible&&
-                      controller.field(ui::Field::transmit_scope).records==captured&&
-                      controller.snapshot().transmission_id==transmission_id,
-                      "Changing preview visibility altered the active transmission or its captured data");
-            }
-            generated_seen=true;
-            check(trace.wire_bits.size()<=expected_wire.size()&&
-                  std::equal(trace.wire_bits.begin(),trace.wire_bits.end(),expected_wire.begin()),
-                  "Unencrypted short scope lost an exact leading-zero or partial-byte wire prefix");
-        }
-        pending_count+=check_pending_snapshot(controller);
         for(std::size_t i=0;i<controller.signals().lines().size();++i)
             received=received||controller.signals().copy_text(i)==expected;
         if(received && controller.snapshot().transmission_finished && !controller.snapshot().simulation_replay)break;
@@ -925,18 +616,13 @@ void receive_pattern_text(Controller& controller,const std::string& expected) {
         for(const auto& line:controller.signals().lines())detail+=" ["+signal_status_label(line)+": "+line.text+"]";
         throw Error(detail);
     }
-    check(pending_count>0,"Pattern text reception must expose pending bits before it becomes received text");
-    check(generated_seen,"Actual simulated generation never reached the Console scope");
-    check(!controller.field(ui::Field::transmit_scope).visible&&
-          !controller.field(ui::Field::transmit_scope_caption).visible,
-          "Auto-hide left the completed transmission preview visible");
 }
 void short_text_reception() {
     using F=ui::Field;
     Controller controller({true,true});controller.edit(F::message,"quick brown fox");prepare(controller);
     check(!controller.inspection()->stream_layout && !controller.inspection()->binary &&
           controller.estimate()->wire_bits==compression::encode_short_bits(Bytes{'q','u','i','c','k',' ','b','r','o','w','n',' ','f','o','x'}).size() && !controller.field(F::fec).enabled &&
-          controller.field(F::fec).selected=="rs60" && controller.field(F::fec).display_text=="Off (short dictionary)",
+          controller.field(F::fec).selected=="rs20" && controller.field(F::fec).display_text=="Off (short dictionary)",
           "15-byte text must use exact dictionary bits and retain the selected FEC for later longer messages");
     receive_pattern_text(controller,"quick brown fox");
     check(controller.inbox().items().empty() && controller.signals().lines().size()==1 &&
@@ -945,15 +631,11 @@ void short_text_reception() {
     const auto& received=controller.signals().lines().front();
     check(!received.raw_bits.empty() && signal_data_label(received)=="No checksum / FEC" &&
           !controller.signals().copy_id(0),"Dictionary decoding must retain exact bits without claiming validation");
-    controller.edit(F::message,"quick brown fox ");prepare(controller);
-    check(!controller.inspection()->stream_layout && controller.estimate()->wire_bits==98 &&
-          parse_binary_bits(controller.field(F::short_bits).text).size()==98 && !controller.field(F::fec).enabled,
-          "A 16-byte message must remain exactly 98 dictionary bits through both message and code previews");
-    controller.edit(F::message,"quick brown fox!!");prepare(controller);
+    controller.edit(F::message,"quick brown fox!");prepare(controller);
     check(controller.inspection()->stream_layout && controller.estimate()->wire_bits==1216 &&
-          controller.field(F::fec).enabled && controller.field(F::fec).selected=="rs60" &&
+          controller.field(F::fec).enabled && controller.field(F::fec).selected=="rs20" &&
           controller.field(F::fec).display_text.empty(),
-          "17-byte text must restore selected fixed interval coding");
+          "16-byte text must restore selected fixed interval coding");
     controller.close();
 }
 
@@ -966,19 +648,6 @@ void three_bit_text_reception() {
     check(controller.signals().lines().size()==1 && controller.signals().copy_raw_bits(0)=="001" &&
           !controller.signals().lines().front().validated && controller.inbox().items().empty(),
           "Three-bit dictionary text must retain raw transport independently of its decoded character");
-    check(controller.snapshot().transmit_trace.wire_bits==Bytes({0,0,1})&&
-          controller.field(F::transmit_scope).records==transmit_scope_records(controller.snapshot().transmit_trace),
-          "Completed three-bit generation did not retain the exact diagnostic capture");
-    const auto retained=controller.field(F::transmit_scope).records;
-    controller.edit(F::message,"A different draft");prepare(controller);
-    check(controller.field(F::transmit_scope).records==retained,
-          "Editing the next draft replaced the previous actual generation capture");
-    const auto transmission_id=controller.snapshot().transmission_id;
-    controller.select(F::transmit_scope_format,"bits");
-    check(controller.field(F::transmit_scope).records==transmit_scope_records(controller.snapshot().transmit_trace,true)&&
-          controller.field(F::transmit_scope).visible&&controller.field(F::transmit_scope_caption).visible&&
-          controller.snapshot().transmission_id==transmission_id,
-          "Bit-detail selection regenerated the transmission or lost its actual retained prefix");
     controller.close();
 }
 
@@ -996,38 +665,22 @@ void short_raw_editor() {
           controller.field(F::short_bits_detail).text.find("exactly as entered")!=std::string::npos,
           "Raw tab did not distinguish three transmitted bits from the decoded t byte");
     const auto& reference=controller.field(F::compression_codes).text;
-    check(reference.find("13 total")!=std::string::npos && reference.find("e 001")!=std::string::npos &&
+    check(reference.find("128-byte")!=std::string::npos && reference.find("e 001")!=std::string::npos &&
           reference.find("t 010")!=std::string::npos && reference.find("space 000")!=std::string::npos,
           "Compression reference must show the fixed dictionary and long source transport");
-    for(const auto& invalid:{std::string(transfer::short_message_bits+1,'0'),std::string("01x"),std::string{}}) {
+    for(const auto invalid:{"01010","01x",""}) {
         controller.edit(F::short_bits,invalid);controller.poll();
         check(controller.field(F::short_bits).text==invalid&&!controller.estimate()&&
               !controller.enabled(C::transmit_short_bits)&&!controller.enabled(C::transmit),
               "Invalid short raw input silently transmitted the previous draft");
     }
-    for(const auto raw:{"0","00","0010","1111","1011","01010","110000","1111101000001"}) {
+    for(const auto raw:{"0","00","0010","1111","1011"}) {
         controller.edit(F::short_bits,raw);prepare(controller);
-        check(parse_binary_bits(controller.field(F::binary).text)==parse_binary_bits(raw)&&controller.enabled(C::transmit_short_bits)&&
+        check(controller.field(F::binary).text==raw&&controller.enabled(C::transmit_short_bits)&&
               controller.inspection()->binary&&controller.estimate()->total_seconds==
                   transfer::estimate_binary(parse_binary_bits(raw),controller.settings().transfer).total_seconds,
-              "Exact raw input was padded, compressed, or rejected as an incomplete dictionary token");
+              "One- to four-bit raw input was padded, compressed, or rejected as an incomplete dictionary token");
     }
-    for(const auto& source:{std::string("s"),std::string("A"),std::string("quick brown"),std::string(transfer::short_message_bytes,'A')}) {
-        const Bytes bytes(source.begin(),source.end());const auto expected_bits=compression::encode_short_bits(bytes);
-        controller.edit(F::message,source);prepare(controller);
-        check(parse_binary_bits(controller.field(F::short_bits).text)==expected_bits && !controller.inspection()->binary &&
-              !controller.inspection()->stream_layout && controller.estimate()->wire_bits==expected_bits.size() &&
-              controller.field(F::short_bits_detail).text.find("Expected text: '"+source+"'")!=std::string::npos,
-              "Compression tab must expose the full short text code without changing Message transmission mode");
-        controller.edit(F::short_bits,controller.field(F::short_bits).text);prepare(controller);
-        check(controller.inspection()->binary && controller.message_bytes()==bytes &&
-              parse_binary_bits(controller.field(F::binary).text)==expected_bits && controller.estimate()->wire_bits==expected_bits.size(),
-              "Selecting displayed dictionary bits must preserve its text preview and exact raw transmission");
-    }
-    controller.edit(F::short_bits,std::string(3*(transfer::short_message_bytes+1),'0'));prepare(controller);
-    check(controller.inspection()->binary && controller.estimate()->wire_bits==3*(transfer::short_message_bytes+1) &&
-          controller.field(F::short_bits_detail).text.find("exceed")!=std::string::npos,
-          "Complete codes beyond the short text byte limit must remain usable raw bits with an honest preview");
     controller.edit(F::message,"t");prepare(controller);
     check(controller.field(F::short_bits).text=="010"&&!controller.inspection()->binary&&
           controller.field(F::binary).text=="01110100"&&controller.enabled(C::transmit_short_bits),
@@ -1056,15 +709,13 @@ void short_raw_editor() {
 }
 void short_raw_reception() {
     using F=ui::Field;using C=ui::Command;
-    for(const auto raw:{"010","01","0010","1111101110001110101101011011011111011010110001111001100101001110011011"}) {
+    for(const auto raw:{"010","1","0010"}) {
         Controller controller({true,true});controller.edit(F::short_bits,raw);prepare(controller);
         controller.start();controller.activate(C::transmit_short_bits);
         const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(15);
         std::optional<std::size_t> received;
-        std::size_t pending_count=0;
         while(std::chrono::steady_clock::now()<deadline) {
             controller.poll();
-            pending_count+=check_pending_snapshot(controller);
             for(std::size_t i=0;i<controller.signals().lines().size();++i)
                 if(controller.signals().copy_raw_bits(i)==raw)received=i;
             if(controller.snapshot().simulation_replay)
@@ -1072,24 +723,22 @@ void short_raw_reception() {
             if(received&&controller.snapshot().transmission_finished&&!controller.snapshot().simulation_replay)break;
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
-        check(pending_count>0,"Short raw reception must display incoming bits before physical completion");
         check(received.has_value(),"Simulated short raw pattern did not retain its exact received bits");
         controller.select(F::signals,std::to_string(controller.signals().lines()[*received].id));
         check(controller.enabled(C::copy_raw_signal)&&controller.enabled(C::paste_raw_signal)&&
-              controller.field(F::received_raw_bits).text.find(std::string(raw).substr(0,64))!=std::string::npos,
+              controller.field(F::received_raw_bits).text.find(raw)!=std::string::npos,
               "Completed raw reception did not enable inspection, copy and reuse");
         controller.activate(C::copy_raw_signal);const auto requests=controller.take_services();
         check(requests.size()==1&&requests.front().value==raw,"Copy raw bits copied decoded text or padded byte bits");
         controller.complete_service({requests.front().id,false,{},{}});
-        if(std::string_view(raw)=="010" || std::string_view(raw).size()==70) {
-            check(controller.signals().copy_text(*received)==(std::string_view(raw)=="010"?"t":"quick brown") && !controller.signals().copy_id(*received) &&
+        if(std::string_view(raw)=="010") {
+            check(controller.signals().copy_text(*received)=="t" && !controller.signals().copy_id(*received) &&
                   controller.signals().lines().size()==1 && controller.inbox().items().empty(),
                   "Complete dictionary token must replace its pending row with unvalidated text and retain exact bits");
         } else check(!controller.signals().copy_text(*received),"Incomplete dictionary token must remain raw bits");
         controller.activate(C::paste_raw_signal);prepare(controller);
-        check(controller.field(F::short_bits).text==raw&&parse_binary_bits(controller.field(F::binary).text)==parse_binary_bits(raw)&&
-              controller.inspection()->binary&&controller.enabled(C::transmit_short_bits)&&
-              controller.estimate()->wire_bits==std::string_view(raw).size(),
+        check(controller.field(F::short_bits).text==raw&&controller.field(F::binary).text==raw&&
+              controller.inspection()->binary&&controller.enabled(C::transmit_short_bits),
               "Reusing received raw bits changed their exact length or value");
         controller.activate(C::clear_received);
         check(!controller.enabled(C::copy_raw_signal)&&!controller.enabled(C::paste_raw_signal),
@@ -1183,8 +832,8 @@ void binary_source_representation() {
 void receive_target_controls() {
     using F=ui::Field;
     Controller controller({true,true});
-    check(controller.field(F::receive_snr).text=="32" && controller.settings().transfer.receive_targets_db_hz==std::vector<double>{32} &&
-          controller.settings().transfer.automatic_receive_profiles,"automatic receive targets must default to the TX target of 32");
+    check(controller.field(F::receive_snr).text=="80" && controller.settings().transfer.receive_targets_db_hz==std::vector<double>{80} &&
+          controller.settings().transfer.automatic_receive_profiles,"automatic receive targets must default to the TX target of 80");
     const auto tx=controller.settings().transfer.modem;
     controller.edit(F::receive_snr,"40,");
     controller.poll();
@@ -1193,7 +842,7 @@ void receive_target_controls() {
     std::this_thread::sleep_for(std::chrono::milliseconds(775));controller.poll();
     check(controller.field(F::receive_snr).text=="40, 6, -6" &&
           controller.settings().transfer.receive_targets_db_hz==std::vector<double>({40,6,-6}),"receive target field must canonicalize a valid list");
-    check(controller.field(F::snr).text=="32" && controller.settings().transfer.modem.spreading_factor==tx.spreading_factor &&
+    check(controller.field(F::snr).text=="80" && controller.settings().transfer.modem.spreading_factor==tx.spreading_factor &&
           controller.settings().transfer.modem.integration_seconds==tx.integration_seconds,"receive search targets must not change the transmitted profile");
     controller.edit(F::bandwidth,"18 kHz");
     check(controller.settings().transfer.modem.bandwidth_hz==18000 &&
@@ -1217,10 +866,10 @@ void receive_target_controls() {
           "correcting TX SNR must restore matching receive targets");
     controller.edit(F::receive_snr,"40, wrong");
     std::this_thread::sleep_for(std::chrono::milliseconds(775));controller.poll();
-    check(controller.field(F::receive_snr).text=="32" && controller.settings().transfer.receive_targets_db_hz==std::vector<double>{32},
+    check(controller.field(F::receive_snr).text=="40" && controller.settings().transfer.receive_targets_db_hz==std::vector<double>{40},
           "invalid receive target text must reset the complete field to its default");
     controller.edit(F::receive_snr,std::string(513,'1'));
-    check(controller.field(F::receive_snr).text=="32","overlong receive target input must reset to the default too");
+    check(controller.field(F::receive_snr).text=="40","overlong receive target input must reset to the default too");
     const auto& controls=ui::console_screen();
     const auto found=std::find_if(controls.begin(),controls.end(),[](const auto& control){return control.field==F::receive_snr;});
     check(found!=controls.end() && found->persistent && found->kind==ui::Kind::text,
@@ -1284,10 +933,6 @@ void bitmap_source_checks() {
           sources.caption(ui::Bitmap::pattern_scores, 240).find("waiting") != std::string::npos &&
           std::string_view(patterns->help).find("Hardware audio input is paused during transmission") != std::string_view::npos,
           "Console pattern plot did not explain complete-window evidence and paused reception during hardware TX");
-    check(patterns->click == ui::Command::clear_pattern_scores &&
-          std::string_view(patterns->help).find("Click to clear") != std::string_view::npos &&
-          std::string_view(patterns->help).find("older than six seconds") != std::string_view::npos,
-          "Pattern evidence must declare its click-to-clear action and six-second retention in the shared GUI");
     const auto original = sources.get(ui::Bitmap::qr);
     const auto empty = render(original);
     check(empty.pixels()[0] == 32 && empty.pixels()[1] == 0 && empty.pixels()[2] == 0,
@@ -1308,19 +953,6 @@ void bitmap_source_checks() {
     controller.activate(ui::Command::clear_waterfall);
     check(sources.update(controller) == std::vector{ui::Bitmap::waterfall}, "Clear waterfall did not target only its named source");
     check(sources.update(controller).empty(), "Bitmap mapping consumed one-shot invalidation more than once");
-    const auto before_clear_version = sources.version(ui::Bitmap::pattern_scores);
-    const auto before_clear_revision = controller.revision();
-    const auto before_clear_samples = controller.snapshot().samples_received;
-    const auto before_clear_message = controller.message_bytes();
-    controller.activate(patterns->click);
-    check(sources.update(controller) == std::vector{ui::Bitmap::pattern_scores} &&
-          sources.version(ui::Bitmap::pattern_scores) == before_clear_version + 1 &&
-          sources.caption(ui::Bitmap::pattern_scores).find("waiting") != std::string::npos,
-          "Clicking pattern evidence must clear and invalidate only its named plot, including an empty plot");
-    check(sources.update(controller).empty(), "Pattern evidence clear invalidation must be consumed exactly once");
-    check(controller.revision() == before_clear_revision &&
-          controller.snapshot().samples_received == before_clear_samples && controller.message_bytes() == before_clear_message,
-          "Clearing pattern evidence must not reconfigure reception or change the draft");
     controller.edit(ui::Field::message, std::string(501, 'a'));
     sources.update(controller);
     check(sources.caption(ui::Bitmap::qr).find("500") != std::string::npos,
@@ -1354,10 +986,6 @@ int main(int argc,char** argv) {
     try {
         datapump::gui::controller_self_check();
         rate_carrier_controls();
-        shannon_capacity_display();
-        profile_reference_display();
-        mono_controls();
-        noise_transmission_controls();
         tone_mode_controls();
         tone_key_controls();
         composer_conveniences();

@@ -2,8 +2,6 @@
 #include "datapump/compression.hpp"
 #include "controller.hpp"
 #include "record_presentations.hpp"
-#include "transmit_scope.hpp"
-#include "profile_reference.hpp"
 #include "text_policy.hpp"
 #include "binary_editor.hpp"
 #include "datapump/audio.hpp"
@@ -31,8 +29,8 @@ std::string bit_text(std::span<const std::uint8_t> bits) {
     return result;
 }
 std::string compression_reference() {
-    std::string result="Fixed dictionary (up to "+std::to_string(transfer::short_message_bytes)+" source bytes)\n";
-    for(const auto group:{" etao","in","shrdluc","mfwypbg"}) {
+    std::string result="Nonempty text below 16 bytes uses the fixed short-text dictionary, with no framing, FEC or padding.\n";
+    for(const auto group:{" etao","in","shrd","lucm","fwyp","bg","jk","qv","xz"}) {
         const auto first=static_cast<std::uint8_t>(group[0]);
         result+=std::to_string(compression::encode_short_bits(Bytes{first}).size())+" bits:  ";
         for(const char* byte=group;*byte;++byte) {
@@ -42,9 +40,9 @@ std::string compression_reference() {
         }
         result+='\n';
     }
-    result+="Other bytes: 11111 followed by 8 literal bits (13 total).\n"
-        "Raw bits add no markers, padding, checksum or FEC.\n"
-        "Reception completes only after the six-second search rule.";
+    result+="Other bytes use a 13-bit literal escape. Explicit raw bits are sent exactly as entered.\n"
+        "Text of 16 bytes or more and attachments of every size use fixed 128-byte coding intervals.\n"
+        "Both source decoders wait for the physical six-second symbol-search ending rule.";
     return result;
 }
 
@@ -101,7 +99,7 @@ struct Controller::Impl {
     PlotReplayPolicy plot_policy;
     PlotUpdate plot_update;
     bool started=false,closing=false,preparing=false,key_loading=false,key_failed=false,file_loading=false;
-    bool need_devices=true,settings_valid=true,transmit_requested=false,noise_requested=false,was_encrypted=false;
+    bool need_devices=true,settings_valid=true,transmit_requested=false,was_encrypted=false;
     bool attachment_image=false,target_supported=true;
     BinaryEditor composer;
     std::optional<BinaryEditor> previous_message;
@@ -115,7 +113,7 @@ struct Controller::Impl {
     std::size_t pattern_first=0,page_size=16;
     std::size_t dsp_workspace_bytes=runtime::dsp_workspace_budget();
     unsigned dsp_workspace_percent=50;
-    double zoom=1,channel_snr=0,cpu_percent=0,shannon_capacity_bps=0;
+    double zoom=1,channel_snr=0,cpu_percent=0;
     std::string draft_error,tuning_explanation;
     std::vector<KeyEntry> keys;
     std::shared_ptr<const Bytes> attachment;
@@ -154,16 +152,11 @@ struct Controller::Impl {
     std::optional<Clock::time_point> receive_targets_due;
     std::uint64_t next_pattern_text_id=std::numeric_limits<std::uint64_t>::max();
     explicit Impl(Options value):options(value) {
-        f(UiField::transmit_scope).records=transmit_scope_records({});
-        f(UiField::transmit_scope_caption).text=transmit_scope_caption({});
-        f(UiField::transmit_scope_format).options={{"none","None"},{"hex-auto-hide","Hex, auto-hide"},{"hex","Hex"},{"bits","Bits"}};
-        f(UiField::transmit_scope_format).selected="hex-auto-hide";
         f(UiField::device).text="default"; f(UiField::device).options={{"default","default"}};
-        f(UiField::mono).checked=true;
         f(UiField::bandwidth).text="3.6 kHz";
         for(const auto* s:{"1 Hz","100 Hz","1.2 kHz","2.4 kHz","3.6 kHz","12 kHz","18 kHz","24 kHz","1 MHz","30 MHz"}) f(UiField::bandwidth).options.push_back({s,s});
         reset_carrier(3600);
-        f(UiField::snr).text="32"; for(const auto* s:{"140","120","100","80","60","40","32","20","6","-6","-10","-16","-20","-23","-26","-30","-60"}) f(UiField::snr).options.push_back({s,s});
+        f(UiField::snr).text="80"; for(const auto* s:{"140","120","100","80","60","40","20","6","-6","-10","-16","-20","-23","-26","-30","-60"}) f(UiField::snr).options.push_back({s,s});
         f(UiField::receive_snr).text=f(UiField::snr).text;
         for(const auto& p:tuning::simulation_presets()) f(UiField::simulation).options.push_back({std::string(p.name),p.enabled?std::string(p.name):"No"});
         const auto presets=tuning::simulation_presets();
@@ -173,7 +166,7 @@ struct Controller::Impl {
         f(UiField::send_key).options={{"enter","on Enter"},{"ctrl-enter","on Ctrl+Enter"}}; f(UiField::send_key).selected="enter";
         for(auto mode:tuning::pattern_modes()) { const std::string id(tuning::pattern_mode_name(mode)); auto label=id; std::replace(label.begin(),label.end(),'-',' '); f(UiField::pattern).options.push_back({id,label}); }
         f(UiField::pattern).selected="auto-pattern";
-        f(UiField::fec).options={{"rs20","Reed-Solomon 20%"},{"rs60","Reed-Solomon 60%"},{"off","Off"}}; f(UiField::fec).selected="rs60";
+        f(UiField::fec).options={{"rs20","Reed-Solomon 20%"},{"rs60","Reed-Solomon 60%"},{"off","Off"}}; f(UiField::fec).selected="rs20";
         f(UiField::dsp_workspace).options={{"ram-25","25% available RAM"},{"ram-50","50% available RAM"},{"ram-75","75% available RAM"}};
         f(UiField::dsp_workspace).selected="ram-50";
         f(UiField::message_label).text="Message"; f(UiField::binary_label).text="Binary / first 16 bytes";
@@ -218,29 +211,21 @@ struct Controller::Impl {
         auto& carrier=f(UiField::carrier);
         carrier.text=frequency_text(recommended_gui_carrier(rate));
         carrier.options={{carrier.text,carrier.text}};
+        for(const auto* preset:{"1 kHz","1.5 kHz","1.8 kHz","2 kHz","2.5 kHz","2.7 kHz","3 kHz","6 kHz","9 kHz","13.5 kHz","18 kHz"})
+            if(carrier.text!=preset)carrier.options.push_back({preset,preset});
     }
     void configure(bool match_receive_target=false,bool match_carrier=false) {
         receive_targets_due.reset();
         dirty();
-        f(UiField::profile_reference).records.clear();
-        f(UiField::profile_reference).selected.clear();
         try {
             live::Settings next;
             const auto mode=tuning::parse_pattern_mode(f(UiField::pattern).selected);
             const auto rate=frequency(f(UiField::bandwidth).text,"Rate");
             if(match_carrier)reset_carrier(rate);
-            const auto target_snr=number(f(UiField::snr).text,"Target SNR");
-            const auto plan=tuning::resolve(rate,target_snr,mode,encrypted(),frequency(f(UiField::carrier).text,"Carrier"));
-            const auto capacity=tuning::shannon_capacity_bps(rate,target_snr);
+            const auto plan=tuning::resolve(rate,number(f(UiField::snr).text,"Target SNR"),mode,encrypted(),frequency(f(UiField::carrier).text,"Carrier"));
             const auto targets=tuning::parse_receive_targets(f(match_receive_target?UiField::snr:UiField::receive_snr).text);
             f(UiField::receive_snr).text=targets.canonical;
             next.transfer.modem=plan.config; next.transfer.timestamp=0;
-            const auto reference=profile_reference::build(plan.config,target_snr,mode,encrypted());
-            for(std::size_t index=0;index<reference.rows.size();++index) {
-                const auto& row=reference.rows[index];
-                f(UiField::profile_reference).records.push_back({std::to_string(index),
-                    {{row.label,5,1,-5,16,10,row.active?ui::TextTone::data:ui::TextTone::muted,row.active}}});
-            }
             next.transfer.automatic_receive_profiles=true;
             next.transfer.receive_targets_db_hz=targets.values;
             next.transfer.receive_pattern_mode=mode;
@@ -249,7 +234,6 @@ struct Controller::Impl {
             if(encrypted()) { const auto* key=selected_key(); if(!key) throw Error("Select a valid encryption key entry"); next.transfer.key=key->key; }
             if(!tone())for(const auto& key:keys) next.receive_keys.push_back(key.key);
             next.device=f(UiField::device).text.empty()?"default":f(UiField::device).text;
-            next.mono=f(UiField::mono).checked;
             const auto preset=tuning::parse_simulation_preset(f(UiField::simulation).selected); next.simulation=preset.enabled;
             if(preset.enabled) { const auto budget=tuning::link_budget(preset,next.transfer.modem.bandwidth_hz,next.transfer.modem.sample_rate); next.simulation_snr_db=budget.sample_snr_db; channel_snr=budget.snr_db; }
             const auto workspace_percent=f(UiField::dsp_workspace).selected=="ram-25"?25u:f(UiField::dsp_workspace).selected=="ram-75"?75u:50u;
@@ -261,7 +245,6 @@ struct Controller::Impl {
             next.transfer.dsp_workspace_bytes=next.dsp_workspace_bytes;
             f(UiField::dsp_workspace).display_text=workspace_text(workspace_percent,next.dsp_workspace_bytes);
             settings=std::move(next); settings_valid=true; target_supported=plan.target_supported; tuning_explanation=plan.explanation;
-            shannon_capacity_bps=capacity;
             plot_policy.reset(); plot_update.clear_waterfall=true;
             if(started) session.configure(settings);
         } catch(...) { settings_valid=false; f(UiField::airtime).text="Invalid modem settings"; f(UiField::inspection).text="Invalid modem settings"; throw; }
@@ -284,9 +267,10 @@ struct Controller::Impl {
     void sync_short_bits() {
         auto& text=f(UiField::short_bits).text;text.clear();
         if(composer.raw_bits()) {
-            if(composer.raw_bits()->size()<=transfer::short_message_bits)text=bit_text(*composer.raw_bits());
-        } else if(!composer.bytes().empty()&&composer.bytes().size()<=transfer::short_message_bytes) {
-            text=bit_text(compression::encode_short_bits(composer.bytes(),transfer::short_message_bits));
+            if(composer.raw_bits()->size()<=4)text=bit_text(*composer.raw_bits());
+        } else if(composer.bytes().size()==1) {
+            try { text=bit_text(compression::encode_short_bits(composer.bytes(),4)); }
+            catch(const Error&) {} // This byte has a longer dictionary code.
         }
     }
 
@@ -294,11 +278,11 @@ struct Controller::Impl {
         const auto input=f(UiField::short_bits).text;
         try {
             const auto bits=parse_binary_bits(input);
-            if(bits.size()>transfer::short_message_bits)throw Error("Enter 1-"+std::to_string(transfer::short_message_bits)+" exact bits.");
+            if(bits.size()>4)throw Error("Enter 1-4 bits; use Console for longer input.");
             Bytes decoded;
-            try { decoded=compression::decode_short_bits(bits,transfer::short_message_bytes); }
+            try { decoded=compression::decode_short_bits(bits,15); }
             catch(const Error&) {} // An incomplete dictionary code remains a valid raw draft.
-            BinaryEditor next(std::move(decoded));next.select_raw_bits(bits,transfer::short_message_bits);
+            BinaryEditor next(std::move(decoded));next.edit_binary(input);
             composer=std::move(next);
             repeatable_prefix.clear();pending_repeatable_removal=false;f(UiField::repeatable).checked=false;
             seeded_message.clear();sync_composer();f(UiField::short_bits).text=input;
@@ -311,16 +295,16 @@ struct Controller::Impl {
         auto& detail=f(UiField::short_bits_detail).text;
         if(attachment||file_loading)detail="Attachment selected. Choose Use text\nto enter a short raw pattern.";
         else if(!draft_error.empty())detail=draft_error;
-        else if(f(UiField::short_bits).text.empty())detail="Enter 1 to "+std::to_string(transfer::short_message_bits)+" exact bits, or type a short Message.\nLeading zeros and incomplete codes are preserved.";
+        else if(f(UiField::short_bits).text.empty())detail="Enter 1 to 4 bits to replace the current draft.\nLeading zeros are preserved.";
         else {
             const auto bits=parse_binary_bits(f(UiField::short_bits).text);
-            detail=std::to_string(bits.size())+" payload bits. Sent exactly as entered.\n";
+            detail="Current draft: "+std::to_string(bits.size())+" payload bits, "+bit_text(bits)+".\n";
             try {
-                const auto decoded=compression::decode_short_bits(bits,transfer::short_message_bits/3);
-                if(decoded.size()>transfer::short_message_bytes)
-                    detail+="Complete codes exceed the "+std::to_string(transfer::short_message_bytes)+"-byte short-text limit; received as raw bits.";
-                else detail+="Expected text: "+(decoded==Bytes{' '}?std::string("space"):"'"+BinaryEditor(decoded).text()+"'");
-            } catch(const Error&) { detail+="Incomplete dictionary code; received as raw bits."; }
+                const auto decoded=compression::decode_short_bits(bits,15);
+                detail+="Dictionary preview: "+(decoded==Bytes{' '}?std::string("space"):"'"+BinaryEditor(decoded).text()+"'");
+                detail+=". Message byte: "+BinaryEditor(decoded).binary()+".";
+            } catch(const Error&) { detail+="No complete dictionary code."; }
+            detail+=" Sent exactly as entered.";
         }
         auto& received=f(UiField::received_raw_bits).text;
         const auto index=selected_signal();
@@ -463,7 +447,6 @@ struct Controller::Impl {
         case Command::transmit_short_bits: return !attachment&&!file_loading&&draft_error.empty()&&
             !f(UiField::short_bits).text.empty()&&enabled(Command::transmit);
         case Command::transmit: return !busy && !key_loading && !key_failed && !file_loading && settings_valid && estimate && estimated_revision==revision && estimate->memory_supported && gate.remaining(settings.simulation,encrypted()).count()==0;
-        case Command::transmit_noise: return !busy && !key_loading && settings_valid;
         case Command::cancel: return busy||snapshot.simulation_replay;
         case Command::open_keyfile: case Command::generate_keyfile: return !busy&&!key_loading;
         case Command::show_key_folder: return !busy&&!key_loading&&!key_path.empty();
@@ -476,7 +459,7 @@ struct Controller::Impl {
         case Command::copy_raw_signal: { const auto index=selected_signal();return index&&signals.copy_raw_bits(*index).has_value(); }
         case Command::paste_raw_signal: {
             const auto index=selected_signal();const auto bits=index?signals.copy_raw_bits(*index):std::nullopt;
-            return !attachment&&!file_loading&&bits&&bits->size()<=transfer::short_message_bits;
+            return !attachment&&!file_loading&&bits&&bits->size()<=4;
         }
         case Command::paste_signal: {
             if(closing||attachment||file_loading)return false;
@@ -494,15 +477,10 @@ struct Controller::Impl {
         }
     }
     void controls() {
-        const auto& scope_mode=f(UiField::transmit_scope_format).selected;
-        const bool scope_visible=!closing&&(scope_mode=="hex"||scope_mode=="bits"||
-            (scope_mode=="hex-auto-hide"&&!noise_requested&&!snapshot.transmitting_noise&&
-                (snapshot.transmitting||snapshot.simulation_replay)));
-        f(UiField::transmit_scope).visible=f(UiField::transmit_scope_caption).visible=scope_visible;
         if((f(UiField::repeatable).checked||has_repeatable_prefix())&&!pending_repeatable_removal&&
            (attachment||file_loading||composer.bytes().size()>repeatable_limit))set_repeatable(false);
         const bool busy=transmit_requested||snapshot.transmitting||closing;
-        for(auto id:{UiField::simulation,UiField::key,UiField::device,UiField::mono,UiField::bandwidth,UiField::carrier,UiField::snr,UiField::receive_snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
+        for(auto id:{UiField::simulation,UiField::key,UiField::device,UiField::bandwidth,UiField::carrier,UiField::snr,UiField::receive_snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
         if(key_loading || tone()) f(UiField::key).enabled=false;
         for(auto id:{UiField::callsign,UiField::grid}) f(id).enabled=!closing;
         f(UiField::short_bits).enabled=!attachment&&!file_loading&&!closing;
@@ -510,7 +488,7 @@ struct Controller::Impl {
         const auto repeatable_overhead=f(UiField::repeatable).checked||has_repeatable_prefix()?0:repeatable_prefix_size;
         f(UiField::repeatable).enabled=!attachment&&!file_loading&&!composer.raw_bits()&&draft_error.empty()&&
             composer.bytes().size()+repeatable_overhead<=repeatable_limit&&!closing;
-        const bool short_message=!attachment&&!composer.raw_bits()&&!composer.bytes().empty()&&composer.bytes().size()<=transfer::short_message_bytes;
+        const bool short_message=!attachment&&!composer.raw_bits()&&!composer.bytes().empty()&&composer.bytes().size()<16;
         const bool raw=!attachment&&(composer.raw_bits().has_value()||short_message);
         f(UiField::fec).enabled=f(UiField::fec).enabled&&!raw;
         f(UiField::fec).display_text=short_message?"Off (short dictionary)":raw?"Off (raw bits)":"";
@@ -627,17 +605,6 @@ struct Controller::Impl {
         }
     }
     void accept_snapshot(live::Snapshot next) {
-        // Scope changes follow generation itself, independently of plot cadence
-        // or draft estimation. A one-bit prefix reaches this same poll.
-        if(next.transmission_id!=snapshot.transmission_id ||
-           next.transmit_trace.active!=snapshot.transmit_trace.active ||
-           next.transmit_trace.revision!=snapshot.transmit_trace.revision)
-            f(UiField::transmit_scope).records=transmit_scope_records(next.transmit_trace,f(UiField::transmit_scope_format).selected=="bits");
-        const auto scope_status=next.simulation_replay?"replay":next.transmission_cancelled?"cancelled":
-            !next.error.empty()?"interrupted":next.transmitting?"generating":"complete";
-        f(UiField::transmit_scope_caption).text=next.transmitting_noise?
-            "Tuning noise / ordinary encrypted modulation / temporary keys are not saved":
-            transmit_scope_caption(next.transmit_trace,scope_status);
         const auto changed=plot_policy.observe(next.sequence,next.transmission_id,next.simulation_replay,next.replay_frame_index);
         plot_update.update_plots=plot_update.update_plots||changed.update_plots;
         plot_update.append_waterfall=plot_update.append_waterfall||changed.append_waterfall;
@@ -655,21 +622,14 @@ struct Controller::Impl {
             signals.update(std::move(line));
         }
         if(!next.signals.empty() || !next.received.empty()) refresh_signals();
-        if(transmit_requested&&!next.transmitting&&next.transmission_finished) {
-            if(!noise_requested)gate.finished();
-            transmit_requested=false; noise_requested=false;
-        }
+        if(transmit_requested&&!next.transmitting&&next.transmission_finished) { transmit_requested=false; gate.finished(); }
         const auto mode=next.simulation?"Simulation / continuous receive":"Listening / "+settings.device;
-        const auto tx_mode=next.transmitting_noise?
-            std::string(next.simulation?"Simulating noise / ":"Transmitting noise / ")+seconds_text(next.transmission_seconds)+" elapsed":
-            std::string(next.simulation?"Calculating simulation ":"Transmitting ")+std::to_string(static_cast<int>(std::clamp(next.transmission_fraction,0.0,1.0)*100))+"% / "+seconds_text(next.transmission_seconds)+" media";
+        const auto tx_mode=std::string(next.simulation?"Calculating simulation ":"Transmitting ")+std::to_string(static_cast<int>(std::clamp(next.transmission_fraction,0.0,1.0)*100))+"% / "+seconds_text(next.transmission_seconds)+" media";
         f(UiField::mode).text=next.transmitting?tx_mode:next.simulation_replay?"Simulation replay "+std::to_string(static_cast<int>(std::clamp(next.simulation_sample_fraction,0.0,1.0)*100))+"%":mode;
         if(next.simulation_replay||snapshot.simulation_replay||Clock::now()>=notice_until) f(UiField::status).text=next.error.empty()?next.status:next.error;
         if(Clock::now()-cpu_time>=std::chrono::seconds(1)) { const auto now=Clock::now(); cpu_percent=100*static_cast<double>(std::clock()-cpu_clock)/CLOCKS_PER_SEC/std::chrono::duration<double>(now-cpu_time).count(); cpu_clock=std::clock(); cpu_time=now; }
         std::ostringstream diagnostics;
-        diagnostics<<format_bit_rate(modem::bit_rate(settings.transfer.modem))
-            <<" | Shannon-Hartley limit "<<format_bit_rate(shannon_capacity_bps)
-            <<" | "<<next.samples_received<<" input samples | CPU "<<std::fixed<<std::setprecision(1)<<cpu_percent<<"%";
+        diagnostics<<format_bit_rate(modem::bit_rate(settings.transfer.modem))<<" | "<<next.samples_received<<" input samples | CPU "<<std::fixed<<std::setprecision(1)<<cpu_percent<<"%";
         if(next.simulation) diagnostics<<" | Channel SNR "<<channel_snr<<" dB / media "<<seconds_text(next.virtual_seconds);
         else if(next.hardware_sample_rate) diagnostics<<" | Hardware "<<next.hardware_sample_rate/1000.0<<" kHz";
         diagnostics<<" | DSP "<<settings.transfer.modem.sample_rate<<" Hz | Carrier "<<std::defaultfloat<<std::setprecision(6)<<settings.transfer.modem.carrier_hz<<" Hz";
@@ -704,17 +664,10 @@ struct Controller::Impl {
             if(sent) { previous_message=std::move(sent); previous_repeatable_prefix=has_repeatable_prefix()?repeatable_prefix:std::string{}; seed_composer(); }
             notice(settings.simulation?"Calculating the simulated transmission...":"Transmitting audio..."); break;
         }
-        case Command::transmit_noise:
-            transmit_requested=true; noise_requested=true;
-            try { session.transmit_noise(); }
-            catch(...) { transmit_requested=false; noise_requested=false; throw; }
-            notice(settings.simulation?"Simulating noise with temporary keys. Stop noise to finish.":
-                "Transmitting noise with temporary keys. Stop noise to finish."); break;
         case Command::paste_previous:
             composer=*previous_message; repeatable_prefix=previous_repeatable_prefix; pending_repeatable_removal=false; f(UiField::repeatable).checked=false;
             seeded_message.clear(); sync_composer(); ++f(UiField::message).text_cursor_end_revision; dirty(); break;
-        case Command::cancel: session.cancel_transmit(); notice(noise_requested||snapshot.transmitting_noise?
-            "Stopping noise...":snapshot.simulation_replay?"Stopping simulation replay...":"Cancelling transmission..."); break;
+        case Command::cancel: session.cancel_transmit(); notice(snapshot.simulation_replay?"Stopping simulation replay...":"Cancelling transmission..."); break;
         case Command::clear_received: inbox.clear(); signals.clear(); refresh_files(); refresh_signals(); notice("Received content cleared from memory."); break;
         case Command::attach_file:
             ++attachment_revision; pending_file.reset(); file_loading=false;
@@ -767,7 +720,6 @@ struct Controller::Impl {
         case Command::zoom_out: zoom=std::min(256.,zoom*2); plot_update.update_plots=true; break;
         case Command::reset_zoom: zoom=1; plot_update.update_plots=true; break;
         case Command::clear_waterfall: plot_update.clear_waterfall=true; break;
-        case Command::clear_pattern_scores: plot_update.clear_pattern_scores_through=snapshot.pattern_score_observation_id; break;
         case Command::pattern_first: pattern_first=0; break;
         case Command::pattern_previous: pattern_first=pattern_first>page_size?pattern_first-page_size:0; break;
         case Command::pattern_next: pattern_first=std::min(last_pattern_page(),pattern_first+page_size); break;
@@ -825,7 +777,7 @@ void Controller::edit(UiField field,std::string text) {
         if(declaration==screen.end()) throw Error("This field is not editable text");
         if(const auto error=ui::edit_error(*declaration,text);!error.empty()) {
             if(field!=UiField::receive_snr)throw Error(error);
-            p.f(field).text="32";p.configure();p.controls();return;
+            p.f(field).text="40";p.configure();p.controls();return;
         }
         if(field==UiField::message) { p.message_changed(text); p.controls(); return; }
         const bool untouched=!p.composer.raw_bits()&&p.draft_error.empty()&&p.f(UiField::message).text==p.seeded_message;
@@ -854,8 +806,6 @@ void Controller::select(UiField field,std::string id) {
             if(field==UiField::pattern && p.tone())p.notice("Tone modes are unencrypted and do not provide Low-Probability-of-Intercept protection.");
         }
         else if(field==UiField::simulation||field==UiField::fec||field==UiField::dsp_workspace) p.configure();
-        else if(field==UiField::transmit_scope_format)
-            p.f(UiField::transmit_scope).records=transmit_scope_records(p.snapshot.transmit_trace,state.selected=="bits");
     } catch(const std::exception& e) { p.notice(e.what(),10); }
     p.controls();
 }
@@ -863,11 +813,6 @@ void Controller::toggle(UiField field,bool value) {
     auto& p=*impl_;
     if(p.f(field).enabled&&p.f(field).checked!=value) {
         if(field==UiField::repeatable)p.set_repeatable(value);
-        else if(field==UiField::mono) {
-            p.f(field).checked=value;
-            p.settings.mono=value;
-            if(p.started)p.session.set_mono(value);
-        }
         else { p.f(field).checked=value; p.dirty(); }
         p.controls();
     }
@@ -878,8 +823,7 @@ std::vector<ui::ServiceRequest> Controller::take_services() { auto result=std::m
 const ui::FieldState& Controller::field(UiField field) const { return impl_->f(field); }
 bool Controller::enabled(Command command) const { return impl_->enabled(command); }
 std::string Controller::command_label(Command command) const {
-    if(command==Command::cancel)return impl_->noise_requested||impl_->snapshot.transmitting_noise?
-        "Stop noise":impl_->snapshot.simulation_replay?"Stop replay":"Cancel TX";
+    if(command==Command::cancel)return impl_->snapshot.simulation_replay?"Stop replay":"Cancel TX";
     if(command==Command::transmit) {
         const auto remaining=impl_->gate.remaining(impl_->settings.simulation,impl_->encrypted()).count();
         if(remaining>0&&!impl_->snapshot.transmitting)return "TX wait "+std::to_string((remaining+999)/1000)+"s";

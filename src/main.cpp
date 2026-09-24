@@ -68,13 +68,13 @@ Modem:
   --sample-rate HZ      Internal DSP clock, 64..120000000; default max(6000,4*bw)
   --carrier HZ          Default max(1500,0.75*bw); explicit overrides stay available
   --spreading N         Manual 4-bit APSK chips/symbol, 1..16384 (disables auto)
-  --target-snr DBHZ     Automatic target C/N0; default32, auto unless manual controls
-  --receive-targets LIST Receive C/N0 search list, e.g. 40,6,-6; default32
-                        Invalid lists reset to32; selected bandwidth/pattern stay fixed
+  --target-snr DBHZ     Automatic target C/N0; default40, auto unless manual controls
+  --receive-targets LIST Receive C/N0 search list, e.g. 40,6,-6; default40
+                        Invalid lists reset to40; selected bandwidth/pattern stay fixed
   --pattern MODE        auto-keystream, auto-pattern, auto-tone, pattern-N, tone-N
   --scramble            Cryptographic pattern rotation (requires keyfile)
   --dsss                Independent encrypted direct-sequence spreading
-  --fec 20|60|off        Reed-Solomon parity overhead, default60
+  --fec 20|60|off        Reed-Solomon parity overhead, default20
   --no-compression      Diagnostic override; both peers must select the same source codec
   --memory-mb N         Legacy batch PCM workspace budget, default256 MiB
   --cache-mb N          Received content/input limit, default256 MiB
@@ -89,7 +89,6 @@ Modem:
 
 Audio/simulation:
   --device ID           OS audio endpoint; listen automatically uses default
-  --no-mono             TX on both stereo channels; default right only (mono devices use their sole channel)
   --device-type audio   Analog audio input only; no network/raw serial input
   --seconds N           RX recording duration(default15); listen limit(default0)
   --tx-delay N          Delay after live TX completes; default6 seconds
@@ -119,7 +118,7 @@ class Args {
 public:
     std::string command;
     Args(int argc,char** argv) {
-        const std::set<std::string> booleans={"json","repeatable","no-compression","no-mono","scramble","dsss","progress","help","version"};
+        const std::set<std::string> booleans={"json","repeatable","no-compression","scramble","dsss","progress","help","version"};
         const std::set<std::string> valued={"text","input","output","save","kind","filename","callsign","grid",
             "bw","sample-rate","carrier","spreading","fec","memory-mb","keyfile","pad","time","search-seconds",
             "device","device-type","seconds","tx-delay","snr","seed","delay-samples","frequency-offset","bits","format",
@@ -217,7 +216,7 @@ modem::Config config(const Args& a) {
     if(automatic) {
         if(a.has("spreading") || a.has("scramble") || a.has("dsss") || a.has("sample-rate") || a.has("carrier"))
             throw Error("automatic tuning cannot be combined with manual spreading/scramble/dsss/sample-rate/carrier");
-        const auto plan=tuning::resolve(c.bandwidth_hz,a.number("target-snr",32),
+        const auto plan=tuning::resolve(c.bandwidth_hz,a.number("target-snr",40),
             tuning::parse_pattern_mode(a.get("pattern",a.has("keyfile")?"auto-keystream":"auto-pattern")),a.has("keyfile"));
         c=plan.config;
         if(a.has("progress") || !plan.target_supported) std::cerr<<plan.explanation<<'\n';
@@ -263,7 +262,7 @@ void play_transmission(const Args& a, transfer::Options& options, Factory make) 
         },clock);
         source=std::move(scheduled.transmitter);
         detail::wait_for_playback(scheduled.playback_epoch,clock);
-    },!a.has("no-mono"));
+    });
 }
 std::uint64_t epoch(const Args& a) {
     return a.integer("time",static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
@@ -289,10 +288,10 @@ transfer::Options transfer_options(const Args& a,const modem::Config& c,const st
     if(a.has("receive-targets") && !automatic_tuning(a))throw Error("receive-targets requires automatic tuning");
     options.automatic_receive_profiles=automatic_tuning(a);
     options.receive_pattern_mode=tuning::parse_pattern_mode(a.get("pattern",k?"auto-keystream":"auto-pattern"));
-    const auto targets=tuning::parse_receive_targets(a.get("receive-targets","32"));
+    const auto targets=tuning::parse_receive_targets(a.get("receive-targets","40"));
     options.receive_targets_db_hz=targets.values;
-    if(targets.reset)std::cerr<<"Invalid receive target list; reset to 32 dB-Hz.\n";
-    auto fec=a.get("fec","60");
+    if(targets.reset)std::cerr<<"Invalid receive target list; reset to 40 dB-Hz.\n";
+    auto fec=a.get("fec","20");
     if(fec=="20") options.fec=FecMode::rs20;
     else if(fec=="60") options.fec=FecMode::rs60;
     else if(fec=="off") options.fec=FecMode::off;
@@ -357,7 +356,7 @@ void output_wave(const Args& a,std::vector<float> samples,const modem::Config& c
     }
     if(a.has("device")) {
         const auto delay=hardware_delay(a,c);
-        audio::play(samples,c.sample_rate,a.get("device"),{},audio_passband_guard(c),!a.has("no-mono"));
+        audio::play(samples,c.sample_rate,a.get("device"),{},audio_passband_guard(c));
         std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long long>(delay*1000)));
     }
 }
@@ -442,7 +441,6 @@ void listen(const Args& a,const transfer::Options& options) {
     settings.dsp_workspace_bytes=dsp_budget(a);
     if(!a.has("time")) settings.transfer.timestamp=0;
     settings.device=a.get("device","default");
-    settings.mono=!a.has("no-mono");
     if(a.has("simulation")) {
         const auto preset=tuning::parse_simulation_preset(a.get("simulation"));
         settings.simulation=preset.enabled;
@@ -555,21 +553,18 @@ int main(int argc,char** argv) {
         if(a.has("progress")) progress=[](std::uint64_t candidate) {std::cerr<<"Searching epoch "<<candidate<<'\n';};
         if(a.command=="estimate") {
             const auto result=transfer::estimate(message(a),settings);
-            const auto capacity=tuning::shannon_capacity_bps(c.bandwidth_hz,a.number("target-snr",32));
             std::cout<<std::setprecision(std::numeric_limits<double>::max_digits10)
                 <<"{\"coded_bytes\":"<<result.coded_bytes<<",\"wire_bits\":"<<result.wire_bits<<",\"content_bytes\":"<<result.content_bytes
                 <<",\"coded_seconds\":"<<result.coded_seconds<<",\"content_seconds\":"<<result.content_seconds
                 <<",\"total_seconds\":"<<result.total_seconds<<",\"bit_rate\":"<<modem::bit_rate(c)
-                <<",\"shannon_capacity_bps\":";
-            if(std::isfinite(capacity))std::cout<<capacity;else std::cout<<"null";
-            std::cout<<",\"spreading\":"<<c.spreading_factor
+                <<",\"spreading\":"<<c.spreading_factor
                 <<",\"constellation_bits\":"<<c.constellation_bits
                 <<",\"sample_rate\":"<<c.sample_rate<<",\"carrier_hz\":"<<c.carrier_hz
                 <<",\"repeatable_allowed\":"<<(result.repeatable_allowed?"true":"false")
                 <<",\"memory_supported\":"<<(result.memory_supported?"true":"false")
                 <<",\"batch_memory_supported\":"<<(result.batch_memory_supported?"true":"false");
             if(automatic_tuning(a)) {
-                const auto plan=tuning::resolve(c.bandwidth_hz,a.number("target-snr",32),
+                const auto plan=tuning::resolve(c.bandwidth_hz,a.number("target-snr",40),
                     tuning::parse_pattern_mode(a.get("pattern",a.has("keyfile")?"auto-keystream":"auto-pattern")),a.has("keyfile"));
                 std::cout<<",\"estimated_symbol_snr_db\":"<<plan.estimated_symbol_snr_db
                     <<",\"symbol_seconds\":"<<modem::symbol_seconds(c)

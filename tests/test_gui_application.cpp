@@ -1,8 +1,6 @@
 #include "application.hpp"
 #include "control_interactions.hpp"
 #include "record_presentations.hpp"
-#include "transmit_scope.hpp"
-#include "datapump/transfer.hpp"
 #include <array>
 #include <iostream>
 #include <set>
@@ -15,154 +13,6 @@ void check(bool value,const char* message) { if(!value)throw Error(message); }
 const ui::Control& control(ui::Field field) {
     for(const auto& value:ui::console_screen())if(value.field==field)return value;
     throw Error("Missing shared control");
-}
-void transmission_scope_records() {
-    using F=ui::Field;
-    const auto& declaration=control(F::transmit_scope);
-    check(declaration.kind==ui::Kind::list&&declaration.page==ui::Page::console&&
-          !declaration.persistent&&!declaration.follow_tail&&declaration.list_row_height==17&&
-          declaration.activate_record==ui::Command::none,
-          "TX scope must be a shared first-tab native list without copy/completion actions");
-    Application app({.simulation=true});
-    const auto empty=app.field(F::transmit_scope).records;
-    check(empty.size()==11&&app.field(F::transmit_scope_caption).text.find("waiting for transmission")!=std::string::npos,
-          "Scope must expose all diagnostic rows before any real generation");
-    app.edit(control(F::message),"e");
-    check(app.field(F::transmit_scope).records==empty,"Draft edits populated a purported generation capture");
-    const auto& format=app.field(F::transmit_scope_format);
-    check(format.selected=="hex-auto-hide"&&format.options.size()==4&&
-          format.options[0].label=="None"&&format.options[1].label=="Hex, auto-hide"&&
-          format.options[2].label=="Hex"&&format.options[3].label=="Bits"&&
-          control(F::transmit_scope_format).kind==ui::Kind::choice&&
-          !app.control(declaration).visible&&!app.control(control(F::transmit_scope_caption)).visible&&
-          app.control(control(F::transmit_scope_format)).visible,
-          "Scope must default to hidden Hex auto-hide while leaving all display choices available");
-    app.select(control(F::transmit_scope_format),"bits");
-    check(app.field(F::transmit_scope).records==transmit_scope_records({},true)&&
-          app.control(declaration).visible&&app.control(control(F::transmit_scope_caption)).visible,
-          "Bits selection did not redraw the retained scope through the shared facade");
-    app.select(control(F::transmit_scope_format),"hex");
-    check(app.field(F::transmit_scope).records==empty&&app.control(declaration).visible,
-          "Hex selection changed its source capture or hid the manual preview");
-    for(const auto* mode:{"none","hex-auto-hide"}) {
-        app.select(control(F::transmit_scope_format),mode);
-        check(!app.control(declaration).visible&&!app.control(control(F::transmit_scope_caption)).visible&&
-              app.control(control(F::transmit_scope_format)).visible&&app.field(F::transmit_scope).records==empty,
-              "Hiding an idle scope removed its capture or its display choice");
-    }
-    auto get=[](const auto& rows,std::string_view id)->const ui::Record& {
-        const auto found=std::find_if(rows.begin(),rows.end(),[&](const auto& row){return row.id==id;});
-        if(found==rows.end())throw Error("A generation scope stage disappeared");
-        return *found;
-    };
-    auto value=[](const ui::Record& row,int column)->ui::RecordCell {
-        const int x=transmit_scope::column_x+column*transmit_scope::column_width;
-        const auto found=std::find_if(row.cells.begin(),row.cells.end(),[&](const auto& cell){return cell.x==x;});
-        if(found==row.cells.end())throw Error("A generation scope byte column disappeared");
-        auto cell=*found;
-        const auto binary=std::find_if(row.cells.begin(),row.cells.end(),[&](const auto& candidate){return candidate.x==x+20;});
-        if(binary!=row.cells.end())cell.text+=" "+binary->text;
-        return cell;
-    };
-    modem::TransmitTrace trace;
-    trace.active=true;trace.short_text=true;trace.source_available=true;trace.compressed_available=true;
-    trace.source={'A',' ','9','\n',0xc3,0xa9};trace.compressed_bits={0,0,1};
-    trace.wire_plain_bits={0,0};trace.wire_bits={1,0};trace.data_key_bits={1,0};trace.data_masked=true;
-    trace.generated_bits=2;trace.total_wire_bits=3;
-    trace.pattern_available=true;trace.pattern_private=true;trace.dsss=true;
-    trace.pattern_input={0xa5,0x00};trace.pattern_key=trace.pattern_input;
-    trace.dsss_key={0x3c,0xff};trace.pattern_output={0x99,0xff};
-    const auto rows=transmit_scope_records(trace,true);
-    const auto compact=transmit_scope_records(trace);
-    check(get(compact,"tx-wire").cells.front().text.ends_with("[10]")&&
-          value(get(compact,"tx-wire"),0).text=="2b"&&
-          get(compact,"tx-pattern").cells.back().x+get(compact,"tx-pattern").cells.back().w<ui::min_width-2*ui::margin-4,
-          "Compact scope hid exact partial bits or forced full-byte columns beyond minimum width");
-    check(value(get(rows,"tx-source"),0).text=="A."&&value(get(rows,"tx-source"),1).text=="9."&&
-          value(get(rows,"tx-source"),2).text=="..",
-          "Alphanumeric projection skipped source offsets or exposed unsafe text");
-    check(value(get(rows,"tx-compressed"),0).text=="-- 001"&&value(get(rows,"tx-wire-plain"),0).text=="-- 00"&&
-          value(get(rows,"tx-data-key"),0).text=="-- 10"&&value(get(rows,"tx-wire"),0).text=="-- 10"&&
-          value(get(rows,"tx-wire"),1).text=="-- --------",
-          "Scope fabricated byte padding or showed ungenerated wire bits");
-    check(value(get(rows,"tx-pattern"),0).text=="A5 10100101"&&value(get(rows,"tx-dsss-key"),0).text=="3C 00111100"&&
-          value(get(rows,"tx-pattern-output"),0).text=="99 10011001"&&
-          value(get(rows,"tx-pattern-key"),0).text=="null (private replacement, no XOR mask)",
-          "Final mapper input, actual DSSS mixing or private replacement was misrepresented");
-    for(const auto& row:rows) {
-        check(!row.activatable&&row.cells.size()<=66,"Scope became activatable or exceeded its bounded native cells");
-        for(const auto& cell:row.cells)check(cell.h==17&&cell.y==0,"Diagnostic rows lost common vertical alignment");
-    }
-    check(rows[3].id=="tx-wire-plain"&&rows[4].id=="tx-data-key"&&rows[5].id=="tx-wire"&&
-          rows[7].id=="tx-pattern"&&rows[8].id=="tx-dsss-key"&&rows[9].id=="tx-pattern-output",
-          "Input, XOR key and output stages must remain adjacent for direct comparison");
-    trace.raw=true;trace.short_text=false;trace.source_available=false;trace.compressed_available=false;
-    trace.data_masked=false;trace.pattern_private=false;trace.pattern_available=false;trace.dsss=false;
-    const auto unused=transmit_scope_records(trace,true);
-    check(value(get(unused,"tx-source"),0).text.find("Unavailable")!=std::string::npos&&
-          value(get(unused,"tx-compressed"),0).text.find("Unused")!=std::string::npos&&
-          value(get(unused,"tx-data-key"),0).text.find("off")!=std::string::npos&&
-          value(get(unused,"tx-pattern"),0).text.find("Unavailable")!=std::string::npos&&
-          value(get(unused,"tx-fhss-key"),0).text.find("not implemented")!=std::string::npos,
-          "Unused or unavailable stages were presented as generated keystream bytes");
-    check(transmit_scope_caption(trace,"cancelled").find("cancelled")!=std::string::npos,
-          "Cancelled generation lost its truthful capture status");
-    app.close();
-}
-void transmission_scope_reflow() {
-    using F=ui::Field;using S=ui::Slot;
-    Application app({.simulation=true});
-    const auto& scope=control(F::transmit_scope);
-    const auto& caption=control(F::transmit_scope_caption);
-    const auto& format=control(F::transmit_scope_format);
-    const auto& signals=control(F::signals);
-    const auto capture_layout=[&](int width,int height) {
-        std::vector<ui::ControlLayout> result;
-        for(const auto& c:ui::console_screen())result.push_back(app.control_layout(c,width,height));
-        return result;
-    };
-    for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},
-                         ui::Rect{0,0,ui::default_width,ui::default_height},ui::Rect{0,0,1920,1080}}) {
-        check(app.field(F::transmit_scope_format).selected=="hex-auto-hide"&&!app.control(scope).visible,
-              "Idle Console did not start with the auto-hidden scope layout");
-        const auto hidden=capture_layout(size.w,size.h);
-        const auto hidden_signals=app.control_layout(signals,size.w,size.h);
-        const auto selector=app.control_layout(format,size.w,size.h);
-        check(app.control_layout(scope,size.w,size.h).frame.h==0&&
-              app.control_layout(caption,size.w,size.h).frame.h==0&&selector.widget.h>0,
-              "Application facade hid scope content while retaining its empty panel height");
-        app.edit(control(F::message),"e");
-        check(capture_layout(size.w,size.h)==hidden,
-              "An idle draft reopened the auto-hidden generation panel");
-        app.select(format,"hex");
-        const auto visible=capture_layout(size.w,size.h);
-        const auto visible_scope=app.control_layout(scope,size.w,size.h);
-        const auto visible_signals=app.control_layout(signals,size.w,size.h);
-        check(app.control(scope).visible&&visible_scope.widget.h>=11*17&&
-              hidden_signals.widget.h-visible_signals.widget.h==2*signals.list_row_height&&
-              hidden_signals.widget.y+visible_scope.frame.h==visible_signals.widget.y&&
-              app.control_layout(format,size.w,size.h)==selector,
-              "Manual Hex selection did not exchange signal history space for the scope through the facade");
-        for(const auto& c:ui::console_screen())if(c.slot==S::waterfall||c.slot==S::waveform||
-                                                c.slot==S::constellation||c.slot==S::pattern_scores) {
-            const auto shown=app.control_layout(c,size.w,size.h);
-            app.select(format,"none");
-            const auto collapsed=app.control_layout(c,size.w,size.h);
-            check(collapsed.widget.h>shown.widget.h&&
-                  collapsed.frame.y+collapsed.frame.h==shown.frame.y+shown.frame.h&&
-                  collapsed.frame.h-shown.frame.h+hidden_signals.frame.h-visible_signals.frame.h==visible_scope.frame.h,
-                  "Hiding the scope did not enlarge the actual plot content and reclaim its full height");
-            app.select(format,"hex");
-        }
-        app.select(format,"bits");
-        check(capture_layout(size.w,size.h)==visible,"Bits changed the visible preview's desktop allocation");
-        for(const auto* mode:{"none","hex-auto-hide"}) {
-            app.select(format,mode);
-            check(capture_layout(size.w,size.h)==hidden&&!app.control(scope).visible&&app.control(format).visible,
-                  "None or idle auto-hide did not immediately restore the expanded reception and plots");
-        }
-    }
-    app.close();
 }
 void records() {
     Signals signals;
@@ -246,43 +96,6 @@ void records() {
           rows.back().cells[3].text=="Raw observations / prefix"&&rows.back().cells[4].text.starts_with("\\x00\\x00"),
           "A truncated aligned result must show a text prefix without offering incomplete clipboard data");
     check(control(ui::Field::signals).follow_tail&&control(ui::Field::signals).activate_on_select,"Signal interaction policy is missing from the declaration");
-}
-void progressive_pending_records() {
-    // Feed one accepted bit at a time, independent of modem speed or wall time.
-    // A dictionary token, an aligned byte and a full interval are still only
-    // observations until the receiver explicitly reports physical completion.
-    for(const auto& bits:{std::string("001"),std::string("0100100001101001"),
-                         std::string("1111101110001110101101011011011111011010110001111001100101001110011011"),
-                         std::string(1216,'0')}) {
-        Signals signals;
-        SignalLine pending;pending.id=91;pending.frequency_hz=1500;pending.binary=true;
-        pending.pattern_score=24.5; // Confidence in observed symbols is not completion.
-        for(std::size_t count=1;count<=bits.size();++count) {
-            pending.text=bits.substr(0,count);pending.received_bits=count;
-            signals.update(pending);
-            const auto rows=signal_records(signals);
-            check(rows.size()==1&&rows.front().id=="91"&&rows.front().cells[4].text==pending.text&&
-                  rows.front().cells[1].text=="binary pending"&&rows.front().cells[4].tone==ui::TextTone::muted&&
-                  !rows.front().activatable,
-                  "Each pending bit must remain visible in the same row across dictionary, byte and interval boundaries");
-            check(signals.lines().front().received_bits==count&&signals.lines().front().expected_bits==0&&
-                  !signals.lines().front().complete&&!signals.lines().front().validated&&
-                  !signals.copy_bits(0)&&!signals.copy_raw_bits(0)&&!signals.copy_bytes(0)&&
-                  !signals.copy_text(0)&&!signals.copy_id(0),
-                  "Pending observations must not require a known length or become decoded/copyable at a convenient bit boundary");
-        }
-    }
-
-    Signals gaps;
-    SignalLine pending;pending.id=92;pending.frequency_hz=1500;pending.binary=true;
-    pending.text="1";pending.received_bits=1;gaps.update(pending);
-    pending.text="10";pending.received_bits=2;pending.missing_symbols=1;gaps.update(pending);
-    pending.text="101";pending.received_bits=3;gaps.update(pending);
-    const auto rows=signal_records(gaps);
-    check(rows.size()==1&&rows.front().cells[4].text=="101"&&
-          rows.front().cells.back().text=="1 missing bit filled with 0"&&
-          rows.front().cells[1].text=="binary pending"&&!rows.front().activatable,
-          "A missing timed slot must retain its position and visible zero-placeholder notice while subsequent bits arrive");
 }
 void presentation() {
     Application app({.simulation=true});
@@ -432,18 +245,15 @@ void rate_carrier_declarations() {
     const auto& rate=control(F::bandwidth);const auto& carrier=control(F::carrier);
     check(std::string_view(rate.label)=="Rate" && std::string_view(carrier.label)=="Carrier" &&
           rate.kind==ui::Kind::text && carrier.kind==ui::Kind::text && rate.persistent && carrier.persistent &&
-          carrier.open_upward && app.field(carrier.field).options.size()==1 &&
-          app.field(carrier.field).options.front().id=="1.5 kHz",
+          carrier.open_upward && !app.field(carrier.field).options.empty(),
           "Rate and Carrier must be shared persistent editable dropdowns");
     for(const auto& page:ui::pages()) {
         app.select_page(page.id);app.preset(rate,"2.4 kHz");
-        check(app.field(F::carrier).text=="1.8 kHz" && app.field(F::carrier).options.size()==1 &&
-              app.field(F::carrier).options.front().id=="1.8 kHz",
-              "Rate preset did not offer only its default Carrier on every page");
+        check(app.field(F::carrier).text=="1.8 kHz","Rate preset did not reset Carrier on every page");
+        app.preset(carrier,"2 kHz");
+        check(app.field(F::carrier).text=="2 kHz","Carrier preset did not use the shared edit path");
         app.edit(carrier,"2150 Hz");
         check(app.field(F::carrier).text=="2150 Hz","Carrier dropdown did not accept a custom frequency");
-        app.preset(carrier,"1.8 kHz");
-        check(app.field(F::carrier).text=="1.8 kHz","Default Carrier preset did not use the shared edit path");
         app.preset(rate,"3.6 kHz");
         check(app.field(F::carrier).text=="1.5 kHz","HF rate preset did not restore its recommended carrier");
         for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
@@ -455,34 +265,6 @@ void rate_carrier_declarations() {
                   "Rate and Carrier native editors or suggestion buttons overlap");
         }
     }
-}
-void mono_declaration() {
-    Application app({.simulation=true});
-    const auto& mono=control(ui::Field::mono);
-    const std::string_view help=mono.help;
-    check(mono.kind==ui::Kind::toggle&&mono.persistent&&std::string_view(mono.label)=="Mono"&&
-          app.field(mono.field).checked&&help.find("right channel")!=help.npos&&
-          help.find("sole channel")!=help.npos&&help.find("both stereo channels")!=help.npos,
-          "Mono must be a default-on shared toggle explaining stereo and mono-device routing");
-    for(const auto& page:ui::pages()) {
-        app.select_page(page.id);
-        const auto presentation=app.control(mono);
-        check(presentation.visible&&presentation.enabled,"Mono routing disappeared or became unavailable on another page");
-        app.toggle(mono,false);
-        check(!app.field(mono.field).checked,"Declared Mono off callback did not reach the shared controller");
-        app.toggle(mono,true);
-        check(app.field(mono.field).checked,"Declared Mono on callback did not reach the shared controller");
-        for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
-            const auto geometry=ui::control_layout(mono,app.field(mono.field),size.w,size.h);
-            const auto diagnostics=ui::control_layout(control(ui::Field::diagnostics),app.field(ui::Field::diagnostics),size.w,size.h);
-            check(!geometry.has_label&&geometry.widget.w>=74&&geometry.widget.h>=22&&
-                  geometry.frame.x+geometry.frame.w<diagnostics.frame.x,
-                  "Mono's native checkbox label or diagnostic text lost its reserved space");
-        }
-    }
-    app.close();app.toggle(mono,false);
-    check(!app.control(mono).enabled&&app.field(mono.field).checked,
-          "A stale declared Mono callback reconfigured a closing application");
 }
 void declared_submission() {
     Application app({.simulation=true});
@@ -647,66 +429,6 @@ void declarations() {
     const auto a=ui::control_layout(extension[0],{},1180,866,extension),b=ui::control_layout(extension[1],{},1180,866,extension);
     check(a.frame.x+a.frame.w<b.frame.x&&a.frame.y==b.frame.y,"Generic extension declarations overlap or ignore order");
 }
-std::string document_text(const ui::DocumentNode& node) {
-    std::string result=node.text+"\n";
-    for(const auto& child:node.children)result+=document_text(child);
-    return result;
-}
-void typed_short_text_inspection() {
-    using F=ui::Field;using P=ui::Page;
-    Application app({}); // Production defaults; no audio session is needed to inspect a draft.
-    const auto& message=control(F::message);
-    check(app.field(F::bandwidth).text=="3.6 kHz" && app.field(F::carrier).text=="1.5 kHz" &&
-          app.field(F::snr).text=="32" && app.field(F::receive_snr).text=="32" &&
-          app.field(F::pattern).selected=="auto-pattern" && app.field(F::fec).selected=="rs60" &&
-          !app.field(F::repeatable).checked,"Production defaults changed the short message fixture");
-    const auto await_layout=[&] {
-        const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
-        do {app.tick();if(app.field(F::transmission_detail).text.find("Transmitted bits:")!=std::string::npos)return;
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        } while(std::chrono::steady_clock::now()<deadline);
-        throw Error("Typed message did not produce its current transmission layout: "+app.field(F::inspection).text);
-    };
-    app.edit(message,"A longer previous message");await_layout();
-    const auto old_document=app.document(P::transmission,900);
-    check(document_text(*old_document).find("Fixed 128-byte coded interval")!=std::string::npos,
-          "Long source fixture did not exercise the old interval document cache");
-    const std::string source="quick brown";
-    app.edit(message,std::string(4096,'Q'));
-    std::this_thread::sleep_for(std::chrono::milliseconds(130));app.tick(); // Start an older long draft's estimate.
-    for(std::size_t count=1;count<=source.size();++count) {
-        app.edit(message,source.substr(0,count));
-        check(app.field(F::message).text==source.substr(0,count),"Native-style typing inserted hidden source text");
-    }
-    app.select_page(P::transmission);
-    check(app.field(F::transmission_detail).text.empty() &&
-          document_text(*app.document(P::transmission,900)).find("Fixed 128-byte coded interval")==std::string::npos,
-          "A changed short draft must immediately replace the old interval layout with pending state");
-    await_layout();
-    const auto check_short=[&](std::size_t bits) {
-        const auto& layout=app.field(F::transmission_detail).text;
-        const auto document=app.document(P::transmission,900);const auto rendered=document_text(*document);
-        check(document!=old_document && layout.find("Meaningful bits: "+std::to_string(bits)+"\n")!=std::string::npos &&
-              layout.find("Transmitted bits: "+std::to_string(bits)+"\n")!=std::string::npos &&
-              layout.find("Coded stream:")==std::string::npos && layout.find("Byte-boundary recovery: 0 bits")!=std::string::npos &&
-              rendered.find("Fixed 128-byte coded interval")==std::string::npos,
-              "Transmission layout retained interval coding or an earlier draft after short text input");
-    };
-    check_short(70);
-    app.select_page(P::console);app.edit(control(F::binary),"010");await_layout();check_short(3);
-    // A partial raw edit retains the text preview. Re-entering that same text
-    // must still switch dispatch back to dictionary text rather than be ignored.
-    app.edit(message,source);await_layout();check_short(70);
-    app.toggle(control(F::repeatable),true);await_layout();
-    check(app.field(F::message).text.starts_with("REPEATABLE-") &&
-          app.field(F::transmission_detail).text.find("Coded stream:")!=std::string::npos,
-          "Explicit Repeatable prefix must remain visible and count toward actual source size");
-    app.toggle(control(F::repeatable),false);await_layout();check_short(70);
-    check(app.field(F::message).text==source,"Turning Repeatable off did not recover the exact short draft");
-    app.edit(control(F::callsign),"N0CALL");app.edit(message,"");app.edit(message,source);await_layout();check_short(70);
-    app.close();
-}
-
 void compression_declarations() {
     const auto page=std::find_if(ui::pages().begin(),ui::pages().end(),[](const auto& p){return p.id==ui::Page::compression;});
     check(page!=ui::pages().end()&&!page->document&&std::string_view(page->title)=="Compression / raw bits",
@@ -719,7 +441,7 @@ void compression_declarations() {
         controls.push_back(&c);fields.insert(c.field);commands.insert(c.command);
         check(!c.persistent&&c.slot!=ui::Slot::none,"Compression binding lost shared page geometry");
         if(c.field==ui::Field::short_bits)
-            check(c.kind==ui::Kind::text&&c.multiline&&c.byte_limit==2*transfer::short_message_bits&&c.submit==ui::Command::transmit_short_bits&&
+            check(c.kind==ui::Kind::text&&!c.multiline&&c.submit==ui::Command::transmit_short_bits&&
                   c.submit_mode==ui::Field::send_key,"Short-bit editor lost its guarded send-key binding");
         if(c.field==ui::Field::signals)
             check(c.kind==ui::Kind::list&&c.follow_tail&&!c.activate_on_select&&c.activate_record==ui::Command::copy_raw_signal,
@@ -730,7 +452,7 @@ void compression_declarations() {
                 label.find("fixed 128-byte coding intervals")!=label.npos;
         }
     }
-    check(explains_code,"Raw-bit page must explain short dictionary and longer fixed interval behavior");
+    check(explains_code,"Raw-bit page retained an implicit dictionary or omitted fixed interval behavior");
     for(const auto field:{ui::Field::short_bits,ui::Field::short_bits_detail,ui::Field::compression_codes,
                          ui::Field::received_raw_bits,ui::Field::signals,ui::Field::send_key,ui::Field::airtime})
         check(fields.contains(field),"Compression page lost a shared field binding");
@@ -755,62 +477,8 @@ void compression_declarations() {
     check(std::string_view(control(ui::Field::binary).help).find("Incomplete bytes pause")==std::string_view::npos,
           "Binary help still rejects supported short raw patterns");
 }
-void noise_declarations_and_dispatch() {
-    using C=ui::Command;using F=ui::Field;using P=ui::Page;
-    const auto declaration=[](C command,P page)->const ui::Control& {
-        const auto& controls=ui::console_screen();
-        const auto found=std::find_if(controls.begin(),controls.end(),[&](const auto& c){return c.command==command&&c.page==page;});
-        if(found==controls.end())throw Error("Missing shared tuning-noise control");
-        return *found;
-    };
-    Application app({.simulation=true});
-    for(const auto page:{P::console,P::compression}) {
-        const auto& noise=declaration(C::transmit_noise,page);
-        const auto& send=declaration(page==P::console?C::transmit:C::transmit_short_bits,page);
-        const auto& cancel=declaration(C::cancel,page);
-        check(noise.kind==ui::Kind::action&&!noise.persistent&&noise.field==F::count&&
-              noise.slot==(page==P::console?ui::Slot::transmit_noise:ui::Slot::short_transmit_noise)&&
-              std::string_view(noise.label)=="Transmit noise"&&
-              std::string_view(noise.help).find("fresh temporary keys")!=std::string_view::npos&&
-              std::string_view(noise.help).find("Stop noise")!=std::string_view::npos,
-              "Tuning noise lost its shared button, temporary-key help or stop instructions");
-        for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
-            const auto a=app.control_layout(send,size.w,size.h).frame;
-            const auto b=app.control_layout(noise,size.w,size.h).frame;
-            const auto c=app.control_layout(cancel,size.w,size.h).frame;
-            check(a.y==b.y&&b.y==c.y&&a.h==b.h&&b.h==c.h&&
-                  a.x+a.w<b.x&&b.x+b.w<c.x&&b.w>=130&&c.x+c.w<=size.w-ui::margin,
-                  "Transmit noise overlaps its neighboring actions or clips at a supported desktop size");
-        }
-        app.select_page(page);
-        check(app.control(noise).enabled&&app.control(noise).visible,
-              "Empty composer disabled or hid the shared tuning-noise action");
-    }
-    app.select_page(P::console);app.edit(control(F::binary),"invalid draft");
-    const auto draft=app.field(F::binary).text;
-    const auto& noise=declaration(C::transmit_noise,P::console);
-    check(app.control(noise).enabled&&!app.enabled(C::transmit),
-          "Invalid message draft disabled noise in the shared facade");
-    app.start();app.activate(noise);
-    check(!app.control(noise).enabled&&app.control(declaration(C::cancel,P::console)).label=="Stop noise",
-          "Native noise action did not dispatch the controller's start and dynamic stop label");
-    app.select_page(P::compression);
-    const auto& cancel=declaration(C::cancel,P::compression);
-    check(app.control(cancel).enabled&&app.control(cancel).label=="Stop noise"&&
-          !app.control(declaration(C::transmit_noise,P::compression)).enabled,
-          "Changing pages lost the common active noise state");
-    app.activate(cancel);
-    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
-    while(!app.enabled(C::transmit_noise)&&std::chrono::steady_clock::now()<deadline) {
-        app.tick();std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-    check(app.enabled(C::transmit_noise)&&!app.control(cancel).enabled&&app.control(cancel).label=="Cancel TX"&&
-          app.field(F::binary).text==draft,
-          "Shared Stop noise failed to restore controls and preserve the invalid draft");
-    app.close();check(!app.enabled(C::transmit_noise),"Closed application retained an active noise action");
-}
 }
 int main() {
-    try {transmission_scope_records();transmission_scope_reflow();records();progressive_pending_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();mono_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();noise_declarations_and_dispatch();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();compression_declarations();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

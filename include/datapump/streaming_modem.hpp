@@ -1,7 +1,6 @@
 #pragma once
 #include "datapump/modem.hpp"
 #include "datapump/pattern_receiver.hpp"
-#include "datapump/transmit_trace.hpp"
 #include <functional>
 #include <memory>
 #include <optional>
@@ -24,9 +23,6 @@ struct ConstellationBatch {
 // Unframed binary input: one meaningful 0/1 bit per element, including leading
 // zeros. Every symbol carries exactly one bit, including the last symbol.
 struct RawBits { Bytes bits; };
-// Continuous random bits through the ordinary encrypted pattern modem, with
-// a private temporary key per start and no message contents or framing.
-struct Noise {};
 
 class StreamingTransmitter {
 public:
@@ -37,11 +33,9 @@ public:
     // bitmap frame of physical chips, including a chip already in progress.
     static std::size_t constellation_history_capacity(const Config& config);
     // Both input forms include the rounded settling prefix and an exact
-    // three-second suppression-noise tail, outside all payload symbol slots.
+    // two-second suppression-noise tail, outside all payload symbol slots.
     StreamingTransmitter(Bytes wire, Config config, std::size_t workspace_bytes = 8 * 1024 * 1024);
-    StreamingTransmitter(RawBits bits, Config config, std::size_t workspace_bytes = 8 * 1024 * 1024,
-                         TransmitTrace trace = {});
-    StreamingTransmitter(Noise, Config config, std::size_t workspace_bytes = 8 * 1024 * 1024);
+    StreamingTransmitter(RawBits bits, Config config, std::size_t workspace_bytes = 8 * 1024 * 1024);
     ~StreamingTransmitter();
     StreamingTransmitter(StreamingTransmitter&&) noexcept;
     StreamingTransmitter& operator=(StreamingTransmitter&&) noexcept;
@@ -63,9 +57,6 @@ public:
     // Each point is retained once, regardless of PCM block size or duration.
     std::vector<std::complex<double>> payload_constellation() const;
     ConstellationBatch take_payload_constellation();
-    // Actual generation prefix; previews do not advance it. Source preparation
-    // can be visible before read(), wire/chip rows require begun payload slots.
-    TransmitTrace transmit_trace() const;
     // Reconstruct the actual recent PCM, including spreading and carrier phase.
     // At most 2048 samples; any portion before the transmission is zero-filled.
     void preview_last(std::span<float> output) const;

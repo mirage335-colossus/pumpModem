@@ -1,7 +1,6 @@
 """CLI integration for the fixed interval format and physical end gate."""
 import base64
 import json
-import math
 import pathlib
 import subprocess
 import sys
@@ -23,26 +22,12 @@ class StreamCLI(unittest.TestCase):
         for command in ('pack','unpack'):
             self.run_pump(command,'--text','x',ok=False)
     def test_short_text_dictionary_threshold(self):
-        for size in (1,15,16,17):
+        for size in (1,15,16):
             for fec in ('off','20','60'):
                 value=json.loads(self.run_pump('estimate','--text','e'*size,'--fec',fec,*AUDIO).stdout)
-                self.assertEqual(value['coded_bytes'],(3*size+7)//8 if size<=16 else 128)
-                self.assertEqual(value['wire_bits'],3*size if size<=16 else 1216)
+                self.assertEqual(value['coded_bytes'],(3*size+7)//8 if size<16 else 128)
+                self.assertEqual(value['wire_bits'],3*size if size<16 else 1216)
                 self.assertNotIn('packet_bytes',value)
-    def test_shannon_capacity_estimate(self):
-        for bandwidth,target,expected in ((1000,30,1000), (2000,30,1169.9250014423124),
-                                          (1000,60,9967.226258835993), (30000000,-200,1.4426950408889634e-20)):
-            # Force a finite symbol at the weakest target, beyond automatic timing's range.
-            pattern=('--pattern','pattern-16') if target==-200 else ()
-            value=json.loads(self.run_pump('estimate','--text','e','--bw',bandwidth,
-                                          '--target-snr',target,*pattern).stdout)
-            self.assertTrue(math.isclose(value['shannon_capacity_bps'],expected,rel_tol=1e-12))
-            self.assertEqual(value['wire_bits'],3)
-            self.assertIn('bit_rate',value)
-        manual=json.loads(self.run_pump('estimate','--text','e',*AUDIO).stdout)
-        self.assertTrue(math.isclose(manual['shannon_capacity_bps'],1370.1046697509862,rel_tol=1e-12))
-        extreme=json.loads(self.run_pump('estimate','--text','e','--bw','1000','--target-snr','1e308').stdout)
-        self.assertIsNone(extreme['shannon_capacity_bps'])
     def test_short_dictionary_text_received_with_exact_bits(self):
         source=b'e\x00'
         value=json.loads(self.run_pump('simulate','--input','-','--json','--snr','30',
@@ -55,26 +40,6 @@ class StreamCLI(unittest.TestCase):
         self.assertEqual(value['raw_bits'],'001'+'11111'+'00000000')
         self.assertEqual(value['raw_bit_count'],16)
         self.assertEqual(value['filename'],'')
-    def test_automatic_profile_short_text_and_binary_dictionary(self):
-        defaults=('--bw','3600','--pattern','auto-pattern',
-                  '--time','1800000000','--search-seconds','0')
-        for source,expected_bits in (('quick brown',70),('quick brown fox ',98),('e'*16,48)):
-            estimate=json.loads(self.run_pump('estimate','--text',source,*defaults).stdout)
-            self.assertEqual(estimate['wire_bits'],expected_bits)
-            value=json.loads(self.run_pump('simulate','--text',source,'--json','--snr','30',
-                '--clock-error-ppm','0','--phase-noise','0',*defaults).stdout)
-            self.assertTrue(value['stream_complete'])
-            self.assertTrue(value['short_text_decoded'])
-            self.assertFalse(value['content_validated'])
-            self.assertEqual(value['observed_bit_count'],expected_bits)
-            self.assertEqual(base64.b64decode(value['data_base64']),source.encode())
-        with tempfile.TemporaryDirectory() as directory:
-            path=pathlib.Path(directory)/'raw.wav'
-            self.run_pump('status-tx','--bits','010','--output',path,*defaults)
-            value=json.loads(self.run_pump('rx','--input',path,'--json',*defaults).stdout)
-            self.assertEqual(value['raw_bits'],'010')
-            self.assertEqual(base64.b64decode(value['data_base64']),b't')
-            self.assertTrue(value['short_text_decoded'])
     def test_three_bit_dictionary_text_and_physical_end(self):
         with tempfile.TemporaryDirectory() as directory:
             path=pathlib.Path(directory)/'letter.wav'
@@ -164,7 +129,7 @@ class StreamCLI(unittest.TestCase):
     def test_raw_bits_same_physical_rule(self):
         with tempfile.TemporaryDirectory() as directory:
             path=pathlib.Path(directory)/'raw.wav'
-            self.run_pump('status-tx','--bits','001','--output',path,'--no-mono',*AUDIO)
+            self.run_pump('status-tx','--bits','001','--output',path,*AUDIO)
             value=json.loads(self.run_pump('status-rx','--bits','001','--input',path,*AUDIO).stdout)
             self.assertEqual(value['raw_bits'],'001')
             self.assertTrue(value['known_bits_match'])
@@ -172,7 +137,6 @@ class StreamCLI(unittest.TestCase):
             self.assertTrue(value['stream_complete'])
             with wave.open(str(path),'rb') as f:
                 params=f.getparams();pcm=f.readframes(f.getnframes())
-            self.assertEqual(params.nchannels,1,'Live stereo routing must not change WAV framing')
             trim=6*params.framerate*params.sampwidth*params.nchannels
             with wave.open(str(path),'wb') as f:
                 f.setparams(params);f.writeframes(pcm[:-trim])

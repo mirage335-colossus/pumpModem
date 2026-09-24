@@ -15,16 +15,11 @@ unimplemented. See the [requirements matrix](docs/requirements.md) for precise
 coverage and boundaries. No unimplemented control is presented as functioning.
 
 The transport sends one bit per pattern symbol. Pattern evidence alone admits
-timing, carrier and keystream candidates. Nonempty text of up to 16 source bytes and
+timing, carrier and keystream candidates. Nonempty text below 16 source bytes and
 explicit bit drafts use raw transmission. Longer byte streams use a fixed 128-byte coding
 interval after each alignment marker, with no packet header, received length,
 or metadata parser. Legacy APSK and packet APIs have been removed; peers must use
 the same local source/FEC profile. Short text uses the fixed bit dictionary.
-
-**Development requirement:** preserve tiny dictionary/raw-bit messages, fixed
-intervals and per-bit pending reception. Each bit may cost hours or longer;
-neither added framing nor waiting for a whole message is harmless. See the
-[message behavior contract and regression checks](docs/development.md).
 
 Encrypted pattern chips use circular I/Q noise with private amplitude and phase,
 removing the fixed squared-carrier signature of the previous +/-1 mapping.
@@ -59,10 +54,10 @@ The model score is evidence for comparing pattern hypotheses;
 it is not a calibrated false-alarm probability, measured SNR, authentication or
 a demonstration of extreme weak-signal performance.
 
-Nonempty text of up to 16 source bytes uses the fixed short dictionary,
+Nonempty text shorter than 16 source bytes uses the fixed short dictionary,
 with no marker, padding, FEC or MAC: `e` sends exactly `001`. Explicit Binary/status input
 also supports individual bits: `001` sends exactly three payload symbols.
-Text longer than 16 bytes and attachments use the fixed interval format. Each 192-bit
+Text of at least 16 bytes and attachments use the fixed interval format. Each 192-bit
 alignment marker precedes 128 coded bytes, for 1,216 symbols per interval. RS20
 uses 106 systematic bytes plus 22 parity bytes; RS60 uses 80 plus 48. Only
 encrypted intervals reserve 32 systematic bytes for HMAC-SHA256. Public intervals
@@ -86,8 +81,7 @@ Marker recognition uses bounded fixed-cadence searches and a conservative `2^-84
 random-input evidence budget, independently of authentication. Unknown slots add
 no marker confidence. See the [fixed stream protocol](docs/protocol.md).
 
-The desktop has **Console**, **Modem flow**, **Transmission layout**, and
-**Compression / raw bits** tabs.
+The desktop has **Console**, **Modem flow**, and **Transmission layout** tabs.
 The inspection views show the two pattern codewords, their modeled distances,
 and exact bit/symbol counts. Long patterns use a bounded illustrative prefix;
 keyed previews use clearly labeled public example streams. These design plots
@@ -120,27 +114,17 @@ independently.
 The DSP workspace dropdown is an upper limit: 25%, 50% (default), or 75% of
 available RAM. It does not request that amount of history. Received messages
 and files have a separate 256 MiB quota. The GUI defaults to **Rate**
-`3.6 kHz`, **Carrier** `1.5 kHz`, and **TX SNR (dB-Hz)** `60`.
+`3.6 kHz`, **Carrier** `1.5 kHz`, and **TX SNR (dB-Hz)** `80`.
 Rate is the nominal chip-rate planning parameter, not a measured occupied
 bandwidth: the default produces 1,800 chips/s and an ideal shaped spectrum of
 375–2,625 Hz, including the 25% RRC rolloff. Rate presets still include `18 kHz`.
 Changing Rate selects its default carrier: `1.5 kHz` for `3.6 kHz`, otherwise
-`max(1500, 0.75 × rate)` Hz. The Carrier dropdown offers only the current rate's
-default carrier; manual frequency entry remains available.
-The **RX targets (dB-Hz)** comma-list also starts at `60`. Changing TX SNR to
+`max(1500, 0.75 × rate)` Hz. Carrier can then be selected or entered separately.
+The **RX targets (dB-Hz)** comma-list also starts at `80`. Changing TX SNR to
 a valid value replaces the RX list with that single matching target; the RX
 list can then be edited independently. Search varies this list while holding
 the selected rate, carrier, and pattern/tone mode fixed. Invalid RX input resets
-the entire list to `60`.
-
-Beside the gross bitrate, diagnostics show the **[Shannon-Hartley limit](https://disalw3.epfl.ch/teaching/signals_instruments_systems/ay_2025-26/lecture/SIS_25-26_W07_lecture.pdf#page=33)** for the
-selected TX target and nominal bandwidth. This is ideal Gaussian-noise channel
-capacity: `B * log2(1 + 10^(C/N0_dBHz / 10) / B)` bit/s, with `B` in Hz. At the
-GUI defaults (3.6 kHz, 60 dB-Hz), it is about **29.2 kbit/s**. Actual payload
-throughput depends on the waveform and coding overhead. CLI `estimate` reports
-the same value as `shannon_capacity_bps`, using `--bw` and `--target-snr` (default
-60 dB-Hz, including manual modem profiles); values beyond the numeric range are
-reported as `null` (GUI: `Unavailable`).
+the entire list to `40`.
 
 Simulation feeds the actual PCM receiver with independent carrier phase and
 sample offset and replays its presentation over three seconds. Signal progress
@@ -198,34 +182,7 @@ transmitted by the automated tests. Physical audio transfer and Windows hardware
 operation still require device testing. Use a capture long enough to contain the
 complete rounded two-second hardware-settling prefix and payload.
 
-Transmit audio defaults to the right channel on stereo outputs and the sole
-channel on mono outputs. Use `--no-mono` to send the same audio to both stereo
-channels. The GUI's **Mono** toggle, below **Audio device**, controls the same
-routing and starts enabled. Mono-only devices remain usable with either setting;
-WAV output and simulation keep their existing single-channel waveform.
-
 ## Desktop console
-
-**Transmit noise**, beside the transmit controls on Console and Compression,
-starts continuous tuning noise; **Stop noise** stops it. It works without a
-draft or loaded key and leaves your draft, attachments and selected keys intact.
-Noise uses the selected carrier, bandwidth, audio device and Mono routing at
-the normal transmit signal level. It always generates noise, including when
-a tone mode is selected. Simulation previews it continuously until stopped.
-
-Every start generates fresh temporary cryptographic key material for the usual
-Data, Scrambler and DSSS streams. The regular pattern encoder modulates
-Data-masked dummy bits using its ordinary encrypted symbol schedule, shaping,
-settling prefix and signal level. No user content, message framing or headers
-are added. The generator advances the streams without looping a recording or
-reusing symbol addresses. Temporary keys never enter the receive key bank or
-keyfile. See [tuning noise](docs/crypto.md#continuous-tuning-noise).
-Chance repetitions in random samples remain possible. Noise supplies no
-public or saved-key pattern for a receiver to recognize, but an unauthenticated raw-bit
-receiver can still make false detections, as it can with background noise.
-Received power and bandwidth determine how much it raises the noise floor;
-cryptographic randomness alone does not establish thermal indistinguishability
-or absence of interference.
 
 FLTK remains the default GUI. An optional Rev backend uses the pinned upstream
 `clean` branch, shared semantic controls/controller and the same bitmap plot
@@ -299,14 +256,11 @@ limited to 128 meaningful bits, with optional whitespace between groups. While
 an attachment is selected, both message draft views are inactive; Use text
 restores the synchronized draft.
 
-The **Compression / raw bits** tab shows the full dictionary bitstream for text
-of 1–16 bytes: `quick brown` shows 70 bits. Its editor accepts up to 208 exact
-bits and previews the expected dictionary text; `010` previews `t`. Editing this
-field selects exact raw transmission. One- and two-bit inputs and incomplete
-codes remain usable raw messages without invented characters or padding.
-After physical completion, eligible short receptions show their dictionary
-text and retain the exact bits for copying or retransmission. **Paste as message**
-loads decoded bytes into Message. Console Binary keeps its 128-bit editing limit.
+The raw-bit controls preserve exact short patterns, including leading zeros and
+incomplete bytes. After physical completion, eligible short receptions also show
+their fixed-dictionary text interpretation. Select a reception to copy its retained raw bits or load a short pattern for
+sending again. **Paste as message** loads decoded source bytes into the message
+editor; Console Binary supports longer raw drafts up to 128 bits.
 
 **Callsign** and **Grid** are convenience fields for the editable greeting in
 Message. Clearing Message inserts `CQ CQ CQ`, followed by ` DE ` and Callsign
@@ -337,7 +291,7 @@ updating while idle. Transmissions run at CPU speed through noisy PCM, with
 virtual airtime reported separately. The receiver runs independently through
 idle noise and burst starts and derives timing, phase and spreading correlation
 from its samples. Transmit start and completion do not reset its acquisition.
-After computation completes, the entire transmission (including any hardware-settling prefix and the three-second echo-suppression noise)
+After computation completes, the entire transmission (including any hardware-settling prefix and the two-second echo-suppression noise)
 replays chronologically over three seconds. Waveform, waterfall, constellation
 and pattern evidence follow the same timeline. Each frame shows fresh measured
 input I/Q and the retained pattern evidence at that transmission position.
@@ -443,9 +397,7 @@ and `content_validated: false`. Manual sample-rate/carrier overrides use the sam
 pattern transport.
 
 The reference modem accepts nominal bandwidths from 1 Hz through 30 MHz and
-forced durations of 1..16,384 chips. `--target-snr` is the desired C/N0 in dB-Hz,
-defaulting to 60 (60 dB/1Hz). Large messages and attachments default to 60%
-Reed–Solomon parity overhead (`--fec 60`).
+forced durations of 1..16,384 chips. `--target-snr` is the desired C/N0 in dB-Hz.
 Auto planning uses one bit per pattern symbol, a 16/32/64-chip floor based on
 in-band SNR and an initial 18 dB integrated-energy model. Forced short patterns
 preserve their duration and report unsupported automatic confidence assumptions
@@ -498,10 +450,6 @@ that exceed that workspace. Corrected source intervals drain to a quota-limited 
 physical completion; it is separate from the application receive cache.
 
 ## Development and portability
-
-Start with the [message behavior preservation contract](docs/development.md).
-It records the required short-text/binary paths, physical-end boundary and
-pending GUI behavior, with focused regression commands.
 
 ```sh
 cmake -S . -B build-sanitize -DCMAKE_BUILD_TYPE=Debug -DDATAPUMP_SANITIZERS=ON

@@ -12,9 +12,6 @@ namespace datapump::live {
 struct Settings {
     transfer::Options transfer;
     std::string device = "default";
-    // Right channel on stereo output, sole channel on mono output. When off,
-    // send the same signal to both stereo channels.
-    bool mono = true;
     bool simulation = false;
     double simulation_snr_db = 18;
     double simulation_clock_error_ppm = 100;
@@ -64,14 +61,8 @@ struct SignalUpdate {
     std::string raw_bits;
 };
 enum class ConstellationSource { input, transmitted, received };
-struct PatternScoreObservation {
-    std::uint64_t id = 0;
-    std::chrono::steady_clock::time_point observed_at{};
-    bool operator==(const PatternScoreObservation&) const = default;
-};
 struct Snapshot {
     static constexpr std::size_t pattern_score_limit = 128;
-    static constexpr auto pattern_score_lifetime = std::chrono::seconds(6);
     std::vector<float> waveform;
     std::vector<double> spectrum_db;
     double spectrum_bin_hz = 0;
@@ -79,23 +70,13 @@ struct Snapshot {
     // Retained receiver hypotheses, not probabilities: real = pattern 0
     // evidence, imaginary = pattern 1 evidence, both against noise.
     std::vector<std::complex<double>> pattern_scores;
-    // Stable identities and first-observed presentation times, parallel to
-    // pattern_scores. Repeated retained hypotheses do not refresh their age.
-    std::vector<PatternScoreObservation> pattern_score_observations;
-    // Highest observation allocated at this live/replay position, including
-    // candidates from receivers not selected for the displayed plot.
-    std::uint64_t pattern_score_observation_id = 0;
     ConstellationSource constellation_source = ConstellationSource::input;
     std::vector<SignalUpdate> signals;
     std::vector<transfer::Received> received;
-    // Bounded capture from the actual transmitter. Replay uses its matching
-    // generation frame; idle snapshots retain the last transmission capture.
-    modem::TransmitTrace transmit_trace;
     std::string status;
     std::string error;
     bool running = false;
     bool transmitting = false;
-    bool transmitting_noise = false; // Continuous tuning noise; fraction has no endpoint.
     bool simulation = false;
     std::uint64_t sequence = 0;
     std::uint64_t samples_received = 0;
@@ -139,19 +120,12 @@ public:
     void start(const Settings& settings);
     void configure(const Settings& settings);
     void update(const Settings& settings) { configure(settings); }
-    // Apply output routing to the next playback without interrupting reception
-    // or changing audio already being transmitted.
-    void set_mono(bool mono);
     void transmit(const Message& message);
     // One 0/1 per element, including leading zeros. Uses streaming APSK and
     // the selected data key, with no interval coding, preamble or FEC. Raw
     // simulations pass sampled audio to ordinary blind acquisition. Without
     // raw discovery framing, no timing/length-assisted raw result is emitted.
     void transmit_bits(std::span<const std::uint8_t> bits);
-    // Continuous noise at the selected carrier/bandwidth and normal signal
-    // level, with fresh temporary private streams. Does not encode a message
-    // or use/register saved keys. Stop with cancel_transmit().
-    void transmit_noise();
     void cancel_transmit();
     Snapshot snapshot();
     void stop();

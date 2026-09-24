@@ -1,7 +1,7 @@
 # Modem and transmission inspection
 
 The native desktop keeps shared key, metadata and modem controls visible above
-and below four tabs. **Console** contains composition, the signal browser,
+and below three tabs. **Console** contains composition, the signal browser,
 received files and live plots. Switching tabs leaves the receiver and current
 three-second simulation replay running.
 
@@ -9,9 +9,9 @@ three-second simulation replay running.
 cards. Automatic profiles carry one meaningful bit in each of two distinguishable
 patterns. Their cards show content-bit encoding, optional private Data masking,
 pattern selection, hardware settling, audio or sampled simulation, and reception
-by pattern evidence. Text longer than 16 source bytes, files and screenshots use
+by pattern evidence. Text of at least 16 source bytes, files and screenshots use
 fixed 128-byte coded intervals, with one alignment marker before each interval.
-Nonempty text of up to 16 bytes uses the fixed short dictionary, bypassing interval
+Nonempty text below 16 bytes uses the fixed short dictionary, bypassing interval
 codecs. Explicit raw bits bypass both. The separate settling
 waveform helps external hardware prepare and is never an acquisition condition.
 Active, disabled and unavailable stages have
@@ -63,7 +63,7 @@ slots for Reed–Solomon erasure correction. EOF and codec success do not comple
 a stream.
 
 Receive searches use the selected rate, carrier and pattern mode, plus the separate
-comma-separated target C/N0 list. Invalid list text resets it to `60`. Carrier,
+comma-separated target C/N0 list. Invalid list text resets it to `40`. Carrier,
 clock and key coverage is finite. The long-symbol fallback requires an explicit
 clock-start window and budgets every frequency/rate/timing combination; memory
 or CPU can still make that coverage impractical. See
@@ -80,7 +80,7 @@ bit, with zero modem training and symbol padding. A separate hardware-settling
 block rounds two seconds to the nearest whole payload-symbol duration, with
 ties upward; it is absent for symbols longer than four seconds. Its duration
 contributes to total airtime without adding meaningful bits. A separate echo-suppression
-block follows the payload and filter tail for exactly three seconds, even for
+block follows the payload and filter tail for exactly two seconds, even for
 hour-long symbols. It carries no bits and supplies no ending rule. The diagrams show
 counts and placeholders,
 never input contents, metadata values, key bytes or private spreading sequences.
@@ -112,16 +112,7 @@ selection clears and disables encryption, and its inspection reports that it
 provides no LPI protection. Private pattern examples use public illustration
 seeds; actual private streams never appear in configuration illustrations.
 
-**Compression / raw bits** shows the full fixed dictionary encoding for text of
-1–16 source bytes, including the 16-byte endpoint, and previews the expected text.
-Its editor accepts up to 208 exact bits, including leading zeros and incomplete
-tokens. Editing it selects explicit raw transmission; editing Message returns to
-text encoding. Dictionary preview in the composer does not enable pre-end source
-decoding of a pending reception. These paths and the incremental pending view are
-[development requirements](development.md).
-
-The separate **Console Binary** field has a 128-bit limit. For a draft no longer
-than 16 bytes, editing this binary field selects an exact
+For a draft no longer than 16 bytes, editing the binary field selects an exact
 raw draft of up to 128 bits. A partial final byte is valid and adds no padding;
 complete bytes also refresh the separate text/byte view. Editing text returns
 to ordinary text encoding. For longer messages, the binary field continues to

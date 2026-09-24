@@ -25,24 +25,6 @@ screen fitting and host file-chooser internals remain toolkit mechanisms.
 
 ## Controls and state
 
-**Transmit noise** appears beside the transmit controls on Console and
-Compression. It starts the regular encrypted pattern modulation with fresh
-temporary keys and dummy bits, independently of draft/attachment validity or
-the selected saved key. Valid modem settings and an idle transmitter are
-required; key loading disables startup. **Stop noise** cancels it, and the mode
-line shows elapsed time. Drafts, prepared inspection, previous-message history
-and saved keys remain intact. Simulation runs continuously without a completion
-replay. Automatic transmission capture stays hidden during noise; manual Hex/Bits
-show an explanatory caption and no retained temporary keystream diagnostics.
-
-The persistent **Mono** toggle below **Audio device** starts enabled. Transmit
-audio uses the right channel of a stereo output, with silence on the left;
-mono-only outputs use their sole channel. Turning Mono off sends the same audio
-to both stereo channels. It follows the audio device control's availability
-during transmission. Changing it preserves the running receiver, pending bits,
-plots and airtime estimate; the selected routing applies to the next playback.
-Simulated samples and exported WAV framing are independent of this choice.
-
 The persistent **DSP workspace** choice selects 25%, 50% (default), or 75% of
 available RAM. Its display includes the resolved MiB/GiB ceiling. The value is
 sampled at controller startup and when the percentage changes; other modem edits
@@ -53,26 +35,18 @@ received-message/file cache.
 The persistent **Rate** field defaults to `3.6 kHz`, with `18 kHz` also
 available as a preset. The adjacent editable **Carrier** dropdown defaults to
 `1.5 kHz`. Changing Rate resets Carrier to `1.5 kHz` for `3.6 kHz`, otherwise
-to the existing `max(1500, 0.75 × rate)` Hz recommendation. The dropdown offers
-only the current rate's default carrier. A manually entered carrier override
+to the existing `max(1500, 0.75 × rate)` Hz recommendation. A carrier override
 persists until the next rate change. Both fields configure transmit planning,
 receive profiles, live audio, simulation and inspection together. Rate remains
 the nominal timing parameter; it does not claim a measured spectral width.
-**TX SNR (dB-Hz)** defaults to `60`; its presets include
+**TX SNR (dB-Hz)** defaults to `80`; its presets include
 `140`, `120`, `100`, `80`, `60`, `20`, `-10`, `-16`, `-20`, `-23`, `-26` and
 `-30` alongside the existing targets.
 
-Diagnostics show the gross modem bitrate followed by the **Shannon-Hartley
-limit**, the ideal Gaussian-noise channel capacity in bit/s. It uses the accepted
-TX target C/N0 and nominal Rate as bandwidth; RX targets and simulation noise do
-not select this estimate. It updates with accepted settings and retains the last
-valid value while a setting contains an invalid draft. The diagnostic tooltip
-explains the formula and distinguishes channel capacity from payload throughput.
-
-The **RX targets (dB-Hz)** comma-list initially matches the TX default, `60`.
+The **RX targets (dB-Hz)** comma-list initially matches the TX default, `80`.
 Changing TX SNR to a valid value replaces the RX list with that single matching
 target. The RX list can then be edited independently without changing TX SNR.
-It trims and deduplicates valid entries, and resets the entire list to `60` on
+It trims and deduplicates valid entries, and resets the entire list to `40` on
 invalid input. Its 512-byte edit limit and 750 ms normalization delay allow
 comma/minus drafts while keeping native adapters free of parser logic. Receive
 profiles hold the selected rate, carrier and pattern/tone mode fixed.
@@ -144,7 +118,7 @@ to accept input across page changes.
 eligibility, options and records. Options have IDs, literal labels and enabled
 flags. `display_text` optionally shows an effective value without replacing a
 saved selection or disabling an otherwise enabled choice. For example, the
-selected Reed-Solomon preset (60% by default) remains saved
+selected Reed-Solomon preset remains saved
 while a tiny message reports `Off (short dictionary)`.
 
 A record has a stable ID, enabled/activation eligibility and ordered native text
@@ -163,80 +137,7 @@ final byte uses an exact-bit record. **Paste as message** loads text/byte record
 into the composer without interpreting their display escapes as literal
 characters. Binary shows the first 16 message bytes.
 
-The Compression page mirrors the entire dictionary encoding of a 1–16-byte
-Message draft and previews its expected text. Its separate exact-bit editor
-accepts 1–208 bits, including leading zeros and incomplete codes; it preserves
-the dictionary preview independently of byte packing. Editing that field
-selects raw transmission. Console Binary retains its separate 128-bit edit
-limit. Both fields represent the same active draft, so a later Message edit
-returns to text encoding and a later exact-bit edit sends precisely those bits.
-The transmission layout uses the same short-message limit as the transmitter
-and receiver, including the 16-byte endpoint. Dictionary bytes are never rounded
-up to transmitted whole bytes merely for display.
-
-This incremental pending view and the short/raw compose paths are
-[development requirements](development.md), including when a symbol takes hours
-or longer. GUI refactoring must preserve the next-poll update for each accepted
-bit and must not interpret source content or mark a row complete before physical
-absence establishes the end of reception.
-
 ## Behavior every adapter preserves
-
-### Console transmission scope
-
-The first tab includes ten aligned native-text diagnostic rows and an offset
-header. The scope captures the active transmitter, independently of the draft
-and its estimate. It retains at most 64 source bytes, 256 bits in each data
-lane and 32 bytes in each pattern lane. ASCII alphanumeric source characters
-keep their original positions; other source bytes display as dots. Empty cells
-remain placeholders, and incomplete data bytes show their exact bit prefixes.
-Hex view fits all 32 byte columns at minimum window width; Bits view adds
-aligned binary digits and horizontal scrolling. A partial byte in Hex view
-shows its bit count and the exact prefix beside the row label. Switching views
-only redraws the retained capture. The display choice offers **None**,
-**Hex, auto-hide**, **Hex** and **Bits**, with **Hex, auto-hide** selected by default.
-Auto-hide shows the scope and its caption during transmission and simulation replay, then hides
-them on completion, cancellation or failure. None always hides them. The format
-choice remains available; Hex and Bits show the retained capture even while idle.
-Whenever the scope is hidden, its area collapses: the signal and file browsers
-move up and grow, fitting two more full signal entries, and all four plots grow
-to fill the remaining space. Showing the scope restores its aligned rows and
-the compact browsers and plots on the same presentation update.
-
-Source and compressed-source previews come from the encoding used for that
-transmission. Wire rows advance when payload symbol generation begins; pattern
-rows sample the first chip of each of the first four generated payload symbols.
-Preview reconstruction, settling
-noise and suppression noise do not append payload evidence. Simulation replay
-uses the capture saved with each frame; the source generator may read ahead of
-the simulated receiver. The scope describes generation, not sound-card emission
-or a measurement of intercept probability. The last capture remains available
-after completion or cancellation and resets for the next transmission.
-
-Input, XOR keystream and resulting bytes sit in adjacent rows. The additional
-Wire Plaintext row exposes the complete pre-encryption framing input. The
-compressed-source and transmitted-wire offsets describe different stages.
-For interval sources, source coding/padding, authentication, FEC and the fixed
-markers intervene. **Every wire bit, including each marker, is Data-masked when
-encryption is enabled.** Transmitted Bytes therefore shows ciphertext from the
-final modem input, never a clear marker beside encrypted content. The exact
-short-dictionary and raw-bit endpoints remain unchanged.
-
-Pattern rows show the actual eight input bytes at each sampled symbol start,
-used to map circular I/Q amplitude and phase. Columns 00–07 belong to symbol 0,
-08–0F to symbol 1, 10–17 to symbol 2, and 18–1F to symbol 3. This makes repeated
-public template input visible beside the changing private input, without
-retaining a duration-sized pattern. A private Pattern stream replaces the public template;
-there is no public-template XOR keystream to display. Its replacement bytes
-appear in Pattern Bitstream. DSSS, when enabled, is XORed into those bytes to
-produce Transmitted Pattern Bitstream. The Pattern Keystream row explicitly
-identifies the absent XOR operation. FHSS is not applied by this transmitter
-and its row says so. These are local diagnostic values, not extra wire fields.
-The pattern-byte rows are marked as mapper inputs: payload-dependent pattern
-selection, pulse shaping and carrier modulation follow. The existing waveform
-and transmitted constellation display the generated signal from those stages.
-
-### Native interaction and presentation
 
 - Applying state is silent and preserves unchanged native widgets, focus, text
   cursor/selection, scroll and record identities. Removing or reordering records
@@ -401,15 +302,6 @@ provides titles/captions/error-overlay tone without any source-specific decision
 inside an adapter. Changing QR brightness affects only that bitmap and never
 changes modem state. Monochrome and color are shared presentation preferences;
 unsupported targets retain the grayscale path.
-
-Clicking the Console **Pattern evidence** plot clears its retained points.
-Each observation disappears after six seconds, including while input is idle;
-polling the same candidate does not refresh its age. New observations can appear
-after a clear, even when their scores match an earlier point. The age starts
-when a completed pattern window produces evidence, so a long symbol retains
-its full scoring duration. Replay uses each observation's first scheduled frame
-as its presentation time. Clearing and expiry affect diagnostic display only;
-they do not reset acquisition, discard pending bits or complete a reception.
 
 ## Platform services and lifecycle
 

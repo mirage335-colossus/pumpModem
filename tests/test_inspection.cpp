@@ -119,7 +119,7 @@ void raw_and_short_sources() {
           "hardware prefix must have separate airtime and cannot inflate the three meaningful bits");
     check(section(raw,"Pulse tails").symbols==0 && section(raw,"Pulse tails").duration_seconds==pulse_seconds,
           "pulse edges must account for both tails without adding meaningful symbols");
-    check(section(raw,"Echo suppression").symbols==0 && section(raw,"Echo suppression").duration_seconds==3. && field(raw,"Echo suppression")=="3 s / 0 payload bits", "tail must cost exactly three seconds without payload symbols");
+    check(section(raw,"Echo suppression").symbols==0 && section(raw,"Echo suppression").duration_seconds==2. && field(raw,"Echo suppression")=="2 s / 0 payload bits", "tail must cost exactly two seconds without payload symbols");
     check_airtime(raw);
     request.options.modem.pulse_shaping=false;
     const auto rectangular=gui::inspect(request);
@@ -127,10 +127,10 @@ void raw_and_short_sources() {
           std::abs(raw.estimate.total_seconds-rectangular.estimate.total_seconds-pulse_seconds)<1e-9,
           "disabling shaping must remove only its filter-tail airtime");
     request.options.modem.pulse_shaping=true;request.binary.reset();request.options.compression=false;request.options.fec=FecMode::off;
-    for(const auto size:{1,4,15,16,17})for(const auto kind:{MessageKind::text,MessageKind::file}) {
+    for(const auto size:{1,4,15,16})for(const auto kind:{MessageKind::text,MessageKind::file}) {
         request.message.kind=kind;request.message.filename="sample.bin";request.message.data=Bytes(static_cast<std::size_t>(size),'e');
         const auto source=gui::inspect(request);
-        if(kind==MessageKind::text && static_cast<std::size_t>(size)<=transfer::short_message_bytes) {
+        if(kind==MessageKind::text && size<16) {
             check(!source.binary && !source.stream_layout && source.estimate.coded_bytes==static_cast<std::size_t>((size*3+7)/8) &&
                   source.estimate.wire_bits==static_cast<std::size_t>(size)*3 &&
                   field(source,"Meaningful bits")==std::to_string(size*3) && field(source,"FEC")=="Off" &&
@@ -140,7 +140,7 @@ void raw_and_short_sources() {
         } else check(source.stream_layout && source.stream_layout->intervals==1 && source.estimate.coded_bytes==128 &&
               source.estimate.wire_bits==1216 && field(source,"Meaningful bits")=="1024" &&
               section(source,"Byte-boundary recovery").symbols==192,
-              "attachments and text longer than 16 bytes must retain fixed interval coding");
+              "attachments and text of at least 16 bytes must retain fixed interval coding");
     }
     request.message.kind=MessageKind::text;request.message.data=Bytes{'e'};
     for(const auto fec:{FecMode::off,FecMode::rs20,FecMode::rs60})for(const bool keyed:{false,true}) {
@@ -157,7 +157,7 @@ void raw_and_short_sources() {
     const auto slow=gui::inspect(request);
     check(slow.estimate.wire_bits==3 && slow.estimate.coded_seconds==10800 &&
           field(slow,"Meaningful bits")=="3" && field(slow,"Hardware settling")=="0 s / 0 symbol durations" && section(slow,"Pulse tails").symbols==0 &&
-          std::abs(slow.estimate.total_seconds-slow.estimate.coded_seconds-pulse_seconds-3.)<1e-8,
+          std::abs(slow.estimate.total_seconds-slow.estimate.coded_seconds-pulse_seconds-2.)<1e-8,
           "hour-long pattern inspection must retain pulse tails separately from its zero hardware prefix");
     request.options.modem.integration_seconds=0;request.message.data=Bytes(400,'e');
     const auto marked=gui::inspect(request);

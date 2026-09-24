@@ -4,8 +4,8 @@ The default CLI and GUI transport carries one bit per independent pattern
 codeword. The pattern receiver discovers signal start, bit sequence and end
 from pattern evidence alone. It compares timing, carrier and keystream positions
 without a preamble, packet header, checksum or APSK residual lock condition.
-Nonempty text of up to 16 bytes sends its exact fixed-dictionary bits.
-Text longer than 16 bytes and attachments use fixed 128-byte intervals with
+Nonempty text shorter than 16 bytes sends its exact fixed-dictionary bits.
+Text of at least 16 bytes and attachments use fixed 128-byte intervals with
 locally selected FEC and source encoding, plus HMAC only when keyed. Explicit raw
 drafts send exactly their 0/1 bits, including partial bytes. Both unmarked paths
 bypass interval coding, markers, padding, FEC and MAC. See [protocol.md](protocol.md).
@@ -39,7 +39,7 @@ The modem's nominal chip rate is bandwidth / 2.
 independent of the hardware clock. `symbol_sample_count` rounds that duration
 up once to an internal PCM sample; exact airtime estimates include this rounding.
 Shaped transmissions also include the two finite filter tails described below.
-Every nonempty transmission then adds exactly three seconds of suppression noise;
+Every nonempty transmission then adds exactly two seconds of suppression noise;
 these durations do not change any payload-symbol duration.
 The nominal gross bit rate is selected bits per symbol divided by nominal symbol
 duration, before interval markers, integrity/parity and surrounding-noise overhead. Audio conversion does not alter
@@ -85,7 +85,7 @@ payload bits. For shaped profiles the first payload position is
 ### Trailing suppression noise
 
 Every nonempty transmission, including raw bits and tone mode, appends exactly
-`3 * sample_rate` samples of independent circular noise after the payload's
+`2 * sample_rate` samples of independent circular noise after the payload's
 complete final filter tail. It is never rounded to a symbol boundary, even
 when a symbol lasts hours and the rounded settling prefix is absent. The
 noise is generated from fixed-size caches; no duration-sized tail buffer is
@@ -98,14 +98,13 @@ the settling prefix, with the independent `Suppression` counter domain: its
 high eight bytes are ASCII `suppress`, rather than `preamble` or zero. Eligible
 profiles shape this noise with the same pulse, using virtual neighboring noise
 chips without overlapping the payload waveform. Ten-millisecond edge tapers
-are included within the exact three-second duration. Waveform previews include
+are included within the exact two-second duration. Waveform previews include
 the tail, while payload constellation observations exclude it.
 
 The noise can mask weaker delayed copies of recently transmitted patterns.
-The three-second guard duration is selected for the Earth–Moon–Earth case. It
-is not a bound on possible acoustic or radio echoes, and stronger interference
-can still disrupt reception. The tail carries no valid payload pattern or end
-marker. Reception still ends only
+Two seconds is a selected guard duration, not a bound on possible acoustic or
+radio echoes, and stronger interference can still disrupt reception. It is
+neither a valid payload pattern nor an end marker. Reception still ends only
 after completed unsuccessful pattern searches cover six seconds; suppression
 noise contributes to that absence only when those searches reject it.
 
@@ -261,8 +260,8 @@ physical microphone/speaker frequency response still need device-level validatio
 
 ## Automatic signal planning
 
-The CLI defaults to nominal rate 1,200 Hz and TX target C/N0 of 60 dB-Hz. The GUI
-defaults to Rate 3,600 Hz, Carrier 1,500 Hz and TX target C/N0 of 60 dB-Hz, and
+The CLI defaults to nominal rate 1,200 Hz and TX target C/N0 of 40 dB-Hz. The GUI
+defaults to Rate 3,600 Hz, Carrier 1,500 Hz and TX target C/N0 of 80 dB-Hz, and
 offers an 18 kHz rate preset. Its default shaped spectrum ideally spans
 375–2,625 Hz, including rolloff, for ordinary audio transfer between computers.
 This changes carrier placement and chip timing, not the keystream purposes,
@@ -270,13 +269,13 @@ encryption, pulse shape or pattern-evidence synchronization rules. The selected
 rate, carrier and pattern/tone mode are fixed during receive
 search; encryption normally selects `auto-keystream`, with `auto-pattern`
 otherwise. The **RX targets (dB-Hz)** field and CLI `--receive-targets` accept
-a comma-separated list. The GUI RX list starts at `60`; changing TX SNR to a
+a comma-separated list. The GUI RX list starts at `80`; changing TX SNR to a
 valid value replaces it with that single matching target. It can then be edited
-independently. The CLI receive list defaults to `60`.
+independently. The CLI receive list defaults to `40`.
 
 Entries are trimmed and deduplicated. An empty, malformed,
 nonfinite, out-of-range (outside -200..200 dB-Hz), over-16-entry or over-512-byte
-list resets entirely to `60`. The GUI permits partial editing, then normalizes
+list resets entirely to `40`. The GUI permits partial editing, then normalizes
 after 750 ms of inactivity. RX targets never alter the scalar TX target.
 
 The receiver resolves only this list, using the selected rate, carrier, clock
@@ -536,7 +535,7 @@ performance, nonlinear hardware behavior or interference rejection.
 
 During computation, snapshots are captured at evenly spaced media positions from
 the start to the end of the transmitted signal, including any hardware-settling
-prefix and the three-second suppression tail. The normal timeline contains 60 frames. Each
+prefix and the two-second suppression tail. The normal timeline contains 60 frames. Each
 stores a compact 256-sample waveform, 257 peak-pooled spectrum bins, the fresh
 measured input I/Q and retained pattern evidence for its interval. Pattern
 acquisition does not switch the I/Q source. Reception continues through ordinary
@@ -601,7 +600,7 @@ presets may fail decoding.
 
 ## Raw binary transmission
 
-Nonempty text of up to 16 source bytes automatically uses the fixed short
+Nonempty text shorter than 16 source bytes automatically uses the fixed short
 dictionary: common letters take 3–6 bits, other bytes take 13-bit literal escapes.
 It bypasses LZMA2, markers, interval padding, FEC and MAC.
 This threshold does not apply to attachments or change explicit bit drafts.
@@ -614,7 +613,7 @@ or the sampled simulation channel. Binary mode does not send callsign/grid
 metadata, an attachment, repeat requests, compression, interval markers,
 integrity tags or error correction. The separate hardware-settling prefix
 uses the same rounded duration as other pattern transmissions, and the
-suppression tail adds exactly three seconds after the final filter samples.
+suppression tail adds exactly two seconds after the final filter samples.
 
 In default pattern mode, each bit occupies exactly one complete pattern symbol,
 so a three-bit draft occupies three payload symbols with no byte padding. Any
@@ -630,7 +629,7 @@ or passing the bit count, start sample or carrier phase as decoder metadata.
 Pattern evidence discovers the bits and burst end. Accepted bits are drained
 on each receive poll and displayed while pending, without waiting for a byte,
 1,024-bit chunk or stream end. The dictionary is interpreted only after physical
-completion, under a 16-byte output bound, retaining exact raw bits and making no
+completion, under a 15-byte output bound, retaining exact raw bits and making no
 validation claim. Completed raw bits can be
 copied even when the expected bit count is unknown. The aligned legacy
 `modem::BinaryReceiver` API has been removed.
