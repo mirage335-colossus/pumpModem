@@ -172,6 +172,26 @@
             return std::array<float,4>{element->style->position.left.val,element->style->position.top.val,
                 element->style->size.width.val,element->style->size.height.val};
         };
+        const auto shared_geometry=[&] {
+            const auto expected=[](ui::Rect rect) {
+                return std::array<float,4>{static_cast<float>(rect.x),static_cast<float>(rect.y),
+                    static_cast<float>(rect.w),static_cast<float>(rect.h)};
+            };
+            const auto viewport=application.page_bounds(details.size.width,details.size.height);
+            const auto tab_bounds=application.tabs_bounds(details.size.width,details.size.height);
+            require(geometry(navigation)==expected(tab_bounds),"Rev modem switch retained stale tab container geometry");
+            for(const auto& [id,page]:pages)require(geometry(page)==expected(viewport),
+                "Rev modem switch retained a stale page viewport");
+            for(const auto& tab:application.tab_layout(details.size.width,details.size.height)) {
+                auto local=tab.frame;local.x-=tab_bounds.x;local.y-=tab_bounds.y;
+                auto* button=tabs.at(tab.page);
+                require(geometry(button)==expected(local)&&button->resolved.hidden==!tab.visible,
+                    "Rev modem switch retained stale tab placement or visibility");
+                if(tab.visible)require(frame(button)==expected(tab.frame),
+                    "Rev visible tabs overlap after a modem or developer mode change");
+            }
+            verify_layout();
+        };
         std::vector<std::pair<re::Element*,std::array<float,4>>> preserved;
         for(auto& binding:bindings)if(binding.control.persistent)preserved.push_back({binding.element,geometry(binding.element)});
         for(const auto& [id,button]:tabs)preserved.push_back({button,geometry(button)});
@@ -179,12 +199,26 @@
             if(toggle->value!=checked) {re::Event click;toggle->checkbox->click(click);}
             settle();
         };
+        const auto selector_binding=std::find_if(bindings.begin(),bindings.end(),[](const auto& binding) {
+            return binding.control.field==ui::Field::fast_mode;
+        });
+        require(selector_binding!=bindings.end()&&selector_binding->choice,"Rev modem transition fixture lacks its selector");
+        auto* selector=selector_binding->choice;
+        // Exercise mode-only geometry changes at a fixed window size. No
+        // unrelated edit or resize may repair the retained desktop first.
+        for(bool checked:{false,true}) {
+            set_mode(checked);
+            for(const auto* mode:{"fast","robust"}) {
+                re::Event change;selector->params.value=mode;selector->onChange(change);settle();shared_geometry();
+            }
+        }
+        set_mode(false);
         set_mode(true);
         std::vector<std::pair<re::Element*,std::array<float,4>>> visible_bounds;
         for(const auto& [element,bounds]:preserved)if(!element->resolved.hidden)visible_bounds.push_back({element,frame(element)});
         set_mode(false);
         for(bool checked:{false,true,false,true,false}) {
-            set_mode(checked);
+            set_mode(checked);shared_geometry();
             require(application.field(ui::Field::developer_mode).checked==checked&&allows_input(toggle),
                 "Rev developer mode callback failed or hid its own toggle");
             for(const auto& binding:bindings)if(binding.control.developer_only&&binding.control.persistent)

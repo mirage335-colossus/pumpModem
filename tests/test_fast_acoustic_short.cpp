@@ -21,7 +21,6 @@ using namespace datapump;
 using namespace datapump::fast;
 namespace {
 double reference_snr_db=3;
-std::optional<Profile> profile_override;
 constexpr double reference_bandwidth_hz=17500;
 constexpr std::size_t target_source_bytes=2560;
 constexpr std::size_t echo_delay_samples=240;
@@ -33,18 +32,18 @@ void require(bool ok,const std::string& message) {
 
 Profile short_profile() {
     const auto preset=resolve_snr_preset(Channel::acoustic_short,reference_snr_db);
-    const auto p=profile_override.value_or(preset.profile);
+    const auto& p=preset.profile;
     require(preset.reference_bandwidth_hz==reference_bandwidth_hz&&
-        default_expected_snr(Channel::acoustic_short)==3&&preset.expected_snr_db==reference_snr_db,
-        "short acoustic default lost its original-band 3 dB reference");
+        default_expected_snr(Channel::acoustic_short)==-6&&preset.expected_snr_db==reference_snr_db,
+        "short acoustic default or explicit original-band SNR selection changed");
     require(p.channel==Channel::acoustic_short&&p.capacity_mode&&
         (p.compact_convolutional||p.ldpc_frame_bits==16200||small_ldpc_frame(p.ldpc_frame_bits))&&
         (!p.acoustic_ofdm||p.ofdm_training_blocks<16)&&p.interleave_depth>=1&&p.interleave_depth<=16,
         "short acoustic regression no longer uses the separate short-frame profile");
     require(p.sample_rate==48000&&(!p.acoustic_ofdm||p.ofdm_prefix_samples>echo_delay_samples),
         "short acoustic echo must remain inside the cyclic prefix");
-    if(!profile_override&&reference_snr_db>=-6)require(estimate_transmission(p,true,60).seconds<=10.5,
-        "short acoustic preset lost the roughly 10-second minimum across supported SNR choices");
+    if(reference_snr_db>=-6)require(estimate_transmission(p,true,60).seconds<=12.5,
+        "short acoustic preset lost the 12.5-second minimum budget across supported SNR choices");
     return p;
 }
 

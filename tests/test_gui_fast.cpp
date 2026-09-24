@@ -79,13 +79,44 @@ const ui::Control& action(ui::Command command) {
     for(const auto& c:ui::console_screen())if(c.command==command)return c;
     throw Error("Missing shared fast action");
 }
+void message_submit_shortcut() {
+    using F=ui::Field;using C=ui::Command;
+    Application app({.simulation=true});
+    const auto& editor=control(F::fast_text);
+    check(editor.submit==C::fast_transmit&&editor.submit_mode==F::count,
+        "Fast message submit is not independent of the regular send-key preference");
+    app.select(F::send_key,"enter");app.select(F::fast_mode,"fast");
+    const auto idle=app.field(F::fast_status).text;
+    check(!app.enabled(C::fast_transmit)&&app.submit(editor,true,false)&&
+        app.field(F::fast_status).text==idle,"Empty Fast draft was transmitted by Ctrl+Enter");
+    app.edit(F::fast_device,""); // Exercise dispatch without opening an audio device.
+    app.edit(F::fast_text,"Shortcut message");
+    check(!app.submit(editor,false,false)&&!app.submit(editor,false,true)&&!app.submit(editor,true,true)&&
+        app.field(F::fast_status).text==idle,"Plain/Shift+Enter triggered Fast transmission");
+    check(app.enabled(C::fast_transmit)&&app.submit(editor,true,false)&&
+        app.field(F::fast_status).text=="Select a fast audio device",
+        "Ctrl+Enter did not dispatch the Fast transmit action");
+    app.report_error("Keep disabled draft");app.toggle(F::fast_encryption,true);
+    check(!app.enabled(C::fast_transmit)&&app.submit(editor,true,false)&&
+        app.field(F::fast_status).text=="Keep disabled draft","Ctrl+Enter bypassed missing-key protection");
+    app.toggle(F::fast_encryption,false);app.select(F::fast_source,"file");
+    app.edit(F::fast_file,"unopened-shortcut-fixture.bin");
+    const auto hidden=app.field(F::fast_status).text;
+    check(app.submit(editor,true,false)&&app.field(F::fast_status).text==hidden,
+        "Hidden message editor submitted a file transfer");
+    app.select(F::fast_mode,"robust");
+    const auto inactive=app.field(F::fast_status).text;
+    check(app.submit(editor,true,false)&&app.field(F::fast_status).text==inactive,
+        "Inactive Fast editor submitted from another modem");
+    app.close();
+}
 void snr_and_symbol_rate_controls() {
     using F=ui::Field;using C=ui::Command;
     unsigned acquisitions=0;
     fast_ui::Controller controller([&] {++acquisitions;return false;});
-    check(controller.field(F::fast_profile).selected=="acoustic"&&controller.field(F::fast_expected_snr).selected=="3"&&
+    check(controller.field(F::fast_profile).selected=="acoustic-short"&&controller.field(F::fast_expected_snr).selected=="-6"&&
         controller.field(F::fast_symbol_rate).selected=="auto",
-        "Fast GUI did not default to speakers/microphone at 3 dB");
+        "Fast GUI did not default to short speakers/microphone at -6 dB");
     for(const auto field:{F::fast_expected_snr,F::fast_symbol_rate}) {
         const auto& c=control(field);
         check(c.kind==ui::Kind::choice&&c.persistent==(field==F::fast_expected_snr)&&c.scope==ui::ScreenScope::fast&&c.help[0],
@@ -182,15 +213,15 @@ void snr_and_symbol_rate_controls() {
         [&](const auto& option){return option.id==fast::symbol_rate_option_id(narrow_auto);}),
         "Manual narrow SC Auto timing has no matching explicit dropdown option");
     controller.select(F::fast_profile,"acoustic-short");
-    const auto short_acoustic=fast::resolve_snr_preset(fast::Channel::acoustic_short,3).profile;
+    const auto short_acoustic=fast::resolve_snr_preset(fast::Channel::acoustic_short,-6).profile;
     check(controller.field(F::fast_profile).selected=="acoustic-short"&&
-        controller.field(F::fast_expected_snr).selected=="3"&&
+        controller.field(F::fast_expected_snr).selected=="-6"&&
         controller.field(F::fast_symbol_rate).selected=="auto"&&
         controller.field(F::fast_constellation).selected==std::to_string(short_acoustic.constellation)&&
         controller.field(F::fast_depth).selected==std::to_string(short_acoustic.interleave_depth)&&
         controller.field(F::fast_mono).selected=="left"&&
         controller.field(F::fast_detail).text.find("acoustic-short")!=std::string::npos,
-        "Short-transfer acoustic profile did not select its independent 3 dB preset");
+        "Short-transfer acoustic profile did not select its independent -6 dB preset");
     check(controller.field(F::fast_coding).options.size()==(short_acoustic.compact_convolutional?2U:3U)&&
         controller.field(F::fast_coding).options[0].id=="half"&&
         controller.field(F::fast_coding).options.back().id=="three-quarters",
@@ -200,16 +231,16 @@ void snr_and_symbol_rate_controls() {
     check(controller.field(F::fast_coding).selected==short_coding,
         "Unsupported normal-frame LDPC rate was accepted for short-transfer acoustic");
     controller.select(F::fast_expected_snr,"-6");
-    check(controller.field(F::fast_coding).selected=="half"&&
-        controller.field(F::fast_coding).options.size()==2&&
-        controller.field(F::fast_coding).options[0].label=="Convolutional 1/2"&&
+    check(controller.field(F::fast_coding).selected=="three-quarters"&&
+        controller.field(F::fast_coding).options.size()==3&&
+        controller.field(F::fast_coding).options[0].label=="LDPC 1/2"&&
         controller.field(F::fast_depth).options.size()==16&&
         controller.field(F::fast_constellation).options.size()==1,
-        "Weak short profile did not expose its compact coding geometry");
+        "Weak short profile did not expose its small LDPC coding geometry");
     controller.select(F::fast_coding,"two-thirds");
-    check(controller.field(F::fast_coding).selected=="half"&&
-        controller.field(F::fast_expected_snr).selected=="-6",
-        "Weak short profile accepted an unsupported LDPC selection");
+    check(controller.field(F::fast_coding).selected=="two-thirds"&&
+        controller.field(F::fast_expected_snr).selected=="manual",
+        "Weak short profile rejected the supported stronger LDPC selection");
     controller.select(F::fast_expected_snr,"3");
     check(controller.field(F::fast_coding).options.size()==(short_acoustic.compact_convolutional?2U:3U)&&
         controller.field(F::fast_constellation).options.size()==11&&
@@ -223,7 +254,7 @@ void snr_and_symbol_rate_controls() {
         controller.field(F::fast_mono).selected=="stereo",
         "Short-transfer acoustic settings changed the existing acoustic profile");
     controller.select(F::fast_profile,"acoustic-short");
-    check(controller.field(F::fast_expected_snr).selected=="3"&&
+    check(controller.field(F::fast_expected_snr).selected=="-6"&&
         controller.field(F::fast_depth).selected==std::to_string(short_acoustic.interleave_depth)&&
         controller.field(F::fast_mono).selected=="right",
         "Returning to short-transfer acoustic did not reset SNR while retaining its output routing");
@@ -256,8 +287,8 @@ void presentation_and_retention() {
     app.select(F::fec,"off");const auto fec=app.field(F::fec).selected;
     app.select(mode,"fast");
     check(app.field(F::fast_mode).selected=="fast","Fast Modem choice was not accepted");
-    check(app.field(F::fast_profile).selected=="acoustic"&&app.field(F::fast_expected_snr).selected=="3"&&
-        app.field(F::fast_mono).selected=="left","Fast must default to speakers/microphone with left mono");
+    check(app.field(F::fast_profile).selected=="acoustic-short"&&app.field(F::fast_expected_snr).selected=="-6"&&
+        app.field(F::fast_mono).selected=="left","Fast must default to short speakers/microphone at -6 dB with left mono");
     check(app.field(F::fast_qr_brightness).selected=="dark"&&app.field(F::fast_qr_brightness).options.size()==4,
         "Fast QR brightness choices/default differ from the shared convention");
     for(const auto& c:ui::console_screen()) {
@@ -275,7 +306,7 @@ void presentation_and_retention() {
     const auto& profiles=app.field(F::fast_profile).options;
     check(profiles.size()==5&&profiles[0].id=="wire"&&profiles[1].id=="ssb"&&
         profiles[2].id=="fm"&&profiles[3].id=="acoustic"&&profiles[4].id=="acoustic-short"&&
-        profiles[4].label=="Speakers / mic · short"&&app.field(F::fast_constellation).options.size()==11,
+        profiles[4].label=="Speakers / mic · short"&&app.field(F::fast_constellation).options.size()==1,
           "Fast channel/constellation selections are incomplete");
     check(!app.field(F::fast_encryption).checked&&app.enabled(C::fast_listen)&&!app.enabled(C::fast_transmit),"Fast defaults must allow plain reception and require nonempty transmit text");
     check(!app.field(F::fast_key).enabled&&!app.enabled(C::fast_open_key)&&!app.enabled(C::fast_generate_key),"Plain mode retained active key controls");
@@ -623,6 +654,6 @@ void regular_work_keeps_polling() {
 }
 }
 int main() {
-    try {rate_and_spectrum_presentation();damaged_reception_presentation();snr_and_symbol_rate_controls();presentation_and_retention();service_generations();retained_key_and_result_presentation();live_plot_presentation();unsynchronized_plot_presentation();regular_work_keeps_polling();std::cout<<"Fast GUI isolation tests passed\n";}
+    try {rate_and_spectrum_presentation();damaged_reception_presentation();snr_and_symbol_rate_controls();message_submit_shortcut();presentation_and_retention();service_generations();retained_key_and_result_presentation();live_plot_presentation();unsynchronized_plot_presentation();regular_work_keeps_polling();std::cout<<"Fast GUI isolation tests passed\n";}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

@@ -40,6 +40,23 @@ inline BindingPresentation binding_presentation(Application& application,const u
     return resolve_binding(declaration,std::move(control),geometry,std::move(menu));
 }
 
+// Desktop containers and tabs can move while every control keeps its shared
+// rectangle. Retain their complete presentation independently of bindings.
+class DesktopLayoutState {
+public:
+    bool needs_layout(ui::Rect page_bounds,ui::Rect tabs_bounds,std::span<const ui::TabLayout> tabs) const {
+        return !layout_||layout_->page_bounds!=page_bounds||layout_->tabs_bounds!=tabs_bounds||
+            layout_->tabs.size()!=tabs.size()||!std::equal(tabs.begin(),tabs.end(),layout_->tabs.begin(),
+                [](const auto& a,const auto& b){return a.page==b.page&&a.frame==b.frame&&a.visible==b.visible;});
+    }
+    void applied_layout(ui::Rect page_bounds,ui::Rect tabs_bounds,std::span<const ui::TabLayout> tabs) {
+        layout_=Layout{page_bounds,tabs_bounds,{tabs.begin(),tabs.end()}};
+    }
+private:
+    struct Layout {ui::Rect page_bounds,tabs_bounds;std::vector<ui::TabLayout> tabs;};
+    std::optional<Layout> layout_;
+};
+
 // Retained presentation bookkeeping is common even though native updates are
 // different. A toolkit with a nested popup loop can defer option replacement;
 // callback indices continue to refer to exactly the options it displayed.

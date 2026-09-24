@@ -210,8 +210,8 @@ DecodeResult decode(std::span<const float> soft, CodeRate rate, unsigned limit, 
     }
     DecodeResult result; result.bytes.resize(g.k / 8);
     if (!informative) return result;
-    // The final 0..7 systematic coordinates are fixed local zero shortening
-    // when a standard matrix's information length is not byte aligned.
+    // The final 0..7 systematic coordinates are fixed local zeros for byte
+    // alignment. They remain in the transmitted codeword.
     for(std::size_t bit=result.bytes.size()*8;bit<g.k;++bit)posterior[bit]=50;
     auto satisfied = [&] {
         // Exactly unknown variables cannot masquerade as a valid all-zero word.

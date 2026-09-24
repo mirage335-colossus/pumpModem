@@ -707,6 +707,7 @@ private:
     std::span<const ui::Control> controls_;
     std::vector<std::unique_ptr<std::function<void()>>> callbacks;
     NativeServices services;
+    DesktopLayoutState desktop_layout;
     ui::Page shown_page=ui::Page::count;
     std::exception_ptr failure_;
 
@@ -914,7 +915,9 @@ private:
         background->resize(0,0,window->w(),window->h());
         if(overlay_surface)overlay_surface->resize(0,0,window->w(),window->h());
         const auto page_bounds=application.page_bounds(window->w(),window->h());
-        for(const auto& tab:application.tab_layout(window->w(),window->h())) {
+        const auto tabs_bounds=application.tabs_bounds(window->w(),window->h());
+        const auto tab_layout=application.tab_layout(window->w(),window->h());
+        for(const auto& tab:tab_layout) {
             const auto found=std::find_if(tabs.begin(),tabs.end(),[&](const auto& item){return item.first==tab.page;});
             place(found->second,tab.frame);
         }
@@ -924,7 +927,8 @@ private:
             const auto view=binding_presentation(application,c,b.menu_items,window->w(),window->h(),b.declarations);
             layout_binding(b,view);
         }
-        update_documents();apply_layers();window->redraw();
+        update_documents();desktop_layout.applied_layout(page_bounds,tabs_bounds,tab_layout);
+        apply_layers();window->redraw();
     }
     void update_documents() {
         const auto bounds=application.page_bounds(window->w(),window->h());
@@ -958,6 +962,9 @@ private:
     void apply() {
         auto* previous_group=Fl_Group::current();
         bool relayout=update_overlay();
+        relayout=desktop_layout.needs_layout(application.page_bounds(window->w(),window->h()),
+            application.tabs_bounds(window->w(),window->h()),
+            application.tab_layout(window->w(),window->h()))||relayout;
         for(auto* item:current_bindings()) {
             auto& b=*item;const auto& c=*b.control;
             const auto view=binding_presentation(application,c,b.menu_items,window->w(),window->h(),b.declarations);

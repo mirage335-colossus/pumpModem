@@ -551,6 +551,8 @@ void developer_mode_visibility() {
                     for(const auto& declaration:ui::console_screen())if(declaration.persistent&&
                         app.application.control_layout(declaration,window->w(),window->h()).frame==frame(control)) {
                         preserved.push_back({control,frame(control)});
+                        for(int j=0;j<control->children();++j)
+                            preserved.push_back({control->child(j),frame(control->child(j))});
                         if(declaration.developer_only)advanced.push_back(control);
                         break;
                     }
@@ -563,24 +565,42 @@ void developer_mode_visibility() {
             auto* button=find_button(*window,definition.title);require(button,"Developer mode fixture lost a native tab");
             preserved.push_back({button,frame(button)});
         }
-        for(bool checked:{false,true,false,true,false}) {
-            set_mode(checked);
-            require(app.application.field(ui::Field::developer_mode).checked==checked&&toggle->visible_r(),
-                "Native developer mode callback failed or hid its own toggle");
-            for(auto* control:advanced)require(static_cast<bool>(control->visible_r())==checked,
-                "Developer mode did not hide/show an entire advanced control in place");
-            for(const auto& definition:ui::pages()) {
-                auto* button=find_button(*window,definition.title);
-                require(static_cast<bool>(button->visible_r())==((checked||!definition.developer_only)&&definition.id!=ui::Page::fast_modem),
-                    "Developer mode did not update native tab visibility without resizing");
-                if(!button->visible_r()) {
-                    require(!button->take_focus(),"Hidden advanced tab retained keyboard focus eligibility");
-                    button->do_callback();require(app.application.page()==ui::Page::console,
-                        "A stale native callback selected a hidden advanced tab");
+        for(bool fast_developer:{false,true}) {
+            set_mode(fast_developer);
+            app.application.select(ui::Field::fast_mode,"fast");refresh();
+            window->size(size.first+20,size.second+20);refresh();
+            window->size(size.first,size.second);refresh();
+            app.application.select(ui::Field::fast_mode,"robust");refresh();
+            // No resize between changing modem and toggling developer mode:
+            // hidden Fast tabs must not retain their overlapping header slots.
+            for(bool checked:{false,true,false,true,false}) {
+                set_mode(checked);
+                require(app.application.field(ui::Field::developer_mode).checked==checked&&toggle->visible_r(),
+                    "Native developer mode callback failed or hid its own toggle");
+                for(auto* control:advanced)require(static_cast<bool>(control->visible_r())==checked,
+                    "Developer mode did not hide/show an entire advanced control in place");
+                for(const auto& definition:ui::pages()) {
+                    auto* button=find_button(*window,definition.title);
+                    require(static_cast<bool>(button->visible_r())==((checked||!definition.developer_only)&&definition.id!=ui::Page::fast_modem),
+                        "Developer mode did not update native tab visibility without resizing");
+                    if(!button->visible_r()) {
+                        require(!button->take_focus(),"Hidden advanced tab retained keyboard focus eligibility");
+                        button->do_callback();require(app.application.page()==ui::Page::console,
+                            "A stale native callback selected a hidden advanced tab");
+                    }
                 }
+                for(const auto& [widget,bounds]:preserved)require(frame(widget)==bounds,
+                    "Toggling developer mode moved an existing native control or tab");
+                for(const auto& tab:app.application.tab_layout(window->w(),window->h())) {
+                    const auto& definitions=ui::pages();
+                    const auto definition=std::find_if(definitions.begin(),definitions.end(),[&](const auto& value){return value.id==tab.page;});
+                    require(frame(find_button(*window,definition->title))==tab.frame,
+                        "Returning to Robust retained Fast tab geometry after a developer mode toggle");
+                }
+                auto* page=find_button(*window,"Transmit")->parent()->parent();
+                require(frame(page)==app.application.page_bounds(window->w(),window->h()),
+                    "Returning to Robust retained the Fast page viewport after a developer mode toggle");
             }
-            for(const auto& [widget,bounds]:preserved)require(frame(widget)==bounds,
-                "Toggling developer mode moved an existing native control or tab");
         }
         for(const auto& definition:ui::pages())if(definition.developer_only&&definition.id!=ui::Page::fast_modem) {
             set_mode(true);auto* button=find_button(*window,definition.title);button->do_callback();refresh();

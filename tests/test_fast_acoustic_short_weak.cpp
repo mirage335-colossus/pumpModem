@@ -21,6 +21,8 @@ using namespace datapump;
 using namespace datapump::fast;
 namespace {
 constexpr double reference_snr_db=-6;
+bool legacy_convolutional=false;
+unsigned ldpc_depth=0,ldpc_markers=0,ldpc_pilots=0;
 constexpr double reference_bandwidth_hz=17500;
 constexpr std::size_t target_source_bytes=2560;
 constexpr std::size_t minimum_attachment_bytes=32;
@@ -33,12 +35,24 @@ void require(bool ok,const std::string& message) {
 
 Profile short_profile() {
     const auto preset=resolve_snr_preset(Channel::acoustic_short,reference_snr_db);
-    const auto& p=preset.profile;
+    auto p=preset.profile;
+    if(legacy_convolutional) {
+        // Freeze the previously qualified convolutional waveform independently
+        // of automatic preset selection; its wire/physical tests stay intact.
+        p=profile(Channel::acoustic_short);p.acoustic_ofdm=false;p.ofdm_training_blocks=16;
+        p.carrier_hz=1800;p.rolloff=.20;p.amplitude*=std::sqrt(2.)/4.5;
+        p.symbol_rate=920.14612674713135;p.constellation=4;p.code_rate=CodeRate::half;
+        p.compact_convolutional=true;p.interleave_depth=1;
+        p.marker_spacing_intervals=1;p.pilot_spacing_symbols=64;
+    }
+    if(ldpc_depth)p.interleave_depth=ldpc_depth;
+    if(ldpc_markers)p.marker_spacing_intervals=ldpc_markers;
+    if(ldpc_pilots)p.pilot_spacing_symbols=ldpc_pilots;
     require(preset.reference_bandwidth_hz==reference_bandwidth_hz&&
         preset.expected_snr_db==reference_snr_db,
         "weak short acoustic preset lost its original-band -6 dB reference");
     require(p.channel==Channel::acoustic_short&&p.capacity_mode&&
-        p.compact_convolutional&&p.interleave_depth==1,
+        p.compact_convolutional==legacy_convolutional&&p.interleave_depth==(ldpc_depth?ldpc_depth:1),
         "weak short acoustic regression no longer uses the separate short profile");
     require(p.sample_rate==48000&&(!p.acoustic_ofdm||p.ofdm_prefix_samples>echo_delay_samples),
         "short acoustic echo must remain inside the cyclic prefix");
@@ -117,7 +131,7 @@ struct Fixture {
         if(short_text&&!attachment) {
             require(prepared.encoded.size()<=capacity_source_bytes_per_cycle(profile,encrypted),
                 "weak short acoustic minimum fixture no longer fits one source cycle");
-            require(estimate.seconds<=10.5,
+            require(estimate.seconds<=(legacy_convolutional?10.5:ldpc_depth?13.:12.5),
                 "weak short acoustic minimum transfer exceeded its roughly 10-second total airtime");
         }
         auto encoder=fast::testing::deterministic_encoder(profile,key,byte_source(prepared.encoded),
@@ -220,7 +234,7 @@ void sampled_completion(const char* label,bool encrypted,bool attachment,bool sh
         state.coding_cycles==f.estimate.intervals/cycle_intervals(f.profile),
         "weak short acoustic noisy coding fixture lost fixed cycle positions");
     require(hard_errors>0,"weak short acoustic noisy case did not exercise error correction");
-    require(!state.ldpc_frames&&!state.ldpc_iterations&&!state.ldpc_changed_bits,
+    if(legacy_convolutional)require(!state.ldpc_frames&&!state.ldpc_iterations&&!state.ldpc_changed_bits,
         "compact convolutional correction was mislabeled as LDPC evidence");
     require(receiver.workspace_bytes()<8*1024*1024,"short acoustic receiver retained unbounded PCM");
 }
@@ -306,9 +320,17 @@ void noise_only() {
 }
 
 int main(int argc,char** argv) {try {
+    std::string_view selected;
+    for(int i=1;i<argc;++i) {
+        if(std::string_view(argv[i])=="--legacy-convolutional")legacy_convolutional=true;
+        else if(std::string_view(argv[i]).starts_with("--depth="))ldpc_depth=std::stoul(argv[i]+8);
+        else if(std::string_view(argv[i]).starts_with("--markers="))ldpc_markers=std::stoul(argv[i]+10);
+        else if(std::string_view(argv[i]).starts_with("--pilots="))ldpc_pilots=std::stoul(argv[i]+9);
+        else selected=argv[i];
+    }
     unsigned executed=0,failed=0;
     const auto run=[&](const char* name,const std::function<void()>& test) {
-        if(argc>1&&std::string_view(argv[1])!=name)return;
+        if(!selected.empty()&&selected!=name)return;
         ++executed;
         try{test();}catch(const std::exception& error){++failed;std::cerr<<name<<": "<<error.what()<<'\n';}
     };

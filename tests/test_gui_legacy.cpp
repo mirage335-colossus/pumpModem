@@ -20,6 +20,7 @@ void presentation_and_isolation() {
     app.edit(F::binary,"001");app.select(F::fec,"off");
     const auto encryption=app.field(F::key).selected,carrier=app.field(F::carrier).text,fec=app.field(F::fec).selected;
     app.select(F::fast_mode,"fast");app.edit(F::fast_text,"retained fast text");
+    app.select(F::fast_profile,"wire"); // The short acoustic default only offers QPSK.
     app.select(F::fast_constellation,"256");app.toggle(F::fast_encryption,true);
     app.select(F::fast_mode,"legacy");
     check(app.field(F::fast_mode).options.size()==3&&app.field(F::fast_mode).options.back().label=="Legacy Modem","Legacy dropdown choice missing");

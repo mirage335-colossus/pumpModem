@@ -4,7 +4,7 @@
 
 namespace datapump::fast::ldpc {
 // DVB-S2/S2X normal/short frames plus 648/1296/1944-bit IEEE QC matrices.
-// The QC family's final k%8 information positions are fixed zero shortening;
+// The QC family's final k%8 information positions are fixed zero;
 // callers supply floor(k/8) bytes. DVB codes retain their original exact bits.
 // No BCH or puncturing. Frame size is selected locally by the profile.
 inline constexpr std::size_t coded_bits = 64800;

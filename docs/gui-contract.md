@@ -55,6 +55,9 @@ copy/save eligibility.
 History is bounded to 64 entries and the local source-memory quota. Existing save
 destinations are never overwritten. Only keyed transfers claim authentication.
 
+In the Fast Message editor, Ctrl+Enter transmits; Enter and Shift+Enter insert
+a newline. The shortcut uses the same availability checks as Transmit.
+
 Fast listens continuously when selected on a normal live launch. Sending pauses
 reception and resumes listening afterward, including after cancelling a
 transmission. A received stream is retained before the next listener starts.
@@ -71,9 +74,9 @@ feeds receiver decisions. RX constellation points precede slicing; TX points com
 from the mapper. Titles distinguish active, stalled and retained captures. The
 waterfall retains at most 96 rows, with display publication limited to ten frames
 per second. **Audio device**, **Channel profile** and **Expected SNR** sit at the
-bottom. Speakers/microphone is the default channel, at 3 dB expected SNR; cable
-defaults to 36 dB. Changing profiles restores their default SNR and waveform
-settings, while retaining output routing choices. The final
+bottom. Speakers/mic · short is the default channel, at −6 dB expected SNR;
+speakers/microphone defaults to 3 dB and cable to 36 dB. Changing profiles restores
+their default SNR and waveform settings, while retaining output routing choices. The final
 row contains channel routing, expected steady modem bitrate after coding and
 recurring overhead, the assumed-SNR Shannon–Hartley limit, and occupied frequency
 range/bandwidth. Gross and measured source rates stay on Modem details.

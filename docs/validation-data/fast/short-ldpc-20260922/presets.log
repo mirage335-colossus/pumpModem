@@ -1,0 +1,14 @@
+13 n=16200 ofdm=1 qam=16 rate=3/4 depth=4 fft=4096 min=9.61 bps=32681 keyed=32592.8 file=9.61
+10 n=16200 ofdm=1 qam=16 rate=2/3 depth=4 fft=8192 min=10.3432 bps=29464.8 keyed=29355 file=10.3432
+6 n=16200 ofdm=1 qam=4 rate=3/4 depth=2 fft=4096 min=9.61 bps=16243.7 keyed=16077.3 file=9.61
+3 n=16200 ofdm=1 qam=4 rate=3/4 depth=1 fft=8192 min=10.3432 bps=7956.09 keyed=7845.84 file=11.7939
+0 n=1944 ofdm=1 qam=4 rate=3/4 depth=4 fft=16384 min=12.3277 bps=3140.64 keyed=3049.74 file=17.6077
+-3 n=1944 ofdm=0 qam=4 rate=3/4 depth=1 fft=8192 min=9.55702 bps=863.079 keyed=755.94 file=36.437
+-6 n=1944 ofdm=0 qam=4 rate=3/4 depth=1 fft=8192 min=9.84402 bps=794.16 keyed=695.576 file=39.0568
+-10 n=1944 ofdm=0 qam=4 rate=3/4 depth=1 fft=8192 min=15.2777 bps=316.163 keyed=276.916 file=88.6569
+-13 n=1944 ofdm=0 qam=4 rate=3/4 depth=1 fft=8192 min=24.2627 bps=158.457 keyed=138.787 file=170.673
+-16 n=1944 ofdm=0 qam=4 rate=3/4 depth=1 fft=8192 min=42.19 bps=79.4168 keyed=69.5583 file=334.317
+-20 n=1944 ofdm=0 qam=4 rate=3/4 depth=1 fft=8192 min=96.5271 bps=31.6164 keyed=27.6917 file=830.318
+-23 n=1944 ofdm=0 qam=4 rate=3/4 depth=1 fft=8192 min=186.376 bps=15.8458 keyed=13.8787 file=1650.48
+-26 n=1944 ofdm=0 qam=4 rate=3/4 depth=1 fft=8192 min=365.649 bps=7.94169 keyed=6.95584 file=3286.92
+-27 n=1944 ofdm=0 qam=4 rate=3/4 depth=1 fft=8192 min=458.707 bps=6.30831 keyed=5.52522 file=4136.37

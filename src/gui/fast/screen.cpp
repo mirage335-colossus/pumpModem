@@ -42,7 +42,7 @@ const std::vector<Control>& screen() {
         placed(Kind::action,Field::count,Command::fast_open_key,"Open keyfile…",Slot::fast_open_key),
         placed(Kind::action,Field::count,Command::fast_generate_key,"Generate keyfile…",Slot::fast_generate_key),
         placed(Kind::label,Field::fast_key_path,Command::none,"",Slot::fast_key_path),
-        [] {auto c=placed(Kind::text,Field::fast_text,Command::none,"Message",Slot::fast_text,"Exact UTF-8 bytes, up to 32,768 bytes. Enter inserts a newline.");c.multiline=true;c.tab_navigation=true;return c;}(),
+        [] {auto c=placed(Kind::text,Field::fast_text,Command::none,"Message",Slot::fast_text,"Exact UTF-8 bytes, up to 32,768 bytes. Ctrl+Enter transmits; Enter inserts a newline.");c.multiline=true;c.tab_navigation=true;c.submit=Command::fast_transmit;return c;}(),
         placed(Kind::text,Field::fast_file,Command::none,"Source file",Slot::fast_file),
         placed(Kind::action,Field::count,Command::fast_choose_file,"Attach file",Slot::fast_choose_file),
         placed(Kind::action,Field::count,Command::fast_use_text,"Use text",Slot::fast_use_text),

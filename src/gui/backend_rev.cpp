@@ -727,6 +727,7 @@ public:
     std::optional<ui::ServiceResult> dialog_result;
     bool service_probe=false;
     bool smoke_layout_pending=false;
+    DesktopLayoutState desktop_layout;
     RevApp(std::vector<void*>& windows,Launch options,std::span<const ui::Control> controls=ui::console_screen())
         :Rev::Window(windows,{.name=ui::window_title(),.size={ui::default_width,ui::default_height,{ui::min_width,ui::min_height},{0,0}}}),
          application(options),launch(application.launch),declarations(controls),group(&windows) {
@@ -1083,8 +1084,9 @@ public:
     void layout_desktop() {
         const auto viewport=application.page_bounds(details.size.width,details.size.height);
         const auto tab_bounds=application.tabs_bounds(details.size.width,details.size.height);
+        const auto tab_layout=application.tab_layout(details.size.width,details.size.height);
         place(navigation,tab_bounds);
-        for(const auto& tab:application.tab_layout(details.size.width,details.size.height)) {
+        for(const auto& tab:tab_layout) {
             auto frame=tab.frame;frame.x-=tab_bounds.x;frame.y-=tab_bounds.y;
             place(tabs.at(tab.page),frame);place(pages.at(tab.page),viewport);
         }
@@ -1093,7 +1095,8 @@ public:
             place(overlay_view->element.get(),{0,0,details.size.width,details.size.height});
             layout_controls(overlay_view->bindings,overlay_view->definition->controls);
         }
-        update_documents();shared->layoutDirty=true;refresh(event);
+        update_documents();desktop_layout.applied_layout(viewport,tab_bounds,tab_layout);
+        shared->layoutDirty=true;refresh(event);
     }
     BindingPresentation control_view(const Binding& binding,std::span<const ui::Control> controls,
             const ui::ControlLayout* geometry=nullptr) {
@@ -1195,7 +1198,10 @@ public:
                 button->style->visibility=visibility;button->dirty.style=true;shared->layoutDirty=true;
             }
         }
-        bool relayout=apply_controls(bindings,declarations);
+        bool relayout=desktop_layout.needs_layout(application.page_bounds(details.size.width,details.size.height),
+            application.tabs_bounds(details.size.width,details.size.height),
+            application.tab_layout(details.size.width,details.size.height));
+        relayout=apply_controls(bindings,declarations)||relayout;
         if(overlay_view)relayout=apply_controls(overlay_view->bindings,overlay_view->definition->controls)||relayout;
         if(relayout)layout_desktop();
         update_plots();update_documents();services.synchronize(application.take_services(),application.closing());process_services();

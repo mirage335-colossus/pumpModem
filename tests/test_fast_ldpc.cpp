@@ -1,6 +1,7 @@
 #include "datapump/fast/ldpc.hpp"
 #include "../third_party/ldpc/tables.hpp"
 #include "../third_party/ldpc/short_tables.hpp"
+#include "../third_party/ldpc/wifi_tables.hpp"
 #include <openssl/evp.h>
 #include <algorithm>
 #include <array>
@@ -266,6 +267,52 @@ void qam_noise(unsigned order, CodeRate rate, double db) {
               << " decoder_ms=" << seconds * 1000 << '\n';
     check(decoded.converged && decoded.bytes == bytes, "Gray QAM noisy frame");
 }
+template<std::size_t Rows> void small_matrix(const std::int8_t (&matrix)[Rows][24],
+        std::size_t n,CodeRate rate,const char* expected) {
+    const auto bytes=source(rate,n),bits=ldpc::encode(bytes,rate,n);
+    const auto z=n/24,k=(24-Rows)*z;
+    check(ldpc::data_bits(rate,n)==k&&bytes.size()==k/8,"QC information geometry");
+    check(digest(bits)==expected,"independent QC back-substitution wire fixture");
+    // Check the circulants directly, independent of the production sparse graph
+    // and Gaussian-elimination encoder. Frozen hashes use a second encoder.
+    for(std::size_t row=0;row<Rows;++row)for(std::size_t i=0;i<z;++i) {
+        unsigned sum=0;
+        for(std::size_t col=0;col<24;++col)if(matrix[row][col]>=0)
+            sum^=bits[col*z+(i+matrix[row][col])%z];
+        check(!sum,"independent QC parity equation");
+    }
+    for(auto i=bytes.size()*8;i<k;++i)check(!bits[i],"fixed byte-shortening zero positions");
+    const auto wire=ldpc::interleave(bits,n);
+    std::vector<float> soft(n);std::vector<bool> seen(n);
+    for(std::size_t i=0;i<n;++i) {
+        const auto index=ldpc::interleave_index(i,n);
+        check(index<n&&!seen[index],"small frame permutation is bijective");seen[index]=true;
+        soft[i]=wire[i]?12.F:-12.F;
+    }
+    soft.front()=0;soft.back()=-soft.back();
+    const auto decoded=ldpc::decode(ldpc::deinterleave(soft,n),rate,50,n);
+    check(decoded.converged&&decoded.bytes==bytes,"small frame flip and timed erasure repair");
+    check(!ldpc::decode(std::vector<float>(n),rate,50,n).converged,"known zeros cannot turn absent evidence into success");
+    auto corrupted=bits;corrupted[k-1]^=1;
+    check(!ldpc::valid_codeword(corrupted,rate,n),"small parity boundary corruption rejected");
+    rejects([&]{ldpc::encode(Bytes(bytes.size()+1),rate,n);});
+    rejects([&]{ldpc::decode(std::vector<float>(n-1),rate,50,n);});
+    rejects([&]{ldpc::data_bits(CodeRate::nine_tenths,n);});
+    soft[0]=std::numeric_limits<float>::quiet_NaN();
+    rejects([&]{ldpc::decode(soft,rate,50,n);});
+}
+void small_frames() {
+    using namespace datapump_wifi_ldpc;
+    small_matrix(H_648_1_2,648,CodeRate::half,"0f101c641a0b329617783ed70fab371f846b9aa28b0b920957907813eeb9c1cd");
+    small_matrix(H_648_2_3,648,CodeRate::two_thirds,"b7e2245f2135e78fc5bf7e576c4031a2eb2b0d3b49f442c287a297b835d7b457");
+    small_matrix(H_648_3_4,648,CodeRate::three_quarters,"c5b6739bad19f5139294196aaae013c238bca337373268fa31592a1fc2acc2af");
+    small_matrix(H_1296_1_2,1296,CodeRate::half,"7138c4eec0c43491a7f0a9df76647d65c4150131b7f561aa9315cff082c75910");
+    small_matrix(H_1296_2_3,1296,CodeRate::two_thirds,"e2e20c6df42a34e5e95aec00a12a79b98bcdb7c1139e5dd822e46266a6f1a185");
+    small_matrix(H_1296_3_4,1296,CodeRate::three_quarters,"259b459a3e5b6b9855d9e77cfccbdd85cf03331c5caf90b89c3d420eb1e12cce");
+    small_matrix(H_1944_1_2,1944,CodeRate::half,"162364fc1e935a4b987d563e90c8b6701837f252fe33f14176ab8de387227eef");
+    small_matrix(H_1944_2_3,1944,CodeRate::two_thirds,"c41d24b973f56cf87d0da238d063ea49bf6782ccdf0bd05de5fb54a96f7356e0");
+    small_matrix(H_1944_3_4,1944,CodeRate::three_quarters,"c26a607a1f46f1e52678de201d7b76d8394ac45c1cd46dbb1290b9458df57c95");
+}
 void invalid_and_bounded() {
     const auto rate = CodeRate::seven_ninths;
     rejects([&] { ldpc::data_bits(CodeRate::seven_eighths); });
@@ -305,7 +352,7 @@ int main(int argc, char** argv) {
     try {
         const unsigned frames = argc == 2 ? static_cast<unsigned>(std::stoul(argv[1])) : 12;
         check(frames > 0 && frames <= 10000, "bounded benchmark frame count");
-        fixtures(); interleaver(); short_frames(); invalid_and_bounded(); parallel_calls(); bpsk_noise(frames);
+        fixtures(); interleaver(); short_frames(); small_frames(); invalid_and_bounded(); parallel_calls(); bpsk_noise(frames);
         qam_noise(4, CodeRate::half, 2.);
         qam_noise(16, CodeRate::half, 7.);
         qam_noise(256, CodeRate::two_thirds, 20.);
