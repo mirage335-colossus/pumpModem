@@ -138,11 +138,11 @@ struct DesktopLayout {
         out[Slot::legacy_transmit]={width-margin-150,75,150,action_height};
         const int legacy_transcript_height=(height-486)*3/5;
         const int legacy_draft_height=(height-486)-legacy_transcript_height;
-        out[Slot::legacy_squelch]={margin,height-284,240,field_height};
-        out[Slot::legacy_device]={margin+258,height-284,fast_width-258,field_height};
+        out[Slot::legacy_device]={margin,height-80,fast_width-258,field_height};
+        out[Slot::legacy_squelch]={width-margin-240,height-80,240,field_height};
         out[Slot::legacy_transcript]={margin,140,fast_width,legacy_transcript_height};
         out[Slot::legacy_text]={margin,170+legacy_transcript_height,fast_width,legacy_draft_height};
-        out[Slot::legacy_waterfall]={margin,height-218,fast_width,166};
+        out[Slot::legacy_waterfall]={margin,height-284,fast_width,166};
         out[Slot::legacy_status]={margin,height-31,volume_x-audio_gap-margin,24};
         out[Slot::legacy_volume]={volume_x,height-31,volume_width,field_height};
         out[Slot::legacy_exclusive]={exclusive_x,height-31,exclusive_width,field_height};

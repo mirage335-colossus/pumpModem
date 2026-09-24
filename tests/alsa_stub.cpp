@@ -12,13 +12,15 @@ void reset(){state=State{};}
 extern "C" {
 int snd_pcm_open(void** pcm,const char* name,int direction,int) {
     auto& s=alsa_test::state;s.attempts.emplace_back(name);
-    for(const auto& [device,error]:s.open_errors)if(device==name)return error;
-    if(std::find(s.available.begin(),s.available.end(),name)==s.available.end())return -2;
-    *pcm=reinterpret_cast<void*>(1);s.selected=name;s.direction=direction;++s.opens;++s.live;return 0;
+    for(const auto& [device,error]:s.open_errors)if(device==name){if(s.after_open)s.after_open();return error;}
+    if(std::find(s.available.begin(),s.available.end(),name)==s.available.end()){if(s.after_open)s.after_open();return -2;}
+    *pcm=reinterpret_cast<void*>(1);s.selected=name;s.direction=direction;++s.opens;++s.live;
+    if(s.after_open)s.after_open();return 0;
 }
 int snd_pcm_set_params(void*,int format,int access,unsigned channels,unsigned rate,int,unsigned) {
     auto& s=alsa_test::state;s.rate=rate;s.configured.emplace_back(s.selected,rate);
     s.configured_channels.push_back(channels);
+    if(s.after_configure)s.after_configure();
     if(format!=2 || access!=3 || (channels!=1 && channels!=2))throw std::runtime_error("expected interleaved S16 ALSA PCM");
     if(s.direction && channels!=1)throw std::runtime_error("capture channel contract changed");
     if(std::find(s.supported_channels.begin(),s.supported_channels.end(),channels)==s.supported_channels.end())return -22;
@@ -46,10 +48,10 @@ int snd_pcm_drain(void*){return 0;}
 int snd_pcm_close(void*){++alsa_test::state.closes;--alsa_test::state.live;return 0;}
 int snd_pcm_wait(void*,int){return 1;}
 int snd_device_name_hint(int,const char*,void*** hints) {
-    auto& list=alsa_test::state.hints;
+    auto& s=alsa_test::state;auto& list=s.hints;++s.hint_calls;
     *hints=static_cast<void**>(std::calloc(list.size()+1,sizeof(void*)));
     for(std::size_t i=0;i<list.size();++i)(*hints)[i]=&list[i];
-    return 0;
+    if(s.after_hint)s.after_hint();return s.hint_error;
 }
 char* snd_device_name_get_hint(const void* hint,const char* id) {
     const auto& item=*static_cast<const alsa_test::Hint*>(hint);
@@ -57,5 +59,5 @@ char* snd_device_name_get_hint(const void* hint,const char* id) {
     if(value.empty())return nullptr;
     auto* result=static_cast<char*>(std::malloc(value.size()+1));std::memcpy(result,value.c_str(),value.size()+1);return result;
 }
-int snd_device_name_free_hint(void** hints){std::free(hints);return 0;}
+int snd_device_name_free_hint(void** hints){++alsa_test::state.hints_freed;std::free(hints);return 0;}
 }

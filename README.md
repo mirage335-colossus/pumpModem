@@ -348,8 +348,10 @@ printf 'clipboard text' | ./build/dev/pump tx --input - --output message.wav
 
 `listen` continuously receives from the operating system's default audio device;
 `--device` selects an override. Device enumeration is optional. Linux loads the common
-ALSA `libasound.so.2`; a failed default route reports an error instead of silently
-opening exclusive hardware. Windows uses the system
+ALSA `libasound.so.2`; if the default route fails, it tries advertised shared
+PipeWire/PulseAudio routes before reporting an error. Explicit device choices
+stay on the selected route, and no failure silently opens exclusive hardware.
+Windows uses the system
 WinMM audio API. WAV and simulation
 operation work without audio hardware or the ALSA library. No radio is keyed or
 transmitted by the automated tests. Physical audio transfer and Windows hardware
@@ -367,7 +369,8 @@ All three GUIs have a **TX volume** dropdown in the lower-right corner, starting
 at **100%**, which preserves the existing output exactly. The available levels
 range from **0.01%** to **175%**; values above 100% can clip at the hardware PCM
 limit. This scales playback only, leaving capture, simulation and WAV exports
-unchanged. Fast and Legacy provide **Audio device** dropdowns.
+unchanged. Fast and Legacy provide **Audio device** dropdowns. Legacy places
+the device selector below the waterfall on the left, with squelch on the right.
 
 The adjacent **Exclusive** checkbox starts off. On Linux, system default and
 named routes use the system's sharing configuration; explicit `hw`/`plughw`

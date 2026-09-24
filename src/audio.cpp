@@ -212,11 +212,45 @@ struct Alsa {
     }
     ~Alsa(){dlclose(library);}
 };
+std::vector<std::string> shared_server_endpoints(Alsa& api,int direction,std::stop_token stop,std::string& diagnostic) {
+    check_cancelled(stop);
+    struct Hints {
+        Alsa& api;void** values=nullptr;
+        ~Hints(){if(values)api.free_hint(values);}
+    } hints{api};
+    const auto error=api.hint(-1,"pcm",&hints.values);
+    check_cancelled(stop);
+    if(error<0) {
+        diagnostic="cannot enumerate shared audio routes: "+std::error_code(-error,std::generic_category()).message();
+        return {};
+    }
+    std::array<bool,2> advertised{};
+    constexpr std::array<const char*,2> servers{"pipewire","pulse"};
+    for(void** hint=hints.values;hint && *hint;++hint) {
+        check_cancelled(stop);
+        std::unique_ptr<char,decltype(&std::free)> name(api.get_hint(*hint,"NAME"),std::free);
+        std::unique_ptr<char,decltype(&std::free)> io(api.get_hint(*hint,"IOID"),std::free);
+        check_cancelled(stop);
+        if(!name || (io && std::string_view(io.get())!=(direction?"Input":"Output")))continue;
+        for(std::size_t i=0;i<servers.size();++i)
+            if(std::string_view(name.get())==servers[i])advertised[i]=true;
+    }
+    std::vector<std::string> result;
+    for(std::size_t i=0;i<servers.size();++i)if(advertised[i])result.emplace_back(servers[i]);
+    return result;
+}
 struct Stream {
     Alsa& api; Alsa::PCM* pcm=nullptr;
     std::uint32_t hardware_rate=0;
     unsigned channels=1;
-    Stream(Alsa& a,const std::string& device,int direction,std::uint32_t rate,bool nonblocking=false):api(a) {
+    Stream(Alsa& a,const std::string& device,int direction,std::uint32_t rate,std::stop_token stop,bool nonblocking=false):api(a) {
+        // A throwing constructor has no Stream destructor. Keep the in-flight
+        // handle guarded until configuration and cancellation checks complete.
+        struct CloseOnFailure {
+            Alsa& api;Alsa::PCM*& pcm;bool committed=false;
+            ~CloseOnFailure(){if(!committed && pcm)api.close(pcm);}
+        } cleanup{api,pcm};
+        check_cancelled(stop);
         const auto rates=rate_candidates(rate);
         const auto requested=device.empty()?std::string("default"):device;
         std::string attempted;
@@ -226,26 +260,43 @@ struct Stream {
                 // Stereo lets us route transmit PCM explicitly. Mono-only
                 // endpoints still work, while capture retains one channel.
                 for(unsigned candidate_channels=direction?1:2;candidate_channels>0;--candidate_channels) {
+                    check_cancelled(stop);
                     if(!attempted.empty())attempted+=", ";
                     attempted+=name+"@"+std::to_string(candidate)+"Hz/"+std::to_string(candidate_channels)+"ch";
                     last_error=api.open(&pcm,name.c_str(),direction,nonblocking?1:0);
-                    if(last_error<0){pcm=nullptr;return false;}
+                    if(last_error<0)pcm=nullptr;
+                    check_cancelled(stop);
+                    if(last_error<0) {
+                        attempted+=": "+std::error_code(-last_error,std::generic_category()).message();
+                        return false;
+                    }
                     // Let the application own rate conversion: an accepted ALSA
                     // rate is the selected endpoint's clock, not a modem setting.
                     last_error=api.set_params(pcm,2,3,candidate_channels,candidate,0,100000);
+                    check_cancelled(stop);
                     if(last_error>=0) {
                         hardware_rate=candidate;channels=candidate_channels;return true;
                     }
                     api.close(pcm);pcm=nullptr;
+                    attempted+=": "+std::error_code(-last_error,std::generic_category()).message();
                 }
             }
             return false;
         };
-        if(try_device(requested))return;
+        if(try_device(requested)){cleanup.committed=true;return;}
         auto message="cannot open audio device '"+requested+"': "+
             std::error_code(-last_error,std::generic_category()).message();
-        if(requested=="default")
+        if(requested=="default") {
+            // Only automatic default selection may try known shared sound
+            // servers. Advertised card, hardware and custom aliases are never
+            // fallback candidates; explicit and exclusive routes stay exact.
+            std::string diagnostic;
+            const auto servers=shared_server_endpoints(api,direction,stop,diagnostic);
+            for(const auto& server:servers)
+                if(try_device(server)){cleanup.committed=true;return;}
+            if(!diagnostic.empty())message+=". "+diagnostic;
             message+=". Configure the system's shared audio route (PipeWire/PulseAudio or ALSA dmix/dsnoop), or select an explicit Audio device";
+        }
         throw Error(message+" (tried "+attempted+")");
     }
     ~Stream(){if(pcm) api.close(pcm);}
@@ -266,7 +317,7 @@ std::vector<Device> devices() {
 static void playback_device(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop,StreamFormatCallback on_format,ChannelMode channels,double gain) {
     check_cancelled(stop);
     if(!next_samples)throw Error("playback callback is required");
-    Alsa api; Stream stream(api,device,0,rate);
+    Alsa api; Stream stream(api,device,0,rate,stop);
     PlaybackSource source(rate,stream.hardware_rate,next_samples,stop);
     const auto chunk_limit=std::min<std::size_t>(4096,stream.hardware_rate/20);
     std::vector<std::int16_t> block(chunk_limit*stream.channels);
@@ -309,7 +360,7 @@ std::vector<float> record(double seconds,std::uint32_t rate,const std::string& d
 static void capture_device(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop,StreamFormatCallback on_format) {
     check_cancelled(stop);
     if(!on_chunk) throw Error("capture callback is required");
-    Alsa api; Stream stream(api,device,1,rate,true);
+    Alsa api; Stream stream(api,device,1,rate,stop,true);
     CaptureSink sink(rate,stream.hardware_rate,on_chunk,stop);
     std::vector<std::int16_t> block(4096);
     const auto chunk_limit=std::min<std::size_t>(block.size(),stream.hardware_rate/20);

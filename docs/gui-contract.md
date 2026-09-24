@@ -347,14 +347,19 @@ Changing volume applies to the next transmission without restarting reception;
 capture, simulation, modem normalization and exported WAV samples do not change.
 Both controls are unavailable during transmission or shutdown.
 
-Exclusive starts off. Linux uses the selected system route, or directional
-`dmix`/`dsnoop` routes for an explicit hardware card. Opting into Exclusive opens
-that card's raw hardware endpoint; unresolved named aliases report an actionable
-error. No failed route silently switches to exclusive hardware or another card.
+Exclusive starts off. Linux first tries the selected system route. If **System
+default** cannot open or negotiate a usable format, it tries advertised shared
+PipeWire and PulseAudio routes for that stream direction. Explicit device
+selections never use this fallback. Explicit hardware cards use directional
+`dmix`/`dsnoop` routes. Opting into Exclusive opens that card's raw hardware
+endpoint; unresolved named aliases report an actionable error. Automatic fallback
+candidates never include hardware devices or other cards' ALSA aliases.
 Windows WinMM does not expose exclusive access, so the toggle is disabled.
 Device or access-mode changes close capture before reopening it. Fast and Legacy
 device selectors are dropdowns populated from the same asynchronous enumeration
 as Robust; custom selections survive an inventory update.
+Legacy places its audio-device selector on the left and squelch on the right in
+one row below the waterfall, above the status and transmit-volume row.
 
 The persistent **Oscillator model** dropdown below the Simulation estimates
 offers **Free-running crystal** (the unchanged default), **GPSDO: hobbyist XO

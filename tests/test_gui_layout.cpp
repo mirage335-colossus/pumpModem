@@ -75,10 +75,15 @@ void supported_sizes() {
               layout[Slot::legacy_waterfall].y+layout[Slot::legacy_waterfall].h<layout[Slot::legacy_volume].y-label_height,
               "Audio volume labels overlap the preceding modem controls or waterfall");
         const auto legacy_device=layout[Slot::legacy_device],legacy_squelch=layout[Slot::legacy_squelch];
-        check(legacy_device.y==legacy_squelch.y&&legacy_device.x>=legacy_squelch.x+legacy_squelch.w+18&&
-              legacy_device.w>=600&&legacy_device.x+legacy_device.w==size.w-margin&&
-              legacy_device.y+legacy_device.h<layout[Slot::legacy_waterfall].y-23,
-              "Legacy audio device must fit beside Squelch above the waterfall");
+        const auto legacy_waterfall=layout[Slot::legacy_waterfall],legacy_text=layout[Slot::legacy_text];
+        check(legacy_device.y==legacy_squelch.y&&legacy_device.x==margin&&legacy_device.w>=600&&
+              legacy_squelch.x==legacy_device.x+legacy_device.w+18&&legacy_squelch.w==240&&
+              legacy_squelch.x+legacy_squelch.w==size.w-margin&&
+              legacy_waterfall.y+legacy_waterfall.h<legacy_device.y-label_height&&
+              legacy_device.y+legacy_device.h<layout[Slot::legacy_volume].y-label_height,
+              "Legacy audio device must be left of Squelch below the waterfall and clear of volume labels");
+        check(legacy_waterfall.h==166&&legacy_text.y+legacy_text.h<legacy_waterfall.y-23,
+              "Moving Legacy audio controls must preserve waterfall height and keep its title clear of the draft");
         for (std::size_t index = 1; index < static_cast<std::size_t>(Slot::count); ++index) {
             const auto slot = static_cast<Slot>(index);
             const auto rect = layout[slot];

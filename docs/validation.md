@@ -4,6 +4,41 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Default audio routing and Legacy controls — 23 September 2026
+
+On the local Linux host, ALSA's `default` playback and capture endpoints both
+failed with `ENOENT`, while the advertised `pulse` endpoint negotiated 48 kHz
+successfully in both directions. PipeWire's PulseAudio server was running with
+an analog input/output default; ALSA card 0 was HDMI. The application-level
+8 kHz open probe reproduced the default failure before the change. These probes
+opened/configured and closed devices without reading or writing audio samples.
+
+The fix tries advertised, direction-compatible `pipewire` then `pulse` endpoints
+only after `default` fails. It preserves working defaults and explicit device
+choices, including Exclusive; it never searches other cards or raw hardware as
+an automatic fallback. Legacy now places Audio device on the left and Squelch
+on the right below the unchanged-size waterfall, above the status/TX-volume row.
+The volume default and hardware PCM conversion remain unchanged.
+
+After the fix, the same production-audio probe simultaneously configured two
+capture and two playback streams using `default`, at logical rates 3.6, 8, 48 and
+96 kHz. The 3.6 kHz case negotiated 8 kHz hardware audio; the other cases kept
+their requested rates. All four combinations completed with no samples read or
+written. This verifies shared opening/negotiation, not a physical modem link or
+sustained multi-instance audio quality.
+
+The application builds, the shared GUI group passes 37/37 (112.78 seconds), and
+ALSA, WinMM, audio-rate and resampling contracts pass 4/4 (20.86 seconds). The
+ALSA fixture covers failed-open and failed-format fallback, route priority and
+direction, explicit/exclusive isolation, cancellation and cleanup, concurrent
+shared streams, and unchanged unity PCM. The focused FLTK adapter check passes
+with the new default/minimum-size Legacy assertions. The first CTest attempt
+had native registration disabled by the shared-GUI profile and ran no tests;
+the built adapter binary was then run directly on a private Xvfb display.
+Full native CI and the matching Rev adapter check remain in progress. Retained
+local evidence lives in `build/default-audio-validation/`. This is a source fix,
+not a published or certified replacement for earlier portable binaries.
+
 ## Instrumented GUI workload budget — 23 September 2026
 
 The sampled GUI smoke now distinguishes exhausted cumulative CPU-work allowance

@@ -71,7 +71,9 @@ void playback(std::uint32_t rate, const std::string& device,
               const PlaybackCallback& next_samples, std::stop_token stop, StreamFormatCallback on_format, ChannelMode channels);
 // Options overloads prefer shared ALSA routes for explicit hardware/card IDs;
 // exclusive opts into the same card's raw hw endpoint. Named custom/default
-// routes use their system configuration. No failure changes the selected card.
+// routes use their system configuration. On Linux, only a failed default route
+// may try advertised shared pipewire/pulse aliases, in that order. Explicit
+// selections never fall back to another endpoint or raw hardware.
 // The original overloads retain explicitly selected endpoint behavior.
 void playback(std::uint32_t rate, const std::string& device,
               const PlaybackCallback& next_samples, std::stop_token stop, StreamFormatCallback on_format, ChannelMode channels, Options options);

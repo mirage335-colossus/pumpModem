@@ -59,6 +59,20 @@
                 device->params.value="default";device->onChange(change);settle();
                 require(application.field(device_field).selected=="default"&&application.field(device_field).text=="default",
                     "Rev device dropdown did not restore the system default");
+                if(device_field==ui::Field::legacy_device) {
+                    auto* squelch=by_field(ui::Field::legacy_squelch).choice;
+                    const auto waterfall=ui::DesktopLayout(details.size.width,details.size.height)[ui::Slot::legacy_waterfall];
+                    require(squelch&&allows_input(squelch)&&device->rect.x==ui::margin&&device->rect.y==squelch->rect.y&&
+                        device->rect.x+device->rect.w+18==squelch->rect.x&&
+                        squelch->rect.x+squelch->rect.w==details.size.width-ui::margin&&
+                        waterfall.y+waterfall.h<device->rect.y-ui::label_height&&
+                        squelch->rect.y+squelch->rect.h<volume->rect.y-ui::label_height,
+                        "Rev Legacy device and Squelch must sit left-to-right below the waterfall and above volume");
+                    const auto& declarations=ui::console_screen();
+                    const auto device_declaration=std::find_if(declarations.begin(),declarations.end(),[](const auto& c){return c.field==ui::Field::legacy_device;});
+                    const auto squelch_declaration=std::find_if(declarations.begin(),declarations.end(),[](const auto& c){return c.field==ui::Field::legacy_squelch;});
+                    require(device_declaration<squelch_declaration,"Rev Legacy keyboard traversal must reach Audio device before Squelch");
+                }
             }
         };
         for(const auto size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
@@ -159,7 +173,10 @@
         }
         resize(ui::default_width,ui::default_height);
         re::Event legacy_selection;selector->params.value="legacy";selector->onChange(legacy_selection);settle();
-        verify_audio(ui::Field::legacy_volume,ui::Field::legacy_exclusive,ui::Field::legacy_device);
+        for(const auto size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
+            resize(size.first,size.second);
+            verify_audio(ui::Field::legacy_volume,ui::Field::legacy_exclusive,ui::Field::legacy_device);
+        }
         auto* transcript=by_field(ui::Field::legacy_transcript).editor;
         auto* draft=by_field(ui::Field::legacy_text).editor;
         require(transcript&&draft&&transcript->read_only&&!transcript->editable&&transcript->selectable&&

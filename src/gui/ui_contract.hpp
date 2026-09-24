@@ -49,7 +49,7 @@ enum class Menu { none, keyfile, recovery };
 enum class TextTone { normal, muted, data, inverse, negative };
 enum class BitmapCaption { footer, overlay_error };
 inline constexpr char transmit_volume_help[] = "Transmit audio gain relative to the modem's existing output. 100% preserves the original level. Values above 100% can clip. Does not change system volume or received audio.";
-inline constexpr char exclusive_audio_help[] = "Off prefers shared audio without silently falling back to direct hardware. System default and custom routes retain their configuration. On selects exclusive direct hardware and may prevent other instances from using that device; the default hardware card can differ from the system's default audio route. Exclusive access is unavailable with the Windows WinMM backend.";
+inline constexpr char exclusive_audio_help[] = "Off prefers shared audio without silently falling back to direct hardware. If System default is unavailable, advertised PipeWire/PulseAudio routes are tried. Explicit device choices retain their routing. On selects exclusive direct hardware and may prevent other instances from using that device; the default hardware card can differ from the system's default audio route. Exclusive access is unavailable with the Windows WinMM backend.";
 // Overlay controls use viewport-relative insets and optional fixed dimensions.
 // A zero width/height fills the space between the corresponding insets.
 struct OverlayPlacement {

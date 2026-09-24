@@ -24,8 +24,8 @@ const std::vector<Control>& screen() {
         [] {auto c=placed(Kind::action,Field::count,"Transmit",Slot::legacy_transmit);c.command=Command::legacy_transmit;return c;}(),
         [] {auto c=placed(Kind::bitmap,Field::count,"Waterfall",Slot::legacy_waterfall);c.bitmap=Bitmap::legacy_waterfall;
             c.help="Live audio from 0 to 4 kHz; newest row at the top. Reception pauses during transmission.";return c;}(),
-        placed(Kind::choice,Field::legacy_squelch,"Squelch",Slot::legacy_squelch),
         placed(Kind::choice,Field::legacy_device,"Audio device",Slot::legacy_device),
+        placed(Kind::choice,Field::legacy_squelch,"Squelch",Slot::legacy_squelch),
         [] {auto c=placed(Kind::choice,Field::legacy_volume,"TX volume",Slot::legacy_volume);c.help=transmit_volume_help;return c;}(),
         [] {auto c=placed(Kind::toggle,Field::legacy_exclusive,"Exclusive",Slot::legacy_exclusive);c.help=exclusive_audio_help;return c;}(),
         [] {auto c=placed(Kind::choice,Field::legacy_mono,"Audio channels",Slot::legacy_mono);

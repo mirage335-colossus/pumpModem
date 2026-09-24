@@ -73,6 +73,125 @@ void selected_endpoint() {
     check(simultaneous&&f::state.live==0&&f::state.opens==2&&f::state.closes==2,
           "independent shared capture streams blocked or leaked each other");
 }
+void default_shared_routes() {
+    const std::vector<float> samples{0,.25f,-.5f,1,-1,2,-2,.00004f};
+    const auto setup=[](std::vector<std::string> available,std::vector<f::Hint> hints) {
+        f::reset();f::state.available=std::move(available);f::state.hints=std::move(hints);
+        f::state.supported_channels={1,2};
+    };
+    setup({"default","pipewire","pulse"},{{"pipewire",""},{"pulse",""}});
+    a::play(samples,48000);
+    check(f::state.attempts==std::vector<std::string>{"default"}&&f::state.hint_calls==0,
+          "working default lost priority or unnecessarily enumerated routes");
+    for(const auto& requested:std::vector<std::string>{"default",""}) {
+        for(const auto& server:std::vector<std::string>{"pipewire","pulse"}) {
+            setup({server},{{server,""}});
+            const auto captured=a::record(.01,48000,requested);
+            check(captured.size()==480&&f::state.selected==server&&f::state.hints_freed==1,
+                  "default capture did not select advertised shared server");
+            a::play(samples,48000,requested,{},{},a::ChannelMode::stereo,{});
+            check(f::state.selected==server&&f::state.hints_freed==2&&f::state.live==0,
+                  "default options playback did not select advertised shared server");
+        }
+    }
+    setup({"pipewire","pulse"},{{"pulse",""},{"pipewire",""},{"pipewire",""}});
+    a::play(samples,48000);
+    check(f::state.attempts==std::vector<std::string>{"default","pipewire"},
+          "shared fallback did not prefer pipewire independently of hint order");
+    setup({"pulse"},{{"pulse",""},{"pipewire",""},{"pipewire",""}});
+    f::state.open_errors={{"pipewire",-EBUSY}};
+    a::play(samples,48000);
+    check(f::state.attempts==std::vector<std::string>{"default","pipewire","pulse"}&&f::state.hints_freed==1,
+          "shared fallback repeated duplicate hints or stopped before pulse");
+    for(const bool recording:{false,true}) {
+        setup({"pipewire","pulse"},{{"pipewire",recording?"Output":"Input"},{"pulse",recording?"Input":"Output"}});
+        if(recording)a::record(.01,48000);else a::play(samples,48000);
+        check(f::state.attempts==std::vector<std::string>{"default","pulse"},
+              "shared fallback ignored ALSA stream direction");
+    }
+    setup({"pipewire","pulse","hw:0","null","pipewire:CARD=USB"},
+          {{"pulse","Duplex"},{"hw:0",""},{"null",""},{"pipewire:CARD=USB",""}});
+    rejects([&]{a::play(samples,48000);});
+    check(f::state.attempts==std::vector<std::string>{"default"}&&f::state.hints_freed==1,
+          "shared fallback guessed an unadvertised or unsupported alias");
+    for(const auto& device:std::vector<std::string>{"custom","default:CARD=USB","hw:0","pulse","pipewire"}) {
+        setup({},{{"pipewire",""},{"pulse",""}});
+        rejects([&]{a::play(samples,48000,device);});
+        check(f::state.attempts==std::vector<std::string>{device}&&f::state.hint_calls==0,
+              "explicit endpoint failure enumerated or opened fallback routes");
+    }
+    setup({"pipewire","pulse"},{{"pipewire",""},{"pulse",""}});
+    rejects([&]{a::play(samples,48000,"default",{},{},a::ChannelMode::stereo,{1.,true});});
+    check(f::state.attempts==std::vector<std::string>{"hw"}&&f::state.hint_calls==0,
+          "exclusive default fell back to a shared route");
+    setup({},{{"pipewire",""},{"pulse",""}});
+    f::state.open_errors={{"default",-ENOENT},{"pipewire",-EBUSY},{"pulse",-EACCES}};
+    std::string error;
+    try{a::play(samples,48000);}catch(const datapump::Error& e){error=e.what();}
+    for(const auto& endpoint:std::vector<std::string>{"default@48000Hz/2ch","pipewire@48000Hz/2ch","pulse@48000Hz/2ch"})
+        check(error.find(endpoint)!=std::string::npos,"shared failure omitted an attempted endpoint");
+    for(const auto code:{ENOENT,EBUSY,EACCES})
+        check(error.find(std::error_code(code,std::generic_category()).message())!=std::string::npos,
+              "shared failure omitted an endpoint's failure reason");
+    check(f::state.hints_freed==1&&f::state.live==0,"all-failed shared negotiation leaked resources");
+    setup({"pulse"},{{"pulse",""}});f::state.hint_error=-EIO;
+    error.clear();
+    try{a::play(samples,48000);}catch(const datapump::Error& e){error=e.what();}
+    check(error.find("cannot enumerate shared audio routes")!=std::string::npos&&
+          error.find(std::error_code(ENOENT,std::generic_category()).message())!=std::string::npos&&
+          error.find(std::error_code(EIO,std::generic_category()).message())!=std::string::npos&&
+          f::state.attempts==std::vector<std::string>{"default"}&&f::state.hints_freed==1,
+          "failed hint enumeration hid the original failure or leaked hints");
+    setup({"default","pipewire","pulse"},{{"pipewire",""},{"pulse",""}});
+    f::state.wrong_format={"default","pipewire"};f::state.supported_rates={48000};
+    a::play(samples,96000);
+    check(f::state.selected=="pulse"&&f::state.rate==48000&&f::state.live==0&&f::state.opens==f::state.closes,
+          "format failure did not negotiate a shared server or leaked handles");
+    check(std::find(f::state.attempts.begin(),f::state.attempts.end(),"pipewire")!=f::state.attempts.end(),
+          "format fallback skipped the first advertised shared server");
+    setup({"pulse"},{{"pulse",""}});bool simultaneous=false;
+    a::capture(48000,"default",[&](std::span<const float>) {
+        a::capture(48000,"default",[&](std::span<const float>) {simultaneous=f::state.live==2;return false;});
+        return false;
+    });
+    check(simultaneous&&f::state.live==0&&f::state.opens==2&&f::state.closes==2&&f::state.hints_freed==2,
+          "shared fallback streams could not coexist or leaked resources");
+    // Route recovery must not alter unity gain, resampling, or channel routing.
+    for(const unsigned rate:{48000u,96000u})
+        for(const auto channels:{a::ChannelMode::left_mono,a::ChannelMode::right_mono,a::ChannelMode::stereo}) {
+            setup({"pulse"},{});f::state.supported_rates={48000};
+            a::play(samples,rate,"pulse",{},{},channels);const auto explicit_pcm=f::state.played;
+            setup({"pulse"},{{"pulse",""}});f::state.supported_rates={48000};
+            a::play(samples,rate,"default",{},{},channels,{});
+            check(f::state.played==explicit_pcm,"shared fallback changed unity PCM");
+        }
+    setup({"pulse"},{});const auto explicit_capture=a::record(.01,48000,"pulse");
+    setup({"pulse"},{{"pulse",""}});
+    check(a::record(.01,48000)==explicit_capture,"shared fallback changed capture PCM");
+    for(const auto stage:{"before","open_failed","open_success","format_failed","format_success","hints","fallback_open"}) {
+        setup({"pipewire","pulse"},{{"pipewire",""},{"pulse",""}});
+        std::stop_source cancellation;
+        const auto cancel=[&]{cancellation.request_stop();};
+        const std::string when=stage;
+        if(when=="before")cancel();
+        else if(when=="open_failed")f::state.after_open=cancel;
+        else if(when=="hints")f::state.after_hint=cancel;
+        else if(when=="fallback_open")f::state.after_open=[&]{if(f::state.selected=="pipewire")cancel();};
+        else {
+            f::state.available.push_back("default");
+            if(when=="open_success")f::state.after_open=cancel;
+            else {f::state.after_configure=cancel;if(when=="format_failed")f::state.wrong_format={"default"};}
+        }
+        error.clear();
+        try{a::play(samples,48000,"default",cancellation.get_token());}catch(const datapump::Error& e){error=e.what();}
+        check(error=="audio operation cancelled"&&f::state.live==0&&f::state.opens==f::state.closes,
+              "negotiation cancellation was ignored or leaked an open handle");
+        check(f::state.hint_calls==f::state.hints_freed,"cancelled fallback enumeration leaked hints");
+        const std::vector<std::string> expected=when=="before"?std::vector<std::string>{}:
+            when=="fallback_open"?std::vector<std::string>{"default","pipewire"}:std::vector<std::string>{"default"};
+        check(f::state.attempts==expected,"cancellation continued with format retries or another fallback");
+    }
+}
 void channel_routing() {
     const std::vector<float> samples{0,.25f,-.5f,1,-1,2,-2};
     const std::vector<std::int16_t> pcm{0,8191,-16383,32767,-32767,32767,-32767};
@@ -206,7 +325,7 @@ void audio_options() {
           "shared capture did not keep its own route after exclusive access was busy");
 }
 int main(){try{
-    plugin_directories();selected_endpoint();
+    plugin_directories();selected_endpoint();default_shared_routes();
     channel_routing();audio_options();
     f::reset();f::state.available={"default:CARD=Good"};f::state.hints={{"default:CARD=Good",""}};
     rejects([&]{a::play(std::vector<float>(1),48000,"explicit-bad");});

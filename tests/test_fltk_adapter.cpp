@@ -519,6 +519,19 @@ void fast_mode_visibility() {
             device->picked(device->menu());refresh();
             require(app.application.field(device_field).selected=="default"&&app.application.field(device_field).text=="default",
                 "Native device dropdown did not restore the system default");
+            if(device_field==ui::Field::legacy_device) {
+                auto* squelch=native_field.template operator()<NativeChoice>(ui::Field::legacy_squelch);
+                const auto waterfall=ui::DesktopLayout(window->w(),window->h())[ui::Slot::legacy_waterfall];
+                require(squelch&&squelch->active_r()&&device->x()==ui::margin&&device->y()==squelch->y()&&
+                    device->x()+device->w()+18==squelch->x()&&squelch->x()+squelch->w()==window->w()-ui::margin&&
+                    waterfall.y+waterfall.h<device->y()-ui::label_height&&
+                    squelch->y()+squelch->h()<volume->y()-ui::label_height,
+                    "Native Legacy device and Squelch must sit left-to-right below the waterfall and above volume");
+                const auto& declarations=ui::console_screen();
+                const auto device_declaration=std::find_if(declarations.begin(),declarations.end(),[](const auto& c){return c.field==ui::Field::legacy_device;});
+                const auto squelch_declaration=std::find_if(declarations.begin(),declarations.end(),[](const auto& c){return c.field==ui::Field::legacy_squelch;});
+                require(device_declaration<squelch_declaration,"Legacy keyboard traversal must reach Audio device before Squelch");
+            }
         }
     };
     app.application.edit(ui::Field::binary,"001");
@@ -630,7 +643,10 @@ void fast_mode_visibility() {
         choose->do_callback();require(app.application.take_services().empty(),"Hidden fast native callback opened a file chooser");
     }
     selector->picked(selector->menu()+2);refresh();
-    verify_audio(ui::Field::legacy_volume,ui::Field::legacy_exclusive,ui::Field::legacy_device);
+    for(const auto size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
+        window->size(size.first,size.second);refresh();
+        verify_audio(ui::Field::legacy_volume,ui::Field::legacy_exclusive,ui::Field::legacy_device);
+    }
     auto* transcript=field_widget.template operator()<NativeEditor>("Received and transmitted text");
     auto* legacy_draft=field_widget.template operator()<NativeEditor>("Text to transmit");
     auto* legacy_carrier=field_widget.template operator()<NativeInput>("Carrier (Hz)");
