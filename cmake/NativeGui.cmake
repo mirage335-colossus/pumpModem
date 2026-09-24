@@ -15,7 +15,7 @@ message(STATUS "DataPump GUI backend: ${DATAPUMP_GUI_BACKEND}")
 
 target_include_directories(datapump-gui PRIVATE src/gui)
 target_link_libraries(datapump-gui PRIVATE datapump_gui_application)
-target_compile_definitions(datapump-gui PRIVATE DATAPUMP_VERSION="${PROJECT_VERSION}"
+target_compile_definitions(datapump-gui PRIVATE DATAPUMP_VERSION="${DATAPUMP_VERSION}"
   DATAPUMP_GUI_BACKEND="${DATAPUMP_GUI_BACKEND}")
 if(MSVC)
   target_compile_options(datapump-gui PRIVATE /W4 /permissive-)

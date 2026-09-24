@@ -8,15 +8,21 @@ A C++20 audio modem for moving clipboard text, screenshots, and files between
 computers. It includes a compiled CLI, a native C++/FLTK desktop console, real
 waveform and sampled channel simulation, and a documented fixed-interval byte stream. Received source data uses bounded
 RAM storage; reception creates no temporary files or disk cache. Saves are
-explicit. No network listener or routable addressing is implemented.
+explicit. Communication uses PCM or analog audio interfaces.
 
-**Status: working reference implementation, version 0.7.2.** The audio/stream/crypto
-pipeline works end to end and has automated regression tests. This is not yet
-the complete high-performance modem described in the supplied specification.
-In particular, automatic modulation/rate adaptation, multi-signal radio scanning,
-RF hopping, multi-day status reception, and hardware radio integrations remain
-unimplemented. See the [requirements matrix](docs/requirements.md) for precise
-coverage and boundaries. No unimplemented control is presented as functioning.
+**Status: feature complete, version 001_00.** All features included in this
+version are implemented. Automatic radio-frequency tuning to find suitable HF
+shortwave ionospheric propagation frequencies remains unimplemented; it is the
+sole planned addition, as an alternative to Automatic Link Establishment (ALE)
+and Frequency Hopping Spread Spectrum (FHSS). See the
+[requirements matrix](docs/requirements.md) for implemented behavior and
+measured limits. Feature completeness does not imply qualification on every
+radio, audio device or propagation path.
+
+Operators maintain written procedures for carrier frequencies, listening
+schedules, and the meaning of `0` or `1` as status or distress on each agreed
+frequency. Data Pump transmits and receives the exact bits; their operational
+meaning and the response to them belong to those procedures.
 
 Regular mode sends one bit per pattern symbol. Pattern evidence alone admits
 timing, carrier and keystream candidates. Nonempty text of up to 16 source bytes and
@@ -86,7 +92,7 @@ The separate [physical SNR measurement](docs/cable-snr-live-study.md) found abou
 79 dB on one input and 81.5 dB with both inputs averaged under best-case tone
 conditions; this is not a direct measurement of dense-QAM decoding margin.
 The [coding study](docs/fast-coding-study.md) records the preceding theoretical
-analysis and remaining work such as probabilistic shaping and adaptive loading.
+analysis and the evidence behind the implemented coding choices.
 
 Fast now has **Expected SNR** and **Symbol rate** dropdowns. Expected SNR sets
 matching local waveform/coding defaults, starting at **36 dB for audio cable**
@@ -217,9 +223,9 @@ are separate from measured receive evidence. See
 The receiver keeps a short baseband history and bounded timestamped candidate
 records instead of retaining a whole transmission waveform. Its frequency,
 timing and keystream searches are finite. The default carrier bank spans
-±1/(2T), where T is symbol duration; arbitrary drift and whole-band scanning
-are not implemented. When a full symbol window exceeds the FFT workspace, a bounded correlator
-searches an explicit system-clock start window instead. Tests cover a four-hour
+±1/(2T), where T is symbol duration, so reception depends on the signal staying
+within the configured search bank. When a full symbol window exceeds the FFT
+workspace, a bounded correlator searches an explicit system-clock start window instead. Tests cover a four-hour
 symbol prefix with bounded storage and actual short-signal PCM recovery through
 this fallback. Coverage is finite: broad unknown-start acquisition and real-time
 performance across a large epoch bank are not established.
@@ -451,7 +457,7 @@ input pauses during playback. Pattern scores wait for complete receiver windows.
 It includes named shared-key selection and
 a bounded receive cache. WAV tools remain available through the CLI. It does not
 open received files or execute received content. Screenshots can be attached as
-ordinary image files; direct operating-system screenshot capture is not implemented.
+ordinary image files saved with the operating system's screenshot tools.
 
 The **Keyfile** menu opens existing files, generates and saves a new 128 MiB
 keyfile with named entries in the background, or opens the loaded file's folder.
@@ -608,9 +614,10 @@ signing keys or other applications' secrets in this format.
 
 AES-256-CTR masks every wire bit, including markers, source bytes, HMAC and RS
 parity. Only encrypted byte intervals carry HMAC-SHA256; exact raw-bit signaling
-has no MAC. Independent HKDF-derived keys separate Data, MAC, DSSS, Scrambler and
-reserved FHSS purposes. Symbol-start epoch/ordinal addresses bind interval MACs
-and preserve cipher positions through missing symbols and drains. Automatically
+has no MAC. Independent HKDF-derived keys separate the Data, MAC, DSSS and
+Scrambler purposes; the keyfile retains its compatible five-key layout.
+Symbol-start epoch/ordinal addresses bind interval MACs and preserve cipher
+positions through missing symbols and drains. Automatically
 timed hardware output schedules the first payload symbol on a whole second.
 Receive time defaults to capture start; recordings require a suitable epoch and
 finite search window. This is not a nanosecond-resolution absolute-time receiver.
@@ -627,7 +634,7 @@ from someone holding the complete keyfile and required pad. See
 ## Scriptable tools
 
 ```sh
-# Automatic tuning and exact airtime, without allocating audio.
+# Automatic symbol-duration planning and exact airtime, without allocating audio.
 ./build/dev/pump estimate --text 'CQ hello' --bw 1200 --target-snr 40 --pattern auto-pattern
 
 # Optical transfer, UTF-8, up to500 Unicode characters.
@@ -692,7 +699,7 @@ ratios use bounded filter stages. Different 44.1/48/96 kHz cards can share the
 same modem settings. Conversion cannot restore frequencies outside the physical
 card's passband. Live GUI audio rejects a selected band that exceeds the converter's
 usable passband; actual analog response remains device-dependent. The 30 MHz
-planning range permits future SDR integration; no SDR device backend is implemented.
+planning range does not extend the connected audio device's physical passband.
 `--snr` is simulated sample-power SNR in dB. Simulation presets instead specify
 transmit dBm and channel attenuation, with thermal noise at 290K and a 10dB
 receiver noise figure. With the default crystal impairment, extremely long
@@ -785,9 +792,9 @@ The source is separated into fixed interval coding, cryptography, DSP/WAV, audio
 runtime policy, a shared transfer service, CLI orchestration, and GUI state. See [protocol](docs/protocol.md),
 [modem](docs/modem.md), [QR](docs/qr.md), and
 [release disclaimer](docs/disclaimer.md). The [validation record](docs/validation.md)
-lists the tests actually run. The supplied design is preserved in
-[original-specification.md](docs/original-specification.md) as source material,
-not as a claim that every requested feature or assertion is implemented.
+lists the tests actually run. The [requirements matrix](docs/requirements.md)
+defines the current product scope; [scope record](docs/original-specification.md)
+records its operating assumptions.
 
 Application code is dedicated to the public domain under [CC0 1.0 Universal](LICENSE).
 Copyright (c) 2026 mirage335. The vendored QR encoder retains its own

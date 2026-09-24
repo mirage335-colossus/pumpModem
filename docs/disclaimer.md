@@ -1,11 +1,10 @@
 # Public release and scope
 
 Data Pump is an independently developed civilian audio modem for text and file
-transfer. The implemented features are recorded in [requirements.md](requirements.md).
-It excludes routed addressing, built-in repeaters, asymmetric key exchange,
-and rapid uncontrolled Doppler tracking. These statements describe its actual
-functionality; they are not a legal classification or a claim that a particular
-class of user could never use the software.
+transfer. The implemented features are recorded in [requirements.md](requirements.md)
+and the version 001_00 [scope record](original-specification.md). These statements
+describe its functionality; they are not a legal classification or a claim that
+a particular class of user could never use the software.
 
 The implementation uses publicly documented standard symmetric cryptographic
 primitives through OpenSSL: AES256-CTR, AES256-GCM, HKDF-SHA256, and HMAC-SHA256.
@@ -26,11 +25,10 @@ non-standard cryptography. See the primary texts in
 [15CFR742.15](https://www.ecfr.gov/current/title-15/subtitle-B/chapter-VII/subchapter-C/part-742/section-742.15),
 and the [BIS encryption guidance](https://www.bis.gov/learn-support/encryption-controls/encryption-items-not-subject-to-ear).
 No applicable USML/ECCN determination has been obtained for this implementation.
-The original supplied disclaimer is retained only within the preserved design
-document; its broader legal and performance assertions are not adopted as
+Legal and performance assertions in the original proposal are not adopted as
 verified facts by this release.
 
 The software does not certify permitted frequencies, power, modulation masks,
-spreading, or licenses for any jurisdiction. It has no FHSS/ISM compliance mode.
-Operators choose hardware and authorized operating conditions. See the
+spreading, or licenses for any jurisdiction. Operators choose hardware and
+authorized operating conditions. See the
 [CC0 1.0 Universal license](../LICENSE) for the software warranty terms.

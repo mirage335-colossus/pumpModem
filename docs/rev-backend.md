@@ -119,7 +119,7 @@ delta. High-DPI startup centers the final physical window size on its display.
 This Rev revision uses GLSL 4.30 and persistent mapped buffers. Startup requires
 OpenGL 4.3 plus `ARB_buffer_storage`, or OpenGL 4.4+. Missing capabilities produce
 an error before the rendering buffers are created. Software OpenGL is a valid
-profile; a separate native software renderer remains future upstream work.
+profile.
 
 ```sh
 LIBGL_ALWAYS_SOFTWARE=1 LP_NUM_THREADS=2 ./build-rev/datapump-gui --smoke-test

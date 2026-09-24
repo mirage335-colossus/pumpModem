@@ -1,10 +1,8 @@
 # Batched iterative search
 
-The iterative pattern receiver has numerical batch interfaces for a future GPU
-backend. The implementations currently execute on the CPU. This prepares large
-logical work grids without creating one operating-system thread, template cache
-or transform buffer per hypothesis. It does not add CUDA/OpenCL dependencies or
-claim a GPU speedup.
+The iterative pattern receiver executes numerical batches on the CPU. This
+supports large logical work grids without creating one operating-system thread,
+template cache or transform buffer per hypothesis.
 
 ## Compute boundaries
 
@@ -18,8 +16,7 @@ Logical indices do not encode a CPU worker number. Range dispatch allocates no
 state proportional to the number of jobs; tests cover 100,003 jobs and sparse
 ranges spanning `SIZE_MAX`. CPU concurrency still defaults to all but one
 available logical CPU, with at least one. Available work and workspace can lower
-the actual concurrency. GPU execution would map these logical indices to its
-own grid independently of that CPU setting.
+the actual concurrency.
 
 CPU correlation chooses its range grain from both lane count and worker count,
 targeting at least 16 ranges per worker when enough lanes exist, capped at 16
@@ -55,42 +52,12 @@ counters or publication callbacks. Copied pattern seeds are cleared when the
 batch view is destroyed. CPU pattern caches must be constructed from the same
 configuration as the supplied immutable pattern parameters.
 
-## Implementing a device backend
-
-The batch functions are the integration points; their host coordinator remains
-responsible for observable receiver behavior. A device implementation still
-needs the following work:
-
-1. Define explicit device storage and upload layouts for geometry, jobs,
-   projection/template rows and results. Host spans are views, not device
-   pointers or a serialized ABI. In particular, `long double`, `size_t`, Boolean
-   fields and complex storage require deliberate device representations.
-2. Port pattern generation and its exact stream addresses, or upload bounded
-   generated templates. Immutable mode, seed, epoch and symbol/chip geometry
-   are available in the batch descriptors. CPU `PatternCode` caches and their
-   OpenSSL state cannot be passed into a kernel.
-3. Keep reusable templates, projection data and buffers on the device where
-   possible, amortize transfers and dispatch, and select a device-specific
-   memory layout and work-group size. NVIDIA's [transfer guidance](https://developer.nvidia.com/blog/how-optimize-data-transfers-cuda-cc/)
-   explains why many tiny transfers are costly. Cross-key/epoch aggregation
-   remains future work: the existing receiver bank still submits these contexts
-   separately, and its workspace/admission order must be preserved.
-4. Validate symbol coordinates and numerical behavior before enabling device
-   results. The CPU reference deliberately preserves extended-precision clock
-   calculations and the previous within-job arithmetic. Parallel reductions,
-   fused operations, transcendental functions and different precision can change
-   scores near an admission threshold; GPU thread count alone does not establish
-   equivalence. See NVIDIA's [floating-point discussion](https://docs.nvidia.com/cuda/archive/12.8.0/cuda-c-best-practices-guide/#numerical-accuracy-and-precision).
-5. Complete or cancel device work before returning to ordered host collection.
-   Do not publish speculative results, relax the search coverage, or change
-   memory/physical-end rules to accommodate a backend. Bound and clear device
-   copies of secret template material as well as host copies.
+## CPU validation and reproduction
 
 The CPU reference tests exercise 16,387 FFT jobs and 10,019 correlator lanes,
 worker-count and tile-size equivalence, reordered FFT jobs, malformed spans,
 cancellation and reuse. Receiver-level tests preserve exact scores, next-poll
-prefixes, physical absence, tight workspace and idle footprints. These are the
-baseline for a device port; no GPU has been exercised by this change.
+prefixes, physical absence, tight workspace and idle footprints.
 
 For a reproducible large-bank CPU workload, build and run:
 

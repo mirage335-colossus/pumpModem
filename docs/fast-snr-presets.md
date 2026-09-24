@@ -99,9 +99,8 @@ marker design require at least 512 active bins and a 1 kHz configured band.
 Below that supported geometry the selector uses a narrow single carrier near
 1.8 kHz. Its output amplitude is normalized to preserve the nominal OFDM
 average PCM power. Radio keeps its 1.5 kHz carrier. These restrictions cause a sizable
-throughput drop at the OFDM-to-single-carrier transition. Lower-SNR acquisition,
-longer coherent training, and a new multiblock marker design could reduce this
-gap in a future wire revision; stronger LDPC alone would not fix acquisition.
+throughput drop at the OFDM-to-single-carrier transition. Acquisition and marker
+geometry constrain this transition in addition to payload error correction.
 
 Each OFDM candidate now halves its interleave depth until its known-channel
 refresh interval fits the nominal 13-block, 9.984-second interval, or depth

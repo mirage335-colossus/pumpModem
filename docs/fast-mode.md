@@ -273,8 +273,7 @@ and burst disturbances all affect achievable throughput.
 
 The [coding study](fast-coding-study.md) records the earlier design analysis.
 LDPC, sparse outer RS, compact source bytes and sparse full markers are now
-implemented; probabilistic constellation shaping and adaptive loading remain
-future work. The [codec specification](fast-capacity-codec.md) gives exact
+implemented. The [codec specification](fast-capacity-codec.md) gives exact
 ratios and overhead, and the [live capacity study](fast-capacity-live-study.md)
 separates measured results from projections.
 

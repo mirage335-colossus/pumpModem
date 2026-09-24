@@ -9,9 +9,10 @@ until completion can make a useful message impractical.
 This is a maintenance contract for the existing implementation. The
 [protocol](protocol.md) specifies the wire format and
 [GUI contract](gui-contract.md) specifies its shared presentation. The
-[original specification](original-specification.md),
-[migration plan](packetless-stream-plan.md) and older validation entries describe
-historical designs; they do not override these current requirements.
+[version 001_00 scope record](original-specification.md) describes the product
+scope. The [migration plan](packetless-stream-plan.md) and older validation
+entries describe historical designs; they do not override these current
+requirements.
 
 Preserve the restricted received-byte presentation and the selected index and
 validation-boundary protections documented in
@@ -21,14 +22,14 @@ to protected paths need functional and performance validation; neither new wire
 overhead nor process/VM isolation is part of this design.
 
 For independent Fast Modem throughput work, consult the
-[coding and capacity study](fast-coding-study.md), including its development
-priorities and evidence limits, the [physical cable study](fast-cable-live-study.md),
+[coding and capacity study](fast-coding-study.md), including its historical
+measurements and evidence limits, the [physical cable study](fast-cable-live-study.md),
 and the [current Fast format](fast-mode.md).
 The [implemented capacity format](fast-capacity-codec.md) and
 [capacity cable experiments](fast-capacity-live-study.md) describe the independent
 Fast v2 development; its compact source flags and sparse framing do not apply to
 the regular transport paths below.
-Its proposed coding and marker changes do not alter this compatibility contract.
+Its independent coding and marker format does not alter this compatibility contract.
 The independent [acoustic OFDM format](fast-acoustic-ofdm.md) and
 [speaker/microphone live study](fast-acoustic-live-study.md) cover frequency
 equalization, training, physical completion and measured acoustic limits.

@@ -204,18 +204,16 @@ throughput** before other fixed costs. The new flag costs one byte per roughly
 28–29 KB, about 0.0035%. The public digest costs about 0.112%; keyed mode adds
 an IV and small alignment fill. Shortening these further offers little gain.
 At 4M-QAM the full markers average 3.92% of transmitted interval symbols and
-pilots another 3.92%. Less pilot evidence is a possible future gain, but this
-experiment found that accurate pilot tracking is necessary at this density.
+pilots another 3.92%. This experiment found that accurate pilot tracking is
+necessary at this density.
 
 An exhaustive geometry calculation for depths 1–16 finds depth 6 marginally
 fastest for an exact 50 MB public source: 1,283.610 seconds versus 1,287.337
 at depth 4, a 0.29% gain. Depth 4 is the whole-file live-test setting; the deeper
 cycle changes burst distribution and decoder work per callback, so arithmetic
 alone is insufficient to promote it. The [depth sweep](validation-data/fast/capacity-20260920/interleave-airtime.json)
-records every result. Cross-interval pilot/payload packing is another untested
-proposal, estimated to recover roughly 3.4%; it would require new wire-format
-and long-file validation. These are remaining opportunities, not implemented
-or measured throughput gains.
+records every result. These arithmetic comparisons are not measured
+throughput gains.
 
 ## Capacity comparison and reliability limits
 
@@ -275,8 +273,8 @@ noise floor. Some failing cycles' likelihood variance estimates were 1.7–2.0 d
 below their actual data error; that is a plausible additional near-threshold
 limitation, not a conclusively isolated sole cause. The live max-log demapper and
 non-Gaussian residuals also differ from the ideal benchmark's exact PAM
-likelihoods. Further likelihood calibration is a practical candidate for future
-recorded-replay testing; no untested gain is included in the default's results.
+likelihoods. These differences limit direct comparison with the ideal
+benchmark; no untested gain is included in the default's results.
 
 Total diagnostic live wall time, including failed and aborted trials and their
 real silence tails, was **1,796.165 seconds (29 minutes 56.165 seconds)**. No

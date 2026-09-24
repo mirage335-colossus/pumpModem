@@ -151,8 +151,10 @@ evidence before removing them yourself.
 Every configuration writes `build-info.txt` with source revision, compiler,
 backend and build flags; packaging includes it. This is configure-time
 provenance, not a claim of byte-for-byte reproducibility or an uncommitted diff
-archive. `./build.sh` reconfigures before building to refresh it. Existing
-`--version` output remains compatible.
+archive. `./build.sh` reconfigures before building to refresh it. The application
+display version is `001_00`, reported by the CLI and GUI `--version` commands.
+CMake and distribution packaging use the numeric equivalent `1.0.0`; build
+information records both identities. See [release versioning](releases.md).
 Configuration also compiles the receive-hardening header's capability probes and
 records index/barrier support, or an explicit unsupported status, in the build
 information. These compile-only probes support cross-compilation; they do not

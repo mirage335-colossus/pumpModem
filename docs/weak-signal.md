@@ -84,9 +84,8 @@ projection bins are kept short enough to retain the searched offsets.
 At a matching start time, these clock/carrier hypotheses compete before
 admission. The sampled regressions verify rejection of previously admitted
 bit-selection harmonics that appeared as a second message at another carrier.
-Simultaneous signals with
-the same pattern and overlapping timing compete for this receiver; this search
-does not implement successive interference cancellation.
+Simultaneous signals with the same pattern and overlapping timing compete for
+this receiver.
 
 When retaining every transformed template would exceed RAM, the FFT search
 generates rows in bounded scratch space. Expanded live banks sharing memory
@@ -118,10 +117,8 @@ not an unrestricted drift tracker. Arbitrarily low C/N0 cannot be made useful
 by selecting arbitrarily long symbols. In particular, years of coherent
 integration are not established by a test of numerical long-symbol coordinates.
 
-When phase cannot remain predictable over a whole symbol, a further receiver
-stage would need to combine shorter coherent correlations statistically,
-including the noncoherent sensitivity loss and all search trials. That stage
-is not implemented here. [ESA's baseband processing description](https://gssc.esa.int/navipedia/index.php/Baseband_Processing)
+The implemented receiver requires phase predictability over its coherent
+integration windows. [ESA's baseband processing description](https://gssc.esa.int/navipedia/index.php/Baseband_Processing)
 explains the integration, clock/Doppler and noncoherent accumulation tradeoffs.
 
 Low transmitted spectral density helps reduce interference. Reception below

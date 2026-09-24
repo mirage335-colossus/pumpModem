@@ -1,5 +1,13 @@
 # Manual portable releases
 
+The feature-complete application version is **001_00**. The CLI, GUI and build
+information use that display version, and an ordinary release dispatch defaults
+to the label `v001_00`. CMake, portable archive roots and distribution packages
+use its numeric equivalent `1.0.0`; the Windows manifest uses `1.0.0.0`.
+Version identity does not change the publication and certification requirements
+below. See the [requirements matrix](requirements.md) for the implemented scope
+and the remaining automatic HF frequency-tuning work.
+
 The [release workflow](../.github/workflows/release.yml) builds and publishes
 six portable application bundles: separate **FLTK** and **Rev** builds for Linux
 x86_64, Linux aarch64 and Windows x64. Each contains its selected GUI, the CLI,
@@ -21,7 +29,7 @@ long preservation contract and GUI tests remain intact in that workflow.
 
 | Input | Default | Meaning |
 | --- | --- | --- |
-| `version` | Empty | Use the CMake version (`0.7.2`) as `v0.7.2`, or supply a label such as `v001_00`. |
+| `version` | Empty | Use the application display version as `v001_00`, or supply an explicit release label. |
 | `experiment` | Checked | Title exactly `experiment`; GitHub prerelease; never Latest, even after certification passes. |
 | `publish` | Checked | Publish after all six platform/backend packages pass basic checks. Uncheck to retain a draft with its assets for inspection. |
 | `linux_baseline` | `bookworm-sdk` | Source SDK/glibc 2.36 for x86_64, or `ubuntu-22.04`/glibc 2.35. ARM64 always uses the Ubuntu 22.04 baseline. |

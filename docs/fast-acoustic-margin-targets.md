@@ -1,7 +1,9 @@
 # Acoustic throughput versus desired noise margin
 
-These are planning estimates from the recorded default-profile information,
-not tested attenuation, distance or distortion margins. All margin targets are
+This historical study records planning estimates from the 2026-09-21
+profile information, not tested attenuation, distance or distortion margins.
+Its model comparisons do not define additional version 001_00 features; current
+supported profiles are documented in [Fast mode](fast-mode.md). All margin targets are
 total margins relative to the same recorded starting condition. A 6 dB target
 adds about 3 dB to the current default's estimated headroom.
 
@@ -15,11 +17,11 @@ uniform 16-QAM AWGN bit information gives 13.0658 dB Es/N0. The current
 | Total margin target | Candidate/planning source rate | Loss from current ~38.8 kbit/s | Basis |
 | --- | ---: | ---: | --- |
 | 6 dB | 25.8 kbit/s | 33% | Existing 16-QAM, LDPC 1/2 payload mode |
-| 10 dB | 17.9 kbit/s | 54% | Existing QPSK, LDPC 2/3 payload mode; synchronization needs work |
-| 16 dB | ~5.7 kbit/s | ~85% | New low-rate coding and stronger synchronization; model only |
-| 20 dB | ~2.5 kbit/s | ~94% | New low-rate coding and stronger synchronization; model only |
-| 23 dB | ~1.3 kbit/s | ~97% | New low-rate coding and stronger synchronization; model only |
-| 26 dB | ~0.65 kbit/s | ~98% | New low-rate coding and stronger synchronization; model only |
+| 10 dB | 17.9 kbit/s | 54% | Existing QPSK, LDPC 2/3 payload mode; baseline synchronization limits apply |
+| 16 dB | ~5.7 kbit/s | ~85% | Constant-gap analytical model only |
+| 20 dB | ~2.5 kbit/s | ~94% | Constant-gap analytical model only |
+| 23 dB | ~1.3 kbit/s | ~97% | Constant-gap analytical model only |
+| 26 dB | ~0.65 kbit/s | ~98% | Constant-gap analytical model only |
 
 The first two source rates come from the production CLI's 50,000,000-byte
 airtime estimate, including existing overhead. Their loss percentages compare
@@ -45,20 +47,21 @@ short screens support the two payload candidates; 24 successful frames do not
 establish a rare-error rate or a file success probability. No OFDM waveform,
 channel estimation, synchronization, outer RS or audio hardware was tested.
 
-The current presence detector has an additional limitation: it checks at most
+The presence detector in this recorded baseline had an additional limitation: it checked at most
 16 sign errors among 256 QPSK pilot bits, plus residual power below signal
 power. In ideal flat AWGN at 3 dB Es/N0, the sign test alone passes about 20%
 of blocks, even though the QPSK/LDPC2/3 payload decoder passes the screen.
 Actual selected pilot tones can be stronger than the information-equivalent
 average, so this is not a prediction of the room's measured pilot performance.
 It demonstrates why lowering the payload rate alone cannot establish 10 dB
-whole-modem margin. Stronger training and pilot detection must accompany it.
+whole-modem margin; training and pilot detection are separate constraints.
 
 Targets of 16–26 dB imply negative per-tone Es/N0 under this reference. The
-lowest implemented capacity code is QPSK LDPC1/2; lower-rate codes or coherent
-repetition/spreading, with suitable synchronization, would require new work.
+lowest capacity code in this recorded baseline was QPSK LDPC1/2. The higher
+margin rows are analytical comparisons, not available profiles or measured
+whole-modem margins.
 
-## Model for the unimplemented modes
+## Historical analytical model
 
 Use a constant-gap AWGN curve with the present overhead and a 1.549 dB gap,
 calibrated to deliver three information bits per payload tone at a 10 dB

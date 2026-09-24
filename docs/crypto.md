@@ -2,7 +2,7 @@
 
 The implementation uses OpenSSL 3 for all cryptographic primitives: HKDF-SHA256,
 AES-256-CTR, AES-256-CBC, HMAC-SHA256, AES-256-GCM, SHA256, and operating-system-seeded private
-random generation. It implements no asymmetric cryptography or key exchange.
+random generation.
 
 The time-indexed streams below belong to regular mode and are unchanged by
 Fast. [Fast cryptography](fast-mode.md#cryptography-and-exact-source-bytes) uses
@@ -26,7 +26,7 @@ The master secret is exactly 32 random bytes. Independent purpose keys are:
 | Data encryption | `datapump/v1/data` |
 | DSSS | `datapump/v1/dsss` |
 | Scrambler | `datapump/v1/scrambler` |
-| FHSS | `datapump/v1/fhss` |
+| Reserved keyfile purpose (FHSS) | `datapump/v1/fhss` |
 | Authentication | `datapump/v1/mac` |
 
 Each stream purpose derives `epoch_key = HKDF(purpose_key,
@@ -198,8 +198,8 @@ The GUI's **Transmit noise** action continuously modulates dummy bits through
 the regular encrypted pattern transmitter. Each start obtains fresh temporary
 master key material through `Crypto::random()` (OpenSSL `RAND_priv_bytes`).
 The usual purpose-separated Data, Scrambler and DSSS streams use the same
-derivation and addressing as ordinary encrypted transmission. FHSS is not an
-active modem stage. Saved key material is not a noise input; temporary keys
+derivation and addressing as ordinary encrypted transmission. Saved key
+material is not a noise input; temporary keys
 are never registered with reception, saved or shown in the transmission trace,
 and their owned cryptographic storage is cleansed on release.
 

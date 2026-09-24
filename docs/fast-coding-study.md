@@ -14,8 +14,9 @@ new default settings or a replacement wire specification.
 The subsequent [live cable study](fast-cable-live-study.md) tests the connected
 DAC/ADC path and selects faster existing convolutional/RS settings with more
 transmitter headroom. It retains the distinction between measured small-file
-outcomes and 50 MB reliability projections; the LDPC and sparse-parity proposals
-below remain unimplemented.
+outcomes and 50 MB reliability projections. Subsequent work implemented LDPC
+and sparse outer parity in the [capacity format](fast-capacity-codec.md); the
+proposals below are historical analysis, not a product roadmap.
 
 ## Objective and scope
 
@@ -452,44 +453,24 @@ threshold, but excludes acquisition, final fill, longer loss propagation and
 reacquisition cost. It proposes a Fast-format change only; regular-mode
 192-bit markers and 128-coded-byte intervals retain their separate contract.
 
-## Next development work and evidence to retain
+## Implemented follow-on work and evidence limits
+
+The independent [capacity format](fast-capacity-codec.md),
+[live cable capacity study](fast-capacity-live-study.md), and
+[acoustic OFDM format](fast-acoustic-ofdm.md) document the implemented follow-on
+work. The [current Fast specification](fast-mode.md) defines the supported
+version 001_00 behavior. The numerical comparisons in this historical study do
+not add requirements to that scope.
 
 For identical independent attempts taking T seconds with file-success
 probability P, expected time to success is `T/P` and goodput is
 `source_bytes * P / T`. If a failed attempt adds turnaround W, expected time
 becomes `(T + (1-P)*W)/P`. These expressions need a different model when channel
 conditions remain correlated between retries or attempts change profile.
-
-1. Establish a complete-file baseline for each channel at 100,000 and 5,000,000
-   source bytes, public and encrypted. Record exact profiles, code/mapping,
-   marker cadence, interleave, padding, airtime, startup/end silence and retry
-   turnaround. Optimize `source_bytes / expected_time_to_success`, including
-   failed attempts, rather than nominal mapper rate or first-attempt success.
-2. Integrate the measured uniform-QAM/LDPC candidates into an isolated diagnostic
-   path and compare against current convolutional modes through sampled PCM.
-   Sweep SNR around each transition with multiple independent seeds; retain
-   whole-word errors, convergence failures, wrong valid codewords, erasures,
-   file outcomes, CPU deadlines and memory. Estimate uncertainty at each point;
-   0/800 is not evidence for zero FER. Separate pilot selection from validation.
-3. Select RS and interleaving jointly from those results. Sweep interruption
-   position, duration and alignment through data, repair, training and markers;
-   distinguish unused burst budget from random-error capacity. Report correlated
-   erasure patterns and detection failures, not just average BER. Include the
-   zero-RS short-file option and account for local geometry and bounded storage.
-4. Compare Gray QAM, probabilistic shaping, mapping and LDPC matrices/rates
-   together. Then measure the gain from marker/pilot cadence, source-cell layout
-   and pulse-shaping rolloff. Keep Gaussian bandwidth bounds, symbol bounds,
-   bit metrics, decoded information rate and actual file goodput separate.
-5. Qualify all three channel classes. Wire needs timing drift and linearity;
-   radio audio needs the intended radio path and its filtering/level behavior;
-   acoustic needs varied echoes, transducer response and sound interruptions.
-   Archive clean received power/SNR normalization and device or impulse-response
-   details. One static echo fixture cannot select a universal acoustic mode.
-6. Record any resulting choice with its measured improvement, confidence limits,
-   CPU/latency tradeoff, remaining uncertainty and wire-compatibility scope.
-   Preserve physical completion, missing-slot positions and pending progress.
-   Follow the current development contract and relevant independent vectors
-   and Fast/shared-GUI checks when implementation changes actually occur.
+Recorded file outcomes, CPU deadlines, memory, channel conditions and failure
+patterns therefore remain essential context for every throughput measurement.
+No result here establishes universal hardware qualification or zero failure
+probability.
 
 ## Reproducing the information-rate calculation
 

@@ -231,7 +231,5 @@ destination path or executable file type.
 The system still trusts audio hardware, firmware, OS drivers and its runtime.
 Analog modulation does not establish protection against hostile peripherals,
 BadUSB, electrical faults, host compromise or driver defects. Hardware isolation
-and attenuation remain external engineering responsibilities. There is no serial
-modem substitute, network receiver API, built-in repeater or automatic radio-control
-channel. Tests and source review do not replace independent security assessment
-on the intended hardware.
+and attenuation remain external engineering responsibilities. Tests and source
+review do not replace independent security assessment on the intended hardware.

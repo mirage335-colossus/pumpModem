@@ -33,7 +33,8 @@ Narrow audio remains around a usable carrier rather than falling below 300 Hz.
 The 6 kHz floor is needed for this real-PCM carrier representation; it does not
 raise the nominal chip or symbol rate. The 30 MHz plan still uses 120 million
 internal samples/second. Manual CLI carrier/sample-rate overrides remain available.
-The range is a DSP configuration range; an SDR device backend is not implemented.
+The range is a DSP configuration range; physical operation uses the selected
+audio device's available sample rate and passband.
 The modem's nominal chip rate is bandwidth / 2.
 `symbol_seconds` is the bandwidth-derived duration (or explicit integration),
 independent of the hardware clock. `symbol_sample_count` rounds that duration

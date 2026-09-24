@@ -46,6 +46,14 @@ def project_version(root=ROOT):
     return match[1]
 
 
+def display_version(root=ROOT):
+    contents = (root / 'CMakeLists.txt').read_text(encoding='utf-8')
+    match = re.search(r'set\(DATAPUMP_VERSION\s+"([^"]+)"\s*\)', contents)
+    if not match:
+        raise ValueError('Cannot read the DataPump display version from CMakeLists.txt')
+    return match[1]
+
+
 def chicago_time(instant):
     if instant.tzinfo is None or instant.utcoffset() is None:
         raise ValueError('Build timestamp must include a UTC offset')
@@ -71,7 +79,9 @@ def make_metadata(*, source_sha, run_id, run_attempt, version='', experiment=Fal
                   packager_sha=None, repackaged_from=None):
     if type(schema) is not int or schema not in (1, 2, 3, 4, 5):
         raise ValueError('Unsupported release metadata schema')
-    cmake_version = cmake_version or project_version()
+    if cmake_version is None:
+        cmake_version = project_version()
+        version = version or f'v{display_version()}'
     if not re.fullmatch(r'\d+(?:\.\d+){1,3}', cmake_version):
         raise ValueError('Invalid CMake project version')
     version = version or f'v{cmake_version}'
@@ -417,7 +427,7 @@ def release_notes(metadata, details):
             f'- Source commit: `{metadata["source_sha"]}`\n'
             f'- Build date: `{metadata["build_date"]}` (America/Chicago)\n'
             f'- Workflow run: `{metadata["run_id"]}`, attempt `{metadata["run_attempt"]}`\n'
-            f'- Application version: `{metadata["project_version"]}`\n'
+            f'- Package version: `{metadata["project_version"]}`\n'
             f'- GUI downloads: {", ".join(metadata.get("gui_backends", ["fltk"]))}\n'
             f'- Linux ABI: {baseline}\n\n{details}')
 

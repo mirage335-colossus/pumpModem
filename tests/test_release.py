@@ -212,6 +212,24 @@ class MetadataTests(unittest.TestCase):
     def test_project_version_is_read_from_cmake(self):
         self.assertRegex(release.project_version(), r'^\d+(?:\.\d+)+$')
 
+    def test_current_release_preserves_display_and_numeric_package_versions(self):
+        self.assertEqual(release.display_version(), '001_00')
+        self.assertEqual(release.project_version(), '1.0.0')
+        value = metadata(cmake_version=None, schema=5)
+        self.assertEqual(value['version'], 'v001_00')
+        self.assertEqual(value['tag'], 'v001_00-2026-09-22-0252CDT')
+        self.assertEqual(value['project_version'], '1.0.0')
+        self.assertIn('DataPump-1.0.0-Linux-x86_64-native-fltk',
+                      release.package_bases(value, 'linux-x86_64-fltk'))
+        self.assertIn('- Package version: `1.0.0`', release.release_notes(value, 'Details'))
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'metadata.json'
+            release.write_json(path, value)
+            self.assertEqual(release.load_metadata(path), value)
+        custom = metadata(cmake_version=None, version='custom-label')
+        self.assertEqual(custom['version'], 'custom-label')
+        self.assertEqual(custom['project_version'], '1.0.0')
+
 
 class MatrixTests(unittest.TestCase):
     def test_both_schemas_and_baselines_cover_every_expected_target(self):

@@ -109,7 +109,10 @@ The physical receivers do not normally need packet lengths. Their explicit packe
 | `src/gui/inspection_model.cpp` (reviewed checkout) | Estimates and diagrams encode/inspect a full packet | Arithmetic from fixed geometry and local input size |
 | `src/main.cpp` (reviewed checkout) | Packet scratch, kinds, filenames, `pack/unpack`, packet JSON | Stream input/output and local-only presentation options |
 
-The older `docs/original-specification.md` (reviewed checkout) explicitly described repeatable packets and a text/file packet format. The user's current direction supersedes those sections; they should not be used to retain the old parser in the new receiver.
+The original proposal described repeatable packets and a text/file packet
+format. This migration superseded that proposal; the old parser is not part of
+the completed fixed-interval transport. The [scope record](original-specification.md)
+now describes version 001_00.
 
 ## 4. Security assessment
 

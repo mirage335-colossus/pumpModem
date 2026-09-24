@@ -1,8 +1,42 @@
-# Validation record — version 0.7.2
+# Validation record
 
 The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
+
+## Version 001_00 and completed product scope — 24 September 2026
+
+The application display version is now `001_00`, with numeric CMake/package
+version `1.0.0` and Windows manifest version `1.0.0.0`. Both GUI backends and the
+CLI use the display version; build and package provenance retain both identities.
+An ordinary release dispatch defaults to `v001_00`, while explicit release
+labels and historical metadata retain their existing behavior.
+
+The README, requirements matrix and supporting documentation now describe the
+feature-complete scope and operator-written frequency/status procedures.
+Automatic HF radio-frequency tuning remains the sole planned addition. Earlier
+measurements and their qualification limits remain historical evidence below;
+the new scope declaration does not reclassify their outcomes.
+
+Validation on the local Linux host:
+
+- `./build.sh --build-jobs 4` and `./build.sh --backend rev --build-jobs 4`
+  both built successfully. Each CLI and GUI `--version` reported `001_00`, and
+  both GUI `--self-check` runs passed without a display.
+- `./build.sh test build --build-jobs 4`: 15/18 suites passed initially. The
+  three package-signing suites could not start their disposable GPG agents
+  inside the sandbox; all three passed unchanged when rerun outside it. All
+  18 build suites therefore have passing results, including release-label,
+  numeric-package-version and metadata round-trip coverage.
+- `./build.sh test packaging --build-jobs 2`: 4/4 passed, including native
+  relocation, runtime collection, SDK packaging fixtures and corruption checks.
+- Local Markdown targets and `git diff --check` passed.
+
+Build and test logs are retained under `build/version-001_00-validation/`.
+Changes are confined to documentation and version identity; modem, codec and
+reception behavior are unchanged. These checks do not constitute new physical
+hardware, Windows or native-display qualification. No release was published or
+certified by this update.
 
 ## Default audio routing and Legacy controls — 23 September 2026
 

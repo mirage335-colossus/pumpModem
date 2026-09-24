@@ -44,7 +44,7 @@ and prefix counter separation are unchanged. A shorter symbol still consumes
 fresh private chips. Raw and dictionary messages retain exact bit counts;
 keyed interval authentication and boundary recovery still follow pattern acquisition.
 The [development contract](development.md) requires preserving these paths and
-per-bit pending reception through future throughput work.
+per-bit pending reception during maintenance.
 
 Private symbols of at most 256 samples with nonorthogonal carrier bins now use
 the existing exact two-real-basis sample fit used by short public patterns.
@@ -106,8 +106,8 @@ CPU worker count, while reusing each worker's transform buffer and private
 pattern state; only jobs and results awaiting ordered collection need separate
 storage. Long-symbol correlation groups original blocks between possible
 symbol completions and exposes bounded numerical tiles of up to 65,536 lanes.
-The [compute interfaces and GPU port requirements](search-compute.md) describe
-these CPU implementations and the work still required for device execution.
+The [batched compute interfaces](search-compute.md) describe these bounded CPU
+implementations.
 Tracking refinements also reuse exact template
 and carrier phase values, using acquisition scratch buffers between transforms
 without increasing receiver memory even when optional caches are unavailable.

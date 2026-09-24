@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Optional release label, for example v001_00; blank uses the CMake version'
+        description: 'Optional release label; blank uses the application version (v001_00)'
         type: string
         default: ''
       experiment:

@@ -2,10 +2,12 @@
 
 Status: original design and source audit, reviewed 2026-09-19. The implementation
 now exists; [Fast mode](fast-mode.md) specifies its actual behavior and limits.
-The recommendations below remain the design history, not the wire specification.
+The recommendations below remain design history, not a product roadmap or the
+wire specification.
 Subsequent [throughput and coding research](fast-coding-study.md) records the
 revised throughput-first objective, LDPC/RS candidates, measured limits and
-future optimization priorities; consult it before extending this original plan.
+historical comparisons. The version 001_00 [scope record](original-specification.md)
+and current Fast specification define the completed product.
 The subsequent user revision adds text sources and optional encryption. Public
 mode uses separate checksum domains; encrypted wire vectors remain unchanged.
 
@@ -14,9 +16,9 @@ QPSK through 256-APSK, convolutional plus interleaved RS, CBC/HMAC, four profile
 bounded streaming files/audio and independent SNR regressions. The authenticated
 salt bootstrap occupies one complete fixed coding cycle. There is no separate
 supercycle marker or received cycle index: cycle phase starts with acquisition
-and advances at the local cadence. Unknown sample gaps fail incomplete. LDPC,
-automatic rate adaptation, arbitrary mid-file joins, hardware qualification and
-spectral-mask certification remain outside this implemented baseline.
+and advances at the local cadence. Unknown sample gaps fail incomplete.
+The subsequent [capacity format](fast-capacity-codec.md) adds QAM/LDPC;
+hardware and spectral-mask qualification depend on intended-device measurements.
 The original audit used commit `2373fba`. The
 [development contract](development.md) remains authoritative for regular mode;
 this proposal does not supersede the [current protocol](protocol.md).
@@ -42,9 +44,10 @@ version, modulation choice, FEC choice, address or filename determines a modem
 allocation, next boundary or completion event. All geometry is local and fixed
 for the whole transmission. Both ends must select the same profile.
 
-This is a plan for implementation, with candidate numerical profiles below.
-Rates, constellation thresholds and interruption tolerance are engineering
-targets pending sampled tests and physical measurements, not measured features.
+The numerical profiles below record the original implementation plan. Its
+rates, constellation thresholds and interruption tolerance were engineering
+targets at that time; current behavior and measurements are documented in
+[Fast mode](fast-mode.md).
 
 ## 2. What the current code actually does
 
@@ -147,8 +150,7 @@ symbols explicitly; no received value selects how much to remove.
 QPSK, 16- and 256-APSK divide 2,048-bit spans exactly by their bits/symbol.
 For 64-APSK, add four fixed mapper-fill bits to produce 342 symbols; remove
 those four known positions before inner decoding. The fill is distinct from
-the 2,048 coded payload bits. Future 32-/128-APSK profiles likewise need
-explicit fixed mapper fill; rounding cannot silently lose bits.
+the 2,048 coded payload bits; rounding cannot silently lose bits.
 Freeze complete independent vectors covering puncture phase, fill, RS
 interleaving, bit order, constellation labels and both kinds of boundaries.
 
@@ -508,17 +510,12 @@ callbacks and outstanding file dialogs. Extend dependency-negative fixtures
 and run both FLTK and Rev conformance checks from
 [GUI architecture](gui-architecture.md#verification-and-maintenance-guardrails).
 
-## 12. Evidence and remaining decisions
+## 12. Historical evidence and implemented format
 
-This review read the development contract and traced the current source paths;
+This review read the development contract and traced the source paths at that time;
 it did not execute a new DSP implementation or measure hardware. No runtime
-files or existing tests are changed by this plan. Validate documentation links,
-layout arithmetic and whitespace now; record actual implementation test runs in
-[validation.md](validation.md) when those stages exist.
-
-Before freezing fast wire v1, settle the exact sync/training sequence and false
-lock budget; convolutional polynomials/puncturing/termination; per-profile
-interleave depth and supercycle fill; authenticated salt bootstrap; fast key
-derivation interface; and connector-specific filter measurements. These are
-bounded design decisions inside the proposed architecture, not reasons to
-modify regular mode or bring back packet lengths.
+files or existing tests were changed by this plan. Subsequent implementation
+test runs are recorded in [validation.md](validation.md). The implemented
+sync/training, coding, interleaving, bootstrap and cryptographic choices are
+defined in [Fast mode](fast-mode.md) and the [capacity format](fast-capacity-codec.md).
+Their independent wire formats preserve the regular-mode development contract.
