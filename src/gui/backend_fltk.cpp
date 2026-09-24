@@ -222,6 +222,13 @@ public:
     NativeEditor():Fl_Text_Editor(0,0,1,1) {
         buffer(&buffer_);wrap_mode(Fl_Text_Display::WRAP_AT_BOUNDS,0);
         textfont(theme::font);
+        // FLTK's default paste binding deletes the selection before the
+        // clipboard arrives. Keep it intact until our atomic FL_PASTE edit
+        // has validated the replacement and its byte limit.
+        const auto request_paste=[](int,Fl_Text_Editor* editor){Fl::paste(*editor,1);return 1;};
+        add_key_binding('v',FL_CTRL,request_paste);
+        if(FL_COMMAND!=FL_CTRL)add_key_binding('v',FL_COMMAND,request_paste);
+        add_key_binding(FL_Insert,FL_SHIFT,request_paste);
         buffer_.add_modify_callback([](int,int inserted,int deleted,int,const char*,void* context) {
             auto& self=*static_cast<NativeEditor*>(context);
             if(!self.applying_&&(inserted||deleted)&&self.changed)self.changed(buffer_text(self.buffer_));
@@ -238,14 +245,19 @@ public:
         const std::string inserted(text);buffer_.replace(edit.start,edit.end,inserted.c_str(),static_cast<int>(inserted.size()));
         buffer_.unselect();insert_position(edit.cursor);show_insert_position();return true;
     }
-    void apply(const std::string& text) {
-        if(buffer_text(buffer_)==text)return;
-        const auto cursor=insert_position(),top=mTopLineNum,horizontal=mHorizOffset;
-        int start=0,end=0;const bool selected=buffer_.selection_position(&start,&end)!=0;
-        applying_=true;buffer_.text(text.c_str());
-        const auto clamp=[&](int position){return ui::text_boundary(text,position);};
-        insert_position(clamp(cursor));if(selected)buffer_.select(clamp(start),clamp(end));
-        scroll(top,horizontal);applying_=false;
+    void apply(const std::string& text,std::uint64_t cursor_end_revision=0) {
+        if(buffer_text(buffer_)!=text) {
+            const auto cursor=insert_position(),top=mTopLineNum,horizontal=mHorizOffset;
+            int start=0,end=0;const bool selected=buffer_.selection_position(&start,&end)!=0;
+            applying_=true;buffer_.text(text.c_str());
+            const auto clamp=[&](int position){return ui::text_boundary(text,position);};
+            insert_position(clamp(cursor));if(selected)buffer_.select(clamp(start),clamp(end));
+            scroll(top,horizontal);applying_=false;
+        }
+        if(cursor_end_revision&&cursor_end_revision!=cursor_end_revision_) {
+            cursor_end_revision_=cursor_end_revision;
+            buffer_.unselect();insert_position(static_cast<int>(text.size()));show_insert_position();
+        }
     }
     int handle(int event) override {
         if(event==FL_PASTE) {
@@ -268,6 +280,7 @@ private:
     void draw() override {theme::DrawStyle style(*this);Fl_Text_Editor::draw();}
     Fl_Text_Buffer buffer_;
     bool applying_=false;
+    std::uint64_t cursor_end_revision_=0;
     ui::TextEdit propose(std::string_view inserted,int start,int end) {
         auto edit=ui::text_edit(buffer_text(buffer_),{insert_position(),start,end},inserted,true,byte_limit);
         if(!edit.error.empty()&&error)error(edit.error);
@@ -281,10 +294,15 @@ public:
     std::function<bool(bool,bool)> submit;
     std::size_t byte_limit=1024*1024;
     std::function<void(std::string)> error;
-    void apply(const std::string& text) {
-        if(text==value())return;
-        const auto selection=ui::TextSelection{insert_position(),mark(),insert_position()}.clamped(text);
-        value(text.c_str());insert_position(selection.cursor,selection.anchor);
+    void apply(const std::string& text,std::uint64_t cursor_end_revision=0) {
+        if(text!=value()) {
+            const auto selection=ui::TextSelection{insert_position(),mark(),insert_position()}.clamped(text);
+            value(text.c_str());insert_position(selection.cursor,selection.anchor);
+        }
+        if(cursor_end_revision&&cursor_end_revision!=cursor_end_revision_) {
+            cursor_end_revision_=cursor_end_revision;
+            insert_position(static_cast<int>(text.size()),static_cast<int>(text.size()));
+        }
     }
     bool paste(std::string_view text) {
         const auto edit=propose(text);if(!edit)return false;
@@ -302,6 +320,7 @@ public:
         return Fl_Input::handle(event);
     }
 private:
+    std::uint64_t cursor_end_revision_=0;
     void draw() override {theme::DrawStyle style(*this);Fl_Input::draw();}
     ui::TextEdit propose(std::string_view inserted) {
         auto edit=ui::text_edit(value(),{insert_position(),mark(),insert_position()},inserted,false,byte_limit);
@@ -319,12 +338,50 @@ private:
     void draw() override {widgets::draw_bitmap(source_,x(),y(),w(),h());}
 };
 
+ui::KeyStroke native_key_stroke() {
+    ui::Key key=ui::Key::other;
+    switch(Fl::event_key()) {
+    case FL_Escape:key=ui::Key::escape;break;
+    case FL_Enter:case FL_KP_Enter:key=ui::Key::enter;break;
+    case ' ':key=ui::Key::space;break;
+    case FL_Tab:key=ui::Key::tab;break;
+    case FL_Left:key=ui::Key::left;break;
+    case FL_Right:key=ui::Key::right;break;
+    case FL_Up:key=ui::Key::up;break;
+    case FL_Down:key=ui::Key::down;break;
+    case FL_BackSpace:key=ui::Key::backspace;break;
+    case FL_Delete:key=ui::Key::del;break;
+    }
+    return {key,(Fl::event_state()&FL_CTRL)!=0,(Fl::event_state()&FL_SHIFT)!=0,(Fl::event_state()&FL_ALT)!=0};
+}
 class NativeWindow : public Fl_Double_Window {
 public:
-    NativeWindow():Fl_Double_Window(ui::default_width,ui::default_height,ui::window_title()) {}
+    NativeWindow():Fl_Double_Window(ui::default_width,ui::default_height,ui::window_title()) {
+        if(instances_++==0) {previous_dispatch_=Fl::event_dispatch();Fl::event_dispatch(dispatch_event);}
+    }
+    ~NativeWindow() override {if(--instances_==0)Fl::event_dispatch(previous_dispatch_);}
     std::function<void()> resized;
+    std::function<bool(ui::KeyStroke)> key;
+    Fl_Widget* overlay=nullptr;
+    bool show_background=true;
     void resize(int x,int y,int width,int height) override {
         Fl_Double_Window::resize(x,y,width,height);if(resized)resized();
+    }
+private:
+    inline static unsigned instances_=0;
+    inline static Fl_Event_Dispatch previous_dispatch_=nullptr;
+    static int dispatch_event(int event,Fl_Window* window) {
+        // Intercept policy keys before FLTK delivers them to a focused editor.
+        if(event==FL_KEYDOWN||event==FL_SHORTCUT)
+            if(auto* native=dynamic_cast<NativeWindow*>(window);native&&native->key&&native->key(native_key_stroke()))return 1;
+        return previous_dispatch_?previous_dispatch_(event,window):Fl::handle_(event,window);
+    }
+    void draw() override {
+        if(!overlay||!overlay->visible()) {Fl_Double_Window::draw();return;}
+        if(show_background)Fl_Double_Window::draw();
+        // Covered controls may damage their own rectangle between ticks.
+        // Always repaint the overlay last, including damage-only native draws.
+        draw_child(*overlay);
     }
 };
 
@@ -343,6 +400,19 @@ private:
         fl_pop_clip();
     }
 };
+// A generic surface shell; controls, layout and key policy come from the same
+// declarations and presentation path as the desktop controls.
+class NativeOverlay : public Fl_Group {
+public:
+    NativeOverlay(int width,int height):Fl_Group(0,0,width,height) {end();}
+    bool block_background=true;
+    int handle(int event) override {
+        if(Fl_Group::handle(event))return 1;
+        if(event==FL_FOCUS)return 1;
+        return block_background&&(event==FL_PUSH||event==FL_RELEASE||event==FL_MOUSEWHEEL||event==FL_DRAG||event==FL_MOVE||event==FL_ENTER);
+    }
+};
+
 class NativeRecords : public Fl_Scroll {
     struct Row : Fl_Group {
         NativeRecords& owner;
@@ -465,6 +535,7 @@ public:
     std::function<void(ui::ServiceResult)> complete;
     std::function<void(std::string)> error;
     ui::ServiceQueue queue;
+    bool active() const {return chooser_||prompt_;}
     void enqueue(std::vector<ui::ServiceRequest> requests) {queue.enqueue(std::move(requests));}
     void poll() {
         if(queue.closed()) {cancel();return;}
@@ -544,6 +615,7 @@ private:
 
 struct Binding {
     const ui::Control* control=nullptr;
+    std::span<const ui::Control> declarations;
     NativeControlGroup* group=nullptr;
     Fl_Box *label=nullptr,*caption=nullptr;
     NativeInput* input=nullptr;
@@ -556,36 +628,39 @@ struct Binding {
     NativeBitmap* bitmap=nullptr;
     std::vector<const ui::Control*> menu_items;
     BindingState presentation;
+    std::vector<std::unique_ptr<std::function<void()>>> callbacks;
 };
 
 class NativeApp {
 public:
     explicit NativeApp(Launch launch,std::span<const ui::Control> controls=ui::console_screen()):application(std::move(launch)),controls_(controls) {
         window=std::make_unique<NativeWindow>();window->size_range(ui::min_width,ui::min_height);window->begin();
+        background=new Fl_Group(0,0,window->w(),window->h());background->begin();
         for(const auto& definition:ui::pages()) {
             auto* button=new theme::Widget<Fl_Button>(0,0,1,1,definition.title);
-            bind(*button,[this,id=definition.id]{application.select_page(id);show_page();});tabs.push_back({definition.id,button});
+            bind(*button,[this,id=definition.id]{application.navigate(id);show_page();});tabs.push_back({definition.id,button});
             Page page;page.definition=&definition;
             if(definition.document) {
                 page.scroll=new Fl_Scroll(0,0,1,1);page.scroll->type(Fl_Scroll::VERTICAL_ALWAYS);
                 page.group=page.scroll;
                 page.document_frame=new Fl_Group(0,0,1,1);
-                page.document=new FltkDocumentView(0,0,1,1,[this](ui::Command command){application.activate(command);});
+                page.document=new FltkDocumentView(0,0,1,1,[this](ui::Command command){application.dispatch(command);});
                 page.document_frame->end();
                 page.scroll->end();
             } else {page.group=new Fl_Group(0,0,1,1);page.group->end();}
             pages.emplace(definition.id,std::move(page));
         }
-        create_controls(controls_);window->end();
+        create_controls(controls_,bindings);background->end();window->end();
         theme::apply_widgets(*window);
         window->callback([](Fl_Widget*,void* context){static_cast<NativeApp*>(context)->application.close();},this);
         window->resized=[this]{layout();};
+        window->key=[this](ui::KeyStroke stroke){return application.overlay_key(stroke,services.active(),Fl::grab()!=nullptr);};
         services.complete=[this](ui::ServiceResult result){application.complete_service(std::move(result));};
         services.error=[this](std::string message){application.report_error(std::move(message));};
         layout();show_page();application.start();apply();window->show();
         Fl::add_timeout(.004,timer_callback,this);
     }
-    ~NativeApp() {Fl::remove_timeout(timer_callback,this);services.cancel();application.close();window.reset();}
+    ~NativeApp() {Fl::remove_timeout(timer_callback,this);services.cancel();application.close();window->overlay=nullptr;overlay_surface.reset();window.reset();}
     Application application;
     int run() {
         while(!application.finished()) {
@@ -603,6 +678,14 @@ private:
         std::shared_ptr<const ui::DocumentNode> source;
     };
     std::unique_ptr<NativeWindow> window;
+    Fl_Group* background=nullptr;
+    std::unique_ptr<NativeOverlay> overlay_surface;
+    std::shared_ptr<const ui::OverlayDefinition> overlay_definition;
+    std::vector<std::unique_ptr<Binding>> overlay_bindings;
+    std::unique_ptr<Fl_Widget_Tracker> overlay_focus;
+    bool restore_overlay_focus=true;
+    bool overlay_focus_pending=false,restore_focus_pending=false;
+    unsigned callback_depth=0;
     std::map<ui::Page,Page> pages;
     std::vector<std::pair<ui::Page,Fl_Button*>> tabs;
     std::vector<std::unique_ptr<Binding>> bindings;
@@ -619,35 +702,45 @@ private:
     static void timer_callback(void* context) {
         auto& self=*static_cast<NativeApp*>(context);
         try {
-            if(self.application.tick()) {self.apply();if(self.application.launch.smoke)self.verify_layout();}
+            const bool service_was_active=self.services.active();
+            self.application.set_service_active(self.services.active());
+            const bool changed=self.application.tick();
+            if(changed||(!Fl::grab()&&!self.callback_depth&&self.application.overlay()!=self.overlay_definition)) {self.apply();if(self.application.launch.smoke)self.verify_layout();}
             self.services.queue.synchronize(self.application.take_services(),self.application.closing());
-            if(self.services.queue.closed()||!Fl::grab())self.services.poll();
+            const auto layers=self.application.overlay_layers(self.services.active());
+            if(self.services.queue.closed()||(!Fl::grab()&&layers.present_services))self.services.poll();
+            self.application.set_service_active(self.services.active());
+            if(service_was_active!=self.services.active())self.apply();else self.apply_layers();
             if(self.application.page()!=self.shown_page)self.show_page();
             if(self.application.smoke_passed())self.scroll_to(self.application.launch.scroll);
         } catch(...) {self.failure_=std::current_exception();self.application.close();}
         if(!self.application.finished())Fl::repeat_timeout(.004,timer_callback,&self);
     }
 
-    void bind(Fl_Widget& widget,std::function<void()> callback) {
-        auto value=std::make_unique<std::function<void()>>(std::move(callback));
-        widget.callback([](Fl_Widget*,void* context){(*static_cast<std::function<void()>*>(context))();},value.get());callbacks.push_back(std::move(value));
+    void bind(Fl_Widget& widget,std::function<void()> callback,Binding* owner=nullptr) {
+        auto value=std::make_unique<std::function<void()>>([this,callback=std::move(callback)] {
+            struct Guard {unsigned& depth;Guard(unsigned& value):depth(value){++depth;}~Guard(){--depth;}} guard(callback_depth);
+            callback();
+        });
+        widget.callback([](Fl_Widget*,void* context){(*static_cast<std::function<void()>*>(context))();},value.get());(owner?owner->callbacks:callbacks).push_back(std::move(value));
     }
+    void bind_control(Binding& owner,Fl_Widget& widget,std::function<void()> callback) {bind(widget,std::move(callback),&owner);}
     static void place(Fl_Widget* widget,ui::Rect bounds) {if(widget)widget->resize(bounds.x,bounds.y,std::max(0,bounds.w),std::max(0,bounds.h));}
     static void label(Fl_Widget* widget,const std::string& value) {if(widget&&(!widget->label()||value!=widget->label()))widget->copy_label(value.c_str());}
     static void enabled(Fl_Widget* widget,bool value) {if(widget) {if(value&&!widget->active())widget->activate();else if(!value&&widget->active())widget->deactivate();}}
     static void visible(Fl_Widget* widget,bool value) {if(widget) {if(value&&!widget->visible())widget->show();else if(!value&&widget->visible())widget->hide();}}
-    void create_controls(std::span<const ui::Control> controls) {
+    void create_controls(std::span<const ui::Control> controls,std::vector<std::unique_ptr<Binding>>& destination,Fl_Group* surface=nullptr) {
         for(const auto& declaration:ui::control_groups(controls)) {
             const auto& control=*declaration.control;
-            auto binding=std::make_unique<Binding>();auto& b=*binding;b.control=&control;
-            auto* parent=control.persistent?static_cast<Fl_Group*>(window.get()):pages.at(control.page).group;parent->begin();
+            auto binding=std::make_unique<Binding>();auto& b=*binding;b.control=&control;b.declarations=controls;
+            auto* parent=surface?surface:control.persistent?background:pages.at(control.page).group;parent->begin();
             b.group=new NativeControlGroup(control);b.group->dispatch=[this,c=&control](ui::Command command){application.gesture(*c,command);};b.group->begin();
             if(control.menu==ui::Menu::none) {
                 b.label=new NativeLiteralText;b.label->align(FL_ALIGN_LEFT|FL_ALIGN_INSIDE|FL_ALIGN_CLIP);b.label->labelsize(control.font_size);
             }
             if(control.menu!=ui::Menu::none) {
                 b.menu=new theme::Widget<NativeMenuButton>(0,0,1,1,control.menu_label);b.menu_items=declaration.menu_items;
-                bind(*b.menu,[this,p=&b]{if(const auto id=p->presentation.option_id(p->menu->value()))application.select_menu(p->menu_items,*id);});
+                bind_control(b,*b.menu,[this,p=&b]{if(const auto id=p->presentation.option_id(p->menu->value()))application.select_menu(p->menu_items,*id);});
             } else switch(control.kind) {
             case ui::Kind::label:break;
             case ui::Kind::text:
@@ -662,20 +755,20 @@ private:
                     b.input->submit=[this,c=&control](bool ctrl,bool shift){return application.submit(*c,ctrl,shift);};
                     b.input->byte_limit=control.byte_limit;
                     b.input->error=[this](std::string error){application.report_error(std::move(error));};
-                    bind(*b.input,[this,p=&b]{application.edit(*p->control,p->input->value());});
+                    bind_control(b,*b.input,[this,p=&b]{application.edit(*p->control,p->input->value());});
                 }
                 b.suggestions=new theme::Widget<NativeMenuButton>(0,0,1,1,ui::preset_indicator);
-                bind(*b.suggestions,[this,p=&b]{if(const auto id=p->presentation.option_id(p->suggestions->value()))application.preset(*p->control,*id);});
+                bind_control(b,*b.suggestions,[this,p=&b]{if(const auto id=p->presentation.option_id(p->suggestions->value()))application.preset(*p->control,*id);});
                 break;
             case ui::Kind::choice:
                 b.choice=new NativeChoice;b.choice->textsize(control.font_size);b.choice->when(FL_WHEN_RELEASE_ALWAYS);
-                bind(*b.choice,[this,p=&b]{if(const auto id=p->presentation.option_id(p->choice->value()))application.select(*p->control,*id);});break;
+                bind_control(b,*b.choice,[this,p=&b]{if(const auto id=p->presentation.option_id(p->choice->value()))application.select(*p->control,*id);});break;
             case ui::Kind::toggle:
                 b.toggle=new NativeCheckbox(0,0,1,1,control.label);
-                bind(*b.toggle,[this,p=&b]{application.toggle(*p->control,p->toggle->value()!=0);});break;
+                bind_control(b,*b.toggle,[this,p=&b]{application.toggle(*p->control,p->toggle->value()!=0);});break;
             case ui::Kind::action:
                 b.button=new theme::Widget<Fl_Button>(0,0,1,1,control.label);
-                bind(*b.button,[this,c=&control]{application.activate(*c);});break;
+                bind_control(b,*b.button,[this,c=&control]{application.activate(*c);});break;
             case ui::Kind::list:
                 b.records=new NativeRecords(control);
                 b.records->selected=[this,c=&control](std::string id){application.select(*c,id);};
@@ -690,19 +783,27 @@ private:
                 if(child!=b.caption)child->labelsize(control.font_size);
                 if(auto* menu=dynamic_cast<Fl_Menu_*>(child))menu->textsize(control.font_size);
             }
-            b.group->end();parent->end();bindings.push_back(std::move(binding));
+            b.group->end();parent->end();destination.push_back(std::move(binding));
         }
     }
+    std::vector<Binding*> current_bindings() const {
+        std::vector<Binding*> result;result.reserve(bindings.size()+overlay_bindings.size());
+        for(const auto& binding:bindings)result.push_back(binding.get());
+        for(const auto& binding:overlay_bindings)result.push_back(binding.get());
+        return result;
+    }
     void layout() {
-        const auto page_bounds=ui::page_rect(window->w(),window->h());
-        for(const auto& tab:ui::tab_layout(window->w(),window->h())) {
+        background->resize(0,0,window->w(),window->h());
+        if(overlay_surface)overlay_surface->resize(0,0,window->w(),window->h());
+        const auto page_bounds=application.page_bounds(window->w(),window->h());
+        for(const auto& tab:application.tab_layout(window->w(),window->h())) {
             const auto found=std::find_if(tabs.begin(),tabs.end(),[&](const auto& item){return item.first==tab.page;});
             place(found->second,tab.frame);
         }
         for(auto& [id,page]:pages) {(void)id;place(page.group,page_bounds);}
-        for(auto& item:bindings) {
+        for(auto* item:current_bindings()) {
             auto& b=*item;const auto& c=*b.control;
-            const auto view=binding_presentation(application,c,b.menu_items,window->w(),window->h(),controls_);
+            const auto view=binding_presentation(application,c,b.menu_items,window->w(),window->h(),b.declarations);
             const auto& geometry=view.geometry;
             b.presentation.applied_layout(geometry,c.font_size);
             if(b.choice)b.choice->popup_upward=geometry.popup_upward;
@@ -723,10 +824,10 @@ private:
             place(b.caption,geometry.caption);visible(b.caption,geometry.has_caption&&ui::drawable(geometry.caption));
             b.group->box(geometry.border?FL_DOWN_BOX:FL_NO_BOX);
         }
-        update_documents();window->redraw();
+        update_documents();apply_layers();window->redraw();
     }
     void update_documents() {
-        const auto bounds=ui::page_rect(window->w(),window->h());
+        const auto bounds=application.page_bounds(window->w(),window->h());
         for(auto& [id,page]:pages)if(page.document) {
             const int width=ui::document_content_width(bounds.w,Fl::scrollbar_size());
             const auto source=application.document(id,width);
@@ -744,15 +845,17 @@ private:
     }
     void show_page() {
         shown_page=application.page();for(auto& [id,page]:pages)visible(page.group,id==shown_page);
-        for(auto& [id,button]:tabs)button->value(id==shown_page);
+        // value() resets FLTK's press baseline and can swallow the release.
+        // Keep a held tab's native state until the click or drag completes.
+        for(auto& [id,button]:tabs)if(Fl::pushed()!=button)button->value(id==shown_page);
         window->redraw();
     }
     void apply() {
         auto* previous_group=Fl_Group::current();
-        bool relayout=false;
-        for(auto& item:bindings) {
+        bool relayout=update_overlay();
+        for(auto* item:current_bindings()) {
             auto& b=*item;const auto& c=*b.control;
-            const auto view=binding_presentation(application,c,b.menu_items,window->w(),window->h(),controls_);
+            const auto view=binding_presentation(application,c,b.menu_items,window->w(),window->h(),b.declarations);
             const auto& state=view.control.state;
             relayout=relayout||b.presentation.needs_layout(view.geometry,c.font_size);
             visible(b.group,view.visible);enabled(b.group,view.enabled);
@@ -761,24 +864,74 @@ private:
                 if(!child->tooltip()||std::string_view(child->tooltip())!=c.help)child->copy_tooltip(c.help);
             }
             if(b.label)label(b.label,view.control.label);
-            if(b.input){b.input->byte_limit=c.byte_limit;b.input->apply(state.text);}
-            if(b.editor){b.editor->byte_limit=c.byte_limit;b.editor->apply(state.text);}
+            if(b.input){b.input->byte_limit=c.byte_limit;b.input->apply(state.text,state.text_cursor_end_revision);}
+            if(b.editor){b.editor->byte_limit=c.byte_limit;b.editor->apply(state.text,state.text_cursor_end_revision);}
             if(b.presentation.update_options(view.options,Fl::grab()!=nullptr)) {
                 for(auto* menu:std::initializer_list<Fl_Menu_*>{b.choice,b.suggestions,b.menu})
                     if(menu)populate(*menu,b.presentation.options());
             }
             if(b.choice&&!Fl::grab()) {const auto index=b.presentation.option_index(state.selected);if(b.choice->value()!=index)b.choice->value(index);}
             if(b.choice)b.choice->apply_display(state.display_text);
-            if(b.toggle) {b.toggle->value(state.checked);label(b.toggle,view.control.label);}
+            if(b.toggle) {
+                // value() also resets FLTK's press baseline. Preserve its
+                // pending toggle until release, including drag cancellation.
+                if(Fl::pushed()!=b.toggle)b.toggle->value(state.checked);
+                label(b.toggle,view.control.label);
+            }
             if(b.records){b.records->configure(c);b.records->apply(state);}
             if(b.button) {enabled(b.button,view.enabled);label(b.button,view.control.label);}
             if(b.menu)label(b.menu,view.control.label);
         }
         if(relayout)layout();else update_documents();
-        update_bitmaps();show_page();Fl_Group::current(previous_group);
+        update_bitmaps();show_page();apply_layers();apply_focus();Fl_Group::current(previous_group);
+    }
+    bool update_overlay() {
+        const auto definition=application.overlay();
+        if(definition==overlay_definition||Fl::grab()||callback_depth)return false;
+        const bool opening=!overlay_definition&&definition;
+        if(opening&&Fl::focus())overlay_focus=std::make_unique<Fl_Widget_Tracker>(Fl::focus());
+        // Widget-owned handlers and binding-owned callbacks die before their
+        // immutable declarations; active callbacks and popup loops defer this.
+        window->overlay=nullptr;overlay_surface.reset();overlay_bindings.clear();
+        const bool closing=!definition&&overlay_definition;
+        if(closing)restore_focus_pending=true;
+        overlay_definition=definition;
+        if(definition) {
+            restore_overlay_focus=definition->policy.restore_focus;
+            auto* previous_group=Fl_Group::current();window->begin();
+            overlay_surface=std::make_unique<NativeOverlay>(window->w(),window->h());
+            create_controls(definition->controls,overlay_bindings,overlay_surface.get());
+            theme::apply_widgets(*overlay_surface);Fl_Group::current(previous_group);
+            window->overlay=overlay_surface.get();
+            overlay_focus_pending=true;
+        }
+        apply_layers();
+        window->redraw();return true;
+    }
+    void apply_focus() {
+        if(services.active())return;
+        if(overlay_focus_pending&&overlay_surface&&overlay_surface->active_r()) {
+            overlay_surface->take_focus();overlay_focus_pending=false;
+        }
+        if(restore_focus_pending&&!overlay_surface) {
+            if(restore_overlay_focus&&overlay_focus&&overlay_focus->exists()) {
+                auto* widget=overlay_focus->widget();if(widget&&widget->visible_r()&&widget->active_r())widget->take_focus();
+            }
+            overlay_focus.reset();restore_focus_pending=false;overlay_focus_pending=false;
+        }
+    }
+    void apply_layers() {
+        const auto layers=application.overlay_layers(services.active());
+        visible(background,layers.show_background);enabled(background,layers.enable_background);
+        window->show_background=layers.show_background;
+        if(overlay_surface) {
+            visible(overlay_surface.get(),layers.show_overlay);enabled(overlay_surface.get(),layers.enable_overlay);
+            overlay_surface->block_background=!layers.enable_background;
+            overlay_surface->box(layers.show_background?FL_NO_BOX:FL_FLAT_BOX);
+        }
     }
     void update_bitmaps() {
-        for(auto& item:bindings) {
+        for(auto* item:current_bindings()) {
             auto& b=*item;const auto& c=*b.control;
             if(b.bitmap&&b.bitmap->w()>0&&b.bitmap->h()>0) {
                 const auto presentation=application.bitmap(c,static_cast<unsigned>(std::max(1,widgets::bitmap_sample_extent(b.bitmap->x(),b.bitmap->w(),Fl::screen_scale(window->screen_num())))));
@@ -794,12 +947,12 @@ private:
         page.scroll->scroll_to(0,static_cast<int>(fraction*maximum));
     }
     void verify_layout() const {
-        for(const auto& item:bindings) {
+        for(auto* item:current_bindings()) {
             const auto& b=*item;const auto& c=*b.control;
-            if(!c.persistent&&c.page!=shown_page)continue;
+            if(!c.surface&&!c.persistent&&c.page!=shown_page)continue;
             const ui::FieldState empty;const auto& state=c.field==ui::Field::count?empty:application.field(c.field);
             if(!state.visible)continue;
-            const auto expected=ui::control_layout(c,state,window->w(),window->h(),controls_).frame;
+            const auto expected=application.control_layout(c,window->w(),window->h(),b.declarations).frame;
             if(b.group->x()!=expected.x||b.group->y()!=expected.y||b.group->w()!=expected.w||b.group->h()!=expected.h)
                 throw std::runtime_error("FLTK control diverged from shared layout: "+std::string(c.label));
         }

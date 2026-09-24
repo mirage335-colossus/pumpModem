@@ -7,7 +7,7 @@ namespace datapump::gui::ui {
 // Menu identity belongs to the declaration's scope. Reusing a menu on another
 // page, or giving it a distinct instance, creates another native control.
 inline bool same_menu(const Control& a,const Control& b) {
-    return a.menu!=Menu::none&&a.menu==b.menu&&a.persistent==b.persistent&&
+    return a.surface==b.surface&&a.menu!=Menu::none&&a.menu==b.menu&&a.persistent==b.persistent&&
         (a.persistent||a.page==b.page)&&a.instance==b.instance;
 }
 inline bool menu_continuation(std::span<const Control> controls,std::size_t index) {

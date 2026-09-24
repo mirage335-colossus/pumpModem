@@ -16,7 +16,7 @@ using Clock=std::chrono::steady_clock;
 const std::string message=
     "CQ CQ - continuous reception\nClipboard caf\xc3\xa9 \xf0\x9f\x8c\x8d verified.\n"
     "This message passes through the noisy symbol receiver while the waterfall keeps scrolling. "
-    "Text first appears as pending, then becomes available to copy after the complete packet "
+    "Text first appears as pending, then becomes available to copy after the complete stream "
     "has passed error correction and integrity checks.";
 const std::string interrupted_message="Replace this pending replay. "+message;
 const std::string cancelled_message="Cancel this pending replay. "+message;
@@ -35,12 +35,12 @@ std::vector<unsigned char> preview_pixels(const plots::PlotSnapshot& source) {
 }
 struct Smoke::Impl {
     enum class Phase {
-        initialize,fec20,fec60,generate,generated,reloaded,key_failed,text_ready,text_received,
+        initialize,fec20,fec60,generate,generated,reloaded,key_failed,noise_ready,noise_active,noise_stopped,text_ready,text_received,
         file_ready,file_received,interrupt_ready,interrupt_replay,replacement_ready,
-        replacement_replay,cancelled,raw_attachment,raw_ready,raw_received,tiny,long_text
+        replacement_replay,cancelled,binary_attachment,binary_ready,binary_received,tiny,long_text
     };
     struct Replay {
-        bool active=false,binary=false,saw_symbols=false,resumed=false;
+        bool active=false,binary=false,pending_required=false,saw_symbols=false,resumed=false;
         std::uint64_t id=0,pending_poll=0,waterfall_version=0,waveform_version=0,constellation_version=0;
         std::size_t frame=0,frame_count=0,frames=0,waveform_changes=0;
         double fraction=0;
@@ -49,11 +49,13 @@ struct Smoke::Impl {
         std::vector<std::complex<double>> constellation;
     } replay;
     std::filesystem::path directory,input_path,save_path,key_path;
-    double timeout,raw_seconds=0;
+    double timeout;
     Clock::time_point started=Clock::now(),cancelled_at;
     Phase phase=Phase::initialize;
     bool done=false,launched_binary=false,saw_idle_change=false,key_reception=false,owns_directory=false;
     std::uint64_t polls=0,completed_replay=0,key_samples=0,cancel_samples=0;
+    std::uint64_t noise_revision=0;
+    std::shared_ptr<const Inspection> noise_inspection;
     std::vector<float> idle_waveform;
     std::set<std::uint64_t> interrupted;
     std::set<std::string> verified_ids;
@@ -94,7 +96,7 @@ struct Smoke::Impl {
     }
     void transmit(Controller& controller) {
         require(controller.enabled(C::transmit),"Smoke attempted a transmission before its preparation finished");
-        launched_binary=controller.field(F::source).selected=="binary";
+        launched_binary=controller.inspection()&&controller.inspection()->binary;
         controller.activate(C::transmit);
         require(!controller.enabled(C::transmit)&&controller.enabled(C::cancel),"Transmission did not immediately claim its single active slot");
     }
@@ -106,16 +108,17 @@ struct Smoke::Impl {
     }
     void check_fec(Controller& controller,FecMode mode) {
         const auto& model=controller.inspection();
-        require(model&&model->packet_layout&&!model->binary,"Packet inspection was unavailable after preparation");
-        const auto& layout=*model->packet_layout;
-        require(layout.fec==mode,"Packet inspection did not follow the selected effective FEC");
-        require((layout.header_parity_bytes>0)==(mode!=FecMode::off)&&
-                (layout.body_parity_bytes>0)==(mode!=FecMode::off),"FEC inspection disagrees with actual header/body parity");
-        require(model->lanes.size()==2&&model->constellations.size()==2&&!model->sections.empty(),"Packet inspection lost its flow, structure or alphabets");
+        require(model&&model->stream_layout&&!model->binary,"Stream inspection was unavailable after preparation");
+        const auto& layout=*model->stream_layout;
+        require(layout.fec==mode,"Stream inspection did not follow the selected effective FEC");
+        require((layout.parity_bytes_per_interval>0)==(mode!=FecMode::off),"FEC inspection disagrees with fixed interval parity");
+        require(model->lanes.size()==2&&!model->sections.empty()&&
+                (controller.settings().transfer.modem.pattern_symbols?model->pattern_space.has_value():model->constellations.size()==2),
+                "Stream inspection lost its flow, structure or pattern alphabet");
         bool unavailable=false;
         for(const auto& lane:model->lanes)for(const auto& step:lane.steps)
             unavailable=unavailable||step.state==InspectionState::unavailable;
-        require(unavailable,"Inspection falsely presented unimplemented receiver stages as available");
+        if(!controller.settings().transfer.modem.pattern_symbols)require(unavailable,"Inspection falsely presented unimplemented receiver stages as available");
     }
     void inspect_replay(Controller& controller,const BitmapSources* bitmaps) {
         const auto& snapshot=controller.snapshot();
@@ -126,25 +129,26 @@ struct Smoke::Impl {
                     snapshot.simulation_sample_fraction<=1,"Simulation replay did not identify a chronological frame");
             require(controller.field(F::mode).text.starts_with("Simulation replay "),"Replay mode label did not identify displayed frames");
             if(bitmaps)require(std::string_view(bitmaps->title(B::waveform))=="Simulation replay / waveform"&&
-                    std::string_view(bitmaps->title(B::waterfall))=="Simulation replay / waterfall","Shared bitmap titles lost their replay source");
+                    std::string_view(bitmaps->title(B::waterfall))=="Replay spectrum","Shared bitmap titles lost their replay source");
             const bool beginning=!replay.active||replay.id!=snapshot.transmission_id;
             if(beginning) {
                 require(!replay.active||interrupted.contains(replay.id),"An active replay was replaced without an explicit new transmission");
-                replay={};replay.active=true;replay.id=snapshot.transmission_id;replay.binary=launched_binary;replay.started=Clock::now();
+                replay={};replay.active=true;replay.id=snapshot.transmission_id;replay.binary=launched_binary;replay.pending_required=!launched_binary;replay.started=Clock::now();
                 replay.frame_count=snapshot.replay_frame_count;
             } else require(snapshot.replay_frame_index>=replay.frame&&snapshot.simulation_sample_fraction>=replay.fraction,
                            "Simulation replay moved backwards in transmission time");
             require(snapshot.replay_frame_count==replay.frame_count,"Simulation replay changed its retained frame count");
             for(const auto& signal:snapshot.signals) {
-                require(!signal.validated&&!signal.complete&&signal.binary==replay.binary,"Replay delivered completed or incorrectly typed reception early");
+                require(!signal.validated&&!signal.complete&&signal.binary,"Replay delivered completed source content before its physical end");
                 const auto& lines=controller.signals().lines();
                 const auto found=std::find_if(lines.begin(),lines.end(),[&](const auto& line){return line.id==signal.id;});
                 require(found!=lines.end()&&!found->validated&&!found->complete,"Pending replay signal was not presented");
                 const auto index=static_cast<std::size_t>(found-lines.begin());
                 require(!controller.signals().copy_id(index)&&!controller.signals().copy_bits(index),"Pending reception became copyable before completion");
-                require(signal_data_label(*found)==(replay.binary?"FEC off":"Data pre-FEC pending"),"Pending reception claimed measured data accuracy");
-                if(replay.binary)require(signal_status_label(*found)=="binary pending"&&signal_preamble_label(*found)=="Preamble none"&&
-                        found->expected_bits==3&&!found->preamble_received_percent&&!found->pre_fec_accuracy,"Pending raw bits acquired packet metadata");
+                require(!found->pre_fec_accuracy&&signal_status_label(*found)=="binary pending",
+                        "Pending physical observations claimed completed content or measured FEC accuracy");
+                require(found->expected_bits==0&&!found->preamble_received_percent&&found->pattern_score,
+                        "Pending physical observations acquired a transmitted length or lost their pattern evidence");
                 if(!replay.pending_poll)replay.pending_poll=polls;
             }
             const auto source=snapshot.constellation_source;
@@ -178,16 +182,8 @@ struct Smoke::Impl {
             replay.active=false;
             if(!interrupted.contains(replay.id)) {
                 const auto elapsed=std::chrono::duration<double>(Clock::now()-replay.started).count();
-                // Three raw bits can produce receiver symbols only in the
-                // final replay slice (as short as 50 ms). When native rendering
-                // spans that deadline, Session must return live input and account for skipped
-                // points, rather than extend playback to satisfy a UI poll.
-                // The deterministic live tests require the actual terminal
-                // receiver frame and independently check skipped-tail counts.
-                const bool accounted_raw_tail=replay.binary&&snapshot.transmission_id==replay.id&&
-                    replay.frame+1<replay.frame_count&&snapshot.constellation_source==live::ConstellationSource::input&&
-                    snapshot.constellation_dropped>0&&std::any_of(snapshot.signals.begin(),snapshot.signals.end(),
-                        [](const auto& signal){return signal.binary&&signal.complete;});
+                if(replay.binary && !controller.settings().transfer.modem.pattern_symbols)require(!replay.saw_symbols&&!replay.pending_poll&&snapshot.signals.empty()&&snapshot.received.empty(),
+                        "Unsynchronized raw replay fabricated symbol lock or received bits");
                 const auto replay_diagnostics=std::string("Replay did not show changing measured frames and pending reception over about three seconds")+
                         ": elapsed="+std::to_string(elapsed)+" frames="+std::to_string(replay.frames)+
                         " changes="+std::to_string(replay.waveform_changes)+" fraction="+std::to_string(replay.fraction)+
@@ -195,7 +191,7 @@ struct Smoke::Impl {
                         " pending="+std::to_string(replay.pending_poll);
                 require(elapsed>=2.4&&elapsed<=8&&replay.frames>=(replay.binary?2U:10U)&&
                         replay.waveform_changes>=(replay.binary?1U:5U)&&replay.fraction>=.9&&
-                        (replay.saw_symbols||accounted_raw_tail)&&replay.pending_poll,
+                        (controller.settings().transfer.modem.pattern_symbols||replay.binary||(replay.saw_symbols&&(!replay.pending_required||replay.pending_poll))),
                         replay_diagnostics.c_str());
                 completed_replay=replay.id;
             }
@@ -207,16 +203,17 @@ struct Smoke::Impl {
             replay.resumed=true;
         }
     }
-    void inspect_packets(Controller& controller) {
-        for(const auto& packet:controller.inbox().items()) {
-            const auto id=id_label(packet.message);
+    void inspect_streams(Controller& controller) {
+        for(const auto& stream:controller.inbox().items()) {
+            const auto id=id_label(stream.message);
             if(verified_ids.contains(id))continue;
-            const auto text=std::string(packet.message.data.begin(),packet.message.data.end());
-            require(text!=interrupted_message&&text!=cancelled_message,"Replaced or cancelled replay delivered a late verified packet");
+            const auto text=std::string(stream.message.data.begin(),stream.message.data.end());
+            require(text!=interrupted_message&&text!=cancelled_message,"Replaced or cancelled replay delivered a late verified stream");
             require(!controller.snapshot().transmitting&&!controller.snapshot().simulation_replay&&
-                    completed_replay==controller.snapshot().transmission_id&&replay.pending_poll&&replay.pending_poll<polls,
-                    "Verified packet bypassed an earlier pending replay poll");
-            require(text==message||packet.message.data==file_bytes,"Smoke received unexpected packet content");
+                    completed_replay==controller.snapshot().transmission_id&&
+                    (!replay.pending_required||(replay.pending_poll&&replay.pending_poll<polls)),
+                    "Verified stream bypassed an earlier pending replay poll");
+            require(text==message||text=="Help"||stream.message.data==file_bytes,"Smoke received unexpected stream content");
             verified_ids.insert(id);
         }
     }
@@ -228,9 +225,9 @@ struct Smoke::Impl {
             require(row!=records.end(),"Signal collection lost its stable reception identity");
             const auto has=[&](const std::string& text){return std::any_of(row->cells.begin(),row->cells.end(),[&](const auto& cell){return cell.text==text;});};
             require(has(std::to_string(static_cast<long long>(std::llround(signal.frequency_hz)))+" Hz")&&
-                    has(signal_status_label(signal))&&has(signal_preamble_label(signal))&&has(signal_data_label(signal))&&has(display_label(signal.text)),
+                    has(signal_status_label(signal))&&has(signal_preamble_label(signal))&&has(signal_data_label(signal))&&has(display_label(signal_display_text(signal))),
                     "Signal record omitted frequency, status, preamble, data accuracy or complete received text");
-            require(row->activatable==(signal.binary?signal.complete:signal.validated&&signal.text_message),
+            require(row->activatable==(signal.binary?signal.complete:(signal.validated||signal.complete&&signal.pattern_score)&&signal.text_message),
                     "Signal record activation disagreed with verified-text or completed-raw clipboard eligibility");
         }
     }
@@ -241,7 +238,7 @@ struct Smoke::Impl {
         ++polls;
         require(controller.settings().simulation,"Shared GUI smoke attempted hardware audio");
         const auto& snapshot=controller.snapshot();
-        inspect_replay(controller,bitmaps);inspect_packets(controller);inspect_records(controller);
+        inspect_replay(controller,bitmaps);inspect_streams(controller);inspect_records(controller);
         if(!snapshot.waveform.empty()) {
             if(!idle_waveform.empty()&&idle_waveform!=snapshot.waveform)saw_idle_change=true;
             idle_waveform=snapshot.waveform;
@@ -254,16 +251,16 @@ struct Smoke::Impl {
             controller.select(F::qr_brightness,"dim");controller.activate(C::zoom_in);controller.activate(C::reset_zoom);
             controller.select(F::send_key,"ctrl-enter");controller.select(F::send_key,"enter");
             require(controller.revision()==revision,"Display/input-preference actions changed modem settings");
-            phase=Phase::fec20;break;
+            phase=Phase::fec60;break;
         }
         case Phase::fec20:
             if(!controller.estimate()||!saw_idle_change||!snapshot.samples_received)break;
             check_fec(controller,FecMode::rs20);
             require(controller.field(F::fec).enabled&&controller.field(F::fec).display_text.empty(),"Long text did not expose its retained FEC selection");
-            controller.select(F::fec,"rs60");phase=Phase::fec60;break;
+            phase=Phase::generate;break;
         case Phase::fec60:
             if(!controller.estimate())break;
-            check_fec(controller,FecMode::rs60);controller.select(F::fec,"rs20");phase=Phase::generate;break;
+            check_fec(controller,FecMode::rs60);controller.select(F::fec,"rs20");phase=Phase::fec20;break;
         case Phase::generate:
             if(!controller.estimate())break;
             key_samples=snapshot.samples_received;generate(controller,"A|B, None");
@@ -309,17 +306,48 @@ struct Smoke::Impl {
             controller.activate(C::acknowledge_key_failure);
             require(!controller.enabled(C::acknowledge_key_failure)&&controller.field(F::key).selected==first_key_id,
                     "Key failure acknowledgement changed the retained selected key");
-            controller.select(F::key,"none");phase=Phase::text_ready;break;
+            phase=Phase::noise_ready;break;
+        case Phase::noise_ready:
+            if(!controller.estimate())break;
+            require(controller.enabled(C::transmit_noise)&&controller.field(F::message).text==message,
+                    "Tuning noise was unavailable or changed the prepared message before starting");
+            noise_revision=controller.revision();noise_inspection=controller.inspection();
+            controller.activate(C::transmit_noise);
+            require(controller.enabled(C::cancel)&&!controller.enabled(C::transmit_noise)&&
+                    !controller.enabled(C::transmit)&&controller.command_label(C::cancel)=="Stop noise",
+                    "Noise did not immediately expose Stop noise and claim the single transmitter");
+            phase=Phase::noise_active;break;
+        case Phase::noise_active:
+            if(!snapshot.transmitting_noise||snapshot.transmission_seconds<.1)break;
+            require(snapshot.transmitting&&!snapshot.simulation_replay&&snapshot.transmission_fraction==0&&
+                    controller.field(F::mode).text.starts_with("Simulating noise / ")&&
+                    controller.field(F::mode).text.find("elapsed")!=std::string::npos&&
+                    controller.command_label(C::cancel)=="Stop noise",
+                    "Noise did not present continuous elapsed generation and its stop action");
+            controller.activate(C::cancel);phase=Phase::noise_stopped;break;
+        case Phase::noise_stopped:
+            if(snapshot.transmitting||!snapshot.transmission_finished)break;
+            require(!snapshot.transmitting_noise&&!snapshot.simulation_replay&&
+                    controller.enabled(C::transmit_noise)&&!controller.enabled(C::cancel)&&
+                    controller.command_label(C::cancel)=="Cancel TX",
+                    "Stop noise failed to return to continuous reception without replay");
+            require(controller.field(F::message).text==message&&controller.revision()==noise_revision&&
+                    controller.inspection()==noise_inspection&&controller.field(F::key).selected==first_key_id&&
+                    controller.settings().transfer.key&&controller.settings().transfer.key->mac(file_bytes)==first_key_mac&&
+                    controller.settings().receive_keys.size()==2&&controller.inbox().items().empty()&&
+                    controller.signals().lines().empty()&&!controller.enabled(C::paste_previous),
+                    "Noise changed the draft, prepared inspection, saved keys or message history");
+            noise_inspection.reset();controller.select(F::key,"none");phase=Phase::text_ready;break;
         case Phase::text_ready:
             if(!controller.enabled(C::transmit))break;
             require(!controller.settings().transfer.key,"Plaintext smoke retained an encryption key");
             transmit(controller);phase=Phase::text_received;break;
         case Phase::text_received: {
             if(verified_ids.size()!=1)break;
-            require(controller.inbox().file_items().empty(),"Received text appeared in the file-only collection");
+            require(controller.inbox().file_items().empty(),"Ordinary text appeared as a received attachment");
             bool copied=false;
             for(const auto& line:controller.signals().lines())if(line.validated) {
-                require(line.preamble_received_percent&&line.pre_fec_accuracy&&line.pre_fec_accuracy->received_data_bits,
+                require((line.pattern_score||line.preamble_received_percent)&&line.pre_fec_accuracy&&line.pre_fec_accuracy->received_data_bits,
                         "Verified text lost its measured preamble and pre-FEC diagnostics");
                 controller.select(F::signals,std::to_string(line.id));const auto request=copy(controller,message);
                 controller.complete_service({request.id,false,{},{}});copied=true;break;
@@ -332,16 +360,27 @@ struct Smoke::Impl {
             require(!controller.field(F::message).enabled,"Attached file did not make the inactive text draft read-only");
             transmit(controller);phase=Phase::file_received;break;
         case Phase::file_received: {
-            if(verified_ids.size()!=2)break;
+            if(verified_ids.size()!=2) {
+                if(!snapshot.transmitting&&!snapshot.simulation_replay&&completed_replay==snapshot.transmission_id&&replay.resumed) {
+                    std::string detail="Completed file replay did not validate; fixture="+path_text(directory)+
+                        "; expected bits="+(controller.inspection()?inspection_field(*controller.inspection(),"Meaningful bits"):"none");
+                    for(const auto& line:controller.signals().lines())detail+=" [id="+std::to_string(line.id)+
+                        " status="+signal_status_label(line)+" bits="+std::to_string(line.received_bits)+
+                        " score="+(line.pattern_score?std::to_string(*line.pattern_score):"none")+
+                        " text="+line.text.substr(0,64)+(line.text.size()>64?"..."+line.text.substr(line.text.size()-32):"")+"]";
+                    throw Error(detail);
+                }
+                break;
+            }
             const auto files=controller.inbox().file_items();
-            require(files.size()==1&&files.front()->message.data==file_bytes,"Received file list did not retain the exact binary attachment");
-            const auto id=id_label(files.front()->message);
+            require(files.size()==1&&files.back()->message.data==file_bytes&&files.back()->message.filename==path_text(input_path.filename()),"Received file list did not retain the exact binary attachment");
+            const auto id=id_label(files.back()->message);
             bool measured_file=false;
-            for(const auto& line:controller.signals().lines())if(line.packet_id==id) {
-                require(line.preamble_received_percent&&line.pre_fec_accuracy&&files.front()->pre_fec_accuracy&&
-                        line.pre_fec_accuracy->received_data_bits==files.front()->pre_fec_accuracy->received_data_bits&&
-                        line.pre_fec_accuracy->corrected_data_bits==files.front()->pre_fec_accuracy->corrected_data_bits&&
-                        line.pre_fec_accuracy->received_data_bits,"Received file signal lost its validated packet's measured accuracy");
+            for(const auto& line:controller.signals().lines())if(line.reception_id==id) {
+                require((line.pattern_score||line.preamble_received_percent)&&line.pre_fec_accuracy&&files.back()->pre_fec_accuracy&&
+                        line.pre_fec_accuracy->received_data_bits==files.back()->pre_fec_accuracy->received_data_bits&&
+                        line.pre_fec_accuracy->corrected_data_bits==files.back()->pre_fec_accuracy->corrected_data_bits&&
+                        line.pre_fec_accuracy->received_data_bits,"Received file signal lost its validated stream's measured accuracy");
                 controller.select(F::signals,std::to_string(line.id));require(!controller.enabled(C::copy_signal),"Binary file was coerced to clipboard text");
                 measured_file=true;
             }
@@ -374,79 +413,79 @@ struct Smoke::Impl {
             controller.edit(F::message,cancelled_message);phase=Phase::replacement_ready;break;
         case Phase::replacement_ready:
             require(snapshot.simulation_replay,"Replacement preparation missed the active replay");
-            if(!controller.enabled(C::transmit)||!replay.pending_poll||replay.pending_poll>=polls||replay.frames<3)break;
+            if(!controller.enabled(C::transmit)||(replay.pending_required&&(!replay.pending_poll||replay.pending_poll>=polls))||replay.frames<3)break;
             interrupted.insert(replay.id);transmit(controller);phase=Phase::replacement_replay;break;
         case Phase::replacement_replay:
-            if(!snapshot.simulation_replay||interrupted.contains(replay.id)||!replay.pending_poll||replay.pending_poll>=polls||replay.frames<3)break;
+            if(!snapshot.simulation_replay||interrupted.contains(replay.id)||(replay.pending_required&&(!replay.pending_poll||replay.pending_poll>=polls))||replay.frames<3)break;
             require(controller.command_label(C::cancel)=="Stop replay","Cancel action did not describe stopping the replay");
             interrupted.insert(replay.id);controller.activate(C::cancel);cancelled_at=Clock::now();cancel_samples=snapshot.samples_received;
             phase=Phase::cancelled;break;
         case Phase::cancelled:
-            require(controller.inbox().items().empty()&&verified_ids.size()==2,"Interrupted replay added a received packet");
+            require(controller.inbox().items().empty()&&verified_ids.size()==2,"Interrupted replay added a received stream");
             if(Clock::now()-cancelled_at>std::chrono::seconds(2))require(replay.resumed&&snapshot.samples_received>cancel_samples,
                     "Stopping replay did not promptly resume live receiver samples and plots");
             if(Clock::now()-cancelled_at<std::chrono::milliseconds(3250)||!replay.resumed)break;
             controller.edit(F::message,"help");controller.toggle(F::repeatable,true);
-            require(controller.field(F::repeatable).checked,"Smoke could not establish a retained repeatable packet draft");
-            attach(controller);phase=Phase::raw_attachment;break;
-        case Phase::raw_attachment:
+            require(controller.field(F::repeatable).checked,"Smoke could not establish a retained repeatable stream draft");
+            attach(controller);phase=Phase::binary_attachment;break;
+        case Phase::binary_attachment:
             if(!controller.field(F::message_label).text.starts_with("Attached:")||!controller.estimate())break;
-            controller.select(F::source,"binary");controller.edit(F::binary,"001x");
-            require(!controller.enabled(C::transmit)&&!controller.estimate(),"Invalid binary draft retained a usable stale estimate");
-            controller.select(F::source,"message");
-            require(controller.field(F::binary).text=="001x"&&controller.field(F::message).text=="help"&&controller.field(F::fec).selected=="rs20"&&
-                    controller.field(F::fec).enabled,"Source switching discarded inactive drafts or the packet FEC choice");
-            controller.select(F::source,"binary");controller.edit(F::binary,"0 0\n1");controller.select(F::key,first_key_id);
-            phase=Phase::raw_ready;break;
-        case Phase::raw_ready: {
+            require(!controller.field(F::binary).enabled,"Attachment left its inactive binary draft editable");
+            controller.activate(C::use_text);controller.toggle(F::repeatable,false);
+            controller.edit(F::binary,"001x");
+            require(!controller.enabled(C::transmit)&&!controller.estimate()&&controller.field(F::message).text=="help",
+                    "Invalid binary draft changed committed bytes or retained a usable estimate");
+            controller.edit(F::binary,"01001000 01100101\n01101100 01110000");controller.select(F::key,first_key_id);
+            require(controller.field(F::message).text=="Help","Binary edit did not update the message");
+            phase=Phase::binary_ready;break;
+        case Phase::binary_ready: {
             if(!controller.enabled(C::transmit))break;
-            const auto& model=controller.inspection();const auto& estimate=*controller.estimate();
-            const auto expected=transfer::estimate_binary(Bytes{0,0,1},controller.settings().transfer);
+            const auto& model=controller.inspection();
             require(controller.settings().transfer.key&&controller.settings().transfer.key->mac(file_bytes)==first_key_mac,
-                    "Raw binary loopback did not use the selected production key");
-            require(model&&model->binary&&!model->packet_layout&&inspection_field(*model,"Meaningful bits")=="3"&&
-                    inspection_field(*model,"Body FEC")=="Off"&&inspection_field(*model,"Symbol padding")=="0 bits",
-                    "Raw inspection added packet framing, parity or padded bits");
-            require(estimate.total_seconds==expected.total_seconds&&estimate.packet_seconds==estimate.total_seconds&&
-                    estimate.content_seconds==estimate.total_seconds&&controller.field(F::airtime).text.starts_with("3 bits /"),
-                    "Raw airtime used packet/attachment overhead or padded the meaningful bit count");
-            raw_seconds=expected.total_seconds;
-            for(auto field:{F::callsign,F::grid,F::repeatable,F::fec,F::message})require(!controller.field(field).enabled,"Binary source left packet-only input active");
-            require(controller.field(F::binary).enabled&&controller.field(F::key).enabled&&controller.field(F::repeatable).checked&&
-                    controller.field(F::fec).selected=="rs20"&&controller.field(F::fec).display_text=="Off"&&
-                    !controller.enabled(C::attach_file)&&!controller.enabled(C::use_text),"Raw source did not preserve and disable inactive packet choices");
-            transmit(controller);phase=Phase::raw_received;break;
+                    "Binary-edited message did not retain the selected production key");
+            require(model&&model->binary&&!model->stream_layout&&inspection_field(*model,"Meaningful bits")=="32",
+                    "Binary edit did not prepare its exact raw bit count without a stream");
+            require(controller.field(F::message).enabled&&controller.field(F::binary).enabled&&
+                    controller.field(F::callsign).enabled&&controller.field(F::grid).enabled&&
+                    controller.field(F::fec).selected=="rs20"&&controller.field(F::fec).display_text=="Off (raw bits)",
+                    "Synchronized editors changed stream settings or disabled the other editor");
+            transmit(controller);phase=Phase::binary_received;break;
         }
-        case Phase::raw_received:
-            if(snapshot.transmitting||snapshot.simulation_replay)break;
-            for(const auto& line:controller.signals().lines())if(line.binary&&line.complete) {
-                require(completed_replay==snapshot.transmission_id&&replay.pending_poll&&replay.pending_poll<polls,
-                        "Raw result skipped an earlier pending chronological replay");
-                require(!line.validated&&line.packet_id.empty()&&line.text=="001"&&line.received_bits==3&&line.expected_bits==3&&
-                        !line.preamble_received_percent&&!line.pre_fec_accuracy,"Encrypted raw loopback changed exact bits or claimed packet verification");
-                require(std::abs(snapshot.transmission_seconds-raw_seconds)<=1.0/controller.settings().transfer.modem.sample_rate+1e-12,
-                        "Raw transmitter emitted a duration different from its three meaningful bits");
-                require(controller.inbox().items().empty()&&verified_ids.size()==2,"Raw binary was promoted to a verified packet");
-                controller.select(F::signals,std::to_string(line.id));const auto request=copy(controller,"001");controller.complete_service({request.id,false,{},{}});
-                controller.select(F::source,"message");controller.activate(C::use_text);controller.toggle(F::repeatable,false);
-                require(controller.field(F::message).text=="help"&&controller.field(F::binary).text=="0 0\n1","Raw source switching discarded an inactive editor");
-                controller.select(F::key,"none");phase=Phase::tiny;break;
-            }
-            break;
+        case Phase::binary_received:
+            if(snapshot.transmitting||snapshot.simulation_replay||completed_replay!=snapshot.transmission_id)break;
+            require(controller.inbox().items().empty()&&verified_ids.size()==2,"Raw binary reception acquired a stream identity");
+            { bool recovered=false;for(std::size_t i=0;i<controller.signals().lines().size();++i)
+                recovered=recovered||(controller.signals().copy_text(i)=="Help"&&controller.signals().copy_bytes(i)==Bytes({'H','e','l','p'})&&!controller.signals().copy_bits(i));
+              if(!recovered) {
+                  std::string detail="Binary-edited bytes did not arrive as exact copyable text; error="+snapshot.error+
+                      "; transmission="+std::to_string(snapshot.transmission_id)+"; fixture="+path_text(directory);
+                  for(std::size_t i=0;i<controller.signals().lines().size();++i) {
+                      const auto& line=controller.signals().lines()[i];
+                      detail+=" [id="+std::to_string(line.id)+" status="+signal_status_label(line)+" bits="+
+                          std::to_string(line.received_bits)+" expected="+std::to_string(line.expected_bits)+
+                          " score="+(line.pattern_score?std::to_string(*line.pattern_score):"none")+
+                          " copy="+controller.signals().copy_text(i).value_or("unavailable")+" text="+signal_display_text(line)+"]";
+                  }
+                  throw Error(detail);
+              } }
+            // Observe live plot resumption before reconfiguration clears the
+            // transmission ID that identifies this completed replay.
+            if(!replay.resumed)break;
+            controller.select(F::key,"none");controller.edit(F::message,"e");phase=Phase::tiny;break;
         case Phase::tiny:
             if(!controller.estimate())break;
-            check_fec(controller,FecMode::off);
-            require(controller.inspection()->packet_layout->header_bytes==4&&controller.field(F::fec).selected=="rs20"&&
-                    !controller.field(F::fec).enabled&&controller.field(F::fec).display_text=="Off (under 16 B)",
-                    "Tiny packet inspection or effective FEC display did not disable all RS below sixteen bytes");
+            require(!controller.inspection()->stream_layout&&controller.estimate()->wire_bits==3&&
+                    controller.field(F::fec).selected=="rs20"&&!controller.field(F::fec).enabled&&
+                    controller.field(F::fec).display_text=="Off (short dictionary)",
+                    "Short text did not bypass fixed-interval coding while retaining the FEC selection");
             controller.edit(F::message,message);phase=Phase::long_text;break;
         case Phase::long_text:
             if(!controller.estimate()||!replay.resumed)break;
             check_fec(controller,FecMode::rs20);
-            require(inspection_field(*controller.inspection(),"Compression").starts_with("LZMA2 preset 9e")&&
+            require(inspection_field(*controller.inspection(),"Compression").starts_with("Raw LZMA2")&&
                     controller.field(F::fec).enabled&&controller.field(F::fec).display_text.empty(),
                     "Returning to long text failed to restore compression and retained FEC presentation");
-            require(verified_ids.size()==2&&interrupted.size()==2,"Smoke did not complete normal packet, replacement and cancellation workflows");
+            require(verified_ids.size()==2&&interrupted.size()==2,"Smoke did not complete stream, raw-bit, replacement and cancellation workflows");
             done=true;break;
         }
     }
@@ -463,7 +502,7 @@ bool Smoke::done() const { return impl_->done; }
 void controller_self_check() {
     Controller controller({true,true});
     require(controller.field(F::qr_brightness).selected=="dark","QR brightness must start Dark");
-    require(!controller.field(F::binary).enabled,"Inactive binary editor must not control message dispatch");
+    require(controller.field(F::binary).enabled&&controller.field(F::message).enabled,"Both synchronized editors must be available");
     controller.edit(F::message,"Preserve this message");
     const auto revision=controller.revision();
     controller.edit(F::message,"Preserve this message");
@@ -476,9 +515,10 @@ void controller_self_check() {
     require(controller.settings().transfer.modem.bandwidth_hz==settings.bandwidth_hz,"Invalid draft replaced the last valid modem settings");
     require(!controller.enabled(C::transmit),"Invalid settings enabled transmission");
     controller.edit(F::bandwidth,"1.2 kHz");
-    controller.select(F::source,"binary"); controller.edit(F::binary,"001");
-    controller.select(F::source,"message");
-    require(controller.field(F::message).text=="Preserve this message"&&controller.field(F::binary).text=="001","Source switching discarded editor text");
+    controller.edit(F::binary,"001");
+    require(controller.field(F::message).text=="Preserve this message"&&!controller.estimate(),"Partial byte changed committed message bytes");
+    controller.edit(F::message,"Preserve this message!");
+    require(controller.field(F::binary).text.starts_with("01010000"),"Message edit did not restore the synchronized binary view");
     const auto before=controller.field(F::message).text;
     controller.edit(F::message,std::string(1024*1024+1,'a'));
     require(controller.field(F::message).text==before,"Over-limit edit was truncated or accepted");
@@ -489,6 +529,8 @@ void controller_self_check() {
     std::set<std::tuple<ui::Page,int,int,unsigned>> identities;
     for(const auto& control:ui::console_screen()) {
         const auto kind=control.kind==ui::Kind::action?1:control.kind==ui::Kind::bitmap?2:0;
+        // Literal labels have no model binding; several can share a page.
+        if(kind==0 && control.field==F::count)continue;
         const auto binding=kind==1?static_cast<int>(control.command):kind==2?static_cast<int>(control.bitmap):static_cast<int>(control.field);
         require(identities.emplace(control.page,kind,binding,control.instance).second,"Screen declares a duplicate binding identity");
     }

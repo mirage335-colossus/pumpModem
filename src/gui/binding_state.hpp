@@ -35,7 +35,7 @@ inline BindingPresentation resolve_binding(const ui::Control& declaration,Contro
 inline BindingPresentation binding_presentation(Application& application,const ui::Control& declaration,
         std::span<const ui::Control* const> menu_items,int width,int height,std::span<const ui::Control> controls) {
     auto control=application.control(declaration);
-    const auto geometry=ui::control_layout(declaration,control.state,width,height,controls);
+    const auto geometry=application.control_layout(declaration,width,height,controls);
     auto menu=menu_items.empty()?std::nullopt:std::optional{application.menu(menu_items)};
     return resolve_binding(declaration,std::move(control),geometry,std::move(menu));
 }
