@@ -2,7 +2,6 @@
 #include "datapump/runtime.hpp"
 #include "datapump/streaming_modem.hpp"
 #include "datapump/channel.hpp"
-#include "datapump/compression.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -81,11 +80,11 @@ Estimate estimate_encoded(const Message& message, const Options& options, std::s
         result.batch_memory_supported = modem::memory_supported(wire_bytes, training_bytes, options.modem);
     } catch (const Error&) { return result; }
     try {
-        // Complete-frame matching retains measured pattern symbols under the
-        // DSP budget, separately from content and a hypothetical PCM vector.
+        // A real streaming receiver allocates only its finite hypothesis bank.
+        // Check that same allocation contract, not the hypothetical PCM vector.
         modem::StreamingReceiver probe(options.modem,modem::preamble(options.modem),
             options.dsp_workspace_bytes-audio_validation_workspace);
-        result.memory_supported = probe.frame_supported(frame_size);
+        result.memory_supported = probe.working_bytes()+audio_validation_workspace <= options.dsp_workspace_bytes;
     } catch (const Error&) {
         result.memory_supported = false;
     }
@@ -173,23 +172,11 @@ AudioValidators audio_validators(const Options& options,std::uint64_t timestamp)
             return packet_probe_frame_size(plain,limit);
         } catch(const Error&) {return {};}
     };
-    result.packet=[mask,limit,key=options.key,timestamp,content_limit=options.content_limit,codec=packet_options(options,timestamp)](const Bytes& bytes) {
+    result.packet=[mask,limit,content_limit=options.content_limit,codec=packet_options(options,timestamp)](const Bytes& bytes) {
         try {
-            if(bytes.size()>limit)return false;
+            if(bytes.size()>mask->size())return false;
             auto plain=bytes;
-            const auto cached=std::min(plain.size(),mask->size());
-            for(std::size_t i=0;i<cached;++i)plain[i]^=(*mask)[i];
-            for(std::size_t offset=cached;offset<plain.size();) {
-                const auto count=std::min(audio_validation_limit,plain.size()-offset);
-                auto chunk=std::span(plain).subspan(offset,count);
-                const auto wire_offset=audio_training_bytes+offset;
-                xor_audio_whitening(chunk,wire_offset);
-                if(key) {
-                    const auto private_mask=key->stream(StreamPurpose::Data,timestamp,wire_offset,count);
-                    for(std::size_t i=0;i<count;++i)chunk[i]^=private_mask[i];
-                }
-                offset+=count;
-            }
+            for(std::size_t i=0;i<plain.size();++i)plain[i]^=(*mask)[i];
             const auto decoded=decode_packet(plain,codec,limit);
             return decoded.consumed_bytes==plain.size()&&decoded.message.data.size()<=content_limit;
         } catch(const Error&) {return false;}
@@ -224,8 +211,6 @@ PacketOptions packet_options(const Options& options, std::uint64_t timestamp) {
 modem::Config seeded_config(const Options& options, std::uint64_t timestamp) {
     validate(options);
     auto result = options.modem;
-    result.stream_epoch=timestamp;
-    if(result.pattern_symbols)result.data_key=options.key;
     if (options.key && result.scramble) {
         const auto seed = options.key->stream(StreamPurpose::Scrambler, timestamp, 0, result.spreading_seed.size());
         std::copy(seed.begin(), seed.end(), result.spreading_seed.begin());
@@ -243,20 +228,6 @@ Estimate estimate(const Message& message, const Options& options) {
 
 Estimate estimate(const Message& message,const Options& options,PacketLayout* layout) {
     validate_message(message, options);
-    if(options.modem.pattern_symbols) {
-        const auto bits=message_bits(message,options);
-        if(layout) {
-            *layout={};layout->original_bytes=message.data.size();
-            if(message.kind!=MessageKind::text || message.data.size()>=16)
-                *layout=packet_layout(encode_packet(message,packet_options(options,options.timestamp),packet_budget(options)),packet_budget(options));
-        }
-        if(bits.empty()) { Estimate empty;empty.memory_supported=empty.batch_memory_supported=empty.repeatable_allowed=true;return empty; }
-        auto value=options;value.content_limit=std::max(value.content_limit,bits.size());
-        auto result=estimate_binary(bits,value);
-        result.content_bytes=message.data.size();
-        result.repeatable_allowed=message.data.size()<=options.repeat_policy.minimum_payload_bytes || result.content_seconds<=options.repeat_policy.maximum_seconds;
-        return result;
-    }
     std::size_t frame_size=0;
     {
         const auto frame=encode_packet(message,packet_options(options,options.timestamp),packet_budget(options));
@@ -272,30 +243,13 @@ Estimate estimate_binary(std::span<const std::uint8_t> bits,const Options& optio
     const auto symbol_samples=modem::symbol_sample_count(value.modem);
     if(symbols>std::numeric_limits<std::uint64_t>::max()/symbol_samples)
         throw Error("transmission duration exceeds 64-bit sample counter");
-    const auto content_samples=static_cast<std::uint64_t>(symbols)*symbol_samples;
-    const auto hardware_samples=value.modem.pattern_symbols?modem::training_sample_count(value.modem):0;
-    if(hardware_samples>std::numeric_limits<std::uint64_t>::max()-content_samples)
-        throw Error("transmission duration exceeds 64-bit sample counter");
-    const auto samples=hardware_samples+content_samples;
+    const auto samples=static_cast<std::uint64_t>(symbols)*symbol_samples;
     Estimate result;
     result.content_bytes=result.packet_bytes=bits.size()/8+(bits.size()%8!=0);
-    result.content_seconds=result.packet_seconds=static_cast<double>(content_samples)/value.modem.sample_rate;
-    result.total_seconds=static_cast<double>(samples)/value.modem.sample_rate;
+    result.content_seconds=result.packet_seconds=result.total_seconds=static_cast<double>(samples)/value.modem.sample_rate;
     result.repeatable_allowed=true;
-    std::size_t scratch=std::numeric_limits<std::size_t>::max();
-    if(value.modem.pattern_symbols) {
-        // PatternCode seeks through fixed stream caches; symbol duration must
-        // not be charged as a retained chip array or sampled waveform.
-        try {
-            modem::StreamingTransmitter probe(modem::RawBits{Bytes(bits.begin(),bits.end())},
-                value.modem,std::max(value.modem.memory_limit,value.dsp_workspace_bytes/4));
-            scratch=probe.working_bytes();
-            result.memory_supported=scratch<=value.dsp_workspace_bytes/4;
-        } catch(const Error&) { result.memory_supported=false; }
-    } else {
-        scratch=65536+value.modem.spreading_factor*sizeof(int);
-        result.memory_supported=scratch<=value.dsp_workspace_bytes/4;
-    }
+    const auto scratch=65536+value.modem.spreading_factor*sizeof(int);
+    result.memory_supported=scratch<=value.dsp_workspace_bytes/4;
     if(samples<=std::numeric_limits<std::size_t>::max()) {
         result.waveform_samples=static_cast<std::size_t>(samples);
         const auto budget=value.modem.memory_limit;
@@ -311,58 +265,6 @@ std::unique_ptr<modem::StreamingTransmitter> binary_transmitter(
     modem::RawBits raw{Bytes(bits.begin(),bits.end())};
     xor_binary_bits(raw.bits,value);
     return std::make_unique<modem::StreamingTransmitter>(std::move(raw),seeded_config(value,value.timestamp),value.dsp_workspace_bytes/4);
-}
-
-Bytes message_bits(const Message& message,const Options& options) {
-    validate_message(message,options);
-    if(message.kind==MessageKind::text && message.data.size()<16)
-        return compression::encode_short_bits(message.data,packet_budget(options));
-    const auto packet=encode_packet(message,packet_options(options,options.timestamp),packet_budget(options));
-    if(packet.size()>packet_budget(options)/8)throw Error("pattern packet bit storage exceeds content workspace");
-    Bytes bits;bits.reserve(packet.size()*8);
-    for(auto byte:packet)for(unsigned i=0;i<8;++i)bits.push_back(static_cast<std::uint8_t>((byte>>(7-i))&1));
-    return bits;
-}
-std::unique_ptr<modem::StreamingTransmitter> message_transmitter(const Message& message,const Options& options) {
-    if(options.modem.pattern_symbols) {
-        auto bits=message_bits(message,options);
-        if(message.repeatable && message.data.size()>options.repeat_policy.minimum_payload_bytes &&
-           static_cast<double>(bits.size())*modem::symbol_seconds(options.modem)>options.repeat_policy.maximum_seconds)
-            throw Error("repeatable content exceeds airtime limit");
-        // Encoded packet bits have their own checked workspace limit. They
-        // are not an untrusted raw UI draft's one-byte-per-bit quota.
-        auto value=options;value.content_limit=std::max(value.content_limit,bits.size());
-        return binary_transmitter(bits,value);
-    }
-    return std::make_unique<modem::StreamingTransmitter>(transmission_wire(message,options),seeded_config(options,options.timestamp),options.dsp_workspace_bytes/4);
-}
-Received interpret_pattern(modem::PatternBurst burst,const Options& options,std::uint64_t timestamp,modem::Diagnostics diagnostics) {
-    auto context=options;context.timestamp=timestamp;
-    context.content_limit=std::max(context.content_limit,burst.bits.size());
-    if(burst.first_stream_symbol>std::numeric_limits<std::size_t>::max())throw Error("received pattern stream index exceeds bit address space");
-    xor_binary_bits(burst.bits,context,static_cast<std::size_t>(burst.first_stream_symbol));
-    Received result;result.timestamp=timestamp;result.diagnostics=std::move(diagnostics);
-    result.diagnostics.pattern_score=burst.score;
-    result.diagnostics.sample_offset=static_cast<std::size_t>(burst.first_sample);
-    result.raw_bits=std::move(burst.bits);result.packet_validated=false;
-    if(options.key && burst.first_stream_symbol)return result;
-    // Content grammar is interpreted only after pattern acquisition. A bad
-    // packet never changes the winning signal timing or discards its raw bits.
-    if(result.raw_bits.size()%8==0) {
-        Bytes bytes(result.raw_bits.size()/8);
-        for(std::size_t i=0;i<result.raw_bits.size();++i)bytes[i/8]|=static_cast<std::uint8_t>(result.raw_bits[i]<<(7-i%8));
-        try {
-            auto packet=decode_packet(bytes,packet_options(options,timestamp),packet_budget(options));
-            if(packet.consumed_bytes==bytes.size() && packet.message.data.size()<=options.content_limit) {
-                result.packet=std::move(packet);result.packet_validated=true;return result;
-            }
-        } catch(const Error&) {}
-    }
-    try {
-        auto decoded=compression::decode_short_bits(result.raw_bits,std::min<std::size_t>(15,options.content_limit));
-        result.packet.message.data=std::move(decoded);
-    } catch(const Error&) {} // Preserve uninterpreted or truncated raw bits.
-    return result;
 }
 
 void xor_binary_bits(std::span<std::uint8_t> bits,const Options& options,std::size_t bit_offset) {
@@ -402,13 +304,6 @@ DecodedPacket unpack(const Bytes& wire, const Options& options) {
 }
 
 Bytes transmission_wire(const Message& message,const Options& options) {
-    if(options.modem.pattern_symbols) {
-        if(message.kind==MessageKind::text && message.data.size()<16)
-            throw Error("short pattern text has an exact bit length; use message_transmitter");
-        validate_message(message,options);
-        auto bytes=encode_packet(message,packet_options(options,options.timestamp),packet_budget(options));
-        return options.key?options.key->xor_data(bytes,options.timestamp):std::move(bytes);
-    }
     validate_message(message, options);
     const auto config = seeded_config(options, options.timestamp);
     const auto frame = encode_packet(message, packet_options(options, options.timestamp), packet_budget(options));
@@ -422,13 +317,6 @@ Bytes transmission_wire(const Message& message,const Options& options) {
 
 std::vector<float> transmit(const Message& message, const Options& options, std::stop_token stop) {
     check_cancelled(stop);
-    if(options.modem.pattern_symbols) {
-        auto source=message_transmitter(message,options);
-        if(source->total_samples()>options.modem.memory_limit/sizeof(float))throw Error("pattern waveform exceeds batch memory limit; use streaming output");
-        std::vector<float> samples(static_cast<std::size_t>(source->total_samples()));
-        std::size_t position=0;while(position<samples.size())position+=source->read(std::span(samples).subspan(position,std::min<std::size_t>(4096,samples.size()-position)),stop);
-        return samples;
-    }
     auto wire=transmission_wire(message,options);
     check_cancelled(stop);
     auto samples = modem::modulate(wire, seeded_config(options,options.timestamp), stop);
@@ -439,38 +327,6 @@ std::vector<float> transmit(const Message& message, const Options& options, std:
 Received receive(std::span<const float> samples, const Options& options, Progress progress, std::stop_token stop) {
     check_cancelled(stop);
     validate(options);
-    if(options.modem.pattern_symbols) {
-        std::optional<Received> best;double best_score=-1;
-        std::string last_error;
-        auto profiles=options.automatic_receive_profiles?tuning::receive_profiles(options.modem,options.receive_targets_db_hz,options.receive_pattern_mode,options.key.has_value()):std::vector<modem::Config>{options.modem};
-        for(const auto& profile:profiles)for(auto epoch:drift_candidates(options.timestamp,options.search_seconds,options.key.has_value())) {
-            check_cancelled(stop);if(progress)progress(epoch);
-            try {
-            auto value=options;value.modem=profile;
-            modem::PatternSearch search;search.start_offset_seconds=static_cast<double>(epoch)-static_cast<double>(options.timestamp)+
-                static_cast<double>(modem::training_sample_count(profile))/profile.sample_rate;
-            search.bit_limit=packet_budget(value);
-            search.start_uncertainty_seconds=options.search_seconds+1.;
-            modem::PatternReceiver decoder(seeded_config(value,epoch),options.dsp_workspace_bytes,search);
-            for(std::size_t offset=0;offset<samples.size();) {
-                const auto count=std::min<std::size_t>(4096,samples.size()-offset);decoder.push(samples.subspan(offset,count),stop);offset+=count;
-                for(auto& burst:decoder.take_bursts())if(burst.score>best_score) {
-                    best_score=burst.score;best=interpret_pattern(std::move(burst),value,epoch,decoder.diagnostics());
-                }
-            }
-            decoder.finish(stop);
-            for(auto& burst:decoder.take_bursts())if(burst.score>best_score) {
-                best_score=burst.score;best=interpret_pattern(std::move(burst),value,epoch,decoder.diagnostics());
-            }
-            } catch(const Error& error){check_cancelled(stop);last_error=error.what();}
-        }
-        if(best) {
-            const auto tail=samples.last(std::min<std::size_t>(2048,samples.size()));
-            best->diagnostics.waveform.assign(tail.begin(),tail.end());
-            return std::move(*best);
-        }
-        throw Error("no sufficiently confident pattern in timing search"+(last_error.empty()?std::string{}:": "+last_error));
-    }
     auto candidates = drift_candidates(options.timestamp, options.search_seconds, options.key.has_value());
     if (!options.key) candidates = {options.timestamp};
     std::string last_error;
@@ -515,78 +371,33 @@ Received simulate(const Message& message, const Options& options, const modem::C
     validate_message(message,options);
     const auto config = seeded_config(options, options.timestamp);
     modem::validate_channel(config,channel);
-    if(config.pattern_symbols) {
-        std::optional<Received> best;double best_score=-1;
-        std::string last_error;
-        const auto center=channel.receiver_timestamp.value_or(options.timestamp);
-        const auto profiles=options.automatic_receive_profiles?tuning::receive_profiles(options.modem,options.receive_targets_db_hz,options.receive_pattern_mode,options.key.has_value()):std::vector<modem::Config>{options.modem};
-        for(const auto& profile:profiles)for(auto epoch:drift_candidates(center,options.search_seconds,options.key.has_value())) {
-            check_cancelled(stop);if(progress)progress(epoch);
-            try {
-            auto source=message_transmitter(message,options);auto value=options;value.modem=profile;
-            modem::PatternSearch search;search.start_offset_seconds=static_cast<double>(epoch)-static_cast<double>(center)+
-                static_cast<double>(modem::training_sample_count(profile))/profile.sample_rate;
-            search.bit_limit=packet_budget(value);
-            search.start_uncertainty_seconds=options.search_seconds+1.;
-            modem::PatternReceiver decoder(seeded_config(value,epoch),options.dsp_workspace_bytes,search);
-            modem::SampledSimulationChannel impairments(config,channel);std::array<float,2048> samples{};
-            std::size_t preview_count=0;
-            const auto harvest=[&] {
-                for(auto& burst:decoder.take_bursts())if(burst.score>best_score) {
-                    best_score=burst.score;best=interpret_pattern(std::move(burst),value,epoch,decoder.diagnostics());
-                    best->diagnostics.waveform.assign(samples.begin(),samples.begin()+static_cast<std::ptrdiff_t>(preview_count));
-                }
-            };
-            while(const auto count=impairments.read(*source,samples,stop)){preview_count=count;decoder.push(std::span(samples).first(count),stop);harvest();}
-            auto trailing=2*modem::symbol_sample_count(profile);
-            while(trailing) {
-                const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(trailing,samples.size()));
-                auto tail=std::span(samples).first(count);impairments.read_noise(tail,stop);preview_count=count;decoder.push(tail,stop);trailing-=count;harvest();
-            }
-            decoder.finish(stop);harvest();
-            }catch(const Error& error){check_cancelled(stop);last_error=error.what();}
-        }
-        if(best)return std::move(*best);
-        throw Error("no sufficiently confident pattern in simulated timing search"+(last_error.empty()?std::string{}:": "+last_error));
-    }
     const auto wire=transmission_wire(message,options);
-    const auto receiver_center=channel.receiver_timestamp.value_or(options.timestamp);
-    auto candidates=drift_candidates(receiver_center,options.search_seconds,options.key.has_value());
-    if(!options.key)candidates={receiver_center};
+    auto candidates=drift_candidates(options.timestamp,options.search_seconds,options.key.has_value());
+    if(!options.key)candidates={options.timestamp};
     std::string last_error;
     for(const auto timestamp:candidates) {
         check_cancelled(stop);if(progress)progress(timestamp);check_cancelled(stop);
         try {
             modem::StreamingTransmitter source(wire,config,options.dsp_workspace_bytes);
             auto decoder=receiver(options,timestamp);
-            modem::SampledSimulationChannel impairments(config,channel);
+            modem::SimulationChannel impairments(config,channel);
             Bytes received;
-            std::array<float,2048> samples{},preview{};
-            std::size_t preview_count=0;
-            while(const auto count=impairments.read(source,samples,stop)) {
-                // The receiver sees only its own clocked PCM, including idle
-                // noise and arbitrary burst/carrier phase. It derives chip
-                // correlation and packet timing from those samples.
-                append_wire(received,decoder.push(std::span(samples).first(count),stop),options);
-                const auto retained=std::min(preview_count,preview.size()-count);
-                std::move(preview.begin()+static_cast<std::ptrdiff_t>(preview_count-retained),
-                          preview.begin()+static_cast<std::ptrdiff_t>(preview_count),preview.begin());
-                std::copy_n(samples.begin(),count,preview.begin()+static_cast<std::ptrdiff_t>(retained));
-                preview_count=retained+count;
+            auto delay=static_cast<std::uint64_t>(channel.delay_samples);
+            const auto quantum=std::max<std::uint64_t>(1,modem::symbol_sample_count(config)/32);
+            while(delay) {
+                check_cancelled(stop);
+                const auto count=std::min(delay,quantum);
+                const auto noise=impairments.noise(count);
+                append_wire(received,decoder.push_symbols(std::span(&noise,1),stop),options);
+                delay-=count;
             }
-            // Receiver integration continues after the source stops. Do not
-            // finish the capture at a transmitter-provided symbol boundary.
-            auto trailing=modem::symbol_sample_count(config);
-            while(trailing) {
-                const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(trailing,samples.size()));
-                const auto tail=std::span(samples).first(count);
-                impairments.read_noise(tail,stop);
-                append_wire(received,decoder.push(tail,stop),options);
-                trailing-=count;
+            while(const auto observation=source.next_symbol(stop)) {
+                if(const auto noisy=impairments.process(*observation))
+                    append_wire(received,decoder.push_symbols(std::span(&*noisy,1),stop),options);
             }
             append_wire(received,decoder.finish(stop),options);
-            auto diagnostics=decoder.diagnostics();
-            diagnostics.waveform.assign(preview.begin(),preview.begin()+static_cast<std::ptrdiff_t>(preview_count));
+            auto diagnostics=decoder.diagnostics();diagnostics.waveform.resize(2048);
+            impairments.preview_last(source,diagnostics.waveform);
             return verified(std::move(received),std::move(diagnostics),options,timestamp);
         } catch(const Error& error) {check_cancelled(stop);last_error=error.what();}
     }

@@ -1,5 +1,4 @@
 #include "../src/gui/pattern_space.hpp"
-#include "datapump/tuning.hpp"
 #include "../src/constellation.hpp"
 #include "datapump/streaming_modem.hpp"
 #include <cmath>
@@ -26,10 +25,10 @@ void exact_transmitter_templates() {
     config.bandwidth_hz = 1100; // Nonintegral chip clock: last chip is partial.
     for (const auto factor : {3U, 4U, 6U, 8U, 12U, 16U}) {
         config.spreading_factor = factor;
-        for (unsigned mode = 0; mode != 3; ++mode) {
-            config.spreading_mode = modem::SpreadingMode::pattern;
-            config.scramble = mode == 1;
-            config.dsss = mode == 2;
+        for (unsigned mode = 0; mode != 4; ++mode) {
+            config.spreading_mode = mode == 1 ? modem::SpreadingMode::tone : modem::SpreadingMode::pattern;
+            config.scramble = mode == 2;
+            config.dsss = mode == 3;
             config.spreading_seed[7] = 71; config.dsss_seed[3] = 19;
             for (unsigned width = 2; width <= 6; ++width) {
                 config.constellation_bits = width;
@@ -115,10 +114,12 @@ void durations_and_modes() {
     weighted_evidence(model);
 
     for (const auto factor : {1U, 2U, 3U, 4U, 8U, 32U, 128U, 1024U, 4096U, 16384U}) {
-        config.spreading_factor = factor; config.integration_seconds = 0;
+        config.spreading_factor = factor; config.integration_seconds = 0; config.spreading_mode = modem::SpreadingMode::tone;
         model = inspect_pattern_space(config, -10);
-        check(model.unused_pattern.has_value() == (factor > 1), "multichip patterns retain off-code comparison directions");
-        near(model.processing_gain_db, 10 * std::log10(factor), "full-pattern coherent integration gain follows its duration");
+        check(!model.code_selective && !model.timing_selective, "plain tones have no changing-sign code timing discrimination");
+        near(model.one_chip_shift.residual_fraction, 0, "a shifted tone is the same template");
+        check(model.unused_pattern.has_value() == (factor > 1), "a tone still rejects nonconstant chip vectors through integration");
+        near(model.processing_gain_db, 10 * std::log10(factor), "a tone still benefits from full-duration coherent integration");
         weighted_evidence(model);
     }
     config.spreading_mode = modem::SpreadingMode::pattern; config.spreading_factor = 1;
@@ -179,28 +180,10 @@ void bounded_and_public_illustration() {
     try { (void)inspect_pattern_space(config, std::numeric_limits<double>::quiet_NaN()); } catch (const Error&) { rejected = true; }
     check(rejected, "nonfinite C/N0 must be rejected before display");
 }
-void binary_pattern_preview() {
-    for(const auto mode:{tuning::PatternMode::auto_pattern,tuning::PatternMode::auto_keystream,tuning::PatternMode::auto_tone}) {
-        auto config=tuning::resolve(1200,40,mode,true).config;
-        const auto model=inspect_pattern_space(config,40,true);
-        check(model.bounded_pattern_preview && model.coefficients.size()==2 && model.codewords.size()==2,
-              "binary pattern inspection must preserve two independent codeword rows");
-        check(model.squared_distance(0,1)>0 && model.squared_distance(0,0)==0,
-              "binary pattern rows must have measured nonzero distance despite equal scalar coefficients");
-        modem::PatternCode expected(config,config.stream_epoch);
-        if(!config.scramble)for(std::size_t i=0;i<model.code.size();++i)
-            check(std::abs(model.chip_value(1,i)-std::sqrt(2*modem::nominal_signal_power)*expected.value(i,1,.5))<1e-10,
-                  "pattern preview must render the actual selected codeword");
-        config.integration_seconds=3600;
-        const auto long_model=inspect_pattern_space(config,0,true);
-        check(long_model.truncated && long_model.code.size()==16384 && long_model.symbol_samples<long_model.full_symbol_samples,
-              "hour-long pattern inspection must retain only a bounded explicitly labeled prefix");
-    }
-}
 }
 int main() {
     try {
-        exact_transmitter_templates(); durations_and_modes(); bounded_and_public_illustration();binary_pattern_preview();
+        exact_transmitter_templates(); durations_and_modes(); bounded_and_public_illustration();
         std::cout << "Static full-pattern space tests passed\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n'; return 1;

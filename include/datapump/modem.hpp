@@ -1,5 +1,4 @@
 #pragma once
-#include "datapump/crypto.hpp"
 #include "datapump/types.hpp"
 #include <array>
 #include <complex>
@@ -15,16 +14,12 @@ namespace datapump::modem {
 inline constexpr double nominal_signal_power = 0.153125;
 enum class SpreadingMode : std::uint8_t { pattern, tone };
 struct Config {
-    // Pattern transport conveys one bit per independently detectable waveform.
-    // False retains the explicitly configured legacy APSK transport.
-    bool pattern_symbols = false;
-    std::uint64_t stream_epoch = 0;
     // Internal DSP clock, independent of the hardware audio endpoint clock.
     std::uint32_t sample_rate = 6000;
     unsigned constellation_bits = 4; // 2..6 bits: 2/4/8 phases, 2/4/8 rings.
     double carrier_hz = 1500;
     double bandwidth_hz = 1200;
-    double training_seconds = 5; // Hardware target; pattern mode rounds to whole symbols.
+    double training_seconds = 5; // The physical format requires exactly five seconds.
     unsigned spreading_factor = 1;
     // Automatic plans can request integration beyond the named chip factors.
     // Zero retains spreading_factor * quantized chip duration.
@@ -34,9 +29,6 @@ struct Config {
     bool dsss = false;
     std::array<std::uint8_t, 32> spreading_seed{};
     std::array<std::uint8_t, 32> dsss_seed{};
-    // Same selected key used to encrypt payload data. Preamble bytes use its
-    // Data stream with the fixed preamble CTR pad, even without spreading.
-    std::optional<Crypto> data_key;
     std::size_t memory_limit = default_memory_limit;
 };
 // Duration of captured training independently recognized before the protected
@@ -57,9 +49,6 @@ struct Diagnostics {
     std::vector<std::complex<double>> constellation;
     std::vector<float> waveform;
     std::optional<PreambleReception> preamble_reception = std::nullopt;
-    // Model-based pattern evidence in natural-log units; not measured SNR or
-    // a calibrated probability of signal presence.
-    std::optional<double> pattern_score;
 };
 struct DecodeResult { Bytes bytes; Diagnostics diagnostics; };
 struct ChannelConfig {
@@ -73,10 +62,6 @@ struct ChannelConfig {
     // Wiener phase diffusion: RMS phase change over one second, scaling as
     // sqrt(elapsed seconds). This is separate from deterministic clock error.
     double phase_noise_degrees_per_sqrt_second = .5;
-    // Optional independent receiver wall-clock center for transfer::simulate.
-    // Omission uses the explicitly configured transfer timestamp; the receiver
-    // still searches its configured finite epoch window from this center.
-    std::optional<std::uint64_t> receiver_timestamp;
 };
 struct Wav { std::uint32_t sample_rate; std::vector<float> samples; };
 // Raises Error for invalid configuration, insufficient memory, or absent preamble.
@@ -105,8 +90,7 @@ std::vector<float> simulate(std::span<const float> samples, const Config& config
 void write_wav(std::ostream& output, std::span<const float> samples,
                std::uint32_t sample_rate);
 Wav read_wav(std::istream& input, std::size_t memory_limit = default_memory_limit);
-// Each element is one 0/1 payload bit, with no padding bits. Pattern output
-// includes rounded hardware-settling audio, which carries no payload.
+// Each element is one 0/1 bit. These functions add no preamble or padding bits.
 std::vector<float> modulate_status(std::span<const std::uint8_t> bits, const Config& config);
 double detect_status(std::span<const float> samples, std::span<const std::uint8_t> known_bits,
                      const Config& config);

@@ -68,28 +68,27 @@ packet digest.
 
 The new GUI policy tests cover file-kind filtering, strict clipboard eligibility,
 one active transmission, and cooldown only for actual encrypted output. The
-regression suite now covers long changing-sign patterns without duration-sized
-PCM, fractional-carrier 24 kHz PCM reception, automatic integration beyond the
-previous ceiling and independent five-second training. Adding those tests is
-not a claim that they have passed on every target; execution evidence belongs
-in validation.md.
+regression suite covers long tones without duration-sized PCM, fractional-carrier
+24 kHz PCM reception, automatic integration beyond the previous ceiling and
+independent five-second training. Adding those tests is not a claim that they
+have passed on every target; execution evidence belongs in validation.md.
 
 Adaptive profiles use two through six bits per symbol with geometry-based noise
 and drift margins; they do not change cryptographic validation. Symbol padding
 is removed before packet decoding. Hardware rate conversion uses bounded filter
 state and exposes its physical passband. Its stages keep large conversion ratios
 bounded, and a wider planning range does not implement an SDR hardware backend.
-Simulation review retains only bounded diagnostics for three seconds, then all plots
+Simulation review retains only bounded diagnostics for two seconds, then all plots
 return to live input. Received observations remain distinct from ideal transmitted
 symbols; continuous plot windows do not restart carrier phase at callback boundaries.
 
-The sampled simulator adds noise, arbitrary fractional startup timing and initial
-carrier phase, 100 ppm relative crystal error, and phase diffusion of 0.5 degrees
-per square root second by default. The independent receiver processes PCM and
-performs its own chip correlation and acquisition. Its state and oscillator
-continue through idle periods and burst boundaries. The channel does not model
-fading, multipath or hardware nonlinearities, and the receiver has no continuous
-oscillator tracking. Very long integrations can fail with the default
+The accelerated simulator adds noise, 100 ppm relative crystal error and phase
+diffusion of 0.5 degrees per square root second by default. It changes symbol
+durations and analytically integrates carrier coherence loss, with a bounded
+piecewise approximation to the Wiener phase trajectory. Chip despreading remains
+matched. It shares waveform mapping and receiver decisions with PCM, but does not
+implement oscillator tracking or model arbitrary acquisition, fading, multipath
+or hardware nonlinearities. Very long integrations can fail with the default
 crystal error; disabling impairments for a diagnostic does not demonstrate a
 solution to that limitation. Real reception uses a finite timing/key/epoch bank,
 bounded by configured workspace. Fixed five-second training does not gain energy

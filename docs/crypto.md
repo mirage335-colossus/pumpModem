@@ -29,96 +29,13 @@ The caller maps its symbol/sample schedule to byte positions; this library does
 not convert fractional seconds or automatically advance the anchor during a
 transmission.
 
-For byte offset `o`, the AES-256-CTR initial 128-bit counter is
-`domain_pad || BE64(floor(o / 16))`. The optional final `Crypto::stream`
-argument selects `StreamDomain::Payload` by default, whose eight-byte pad is
-all zero, preserving existing payload output. `StreamDomain::Preamble` uses
-the eight ASCII bytes `preamble`. Both domains use the same purpose and epoch
-key; the counter pad is not another key derivation. Discard the first `o % 16`
-keystream bytes and produce the requested count. OpenSSL increments the whole
-counter in big-endian order. The API rejects an offset/count combination whose
-final byte exceeds `2^64-1`, so neither domain can carry into the high counter
-bytes or overlap the other domain.
+For byte offset `o`, the AES-256-CTR initial 128-bit counter is the big-endian
+integer `floor(o / 16)`. Discard the first `o % 16` keystream bytes and produce
+the requested count. OpenSSL increments the whole counter in big-endian order.
+The API rejects an offset/count combination whose final byte exceeds `2^64-1`.
 Changing the whole-second anchor derives a fresh epoch key; counter positions
 therefore do not collide merely because adjacent transmissions cross a second.
-Within one anchor, purpose and domain, random access and sequential generation
-agree.
-
-### Binary pattern chip addressing
-
-The planned Auto Pattern and fixed-length pattern modes enable private
-Scrambler fragments whenever a key is selected. Public and different-key
-receive hypotheses therefore have different acquisition patterns; Data-only
-masking would leave them indistinguishable at the pattern decoder.
-The binary `PatternCode` waveform addresses Scrambler and DSSS independently.
-Transfer first derives each 32-byte waveform seed from that purpose's original
-key stream at the selected epoch and byte offset zero. `PatternCode` constructs
-its own `Crypto` instance from the supplied seed and then selects the same
-purpose and epoch for chip generation. This second derivation layer is part of
-the waveform convention; direct `PatternCode` callers supply those seeds
-themselves. Raw payload masking continues to use the original Data-purpose key.
-For absolute chip position `k`, it reads byte `floor(k/8)` and bit `k % 8`
-(least-significant bit first) from that purpose's epoch stream. This bit order
-is a waveform convention; packed application bytes still carry payload bits
-most-significant bit first.
-
-Let `C` be `ceil(symbol_samples / chip_samples)`. Symbol `j` starts at chip
-`start_chip + j*C`; chip `i` within it uses the absolute address
-`start_chip + j*C + i`. A partial final chip consumes its entire bit position.
-Consequently adjacent symbols never restart a private prefix, and a long
-symbol never repeats the legacy 16,384-chip period. Every multiply/add used to
-form a transmitted stream range is checked before waveform generation.
-
-The two legal bit patterns share that time's private row and mix it with
-different public internal-transition masks. Only one alternative is
-transmitted at that time. DSSS, when enabled, applies signs from its separate
-purpose and seed. Small fixed caches support both sequential output and
-receiver seeks without storing a keystream proportional to hours of airtime.
-Cache contents are cleansed when released.
-
-The hardware-settling prefix starts with public pseudorandom noise bytes. Any
-selected transfer key supplies its existing Data-purpose, transmission-epoch
-key to XOR-encrypt those bytes before waveform mapping, including when payload
-spreading is disabled. `Config::data_key` retains that original `Crypto` key;
-it is not reconstructed from a new seed. Every half-chip interval consumes
-eight bytes: two big-endian 32-bit uniform words mapped into circular I/Q noise
-using a Gaussian transform. Its radius is capped and mean power normalized to
-stay within PCM headroom. Enabled Scrambler and DSSS layers then each multiply
-their own independent prefix signs into the noise. All selected layers apply
-together.
-
-Data, enabled Scrambler and enabled DSSS use their existing payload keys and
-epoch, with `StreamDomain::Preamble` selecting the separate counter range.
-The Scrambler and DSSS waveform seeds remain exactly those supplied to
-`PatternCode`; the public noise generator uses the existing public seed,
-Scrambler purpose and transmission epoch. Its public payload row instead uses
-epoch zero. At most four fixed 512-byte seek caches hold these streams.
-No preamble-specific key is generated or derived. The earlier extra HMAC
-derivations were deterministic, not random-key generation, and are no longer
-used. The fixed `preamble` counter pad is local state, never a transmitted
-field. Removing the spreading layers still leaves independent
-noise, not a legal payload codeword. The receiver never matches the prefix as
-a synchronization marker. It consumes no Data, Scrambler or DSSS payload
-positions. The epoch is fixed at transmission start, before that prefix;
-payload positions begin at zero afterward. Clock-start hypotheses add the
-rounded prefix duration when predicting the first payload symbol. No epoch,
-prefix length or stream index is transmitted as a field.
-
-The epoch and chip coordinates are local transmitter state and receiver clock
-hypotheses. They add no sender identifier, nonce, slot, symbol index or chip
-counter to the transmitted raw bits. A Unix-time anchor approximates absolute
-time; the implementation does not claim a native TAI clock. Acquisition must
-find the corresponding pattern evidence within its implemented clock search.
-The bounded long-symbol correlator can derive the surviving stream-symbol
-index from a negative clock-relative start offset. The raw Data-stream decoder
-uses that same bit index when unmasking a cropped reception; it must not restart
-the data stream at zero merely because the captured fragment begins there.
-
-Public unkeyed patterns restart their deterministic row for every symbol, so
-they do not require a secret symbol index. That public mode does not provide
-the nonrepeating private waveform of the keyed mode. Manual legacy APSK keeps
-its earlier repeated sign-template behavior and should not be described as
-the new nonrepeating pattern waveform.
+Within one anchor and purpose, random access and sequential generation agree.
 
 `xor_data` XORs that stream with arbitrary bytes. `mac` computes the complete
 32-byte HMAC-SHA256 over exactly the supplied bytes with the separate MAC key.
@@ -127,24 +44,12 @@ unambiguous encoding. Verification requires a 32-byte tag and compares it with
 `CRYPTO_memcmp`. HMAC does not require a unique message nonce. Packet framing
 decides where the tag is placed and which surrounding coding is applied.
 
-Reusing the same key, timestamp, purpose, domain and byte positions repeats CTR
-output and exposes the XOR of the plaintexts. Known plaintext reveals those reused
+Reusing the same key, timestamp, purpose, and byte positions repeats CTR output
+and exposes the XOR of the plaintexts. Known plaintext reveals those reused
 positions. It does not directly reveal other CTR positions or the independent
 MAC key. HMAC still rejects altered authenticated content. This is not a claim
 that CTR reuse preserves confidentiality. Use transmission spacing and coordinate
 large transfers sharing a key.
-
-The live session waits for a fresh whole-second epoch before preparing another
-automatically timed keyed pattern transmission on that device. An explicitly
-supplied timestamp remains a caller-controlled override. This local guard does
-not coordinate independent devices sharing a key or replace operational
-transmission spacing.
-
-Raw-bit bursts and dictionary-coded short text carry no MAC or checksum. Their
-pattern confidence can reject noise and mismatched time/key hypotheses, but
-does not supply cryptographic message authentication or replay protection.
-The packet path retains its existing keyed MAC when enabled. No extra
-authentication field is silently appended to a three-bit raw transmission.
 
 ## Named key sets: keyfile version 2
 

@@ -18,15 +18,15 @@ struct Settings {
     double simulation_phase_noise_degrees_per_sqrt_second = .5;
     // Received content and pending event storage are independent of DSP work.
     std::size_t content_limit = default_memory_limit;
-    std::size_t dsp_workspace_bytes = transfer.dsp_workspace_bytes;
+    std::size_t dsp_workspace_bytes = 64 * 1024 * 1024;
     // Compatibility fields: streaming capture no longer retains a duration
     // window, and simulated media progresses as fast as bounded DSP permits.
     double receive_buffer_seconds = 30;
     std::uint64_t simulation_seed = 1;
     double simulation_speed = 1;
     std::vector<Crypto> receive_keys;
-    // Selecting a transmit key restricts reception to matching keyed streams.
-    // Pattern-only raw results carry no separate authentication tag.
+    // Selecting a transmit key also requires authenticated reception. An
+    // unkeyed channel may search loaded keys in addition to plain packets.
     bool permits_plaintext() const noexcept {
         return !transfer.key && !transfer.modem.scramble && !transfer.modem.dsss;
     }
@@ -53,7 +53,6 @@ struct SignalUpdate {
     bool complete = false;
     std::size_t received_bits = 0;
     std::size_t expected_bits = 0;
-    std::optional<double> pattern_score = std::nullopt;
 };
 enum class ConstellationSource { input, transmitted, received };
 struct Snapshot {
@@ -114,8 +113,8 @@ public:
     void transmit(const Message& message);
     // One 0/1 per element, including leading zeros. Uses streaming APSK and
     // the selected data key, with no packet framing, preamble or FEC. Raw
-    // simulations pass sampled audio to ordinary blind acquisition. Without
-    // raw discovery framing, no timing/length-assisted raw result is emitted.
+    // simulations decode aligned channel observations and deliver raw bits
+    // through signals, without claiming verified packet reception.
     void transmit_bits(std::span<const std::uint8_t> bits);
     void cancel_transmit();
     Snapshot snapshot();

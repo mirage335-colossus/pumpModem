@@ -30,11 +30,12 @@ std::string compression_description(const PacketLayout& layout,const transfer::O
 }
 FlowLane packet_receiver(bool simulation,bool keyed,bool fec,bool compressed,bool counterpart=true) {
     return {simulation?"Receive • packet simulation":"Receive • continuous audio",{
-        {simulation?"Independent sampled channel":"Audio input + sample-rate conversion",simulation?
-            "Continuously receive PCM samples from independently running clocks with unknown start timing and carrier phase, clock/frequency error, phase diffusion and AWGN. Hardware audio is bypassed.":
+        {simulation?"Channel observations":"Audio input + sample-rate conversion",simulation?
+            "Integrate channel observations containing clock/frequency error, phase diffusion and AWGN. Hardware audio is bypassed.":
             "Convert the selected hardware clock to the internal modem clock, then project the carrier and despread each timing hypothesis."},
-        {"Full-pattern correlation",
-            "The same continuous receiver processes simulation and hardware PCM. Search chip and symbol timing without transmitter boundaries, multiply complex chip projections by the candidate code and integrate before deciding phase/amplitude. Wrong codes and code phases leave energy outside the legal pattern space."},
+        {simulation?"Already matched observations":"Full-pattern correlation",simulation?
+            "Accelerated simulation supplies whole-symbol matched channel statistics. It does not test blind chip timing acquisition.":
+            "Multiply complex chip projections by the candidate code and integrate before deciding a phase/amplitude symbol. No hard chip decisions are needed: correctly aligned signal adds coherently while independent noise does not. Wrong codes and code phases leave energy outside the legal pattern space."},
         {"Timing, gain and initial phase","Fit the pattern constellation across timing and gain hypotheses, then try the first symbol's possible differential phases. A plausible compact header starts a bounded provisional decoder. Verify the complete short frame before committing to lock; other timing hypotheses keep searching."},
         {"Parallel training diagnostic","An independent recorder measures matching portions of the five-second training signal; it is not a prerequisite for packet lock or byte recovery."},
         {"Remove public whitening","Reverse the public mask on the audio frame; the first 32 training-input bytes are excluded."},
@@ -59,52 +60,6 @@ Inspection inspect(const InspectionRequest& request) {
     const auto symbol_seconds=static_cast<double>(symbol_samples)/config.sample_rate;
     const auto chip_samples=static_cast<std::uint64_t>(std::ceil(2.*config.sample_rate/config.bandwidth_hz));
     const auto keyed=options.key.has_value();
-    if(config.pattern_symbols) {
-        const bool short_text=!result.binary && request.message.kind==MessageKind::text && request.message.data.size()<16;
-        const auto hardware_samples=result.estimate.packet_seconds>0?modem::training_sample_count(config):0;
-        const auto hardware_symbols=hardware_samples/symbol_samples;
-        const auto hardware_seconds=static_cast<double>(hardware_samples)/config.sample_rate;
-        const auto meaningful=result.binary?request.binary->size():
-            (result.estimate.waveform_samples>=hardware_samples?(result.estimate.waveform_samples-hardware_samples)/symbol_samples:0);
-        result.title=result.binary?"Raw bit pattern transmission":short_text?"Short text pattern transmission":"Message / file pattern transmission";
-        result.summary=count(meaningful)+" meaningful bits use one binary pattern each and "+number(result.estimate.total_seconds)+" seconds on air.";
-        result.preamble_description="Hardware settling sends independent noise-like chips for five seconds rounded to the nearest whole payload-symbol duration: "+
-            count(hardware_symbols)+" symbol durations / "+number(hardware_seconds)+" seconds. Symbols longer than ten seconds need no prefix. The receiver does not require or lock to this prefix; payload pattern evidence determines signal start, end, timing and keystream synchronization.";
-        result.chip_description="Each meaningful bit selects one of two distinguishable internal patterns. The nominal chip duration follows the selected bandwidth. Keyed pattern and DSSS streams use separate purposes and advancing stream addresses.";
-        result.fields={{"Source",result.binary?"Raw bits":short_text?"Short text":"Message / file"},
-            {"Bandwidth",number(config.bandwidth_hz)+" Hz"},{"TX target C/N0",number(request.target_snr)+" dB-Hz"},
-            {"Internal sample rate",count(config.sample_rate)+" samples/s"},{"Carrier",number(config.carrier_hz)+" Hz"},
-            {"Pattern symbols","2 distinguishable patterns / 1 meaningful bit each"},
-            {"Pattern selection",request.requested_pattern.empty()?"Configured modem":request.requested_pattern},
-            {"Symbol duration",number(symbol_seconds)+" s"},{"Meaningful bits",count(meaningful)},
-            {"Symbol padding","0 bits"},{"Hardware settling",number(hardware_seconds)+" s / "+count(hardware_symbols)+" symbol durations"},
-            {"Payload time",number(result.estimate.packet_seconds)+" s"},{"Total on-air time",number(result.estimate.total_seconds)+" s"},
-            {"Acquisition evidence","Received pattern evidence versus noise; APSK geometry is diagnostic only"}};
-        const std::string encoding=result.binary?"Raw bits are used exactly as supplied, preserving leading zeros.":
-            short_text?"The built-in short-text dictionary produces a self-delimiting bit string. No byte padding, packet header, checksum, integrity tag or FEC is added.":
-            "The existing byte-oriented packet codec supplies the content bitstream. Packet parsing and optional error correction follow pattern acquisition.";
-        if(hardware_samples)result.sections.push_back({"Hardware settling", "Independent noise-like chips let audio gain control and gating settle. They convey no data bits and use no payload keystream positions.",{},hardware_symbols,hardware_seconds});
-        result.sections.push_back({"Meaningful pattern symbols",encoding,{},meaningful,result.estimate.packet_seconds});
-        if(short_text || result.binary)result.fields.insert(result.fields.end(),{{"Packet header","0 bits"},{"Checksum / integrity tag","0 bits"},{"FEC","Off"},
-            {"Compression",short_text?"Built-in short-text dictionary":"Off (raw bits)"}});
-        else {
-            result.packet_layout=layout;
-            result.fields.insert(result.fields.end(),{{"Encoded packet",count(layout.wire_bytes)+" bytes"},{"Compression",compression_description(layout,options)},
-                {"Body FEC",fec_name(layout.fec)}});
-        }
-        result.pattern_space=inspection::inspect_pattern_space(config,request.target_snr,config.scramble || config.dsss);
-        result.lanes.push_back({"Transmit • pattern symbols",{{"Hardware settling",result.preamble_description,hardware_samples?InspectionState::active:InspectionState::off},
-            {"Content bits",encoding},
-            {"Private data stream",keyed?"Mask the meaningful bitstream with the selected epoch's independent data keystream.":"No private data mask selected.",keyed?InspectionState::active:InspectionState::off},
-            {"Pattern selection","Map each bit to a distinguishable internal pattern. A keyed symbol advances to a fresh scrambler fragment; configured DSSS uses its independent stream."},
-            {request.simulation?"Sampled channel":"Audio output",request.simulation?"Transmit sampled PCM through independent clock, frequency, phase-noise and additive-noise simulation.":"Generate PCM at the internal clock and resample to the selected audio output."}}});
-        result.lanes.push_back({"Receive • pattern evidence",{{"Bounded hypotheses","Search only the configured receive targets, selected bandwidth and pattern mode, with local clock/key hypotheses."},
-            {"Pattern versus noise","Accumulate soft pattern evidence. Refine timing and frequency using that score; a noisy APSK plot does not veto a pattern match."},
-            {"Candidate history","Keep compact scored symbol candidates and useful chain state within the DSP workspace limit; release old waveform history."},
-            {"Meaningful bits","Emit pattern-supported bits with exact length; signal end is inferred from subsequent absence of adequate pattern evidence."},
-            {"Content interpretation",short_text?"Decode the predefined dictionary from the recovered bit string.":result.binary?"Present the recovered raw bits.":"Decode the optional packet and error correction after symbol acquisition."}}});
-        return result;
-    }
     result.fields={{"Source",result.binary?"Raw binary":"Message / file packet"},
         {"Bandwidth",number(config.bandwidth_hz)+" Hz"},{"Target C/N0",number(request.target_snr)+" dB-Hz"},
         {"Internal sample rate",count(config.sample_rate)+" samples/s"},{"Carrier",number(config.carrier_hz)+" Hz"},
@@ -113,7 +68,7 @@ Inspection inspect(const InspectionRequest& request) {
         {"Nominal full-symbol rate",number(static_cast<double>(bits)/symbol_seconds)+" bits/s"},
         {"Pattern selection",request.requested_pattern.empty()?"Configured modem":request.requested_pattern},
         {"Audio device",request.device.empty()?"Default":request.device},
-        {"Channel",request.simulation?"Unsynchronized sampled simulation; three-second presentation":"Real audio"},
+        {"Channel",request.simulation?"CPU-bounded simulation; three-second presentation":"Real audio"},
         {"Total on-air time",number(result.estimate.total_seconds)+" s"},
         {result.binary?"Data symbol time":"Encoded packet time",number(result.estimate.packet_seconds)+" s"},
         {"Incremental content time",number(result.estimate.content_seconds)+" s"}};
@@ -135,7 +90,7 @@ Inspection inspect(const InspectionRequest& request) {
         const auto remaining=static_cast<unsigned>(meaningful%bits);
         result.title="Raw binary transmission";
         result.summary=count(meaningful)+" meaningful bits use "+count(symbols)+" APSK symbols and "+number(result.estimate.total_seconds)+" seconds on air. No packet fields are added.";
-        result.preamble_description="Off: raw binary adds no training or preamble. Continuous raw discovery is not implemented; an unsynchronized receiver has no known start, phase or bit count.";
+        result.preamble_description="Off: raw binary adds no training or preamble. Aligned simulation reception starts from a known reference phase and unit gain.";
         result.fields.insert(result.fields.end(),{{"Body FEC","Off"},{"Bootstrap FEC","Off"},{"Compression","Off (raw bits)"},
             {"Integrity","Off (unverified raw decisions)"},{"Symbol padding","0 bits"},{"Meaningful bits",count(meaningful)}});
         result.sections.push_back({"Raw APSK symbols","Only the supplied bits; leading zeros remain significant. The last group uses its actual-width subset. Byte counts are storage equivalents, not transmitted padding.",{},symbols,result.estimate.total_seconds});
@@ -143,15 +98,16 @@ Inspection inspect(const InspectionRequest& request) {
             {"Private data mask",keyed?"XOR only meaningful bits with the selected epoch's Data stream; no tag or framing is added.":"No symmetric key selected.",keyed?InspectionState::active:InspectionState::off},
             {"APSK symbol mapping","Map full groups through the configured differential phase/amplitude alphabet; select a smaller subset for the final short group."},
             {"Chip signs",spread_detail},{request.simulation?"Simulation channel":"Carrier + audio output",request.simulation?
-                "Generate PCM on an independent transmitter clock with unknown start timing and carrier phase, clock/frequency error, phase diffusion and AWGN. Bounded plots show the actual received samples.":
+                "Integrated observations pass through clock/frequency error, phase diffusion and AWGN; bounded plots reconstruct the signal.":
                 "Generate the carrier at the internal clock and interpolate to the negotiated hardware output clock."},
             {"Packet framing / FEC","Off: no training, header, metadata, integrity tag, interleaving or Reed-Solomon bytes.",InspectionState::off}}});
-        result.lanes.push_back({"Receive • raw binary",{
-            {"Blind raw discovery","Unavailable for simulation and hardware: no receiver discovers the raw start, meaningful bit count, gain or initial phase without framing.",InspectionState::unavailable},
-            {"Measured channel input","Waveform, spectrum and input I/Q show received PCM. Transmitting raw bits does not create received text or a completed binary signal."},
-            {"Raw decisions + private data mask","No raw decoding or unmasking is performed by the continuous receiver.",InspectionState::unavailable},
+        result.lanes.push_back({"Receive • raw simulation",{
+            {"Observed symbol integration","Use actual channel observations with known bit count, aligned start, nominal unit gain and initial phase reference; no transmitted bit values are supplied.",request.simulation?InspectionState::active:InspectionState::unavailable},
+            {"Nearest APSK subset","Use measured differential phase/amplitude to choose bit guesses. A final expected symbol needs at least 99% nominal clock coverage.",request.simulation?InspectionState::active:InspectionState::unavailable},
+            {"Reverse private data mask",keyed?"Unmask the received guesses with the selected local epoch/key; this supplies no integrity check.":"No symmetric key selected.",request.simulation && keyed?InspectionState::active:InspectionState::off},
+            {"Unverified binary output","No CRC, MAC, FEC correction or success percentage is invented. Continuous real-audio raw discovery is not implemented.",request.simulation?InspectionState::active:InspectionState::unavailable},
             {"AGC / convolutional / trellis decoding","Off: audio AGC, convolutional codes and trellis decoding are not implemented.",InspectionState::unavailable}}});
-        result.lanes.push_back(packet_receiver(request.simulation,keyed,options.fec!=FecMode::off,false,false));
+        if(!request.simulation)result.lanes.push_back(packet_receiver(false,keyed,options.fec!=FecMode::off,false,false));
         if(remaining) {
             Constellation partial;partial.title="Final "+count(remaining)+"-bit subset";
             partial.detail="All allowed points for the final group, drawn from the configured APSK alphabet. No extra meaningful bits are padded.";
@@ -187,6 +143,8 @@ Inspection inspect(const InspectionRequest& request) {
     result.preamble_description="32 training-input bytes map to 64 fixed four-bit APSK segments over exactly five seconds (12.8 segments/s), independently of payload baud. Training is not chip-spread. A selected key masks its bytes; the public whitening mask skips them.";
     result.fields.insert(result.fields.end(),{{"Compression",compression_detail},
         {"Message kind",request.message.kind==MessageKind::text?"Text":request.message.kind==MessageKind::file?"File":"Screenshot"},
+        {"Repeat requested",request.message.repeatable?"Yes":"No"},
+        {"Repeat eligibility",result.estimate.repeatable_allowed?"Within the configured incremental-content policy":"Exceeds the configured incremental-content policy"},
         {"Body FEC",fec_name(layout.fec)},{"Bootstrap FEC",header_fec},
         {"FEC selection",layout.original_bytes<16?"Automatically off below 16 original bytes":"Selected mode applies to header and body"},
         {"Integrity",keyed?"32-byte epoch-bound HMAC-SHA256":"32-byte SHA-256"},
@@ -220,7 +178,7 @@ Inspection inspect(const InspectionRequest& request) {
         {"Public whitening","Apply the reversible public audio mask after private masking, skipping training. This is not encryption."},
         {"APSK + chip signs","Training uses fixed four-bit symbols; the entire packet uses continuous configured-width groups without an internal padding boundary. "+std::string(spread_detail)},
         {request.simulation?"Simulation channel":"Carrier + audio output",request.simulation?
-            "Generate PCM on an independent transmitter clock with unknown start timing and carrier phase, clock/frequency error, phase diffusion and AWGN. Feed the persistent blind receiver and bounded plots with those received samples.":
+            "Process integrated channel observations with clock/frequency error, phase diffusion and AWGN; bounded previews feed the plots.":
             "Generate at the internal modem clock; interpolate to the independently negotiated hardware clock."},
         {"Convolutional / trellis coding","Off: convolutional encoding and trellis coding are not implemented.",InspectionState::unavailable}}});
     result.lanes.push_back(packet_receiver(request.simulation,keyed,fec,layout.compressed));

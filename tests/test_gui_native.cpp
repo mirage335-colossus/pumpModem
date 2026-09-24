@@ -23,6 +23,13 @@ int main() {
             try { (void)gui::parse_binary_bits(invalid); } catch (const Error&) { rejected_bits=true; }
             check(rejected_bits);
         }
+        auto source=gui::TransmitSource::message_file;
+        check(!gui::selected_binary_bits(source,"000101"));
+        check(!gui::selected_binary_bits(source,"invalid stale binary text"));
+        source=gui::TransmitSource::binary;
+        check(gui::selected_binary_bits(source,"000101")==std::optional<Bytes>(Bytes{0,0,0,1,0,1}));
+        source=gui::TransmitSource::message_file;
+        check(!gui::selected_binary_bits(source,"000101"));
         gui::Inbox inbox(5);
         inbox.put(packet(1,3));
         inbox.put(packet(1,2));
@@ -132,9 +139,6 @@ int main() {
         signals.update(binary_line); check(!signals.copy_bits(2));
         binary_line.expected_bits=0; binary_line.received_bits=0;
         signals.update(binary_line); check(!signals.copy_bits(2));
-        binary_line.received_bits=3;binary_line.pattern_score=25.;
-        signals.update(binary_line);check(signals.copy_bits(2)=="001");
-        binary_line.pattern_score.reset();
         binary_line.text=std::string(5000,'0'); binary_line.expected_bits=binary_line.received_bits=5000;
         signals.update(binary_line);
         check(signals.lines()[2].complete && signals.lines()[2].text.size()==4096 && !signals.copy_bits(2));
@@ -182,7 +186,7 @@ int main() {
         check(gui::key_entry_names(" Home, Portable , Caf\xc3\xa9 ")==std::vector<std::string>({"Home","Portable","Caf\xc3\xa9"}));
         const std::vector<std::string> choice_names{"A|B","None","_Home","Home","A&B","AB","Path/Back\\slash"};
         check(gui::key_choice_labels(choice_names)==std::vector<std::string>({
-            "None","1. A|B","2. None","3. _Home","4. Home","5. A&B","6. AB","7. Path/Back\\slash"}));
+            "None","1. A|B","2. None","3. _Home","4. Home","5. A&&B","6. AB","7. Path/Back\\slash"}));
         check(gui::key_choice_labels({})==std::vector<std::string>({"None"}));
         for (const auto* invalid : {"", " ", ",Home", "Home,", "Home,,Portable"}) {
             bool invalid_names=false;

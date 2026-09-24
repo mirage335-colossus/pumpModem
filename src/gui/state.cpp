@@ -20,6 +20,14 @@ Bytes parse_binary_bits(std::string_view text) {
         if (value=='0' || value=='1') bits.push_back(static_cast<std::uint8_t>(value-'0'));
     return bits;
 }
+std::optional<Bytes> selected_binary_bits(TransmitSource source, std::string_view text) {
+    switch (source) {
+    case TransmitSource::message_file: return std::nullopt;
+    case TransmitSource::binary: return parse_binary_bits(text);
+    }
+    throw Error("Select Message / File or Binary input");
+}
+
 Inbox::Inbox(std::size_t capacity) : capacity_(capacity) {
     if (!capacity) throw Error("Receive cache capacity must be positive");
 }
@@ -107,7 +115,12 @@ std::vector<std::string> key_choice_labels(std::span<const std::string> names) {
     std::vector<std::string> labels{"None"};
     labels.reserve(names.size()+1);
     for(std::size_t index=0;index<names.size();++index) {
-        labels.push_back(std::to_string(index+1)+". "+display_label(names[index]));
+        std::string label=std::to_string(index+1)+". ";
+        for(const char c:display_label(names[index])) {
+            if(c=='&')label+='&';
+            label+=c;
+        }
+        labels.push_back(std::move(label));
     }
     return labels;
 }
@@ -138,15 +151,9 @@ std::string folder_uri(const std::filesystem::path& directory) {
 
 std::string signal_status_label(const SignalLine& line) {
     if (line.binary) return line.complete?"binary received":"binary pending";
-    if(line.complete && line.pattern_score && !line.validated)return "text received";
     return line.validated?(line.text_message?"verified":"verified file"):"pending";
 }
 std::string signal_preamble_label(const SignalLine& line) {
-    if(line.pattern_score && std::isfinite(*line.pattern_score)) {
-        std::ostringstream text;text.imbue(std::locale::classic());
-        text<<"Pattern score "<<std::fixed<<std::setprecision(1)<<*line.pattern_score;
-        return text.str();
-    }
     if (line.binary) return "Preamble none";
     const auto value=line.preamble_received_percent;
     if (!value || !std::isfinite(*value) || *value<0 || *value>100) return "Preamble --";
@@ -156,7 +163,6 @@ std::string signal_preamble_label(const SignalLine& line) {
     return text.str();
 }
 std::string signal_data_label(const SignalLine& line) {
-    if(line.pattern_score && line.complete && !line.validated && !line.binary)return "No checksum / FEC";
     if (line.binary) return line.received_bits>line.text.size()?"FEC off / prefix":"FEC off";
     if (!line.validated) return "Data pre-FEC pending";
     const auto& accuracy=line.pre_fec_accuracy;
@@ -179,7 +185,7 @@ void Signals::update(SignalLine line) {
     if (line.text.size()>4096) line.text.resize(4096);
     const auto found=std::find_if(lines_.begin(),lines_.end(),[&](const auto& item) { return item.id==line.id; });
     if (found!=lines_.end()) {
-        if ((found->validated && !line.validated) || ((found->binary || found->pattern_score) && found->complete && !line.complete)) return;
+        if ((found->validated && !line.validated) || (found->binary && found->complete && !line.complete)) return;
         *found=std::move(line);
     } else {
         if (lines_.size()>=64) lines_.pop_front();
@@ -193,20 +199,33 @@ std::optional<std::string> Signals::copy_id(std::size_t index) const {
 std::optional<std::string> Signals::copy_bits(std::size_t index) const {
     if (index>=lines_.size()) return std::nullopt;
     const auto& line=lines_[index];
-    if (!line.binary || !line.complete || !line.received_bits || (line.expected_bits && line.received_bits!=line.expected_bits) ||
+    if (!line.binary || !line.complete || !line.received_bits || line.received_bits!=line.expected_bits ||
         line.text.size()!=line.received_bits || line.text.find_first_not_of("01")!=std::string::npos) return std::nullopt;
     return line.text;
 }
-std::optional<std::string> Signals::copy_text(std::size_t index) const {
-    if(index>=lines_.size())return {};
-    const auto& line=lines_[index];
-    if(line.binary || !line.complete || line.validated || !line.text_message || !line.pattern_score ||
-       !std::isfinite(*line.pattern_score) || line.text.empty())return {};
-    const auto bytes=std::span(reinterpret_cast<const std::uint8_t*>(line.text.data()),line.text.size());
-    if(!valid_clipboard_text(bytes))return {};
-    return line.text;
-}
 
+bool valid_clipboard_text(std::span<const std::uint8_t> bytes) noexcept {
+    for (std::size_t i = 0; i < bytes.size();) {
+        const auto first = bytes[i++];
+        if (!first) return false;
+        if (first < 0x80) continue;
+        unsigned continuation;
+        std::uint32_t value;
+        std::uint32_t minimum;
+        if (first >= 0xc2 && first <= 0xdf) { continuation=1; value=first&0x1f; minimum=0x80; }
+        else if (first >= 0xe0 && first <= 0xef) { continuation=2; value=first&0x0f; minimum=0x800; }
+        else if (first >= 0xf0 && first <= 0xf4) { continuation=3; value=first&7; minimum=0x10000; }
+        else return false;
+        if (continuation > bytes.size() - i) return false;
+        for (unsigned n=0; n<continuation; ++n) {
+            const auto next=bytes[i++];
+            if ((next&0xc0) != 0x80) return false;
+            value=(value<<6)|(next&0x3f);
+        }
+        if (value<minimum || value>0x10ffff || (value>=0xd800 && value<=0xdfff)) return false;
+    }
+    return true;
+}
 std::string id_label(const Message& message) {
     constexpr char digits[]="0123456789abcdef";
     std::string result;

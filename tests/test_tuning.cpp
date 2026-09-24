@@ -1,7 +1,6 @@
 #include "datapump/tuning.hpp"
 #include "datapump/transfer.hpp"
 #include "../src/constellation.hpp"
-#include "../src/spreading_code.hpp"
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -18,49 +17,36 @@ template<class F> void rejects(F action,const char* text) {
     throw std::runtime_error(text);
 }
 void near(double a,double b,const char* text) {check(std::abs(a-b)<1e-8,text);}
-modem::Config legacy_profile(modem::Config config) {
-    config.pattern_symbols=false;config.constellation_bits=4;return config;
-}
-void changing_pattern(const modem::Config& config) {
-    check(config.spreading_mode==modem::SpreadingMode::pattern,"automatic waveform checks require changing patterns");
-    const auto code=modem::detail::spreading_code(config);
-    check(std::find(code.begin(),code.end(),1)!=code.end() && std::find(code.begin(),code.end(),-1)!=code.end(),
-          "waveform fixtures require measurable chip phase shifts");
-}
-void modes_and_patterns() {
+void modes_and_tones() {
     check(tuning::pattern_modes().size()==19,"exact number of pattern choices");
-    for(const auto mode:tuning::pattern_modes())
+    for(const auto mode:tuning::pattern_modes()) {
         check(tuning::parse_pattern_mode(tuning::pattern_mode_name(mode))==mode,"pattern name roundtrip");
-    // Forced tones are manual hardware experiments. Automated modulation and
-    // acquisition use chip patterns with observable phase changes instead.
-    for(const auto mode:{tuning::PatternMode::auto_pattern,tuning::PatternMode::auto_keystream,
-                         tuning::PatternMode::pattern_3,tuning::PatternMode::pattern_4,
-                         tuning::PatternMode::pattern_6,tuning::PatternMode::pattern_8,
-                         tuning::PatternMode::pattern_12,tuning::PatternMode::pattern_16}) {
-        const auto plan=tuning::resolve(24000,40,mode,true);
+        const auto plan=tuning::resolve(24000,100,mode,true);
         modem::validate(plan.config);
-        check(plan.config.scramble,"every keyed pattern mode needs private acquisition evidence");
-        changing_pattern(plan.config);
         const Bytes bits{0,1,1,0};
         const auto wave=modem::modulate_status(bits,plan.config);
-        check(modem::detect_status(wave,bits,plan.config)>.999,"changing patterns preserve positive and negative status symbols");
+        check(modem::detect_status(wave,bits,plan.config)>.999,"all explicit patterns preserve positive and negative status symbols");
     }
     rejects([]{tuning::parse_pattern_mode("pattern-7");},"reject unlisted pattern");
     rejects([]{tuning::parse_pattern_mode("tone-64");},"reject unlisted tone");
+    auto tone=tuning::resolve(24000,100,tuning::PatternMode::tone_8,false).config;
     auto pattern=tuning::resolve(24000,100,tuning::PatternMode::pattern_8,false).config;
-    check(!pattern.scramble,"forced plaintext patterns do not turn on keystream");
-    changing_pattern(pattern);
-    for(const auto mode:{tuning::PatternMode::pattern_3,tuning::PatternMode::pattern_16}) {
-        auto config=legacy_profile(tuning::resolve(24000,100,mode,false).config);
-        changing_pattern(config);
+    check(tone.spreading_mode==modem::SpreadingMode::tone,"tone mode resolved");
+    check(!tone.scramble && !pattern.scramble,"forced plaintext modes do not turn on keystream");
+    const auto tone_wave=modem::modulate_status(Bytes{0},tone);
+    const auto pattern_wave=modem::modulate_status(Bytes{0},pattern);
+    check(tone_wave!=pattern_wave,"tone is an actual waveform change");
+    check(modem::detect_status(tone_wave,Bytes{0},pattern)<.1,"fixed pattern has distinct phase chips");
+    for(const auto mode:{tuning::PatternMode::tone_3,tuning::PatternMode::pattern_3,tuning::PatternMode::pattern_16}) {
+        auto config=tuning::resolve(24000,100,mode,false).config;
         auto preamble=modem::preamble(config),wire=preamble;
         wire.insert(wire.end(),{0,0xff,0x35,0xa8});
-        check(modem::demodulate(modem::modulate(wire,config),config,preamble).bytes==wire,"changing-pattern packet roundtrip");
+        check(modem::demodulate(modem::modulate(wire,config),config,preamble).bytes==wire,"tone and pattern packet roundtrip");
     }
 }
 void snr_planning() {
     auto plan=tuning::resolve(1200,6,tuning::PatternMode::auto_pattern,false);
-    check(plan.config.pattern_symbols && plan.config.constellation_bits==1,"automatic planning carries one meaningful bit per rare pattern");
+    check(plan.config.constellation_bits<=3,"weak links choose a sparse efficient constellation");
     near(plan.required_spreading,std::pow(10.,(plan.target_symbol_snr_db-6)/10)*600.,"required spreading from selected symbol energy");
     near(plan.estimated_processing_gain_db,10*std::log10(static_cast<double>(plan.config.spreading_factor)),"spreading gain estimate");
     near(plan.estimated_symbol_snr_db,6+10*std::log10(modem::symbol_seconds(plan.config)),"C/N0 to symbol SNR");
@@ -71,28 +57,27 @@ void snr_planning() {
     rejects([]{tuning::resolve(1200,-270,tuning::PatternMode::auto_keystream,true);},"duration beyond 64-bit sample counters is rejected explicitly");
     plan=tuning::resolve(1200,6,tuning::PatternMode::auto_keystream,false);
     check(!plan.config.scramble && plan.config.spreading_mode==modem::SpreadingMode::pattern,"no-key auto fallback");
-    plan=tuning::resolve(1200,-60,tuning::PatternMode::pattern_3,true);
-    check(!plan.target_supported && plan.config.spreading_factor==3,"explicit mode retained even if target impossible");
+    plan=tuning::resolve(1200,-60,tuning::PatternMode::tone_1,true);
+    check(!plan.target_supported && plan.config.spreading_factor==1,"explicit mode retained even if target impossible");
     rejects([]{tuning::resolve(0,6,tuning::PatternMode::auto_pattern,false);},"invalid bandwidth");
     rejects([]{tuning::resolve(30000001,6,tuning::PatternMode::auto_pattern,false);},"unsupported modem bandwidth");
     rejects([]{tuning::resolve(1200,std::numeric_limits<double>::quiet_NaN(),tuning::PatternMode::auto_pattern,false);},"invalid target SNR");
 }
 void bandwidth_derived_clocks() {
     for(const double bandwidth:{1.,16.,100.,100.25,1200.,1499.,1499.25,1500.,1501.,1703.,1800.,2000.,2000.25,2400.,24000.,192000.,1000000.,30000000.}) {
-        const auto plan=tuning::resolve(bandwidth,150,tuning::PatternMode::auto_pattern,false);
+        const auto plan=tuning::resolve(bandwidth,150,tuning::PatternMode::auto_tone,false);
         const auto carrier=std::max(1500.,.75*bandwidth);
         const auto expected=static_cast<std::uint32_t>(std::ceil(std::max(4*bandwidth,4*carrier)));
         check(plan.config.sample_rate==expected,"internal sample clock must cover occupied bandwidth and the audio carrier");
         near(plan.config.carrier_hz,carrier,"low-bandwidth audio must use a usable carrier");
         check(plan.config.carrier_hz-bandwidth/2>=300,"automatic audio band extends below the usable audio range");
         check(plan.config.carrier_hz+bandwidth/2<.42*plan.config.sample_rate,"internal spectrum must fit the conversion passband");
-        check(plan.config.spreading_factor>=64,"strong links retain enough chips for standalone pattern evidence");
-        near(modem::bit_rate(plan.config),bandwidth/128,"strong channel rate preserves the 64-chip confidence floor");
+        check(modem::training_sample_count(plan.config)==5ULL*plan.config.sample_rate,"carrier changes must preserve the fixed training duration");
+        near(modem::bit_rate(plan.config),3*bandwidth,"strong channel throughput scales without an audio-rate ceiling");
         const auto budget=tuning::link_budget(tuning::simulation_presets()[1],bandwidth,plan.config.sample_rate);
         check(std::isfinite(budget.sample_snr_db),"low and SDR-rate clocks need valid link budgets");
     }
-    const auto config=legacy_profile(tuning::resolve(100,100,tuning::PatternMode::pattern_3,false).config);
-    changing_pattern(config);
+    const auto config=tuning::resolve(100,100,tuning::PatternMode::auto_tone,false).config;
     const auto training=modem::preamble(config);
     auto wire=training;wire.insert(wire.end(),{0,0xff,0x35,0xa8});
     check(modem::demodulate(modem::modulate(wire,config),config,training).bytes==wire,"narrow audio passband preserves packet symbols");
@@ -105,18 +90,16 @@ void audio_passband_packet_roundtrips() {
     // per chip and the short symbols chosen for a strong 64-APSK channel.
     // Integrated simulation alone cannot expose I/Q bin boundary errors.
     const std::pair<double,tuning::PatternMode> cases[]{
-        {100,tuning::PatternMode::pattern_3},{1200,tuning::PatternMode::pattern_8},
-        {1200,tuning::PatternMode::pattern_3},{1499,tuning::PatternMode::pattern_3},
-        {1499.25,tuning::PatternMode::pattern_3},
-        {1703,tuning::PatternMode::pattern_3},{1800,tuning::PatternMode::pattern_3}};
+        {100,tuning::PatternMode::tone_1},{1200,tuning::PatternMode::tone_1},
+        {1200,tuning::PatternMode::pattern_3},{1499,tuning::PatternMode::tone_1},
+        {1499.25,tuning::PatternMode::tone_1},
+        {1703,tuning::PatternMode::pattern_3},{1800,tuning::PatternMode::tone_1}};
     Message message;message.id[0]=17;
     for(unsigned i=0;i<128;++i)message.data.push_back(static_cast<std::uint8_t>(i));
     for(const auto& [bandwidth,mode]:cases) {
         transfer::Options options;
-        options.modem=legacy_profile(tuning::resolve(bandwidth,100,mode,false).config);
-        options.modem.constellation_bits=6;
-        changing_pattern(options.modem);
-        check(options.modem.constellation_bits==6,"manual audio fixture must exercise a dense constellation");
+        options.modem=tuning::resolve(bandwidth,100,mode,false).config;
+        check(options.modem.constellation_bits==6,"strong audio fixture did not choose a dense constellation");
         const auto samples=transfer::transmit(message,options);
         try {
             const auto decoded=transfer::receive(samples,options);
@@ -168,12 +151,12 @@ void adaptive_geometry_and_rates() {
         }
         check(errors<300,"geometry margin exceeds one-percent symbol errors in seeded AWGN/drift test");
     }
-    const auto fast=tuning::resolve(2400,100,tuning::PatternMode::auto_pattern,false);
-    check(fast.config.pattern_symbols && fast.config.constellation_bits==1 && fast.config.spreading_factor==64,"strong links preserve sparse pattern evidence");
-    near(modem::bit_rate(fast.config),18.75,"high-C/N0 rate includes the minimum pattern length");
-    const auto weak=tuning::resolve(2400,-20,tuning::PatternMode::auto_pattern,false);
-    const auto weaker=tuning::resolve(2400,-30,tuning::PatternMode::auto_pattern,false);
-    check(weak.config.constellation_bits==1,"weak links integrate evidence for each raw bit");
+    const auto fast=tuning::resolve(2400,100,tuning::PatternMode::auto_tone,false);
+    check(fast.config.constellation_bits==6 && fast.config.spreading_factor==1,"strong links use the densest bounded constellation at full symbol rate");
+    near(modem::bit_rate(fast.config),7200,"high-C/N0 adaptive gross throughput");
+    const auto weak=tuning::resolve(2400,-20,tuning::PatternMode::auto_tone,false);
+    const auto weaker=tuning::resolve(2400,-30,tuning::PatternMode::auto_tone,false);
+    check(weak.config.constellation_bits<=3,"weak links favor useful rate over dense slow symbols");
     near(modem::symbol_seconds(weaker.config)/modem::symbol_seconds(weak.config),10,"ten-dB weaker automatic mode integrates ten times longer");
     auto clock=fast.config;clock.bandwidth_hz=1703;clock.spreading_factor=128;
     clock.integration_seconds=0;
@@ -202,8 +185,7 @@ void physical_simulation_presets() {
     rejects([]{tuning::parse_simulation_preset("3dBm -7dB");},"reject unlisted preset");
 }
 void sizing_and_validation() {
-    auto config=legacy_profile(tuning::resolve(24000,100,tuning::PatternMode::pattern_3,false).config);
-    changing_pattern(config);
+    auto config=tuning::resolve(24000,100,tuning::PatternMode::tone_3,false).config;
     const auto training=modem::preamble(config);
     auto bytes=training;bytes.insert(bytes.end(),{1,2,3});
     const auto wave=modem::modulate(bytes,config);
@@ -215,56 +197,11 @@ void sizing_and_validation() {
     config.memory_limit=std::numeric_limits<std::size_t>::max();
     rejects([&]{modem::waveform_sample_count(std::numeric_limits<std::size_t>::max(),config);},"sample count overflow rejected before allocation");
     check(!modem::memory_supported(std::numeric_limits<std::size_t>::max(),training.size(),config),"memory overflow reported as unsupported");
-}
-void receive_target_lists() {
-    const auto valid=tuning::parse_receive_targets(" 40, +6, -6, 40.0, 6e0, -0 ");
-    check(!valid.reset && valid.values==std::vector<double>({40,6,-6,0}) && valid.canonical=="40, 6, -6, 0",
-          "receive list parsing must trim, deduplicate and canonicalize without changing order");
-    for(const auto* input:{"", "40,", ",40", "40,,6", "40, nonsense", "nan", "inf", "1e999", "201", "-201", "40 dB", "0x40", "+-6"}) {
-        const auto rejected=tuning::parse_receive_targets(input);
-        check(rejected.reset && rejected.values==std::vector<double>{40} && rejected.canonical=="40",
-              "one invalid target must reset the entire receive list");
-    }
-    check(tuning::parse_receive_targets(std::string(513,' ')).reset,"receive target text exceeds its bounded parser");
-    std::string many="40";for(unsigned i=1;i<=16;++i)many+=",40";
-    check(tuning::parse_receive_targets(many).reset,"repeated entries cannot bypass the target count bound");
-    const std::array<double,4> targets{40,100,6,-6};
-    const auto profiles=tuning::receive_profiles(1200,targets,tuning::PatternMode::auto_pattern,false);
-    check(profiles.size()==3,"targets with identical actual waveform profiles must share a receiver");
-    for(const auto& profile:profiles)
-        check(profile.bandwidth_hz==1200 && profile.spreading_mode==modem::SpreadingMode::pattern && !profile.scramble,
-              "receive targets must not search other bandwidths or pattern modes");
-    const auto keyed_profiles=tuning::receive_profiles(1200,targets,tuning::PatternMode::auto_pattern,true);
-    check(keyed_profiles.size()==profiles.size() && std::all_of(keyed_profiles.begin(),keyed_profiles.end(),[](const auto& c){return c.scramble;}),
-          "default keyed receive profiles must distinguish keys using pattern evidence");
-    check(tuning::receive_profiles(1200,targets,tuning::PatternMode::pattern_8,false).size()==1,
-          "forced length profiles must deduplicate independently of target labels");
-    auto customized=profiles.front();customized.sample_rate=8000;customized.carrier_hz=1750;
-    customized.memory_limit=2*1024*1024;customized.dsss=true;customized.stream_epoch=12345;
-    customized.spreading_seed.fill(7);customized.dsss_seed.fill(11);
-    const auto preserved=tuning::receive_profiles(customized,targets,tuning::PatternMode::auto_keystream,true);
-    check(preserved.size()==3,"custom-clock duplicate waveform profiles were not merged");
-    for(const auto& profile:preserved)
-        check(profile.sample_rate==8000 && profile.carrier_hz==1750 && profile.dsss && profile.scramble &&
-              profile.memory_limit==customized.memory_limit && profile.stream_epoch==customized.stream_epoch &&
-              profile.spreading_seed==customized.spreading_seed && profile.dsss_seed==customized.dsss_seed,
-              "receive search discarded the caller's clock, carrier, spreading stream or resource configuration");
-    transfer::Options custom_receive;custom_receive.modem=customized;custom_receive.modem.dsss=false;
-    custom_receive.automatic_receive_profiles=true;custom_receive.timestamp=1800000000;custom_receive.search_seconds=0;
-    Message tiny;tiny.data=Bytes{'e'};
-    const auto actual=transfer::receive(transfer::transmit(tiny,custom_receive),custom_receive);
-    check(actual.packet.message.data==tiny.data && actual.raw_bits==Bytes({0,0,1}) && !actual.packet_validated,
-          "automatic receive profiles lost an explicit carrier or PCM clock during physical short-bit recovery");
-    rejects([]{tuning::receive_profiles(1200,{},tuning::PatternMode::auto_pattern,false);},"empty programmatic target list accepted");
-    const auto forced=tuning::resolve(1200,100,tuning::PatternMode::pattern_8,false);
-    check(!forced.target_supported && forced.config.spreading_factor==8 && forced.config.pattern_symbols,
-          "forced short patterns must remain available with unsupported standalone confidence");
-    const transfer::Options defaults;
-    check(defaults.receive_targets_db_hz==std::vector<double>{40} && !defaults.automatic_receive_profiles,
-          "manual API configurations must preserve their explicit profile by default");
+    config.scramble=true;
+    rejects([&]{modem::validate(config);},"tone cannot accidentally select keystream chips");
 }
 }
 int main() {
-    try {modes_and_patterns();snr_planning();receive_target_lists();adaptive_geometry_and_rates();bandwidth_derived_clocks();audio_passband_packet_roundtrips();physical_simulation_presets();sizing_and_validation();std::cout<<"tuning tests passed\n";return 0;}
+    try {modes_and_tones();snr_planning();adaptive_geometry_and_rates();bandwidth_derived_clocks();audio_passband_packet_roundtrips();physical_simulation_presets();sizing_and_validation();std::cout<<"tuning tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"tuning tests failed: "<<error.what()<<'\n';return 1;}
 }
