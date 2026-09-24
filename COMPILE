@@ -1,4 +1,0 @@
-
-./build.sh
-./build.sh test contract
-./build.sh package

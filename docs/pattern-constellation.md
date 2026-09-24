@@ -10,82 +10,77 @@ prefix can precede those symbols; reception does not depend on receiving it.
 
 ## Hardware-settling prefix
 
-A nonempty transmission starts with approximately two seconds of settling,
-rounded to the nearest whole sample-quantized payload-symbol duration, with
-half-symbol ties upward. If a symbol lasts `T` seconds, the prefix lasts
-`floor(2/T + 0.5)*T`. It is absent when `T > 4`. At `T = 4`, the tie rounds up
-to one four-second interval. Empty payloads emit nothing.
+For a nonempty transmission, the transmitter first emits approximately five
+seconds of settling waveform, rounded to the nearest whole payload-symbol
+duration, with half-symbol ties rounded up. If `T` is the actual sample-quantized
+symbol duration, its count is `floor(5 / T + 0.5)` and its duration is that count
+multiplied by `T`. Thus 0.1-second symbols get 50 settling intervals, four-second
+symbols get one, ten-second symbols get one, and symbols longer than ten seconds
+get none. Empty payloads emit nothing.
 
-The prefix helps external gain control and muting settle. Its samples use the
-same bounded circular Gaussian-derived I/Q mapping, expected mean power and
-once-per-chip updates as private payload patterns. Public prefix bytes are
-XORed with Data and every enabled Scrambler/DSSS byte stream before mapping.
-All use the existing purpose keys and epoch with the separate `preamble` CTR
-counter pad. The prefix does not consume payload stream positions. It is generated
-independently of both payload codewords and carries no acquisition marker. The receiver must
-acquire surviving payload patterns even when settling is missing or obscured.
+This prefix brings external automatic gain control, audio muting and similar
+hardware toward their transmit operating level before the first payload symbol.
+It uses an independent noise-like sign stream at the normal amplitude and chip
+rate, rather than sending legal payload codewords. It is neither a training
+sequence nor a synchronization marker, and the receiver never requires or fits
+it to establish lock. A missing or distorted prefix does not change the payload
+format or the evidence needed to accept a symbol.
 
-Tone modes use an unencrypted settling prefix; selecting tone clears the key
-and disables private spreading. They are not LPI modes. No separate legacy
-APSK preamble or final-symbol padding remains.
+The prefix stream has its own derivation domain, with a private seed when
+keyed pattern or DSSS spreading is active and a public seed otherwise. Its samples are
+reproducible for previews without reusing payload stream positions. The epoch
+is fixed at transmission start; payload Data and pattern positions still begin
+at zero. System-clock hypotheses account for the prefix's elapsed duration
+when predicting the first payload symbol. Estimates and transmission layouts
+include its airtime separately from meaningful bits and payload symbols.
 
 ## Pattern waveform
 
-Every complete pattern carries one bit. Chip duration is
-`ceil(2*sample_rate/bandwidth)` samples; the final chip of a symbol can be
-partial. Symbol `j` uses absolute chip positions starting at `j*C`, where
-`C = ceil(symbol_samples/chip_samples)`. Partial chips consume a full position.
-These absolute chip coordinates index a symbol schedule. Each private symbol
-uses the whole second at its scheduled start, held fixed throughout that
-pattern, plus a symbol ordinal within that second. A later-second symbol
-resets its local positions under the new epoch; hours-long symbols skip
-intervening seconds. Epoch, subsecond phase and chip index are local hypotheses
-and are never transmitted fields.
+Auto Pattern and the forced pattern lengths use keyed, advancing pattern
+fragments whenever encryption is selected. This lets pattern evidence identify
+the receive key and epoch without packet validation; a public template with
+only an encrypted Data stream could not distinguish those hypotheses. The
+Auto keystream choice has the same keyed behavior and falls back to public
+patterns without a key. Explicit tone modes retain their separate waveform.
 
-Public unkeyed patterns use a deterministic circular I/Q noise row that restarts
-each symbol. Its amplitude and phase both vary; a binary pattern alphabet
-means two complete codewords, not two permitted chip values. A short public
-codeword still has few distinct points: repeated transmissions reuse its chips,
-so the scatter plot contains at most twice its chip count across both bit values.
-Selected keys always enable private Scrambler waveforms on the
-transfer path. A private row consumes eight bytes per addressed chip, mixing
-Scrambler and enabled DSSS bytes before mapping to circular noise. Both its
-amplitude and phase depend on the private streams. The radius is capped to
-stay inside PCM headroom, with unit expected complex power before scaling.
-[Cryptographic addressing](crypto.md#binary-pattern-chip-addressing) defines
-the exact byte and amplitude/phase convention.
+`PatternCode` generates a public pseudorandom sign row for ordinary patterns or
+a private Scrambler stream for keyed patterns. Bit zero uses that row; bit one
+multiplies it by the balanced mask `+--+++--`, repeated over the symbol. The mask
+changes internal differential signs and is neither a global phase reversal nor
+a simple alternating carrier shift. A one-chip profile remains ambiguous under
+unknown carrier phase; permitting a manually selected short profile is not a
+claim of adequate detection confidence.
 
-The two bit alternatives mix this row with distinct public internal-transition
-masks. They are neither a global phase reversal nor an alternating carrier
-shift, so unknown common phase does not erase their distinction. Only one
-alternative is transmitted at each private position. Fresh secret positions
-across symbols prevent the paired waveform cancellation that reuse would allow.
+The public row restarts at each symbol. Private Scrambler and independent DSSS
+streams instead consume fresh absolute chip positions throughout and between
+symbols. Integrations longer than 16,384 chips do not repeat a private template.
+The generator caches only a fixed block of each stream and supports random
+access for candidate clock positions. A partial final chip consumes its stream
+position before the next symbol begins.
 
-The previous real +/-1 mapping left a fixed carrier after squaring PCM. That
-signature was a mapping defect, not a necessary property of pattern search.
-Circular I/Q noise removes it and avoids a fixed payload envelope. Public rows
-remain recognizable through repetition and provide no encryption or LPI. The
-new prefix and private payload also share noise statistics and chip cadence.
-Finite bandwidth, rectangular chip holds, capped amplitudes and burst edges
-remain observable physical properties; there is no claim of absolute
-indistinguishability from ambient noise.
+Both bit values have the same constant transmitted amplitude. Their information
+is in the complete pattern, not a separately distinguishable APSK coefficient.
+The sample clock determines quantized chip durations; the configured symbol
+duration determines the exact number of samples sent. No extra symbol is added
+to fill a byte.
 
-Tone waveforms use opposite quarter-turn progression per chip, producing
-carrier offsets of +/- chip_rate/4. Distinguishing labels requires a narrower
-carrier-uncertainty range. Tone disables encryption, Scrambler and DSSS in the
-GUI, CLI and transfer APIs. Public tone experiments make no LPI claim.
+Tone mode uses two tones at the nominal carrier plus or minus one quarter of
+the chip rate. Their labels require an agreed carrier and receiver frequency
+uncertainty smaller than one quarter of the chip rate. Allowing unrestricted
+frequency search would make one bit's tone indistinguishable from the other's
+frequency offset. Tone evidence can accumulate with duration, but does not
+provide a pseudorandom timing signature.
 
 ## Acquisition evidence
 
 `PatternReceiver` scores sampled waveforms against both legal patterns. A fit
 allows unknown common complex phase and amplitude; no hard chip decision or
-clean APSK cloud is required before pattern scoring. The live constellation
-shows measured receiver input I/Q or a bounded history of actual transmitted
-chip I/Q, with the source labeled. Its geometry does not control pattern acquisition.
+clean APSK cloud is required before pattern scoring. The live chip constellation
+therefore remains a diagnostic view of measured differential observations.
+Its radial/phase residual does not control pattern acquisition.
 
 For independent circular Gaussian complex observations, let `rho²` be the
-normalized energy in the fitted pattern direction (using the actual sum of
-squared template magnitudes, including partial observations) and `N` the number of
+normalized energy in the fitted pattern direction and `N` the number of
 observations. The detector's noise-tail score is:
 
 ```text
@@ -115,21 +110,6 @@ optional FEC operate after that detection decision. A fade can still split a
 burst; silence-based delimiting does not establish that a transmitter intended
 to stop.
 
-Public symbols and private symbols with nonorthogonal carrier bins, of at most
-256 samples, use individual PCM samples in the FFT search,
-so coarse chip-bin boundaries cannot erase a short final bit. This path fits
-the exact two-real-basis carrier Gram matrix. Its real-sample score
-`-(N-2)/2 * log(1-rho²)` caps `N` at four real dimensions per chip to retain
-the previous half-chip evidence scale; finer sampling does not create extra
-independent chip evidence. Longer public symbols retain chip-bin integration;
-when their sample/chip alignment requires one-sample bins, they also use this
-fit. Longer private symbols retain their previous scoring and timing path.
-Orthogonal private bins retain their compact search; automatic profiles reserve
-at least 32 chips on that path to preserve boundary-bit recovery.
-The two pattern candidates, search penalties and chain thresholds are unchanged.
-The reported start can retain a nearby
-earlier candidate admitted before the next FFT block arrives.
-
 The current default frequency bank has five offsets spaced by `1/(4T)`, where
 `T` is a symbol's duration. This is finite frequency coverage, not an unlimited
 carrier or continuous clock tracking loop. The receiver retains a few symbols
@@ -142,52 +122,6 @@ error instead of silently reducing timing resolution.
 
 ## Streaming long-symbol correlation
 
-### Local differential evidence
-
-Very long pattern symbols also compare phase relationships between local
-matched windows. `PatternSearch.differential_window_seconds` defaults to
-100 seconds, rounded upward to whole chips with a minimum of 16 chips. The
-branch is eligible only when a complete symbol contains at least 256 complete
-windows. Setting this local option to zero disables this branch alone; the
-existing coherent and four-quarter fits retain their own settings. Tone
-symbols do not use differential pattern scoring.
-
-For each bit alternative, the receiver removes the known pattern transitions
-inside each window and obtains a complex soft match. It compares disjoint
-neighboring pairs, `(0,1), (2,3), ...`, by multiplying one match by the
-conjugate of the other. The receiver never makes a hard bit or phase decision
-for an individual window. An incomplete final window contributes no product;
-the complete symbol must still be observed before any bit can be admitted.
-Real PCM projections use the local carrier Gram matrix to whiten quadrature
-noise before forming a product.
-
-The statistic sums these soft products, normalizes by their squared
-magnitudes, and tests eight fixed phase directions. It removes the strongest
-positive quarter contribution so evidence confined to one fixed quarter cannot
-supply all the evidence. A conditional circular-Gaussian noise bound charges all
-eight directions. The receiver then uses
-`max(existing_coherent_and_quarter_score, differential_score) - ln(2)`,
-clipped at zero, to account for selecting the additional detector. Its
-finite timing, carrier, clock and competing-bit searches remain in force.
-This score is model-based evidence, not a calibrated receive probability.
-
-Only one active local fit and fixed product summaries are retained per compact
-lane. FFT acquisition reuses its spectrum and template work buffers while
-transforming each local window; its per-start accumulator is fixed in size,
-but compute work grows with the number of windows. Small FFT batches can
-instead score their complete starts directly. Optional compact state must fit
-the configured DSP budget. No array of all local window observations is kept.
-
-This branch tolerates loss of absolute coherence across a complete bit when
-neighboring local matches still retain a useful phase relationship. It does
-not supply arbitrary oscillator tracking, eliminate weak-window noise or
-guarantee reception after a particular number of hours. Its observations come
-from the pattern scorer; the plotted differential constellation remains a
-display diagnostic. Wire bits, pending progress and physical completion do
-not change.
-
-### Compact acquisition
-
 `PatternSearch.start_offset_seconds` predicts the first payload symbol's
 start relative to the first captured sample. `start_uncertainty_seconds`
 defines its uncertainty window; `clock_errors_ppm` and
@@ -198,13 +132,6 @@ The receiver searches the entire supplied start window at half-chip spacing.
 It budgets the full time × frequency × clock-rate combination before allocation
 and rejects a window it cannot cover. A negative start offset also identifies
 which private stream symbols precede the surviving capture.
-
-For an independently acquired later epoch, phase search retains the finite
-subsecond lattice implied by a whole-second first-symbol start. Phases mapping
-to the same `(epoch, symbol ordinal)` share their current reference. Only
-distinct addresses need separate running fits; this does not allocate a
-keystream or a fit for every possible chip in an hours-long symbol. A confident
-symbol narrows the phase interval, while a failed symbol leaves it undecided.
 
 `PatternCorrelator` generates chip references on demand and retains sufficient
 statistics for each hypothesis. Fixed blocks of 128 real PCM samples share
@@ -227,22 +154,26 @@ coherent for hours. Tests cover constant storage during a four-hour symbol,
 sampled short bursts, a finite clock-rate bank and cropped keyed captures;
 they do not claim a measured multi-hour radio link budget.
 
-Transfer's default six-second epoch search supplies a ±7-second start window.
-Each alignment accumulates through the symbol's duration; the window does not
-restart or discard observations every six seconds. Low-confidence symbol
-results are discarded separately from the running timing/frequency fits.
-Allocation depends on timing resolution, frequency/rate hypotheses and the
-distinct phase-address groups. `working_bytes()` reports actual allocated
-state. The live receiver also budgets wrappers, audio, plots and other admitted
-epochs, and retires unsuccessful searches according to its finite gap policy.
+At 1,200 Hz bandwidth, 6,000 samples/s, ten samples/chip and the default five
+frequencies, the four-hour-symbol constructor retains the following state on
+the tested 64-bit build. These amounts are **per epoch/profile**; the live
+receiver also budgets its wrappers, audio, plots and other admitted epochs.
 
-Earlier measurements before symbol-start epoch rotation reported 7.13 MiB
-per epoch/profile for ±2 seconds at one clock rate and 24.53 MiB for ±7 seconds
-(1,200 Hz bandwidth, 6,000 samples/s, five frequencies). Those values are a
-historical baseline, not the allocation of the current phase-group search.
-Adding memory does not make an unaffordable CPU search real time. The scalar
-fallback provides bounded offline/streaming state; sustained live operation
-requires measurements for the actual admitted bank.
+| Start uncertainty | One clock rate | Three rates: -100, 0, +100 ppm |
+| --- | ---: | ---: |
+| ±1 second | 3.65 MiB | 13.22 MiB |
+| ±2 seconds | 7.13 MiB | 26.27 MiB |
+| ±7 seconds | 24.53 MiB | 91.50 MiB |
+
+Transfer's default six-second epoch search supplies a ±7-second start window.
+Thus an 8 MiB direct receiver can hold the ±2-second, one-rate example, but not
+the default ±7-second coverage. The live receiver reserves other DSP storage
+and caps each receiver's share, so its total configured ceiling must be larger
+still. Adding memory does not make an unaffordable CPU search real time. A
+brief full-active-bank benchmark on the development host needed about 34 ms
+for a 21.3 ms PCM block at ±2 seconds with one rate, and 111 ms at ±7 seconds.
+The scalar fallback provides bounded offline/streaming state; sustained live
+operation requires measured computational capacity for its admitted bank.
 
 ## Modem flow inspection
 
@@ -259,17 +190,12 @@ their display is an illustration of continuous tone evolution, not extra
 transmitted chip labels. The Console's live measured chip constellation is
 separate from this static alphabet view.
 
-## Compatibility
+## Manual legacy APSK
 
-High-SNR automatic plans now select 16 or 32 chips where the in-band SNR,
-whole-chip alignment and receiver confidence gates permit, with 64 chips or
-longer retained otherwise. Both peers must
-derive matching plans. The private chip mapping, purpose keys and epoch/chip
-address convention are unchanged by this tuning update; shortening a symbol
-does not reuse its absolute private chip positions. See [throughput](throughput.md).
-
-The previous APSK transmitter, fixed training, repeating sign-template path,
-and aligned symbol receiver have been removed. The private circular waveform
-also changes the previous keyed pattern format; public circular chips replace
-the previous unkeyed real-sign format. Peers must use the same current
-waveform; the receiver performs no compatibility negotiation or fallback.
+Explicit legacy configurations with `pattern_symbols == false` retain the
+previous 2–6-bit APSK alphabet, repeated sign period, five-second training and
+packet-oriented acquisition. Their static inspection still uses the shared-row
+model `s[k] = a * p[k]`. In that model all legal waveforms are coefficients in
+one complex direction, and the complete-template distance is `T * |a-b|²`.
+Those properties and the legacy APSK residual gate do not describe the new
+binary pattern receiver.

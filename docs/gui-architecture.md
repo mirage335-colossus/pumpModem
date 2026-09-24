@@ -12,7 +12,6 @@ removed.
 | Shared module | Responsibility |
 | --- | --- |
 | `application.hpp` | Backend-facing facade; controller, workers and bitmap producers are private to its implementation. |
-| `application.cpp`, `fast/controller.*`, `fast/screen.*`, `legacy/*` | Shared mode host and independent Fast/Legacy state and screens. Existing engines remain polled; native service routes retain owner/generation and idle audio ownership prevents overlap. Legacy owns its auto-listen/simplex text workflow. Regular waveform and pending-reception policy remain in the existing controller/service. |
 | `ui_contract.hpp` | Control, page, field, command, record and service vocabulary. |
 | `ui_document.hpp`, `bitmap.hpp` | Generic document nodes and opaque `BitmapSource` pixel handles, without domain factories. |
 | `control_binding.hpp` | Declaration-order control groups and menu identity by page or persistent scope, plus instance. |
@@ -21,7 +20,6 @@ removed.
 | `document_actions.hpp` | Document action identity, inherited availability and eligibility for restoring focus after a document replacement. |
 | `document_presentation.hpp` | Immutable document ownership, rendered child traversal, action association and local/absolute placement with inherited allocation and availability. |
 | `control_interactions.hpp`, `record_interactions.hpp` | Pointer double-click identity, wheel command repetition, record keyboard navigation, selection and activation eligibility. |
-| `overlay.hpp`, `screen_overlay.hpp` | Shared overlay composition, key bindings, background access, service priority and focus-restoration policy; the expanded QR definition. |
 | `record_scroll.hpp` | Record tail detection, scroll retention across data and viewport changes, and revealing selected rows. |
 | `record_reconciliation.hpp` | Retained record identity, order, changed/added/removed rows, selection and availability. Native lists keep widget handles and glyph measurements. |
 | `service_queue.hpp` | Serial platform-service requests, completion identity, declared input validation and cancellation of current/queued work during shutdown. |
@@ -33,8 +31,6 @@ removed.
 | `controller.cpp` | Authoritative drafts, validation, settings, workers, commands, key/file state, reception and eligibility. |
 | `record_presentations.hpp` | Signal/file records, including frequency, status, reception quality, text, tone and activation eligibility. |
 | `inspection_page.hpp` | Inspection section order, cards, tables, pagination and native text around plot snapshots. |
-| `link_planner_model.*`, `link_planner_page.*` | Bounded link previews, native planner controls and labels, logarithmic plot snapshots and model details. |
-| `launch_command.*` | Settings-only command parsing and formatting shared by GUI launch and the planner's copy/load editor; no process execution or shell expansion. |
 | `bitmap_sources.hpp`, `plot_render.cpp` | Shared snapshots, captions, error overlays, invalidation and pixel producers. |
 | `application.cpp` | Control/menu presentation and dispatch, validated edits/presets, launch parsing, lifecycle, submission/record dispatch, document caching and common self-check/smoke orchestration. |
 | `gui_smoke.cpp` | The same application workflow checks for both native backends and the headless harness. |
@@ -56,48 +52,6 @@ these checks.
 Adapters own native widget construction, text measurement, focus/caret behavior,
 scroll containers, menu escaping, event translation and platform services.
 Bitmap widgets receive opaque snapshots; they do not interpret measurements.
-
-Legacy's upper transcript is a generic `Control.read_only` multiline editor:
-it remains selectable and scrollable while rejecting edits and paste. The
-flag defaults to false, preserving all existing editors. Native adapters share
-the same Legacy declarations, text presentation and waterfall snapshots.
-
-The planner command editor is an ordinary document-only multiline control.
-Its shared declaration makes Enter insert a newline and Tab navigate to the
-next control. Retained native editors preserve selection, caret and uncommitted
-text across document updates. Adapters keep glyphs, selection, hit testing and
-caret reveal in the same scrolled coordinates and pass a wheel event to the
-containing document when the editor cannot scroll further.
-The controller stages imported settings, including the derived link channel,
-and preflights live-session validation before committing fields or configuration.
-Parsing and validation errors therefore preserve both the existing settings and
-the pasted command. Successful loads use the ordinary configuration path and
-do not submit the message.
-
-Full-window views use `OverlayDefinition.controls`, the same `Control` vocabulary
-and native factories as the desktop. Edit the QR view in `screen_overlay.hpp`:
-add a choice, editor, action, list, label or bitmap; set its placement and ordinary
-bindings; and change `OverlayPolicy` for dismissal keys, keyboard routing,
-background access or service priority. These changes require no backend edits.
-The default QR view still contains just the QR bitmap and its error caption.
-Its Escape binding and keyboard policy are shared data.
-
-`Application::show_overlay()` owns an immutable definition and stamps every
-control with a new surface generation. Native callbacks retain that definition;
-the facade rejects input from a closed or replaced generation, including after
-the same view is reopened. Native page and document actions use `navigate()` and
-`dispatch()` so covered desktop content cannot bypass the same input policy.
-`activate()` and `select_page()` remain programmatic shared-workflow entry points.
-Native services report their active state; overlay policy can defer queued
-services, while an already active service retains priority.
-
-Native overlay code handles widget ownership, popup lifetimes, painting and
-focus mechanics. Both adapters consume `overlay_layers()` and `overlay_key()`;
-neither defines its own Escape command or assumes that an expanded view is only
-a bitmap. `tests/overlay_fixture.hpp` supplies an identical bitmap, brightness
-choice, editor, action and grouped menu to both native suites, including a
-replacement that changes layout and key/service policy. `gui_overlay` verifies
-the shared contract and stale-callback rejection without a toolkit.
 
 Both toolkits retain native text and controls. A signal row is not rasterized
 into a bitmap or flattened into one string. Stable record IDs preserve selection
@@ -133,7 +87,7 @@ services and native rendering differences likewise remain adapter work.
 A `Control` stores behavior as named commands and ordinary metadata. Adapters
 never switch on a particular application field, command, bitmap or page. A
 Choice's optional `display_text` reports an effective value without changing its
-saved selected ID, for example FEC being off for explicit raw-bit input. Key labels
+saved selected ID, for example FEC being off for input under sixteen bytes. Key labels
 are literal UTF-8; FLTK-specific escaping stays in its menu adapter.
 `control_binding.hpp` groups a menu only with declarations in the same scope and
 with the same `instance`: ordinary menus belong to a page, while persistent
@@ -174,14 +128,7 @@ changed immutable document; neither independently derives document structure or
 geometry. Native ownership, focus calls and measurements remain adapter code.
 
 The application polls reception and captures plot history at 25 Hz while native
-state/plot presentation runs at 10 Hz. Native input can repaint immediately. Received-text policy is applied in the shared
-controllers before field, record and service presentation. A shared
-`text_history_revision` invalidates native undo/redo when received draft
-provenance is cleared or its printable-ASCII exception is withdrawn. FLTK also
-consumes pending editor state before input events, so Undo cannot race the next
-presentation poll; Rev currently has no undo history. Clipboard requests carry a
-revocable lifetime token which the shared service queue checks before native
-dispatch.
+state/plot presentation runs at 10 Hz. Native input can repaint immediately.
 Pointer double-click timing, wheel command repetition and record keyboard
 selection/activation use shared policy. Adapters translate keys and pointer
 coordinates, then focus the returned native row and apply the shared reveal
@@ -266,7 +213,6 @@ display. Register display-dependent tests explicitly with
 `-DDATAPUMP_TEST_NATIVE_GUI=ON`, then run:
 
 ```sh
-cmake --build build-gui --target datapump-tests-gui --parallel 2
 LIBGL_ALWAYS_SOFTWARE=1 LP_NUM_THREADS=2 xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' \
   ctest --test-dir build-gui --output-on-failure -L gui
 ```
@@ -276,11 +222,6 @@ without a display. Native tests include clipboard, editor focus/selection,
 record history, document resizing and Rev coordinates at 1x and 2x. Windows
 runtime testing remains a separate platform requirement; Linux success does
 not establish Windows validation.
-
-For the canonical wrapper profiles, use `./build.sh test gui` for headless GUI
-coverage and `./build.sh test native` inside a private display for the native
-checks. Add `--backend rev` for Rev. Both commands build their prerequisites;
-ordinary application builds omit the native test executables.
 Successful smoke runs remove their automatically created temporary fixtures;
 failed-run evidence and explicitly selected `--smoke-dir` output are retained.
 
