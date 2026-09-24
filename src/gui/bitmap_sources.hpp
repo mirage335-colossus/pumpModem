@@ -1,7 +1,6 @@
 #pragma once
 #include "controller.hpp"
 #include "plot_render.hpp"
-#include "pattern_score_view.hpp"
 #include <map>
 
 namespace datapump::gui {
@@ -18,6 +17,7 @@ public:
         const auto update = controller.plot_update();
         const auto& snapshot = controller.snapshot();
         replaying_ = snapshot.simulation_replay;
+        constellation_source_ = snapshot.constellation_source;
         if (update.clear_waterfall) history_.clear();
         if (update.append_waterfall) history_.push(snapshot.spectrum_db, snapshot.spectrum_bin_hz);
         const auto zoom = controller.waveform_zoom();
@@ -27,26 +27,11 @@ public:
         if (update.update_plots) {
             put(ui::Bitmap::constellation, plots::PlotSnapshot::constellation(snapshot.constellation,
                 snapshot.constellation_source != live::ConstellationSource::input));
-            constellation_source_ = snapshot.constellation_source;
             constellation_dropped_ = snapshot.constellation_dropped;
         }
-        const bool pattern_enabled = controller.settings().transfer.modem.pattern_symbols;
-        const bool pattern_rx_paused = snapshot.transmitting && !controller.settings().simulation &&
-            snapshot.constellation_source == live::ConstellationSource::transmitted;
-        if (update.clear_pattern_scores_through) pattern_view_.clear_through(*update.clear_pattern_scores_through);
-        auto pattern_scores = pattern_rx_paused ? std::vector<plots::PatternScore>{} : pattern_view_.scores(snapshot);
-        if (update.update_plots || pattern_enabled_ != pattern_enabled || pattern_rx_paused_ != pattern_rx_paused ||
-            update.clear_pattern_scores_through || pattern_scores_ != pattern_scores || !frames_.contains(ui::Bitmap::pattern_scores)) {
-            pattern_scores_ = std::move(pattern_scores);
-            put(ui::Bitmap::pattern_scores, plots::PlotSnapshot::pattern_scores(pattern_scores_, pattern_enabled));
-            pattern_waiting_ = pattern_scores_.empty();
-        }
-        pattern_enabled_ = pattern_enabled;
-        pattern_rx_paused_ = pattern_rx_paused;
         if (update.clear_waterfall || update.append_waterfall)
             put(ui::Bitmap::waterfall, plots::PlotSnapshot::waterfall(history_));
-        const auto& bytes = controller.message_bytes();
-        const std::string text(bytes.begin(), bytes.end());
+        const auto& text = controller.field(ui::Field::message).text;
         const auto& brightness = controller.field(ui::Field::qr_brightness).selected;
         if (qr_text_ != text || brightness_ != brightness) {
             qr_text_ = text; brightness_ = brightness; qr_error_.clear();
@@ -84,11 +69,6 @@ public:
     std::uint64_t version(ui::Bitmap id) const { const auto it=versions_.find(id);return it==versions_.end()?0:it->second; }
     std::string caption(ui::Bitmap id, unsigned width = 640) const {
         if (id == ui::Bitmap::qr && !qr_error_.empty()) return qr_error_;
-        if (id == ui::Bitmap::pattern_scores && pattern_enabled_) {
-            if (pattern_rx_paused_) return width < 320 ? "RX paused during TX" : "Receiver audio input is paused during transmission";
-            if (pattern_waiting_) return width < 320 ? "waiting for full-pattern evidence" :
-                "Horizontal P0 / vertical P1: waiting for retained evidence from complete pattern windows";
-        }
         auto result = get(id).caption(width);
         if (id == ui::Bitmap::constellation && constellation_dropped_)
             result += " / " + std::to_string(constellation_dropped_) + " omitted";
@@ -98,11 +78,10 @@ public:
     const char* title(ui::Bitmap id) const {
         switch (id) {
         case ui::Bitmap::waveform: return replaying_ ? "Simulation replay / waveform" : "Live waveform";
-        case ui::Bitmap::waterfall: return replaying_ ? "Replay spectrum" : "Spectrum";
+        case ui::Bitmap::waterfall: return replaying_ ? "Simulation replay / waterfall" : "Spectrum / amplitude waterfall";
         case ui::Bitmap::constellation:
             return constellation_source_ == live::ConstellationSource::received ? "Received constellation" :
                 constellation_source_ == live::ConstellationSource::transmitted ? "Transmitted constellation" : "Receiver input I/Q";
-        case ui::Bitmap::pattern_scores: return "Pattern evidence";
         default: return ""; // Other sources retain their ordinary declaration label.
         }
     }
@@ -111,8 +90,6 @@ private:
     std::map<ui::Bitmap, std::uint64_t> versions_;
     plots::PlotSnapshot empty_;
     plots::SpectrumHistory history_;
-    PatternScoreView pattern_view_;
-    std::vector<plots::PatternScore> pattern_scores_;
     std::string qr_text_, brightness_, qr_error_;
     std::shared_ptr<const Inspection> inspected_;
     std::size_t pattern_first_ = 0;
@@ -120,9 +97,6 @@ private:
     std::uint64_t constellation_dropped_ = 0;
     double zoom_ = 0;
     bool replaying_ = false;
-    bool pattern_enabled_ = false;
-    bool pattern_rx_paused_ = false;
-    bool pattern_waiting_ = true;
     live::ConstellationSource constellation_source_ = live::ConstellationSource::input;
 };
 }
