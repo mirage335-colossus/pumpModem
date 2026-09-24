@@ -10,15 +10,33 @@ stage cards. Active processing, disabled options and unavailable algorithms have
 different labels. It includes the ideal phase/amplitude alphabets used for
 training and data, the chosen pattern or tone mode, symbol integration, packet
 coding, encryption, and the appropriate audio or simulation path. These are
-configured ideal points; measured received symbols remain on the Console.
+configured ideal points; measured received symbols appear on Console.
+
+Its static **pattern/scrambler constellation** shows each complete symbol as a
+row of complex phase/amplitude chips. All configured symbols and every position
+in the compact sign period are inspectable, with pages for long patterns.
+Distances account for the full template and exact quantized chip durations,
+even when only one page is visible. The view compares the permitted templates
+with an unused sign-vector example and a one-chip cyclic timing shift, including
+correlation and residual after the best complex amplitude/phase fit. It reports
+modeled chip-to-symbol integration gain separately from phase/amplitude geometry.
+Keyed modes use public illustrative signs and never expose the epoch-derived
+private sequence. See [geometry and interpretation](pattern-constellation.md).
 
 The view describes the implemented gain estimate accurately: framed acquisition
-searches timing and gain candidates using the protected bootstrap, then holds
-that gain for body decoding. There is no continuous audio AGC or convolutional
+searches timing, gain and initial differential-phase candidates using pattern
+constellation evidence and compact headers. Short frames remain provisional
+until complete integrity verification, while acquisition keeps searching.
+The receiver despreads and integrates the complex chip samples before its APSK
+decisions; no hard chip decisions or independently clean chip constellation are
+required. The chosen gain is held for body decoding. Timing hypotheses remain
+finite, with no continuous clock/frequency tracker, audio AGC or convolutional
 encoder/Viterbi decoder. Raw binary simulation has an aligned known-length
 receiver with nominal unit gain; continuous real audio reception still discovers
 framed packets. Simulation uses integrated channel observations, whereas real
-audio passes through the hardware/internal-clock conversion.
+audio passes through the hardware/internal-clock conversion. Integrated
+simulation assumes matched chip despreading and does not demonstrate blind
+timing/phase acquisition below the chip noise floor.
 
 **Transmission layout** shows the physical on-air sequence separately from the
 logical packet fields before interleaving. Blocks are schematic, with byte,
@@ -27,21 +45,25 @@ the diagrams never display input contents, metadata values, key bytes, encrypted
 training, or private spreading sequences.
 
 For packets, the fixed five-second training consists of 64 four-bit APSK
-segments. The following 8-byte header always carries 8 Reed–Solomon parity
-bytes, including when body FEC is Off. Its fields are a one-byte `0xD5` marker,
-one packed byte for FEC/kind/compression/authentication/repeat flags, a four-byte
-big-endian body length, and a two-byte CRC16. There is no packet version,
-dictionary identifier, or compression-selector field.
+segments. The following header contains packed flags, a canonical ULEB128
+body length and CRC16: four to eight systematic bytes, plus parity according
+to the effective data coding policy. Below 16 original bytes there is no RS
+in the header or body; an ordinary one-word message has a four-byte bootstrap.
+The Console displays this automatic FEC override while retaining the choice
+for longer messages. There is no magic, packet version, dictionary identifier,
+or compression-selector field.
 
 The logical body starts with 23 fixed metadata bytes: a 16-byte ID, four-byte
 ID/repeat CRC32, and three one-byte string lengths. A canonical ULEB128 original
 payload length takes another one to five bytes, followed by the metadata
 strings, encoded or original payload, and 32-byte digest or keyed MAC. Encoded
 payload length is inferred from the body length and metadata. The integrity
-tag covers the canonical 8-byte header and uncoded metadata/payload, excluding
+tag covers the canonical variable header and uncoded metadata/payload, excluding
 the tag itself and parity. The view shows body Reed–Solomon block geometry and
 column-wise interleaving, including shortened final blocks. Header and body
-symbol padding are independent. No diagram represents interleaved parity as a
+share a continuous bitstream; only the final packet symbol can need pad bits.
+The view apportions airtime by bits across the shared header/body symbol.
+No zero-byte tail is transmitted. No diagram represents interleaved parity as a
 single physical footer.
 
 Compression is enabled only when the candidate is smaller. Original payloads

@@ -1,9 +1,157 @@
-# Local validation record — version 0.6.0
+# Local validation record — version 0.7.2
 
 The application and portable runtime are native C++. Python remains optional
 developer test tooling and is not installed with the application.
 
-## Completed 0.6.0 checks
+## Version 0.7.2 static full-pattern inspection
+
+The standalone Constellations tab is removed. Modem flow now displays all legal
+full-pattern symbols as phase/amplitude chip rows, a full-vector distance map,
+and matched/off-pattern energy for legal, shifted, unused and mean-noise cases.
+Every code position is inspectable through pagination; metrics always use the
+entire actual symbol, including repeated periods and partial chips.
+
+The new model tests first failed for the missing implementation. They then
+compared every displayed chip against the previously compiled transmitter's
+analytic preview and actual PCM, before rebuilding the modem with its extracted
+shared code generator. This checks that sharing the generator preserves the
+existing on-air sequences. Coverage includes every 2–6-bit APSK alphabet,
+fixed/tone/keyed/DSSS modes, exact time-weighted distances, truncated and repeated
+periods, antipodal timing ambiguity, public keyed illustrations, 16,384-chip
+codes, long integrations and 30 MHz configurations.
+
+The strengthened real-PCM acquisition test uses a 1,024-chip keyed pattern,
+4APSK, -15 dB sample SNR, erased training and a 17-sample delay that changes the
+carrier reference by 90 degrees. It measures per-chip Es/N0 below -7 dB, recovers
+the complete authenticated packet without Reed-Solomon, and rejects the same
+capture with a wrong code and a noise-only capture through finish.
+This verifies acquisition within the receiver's bounded timing bank, without
+hard chip decisions or a clean chip constellation. It does not establish
+arbitrary clock/frequency tracking; accelerated matched-symbol simulation is
+not used as evidence of blind chip acquisition.
+
+* All **29 native CTest suites passed** across the full run and focused GUI
+  rerun. The new keyed inspection fixture initially omitted its required key;
+  the corrected fixture retains the production key requirement.
+* All five GUI/model suites passed in Release (0.30 seconds) and under
+  ASan/UBSan (2.28 seconds). The below-chip-noise PCM regression also passed
+  under ASan/UBSan.
+* The CLI-only Release rebuilt with Python discovery disabled and reports 0.7.2.
+* The Release and ASan/UBSan GUI workflows passed with three tabs, current static-pattern model
+  binding, unchanged live plots, three-second packet/raw replay and complete
+  scrolling at minimum and expanded window sizes.
+* Native visual checks covered fixed16, tone16, keyed128, all 64 APSK values,
+  last-page access for 16,384 chips and a weak-signal example with -37.8 dB
+  nominal chip Es/N0 and +10 dB integrated Es/N0. All four navigation buttons
+  and static redraw invariance passed. The colour scale preserves distinct
+  outer amplitude rings. Strict GUI and harness warning checks passed.
+
+No wire format, keyfile or runtime dependency changed. Physical audio devices,
+battery-state comparisons and hosted Windows/CI execution were not tested.
+LeakSanitizer is disabled for this host's tracing environment; ASan and UBSan
+remain enabled.
+
+## Recorded 0.7.1 pattern constellation checks
+
+The new Constellations tab shows the existing phase/amplitude observations beside
+the full analytic pattern projection in modeled noise units. The new numerical
+tests first failed because the projection did not exist, then passed with the
+bounded model. They cover every supported alphabet, pairwise template distances,
+fixed/keyed/tone equivalence, quantized integration time, sample-clock invariance,
+unsnapped observations, invalid numeric inputs, hour-long integrations and 30 MHz
+plans. A deterministic 16,000-trial Monte Carlo check uses the modem's actual AWGN
+generator to verify the modeled radial and differential tangential variance.
+
+* Native GUI Release: all **28 CTest suites passed** (54.72 seconds).
+* After the final layout adjustment, all four focused GUI/model suites passed
+  in Release (0.26 seconds) and under ASan/UBSan (1.93 seconds).
+  The complete GUI source also passed strict warning checks with `-Werror`.
+* The CLI-only Release rebuilt with Python discovery disabled and reports 0.7.1.
+* The complete Release and ASan/UBSan GUI workflows passed on a private virtual
+  display, including all four tabs during
+  continuous reception and three-second replay, minimum/expanded resizing,
+  exact observation projection, exclusion of unmatched I/Q, retained fresh-point
+  batches and clearing replay points on return to live reception.
+* The plot was visually inspected at the actual minimum 479×383 panel size
+  for 8- and 64-symbol alphabets, using real `add_awgn` differential observations
+  at moderate SNR and ideal-only high-SNR cases. Pixel margins preserve outer
+  markers and labels, and the closest-pair labels remain separate in dense views.
+
+The axes represent the analytic AWGN model, not a measured receiver likelihood.
+The differential-noise ellipses use the weakest configured reference ring;
+finite real-PCM quadrature covariance, clock drift and phase noise can differ
+from that approximation. No modem, packet, keyfile or replay format changed;
+0.7.1 remains compatible with 0.7.0. No runtime dependency was added.
+Physical audio, battery-state comparisons and hosted Windows/CI execution were
+not tested for this visualization release. LeakSanitizer is disabled for this
+host's tracing environment; ASan and UBSan remain enabled.
+
+## Recorded 0.7.0 framing checks
+
+The new tests first reproduced mandatory RS on a tiny message and receiver
+synchronization before rejection of a damaged short frame. The format removes
+the magic byte and fixed-width body length, uses a variable compact header,
+automatically disables all RS below 16 original bytes, and carries header and
+body in one continuous symbol stream. Bounded provisional decoders verify
+complete short frames before synchronization; initial phase hypotheses allow
+reception without relying on header RS to repair the first symbol.
+
+* Native GUI Release: all **28 CTest suites passed** (67.93 seconds).
+* CLI-only Release with Python discovery disabled: all **23 suites passed**
+  (49.38 seconds).
+* Final Debug ASan/UBSan with `-O1`: all **27 CTest suites passed**
+  (424.14 seconds), including the instrumented vendored codec, full streaming
+  acquisition, transfer, live sessions, CLI, audio contracts and GUI models.
+  The initial unoptimized nine-suite sanitizer run and the separate broader
+  compact-bootstrap acquisition matrix also passed.
+* Short provisional-reception tests passed under ASan/UBSan: corrupted complete
+  packets never establish lock, subsequent valid packets recover, noise alone
+  does not synchronize, and extremely long observations remain bounded.
+* The complete Release and ASan/UBSan GUI workflows passed on the private virtual display,
+  including automatic FEC Off below 16 bytes, restoration of the longer-message
+  FEC choice, all three tabs, pending previews and exactly three-second replay.
+  The compact transmission diagram and processing flow were visually inspected.
+* Native ZIP and TGZ bundles passed fresh extraction into directories containing
+  spaces, manifest and dependency checks, short/long compression simulations,
+  and complete GUI workflows with package-search paths cleared. Their 42 ELF
+  files have no GTK/GLib dependency; the local glibc requirement is at most 2.38.
+
+The packet tests cover original-size boundaries 0/1/15/16/255/256, canonical
+variable lengths, maximum metadata, every content kind, header correction up to
+the actual parity budget, and malformed frames with otherwise valid integrity.
+Receiver and transfer tests span two through six bits per symbol, keyed and
+plain frames, missing training, continuous partial-bit boundaries, noisy gain
+hypotheses, and recovery after a corrupted short body. Live tests preserve the
+fresh-symbol limit across timing/gain changes and fit hours of simulated airtime
+within a 1 MiB workspace.
+
+A deterministic same-wire oracle confirmed that the old marginal-SNR CLI fixture
+contains one to three actual bit errors in its now-uncoded six-byte message.
+Those packets correctly fail integrity. The lifecycle fixture now uses the
+healthy 3 dBm / -90 dB preset, retaining default crystal drift and phase noise;
+noisy packet rejection is tested separately. Replay-start checks permit only a
+new, empty, unverified frame-zero status and still forbid cancelled content.
+
+Profiling the same PCM cases before and after nonthrowing acquisition probes
+reduced two/three/four/five/six-bit trial times from
+0.415/1.038/2.115/3.547/5.082 seconds to
+0.179/0.211/0.278/0.531/0.732 seconds, with identical header decisions. Fixed-size
+probe caches and conservative RS shape checks avoid repeated rejection work;
+these measurements are local observations, not throughput guarantees.
+
+The unoptimized Debug sanitizer live test reached its existing 60-second
+computation deadline midway through multi-key reception. Sanitizer compilation
+now uses `-O1`, retaining debug symbols, assertions, ASan/UBSan and frame pointers.
+This also covers the already-instrumented vendored codec and standalone audio
+tests. Normal Release, portable and MSVC compilation flags are unaffected.
+The final full live suite passes with its original deadlines and assertions.
+
+Both peers must use 0.7.0 framing. Raw-bit and keyfile formats are unchanged.
+Physical audio, battery-state comparisons and hosted Windows/CI execution were
+not tested for this release. LeakSanitizer is disabled for this host's tracing
+environment; address and undefined-behavior instrumentation remain enabled.
+
+## Recorded 0.6.0 checks
 
 * All **28 native/core CTest suites passed** across the full run and focused CLI
   rerun. The original CLI fixture assumed 65 KiB of repetition could not fit the

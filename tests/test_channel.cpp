@@ -142,8 +142,7 @@ void sdr_and_missing_training(){
         m::StreamingTransmitter source(wire,cfg);std::size_t validation_calls=0;
         m::StreamingReceiver receiver(cfg,m::preamble(cfg),8*1024*1024,[&](const Bytes& prefix){
             ++validation_calls;
-            try{return packet_bootstrap_possible(prefix) && packet_frame_size(prefix).has_value();}
-            catch(const Error&){return false;}
+            return packet_probe_frame_size(prefix);
         });
         m::ChannelConfig model;model.snr_db=40;m::SimulationChannel channel(cfg,model);
         std::size_t observations=0;Bytes received;

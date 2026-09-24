@@ -31,7 +31,7 @@ class PumpCase(unittest.TestCase):
 class CommandTests(PumpCase):
     def test_help_and_invalid_options(self):
         self.assertIn(b"simulate", self.run_pump("--help").stdout)
-        self.assertEqual(self.run_pump("--version").stdout, b"Data Pump 0.6.0\n")
+        self.assertEqual(self.run_pump("--version").stdout, b"Data Pump 0.7.2\n")
         self.run_pump("simulate", "--text", "x", "--nonsense", "yes", ok=False)
         self.run_pump("simulate", "--text", "x", "--snr", "nan", ok=False)
         self.run_pump("tx", "--text", "x", ok=False)
@@ -212,6 +212,16 @@ class CommandTests(PumpCase):
         broken[-40:] = b"\xff" * 40
         self.run_pump("unpack", "--input", "-", data=broken, ok=False)
 
+    def test_word_uses_four_byte_bootstrap_without_rs(self):
+        for mode in ("off", "20", "60"):
+            with self.subTest(mode=mode):
+                packet = self.run_pump("pack", "--text", "help", "--fec", mode).stdout
+                self.assertEqual(packet[0] & 3, 0, "under16-byte input overrides requested RS")
+                self.assertEqual(packet[1], 59, "one-byte canonical body length")
+                self.assertEqual(len(packet), 4 + 24 + 3 + 32,
+                                 "four-byte header and no header/body parity or tail")
+                self.assertEqual(self.run_pump("unpack", data=packet).stdout, b"help")
+
     def test_repeatable_and_memory_limit(self):
         result = self.run_pump("simulate", "--text", "repeat me", "--repeatable", "--json")
         self.assertTrue(json.loads(result.stdout)["repeatable"])
@@ -262,7 +272,8 @@ class CommandTests(PumpCase):
         self.assertEqual(base64.b64decode(json.loads(result.stdout)["data_base64"]), b"tone test")
 
     def test_continuous_simulation(self):
-        result = self.run_pump("listen", "--simulation", "3dBm -120dB", "--text", "stream",
+        # Tiny packets have no FEC; this lifecycle fixture needs a healthy channel.
+        result = self.run_pump("listen", "--simulation", "3dBm -90dB", "--text", "stream",
                                "--seconds", "10", "--json", "--progress", *AUDIO)
         events = [json.loads(line) for line in result.stdout.splitlines()]
         frames = [event for event in events if event.get("event") == "signal"]
@@ -451,7 +462,7 @@ class EncryptedCommandTests(PumpCase):
         self.assertTrue(packet["authenticated"])
         self.assertEqual(base64.b64decode(packet["data_base64"]), text)
         self.assertNotIn(text, packed)
-        for offset in (16 + 24, len(packed) - 1):
+        for offset in (4 + 24, len(packed) - 1):
             # AES-CTR lets an attacker flip a chosen known-plaintext bit. With
             # body FEC off this reaches MAC verification and must be rejected.
             modified = bytearray(packed)

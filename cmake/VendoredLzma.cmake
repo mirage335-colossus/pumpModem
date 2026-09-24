@@ -19,7 +19,9 @@ function(datapump_add_lzma)
     message(FATAL_ERROR "DataPump requires its vendored static liblzma")
   endif()
   if(DATAPUMP_SANITIZERS AND NOT MSVC)
-    target_compile_options(liblzma PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+    # The bounded codec has intensive C loops too; use the same instrumented
+    # optimization level as the C++ callers while preserving Debug symbols.
+    target_compile_options(liblzma PRIVATE -O1 -fsanitize=address,undefined -fno-omit-frame-pointer)
     target_link_options(liblzma PRIVATE -fsanitize=address,undefined)
   endif()
 endfunction()

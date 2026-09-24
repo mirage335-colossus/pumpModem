@@ -33,12 +33,13 @@ void packet_layout() {
         for(const auto& section:result.sections)if(!section.logical && !section.coding && section.bytes)physical_bytes+=*section.bytes;
         check(physical_bytes==wire.size()+32,"physical diagram duplicates logical fields or body parity");
         check(result.packet_layout && result.packet_layout->wire_bytes==wire.size(),"numeric packet layout missing");
-        check(field(result,"Bootstrap FEC")=="RS(16,8):8 parity bytes","body FEC off removed mandatory bootstrap protection");
-        check(field(result,"Bootstrap padding")=="2 bits","five-bit bootstrap padding is not represented exactly");
+        check((field(result,"Bootstrap FEC")=="Off")== (fec==FecMode::off),"bootstrap FEC must follow the effective data mode");
+        check(field(result,"Bootstrap padding")=="0 bits (continuous packet)","header must not add a separate symbol boundary");
+        check(field(result,"Final symbol padding")==std::to_string((5-wire.size()*8%5)%5)+" bits","continuous packet final padding is not exact");
         check(field(result,"Compression").find("Fixed byte prefix")!=std::string::npos,"actual selected fixed byte compression missing");
         for(const auto& item:result.fields)check(item.name!="Packet version","inspection invents a packet version field");
         const auto rendered=text(result);
-        check(rendered.find("incoming protected header")!=std::string::npos,"receiver follows outgoing compression/FEC flags");
+        check(rendered.find("incoming header")!=std::string::npos,"receiver follows outgoing compression/FEC flags");
         for(const auto secret:{"eeeeeeee","private-name.txt","SECRET-CALL","ZZ99"})
             check(rendered.find(secret)==std::string::npos,"inspection retained actual data or metadata values");
         check(rendered.find("Convolutional")!=std::string::npos && rendered.find("not implemented")!=std::string::npos,"inspection invents missing convolutional coding");
@@ -57,7 +58,7 @@ void packet_layout() {
     for(const auto fec:{FecMode::off,FecMode::rs20,FecMode::rs60}) {
         PacketOptions options;options.fec=fec;options.compression=false;
         const auto layout=datapump::packet_layout(encode_packet(fixed,options));
-        check(layout.header_bytes==8 && layout.header_parity_bytes==8 && layout.body_bytes==420 &&
+        check(layout.header_bytes==5 && layout.header_parity_bytes==(fec==FecMode::off?0U:fec==FecMode::rs20?2U:4U) && layout.body_bytes==420 &&
               layout.metadata_bytes==25 && layout.payload_bytes==363 && layout.integrity_bytes==32,"codec introspection field sizes are not exact");
         if(fec==FecMode::rs20)check(layout.block_count==2 && layout.block_capacity==210 && layout.full_block_parity==42 && layout.body_parity_bytes==84,"full RS20 block layout is wrong");
         if(fec==FecMode::rs60)check(layout.block_count==3 && layout.block_capacity==150 && layout.full_block_parity==90 && layout.last_block_data==120 && layout.last_block_parity==72 && layout.body_parity_bytes==252,"shortened RS60 block layout is wrong");
@@ -68,6 +69,15 @@ void packet_layout() {
         const auto layout=datapump::packet_layout(encode_packet(edge,options));
         check(layout.metadata_bytes==metadata && layout.body_bytes==metadata+payload+32,"ULEB128 original-length boundary is not reflected in layout");
     }
+}
+void tiny_packet_layout() {
+    gui::InspectionRequest request;request.message.data=Bytes{'h','e','l','p'};
+    request.options.fec=FecMode::rs60;
+    const auto result=gui::inspect(request);
+    check(field(result,"Body FEC")=="Off" && field(result,"Bootstrap FEC")=="Off","tiny messages must show no RS anywhere");
+    check(result.packet_layout->header_bytes==4 && result.packet_layout->header_parity_bytes==0,"word bootstrap should be four bytes");
+    check(field(result,"FEC selection")=="Automatically off below 16 original bytes","automatic tiny-message override is missing");
+    check(text(result).find("complete short frame")!=std::string::npos,"short-frame integrity gating is not explained");
 }
 void raw_layout() {
     gui::InspectionRequest request;request.binary=Bytes{0,0,1};request.options.fec=FecMode::rs60;
@@ -83,5 +93,23 @@ void raw_layout() {
     request.options.modem=plan.config;
     check(std::isfinite(gui::inspect(request).estimate.total_seconds),"30MHz inspection cannot remain bounded");
 }
+void static_pattern_binding() {
+    gui::InspectionRequest request;request.binary=Bytes{0,1};request.options.modem.spreading_factor=16;
+    const auto pattern=gui::inspect(request);
+    check(pattern.pattern_space && pattern.pattern_space->code.size()==16,"flow inspection must retain every pattern chip");
+    request.options.modem.spreading_mode=modem::SpreadingMode::tone;
+    const auto tone=gui::inspect(request);
+    check(tone.pattern_space->code!=pattern.pattern_space->code && !tone.pattern_space->timing_selective,
+          "switching to tone must change the static pattern, including its timing evidence");
+    check(tone.pattern_space->coefficients==pattern.pattern_space->coefficients,
+          "a code change must not pretend to change the phase/amplitude alphabet");
+    request.options.modem.spreading_mode=modem::SpreadingMode::pattern;request.options.modem.scramble=true;
+    request.options.key.emplace(Bytes(32,0x57));
+    const auto keyed=gui::inspect(request);
+    request.options.modem.spreading_seed.fill(99);
+    const auto other_key=gui::inspect(request);
+    check(keyed.pattern_space->representative_keyed && keyed.pattern_space->code==other_key.pattern_space->code,
+          "static keyed illustration must be labelled and independent of private epoch material");
 }
-int main(){try{packet_layout();raw_layout();std::cout<<"inspection tests passed\n";}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
+}
+int main(){try{packet_layout();tiny_packet_layout();raw_layout();static_pattern_binding();std::cout<<"inspection tests passed\n";}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

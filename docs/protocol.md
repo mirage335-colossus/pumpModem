@@ -1,46 +1,74 @@
 # Data Pump compact packet format
 
-Release 0.6.0 uses this format exclusively. The old packet formats and their
+Release 0.7.0 uses this format exclusively. The old packet formats and their
 compression selectors are removed. Both audio peers must use the compact
 format and matching modem settings. Existing keyfiles and the separate raw-bit
 transmission path are unchanged. Receiving a file never executes it.
 
 ## On-air sequence
 
-The modem sends its fixed five-second training, then a **16-byte protected
+The modem sends its fixed five-second training, then a **variable compact
 bootstrap**, then the optionally Reed–Solomon-coded and interleaved body.
 Training contains 32 input bytes mapped onto 64 four-bit APSK segments; it is
-independent of the payload symbol clock. Bootstrap and body end at separate
-APSK symbol boundaries. Their final zero pad bits are not packet bytes.
+independent of the payload symbol clock. Bootstrap and body form one continuous
+APSK bitstream. There is no internal symbol padding or transmitted zero-byte
+tail. Only the last symbol can contain unused pad bits, excluded from content.
 
-The eight systematic bootstrap bytes have this network-byte-order layout:
+The systematic bootstrap occupies four to eight bytes:
 
 | Offset | Bytes | Meaning |
 | --- | ---: | --- |
-| 0 | 1 | Fixed acquisition marker `D5` |
-| 1 | 1 | Packed controls, below |
-| 2 | 4 | Uncoded body length, including metadata and integrity tag |
-| 6 | 2 | CRC-16/CCITT-FALSE of bytes 0–5 |
-| 8 | 8 | Shortened RS parity over the eight systematic bytes |
+| 0 | 1 | Packed controls, below |
+| 1 | 1–5 | Uncoded body length as canonical ULEB128, including metadata and integrity tag |
+| following | 2 | Big-endian CRC-16/CCITT-FALSE of controls and encoded length |
+| following | 0–6 | Shortened RS parity, using the effective data FEC policy |
 
 Control bits 0–1 select body FEC: 0 off, 1 RS20, 2 RS60; 3 is invalid.
 Bits 2–3 select content kind: 0 text, 1 file, 2 screenshot; 3 is invalid.
 Bit 4 indicates compressed payload, bit 5 keyed authentication and bit 6 a
 repeat request. Bit 7 is zero. There is no format-version byte, compression
 algorithm selector, dictionary identifier, transmitted codebook, tag-length
-field or duplicate payload-length field.
+field, magic marker or duplicate payload-length field. Original content below
+16 bytes forces FEC Off for both header and body, regardless of the requested
+mode. This threshold concerns original bytes, including UTF-8 byte counts,
+and applies to files as well as text. It does not depend on compressed size or
+the length of metadata strings.
 
 The CRC uses polynomial `0x1021`, initial value `0xFFFF`, no reflection and no
-final XOR. RS(16,8) corrects up to four damaged bytes, including damage to the
-CRC. A conservative prefilter can reject only independently contradictory
-bytes; full RS, CRC and length validation decide acquisition. The bootstrap
-is 56 bytes shorter than the former 72-byte prefix. Its smaller observation
-window uses alternate radial-gain hypotheses during symbol acquisition.
+final XOR. Header parity uses the same even-rounded 20% or 60% rule as body
+blocks; FEC Off adds none. A four-byte header therefore uses zero, two or four
+parity bytes. A five-byte header uses zero, two or four. This is the same nominal
+coding policy; rounding small blocks to even parity makes their actual overhead
+ratio higher. Header and body always use the same modulation and symbol rate.
+
+Ordinary text under 16 bytes has a **four-byte total bootstrap**. Text under
+256 bytes usually has four or five systematic bytes and at most four parity
+bytes. Long metadata strings can increase the length field by one byte. The
+maximum bootstrap is 14 bytes, a receive-probe bound, not transmitted padding.
+The receiver tries bounded header-length and FEC hypotheses, repairs enabled
+RS codewords, and validates controls, canonical length and CRC before using a
+declared size. The CRC is a candidate filter, not a substitute for final integrity.
 
 The body length determines codeword and interleaver dimensions. The receiver
 checks that length and its working-buffer cost before allocation.
-`packet_frame_size` needs all 16 bootstrap bytes; `decode_packet` reports the
-exact consumed length and ignores a demodulator tail after that frame.
+`packet_frame_size` accepts a complete variable bootstrap; `packet_header_extent`
+returns its actual protected length. Incomplete prefixes return no size.
+`decode_packet` reports the exact consumed length and ignores a demodulator
+tail after that frame.
+
+Blind acquisition fits the measured pattern constellation's amplitude lattice
+and differential phase residuals. It tries the first symbol's possible phase
+labels, so loss of the physical training does not require header RS to repair
+an unknown phase reference. Frames up to 2048 encoded bytes remain provisional
+until their complete digest or MAC verifies, while other timing hypotheses keep
+searching. This covers all packets with less than 256 original bytes, including
+maximum metadata. A plausible short header alone cannot commit the receiver to
+a corrupted length. Finite timing, noise and drift limits still apply.
+
+The validated length terminates content. Signal fade is not an unambiguous
+message delimiter: a channel fade can also occur within a transmission. No
+end marker or zero-byte guard is sent; finite-capture integration is flushed
+locally and does not increase transmitted airtime.
 
 ## Logical body before coding
 
@@ -68,7 +96,7 @@ checksum uses reflected CRC-32, polynomial `0xEDB88320`, initial and final XOR
 `0xFFFFFFFF`. It also limits accidental identity changes in pending previews.
 Callsign and grid describe content; no routing or destination address exists.
 
-The digest/MAC covers the canonical eight-byte systematic bootstrap followed
+The digest/MAC covers the canonical variable systematic bootstrap followed
 by the logical metadata and encoded payload. It excludes the tag itself,
 training, parity and symbol pad bits. A keyed receiver rejects unkeyed packets;
 SHA-256 alone supplies integrity, not authentication. Transfer-layer keyed
@@ -133,8 +161,9 @@ discarded without allowing its output buffer to grow beyond the input size.
 ## Reed–Solomon and interleaving
 
 All RS codewords are systematic, shortened over GF(256), polynomial `0x11D`,
-first generator root alpha^0. Bootstrap parity is always eight bytes, including
-when body FEC is Off. Body coding uses these maximum data-block sizes:
+first generator root alpha^0. Bootstrap and body use the same selected coding
+policy, automatically Off below 16 original bytes. Body coding uses these
+maximum data-block sizes:
 
 | Body mode | Full data bytes | Full parity bytes |
 | --- | ---: | ---: |
@@ -169,8 +198,9 @@ UTF-8; traversal, separators, control characters, reserved device names and
 malformed metadata are rejected independently of packet integrity.
 
 Repeat policy is unchanged: compare actual encoded content airtime against the
-same message with an empty payload. Fixed training, header and metadata costs
+same message with an empty payload, retaining the original packet's effective
+coding policy for this numeric baseline. Fixed training, header and metadata costs
 are excluded; growth of the variable original-length field and its parity is
 part of the incremental encoded cost. At most two seconds of incremental content, or at most one
 original payload byte, is allowed by the default policy. Packet sizes and time
-estimates reflect actual compression, body FEC and separate symbol boundaries.
+estimates reflect actual compression, FEC and the single packet symbol boundary.
