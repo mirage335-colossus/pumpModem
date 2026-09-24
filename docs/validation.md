@@ -11,8 +11,8 @@ from a failed assertion or stalled workflow. Its dedicated nonzero result (75)
 requires recent, monotone generated media or physical-tail sample progress from
 the same active transmission. Idle samples and elapsed compute time cannot
 qualify; observed errors or counter regressions disqualify that transmission.
-Every existing phase assertion runs before the budget classifier, and shutdown
-does not restart smoke actions.
+The current phase's applicable assertions run before budget classification, and
+shutdown does not restart smoke actions.
 
 Only native CI's instrumented Debug runner accepts the exact structured result
 as **incomplete coverage with a warning**. Other diagnostics, sanitizer reports,
@@ -27,8 +27,27 @@ runner's 14 offline policy tests pass, including strict-mode rejection, malforme
 and swallowed markers, extra errors, sanitizer reports and preserved logs.
 The C++ progress-policy fixture also passes ASan/UBSan. The complete shared GUI
 group passes 37/37 in 108.93 seconds, and the build-helper group passes 18/18 in
-10.29 seconds. Actionlint and whitespace checks pass. Native and CI results for
-the final policy candidate will be recorded after completion.
+10.29 seconds. Actionlint and whitespace checks pass. Both complete local native
+groups pass on `c7e92099495ee3c9efb71a4ff8ed694be4a182c6`: FLTK 3/3 in 296.01
+seconds and Rev 5/5 in 443.16 seconds. They ran serially on private Xvfb displays
+with the unchanged 600-second overall allowance and full phase assertions.
+Logs are retained under `build/gui-budget-validation/`.
+
+The [automatic main checks](https://github.com/mirage335-colossus/pumpModem/actions/runs/35943681598)
+pass on that commit: offline build/SDK helpers and focused Linux/Windows Legacy
+checks. The [focused instrumented workflow](https://github.com/mirage335-colossus/pumpModem/actions/runs/35943705099)
+demonstrates the new outcome on the default H runner: phase 17 reaches 600.008538
+seconds with transmission 14 at fraction 0.616505 (83.047361 media seconds), with
+useful progress observed 0.039292 seconds earlier. The exact typed result is
+retained as **incomplete**, followed by a visible warning and the per-attempt log
+artifact; it is not recorded as a smoke pass. The workflow completes successfully:
+its 14 runner-policy tests and two instrumented C++ checks pass, followed by all
+29 developer CLI tests in 158.621 seconds. The downloaded smoke artifact, complete
+job log and provenance are retained in
+`build/gui-budget-validation/remote-c7e920-run-35943705099/`.
+This is targeted policy validation, not a repeat of full native qualification.
+Earlier platform/SDK/DSP results below remain evidence for unchanged code paths;
+no release was published or certified by this diagnostic.
 
 ## Audio device sharing and transmit volume — 23 September 2026
 
