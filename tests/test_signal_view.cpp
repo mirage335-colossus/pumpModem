@@ -1,11 +1,12 @@
-#include <algorithm>
 #include "../src/signal_view.hpp"
 #include "datapump/streaming_modem.hpp"
 #include "datapump/resampler.hpp"
 #include <array>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <numbers>
+#include <random>
 
 using namespace datapump;
 namespace {
@@ -16,12 +17,121 @@ std::vector<float> tone(std::uint64_t start, std::size_t size, const modem::Conf
         result[i]=static_cast<float>(.7*std::cos(2*std::numbers::pi*config.carrier_hz*static_cast<double>(start+i)/config.sample_rate+.31));
     return result;
 }
+std::vector<float> noisy_tone(const modem::Config& config,double amplitude,double sigma,std::uint64_t seed,
+                              std::size_t size=live::detail::signal_window_size) {
+    std::mt19937_64 random(seed);
+    std::normal_distribution<double> noise(0,sigma);
+    std::vector<float> samples(size);
+    for(std::size_t i=0;i<size;++i)
+        samples[i]=static_cast<float>(amplitude*std::cos(2*std::numbers::pi*config.carrier_hz*
+            static_cast<double>(i)/config.sample_rate+.31)+noise(random));
+    return samples;
+}
+void carrier_snr_calibration() {
+    // Real AWGN has one-sided PSD 2*sigma^2/Fs. Compare known carrier
+    // power against that density, independently of FFT bin width and ENBW.
+    for(const auto rate:{4800U,6000U,8000U,44100U,48000U}) {
+        for(const double fraction:{0.,.37,.5}) {
+            modem::Config config;config.sample_rate=rate;
+            config.carrier_hz=(471+fraction)*rate/live::detail::signal_window_size;
+            for(const double expected:{30.,45.,65.}) {
+                constexpr double amplitude=.3;
+                const double sigma=amplitude*.5*std::sqrt(rate*std::pow(10.,-expected/10));
+                double total=0;
+                for(std::uint64_t seed=1;seed<=64;++seed) {
+                    const auto frame=live::detail::signal_plots(noisy_tone(config,amplitude,sigma,seed),config);
+                    check(frame.carrier_snr_db_hz.has_value(),"resolvable noisy carrier has no C/N0 measurement");
+                    total+=*frame.carrier_snr_db_hz;
+                }
+                if(std::abs(total/64-expected)>=.7)
+                    throw Error("carrier C/N0 calibration: Fs="+std::to_string(rate)+" fraction="+std::to_string(fraction)+
+                        " expected="+std::to_string(expected)+" measured="+std::to_string(total/64));
+            }
+        }
+    }
+    modem::Config config;config.sample_rate=6000;config.carrier_hz=1573;
+    double previous=0;
+    for(const double amplitude:{.1,.2,.4}) {
+        const auto samples=noisy_tone(config,amplitude,.04,719);
+        const auto baseline=live::detail::signal_plots(samples,config).carrier_snr_db_hz;
+        check(baseline.has_value(),"tone fixture C/N0 is unresolved");
+        if(previous) check(std::abs(*baseline-previous-20*std::log10(2.))<.3,
+                           "carrier measurement did not track increased signal power");
+        previous=*baseline;
+        for(const double gain:{1e-5,-1.,1000.}) {
+            auto scaled=samples;
+            for(auto& sample:scaled) sample=static_cast<float>(sample*gain);
+            const auto measured=live::detail::signal_plots(scaled,config).carrier_snr_db_hz;
+            check(measured && std::abs(*measured-*baseline)<.001,"carrier C/N0 changes with input gain");
+        }
+        auto shifted=samples;
+        for(auto& sample:shifted) sample+=3.f;
+        const auto measured=live::detail::signal_plots(shifted,config).carrier_snr_db_hz;
+        check(measured && std::abs(*measured-*baseline)<.001,"DC offset contaminates the carrier measurement");
+    }
+    // A partially filled window uses its true Hann ENBW, not its padded size.
+    for(const auto size:{256U,512U,1024U}) {
+        double total=0;
+        for(std::uint64_t seed=1;seed<=32;++seed) {
+            const auto measured=live::detail::signal_plots(noisy_tone(config,.2,.03,seed,size),config).carrier_snr_db_hz;
+            check(measured.has_value(),"usable partial window lost its carrier reference");
+            total+=*measured;
+        }
+        const double expected=10*std::log10((.2*.2/2)/(2*.03*.03/config.sample_rate));
+        check(std::abs(total/32-expected)<.7,"zero padding changed the C/N0 calibration");
+    }
+}
+void unavailable_carrier_snr() {
+    modem::Config config;config.sample_rate=6000;config.carrier_hz=1573;
+    const auto unavailable=[&](const std::vector<float>& samples,const modem::Config& settings) {
+        check(!live::detail::signal_plots(samples,settings).carrier_snr_db_hz,
+              "unmeasurable input manufactured a carrier C/N0 reference");
+    };
+    unavailable({},config);
+    unavailable(std::vector<float>(2048),config);
+    unavailable(std::vector<float>(2048,.5f),config);
+    unavailable(noisy_tone(config,.2,.03,1,255),config);
+    unavailable(tone(0,2048,config),config);
+    for(std::uint64_t seed=1;seed<=64;++seed)
+        unavailable(noisy_tone(config,0,.1,seed),config);
+    auto elsewhere=config;elsewhere.carrier_hz=712;
+    unavailable(noisy_tone(elsewhere,.7,.03,1),config);
+    auto samples=noisy_tone(config,.2,.03,1);
+    for(const auto bad:{std::numeric_limits<float>::quiet_NaN(),std::numeric_limits<float>::infinity()}) {
+        auto invalid=samples;invalid[391]=bad;unavailable(invalid,config);
+    }
+    auto invalid=config;invalid.sample_rate=0;unavailable(samples,invalid);
+    for(const double bad:{0.,-1.,3000.,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()}) {
+        invalid=config;invalid.carrier_hz=bad;unavailable(samples,invalid);
+    }
+    for(const double bad:{0.,-1.,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()}) {
+        invalid=config;invalid.bandwidth_hz=bad;unavailable(samples,invalid);
+    }
+    invalid=config;invalid.carrier_hz=1;unavailable(samples,invalid);
+    invalid=config;invalid.carrier_hz=2999;unavailable(samples,invalid);
+}
+void carrier_snr_fragmentation() {
+    modem::Config config;config.sample_rate=6000;config.carrier_hz=1573;
+    const auto samples=noisy_tone(config,.2,.03,71,9317);
+    live::detail::SignalWindow whole,fragments;
+    whole.push(samples);
+    for(std::size_t offset=0;offset<samples.size();) {
+        const auto count=std::min(samples.size()-offset,1+(offset*37)%511);
+        fragments.push(std::span(samples).subspan(offset,count));offset+=count;
+        static_cast<void>(fragments.frame(config));
+    }
+    const auto measured=whole.frame(config).carrier_snr_db_hz;
+    check(measured && measured==fragments.frame(config).carrier_snr_db_hz,
+          "carrier C/N0 depends on capture fragmentation or UI polling cadence");
+    fragments.reset();
+    check(!fragments.frame(config).carrier_snr_db_hz,"reset retained a stale carrier measurement");
+}
 void actual_default_clock_carrier() {
     modem::Config config; config.sample_rate=4800; config.carrier_hz=900;
-    // Preserve the actual noise prefix and private I/Q chip waveform in plots.
-    config.scramble=true;config.dsss=true;config.spreading_seed[0]=41;config.dsss_seed[0]=79;
+    // Zero symbols retain the inner16APSK radius and phase, so the actual
+    // transmitter must deliver a pure carrier through its training/data edge.
     modem::StreamingTransmitter source(Bytes(256,0),config);
-    live::detail::SignalWindow window(config);
+    live::detail::SignalWindow window;
     std::array<float,317> block{};
     const auto append=[&](std::uint64_t endpoint) {
         while(source.samples_emitted()<endpoint) {
@@ -36,17 +146,25 @@ void actual_default_clock_carrier() {
     check(first.waveform.size()*config.carrier_hz/config.sample_rate==384,
           "carrier fixture must contain enough cycles to alias if drawn directly into a narrow pane");
     const auto verify=[&](const live::detail::SignalPlots& frame) {
-        std::vector<float> expected(frame.waveform.size());source.preview_last(expected);
-        for(std::size_t i=0;i<frame.waveform.size();++i)
-            check(std::abs(frame.waveform[i]-expected[i])<1e-6,"actual private waveform was clipped, flattened or phase-reset in plot data");
-        check(std::any_of(frame.waveform.begin(),frame.waveform.end(),[](float value){return std::abs(value)>.1F;}),"plot lost the transmitted waveform");
+        const auto start=window.samples_seen()-frame.waveform.size();
+        for(std::size_t i=0;i<frame.waveform.size();++i) {
+            const auto expected=.35*std::cos(2*std::numbers::pi*config.carrier_hz*static_cast<double>(start+i)/config.sample_rate);
+            check(std::abs(frame.waveform[i]-expected)<1e-6,"actual transmitted carrier was clipped, flattened or phase-reset in the plot data");
+        }
+        check(std::abs(frame.spectrum[384]-20*std::log10(.35))<.001,"actual carrier FFT level changed with its sampled phase");
+        // A square wave would add odd harmonics; at this DSP clock the third
+        // and fifth harmonics alias to2100Hz and300Hz respectively.
+        for(const auto bin:{128U,768U,896U})
+            check(frame.spectrum[bin]<frame.spectrum[384]-70,"plot signal data added harmonics to a clean carrier");
+        for(const auto point:frame.constellation)
+            check(std::abs(point-std::complex<double>{.35,0})<1e-6,"successive default-clock frames changed carrier phase/amplitude");
     };
     verify(first);
     append(source.samples_emitted()+137);
     const auto second=window.frame(config);
     verify(second);
     check(first.waveform!=second.waveform,"carrier fixture did not advance to a distinct sampled phase");
-
+    check(std::abs(first.spectrum[384]-second.spectrum[384])<.001,"continuous carrier changed waterfall power between frames");
 }
 void fractional_carrier_capture() {
     modem::Config config;config.sample_rate=6000;config.carrier_hz=1573;config.bandwidth_hz=1100;
@@ -54,7 +172,7 @@ void fractional_carrier_capture() {
         auto card=config;card.sample_rate=hardware;
         const auto input=tone(0,hardware,card);
         audio::Resampler converter(hardware,config.sample_rate);
-        live::detail::SignalWindow window(config);
+        live::detail::SignalWindow window;
         std::array<float,211> output{};
         std::size_t consumed=0;
         while(consumed<input.size()) {
@@ -75,98 +193,17 @@ void fractional_carrier_capture() {
                   "fractional-cycle capture windows distort measured I/Q amplitude and phase");
     }
 }
-std::vector<float> iq_carrier(std::uint64_t start, std::size_t size,
-                              const modem::Config& config, std::complex<double> symbol) {
-    std::vector<float> result(size);
-    for (std::size_t i=0;i<size;++i) {
-        const auto angle=2*std::numbers::pi*config.carrier_hz*static_cast<double>(start+i)/config.sample_rate;
-        result[i]=static_cast<float>(symbol.real()*std::cos(angle)-symbol.imag()*std::sin(angle));
-    }
-    return result;
-}
-bool contains_symbol(const live::detail::SignalPlots& frame, std::complex<double> symbol) {
-    return std::any_of(frame.constellation.begin(),frame.constellation.end(),[&](const auto point) {
-        return std::abs(point-symbol)<1e-6;
-    });
-}
-void refresh_capacity_bounds() {
-    modem::Config config;
-    check(live::detail::SignalWindow::sample_capacity(config)==2048,
-          "low sample rates must retain the complete fixed waveform window");
-    config.sample_rate=480001;config.bandwidth_hz=120000;config.carrier_hz=90000;
-    check(live::detail::SignalWindow::sample_capacity(config)==8001,
-          "refresh-frame sample capacity rounded down a fractional sample");
-    config.sample_rate=120000000;config.bandwidth_hz=30000000;config.carrier_hz=30000000;
-    check(live::detail::SignalWindow::sample_capacity(config)==2000000,
-          "maximum-rate signal history does not have a bounded 60 Hz refresh window");
-    check(live::detail::SignalWindow::constellation_capacity(config)==250000,
-          "maximum-rate constellation capacity cannot retain a complete refresh frame");
-}
-void entire_refresh_frame() {
-    modem::Config config;config.sample_rate=480000;config.bandwidth_hz=120000;config.carrier_hz=90000;
-    constexpr std::size_t refresh_samples=8000;
-    const std::array<std::complex<double>,3> symbols{{{.65,.2},{-.3,.7},{-.6,-.4}}};
-    const std::array<std::size_t,4> boundaries{{0,2000,5000,refresh_samples}};
-    std::vector<float> samples;
-    for (std::size_t i=0;i<symbols.size();++i) {
-        const auto segment=iq_carrier(boundaries[i],boundaries[i+1]-boundaries[i],config,symbols[i]);
-        samples.insert(samples.end(),segment.begin(),segment.end());
-    }
-    live::detail::SignalWindow whole(config),fragments(config);
-    whole.push(samples);
-    for (std::size_t offset=0;offset<samples.size();) {
-        const auto count=std::min(samples.size()-offset,1+(offset*37)%511);
-        fragments.push(std::span(samples).subspan(offset,count));offset+=count;
-    }
-    const auto frame=whole.frame(config),fragmented=fragments.frame(config);
-    check(frame.waveform==fragmented.waveform && frame.spectrum==fragmented.spectrum &&
-          frame.constellation==fragmented.constellation,
-          "refresh-frame observations depend on callback fragmentation");
-    check(frame.waveform.size()==2048 && frame.spectrum.size()==1025 && whole.samples_seen()==refresh_samples,
-          "a longer constellation frame changed waveform, FFT or sample clock bounds");
-    check(frame.constellation.size()==1000,"constellation did not retain every chip in a 60 Hz refresh frame");
-    for (const auto symbol:symbols)
-        check(contains_symbol(frame,symbol),"constellation lost a symbol occurring earlier in the refresh frame");
-
-    const auto tail=live::detail::signal_plots(std::span(samples).last(2048),config,refresh_samples-2048);
-    check(frame.waveform==tail.waveform && frame.spectrum==tail.spectrum,
-          "refresh-frame constellation accumulation changed the latest 2048-sample waveform or FFT");
-    check(!contains_symbol(tail,symbols[0]) && !contains_symbol(tail,symbols[1]) && contains_symbol(tail,symbols[2]),
-          "refresh-frame fixture must place its early and middle symbols outside the waveform tail");
-    const auto direct=live::detail::signal_plots(samples,config);
-    check(direct.waveform==frame.waveform && direct.spectrum==frame.spectrum && direct.constellation==frame.constellation,
-          "direct signal plots did not use their entire input span for constellation observations");
-
-    const std::complex<double> next_symbol{.2,-.75};
-    whole.push(iq_carrier(refresh_samples,refresh_samples,config,next_symbol));
-    const auto advanced=whole.frame(config);
-    check(advanced.constellation.size()==1000 && whole.samples_seen()==2*refresh_samples,
-          "advancing a complete refresh frame changed observation or clock bounds");
-    for (const auto point:advanced.constellation)
-        check(std::abs(point-next_symbol)<1e-6,"constellation retained stale symbols after a complete refresh frame");
-
-    constexpr std::uint64_t restarted_at=900137;
-    fragments.reset(restarted_at);
-    const auto empty=fragments.frame(config);
-    check(fragments.samples_seen()==restarted_at && empty.waveform.empty() && empty.constellation.empty(),
-          "reset retained old waveform or constellation observations");
-    fragments.push(iq_carrier(restarted_at,refresh_samples,config,next_symbol));
-    const auto restarted=fragments.frame(config);
-    check(fragments.samples_seen()==restarted_at+refresh_samples && restarted.constellation.size()>=999,
-          "reset discarded the configured refresh capacity or absolute sample clock");
-    for (const auto point:restarted.constellation)
-        check(std::abs(point-next_symbol)<1e-6,"reset did not preserve absolute carrier phase across the refresh frame");
-}
 }
 int main() {
     try {
+        carrier_snr_calibration();
+        unavailable_carrier_snr();
+        carrier_snr_fragmentation();
         fractional_carrier_capture();
         actual_default_clock_carrier();
-        refresh_capacity_bounds();
-        entire_refresh_frame();
         modem::Config config; config.sample_rate=8000; config.bandwidth_hz=1000; config.carrier_hz=1500;
         const auto samples=tone(0,16000,config);
-        live::detail::SignalWindow whole(config), fragments(config);
+        live::detail::SignalWindow whole, fragments;
         whole.push(samples);
         for (std::size_t offset=0;offset<samples.size();) {
             const auto count=std::min(samples.size()-offset,1+(offset*37)%511);

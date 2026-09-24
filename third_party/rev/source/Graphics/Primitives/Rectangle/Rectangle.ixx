@@ -1,7 +1,6 @@
 module;
 
 #include <cstddef>
-#include <functional>
 #include <managed.hpp>
 
 export module Rev.Primitive.Rectangle;
@@ -22,9 +21,6 @@ import Rev.Graphics.Pipeline;
 import Rev.Graphics.Shader;
 
 export namespace Rev::Primitives {
-
-    using namespace Rev::Core;
-    using namespace Rev::Graphics;
 
     struct Rectangle : public Primitive {
 

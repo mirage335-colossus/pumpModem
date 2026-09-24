@@ -7,15 +7,6 @@
 #include <span>
 
 namespace datapump {
-namespace runtime {
-// Available physical RAM (and process/container headroom where exposed).
-// DSP signal history is independent of the received-content cache limit.
-std::size_t available_memory_bytes();
-std::size_t dsp_workspace_budget(unsigned percent = 50);
-// Capture the default once, so ordinary Options/Settings copies keep a stable
-// budget. A user-selected percentage can be resolved again on configuration.
-std::size_t default_dsp_workspace_bytes();
-}
 struct ReceivedItem {
     std::string id;
     std::string filename;
@@ -61,7 +52,7 @@ std::vector<std::uint64_t> drift_candidates(std::uint64_t center, unsigned windo
 std::uint64_t sample_nanoseconds(std::uint64_t sample, std::uint32_t sample_rate);
 std::string json_escape(std::string_view text);
 std::string base64_encode(std::span<const std::uint8_t> bytes);
-// Restricted received ASCII with one underscore for every rejected byte.
+// Escape terminal controls while leaving ordinary UTF-8 and pipe bytes alone.
 std::string terminal_text(std::span<const std::uint8_t> bytes);
 Bytes read_bounded(std::istream& input, std::size_t limit);
 void write_new_file(const std::string& path, std::span<const std::uint8_t> bytes);

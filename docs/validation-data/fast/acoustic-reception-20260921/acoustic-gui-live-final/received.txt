@@ -1,1 +1,0 @@
-Acoustic GUI diagnosis: exact received text with real audio.

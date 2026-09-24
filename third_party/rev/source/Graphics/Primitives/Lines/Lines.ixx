@@ -3,7 +3,6 @@ module;
 #include <cstdint>
 #include <cmath>
 #include <vector>
-#include <functional>
 #include <sentinel.hpp>
 #include <managed.hpp>
 
@@ -26,7 +25,6 @@ export namespace Rev::Primitives {
 
     using namespace sentinel;
     using namespace Rev::Core;
-    using namespace Rev::Graphics;
 
     struct Lines : public Primitive {
 
