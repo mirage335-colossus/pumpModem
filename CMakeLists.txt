@@ -227,6 +227,13 @@ if(BUILD_TESTING)
       add_test(NAME ${component} COMMAND test_${component})
     endif()
   endforeach()
+  if(DATAPUMP_SANITIZERS AND NOT MSVC)
+    # Sampled-media functional fixtures need bounded CPU-work allowances under
+    # ASan/UBSan. Their physical/cancellation clocks and assertions are unchanged.
+    foreach(_functional_test test_live test_live_profiles)
+      target_compile_definitions(${_functional_test} PRIVATE DATAPUMP_INSTRUMENTED_TEST=1)
+    endforeach()
+  endif()
   target_include_directories(test_differential_probability PRIVATE src)
   # Each capture retains one DSP worker. Independent fixed-seed captures use
   # the selected CPU count, with no other CTest work scheduled concurrently.

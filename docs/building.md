@@ -312,8 +312,10 @@ instead of silently building an SDK.
 Native CI builds portable packages independently of source regression jobs.
 Copied Linux checks depend only on the package producer, so sanitizer or
 calibration work cannot delay them. Linux Release/Debug and Windows split
-regressions into Core, Fast and calibration jobs. Calibration runs its four
-existing independent sections (`matrix`, `shaped`, `null`, `default-window`) on
+regressions into Core, Fast, Live and calibration jobs. Live contains the two
+CPU-intensive `live` and `live_profiles` suites and runs them serially on its
+own runner. Calibration runs its four existing independent sections
+(`matrix`, `shaped`, `null`, `default-window`) on
 separate runners; each preserves all its fixed seeds and aggregate assertions.
 Local calibration still defaults to `all` and the existing CTest name. The
 `DATAPUMP_CALIBRATION_SECTION` CMake setting selects a section for CI.
@@ -330,7 +332,8 @@ establish correctness.
 Package and test jobs share reusable workflow definitions, not configured build
 trees. This repeats a small amount of setup/compilation while avoiding brittle
 build-tree relocation and keeping test work disjoint. Linux retains two CTest
-slots and Windows one; calibration detects available CPUs, capped at 16.
+slots, except Live uses one; Windows also uses one. Calibration detects
+available CPUs, capped at 16.
 SDK package producers likewise run independently of source qualification, so
 copied SDK binaries can be checked as soon as the packages are ready. Every
 required scope still contributes to the workflow result.
@@ -437,6 +440,14 @@ Failures remain fatal when requested. Keep the production FIFO, physical-end and
 pending-content assertions intact; do not classify unrelated sanitizer findings
 as performance warnings.
 
+The functional `live` and `live_profiles` fixtures have separate computation
+allowances. Instrumented builds allow up to three times their normal workload
+budget and report `TEST_WORKLOAD_BUDGET` when they exceed the normal allowance.
+CI preserves these warnings from successful CTest output in its report and
+summary. Every case must still finish and pass its assertions within the bounded
+instrumented allowance. Real-time throughput, cancellation, physical absence
+and queue-drain stabilization requirements are unchanged.
+
 The instrumented native GUI smoke is an independent optional job. Normal full
 CI omits it and explicitly records missing instrumented desktop coverage;
 Release/package GUI smoke remains mandatory. Select `sanitizer_smoke=true` to
@@ -458,7 +469,7 @@ timeouts and other failures. ASan/UBSan also halt on errors in that job. Release
 SDK, packaging and certification remain strict, including for exit 75. This
 exception does not apply to calibration or other test timeouts.
 
-To repeat the entire affected instrumented GUI workflow and CLI checks without
+To repeat the entire affected instrumented GUI workflow without
 repeating unrelated calibration or platform suites, use:
 
 ```sh
@@ -469,7 +480,8 @@ This uses the same Debug compiler, sanitizer flags, default H runner and
 600-second smoke allowance. It additionally checks the budget classifier
 and strict runner policy with bounded fixtures. A successful diagnostic with an
 incomplete warning is not full native qualification. Ordinary automatic CI
-remains limited to the existing lightweight checks.
+remains limited to the existing lightweight checks. Full CLI regression runs in
+the independent Core jobs rather than being repeated by this GUI diagnostic.
 
 ## Focused development diagnostics
 

@@ -1434,6 +1434,20 @@ std::vector<PatternEvidence> PatternReceiver::candidates(std::size_t limit)const
 std::vector<Complex> PatternReceiver::take_chip_constellation(){if(impl_->fallback)return impl_->fallback->take_chip_constellation();auto result=impl_->chip_points();impl_->points.clear();impl_->point_cursor=0;return result;}
 bool PatternReceiver::acquiring()const{return impl_->fallback?impl_->fallback->acquiring():!impl_->tracks.empty();}
 bool PatternReceiver::synchronized()const{return impl_->fallback?impl_->fallback->synchronized():std::any_of(impl_->tracks.begin(),impl_->tracks.end(),[](const auto& track){return track.admitted;});}
+bool PatternReceiver::initial_search_complete()const {
+    const auto& s=*impl_;
+    if(s.fallback)return s.fallback->initial_search_complete();
+    if(!s.search.start_offset_seconds)return false;
+    const auto upper=(static_cast<long double>(*s.search.start_offset_seconds)+
+        s.search.start_uncertainty_seconds)*s.config.sample_rate;
+    // next_start advances only after a complete FFT acquisition batch. It
+    // includes the actual stretched integration and batching lookahead;
+    // merely consuming a nominal symbol's PCM is not sufficient.
+    // Require at least the first scored start for an entirely past window.
+    // Compare floating sample coordinates without integer products/casts.
+    return std::isfinite(upper) && static_cast<long double>(s.next_start)*s.bin_samples>
+        std::max(0.L,upper);
+}
 bool PatternReceiver::clock_windowed()const{return static_cast<bool>(impl_->fallback);}
 bool PatternReceiver::local_clock_fallback()const{return impl_->local_search_fallback;}
 bool PatternReceiver::drift_tolerant()const{return impl_->fallback?impl_->fallback->drift_tolerant():impl_->drift_sections>1;}

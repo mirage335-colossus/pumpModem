@@ -10,7 +10,7 @@ on:
         type: string
         default: Release
       scope:
-        description: 'core, fast, calibration, package, or sanitizer-gui'
+        description: 'core, fast, live, calibration, package, or sanitizer-gui'
         type: string
         required: true
       calibration_section:
@@ -80,11 +80,12 @@ jobs:
             sanitizer-gui) targets=(datapump-apps test_gui_smoke_budget test_gui_launch_command) ;;
             core) targets=(datapump-apps datapump-tests-ci-core) ;;
             fast) targets=(datapump-tests-fast) ;;
+            live) targets=(datapump-tests-ci-live) ;;
             *) echo "Unknown native scope: $CI_SCOPE" >&2; exit 2 ;;
           esac
           cmake --build build --target "${targets[@]}" --parallel "$(nproc)"
       - name: Run the selected native tests
-        if: inputs.scope == 'core' || inputs.scope == 'fast' || inputs.scope == 'calibration'
+        if: inputs.scope == 'core' || inputs.scope == 'fast' || inputs.scope == 'live' || inputs.scope == 'calibration'
         run: |
           options=()
           if [ "$DATAPUMP_SANITIZERS" = ON ]; then
@@ -93,9 +94,11 @@ jobs:
           if [ "$SANITIZER_REALTIME" = true ]; then
             options+=(--sanitizer-realtime)
           fi
-          python3 tools/run-ci-tests.py --build-dir build --scope "$CI_SCOPE" --jobs 2 --report build/ci-test-report.json "${options[@]}"
+          jobs=2
+          if [ "$CI_SCOPE" = live ]; then jobs=1; fi
+          python3 tools/run-ci-tests.py --build-dir build --scope "$CI_SCOPE" --jobs "$jobs" --report build/ci-test-report.json "${options[@]}"
       - name: Record separate instrumented desktop coverage
-        if: inputs.scope == 'core' && inputs.build_type == 'Debug'
+        if: always() && inputs.scope == 'core' && inputs.build_type == 'Debug'
         run: |
           echo '::notice::Instrumented desktop smoke is a separate opt-in job. Its omission is not a smoke pass; Release/package desktop workflows remain required.'
           echo 'Instrumented desktop smoke is outside this regression shard. Select sanitizer_smoke=true or the focused sanitizer-gui diagnostic to run it. Omitted instrumented desktop coverage is not a pass.' >> "$GITHUB_STEP_SUMMARY"

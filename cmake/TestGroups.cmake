@@ -54,6 +54,7 @@ set(_contract
   pattern_correlator_batch pattern_search tuning simulation_estimate
   receiver_probability differential_probability differential_receiver_probability
   weak_signal gui_application gui_controller gui_inspection gui_binary_editor cli)
+set(_ci_live_tests live live_profiles)
 
 foreach(_test IN LISTS _tests)
   get_property(_labels TEST ${_test} PROPERTY LABELS)
@@ -96,7 +97,9 @@ foreach(_test IN LISTS _tests)
   foreach(_group IN LISTS _labels)
     list(APPEND _group_${_group} ${_dependencies})
   endforeach()
-  if(NOT "fast" IN_LIST _labels AND NOT "calibration" IN_LIST _labels)
+  if(_test IN_LIST _ci_live_tests)
+    list(APPEND _ci_live_targets ${_dependencies})
+  elseif(NOT "fast" IN_LIST _labels AND NOT "calibration" IN_LIST _labels)
     list(APPEND _ci_core_targets ${_dependencies})
   endif()
   list(APPEND _all_test_targets ${_dependencies})
@@ -104,6 +107,7 @@ endforeach()
 
 add_custom_target(datapump-tests DEPENDS ${_all_test_targets})
 add_custom_target(datapump-tests-ci-core DEPENDS ${_ci_core_targets})
+add_custom_target(datapump-tests-ci-live DEPENDS ${_ci_live_targets})
 foreach(_group contract regular fast legacy gui native packaging build)
   if(_group STREQUAL "native")
     set(_label native_gui)

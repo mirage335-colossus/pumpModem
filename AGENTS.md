@@ -29,13 +29,17 @@ captures have their own documented provenance. Keep all checks below intact.
   Runner defaults use the organization's H pools; do not repeat checks on
   smaller runners unless specifically requested.
 - Optimize CI elapsed time with independent package producers and disjoint test
-  jobs. Keep calibration sections and expensive sanitizer GUI simulation off
-  the dependency path for ordinary regressions and copied-package checks.
+  jobs. Keep the serial Live scope, calibration sections and expensive sanitizer
+  GUI simulation off the dependency path for ordinary regressions and
+  copied-package checks.
   Prefer modest repeated setup/compilation over transferring configured build
   trees; keep total runner minutes and workflow complexity within a few times
   the unsplit work. Retain conservative within-runner test concurrency so the
   same workflows remain usable on standard runners. Near-timeout passing tests
-  should produce timing warnings, not failures.
+  should produce timing warnings, not failures. Instrumented functional Live
+  fixtures have bounded extra computation allowances and warn when they exceed
+  the normal budget; they must still complete every assertion. Preserve actual
+  real-time, cancellation and physical-absence deadlines.
 - Native CI excludes only `fast_session` and `gui_fast_live` from its instrumented
   Debug job unless `sanitizer_realtime=true` is explicitly requested. Their
   real-time audio budgets are sensitive to sanitizer overhead; this is omitted

@@ -236,6 +236,7 @@ jobs:
         shard:
           - {scope: core, section: all}
           - {scope: fast, section: all}
+          - {scope: live, section: all}
           - {scope: calibration, section: matrix}
           - {scope: calibration, section: shaped}
           - {scope: calibration, section: "null"}
@@ -310,6 +311,7 @@ jobs:
         shard:
           - {scope: core, section: all}
           - {scope: fast, section: all}
+          - {scope: live, section: all}
           - {scope: calibration, section: matrix}
           - {scope: calibration, section: shaped}
           - {scope: calibration, section: "null"}

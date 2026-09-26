@@ -29,6 +29,7 @@ class Selection(unittest.TestCase):
     def test_contract_overlap_and_new_tests_have_one_owner(self):
         inventory = [test('unlabelled'), test('gui', ('gui', 'contract')),
                      test('fast', ('fast', 'contract')), test('legacy', ('legacy',)),
+                     test('live', ('regular', 'contract')), test('live_profiles', ('regular', 'contract')),
                      test('calibration', ('regular', 'contract', 'calibration'))]
         owners = []
         for scope in runner.SCOPES:
@@ -38,6 +39,17 @@ class Selection(unittest.TestCase):
             owners += [item['name'] for item in selected]
         self.assertCountEqual(owners, [item['name'] for item in inventory])
         self.assertEqual(len(owners), len(set(owners)))
+
+    def test_live_scope_is_exact_and_mandatory_in_every_configuration(self):
+        inventory = [test(name, ('regular', 'contract'))
+                     for name in ('live', 'live_profiles', 'live_resources', 'live_receptions', 'live_transmit_lock')]
+        for kwargs in ({}, {'sanitizers': True}, {'sanitizers': True, 'sanitizer_realtime': True}):
+            selected, omitted, _ = runner.select_tests(inventory, 'live', **kwargs)
+            self.assertCountEqual([item['name'] for item in selected], runner.LIVE)
+            self.assertFalse(omitted)
+            core, _, _ = runner.select_tests(inventory, 'core', **kwargs)
+            self.assertCountEqual([item['name'] for item in core],
+                                  ['live_resources', 'live_receptions', 'live_transmit_lock'])
 
     def test_only_documented_debug_realtime_cases_are_omitted(self):
         inventory = [test(name, ('fast',)) for name in ('fast_session', 'gui_fast_live', 'fast_codec')]
@@ -121,6 +133,21 @@ class CTestIntegration(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertEqual(report['status'], 'failed')
         self.assertFalse(report['tests'][0]['near_timeout'])
+
+    def test_workload_warning_from_passing_ctest_output_remains_visible(self):
+        marker = 'TEST_WORKLOAD_BUDGET: fixture: exceeded 30s normal budget; instrumented limit 90s (full completion remains required)'
+        result, report, output = self.exercise(f'print({marker!r})')
+        self.assertEqual(result, 0)
+        self.assertEqual(report['tests'][0]['workload_warnings'], [marker])
+        self.assertIn('::warning title=CI test workload::sample passed all assertions.', output)
+
+    def test_workload_marker_cannot_turn_failure_into_warning(self):
+        marker = 'TEST_WORKLOAD_BUDGET: fixture: exceeded 30s normal budget'
+        result, report, output = self.exercise(f'print({marker!r}); raise AssertionError(123)')
+        self.assertEqual(result, 1)
+        self.assertEqual(report['status'], 'failed')
+        self.assertEqual(report['tests'][0]['workload_warnings'], [marker])
+        self.assertNotIn('::warning title=CI test workload::', output)
 
 
 if __name__ == '__main__':

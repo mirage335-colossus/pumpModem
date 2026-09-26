@@ -825,6 +825,17 @@ std::vector<Complex> PatternCorrelator::take_chip_constellation() {
 }
 bool PatternCorrelator::acquiring()const {return !impl_->finished && std::any_of(impl_->hypotheses.begin(),impl_->hypotheses.end(),[](const auto& h){return h.admitted || !h.burst.bits.empty();});}
 bool PatternCorrelator::synchronized()const{return std::any_of(impl_->hypotheses.begin(),impl_->hypotheses.end(),[](const auto& h){return h.admitted;});}
+bool PatternCorrelator::initial_search_complete()const {
+    const auto& s=*impl_;
+    return std::all_of(s.hypotheses.begin(),s.hypotheses.end(),[&](const auto& h) {
+        // A negative origin can leave the first scored symbol truncated at
+        // capture start. Wait for the next full symbol in that hypothesis's
+        // own rate. index advances only after complete() scores every phase;
+        // clearing noise candidates or flushing EOF never advances it.
+        const auto first_full=std::ceil(std::max(0.L,-h.origin)*h.rate/s.code.symbol_samples());
+        return static_cast<long double>(h.index)>first_full;
+    });
+}
 bool PatternCorrelator::drift_tolerant()const{return impl_->drift_sections>1;}
 std::size_t PatternCorrelator::working_bytes()const{return sizeof(PatternCorrelator)+impl_->working_bytes();}
 void PatternCorrelator::set_workspace_bytes(std::size_t bytes) {

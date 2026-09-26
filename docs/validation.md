@@ -4,6 +4,81 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Parallel CI qualification — 26 September 2026
+
+The native run recorded below took about 77 minutes. Its Linux Release archives
+were available at 19:49:35 UTC, but copied-distribution checks waited for the
+Debug matrix member until 20:15:24 UTC. Calibration also ran alone after the
+other CTest cases: 976.46 seconds in Debug, 497.99 seconds in Linux Release and
+280.92 seconds on Windows. The user requested lower CI latency, bounded extra
+runner minutes/complexity, warning-level timing feedback, and explicit testing
+on standard runners while retaining the H defaults.
+
+Candidate `476952b88ae500e2d571f41eece173fbe129e7e7` separates package producers,
+Core/Fast regressions and the four existing independent calibration sections.
+SDK package production is independent of source qualification. Copied-package
+checks depend only on their package producers; every mandatory source and
+package scope still contributes to the overall result. Calibration retains its
+complete fixed seeds and per-matrix aggregate checks; local default coverage is
+unchanged. Only the optional instrumented GUI smoke is omitted by default, with
+an explicit coverage notice; its existing progressing-budget warning remains
+available when selected. Passing tests near their timeout produce warnings,
+while correctness failures and unclassified timeouts remain fatal.
+
+Local validation passes all 21 build-tool suites, ten timing/selection fixtures
+(including actual CTest assertion and timeout propagation), all calibration
+section/argument plans and the full null-control section. The actual local CTest
+inventory has 147 tests with exactly one Core/Fast/calibration owner each.
+Actionlint and whitespace checks pass. Shared workflow definitions grew from
+620 to 890 lines (1.44x), with the timing helper and its fixtures kept separately.
+
+[Full native standard-runner validation 36273230736](https://github.com/mirage335-colossus/pumpModem/actions/runs/36273230736)
+uses `ubuntu-24.04` and `windows-2022` with `devfast=false`. Calibration uses
+four capture workers on these standard runners, versus sixteen in the prior
+H-runner run. Windows also changes from the 2025 to the 2022 image. Elapsed
+times therefore compare complete observed runs, not a controlled speedup
+benchmark; H defaults remain unchanged.
+[Full SDK H-runner validation 36273232390](https://github.com/mirage335-colossus/pumpModem/actions/runs/36273232390)
+uses the default H pool and passed all eight required jobs. Its active span was
+19m06s versus 35m58s before the split, with summed job duration 64m56s versus
+79m13s. Both package producers, both source scopes and all four copied-runtime
+checks passed full required smoke and archive verification. The first copied
+job started three seconds after the final package producer, while FLTK source
+qualification was still running. These are observed hosted runs, not repeated
+controlled benchmarks.
+
+The native standard-runner run exposed a mandatory Rev GUI phase-21 failure:
+the binary editor prepared 32 bits for `Help`, but physical reception retained
+only their final 17 bits. This matches the earlier recorded unresolved symptom
+and is neither a cadence warning nor workload-budget exhaustion. Debug Core
+also failed two internal functional workload limits: `live` reached 40 seconds
+while generating bit 4824/8192, and `live_profiles` reached its 30-second decode
+allowance after delivering 1013760/1345920 samples. Both were progressing and
+neither log reported a sanitizer error. These remain failures for that source.
+
+A focused keyed acquisition probe reproduces an early epoch-retirement defect:
+advancing wall time by six seconds while only 0.0984722 seconds of PCM have been
+processed generates all 32 bits but loses reception. Temporarily retaining the
+key epoch restores all 32 bits. The correction retains an unconfirmed receiver
+until its original acquisition window has actually been scored, then applies
+its existing clock-age retirement. New query methods add no state or allocation
+and do not change scores, wire bits, physical completion or workspace limits.
+FFT and correlator boundary fixtures, the exact-bit regression and noise-only
+retirement with the unchanged memory assertion pass locally.
+
+The two CPU-intensive Live suites now have their own serial CI scope. Only
+instrumented functional computation gets a bounded threefold allowance; crossing
+the original budget emits a retained warning, and all assertions still must
+complete. Real-time, cancellation, queue stabilization and physical-absence
+requirements retain their existing limits. The final correction is undergoing
+validation. Local follow-up checks pass all 21 build-tool suites, 13 CI helper
+fixtures, and the complete FLTK native group (3/3, including the 215.79-second
+GUI workflow). ASan/UBSan passes the budget boundaries, exact-bit early epoch
+regression, recovery lifecycle and controlled interval queue cases. The early
+epoch fixture exceeded its ordinary 30-second workload allowance, emitted the
+intended warning and completed within the 90-second instrumented cap. No
+sanitizer error was reported. Existing release assets/reports remain unchanged.
+
 ## CI package recovery and replay interruption fixtures — 26 September 2026
 
 [Certification 36010161027](https://github.com/mirage335-colossus/pumpModem/actions/runs/36010161027)

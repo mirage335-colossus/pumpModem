@@ -13,8 +13,9 @@ import time
 import xml.etree.ElementTree as ET
 
 
-SCOPES = ('core', 'fast', 'calibration')
+SCOPES = ('core', 'fast', 'live', 'calibration')
 REALTIME = {'fast_session', 'gui_fast_live'}
+LIVE = {'live', 'live_profiles'}
 
 
 def properties(test):
@@ -22,6 +23,8 @@ def properties(test):
 
 
 def scope_for(test):
+    if test['name'] in LIVE:
+        return 'live'
     labels = properties(test).get('LABELS', [])
     if 'calibration' in labels:
         return 'calibration'
@@ -64,8 +67,13 @@ def read_results(path, selected, default_timeout, warn_fraction):
         # failure/skip into success just because it ran slowly.
         passed = (case.get('status', 'run') == 'run' and
                   not any(case.find(tag) is not None for tag in ('failure', 'error', 'skipped')))
+        workload_warnings = list(dict.fromkeys(
+            line for output in case.findall('system-out')
+            for line in (output.text or '').splitlines()
+            if line.startswith('TEST_WORKLOAD_BUDGET:')))
         results.append({'name': name, 'status': 'passed' if passed else 'incomplete_or_failed',
                         'seconds': seconds, 'timeout_seconds': timeout,
+                        'workload_warnings': workload_warnings,
                         'near_timeout': passed and timeout > 0 and seconds >= timeout * warn_fraction})
     return results
 
@@ -97,6 +105,13 @@ def write_summary(path, report):
             for test in slow:
                 stream.write(f"- `{test['name']}`: {test['seconds']:.1f}s / "
                              f"{test['timeout_seconds']:.1f}s.\n")
+        workload = [test for test in report.get('tests', [])
+                    if test['status'] == 'passed' and test.get('workload_warnings')]
+        if workload:
+            stream.write('\nThese tests completed all assertions using additional instrumented workload time:\n\n')
+            for test in workload:
+                for warning in test['workload_warnings']:
+                    stream.write(f"- `{test['name']}`: {warning}\n")
         if report.get('error'):
             stream.write(f"Runner error: {report['error']}\n\n")
 
@@ -143,6 +158,9 @@ def run(args):
         else:
             returncode = returncode or 1
         for test in report['tests']:
+            if test['status'] == 'passed':
+                for warning in test['workload_warnings']:
+                    annotation(f"{test['name']} passed all assertions. {warning}", title='CI test workload')
             if test['near_timeout']:
                 annotation(f"{test['name']} passed in {test['seconds']:.1f}s, "
                            f"near its {test['timeout_seconds']:.1f}s allowance. "
