@@ -36,134 +36,46 @@ jobs:
       linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
       windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
 
-  application:
+  packages:
     if: ${{ !inputs.devfast }}
-    name: App and tests with SDK, ${{ matrix.backend }} on ${{ matrix.name }}
-    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
-    container: ${{ matrix.image }}
-    timeout-minutes: 120
+    name: SDK packages, ${{ matrix.backend }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: Bookworm
-            image: debian:bookworm-slim
+          - image: debian:bookworm-slim
             backend: fltk
-          - name: Ubuntu-24.04
-            image: ubuntu:24.04
+          - image: ubuntu:24.04
             backend: rev
-    env:
-      DEBIAN_FRONTEND: noninteractive
-      LIBGL_ALWAYS_SOFTWARE: '1'
-      LP_NUM_THREADS: '2'
-    steps:
-      # No host compiler or development packages: the downloaded SDK supplies
-      # all application headers/libraries, GCC, CMake, Ninja and pkg-config.
-      - name: Load current package-fetch helper before installing Git
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ github.sha }}
-          path: .ci-bootstrap
-          sparse-checkout: tools/ci-apt.sh
-          sparse-checkout-cone-mode: false
-      - name: Install checkout and runtime test prerequisites
-        run: |
-          cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
-          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates git gh python3 file binutils make xvfb xauth fonts-dejavu-core fontconfig-config libgl1 libopengl0 libgl1-mesa-dri libxtst6
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Fetch the exact published SDK from base
-        id: sdk
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 tools/sdk-release.py fetch --binary-only --repo "$GITHUB_REPOSITORY" --directory downloaded-sdk --github-output "$GITHUB_OUTPUT"
-      - name: Install and verify the same SDK on this host
-        run: |
-          if [ '${{ steps.sdk.outputs.found }}' != true ]; then
-            echo '::error::The base release has no SDK matching this recipe. Run the SDK base workflow first.'
-            exit 1
-          fi
-          set -- downloaded-sdk/datapump-sdk-*-linux-x86_64.tar.gz
-          test "$#" -eq 1
-          python3 tools/build-sdk.py install --archive "$1" --destination "$GITHUB_WORKSPACE/build/sdk"
-          python3 tools/build-sdk.py verify "$GITHUB_WORKSPACE/build/sdk" --max-host-glibc 2.36
-      - name: Verify relocated SDK tools and their private runtimes
-        run: |
-          python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-          import subprocess
+    uses: ./.github/workflows/sdk-application.yml
+    with:
+      scope: packages
+      backend: ${{ matrix.backend }}
+      image: ${{ matrix.image }}
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
 
-          root = (Path(os.environ['GITHUB_WORKSPACE']) / 'build/sdk').resolve()
-          manifest = json.loads((root / 'share/datapump-sdk/manifest.json').read_text())
-          runtimes = {'libstdc++.so.6', 'libgcc_s.so.1'}
-          for name in runtimes:
-              if not (root / 'lib' / name).is_file():
-                  raise SystemExit('SDK host runtime is missing: ' + name)
-          env = os.environ.copy()
-          for name in ('LD_LIBRARY_PATH', 'LD_PRELOAD', 'LD_AUDIT', 'LD_DEBUG'):
-              env.pop(name, None)
-          compiler = root / manifest['target']['cxx_compiler']
-          cc1plus = subprocess.check_output([str(compiler), '-print-prog-name=cc1plus'], env=env, text=True).strip()
-          python = root / 'bin/python3'
-          tools = [root / 'bin/cmake', root / 'bin/ninja', Path(cc1plus), python]
-          if (root / 'bin/patchelf').is_file():
-              tools.append(root / 'bin/patchelf')
-          for tool in tools:
-              if not tool.is_absolute() or not tool.is_file() or root not in tool.resolve().parents:
-                  raise SystemExit('SDK host tool is missing or outside its root: ' + str(tool))
-              result = subprocess.run(['ldd', str(tool)], env=env, text=True, capture_output=True, check=True)
-              if 'not found' in result.stdout:
-                  raise SystemExit('SDK host dependency is missing: ' + result.stdout)
-              for line in result.stdout.splitlines():
-                  fields = line.split()
-                  if fields and fields[0] in runtimes:
-                      expected = (root / 'lib' / fields[0]).resolve()
-                      if len(fields) < 3 or fields[1] != '=>' or Path(fields[2]).resolve() != expected:
-                          raise SystemExit('SDK tool selected a non-SDK C++ runtime: ' + str(tool) + '\n' + line)
-              print('Verified SDK host runtime resolution:', tool.relative_to(root))
-          python_paths = json.loads(subprocess.check_output([str(python), '-c',
-              'import argparse, json, pathlib, re, sys, sysconfig; print(json.dumps([sys.executable, sys.prefix, sys.base_prefix, sysconfig.get_path("stdlib")]))'], env=env, text=True))
-          for location in python_paths:
-              resolved = Path(location).resolve()
-              if resolved != root and root not in resolved.parents:
-                  raise SystemExit('SDK Python selected a path outside its installation: ' + location)
-          print('Verified relocated SDK Python and Rev resource-builder imports:', python_paths[0])
-          PY
-      - name: Build and verify portable application archives
-        run: |
-          ./build.sh package --sdk "$GITHUB_WORKSPACE/build/sdk" --backend '${{ matrix.backend }}' --build-dir build/sdk-application --jobs 2 --build-jobs "$(nproc)"
-          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' build/sdk/bin/cmake -DARCHIVE_DIR="$PWD/build/sdk-application/releases" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.36 -P tools/verify-native-archives.cmake
-      - name: Run build and packaging isolation regressions
-        run: |
-          ./build.sh test build --sdk "$GITHUB_WORKSPACE/build/sdk" --backend '${{ matrix.backend }}' --build-dir build/sdk-application --jobs 2 --build-jobs "$(nproc)" -- -DDATAPUMP_PORTABLE=ON
-          ./build.sh test packaging --sdk "$GITHUB_WORKSPACE/build/sdk" --backend '${{ matrix.backend }}' --build-dir build/sdk-application --jobs 2 --build-jobs "$(nproc)" -- -DDATAPUMP_PORTABLE=ON
-      - name: Preserve wire and shared GUI contracts with the SDK toolchain
-        if: matrix.backend == 'fltk'
-        run: ./build.sh test contract --sdk "$GITHUB_WORKSPACE/build/sdk" --backend fltk --build-dir build/sdk-application --jobs 2 --build-jobs "$(nproc)" -- -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600
-      - name: Run Rev native conformance separately under a private display
-        if: matrix.backend == 'rev'
-        # Full validation includes the complete workflow; devfast never runs it.
-        # Only its overall allowance changes, not the internal assertions.
-        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' ./build.sh test native --sdk "$GITHUB_WORKSPACE/build/sdk" --backend rev --build-dir build/sdk-application --jobs 2 --build-jobs "$(nproc)" -- -DDATAPUMP_PORTABLE=ON -DGUI_SMOKE_TIMEOUT=600
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: DataPump-SDK-${{ matrix.backend }}-Linux-x86_64-glibc-2.36
-          path: |
-            build/sdk-application/releases/*.tar.gz
-            build/sdk-application/releases/*.zip
-            build/sdk-application/releases/SHA256SUMS.txt
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 1
+  tests:
+    if: ${{ !inputs.devfast }}
+    name: SDK tests, ${{ matrix.backend }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: debian:bookworm-slim
+            backend: fltk
+          - image: ubuntu:24.04
+            backend: rev
+    uses: ./.github/workflows/sdk-application.yml
+    with:
+      scope: tests
+      backend: ${{ matrix.backend }}
+      image: ${{ matrix.image }}
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
 
   compatibility:
     if: ${{ !inputs.devfast }}
     name: Copied SDK-built ${{ matrix.backend }} on ${{ matrix.image }}
-    needs: application
+    needs: packages
     runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
     container: ${{ matrix.image }}
     timeout-minutes: 45
@@ -201,4 +113,24 @@ jobs:
           sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
           echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
       - name: Verify the identical archives on this distribution
-        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/downloaded" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.36 -P tools/verify-native-archives.cmake
+        shell: bash
+        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/downloaded" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.36 -P tools/verify-native-archives.cmake 2>&1 | tee "$RUNNER_TEMP/sdk-compatibility.log"
+      - name: Preserve failed or cancelled copied-runtime log
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: DataPump-SDK-compatibility-${{ strategy.job-index }}-failure-log
+          path: ${{ runner.temp }}/sdk-compatibility.log
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Summarize copied-runtime qualification
+        if: always()
+        env:
+          RESULT: ${{ job.status }}
+          BACKEND: ${{ matrix.backend }}
+          IMAGE: ${{ matrix.image }}
+        run: |
+          {
+            printf 'SDK copied runtime **%s / %s**: **%s**.\n\n' "$BACKEND" "$IMAGE" "$RESULT"
+            echo 'Both archive formats retain full smoke, checksum, ABI and relocation checks. Source qualification runs independently and remains required for the complete workflow.'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -300,11 +300,47 @@ Branch pushes do not launch a second copy of the PR checks, and documentation
 changes alone do not trigger them. Release and base workflows retain their
 path-specific helper checks. Automatic green checks do **not** mean the full
 application passed regression testing. Dispatch `ci.yml` with `devfast=false`
-when the candidate is ready; its native GUI, sanitizer, Windows, application
-and archive checks remain intact. `sdk.yml` is now manual so the additional
+when the candidate is ready; required native GUI, sanitizer regression, Windows,
+application and archive checks run in independent scopes. The instrumented GUI
+smoke is separately opt-in as described below. `sdk.yml` is manual so the additional
 SDK host-tool and copied Bookworm/Ubuntu matrix runs when relevant, without
 duplicating every push and PR. Ordinary consumers fail on a missing base recipe
 instead of silently building an SDK.
+
+### Parallel CI scopes and timing warnings
+
+Native CI builds portable packages independently of source regression jobs.
+Copied Linux checks depend only on the package producer, so sanitizer or
+calibration work cannot delay them. Linux Release/Debug and Windows split
+regressions into Core, Fast and calibration jobs. Calibration runs its four
+existing independent sections (`matrix`, `shaped`, `null`, `default-window`) on
+separate runners; each preserves all its fixed seeds and aggregate assertions.
+Local calibration still defaults to `all` and the existing CTest name. The
+`DATAPUMP_CALIBRATION_SECTION` CMake setting selects a section for CI.
+
+[`tools/run-ci-tests.py`](../tools/run-ci-tests.py) assigns every registered test
+to exactly one functional scope. Contract labels intentionally overlap these
+scopes and are not another duplicated test selection. Each run checks its JUnit
+results against the selected inventory and retains JSON timing/coverage, JUnit
+and console logs. Passing tests that consume at least 80% of their individual
+timeout produce warnings. Assertions, sanitizer findings, skipped mandatory
+tests and unclassified timeouts remain failures; elapsed time alone cannot
+establish correctness.
+
+Package and test jobs share reusable workflow definitions, not configured build
+trees. This repeats a small amount of setup/compilation while avoiding brittle
+build-tree relocation and keeping test work disjoint. Linux retains two CTest
+slots and Windows one; calibration detects available CPUs, capped at 16.
+SDK package producers likewise run independently of source qualification, so
+copied SDK binaries can be checked as soon as the packages are ready. Every
+required scope still contributes to the workflow result.
+
+H pools remain the defaults. Standard runners can be selected explicitly:
+
+```sh
+gh workflow run ci.yml --ref REF -f devfast=false -f linux_runner=ubuntu-24.04 -f windows_runner=windows-2022
+gh workflow run sdk.yml --ref REF -f devfast=false -f linux_runner=ubuntu-24.04
+```
 
 For changes confined to Linux distribution packaging, start with
 `python3 tests/test_apt_release.py`, `python3 tests/test_distro_release.py`,
@@ -378,9 +414,10 @@ capture queue before decoding catches up. This is not evidence of a hardware-onl
 fault. The omission removes these scenarios' instrumented end-to-end coverage;
 the job notice and summary name it explicitly. No error is converted to success.
 
-Release jobs still require both tests, and all other sanitizer tests remain
-required. Calibration, source contract checks and release certification are
-unchanged. Include the two instrumented checks explicitly with:
+Release jobs still require both tests, and all other sanitizer regression tests
+remain required across the independent scopes. Calibration, source contract
+checks and release certification retain their assertions. Include the two
+instrumented checks explicitly with:
 
 ```sh
 gh workflow run ci.yml --ref REF -f devfast=false -f sanitizer_realtime=true
@@ -400,7 +437,11 @@ Failures remain fatal when requested. Keep the production FIFO, physical-end and
 pending-content assertions intact; do not classify unrelated sanitizer findings
 as performance warnings.
 
-The separate instrumented native GUI smoke has a cumulative workload allowance,
+The instrumented native GUI smoke is an independent optional job. Normal full
+CI omits it and explicitly records missing instrumented desktop coverage;
+Release/package GUI smoke remains mandatory. Select `sanitizer_smoke=true` to
+include it alongside full regression, or use the focused diagnostic below.
+It has a cumulative workload allowance,
 not a real-time receiver requirement. If that allowance expires while the same
 finite sampled transmission is demonstrably advancing, the application returns
 75 with `INCOMPLETE GUI_SMOKE_BUDGET:` and progress evidence. All existing smoke
@@ -409,7 +450,7 @@ polling or advancing wall-clock compute time cannot establish progress. The
 recent-progress window is 30 seconds; errors and non-transmission waits keep
 their ordinary failure result.
 
-Only native CI's Debug step opts into treating this exact result as a warning
+Only native CI's optional Debug smoke job treats this exact result as a warning
 with **incomplete instrumented GUI coverage**. Its log is retained as a workflow
 artifact and its summary identifies the missing coverage; it is not a smoke
 pass. The wrapper rejects sanitizer diagnostics, crashes, external process
@@ -424,8 +465,8 @@ repeating unrelated calibration or platform suites, use:
 gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=sanitizer-gui
 ```
 
-This uses the same Debug compiler, sanitizer flags, H runner and 600-second
-smoke allowance as full native CI. It additionally checks the budget classifier
+This uses the same Debug compiler, sanitizer flags, default H runner and
+600-second smoke allowance. It additionally checks the budget classifier
 and strict runner policy with bounded fixtures. A successful diagnostic with an
 incomplete warning is not full native qualification. Ordinary automatic CI
 remains limited to the existing lightweight checks.

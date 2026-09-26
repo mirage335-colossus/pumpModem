@@ -12,7 +12,7 @@ endforeach()
 # executable prerequisite are listed explicitly so new cases cannot silently
 # run without their required build step.
 set(_script_tests legacy_boundary fast_boundary vendored_lzma_source packaging_cxx_runtime
-  gui_adapter_boundary gui_boundary_regression packaging_support sdk_packaging build_wrapper build_gui_smoke_runner build_dependencies build_source_sdk build_sdk_runtime build_release build_release_dependencies build_sdk_release build_certify_release build_windows_certification build_release_rev_tools build_windows_base build_ci_apt build_apt_release build_distro_release build_arch_release build_gentoo_sync)
+  gui_adapter_boundary gui_boundary_regression packaging_support sdk_packaging build_wrapper build_gui_smoke_runner build_ci_tests build_dependencies build_source_sdk build_sdk_runtime build_release build_release_dependencies build_sdk_release build_certify_release build_windows_certification build_release_rev_tools build_windows_base build_ci_apt build_apt_release build_distro_release build_arch_release build_gentoo_sync)
 set(_aliases
   "gui_document_layout=test_document_layout"
   "gui_record_reconciliation=test_record_reconciliation"
@@ -96,10 +96,14 @@ foreach(_test IN LISTS _tests)
   foreach(_group IN LISTS _labels)
     list(APPEND _group_${_group} ${_dependencies})
   endforeach()
+  if(NOT "fast" IN_LIST _labels AND NOT "calibration" IN_LIST _labels)
+    list(APPEND _ci_core_targets ${_dependencies})
+  endif()
   list(APPEND _all_test_targets ${_dependencies})
 endforeach()
 
 add_custom_target(datapump-tests DEPENDS ${_all_test_targets})
+add_custom_target(datapump-tests-ci-core DEPENDS ${_ci_core_targets})
 foreach(_group contract regular fast legacy gui native packaging build)
   if(_group STREQUAL "native")
     set(_label native_gui)

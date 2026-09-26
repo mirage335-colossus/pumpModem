@@ -338,7 +338,8 @@ void default_window_capture() {
 int main(int argc,char** argv) {
     try {
         auto workers=bounded_workers(std::thread::hardware_concurrency());
-        bool plan_only=false,workers_set=false;
+        bool plan_only=false,workers_set=false,section_set=false;
+        std::string_view section="all";
         for(int arg=1;arg<argc;++arg) {
             const std::string_view option=argv[arg];
             if(option=="--check-worker-plan")plan_only=true;
@@ -349,16 +350,26 @@ int main(int argc,char** argv) {
                       workers>=1&&workers<=maximum_workers,
                       "calibration --workers must be an integer from 1 to 16");
                 workers_set=true;
-            } else throw Error("Usage: test_differential_receiver_probability [--workers 1..16] [--check-worker-plan]");
+            } else if(option=="--section"&&!section_set&&arg+1<argc) {
+                section=argv[++arg];
+                check(section=="all"||section=="matrix"||section=="shaped"||section=="null"||section=="default-window",
+                      "calibration --section must be all, matrix, shaped, null or default-window");
+                section_set=true;
+            } else throw Error("Usage: test_differential_receiver_probability [--workers 1..16] [--section all|matrix|shaped|null|default-window] [--check-worker-plan]");
         }
         check_worker_plan();
         std::cout<<"Differential receiver calibration: "<<workers<<" independent capture workers, "
-                 <<captures_per_case<<" fixed seeds per matrix case"<<std::endl;
+                 <<captures_per_case<<" fixed seeds per matrix case; section "<<section<<std::endl;
         if(plan_only) {
             std::cout<<"worker partitions 1..16 preserve all fixed seeds; no calibration run\n";
             return 0;
         }
-        sampled_matrix(workers);sampled_shaped_matrix(workers);null_controls();default_window_capture();
+        // Keep each matrix whole: its aggregate error and improvement checks
+        // must not be replaced by assertions on independently selected cases.
+        if(section=="all"||section=="matrix")sampled_matrix(workers);
+        if(section=="all"||section=="shaped")sampled_shaped_matrix(workers);
+        if(section=="all"||section=="null")null_controls();
+        if(section=="all"||section=="default-window")default_window_capture();
         std::cout<<"differential receiver probability tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"differential receiver probability tests failed: "<<error.what()<<'\n';return 1;}
 }

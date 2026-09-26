@@ -1,0 +1,152 @@
+name: Native Linux validation shard
+
+on:
+  workflow_call:
+    inputs:
+      linux_runner:
+        type: string
+        default: ubuntu-latest-h
+      build_type:
+        type: string
+        default: Release
+      scope:
+        description: 'core, fast, calibration, package, or sanitizer-gui'
+        type: string
+        required: true
+      calibration_section:
+        type: string
+        default: all
+      sanitizer_realtime:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: Linux ${{ inputs.build_type }} / ${{ inputs.scope }} / ${{ inputs.calibration_section }}
+    runs-on: ${{ inputs.linux_runner }}
+    # Preserve the portable application's glibc 2.35 baseline in every shard.
+    container: ubuntu:22.04
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      ASAN_OPTIONS: detect_leaks=0:halt_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+      CC: gcc-11
+      CXX: g++-11
+      CI_SCOPE: ${{ inputs.scope }}
+      DATAPUMP_SANITIZERS: ${{ inputs.build_type == 'Debug' && 'ON' || 'OFF' }}
+      SANITIZER_REALTIME: ${{ inputs.sanitizer_realtime }}
+    steps:
+      - name: Load current package-fetch helper before installing Git
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .ci-bootstrap
+          sparse-checkout: tools/ci-apt.sh
+          sparse-checkout-cone-mode: false
+      - name: Prepare build dependencies
+        run: |
+          cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
+          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates curl git cmake ninja-build make g++-11 binutils libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev xvfb xauth fontconfig-config fonts-dejavu-core python3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned dependency scanner
+        run: |
+          sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
+          echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
+      - name: Configure native application without Python
+        run: >-
+          cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc-11 -DCMAKE_CXX_COMPILER=g++-11
+          -DCMAKE_BUILD_TYPE=${{ inputs.build_type }}
+          -DDATAPUMP_SANITIZERS=${{ inputs.build_type == 'Debug' && 'ON' || 'OFF' }}
+          -DDATAPUMP_PORTABLE=${{ inputs.build_type == 'Release' && 'ON' || 'OFF' }}
+          -DBUILD_TESTING=${{ inputs.scope == 'package' && 'OFF' || 'ON' }}
+          -DDATAPUMP_CALIBRATION_SECTION=${{ inputs.calibration_section }}
+          -DDART_TESTING_TIMEOUT=3600
+          -DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE
+      - name: Build this shard's prerequisites
+        run: |
+          case "$CI_SCOPE" in
+            calibration) targets=(test_differential_receiver_probability) ;;
+            package) targets=(datapump-apps) ;;
+            sanitizer-gui) targets=(datapump-apps test_gui_smoke_budget test_gui_launch_command) ;;
+            core) targets=(datapump-apps datapump-tests-ci-core) ;;
+            fast) targets=(datapump-tests-fast) ;;
+            *) echo "Unknown native scope: $CI_SCOPE" >&2; exit 2 ;;
+          esac
+          cmake --build build --target "${targets[@]}" --parallel "$(nproc)"
+      - name: Run the selected native tests
+        if: inputs.scope == 'core' || inputs.scope == 'fast' || inputs.scope == 'calibration'
+        run: |
+          options=()
+          if [ "$DATAPUMP_SANITIZERS" = ON ]; then
+            options+=(--sanitizers)
+          fi
+          if [ "$SANITIZER_REALTIME" = true ]; then
+            options+=(--sanitizer-realtime)
+          fi
+          python3 tools/run-ci-tests.py --build-dir build --scope "$CI_SCOPE" --jobs 2 --report build/ci-test-report.json "${options[@]}"
+      - name: Record separate instrumented desktop coverage
+        if: inputs.scope == 'core' && inputs.build_type == 'Debug'
+        run: |
+          echo '::notice::Instrumented desktop smoke is a separate opt-in job. Its omission is not a smoke pass; Release/package desktop workflows remain required.'
+          echo 'Instrumented desktop smoke is outside this regression shard. Select sanitizer_smoke=true or the focused sanitizer-gui diagnostic to run it. Omitted instrumented desktop coverage is not a pass.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Check the focused smoke budget policy
+        if: inputs.scope == 'sanitizer-gui'
+        run: |
+          python3 tests/test_gui_smoke_runner.py
+          ctest --test-dir build --output-on-failure --no-tests=error -R '^(gui_smoke_budget|gui_launch_command)$'
+          echo 'Focused instrumented GUI workflow and budget-policy checks only; no general regression or calibration is claimed by this job.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Exercise native desktop workflow
+        if: inputs.scope == 'package' || inputs.scope == 'sanitizer-gui'
+        run: |
+          options=()
+          if [ "$DATAPUMP_SANITIZERS" = ON ]; then
+            options+=(--allow-budget-exhaustion)
+          fi
+          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' python3 tools/run-gui-smoke.py "${options[@]}" --log "build/gui-smoke-${{ inputs.build_type }}-${{ github.run_attempt }}.log" --summary "$GITHUB_STEP_SUMMARY" -- ./build/datapump-gui --smoke-test --smoke-timeout 600
+      - name: Developer CLI regressions (Python is not packaged)
+        if: inputs.scope == 'core'
+        run: python3 tests/test_cli.py build/pump
+      - name: Verify relocated native GUI and package inventory
+        if: inputs.scope == 'package'
+        run: |
+          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DBUILD_DIR="$PWD/build" -DCONFIG=Release -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P tests/package_native.cmake 2>&1 | tee build/package-relocation.log
+      - name: Create and verify both native archives
+        if: inputs.scope == 'package'
+        run: |
+          cmake --build build --target package --parallel "$(nproc)"
+          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/build/releases" -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.35 -P tools/verify-native-archives.cmake 2>&1 | tee build/package-archives.log
+          echo 'Portable Release desktop, relocation, corruption, both archive formats and ABI checks passed. Independent regression/calibration jobs still determine the overall workflow result.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload Linux offline bundles
+        if: inputs.scope == 'package'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: DataPump-Linux-x86_64-glibc-2.35
+          path: |
+            build/releases/*.tar.gz
+            build/releases/*.zip
+            build/releases/SHA256SUMS.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+      - name: Retain shard reports and failure logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: CI-Linux-${{ inputs.build_type }}-${{ inputs.scope }}-${{ inputs.calibration_section }}-attempt-${{ github.run_attempt }}
+          path: |
+            build/ci-test-report.*
+            build/Testing/Temporary/
+            build/gui-smoke-*.log
+            build/package-*.log
+          if-no-files-found: warn
+          retention-days: 7
