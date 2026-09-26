@@ -135,11 +135,14 @@ class CTestIntegration(unittest.TestCase):
         self.assertFalse(report['tests'][0]['near_timeout'])
 
     def test_workload_warning_from_passing_ctest_output_remains_visible(self):
-        marker = 'TEST_WORKLOAD_BUDGET: fixture: exceeded 30s normal budget; instrumented limit 90s (full completion remains required)'
-        result, report, output = self.exercise(f'print({marker!r})')
-        self.assertEqual(result, 0)
-        self.assertEqual(report['tests'][0]['workload_warnings'], [marker])
-        self.assertIn('::warning title=CI test workload::sample passed all assertions.', output)
+        for marker in (
+                'TEST_WORKLOAD_BUDGET: fixture: exceeded 30s normal budget; instrumented limit 90s (full completion remains required)',
+                'TEST_WORKLOAD_BUDGET: GUI smoke completed in 601s, above its ordinary 600s workload allowance; every workflow assertion completed.'):
+            with self.subTest(marker=marker):
+                result, report, output = self.exercise(f'print({marker!r})')
+                self.assertEqual(result, 0)
+                self.assertEqual(report['tests'][0]['workload_warnings'], [marker])
+                self.assertIn('::warning title=CI test workload::sample passed all assertions.', output)
 
     def test_workload_marker_cannot_turn_failure_into_warning(self):
         marker = 'TEST_WORKLOAD_BUDGET: fixture: exceeded 30s normal budget'

@@ -382,7 +382,7 @@ if(BUILD_TESTING)
     add_test(NAME gui_self_check COMMAND datapump-gui --self-check)
     set_tests_properties(gui_self_check PROPERTIES LABELS "gui")
     if(DATAPUMP_TEST_NATIVE_GUI)
-      set(GUI_SMOKE_TIMEOUT 300 CACHE STRING "Overall native GUI workflow allowance in seconds (10 to 600)")
+      set(GUI_SMOKE_TIMEOUT 300 CACHE STRING "Overall native GUI workflow allowance in seconds (10 to 1200)")
       include("${CMAKE_CURRENT_SOURCE_DIR}/tools/gui-smoke-timeout.cmake")
       add_test(NAME gui_workflow COMMAND datapump-gui --smoke-test --smoke-timeout "${GUI_SMOKE_TIMEOUT}")
       set_tests_properties(gui_workflow PROPERTIES LABELS "gui;native_gui"

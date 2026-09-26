@@ -49,6 +49,14 @@ class SmokeClassificationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             classify(0, 'earlier output\n' + MARKER, True)
 
+    def test_extended_gui_scope_budget_never_gains_the_instrumented_exception(self):
+        extended = MARKER.replace('elapsed=600.011000', 'elapsed=1200.011000').replace(
+            'budget=600.000000', 'budget=1200.000000')
+        for allow in (False, True):
+            for code in (0, 1, 75, 124):
+                with self.subTest(allow=allow, code=code), self.assertRaises(ValueError):
+                    classify(code, extended, allow)
+
     def test_extra_diagnostics_never_hide_behind_a_valid_marker(self):
         for extra in ('Shared GUI smoke pending assertion failed', 'Segmentation fault',
                       'terminate called after throwing an exception', 'Xvfb: server failed',

@@ -1307,7 +1307,7 @@ void smoke_shutdown_does_not_resume_workflow() {
         std::filesystem::path path;
         ~Cleanup(){std::error_code ignored;std::filesystem::remove_all(path,ignored);}
     } cleanup{directory};
-    // Internal fixture only: the public CLI still accepts only 10..600 seconds.
+    // Internal fixture only: the public CLI still accepts only 10..1200 seconds.
     Application app({.simulation=true,.smoke=true,.timeout=0,.smoke_directory=directory});
     app.edit(ui::Field::message,"Preserved shutdown draft");
     const auto draft=app.field(ui::Field::message).text;

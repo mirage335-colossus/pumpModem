@@ -60,7 +60,7 @@ on:
       diagnostic:
         description: 'Focused check used only with devfast=true'
         type: choice
-        options: [legacy, certification, windows-certification, windows-rev, graphics, arm-rev-package, arm-rev-smoke, sanitizer-gui, runner-capacity, arm-runner-capacity]
+        options: [legacy, certification, windows-certification, windows-rev, graphics, arm-rev-package, arm-rev-smoke, gui-contract, sanitizer-gui, runner-capacity, arm-runner-capacity]
         default: legacy
       diagnostic_release:
         description: 'Published release tag for graphics diagnostics only; no binaries are rebuilt'
@@ -148,11 +148,11 @@ jobs:
       smoke: ${{ inputs.diagnostic == 'arm-rev-smoke' }}
 
   gui-contract:
-    if: github.event_name == 'workflow_dispatch' && !inputs.devfast
+    if: github.event_name == 'workflow_dispatch' && (!inputs.devfast || inputs.diagnostic == 'gui-contract')
     name: GUI contract (${{ matrix.backend }})
     runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
     container: debian:trixie-slim
-    timeout-minutes: 30
+    timeout-minutes: ${{ inputs.linux_runner == 'ubuntu-24.04' && 45 || 30 }}
     strategy:
       fail-fast: false
       matrix:
@@ -161,7 +161,7 @@ jobs:
       DEBIAN_FRONTEND: noninteractive
       LIBGL_ALWAYS_SOFTWARE: "1"
       # Keep software rendering from saturating the UI polling thread's CPUs.
-      LP_NUM_THREADS: "2"
+      LP_NUM_THREADS: ${{ inputs.linux_runner == 'ubuntu-24.04' && '1' || '2' }}
     steps:
       - name: Load current package-fetch helper before installing Git
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -179,14 +179,15 @@ jobs:
         with:
           persist-credentials: false
       - name: Configure the same contract suite for the selected adapter
-        # Full validation runs the whole smoke sequence; devfast skips it.
-        # Extend only its overall budget, preserving every internal deadline.
+        # The focused GUI diagnostic runs this same complete scope. Standard
+        # runners get bounded cumulative computation headroom, with a warning
+        # after a successful >600s smoke; all internal assertions stay strict.
         run: >-
           cmake -S . -B build-gui -G Ninja
           -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19
           -DCMAKE_BUILD_TYPE=Release -DDATAPUMP_PORTABLE=OFF
           -DDATAPUMP_GUI_BACKEND=${{ matrix.backend }} -DDATAPUMP_TEST_NATIVE_GUI=ON
-          -DGUI_SMOKE_TIMEOUT=600 -DDART_TESTING_TIMEOUT=3600
+          -DGUI_SMOKE_TIMEOUT=${{ inputs.linux_runner == 'ubuntu-24.04' && '1200' || '600' }} -DDART_TESTING_TIMEOUT=3600
       - run: cmake --build build-gui --target datapump-tests-gui --parallel "$(nproc)"
       - name: Check offline build and dependency tooling
         if: matrix.backend == 'fltk'
@@ -195,6 +196,9 @@ jobs:
           ctest --test-dir build-gui --output-on-failure -L '^build$'
       - name: Test shared behavior, native contract and simulated workflow
         run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' python3 tools/run-ci-tests.py --build-dir build-gui --scope gui --jobs 1 --report build-gui/ci-test-report.json
+      - name: Record focused GUI scope
+        if: inputs.devfast
+        run: echo 'This diagnostic runs both complete GUI contracts. It does not run general native regression, calibration, SDK or package qualification; skipped scopes are not passes.' >> "$GITHUB_STEP_SUMMARY"
       - name: Retain GUI timing report and failure logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

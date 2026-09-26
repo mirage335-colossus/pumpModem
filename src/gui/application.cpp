@@ -556,7 +556,7 @@ int gui_main(int argc,char** argv,const char* backend,const std::function<int(La
                 const std::string value=argv[++i];std::size_t used=0;const double number=std::stod(value,&used);
                 if(used!=value.size()||!std::isfinite(number)||number<0)throw Error("Invalid smoke argument");
                 if(arg=="--smoke-hold"&&number<=60)launch.hold=number;
-                else if(arg=="--smoke-timeout"&&number>=10&&number<=600)launch.timeout=number;
+                else if(arg=="--smoke-timeout"&&number>=10&&number<=1200)launch.timeout=number;
                 else if(arg=="--smoke-scroll"&&number<=1)launch.scroll=number;
                 else throw Error("Smoke argument out of range");
             } else if(arg=="--smoke-view"&&i+1<argc) {

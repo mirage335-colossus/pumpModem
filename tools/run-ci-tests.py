@@ -108,7 +108,7 @@ def write_summary(path, report):
         workload = [test for test in report.get('tests', [])
                     if test['status'] == 'passed' and test.get('workload_warnings')]
         if workload:
-            stream.write('\nThese tests completed all assertions using additional instrumented workload time:\n\n')
+            stream.write('\nThese tests completed all assertions using additional workload time:\n\n')
             for test in workload:
                 for warning in test['workload_warnings']:
                     stream.write(f"- `{test['name']}`: {warning}\n")

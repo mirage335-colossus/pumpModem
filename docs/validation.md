@@ -102,6 +102,51 @@ are unchanged from `75f59241136aa6681364db77c475bc97211b9cc9`; its SDK and ARM64
 package evidence remains applicable while the final full native run exercises
 the revised calibration execution and all ordinary platform coverage.
 
+[SDK follow-up 36276100619](https://github.com/mirage335-colossus/pumpModem/actions/runs/36276100619)
+passed all eight required jobs on `75f5924`, reusing the exact prepared base
+recipes. Both source scopes passed 21 build-tool and four packaging suites;
+FLTK passed all 30 contract cases and Rev all five native cases. Both package
+producers and all four copied-runtime checks passed both archive formats,
+including all 13 required GUI workflows, dependency closure, relocation and
+glibc 2.36 verification. Only two established Rev cadence advisories appeared
+in copied Rev checks; no smoke coverage was omitted. The active span was 19m32s
+versus the earlier 35m58s, and summed job duration was 70m17s versus 79m13s.
+Copied checks began three seconds after the final package producer while FLTK
+source qualification was still running. This is observed same-pool evidence,
+not a controlled repeated benchmark.
+
+[ARM64 Rev follow-up 36276106091](https://github.com/mirage335-colossus/pumpModem/actions/runs/36276106091)
+passed both complete copied GUI workflows on Ubuntu 22.04 and Debian Trixie
+using `75f5924`, including the delayed-acquisition correction. Both retained
+the 35-ELF glibc 2.35 audit, dependency closure and unchanged TAR/ZIP inventory.
+The shared TAR SHA256 is
+`0a787ba56fb6423757cf3170ad94605d2b165581679a599be7db6900800a1690`.
+Only established advisory Rev cadence warnings appeared: Ubuntu phases 11/13
+(7/2 frames), Trixie phases 11/13/21 (9/4/3 frames). No assertion, timeout or
+incomplete-coverage exception was used.
+
+Final [full native standard-runner qualification 36276955453](https://github.com/mirage335-colossus/pumpModem/actions/runs/36276955453)
+uses `1126578f88c06c27d24401b130b77defb9ef2470`, `devfast=false`,
+`ubuntu-24.04` and `windows-2022`. The separate Debug Live job passed both full
+suites in 489.65 seconds. Its early-acquisition exact-bit case exceeded the
+ordinary 30-second workload budget, emitted the retained warning and completed
+within the 90-second instrumented allowance. No sanitizer diagnostic appeared.
+The Rev GUI scope failed at its mandatory 600-second cumulative smoke budget:
+phase 17, transmission 14 at fraction 0.068853, 9.274931 media seconds and
+5061237 samples, with useful progress six microseconds earlier. The other
+42 GUI tests passed. This Release outcome remains a failure; no content
+assertion or sanitizer diagnostic was reported before exhaustion.
+
+The final smoke-only follow-up permits a 1200-second cumulative workload for
+standard-runner GUI contracts, keeps H and portable-package budgets at 600,
+and uses one software-rendering worker on the standard runner. A warning is
+emitted only after full smoke success exceeds 600 seconds. Every internal
+assertion and deadline remains unchanged, and an exhausted 1200-second budget
+still returns a fatal nonzero outcome; it cannot acquire the separate
+instrumented incomplete-coverage exception. A focused `gui-contract` dispatch
+runs both complete GUI suites after this change, reusing the other completed
+checks for their unchanged source/configuration. Qualification is ongoing.
+
 ## CI package recovery and replay interruption fixtures — 26 September 2026
 
 [Certification 36010161027](https://github.com/mirage335-colossus/pumpModem/actions/runs/36010161027)

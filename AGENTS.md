@@ -43,6 +43,10 @@ captures have their own documented provenance. Keep all checks below intact.
   Distributed calibration must retain every fixed seed and require the original
   per-case and combined statistical gates after complete result aggregation;
   successful partial captures alone are not qualification.
+  Standard-runner GUI contracts permit a bounded 1200-second cumulative smoke
+  workload, warning after complete success exceeds 600 seconds. H and portable
+  package scopes keep their existing budgets. This changes no individual
+  assertion or physical deadline, and any incomplete Release smoke stays fatal.
 - Native CI excludes only `fast_session` and `gui_fast_live` from its instrumented
   Debug job unless `sanitizer_realtime=true` is explicitly requested. Their
   real-time audio budgets are sensitive to sanitizer overhead; this is omitted

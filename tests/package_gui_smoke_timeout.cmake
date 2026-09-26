@@ -8,16 +8,16 @@ function(check_gui_smoke_timeouts package_directory archive_directory fixture_bu
   file(REAL_PATH "${archive_verifier}" archive_verifier)
   file(REAL_PATH "${relocation_verifier}" relocation_verifier)
   foreach(verifier IN ITEMS "${package_verifier}" "${archive_verifier}" "${relocation_verifier}")
-    foreach(invalid IN ITEMS "" 9 601 -1 1.5 30s)
+    foreach(invalid IN ITEMS "" 9 1201 -1 1.5 30s)
       execute_process(COMMAND "${CMAKE_COMMAND}" "-DGUI_SMOKE_TIMEOUT=${invalid}" -P "${verifier}"
         RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error)
-      if(status EQUAL 0 OR NOT error MATCHES "GUI_SMOKE_TIMEOUT must be an integer from 10 to 600")
+      if(status EQUAL 0 OR NOT error MATCHES "GUI_SMOKE_TIMEOUT must be an integer from 10 to 1200")
         message(FATAL_ERROR "Verifier did not reject GUI timeout '${invalid}': ${output}\n${error}")
       endif()
     endforeach()
   endforeach()
 
-  foreach(allowance IN ITEMS default 10 300 600)
+  foreach(allowance IN ITEMS default 10 300 600 1200)
     set(options "")
     set(expected_process_timeout 120)
     if(NOT allowance STREQUAL "default")
@@ -121,7 +121,7 @@ function(check_gui_smoke_timeouts package_directory archive_directory fixture_bu
     message(FATAL_ERROR "GUI timeout was not checked for both archive formats")
   endif()
 
-  foreach(allowance IN ITEMS default 600)
+  foreach(allowance IN ITEMS default 600 1200)
     set(options "")
     if(NOT allowance STREQUAL "default")
       list(APPEND options "-DGUI_SMOKE_TIMEOUT=${allowance}")

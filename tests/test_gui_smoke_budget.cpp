@@ -109,12 +109,28 @@ void structured_result() {
     check(std::string(smoke_budget_marker)+exhausted.what()==
         "INCOMPLETE GUI_SMOKE_BUDGET: phase=17 elapsed=600.011000 budget=600.000000 tx_id=13 fraction=0.032000 media_seconds=4.275000 samples=2928175 tail=0 progress_age=0.001000 result=incomplete",
         "Budget exhaustion lost its stable measured incomplete-result diagnostic");
+    const SmokeBudgetExhausted extended(17,1200.011,1200,work,.001);
+    check(std::string(extended.what()).find("elapsed=1200.011000 budget=1200.000000")!=std::string::npos,
+          "The extended workload limit lost its typed nonzero exhaustion result");
+}
+void completed_workload_advisory() {
+    using smoke_detail::completed_workload_warning;
+    check(!completed_workload_warning(false,601,1200)&&!completed_workload_warning(false,1201,1200),
+          "An incomplete workflow acquired a completed-workload warning");
+    check(!completed_workload_warning(true,300,300)&&!completed_workload_warning(true,600,1200),
+          "An ordinary-duration workflow acquired an extended-workload warning");
+    check(!completed_workload_warning(true,std::numeric_limits<double>::quiet_NaN(),1200)&&
+          !completed_workload_warning(true,601,std::numeric_limits<double>::infinity()),
+          "Invalid timing evidence acquired a completed-workload warning");
+    const auto warning=completed_workload_warning(true,600.000001,1200);
+    check(warning=="TEST_WORKLOAD_BUDGET: GUI smoke completed in 600.000001s, above its ordinary 600s workload allowance (configured limit 1200.000000s); every workflow assertion completed.",
+          "Completed slow smoke lost its visible measured workload advisory");
 }
 }
 int main() {
     try {
         payload_progress_and_stall_boundary();only_tail_samples_count();invalid_and_unrelated_work();
-        independent_transmissions_and_regressions();observed_errors_remain_failures();structured_result();
+        independent_transmissions_and_regressions();observed_errors_remain_failures();structured_result();completed_workload_advisory();
         std::cout<<"GUI smoke workload budget policy passed\n";return 0;
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

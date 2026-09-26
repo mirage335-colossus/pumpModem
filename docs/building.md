@@ -105,8 +105,11 @@ isolated Xvfb session; `./build.sh test native` builds and runs them explicitly.
 For the full sequence on a slower software-rendered desktop, pass
 `-- -DGUI_SMOKE_TIMEOUT=600` to use the same overall allowance as hosted
 certification. Individual reception and presentation assertions still apply.
-With Mesa software rendering, set `LIBGL_ALWAYS_SOFTWARE=1 LP_NUM_THREADS=2`,
-matching CI's renderer thread cap so drawing does not crowd out GUI polling.
+Standard-runner GUI contracts allow `GUI_SMOKE_TIMEOUT=1200` and warn after a
+successful run exceeds 600 seconds; complete smoke remains mandatory.
+With Mesa software rendering, set `LIBGL_ALWAYS_SOFTWARE=1 LP_NUM_THREADS=2`
+for H-sized hosts, or `LP_NUM_THREADS=1` as used on standard CI runners, so
+drawing leaves CPU time for sampled processing and GUI polling.
 Run native workflow checks separately from other heavy test/build processes:
 their measured replay cadence is sensitive to CPU contention. Rev cadence
 misses are advisory warnings; correctness checks still fail normally.
@@ -333,6 +336,21 @@ and console logs. Passing tests that consume at least 80% of their individual
 timeout produce warnings. Assertions, sanitizer findings, skipped mandatory
 tests and unclassified timeouts remain failures; elapsed time alone cannot
 establish correctness.
+
+The complete GUI contract uses a 1200-second cumulative smoke budget on
+`ubuntu-24.04`, with a warning only after a successful smoke exceeds the normal
+600 seconds. Its renderer uses one worker. H runners retain 600 seconds and
+two renderer workers. Individual reception, cancellation and content checks
+are unchanged; an exhausted hard budget is still a mandatory Release failure.
+To repeat both complete GUI suites after a focused fix without rerunning
+unchanged calibration and package scopes, use:
+
+```sh
+gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=gui-contract -f linux_runner=ubuntu-24.04
+```
+
+This covers full GUI contracts only and does not substitute for general native
+qualification. Reuse completed checks only for their unchanged source/configuration.
 
 Package and test jobs share reusable workflow definitions, not configured build
 trees. This repeats a small amount of setup/compilation while avoiding brittle

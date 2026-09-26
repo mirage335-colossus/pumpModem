@@ -515,6 +515,8 @@ struct Smoke::Impl {
                 throw SmokeBudgetExhausted(static_cast<int>(phase),elapsed,timeout,work,*work_progress.progress_age(now));
             throw Error("Shared GUI smoke timed out in phase "+std::to_string(static_cast<int>(phase))+": "+controller.field(F::status).text);
         }
+        if(const auto warning=smoke_detail::completed_workload_warning(done,elapsed,timeout))
+            std::cerr<<*warning<<'\n';
     }
 };
 Smoke::Smoke(std::shared_ptr<smoke_detail::InterruptionClock> replay_clock,std::filesystem::path directory,double timeout):
