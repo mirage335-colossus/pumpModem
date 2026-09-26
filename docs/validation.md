@@ -38,6 +38,10 @@ four capture workers on these standard runners, versus sixteen in the prior
 H-runner run. Windows also changes from the 2025 to the 2022 image. Elapsed
 times therefore compare complete observed runs, not a controlled speedup
 benchmark; H defaults remain unchanged.
+This intermediate run finished with 21 successful jobs and three failures,
+an active span of 62m44s and summed job duration of 388m54s. Its failed Debug
+Core job never reached CLI checks, so this is diagnostic evidence rather than
+a qualified whole-workflow performance comparison.
 [Full SDK H-runner validation 36273232390](https://github.com/mirage335-colossus/pumpModem/actions/runs/36273232390)
 uses the default H pool and passed all eight required jobs. Its active span was
 19m06s versus 35m58s before the split, with summed job duration 64m56s versus
@@ -55,6 +59,14 @@ also failed two internal functional workload limits: `live` reached 40 seconds
 while generating bit 4824/8192, and `live_profiles` reached its 30-second decode
 allowance after delivering 1013760/1345920 samples. Both were progressing and
 neither log reported a sanitizer error. These remain failures for that source.
+The shaped Debug calibration also hit its 3600-second CTest limit on the
+four-worker standard runner. It remains a timeout failure, not a warning or a
+calibration pass. The follow-up distributes this section's original seeds
+between two jobs and requires strict result aggregation: both original cases,
+all 64 seeds per case exactly once, unchanged per-capture checks and the same
+per-case probability and combined RMS assertions. The aggregate uses the same
+Debug/sanitizer configuration. Ordinary local, Release and Windows sections
+remain whole; no captures or thresholds are removed.
 
 A focused keyed acquisition probe reproduces an early epoch-retirement defect:
 advancing wall time by six seconds while only 0.0984722 seconds of PCM have been
@@ -78,6 +90,17 @@ regression, recovery lifecycle and controlled interval queue cases. The early
 epoch fixture exceeded its ordinary 30-second workload allowance, emitted the
 intended warning and completed within the 90-second instrumented cap. No
 sanitizer error was reported. Existing release assets/reports remain unchanged.
+
+The subsequent calibration-only follow-up passes its partition, versioned
+result-parser and shared statistical-gate fixtures in Release and ASan/UBSan.
+Ten accepted CLI plans and sixteen rejected argument combinations pass; actual
+CMake/CTest registration accepts only shaped parts 0/1, rejects invalid
+combinations and restores the unchanged whole-section default. Workflow
+validation and independent reviews pass. Shared native/SDK workflow definitions
+now total 965 lines versus the original 620 (1.56x). Application runtime inputs
+are unchanged from `75f59241136aa6681364db77c475bc97211b9cc9`; its SDK and ARM64
+package evidence remains applicable while the final full native run exercises
+the revised calibration execution and all ordinary platform coverage.
 
 ## CI package recovery and replay interruption fixtures — 26 September 2026
 

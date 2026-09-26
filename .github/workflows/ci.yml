@@ -241,6 +241,9 @@ jobs:
           - {scope: calibration, section: shaped}
           - {scope: calibration, section: "null"}
           - {scope: calibration, section: default-window}
+        exclude:
+          - build_type: Debug
+            shard: {scope: calibration, section: shaped}
     uses: ./.github/workflows/native-linux.yml
     with:
       linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
@@ -248,6 +251,32 @@ jobs:
       scope: ${{ matrix.shard.scope }}
       calibration_section: ${{ matrix.shard.section }}
       sanitizer_realtime: ${{ inputs.sanitizer_realtime }}
+
+  linux-shaped:
+    if: github.event_name == 'workflow_dispatch' && !inputs.devfast
+    name: Debug shaped captures / part ${{ matrix.part }}
+    strategy:
+      fail-fast: false
+      matrix:
+        part: ['0', '1']
+    uses: ./.github/workflows/native-linux.yml
+    with:
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+      build_type: Debug
+      scope: calibration
+      calibration_section: shaped
+      calibration_shard: ${{ matrix.part }}
+
+  linux-shaped-aggregate:
+    if: github.event_name == 'workflow_dispatch' && !inputs.devfast
+    name: Require complete shaped calibration and original aggregate assertions
+    needs: linux-shaped
+    uses: ./.github/workflows/native-linux.yml
+    with:
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+      build_type: Debug
+      scope: calibration-aggregate
+      calibration_section: shaped
 
   sanitizer-gui:
     if: github.event_name == 'workflow_dispatch' && ((inputs.devfast && inputs.diagnostic == 'sanitizer-gui') || (!inputs.devfast && inputs.sanitizer_smoke))

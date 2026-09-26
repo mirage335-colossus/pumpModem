@@ -317,6 +317,11 @@ CPU-intensive `live` and `live_profiles` suites and runs them serially on its
 own runner. Calibration runs its four existing independent sections
 (`matrix`, `shaped`, `null`, `default-window`) on
 separate runners; each preserves all its fixed seeds and aggregate assertions.
+The instrumented shaped section additionally divides its seeds across two
+runners. Each captures both original cases, and a required aggregation job
+rejects missing/duplicate seeds before applying the same per-case probability
+and combined RMS limits to all 64 seeds per case. Partial capture success is
+not full calibration qualification. Release and Windows retain whole sections.
 Local calibration still defaults to `all` and the existing CTest name. The
 `DATAPUMP_CALIBRATION_SECTION` CMake setting selects a section for CI.
 

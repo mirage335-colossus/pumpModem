@@ -10,12 +10,16 @@ on:
         type: string
         default: Release
       scope:
-        description: 'core, fast, live, calibration, package, or sanitizer-gui'
+        description: 'core, fast, live, calibration, calibration-aggregate, package, or sanitizer-gui'
         type: string
         required: true
       calibration_section:
         type: string
         default: all
+      calibration_shard:
+        description: 'Optional shaped capture part: 0 or 1; requires the separate aggregate job'
+        type: string
+        default: ''
       sanitizer_realtime:
         type: boolean
         default: false
@@ -25,7 +29,7 @@ permissions:
 
 jobs:
   native:
-    name: Linux ${{ inputs.build_type }} / ${{ inputs.scope }} / ${{ inputs.calibration_section }}
+    name: Linux ${{ inputs.build_type }} / ${{ inputs.scope }} / ${{ inputs.calibration_section }}${{ inputs.calibration_shard != '' && format(' / part {0}', inputs.calibration_shard) || '' }}
     runs-on: ${{ inputs.linux_runner }}
     # Preserve the portable application's glibc 2.35 baseline in every shard.
     container: ubuntu:22.04
@@ -70,12 +74,13 @@ jobs:
           -DDATAPUMP_PORTABLE=${{ inputs.build_type == 'Release' && 'ON' || 'OFF' }}
           -DBUILD_TESTING=${{ inputs.scope == 'package' && 'OFF' || 'ON' }}
           -DDATAPUMP_CALIBRATION_SECTION=${{ inputs.calibration_section }}
+          -DDATAPUMP_CALIBRATION_SHARD=${{ inputs.calibration_shard }}
           -DDART_TESTING_TIMEOUT=3600
           -DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE
       - name: Build this shard's prerequisites
         run: |
           case "$CI_SCOPE" in
-            calibration) targets=(test_differential_receiver_probability) ;;
+            calibration|calibration-aggregate) targets=(test_differential_receiver_probability) ;;
             package) targets=(datapump-apps) ;;
             sanitizer-gui) targets=(datapump-apps test_gui_smoke_budget test_gui_launch_command) ;;
             core) targets=(datapump-apps datapump-tests-ci-core) ;;
@@ -97,6 +102,39 @@ jobs:
           jobs=2
           if [ "$CI_SCOPE" = live ]; then jobs=1; fi
           python3 tools/run-ci-tests.py --build-dir build --scope "$CI_SCOPE" --jobs "$jobs" --report build/ci-test-report.json "${options[@]}"
+      - name: Record partial capture scope
+        if: inputs.calibration_shard != ''
+        run: |
+          echo 'This job completed half of the fixed shaped captures. It is not full calibration qualification: the required aggregate job checks complete seed coverage and the original per-case and joined statistical assertions.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish the completed capture part for required aggregation
+        if: inputs.calibration_shard != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          # Stable within this exact-source run, so rerunning only a failed
+          # part can reuse its successful sibling from an earlier attempt.
+          name: Shaped-Debug-captures-part-${{ inputs.calibration_shard }}
+          path: build/shaped-result.txt
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+      - name: Download shaped capture part zero
+        if: inputs.scope == 'calibration-aggregate'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: Shaped-Debug-captures-part-0
+          path: build/calibration-results/0
+      - name: Download shaped capture part one
+        if: inputs.scope == 'calibration-aggregate'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: Shaped-Debug-captures-part-1
+          path: build/calibration-results/1
+      - name: Require every shaped capture and the unchanged aggregate assertions
+        if: inputs.scope == 'calibration-aggregate'
+        timeout-minutes: 5
+        run: |
+          ./build/test_differential_receiver_probability --aggregate-shaped build/calibration-results/0/shaped-result.txt build/calibration-results/1/shaped-result.txt 2>&1 | tee build/calibration-aggregate.log
+          echo 'All 64 original seeds for each shaped case are present exactly once. The original per-case probability and combined RMS assertions passed using the instrumented capture results.' >> "$GITHUB_STEP_SUMMARY"
       - name: Record separate instrumented desktop coverage
         if: always() && inputs.scope == 'core' && inputs.build_type == 'Debug'
         run: |
@@ -145,11 +183,13 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: CI-Linux-${{ inputs.build_type }}-${{ inputs.scope }}-${{ inputs.calibration_section }}-attempt-${{ github.run_attempt }}
+          name: CI-Linux-${{ inputs.build_type }}-${{ inputs.scope }}-${{ inputs.calibration_section }}${{ inputs.calibration_shard != '' && format('-part-{0}', inputs.calibration_shard) || '' }}-attempt-${{ github.run_attempt }}
           path: |
             build/ci-test-report.*
             build/Testing/Temporary/
             build/gui-smoke-*.log
             build/package-*.log
+            build/shaped-result.txt
+            build/calibration-aggregate.log
           if-no-files-found: warn
           retention-days: 7

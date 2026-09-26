@@ -40,6 +40,9 @@ captures have their own documented provenance. Keep all checks below intact.
   fixtures have bounded extra computation allowances and warn when they exceed
   the normal budget; they must still complete every assertion. Preserve actual
   real-time, cancellation and physical-absence deadlines.
+  Distributed calibration must retain every fixed seed and require the original
+  per-case and combined statistical gates after complete result aggregation;
+  successful partial captures alone are not qualification.
 - Native CI excludes only `fast_session` and `gui_fast_live` from its instrumented
   Debug job unless `sanitizer_realtime=true` is explicitly requested. Their
   real-time audio budgets are sensitive to sanitizer overhead; this is omitted

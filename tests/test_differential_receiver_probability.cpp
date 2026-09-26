@@ -9,8 +9,12 @@
 #include <charconv>
 #include <chrono>
 #include <cmath>
+#include <fstream>
 #include <future>
+#include <iomanip>
 #include <iostream>
+#include <limits>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -23,6 +27,7 @@ constexpr std::size_t workspace=8*1024*1024;
 constexpr std::size_t receiver_workspace=workspace/2;
 constexpr unsigned captures_per_case=64;
 constexpr unsigned maximum_workers=16;
+constexpr unsigned shaped_shards=2;
 constexpr double local_seconds=1;
 
 unsigned bounded_workers(unsigned available) {
@@ -32,6 +37,14 @@ unsigned bounded_workers(unsigned available) {
 template<class Function>
 void for_worker_seeds(unsigned worker,unsigned workers,Function&& function) {
     for(unsigned seed=worker;seed<captures_per_case;seed+=workers)function(seed);
+}
+
+template<class Function>
+void for_shard_worker_seeds(unsigned shard,unsigned worker,unsigned workers,Function&& function) {
+    // Partition the selected seeds among all workers, including when the
+    // number of workers is itself divisible by the number of shards.
+    for(unsigned seed=shard+shaped_shards*worker;seed<captures_per_case;seed+=shaped_shards*workers)
+        function(seed);
 }
 
 void check_worker_plan() {
@@ -59,6 +72,14 @@ struct Case {
     bool compare_previous=false;
     bool shaped=false;
     double window_seconds=local_seconds;
+};
+
+// Keep the two shaped cases together when reducing their original RMS gate.
+// Their complete captures may be distributed, but neither case nor seed can
+// disappear from the required joined result.
+constexpr std::array shaped_cases{
+    Case{"shaped public differential transition",false,28,8.838834764831844,1,false,true,8},
+    Case{"shaped private differential transition",true,28,8.838834764831844,1,false,true,8},
 };
 
 transfer::Options options(const Case& fixture) {
@@ -160,71 +181,87 @@ Received receive(const modem::Config& config,std::span<const float> samples,bool
     return result;
 }
 
-void check_matrix(std::span<const Case> cases,bool compare_previous,unsigned workers) {
+struct CasePrediction {bool confidence_available;double success_probability;};
+CasePrediction predict(const Case& fixture) {
+    const auto configured=options(fixture);
+    const auto prediction=simulation::estimate(transmission(configured.modem,fixture.bits),configured,true,
+        channel(fixture,configured.modem,0),{},1,true,fixture.window_seconds);
+    if(!prediction.one_bit_confidence_available)
+        std::cerr<<fixture.name<<": probability unavailable: "<<prediction.probability_model_limit<<'\n';
+    check(prediction.one_bit_confidence_available && prediction.drift_model_available &&
+          !prediction.coherent_reference_only && prediction.differential_windows==512 &&
+          prediction.differential_window_seconds==fixture.window_seconds,
+          "sampled differential geometry lacks a matching implemented-detector probability");
+    if(fixture.bits==1) {
+        check(prediction.confidence_available && std::isfinite(prediction.success_probability) &&
+              prediction.success_probability>=0 && prediction.success_probability<=1,
+              "single-bit differential estimate is not an available finite probability");
+    } else {
+        // The original held-out 001 captures exposed an actual limitation:
+        // the compact receiver keeps the earliest admitted timing lane,
+        // which can have a poorer fit on subsequent bits. Multiplying
+        // independent nearest-lane probabilities was overly optimistic.
+        // Keep these captures and require the explicit coverage exclusion
+        // until a model includes that conditional ownership mechanism.
+        check(!prediction.confidence_available &&
+              prediction.probability_model_limit.find("timing ownership")!=std::string::npos,
+              "compact multi-bit differential estimate hid unmodeled timing ownership");
+    }
+    return {prediction.confidence_available,prediction.success_probability};
+}
+
+struct CaptureOutcome {unsigned case_index,seed,recovered,baseline;};
+std::vector<CaptureOutcome> sampled_case(const Case& fixture,unsigned case_index,unsigned workers,
+                                        unsigned shard=shaped_shards) {
+    const auto configured=options(fixture);
+    // Independent complete captures do not share receiver state or random
+    // streams. Each receiver still has one DSP worker. A shard assigns all
+    // its fixed seed positions among its workers without changing the seeds.
+    std::vector<std::future<std::vector<CaptureOutcome>>> tasks(workers);
+    for(unsigned worker=0;worker<workers;++worker)
+        tasks[worker]=std::async(std::launch::async,[&,worker] {
+            std::vector<CaptureOutcome> results;
+            const auto run=[&](unsigned seed) {
+                const auto bits=fixture.bits==1?Bytes{static_cast<std::uint8_t>(seed%2)}:Bytes{0,0,1};
+                const auto samples=capture(configured.modem,channel(fixture,configured.modem,seed),bits);
+                const auto observed=receive(configured.modem,samples,true,fixture.window_seconds);
+                check(observed.compact,"sampled probability matrix changed its modeled compact engine");
+                CaptureOutcome result{case_index,seed,observed.completions==1 && observed.bits==bits,0};
+                if(fixture.compare_previous) {
+                    const auto old=receive(configured.modem,samples,false);
+                    result.baseline=old.completions==1 && old.bits==bits;
+                }
+                results.push_back(result);
+            };
+            if(shard<shaped_shards)for_shard_worker_seeds(shard,worker,workers,run);
+            else for_worker_seeds(worker,workers,run);
+            return results;
+        });
+    std::vector<CaptureOutcome> results;
+    for(auto& task:tasks) {
+        const auto part=task.get();results.insert(results.end(),part.begin(),part.end());
+    }
+    std::sort(results.begin(),results.end(),[](const auto& left,const auto& right){return left.seed<right.seed;});
+    return results;
+}
+
+struct MatrixReduction {
     double squared_error=0,maximum_error=0;
     unsigned improved=0,previous=0,modeled_cases=0;
-    const auto begun=std::chrono::steady_clock::now();
-    for(const auto& fixture:cases) {
-        const auto configured=options(fixture);
-        const auto prediction=simulation::estimate(transmission(configured.modem,fixture.bits),configured,true,
-            channel(fixture,configured.modem,0),{},1,true,fixture.window_seconds);
-        if(!prediction.one_bit_confidence_available)
-            std::cerr<<fixture.name<<": probability unavailable: "<<prediction.probability_model_limit<<'\n';
-        check(prediction.one_bit_confidence_available && prediction.drift_model_available &&
-              !prediction.coherent_reference_only && prediction.differential_windows==512 &&
-              prediction.differential_window_seconds==fixture.window_seconds,
-              "sampled differential geometry lacks a matching implemented-detector probability");
-        if(fixture.bits==1) {
-            check(prediction.confidence_available && std::isfinite(prediction.success_probability) &&
-                  prediction.success_probability>=0 && prediction.success_probability<=1,
-                  "single-bit differential estimate is not an available finite probability");
-        } else {
-            // The original held-out 001 captures exposed an actual limitation:
-            // the compact receiver keeps the earliest admitted timing lane,
-            // which can have a poorer fit on subsequent bits. Multiplying
-            // independent nearest-lane probabilities was overly optimistic.
-            // Keep these captures and require the explicit coverage exclusion
-            // until a model includes that conditional ownership mechanism.
-            check(!prediction.confidence_available &&
-                  prediction.probability_model_limit.find("timing ownership")!=std::string::npos,
-                  "compact multi-bit differential estimate hid unmodeled timing ownership");
-        }
-        // Independent complete captures can run concurrently without sharing
-        // receiver state or random streams. Each receiver still has one DSP
-        // worker, and fixed seed positions keep counts/order reproducible.
-        std::vector<std::future<std::pair<unsigned,unsigned>>> tasks(workers);
-        for(unsigned worker=0;worker<workers;++worker)
-            tasks[worker]=std::async(std::launch::async,[&,worker] {
-                unsigned recovered=0,baseline=0;
-                for_worker_seeds(worker,workers,[&](unsigned seed) {
-                    const auto bits=fixture.bits==1?Bytes{static_cast<std::uint8_t>(seed%2)}:Bytes{0,0,1};
-                    const auto samples=capture(configured.modem,channel(fixture,configured.modem,seed),bits);
-                    const auto observed=receive(configured.modem,samples,true,fixture.window_seconds);
-                    check(observed.compact,"sampled probability matrix changed its modeled compact engine");
-                    recovered+=observed.completions==1 && observed.bits==bits;
-                    if(fixture.compare_previous) {
-                        const auto old=receive(configured.modem,samples,false);
-                        baseline+=old.completions==1 && old.bits==bits;
-                    }
-                });
-                return std::pair{recovered,baseline};
-            });
-        unsigned recovered=0,baseline=0;
-        for(auto& task:tasks) {
-            const auto counts=task.get();recovered+=counts.first;baseline+=counts.second;
-        }
+    void add(const Case& fixture,CasePrediction prediction,unsigned recovered,unsigned baseline,
+             std::ostream& output=std::cout) {
         const auto observed=static_cast<double>(recovered)/captures_per_case;
         const auto error=std::abs(observed-prediction.success_probability);
         if(prediction.confidence_available) {
             squared_error+=error*error;maximum_error=std::max(maximum_error,error);++modeled_cases;
         }
         if(fixture.compare_previous){improved+=recovered;previous+=baseline;}
-        std::cout<<fixture.name<<": predicted ";
-        if(prediction.confidence_available)std::cout<<prediction.success_probability;
-        else std::cout<<"unavailable (timing ownership)";
-        std::cout<<", sampled "<<recovered<<'/'<<captures_per_case;
-        if(fixture.compare_previous)std::cout<<", previous "<<baseline<<'/'<<captures_per_case;
-        std::cout<<std::endl;
+        output<<fixture.name<<": predicted ";
+        if(prediction.confidence_available)output<<prediction.success_probability;
+        else output<<"unavailable (timing ownership)";
+        output<<", sampled "<<recovered<<'/'<<captures_per_case;
+        if(fixture.compare_previous)output<<", previous "<<baseline<<'/'<<captures_per_case;
+        output<<std::endl;
         // Set before observing the holdout captures. These allow Monte Carlo
         // variation while bounding model error more tightly than the older
         // coherent/four-quarter matrix. They do not establish radio-link
@@ -235,13 +272,30 @@ void check_matrix(std::span<const Case> cases,bool compare_previous,unsigned wor
             check(error<=.10+uncertainty,"differential prediction disagrees materially with sampled reception");
         else check(recovered>0,"unmodeled multi-bit control lost every full sampled reception");
     }
-    check(modeled_cases>0,"differential matrix lost all of its probability coverage");
-    const auto rms=std::sqrt(squared_error/modeled_cases);
-    std::cout<<"Differential probability RMS error "<<rms<<", maximum "<<maximum_error<<", "<<modeled_cases<<" modeled cases"
-             <<", "<<std::chrono::duration<double>(std::chrono::steady_clock::now()-begun).count()<<" s\n";
-    check(rms<=.07,"differential probability matrix retains excessive systematic error");
-    if(compare_previous)
-        check(improved>=previous+8,"sampled differential matrix lost recovery beyond the earlier detector");
+    void finish(bool compare_previous,double seconds,std::ostream& output=std::cout) const {
+        check(modeled_cases>0,"differential matrix lost all of its probability coverage");
+        const auto rms=std::sqrt(squared_error/modeled_cases);
+        output<<"Differential probability RMS error "<<rms<<", maximum "<<maximum_error<<", "<<modeled_cases<<" modeled cases"
+              <<", "<<seconds<<" s\n";
+        check(rms<=.07,"differential probability matrix retains excessive systematic error");
+        if(compare_previous)
+            check(improved>=previous+8,"sampled differential matrix lost recovery beyond the earlier detector");
+    }
+};
+
+void check_matrix(std::span<const Case> cases,bool compare_previous,unsigned workers) {
+    MatrixReduction reduction;
+    const auto begun=std::chrono::steady_clock::now();
+    for(unsigned case_index=0;case_index<cases.size();++case_index) {
+        const auto& fixture=cases[case_index];
+        const auto prediction=predict(fixture);
+        unsigned recovered=0,baseline=0;
+        for(const auto& outcome:sampled_case(fixture,case_index,workers)) {
+            recovered+=outcome.recovered;baseline+=outcome.baseline;
+        }
+        reduction.add(fixture,prediction,recovered,baseline);
+    }
+    reduction.finish(compare_previous,std::chrono::duration<double>(std::chrono::steady_clock::now()-begun).count());
 }
 
 void sampled_matrix(unsigned workers) {
@@ -279,11 +333,263 @@ void sampled_shaped_matrix(unsigned workers) {
     // windows contain 128 chips, making all local real-PCM image/cross-image
     // covariances fit the model's explicit one-percent bound. Diffusion is
     // scaled to retain the same dimensionless 25-degree local variation.
-    constexpr std::array cases{
-        Case{"shaped public differential transition",false,28,8.838834764831844,1,false,true,8},
-        Case{"shaped private differential transition",true,28,8.838834764831844,1,false,true,8},
+    check_matrix(shaped_cases,false,workers);
+}
+
+struct ShapedResult {unsigned shard;std::vector<CaptureOutcome> outcomes;};
+using ShapedCounts=std::array<std::pair<unsigned,unsigned>,shaped_cases.size()>;
+
+void validate_shaped_result(const ShapedResult& result) {
+    check(result.shard<shaped_shards,"shaped result has an invalid shard identity");
+    check(result.outcomes.size()==shaped_cases.size()*captures_per_case/shaped_shards,
+          "shaped result is missing or has extra captures");
+    std::array<std::array<unsigned,captures_per_case>,shaped_cases.size()> visits{};
+    for(const auto& outcome:result.outcomes) {
+        check(outcome.case_index<shaped_cases.size() && outcome.seed<captures_per_case,
+              "shaped result has an unknown case or seed");
+        check(outcome.seed%shaped_shards==result.shard,"shaped result contains another shard's seed");
+        check(outcome.recovered<=1 && outcome.baseline==0,"shaped result has an invalid capture outcome");
+        check(++visits[outcome.case_index][outcome.seed]==1,"shaped result repeats a case/seed identity");
+    }
+    for(const auto& seeds:visits)
+        for(unsigned seed=0;seed<captures_per_case;++seed)
+            check(seeds[seed]==static_cast<unsigned>(seed%shaped_shards==result.shard),
+                  "shaped result omits a required case/seed identity");
+}
+
+ShapedCounts join_shaped_results(std::span<const ShapedResult> results) {
+    check(results.size()==shaped_shards,"shaped aggregation requires exactly two shard results");
+    std::array<unsigned,shaped_shards> shards{};
+    ShapedCounts counts{};
+    for(const auto& result:results) {
+        validate_shaped_result(result);
+        check(++shards[result.shard]==1,"shaped aggregation repeats a shard identity");
+        for(const auto& outcome:result.outcomes) {
+            counts[outcome.case_index].first+=outcome.recovered;
+            counts[outcome.case_index].second+=outcome.baseline;
+        }
+    }
+    check(std::all_of(shards.begin(),shards.end(),[](unsigned count){return count==1;}),
+          "shaped aggregation is missing a required shard");
+    return counts;
+}
+
+std::string shaped_case_identity(unsigned index) {
+    const auto& fixture=shaped_cases[index];
+    const auto configured=options(fixture);
+    std::ostringstream output;
+    output<<std::setprecision(std::numeric_limits<double>::max_digits10)
+          <<"case "<<index<<' '<<std::quoted(fixture.name)<<' '<<fixture.keyed<<' '
+          <<fixture.energy_db<<' '<<fixture.diffusion<<' '<<fixture.bits<<' '
+          <<fixture.compare_previous<<' '<<fixture.shaped<<' '<<fixture.window_seconds<<' '
+          <<configured.modem.sample_rate<<' '<<configured.modem.carrier_hz<<' '
+          <<configured.modem.bandwidth_hz<<' '<<configured.modem.spreading_factor<<' '
+          <<configured.modem.integration_seconds<<' '<<configured.timestamp<<' '
+          <<configured.search_seconds<<' '<<workspace<<' '<<receiver_workspace;
+    for(auto byte:configured.modem.spreading_seed)output<<' '<<static_cast<unsigned>(byte);
+    return output.str();
+}
+
+void write_shaped_result(std::ostream& output,const ShapedResult& result) {
+    validate_shaped_result(result);
+    // Bump the format version if capture or reduction semantics change. The
+    // fixture and seed identities also reject results from a different plan.
+    output<<"DATAPUMP_SHAPED_CALIBRATION_V1\n"
+          <<"capture-plan 2 64 0x7389b0741 1301081\n"
+          <<"shard "<<result.shard<<'\n';
+    for(unsigned index=0;index<shaped_cases.size();++index)output<<shaped_case_identity(index)<<'\n';
+    for(const auto& outcome:result.outcomes)
+        output<<"capture "<<outcome.case_index<<' '<<outcome.seed<<' '
+              <<outcome.recovered<<' '<<outcome.baseline<<'\n';
+    output<<"end\n";
+    output.flush();
+    check(static_cast<bool>(output),"could not write shaped calibration result");
+}
+
+ShapedResult read_shaped_result(std::istream& input) {
+    const auto line=[&] {
+        std::string value;
+        check(static_cast<bool>(std::getline(input,value)),"shaped calibration result is truncated");
+        return value;
     };
-    check_matrix(cases,false,workers);
+    check(line()=="DATAPUMP_SHAPED_CALIBRATION_V1","unsupported shaped calibration result version");
+    check(line()=="capture-plan 2 64 0x7389b0741 1301081","inconsistent shaped calibration capture plan");
+    ShapedResult result{};
+    {
+        std::istringstream header(line());
+        std::string tag;
+        check(static_cast<bool>(header>>tag>>result.shard) && tag=="shard",
+              "malformed shaped calibration shard header");
+        header>>std::ws;
+        check(header.eof(),"extra data in shaped calibration shard header");
+    }
+    for(unsigned index=0;index<shaped_cases.size();++index)
+        check(line()==shaped_case_identity(index),"inconsistent shaped calibration fixture");
+    for(unsigned capture_index=0;capture_index<shaped_cases.size()*captures_per_case/shaped_shards;++capture_index) {
+        std::istringstream record(line());
+        std::string tag;
+        CaptureOutcome outcome{};
+        check(static_cast<bool>(record>>tag>>outcome.case_index>>outcome.seed>>outcome.recovered>>outcome.baseline) &&
+              tag=="capture","malformed shaped calibration capture record");
+        record>>std::ws;
+        check(record.eof(),"extra data in shaped calibration capture record");
+        result.outcomes.push_back(outcome);
+    }
+    check(line()=="end","shaped calibration result lacks its completion record");
+    check(input.peek()==std::char_traits<char>::eof() && !input.bad(),
+          "extra data after shaped calibration completion record");
+    validate_shaped_result(result);
+    return result;
+}
+
+void reduce_shaped_results(std::span<const ShapedResult> results,
+                           const std::array<CasePrediction,shaped_cases.size()>& predictions,
+                           double seconds,std::ostream& output=std::cout) {
+    const auto counts=join_shaped_results(results);
+    MatrixReduction reduction;
+    for(unsigned index=0;index<shaped_cases.size();++index)
+        reduction.add(shaped_cases[index],predictions[index],counts[index].first,counts[index].second,output);
+    reduction.finish(false,seconds,output);
+}
+
+void sampled_shaped_shard(unsigned workers,unsigned shard,const std::string& path) {
+    // Fail early for an unusable path and invalidate any previous result.
+    // Only fully completed captures receive the required completion record.
+    std::ofstream output(path,std::ios::trunc);
+    check(output.is_open(),"could not open shaped calibration result path");
+    ShapedResult result{shard,{}};
+    for(unsigned index=0;index<shaped_cases.size();++index) {
+        // Keep the implemented-detector geometry checks in the capture job;
+        // statistical assertions require both shards and run in aggregation.
+        (void)predict(shaped_cases[index]);
+        const auto part=sampled_case(shaped_cases[index],index,workers,shard);
+        result.outcomes.insert(result.outcomes.end(),part.begin(),part.end());
+        std::cout<<shaped_cases[index].name<<": completed "<<part.size()
+                 <<"/64 captures in shard "<<shard<<"; aggregate validation required"<<std::endl;
+    }
+    write_shaped_result(output,result);
+    output.close();
+    check(static_cast<bool>(output),"could not close shaped calibration result");
+    std::cout<<"shaped capture coverage completed; aggregate validation required: "<<path<<'\n';
+}
+
+void aggregate_shaped_results(const std::array<std::string,shaped_shards>& paths) {
+    const auto begun=std::chrono::steady_clock::now();
+    std::array<ShapedResult,shaped_shards> results;
+    for(unsigned index=0;index<shaped_shards;++index) {
+        std::ifstream input(paths[index]);
+        check(input.is_open(),"could not open required shaped calibration result");
+        results[index]=read_shaped_result(input);
+    }
+    // Validate coverage before doing any estimation, including duplicate files.
+    (void)join_shaped_results(results);
+    std::array<CasePrediction,shaped_cases.size()> predictions;
+    for(unsigned index=0;index<shaped_cases.size();++index)predictions[index]=predict(shaped_cases[index]);
+    reduce_shaped_results(results,predictions,
+        std::chrono::duration<double>(std::chrono::steady_clock::now()-begun).count());
+}
+
+void check_shard_plan() {
+    for(unsigned workers=1;workers<=maximum_workers;++workers) {
+        std::array<unsigned,captures_per_case> visits{};
+        for(unsigned shard=0;shard<shaped_shards;++shard)
+            for(unsigned worker=0;worker<workers;++worker)
+                for_shard_worker_seeds(shard,worker,workers,[&](unsigned seed) {
+                    ++visits[seed];
+                    check(seed%shaped_shards==shard && (seed/shaped_shards)%workers==worker,
+                          "shaped shard changed fixed seed assignment");
+                });
+        check(std::all_of(visits.begin(),visits.end(),[](unsigned count){return count==1;}),
+              "shaped shards repeat or omit fixed seeds");
+    }
+    const auto rejects=[](auto&& operation,const char* message) {
+        bool rejected=false;
+        try {operation();} catch(const Error&) {rejected=true;}
+        check(rejected,message);
+    };
+    std::array<ShapedResult,shaped_shards> results;
+    for(unsigned shard=0;shard<shaped_shards;++shard) {
+        results[shard].shard=shard;
+        for(unsigned index=0;index<shaped_cases.size();++index)
+            for(unsigned seed=shard;seed<captures_per_case;seed+=shaped_shards)
+                results[shard].outcomes.push_back({index,seed,static_cast<unsigned>(seed<32),0});
+    }
+    std::ostringstream encoded;
+    for(auto& result:results) {
+        std::ostringstream serialized;
+        write_shaped_result(serialized,result);
+        std::istringstream input(serialized.str());
+        result=read_shaped_result(input);
+        if(result.shard==0)encoded<<serialized.str();
+    }
+    const auto counts=join_shaped_results(results);
+    check(counts[0].first==32 && counts[1].first==32 && counts[0].second==0 && counts[1].second==0,
+          "shaped aggregation changed complete-case counts");
+    const std::array predictions{CasePrediction{true,.5},CasePrediction{true,.5}};
+    std::ostringstream output;
+    reduce_shaped_results(results,predictions,0,output);
+    // A single case's 6/64 error exceeds .07 while the two-case RMS remains
+    // below .07. Preserving that accepted result rules out a tighter but
+    // different per-case replacement for the original aggregate assertion.
+    auto asymmetric=results;
+    for(auto& result:asymmetric)
+        for(auto& outcome:result.outcomes)
+            outcome.recovered=outcome.seed<(outcome.case_index==0?38U:32U);
+    reduce_shaped_results(asymmetric,predictions,0,output);
+    auto reversed=results;
+    std::swap(reversed[0],reversed[1]);
+    check(join_shaped_results(reversed)==counts,"shaped aggregation depends on file order");
+    rejects([&]{join_shaped_results(std::span(results).first(1));},"shaped aggregate accepted a missing shard");
+    auto duplicate=results;
+    duplicate[1]=duplicate[0];
+    rejects([&]{join_shaped_results(duplicate);},"shaped aggregate accepted duplicate shards");
+    const auto invalid_result=[&](auto&& change) {
+        auto invalid=results;
+        change(invalid[0]);
+        rejects([&]{join_shaped_results(invalid);},"shaped aggregate accepted invalid capture coverage");
+    };
+    invalid_result([](auto& result){result.outcomes.pop_back();});
+    invalid_result([](auto& result){result.outcomes[1]=result.outcomes[0];});
+    invalid_result([](auto& result){result.outcomes[0].seed=1;});
+    invalid_result([](auto& result){result.outcomes[0].seed=64;});
+    invalid_result([](auto& result){result.outcomes[0].case_index=2;});
+    invalid_result([](auto& result){result.outcomes[0].recovered=2;});
+    invalid_result([](auto& result){result.outcomes[0].baseline=1;});
+    invalid_result([](auto& result){result.shard=2;});
+    const auto invalid_text=[&](const std::string& old,const std::string& replacement) {
+        auto text=encoded.str();
+        const auto found=text.find(old);
+        check(found!=std::string::npos,"shaped parser fixture could not locate its mutation");
+        text.replace(found,old.size(),replacement);
+        std::istringstream malformed(text);
+        rejects([&]{read_shaped_result(malformed);},"shaped result parser accepted malformed or inconsistent data");
+    };
+    invalid_text("_V1","_V2");
+    invalid_text("capture-plan 2 64","capture-plan 2 63");
+    invalid_text("case 0","case 9");
+    invalid_text("shard 0","shard 0 extra");
+    invalid_text("capture 0 0 1 0","capture 0 0 1 0 extra");
+    invalid_text("capture 0 0 1 0","capture 0 0 invalid 0");
+    invalid_text("end\n","");
+    invalid_text("end\n","end\nextra\n");
+    // Both cases separately pass the original uncertainty bound at 40/64,
+    // but their joined RMS fails. Do not replace this gate with per-shard or
+    // per-case limits, or accidentally dilute it with the unshaped matrix.
+    auto systematic=results;
+    for(auto& result:systematic)
+        for(auto& outcome:result.outcomes)outcome.recovered=outcome.seed<40;
+    MatrixReduction per_case;
+    for(const auto& fixture:shaped_cases)per_case.add(fixture,{true,.5},40,0,output);
+    rejects([&]{reduce_shaped_results(systematic,predictions,0,output);},
+            "shaped aggregate lost its joined RMS assertion");
+    auto materially_wrong=results;
+    for(auto& result:materially_wrong)
+        for(auto& outcome:result.outcomes)outcome.recovered=1;
+    MatrixReduction per_case_failure;
+    rejects([&]{per_case_failure.add(shaped_cases[0],{true,.5},64,0,output);},
+            "shaped aggregate lost its per-case probability assertion");
+    rejects([&]{reduce_shaped_results(materially_wrong,predictions,0,output);},
+            "shaped aggregate accepted materially wrong probabilities");
 }
 
 void null_controls() {
@@ -338,11 +644,16 @@ void default_window_capture() {
 int main(int argc,char** argv) {
     try {
         auto workers=bounded_workers(std::thread::hardware_concurrency());
-        bool plan_only=false,workers_set=false,section_set=false;
+        bool worker_plan=false,shard_plan=false,workers_set=false,section_set=false;
+        bool shard_set=false,result_set=false,aggregate=false;
+        unsigned shard=0;
+        std::string result_path;
+        std::array<std::string,shaped_shards> aggregate_paths;
         std::string_view section="all";
         for(int arg=1;arg<argc;++arg) {
             const std::string_view option=argv[arg];
-            if(option=="--check-worker-plan")plan_only=true;
+            if(option=="--check-worker-plan"&&!worker_plan)worker_plan=true;
+            else if(option=="--check-shard-plan"&&!shard_plan)shard_plan=true;
             else if(option=="--workers"&&!workers_set&&arg+1<argc) {
                 const std::string_view value=argv[++arg];
                 const auto parsed=std::from_chars(value.data(),value.data()+value.size(),workers);
@@ -355,13 +666,41 @@ int main(int argc,char** argv) {
                 check(section=="all"||section=="matrix"||section=="shaped"||section=="null"||section=="default-window",
                       "calibration --section must be all, matrix, shaped, null or default-window");
                 section_set=true;
-            } else throw Error("Usage: test_differential_receiver_probability [--workers 1..16] [--section all|matrix|shaped|null|default-window] [--check-worker-plan]");
+            } else if(option=="--shaped-shard"&&!shard_set&&arg+1<argc) {
+                const std::string_view value=argv[++arg];
+                check(value=="0"||value=="1","calibration --shaped-shard must be 0 or 1");
+                shard=static_cast<unsigned>(value[0]-'0');shard_set=true;
+            } else if(option=="--shaped-result"&&!result_set&&arg+1<argc) {
+                result_path=argv[++arg];result_set=true;
+                check(!result_path.empty(),"calibration --shaped-result requires a nonempty path");
+            } else if(option=="--aggregate-shaped"&&!aggregate&&arg+2<argc) {
+                aggregate_paths[0]=argv[++arg];aggregate_paths[1]=argv[++arg];aggregate=true;
+            } else throw Error("Usage: test_differential_receiver_probability [--workers 1..16] [--section all|matrix|shaped|null|default-window] [--check-worker-plan] [--check-shard-plan] [--shaped-shard 0|1 --shaped-result PATH] | --aggregate-shaped PATH0 PATH1");
         }
+        check(!aggregate || !(workers_set||section_set||shard_set||result_set||worker_plan||shard_plan),
+              "calibration --aggregate-shaped cannot be combined with capture or plan options");
+        check(shard_set==result_set,"calibration --shaped-shard and --shaped-result must be specified together");
+        check(!shard_set || section=="shaped","calibration sharding requires --section shaped");
         check_worker_plan();
+        check_shard_plan();
+        if(aggregate) {
+            std::cout<<"Differential receiver calibration: aggregate two shaped shards, "
+                     <<captures_per_case<<" fixed seeds per case"<<std::endl;
+            aggregate_shaped_results(aggregate_paths);
+            std::cout<<"shaped differential receiver probability aggregate tests passed\n";
+            return 0;
+        }
         std::cout<<"Differential receiver calibration: "<<workers<<" independent capture workers, "
-                 <<captures_per_case<<" fixed seeds per matrix case; section "<<section<<std::endl;
-        if(plan_only) {
-            std::cout<<"worker partitions 1..16 preserve all fixed seeds; no calibration run\n";
+                 <<captures_per_case<<" fixed seeds per matrix case; section "<<section;
+        if(shard_set)std::cout<<"; shaped shard "<<shard<<'/'<<shaped_shards<<" (32 seeds per case; aggregate required)";
+        std::cout<<std::endl;
+        if(worker_plan||shard_plan) {
+            std::cout<<"worker partitions 1..16 and both shaped shards preserve all fixed seeds; "
+                     <<"strict result parsing and shared aggregate gates checked; no calibration run\n";
+            return 0;
+        }
+        if(shard_set) {
+            sampled_shaped_shard(workers,shard,result_path);
             return 0;
         }
         // Keep each matrix whole: its aggregate error and improvement checks
