@@ -1,4 +1,5 @@
 #include "datapump/audio.hpp"
+#include "cpu_work_budget.hpp"
 #include "datapump/live.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/pattern_receiver.hpp"
@@ -258,9 +259,9 @@ struct Observations {
 
 void advance(live::Session& session, CaptureScript& capture, std::size_t target,
              Observations& observed, const Waveform& expected, std::size_t origin, bool before_absence) {
-    const auto deadline = std::chrono::steady_clock::now() + 30s;
+    testing::CpuWorkBudget budget(30s,"controlled profile PCM decoding");
     std::optional<std::chrono::steady_clock::time_point> drained_at;
-    while (std::chrono::steady_clock::now() < deadline) {
+    while (budget.pending()) {
         auto snapshot = session.snapshot();
         observed.inspect(snapshot, expected, origin, before_absence);
         // This functional arbitration fixture advances a controlled PCM clock;
@@ -483,11 +484,11 @@ void simulated_long_fft_single_bit(double duration = 40, double snr = 30, std::u
     check(session.snapshot().simulation_compute_seconds == 0,
           "idle simulation retained a previous computation's elapsed time");
     session.transmit_bits(Bytes{0});
-    const auto deadline = std::chrono::steady_clock::now() + 30s;
+    testing::CpuWorkBudget budget(30s,"long sampled FFT simulation");
     bool computed = false;
     double elapsed = 0, fraction = 0;
     std::uint64_t samples = 0;
-    while (std::chrono::steady_clock::now() < deadline) {
+    while (budget.pending()) {
         const auto snapshot = session.snapshot();
         check(snapshot.error.empty(), "long sampled simulation failed: " + snapshot.error);
         check(snapshot.received.empty(), "single raw zero unexpectedly became source text");

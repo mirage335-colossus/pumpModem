@@ -181,7 +181,11 @@ void noise_epochs_retire_with_bounded_workspace() {
     for(unsigned second=1;second<=24;++second) {
         epoch=origin+second;const auto old_samples=previous.samples_received;
         previous=wait_for(session,[&](const auto& snapshot) {
-            bounded(snapshot,value);no_reception(snapshot);return snapshot.samples_received>=old_samples+800;
+            // Each elapsed epoch must also deliver a full second of samples:
+            // an unscored acquisition window cannot expire just because its
+            // wall clock advanced faster than the simulated receiver media.
+            bounded(snapshot,value);no_reception(snapshot);
+            return snapshot.samples_received>=old_samples+value.transfer.modem.sample_rate;
         });
         if(second==12)warm_bytes=previous.dsp_buffered_bytes;
     }

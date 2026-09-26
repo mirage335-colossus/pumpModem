@@ -860,6 +860,58 @@ void parallel_long_tiles_preserve_boundaries() {
     }
 }
 }
+namespace {
+void initial_search_coverage() {
+    auto c=config();c.sample_rate=8192;c.carrier_hz=2048;c.bandwidth_hz=1024;c.pulse_shaping=false;
+    const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+    const auto seconds=static_cast<double>(symbol)/c.sample_rate;
+    const std::vector<float> silence(4*symbol);
+    modem::PatternSearch search;search.start_offset_seconds=0;search.frequency_offsets_hz={0};
+    search.drift_tolerant=false;search.worker_threads=1;
+    modem::PatternCorrelator receiver(c,search,4*1024*1024);
+    check(!receiver.initial_search_complete(),"unobserved correlator claimed acquisition coverage");
+    receiver.push(std::span(silence).first(symbol-1));
+    check(!receiver.initial_search_complete(),"partial correlator symbol claimed acquisition coverage");
+    receiver.push(std::span(silence).first(1));
+    check(receiver.initial_search_complete(),"full correlator symbol did not complete acquisition coverage");
+    check(!receiver.acquiring() && receiver.take_bursts().empty(),"noise coverage manufactured reception");
+    receiver.finish();
+    check(receiver.initial_search_complete(),"EOF discarded completed correlator coverage");
+
+    search.start_offset_seconds=-seconds/2;
+    modem::PatternCorrelator negative(c,search,4*1024*1024);
+    negative.push(std::span(silence).first(symbol/2));
+    check(!negative.initial_search_complete(),"negative-origin partial first symbol counted as full coverage");
+    negative.push(std::span(silence).first(symbol-1));
+    check(!negative.initial_search_complete(),"negative-origin coverage preceded the full successor boundary");
+    negative.push(std::span(silence).first(1));
+    check(negative.initial_search_complete(),"negative-origin full successor did not complete coverage");
+
+    search.start_offset_seconds=seconds/2;search.start_uncertainty_seconds=seconds/4;
+    modem::PatternCorrelator future(c,search,4*1024*1024);
+    future.push(std::span(silence).first(7*symbol/4-1));
+    check(!future.initial_search_complete(),"correlator ignored the last original start hypothesis");
+    future.push(std::span(silence).first(1));
+    check(future.initial_search_complete(),"last full start hypothesis did not complete correlator coverage");
+
+    search.start_offset_seconds=0;search.start_uncertainty_seconds=0;search.clock_errors_ppm={-10000,10000};
+    modem::PatternCorrelator rates(c,search,4*1024*1024);
+    const auto slow_end=static_cast<std::size_t>(std::ceil(static_cast<long double>(symbol)/.99L));
+    rates.push(std::span(silence).first(slow_end-1));
+    check(!rates.initial_search_complete(),"fast clock hypothesis hid unfinished slow-clock coverage");
+    rates.push(std::span(silence).first(1));
+    check(rates.initial_search_complete(),"slow-clock full symbol did not complete coverage");
+
+    search.clock_errors_ppm={0};
+    modem::PatternCorrelator partial(c,search,4*1024*1024);
+    partial.push(std::span(silence).first(symbol/2));partial.finish();
+    check(!partial.initial_search_complete(),"EOF supplied missing correlator acquisition samples");
+    modem::PatternReceiver wrapped(c,4*1024*1024,[&] {auto value=search;value.compact_clock_search=true;return value;}());
+    check(wrapped.clock_windowed() && !wrapped.initial_search_complete(),"compact receiver lost initial coverage state");
+    wrapped.push(std::span(silence).first(symbol));
+    check(wrapped.initial_search_complete(),"compact receiver did not delegate correlator acquisition coverage");
+}
+}
 int main(int argc,char** argv) {
     unsigned failures=0;
     const auto run=[&](const char* name,auto test) {
@@ -867,6 +919,7 @@ int main(int argc,char** argv) {
         try {test();std::cout<<name<<": passed\n";}
         catch(const std::exception& error){++failures;std::cerr<<name<<": "<<error.what()<<'\n';}
     };
+    run("initial_search_coverage",initial_search_coverage);
     run("sampled_shaped",[]{sampled_bits_and_rates(true);});
     run("sampled_plain",[]{sampled_bits_and_rates(false);});
     run("late_clock_fragment",late_clock_fragment);

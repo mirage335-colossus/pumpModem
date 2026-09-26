@@ -754,6 +754,11 @@ struct Session::Impl {
             // the physical absence window. Their admitted clock must survive
             // epoch refresh even before any chunk updates last_confident_end.
             if(receiver.modem->synchronized())return false;
+            // Slow decoding can leave captured/simulated PCM behind wall time. An
+            // expired wall-clock hint is not evidence that its original
+            // acquisition window has actually competed across every start,
+            // carrier and clock hypothesis. Keep it until that work finishes.
+            if(!receiver.modem->initial_search_complete())return false;
             const auto& config=receiver.options.modem;
             const auto symbol=static_cast<double>(modem::symbol_sample_count(config))/config.sample_rate;
             const auto prefix=(static_cast<double>(modem::training_sample_count(config))+

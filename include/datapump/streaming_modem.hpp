@@ -96,6 +96,9 @@ public:
     // No synthetic tail samples or bits are inserted.
     Bytes finish(std::stop_token stop = {});
     bool synchronized() const;
+    // Complete sampled acquisition coverage of the original finite start
+    // window, independent of admission and physical message completion.
+    bool initial_search_complete() const;
     // Pattern candidates are accumulating.
     bool acquiring() const;
     // Bounded previews and drainable immutable decision chunks. Only observed

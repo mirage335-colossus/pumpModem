@@ -4,6 +4,279 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Parallel CI qualification — 26 September 2026
+
+The native run recorded below took about 77 minutes. Its Linux Release archives
+were available at 19:49:35 UTC, but copied-distribution checks waited for the
+Debug matrix member until 20:15:24 UTC. Calibration also ran alone after the
+other CTest cases: 976.46 seconds in Debug, 497.99 seconds in Linux Release and
+280.92 seconds on Windows. The user requested lower CI latency, bounded extra
+runner minutes/complexity, warning-level timing feedback, and explicit testing
+on standard runners while retaining the H defaults.
+
+Candidate `476952b88ae500e2d571f41eece173fbe129e7e7` separates package producers,
+Core/Fast regressions and the four existing independent calibration sections.
+SDK package production is independent of source qualification. Copied-package
+checks depend only on their package producers; every mandatory source and
+package scope still contributes to the overall result. Calibration retains its
+complete fixed seeds and per-matrix aggregate checks; local default coverage is
+unchanged. Only the optional instrumented GUI smoke is omitted by default, with
+an explicit coverage notice; its existing progressing-budget warning remains
+available when selected. Passing tests near their timeout produce warnings,
+while correctness failures and unclassified timeouts remain fatal.
+
+Local validation passes all 21 build-tool suites, ten timing/selection fixtures
+(including actual CTest assertion and timeout propagation), all calibration
+section/argument plans and the full null-control section. The actual local CTest
+inventory has 147 tests with exactly one Core/Fast/calibration owner each.
+Actionlint and whitespace checks pass. Shared workflow definitions grew from
+620 to 890 lines (1.44x), with the timing helper and its fixtures kept separately.
+
+[Full native standard-runner validation 36273230736](https://github.com/mirage335-colossus/pumpModem/actions/runs/36273230736)
+uses `ubuntu-24.04` and `windows-2022` with `devfast=false`. Calibration uses
+four capture workers on these standard runners, versus sixteen in the prior
+H-runner run. Windows also changes from the 2025 to the 2022 image. Elapsed
+times therefore compare complete observed runs, not a controlled speedup
+benchmark; H defaults remain unchanged.
+This intermediate run finished with 21 successful jobs and three failures,
+an active span of 62m44s and summed job duration of 388m54s. Its failed Debug
+Core job never reached CLI checks, so this is diagnostic evidence rather than
+a qualified whole-workflow performance comparison.
+[Full SDK H-runner validation 36273232390](https://github.com/mirage335-colossus/pumpModem/actions/runs/36273232390)
+uses the default H pool and passed all eight required jobs. Its active span was
+19m06s versus 35m58s before the split, with summed job duration 64m56s versus
+79m13s. Both package producers, both source scopes and all four copied-runtime
+checks passed full required smoke and archive verification. The first copied
+job started three seconds after the final package producer, while FLTK source
+qualification was still running. These are observed hosted runs, not repeated
+controlled benchmarks.
+
+The native standard-runner run exposed a mandatory Rev GUI phase-21 failure:
+the binary editor prepared 32 bits for `Help`, but physical reception retained
+only their final 17 bits. This matches the earlier recorded unresolved symptom
+and is neither a cadence warning nor workload-budget exhaustion. Debug Core
+also failed two internal functional workload limits: `live` reached 40 seconds
+while generating bit 4824/8192, and `live_profiles` reached its 30-second decode
+allowance after delivering 1013760/1345920 samples. Both were progressing and
+neither log reported a sanitizer error. These remain failures for that source.
+The shaped Debug calibration also hit its 3600-second CTest limit on the
+four-worker standard runner. It remains a timeout failure, not a warning or a
+calibration pass. The follow-up distributes this section's original seeds
+between two jobs and requires strict result aggregation: both original cases,
+all 64 seeds per case exactly once, unchanged per-capture checks and the same
+per-case probability and combined RMS assertions. The aggregate uses the same
+Debug/sanitizer configuration. Ordinary local, Release and Windows sections
+remain whole; no captures or thresholds are removed.
+
+A focused keyed acquisition probe reproduces an early epoch-retirement defect:
+advancing wall time by six seconds while only 0.0984722 seconds of PCM have been
+processed generates all 32 bits but loses reception. Temporarily retaining the
+key epoch restores all 32 bits. The correction retains an unconfirmed receiver
+until its original acquisition window has actually been scored, then applies
+its existing clock-age retirement. New query methods add no state or allocation
+and do not change scores, wire bits, physical completion or workspace limits.
+FFT and correlator boundary fixtures, the exact-bit regression and noise-only
+retirement with the unchanged memory assertion pass locally.
+
+The two CPU-intensive Live suites now have their own serial CI scope. Only
+instrumented functional computation gets a bounded threefold allowance; crossing
+the original budget emits a retained warning, and all assertions still must
+complete. Real-time, cancellation, queue stabilization and physical-absence
+requirements retain their existing limits. Local follow-up checks pass all 21
+build-tool suites, 13 CI helper fixtures, and the complete FLTK native group
+(3/3, including the 215.79-second GUI workflow). ASan/UBSan passes the budget
+boundaries, exact-bit early epoch
+regression, recovery lifecycle and controlled interval queue cases. The early
+epoch fixture exceeded its ordinary 30-second workload allowance, emitted the
+intended warning and completed within the 90-second instrumented cap. No
+sanitizer error was reported. Existing release assets/reports remain unchanged.
+
+The subsequent calibration-only follow-up passes its partition, versioned
+result-parser and shared statistical-gate fixtures in Release and ASan/UBSan.
+Ten accepted CLI plans and sixteen rejected argument combinations pass; actual
+CMake/CTest registration accepts only shaped parts 0/1, rejects invalid
+combinations and restores the unchanged whole-section default. Workflow
+validation and independent reviews pass. Shared native/SDK workflow definitions
+now total 965 lines versus the original 620 (1.56x). Application runtime inputs
+are unchanged from `75f59241136aa6681364db77c475bc97211b9cc9`; its SDK and ARM64
+package evidence remains applicable while the final full native run exercises
+the revised calibration execution and all ordinary platform coverage.
+
+[SDK follow-up 36276100619](https://github.com/mirage335-colossus/pumpModem/actions/runs/36276100619)
+passed all eight required jobs on `75f5924`, reusing the exact prepared base
+recipes. Both source scopes passed 21 build-tool and four packaging suites;
+FLTK passed all 30 contract cases and Rev all five native cases. Both package
+producers and all four copied-runtime checks passed both archive formats,
+including all 13 required GUI workflows, dependency closure, relocation and
+glibc 2.36 verification. Only two established Rev cadence advisories appeared
+in copied Rev checks; no smoke coverage was omitted. The active span was 19m32s
+versus the earlier 35m58s, and summed job duration was 70m17s versus 79m13s.
+Copied checks began three seconds after the final package producer while FLTK
+source qualification was still running. This is observed same-pool evidence,
+not a controlled repeated benchmark.
+
+[ARM64 Rev follow-up 36276106091](https://github.com/mirage335-colossus/pumpModem/actions/runs/36276106091)
+passed both complete copied GUI workflows on Ubuntu 22.04 and Debian Trixie
+using `75f5924`, including the delayed-acquisition correction. Both retained
+the 35-ELF glibc 2.35 audit, dependency closure and unchanged TAR/ZIP inventory.
+The shared TAR SHA256 is
+`0a787ba56fb6423757cf3170ad94605d2b165581679a599be7db6900800a1690`.
+Only established advisory Rev cadence warnings appeared: Ubuntu phases 11/13
+(7/2 frames), Trixie phases 11/13/21 (9/4/3 frames). No assertion, timeout or
+incomplete-coverage exception was used.
+
+[Full native standard-runner validation 36276955453](https://github.com/mirage335-colossus/pumpModem/actions/runs/36276955453)
+uses `1126578f88c06c27d24401b130b77defb9ef2470`, `devfast=false`,
+`ubuntu-24.04` and `windows-2022`. The separate Debug Live job passed both full
+suites in 489.65 seconds. Its early-acquisition exact-bit case exceeded the
+ordinary 30-second workload budget, emitted the retained warning and completed
+within the 90-second instrumented allowance. No sanitizer diagnostic appeared.
+The Rev GUI scope failed at its mandatory 600-second cumulative smoke budget:
+phase 17, transmission 14 at fraction 0.068853, 9.274931 media seconds and
+5061237 samples, with useful progress six microseconds earlier. The other
+42 GUI tests passed. This Release outcome remains a failure; no content
+assertion or sanitizer diagnostic was reported before exhaustion. The run
+finished with 28 successful required jobs and this one failed job; it is not
+a green full run.
+
+The remaining native scopes completed: Linux Release Core 90/90, Fast 33/33,
+Live 2/2 and CLI 29/29; Debug Core 87/87, Fast 31/31, Live 2/2 and CLI 29/29;
+Windows Core 86/86, Fast 33/33 and Live 2/2; all calibration sections; both
+native package producers and both copied Linux distributions. The two established
+Debug real-time exclusions and optional instrumented GUI omission remain
+explicit omitted coverage, not passes. Both shaped Debug capture parts passed
+in 1125.72 and 2130.41 seconds. The mandatory instrumented aggregate verified
+all 64 seeds in each case: public 41/64 versus predicted 0.626953, private
+38/64 versus 0.633301, combined RMS 0.0295904 and maximum error 0.0395508.
+Its statistical checks took 3.78 seconds; its complete job took 2m04s.
+
+The full native run's active span was 40m15s and summed job duration 379m52s,
+versus 77m52s and 197m53s on the earlier H run. This is about half the observed
+latency at 1.92 times summed runner time, but uses different hardware and
+coverage and includes the failed GUI scope; it is not a controlled qualified
+speedup comparison. Copied Linux checks began three seconds after package
+production, while Debug and calibration work continued.
+
+The final smoke-only follow-up permits a 1200-second cumulative workload for
+standard-runner GUI contracts, keeps H and portable-package budgets at 600,
+and uses one software-rendering worker on the standard runner. A warning is
+emitted only after full smoke success exceeds 600 seconds. Every internal
+assertion and deadline remains unchanged, and an exhausted 1200-second budget
+still returns a fatal nonzero outcome; it cannot acquire the separate
+instrumented incomplete-coverage exception. A focused `gui-contract` dispatch
+runs both complete GUI suites after this change, reusing the other completed
+checks for their unchanged source/configuration.
+
+[Complete GUI follow-up 36278498424](https://github.com/mirage335-colossus/pumpModem/actions/runs/36278498424)
+passed on `1a82f4d6772bd105acd1592f8b0185302837d905` using `ubuntu-24.04`:
+Rev 43/43 and FLTK 40/40, with all 21 build-tool suites also passing. The complete
+Rev smoke took 404.80 seconds and FLTK 297.95 seconds; complete GUI groups took
+863.28 and 607.48 seconds respectively. Neither smoke needed its extended
+allowance, so neither emitted a workload-budget warning. The final smoke passed
+all assertions, including the phase-21 binary transmission and exact reception.
+Neither report has skipped or omitted GUI cases. Rev retained two accepted
+`REV_REPLAY_CADENCE` advisories in phases 11/13 (5/6 frames); FLTK had no warnings.
+The [Rev report](https://github.com/mirage335-colossus/pumpModem/actions/runs/36278498424/artifacts/10918870191)
+and [FLTK report](https://github.com/mirage335-colossus/pumpModem/actions/runs/36278498424/artifacts/10917872967)
+retain successful-test output, including those cadence advisories.
+
+This completes the affected GUI qualification together with the passed native,
+calibration, SDK and ARM64 scopes above. The earlier 600-second failure remains
+recorded as failed; skipped scopes in the GUI-only rerun are not passes. SDK and
+ARM64 results remain attributed to `75f5924`: they validate unchanged runtime,
+dependency and package paths, not newly built `1a82f4d` binaries or exact-hash
+release certification. Local follow-up validation also passed the three GUI
+budget/argument tests, 15 smoke-policy fixtures, 13 CI-report fixtures and
+packaging boundary, relocation, corruption and timeout-forwarding checks.
+Actionlint, whitespace checks and independent scope reviews passed. Final shared
+native/SDK workflow definitions total 969 lines versus 620 originally (1.56x).
+Existing release assets and certification reports are unchanged.
+
+## CI package recovery and replay interruption fixtures — 26 September 2026
+
+[Certification 36010161027](https://github.com/mirage335-colossus/pumpModem/actions/runs/36010161027)
+failed two Ubuntu x86-64 prerequisites on `libexpat1` package 404s after successful
+index updates. Its separate Ubuntu 22.04 ARM64 Rev copied smoke failed in phase
+17 before the intended cancellation. The workflow had no project mirror-fallback
+or whole-operation fetch recovery, and the interruption fixture assumed several
+GUI polls would occur within a three-second replay.
+
+The new shared APT helper preserves signed package verification and exact
+requested versions, configures Azure-first recognized Ubuntu archive/security
+sources and separate Debian mirror fallbacks, and bounds both acquisition retries
+and fresh update/install recovery. Non-fetch failures stay fatal. The smoke
+fixture pauses its presentation clock before the interruption sequence and
+advances it only after observed polls until frame/pending-row prerequisites are
+met; sampled computation, ordinary replay cadence, physical completion, content
+checks and real workload deadlines remain unchanged. Pattern-score rendering
+shares the injected clock.
+
+Local validation on candidate `b1250dd2e2829105dd1878400e45938870bb7ef9`:
+
+- All 17 APT fixtures pass, including a real signed repository whose primary
+  mirror advertises an absent package and whose fallback supplies the identical
+  verified bytes. The fixture operates entirely in temporary directories and
+  does not install packages or contact public repositories.
+- `./build.sh test build --build-jobs 4 --jobs 2`: 20/20 pass. Disposable signing
+  fixtures ran outside the sandbox because GPG requires local agent sockets.
+- The focused delayed-replay regression reproduces completion before cancellation
+  with an injected five-second polling gap, then verifies replacement/cancellation
+  with repeated injected delays and a sixty-second preparation gap. Its hour-offset
+  clock case also compares the real pattern bitmap with measured source data.
+- `./build.sh test native` for FLTK on private Xvfb: 3/3 pass, including the full
+  214.57-second shared smoke, adapter conformance and document conformance.
+- Workflow actionlint, shell syntax, shellcheck and `git diff --check` pass.
+
+Hosted validation uses that same candidate and the normal H runner pools:
+
+- [Signed-package matrix 36264958536](https://github.com/mirage335-colossus/pumpModem/actions/runs/36264958536):
+  all nine Debian/Ubuntu distribution/architecture jobs passed signed metadata,
+  exact installed-byte verification and both backend self-checks (18 self-checks).
+  Ubuntu 24.04 and 26.04 x86-64 fetched the previously missing `libexpat1` versions
+  `2.6.1-2ubuntu0.6` and `2.7.4-1ubuntu0.2` from Azure. Debian used its CDN; Ubuntu
+  ARM64 retained ports, including the 26.04 container's actual ports sources.
+  All 36 helper operations succeeded on their first outer attempt. Fault recovery
+  itself was exercised by the local failure-injection and signed-mirror fixtures.
+  Only unrelated build/publication branches were skipped in this read-only mode.
+- [Full native CI 36264961154](https://github.com/mirage335-colossus/pumpModem/actions/runs/36264961154):
+  FLTK GUI passed 40/40 checks and 20/20 build-tool suites; Rev GUI passed 43/43
+  checks. Linux Release passed 126/126 regressions, full desktop smoke, CLI,
+  relocation and both archive formats; Windows passed 122/122 regressions,
+  relocation and both archives. Instrumented Debug passed 121/121 selected
+  regressions in 3051.77 seconds and 29/29 CLI checks. Its existing omissions of
+  `fast_session` and `gui_fast_live` remain omitted instrumented coverage; both
+  passed in Release. Debug desktop smoke reported **incomplete coverage**, not
+  a pass: typed `GUI_SMOKE_BUDGET` at phase 17 after 600.035181 seconds, transmission
+  14 at fraction 0.497861 (67.065208 media seconds, 5885414 samples), with useful
+  progress 0.168770 seconds earlier. No assertion or sanitizer report appeared.
+  The [retained smoke log](https://github.com/mirage335-colossus/pumpModem/actions/runs/36264961154/artifacts/10914089410)
+  preserves the warning; workload limits and the existing narrow exception were
+  unchanged. Both dependent copied-Linux jobs passed full smoke and archive
+  verification on Ubuntu 22.04 and 24.04. All seven required jobs concluded
+  successfully, with the incomplete Debug desktop coverage described above.
+- [ARM64 Rev diagnostic 36264955725](https://github.com/mirage335-colossus/pumpModem/actions/runs/36264955725):
+  both full isolated copied-package smokes passed on Ubuntu 22.04 and Debian
+  Trixie, including replacement/cancellation. Both verified the 35-ELF glibc 2.35
+  audit and unchanged TAR/ZIP inventory before and after use. The shared TAR's
+  SHA256 was `d2522e7a5d0a0cffff66ed3ba4f43b6410c0290a0bea1010abd6ab924d2e1254`.
+  Advisory `REV_REPLAY_CADENCE` warnings remain: Ubuntu phases 11/13 (7/7 frames),
+  Trixie phases 11/13/21 (8/5/4 frames). No correctness or workload-budget exception
+  was used; the separate short Ubuntu 24.04 startup branch was intentionally
+  skipped when selecting full smoke validation.
+- [Full SDK CI 36264963745](https://github.com/mirage335-colossus/pumpModem/actions/runs/36264963745):
+  all six required jobs passed using the prepared base recipes. Each backend
+  passed 20 build and four packaging suites; FLTK passed 30 preservation-contract
+  tests and Rev passed five native-conformance tests. Both TGZ/ZIP packages passed
+  full copied smoke, ABI and relocation checks on Bookworm and Ubuntu 24.04.
+  All six dependency installs succeeded on their first attempt. Advisory
+  `REV_REPLAY_CADENCE` warnings occurred twice during Rev build-archive smoke and
+  three times during copied Bookworm Rev smoke; there was no incomplete-coverage
+  exception. The diagnostic `devfast` branch was intentionally skipped for this
+  full run.
+
+Existing release assets and earlier reports remain unchanged; these source
+changes do not certify or repair the older binaries.
+
 ## Version 001_00 and completed product scope — 24 September 2026
 
 The application display version is now `001_00`, with numeric CMake/package

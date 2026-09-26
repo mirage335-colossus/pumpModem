@@ -21,7 +21,9 @@
 namespace datapump::gui {
 using Clock=std::chrono::steady_clock;
 struct Application::Impl {
-    explicit Impl(const Launch& launch):controller({launch.simulation||launch.smoke,launch.smoke,launch.settings}),
+    explicit Impl(const Launch& launch):smoke_clock(launch.smoke?std::make_shared<smoke_detail::InterruptionClock>():nullptr),
+        controller({launch.simulation||launch.smoke,launch.smoke,launch.settings,
+            smoke_clock?live::Session::ReplayClock([clock=smoke_clock]{return clock->now();}):live::Session::ReplayClock{}}),
         fast_controller([this] {
             if(legacy_controller.active())return false;
             // The first attempt can initiate asynchronous device closure.
@@ -31,6 +33,7 @@ struct Application::Impl {
             if(fast_controller.active())return false;
             audio_suspended=true;return controller.try_suspend_capture();
         }) {}
+    std::shared_ptr<smoke_detail::InterruptionClock> smoke_clock;
     Controller controller;
     fast_ui::Controller fast_controller;
     legacy_ui::Controller legacy_controller;
@@ -102,7 +105,7 @@ void Application::start() {
     if(impl_->started_session)return;
     impl_->started_session=true;
     impl_->next=impl_->next_presentation=impl_->started=Clock::now();
-    if(launch.smoke)impl_->smoke=std::make_unique<Smoke>(launch.smoke_directory,launch.timeout);
+    if(launch.smoke)impl_->smoke=std::make_unique<Smoke>(impl_->smoke_clock,launch.smoke_directory,launch.timeout);
     impl_->controller.start();impl_->bitmaps.update(impl_->controller);
     if(impl_->fast_selected()&&!launch.simulation&&!launch.smoke)impl_->fast_controller.set_selected(true);
 }
@@ -553,7 +556,7 @@ int gui_main(int argc,char** argv,const char* backend,const std::function<int(La
                 const std::string value=argv[++i];std::size_t used=0;const double number=std::stod(value,&used);
                 if(used!=value.size()||!std::isfinite(number)||number<0)throw Error("Invalid smoke argument");
                 if(arg=="--smoke-hold"&&number<=60)launch.hold=number;
-                else if(arg=="--smoke-timeout"&&number>=10&&number<=600)launch.timeout=number;
+                else if(arg=="--smoke-timeout"&&number>=10&&number<=1200)launch.timeout=number;
                 else if(arg=="--smoke-scroll"&&number<=1)launch.scroll=number;
                 else throw Error("Smoke argument out of range");
             } else if(arg=="--smoke-view"&&i+1<argc) {

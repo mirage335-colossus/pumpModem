@@ -112,6 +112,12 @@ enough; one fully observed absent four-hour symbol is. EOF, cancellation, quotas
 receiver replacement, source validity, FEC and MAC outcomes never manufacture
 physical completion. Simulation and recorded audio obey the same rule.
 
+An unconfirmed receiver clock hypothesis must retain its original acquisition
+window until that window has actually been scored. Wall-clock age alone cannot
+discard unprocessed samples when decoding or simulation runs slowly. Preserve
+the bounded receiver workspace, and retire expired noise-only hypotheses after
+their sampled search coverage completes.
+
 Unknown slots keep their positions through masking, marker alignment and FEC.
 An unresolved interval must not disappear so its neighbors become apparently
 contiguous source input. Keep scratch, source buffers and diagnostic retention bounded

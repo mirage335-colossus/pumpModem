@@ -1,0 +1,102 @@
+name: Native Windows validation shard
+
+on:
+  workflow_call:
+    inputs:
+      windows_runner:
+        type: string
+        default: windows-latest-h
+      scope:
+        description: 'core, fast, live, calibration, or package'
+        type: string
+        required: true
+      calibration_section:
+        type: string
+        default: all
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: Windows Release / ${{ inputs.scope }} / ${{ inputs.calibration_section }}
+    runs-on: ${{ inputs.windows_runner }}
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      VCPKG_DISABLE_METRICS: "1"
+      UseMultiToolTask: 'true'
+      EnforceProcessCountAcrossBuilds: 'true'
+      CI_SCOPE: ${{ inputs.scope }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Reuse verified static dependencies from base
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./tools/use-windows-base.ps1 -Repository "$env:GITHUB_REPOSITORY" -Destination "$PWD/build/windows-base"
+      - name: Configure native application without Python
+        run: >-
+          cmake -S . -B build -A x64
+          -DCMAKE_TOOLCHAIN_FILE="$env:DATAPUMP_WINDOWS_TOOLCHAIN"
+          -DVCPKG_TARGET_TRIPLET=x64-windows-static
+          -DDATAPUMP_PORTABLE=ON -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          -DBUILD_TESTING=${{ inputs.scope == 'package' && 'OFF' || 'ON' }}
+          -DDATAPUMP_CALIBRATION_SECTION=${{ inputs.calibration_section }}
+          -DDART_TESTING_TIMEOUT=3600
+          -DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE
+      - name: Build this shard's prerequisites
+        run: |
+          switch ($env:CI_SCOPE) {
+            'calibration' { $targets = @('test_differential_receiver_probability') }
+            'package' { $targets = @('datapump-apps') }
+            'core' { $targets = @('datapump-apps', 'datapump-tests-ci-core') }
+            'fast' { $targets = @('datapump-tests-fast') }
+            'live' { $targets = @('datapump-tests-ci-live') }
+            default { throw "Unknown native scope: $env:CI_SCOPE" }
+          }
+          cmake --build build --config Release --target @targets --parallel $env:NUMBER_OF_PROCESSORS
+          if ($LASTEXITCODE -ne 0) { throw "Native shard build failed" }
+      - name: Run the selected native tests
+        if: inputs.scope != 'package'
+        # Separate runners supply parallelism; preserve per-runner live budgets.
+        run: python tools/run-ci-tests.py --build-dir build --scope "$env:CI_SCOPE" --jobs 1 --config Release --report build/ci-test-report.json
+      - name: Verify Windows GUI and relocation with an empty PATH
+        if: inputs.scope == 'package'
+        run: |
+          cmake -DBUILD_DIR="$PWD/build" -DCONFIG=Release -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P tests/package_native.cmake 2>&1 | Tee-Object -FilePath build/package-relocation.log
+          if ($LASTEXITCODE -ne 0) { throw "Native relocation failed" }
+      - name: Create and verify both native archives
+        if: inputs.scope == 'package'
+        run: |
+          cmake --build build --config Release --target package --parallel $env:NUMBER_OF_PROCESSORS
+          if ($LASTEXITCODE -ne 0) { throw "Native packaging failed" }
+          cmake -DARCHIVE_DIR="$PWD/build/releases" -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P tools/verify-native-archives.cmake 2>&1 | Tee-Object -FilePath build/package-archives.log
+          if ($LASTEXITCODE -ne 0) { throw "Archive verification failed" }
+          'Portable Release relocation, corruption and both archive GUI workflows passed. Independent regression/calibration jobs still determine the overall workflow result.' >> $env:GITHUB_STEP_SUMMARY
+      - name: Upload Windows offline bundles
+        if: inputs.scope == 'package'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: DataPump-Windows-x86_64
+          path: |
+            build/releases/*.tar.gz
+            build/releases/*.zip
+            build/releases/SHA256SUMS.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+      - name: Retain shard reports and failure logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: CI-Windows-Release-${{ inputs.scope }}-${{ inputs.calibration_section }}-attempt-${{ github.run_attempt }}
+          path: |
+            build/ci-test-report.*
+            build/Testing/Temporary/
+            build/package-*.log
+          if-no-files-found: warn
+          retention-days: 7

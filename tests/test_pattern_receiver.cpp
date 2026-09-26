@@ -1299,6 +1299,53 @@ void application_local_fallback_preserves_original_search() {
           "drift section scoring must retain full clock coverage without allocating full template rows");
 }
 }
+namespace {
+void initial_search_coverage() {
+    auto c=config();c.sample_rate=8192;c.carrier_hz=2048;c.bandwidth_hz=1024;c.pulse_shaping=false;
+    const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+    const auto seconds=static_cast<double>(symbol)/c.sample_rate;
+    const std::vector<float> silence(10*symbol);
+    modem::PatternSearch search;search.start_offset_seconds=0;search.frequency_offsets_hz={0};
+    search.drift_tolerant=false;search.worker_threads=1;
+    modem::PatternReceiver receiver(c,8*1024*1024,search);
+    check(!receiver.clock_windowed(),"acquisition coverage fixture unexpectedly selected the correlator");
+    check(!receiver.initial_search_complete(),"unobserved FFT acquisition claimed coverage");
+    receiver.push(std::span(silence).first(symbol));
+    check(!receiver.initial_search_complete(),"consumed FFT symbol bypassed acquisition batch lookahead");
+    receiver.push(std::span(silence).first(3*symbol));
+    check(receiver.initial_search_complete(),"completed FFT acquisition did not report coverage");
+    check(!receiver.acquiring() && receiver.take_bursts().empty(),"noise coverage manufactured reception");
+    receiver.finish();
+    check(receiver.initial_search_complete(),"EOF discarded completed acquisition coverage");
+
+    search.start_offset_seconds=4*seconds;search.start_uncertainty_seconds=seconds;
+    modem::PatternReceiver future(c,8*1024*1024,search);
+    future.push(std::span(silence).first(3*symbol));
+    check(!future.initial_search_complete(),"FFT coverage ignored the original future search horizon");
+    future.push(std::span(silence).first(7*symbol));
+    check(future.initial_search_complete(),"FFT coverage did not reach the complete future search horizon");
+
+    search.start_offset_seconds=-seconds;search.start_uncertainty_seconds=0;
+    modem::PatternReceiver past(c,8*1024*1024,search);
+    check(!past.initial_search_complete(),"negative start window skipped all FFT acquisition");
+    past.push(std::span(silence).first(4*symbol));
+    check(past.initial_search_complete(),"negative start window never completed its first FFT acquisition");
+
+    search.start_offset_seconds=0;
+    modem::PatternReceiver partial(c,8*1024*1024,search);
+    partial.push(std::span(silence).first(symbol/2));partial.finish();
+    check(!partial.initial_search_complete(),"EOF supplied missing FFT acquisition samples");
+    search.frequency_offsets_hz={-16,0,16};search.couple_clock_to_carrier=true;
+    modem::PatternReceiver stretched(c,8*1024*1024,search);
+    stretched.push(std::span(silence).first(symbol));stretched.finish();
+    check(!stretched.initial_search_complete(),"nominal FFT duration omitted the stretched clock hypothesis");
+
+    search.frequency_offsets_hz={0};search.couple_clock_to_carrier=false;search.start_offset_seconds.reset();
+    modem::PatternReceiver unbounded(c,8*1024*1024,search);
+    unbounded.push(std::span(silence).first(4*symbol));
+    check(!unbounded.initial_search_complete(),"unbounded FFT search invented a finite initial horizon");
+}
+}
 int main(int argc,char** argv) {
     unsigned failures=0;
     const auto run=[&](const char* name,auto test) {
@@ -1306,6 +1353,7 @@ int main(int argc,char** argv) {
         try { test();std::cout<<name<<": passed\n"; }
         catch(const std::exception& error){++failures;std::cerr<<name<<": "<<error.what()<<'\n';}
     };
+    run("initial search coverage",initial_search_coverage);
     run("exact blind bits",exact_blind_bits);run("chunk invariance and late start",changing_chunks_and_late_start);
     run("continuous long FFT progress",continuous_long_fft_progress);
     run("carrier evidence after distorted startup",carrier_evidence_recovers_after_distorted_start);

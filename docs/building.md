@@ -105,8 +105,11 @@ isolated Xvfb session; `./build.sh test native` builds and runs them explicitly.
 For the full sequence on a slower software-rendered desktop, pass
 `-- -DGUI_SMOKE_TIMEOUT=600` to use the same overall allowance as hosted
 certification. Individual reception and presentation assertions still apply.
-With Mesa software rendering, set `LIBGL_ALWAYS_SOFTWARE=1 LP_NUM_THREADS=2`,
-matching CI's renderer thread cap so drawing does not crowd out GUI polling.
+Standard-runner GUI contracts allow `GUI_SMOKE_TIMEOUT=1200` and warn after a
+successful run exceeds 600 seconds; complete smoke remains mandatory.
+With Mesa software rendering, set `LIBGL_ALWAYS_SOFTWARE=1 LP_NUM_THREADS=2`
+for H-sized hosts, or `LP_NUM_THREADS=1` as used on standard CI runners, so
+drawing leaves CPU time for sampled processing and GUI polling.
 Run native workflow checks separately from other heavy test/build processes:
 their measured replay cadence is sensitive to CPU contention. Rev cadence
 misses are advisory warnings; correctness checks still fail normally.
@@ -227,6 +230,40 @@ tests but do not compile them. For individual work, existing targets such as
 
 ## Testing stages
 
+### CI package downloads
+
+Container jobs use [`tools/ci-apt.sh`](../tools/ci-apt.sh) for their Debian/Ubuntu
+prerequisites. Containers have their own APT sources; the hosted runner's mirror
+configuration does not carry into them. The helper prefers Azure for recognized
+Ubuntu archive/security sources on supported architectures and retains alternate
+official mirrors. Debian uses its own archive and security mirrors. Ubuntu ports
+sources remain separate, including containers that still use ports for newer ARM
+releases; those sources receive the bounded acquisition and index-refresh retries.
+The helper never substitutes a different distribution, suite or architecture.
+Source signing keys, components, requested versions and package verification
+remain unchanged.
+
+APT file downloads have explicit retry and timeout limits. A failed fetch can
+also trigger a bounded fresh index update and installation attempt, so a package
+404 does not keep requesting an obsolete version indefinitely. Index updates
+fail on partial errors; authentication, dependency and package-configuration
+errors are not converted into successful or skipped installations. Exhausted
+retries fail the job and retain the diagnostic output.
+
+For containers without Git, a separate checkout first obtains the current
+workflow's helper using the checkout action's archive fallback. The helper is
+copied to the runner's temporary directory before installing prerequisites.
+The ordinary Git checkout then runs, preserving source revision provenance.
+Certification still checks out the published application's exact source and
+tests its original binary hashes. Preparing host tools does not certify or
+repair an older published binary.
+
+The offline regression `python3 tests/test_ci_apt.py` exercises mirror selection,
+fetch recovery and fatal errors without changing the machine's package sources.
+It is also included in `./build.sh test build` and automatic helper checks.
+
+### Candidate validation
+
 Use focused feedback while a fault or feature is still changing, then broaden
 validation after the candidate is complete. A fast diagnostic pass establishes
 that a particular case works; it does not establish that the rest of the
@@ -266,11 +303,70 @@ Branch pushes do not launch a second copy of the PR checks, and documentation
 changes alone do not trigger them. Release and base workflows retain their
 path-specific helper checks. Automatic green checks do **not** mean the full
 application passed regression testing. Dispatch `ci.yml` with `devfast=false`
-when the candidate is ready; its native GUI, sanitizer, Windows, application
-and archive checks remain intact. `sdk.yml` is now manual so the additional
+when the candidate is ready; required native GUI, sanitizer regression, Windows,
+application and archive checks run in independent scopes. The instrumented GUI
+smoke is separately opt-in as described below. `sdk.yml` is manual so the additional
 SDK host-tool and copied Bookworm/Ubuntu matrix runs when relevant, without
 duplicating every push and PR. Ordinary consumers fail on a missing base recipe
 instead of silently building an SDK.
+
+### Parallel CI scopes and timing warnings
+
+Native CI builds portable packages independently of source regression jobs.
+Copied Linux checks depend only on the package producer, so sanitizer or
+calibration work cannot delay them. Linux Release/Debug and Windows split
+regressions into Core, Fast, Live and calibration jobs. Live contains the two
+CPU-intensive `live` and `live_profiles` suites and runs them serially on its
+own runner. Calibration runs its four existing independent sections
+(`matrix`, `shaped`, `null`, `default-window`) on
+separate runners; each preserves all its fixed seeds and aggregate assertions.
+The instrumented shaped section additionally divides its seeds across two
+runners. Each captures both original cases, and a required aggregation job
+rejects missing/duplicate seeds before applying the same per-case probability
+and combined RMS limits to all 64 seeds per case. Partial capture success is
+not full calibration qualification. Release and Windows retain whole sections.
+Local calibration still defaults to `all` and the existing CTest name. The
+`DATAPUMP_CALIBRATION_SECTION` CMake setting selects a section for CI.
+
+[`tools/run-ci-tests.py`](../tools/run-ci-tests.py) assigns every registered test
+to exactly one functional scope. Contract labels intentionally overlap these
+scopes and are not another duplicated test selection. Each run checks its JUnit
+results against the selected inventory and retains JSON timing/coverage, JUnit
+and console logs. Passing tests that consume at least 80% of their individual
+timeout produce warnings. Assertions, sanitizer findings, skipped mandatory
+tests and unclassified timeouts remain failures; elapsed time alone cannot
+establish correctness.
+
+The complete GUI contract uses a 1200-second cumulative smoke budget on
+`ubuntu-24.04`, with a warning only after a successful smoke exceeds the normal
+600 seconds. Its renderer uses one worker. H runners retain 600 seconds and
+two renderer workers. Individual reception, cancellation and content checks
+are unchanged; an exhausted hard budget is still a mandatory Release failure.
+To repeat both complete GUI suites after a focused fix without rerunning
+unchanged calibration and package scopes, use:
+
+```sh
+gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=gui-contract -f linux_runner=ubuntu-24.04
+```
+
+This covers full GUI contracts only and does not substitute for general native
+qualification. Reuse completed checks only for their unchanged source/configuration.
+
+Package and test jobs share reusable workflow definitions, not configured build
+trees. This repeats a small amount of setup/compilation while avoiding brittle
+build-tree relocation and keeping test work disjoint. Linux retains two CTest
+slots, except Live uses one; Windows also uses one. Calibration detects
+available CPUs, capped at 16.
+SDK package producers likewise run independently of source qualification, so
+copied SDK binaries can be checked as soon as the packages are ready. Every
+required scope still contributes to the workflow result.
+
+H pools remain the defaults. Standard runners can be selected explicitly:
+
+```sh
+gh workflow run ci.yml --ref REF -f devfast=false -f linux_runner=ubuntu-24.04 -f windows_runner=windows-2022
+gh workflow run sdk.yml --ref REF -f devfast=false -f linux_runner=ubuntu-24.04
+```
 
 For changes confined to Linux distribution packaging, start with
 `python3 tests/test_apt_release.py`, `python3 tests/test_distro_release.py`,
@@ -344,9 +440,10 @@ capture queue before decoding catches up. This is not evidence of a hardware-onl
 fault. The omission removes these scenarios' instrumented end-to-end coverage;
 the job notice and summary name it explicitly. No error is converted to success.
 
-Release jobs still require both tests, and all other sanitizer tests remain
-required. Calibration, source contract checks and release certification are
-unchanged. Include the two instrumented checks explicitly with:
+Release jobs still require both tests, and all other sanitizer regression tests
+remain required across the independent scopes. Calibration, source contract
+checks and release certification retain their assertions. Include the two
+instrumented checks explicitly with:
 
 ```sh
 gh workflow run ci.yml --ref REF -f devfast=false -f sanitizer_realtime=true
@@ -366,7 +463,19 @@ Failures remain fatal when requested. Keep the production FIFO, physical-end and
 pending-content assertions intact; do not classify unrelated sanitizer findings
 as performance warnings.
 
-The separate instrumented native GUI smoke has a cumulative workload allowance,
+The functional `live` and `live_profiles` fixtures have separate computation
+allowances. Instrumented builds allow up to three times their normal workload
+budget and report `TEST_WORKLOAD_BUDGET` when they exceed the normal allowance.
+CI preserves these warnings from successful CTest output in its report and
+summary. Every case must still finish and pass its assertions within the bounded
+instrumented allowance. Real-time throughput, cancellation, physical absence
+and queue-drain stabilization requirements are unchanged.
+
+The instrumented native GUI smoke is an independent optional job. Normal full
+CI omits it and explicitly records missing instrumented desktop coverage;
+Release/package GUI smoke remains mandatory. Select `sanitizer_smoke=true` to
+include it alongside full regression, or use the focused diagnostic below.
+It has a cumulative workload allowance,
 not a real-time receiver requirement. If that allowance expires while the same
 finite sampled transmission is demonstrably advancing, the application returns
 75 with `INCOMPLETE GUI_SMOKE_BUDGET:` and progress evidence. All existing smoke
@@ -375,7 +484,7 @@ polling or advancing wall-clock compute time cannot establish progress. The
 recent-progress window is 30 seconds; errors and non-transmission waits keep
 their ordinary failure result.
 
-Only native CI's Debug step opts into treating this exact result as a warning
+Only native CI's optional Debug smoke job treats this exact result as a warning
 with **incomplete instrumented GUI coverage**. Its log is retained as a workflow
 artifact and its summary identifies the missing coverage; it is not a smoke
 pass. The wrapper rejects sanitizer diagnostics, crashes, external process
@@ -383,18 +492,19 @@ timeouts and other failures. ASan/UBSan also halt on errors in that job. Release
 SDK, packaging and certification remain strict, including for exit 75. This
 exception does not apply to calibration or other test timeouts.
 
-To repeat the entire affected instrumented GUI workflow and CLI checks without
+To repeat the entire affected instrumented GUI workflow without
 repeating unrelated calibration or platform suites, use:
 
 ```sh
 gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=sanitizer-gui
 ```
 
-This uses the same Debug compiler, sanitizer flags, H runner and 600-second
-smoke allowance as full native CI. It additionally checks the budget classifier
+This uses the same Debug compiler, sanitizer flags, default H runner and
+600-second smoke allowance. It additionally checks the budget classifier
 and strict runner policy with bounded fixtures. A successful diagnostic with an
 incomplete warning is not full native qualification. Ordinary automatic CI
-remains limited to the existing lightweight checks.
+remains limited to the existing lightweight checks. Full CLI regression runs in
+the independent Core jobs rather than being repeated by this GUI diagnostic.
 
 ## Focused development diagnostics
 
@@ -476,16 +586,16 @@ visible window and host Mesa/LLVM/C++ runtime mappings within 15 seconds.
 It does not run the full GUI smoke or calibration, upload artifacts, or publish
 a release. Follow a focused pass with applicable full validation.
 
-For a copied ARM64 Rev smoke failure on Debian Trixie, build only the affected
-package from the corrected branch and run its complete GUI smoke there:
+For a copied ARM64 Rev smoke failure, build only the affected package from the
+corrected branch and run its complete GUI smoke on Ubuntu 22.04 and Debian Trixie:
 
 ```sh
 gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=arm-rev-smoke
 ```
 
 This mode retains the Ubuntu 22.04 build baseline, verifies archive/package
-hashes and the glibc 2.35 ceiling, then runs one full copied GUI smoke with its
-600-second allowance and the same Trixie display prerequisites as certification.
+hashes and the glibc 2.35 ceiling, then runs both copied GUI smokes with their
+600-second allowances and the same display prerequisites as certification.
 It uses the H ARM64 runner by default and the pinned runtime dependency scanner;
 it does not rebuild an SDK, run calibration or a general matrix, upload artifacts,
 publish or certify a release. Rerunning an older release cannot test this new

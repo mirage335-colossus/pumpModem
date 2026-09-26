@@ -76,6 +76,8 @@ class ReleaseRevTools(unittest.TestCase):
                 self.assertNotIn('trusted=yes', source)
                 self.assertIn('https://apt.llvm.org/jammy/ llvm-toolchain-jammy-19 main', source)
         clang_install = next(call for call in self.calls if any(value.startswith('clang-19=') for value in call))
+        self.assertEqual(clang_install[:3], ['sh', str(ROOT / 'tools/ci-apt.sh'), 'install'])
+        self.assertFalse(any(call[0] == 'apt-get' for call in self.calls))
         self.assertIn(f'clang-19={tools.LLVM_VERSION}', clang_install)
         self.assertIn(f'clang-tools-19={tools.LLVM_VERSION}', clang_install)
         for dependency in ['libxrandr-dev', 'libgl-dev', 'libglew-dev', 'libfreetype-dev']:

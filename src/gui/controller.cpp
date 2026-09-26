@@ -240,7 +240,7 @@ struct Controller::Impl {
     const ui::FieldState& f(UiField id) const { return fields.at(static_cast<std::size_t>(id)); }
     std::optional<Clock::time_point> receive_targets_due;
     std::uint64_t next_pattern_text_id=std::numeric_limits<std::uint64_t>::max();
-    explicit Impl(Options value):options(value) {
+    explicit Impl(Options value):options(value),session({},value.replay_clock) {
         f(UiField::transmit_scope).records=transmit_scope_records({});
         f(UiField::transmit_scope_caption).text=transmit_scope_caption({});
         f(UiField::transmit_scope_format).options={{"none","None"},{"hex-auto-hide","Hex, auto-hide"},{"hex","Hex"},{"bits","Bits"}};
@@ -1575,6 +1575,9 @@ std::string Controller::command_label(Command command) const {
     return {};
 }
 const live::Snapshot& Controller::snapshot() const { return impl_->snapshot; }
+std::chrono::steady_clock::time_point Controller::presentation_time() const {
+    return impl_->options.replay_clock?impl_->options.replay_clock():Clock::now();
+}
 const live::Settings& Controller::settings() const { return impl_->settings; }
 const std::vector<audio::Device>& Controller::audio_devices() const {return impl_->audio_devices;}
 const Inbox& Controller::inbox() const { return impl_->inbox; }

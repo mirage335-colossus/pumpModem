@@ -151,6 +151,10 @@ public:
     std::vector<std::complex<double>> take_chip_constellation();
     bool acquiring() const;
     bool synchronized() const;
+    // The original finite start window has received complete acquisition
+    // scoring. Independent of admission, message completion and wall time;
+    // false without a finite start hint. EOF cannot supply missing samples.
+    bool initial_search_complete() const;
     // True when acquisition covers an explicit finite system-clock window.
     bool clock_windowed() const;
     // The application requested expansion but only the original local

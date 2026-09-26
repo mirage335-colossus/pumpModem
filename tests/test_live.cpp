@@ -1,4 +1,5 @@
 #include "datapump/live.hpp"
+#include "cpu_work_budget.hpp"
 #include "datapump/symbol_schedule.hpp"
 #include "../src/live_pattern_scores.hpp"
 #include <algorithm>
@@ -14,6 +15,23 @@ using namespace datapump;
 using namespace std::chrono_literals;
 namespace {
 void check(bool value,const char* text){if(!value)throw Error(text);}
+void cpu_work_budget_boundaries() {
+    using Budget=testing::CpuWorkBudget;
+    const auto origin=Budget::Clock::time_point{};
+    std::ostringstream plain_log,instrumented_log;
+    Budget plain(30s,"ordinary fixture",false,origin,plain_log);
+    check(plain.pending(origin+29999ms)&&!plain.pending(origin+30s)&&plain_log.str().empty(),
+          "noninstrumented workload changed its original deadline or emitted an allowance warning");
+    Budget instrumented(30s,"instrumented fixture",true,origin,instrumented_log);
+    check(instrumented.pending(origin+29999ms)&&instrumented_log.str().empty(),
+          "instrumented workload warned before its normal deadline");
+    check(instrumented.pending(origin+30s)&&instrumented.pending(origin+89999ms)&&
+          !instrumented.pending(origin+90s),"instrumented workload did not retain its bounded threefold deadline");
+    const auto warning=instrumented_log.str();
+    check(warning.starts_with("TEST_WORKLOAD_BUDGET: instrumented fixture: exceeded 30s normal budget; instrumented limit 90s")&&
+          warning.find("TEST_WORKLOAD_BUDGET:")==warning.rfind("TEST_WORKLOAD_BUDGET:"),
+          "instrumented workload lost or repeated its normal-budget warning");
+}
 void pattern_score_observation_lifetime() {
     using History=live::detail::PatternScoreHistory;
     using Clock=std::chrono::steady_clock;
@@ -89,9 +107,9 @@ void run() {
     Message sent;const std::string source="hello fixed intervals";
     sent.data.assign(source.begin(),source.end());sent.data.insert(sent.data.end(),2,0);
     session.transmit(sent);
-    const auto deadline=std::chrono::steady_clock::now()+40s;
+    testing::CpuWorkBudget budget(40s,"fixed-interval sampled reception");
     bool received=false;
-    while(std::chrono::steady_clock::now()<deadline) {
+    while(budget.pending()) {
         auto snapshot=session.snapshot();
         check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,"live aggregate workspace bounded");
         check(snapshot.signals.size()<=64,"signal queue bounded");
@@ -107,8 +125,8 @@ void run() {
     check(received,"fixed interval simulation completed");
     session.transmit_bits(Bytes{0,0,1});
     bool raw=false,decoded_short=false;
-    const auto raw_deadline=std::chrono::steady_clock::now()+20s;
-    while(std::chrono::steady_clock::now()<raw_deadline) {
+    testing::CpuWorkBudget raw_budget(20s,"three-bit sampled reception");
+    while(raw_budget.pending()) {
         auto snapshot=session.snapshot();
         for(const auto& signal:snapshot.signals)if(signal.complete) {
             check(!signal.validated,"raw bits cannot become validated text");
@@ -144,8 +162,8 @@ void short_keyed_stream_survives_epoch_refresh() {
     value.transfer.key.emplace(Bytes(32,0x45));value.receive_keys.emplace_back(Bytes(32,0x46));
     session.start(value);const std::string expected="01001000011001010110110001110000";
     Bytes bits;for(auto digit:expected)bits.push_back(static_cast<std::uint8_t>(digit-'0'));session.transmit_bits(bits);
-    const auto deadline=std::chrono::steady_clock::now()+30s;bool jumped=false,computed=false;
-    while(std::chrono::steady_clock::now()<deadline) {
+    testing::CpuWorkBudget budget(30s,"admitted keyed epoch refresh");bool jumped=false,computed=false;
+    while(budget.pending()) {
         const auto snapshot=session.snapshot();
         if(!snapshot.error.empty())throw Error(snapshot.error);
         check(snapshot.received.empty(),"raw keyed input must not release source content");
@@ -165,6 +183,57 @@ void short_keyed_stream_survives_epoch_refresh() {
     check(received,"epoch refresh discarded a short admitted keyed stream before six-second physical completion");
     session.stop();
 }
+void keyed_acquisition_survives_early_epoch_refresh() {
+    constexpr double origin=1800000000.35;
+    std::atomic<double> epoch{origin};std::atomic<std::int64_t> replay_milliseconds{0};
+    live::Session session([&]{return epoch.load();},[&] {
+        return std::chrono::steady_clock::time_point{}+std::chrono::milliseconds(replay_milliseconds.load());
+    });
+    auto value=settings();value.transfer.timestamp=0;
+    value.simulation_snr_db=68.42667503568732;
+    value.simulation_clock_error_ppm=100;value.simulation_phase_noise_degrees_per_sqrt_second=.5;
+    value.transfer.automatic_receive_profiles=true;
+    value.transfer.receive_pattern_mode=tuning::PatternMode::auto_pattern;
+    value.transfer.receive_targets_db_hz={32,55};
+    value.transfer.modem=tuning::resolve(3600,32,tuning::PatternMode::auto_pattern,true,1500).config;
+    value.transfer.key.emplace(Bytes(32,0x45));value.receive_keys.emplace_back(Bytes(32,0x46));
+    value.dsp_workspace_bytes=128*1024*1024;value.transfer.dsp_workspace_bytes=value.dsp_workspace_bytes;
+    const std::string expected="01001000011001010110110001110000";
+    Bytes bits;for(auto digit:expected)bits.push_back(static_cast<std::uint8_t>(digit-'0'));
+    session.start(value);session.transmit_bits(bits);
+    testing::CpuWorkBudget budget(30s,"pre-acquisition keyed epoch refresh");
+    bool jumped=false,computed=false;
+    while(budget.pending()) {
+        const auto snapshot=session.snapshot();
+        if(!snapshot.error.empty())throw Error(snapshot.error);
+        check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes&&snapshot.signals.size()<=64,
+              "pre-acquisition epoch refresh exceeded bounded receiver storage");
+        check(snapshot.received.empty(),"raw keyed input released source content before presentation");
+        for(const auto& signal:snapshot.signals)
+            check(!signal.complete&&!signal.validated,"raw keyed input completed before its physical end and replay");
+        // Advance wall time while the independent sampled receiver
+        // has not yet seen even one second of the settling prefix. Unlike the
+        // admitted-stream fixture above, no synchronized receiver protects this
+        // key epoch yet. Its actual sampled search window still needs scoring.
+        if(!jumped&&snapshot.transmission_seconds>0) {
+            check(snapshot.transmission_seconds<1.,"early epoch-refresh fixture missed pre-acquisition samples");
+            epoch=origin+6;jumped=true;
+        }
+        if(snapshot.transmission_finished&&snapshot.simulation_replay){computed=true;break;}
+        std::this_thread::sleep_for(20us);
+    }
+    check(jumped&&computed,"pre-acquisition keyed fixture did not finish its unchanged sampled transmission");
+    replay_milliseconds=3000;
+    const auto completed=session.snapshot();bool received=false;
+    check(completed.dsp_buffered_bytes<=value.dsp_workspace_bytes&&completed.received.empty(),
+          "completed raw keyed input exceeded storage or acquired a source identity");
+    for(const auto& signal:completed.signals)
+        received=received||(signal.complete&&!signal.validated&&signal.received_bits==bits.size()&&
+            (signal.binary?signal.text:signal.raw_bits)==expected);
+    check(completed.transmit_trace.generated_bits==bits.size()&&received,
+          "epoch refresh discarded unscored keyed acquisition samples or lost the exact 32-bit prefix");
+    session.stop();
+}
 bool same_capture(const modem::TransmitTrace& a,const modem::TransmitTrace& b) {
     const auto fields=[](const auto& value) {
         return std::tie(value.source,value.compressed_bits,value.wire_plain_bits,value.wire_bits,
@@ -176,10 +245,10 @@ bool same_capture(const modem::TransmitTrace& a,const modem::TransmitTrace& b) {
     return fields(a)==fields(b);
 }
 template<class Predicate>
-live::Snapshot wait_for(live::Session& session,std::string_view stage,Predicate predicate) {
-    const auto deadline=std::chrono::steady_clock::now()+40s;
+live::Snapshot wait_for(live::Session& session,std::string_view stage,Predicate predicate,bool sampled_work=false) {
+    testing::CpuWorkBudget budget(40s,stage,sampled_work&&testing::instrumented_test);
     live::Snapshot last;
-    while(std::chrono::steady_clock::now()<deadline) {
+    while(budget.pending()) {
         last=session.snapshot();
         if(!last.error.empty())throw Error(std::string(stage)+": "+last.error);
         if(predicate(last))return last;
@@ -197,6 +266,10 @@ live::Snapshot wait_for(live::Session& session,std::string_view stage,Predicate 
         <<" recovery_bytes="<<last.recovery_working_bytes;
     throw Error(diagnostic.str());
 }
+template<class Predicate>
+live::Snapshot wait_for_sampled(live::Session& session,std::string_view stage,Predicate predicate) {
+    return wait_for(session,stage,std::move(predicate),true);
+}
 void separate_short_and_long_transmit_profiles() {
     std::atomic<std::int64_t> replay_milliseconds{0};
     live::Session session({},[&] {
@@ -212,7 +285,7 @@ void separate_short_and_long_transmit_profiles() {
     session.start(value);
     std::uint64_t previous_samples=0,previous_transmission=0;
     const auto finish=[&](const transfer::Estimate& estimate,const Bytes& expected_bits,bool short_text) {
-        const auto computed=wait_for(session,"short/long transmit profile completion",[](const auto& snapshot) {
+        const auto computed=wait_for_sampled(session,"short/long transmit profile completion",[](const auto& snapshot) {
             return snapshot.transmission_finished && snapshot.simulation_replay;
         });
         check(computed.samples_received>previous_samples && computed.transmission_id>previous_transmission,
@@ -282,7 +355,7 @@ void background_recovery_lifecycle() {
         bit=static_cast<std::uint8_t>(generator&1U);
     }
     session.transmit_bits(bits);
-    const auto staged=wait_for(session,"initial recovery simulation",[](const auto& state){return state.transmission_finished&&state.simulation_replay;});
+    const auto staged=wait_for_sampled(session,"initial recovery simulation",[](const auto& state){return state.transmission_finished&&state.simulation_replay;});
     check(staged.received.empty()&&staged.recovery_working_bytes==0,
           "Recovery ran before simulation physical completion reached its presentation deadline");
     session.clear_recoveries();
@@ -291,7 +364,7 @@ void background_recovery_lifecycle() {
     check(cleared.signals.empty()&&cleared.received.empty()&&cleared.recovery_working_bytes==0&&!cleared.simulation_replay,
           "Cleared staged recovery restored a row, job or source at the replay deadline");
     session.transmit_bits(bits);
-    wait_for(session,"restarted recovery simulation",[](const auto& state){return state.transmission_finished&&state.simulation_replay;});
+    wait_for_sampled(session,"restarted recovery simulation",[](const auto& state){return state.transmission_finished&&state.simulation_replay;});
     replay_milliseconds=6000;
     const auto ended=session.snapshot();
     const auto ready=std::find_if(ended.signals.begin(),ended.signals.end(),[](const auto& signal) {
@@ -315,7 +388,7 @@ void background_recovery_lifecycle() {
     session.configure(value);
     check(!session.resume_recovery(id),"Reconfiguration retained an obsolete recovery generation");
     session.transmit_bits(Bytes{0,0,1});
-    wait_for(session,"next reception after recovery cancellation",[](const auto& state){return state.transmission_finished&&state.simulation_replay;});
+    wait_for_sampled(session,"next reception after recovery cancellation",[](const auto& state){return state.transmission_finished&&state.simulation_replay;});
     replay_milliseconds=9000;
     const auto next=session.snapshot();
     check(std::none_of(next.signals.begin(),next.signals.end(),[&](const auto& signal) {
@@ -340,7 +413,7 @@ void background_recovery_lifecycle() {
           repaired.content.message.data==source.data,
           "Published-recovery fixture did not independently recover its source");
     session.configure(value);session.transmit_bits(damaged);
-    wait_for(session,"published recovery simulation",[](const auto& state){return state.transmission_finished&&state.simulation_replay;});
+    wait_for_sampled(session,"published recovery simulation",[](const auto& state){return state.transmission_finished&&state.simulation_replay;});
     replay_milliseconds=12000;
     const auto completing=session.snapshot();
     check(std::any_of(completing.signals.begin(),completing.signals.end(),[](const auto& signal) {
@@ -399,7 +472,7 @@ void transmit_capture_tracks_generation_and_replay() {
               "live capture omitted or shifted actual encrypted marker and coded payload bits");
     };
     session.start(value);session.transmit(sent);
-    const auto first=wait_for(session,"initial transmission trace replay",[&](const auto& snapshot) {
+    const auto first=wait_for_sampled(session,"initial transmission trace replay",[&](const auto& snapshot) {
         check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,"capture replay exceeded live workspace");
         return snapshot.transmission_finished && snapshot.simulation_replay;
     });
@@ -540,6 +613,10 @@ void continuous_noise_lifecycle() {
 }
 int main(int argc,char** argv) {
     try {
+        cpu_work_budget_boundaries();
+        if(argc>1&&std::string_view(argv[1])=="--workload-budget") {
+            std::cout<<"CPU workload budget boundaries passed\n";return 0;
+        }
         pattern_score_observation_lifetime();
         if(argc>1 && std::string_view(argv[1])=="--pattern-scores") {
             std::cout<<"pattern score observation lifetime passed\n";return 0;
@@ -550,7 +627,10 @@ int main(int argc,char** argv) {
         if(argc>1 && std::string_view(argv[1])=="--transmit-profiles") {
             separate_short_and_long_transmit_profiles();std::cout<<"separate transmit profiles passed\n";return 0;
         }
-        if(argc==1){run();separate_short_and_long_transmit_profiles();background_recovery_lifecycle();transmit_capture_tracks_generation_and_replay();continuous_noise_lifecycle();}
+        if(argc>1 && std::string_view(argv[1])=="--keyed-acquisition-epoch") {
+            keyed_acquisition_survives_early_epoch_refresh();std::cout<<"pre-acquisition keyed epoch refresh passed\n";return 0;
+        }
+        if(argc==1){run();separate_short_and_long_transmit_profiles();background_recovery_lifecycle();transmit_capture_tracks_generation_and_replay();continuous_noise_lifecycle();keyed_acquisition_survives_early_epoch_refresh();}
         short_keyed_stream_survives_epoch_refresh();std::cout<<"live fixed-interval lifecycle passed\n";
     } catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
 }

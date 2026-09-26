@@ -23,6 +23,14 @@ jobs:
       DEBIAN_FRONTEND: noninteractive
       SELECTED_RUNNER: ${{ inputs.linux_runner }}
     steps:
+      - name: Load current package-fetch helper before installing Git
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .ci-bootstrap
+          sparse-checkout: tools/ci-apt.sh
+          sparse-checkout-cone-mode: false
       - name: Check architecture and CPU availability inside the build baseline
         run: |
           test "$(uname -m)" = x86_64
@@ -32,8 +40,8 @@ jobs:
             awk '/MemTotal/ {print "Host memory: " $2 " KiB"}' /proc/meminfo
             echo 'Focused compiler/routing check only; no SDK build, packages or certification.'
           } | tee -a "$GITHUB_STEP_SUMMARY"
-          apt-get update
-          apt-get install -y --no-install-recommends ca-certificates git cmake ninja-build g++
+          cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
+          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates git cmake ninja-build g++
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false

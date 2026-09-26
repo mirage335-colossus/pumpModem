@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       smoke:
-        description: 'Run the complete copied GUI smoke on Trixie instead of the short Ubuntu startup probe'
+        description: 'Run complete copied GUI smoke on Ubuntu 22.04 and Trixie instead of the short Ubuntu startup probe'
         type: boolean
         default: false
       arm_runner:
@@ -17,9 +17,9 @@ permissions:
 
 jobs:
   package:
-    name: ARM64 Rev package / ${{ inputs.smoke && 'full Trixie GUI smoke' || 'Ubuntu startup' }} (not certification)
+    name: ARM64 Rev package / ${{ inputs.smoke && 'full Ubuntu 22.04 and Trixie GUI smoke' || 'Ubuntu startup' }} (not certification)
     runs-on: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-h' }}
-    timeout-minutes: ${{ inputs.smoke && 20 || 15 }}
+    timeout-minutes: ${{ inputs.smoke && 30 || 15 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -27,8 +27,7 @@ jobs:
       - name: Build only the affected package in its Ubuntu 22.04 baseline
         run: |
           docker run --rm -v "$PWD:/workspace" -w /workspace -e DEBIAN_FRONTEND=noninteractive ubuntu:22.04 sh -ec '
-            apt-get update
-            apt-get install -y --no-install-recommends ca-certificates curl git python3 file binutils make cmake ninja-build g++-11 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev libgl1 libopengl0
+            sh /workspace/tools/ci-apt.sh install ca-certificates curl git python3 file binutils make cmake ninja-build g++-11 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev libgl1 libopengl0
             git config --global --add safe.directory /workspace
             sh tools/install-release-cmake.sh /workspace/build/ci-cmake
             python3 tools/install-release-rev.py /workspace/build/ci-rev-tools
@@ -39,8 +38,7 @@ jobs:
         if: ${{ !inputs.smoke }}
         run: |
           docker run --rm -v "$PWD:/workspace" -w /workspace -e DEBIAN_FRONTEND=noninteractive -e LIBGL_ALWAYS_SOFTWARE=1 -e LP_NUM_THREADS=2 ubuntu:24.04 sh -ec '
-            apt-get update
-            apt-get install -y --no-install-recommends python3 cmake binutils xvfb xauth x11-utils mesa-utils fonts-dejavu-core fontconfig-config libgl1 libopengl0 libgl1-mesa-dri
+            sh /workspace/tools/ci-apt.sh install python3 cmake binutils xvfb xauth x11-utils mesa-utils fonts-dejavu-core fontconfig-config libgl1 libopengl0 libgl1-mesa-dri
             mkdir -p "build/arm-rev-copied destination"
             set -- build/arm-rev-package/releases/*.tar.gz
             test "$#" -eq 1
@@ -52,38 +50,40 @@ jobs:
             xvfb-run -a -s "-screen 0 2400x1800x24 -dpi 96" python3 tools/check-rev-graphics-startup.py "$package_root" "$PWD/build/arm-rev-graphics-startup.log"
             cmake -DPACKAGE_ROOT="$package_root" -DVERIFY_ONLY=ON -P tools/verify-native-package.cmake
           '
-      - name: Verify the same package and run its complete GUI smoke on Trixie
+      - name: Verify the same package and run its complete GUI smoke on Ubuntu 22.04 and Trixie
         if: inputs.smoke
         run: |
           # Keep source and produced archives read-only in the compatibility
           # container. Only its extracted copy and temporary runtime files vary.
-          docker run --rm -v "$PWD:/workspace:ro" -w /workspace -e DEBIAN_FRONTEND=noninteractive -e LIBGL_ALWAYS_SOFTWARE=1 -e LP_NUM_THREADS=2 debian:trixie-slim sh -ec '
-            apt-get update
-            apt-get install -y --no-install-recommends ca-certificates curl git gh python3 cmake binutils xvfb xauth fontconfig-config fonts-dejavu-core libxtst6 libgl1 libopengl0 libgl1-mesa-dri
-            export PATH=/workspace/build/ci-cmake/bin:$PATH
-            (cd build/arm-rev-package/releases && sha256sum --check SHA256SUMS.txt)
-            set -- build/arm-rev-package/releases/*.tar.gz
-            test "$#" -eq 1
-            sha256sum "$1"
-            scratch=$(mktemp -d /tmp/datapump-arm-rev-smoke.XXXXXX)
-            destination="$scratch/copied destination"
-            mkdir -p "$destination"
-            tar -xzf "$1" -C "$destination"
-            set -- "$destination"/DataPump-*
-            test "$#" -eq 1
-            package_root=$1
-            cmake -DPACKAGE_ROOT="$package_root" -DVERIFY_ONLY=ON -P tools/verify-native-package.cmake
-            cmake -DPACKAGE_ROOT="$package_root" -DMAX_GLIBC=2.35 -P tools/verify-linux-abi.cmake
-            xvfb-run -a -s "-screen 0 2400x1800x24 -dpi 96" cmake -DPACKAGE_ROOT="$package_root" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P tools/verify-native-package.cmake
-            cmake -DPACKAGE_ROOT="$package_root" -DVERIFY_ONLY=ON -P tools/verify-native-package.cmake
-            (cd build/arm-rev-package/releases && sha256sum --check SHA256SUMS.txt)
-          '
+          for smoke_image in ubuntu:22.04 debian:trixie-slim; do
+            echo "Running the unchanged ARM64 Rev package on $smoke_image"
+            docker run --rm -v "$PWD:/workspace:ro" -w /workspace -e DEBIAN_FRONTEND=noninteractive -e LIBGL_ALWAYS_SOFTWARE=1 -e LP_NUM_THREADS=2 "$smoke_image" sh -ec '
+              sh /workspace/tools/ci-apt.sh install ca-certificates curl git gh python3 cmake binutils xvfb xauth fontconfig-config fonts-dejavu-core libxtst6 libgl1 libopengl0 libgl1-mesa-dri
+              export PATH=/workspace/build/ci-cmake/bin:$PATH
+              (cd build/arm-rev-package/releases && sha256sum --check SHA256SUMS.txt)
+              set -- build/arm-rev-package/releases/*.tar.gz
+              test "$#" -eq 1
+              sha256sum "$1"
+              scratch=$(mktemp -d /tmp/datapump-arm-rev-smoke.XXXXXX)
+              destination="$scratch/copied destination"
+              mkdir -p "$destination"
+              tar -xzf "$1" -C "$destination"
+              set -- "$destination"/DataPump-*
+              test "$#" -eq 1
+              package_root=$1
+              cmake -DPACKAGE_ROOT="$package_root" -DVERIFY_ONLY=ON -P tools/verify-native-package.cmake
+              cmake -DPACKAGE_ROOT="$package_root" -DMAX_GLIBC=2.35 -P tools/verify-linux-abi.cmake
+              xvfb-run -a -s "-screen 0 2400x1800x24 -dpi 96" cmake -DPACKAGE_ROOT="$package_root" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P tools/verify-native-package.cmake
+              cmake -DPACKAGE_ROOT="$package_root" -DVERIFY_ONLY=ON -P tools/verify-native-package.cmake
+              (cd build/arm-rev-package/releases && sha256sum --check SHA256SUMS.txt)
+            '
+          done
       - name: Record focused scope
         env:
           FULL_GUI_SMOKE: ${{ inputs.smoke }}
         run: |
           if [ "$FULL_GUI_SMOKE" = true ]; then
-            echo "ARM64 Rev package from $GITHUB_SHA passed full copied GUI smoke on Debian Trixie and the glibc 2.35 audit. No calibration, general matrix, SDK rebuild or release certification; no release assets changed." >> "$GITHUB_STEP_SUMMARY"
+            echo "ARM64 Rev package from $GITHUB_SHA passed full copied GUI smoke on Ubuntu 22.04 and Debian Trixie and the glibc 2.35 audit. No calibration, general matrix, SDK rebuild or release certification; no release assets changed." >> "$GITHUB_STEP_SUMMARY"
           else
             echo 'ARM64 Rev packaging and visible startup with the Ubuntu 24.04 host driver passed. No full smoke, calibration or certification claim; no release assets changed.' >> "$GITHUB_STEP_SUMMARY"
           fi

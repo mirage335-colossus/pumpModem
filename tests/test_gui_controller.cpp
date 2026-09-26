@@ -8,6 +8,7 @@
 #include "datapump/received_text.hpp"
 #include "datapump/simulation_estimate.hpp"
 #include <filesystem>
+#include <atomic>
 #include <iostream>
 #include <set>
 #include <thread>
@@ -1696,6 +1697,83 @@ void fixed_text_reception() {
     controller.close();
 }
 
+void delayed_replay_interruption() {
+    using F=ui::Field;using C=ui::Command;
+    using Clock=std::chrono::steady_clock;
+    using namespace std::chrono_literals;
+    // A deliberate clock offset also verifies that pattern bitmaps expire
+    // evidence in the session's presentation domain, including after resume.
+    const auto origin=Clock::now()-1h;std::atomic<std::int64_t> wall_ms{0};
+    auto clock=std::make_shared<smoke_detail::InterruptionClock>([&] {
+        return origin+std::chrono::milliseconds(wall_ms.load());
+    });
+    Controller controller({true,true,std::nullopt,[clock]{return clock->now();}});
+    const std::string first="Replacement replay one.",second="Replacement replay two.";
+    controller.edit(F::message,first);prepare(controller);controller.start();
+    const auto wait_replay=[&](std::uint64_t previous=0) {
+        const auto deadline=Clock::now()+30s;
+        do {
+            controller.poll();
+            check(controller.snapshot().error.empty(),"Replay interruption computation failed");
+            if(controller.snapshot().simulation_replay&&controller.snapshot().transmission_id!=previous)return;
+            std::this_thread::sleep_for(1ms);
+        }while(Clock::now()<deadline);
+        throw Error("Replay interruption fixture did not finish sampled computation");
+    };
+    // Reproduce the old choreography's race without sleeping: one delayed poll
+    // can deliver the completed source before the test calls Stop replay.
+    controller.activate(C::transmit);wait_replay();wall_ms+=5000;controller.poll();
+    check(!controller.snapshot().simulation_replay&&controller.inbox().items().size()==1&&
+          controller.inbox().items().front().message.data==Bytes(first.begin(),first.end()),
+          "Delayed real-time poll did not reproduce completion before the intended cancellation");
+    controller.activate(C::clear_received);clock->pause();
+    controller.edit(F::message,first);prepare(controller);controller.activate(C::transmit);wait_replay();
+    BitmapSources bitmaps;
+    const auto pending_replay=[&] {
+        std::set<std::size_t> frames;std::optional<unsigned> pending_poll;
+        bool saw_pattern_evidence=false;
+        const auto transmission=controller.snapshot().transmission_id;
+        for(unsigned poll=0;poll<65;++poll) {
+            wall_ms+=5000;controller.poll();
+            const auto& snapshot=controller.snapshot();
+            check(snapshot.simulation_replay&&snapshot.transmission_id==transmission&&controller.inbox().items().empty(),
+                  "Delayed native polling released a controlled interruption source");
+            bitmaps.update(controller);
+            const auto evidence=PatternScoreView{}.scores(snapshot,clock->now());
+            saw_pattern_evidence=saw_pattern_evidence||!evidence.empty();
+            check(render(bitmaps.get(ui::Bitmap::pattern_scores)).pixels()==
+                  render(plots::PlotSnapshot::pattern_scores(evidence,true)).pixels(),
+                  "Pattern bitmap aged controlled replay evidence against an unrelated clock");
+            frames.insert(snapshot.replay_frame_index);
+            for(const auto& signal:snapshot.signals) {
+                check(!signal.validated&&!signal.complete&&signal.binary,"Interruption replay skipped pending reception");
+                if(const auto row=smoke_detail::pending_replay_row(signal,snapshot,controller.signals())) {
+                    check(!controller.signals().copy_id(*row)&&!controller.signals().copy_bits(*row),
+                          "Interruption replay made pending content copyable");
+                    if(!pending_poll)pending_poll=poll;
+                }
+            }
+            if(frames.size()>=3&&pending_poll&&*pending_poll<poll) {
+                check(saw_pattern_evidence,"Interruption replay did not exercise measured pattern evidence");
+                return transmission;
+            }
+            if(frames.size()<3||!pending_poll)clock->advance_frame();
+        }
+        throw Error("Controlled replay did not expose three real frames and an earlier pending poll");
+    };
+    const auto replaced=pending_replay();
+    controller.edit(F::message,second);wall_ms+=60000;prepare(controller);
+    check(controller.snapshot().simulation_replay&&controller.inbox().items().empty(),
+          "Asynchronous replacement preparation completed the controlled replay");
+    controller.activate(C::transmit);wait_replay(replaced);
+    check(pending_replay()!=replaced,"Replacement reused the interrupted transmission identity");
+    check(controller.command_label(C::cancel)=="Stop replay","Replacement lost its replay cancellation action");
+    controller.activate(C::cancel);clock->resume();wall_ms+=5000;controller.poll();
+    check(!controller.snapshot().simulation_replay&&controller.snapshot().transmission_cancelled&&
+          controller.inbox().items().empty(),"Replaced or cancelled source returned after resuming real time");
+    controller.close();
+}
+
 void receive_pattern_text(Controller& controller,const std::string& expected) {
     check(!controller.snapshot().transmit_trace.active,
           "A prepared draft became an actual generation trace before transmission");
@@ -2376,6 +2454,11 @@ int main(int argc,char** argv) {
             std::cout<<"Pending replay batch checks passed\n";
             return 0;
         }
+        if(argc>1&&std::string_view(argv[1])=="--replay-interruption") {
+            delayed_replay_interruption();
+            std::cout<<"Delayed replay interruption checks passed\n";
+            return 0;
+        }
         datapump::gui::controller_self_check();
         simulation_estimate_controls();
         empty_composer_preview();
@@ -2383,6 +2466,7 @@ int main(int argc,char** argv) {
         lpi_estimate_controls();
         revised_reception_ingestion();
         pending_replay_batch();
+        delayed_replay_interruption();
         rate_carrier_controls();
         sub_hertz_controls();
         shannon_capacity_display();
@@ -2403,8 +2487,9 @@ int main(int argc,char** argv) {
         escaped_signal_message_paste();received_raw_text_boundary();binary_source_representation();workspace_controls();
         bitmap_source_checks();
         if(argc>1&&std::string_view(argv[1])=="--smoke") {
-            datapump::gui::Controller controller({true,true});
-            datapump::gui::Smoke smoke({},300); // Match the native workflow budget.
+            auto clock=std::make_shared<smoke_detail::InterruptionClock>();
+            datapump::gui::Controller controller({true,true,std::nullopt,[clock]{return clock->now();}});
+            datapump::gui::Smoke smoke(clock,{},300); // Match the native workflow budget.
             datapump::gui::BitmapSources bitmaps;
             controller.start();
             while(!smoke.done()) {

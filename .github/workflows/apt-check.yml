@@ -46,11 +46,19 @@ jobs:
       LIBGL_ALWAYS_SOFTWARE: '1'
       LP_NUM_THREADS: '2'
     steps:
+      - name: Load current package-fetch helper before installing Git
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .ci-bootstrap
+          sparse-checkout: tools/ci-apt.sh
+          sparse-checkout-cone-mode: false
       - name: Install inspection tools and host services without a compiler
         run: |
           test "$(dpkg --print-architecture)" = "$EXPECTED_ARCH"
-          apt-get update
-          apt-get install -y --no-install-recommends ca-certificates git gh python3 gnupg gpgv \
+          cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
+          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates git gh python3 gnupg gpgv \
             xvfb xauth
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -73,14 +81,14 @@ jobs:
           Architectures: $EXPECTED_ARCH
           Signed-By: /etc/apt/keyrings/datapump.gpg
           EOF
-          apt-get update
+          sh "$RUNNER_TEMP/ci-apt.sh" update
       - name: Install both backends from GitHub through APT and verify installed bytes
         run: |
           for backend in fltk rev; do
             set -- apt-assets/datapump-"$backend"_*_"$EXPECTED_ARCH".deb
             test "$#" -eq 1 && test -f "$1"
             version=$(dpkg-deb --field "$1" Version)
-            apt-get install -y --no-install-recommends "datapump-$backend=$version"
+            sh "$RUNNER_TEMP/ci-apt.sh" install "datapump-$backend=$version"
             test "$(dpkg-query -W -f='${Status}' "datapump-$backend")" = 'install ok installed'
             expected=$(mktemp -d)
             dpkg-deb --extract "$1" "$expected"

@@ -12,6 +12,19 @@ inline constexpr int smoke_budget_exit_code=75;
 inline constexpr const char* smoke_budget_marker="INCOMPLETE GUI_SMOKE_BUDGET: ";
 
 namespace smoke_detail {
+// This advisory is emitted only after the whole workflow completes. It never
+// changes a deadline or converts an incomplete/failed workflow into a pass.
+inline std::optional<std::string> completed_workload_warning(bool completed,double elapsed,double budget) {
+    if(!completed || !std::isfinite(elapsed) || !std::isfinite(budget) || elapsed<=600)return std::nullopt;
+    std::ostringstream out;
+    out.imbue(std::locale::classic());
+    out<<std::fixed<<std::setprecision(6)
+       <<"TEST_WORKLOAD_BUDGET: GUI smoke completed in "<<elapsed
+       <<"s, above its ordinary 600s workload allowance (configured limit "<<budget
+       <<"s); every workflow assertion completed.";
+    return out.str();
+}
+
 // Only observable sampled-transmission work can distinguish an exhausted
 // overall workload allowance from a stalled workflow. Polls, status changes,
 // idle audio and elapsed computation time are deliberately not observations.

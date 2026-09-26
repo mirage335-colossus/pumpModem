@@ -28,12 +28,33 @@ captures have their own documented provenance. Keep all checks below intact.
   native and SDK qualification require explicit manual dispatch after fixes.
   Runner defaults use the organization's H pools; do not repeat checks on
   smaller runners unless specifically requested.
+- Optimize CI elapsed time with independent package producers and disjoint test
+  jobs. Keep the serial Live scope, calibration sections and expensive sanitizer
+  GUI simulation off the dependency path for ordinary regressions and
+  copied-package checks.
+  Prefer modest repeated setup/compilation over transferring configured build
+  trees; keep total runner minutes and workflow complexity within a few times
+  the unsplit work. Retain conservative within-runner test concurrency so the
+  same workflows remain usable on standard runners. Near-timeout passing tests
+  should produce timing warnings, not failures. Instrumented functional Live
+  fixtures have bounded extra computation allowances and warn when they exceed
+  the normal budget; they must still complete every assertion. Preserve actual
+  real-time, cancellation and physical-absence deadlines.
+  Distributed calibration must retain every fixed seed and require the original
+  per-case and combined statistical gates after complete result aggregation;
+  successful partial captures alone are not qualification.
+  Standard-runner GUI contracts permit a bounded 1200-second cumulative smoke
+  workload, warning after complete success exceeds 600 seconds. H and portable
+  package scopes keep their existing budgets. This changes no individual
+  assertion or physical deadline, and any incomplete Release smoke stays fatal.
 - Native CI excludes only `fast_session` and `gui_fast_live` from its instrumented
   Debug job unless `sanitizer_realtime=true` is explicitly requested. Their
   real-time audio budgets are sensitive to sanitizer overhead; this is omitted
   instrumented coverage, not proof of a hardware-only problem or a test pass.
   Keep both mandatory in Release and retain their existing assertions. The
-  separate instrumented native GUI smoke may report an exhausted cumulative
+  instrumented native GUI smoke is an independent opt-in job (`sanitizer_smoke`
+  or the `sanitizer-gui` diagnostic); ordinary CI records that coverage as
+  omitted. When selected, it may report an exhausted cumulative
   workload budget as **incomplete coverage with a warning** only for its typed
   budget result with recent sampled-transmission progress. That is not a pass.
   Stalls, assertions, sanitizer reports and other failures remain fatal; do not

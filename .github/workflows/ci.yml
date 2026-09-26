@@ -49,6 +49,10 @@ on:
         description: 'Run only the selected focused diagnostic; skip full regression and release work'
         type: boolean
         default: false
+      sanitizer_smoke:
+        description: 'Run the instrumented desktop smoke as a separate job (full runs only)'
+        type: boolean
+        default: false
       sanitizer_realtime:
         description: 'Include real-time Fast RX checks in the instrumented Debug job (full runs only)'
         type: boolean
@@ -56,7 +60,7 @@ on:
       diagnostic:
         description: 'Focused check used only with devfast=true'
         type: choice
-        options: [legacy, certification, windows-certification, windows-rev, graphics, arm-rev-package, arm-rev-smoke, sanitizer-gui, runner-capacity, arm-runner-capacity]
+        options: [legacy, certification, windows-certification, windows-rev, graphics, arm-rev-package, arm-rev-smoke, gui-contract, sanitizer-gui, runner-capacity, arm-runner-capacity]
         default: legacy
       diagnostic_release:
         description: 'Published release tag for graphics diagnostics only; no binaries are rebuilt'
@@ -67,7 +71,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: native-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ inputs.diagnostic || 'legacy' }}-${{ inputs.devfast && 'devfast' || 'full' }}-${{ !inputs.devfast && inputs.sanitizer_realtime && 'realtime' || 'standard' }}-${{ inputs.linux_runner || 'ubuntu-latest-h' }}-${{ inputs.windows_runner || 'windows-latest-h' }}-${{ inputs.arm_runner || 'ubuntu-24.04-arm-h' }}
+  group: native-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ inputs.diagnostic || 'legacy' }}-${{ inputs.devfast && 'devfast' || 'full' }}-${{ !inputs.devfast && inputs.sanitizer_realtime && 'realtime' || 'standard' }}-${{ inputs.sanitizer_smoke && 'sanitizer-smoke' || 'no-sanitizer-smoke' }}-${{ inputs.linux_runner || 'ubuntu-latest-h' }}-${{ inputs.windows_runner || 'windows-latest-h' }}-${{ inputs.arm_runner || 'ubuntu-24.04-arm-h' }}
   cancel-in-progress: true
 
 jobs:
@@ -84,10 +88,12 @@ jobs:
         run: |
           python3 tests/test_build_wrapper.py
           python3 tests/test_build_dependencies.py
+          python3 tests/test_ci_apt.py
           python3 tests/test_source_sdk.py
           python3 tests/test_sdk_build.py
           python3 tests/test_release_dependencies.py
           python3 tests/test_gui_smoke_runner.py
+          python3 tests/test_ci_tests.py
       - name: Record the remaining candidate gate
         run: echo 'Automatic checks are focused feedback only. Completed runtime changes require explicit ci.yml devfast=false, applicable SDK qualification, and release certification when publishing.' >> "$GITHUB_STEP_SUMMARY"
 
@@ -142,11 +148,11 @@ jobs:
       smoke: ${{ inputs.diagnostic == 'arm-rev-smoke' }}
 
   gui-contract:
-    if: github.event_name == 'workflow_dispatch' && !inputs.devfast
+    if: github.event_name == 'workflow_dispatch' && (!inputs.devfast || inputs.diagnostic == 'gui-contract')
     name: GUI contract (${{ matrix.backend }})
     runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
     container: debian:trixie-slim
-    timeout-minutes: 30
+    timeout-minutes: ${{ inputs.linux_runner == 'ubuntu-24.04' && 45 || 30 }}
     strategy:
       fail-fast: false
       matrix:
@@ -155,24 +161,33 @@ jobs:
       DEBIAN_FRONTEND: noninteractive
       LIBGL_ALWAYS_SOFTWARE: "1"
       # Keep software rendering from saturating the UI polling thread's CPUs.
-      LP_NUM_THREADS: "2"
+      LP_NUM_THREADS: ${{ inputs.linux_runner == 'ubuntu-24.04' && '1' || '2' }}
     steps:
+      - name: Load current package-fetch helper before installing Git
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .ci-bootstrap
+          sparse-checkout: tools/ci-apt.sh
+          sparse-checkout-cone-mode: false
       - name: Prepare shared native conformance environment
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends ca-certificates git cmake ninja-build make g++ clang-19 clang-tools-19 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev libxrandr-dev libgl-dev libglew-dev libfreetype-dev libxtst6 libgl1-mesa-dri xvfb xauth fonts-dejavu-core python3
+          cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
+          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates git cmake ninja-build make g++ clang-19 clang-tools-19 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev libxrandr-dev libgl-dev libglew-dev libfreetype-dev libxtst6 libgl1-mesa-dri xvfb xauth fonts-dejavu-core python3
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Configure the same contract suite for the selected adapter
-        # Full validation runs the whole smoke sequence; devfast skips it.
-        # Extend only its overall budget, preserving every internal deadline.
+        # The focused GUI diagnostic runs this same complete scope. Standard
+        # runners get bounded cumulative computation headroom, with a warning
+        # after a successful >600s smoke; all internal assertions stay strict.
         run: >-
           cmake -S . -B build-gui -G Ninja
           -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19
           -DCMAKE_BUILD_TYPE=Release -DDATAPUMP_PORTABLE=OFF
           -DDATAPUMP_GUI_BACKEND=${{ matrix.backend }} -DDATAPUMP_TEST_NATIVE_GUI=ON
-          -DGUI_SMOKE_TIMEOUT=600 -DDART_TESTING_TIMEOUT=3600
+          -DGUI_SMOKE_TIMEOUT=${{ inputs.linux_runner == 'ubuntu-24.04' && '1200' || '600' }} -DDART_TESTING_TIMEOUT=3600
       - run: cmake --build build-gui --target datapump-tests-gui --parallel "$(nproc)"
       - name: Check offline build and dependency tooling
         if: matrix.backend == 'fltk'
@@ -180,125 +195,106 @@ jobs:
           cmake --build build-gui --target datapump-tests-build --parallel "$(nproc)"
           ctest --test-dir build-gui --output-on-failure -L '^build$'
       - name: Test shared behavior, native contract and simulated workflow
-        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' ctest --test-dir build-gui --output-on-failure -L gui
+        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' python3 tools/run-ci-tests.py --build-dir build-gui --scope gui --jobs 1 --report build-gui/ci-test-report.json
+      - name: Record focused GUI scope
+        if: inputs.devfast
+        run: echo 'This diagnostic runs both complete GUI contracts. It does not run general native regression, calibration, SDK or package qualification; skipped scopes are not passes.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain GUI timing report and failure logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: CI-GUI-${{ matrix.backend }}-attempt-${{ github.run_attempt }}
+          path: |
+            build-gui/ci-test-report.*
+            build-gui/Testing/Temporary/
+          if-no-files-found: warn
+          retention-days: 7
 
-  linux:
-    if: github.event_name == 'workflow_dispatch' && (!inputs.devfast || inputs.diagnostic == 'sanitizer-gui')
-    name: Linux ${{ matrix.build_type }} (glibc 2.35)
-    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
-    # Compile every application and collected library against this baseline,
-    # rather than letting a newer hosted runner raise the minimum glibc ABI.
-    container: ubuntu:22.04
-    # Full suites include calibration, sanitizer work and archive GUI checks;
-    # devfast retains its separate short diagnostic budget.
-    timeout-minutes: 120
+  # Package producers do not wait for unit tests or calibration. Their exact
+  # archives still pass every required Release desktop/integrity check, and all
+  # independent test shards remain required for an overall successful workflow.
+  linux-package:
+    if: github.event_name == 'workflow_dispatch' && !inputs.devfast
+    name: Linux portable package (glibc 2.35)
+    uses: ./.github/workflows/native-linux.yml
+    with:
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+      build_type: Release
+      scope: package
+
+  windows-package:
+    if: github.event_name == 'workflow_dispatch' && !inputs.devfast
+    name: Windows portable package (static CRT)
+    uses: ./.github/workflows/native-windows.yml
+    with:
+      windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
+      scope: package
+
+  linux-tests:
+    if: github.event_name == 'workflow_dispatch' && !inputs.devfast
+    name: Linux ${{ matrix.build_type }} / ${{ matrix.shard.scope }} / ${{ matrix.shard.section }}
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(inputs.devfast && '[{"build_type":"Debug","sanitizers":"ON","portable":"OFF"}]' || '[{"build_type":"Release","sanitizers":"OFF","portable":"ON"},{"build_type":"Debug","sanitizers":"ON","portable":"OFF"}]') }}
-    env:
-      DEBIAN_FRONTEND: noninteractive
-      ASAN_OPTIONS: detect_leaks=0:halt_on_error=1
-      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
-      CC: gcc-11
-      CXX: g++-11
-    steps:
-      - name: Prepare build dependencies
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends ca-certificates curl git cmake ninja-build make g++-11 binutils libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev xvfb xauth fontconfig-config fonts-dejavu-core python3
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Install the pinned dependency scanner
-        run: |
-          sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
-          echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
-      - name: Configure native application without Python
-        # liblzma is pinned in third_party/xz and compiled statically; there is
-        # no liblzma development package or compression source download.
-        run: >-
-          cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc-11 -DCMAKE_CXX_COMPILER=g++-11
-          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-          -DDATAPUMP_SANITIZERS=${{ matrix.sanitizers }}
-          -DDATAPUMP_PORTABLE=${{ matrix.portable }}
-          -DDART_TESTING_TIMEOUT=3600
-          -DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE
-      - name: Build the selected checks
-        env:
-          FOCUSED_GUI: ${{ inputs.devfast }}
-        run: |
-          if [ "$FOCUSED_GUI" = true ]; then
-            cmake --build build --target datapump-apps test_gui_smoke_budget test_gui_launch_command --parallel "$(nproc)"
-          else
-            cmake --build build --target datapump-apps datapump-tests --parallel "$(nproc)"
-          fi
-      - name: Check the focused smoke budget policy
-        if: inputs.devfast
-        run: |
-          python3 tests/test_gui_smoke_runner.py
-          ctest --test-dir build --output-on-failure --no-tests=error -R '^(gui_smoke_budget|gui_launch_command)$'
-          echo 'Focused instrumented GUI workflow and CLI diagnostic only; unrelated regression and calibration are not repeated. This is not full native qualification.' >> "$GITHUB_STEP_SUMMARY"
-      - name: Run native tests with explicit sanitizer throughput scope
-        if: '!inputs.devfast'
-        env:
-          DATAPUMP_SANITIZERS: ${{ matrix.sanitizers }}
-          SANITIZER_REALTIME: ${{ inputs.sanitizer_realtime }}
-        run: |
-          set --
-          if [ "$DATAPUMP_SANITIZERS" = ON ] && [ "$SANITIZER_REALTIME" != true ]; then
-            set -- --exclude-regex '^(fast_session|gui_fast_live)$'
-            echo '::notice::Instrumented real-time checks omitted: fast_session, gui_fast_live. Set sanitizer_realtime=true to include them. Release checks remain required.'
-            echo 'Sanitizer scope: fast_session and gui_fast_live omitted because their wall-clock audio budgets are sensitive to instrumentation overhead. This omits their instrumented end-to-end coverage, not a pass. Both remain mandatory in Release. Set sanitizer_realtime=true for the complete instrumented selection; failures then remain fatal.' >> "$GITHUB_STEP_SUMMARY"
-          elif [ "$DATAPUMP_SANITIZERS" = ON ]; then
-            echo 'Sanitizer scope: complete selection, including fast_session and gui_fast_live real-time checks. All failures remain fatal.' >> "$GITHUB_STEP_SUMMARY"
-          fi
-          ctest --test-dir build --output-on-failure --parallel 2 "$@"
-      - name: Exercise native desktop workflow
-        id: desktop
-        env:
-          DATAPUMP_SANITIZERS: ${{ matrix.sanitizers }}
-        run: |
-          set --
-          if [ "$DATAPUMP_SANITIZERS" = ON ]; then
-            set -- --allow-budget-exhaustion
-          fi
-          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' python3 tools/run-gui-smoke.py "$@" --log "build/gui-smoke-${{ matrix.build_type }}-${{ github.run_attempt }}.log" --summary "$GITHUB_STEP_SUMMARY" -- ./build/datapump-gui --smoke-test --smoke-timeout 600
-      - name: Retain native desktop result
-        if: always() && (steps.desktop.outcome == 'success' || steps.desktop.outcome == 'failure')
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: GUI-smoke-Linux-${{ matrix.build_type }}-attempt-${{ github.run_attempt }}
-          path: build/gui-smoke-*.log
-          if-no-files-found: error
-          retention-days: 7
-      - name: Developer CLI regressions (Python is not packaged)
-        run: python3 tests/test_cli.py build/pump
-      - name: Verify relocated native GUI and package inventory
-        if: matrix.portable == 'ON'
-        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DBUILD_DIR="$PWD/build" -DCONFIG=Release -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P tests/package_native.cmake
-      - name: Create and verify both native archives
-        if: matrix.portable == 'ON'
-        run: |
-          cmake --build build --target package --parallel "$(nproc)"
-          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/build/releases" -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.35 -P tools/verify-native-archives.cmake
-      - name: Upload Linux offline bundles
-        if: matrix.portable == 'ON'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: DataPump-Linux-x86_64-glibc-2.35
-          path: |
-            build/releases/*.tar.gz
-            build/releases/*.zip
-            build/releases/SHA256SUMS.txt
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 1
+        build_type: [Release, Debug]
+        shard:
+          - {scope: core, section: all}
+          - {scope: fast, section: all}
+          - {scope: live, section: all}
+          - {scope: calibration, section: matrix}
+          - {scope: calibration, section: shaped}
+          - {scope: calibration, section: "null"}
+          - {scope: calibration, section: default-window}
+        exclude:
+          - build_type: Debug
+            shard: {scope: calibration, section: shaped}
+    uses: ./.github/workflows/native-linux.yml
+    with:
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+      build_type: ${{ matrix.build_type }}
+      scope: ${{ matrix.shard.scope }}
+      calibration_section: ${{ matrix.shard.section }}
+      sanitizer_realtime: ${{ inputs.sanitizer_realtime }}
+
+  linux-shaped:
+    if: github.event_name == 'workflow_dispatch' && !inputs.devfast
+    name: Debug shaped captures / part ${{ matrix.part }}
+    strategy:
+      fail-fast: false
+      matrix:
+        part: ['0', '1']
+    uses: ./.github/workflows/native-linux.yml
+    with:
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+      build_type: Debug
+      scope: calibration
+      calibration_section: shaped
+      calibration_shard: ${{ matrix.part }}
+
+  linux-shaped-aggregate:
+    if: github.event_name == 'workflow_dispatch' && !inputs.devfast
+    name: Require complete shaped calibration and original aggregate assertions
+    needs: linux-shaped
+    uses: ./.github/workflows/native-linux.yml
+    with:
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+      build_type: Debug
+      scope: calibration-aggregate
+      calibration_section: shaped
+
+  sanitizer-gui:
+    if: github.event_name == 'workflow_dispatch' && ((inputs.devfast && inputs.diagnostic == 'sanitizer-gui') || (!inputs.devfast && inputs.sanitizer_smoke))
+    name: Separate instrumented desktop smoke
+    uses: ./.github/workflows/native-linux.yml
+    with:
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+      build_type: Debug
+      scope: sanitizer-gui
 
   linux-compatibility:
     if: github.event_name == 'workflow_dispatch' && !inputs.devfast
     name: Copied Linux binaries on Ubuntu ${{ matrix.ubuntu }}
-    needs: linux
+    needs: linux-package
     runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
     container: ubuntu:${{ matrix.ubuntu }}
     # Both archive formats run the full workflow; measured checks exceed ten
@@ -313,10 +309,18 @@ jobs:
     steps:
       # No application development libraries or compiler: only the display and
       # inspection tools used to check the downloaded, already built bundle.
+      - name: Load current package-fetch helper before installing Git
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .ci-bootstrap
+          sparse-checkout: tools/ci-apt.sh
+          sparse-checkout-cone-mode: false
       - name: Prepare compatibility checks
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends ca-certificates curl git cmake binutils xvfb xauth fontconfig-config fonts-dejavu-core
+          cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
+          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates curl git cmake binutils xvfb xauth fontconfig-config fonts-dejavu-core
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -331,61 +335,22 @@ jobs:
       - name: Run copied archives with isolated runtime paths
         run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/downloaded" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.35 -P tools/verify-native-archives.cmake
 
-  windows:
+  windows-tests:
     if: github.event_name == 'workflow_dispatch' && !inputs.devfast
-    name: Microsoft Windows x64 (static CRT)
-    runs-on: ${{ inputs.windows_runner || 'windows-latest-h' }}
-    defaults:
-      run:
-        shell: pwsh
-    # Full validation includes calibration and both packaged GUI workflows;
-    # the separate devfast diagnostic still has its short overall budget.
-    timeout-minutes: 120
-    env:
-      VCPKG_DISABLE_METRICS: "1"
-      UseMultiToolTask: 'true'
-      EnforceProcessCountAcrossBuilds: 'true'
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Reuse verified static dependencies from base
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: ./tools/use-windows-base.ps1 -Repository "$env:GITHUB_REPOSITORY" -Destination "$PWD/build/windows-base"
-      - name: Configure native application without Python
-        shell: pwsh
-        # The same offline C sources build with MSVC; no liblzma DLL or vcpkg
-        # compression package is required on the copied installation.
-        run: >-
-          cmake -S . -B build -A x64
-          -DCMAKE_TOOLCHAIN_FILE="$env:DATAPUMP_WINDOWS_TOOLCHAIN"
-          -DVCPKG_TARGET_TRIPLET=x64-windows-static
-          -DDATAPUMP_PORTABLE=ON -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
-          -DDART_TESTING_TIMEOUT=3600
-          -DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE
-      - run: cmake --build build --config Release --target datapump-apps datapump-tests --parallel $env:NUMBER_OF_PROCESSORS
-      # The live/audio fixtures have their own workers and internal deadlines.
-      # Preserve the complete selection without competing suites on the runner.
-      - run: ctest --test-dir build -C Release --output-on-failure --parallel 1
-      - name: Verify Windows GUI and relocation with an empty PATH
-        run: cmake -DBUILD_DIR="$PWD/build" -DCONFIG=Release -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P tests/package_native.cmake
-      - name: Create and verify both native archives
-        shell: pwsh
-        run: |
-          cmake --build build --config Release --target package --parallel $env:NUMBER_OF_PROCESSORS
-          if ($LASTEXITCODE -ne 0) { throw "Native packaging failed" }
-          cmake -DARCHIVE_DIR="$PWD/build/releases" -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P tools/verify-native-archives.cmake
-          if ($LASTEXITCODE -ne 0) { throw "Archive verification failed" }
-      - name: Upload Windows offline bundles
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: DataPump-Windows-x86_64
-          path: |
-            build/releases/*.tar.gz
-            build/releases/*.zip
-            build/releases/SHA256SUMS.txt
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 1
+    name: Windows Release / ${{ matrix.shard.scope }} / ${{ matrix.shard.section }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - {scope: core, section: all}
+          - {scope: fast, section: all}
+          - {scope: live, section: all}
+          - {scope: calibration, section: matrix}
+          - {scope: calibration, section: shaped}
+          - {scope: calibration, section: "null"}
+          - {scope: calibration, section: default-window}
+    uses: ./.github/workflows/native-windows.yml
+    with:
+      windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
+      scope: ${{ matrix.shard.scope }}
+      calibration_section: ${{ matrix.shard.section }}

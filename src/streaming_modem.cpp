@@ -176,6 +176,7 @@ StreamingReceiver::~StreamingReceiver()=default;
 StreamingReceiver::StreamingReceiver(StreamingReceiver&&) noexcept=default;
 StreamingReceiver& StreamingReceiver::operator=(StreamingReceiver&&) noexcept=default;
 bool StreamingReceiver::synchronized()const{return impl_->pattern.synchronized();}
+bool StreamingReceiver::initial_search_complete()const{return impl_->pattern.initial_search_complete();}
 bool StreamingReceiver::clock_windowed()const{return impl_->pattern.clock_windowed();}
 bool StreamingReceiver::local_clock_fallback()const{return impl_->pattern.local_clock_fallback();}
 bool StreamingReceiver::acquiring()const{return impl_->pattern.acquiring();}

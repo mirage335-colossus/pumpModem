@@ -22,6 +22,9 @@ public:
     std::vector<std::complex<double>> take_chip_constellation();
     bool acquiring() const;
     bool synchronized() const;
+    // Every original clock hypothesis has scored a fully observed symbol.
+    // A leading partial symbol and capture EOF do not satisfy this coverage.
+    bool initial_search_complete() const;
     // Actual detector availability after reserving the complete search bank.
     bool drift_tolerant() const;
     std::size_t working_bytes() const;
