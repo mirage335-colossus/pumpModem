@@ -80,6 +80,19 @@ class DistroReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '18 digits'):
             distro.distro_version(dict(self.metadata, run_id='1' * 19))
 
+    def test_schema6_preserves_dependency_identity_in_canonical_distribution_metadata(self):
+        value = release.make_metadata(source_sha='a' * 40, run_id='123', run_attempt='2',
+            cmake_version='0.7.2', experiment=True, schema=6, version='v001_00',
+            dependencies={'linux-sdk': '1' * 20, 'windows-base': '2' * 20},
+            now=datetime(2026, 9, 23, 12, 0, tzinfo=timezone.utc))
+        _, manifest = distro.expected(self.assets, value, self.repository)
+        self.assertEqual(manifest['metadata_identity_sha256'], apt.metadata_identity(value))
+        self.assertEqual(manifest['archives'], self.manifest['archives'])
+        missing = dict(value)
+        del missing['dependencies']
+        with self.assertRaises(ValueError):
+            distro.expected(self.assets, missing, self.repository)
+
     def test_recipes_have_native_arch_dependencies_no_build_and_no_strip(self):
         trees, _ = distro.expected(self.assets, self.metadata, self.repository)
         for backend in distro.BACKENDS:

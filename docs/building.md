@@ -40,7 +40,12 @@ For an isolated Bookworm-compatible target toolchain, use the separate
 [source SDK](../third_party/build-support/README.md#source-sdk-for-the-bookworm-abi-baseline).
 It builds pinned upstream sources rather than extracting distribution packages.
 The Git repository retains the recipe; release storage holds a compiled SDK and
-its complete source archive. Download or build it once, explicitly install it
+its complete source archive. Every new binary release retains its required
+reusable dependency archives, sources and per-recipe checksums in its own
+checksummed inventory. A surviving release can therefore bootstrap
+those dependencies after an older release is deleted; see
+[recovery from a binary release](releases.md#bootstrap-from-a-surviving-binary-release).
+Download or build the SDK once, explicitly install it
 with `tools/build-sdk.py install`, then pass `--sdk /absolute/path` to the same
 build wrapper. Using a prepared SDK requires no container, chroot or root access.
 It includes private C++ runtime libraries for CMake, Ninja and GCC helpers,
@@ -50,9 +55,11 @@ relocation. The default native build remains available.
 
 Manual releases with version/date tags, an experiment checkbox and six portable
 application downloads are documented in [manual portable releases](releases.md).
-Windows release, certification and full CI jobs reuse a checksummed dependency
-bundle from the durable `base` release: static OpenSSL, GLEW and FreeType for
-both GUI backends. The runner supplies MSVC and the Windows SDK separately.
+Windows release and full CI jobs reuse a checksummed dependency bundle from the
+durable `base` release: static OpenSSL, GLEW and FreeType for both GUI backends.
+Schema-6 certification uses the target binary release's retained copy, verified
+against its pinned inventory; older schemas keep the base lookup. The runner
+supplies MSVC and the Windows SDK separately.
 The [toolchain selector](../tools/select-windows-toolchain.ps1) prefers an
 installed Visual Studio 2022, or uses Visual Studio 2026 with its installed
 v143 tools. The current larger Windows images have VS2026 and v143 14.44;
@@ -276,9 +283,12 @@ A-to-B update, idempotent refresh and rejected tampered/older metadata with the
 small local fixtures before native installation. Gentoo host dependencies must come from its
 binary repository; a missing binary fails with an actionable error instead of
 starting an expensive source build.
-This path does not rebuild application binaries or SDKs. Follow publication
-with full `certify.yml`, `devfast=false`, for that new release; packaging-only
-checks are not a substitute for release certification. See
+This path does not rebuild application binaries or SDKs. Publication requires
+the new release to retain the original SDK/dependency triplets.
+Repackaging copies them from the source release, or resolves an older release's
+exact application-source recipe in `base`; missing or unprovable recipes fail.
+Follow publication with full `certify.yml`, `devfast=false`, for that new
+release; packaging-only checks are not a substitute for release certification. See
 [APT packaging and validation](releases.md#package-an-existing-release-without-rebuilding-it).
 
 Manual workflows expose `linux_runner` and `windows_runner` dropdowns for the
@@ -570,11 +580,23 @@ recipe from the durable `base` release without rebuilding the toolchain.
 [Base maintenance](../.github/workflows/sdk-base.yml) explicitly builds/reuses
 and preserves SDKs and complete source archives; see
 [SDK maintenance](../third_party/build-support/README.md#ci-publication-and-upgrades).
+New schema-6 binary releases also retain the exact Windows dependency binary,
+complete source archive and recipe checksum file; `bookworm-sdk` releases retain
+the Linux SDK triplet as well. Their global `SHA256SUMS.txt` covers all these
+copies. Repackaging preserves the dependencies used by the original binaries,
+even when the packaging checkout uses a newer recipe. Missing assets require
+explicit maintenance. The runner's MSVC and Windows SDK remain separate and are
+not redistributed. This policy does not backfill older releases.
 
 Application publication and extensive qualification are separate:
 [manual portable releases](releases.md) publishes after packaging checks, then
 [certification](../.github/workflows/certify.yml) attaches source/test outcomes
-and the exact published binary hashes to that release. Copied GUI checks use
+and the exact published binary hashes to that release. For schema 6, source
+certification restores its Linux SDK and Windows dependencies from that release's
+own assets, so deleting `base` does not block it. Older schemas retain the base
+fallback. The current `tools/release-dependencies.py fetch` helper retrieves a
+full verified archive pair by default; use `--binary-only` when sources are not
+needed. Copied GUI checks use
 `-DGUI_SMOKE_TIMEOUT=600`. Rev replay/waterfall cadence misses emit visible
 warnings and do not prevent publication or certification; pending-progress,
 content, physical-completion and cancellation assertions remain mandatory.

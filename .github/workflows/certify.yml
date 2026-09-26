@@ -45,6 +45,9 @@ on:
       - 'tests/test_gentoo_sync.py'
       - 'tools/certify-release.py'
       - 'tests/test_certify_release.py'
+      - 'tools/release-dependencies.py'
+      - 'tools/use-windows-base.ps1'
+      - 'tests/test_release_dependencies.py'
 
 permissions:
   contents: read
@@ -70,6 +73,7 @@ jobs:
         with:
           persist-credentials: false
       - run: python3 tests/test_certify_release.py
+      - run: python3 tests/test_release_dependencies.py
       - run: python3 tests/test_windows_certification.py
 
   prepare:
@@ -137,10 +141,18 @@ jobs:
           ref: ${{ github.sha }}
           path: .certification-tools
           sparse-checkout: tools
-      - name: Fetch exact SDK from base (no compiler rebuild)
+      - name: Fetch this release's verified SDK (legacy base fallback, no compiler rebuild)
         if: matrix.sdk
         id: sdk
-        run: python3 tools/sdk-release.py fetch --binary-only --repo "$GITHUB_REPOSITORY" --directory downloaded-sdk --github-output "$GITHUB_OUTPUT"
+        run: |
+          python3 .certification-tools/tools/release-dependencies.py fetch --repo "$GITHUB_REPOSITORY" \
+            --tag "$RELEASE_TAG" --kind linux-sdk --directory downloaded-sdk \
+            --inventory-sha256 "$INVENTORY_SHA256" > release-sdk.json
+          if python3 -c 'import json, sys; sys.exit(0 if json.load(open("release-sdk.json"))["found"] else 1)'; then
+            echo 'found=true' >> "$GITHUB_OUTPUT"
+          else
+            python3 tools/sdk-release.py fetch --binary-only --repo "$GITHUB_REPOSITORY" --directory downloaded-sdk --github-output "$GITHUB_OUTPUT"
+          fi
       - name: Install verified SDK
         if: matrix.sdk
         env:

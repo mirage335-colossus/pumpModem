@@ -20,7 +20,8 @@ be copied into the system `/lib` directory. Linux uses `.tar.gz`; Windows uses
 Publication and extensive testing are separate operations. Publication checks
 build success, both package formats, checksums, relocation, CLI/self-check
 operation, dependency closure and the Linux ABI ceiling. It then publishes the
-six selected downloads and a signed flat APT repository with **certification pending**. The separate
+six selected downloads, copies of the reusable build dependencies and a signed
+flat APT repository with **certification pending**. The separate
 [certification workflow](../.github/workflows/certify.yml) later tests the exact
 published downloads and attaches immutable reports to that same release. The
 long preservation contract and GUI tests remain intact in that workflow.
@@ -96,6 +97,11 @@ of `main`. It pins `SHA256SUMS.txt` before testing and refuses certification if
 the source, tag, checksum inventory or published asset hashes change. It never
 rebuilds or replaces the published downloads. Source unit tests compile from
 the recorded revision; archive/GUI/CLI tests execute the released binaries.
+For schema-6 releases, source certification retrieves the retained dependencies
+from that same release and verifies them against the pinned inventory. It does
+not need the original `base` release. Older schemas retain the existing exact
+recipe lookup in `base`; missing or corrupt schema-6 assets fail instead of
+falling back to another release.
 
 Every completed certification records passed/failed status, required job
 outcomes, source SHA and binary hashes in
@@ -108,9 +114,14 @@ Existing schema-1 releases retain their original three FLTK assets; schema-2
 releases retain all six backend-specific assets and a checksummed `warning.log`.
 Both remain readable. Schema-3 releases also require the signed APT assets
 and Debian installation checks described below. Schema-4 releases add signed
-Arch/Gentoo recipe hashes and native recipe installation checks. New schema-5
+Arch/Gentoo recipe hashes and native recipe installation checks. Schema-5
 releases additionally require signed pacman repositories and verified Gentoo
-update channels. Upload and certification check each archive's root
+update channels. New schema-6 releases also require the compiled Windows
+dependency bundle, its complete sources and per-recipe checksum file. Releases
+using `bookworm-sdk` require the corresponding Linux SDK triplet too. The final
+`SHA256SUMS.txt` binds every retained dependency asset to the release. Older
+metadata remains readable; this policy does not add assets to older releases.
+Upload and certification check each archive's root
 and shipped build information, so relabeling an FLTK package as Rev is rejected.
 Full qualification of a new release requires coverage of every declared backend.
 The scoped Windows Rev WGL warning described below permits a green workflow with
@@ -276,6 +287,14 @@ their source revision, original tag/inventory hash and packaging-tool revision.
 The new Git tag identifies the packaging-tool revision; `source_sha` identifies
 the application revision whose binaries were reused. Certification builds the
 recorded application revision and checks both identities.
+The new release also copies the original release's retained SDK/dependency
+triplets byte for byte. For older releases without complete retained copies,
+repackaging resolves the recipe at the original application source revision and
+retrieves that exact recipe from `base`. It fails when the original recipe
+cannot be established or its assets are missing; it never substitutes the
+packager's current recipe or rebuilds dependencies. A retained copy remains
+available for later repackaging or bootstrapping after earlier releases are
+deleted.
 The old release and its reports remain intact. `publish=false` leaves the new
 release as a draft after signature/payload checks; public APT installation
 cannot run against a draft. The default `publish=true` publishes the experiment
@@ -694,13 +713,97 @@ count through Buildroot's internal parallelism. A positive number overrides it.
 Application packaging also uses available runner cores; time-sensitive test
 concurrency remains controlled independently.
 
-Routine app builds download only the compiled SDK and checksum inventory. The
-source archive stays in `base` for developers. Neither publication, certification
-nor base maintenance uses Actions cache or artifact storage: platform builds
-upload directly to a draft, and certification downloads the published assets.
+Routine app builds download only the compiled SDK and checksum inventory.
+Before finalizing a new binary release, publication copies the exact source
+recipe's compiled dependencies, complete source archives and per-recipe checksum
+files from `base` into that release. Every new release retains the Windows
+dependency triplet; `bookworm-sdk` releases also retain the Linux SDK triplet.
+Ubuntu-baseline releases do not claim to have used the Linux SDK. Each copy keeps
+its original recipe filename and bytes and joins the release's final
+`SHA256SUMS.txt`. Missing, incomplete or inconsistent dependencies prevent
+publication. SDK compilation remains an explicit base-maintenance operation.
+
+The retained assets cover the reusable SDK/dependency recipes required by the
+binary build. Native Linux builders still use their documented distribution
+toolchains and packages; Windows runners supply MSVC and the Windows SDK
+separately. Microsoft's compiler and SDK are not redistributed. Neither
+publication, certification nor base maintenance uses Actions cache or artifact
+storage: platform builds upload directly to a draft, and certification downloads
+the published assets.
 The separate native and SDK/Rev regression workflows retain small application
 artifacts for one day for CI inspection and copied-binary checks on other hosts.
 Those are not durable releases.
+
+### Bootstrap from a surviving binary release
+
+A schema-6 release contains enough retained assets to recover its reusable
+dependencies even if the original `base` or an earlier binary release has been
+deleted. The retrieval helper downloads the full binary/source pair and recipe
+checksum file, verifies the release inventory and asset hashes, and names the
+local checksum file `SHA256SUMS` for the existing install/verification helpers:
+
+```sh
+python3 tools/release-dependencies.py fetch --repo OWNER/REPO --tag RELEASE_TAG \
+  --kind linux-sdk --directory restore-sdk
+python3 tools/release-dependencies.py fetch --repo OWNER/REPO --tag RELEASE_TAG \
+  --kind windows-base --directory restore-windows-base
+```
+
+Use the Linux command only for a `bookworm-sdk` release. The optional
+`--binary-only` flag verifies the full pair, then retains only the compiled
+archive and checksum for installation. Keep the full pair for restoration to
+`base` or future reconstruction.
+For older schemas the helper returns `found=false`; their existing base lookup
+remains necessary.
+
+For manual downloads, choose the exact recipe IDs in the release's asset
+inventory. Download each compiled archive, matching source archive and per-recipe
+checksum file together. Verify all three against the release's `SHA256SUMS.txt`,
+retaining that inventory outside the isolated directories below.
+
+For Linux, the triplet is `datapump-sdk-ID-linux-x86_64.tar.gz`,
+`datapump-sdk-sources-ID.tar.gz` and `sdk-ID-SHA256SUMS.txt`. Put only those files
+in `restore-sdk`, then rename the recipe checksum file to the local name
+expected by the existing helper. Skip the `mv` command when using `fetch`, which
+already performs this rename:
+
+```sh
+mv restore-sdk/sdk-ID-SHA256SUMS.txt restore-sdk/SHA256SUMS
+python3 tools/sdk-release.py verify --directory restore-sdk
+python3 tools/build-sdk.py install \
+  --archive restore-sdk/datapump-sdk-ID-linux-x86_64.tar.gz \
+  --destination /absolute/path/to/recovered-sdk
+```
+
+Use a checkout matching the retained recipe; `verify` checks the preserved
+recipe and sources against that checkout. The installed SDK can then build the
+application with `./build.sh --sdk /absolute/path/to/recovered-sdk`, subject to
+its documented host baseline.
+
+For Windows, the triplet is `windows-base-ID-x64-windows-static.zip`,
+`windows-base-sources-ID.zip` and `windows-base-ID-SHA256SUMS.txt`. Put only those
+files in `restore-windows-base` and use the matching source checkout:
+
+```powershell
+Rename-Item restore-windows-base/windows-base-ID-SHA256SUMS.txt SHA256SUMS
+$toolchain = & ./tools/select-windows-toolchain.ps1
+python tools/windows-base.py install --directory restore-windows-base `
+  --destination "$PWD/build/recovered-windows-base" --linker-version $toolchain.LinkerVersion
+```
+
+Skip `Rename-Item` when using `fetch`. Windows installation accepts either the
+full binary/source pair or the compiled archive alone, with the adjacent
+`SHA256SUMS`; when the source archive is present it verifies that archive too.
+
+Replace `ID` with the appropriate 20-character recipe identity and use new
+installation destinations. Once downloaded, verification and installation use
+local files. Keep the source archives for future reconstruction. Explicit base
+maintenance can restore the same triplets using the existing
+`sdk-release.py publish` and `windows-base.py publish` commands, with `SHA256SUMS` in each
+isolated directory. Windows publication requires a published prerelease named
+`base` to exist first. Existing recipe assets are compared and never overwritten;
+restoration does not authorize a cold rebuild or alteration of surviving
+release assets.
 
 GitHub [limits each release asset to under 2 GiB](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases),
 while documenting no limit on aggregate release size or download bandwidth.
@@ -833,8 +936,9 @@ Run logs identify the selected generator, toolset and linker version.
 This selection leaves the existing base recipe identity and assets unchanged;
 its hosted compile results must still be checked before claiming qualification.
 
-Ordinary Windows release, certification and full CI jobs download, verify and
-relocate the exact recipe through [the helper](../tools/windows-base.py).
+Ordinary Windows release and full CI jobs download the exact recipe from
+`base`; schema-6 certification downloads the target release's retained copy.
+They verify and relocate it through [the helper](../tools/windows-base.py).
 They fail with maintenance instructions if it is missing, rather than starting
 an implicit vcpkg build. The dependency handoff uses release assets, with no
 Actions cache or artifact storage. Application compilation and the selected
@@ -842,10 +946,13 @@ tests still run normally.
 
 Certification checks out the published source and current workflow tooling into
 separate directories. Its current runner-discovery wrapper invokes the released
-source's dependency helper and recipe, preserving that release's base identity
-while accommodating the selected runner image. Releases predating that helper
-retain the current-tooling fallback. The application source, published archives
-and report hash bindings remain those of the release under certification.
+source's dependency helper and recipe to install the retained copy, preserving
+the recipe identity while accommodating the selected runner image. The wrapper
+passes the release tag and pinned inventory hash to the retrieval helper.
+Older release schemas retain the base lookup, and releases predating the
+dependency helper retain the current-tooling fallback. The application source,
+published archives and report hash bindings remain those of the release under
+certification.
 
 Maintenance uses `source=auto` to reuse the exact bundle or build it when
 missing, `source=base` to require reuse, and `source=rebuild` for an explicit
@@ -893,8 +1000,10 @@ The release inventory names the application downloads
 `DataPump-TAG-linux-aarch64-BACKEND.tar.gz` and
 `DataPump-TAG-windows-x86_64-BACKEND.zip`, where `TAG` is the shared version/build
 label and `BACKEND` is `fltk` or `rev`. It also includes release notes, metadata,
-`warning.log` and `SHA256SUMS.txt`. Compiled SDKs and their corresponding source archives are retained once per
-recipe in `base`, separately from application releases. The optional `version`
+`warning.log` and `SHA256SUMS.txt`, plus the complete SDK/dependency triplets
+required by schema 6. These retain the exact recipe assets from `base` on each
+binary release; see [durable SDK storage](#durable-sdk-storage-and-compilation-time).
+The optional `version`
 input labels the release and archives; it does not rewrite the CMake project
 version embedded in the application's `--version` output.
 

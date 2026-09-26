@@ -91,14 +91,35 @@ def channel_fixture(kind):
     return tool
 
 
+def dependency_files(dependencies):
+    files = {}
+    for kind, identity in dependencies.items():
+        if kind == 'linux-sdk':
+            binary, source, checksum = (f'datapump-sdk-{identity}-linux-x86_64.tar.gz',
+                f'datapump-sdk-sources-{identity}.tar.gz', f'sdk-{identity}-SHA256SUMS.txt')
+        else:
+            binary, source, checksum = (f'windows-base-{identity}-x64-windows-static.zip',
+                f'windows-base-sources-{identity}.zip', f'windows-base-{identity}-SHA256SUMS.txt')
+        pair = {binary: ('compiled ' + identity).encode(), source: ('source ' + identity).encode()}
+        files.update(pair)
+        files[checksum] = ''.join(f'{release.hashlib.sha256(data).hexdigest()}  {name}\n'
+                                 for name, data in sorted(pair.items())).encode()
+    return files
+
+
+def write_dependencies(metadata, repository, directory, **_):
+    for name, data in dependency_files(metadata['dependencies']).items():
+        (directory / name).write_bytes(data)
+
+
 class MetadataTests(unittest.TestCase):
     def test_new_metadata_defaults_to_both_backends_and_legacy_stays_readable(self):
         value = release.make_metadata(source_sha='a' * 40, run_id='123', run_attempt='1')
-        self.assertEqual(value['schema'], 5)
+        self.assertEqual(value['schema'], 6)
         self.assertEqual(value['gui_backends'], ['fltk', 'rev'])
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / 'metadata.json'
-            for schema in (1, 2, 3, 4, 5):
+            for schema in (1, 2, 3, 4, 5, 6):
                 original = metadata(schema=schema)
                 release.write_json(path, original)
                 self.assertEqual(release.load_metadata(path), original)
@@ -109,6 +130,23 @@ class MetadataTests(unittest.TestCase):
                 release.write_json(path, {**metadata(schema=2), **changes})
                 with self.subTest(changes=changes), self.assertRaises(ValueError):
                     release.load_metadata(path)
+
+    def test_schema6_requires_exact_dependencies_and_keeps_original_recipes(self):
+        dependencies = {'windows-base': '1' * 20, 'linux-sdk': '2' * 20}
+        value = metadata(schema=6, dependencies=dependencies)
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'metadata.json'
+            release.write_json(path, value)
+            with patch.object(release.dependency_tool(), 'recipe_ids', side_effect=AssertionError('must not use current recipes')):
+                self.assertEqual(release.load_metadata(path), value)
+            for bad in (None, {}, {'windows-base': '1' * 20}, {**dependencies, 'linux-sdk': '../unsafe'},
+                        {**dependencies, 'unexpected': '3' * 20}):
+                release.write_json(path, {**value, 'dependencies': bad})
+                with self.subTest(bad=bad), self.assertRaises(ValueError):
+                    release.load_metadata(path)
+        native = metadata(schema=6, linux_baseline='ubuntu-22.04', dependencies={'windows-base': '1' * 20})
+        self.assertEqual(len(release.dependency_assets(native)), 3)
+        self.assertEqual(len(release.dependency_assets(value)), 6)
 
     def test_schema3_requires_apt_marker_and_valid_packaging_provenance(self):
         value = metadata(schema=3)
@@ -353,6 +391,29 @@ class ReleaseFixture:
 
 
 class InventoryTests(ReleaseFixture, unittest.TestCase):
+    def test_schema6_offline_assembly_requires_and_checks_complete_dependency_sets(self):
+        value = self.backend_inputs(schema=6)
+        dependencies = self.root / 'dependencies'
+        dependencies.mkdir()
+        write_dependencies(value, None, dependencies)
+        with patch.object(release, 'apt_tool', return_value=apt_fixture()), \
+             patch.object(release, 'distro_tool', return_value=distro_fixture()), \
+             patch.object(release, 'channel_tool', side_effect=channel_fixture):
+            self.assemble(dependency_artifacts=dependencies)
+            self.assertEqual(set(release.verify_release(self.output)[1]), release.required_assets(value))
+            for name, data in dependency_files(value['dependencies']).items():
+                self.assertEqual((self.output / name).read_bytes(), data)
+            # Even replacing the global inventory cannot hide a broken recipe pair.
+            source = next(name for name in release.dependency_assets(value) if '-sources-' in name)
+            (self.output / source).write_bytes(b'corrupt source')
+            self.sums(self.output)
+            with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
+                release.verify_release(self.output)
+            (self.output / source).unlink()
+            self.sums(self.output)
+            with self.assertRaisesRegex(ValueError, 'missing an application target or support file'):
+                release.verify_release(self.output)
+
     def test_schema3_requires_apt_assets_and_signature_verification(self):
         value = self.backend_inputs(schema=3)
         tool = apt_fixture()
@@ -878,6 +939,82 @@ class StagedPublicationTests(ReleaseFixture, unittest.TestCase):
         self.assertIn('--latest=false', self.mutations()[-1])
         self.assertTrue(all('--clobber' not in call for call in self.calls))
 
+    def test_schema6_finalization_uploads_dependency_bytes_before_publication(self):
+        self.value = self.backend_inputs(schema=6)
+        release.reserve(self.metadata, self.notes, 'owner/repository')
+        for target in release.application_targets(self.value):
+            release.upload(self.metadata, 'owner/repository', target, self.artifacts / target)
+        with patch.object(release, 'apt_tool', return_value=apt_fixture()), \
+             patch.object(release, 'distro_tool', return_value=distro_fixture()), \
+             patch.object(release, 'channel_tool', side_effect=channel_fixture), \
+             patch.object(release, 'preserve_dependencies', side_effect=write_dependencies) as preserve:
+            release.finalize(self.metadata, 'owner/repository', self.output, True)
+            self.assertEqual(set(self.remote), release.required_assets(self.value) | {'SHA256SUMS.txt'})
+        preserve.assert_called_once()
+        for name, data in dependency_files(self.value['dependencies']).items():
+            self.assertEqual(self.remote[name], data)
+        upload, publish = self.mutations()[-2:]
+        self.assertEqual(upload[1], 'upload')
+        self.assertTrue(release.dependency_assets(self.value) <= {Path(name).name for name in upload[5:]})
+        self.assertEqual(Path(upload[-1]).name, 'SHA256SUMS.txt')
+        self.assertEqual(publish[1], 'edit')
+
+    def test_dependency_failure_never_signs_or_publishes_the_release(self):
+        self.value = self.backend_inputs(schema=6)
+        release.reserve(self.metadata, self.notes, 'owner/repository')
+        for target in release.application_targets(self.value):
+            release.upload(self.metadata, 'owner/repository', target, self.artifacts / target)
+        with patch.object(release, 'build_delivery_assets') as sign, \
+             patch.object(release, 'preserve_dependencies', side_effect=ValueError('Missing dependency source')):
+            with self.assertRaisesRegex(ValueError, 'Missing dependency source'):
+                release.finalize(self.metadata, 'owner/repository', self.output, True)
+        sign.assert_not_called()
+        self.assertTrue(self.info['draft'])
+        self.assertNotIn('SHA256SUMS.txt', self.remote)
+        self.assertFalse(self.output.exists())
+
+    def test_dependency_upload_failure_never_publishes(self):
+        self.value = self.backend_inputs(schema=6)
+        release.reserve(self.metadata, self.notes, 'owner/repository')
+        for target in release.application_targets(self.value):
+            release.upload(self.metadata, 'owner/repository', target, self.artifacts / target)
+        self.fail_upload = next(name for name in release.dependency_assets(self.value) if '-sources-' in name)
+        with patch.object(release, 'apt_tool', return_value=apt_fixture()), \
+             patch.object(release, 'distro_tool', return_value=distro_fixture()), \
+             patch.object(release, 'channel_tool', side_effect=channel_fixture), \
+             patch.object(release, 'preserve_dependencies', side_effect=write_dependencies):
+            with self.assertRaises(subprocess.CalledProcessError):
+                release.finalize(self.metadata, 'owner/repository', self.output, True)
+        self.assertTrue(self.info['draft'])
+        self.assertNotIn('SHA256SUMS.txt', self.remote)
+
+    def test_schema6_repackage_survives_deleted_base_and_changed_current_recipes(self):
+        self.value = self.backend_inputs(schema=6)
+        dependency_dir = self.root / 'dependencies'
+        dependency_dir.mkdir()
+        write_dependencies(self.value, None, dependency_dir)
+        with patch.object(release, 'apt_tool', return_value=apt_fixture()), \
+             patch.object(release, 'distro_tool', return_value=distro_fixture()), \
+             patch.object(release, 'channel_tool', side_effect=channel_fixture):
+            self.assemble(dependency_artifacts=dependency_dir)
+            self.remote = {path.name: path.read_bytes() for path in self.output.iterdir()}
+            original = dict(self.remote)
+            self.reference, self.exists = self.value['source_sha'], True
+            self.info['tag_name'] = self.value['tag']
+            destination = self.root / 'retained-repackage'
+            tool = release.dependency_tool()
+            with patch.object(tool, 'release_tool', return_value=release), \
+                 patch.object(tool, '_base_assets', side_effect=AssertionError('base deleted')), \
+                 patch.object(tool, 'recipe_ids', side_effect=AssertionError('current recipe differs')), \
+                 patch.object(tool, 'remote_recipe_ids', side_effect=AssertionError('older source unavailable')), \
+                 patch.object(release, 'publish'):
+                value = release.repackage(self.value['tag'], 'owner/repository', destination,
+                                          version='vretained', run_id='456', packager_sha='b' * 40,
+                                          apt_signing_key=Path('key'), apt_signing_fingerprint='A' * 40)
+            self.assertEqual(value['dependencies'], self.value['dependencies'])
+            for name in release.dependency_assets(value):
+                self.assertEqual((destination / name).read_bytes(), original[name])
+            release.verify_release(destination)
     def test_backend_mismatch_prevents_upload_before_network(self):
         value = self.backend_inputs()
         target = 'windows-x86_64-rev'
@@ -1121,6 +1258,15 @@ class StagedPublicationTests(ReleaseFixture, unittest.TestCase):
         self.remote = {path.name: path.read_bytes() for path in self.output.iterdir()}
         self.reference, self.exists = self.value['source_sha'], True
         self.info['tag_name'] = self.value['tag']
+        # Legacy releases recorded no recipe identities. Exercise the new
+        # orchestration using an independently resolved historical recipe.
+        recipes = patch.object(release.dependency_tool(), 'remote_recipe_ids',
+                               return_value={'windows-base': '1' * 20, 'linux-sdk': '2' * 20})
+        self.resolve_recipes = recipes.start()
+        self.addCleanup(recipes.stop)
+        preserved = patch.object(release, 'preserve_dependencies', side_effect=write_dependencies)
+        self.preserve_recipes = preserved.start()
+        self.addCleanup(preserved.stop)
 
     def test_repackage_preserves_all_source_bytes_and_records_new_packager_and_origin(self):
         self.prepare_repackage_source()
@@ -1139,6 +1285,10 @@ class StagedPublicationTests(ReleaseFixture, unittest.TestCase):
                          'inventory_sha256': release.hashlib.sha256(original['SHA256SUMS.txt']).hexdigest()})
         self.assertEqual(value['title'], 'experiment')
         self.assertTrue(value['experiment'])
+        self.resolve_recipes.assert_called_once_with('owner/repository', self.value['source_sha'], 'bookworm-sdk')
+        self.assertEqual(value['dependencies'], {'windows-base': '1' * 20, 'linux-sdk': '2' * 20})
+        for name, data in dependency_files(value['dependencies']).items():
+            self.assertEqual((destination / name).read_bytes(), data)
         for target, name in release.application_names(value).items():
             self.assertEqual((destination / name).read_bytes(), original[release.application_names(self.value)[target]])
         publish.assert_called_once_with(destination, 'owner/repository', publish_now=False)
@@ -1186,6 +1336,8 @@ class StagedPublicationTests(ReleaseFixture, unittest.TestCase):
         self.assertEqual(result['source_sha'], 'a' * 40)
         self.assertEqual(result['packager_sha'], 'c' * 40)
         self.assertEqual(result['repackaged_from']['tag'], value['tag'])
+        self.assertEqual(result['dependencies'], value['dependencies'])
+        self.assertEqual(self.resolve_recipes.call_count, 1)
 
 
 if __name__ == '__main__':

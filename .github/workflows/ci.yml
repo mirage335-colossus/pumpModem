@@ -86,6 +86,7 @@ jobs:
           python3 tests/test_build_dependencies.py
           python3 tests/test_source_sdk.py
           python3 tests/test_sdk_build.py
+          python3 tests/test_release_dependencies.py
           python3 tests/test_gui_smoke_runner.py
       - name: Record the remaining candidate gate
         run: echo 'Automatic checks are focused feedback only. Completed runtime changes require explicit ci.yml devfast=false, applicable SDK qualification, and release certification when publishing.' >> "$GITHUB_STEP_SUMMARY"

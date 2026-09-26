@@ -23,8 +23,8 @@ def asset_names(metadata):
 
 def manifest(directory, metadata, repository, signing_fingerprint):
     client = sync_module()
-    if metadata.get('schema') != 5:
-        raise ValueError('Gentoo update channels require release schema 5')
+    if metadata.get('schema') not in (5, 6):
+        raise ValueError('Gentoo update channels require release schema 5+')
     directory = Path(directory)
     result = {key: metadata[key] for key in ('tag', 'created_at', 'project_version', 'version',
                                             'run_id', 'run_attempt', 'experiment')}

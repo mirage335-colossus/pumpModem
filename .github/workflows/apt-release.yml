@@ -80,6 +80,7 @@ jobs:
           python3 tests/test_arch_release.py
           python3 tests/test_gentoo_sync.py
           python3 tests/test_release.py
+          python3 tests/test_release_dependencies.py
           python3 tests/test_certify_release.py
       - name: Create a new experiment with unchanged archive bytes and signed distribution update channels
         id: package

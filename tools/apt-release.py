@@ -76,7 +76,7 @@ def metadata_identity(metadata):
 def validate_location(metadata, repository):
     release = release_module()
     release.repository_name(repository)
-    if metadata.get('schema') not in (3, 4, 5) or metadata.get('gui_backends') != list(BACKENDS):
+    if metadata.get('schema') not in (3, 4, 5, 6) or metadata.get('gui_backends') != list(BACKENDS):
         raise ValueError('APT packaging requires the complete schema-3+ backend inventory')
     tag = metadata['tag']
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,100}', tag) or '..' in tag:

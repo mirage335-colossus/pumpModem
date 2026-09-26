@@ -168,6 +168,8 @@ def prepare(repository, tag, directory, expected_inventory=None):
         raise ValueError('Published inventory is missing application or support assets')
     extra = set(inventory) - required
     if extra:
+        if metadata['schema'] >= 6:
+            raise ValueError('Published inventory contains assets outside its recorded dependency recipes')
         release.verify_sdk_pair(extra)
     for name, expected in inventory.items():
         server_digest = assets[name].get('digest')
@@ -316,7 +318,8 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
         status = ('passed_with_warnings' if warnings else 'passed') if passed else 'failed'
         # GitHub normally supplies SHA-256 asset digests. Older hosts require
         # re-reading bytes before a report can describe the current assets.
-        checked_names = (list(names.values()) + sorted(release.apt_assets(metadata) | release.distribution_assets(metadata))
+        checked_names = (list(names.values()) + sorted(release.apt_assets(metadata) | release.distribution_assets(metadata)
+                                                      | release.dependency_assets(metadata))
                          + (['warning.log'] if metadata['schema'] >= 2 else []))
         for name in checked_names:
             if not state['assets'][name].get('digest'):
@@ -357,6 +360,9 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
                 evidence['repackaged_from'] = metadata['repackaged_from']
         if metadata['schema'] >= 4:
             evidence['distribution_assets'] = {name: state['inventory'][name] for name in sorted(release.distribution_assets(metadata))}
+        if metadata['schema'] >= 6:
+            evidence['dependencies'] = metadata['dependencies']
+            evidence['dependency_assets'] = {name: state['inventory'][name] for name in sorted(release.dependency_assets(metadata))}
         stem = f'certification-{run_id}-attempt-{run_attempt}'
         if any(stem + suffix in state['assets'] for suffix in ('.json', '.md', '-warning.log')):
             raise ValueError('Certification evidence already exists; never overwrite a prior run')
@@ -407,7 +413,10 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
                + '\n' if metadata['schema'] >= 3 else '')
             + ('\nPublished distribution delivery SHA-256 values (distro-recipes job required):\n\n'
                + '\n'.join(f'- `{name}`: `{digest}`' for name, digest in evidence['distribution_assets'].items())
-               + '\n' if metadata['schema'] >= 4 else ''),
+               + '\n' if metadata['schema'] >= 4 else '')
+            + ('\nPreserved SDK/dependency SHA-256 values:\n\n'
+               + '\n'.join(f'- `{name}`: `{digest}`' for name, digest in evidence['dependency_assets'].items())
+               + '\n' if metadata['schema'] >= 6 else ''),
             encoding='utf-8')
         # No --clobber, no binary upload, and no promotion before evidence upload.
         gh(['release', 'upload', tag, '--repo', repository, str(json_path), str(markdown_path), *warning_paths])

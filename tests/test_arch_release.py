@@ -137,6 +137,20 @@ class ArchReleaseTests(unittest.TestCase):
                 self.assertIn(f'opt/datapump/{backend}/lib/example.so', listing)
                 self.assertNotIn('.PKGINFO', listing)
 
+    def test_schema6_signs_dependency_identity_with_the_native_repository(self):
+        directory = self.root / 'schema6'
+        directory.mkdir()
+        value = dict(self.metadata, schema=6,
+                     dependencies={'linux-sdk': '1' * 20, 'windows-base': '2' * 20})
+        for target, name in release.application_names(value).items():
+            if target.startswith('linux-'):
+                shutil.copyfile(self.base / name, directory / name)
+        manifest = arch.build(directory, value, self.repository, self.key, self.fingerprint)
+        self.assertEqual(arch.verify(directory, value, self.repository, self.fingerprint), manifest)
+        tampered = dict(value, dependencies={'linux-sdk': '3' * 20, 'windows-base': '2' * 20})
+        with self.assertRaisesRegex(ValueError, 'identity'):
+            arch.verify(directory, tampered, self.repository, self.fingerprint)
+
     def test_native_payload_mtree_and_modes_preserve_the_portable_archive(self):
         for row in self.manifest['packages'].values():
             backend = row['backend']

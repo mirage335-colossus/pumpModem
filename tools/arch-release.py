@@ -109,8 +109,8 @@ def mtree(files, epoch):
 
 
 def expected(directory, metadata, repository):
-    if metadata.get('schema') != 5:
-        raise ValueError('Native pacman delivery requires release metadata schema 5')
+    if metadata.get('schema') not in (5, 6):
+        raise ValueError('Native pacman delivery requires release metadata schema 5+')
     distro = distro_module()
     apt = distro.apt_module()
     # This validates the complete canonical release identity and source manifests.

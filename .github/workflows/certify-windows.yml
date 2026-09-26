@@ -59,13 +59,13 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.tooling_sha }}
           path: .certification-tools
-      - name: Reuse verified static dependencies from base
+      - name: Reuse this release's verified static dependencies (legacy base fallback)
         shell: pwsh
         run: |
           # Keep the release's recipe identity, with current runner discovery.
           # Releases predating dependency bases retain the existing fallback.
           $recipeRoot = if (Test-Path tools/windows-base.py) { "$PWD" } else { "$PWD/.certification-tools" }
-          & ./.certification-tools/tools/use-windows-base.ps1 -SourceRoot $recipeRoot -Repository "$env:GITHUB_REPOSITORY" -Destination "$PWD/build/windows-base"
+          & ./.certification-tools/tools/use-windows-base.ps1 -SourceRoot $recipeRoot -Repository "$env:GITHUB_REPOSITORY" -Destination "$PWD/build/windows-base" -ReleaseTag "$env:RELEASE_TAG" -InventorySha256 "$env:INVENTORY_SHA256"
       - name: Configure and compile the native Windows Rev context probe
         shell: pwsh
         run: |

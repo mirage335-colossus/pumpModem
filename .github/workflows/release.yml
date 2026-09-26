@@ -53,6 +53,8 @@ on:
       - '.github/workflows/distro-check.yml'
       - '.github/workflows/certify.yml'
       - 'tools/release.py'
+      - 'tools/release-dependencies.py'
+      - 'tests/test_release_dependencies.py'
       - 'tools/apt-release.py'
       - 'tests/test_apt_release.py'
       - 'tools/distro-release.py'
@@ -152,6 +154,7 @@ jobs:
           persist-credentials: false
       - run: |
           python3 tests/test_release.py
+          python3 tests/test_release_dependencies.py
           python3 tests/test_apt_release.py
           python3 tests/test_distro_release.py
           python3 tests/test_arch_release.py
@@ -217,7 +220,7 @@ jobs:
 
           The ARM64 bundle requires a compatible 64-bit Linux installation, including Raspberry Pi OS or Velvet OS. Windows requires Windows 10 1903+/11 x64. See [requirements and certification scope](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_SHA/docs/releases.md).
 
-          Reusable developer SDKs and their complete source archives are preserved separately in the [base release](https://github.com/$GITHUB_REPOSITORY/releases/tag/base). Application releases never rebuild an SDK automatically.
+          This release includes copies of the prepared developer SDKs and dependency bundles it used, their complete source archives, and recipe checksums. Copies reused from the [base release](https://github.com/$GITHUB_REPOSITORY/releases/tag/base) remain available here even if older releases are deleted. Application releases never rebuild an SDK automatically. The runner supplies MSVC and the Windows SDK separately; they are not redistributed.
           NOTES
           python3 tools/release.py reserve --metadata release-metadata.json --notes release-details.md --repo "$GITHUB_REPOSITORY"
 

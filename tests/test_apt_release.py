@@ -105,10 +105,11 @@ class AptReleaseTests(unittest.TestCase):
             files.append(set(apt.deb_files(self.base / apt.package_name(self.metadata, 'amd64', backend))))
         self.assertFalse(files[0] & files[1])
 
-    def test_schema4_and_5_sign_all_distribution_assets(self):
-        for schema in (4, 5):
+    def test_schema4_through_6_sign_all_distribution_assets(self):
+        for schema in (4, 5, 6):
             value = release.make_metadata(source_sha='a' * 40, run_id='124', run_attempt='1', schema=schema,
-                cmake_version='0.7.2', experiment=True, now=datetime.now(timezone.utc).replace(microsecond=0))
+                cmake_version='0.7.2', experiment=True, now=datetime.now(timezone.utc).replace(microsecond=0),
+                dependencies={'linux-sdk': '1' * 20, 'windows-base': '2' * 20} if schema == 6 else None)
             with tempfile.TemporaryDirectory() as temporary:
                 directory = Path(temporary)
                 for target, name in release.application_names(value).items():

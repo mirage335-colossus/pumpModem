@@ -7,6 +7,7 @@ assets without compiling the application or rebuilding SDKs.
 """
 import argparse
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 import hashlib
 import importlib.util
 import json
@@ -75,9 +76,9 @@ def chicago_time(instant):
 
 
 def make_metadata(*, source_sha, run_id, run_attempt, version='', experiment=False,
-                  linux_baseline='bookworm-sdk', now=None, cmake_version=None, schema=5,
-                  packager_sha=None, repackaged_from=None):
-    if type(schema) is not int or schema not in (1, 2, 3, 4, 5):
+                  linux_baseline='bookworm-sdk', now=None, cmake_version=None, schema=6,
+                  packager_sha=None, repackaged_from=None, dependencies=None):
+    if type(schema) is not int or schema not in (1, 2, 3, 4, 5, 6):
         raise ValueError('Unsupported release metadata schema')
     if cmake_version is None:
         cmake_version = project_version()
@@ -136,6 +137,13 @@ def make_metadata(*, source_sha, run_id, run_attempt, version='', experiment=Fal
         value['distro_channels'] = {
             'schema': 1, 'formats': ['pacman', 'gentoo-sync'],
             'architectures': ['x86_64', 'aarch64'], 'gui_backends': list(GUI_BACKENDS)}
+    if schema >= 6:
+        if dependencies is None:
+            dependencies = dependency_tool().recipe_ids(ROOT, linux_baseline)
+        dependency_tool().asset_names(dependencies, linux_baseline)
+        value['dependencies'] = dict(dependencies)
+    elif dependencies is not None:
+        raise ValueError('Preserved dependency identities require release metadata schema 6')
     return value
 
 
@@ -148,7 +156,8 @@ def load_metadata(path):
                                  now=datetime.fromisoformat(value['created_at'].replace('Z', '+00:00')),
                                  cmake_version=value['project_version'], schema=value['schema'],
                                  packager_sha=value.get('packager_sha'),
-                                 repackaged_from=value.get('repackaged_from'))
+                                 repackaged_from=value.get('repackaged_from'),
+                                 dependencies=(value.get('dependencies') or {}) if value['schema'] >= 6 else value.get('dependencies'))
     except (KeyError, TypeError, AttributeError) as error:
         raise ValueError('Incomplete or invalid release metadata') from error
     if value != expected:
@@ -204,7 +213,7 @@ def application_targets(metadata):
     """Map download identities to their physical platform/archive format."""
     if metadata['schema'] == 1:
         return dict(TARGETS)
-    if metadata['schema'] not in (2, 3, 4, 5) or metadata.get('gui_backends') != list(GUI_BACKENDS):
+    if metadata['schema'] not in (2, 3, 4, 5, 6) or metadata.get('gui_backends') != list(GUI_BACKENDS):
         raise ValueError('Unsupported release schema or GUI backend inventory')
     return {f'{platform}-{backend}': details for platform, details in TARGETS.items()
             for backend in GUI_BACKENDS}
@@ -388,9 +397,28 @@ def build_delivery_assets(directory, metadata, repository, signing_key, signing_
         apt_tool().build(directory, metadata, repository, signing_key, signing_fingerprint)
 
 
+@lru_cache(maxsize=1)
+def dependency_tool():
+    spec = importlib.util.spec_from_file_location('datapump_release_dependencies', ROOT / 'tools/release-dependencies.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def dependency_assets(metadata):
+    return (dependency_tool().asset_names(metadata['dependencies'], metadata['linux_baseline'])
+            if metadata['schema'] >= 6 else set())
+
+
+def preserve_dependencies(metadata, repository, directory, **options):
+    if metadata['schema'] >= 6:
+        dependency_tool().preserve(repository, directory, metadata['dependencies'], metadata['linux_baseline'], **options)
+
+
 def required_assets(metadata):
     """Final inventory; draft upload accepts only the original support files."""
-    return set(application_names(metadata).values()) | support_files(metadata) | apt_assets(metadata) | distribution_assets(metadata)
+    return (set(application_names(metadata).values()) | support_files(metadata)
+            | apt_assets(metadata) | distribution_assets(metadata) | dependency_assets(metadata))
 
 
 def support_files(metadata):
@@ -433,7 +461,7 @@ def release_notes(metadata, details):
 
 
 def assemble(artifacts, metadata_path, notes, output, sdk_artifacts=None, *, repository=None,
-             apt_signing_key=None, apt_signing_fingerprint=None):
+             apt_signing_key=None, apt_signing_fingerprint=None, dependency_artifacts=None):
     metadata = load_metadata(metadata_path)
     if not notes.is_file() or notes.is_symlink() or not notes.read_text(encoding='utf-8').strip():
         raise ValueError('Release notes must be a nonempty regular UTF-8 file')
@@ -444,6 +472,8 @@ def assemble(artifacts, metadata_path, notes, output, sdk_artifacts=None, *, rep
         directory = artifacts / target
         copies.append((native_pair(directory, metadata, target), application_names(metadata)[target]))
     if sdk_artifacts:
+        if metadata['schema'] >= 6:
+            raise ValueError('Use --dependency-artifacts with complete SDK and Windows dependency triplets')
         inventory = check_inventory(sdk_artifacts, 'SHA256SUMS')
         verify_sdk_pair(inventory)
         copies.extend((sdk_artifacts / name, name) for name in sorted(inventory))
@@ -459,6 +489,15 @@ def assemble(artifacts, metadata_path, notes, output, sdk_artifacts=None, *, rep
         (staged / 'release-notes.md').write_text(
             release_notes(metadata, notes.read_text(encoding='utf-8')), encoding='utf-8')
         write_warning(metadata, staged)
+        if dependency_artifacts is not None:
+            expected = dependency_assets(metadata)
+            if not expected or {path.name for path in dependency_artifacts.iterdir()} != expected:
+                raise ValueError('Dependency directory must contain exactly the recorded recipe triplets')
+            dependency_tool().verify(dependency_artifacts, metadata['dependencies'], metadata['linux_baseline'])
+            for name in sorted(expected):
+                shutil.copyfile(dependency_artifacts / name, staged / name)
+        else:
+            preserve_dependencies(metadata, repository, staged)
         build_delivery_assets(staged, metadata, repository, apt_signing_key, apt_signing_fingerprint)
         checksums = ''.join(f'{digest(path)}  {path.name}\n' for path in sorted(staged.iterdir()))
         (staged / 'SHA256SUMS.txt').write_text(checksums, encoding='utf-8')
@@ -475,8 +514,12 @@ def verify_release(directory):
         raise ValueError('Release inventory is missing an application target or support file')
     extra = set(inventory) - required
     if extra:
+        if metadata['schema'] >= 6:
+            raise ValueError('Release contains assets outside its recorded dependency recipes')
         verify_sdk_pair(extra)
     verify_warning(metadata, directory)
+    if metadata['schema'] >= 6:
+        dependency_tool().verify(directory, metadata['dependencies'], metadata['linux_baseline'])
     if metadata['schema'] >= 3:
         apt_tool().verify(directory, metadata)
     if metadata['schema'] >= 4:
@@ -660,13 +703,14 @@ def finalize(metadata_path, repository, directory, publish_now=False, *,
         if {path.name for path in staged.iterdir()} != expected:
             raise ValueError('Downloaded final release inventory contains unexpected files')
         check_draft_metadata(metadata, staged)
+        preserve_dependencies(metadata, repository, staged)
         build_delivery_assets(staged, metadata, repository, apt_signing_key, apt_signing_fingerprint)
         sums = ''.join(f'{digest(path)}  {path.name}\n' for path in sorted(staged.iterdir()))
         (staged / 'SHA256SUMS.txt').write_text(sums, encoding='utf-8')
         verify_release(staged)
         staged.rename(directory)
     gh(['release', 'upload', metadata['tag'], '--repo', repository,
-        *[str(directory / name) for name in sorted(apt_assets(metadata) | distribution_assets(metadata))],
+        *[str(directory / name) for name in sorted(apt_assets(metadata) | distribution_assets(metadata) | dependency_assets(metadata))],
         str(directory / 'SHA256SUMS.txt')])
     if publish_now:
         gh(['release', 'edit', metadata['tag'], '--repo', repository, '--draft=false', '--latest=false'])
@@ -741,6 +785,8 @@ def repackage(source_tag, repository, directory, *, version='', run_id, run_atte
             raise ValueError('Source release has an incomplete finalized inventory')
         extra = set(inventory) - required
         if extra:
+            if original['schema'] >= 6:
+                raise ValueError('Source release contains assets outside its recorded dependency recipes')
             verify_sdk_pair(extra)
         for name, expected in inventory.items():
             if assets[name].get('digest') != 'sha256:' + expected:
@@ -748,19 +794,26 @@ def repackage(source_tag, repository, directory, *, version='', run_id, run_atte
         reference = json.loads(gh(['api', f'repos/{repository}/git/ref/tags/{source_tag}']).stdout).get('object', {})
         if reference.get('type') != 'commit' or reference.get('sha') != tag_revision(original):
             raise ValueError('Source release tag does not identify its recorded source or packaging commit')
-        metadata = make_metadata(source_sha=original['source_sha'], run_id=run_id, run_attempt=run_attempt,
-                                 version=version or original['version'], experiment=True,
-                                 linux_baseline=original['linux_baseline'], cmake_version=original['project_version'],
-                                 packager_sha=packager_sha,
-                                 repackaged_from={'tag': source_tag,
-                                                 'inventory_sha256': digest(source / 'SHA256SUMS.txt')})
         for target, old_name in application_names(original).items():
             archive = source / old_name
             download_asset(repository, assets[old_name], archive)
             if digest(archive) != inventory[old_name]:
                 raise ValueError(f'Source archive checksum mismatch: {old_name}')
             verify_archive_backend(archive, original, target)
-            shutil.copyfile(archive, staged / application_names(metadata)[target])
+        dependencies = (original['dependencies'] if original['schema'] >= 6
+                        else dependency_tool().remote_recipe_ids(repository, original['source_sha'], original['linux_baseline']))
+        metadata = make_metadata(source_sha=original['source_sha'], run_id=run_id, run_attempt=run_attempt,
+                                 version=version or original['version'], experiment=True,
+                                 linux_baseline=original['linux_baseline'], cmake_version=original['project_version'],
+                                 packager_sha=packager_sha,
+                                 dependencies=dependencies,
+                                 repackaged_from={'tag': source_tag,
+                                                 'inventory_sha256': digest(source / 'SHA256SUMS.txt')})
+        if extra and not extra <= dependency_assets(metadata):
+            raise ValueError('Preserved source SDK does not match the original application source recipe')
+        for target, old_name in application_names(original).items():
+            shutil.copyfile(source / old_name, staged / application_names(metadata)[target])
+        preserve_dependencies(metadata, repository, staged, source_assets=assets, source_inventory=inventory)
         write_json(staged / 'release-metadata.json', metadata)
         details = (f'Application archives are byte-for-byte copies of release `{source_tag}`.\n\n'
                    f'- Original inventory SHA-256: `{metadata["repackaged_from"]["inventory_sha256"]}`\n'
@@ -800,6 +853,8 @@ def main(argv=None):
     stage.add_argument('--notes', type=Path, required=True)
     stage.add_argument('--output', type=Path, required=True)
     stage.add_argument('--sdk-artifacts', type=Path)
+    stage.add_argument('--dependency-artifacts', type=Path,
+                       help='Complete recorded SDK/dependency triplets; otherwise fetch them from base')
     stage.add_argument('--repo')
     stage.add_argument('--apt-signing-key', type=Path)
     stage.add_argument('--apt-signing-fingerprint')
@@ -856,7 +911,8 @@ def main(argv=None):
         elif args.command == 'assemble':
             value = assemble(args.artifacts, args.metadata, args.notes, args.output, args.sdk_artifacts,
                              repository=args.repo, apt_signing_key=args.apt_signing_key,
-                             apt_signing_fingerprint=args.apt_signing_fingerprint)
+                             apt_signing_fingerprint=args.apt_signing_fingerprint,
+                             dependency_artifacts=args.dependency_artifacts)
         elif args.command == 'repackage':
             value = repackage(args.source_tag, args.repo, args.directory, version=args.version,
                               run_id=args.run_id, run_attempt=args.run_attempt, packager_sha=args.packager_sha,

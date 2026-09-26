@@ -456,6 +456,61 @@ class CertificationTests(CertificationFixture, unittest.TestCase):
         self.assertFalse(self.uploads)
 
 
+class DependencyCertificationTests(CertificationFixture, unittest.TestCase):
+    schema = 6
+
+    def setUp(self):
+        super().setUp()
+        for name in certify.release.required_assets(self.metadata) - self.files.keys():
+            self.files[name] = ('preserved fixture ' + name).encode()
+        self.refresh_metadata()
+
+    def test_certification_pins_complete_dependency_inventory(self):
+        state = self.prepare()
+        self.assertEqual(state['metadata']['dependencies'], self.metadata['dependencies'])
+        self.assertTrue(certify.release.dependency_assets(self.metadata) <= state['inventory'].keys())
+        # Preparation pins the global inventory without pulling large SDKs in
+        # every compatibility job. The source jobs verify their retained copies.
+        self.assertEqual(set(self.downloads), {'SHA256SUMS.txt', 'release-metadata.json'})
+
+    def test_missing_preserved_source_blocks_certification_even_with_new_global_sums(self):
+        name = next(name for name in certify.release.dependency_assets(self.metadata) if '-sources-' in name)
+        self.files.pop(name)
+        self.refresh_metadata()
+        with self.assertRaisesRegex(ValueError, 'missing application or support'):
+            self.prepare()
+
+    def test_wrong_recipe_cannot_substitute_for_recorded_dependencies(self):
+        name = next(name for name in certify.release.dependency_assets(self.metadata) if '-sources-' in name)
+        self.files[name.replace(self.metadata['dependencies']['windows-base'], '0' * 20)
+                   .replace(self.metadata['dependencies']['linux-sdk'], '0' * 20)] = self.files.pop(name)
+        self.refresh_metadata()
+        with self.assertRaisesRegex(ValueError, 'missing application or support'):
+            self.prepare()
+
+    def test_certificate_records_recipes_and_rechecks_dependencies_without_server_digests(self):
+        names = certify.release.dependency_assets(self.metadata)
+        for asset in self.assets:
+            if asset['name'] in names:
+                asset.pop('digest')
+        evidence = self.record()
+        self.assertEqual(evidence['status'], 'passed')
+        self.assertEqual(evidence['dependencies'], self.metadata['dependencies'])
+        self.assertEqual(evidence['dependency_assets'], {name: digest(self.files[name]) for name in names})
+        self.assertTrue(names <= set(self.downloads))
+
+    def test_changed_dependency_with_missing_server_digest_cannot_be_certified(self):
+        name = next(iter(certify.release.dependency_assets(self.metadata)))
+        self.files[name] += b'changed after source tests'
+        for asset in self.assets:
+            if asset['name'] == name:
+                asset.pop('digest')
+        with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
+            self.record()
+        self.assertEqual(self.uploads, {})
+        self.assertEqual(self.edits, [])
+
+
 class BackendCertificationTests(CertificationFixture, unittest.TestCase):
     schema = 2
 

@@ -7427,3 +7427,74 @@ Final logs and the renderer comparison are retained under the ignored
 contract recorded above was run for the initial reference change; this
 display-only calibration follow-up uses the focused GUI, signal and live
 resource checks without repeating the unchanged detector calibration.
+
+
+## Version 1.0 release workflows — 24 September 2026
+
+Candidate source: `9c83f5ec4ec9671931ffeb8069c5502c004ab495`. Full native and SDK checks use `devfast=false` and the default H runners; publication uses `experiment=false`, `publish=true` and `bookworm-sdk`.
+
+Instrumented native CI retains its default exclusions of `fast_session` and `gui_fast_live`; both remain required in Release. A typed Debug GUI workload-budget warning, if present in the run, means incomplete instrumented coverage, not a passed GUI smoke. Release and certification retain mandatory full native smoke.
+
+- [native run 35983801279](https://github.com/mirage335-colossus/pumpModem/actions/runs/35983801279): **in_progress**.
+- [sdk run 35983827348](https://github.com/mirage335-colossus/pumpModem/actions/runs/35983827348): **failure**.
+
+STOPPED: Required workflow did not pass: sdk
+
+This record does not claim completed release certification. Undispatched, pending or failed stages are not passes.
+
+Coordinator state and retained metadata are in `build/release-1.0-20260924/`. Physical-device qualification is not established by these hosted checks.
+
+### SDK mirror failure and targeted retry
+
+The first SDK attempt failed only in
+[copied Rev on Ubuntu 24.04](https://github.com/mirage335-colossus/pumpModem/actions/runs/35983827348/job/107588767220),
+before checkout or application tests. `apt-get update` rejected the upstream
+`noble-updates/universe` package index: its size was 2,160,695 bytes instead of
+the signed index's expected 2,160,710 bytes, reporting "Mirror sync in progress?"
+and exit 100. The two SDK application jobs and the other three copied-bundle
+jobs passed. Only the failed job was rerun, as attempt 2 of the same workflow;
+no source, dependency recipe or validation requirement changed.
+
+The full native workflow has since completed successfully. Its instrumented
+Debug job passed 121/121 selected regressions in 2,486.18 seconds, but native
+GUI smoke reported the permitted typed budget result at phase 21 after
+600.016 seconds, with sampled transmission progress 0.080 seconds old.
+That smoke is **incomplete coverage**, not a pass. The default exclusions of
+`fast_session` and `gui_fast_live` remain limited to instrumented Debug.
+The Release, Windows, GUI-contract and copied-bundle jobs passed.
+
+The stopped coordinator state and original mirror-error log remain under
+`build/release-1.0-20260924/`. The resumed coordinator uses
+`build/release-1.0-20260924-resume-1/`, reuses the original native/SDK run IDs,
+and retains source `9c83f5ec4ec9671931ffeb8069c5502c004ab495` on the dedicated
+release ref. Publication still awaits successful SDK attempt 2; full
+certification must then test the newly published tag and asset hashes.
+
+SDK attempt 2 subsequently **passed**: the targeted Ubuntu/Rev job completed
+at 13:55:04 UTC, including both copied archive formats and their native GUI
+checks. It reused the original SDK application artifacts and the five other
+passing jobs. The coordinator then dispatched
+[ordinary version 1.0 publication](https://github.com/mirage335-colossus/pumpModem/actions/runs/36009020695)
+on the same candidate at 13:55 UTC. Publication and exact-release certification
+remain pending at this checkpoint; the resumed coordinator retains their
+subsequent state and results.
+
+
+## Version 1.0 release workflows — 24 September 2026
+
+Candidate source: `9c83f5ec4ec9671931ffeb8069c5502c004ab495`. Full native and SDK checks use `devfast=false` and the default H runners; publication uses `experiment=false`, `publish=true` and `bookworm-sdk`.
+
+Instrumented native CI retains its default exclusions of `fast_session` and `gui_fast_live`; both remain required in Release. A typed Debug GUI workload-budget warning, if present in the run, means incomplete instrumented coverage, not a passed GUI smoke. Release and certification retain mandatory full native smoke.
+
+- [native run 35983801279](https://github.com/mirage335-colossus/pumpModem/actions/runs/35983801279): **success**.
+- [sdk run 35983827348](https://github.com/mirage335-colossus/pumpModem/actions/runs/35983827348): **success**.
+- [release run 36009020695](https://github.com/mirage335-colossus/pumpModem/actions/runs/36009020695): **success**.
+- [certify run 36010161027](https://github.com/mirage335-colossus/pumpModem/actions/runs/36010161027): **failure**.
+
+STOPPED: Required workflow did not pass: certify
+
+Published release: [v001_00-2026-09-24-0856CDT](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-24-0856CDT).
+
+This record does not claim completed release certification. Undispatched, pending or failed stages are not passes.
+
+Coordinator state and retained metadata are in `build/release-1.0-20260924-resume-1/`. Physical-device qualification is not established by these hosted checks.

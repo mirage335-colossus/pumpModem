@@ -122,13 +122,15 @@ class GentooSyncTests(unittest.TestCase):
         self.server.server_close()
         self.thread.join()
 
-    def release(self, number=1, experiment=False, unsafe=None, signer='trusted'):
+    def release(self, number=1, experiment=False, unsafe=None, signer='trusted', schema=5):
         assets = self.root / f'release-{number}-{signer}'
         assets.mkdir()
-        metadata = {'schema': 5, 'tag': f'v001_00-2026-09-23-120{number}CDT',
+        metadata = {'schema': schema, 'tag': f'v001_00-2026-09-23-120{number}CDT',
                     'created_at': f'2026-09-23T17:0{number}:00Z', 'project_version': '0.7.2',
                     'version': 'v001_00', 'run_id': str(100 + number), 'run_attempt': '1',
                     'experiment': experiment}
+        if schema >= 6:
+            metadata['dependencies'] = {'linux-sdk': '1' * 20, 'windows-base': '2' * 20}
         overlay(assets / sync.OVERLAY, str(number).encode(), unsafe)
         fpr = self.fingerprints[signer == 'untrusted']
         manifest = channel.build(assets, metadata, self.repository, self.home / f'{signer}.private', fpr)
@@ -153,6 +155,13 @@ class GentooSyncTests(unittest.TestCase):
             output.write(b'# changed\n')
         with self.assertRaisesRegex(ValueError, 'hash mismatch'):
             channel.verify(assets, metadata, self.repository, self.fpr)
+
+    def test_schema6_channel_binds_preserved_dependency_identity(self):
+        assets, metadata, manifest = self.release(schema=6)
+        self.assertEqual(channel.verify(assets, metadata, self.repository, self.fpr), manifest)
+        changed = dict(metadata, dependencies={'linux-sdk': '3' * 20, 'windows-base': '2' * 20})
+        with self.assertRaisesRegex(ValueError, 'metadata'):
+            channel.verify(assets, changed, self.repository, self.fpr)
 
     def test_build_preserves_existing_assets_and_rejects_dangling_symlinks(self):
         assets, metadata, _ = self.release()
