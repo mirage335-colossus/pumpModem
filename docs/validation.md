@@ -82,10 +82,10 @@ The two CPU-intensive Live suites now have their own serial CI scope. Only
 instrumented functional computation gets a bounded threefold allowance; crossing
 the original budget emits a retained warning, and all assertions still must
 complete. Real-time, cancellation, queue stabilization and physical-absence
-requirements retain their existing limits. The final correction is undergoing
-validation. Local follow-up checks pass all 21 build-tool suites, 13 CI helper
-fixtures, and the complete FLTK native group (3/3, including the 215.79-second
-GUI workflow). ASan/UBSan passes the budget boundaries, exact-bit early epoch
+requirements retain their existing limits. Local follow-up checks pass all 21
+build-tool suites, 13 CI helper fixtures, and the complete FLTK native group
+(3/3, including the 215.79-second GUI workflow). ASan/UBSan passes the budget
+boundaries, exact-bit early epoch
 regression, recovery lifecycle and controlled interval queue cases. The early
 epoch fixture exceeded its ordinary 30-second workload allowance, emitted the
 intended warning and completed within the 90-second instrumented cap. No
@@ -125,7 +125,7 @@ Only established advisory Rev cadence warnings appeared: Ubuntu phases 11/13
 (7/2 frames), Trixie phases 11/13/21 (9/4/3 frames). No assertion, timeout or
 incomplete-coverage exception was used.
 
-Final [full native standard-runner qualification 36276955453](https://github.com/mirage335-colossus/pumpModem/actions/runs/36276955453)
+[Full native standard-runner validation 36276955453](https://github.com/mirage335-colossus/pumpModem/actions/runs/36276955453)
 uses `1126578f88c06c27d24401b130b77defb9ef2470`, `devfast=false`,
 `ubuntu-24.04` and `windows-2022`. The separate Debug Live job passed both full
 suites in 489.65 seconds. Its early-acquisition exact-bit case exceeded the
@@ -135,7 +135,27 @@ The Rev GUI scope failed at its mandatory 600-second cumulative smoke budget:
 phase 17, transmission 14 at fraction 0.068853, 9.274931 media seconds and
 5061237 samples, with useful progress six microseconds earlier. The other
 42 GUI tests passed. This Release outcome remains a failure; no content
-assertion or sanitizer diagnostic was reported before exhaustion.
+assertion or sanitizer diagnostic was reported before exhaustion. The run
+finished with 28 successful required jobs and this one failed job; it is not
+a green full run.
+
+The remaining native scopes completed: Linux Release Core 90/90, Fast 33/33,
+Live 2/2 and CLI 29/29; Debug Core 87/87, Fast 31/31, Live 2/2 and CLI 29/29;
+Windows Core 86/86, Fast 33/33 and Live 2/2; all calibration sections; both
+native package producers and both copied Linux distributions. The two established
+Debug real-time exclusions and optional instrumented GUI omission remain
+explicit omitted coverage, not passes. Both shaped Debug capture parts passed
+in 1125.72 and 2130.41 seconds. The mandatory instrumented aggregate verified
+all 64 seeds in each case: public 41/64 versus predicted 0.626953, private
+38/64 versus 0.633301, combined RMS 0.0295904 and maximum error 0.0395508.
+Its statistical checks took 3.78 seconds; its complete job took 2m04s.
+
+The full native run's active span was 40m15s and summed job duration 379m52s,
+versus 77m52s and 197m53s on the earlier H run. This is about half the observed
+latency at 1.92 times summed runner time, but uses different hardware and
+coverage and includes the failed GUI scope; it is not a controlled qualified
+speedup comparison. Copied Linux checks began three seconds after package
+production, while Debug and calibration work continued.
 
 The final smoke-only follow-up permits a 1200-second cumulative workload for
 standard-runner GUI contracts, keeps H and portable-package budgets at 600,
@@ -145,7 +165,32 @@ assertion and deadline remains unchanged, and an exhausted 1200-second budget
 still returns a fatal nonzero outcome; it cannot acquire the separate
 instrumented incomplete-coverage exception. A focused `gui-contract` dispatch
 runs both complete GUI suites after this change, reusing the other completed
-checks for their unchanged source/configuration. Qualification is ongoing.
+checks for their unchanged source/configuration.
+
+[Complete GUI follow-up 36278498424](https://github.com/mirage335-colossus/pumpModem/actions/runs/36278498424)
+passed on `1a82f4d6772bd105acd1592f8b0185302837d905` using `ubuntu-24.04`:
+Rev 43/43 and FLTK 40/40, with all 21 build-tool suites also passing. The complete
+Rev smoke took 404.80 seconds and FLTK 297.95 seconds; complete GUI groups took
+863.28 and 607.48 seconds respectively. Neither smoke needed its extended
+allowance, so neither emitted a workload-budget warning. The final smoke passed
+all assertions, including the phase-21 binary transmission and exact reception.
+Neither report has skipped or omitted GUI cases. Rev retained two accepted
+`REV_REPLAY_CADENCE` advisories in phases 11/13 (5/6 frames); FLTK had no warnings.
+The [Rev report](https://github.com/mirage335-colossus/pumpModem/actions/runs/36278498424/artifacts/10918870191)
+and [FLTK report](https://github.com/mirage335-colossus/pumpModem/actions/runs/36278498424/artifacts/10917872967)
+retain successful-test output, including those cadence advisories.
+
+This completes the affected GUI qualification together with the passed native,
+calibration, SDK and ARM64 scopes above. The earlier 600-second failure remains
+recorded as failed; skipped scopes in the GUI-only rerun are not passes. SDK and
+ARM64 results remain attributed to `75f5924`: they validate unchanged runtime,
+dependency and package paths, not newly built `1a82f4d` binaries or exact-hash
+release certification. Local follow-up validation also passed the three GUI
+budget/argument tests, 15 smoke-policy fixtures, 13 CI-report fixtures and
+packaging boundary, relocation, corruption and timeout-forwarding checks.
+Actionlint, whitespace checks and independent scope reviews passed. Final shared
+native/SDK workflow definitions total 969 lines versus 620 originally (1.56x).
+Existing release assets and certification reports are unchanged.
 
 ## CI package recovery and replay interruption fixtures — 26 September 2026
 
