@@ -366,8 +366,8 @@ jobs:
     with:
       release_tag: ${{ inputs.release_tag }}
       inventory_sha256: ${{ needs.prepare.outputs.inventory_sha256 }}
-      linux_runner: ${{ inputs.linux_runner == 'ubuntu-24.04' && 'ubuntu-latest-l' || inputs.linux_runner || 'ubuntu-latest-h' }}
-      arm_runner: ${{ inputs.arm_runner == 'ubuntu-24.04-arm' && 'ubuntu-24.04-arm-l' || inputs.arm_runner || 'ubuntu-24.04-arm-h' }}
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+      arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-h' }}
 
   distro-recipes:
     if: ${{ !inputs.devfast && needs.prepare.outputs.distro_recipes == 'true' }}
@@ -376,7 +376,7 @@ jobs:
     with:
       release_tag: ${{ inputs.release_tag }}
       inventory_sha256: ${{ needs.prepare.outputs.inventory_sha256 }}
-      linux_runner: ${{ inputs.linux_runner == 'ubuntu-latest-l' && 'ubuntu-latest-l' || 'ubuntu-latest-h' }}
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
 
   record:
     needs: [prepare, linux-tests, windows-tests, compatibility, apt-repository, distro-recipes]

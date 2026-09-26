@@ -37,14 +37,14 @@ on:
         type: boolean
         default: true
       linux_runner:
-        description: 'Larger x86-64 runner for packaging and distribution installation'
+        description: 'x86-64 runner for packaging and distribution installation'
         type: choice
-        options: [ubuntu-latest-l, ubuntu-latest-h]
+        options: [ubuntu-24.04, ubuntu-latest-m, ubuntu-latest-l, ubuntu-latest-h]
         default: ubuntu-latest-h
       arm_runner:
-        description: 'Larger ARM64 runner for Debian and Ubuntu installation'
+        description: 'ARM64 runner for Debian and Ubuntu installation'
         type: choice
-        options: [ubuntu-24.04-arm-l, ubuntu-24.04-arm-h]
+        options: [ubuntu-24.04-arm-l, ubuntu-24.04-arm-h, ubuntu-24.04-arm]
         default: ubuntu-24.04-arm-h
 
 permissions:

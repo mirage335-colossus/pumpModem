@@ -374,7 +374,7 @@ For changes confined to Linux distribution packaging, start with
 the affected release/certification helper tests; `./build.sh test build` runs their normal group. Once complete, use
 `release.yml` with `source_release=SOURCE_RELEASE_TAG` to wrap existing verified archives in a new experiment and
 test the same packages on Debian/Ubuntu AMD64 and ARM64 and native Arch/Gentoo
-repositories with the larger runners. For update channels, also exercise a signed
+repositories with the selected runners. For update channels, also exercise a signed
 A-to-B update, idempotent refresh and rejected tampered/older metadata with the
 small local fixtures before native installation. Gentoo host dependencies must come from its
 binary repository; a missing binary fails with an actionable error instead of
@@ -393,8 +393,9 @@ organization's larger x86-64 runners. Defaults and automatic jobs now use
 certification default `arm_runner` to `ubuntu-24.04-arm-h`. Explicit smaller
 choices remain available when desired, but checks do not repeat on those pools.
 The ARM64 L and H tiers provide 8 and 32 CPUs respectively. The ARM64 selector
-does not affect x86-64 routing. Package-manager checks remain on larger L/H
-pools and use H unless L is explicitly selected.
+does not affect x86-64 routing. Package-manager checks and base-maintenance
+helper jobs preserve explicit standard or larger selections; H remains the
+default when no runner is supplied.
 Agents can pass these input names through `gh workflow run -f`.
 Use the [runner selection guide](releases.md#runner-selection-and-build-parallelism)
 to choose and verify access before a long run. `ci.yml` with `devfast=true` and

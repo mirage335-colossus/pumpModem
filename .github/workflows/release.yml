@@ -90,7 +90,7 @@ concurrency:
 jobs:
   package-check-prepare:
     if: github.event_name == 'workflow_dispatch' && inputs.package_check != 'none'
-    runs-on: ${{ inputs.linux_runner == 'ubuntu-latest-l' && 'ubuntu-latest-l' || 'ubuntu-latest-h' }}
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
     timeout-minutes: 5
     outputs:
       inventory_sha256: ${{ steps.release.outputs.inventory_sha256 }}
@@ -118,8 +118,8 @@ jobs:
     with:
       release_tag: ${{ inputs.source_release }}
       inventory_sha256: ${{ needs.package-check-prepare.outputs.inventory_sha256 }}
-      linux_runner: ${{ inputs.linux_runner == 'ubuntu-latest-l' && 'ubuntu-latest-l' || 'ubuntu-latest-h' }}
-      arm_runner: ${{ inputs.arm_runner == 'ubuntu-24.04-arm-l' && 'ubuntu-24.04-arm-l' || 'ubuntu-24.04-arm-h' }}
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+      arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-h' }}
 
   package-check-distro:
     if: inputs.package_check == 'all' || inputs.package_check == 'arch' || inputs.package_check == 'gentoo'
@@ -128,7 +128,7 @@ jobs:
     with:
       release_tag: ${{ inputs.source_release }}
       inventory_sha256: ${{ needs.package-check-prepare.outputs.inventory_sha256 }}
-      linux_runner: ${{ inputs.linux_runner == 'ubuntu-latest-l' && 'ubuntu-latest-l' || 'ubuntu-latest-h' }}
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
       distro: ${{ inputs.package_check }}
 
   repackage:
@@ -140,10 +140,10 @@ jobs:
       source_tag: ${{ inputs.source_release }}
       version: ${{ inputs.version }}
       publish: ${{ inputs.publish }}
-      # Package-manager checks use the larger H pool by default; an explicit
-      # L selection is retained without testing additional smaller runners.
-      linux_runner: ${{ inputs.linux_runner == 'ubuntu-latest-l' && 'ubuntu-latest-l' || 'ubuntu-latest-h' }}
-      arm_runner: ${{ inputs.arm_runner == 'ubuntu-24.04-arm-l' && 'ubuntu-24.04-arm-l' || 'ubuntu-24.04-arm-h' }}
+      # Keep H defaults while forwarding every explicitly selected runner
+      # through packaging and its distribution installation checks.
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+      arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-h' }}
     secrets: inherit
 
   helpers:

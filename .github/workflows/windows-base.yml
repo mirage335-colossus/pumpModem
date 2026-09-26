@@ -3,6 +3,10 @@ name: Build Windows base dependencies
 on:
   workflow_call:
     inputs:
+      linux_runner:
+        description: 'Linux x86-64 runner label for helper checks'
+        type: string
+        default: ubuntu-latest-h
       windows_runner:
         description: 'Windows x64 runner label'
         type: string
@@ -33,7 +37,7 @@ permissions:
 
 jobs:
   helpers:
-    runs-on: ubuntu-latest-h
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

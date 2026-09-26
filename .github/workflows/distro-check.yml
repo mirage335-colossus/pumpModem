@@ -23,7 +23,7 @@ permissions:
 jobs:
   install:
     name: ${{ matrix.distro }} release packages / x86-64 / both backends
-    runs-on: ${{ inputs.linux_runner == 'ubuntu-latest-l' && 'ubuntu-latest-l' || 'ubuntu-latest-h' }}
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -142,7 +142,7 @@ jobs:
           # only CI's host dependencies, never the generic release payload.
           case "$(/lib64/ld-linux-x86-64.so.2 --help)" in
             *'x86-64-v3 (supported, searched)'*) ;;
-            *) echo 'Gentoo binary-only check requires an x86-64-v3 capable larger runner.' >&2; exit 1 ;;
+            *) echo 'Gentoo binary-only check requires an x86-64-v3 capable runner.' >&2; exit 1 ;;
           esac
           # Replace the disposable container's default binhost so only the
           # selected official repository supplies new host dependencies.
@@ -168,7 +168,7 @@ jobs:
           CONFIG
           printf '%s\n' 'media-plugins/alsa-plugins pulseaudio' > /etc/portage/package.use/datapump-ci
           # This filesystem is discarded on exit. Avoid per-package power-loss
-          # durability syncs and allow parallel merges on the larger runner.
+          # durability syncs and allow parallel merges within the runner's CPU budget.
           # Keep merge-wait, ebuild locks and system dependency ordering intact.
           export FEATURES="$(portageq envvar FEATURES) parallel-install -merge-sync -sandbox -usersandbox -pid-sandbox -ipc-sandbox -network-sandbox"
           emerge --info

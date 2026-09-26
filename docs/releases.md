@@ -300,9 +300,10 @@ release as a draft after signature/payload checks; public APT installation
 cannot run against a draft. The default `publish=true` publishes the experiment
 and then tests actual GitHub `apt-get update`, installation of both backends,
 installed-file hashes and bounded CLI/GUI self-checks across the Debian/Ubuntu
-matrix above. Native Arch and Gentoo recipe installation checks run separately. Its runner dropdowns contain the larger L/H tiers only.
-When called through `release.yml`, H selections are preserved and other runner
-selections use L; Windows and baseline selectors do not trigger builds.
+matrix above. Native Arch and Gentoo recipe installation checks run separately.
+The runner dropdowns include standard and larger hosts. Calls through
+`release.yml` preserve the selected Linux and ARM64 runners; Windows and
+baseline selectors do not trigger builds.
 This path always creates an experiment, regardless of the ordinary release's
 `experiment` checkbox. An optional `version` overrides its display label;
 otherwise the original label is retained. Once registered on the default
@@ -838,10 +839,10 @@ their ARM64 jobs and diagnostics. The same input names work through GitHub CLI:
 The larger labels are the runners configured by `mirage335-colossus`. All
 architecture defaults and automatic fallbacks now use H pools, including helper,
 metadata and report jobs. Existing smaller choices remain available for an
-explicit manual selection in build workflows. Arch/Gentoo checks and release
-repository repackaging use L when explicitly selected and H otherwise, including
-when the parent build uses a standard or M runner. Certification's APT checks
-retain the selected larger runner and map standard runner choices to L.
+explicit manual selection in build workflows. Release repository repackaging,
+APT and Arch/Gentoo checks preserve those explicit selections through their
+reusable workflows. Selecting `ubuntu-24.04` and `ubuntu-24.04-arm` therefore
+keeps those jobs on standard hosts instead of silently substituting a paid pool.
 No job retries on a smaller runner.
 Each architecture has its own selector: an x86-64
 label cannot replace an ARM64 host. Existing Linux baseline containers, SDK
