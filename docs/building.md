@@ -231,10 +231,12 @@ tests but do not compile them. For individual work, existing targets such as
 
 Container jobs use [`tools/ci-apt.sh`](../tools/ci-apt.sh) for their Debian/Ubuntu
 prerequisites. Containers have their own APT sources; the hosted runner's mirror
-configuration does not carry into them. The helper prefers Azure for supported
-Ubuntu archives and retains alternate official mirrors. Debian uses its own
-archive and security mirrors. Older Ubuntu ARM ports sources remain separate;
-the helper never substitutes a different distribution, suite or architecture.
+configuration does not carry into them. The helper prefers Azure for recognized
+Ubuntu archive/security sources on supported architectures and retains alternate
+official mirrors. Debian uses its own archive and security mirrors. Ubuntu ports
+sources remain separate, including containers that still use ports for newer ARM
+releases; those sources receive the bounded acquisition and index-refresh retries.
+The helper never substitutes a different distribution, suite or architecture.
 Source signing keys, components, requested versions and package verification
 remain unchanged.
 

@@ -4,6 +4,91 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## CI package recovery and replay interruption fixtures — 26 September 2026
+
+[Certification 36010161027](https://github.com/mirage335-colossus/pumpModem/actions/runs/36010161027)
+failed two Ubuntu x86-64 prerequisites on `libexpat1` package 404s after successful
+index updates. Its separate Ubuntu 22.04 ARM64 Rev copied smoke failed in phase
+17 before the intended cancellation. The workflow had no project mirror-fallback
+or whole-operation fetch recovery, and the interruption fixture assumed several
+GUI polls would occur within a three-second replay.
+
+The new shared APT helper preserves signed package verification and exact
+requested versions, configures Azure-first recognized Ubuntu archive/security
+sources and separate Debian mirror fallbacks, and bounds both acquisition retries
+and fresh update/install recovery. Non-fetch failures stay fatal. The smoke
+fixture pauses its presentation clock before the interruption sequence and
+advances it only after observed polls until frame/pending-row prerequisites are
+met; sampled computation, ordinary replay cadence, physical completion, content
+checks and real workload deadlines remain unchanged. Pattern-score rendering
+shares the injected clock.
+
+Local validation on candidate `b1250dd2e2829105dd1878400e45938870bb7ef9`:
+
+- All 17 APT fixtures pass, including a real signed repository whose primary
+  mirror advertises an absent package and whose fallback supplies the identical
+  verified bytes. The fixture operates entirely in temporary directories and
+  does not install packages or contact public repositories.
+- `./build.sh test build --build-jobs 4 --jobs 2`: 20/20 pass. Disposable signing
+  fixtures ran outside the sandbox because GPG requires local agent sockets.
+- The focused delayed-replay regression reproduces completion before cancellation
+  with an injected five-second polling gap, then verifies replacement/cancellation
+  with repeated injected delays and a sixty-second preparation gap. Its hour-offset
+  clock case also compares the real pattern bitmap with measured source data.
+- `./build.sh test native` for FLTK on private Xvfb: 3/3 pass, including the full
+  214.57-second shared smoke, adapter conformance and document conformance.
+- Workflow actionlint, shell syntax, shellcheck and `git diff --check` pass.
+
+Hosted validation uses that same candidate and the normal H runner pools:
+
+- [Signed-package matrix 36264958536](https://github.com/mirage335-colossus/pumpModem/actions/runs/36264958536):
+  all nine Debian/Ubuntu distribution/architecture jobs passed signed metadata,
+  exact installed-byte verification and both backend self-checks (18 self-checks).
+  Ubuntu 24.04 and 26.04 x86-64 fetched the previously missing `libexpat1` versions
+  `2.6.1-2ubuntu0.6` and `2.7.4-1ubuntu0.2` from Azure. Debian used its CDN; Ubuntu
+  ARM64 retained ports, including the 26.04 container's actual ports sources.
+  All 36 helper operations succeeded on their first outer attempt. Fault recovery
+  itself was exercised by the local failure-injection and signed-mirror fixtures.
+  Only unrelated build/publication branches were skipped in this read-only mode.
+- [Full native CI 36264961154](https://github.com/mirage335-colossus/pumpModem/actions/runs/36264961154):
+  FLTK GUI passed 40/40 checks and 20/20 build-tool suites; Rev GUI passed 43/43
+  checks. Linux Release passed 126/126 regressions, full desktop smoke, CLI,
+  relocation and both archive formats; Windows passed 122/122 regressions,
+  relocation and both archives. Instrumented Debug passed 121/121 selected
+  regressions in 3051.77 seconds and 29/29 CLI checks. Its existing omissions of
+  `fast_session` and `gui_fast_live` remain omitted instrumented coverage; both
+  passed in Release. Debug desktop smoke reported **incomplete coverage**, not
+  a pass: typed `GUI_SMOKE_BUDGET` at phase 17 after 600.035181 seconds, transmission
+  14 at fraction 0.497861 (67.065208 media seconds, 5885414 samples), with useful
+  progress 0.168770 seconds earlier. No assertion or sanitizer report appeared.
+  The [retained smoke log](https://github.com/mirage335-colossus/pumpModem/actions/runs/36264961154/artifacts/10914089410)
+  preserves the warning; workload limits and the existing narrow exception were
+  unchanged. Both dependent copied-Linux jobs passed full smoke and archive
+  verification on Ubuntu 22.04 and 24.04. All seven required jobs concluded
+  successfully, with the incomplete Debug desktop coverage described above.
+- [ARM64 Rev diagnostic 36264955725](https://github.com/mirage335-colossus/pumpModem/actions/runs/36264955725):
+  both full isolated copied-package smokes passed on Ubuntu 22.04 and Debian
+  Trixie, including replacement/cancellation. Both verified the 35-ELF glibc 2.35
+  audit and unchanged TAR/ZIP inventory before and after use. The shared TAR's
+  SHA256 was `d2522e7a5d0a0cffff66ed3ba4f43b6410c0290a0bea1010abd6ab924d2e1254`.
+  Advisory `REV_REPLAY_CADENCE` warnings remain: Ubuntu phases 11/13 (7/7 frames),
+  Trixie phases 11/13/21 (8/5/4 frames). No correctness or workload-budget exception
+  was used; the separate short Ubuntu 24.04 startup branch was intentionally
+  skipped when selecting full smoke validation.
+- [Full SDK CI 36264963745](https://github.com/mirage335-colossus/pumpModem/actions/runs/36264963745):
+  all six required jobs passed using the prepared base recipes. Each backend
+  passed 20 build and four packaging suites; FLTK passed 30 preservation-contract
+  tests and Rev passed five native-conformance tests. Both TGZ/ZIP packages passed
+  full copied smoke, ABI and relocation checks on Bookworm and Ubuntu 24.04.
+  All six dependency installs succeeded on their first attempt. Advisory
+  `REV_REPLAY_CADENCE` warnings occurred twice during Rev build-archive smoke and
+  three times during copied Bookworm Rev smoke; there was no incomplete-coverage
+  exception. The diagnostic `devfast` branch was intentionally skipped for this
+  full run.
+
+Existing release assets and earlier reports remain unchanged; these source
+changes do not certify or repair the older binaries.
+
 ## Version 001_00 and completed product scope — 24 September 2026
 
 The application display version is now `001_00`, with numeric CMake/package
