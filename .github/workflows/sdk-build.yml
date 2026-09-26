@@ -34,10 +34,18 @@ jobs:
     env:
       DEBIAN_FRONTEND: noninteractive
     steps:
+      - name: Load current package-fetch helper before installing Git
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .ci-bootstrap
+          sparse-checkout: tools/ci-apt.sh
+          sparse-checkout-cone-mode: false
       - name: Install archive and verification prerequisites
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends binutils file python3 git gh ca-certificates xz-utils
+          cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
+          sh "$RUNNER_TEMP/ci-apt.sh" install binutils file python3 git gh ca-certificates xz-utils
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -74,7 +82,7 @@ jobs:
           exit 1
       - name: Install cold-build bootstrap prerequisites
         if: steps.base.outputs.found != 'true'
-        run: apt-get install -y --no-install-recommends build-essential wget curl cpio unzip rsync bc perl patch bzip2 zstd passwd util-linux debianutils
+        run: sh "$RUNNER_TEMP/ci-apt.sh" install build-essential wget curl cpio unzip rsync bc perl patch bzip2 zstd passwd util-linux debianutils
       - name: Prepare an ordinary build user
         if: steps.base.outputs.found != 'true'
         run: |

@@ -1,6 +1,7 @@
 #pragma once
 #include "controller.hpp"
 #include "gui_smoke_budget.hpp"
+#include "gui_smoke_clock.hpp"
 #include <chrono>
 #include <filesystem>
 #include <memory>
@@ -12,7 +13,8 @@ class BitmapSources;
 // Call after each controller poll; exceptions identify an actual failed check.
 class Smoke {
 public:
-    explicit Smoke(std::filesystem::path directory = {}, double timeout_seconds = 100);
+    explicit Smoke(std::shared_ptr<smoke_detail::InterruptionClock> replay_clock,
+                   std::filesystem::path directory = {}, double timeout_seconds = 100);
     ~Smoke();
     void step(Controller& controller, const BitmapSources* bitmaps = nullptr);
     bool done() const;

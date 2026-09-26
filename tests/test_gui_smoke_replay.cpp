@@ -1,4 +1,5 @@
 #include "gui_smoke_replay.hpp"
+#include "gui_smoke_clock.hpp"
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -77,8 +78,23 @@ void cadence_thresholds_and_healthy_replay() {
     require(!warnings.str().empty(),"Rev waveform display miss emitted no warning");
     expect_failure(replay,"fltk");
 }
+void interruption_clock() {
+    using Clock=datapump::gui::smoke_detail::InterruptionClock;
+    using namespace std::chrono_literals;
+    auto wall=Clock::Clock::time_point{};
+    Clock clock([&]{return wall;});
+    wall+=5s;require(clock.now()==wall,"Ordinary smoke replay stopped following real time");
+    clock.pause();const auto held=clock.now();
+    wall+=1h;
+    require(clock.now()==held,"A stalled native poll completed a controlled interruption replay");
+    clock.advance_frame();require(clock.now()==held+50ms,"Observed replay poll did not advance exactly one frame");
+    clock.pause();require(clock.now()==held+50ms,"Repeated pause discarded fixture progress");
+    clock.resume();require(clock.now()==held+50ms,"Resuming the smoke clock jumped across a completion boundary");
+    wall+=3s;require(clock.now()==held+3050ms,"Normal replay time did not resume after the interruption fixture");
+    clock.advance_frame();require(clock.now()==held+3050ms,"Fixture frame advancement changed ordinary real time");
+}
 }
 int main() {try {
-    recorded_display_cases();correctness_remains_mandatory();cadence_thresholds_and_healthy_replay();
+    recorded_display_cases();correctness_remains_mandatory();cadence_thresholds_and_healthy_replay();interruption_clock();
     std::cout<<"GUI replay cadence warning policy passed\n";
 } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}}

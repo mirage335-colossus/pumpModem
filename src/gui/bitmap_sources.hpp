@@ -35,7 +35,8 @@ public:
         const bool pattern_rx_paused = snapshot.transmitting && !controller.settings().simulation &&
             snapshot.constellation_source == live::ConstellationSource::transmitted;
         if (update.clear_pattern_scores_through) pattern_view_.clear_through(*update.clear_pattern_scores_through);
-        auto pattern_scores = pattern_rx_paused ? std::vector<plots::PatternScore>{} : pattern_view_.scores(snapshot);
+        auto pattern_scores = pattern_rx_paused ? std::vector<plots::PatternScore>{} :
+            pattern_view_.scores(snapshot,controller.presentation_time());
         if (update.update_plots || pattern_enabled_ != pattern_enabled || pattern_rx_paused_ != pattern_rx_paused ||
             update.clear_pattern_scores_through || pattern_scores_ != pattern_scores || !frames_.contains(ui::Bitmap::pattern_scores)) {
             pattern_scores_ = std::move(pattern_scores);

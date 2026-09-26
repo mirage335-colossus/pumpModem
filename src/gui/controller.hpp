@@ -16,6 +16,9 @@ public:
         bool simulation = false;
         bool smoke = false;
         std::optional<launch_command::Patch> launch_settings = std::nullopt;
+        // Native smoke can control its interruption fixture's presentation
+        // clock without changing sampled computation or ordinary application time.
+        live::Session::ReplayClock replay_clock = {};
     };
     Controller();
     explicit Controller(Options options);
@@ -43,6 +46,8 @@ public:
     bool enabled(ui::Command command) const;
     std::string command_label(ui::Command command) const; // Empty keeps the declaration label.
     const live::Snapshot& snapshot() const;
+    // Pattern evidence ages in the same clock domain as its session timestamps.
+    std::chrono::steady_clock::time_point presentation_time() const;
     const live::Settings& settings() const;
     const std::vector<audio::Device>& audio_devices() const;
     const Inbox& inbox() const;

@@ -227,6 +227,38 @@ tests but do not compile them. For individual work, existing targets such as
 
 ## Testing stages
 
+### CI package downloads
+
+Container jobs use [`tools/ci-apt.sh`](../tools/ci-apt.sh) for their Debian/Ubuntu
+prerequisites. Containers have their own APT sources; the hosted runner's mirror
+configuration does not carry into them. The helper prefers Azure for supported
+Ubuntu archives and retains alternate official mirrors. Debian uses its own
+archive and security mirrors. Older Ubuntu ARM ports sources remain separate;
+the helper never substitutes a different distribution, suite or architecture.
+Source signing keys, components, requested versions and package verification
+remain unchanged.
+
+APT file downloads have explicit retry and timeout limits. A failed fetch can
+also trigger a bounded fresh index update and installation attempt, so a package
+404 does not keep requesting an obsolete version indefinitely. Index updates
+fail on partial errors; authentication, dependency and package-configuration
+errors are not converted into successful or skipped installations. Exhausted
+retries fail the job and retain the diagnostic output.
+
+For containers without Git, a separate checkout first obtains the current
+workflow's helper using the checkout action's archive fallback. The helper is
+copied to the runner's temporary directory before installing prerequisites.
+The ordinary Git checkout then runs, preserving source revision provenance.
+Certification still checks out the published application's exact source and
+tests its original binary hashes. Preparing host tools does not certify or
+repair an older published binary.
+
+The offline regression `python3 tests/test_ci_apt.py` exercises mirror selection,
+fetch recovery and fatal errors without changing the machine's package sources.
+It is also included in `./build.sh test build` and automatic helper checks.
+
+### Candidate validation
+
 Use focused feedback while a fault or feature is still changing, then broaden
 validation after the candidate is complete. A fast diagnostic pass establishes
 that a particular case works; it does not establish that the rest of the
@@ -476,16 +508,16 @@ visible window and host Mesa/LLVM/C++ runtime mappings within 15 seconds.
 It does not run the full GUI smoke or calibration, upload artifacts, or publish
 a release. Follow a focused pass with applicable full validation.
 
-For a copied ARM64 Rev smoke failure on Debian Trixie, build only the affected
-package from the corrected branch and run its complete GUI smoke there:
+For a copied ARM64 Rev smoke failure, build only the affected package from the
+corrected branch and run its complete GUI smoke on Ubuntu 22.04 and Debian Trixie:
 
 ```sh
 gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=arm-rev-smoke
 ```
 
 This mode retains the Ubuntu 22.04 build baseline, verifies archive/package
-hashes and the glibc 2.35 ceiling, then runs one full copied GUI smoke with its
-600-second allowance and the same Trixie display prerequisites as certification.
+hashes and the glibc 2.35 ceiling, then runs both copied GUI smokes with their
+600-second allowances and the same display prerequisites as certification.
 It uses the H ARM64 runner by default and the pinned runtime dependency scanner;
 it does not rebuild an SDK, run calibration or a general matrix, upload artifacts,
 publish or certify a release. Rerunning an older release cannot test this new

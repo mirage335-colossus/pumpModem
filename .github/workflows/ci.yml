@@ -84,6 +84,7 @@ jobs:
         run: |
           python3 tests/test_build_wrapper.py
           python3 tests/test_build_dependencies.py
+          python3 tests/test_ci_apt.py
           python3 tests/test_source_sdk.py
           python3 tests/test_sdk_build.py
           python3 tests/test_release_dependencies.py
@@ -157,10 +158,18 @@ jobs:
       # Keep software rendering from saturating the UI polling thread's CPUs.
       LP_NUM_THREADS: "2"
     steps:
+      - name: Load current package-fetch helper before installing Git
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .ci-bootstrap
+          sparse-checkout: tools/ci-apt.sh
+          sparse-checkout-cone-mode: false
       - name: Prepare shared native conformance environment
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends ca-certificates git cmake ninja-build make g++ clang-19 clang-tools-19 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev libxrandr-dev libgl-dev libglew-dev libfreetype-dev libxtst6 libgl1-mesa-dri xvfb xauth fonts-dejavu-core python3
+          cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
+          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates git cmake ninja-build make g++ clang-19 clang-tools-19 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev libxrandr-dev libgl-dev libglew-dev libfreetype-dev libxtst6 libgl1-mesa-dri xvfb xauth fonts-dejavu-core python3
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -203,10 +212,18 @@ jobs:
       CC: gcc-11
       CXX: g++-11
     steps:
+      - name: Load current package-fetch helper before installing Git
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .ci-bootstrap
+          sparse-checkout: tools/ci-apt.sh
+          sparse-checkout-cone-mode: false
       - name: Prepare build dependencies
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends ca-certificates curl git cmake ninja-build make g++-11 binutils libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev xvfb xauth fontconfig-config fonts-dejavu-core python3
+          cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
+          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates curl git cmake ninja-build make g++-11 binutils libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev xvfb xauth fontconfig-config fonts-dejavu-core python3
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -313,10 +330,18 @@ jobs:
     steps:
       # No application development libraries or compiler: only the display and
       # inspection tools used to check the downloaded, already built bundle.
+      - name: Load current package-fetch helper before installing Git
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .ci-bootstrap
+          sparse-checkout: tools/ci-apt.sh
+          sparse-checkout-cone-mode: false
       - name: Prepare compatibility checks
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends ca-certificates curl git cmake binutils xvfb xauth fontconfig-config fonts-dejavu-core
+          cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
+          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates curl git cmake binutils xvfb xauth fontconfig-config fonts-dejavu-core
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false

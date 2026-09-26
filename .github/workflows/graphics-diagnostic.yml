@@ -46,10 +46,18 @@ jobs:
       LIBGL_ALWAYS_SOFTWARE: '1'
       LP_NUM_THREADS: '2'
     steps:
+      - name: Load current package-fetch helper before installing Git
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .ci-bootstrap
+          sparse-checkout: tools/ci-apt.sh
+          sparse-checkout-cone-mode: false
       - name: Install inspection tools and the host graphics stack
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends ca-certificates git gh python3 cmake binutils xvfb xauth mesa-utils fonts-dejavu-core fontconfig-config libgl1 libopengl0 libgl1-mesa-dri
+          cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
+          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates git gh python3 cmake binutils xvfb xauth mesa-utils fonts-dejavu-core fontconfig-config libgl1 libopengl0 libgl1-mesa-dri
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false

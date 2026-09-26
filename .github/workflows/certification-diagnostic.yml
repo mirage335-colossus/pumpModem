@@ -38,10 +38,18 @@ jobs:
       LP_NUM_THREADS: '2'
       GUI_BACKEND: ${{ matrix.backend }}
     steps:
+      - name: Load current package-fetch helper before installing Git
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .ci-bootstrap
+          sparse-checkout: tools/ci-apt.sh
+          sparse-checkout-cone-mode: false
       - name: Install download and display prerequisites
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends ca-certificates git gh python3 file binutils make xvfb xauth fonts-dejavu-core fontconfig-config libxtst6 libgl1 libopengl0 libgl1-mesa-dri
+          cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
+          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates git gh python3 file binutils make xvfb xauth fonts-dejavu-core fontconfig-config libxtst6 libgl1 libopengl0 libgl1-mesa-dri
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -122,10 +130,18 @@ jobs:
     env:
       DEBIAN_FRONTEND: noninteractive
     steps:
+      - name: Load current package-fetch helper before installing Git
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .ci-bootstrap
+          sparse-checkout: tools/ci-apt.sh
+          sparse-checkout-cone-mode: false
       - name: Install the same compiler baseline as ARM64 Rev certification
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends ca-certificates curl git python3 file binutils make cmake ninja-build g++-11 libssl-dev
+          cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
+          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates curl git python3 file binutils make cmake ninja-build g++-11 libssl-dev
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false

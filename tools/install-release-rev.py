@@ -58,8 +58,8 @@ def install(destination, system_root=Path('/')):
         raise ValueError('The CI toolchain preparation requires root for apt packages')
     architecture = 'amd64' if platform.machine() in ('x86_64', 'amd64') else 'arm64'
     apt_environment = {**os.environ, 'DEBIAN_FRONTEND': 'noninteractive'}
-    run(['apt-get', 'update'], env=apt_environment)
-    run(['apt-get', 'install', '-y', '--no-install-recommends',
+    apt_helper = Path(__file__).resolve().with_name('ci-apt.sh')
+    run(['sh', apt_helper, 'install',
          'ca-certificates', 'curl', 'gnupg', 'make', 'g++-11'], env=apt_environment)
     with tempfile.TemporaryDirectory(prefix='datapump-rev-tools-') as work:
         scratch = Path(work)
@@ -82,8 +82,7 @@ def install(destination, system_root=Path('/')):
         source.write_text(f'deb [arch={architecture} signed-by={installed_key}] '
                           'https://apt.llvm.org/jammy/ llvm-toolchain-jammy-19 main\n')
         source.chmod(0o644)
-        run(['apt-get', 'update'], env=apt_environment)
-        run(['apt-get', 'install', '-y', '--no-install-recommends',
+        run(['sh', apt_helper, 'install',
              f'clang-19={LLVM_VERSION}', f'clang-tools-19={LLVM_VERSION}',
              'libxrandr-dev', 'libgl-dev', 'libglew-dev', 'libfreetype-dev'], env=apt_environment)
 

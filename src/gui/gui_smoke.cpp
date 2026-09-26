@@ -65,9 +65,12 @@ struct Smoke::Impl {
     std::set<std::uint64_t> interrupted;
     std::set<std::string> verified_ids;
     Bytes first_key_mac;
+    std::shared_ptr<smoke_detail::InterruptionClock> replay_clock;
     std::string first_key_id;
     std::uintmax_t key_size=0;
-    explicit Impl(std::filesystem::path path,double seconds):directory(std::move(path)),timeout(seconds) {
+    explicit Impl(std::shared_ptr<smoke_detail::InterruptionClock> clock,std::filesystem::path path,double seconds):
+        directory(std::move(path)),timeout(seconds),replay_clock(std::move(clock)) {
+        require(bool(replay_clock),"Smoke requires its interruption presentation clock");
         if(directory.empty()) {
             directory=std::filesystem::temp_directory_path()/("datapump-shared-smoke-"+std::to_string(started.time_since_epoch().count()));
             owns_directory=std::filesystem::create_directory(directory);
@@ -208,7 +211,8 @@ struct Smoke::Impl {
             const auto id=id_label(stream.message);
             if(verified_ids.contains(id))continue;
             const auto text=std::string(stream.message.data.begin(),stream.message.data.end());
-            require(text!=interrupted_message&&text!=cancelled_message,"Replaced or cancelled replay delivered a late verified stream");
+            require(text!=interrupted_message,"Replaced replay delivered a late verified stream");
+            require(text!=cancelled_message,"Cancellation fixture delivered a verified stream before its cancellation checks finished");
             require(!controller.snapshot().transmitting&&!controller.snapshot().simulation_replay&&
                     completed_replay==controller.snapshot().transmission_id&&
                     (!replay.pending_required||(replay.pending_poll&&replay.pending_poll<polls)),
@@ -412,6 +416,7 @@ struct Smoke::Impl {
         }
         case Phase::interrupt_ready:
             if(!controller.enabled(C::transmit)||!replay.resumed)break;
+            replay_clock->pause();
             transmit(controller);phase=Phase::interrupt_replay;break;
         case Phase::interrupt_replay:
             if(!snapshot.simulation_replay)break;
@@ -424,6 +429,7 @@ struct Smoke::Impl {
             if(!snapshot.simulation_replay||interrupted.contains(replay.id)||(replay.pending_required&&(!replay.pending_poll||replay.pending_poll>=polls))||replay.frames<3)break;
             require(controller.command_label(C::cancel)=="Stop replay","Cancel action did not describe stopping the replay");
             interrupted.insert(replay.id);controller.activate(C::cancel);cancelled_at=Clock::now();cancel_samples=snapshot.samples_received;
+            replay_clock->resume();
             phase=Phase::cancelled;break;
         case Phase::cancelled:
             require(controller.inbox().items().empty()&&verified_ids.size()==2,"Interrupted replay added a received stream");
@@ -493,6 +499,13 @@ struct Smoke::Impl {
             require(verified_ids.size()==2&&interrupted.size()==2,"Smoke did not complete stream, raw-bit, replacement and cancellation workflows");
             done=true;break;
         }
+        // Observe actual frames and pending rows before advancing the fixture.
+        // Once ready, hold while asynchronous draft preparation finishes. Normal
+        // completed replays above/below these phases still use wall-clock time.
+        if(snapshot.simulation_replay&&
+           (phase==Phase::interrupt_replay||phase==Phase::replacement_ready||phase==Phase::replacement_replay)&&
+           (replay.frames<3||(replay.pending_required&&!replay.pending_poll)))
+            replay_clock->advance_frame();
         // Complete all ordinary and phase-specific assertions first. Reaching
         // the overall workload allowance cannot hide a simultaneous failure.
         const auto now=Clock::now();
@@ -504,7 +517,8 @@ struct Smoke::Impl {
         }
     }
 };
-Smoke::Smoke(std::filesystem::path directory,double timeout):impl_(std::make_unique<Impl>(std::move(directory),timeout)) {}
+Smoke::Smoke(std::shared_ptr<smoke_detail::InterruptionClock> replay_clock,std::filesystem::path directory,double timeout):
+    impl_(std::make_unique<Impl>(std::move(replay_clock),std::move(directory),timeout)) {}
 Smoke::~Smoke()=default;
 void Smoke::step(Controller& controller,const BitmapSources* bitmaps) {
     try { impl_->step(controller,bitmaps); }

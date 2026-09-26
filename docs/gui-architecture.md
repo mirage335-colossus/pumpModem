@@ -260,6 +260,18 @@ the complete shared smoke through the production executable. This keeps the
 workflow's initial state and clock independent of native probe duration, and
 avoids maintaining a second workflow lifecycle in an adapter's test code.
 
+The replacement/cancellation smoke fixture controls only its replay presentation
+clock. It advances after observed GUI polls until the existing pending-row and
+frame prerequisites are satisfied, then holds while preparing the replacement.
+This lets the test issue replacement and cancellation before completion even
+when native painting takes longer than the normal three-second replay. The
+sampled computation, real workload deadlines and ordinary completion/cadence
+checks retain their existing clocks. Normal application sessions use the
+unchanged real-time replay clock. The focused
+`test_gui_controller --replay-interruption` regression demonstrates the original
+completion-before-cancel schedule and verifies both interruptions with delayed
+polls, retaining the no-late-content assertions.
+
 Rev replay/waterfall display cadence is advisory. The shared smoke measures
 the existing elapsed/frame/change/progress targets and emits
 `WARNING REV_REPLAY_CADENCE:` for Rev misses; FLTK retains its strict cadence

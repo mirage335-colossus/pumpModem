@@ -47,6 +47,8 @@ on:
         default: ''
   pull_request:
     paths:
+      - 'tools/ci-apt.sh'
+      - 'tests/test_ci_apt.py'
       - '.github/workflows/release.yml'
       - '.github/workflows/apt-release.yml'
       - '.github/workflows/apt-check.yml'
@@ -154,6 +156,7 @@ jobs:
           persist-credentials: false
       - run: |
           python3 tests/test_release.py
+          python3 tests/test_ci_apt.py
           python3 tests/test_release_dependencies.py
           python3 tests/test_apt_release.py
           python3 tests/test_distro_release.py
@@ -240,10 +243,18 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       RELEASE_METADATA: ${{ needs.metadata.outputs.metadata_json }}
     steps:
+      - name: Load current package-fetch helper before installing Git
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .ci-bootstrap
+          sparse-checkout: tools/ci-apt.sh
+          sparse-checkout-cone-mode: false
       - name: Install download and archive inspection prerequisites
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends ca-certificates curl git gh python3 file binutils make libgl1 libopengl0
+          cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
+          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates curl git gh python3 file binutils make libgl1 libopengl0
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -264,7 +275,7 @@ jobs:
       - name: Install native baseline dependencies and pinned scanner
         if: ${{ !matrix.sdk }}
         run: |
-          apt-get install -y --no-install-recommends cmake ninja-build g++-11 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev
+          sh "$RUNNER_TEMP/ci-apt.sh" install cmake ninja-build g++-11 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev
           sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
           echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
       - name: Install native Rev compiler and module-aware Ninja
