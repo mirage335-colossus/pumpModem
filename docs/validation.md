@@ -340,7 +340,14 @@ uses `0a2a738` and the same exact published source and inventory. Both standard
 Windows jobs passed all 11 native-runner fixtures and the 18 applicable smoke
 fixtures (one POSIX-only signal fixture is explicitly inapplicable on Windows).
 All 20 copied-package checks passed with current tooling; the full source suites
-and final certificate are pending at this checkpoint.
+and final certificate also passed. All 41 required jobs completed in 66m57s
+from dispatch, with 505m54s summed job time. The certificate pins the original
+source and inventory and records `passed_with_warnings` solely for the known
+Windows Rev WGL exclusion. Every executed source and published GUI smoke
+completed; no incomplete-workload exception was needed. Its hosted-warning
+policy permits ordinary-release Latest eligibility; `latest_eligible=false`
+here is due solely to `experiment=true`. The release remains a published
+prerelease. The optional devfast job was skipped and is not counted as a pass.
 
 The completed 73m52s certification exposed a remaining scheduling bottleneck:
 full numerical calibration followed the main source suites on each platform.
@@ -352,8 +359,48 @@ other selected cases and exact published-package checks. Linux matrix rows are
 explicitly expanded; Windows aggregation requires both main and calibration
 children and retains graphics warnings from the main Rev child. Separate
 calibration artifacts preserve registration, configuration, logs and JUnit;
-they cannot replace main-job smoke evidence. A full standard-runner run is
-required to establish the resulting wall-clock timing.
+they cannot replace main-job smoke evidence. The two certification workflows
+grow from 673 to 823 lines (1.22x); the added runtime cost is six setup/minimal
+builds, with each calibration still executed once per target. All 101
+certificate/workflow fixtures and actionlint pass. Full standard-runner
+[parallel certification 36287962659](https://github.com/mirage335-colossus/pumpModem/actions/runs/36287962659)
+uses tooling `a35be64` and the same pinned release source/inventory; its final
+result is **success: all 47 required jobs passed**, with one optional devfast
+skip not counted as a pass. Dispatch-to-last-job completion is **41m43s** and
+summed job duration **500m23s**, compared with 66m57s and 505m54s in the preceding
+warning-policy run. These are observed hosted runs, including runner variation:
+individual calibration durations also varied, so the whole latency difference
+is not attributed solely to the scheduling change.
+
+| Standard-runner target | Main source/published checks | Independent full calibration |
+| --- | --- | --- |
+| Linux x86-64 FLTK | 21m14s | 23m51s |
+| Linux x86-64 Rev | 26m50s | 24m51s |
+| Linux ARM64 FLTK | 25m32s | 22m06s |
+| Linux ARM64 Rev | 39m15s | 25m37s |
+| Windows x64 FLTK | 39m53s | 30m47s |
+| Windows x64 Rev | 25m51s | 27m34s |
+
+All six calibration artifacts contain one passing registered Release case with
+`--workers 4 --section all`, automatic worker configuration, no shard override,
+the original 3600-second limit and complete 64-seed numerical gates. Full logs,
+registration and JUnit are retained. Main Linux contract execution is the two
+serial Live cases plus all 27 other cases; the independent probability case
+restores the complete 30-case contract. All applicable native GUI, audio,
+packaging and exact published-package checks passed. All 30 executed source and
+published GUI smokes completed; no incomplete-workload exception was needed.
+The certificate records only the accepted Windows Rev WGL graphics omission,
+with no Latest eligibility veto for otherwise qualified ordinary releases.
+
+The final certificate SHA256 is
+`33635b0a608d29aac232a418d76774341487ee99b9a5aee066eab7f8ca15daad`.
+All 56 original release assets retain their IDs, sizes and SHA256 digests;
+earlier failed and successful reports remain available. The approved experiment
+is still a published prerelease, and Latest remains
+`v001_00-2026-09-24-0856CDT`. Full native (42m47s), SDK (33m00s), release build
+(8m44s), base reuse and standard-runner focused commit checks are recorded above;
+their unchanged source/configuration evidence is reused instead of duplicating
+those expensive runs for certification-only scheduling changes.
 
 ## CI package recovery and replay interruption fixtures — 26 September 2026
 
