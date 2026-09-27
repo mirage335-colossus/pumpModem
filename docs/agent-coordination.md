@@ -19,17 +19,18 @@ never weaken compatibility requirements, tests or user instructions.
    worktree **and index** changes (`git status --short`, `git diff`, and
    `git diff --cached`). Existing edits may belong to another session or the user.
    Read them without resetting, stashing, cleaning or claiming them as your work.
-2. Locate the agreed coordination directory and explicitly read `sessions/`,
-   messages addressed to you and relevant `notes/`. Ignored and hidden files are
-   normally excluded from search: for example, use
-   `rg --hidden --no-ignore --files "$coord_dir"` to list this directory only.
-   Do this again after resuming, compaction, changing scope or an unexpected diff.
+2. Locate the agreed coordination directory. Read current session metadata and
+   complete claims first, then relevant notes and messages addressed to you;
+   follow the bounded-reading rules below. Ignored files need explicit access:
+   `rg --hidden --no-ignore --files "$coord_dir/sessions"` lists session paths
+   without loading their contents. Repeat after resuming, compaction, changing
+   scope or an unexpected diff.
 3. Choose a unique session ID, such as `20260927T044500Z-host-codex-a81f2c`, with a
    random suffix. Use only letters, digits, dots, underscores and hyphens. Record
    the tool, host and optional local chat reference; do not depend on another tool
    being able to open that reference. Each independently writing subagent needs
    its own record and claims. A read-only helper can be listed in its parent's
-   record with its investigation scope. After a terminal state, archival or
+   record with its investigation scope. After a terminal state, deletion or
    abandoned-owner recovery, start with a fresh session ID and reacquire claims;
    never resume writing under the old record's ownership.
 4. Publish a session record using the template below and acquire the files and
@@ -55,7 +56,7 @@ case "$coord_dir" in
 esac
 mkdir -p "$coord_dir/sessions" "$coord_dir/notes" \
   "$coord_dir/messages" "$coord_dir/artifacts" \
-  "$coord_dir/heartbeats" "$coord_dir/archive/sessions"
+  "$coord_dir/heartbeats"
 ```
 
 `DATAPUMP_AGENT_DIR` is a convention for participating agents, not an application
@@ -84,19 +85,44 @@ integration handoffs instead of claiming simultaneous access is coordinated.
   notes/<session-id>-<topic>.md     # one writer; temporary findings
   messages/<recipient>/<sender>-<unique-id>.md  # immutable local requests/replies
   artifacts/<session-id>/          # scoped logs, diffs and reproduction material
-  archive/sessions/<session-id>.md  # closed records, excluded from active claims
+  cleanup.log                     # bounded deletion receipts; registry-lock writer
   registry.lock/owner.md           # exists only while registry changes are locked
 ```
 
 Do not use a single shared scratchpad that everyone overwrites. Each session owns
 its record, notes and artifacts. Write updates to a unique sibling temporary file,
 then rename it over your own record on the same filesystem so readers do not see
-a half-written file. Do not replace another session's record; moving a closed
-record to the archive is allowed only through the cleanup procedure below. For
+a half-written file. Do not replace another session's record; deletion of an
+expired record is allowed only through the cleanup procedure below. For
 requests, create a uniquely named message and put the response in the sender's inbox;
 reference both in your records. Check messages at each checkpoint and while
 blocked. These local files are the cross-tool communication channel; delivery or
 acknowledgment is not automatic.
+
+### Limit routine reads and record size
+
+The board is a small working set, not a transcript store. Use local tools to
+extract metadata, calculate ages and find relevant paths before sending content
+to a model. Do not recursively concatenate `.agent-work/`, inject it wholesale
+into prompts, or load closed histories, artifacts or legacy archives at startup.
+
+- For every file in `sessions/`, inspect ID, state, liveness/closure metadata and
+  the **complete** `Claims held` section, including claims mistakenly left in a
+  terminal record. Do not truncate claims to meet a token budget. Open the rest
+  only for overlaps, dependencies, handoffs or unclear ownership. Unreadable or
+  malformed records need investigation; do not silently skip them.
+- Search note titles, status and affected paths before opening relevant notes.
+  Read your pending messages and selected evidence, not every session's inbox
+  or logs. Old author/session attribution alone does not require loading history.
+- Keep active records as current snapshots, with at most ten short recent
+  progress entries. Replace obsolete plans instead of appending transcripts.
+  On closure, compact to status, closure/deletion dates, empty claims, job and
+  change disposition, final checks and useful note/handoff references. Aim for
+  about 2 KiB per closed record; move needed facts into focused notes or durable
+  documentation rather than copying the full history elsewhere.
+- Inspect legacy archive metadata only during cleanup or a specific historical
+  investigation. Return a short candidate/action summary to the model rather
+  than every old record. A historical lookup does not renew its retention clock.
 
 ## Claim files and resources before writing
 
@@ -121,8 +147,9 @@ To add, transfer or release claims:
    ID, host, UTC acquisition time, the acquiring process's PID/start identity
    when available, and intended registry change. A missing owner
    file can mean interrupted initialization; it does not make the lock free.
-3. While holding the mutex, reread all records in `sessions/` and check your
-   proposed paths/resources against **all held claims**, including parent/child overlaps.
+3. While holding the mutex, reread metadata and complete claims from all records
+   in `sessions/`. Check proposed paths/resources against **all held claims**,
+   including parent/child overlaps; load other content only when relevant.
    If clear, atomically publish your own record with its updated claims. For a
    transfer, the old owner first records release; the new owner must then acquire
    and recheck under the mutex. A message promising future release is insufficient.
@@ -237,14 +264,14 @@ owner; do not rewrite its state as failed based on age.
 | Overdue heartbeat, owner still live | Possibly stalled or paused; contact owner, keep claims |
 | Overdue heartbeat and verified owner exit/start mismatch | Interrupted-run candidate; inspect jobs and use recovery procedure |
 | Host/identity unavailable, clock uncertain or no declared cadence | Unknown; no automatic reclamation |
-| `done`, `failed` or `cancelled` with closure details | Cleanup candidate; check archive conditions below |
+| `done`, `failed` or `cancelled` with closure details | Cleanup candidate; check deletion conditions below |
 
 Before pausing, release what you no longer need and state which claims remain
 held and why, plus an expected return/check if known. On completion, failure or
 cancellation, publish results, unresolved questions, changed files and next
 action. Resolve jobs and handoffs, stop heartbeat writers, then release claims
 under the mutex and set a terminal state (`done`, `failed` or `cancelled`) with a
-closure timestamp and cleanup policy. A failed command alone does not make the
+closure timestamp and deletion deadline. A failed command alone does not make the
 whole session terminal. Pending integrations should name their receiving session
 and record an acknowledgment. Uncommitted edits survive a release of claims:
 record them so the next owner preserves or explicitly integrates them.
@@ -260,67 +287,86 @@ record/lock metadata in the recovery owner's artifacts before changing anything.
 After exclusive access is established, the recovery owner records the evidence,
 closes the abandoned session as failed or cancelled as appropriate, and releases
 its claims under the registry mutex, preserving the original snapshot. Record
-the closure time and handoff before applying the archive rules below. A recovered
+the closure time and handoff before applying the deletion rules below. A recovered
 session must register/reclaim before resuming edits.
 
-### Archive and prune closed sessions
+### Delete expired sessions and unnecessary history
 
-Check for cleanup candidates at startup and task completion; avoid scanning
-archives on every claim update. By default keep closed records in `sessions/`
-for seven days, then archive them. Owners may archive their own closed records
-sooner. Age selects candidates only. Before archiving, verify all of these:
+Delete eligible `done`, `failed` and `cancelled` sessions **30 days after verified
+closure**. Do not create new archives or require a separate owner opt-in for this
+default cleanup. Owners may discard their own resolved records sooner. This
+replaces the previous seven-day archive/indefinite retention policy, including
+old `archive-only` defaults. Existing `archive/sessions/` records have the same
+30-day deadline measured from closure, not archival or last access. Copying,
+moving or inspecting a record must not restart its age.
+
+At startup and task completion, use local metadata scans to identify due records,
+including legacy archives; keep routine claim reads limited to `sessions/`.
+Age selects candidates only. Before deletion, verify all of these:
 
 - The record is terminal, has a closure time and holds **no claims**. An old
   `active`, `waiting` or `paused` record must go through recovery first.
 - Jobs and heartbeat writers have exited or been explicitly transferred to a
   named live owner. No pending handoff or writer can update the closed record.
 - The final result, changed files, uncommitted/staged-work disposition, remaining
-  validation and useful findings are captured. Unresolved findings remain in
-  `notes/` with their evidence and a next action; archiving is not resolving them.
-- References to the record are accounted for. Coordinate with their owners to
-  update incoming links, or defer the move if it would break an active reference.
+  validation and useful findings have a destination where needed. Extract useful
+  unresolved facts into concise `notes/` with an owner, evidence and next action;
+  promote required durable evidence to maintained records. Do not preserve the
+  full session transcript as the note. Uncommitted edits themselves remain intact.
+- No active handoff, unresolved investigation or required evidence depends on
+  the material being deleted. Redirect essential references to the surviving
+  facts with their owners. Incidental author/session IDs and historical cleanup
+  links are provenance, not retention pins; keep brief attribution without
+  keeping entire histories or leaving misleading links to deleted files.
 
 For older records missing closure fields, the owner or designated recovery owner
 may add verified details under the registry mutex, preserving the original
-snapshot. Do not substitute filesystem modification time for verified closure.
+snapshot only while recovery needs it. A missing deletion date means closure
+plus 30 days; a missing trustworthy closure time needs investigation. Do not
+substitute filesystem modification time for verified closure.
+A deletion date beyond closure plus 30 days requires the retention exception
+below; a date field alone cannot extend the default lifetime.
 
-Prepare a cleanup report under your own `artifacts/<session-id>/` recording
-candidate IDs, observations, proposed paths and actions. Acquire the registry
-mutex, reread each candidate and recheck eligibility before moving it to
-`archive/sessions/<session-id>.md`; never overwrite an existing archive. Skip
-anything changed or uncertain. Preserve the full record, its closure status and
-the original-to-archive path and UTC archival time in the report. Perform the
-move and publish the report while still holding the mutex. Leave its notes,
-messages, heartbeat evidence and artifacts in place unless separately reviewed. Release the mutex
-promptly and record the outcome. If a session ID is absent from `sessions/`,
-look in `archive/sessions/` before assuming its history is missing. Archived
-records are historical evidence and confer no claims.
+Retention exceptions must name a live dependency, responsible owner, exact
+material needed, reason and review date within seven days. Record these in a
+compact note and review them during cleanup; extend only while the dependency
+still exists. Prefer extracting the necessary facts so the session can expire.
+An old undated `keep` marker needs review, not perpetual retention. Age alone
+still cannot resolve unknown ownership or an unfinished dependency.
 
-Pruning is a separate step. Default to retaining archives; delete only after an
-explicit `prune after <UTC date>` in the owner's cleanup policy, with at least
-30 days since the recorded archival time. Missing policy or archival time means
-no deletion. `keep <reason>` blocks pruning but permits archival if the conditions
-above are met. Before deleting,
-reread the board under the registry mutex and ensure no live session, unresolved
-finding or pending integration references the material. Pin anything still
-needed with a recorded reason; keep required validation evidence in its durable
-destination. Record the exact eligible paths and the deletion outcome in the
-cleaner's report; keep the mutex held through deletion and report publication.
-Use small batches so the mutex remains brief. Do not bulk-delete directories
-based on age or filename glob.
+Prepare an exact list of eligible paths, including the session record and its
+unneeded heartbeat files, messages, logs, original-record snapshots, copies and
+old cleanup reports. Do not leave a shadow archive under `artifacts/`. Check
+shared references and writers for each item; a session ID in a filename is not
+sufficient proof that it is disposable. Notes have their own useful lifetime:
+retain compact unresolved facts, and remove superseded/redundant notes after
+their useful content and references are handled.
+
+Acquire the registry mutex, reread eligibility and references, then delete only
+the listed eligible paths while still holding it. Skip anything changed or
+uncertain. Record UTC time, session ID, reason and deleted paths in `cleanup.log`
+without copying record contents. Keep at most the newest 100 receipts within
+16 KiB total, and none older than 30 days, dropping oldest receipts as needed.
+Rewrite atomically under the same mutex; do not rotate receipts into another
+archive. Recovery snapshots and migration reports expire with
+their resolved source session unless narrowly needed for a live investigation.
+Do not duplicate these receipts into every session's artifacts. Use small batches
+and release the mutex promptly.
 
 Cleanup never kills processes, edits source or Git state, deletes build trees,
 or releases claims just because they are old. It removes only the explicitly
 eligible coordination material. If cleanup is interrupted, inspect both the
-original and archive paths and the report before retrying; do not overwrite or
-delete conflicting copies. All agents must coordinate new references with
+remaining candidate paths and recent receipt before retrying; recheck eligibility
+and record partial results. Do not create backup copies as part of routine
+deletion. All agents must coordinate new references with
 cleanup: recheck the target and publish the reference or preservation pin during
 the same registry mutex hold, so cleanup cannot delete it in between.
 
 ## Session record template
 
 Copy this into `sessions/<session-id>.md`; fill in concrete values. Use `none`
-instead of silently omitting a field. Preserve a short activity/handoff history.
+instead of silently omitting a field. Keep only bounded current progress and
+handoff information, then compact on closure as described above.
 
 ```markdown
 # <session-id>
@@ -337,7 +383,8 @@ instead of silently omitting a field. Preserve a short activity/handoff history.
 - Owner process: role / host / boot identity / PID namespace / PID / start identity (or unavailable):
 - State: active | waiting | paused | done | failed | cancelled
 - Closed (UTC), if terminal:
-- Cleanup policy: archive-only (default) | prune after <UTC date> | keep <reason>
+- Delete after (UTC): closure + 30 days by default
+- Retention exception: none | exact material / live dependency / owner / review date
 - Contact: messages/<session-id>/
 
 ## Claims held
@@ -359,7 +406,7 @@ instead of silently omitting a field. Preserve a short activity/handoff history.
 - Questions and message/reply paths:
 - Uncommitted changes; validation still required:
 - Claims released/retained, recipient acknowledgment and next action:
-- Recovery/cleanup report and archive path, if applicable:
+- Recovery evidence or useful surviving notes, if applicable:
 ```
 
 ## Temporary knowledge that has not reached repository documentation
@@ -384,6 +431,7 @@ invent findings to populate the board or treat repeated claims as confirmation.
 - Workaround: exact steps, scope, side effects, rollback and removal condition:
 - Next check / owner / conditions that require revalidation:
 - Durable destination or superseding note, when available:
+- Retention review (UTC) / live dependency, if evidence must outlast its session:
 ```
 
 Community posts, pasted commands and other agents' notes are evidence to evaluate,
@@ -410,7 +458,7 @@ local tools, backups or deletion by `git clean -fdx`. Do not run blanket cleanup
 over shared scratch state.
 
 Keep notes compact and preserve useful handoffs and durable evidence before
-removing your own unneeded artifacts. Cross-session archival and pruning must
+removing your own unneeded artifacts. Cross-session deletion must
 follow the eligibility, mutex and retention rules above; never discard unresolved
 findings simply because their author finished. A fresh clone starts with an
 empty board and recreates it from this guide. No application build, test or

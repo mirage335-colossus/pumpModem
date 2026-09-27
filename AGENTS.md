@@ -15,7 +15,8 @@ separate chats, tools and independently editing subagents, including Codex,
 Anthropic desktop sessions and OpenRouter-compatible harnesses.
 
 - Use the shared, gitignored `.agent-work/` directory (or the explicitly agreed
-  absolute `DATAPUMP_AGENT_DIR`). Read current sessions and relevant notes; keep
+  absolute `DATAPUMP_AGENT_DIR`). Read session metadata/claims and relevant notes;
+  never ingest the whole board or historical logs by default. Keep
   your own session record with exact files/resources, intended edits, approach,
   baseline, progress, checks and handoff. Ignored files require explicit reads.
 - Claim files/resources before writing, using the short atomic registry lock
@@ -25,9 +26,11 @@ Anthropic desktop sessions and OpenRouter-compatible harnesses.
   claims explicitly when finished. Preserve other sessions' edits, staged work,
   processes and notes. Coordinate shared Git state, build trees and devices too.
 - Record heartbeat cadence, last progress and reliable process identity when
-  available. Review overdue sessions and archive closed sessions using the
-  workflow's cleanup rules. PID disappearance or an old timestamp is evidence
-  to investigate, not permission to clear claims or delete unresolved work.
+  available. Review overdue sessions and delete eligible closed sessions after
+  30 days, including legacy archives and unneeded copies; do not create new
+  archives. Follow the workflow's cleanup rules and keep useful unresolved facts
+  in compact notes. PID disappearance or an old timestamp alone never clears
+  claims or authorizes deleting unresolved work.
 - Record discoveries not yet in maintained docs under `.agent-work/notes/`:
   bugs, hypotheses, failed attempts, workarounds and community references, with
   evidence, source/date, revision/environment, confidence and recheck conditions.
