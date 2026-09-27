@@ -153,8 +153,12 @@ the host. Use `./build.sh sanitize GROUP` with the native development toolchain,
 or prepare an SDK that supplies the target sanitizer runtimes explicitly.
 
 Do not run simultaneous configure/build operations against the same directory.
-Separate agents should share a completed incremental build or use a deliberately
-separate toolchain/profile tree. Old top-level `build-native`, `build-agent-*`
+Separate agents must follow the [coordination workflow](agent-coordination.md):
+claim a shared build tree for the entire configure/build/test operation, or use
+`--build-dir build/agents/SESSION/PROFILE` for separate outputs. A completed
+incremental build can be handed off after recording its source/configuration;
+separate output trees still need stable source inputs and coordinated access to
+timing-sensitive tests and devices. Old top-level `build-native`, `build-agent-*`
 and similar directories are not current presets. They may contain unique logs,
 captures or dependencies, so the wrapper never deletes them. Archive useful
 evidence before removing them yourself.

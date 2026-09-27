@@ -5,6 +5,11 @@
 for dependencies, stable profiles, focused tests and portable release limits.
 **Release with GitHub Actions:** follow [RELEASE](RELEASE), in order.
 
+**AI contributors:** read [AGENTS.md](AGENTS.md) and the
+[shared agent coordination workflow](docs/agent-coordination.md) before working
+alongside other chats or tools. Temporary ownership and findings live in the
+gitignored `.agent-work/` directory.
+
 **Manuals:** [pump(1)](docs/man/pump.1), [pump-fast(1)](docs/man/pump-fast.1)
 and [datapump-gui(1)](docs/man/datapump-gui.1). Read a source page with
 `man -l docs/man/pump.1`. Installations and portable releases include the pages;

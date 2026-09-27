@@ -1,5 +1,7 @@
 /build/
 /build-*/
+# Local cross-tool agent coordination and temporary findings.
+/.agent-work/
 /third_party/build-support/cache/
 /CMakeUserPresets.json
 __pycache__/

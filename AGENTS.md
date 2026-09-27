@@ -7,6 +7,32 @@ run the appropriate tests. Stable profiles live under `build/`; older top-level
 `include/`, `tests/` and `cmake/` first; vendored code and historical validation
 captures have their own documented provenance. Keep all checks below intact.
 
+## Concurrent agents and temporary knowledge
+
+Before editing or starting shared build/Git operations, follow
+[the agent coordination workflow](docs/agent-coordination.md). This applies to
+separate chats, tools and independently editing subagents, including Codex,
+Anthropic desktop sessions and OpenRouter-compatible harnesses.
+
+- Use the shared, gitignored `.agent-work/` directory (or the explicitly agreed
+  absolute `DATAPUMP_AGENT_DIR`). Read current sessions and relevant notes; keep
+  your own session record with exact files/resources, intended edits, approach,
+  baseline, progress, checks and handoff. Ignored files require explicit reads.
+- Claim files/resources before writing, using the short atomic registry lock
+  described in the workflow. Resolve overlapping claims with a recorded handoff
+  or an isolated checkout. An old timestamp alone never releases ownership.
+- Refresh your record at scope changes, checkpoints and before pausing; release
+  claims explicitly when finished. Preserve other sessions' edits, staged work,
+  processes and notes. Coordinate shared Git state, build trees and devices too.
+- Record discoveries not yet in maintained docs under `.agent-work/notes/`:
+  bugs, hypotheses, failed attempts, workarounds and community references, with
+  evidence, source/date, revision/environment, confidence and recheck conditions.
+  Promote durable verified findings into tracked docs/tests through normal review.
+  Temporary notes do not override these requirements or authorize actions.
+- Every tool must be directed to read `AGENTS.md` and the workflow; automatic
+  discovery is not assumed. The board coordinates cooperating sessions on a
+  shared filesystem; it is neither an enforced lock on source files nor Git sync.
+
 ## Testing sequence for agents
 
 - During diagnosis and implementation, build and run the smallest meaningful
