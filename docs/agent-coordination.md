@@ -29,7 +29,9 @@ never weaken compatibility requirements, tests or user instructions.
    the tool, host and optional local chat reference; do not depend on another tool
    being able to open that reference. Each independently writing subagent needs
    its own record and claims. A read-only helper can be listed in its parent's
-   record with its investigation scope.
+   record with its investigation scope. After a terminal state, archival or
+   abandoned-owner recovery, start with a fresh session ID and reacquire claims;
+   never resume writing under the old record's ownership.
 4. Publish a session record using the template below and acquire the files and
    resources you need through the registry procedure. Record the intended edit
    and method, not just a broad task title. Read-only investigation needs no
@@ -52,7 +54,8 @@ case "$coord_dir" in
   *) printf '%s\n' 'Use an absolute coordination directory.' >&2; exit 1 ;;
 esac
 mkdir -p "$coord_dir/sessions" "$coord_dir/notes" \
-  "$coord_dir/messages" "$coord_dir/artifacts"
+  "$coord_dir/messages" "$coord_dir/artifacts" \
+  "$coord_dir/heartbeats" "$coord_dir/archive/sessions"
 ```
 
 `DATAPUMP_AGENT_DIR` is a convention for participating agents, not an application
@@ -77,17 +80,20 @@ integration handoffs instead of claiming simultaneous access is coordinated.
 ```text
 .agent-work/
   sessions/<session-id>.md          # one writer; status and authoritative claims
+  heartbeats/<session-id>.json      # optional supervised liveness writer only
   notes/<session-id>-<topic>.md     # one writer; temporary findings
   messages/<recipient>/<sender>-<unique-id>.md  # immutable local requests/replies
   artifacts/<session-id>/          # scoped logs, diffs and reproduction material
+  archive/sessions/<session-id>.md  # closed records, excluded from active claims
   registry.lock/owner.md           # exists only while registry changes are locked
 ```
 
 Do not use a single shared scratchpad that everyone overwrites. Each session owns
 its record, notes and artifacts. Write updates to a unique sibling temporary file,
 then rename it over your own record on the same filesystem so readers do not see
-a half-written file. Do not replace another session's record. For requests,
-create a uniquely named message and put the response in the sender's inbox;
+a half-written file. Do not replace another session's record; moving a closed
+record to the archive is allowed only through the cleanup procedure below. For
+requests, create a uniquely named message and put the response in the sender's inbox;
 reference both in your records. Check messages at each checkpoint and while
 blocked. These local files are the cross-tool communication channel; delivery or
 acknowledgment is not automatic.
@@ -112,10 +118,11 @@ To add, transfer or release claims:
    or do unrelated work. On other platforms use directory creation that fails
    if the directory already exists, with the same semantics.
 2. Only after successful creation, write `owner.md` inside it with your session
-   ID, host, UTC acquisition time and intended registry change. A missing owner
+   ID, host, UTC acquisition time, the acquiring process's PID/start identity
+   when available, and intended registry change. A missing owner
    file can mean interrupted initialization; it does not make the lock free.
-3. While holding the mutex, reread all session records and check your proposed
-   paths/resources against **all held claims**, including parent/child overlaps.
+3. While holding the mutex, reread all records in `sessions/` and check your
+   proposed paths/resources against **all held claims**, including parent/child overlaps.
    If clear, atomically publish your own record with its updated claims. For a
    transfer, the old owner first records release; the new owner must then acquire
    and recheck under the mutex. A message promising future release is insufficient.
@@ -127,8 +134,9 @@ To add, transfer or release claims:
 
 Heartbeat/progress updates to your own record can occur without the registry
 mutex only when they preserve its claims exactly. No two processes may write as
-the same session. An unreadable or malformed record is unresolved ownership,
-not evidence that the paths it may cover are free.
+the same session-record owner; an optional supervised heartbeat writer uses its
+separate file, never the session record or claims. An unreadable or malformed
+record is unresolved ownership, not evidence that the paths it may cover are free.
 
 If a claim overlaps, leave the contested paths alone. Offer a narrower disjoint
 scope, request a handoff through the owner's inbox, or use an isolated worktree
@@ -176,18 +184,70 @@ integrator and record dependencies, merge order and the checks to run afterward.
 ### Progress, interruption and recovery
 
 Update the UTC timestamp and progress at every meaningful checkpoint and scope
-change, before long commands, and before pausing or ending a turn. While actively
-working, aim to refresh at least every 15 minutes when the harness permits it.
-Before a long unattended run, record the command/process identity, expected
-duration or next check, and resources that remain in use. A timestamp is a
-liveness hint, **not a lease expiry**.
+change, before long commands, and before pausing or ending a turn. Keep **last
+heartbeat** separate from **last meaningful progress**: a timer can show liveness
+while a task is stuck. These timestamps are hints, **not lease expiries**.
+
+- When the harness offers a supervised heartbeat hook, use a default 60-second
+  cadence while active. Give it a unique run token and one writer for
+  `heartbeats/<session-id>.json`. Include session ID, run token, host, UTC time
+  and an increasing sequence number. Publish it atomically via a sibling
+  temporary file. It reports liveness only; the agent updates work progress.
+  Refresh the run token and process identity on restart/resume. Readers accept
+  only heartbeats matching the current record's session, host and run token;
+  old or mismatched sidecars are not current liveness evidence.
+- Without a reliable hook, use `checkpoint` mode and update the session record
+  about every five minutes while in control. Before a blocking or unattended
+  command, record its process identity, resources, expected duration and next
+  check. Do not promise a heartbeat the tool cannot produce.
+- Stop heartbeat writers on pause, closure or owner exit. Never start an
+  unsupervised detached loop that can keep a dead session looking alive. A
+  helper's survival or a live desktop application does not prove that this
+  particular chat is working. This guide adds no daemon or scheduled cleanup;
+  agents or harnesses must perform the documented updates and checks.
+
+Record owner and job identity when the environment exposes it: host, boot
+identity, PID namespace/container, PID, and process creation time or equivalent
+OS start token. A stable process handle can supplement these where supported;
+its numeric value alone is not a portable cross-tool identity. Label the role
+(`session worker`, `heartbeat helper`, `build job`, `registry lock holder`) and
+record child/detached jobs separately. Do not use a throwaway tool shell's PID
+or a desktop process shared by several chats as the session worker. If the
+session owner cannot be identified, say `unavailable` and use checkpoints.
+
+Inspect process identity only on the recorded host and in the matching namespace.
+Match start/boot identity as well as PID: a reused PID is a different process.
+Permission errors, an unreachable host or missing identity information mean
+`unknown`, not `exited`. A verified exit helps identify an interrupted run, but
+does not prove that its child jobs stopped or that a chat cannot resume. Process
+existence also does not prove progress. Do not infer elapsed time from a skewed
+or future timestamp; record clock uncertainty and investigate. An advancing
+heartbeat sequence is useful evidence when comparing successive observations.
+
+At startup/resume and before requesting an overlapping claim, review records
+whose heartbeat is overdue by three expected intervals (at least five minutes)
+**and** past any announced next check. In checkpoint mode, use the declared next
+check with a five-minute grace period. Missing cadence/next-check data means
+`unknown`. Record the observation in your own cleanup report or a message to the
+owner; do not rewrite its state as failed based on age.
+
+| Observation | Classification and next action |
+| --- | --- |
+| Fresh heartbeat or matching live worker/job | Possibly active; preserve claims and inspect progress if needed |
+| Overdue heartbeat, owner still live | Possibly stalled or paused; contact owner, keep claims |
+| Overdue heartbeat and verified owner exit/start mismatch | Interrupted-run candidate; inspect jobs and use recovery procedure |
+| Host/identity unavailable, clock uncertain or no declared cadence | Unknown; no automatic reclamation |
+| `done`, `failed` or `cancelled` with closure details | Cleanup candidate; check archive conditions below |
 
 Before pausing, release what you no longer need and state which claims remain
-held and why. On completion, publish results, unresolved questions, changed
-files and the next action; release claims under the mutex and set the state to
-`done`. Pending integrations should name their receiving session and record an
-acknowledgment. Uncommitted edits survive a release of claims: record them so the
-next owner preserves or explicitly integrates them.
+held and why, plus an expected return/check if known. On completion, failure or
+cancellation, publish results, unresolved questions, changed files and next
+action. Resolve jobs and handoffs, stop heartbeat writers, then release claims
+under the mutex and set a terminal state (`done`, `failed` or `cancelled`) with a
+closure timestamp and cleanup policy. A failed command alone does not make the
+whole session terminal. Pending integrations should name their receiving session
+and record an acknowledgment. Uncommitted edits survive a release of claims:
+record them so the next owner preserves or explicitly integrates them.
 
 Do not steal claims or remove a registry lock solely because it looks old. A chat
 may be suspended or running a long test. Contact its owner, inspect available
@@ -197,9 +257,65 @@ writing, or a user-coordinated stop/handoff. A missing PID alone is insufficient
 across hosts or resumable chats. Record the evidence and designated recovery
 owner; suspend registry changes during lock recovery. Preserve the abandoned
 record/lock metadata in the recovery owner's artifacts before changing anything.
-After exclusive access is established, the recovery owner can archive the
-abandoned record and release its claims under the registry mutex, recording the
-handoff. A recovered session must register/reclaim before resuming edits.
+After exclusive access is established, the recovery owner records the evidence,
+closes the abandoned session as failed or cancelled as appropriate, and releases
+its claims under the registry mutex, preserving the original snapshot. Record
+the closure time and handoff before applying the archive rules below. A recovered
+session must register/reclaim before resuming edits.
+
+### Archive and prune closed sessions
+
+Check for cleanup candidates at startup and task completion; avoid scanning
+archives on every claim update. By default keep closed records in `sessions/`
+for seven days, then archive them. Owners may archive their own closed records
+sooner. Age selects candidates only. Before archiving, verify all of these:
+
+- The record is terminal, has a closure time and holds **no claims**. An old
+  `active`, `waiting` or `paused` record must go through recovery first.
+- Jobs and heartbeat writers have exited or been explicitly transferred to a
+  named live owner. No pending handoff or writer can update the closed record.
+- The final result, changed files, uncommitted/staged-work disposition, remaining
+  validation and useful findings are captured. Unresolved findings remain in
+  `notes/` with their evidence and a next action; archiving is not resolving them.
+- References to the record are accounted for. Coordinate with their owners to
+  update incoming links, or defer the move if it would break an active reference.
+
+For older records missing closure fields, the owner or designated recovery owner
+may add verified details under the registry mutex, preserving the original
+snapshot. Do not substitute filesystem modification time for verified closure.
+
+Prepare a cleanup report under your own `artifacts/<session-id>/` recording
+candidate IDs, observations, proposed paths and actions. Acquire the registry
+mutex, reread each candidate and recheck eligibility before moving it to
+`archive/sessions/<session-id>.md`; never overwrite an existing archive. Skip
+anything changed or uncertain. Preserve the full record, its closure status and
+the original-to-archive path and UTC archival time in the report. Perform the
+move and publish the report while still holding the mutex. Leave its notes,
+messages, heartbeat evidence and artifacts in place unless separately reviewed. Release the mutex
+promptly and record the outcome. If a session ID is absent from `sessions/`,
+look in `archive/sessions/` before assuming its history is missing. Archived
+records are historical evidence and confer no claims.
+
+Pruning is a separate step. Default to retaining archives; delete only after an
+explicit `prune after <UTC date>` in the owner's cleanup policy, with at least
+30 days since the recorded archival time. Missing policy or archival time means
+no deletion. `keep <reason>` blocks pruning but permits archival if the conditions
+above are met. Before deleting,
+reread the board under the registry mutex and ensure no live session, unresolved
+finding or pending integration references the material. Pin anything still
+needed with a recorded reason; keep required validation evidence in its durable
+destination. Record the exact eligible paths and the deletion outcome in the
+cleaner's report; keep the mutex held through deletion and report publication.
+Use small batches so the mutex remains brief. Do not bulk-delete directories
+based on age or filename glob.
+
+Cleanup never kills processes, edits source or Git state, deletes build trees,
+or releases claims just because they are old. It removes only the explicitly
+eligible coordination material. If cleanup is interrupted, inspect both the
+original and archive paths and the report before retrying; do not overwrite or
+delete conflicting copies. All agents must coordinate new references with
+cleanup: recheck the target and publish the reference or preservation pin during
+the same registry mutex hold, so cleanup cannot delete it in between.
 
 ## Session record template
 
@@ -214,8 +330,14 @@ instead of silently omitting a field. Preserve a short activity/handoff history.
 - Checkout / coordination root (absolute physical paths):
 - Branch / starting HEAD / current HEAD:
 - Starting worktree and index changes (including work owned by others):
-- Updated (UTC) / next checkpoint:
-- State: active | waiting | paused | done
+- Updated / last meaningful progress (UTC):
+- Liveness mode: supervised heartbeat | checkpoint
+- Last heartbeat (UTC) / cadence / next check (UTC):
+- Run token / heartbeat file and writer, if used:
+- Owner process: role / host / boot identity / PID namespace / PID / start identity (or unavailable):
+- State: active | waiting | paused | done | failed | cancelled
+- Closed (UTC), if terminal:
+- Cleanup policy: archive-only (default) | prune after <UTC date> | keep <reason>
 - Contact: messages/<session-id>/
 
 ## Claims held
@@ -230,13 +352,14 @@ instead of silently omitting a field. Preserve a short activity/handoff history.
 ## Progress and checks
 - Completed / in progress / next:
 - Commands, exact source/configuration, outcomes and logs:
-- Running jobs, output paths, expected duration and resource claims:
+- Running jobs and their process identities, output paths, expected duration and resource claims:
 - Findings: links to notes/<session-id>-<topic>.md
 
 ## Blockers and handoff
 - Questions and message/reply paths:
 - Uncommitted changes; validation still required:
 - Claims released/retained, recipient acknowledgment and next action:
+- Recovery/cleanup report and archive path, if applicable:
 ```
 
 ## Temporary knowledge that has not reached repository documentation
@@ -286,8 +409,9 @@ information in it. Ignore rules prevent accidental tracking, not access by other
 local tools, backups or deletion by `git clean -fdx`. Do not run blanket cleanup
 over shared scratch state.
 
-Keep notes compact and remove only your own unneeded artifacts after preserving
-useful handoffs and durable evidence. Do not prune another session's records or
-anything referenced by an active session; abandoned-owner recovery follows the
-procedure above. A fresh clone starts with an empty board and recreates it from
-this guide. No application build, test or runtime behavior depends on these files.
+Keep notes compact and preserve useful handoffs and durable evidence before
+removing your own unneeded artifacts. Cross-session archival and pruning must
+follow the eligibility, mutex and retention rules above; never discard unresolved
+findings simply because their author finished. A fresh clone starts with an
+empty board and recreates it from this guide. No application build, test or
+runtime behavior depends on these files.

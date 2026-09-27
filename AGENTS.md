@@ -24,6 +24,10 @@ Anthropic desktop sessions and OpenRouter-compatible harnesses.
 - Refresh your record at scope changes, checkpoints and before pausing; release
   claims explicitly when finished. Preserve other sessions' edits, staged work,
   processes and notes. Coordinate shared Git state, build trees and devices too.
+- Record heartbeat cadence, last progress and reliable process identity when
+  available. Review overdue sessions and archive closed sessions using the
+  workflow's cleanup rules. PID disappearance or an old timestamp is evidence
+  to investigate, not permission to clear claims or delete unresolved work.
 - Record discoveries not yet in maintained docs under `.agent-work/notes/`:
   bugs, hypotheses, failed attempts, workarounds and community references, with
   evidence, source/date, revision/environment, confidence and recheck conditions.
