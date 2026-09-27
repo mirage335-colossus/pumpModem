@@ -97,7 +97,7 @@ jobs:
       - name: Run the unchanged keyed acquisition and complete live fixtures serially
         if: inputs.scope == 'sdk-live'
         run: |
-          source_revision=$(git rev-parse HEAD)
+          source_revision=$(git -c safe.directory="$GITHUB_WORKSPACE" rev-parse HEAD)
           echo "SDK live diagnostic source=$source_revision; one test at a time, all original deadlines unchanged"
           timeout --kill-after=10s 120s build/adapter-diagnostic/test_live --keyed-acquisition-epoch
           build/sdk/bin/ctest --test-dir build/adapter-diagnostic --output-on-failure \
@@ -224,7 +224,7 @@ jobs:
           cmake --build build/arm-adapter-diagnostic --target test_rev_adapter --parallel "$(nproc)"
       - name: Measure all native adapter assertions with a bounded diagnostic allowance
         run: |
-          source_revision=$(git rev-parse HEAD)
+          source_revision=$(git -c safe.directory="$GITHUB_WORKSPACE" rev-parse HEAD)
           echo "ARM Rev adapter diagnostic source=$source_revision LP_NUM_THREADS=$LP_NUM_THREADS ordinary_limit=330s diagnostic_limit=600s"
           started=$(date +%s)
           result=0
