@@ -1133,5 +1133,12 @@ its existing 1 ms sleeps and restores it on exit, following Microsoft's
 [timer API contract](https://learn.microsoft.com/en-us/windows/win32/api/timeapi/nf-timeapi-timebeginperiod).
 Coarse timer rounding could otherwise leave fixture audio undelivered after
 30 seconds even with an empty decoder queue. The same audio chunks, 30-second
-deadline and all receiver assertions remain in place. Windows runs the full
-calibration after the other selected tests to report platform failures sooner.
+deadline and all receiver assertions remain in place. Full certification runs
+calibration in independent jobs for every Linux and Windows source target,
+alongside GUI, contract and published-package verification. Both scopes reuse
+the same pinned source, dependency recipe and build configuration. Calibration
+retains every section, seed, worker setting, assertion and process deadline;
+each applicable calibration job must succeed before certification is recorded.
+This duplicates only setup and the minimal calibration build, allowing its
+roughly 20–40 minutes of computation on standard runners to overlap the other
+checks; actual duration varies with the host.

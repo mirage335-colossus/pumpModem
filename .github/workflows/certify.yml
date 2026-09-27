@@ -108,10 +108,26 @@ jobs:
           python3 tools/certify-release.py prepare --repo "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --directory release-info --github-output "$GITHUB_OUTPUT"
       - name: Select full test and copied-binary coverage for every published backend
         id: matrix
-        run: python3 tools/release.py matrices --metadata release-info/release-metadata.json --github-output "$GITHUB_OUTPUT"
+        run: |
+          python3 - <<'PYMATRIX'
+          import json, os, runpy
+          from pathlib import Path
+          release = runpy.run_path('tools/release.py')
+          metadata = release['load_metadata'](Path('release-info/release-metadata.json'))
+          matrices = release['build_matrices'](metadata)
+          # Expand include-only rows explicitly; each published target requires
+          # both independent scopes with the same compiler and recipe identity.
+          matrices['linux_matrix']['include'] = [
+              dict(row, scope=scope)
+              for row in matrices['linux_matrix']['include']
+              for scope in ('main', 'calibration')]
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              for name, value in {'metadata_json': metadata, **matrices}.items():
+                  output.write(name + '=' + json.dumps(value, separators=(',', ':')) + '\n')
+          PYMATRIX
 
   linux-tests:
-    name: Source and published Linux ${{ matrix.arch }} / ${{ matrix.backend }}
+    name: Linux ${{ matrix.arch }} / ${{ matrix.backend }} / ${{ matrix.scope }} qualification
     if: ${{ !inputs.devfast }}
     needs: prepare
     runs-on: ${{ matrix.arch == 'aarch64' && (inputs.arm_runner || 'ubuntu-24.04-arm-h') || inputs.linux_runner || 'ubuntu-latest-h' }}
@@ -195,7 +211,8 @@ jobs:
         run: |
           python3 tools/install-release-rev.py "$GITHUB_WORKSPACE/build/ci-rev-tools"
           echo "$GITHUB_WORKSPACE/build/ci-rev-tools/bin" >> "$GITHUB_PATH"
-      - name: Run the complete source contract, GUI and packaging suites
+      - name: Run source GUI, packaging and non-calibration contract suites
+        if: matrix.scope == 'main'
         env:
           USE_SDK: ${{ matrix.sdk }}
           DATAPUMP_MAX_GLIBC: ${{ matrix.glibc }}
@@ -241,10 +258,65 @@ jobs:
           fi
           "$contract_cmake" --build build/certify --target datapump-tests-contract --parallel "$(nproc)"
           # Disjoint selections retain the complete immutable source contract.
-          # Live simulation gets the CPU alone; remaining tests keep concurrency.
+          # Live simulation gets the CPU alone; full calibration runs in its
+          # required sibling scope and remaining tests keep concurrency.
           "$contract_ctest" --test-dir build/certify -C Release --output-on-failure --stop-on-failure --no-tests=error -L '^contract$' -LE native_gui -R '^(live|live_profiles)$' --parallel 1
-          "$contract_ctest" --test-dir build/certify -C Release --output-on-failure --stop-on-failure --no-tests=error -L '^contract$' -LE native_gui -E '^(live|live_profiles)$' --parallel 2
+          "$contract_ctest" --test-dir build/certify -C Release --output-on-failure --stop-on-failure --no-tests=error -L '^contract$' -LE native_gui -E '^(live|live_profiles|differential_receiver_probability)$' --parallel 2
+      - name: Run the complete registered differential calibration independently
+        if: matrix.scope == 'calibration'
+        env:
+          USE_SDK: ${{ matrix.sdk }}
+          DATAPUMP_MAX_GLIBC: ${{ matrix.glibc }}
+        run: |
+          mkdir -p build/certify
+          python3 - <<'PYCALIBRATION'
+          import json, os
+          from pathlib import Path
+          identity = {key: os.environ[name] for key, name in {
+              'source_sha': 'DATAPUMP_SMOKE_SOURCE_SHA',
+              'inventory_sha256': 'INVENTORY_SHA256', 'target': 'RELEASE_TARGET',
+              'run_id': 'GITHUB_RUN_ID', 'run_attempt': 'GITHUB_RUN_ATTEMPT'}.items()}
+          (Path('build/certify') / 'calibration-identity.json').write_text(json.dumps(identity))
+          PYCALIBRATION
+          if [ "$USE_SDK" != true ]; then
+            if [ "$GUI_BACKEND" = rev ]; then export CC=clang-19 CXX=clang++-19;
+            else export CC=gcc-11 CXX=g++-11; fi
+          fi
+          set -- --backend "$GUI_BACKEND" --build-dir build/certify --jobs 2
+          if ./build.sh --help | grep -q -- '--build-jobs'; then
+            set -- "$@" --build-jobs "$(nproc)"
+          fi
+          calibration_cmake=cmake
+          calibration_ctest=ctest
+          if [ "$USE_SDK" = true ]; then
+            set -- "$@" --sdk "$GITHUB_WORKSPACE/build/sdk"
+            calibration_cmake="$GITHUB_WORKSPACE/build/sdk/bin/cmake"
+            calibration_ctest="$GITHUB_WORKSPACE/build/sdk/bin/ctest"
+          fi
+          # The released wrapper selects the same backend/preset/toolchain.
+          # Static OpenSSL matches main's contract configuration after packaging.
+          # Do not override registered calibration workers, sections or seeds.
+          ./build.sh test build --stop-on-failure "$@" -- -DDATAPUMP_PORTABLE=ON -DOPENSSL_USE_STATIC_LIBS=ON -DDART_TESTING_TIMEOUT=3600
+          "$calibration_cmake" --build build/certify --config Release --target test_differential_receiver_probability --parallel "$(nproc)"
+          "$calibration_ctest" --test-dir build/certify -C Release --show-only=json-v1 -L '^contract$' -LE native_gui -R '^differential_receiver_probability$' > build/certify/calibration-registration.json
+          "$calibration_ctest" --test-dir build/certify -C Release --output-on-failure --stop-on-failure --no-tests=error -L '^contract$' -LE native_gui -R '^differential_receiver_probability$' --parallel 1 --output-log "$GITHUB_WORKSPACE/build/certify/calibration.log" --output-junit "$GITHUB_WORKSPACE/build/certify/calibration.xml"
+          echo 'The complete registered differential receiver calibration passed independently; source and published-package checks remain required.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain independent calibration evidence
+        if: ${{ always() && matrix.scope == 'calibration' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: certification-calibration-${{ matrix.target }}-attempt-${{ github.run_attempt }}
+          path: |
+            build/certify/calibration-identity.json
+            build/certify/calibration-registration.json
+            build/certify/calibration.log
+            build/certify/calibration.xml
+            build/certify/CMakeCache.txt
+            build/certify/Testing/Temporary/
+          if-no-files-found: warn
+          retention-days: 7
       - name: Verify shared audio routing and both audio platform adapters
+        if: matrix.scope == 'main'
         env:
           USE_SDK: ${{ matrix.sdk }}
         run: |
@@ -257,11 +329,13 @@ jobs:
           "$audio_cmake" --build build/certify --target test_alsa_audio test_windows_audio test_audio_rates test_resampler --parallel "$(nproc)"
           "$audio_ctest" --test-dir build/certify --output-on-failure -R '^(alsa_audio_contract|windows_audio_contract|audio_rates|resampler)$' --parallel 1 --stop-on-failure --no-tests=error
       - name: Download and verify the exact published archive
+        if: matrix.scope == 'main'
         id: binary
         env:
           RELEASE_TARGET: ${{ matrix.target }}
         run: python3 .certification-tools/tools/certify-release.py download --repo "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --target "$RELEASE_TARGET" --directory published --inventory-sha256 "$INVENTORY_SHA256" --github-output "$GITHUB_OUTPUT"
       - name: Test published GUI, CLI, relocation and ELF dependencies
+        if: matrix.scope == 'main'
         env:
           DATAPUMP_SMOKE_SCOPE: published/source-host
           PACKAGE_ROOT: ${{ steps.binary.outputs.package_root }}
@@ -273,7 +347,7 @@ jobs:
           xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' "$scanner" -DPACKAGE_ROOT="$PACKAGE_ROOT" -DBUILD_DIR="$PWD/build/certify" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P .certification-tools/tools/verify-native-package.cmake
           "$scanner" -DPACKAGE_ROOT="$PACKAGE_ROOT" -DMAX_GLIBC="$GLIBC_CEILING" -P tools/verify-linux-abi.cmake
       - name: Identify this attempt's smoke coverage artifact
-        if: always()
+        if: ${{ always() && matrix.scope == 'main' }}
         run: |
           python3 - <<'PY'
           import json, os
@@ -285,7 +359,7 @@ jobs:
               'run_attempt': os.environ['GITHUB_RUN_ATTEMPT']}))
           PY
       - name: Retain smoke workload coverage and diagnostics
-        if: always()
+        if: ${{ always() && matrix.scope == 'main' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: certification-smoke-source-${{ matrix.target }}-attempt-${{ github.run_attempt }}
@@ -298,6 +372,7 @@ jobs:
     needs: prepare
     uses: ./.github/workflows/certify-windows.yml
     with:
+      scope: main
       backend: fltk
       target: ${{ contains(needs.prepare.outputs.application_targets, 'windows-x86_64-fltk') && 'windows-x86_64-fltk' || 'windows-x86_64' }}
       source_sha: ${{ needs.prepare.outputs.source_sha }}
@@ -311,6 +386,35 @@ jobs:
     needs: prepare
     uses: ./.github/workflows/certify-windows.yml
     with:
+      scope: main
+      backend: rev
+      target: windows-x86_64-rev
+      source_sha: ${{ needs.prepare.outputs.source_sha }}
+      tooling_sha: ${{ github.sha }}
+      release_tag: ${{ inputs.release_tag }}
+      inventory_sha256: ${{ needs.prepare.outputs.inventory_sha256 }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
+
+  windows-fltk-calibration:
+    if: ${{ !inputs.devfast }}
+    needs: prepare
+    uses: ./.github/workflows/certify-windows.yml
+    with:
+      scope: calibration
+      backend: fltk
+      target: ${{ contains(needs.prepare.outputs.application_targets, 'windows-x86_64-fltk') && 'windows-x86_64-fltk' || 'windows-x86_64' }}
+      source_sha: ${{ needs.prepare.outputs.source_sha }}
+      tooling_sha: ${{ github.sha }}
+      release_tag: ${{ inputs.release_tag }}
+      inventory_sha256: ${{ needs.prepare.outputs.inventory_sha256 }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
+
+  windows-rev-calibration:
+    if: ${{ !inputs.devfast && contains(needs.prepare.outputs.application_targets, 'windows-x86_64-rev') }}
+    needs: prepare
+    uses: ./.github/workflows/certify-windows.yml
+    with:
+      scope: calibration
       backend: rev
       target: windows-x86_64-rev
       source_sha: ${{ needs.prepare.outputs.source_sha }}
@@ -322,7 +426,7 @@ jobs:
   windows-tests:
     name: Collect Windows certification results and warnings
     if: ${{ always() && !inputs.devfast && needs.prepare.result == 'success' }}
-    needs: [prepare, windows-fltk, windows-rev]
+    needs: [prepare, windows-fltk, windows-rev, windows-fltk-calibration, windows-rev-calibration]
     runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
     timeout-minutes: 5
     outputs:
@@ -334,18 +438,18 @@ jobs:
           JOB_RESULTS: ${{ toJSON(needs) }}
           TARGETS: ${{ needs.prepare.outputs.application_targets }}
         run: |
-          python3 - <<'PYRESULTS'
+          python3 - <<'PYWINDOWS'
           import json, os
           needs = json.loads(os.environ['JOB_RESULTS'])
           warnings = json.loads(needs['windows-rev'].get('outputs', {}).get('warnings') or '[]')
           with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
               out.write('warnings=' + json.dumps(warnings, separators=(',', ':')) + '\n')
-          required = ['windows-fltk']
+          required = ['windows-fltk', 'windows-fltk-calibration']
           if 'windows-x86_64-rev' in json.loads(os.environ['TARGETS']):
-              required.append('windows-rev')
-          if any(needs[name]['result'] != 'success' for name in required):
+              required.extend(['windows-rev', 'windows-rev-calibration'])
+          if any(needs.get(name, {}).get('result') != 'success' for name in required):
               raise SystemExit('A required Windows certification job failed or did not complete')
-          PYRESULTS
+          PYWINDOWS
 
   compatibility:
     name: Published ${{ matrix.target }} on ${{ matrix.image }}

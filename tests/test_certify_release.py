@@ -6,10 +6,15 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
+import re
+import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
+import textwrap
 import unittest
 from unittest.mock import Mock, patch
 import zipfile
@@ -258,6 +263,91 @@ class SmokeWarningCollectionTests(CertificationFixture, unittest.TestCase):
             (directory / f'package-{i}.json').write_text(report)
         with self.assertRaisesRegex(ValueError, 'more than 64'):
             self.collect()
+
+
+class CertificationWorkflowTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix='datapump-certify-workflow-')
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+
+    def run_workflow_python(self, marker, **environment):
+        workflow = (ROOT / '.github/workflows/certify.yml').read_text()
+        # Execute the workflow's programs, rather than duplicating their logic or
+        # treating a matching command string as evidence of required coverage.
+        pattern = rf"(?m)^([ ]*)python3 - <<'{marker}'\n(.*?)^\1{marker}$"
+        programs = list(re.finditer(pattern, workflow, re.DOTALL))
+        self.assertEqual(len(programs), 1, f'Expected one {marker} workflow program')
+        output = self.root / 'github-output'
+        output.unlink(missing_ok=True)
+        result = subprocess.run([sys.executable, '-c', textwrap.dedent(programs[0][2])],
+            cwd=self.root, env=dict(os.environ, GITHUB_OUTPUT=str(output), **environment),
+            capture_output=True, text=True, timeout=20)
+        values = dict(line.split('=', 1) for line in output.read_text().splitlines()) if output.exists() else {}
+        return result, {name: json.loads(value) for name, value in values.items()}
+
+    def test_linux_matrix_requires_both_scopes_without_changing_release_rows(self):
+        (self.root / 'tools').mkdir()
+        for name in ('release.py', 'release-dependencies.py'):
+            shutil.copyfile(ROOT / 'tools' / name, self.root / 'tools' / name)
+        (self.root / 'release-info').mkdir()
+        for schema in (1, 2, 6):
+            for baseline in ('bookworm-sdk', 'ubuntu-22.04'):
+                metadata = certify.release.make_metadata(source_sha='a' * 40, run_id='123',
+                    run_attempt='1', cmake_version='1.0.0', schema=schema, linux_baseline=baseline)
+                (self.root / 'release-info/release-metadata.json').write_text(json.dumps(metadata))
+                original = certify.release.build_matrices(metadata)
+                with self.subTest(schema=schema, baseline=baseline):
+                    result, matrices = self.run_workflow_python('PYMATRIX')
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    expected = [dict(row, scope=scope) for row in original['linux_matrix']['include']
+                                for scope in ('main', 'calibration')]
+                    self.assertCountEqual(matrices['linux_matrix']['include'], expected)
+                    self.assertEqual(matrices['windows_matrix'], original['windows_matrix'])
+                    self.assertEqual(matrices['compatibility_matrix'], original['compatibility_matrix'])
+                    self.assertEqual(matrices['metadata_json'], metadata)
+
+    def windows_jobs(self):
+        needs = {name: {'result': 'success', 'outputs': {}} for name in
+                 ('windows-fltk', 'windows-rev', 'windows-fltk-calibration', 'windows-rev-calibration')}
+        needs['windows-rev']['outputs']['warnings'] = json.dumps([certify.windows_certification.warning_record()])
+        return needs
+
+    def collect_windows(self, needs, targets=None):
+        if targets is None:
+            targets = ['windows-x86_64-fltk', 'windows-x86_64-rev']
+        return self.run_workflow_python('PYWINDOWS', JOB_RESULTS=json.dumps(needs), TARGETS=json.dumps(targets))
+
+    def test_windows_main_warning_survives_empty_or_unrelated_calibration_outputs(self):
+        for output in ({}, {'warnings': '[]'}, {'warnings': '[{"code":"not-the-main-probe"}]'}):
+            needs = self.windows_jobs()
+            needs['windows-rev-calibration']['outputs'] = output
+            with self.subTest(output=output):
+                result, values = self.collect_windows(needs)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(values['warnings'], [certify.windows_certification.warning_record()])
+
+    def test_every_required_windows_main_and_calibration_child_must_succeed(self):
+        for name in self.windows_jobs():
+            for status in ('failure', 'cancelled', 'skipped', None):
+                needs = self.windows_jobs()
+                if status is None:
+                    needs.pop(name)
+                else:
+                    needs[name]['result'] = status
+                with self.subTest(name=name, status=status):
+                    result, values = self.collect_windows(needs)
+                    self.assertNotEqual(result.returncode, 0)
+                    if 'windows-rev' in needs:
+                        self.assertEqual(values['warnings'], [certify.windows_certification.warning_record()])
+
+    def test_legacy_fltk_release_does_not_require_unpublished_rev_children(self):
+        needs = self.windows_jobs()
+        for name in ('windows-rev', 'windows-rev-calibration'):
+            needs[name] = {'result': 'skipped', 'outputs': {}}
+        result, values = self.collect_windows(needs, ['windows-x86_64'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(values['warnings'], [])
 
 
 class CertificationTests(CertificationFixture, unittest.TestCase):

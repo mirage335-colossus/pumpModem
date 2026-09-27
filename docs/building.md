@@ -214,6 +214,12 @@ all 1..16 seed partitions without running the calibration. A direct invocation
 also accepts `--workers 1..16`. Avoid overlapping independent heavy build/test runs during timing
 and display qualification.
 
+Release certification runs this complete calibration in a separate job for each
+source target. GUI, contract and package checks run alongside it on independent
+runners, avoiding CPU contention within the target's main job. Both scopes are
+required, use the same source and dependency configuration, and retain separate
+logs. Ordinary local test groups still include calibration as before.
+
 Direct CMake remains supported, including on Windows:
 
 ```sh

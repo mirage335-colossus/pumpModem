@@ -297,7 +297,17 @@ otherwise qualified ordinary release to become Latest. Experiments remain
 prereleases, and unrelated failures still prevent certification. The earlier
 run's three Linux failures remain failures, and its old-policy reports are
 preserved. Omitted graphics checks are not represented as executed passes.
-Full SDK qualification is complete. Exact-release certification is still running at this checkpoint.
+This scheduling follow-up completed all 41 required jobs successfully in
+73m52s from dispatch, with 531m10s summed job duration. Linux x86-64 FLTK and Rev
+completed both serial Live cases, all 28 remaining contract cases, full source
+smokes (337.58s and 392.91s), packaging, audio and exact published-archive checks.
+Their calibrations took 2489.00s and 2203.62s. ARM64 FLTK and Rev completed their
+full source and package checks, including the unchanged full Rev adapter in
+530s under its 900-second cap. Windows FLTK completed all graphics checks;
+Windows Rev retained only the documented WGL omission. All 20 copied-package,
+nine signed APT and two distro-recipe jobs passed. The old-policy certificate
+records `passed_with_warnings`; its historical Latest eligibility restriction is
+preserved and does not establish the newer warning policy.
 
 The updated CI smoke policy retains source/target/scope, run identity, binary
 inventory and exact progress diagnostics in structured reports and per-run logs.
@@ -309,6 +319,41 @@ retains incomplete smoke as `passed_with_warnings`, with separate immutable
 warning assets bound to the main report; ordinary qualified releases remain
 eligible for Latest. These controller changes do not change application source,
 wire behavior, published files or individual test assertions.
+
+Local validation passed all 22 build-tool CTest entries (the four signed-package
+fixtures required an unsandboxed local GPG agent), all four packaging CTest entries,
+97 certificate/collection fixtures, 19 smoke-classification fixtures and 11
+registered-native-runner fixtures. Actual FLTK Release native execution passed
+all three registered cases: adapter 73.38s, document 0.06s and complete smoke
+217.54s, retaining the original 600-second workload and 630-second process caps.
+Actionlint and diff checks passed.
+
+[Policy validation attempt 36285388744](https://github.com/mirage335-colossus/pumpModem/actions/runs/36285388744)
+was cancelled after the newly added Windows native-runner fixture compared
+short and expanded spellings of the same directory lexically. The smoke helper
+fixtures passed; four native fixture checks stopped at that path assertion,
+before application compilation. Test-only fix `0a2a738` uses filesystem identity
+with `samefile()`, preserving the working-directory assertion. That attempt is
+not a certification pass.
+[Final-policy certification 36285582196](https://github.com/mirage335-colossus/pumpModem/actions/runs/36285582196)
+uses `0a2a738` and the same exact published source and inventory. Both standard
+Windows jobs passed all 11 native-runner fixtures and the 18 applicable smoke
+fixtures (one POSIX-only signal fixture is explicitly inapplicable on Windows).
+All 20 copied-package checks passed with current tooling; the full source suites
+and final certificate are pending at this checkpoint.
+
+The completed 73m52s certification exposed a remaining scheduling bottleneck:
+full numerical calibration followed the main source suites on each platform.
+The follow-up separates the exact `differential_receiver_probability` case into
+six required jobs (both backends on Linux x86-64, Linux ARM64 and Windows),
+using the same pinned source, recipes, static dependency configuration,
+registered command, complete sections/seeds and timeout. Main jobs retain all
+other selected cases and exact published-package checks. Linux matrix rows are
+explicitly expanded; Windows aggregation requires both main and calibration
+children and retains graphics warnings from the main Rev child. Separate
+calibration artifacts preserve registration, configuration, logs and JUnit;
+they cannot replace main-job smoke evidence. A full standard-runner run is
+required to establish the resulting wall-clock timing.
 
 ## CI package recovery and replay interruption fixtures — 26 September 2026
 
