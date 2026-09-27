@@ -2,8 +2,10 @@
 # Push the code first. The workflows must be registered on the default branch.
 # Configure the release signing secret/variable described in docs/releases.md.
 
-Repository -> Actions -> _Publish new Latest release -> Run workflow.
+Available manual workflow: _Publish new Latest release
 Workflow file: .github/workflows/_release-latest.yml
+
+Repository -> Actions -> _Publish new Latest release -> Run workflow.
 Select the branch containing the complete candidate; one dispatch pins every
 stage to that commit. The workflow name, run title and filename start with "_".
 
