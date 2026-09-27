@@ -27,9 +27,12 @@ procedures when their triggers apply, not as a repeated startup transcript.
 | Handoff or finish | Finish/stop writers, release through the registry, send the release notice with request ID and scope, and record disposition and next action. |
 
 Apply these checks at action boundaries, then return to research, implementation
-and required tests. In the existing handoff summary, connect requested behaviors
-to their checks, including emitted reports; mark failed or unchecked behavior.
-Completed coordination does not establish that the repair is correct.
+and required tests. Before handoff, verify requested behavior against its contract
+or consumer, including required fields/values in actual emitted artifacts. Helper
+tests and readable reports alone do not verify machine-readable outputs. In the
+existing summary, connect outcomes to evidence or mark them failed/unchecked with
+next actions. No separate coordination report is needed; coordination is not proof
+of repair correctness.
 
 ## Start or resume a session
 
@@ -145,7 +148,9 @@ into prompts, or load closed histories, artifacts or legacy archives at startup.
   the **complete** `Claims held` section, including claims mistakenly left in a
   terminal record. Do not truncate claims to meet a token budget. Open the rest
   only for overlaps, dependencies, handoffs or unclear ownership. Unreadable or
-  malformed records need investigation; do not silently skip them.
+  malformed records need investigation; do not silently skip them. Extract named
+  metadata fields; stop sections at the next same- or higher-level heading rather
+  than returning unrelated disposition text.
 - Search note titles, status and affected paths before opening relevant notes.
   Read your pending messages and selected evidence, not every session's inbox
   or logs. Old author/session attribution alone does not require loading history.
@@ -186,9 +191,12 @@ To add, transfer or release claims:
 3. While holding the mutex, reread metadata and complete claims from all records
    in `sessions/`. Check proposed paths/resources against **all held claims**,
    including parent/child overlaps; load other content only when relevant.
-   If clear, atomically publish your own record with its updated claims. For a
-   transfer, the old owner first records release; the new owner must then acquire
-   and recheck under the mutex. A message promising future release is insufficient.
+   If clear, atomically publish **one update** to your own claims, Current checkpoint
+   and Blockers and handoff. Set Updated to now; retain actual progress/inbox times
+   unless those events occurred; set the next action and remove obsolete blockers.
+   Verify the saved sections agree before unlocking; do not defer status to a heartbeat.
+   For a transfer, the old owner first records release; the new owner must then
+   acquire and recheck under the mutex. A promised future release is insufficient.
 4. Release only the mutex you acquired: remove your `owner.md` and use `rmdir`
    on the now-empty `registry.lock`. Keep it for seconds, never while coding,
    waiting for a reply, building or testing. If publication fails, assume no new
@@ -219,16 +227,23 @@ If a claim overlaps, leave that path alone and use this handoff:
    directories. Decide from current ownership, not whether a reply ID matches:
 
    - Still claimed: follow or request that owner's handoff; old notices grant no access.
+     If ownership changed, replace your pending request in the same record update:
+     `r1 to A superseded by r2 to B; B currently owns <scope>`. Keep one current
+     request per scope, not contradictory pending entries.
    - Release recorded, writers stopped, no overlapping claims, scope and disposition
      clear: acquire now. A wrong or missing reply ID alone needs no clarification round trip.
    - Writers still running, or ownership, scope or disposition unclear: leave that
      path alone and resolve the handoff or follow recovery; continue independent work.
 
-4. After acquiring, send an acknowledgment to the previous owner's inbox with
-   the pending request ID, exact scope and any reply-ID mismatch. This reconciles
-   the request without waiting for a corrected notice. Reread/hash the file and
-   preserve handed-off edits; patch that current state. Finish before releasing
-   the claim; report any unexpected baseline. A notice alone never grants ownership.
+4. After acquiring, send an acknowledgment to the inbox of the owner whose release
+   you acquired from, with the pending request ID, scope and any reply-ID mismatch.
+   Mark that request acquired in your record; do not wait for a corrected notice.
+   An earlier owner
+   can resolve a superseded request from the recorded reroute; no acquisition
+   acknowledgment is owed to an owner you never acquired from. Separate pending
+   content integrations still require acknowledgment. Reread/hash the file and
+   preserve handed-off edits; patch that current state. Finish before releasing;
+   report unexpected changes. A notice alone never grants ownership.
 
 A parent directory claim cannot be narrowed by merely adding an exception in a
 message. Before handing a child path to another writer, replace the covering claim
@@ -297,9 +312,10 @@ progress entries:
 | Last inbox check | Actual read time, not intended poll time |
 | Next check / action | Earliest planned inbox, job or progress check; use a concrete UTC time, not "within 60 seconds" |
 
-Use that single next-check field when waiting too. Remove superseded current
-values; verify the saved record before continuing. Preserve claims exactly unless
-using the registry procedure. Keep liveness separate from progress.
+Use that single next-check field when waiting too. Replace obsolete status and
+blocker text instead of appending a correction below it. Keep closure fields here
+too. For a claim change, publish these sections together under the registry
+procedure; other updates preserve claims exactly. Keep liveness separate from progress.
 Before a blocking command, record its job identity, resources and expected duration.
 If the session worker identity is unavailable, say so; an ephemeral tool shell is
 not the session worker.
@@ -314,7 +330,8 @@ identity mean unknown ownership, never permission to reclaim.
 Before pausing, release unneeded claims and record retained claims and next check.
 Before closure, resolve jobs and handoffs, stop heartbeat writers, preserve useful
 findings and uncommitted-work disposition, then release claims under the mutex.
-Record terminal state, closure time and deletion deadline (closure plus 30 days).
+In that same update, set terminal state, closure time and deletion deadline
+(closure plus 30 days) in Current checkpoint and resolve obsolete pending text.
 A failed command alone is not terminal. Name the receiving integrator and record
 its acknowledgment for pending integrations; released files can still contain
 another session's uncommitted work.
@@ -375,7 +392,7 @@ handoff information, then compact on closure as described above.
 - Findings: links to notes/<session-id>/<topic>.md
 
 ## Blockers and handoff
-- Request ID / exact handoff scope / message and reply paths:
+- Current request ID / scope / owner / state (pending, acquired, released, superseded) / message paths:
 - Uncommitted changes; validation still required:
 - Claims released/retained, recipient acknowledgment and recipient's next action:
 - Recovery evidence or useful surviving notes, if applicable:
@@ -388,6 +405,8 @@ investigations. Add narrowly scoped notes for newly observed bugs, suspected
 causes, failed approaches, environment quirks, workarounds, upstream issues and
 community advice. Separate observation, hypothesis and reported claims. Do not
 invent findings to populate the board or treat repeated claims as confirmation.
+Before repeating a failed workaround, inspect its failure evidence; use a small
+probe if the cause remains unclear. Record uncertainty and missing coverage.
 
 ```markdown
 # <topic>

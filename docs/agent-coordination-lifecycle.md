@@ -70,9 +70,11 @@ Before pausing, release what you no longer need and state which claims remain
 held and why, plus an expected return/check if known. On completion, failure or
 cancellation, publish results, unresolved questions, changed files and next
 action. Resolve jobs and handoffs, stop heartbeat writers, then release claims
-under the mutex and set a terminal state (`done`, `failed` or `cancelled`) with a
-closure timestamp and deletion deadline. A failed command alone does not make the
-whole session terminal. Pending integrations should name their receiving session
+under the mutex. In that same record update, set terminal state (`done`, `failed`
+or `cancelled`), closure timestamp and deletion deadline in Current checkpoint,
+and resolve obsolete blocker/request text. Keep these fields together, not in
+appended progress entries. A failed command alone does not make the whole
+session terminal. Pending integrations should name their receiving session
 and record an acknowledgment. Uncommitted edits survive a release of claims:
 record them so the next owner preserves or explicitly integrates them.
 
