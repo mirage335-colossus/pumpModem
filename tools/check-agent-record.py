@@ -36,6 +36,33 @@ SCAN_SECTIONS = ('Current checkpoint', 'Claims held', 'Baseline and dependencies
 SCAN_ADVISORY = ('Read-only observation, not an atomic snapshot or an ownership decision. '
                  'Recheck complete claims under the registry mutex before changing claims. '
                  'If incomplete, investigate every error; omitted records may hold claims.')
+INSPECT_ADVISORY = (SCAN_ADVISORY + ' Targeted fallback is unvalidated extraction, not '
+                    'legacy-format validation; resolve all errors by manual review.')
+PRIVATE_FIELDS = ('Task and approach', PREAMBLE_FIELDS[-1])
+# Explicit aliases only: a substring match could expose unrelated progress prose.
+LEGACY_METADATA_FIELDS = (
+    'Closed (UTC)', 'Delete after', 'Liveness', 'Liveness mode', 'Owner process identity',
+    'Closed / Updated / last meaningful progress (UTC)',
+    'Closed / updated / last meaningful progress', 'Closed / updated / last progress',
+    'Updated / last meaningful progress / Closed (UTC)',
+)
+
+
+def headings_in(text):
+    return list(re.finditer(r'^(#{1,6})[ \t]+([^\n]+)$', text, re.MULTILINE))
+
+
+def section_text(text, headings, name):
+    found = [h for h in headings if h.group(2).strip() == name]
+    if len(found) != 1 or found[0].group(1) != '##':
+        raise ValueError(f'need exactly one ## {name} section')
+    start = found[0]
+    end = next((h.start() for h in headings
+                if h.start() > start.start() and len(h.group(1)) <= 2), len(text))
+    value = text[start.end():end].strip()
+    if not value:
+        raise ValueError(f'{name}: empty section; use explicit values or none')
+    return value
 
 
 def timestamp(value, field):
@@ -53,29 +80,23 @@ def parse_record(text):
     """Require the documented headings/fields; keep the entire claims text opaque."""
     if re.search(r'^[ \t]*(?:`{3,}|~{3,})', text, re.MULTILINE):
         raise ValueError('fenced examples are unsupported; use the plain current record template')
-    headings = list(re.finditer(r'^(#{1,6})[ \t]+([^\n]+)$', text, re.MULTILINE))
+    headings = headings_in(text)
     titles = [h.group(2).strip() for h in headings if h.group(1) == '#']
     if len(titles) != 1:
         raise ValueError('record needs exactly one # session-id heading')
     sections = {}
     for name in SECTIONS:
-        found = [h for h in headings if h.group(2).strip() == name]
-        if len(found) != 1 or found[0].group(1) != '##':
-            raise ValueError(f'need exactly one ## {name} section')
-        start = found[0]
-        end = next((h.start() for h in headings
-                    if h.start() > start.start() and len(h.group(1)) <= 2), len(text))
-        sections[name] = text[start.end():end].strip()
-        if not sections[name]:
-            raise ValueError(f'{name}: empty section; use explicit values or none')
+        sections[name] = section_text(text, headings, name)
     fields = {}
     for line in sections['Current checkpoint'].splitlines():
         if not line.strip():
             continue
-        match = re.fullmatch(r'- ([^:]+):[ \t]*(.+)', line)
+        match = re.fullmatch(r'- ([^:]+):[ \t]*(.*)', line)
         if not match:
             raise ValueError('Current checkpoint: expected one nonempty "- Field: value" per line')
         key, value = (part.strip() for part in match.groups())
+        if key not in REQUIRED_FIELDS:
+            raise ValueError('unknown checkpoint field; use --fields for exact template labels')
         if key in fields:
             raise ValueError(f'duplicate checkpoint field: {key}')
         if not value:
@@ -95,6 +116,9 @@ def check_transition(before, after):
     state = new['State']
     if state not in TERMINAL | {'active', 'waiting', 'paused'}:
         raise ValueError('State: choose one documented state')
+    if old['State'] in TERMINAL and state not in TERMINAL:
+        raise ValueError('terminal session cannot reopen under the same ID; register a fresh '
+                         'session ID and reacquire claims')
     times = {}
     for field in ('Updated (UTC)', 'Last meaningful progress (UTC)', 'Last inbox check (UTC)'):
         times[field] = timestamp(new[field], field)
@@ -125,10 +149,17 @@ def check_transition(before, after):
         closure = timestamp(closed, 'Closed')
         if closure > updated:
             raise ValueError('Closed must not be later than Updated')
-        if timestamp(deadline, 'Delete after') < closure:
+        deletion = timestamp(deadline, 'Delete after')
+        if deletion < closure:
             raise ValueError('Delete after must not precede Closed')
+        if deletion > closure + timedelta(days=30) and new['Retention exception'].lower() in ('none', 'none.'):
+            raise ValueError('Delete after beyond closure + 30 days requires an explicit '
+                             'Retention exception with exact material, live dependency, '
+                             'responsible owner, reason and review date')
         if new['Running jobs'].lower() not in ('none', 'none.'):
-            raise ValueError('terminal record lists Running jobs; resolve jobs before closure')
+            raise ValueError('terminal Running jobs must be literal none (or None.); resolve jobs '
+                             'first, then move completed-job details to Progress and checks '
+                             'or Blockers and handoff')
     elif closed.lower() != 'none' or deadline.lower() != 'none':
         raise ValueError('nonterminal record needs none in closure/deletion fields')
 
@@ -139,7 +170,7 @@ def scan_record(text, path):
     This intentionally does not use check_transition: terminal claims, old next
     checks and unresolved jobs must remain visible rather than disappearing.
     """
-    headings = list(re.finditer(r'^(#{1,6})[ \t]+([^\n]+)$', text, re.MULTILINE))
+    headings = headings_in(text)
     if not headings or headings[0].start() != 0 or headings[0].group(1) != '#':
         raise ValueError('expected current-template session heading at start of file')
     top = [h for h in headings if len(h.group(1)) <= 2]
@@ -157,13 +188,11 @@ def scan_record(text, path):
         if not match or match[1] not in PREAMBLE_FIELDS or match[1] in identity:
             raise ValueError('unknown, duplicate or malformed preamble field; review manually')
         identity[match[1]] = match[2].strip()
-    if set(identity) != set(PREAMBLE_FIELDS):
-        raise ValueError('missing current-template preamble fields; review manually')
-    try:
-        session_id, checkpoint, claims = parse_record(text)
-    except ValueError as exc:
-        # Unknown field labels may themselves contain unrelated task details.
-        raise ValueError('malformed checkpoint or claims structure; review manually') from exc
+    missing = [field for field in PREAMBLE_FIELDS if field not in identity]
+    if missing:
+        raise ValueError('missing current-template preamble fields: ' + ', '.join(missing))
+    # Parser diagnostics name only known fields, never unknown labels or values.
+    session_id, checkpoint, claims = parse_record(text)
     if not re.fullmatch(r'[A-Za-z0-9._-]+', session_id) or path.name != session_id + '.md':
         raise ValueError('session ID must use documented characters and match the record filename')
     if set(checkpoint) != set(REQUIRED_FIELDS):
@@ -181,7 +210,7 @@ def scan_record(text, path):
         if value != 'none':
             timestamp(value, field)
     metadata = {key: identity[key] for key in PREAMBLE_FIELDS
-                if key not in ('Task and approach', PREAMBLE_FIELDS[-1])}
+                if key not in PRIVATE_FIELDS}
     metadata.update({key: value for key, value in checkpoint.items()
                      if key != 'Next check (UTC) / action'})
     metadata['Next check (UTC)'] = next_check
@@ -200,7 +229,98 @@ def read_scan_record(path, before):
         opened = os.fstat(stream.fileno())
         if not stat.S_ISREG(opened.st_mode) or record_identity(opened) != record_identity(before):
             raise ValueError('record replaced before read; retry after publication settles')
-        return stream.read()
+        text = stream.read()
+        if record_identity(os.fstat(stream.fileno())) != record_identity(opened):
+            raise ValueError('record changed while being read; retry after publication settles')
+        return text
+
+
+def read_record(path):
+    """Read a single stable direct regular record without following a leaf symlink."""
+    before = path.lstat()
+    if path.suffix != '.md' or not stat.S_ISREG(before.st_mode):
+        raise ValueError('expected direct regular .md record; no symlinks or subdirectories')
+    text = read_scan_record(path, before)
+    if record_identity(path.lstat()) != record_identity(before):
+        raise ValueError('record changed while being read; retry after publication settles')
+    return text, before
+
+
+def inspect_record(text, path, section='metadata-claims'):
+    """Select complete named sections, reporting failed validation even on fallback.
+
+    Metadata fallback reads only the preamble and an unambiguous checkpoint. It
+    recognizes explicit old labels, never task/progress/handoff prose by keyword.
+    Claims/handoff extraction stops at the next same-or-higher-level heading and
+    preserves nested headings. Duplicate/misleveled sections and fences are unsafe.
+    """
+    if section not in ('metadata-claims', 'handoff'):
+        raise ValueError('section must be metadata-claims or handoff')
+    result = {'complete': False, 'path': str(path), 'section': section,
+              'errors': [], 'advisory': INSPECT_ADVISORY}
+    try:
+        current = scan_record(text, path)
+    except ValueError as exc:
+        result['errors'].append({'path': str(path), 'error': str(exc)})
+        current = None
+    headings = headings_in(text)
+    name = 'Claims held' if section == 'metadata-claims' else 'Blockers and handoff'
+    key = 'claims' if section == 'metadata-claims' else 'handoff'
+    try:
+        if re.search(r'^[ \t]*(?:`{3,}|~{3,})', text, re.MULTILINE):
+            raise ValueError('fenced examples make targeted section boundaries ambiguous; review manually')
+        result[key] = section_text(text, headings, name)
+    except ValueError as exc:
+        error = {'path': str(path), 'error': str(exc)}
+        if error not in result['errors']:
+            result['errors'].append(error)
+    if section == 'metadata-claims':
+        if current is not None:
+            result['id'] = current['id']
+            result['metadata'] = [{'field': key, 'value': value}
+                                  for key, value in current['metadata'].items()]
+        else:
+            # Do not infer a trusted ID, timestamps or empty ownership from this.
+            first_section = headings[1].start() if len(headings) > 1 else len(text)
+            chunks = [text[:first_section]]
+            try:
+                chunks.append(section_text(text, headings, 'Current checkpoint'))
+            except ValueError:
+                pass  # The strict validation error already makes this incomplete.
+            if (not headings or headings[0].start() != 0 or headings[0][1] != '#' or
+                    re.search(r'^[ \t]*(?:`{3,}|~{3,})', text, re.MULTILINE)):
+                chunks = []
+            known = (set(PREAMBLE_FIELDS) | set(REQUIRED_FIELDS) | set(LEGACY_METADATA_FIELDS)) - set(PRIVATE_FIELDS)
+            fields = []
+            for chunk in chunks:
+                for line in chunk.splitlines():
+                    match = re.fullmatch(r'- ([^:]+):[ \t]*(\S.*)', line)
+                    if not match or match[1] not in known:
+                        continue
+                    label, value = match[1], match[2].strip()
+                    if label == 'Next check (UTC) / action':
+                        label = 'Next check (UTC)'
+                        value = value.partition(' / ')[0]
+                        if value != 'none':
+                            try:
+                                timestamp(value, label)
+                            except ValueError:
+                                continue  # Never leak an unrecognized action as a timestamp.
+                    fields.append({'field': label, 'value': value})
+            result['metadata'] = fields
+    result['complete'] = not result['errors']
+    return result
+
+
+def inspect_path(path, section='metadata-claims'):
+    path = path.absolute()
+    try:
+        text, _ = read_record(path)
+        return inspect_record(text, path, section)
+    except (OSError, UnicodeError, ValueError) as exc:
+        return {'complete': False, 'path': str(path), 'section': section,
+                'errors': [{'path': str(path), 'error': str(exc)}],
+                'advisory': INSPECT_ADVISORY}
 
 
 def scan_sessions(directory):
@@ -208,28 +328,33 @@ def scan_sessions(directory):
     directory = directory.absolute()
     result = {'complete': False, 'records': [], 'errors': [], 'advisory': SCAN_ADVISORY}
     try:
-        if not stat.S_ISDIR(directory.lstat().st_mode):
+        directory_before = directory.lstat()
+        if not stat.S_ISDIR(directory_before.st_mode):
             raise ValueError('scan target must be a directory, not a symlink')
         entries = sorted(directory.iterdir())
     except (OSError, ValueError) as exc:
         result['errors'].append({'path': str(directory), 'error': str(exc)})
         return result
+    observed = {}
     for path in entries:
         try:
-            before = path.lstat()
-            if path.suffix != '.md' or not stat.S_ISREG(before.st_mode):
-                raise ValueError('expected direct regular .md record; no symlinks or subdirectories')
-            text = read_scan_record(path, before)
-            if record_identity(path.lstat()) != record_identity(before):
-                raise ValueError('record changed while being read; retry after publication settles')
+            text, before = read_record(path)
+            observed[path] = before
             result['records'].append(scan_record(text, path))
         except (OSError, UnicodeError, ValueError) as exc:
             result['errors'].append({'path': str(path), 'error': str(exc)})
     try:
-        if sorted(directory.iterdir()) != entries:
+        if (sorted(directory.iterdir()) != entries or
+                record_identity(directory.lstat()) != record_identity(directory_before)):
             raise ValueError('directory entries changed during scan; retry after publication settles')
     except (OSError, ValueError) as exc:
         result['errors'].append({'path': str(directory), 'error': str(exc)})
+    for path, before in observed.items():
+        try:
+            if record_identity(path.lstat()) != record_identity(before):
+                raise ValueError('record changed after read during scan; retry after publication settles')
+        except (OSError, ValueError) as exc:
+            result['errors'].append({'path': str(path), 'error': str(exc)})
     result['complete'] = not result['errors']
     return result
 
@@ -249,15 +374,40 @@ def main(argv=None):
     parser.add_argument('--scan', type=Path, metavar='SESSIONS_DIRECTORY', help=(
         'emit JSON metadata and complete claims from direct current-template .md records; '
         'unknown/unreadable entries produce incomplete output and exit 1; never follow symlinks'))
+    parser.add_argument('--compact', action='store_true', help=(
+        'minify scan/inspection JSON formatting only; preserve every metadata field, whole '
+        'claim and unresolved error; complete-claim review is still required'))
+    parser.add_argument('--inspect', type=Path, metavar='RECORD', help=(
+        'inspect only selected metadata/whole claims or handoff; legacy fallback stays '
+        'incomplete (exit 1), with safe extraction and errors requiring manual review'))
+    parser.add_argument('--section', choices=('metadata-claims', 'handoff'), help=(
+        'selection for --inspect (default: metadata-claims); handoff omits all other sections'))
+    parser.add_argument('--fields', action='store_true', help='list exact current-template field and section labels')
     args = parser.parse_args(argv)
+    if args.fields:
+        if any((args.before, args.after, args.scan, args.inspect, args.section, args.compact)):
+            parser.error('--fields cannot be combined with other modes/options')
+        print(json.dumps({'preamble': PREAMBLE_FIELDS, 'checkpoint': REQUIRED_FIELDS,
+                          'sections': SCAN_SECTIONS}, indent=2))
+        return 0
+    if args.section and not args.inspect:
+        parser.error('--section requires --inspect')
+    if args.compact and not (args.scan or args.inspect):
+        parser.error('--compact requires --scan or --inspect')
+    if args.inspect is not None:
+        if any((args.scan, args.before, args.after)):
+            parser.error('--inspect cannot be combined with --scan, --before or --after')
+        result = inspect_path(args.inspect, args.section or 'metadata-claims')
+        print(json.dumps(result, **({'separators': (',', ':')} if args.compact else {'indent': 2})))
+        return 0 if result['complete'] else 1
     if args.scan is not None:
         if args.before is not None or args.after is not None:
             parser.error('--scan cannot be combined with --before or --after')
         result = scan_sessions(args.scan)
-        print(json.dumps(result, indent=2))
+        print(json.dumps(result, **({'separators': (',', ':')} if args.compact else {'indent': 2})))
         return 0 if result['complete'] else 1
     if args.before is None or args.after is None:
-        parser.error('provide both --before and --after, or --scan')
+        parser.error('provide both --before and --after, or --scan, --inspect or --fields')
     try:
         if args.before.resolve() == args.after.resolve():
             raise ValueError('before and after must be distinct files')

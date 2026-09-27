@@ -66,14 +66,23 @@ owner; do not rewrite its state as failed based on age.
 | Host/identity unavailable, clock uncertain or no declared cadence | Unknown; no automatic reclamation |
 | `done`, `failed` or `cancelled` with closure details | Cleanup candidate; check deletion conditions below |
 
+Release a completed shared-file edit before unrelated evidence formatting or
+whole-session closure. Keep the session nonterminal while required delivery
+acknowledgments or other work remain, without retaining an unneeded file claim.
+Prepare/check closure candidates in claimed artifacts, not `sessions/`; final
+review and atomic publication belong inside the short owned registry operation.
+Remove only your own failed unpublished staging files, never another owner's candidate or lock.
+
 Before pausing, release what you no longer need and state which claims remain
 held and why, plus an expected return/check if known. On completion, failure or
 cancellation, publish results, unresolved questions, changed files and next
 action. Resolve jobs and handoffs, stop heartbeat writers, then release claims
 under the mutex. In that same record update, set terminal state (`done`, `failed`
 or `cancelled`), closure timestamp and deletion deadline in Current checkpoint,
-and resolve obsolete blocker/request text. Keep these fields together, not in
-appended progress entries. A failed command alone does not make the whole
+and resolve obsolete blocker/request text. Use literal `Running jobs: none` and
+standalone `None.` claims for a completed current-template record; finished job
+details belong in Progress and checks. Keep current fields consistent, not in
+appended corrective progress entries. A failed command alone does not make the whole
 session terminal. Pending integrations should name their receiving session
 and record an acknowledgment. Uncommitted edits survive a release of claims:
 record them so the next owner preserves or explicitly integrates them.

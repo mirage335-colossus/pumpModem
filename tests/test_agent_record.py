@@ -2,6 +2,7 @@
 """Candidate records must expose stale/malformed transitions without modifying files."""
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -132,6 +133,35 @@ class Transitions(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'session IDs differ'):
             checker.check_transition(record(), record().replace('# test-session', '# another-session'))
 
+    def test_terminal_session_id_cannot_be_reopened(self):
+        for old_state in checker.TERMINAL:
+            for new_state in ('active', 'waiting', 'paused'):
+                with self.subTest(old=old_state, new=new_state), self.assertRaisesRegex(
+                        ValueError, 'fresh session ID and reacquire claims'):
+                    checker.check_transition(record(State=old_state), record(State=new_state))
+
+    def test_retention_extension_needs_explicit_exception(self):
+        values = {'State': 'done', 'Updated (UTC)': '2026-09-27T10:01:00Z',
+                  'Next check (UTC) / action': 'none / complete',
+                  'Closed (UTC), if terminal': '2026-09-27T10:01:00Z',
+                  'Delete after (UTC)': '2026-10-27T10:01:00.001Z'}
+        for empty in ('none', 'None.'):
+            with self.subTest(empty=empty), self.assertRaisesRegex(ValueError, 'explicit Retention exception'):
+                checker.check_transition(record(), record(**{**values, 'Retention exception': empty}))
+        values['Retention exception'] = 'artifacts/x / pending integration / owner B / evidence / review 2026-09-30'
+        checker.check_transition(record(), record(**values))
+
+    def test_terminal_completed_job_prose_gets_actionable_private_diagnostic(self):
+        candidate = record(State='done', **{
+            'Running jobs': 'none; secret completed job details',
+            'Next check (UTC) / action': 'none / complete',
+            'Closed (UTC), if terminal': '2026-09-27T10:00:00Z',
+            'Delete after (UTC)': '2026-10-27T10:00:00Z'})
+        with self.assertRaisesRegex(ValueError, 'literal none') as caught:
+            checker.check_transition(record(), candidate)
+        self.assertIn('Progress and checks', str(caught.exception))
+        self.assertNotIn('secret', str(caught.exception))
+
 
 class CommandLine(unittest.TestCase):
     def test_success_and_failure_leave_both_files_and_neighbor_records_untouched(self):
@@ -158,6 +188,24 @@ class CommandLine(unittest.TestCase):
 
 
 class SessionScan(unittest.TestCase):
+    def test_known_missing_and_empty_fields_are_named_without_unknown_content(self):
+        path = Path('/board/sessions/test-session.md')
+        for key in ('Last heartbeat (UTC), if supervised', 'Retention exception'):
+            for replacement in ('', f'- {key}: \n'):
+                with self.subTest(key=key, replacement=replacement), self.assertRaises(ValueError) as caught:
+                    checker.scan_record(scan_record().replace(f'- {key}: none\n', replacement), path)
+                self.assertIn(key, str(caught.exception))
+        missing = scan_record().replace('- Parent / read-only helpers: value\n', '')
+        with self.assertRaisesRegex(ValueError, 'missing current-template preamble fields: Parent'):
+            checker.scan_record(missing, path)
+        for section in ('checkpoint', 'preamble'):
+            candidate = scan_record().replace('- State: active' if section == 'checkpoint' else
+                                               '- Task and approach: value',
+                                               '- secret-label: secret-value')
+            with self.assertRaises(ValueError) as caught:
+                checker.scan_record(candidate, path)
+            self.assertNotIn('secret', str(caught.exception))
+
     def test_terminal_nested_claims_remain_complete_and_opaque(self):
         claims = ('| Kind | Absolute path | Relative | Use |\n| --- | --- | --- | --- |\n'
                   '| file | /project/a | a | change |\n### Additional claims\n'
@@ -301,6 +349,50 @@ class SessionScan(unittest.TestCase):
             self.assertTrue(output['complete'], output)
             self.assertGreaterEqual(calls, 2)
 
+    def test_prior_record_replacement_is_detected_before_scan_returns(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first, second = root / 'a.md', root / 'b.md'
+            first.write_text(scan_record().replace('test-session', 'a'), encoding='utf-8')
+            second.write_text(scan_record().replace('test-session', 'b'), encoding='utf-8')
+            original = checker.read_scan_record
+
+            def replace_prior(path, *args):
+                text = original(path, *args)
+                if path == second:
+                    first.write_text(first.read_text() + '\nchanged', encoding='utf-8')
+                return text
+
+            with mock.patch.object(checker, 'read_scan_record', replace_prior):
+                output = checker.scan_sessions(root)
+            self.assertFalse(output['complete'])
+            self.assertTrue(any(e['path'] == str(first) and 'changed after read' in e['error']
+                                for e in output['errors']))
+
+    def test_created_then_removed_temporary_entry_still_invalidates_snapshot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'test-session.md').write_text(scan_record(), encoding='utf-8')
+            original = checker.read_scan_record
+
+            def transient(path, *args):
+                text = original(path, *args)
+                temp = root / 'candidate.tmp'
+                temp.write_text('secret temporary candidate', encoding='utf-8')
+                temp.unlink()
+                # Some filesystems coalesce rapid timestamps. Model an observed
+                # directory change; identical final metadata is undetectable by
+                # this explicitly non-atomic reader.
+                info = root.stat()
+                os.utime(root, ns=(info.st_atime_ns, info.st_mtime_ns + 1_000_000_000))
+                return text
+
+            with mock.patch.object(checker, 'read_scan_record', transient):
+                output = checker.scan_sessions(root)
+            self.assertFalse(output['complete'])
+            self.assertTrue(any('directory entries changed' in e['error'] for e in output['errors']))
+            self.assertNotIn('secret', json.dumps(output))
+
     def test_replaced_record_descriptor_is_rejected_before_read(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'test-session.md'
@@ -337,6 +429,136 @@ class SessionScan(unittest.TestCase):
                                     capture_output=True, text=True)
             self.assertEqual(result.returncode, 1)
             self.assertFalse(json.loads(result.stdout)['complete'])
+
+
+class TargetedInspection(unittest.TestCase):
+    def test_current_metadata_claims_and_handoff_selections_are_disjoint(self):
+        path = Path('/board/sessions/test-session.md')
+        claims = '- file: /project/held\n### Child scope\n- directory: /project/subtree'
+        text = scan_record(claims=claims).replace('Task and approach: value',
+                                                'Task and approach: secret-task')
+        text = text.replace('- progress', '- secret-progress').replace('- baseline', '- secret-baseline')
+        text = text.replace('- Current request: none', '- selected-handoff\n### Details\nrelease reference A-1')
+        selected = checker.inspect_record(text, path)
+        self.assertTrue(selected['complete'], selected)
+        self.assertEqual(selected['claims'], claims)
+        self.assertNotIn('secret', json.dumps(selected))
+        self.assertNotIn('selected-handoff', json.dumps(selected))
+        selected = checker.inspect_record(text, path, 'handoff')
+        self.assertTrue(selected['complete'], selected)
+        self.assertEqual(selected['handoff'], '- selected-handoff\n### Details\nrelease reference A-1')
+        for unwanted in ('secret', '/project/held', 'Owner process', 'metadata', 'claims'):
+            self.assertNotIn(unwanted, json.dumps({k: v for k, v in selected.items() if k != 'advisory'}))
+
+    def test_legacy_fallback_is_incomplete_with_whole_terminal_claims(self):
+        claims = '- file: /project/a\n### Additional claims\n' + '\n'.join(
+            f'- directory: /project/{i}' for i in range(200))
+        text = ('# legacy\n- State: done\n- Closed (UTC): 2026-09-27T10:00:00Z\n'
+                '- Liveness: checkpoint ended\n- Task and approach: secret-task\n'
+                f'## Claims held\n{claims}\n## Progress\n- State: secret-progress\n'
+                '## Blockers and handoff\n- secret-handoff\n')
+        selected = checker.inspect_record(text, Path('/board/legacy.md'))
+        self.assertFalse(selected['complete'])
+        self.assertTrue(selected['errors'])
+        self.assertEqual(selected['claims'], claims)
+        self.assertIn({'field': 'State', 'value': 'done'}, selected['metadata'])
+        self.assertNotIn('secret', json.dumps(selected))
+        self.assertIn('unvalidated', selected['advisory'])
+
+    def test_metadata_error_keeps_safe_complete_claims_but_never_succeeds(self):
+        claims = '- file: /project/a\n### More\n- resource: git-state'
+        text = scan_record(claims=claims).replace('- Retention exception: none\n', '')
+        selected = checker.inspect_record(text, Path('/board/test-session.md'))
+        self.assertFalse(selected['complete'])
+        self.assertEqual(selected['claims'], claims)
+        self.assertIn('Retention exception', selected['errors'][0]['error'])
+
+    def test_ambiguous_claims_are_never_returned_as_complete(self):
+        baseline = scan_record(claims='- file: /project/a')
+        for text in (baseline + '\n## Claims held\n- file: /project/other\n',
+                     baseline.replace('## Claims held', '### Claims held'),
+                     baseline.replace('## Claims held', '```\n## Claims held') + '\n```',
+                     baseline.replace('- file: /project/a', '')):
+            with self.subTest(text=text):
+                selected = checker.inspect_record(text, Path('/board/test-session.md'))
+                self.assertFalse(selected['complete'])
+                self.assertNotIn('claims', selected)
+                self.assertTrue(selected['errors'])
+
+    def test_fallback_handoff_does_not_expose_earlier_sections(self):
+        text = ('# legacy\n- State: secret-state\n## Claims held\n- secret-claim\n'
+                '## Blockers and handoff\nrelease A-2\n### Nested\nwriters stopped\n'
+                '## Secret later heading\nsecret-history\n')
+        selected = checker.inspect_record(text, Path('/board/legacy.md'), 'handoff')
+        self.assertFalse(selected['complete'])
+        self.assertEqual(selected['handoff'], 'release A-2\n### Nested\nwriters stopped')
+        self.assertNotIn('secret', json.dumps(selected).lower())
+
+    def test_fallback_ignores_unknown_metadata_and_malformed_next_action(self):
+        text = scan_record().replace('- Retention exception: none', '- secret-key: secret-value')
+        text = text.replace('2026-09-27T10:05:00Z / check inbox and test result', 'secret action without timestamp')
+        selected = checker.inspect_record(text, Path('/board/test-session.md'))
+        self.assertFalse(selected['complete'])
+        self.assertNotIn('secret', json.dumps(selected))
+
+    def test_inspection_rejects_symlink_invalid_utf8_and_changing_record(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / 'test-session.md'
+            path.write_text(scan_record(), encoding='utf-8')
+            link = root / 'link.md'
+            try:
+                link.symlink_to(path)
+            except (OSError, NotImplementedError):
+                self.skipTest('symlinks unavailable')
+            self.assertFalse(checker.inspect_path(link)['complete'])
+            original = checker.read_scan_record
+
+            def mutate(p, *args):
+                text = original(p, *args)
+                p.write_text(text + '\nchanged', encoding='utf-8')
+                return text
+
+            with mock.patch.object(checker, 'read_scan_record', mutate):
+                result = checker.inspect_path(path)
+            self.assertFalse(result['complete'])
+            self.assertNotIn('claims', result)
+            path.write_bytes(b'\xff')
+            self.assertFalse(checker.inspect_path(path)['complete'])
+
+    def test_cli_compact_equivalence_and_inspection_exit_status(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / 'test-session.md'
+            path.write_text(scan_record(), encoding='utf-8')
+            (root / 'temporary.tmp').write_text('secret candidate', encoding='utf-8')
+            for mode, expected in ((['--scan', str(root)], 1), (['--inspect', str(path)], 0),
+                                   (['--inspect', str(path), '--section', 'handoff'], 0)):
+                results = [subprocess.run([sys.executable, '-B', str(TOOL)] + mode + compact,
+                                         cwd=ROOT, capture_output=True, text=True)
+                           for compact in ([], ['--compact'])]
+                self.assertEqual([r.returncode for r in results], [expected, expected])
+                self.assertEqual(json.loads(results[0].stdout), json.loads(results[1].stdout))
+                self.assertLess(len(results[1].stdout), len(results[0].stdout))
+            path.write_text(path.read_text().replace('- Retention exception: none\n', ''), encoding='utf-8')
+            result = subprocess.run([sys.executable, '-B', str(TOOL), '--inspect', str(path)],
+                                    cwd=ROOT, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(json.loads(result.stdout)['claims'], 'None.')
+
+    def test_field_discovery_and_invalid_mode_combinations(self):
+        result = subprocess.run([sys.executable, '-B', str(TOOL), '--fields'],
+                                cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['checkpoint'], list(checker.REQUIRED_FIELDS))
+        for args in (['--compact'], ['--section', 'handoff'], ['--fields', '--compact'],
+                     ['--inspect', 'a.md', '--scan', 'sessions'],
+                     ['--inspect', 'a.md', '--before', 'a.md', '--after', 'b.md']):
+            with self.subTest(args=args):
+                result = subprocess.run([sys.executable, '-B', str(TOOL)] + args,
+                                        cwd=ROOT, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 2)
+                self.assertNotIn('Traceback', result.stderr)
 
 
 if __name__ == '__main__':

@@ -17,18 +17,27 @@ Anthropic desktop sessions and OpenRouter-compatible harnesses.
 - Use the shared, gitignored `.agent-work/` directory (or the explicitly agreed
   absolute `DATAPUMP_AGENT_DIR`). Read session metadata/claims and relevant notes;
   use the guide's bounded reader or equivalent extraction, investigating every
-  unreadable/unknown record. Never ingest the whole board or historical logs
-  wholesale. Keep
-  your own session record with exact files/resources, intended edits, approach,
-  baseline, progress, checks and handoff. Ignored files require explicit reads.
+  unreadable/unknown record. Read documents separately to avoid truncated startup
+  output; never ingest the whole board or historical logs wholesale. Keep one
+  current session record with exact scope, approach, baseline, progress, checks
+  and handoff. Ignored files require explicit reads.
 - Claim files/resources before writing, including notes and generated outputs,
   using the short atomic registry lock. Check your inbox before reporting blocked.
   Handoffs require recorded release, fresh claim acquisition and acknowledgment;
   a message or old timestamp never grants ownership. Use an isolated checkout
   when overlapping work cannot be handed off.
+- Prepare/check record candidates in claimed artifacts (or memory for initial
+  registration), outside `sessions/`; publish complete records atomically and
+  messages atomically without replacement. The guide links optional tested
+  helpers and filled examples; exclusive creation followed by writing is not
+  complete-message publication. Release a verified shared-file edit before
+  unrelated evidence formatting or whole-session closure.
 - Refresh your record at scope changes, checkpoints and before pausing; release
   claims explicitly when finished. Preserve other sessions' edits, staged work,
   processes and notes. Coordinate shared Git state, build trees and devices too.
+  Reconcile current jobs, results, remaining work and receipts together; keep
+  the user's required research, implementation and validation in scope while
+  coordinating. No extra activity reports or invented findings are required.
 - Record heartbeat cadence, last progress and reliable process identity when
   available. Review overdue sessions and delete eligible closed sessions after
   30 days, including legacy archives and unneeded copies; do not create new

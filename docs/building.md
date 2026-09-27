@@ -154,10 +154,10 @@ or prepare an SDK that supplies the target sanitizer runtimes explicitly.
 
 Do not run simultaneous configure/build operations against the same directory.
 Separate agents must follow the [coordination workflow](agent-coordination.md):
-claim a shared build tree for the entire configure/build/test operation, or use
-`--build-dir build/agents/SESSION/PROFILE` for separate outputs. A completed
-incremental build can be handed off after recording its source/configuration;
-separate output trees still need stable source inputs and coordinated access to
+claim every output tree for the entire configure/build/test operation. Use
+`--build-dir build/agents/SESSION/PROFILE` to avoid contention; unique paths still
+need claims. A completed incremental build can be handed off after recording its
+source/configuration; separate output trees still need stable source inputs and coordinated access to
 timing-sensitive tests and devices. Old top-level `build-native`, `build-agent-*`
 and similar directories are not current presets. They may contain unique logs,
 captures or dependencies, so the wrapper never deletes them. Archive useful
@@ -803,6 +803,7 @@ all required notices and ordinary documentation remain installed. See
 | Shared GUI behavior | [GUI architecture](gui-architecture.md), `src/gui/application.cpp`, `src/gui/controller.cpp` | `gui`, then affected native backends |
 | Native widgets/platform services | `src/gui/backend_fltk*`, `src/gui/backend_rev*` | `gui`, `native` |
 | Build/dependencies/packaging | `CMakeLists.txt`, `cmake/`, `build.sh`, `third_party/README.md` | `build`, `packaging` |
+| Simultaneous agents, records and local messages | [coordination workflow](agent-coordination.md), [recipes](agent-coordination-recipes.md), `tools/check-agent-record.py`, `tools/agent-board.py` | `python3 -B tests/test_agent_record.py` and `python3 -B tests/test_agent_board.py`, then `build` |
 
 Search maintained `src/`, `include/`, `tests/` and `cmake/` first. Vendored trees
 and `docs/validation-data` are reference material; old plans and recorded build
