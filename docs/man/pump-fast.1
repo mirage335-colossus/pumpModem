@@ -1,0 +1,319 @@
+.TH PUMP-FAST 1 "September 2026" "Data Pump 001_00" "User Commands"
+.nh
+.ad l
+.nr HY 0
+.ds AD l
+.SH NAME
+pump-fast \- transfer text and files with the Fast modem
+.SH SYNOPSIS
+.B pump fast-info
+.RI [ options ]
+.br
+.B pump fast-tx
+(\fB\-\-text\fR \fItext\fR | \fB\-\-input\fR \fIfile\fR)
+(\fB\-\-output\fR \fIwav\fR | \fB\-\-device\fR \fIdevice\fR)
+.RI [ options ]
+.br
+.B pump fast-rx
+.BI \-\-input " wav"
+.RI [ options ]
+.br
+.B pump fast-listen
+.RI [ options ]
+.SH DESCRIPTION
+These are subcommands of
+.BR pump (1).
+Fast transfers text and files through audio hardware or WAV files, using its
+own QAM/LDPC or classic APSK format. Text and files are compressed with XZ.
+The receiver reports status and metadata; use
+.B \-\-save
+to write completed content.
+.PP
+Both ends must select matching profile, waveform, coding and encryption
+settings, and the same key material when encryption is enabled.
+There is no negotiation, automatic fallback or retransmission.
+Output channel and amplitude are local choices.
+.PP
+Reception completes only after consecutive, fully scored absent symbols or
+OFDM blocks cover six seconds. EOF, cancellation, successful error correction
+and integrity checks do not end reception. Generated WAV files include at
+least 6.25 seconds of silence, extended when complete symbol or OFDM-block
+observations require it. Preserve this tail when recording or editing audio.
+.SH COMMANDS
+.TP
+.B fast-info
+Print the selected local settings and calculated rates as JSON.
+Does not open audio hardware or load a keyfile.
+.TP
+.B fast-tx
+Transmit exactly one text argument or file. Select exactly one destination:
+a new WAV file or an audio device. Live progress is written to standard error
+unless
+.B \-\-json
+is selected.
+.TP
+.B fast-rx
+Receive one transfer from a WAV file. The recording must contain the
+physical-end silence and use 16-bit PCM, one or two channels, and a sample
+rate from 44100 through 192000 Hz (48000 Hz for OFDM).
+No file is saved unless
+.B \-\-save
+is given and reception completes successfully.
+.TP
+.B fast-listen
+Listen for one transfer from an audio device, then exit.
+The default device is
+.BR default .
+Interrupting the command cancels reception.
+.SH OPTIONS
+Options follow the subcommand. Values are separate arguments; duplicate
+options are rejected.
+.TP
+.BI \-\-text " text"
+Transmit text, including empty text, with
+.BR fast-tx .
+The limit is 32768 source bytes, counting UTF-8 bytes.
+.TP
+.BI \-\-input " file"
+Read a source file for
+.BR fast-tx ,
+or a WAV recording for
+.BR fast-rx .
+File transfers retain the source basename as a suggested filename.
+.TP
+.BI \-\-output " wav"
+Write the transmitted waveform to a new mono 16-bit PCM WAV file.
+Existing files are never overwritten. Classic RIFF limits output to 4 GiB.
+.TP
+.BI \-\-device " device"
+Use this audio device for live transmission or reception. See
+.B pump devices
+for available devices. Live transmission requires this option explicitly.
+.TP
+.BI \-\-save " file"
+Save exact completed receive bytes to a new file. Existing files are never
+overwritten. For attachments, the saved bytes exclude the attachment prefix.
+The received filename never selects the destination path.
+.TP
+.BI \-\-seconds " n"
+Cancel live transmission or listening after
+.I n
+whole seconds. Zero, the default, sets no limit. Cancellation does not
+complete a pending reception.
+.TP
+.BI \-\-estimate\-bytes " n"
+For
+.BR fast-info ,
+estimate airtime for
+.I n
+encoded source bytes, including framing and end silence. This size-only
+estimate does not read a file or measure compression.
+.TP
+.BI \-\-quota\-mb " n"
+Set the local source-storage quota in MiB, from 1 to 256. Default: 256.
+This is not a total process-memory limit.
+.TP
+.B \-\-json
+Print result metadata as JSON.
+.B fast-info
+always prints JSON. Receive results distinguish completion, physical
+completion, encryption and authentication; they do not contain source text.
+.TP
+.B \-\-help
+Show Fast command help and exit.
+.SS Profiles and coding
+Defaults below are the reference profiles selected without
+.BR \-\-expected\-snr .
+Use
+.B fast-info
+to inspect a fully resolved configuration.
+.TP
+.BI \-\-profile " name"
+Select
+.BR wire " (default), " ssb ,
+.BR fm ,
+.BR acoustic " or " acoustic-short .
+Wire is an audio-cable profile; SSB and FM use voice-band audio.
+Acoustic profiles are for speakers and microphones; acoustic-short uses
+shorter coding blocks and training. Radio profiles do not control a radio
+or provide PTT.
+.TP
+.BI \-\-format " name"
+Select
+.BR capacity " (default) or " classic .
+Capacity uses QAM and LDPC; modeled short-acoustic presets may use a compact
+convolutional code. Classic uses QPSK/APSK and convolutional coding.
+.TP
+.BI \-\-expected\-snr " db"
+Resolve a modeled capacity preset from the assumed SNR over the original
+channel bandwidth: 25..65 dB over 18 kHz for wire, \-27..13 dB over 17.5 kHz
+for acoustic profiles, and \-20..20 dB over 2.4 kHz for SSB/FM.
+Weak presets narrow the bandwidth and may switch acoustic OFDM to a single
+carrier. SNR is assumed, not measured or negotiated. Explicit waveform and
+coding options override the preset regardless of argument order.
+.TP
+.BI \-\-qam " order"
+Select a capacity constellation: 4, 16, 64, 256, 1024, 4096, 16384, 65536,
+262144, 1048576 or 4194304.
+Defaults: wire 4194304, SSB/FM 64, acoustic profiles 16.
+.TP
+.BI \-\-apsk " order"
+Select classic format and constellation 4, 16, 64 or 256.
+Conflicts with
+.B \-\-qam
+or an explicit capacity format. Classic defaults: wire 256, SSB 16,
+FM and acoustic profiles 4.
+.TP
+.BI \-\-code\-rate " rate"
+Capacity rates: 1/2, 2/3, 3/4, 7/9, 8/9 or 9/10.
+Short acoustic coding permits a subset depending on the selected preset.
+Classic rates: 1/2, 3/4 or 7/8.
+Defaults: capacity wire 8/9, classic wire 7/8, other profiles 3/4.
+.TP
+.BI \-\-rs " mode"
+Select outer Reed\-Solomon coding.
+Capacity requires
+.BR 0.3% .
+Classic accepts
+.BR robust " or " high-rate ;
+its defaults are high-rate for wire and robust for other profiles.
+.TP
+.BI \-\-interleave " n"
+Set coding depth: 1..16 for capacity, 1..64 for classic.
+Capacity defaults: wire/SSB/FM 4, acoustic 8, acoustic-short 1.
+Classic defaults: wire 62, SSB/FM 16, acoustic profiles 5.
+.SS Audio and waveform
+.TP
+.BI \-\-sample\-rate " hz"
+Set processing audio rate, 44100..192000 Hz. Default: 48000.
+OFDM requires 48000 Hz. Single-carrier peers may use different local
+sample rates while retaining matching waveform settings.
+.B fast-rx
+uses the recording's sample rate.
+.TP
+.BI \-\-amplitude " n"
+Set waveform amplitude, greater than zero and at most 0.8.
+Capacity defaults: wire/SSB/FM 0.30, acoustic profiles 0.40.
+Classic defaults: wire/acoustic profiles 0.35, SSB/FM 0.50.
+.TP
+.B \-\-mono
+Send on the left output only. This is the default.
+.TP
+.B \-\-right\-mono
+Send on the right output only.
+.TP
+.B \-\-stereo
+Send the same waveform on both outputs. The three routing options conflict.
+.PP
+For stereo WAV input,
+.B fast-rx
+uses these options to select the left channel, right channel, or their average,
+respectively. WAV output is always mono.
+.PP
+The following options apply only to single-carrier waveforms.
+The selected band must fit the processing audio rate.
+.TP
+.BI \-\-symbol\-rate " hz"
+Set symbols per second; fractional values are accepted.
+Capacity defaults: wire 18000/1.02, SSB/FM 2400/1.10.
+Classic defaults: wire 15000, SSB/FM 2000, acoustic profiles 500.
+.TP
+.BI \-\-carrier " hz"
+Set carrier frequency. Defaults: wire 9300, SSB/FM 1500,
+classic acoustic profiles 1800.
+.TP
+.BI \-\-rolloff " n"
+Set root-raised-cosine rolloff: 0.02..0.5 for capacity, 0.1..0.5 for classic.
+Defaults: capacity wire 0.02, capacity SSB/FM 0.10, classic 0.20.
+.TP
+.BI \-\-marker\-spacing " n"
+Set capacity intervals per full marker, 1..16.
+Defaults: wire 16, SSB/FM 4.
+.TP
+.BI \-\-pilot\-spacing " n"
+Set capacity data symbols per pilot group, 16..1024.
+Defaults: wire 256, SSB/FM 64.
+.PP
+The following options apply only to acoustic capacity profiles using OFDM.
+.TP
+.BI \-\-ofdm\-fft " n"
+Set FFT size, a power of two from 2048 to 32768.
+Defaults: acoustic 32768, acoustic-short 8192.
+.TP
+.BI \-\-ofdm\-prefix " samples"
+Set cyclic-prefix length, from 256 samples through the FFT size.
+Defaults: acoustic 4096, acoustic-short 512.
+.TP
+.BI \-\-ofdm\-pilots " n"
+Set pilot stride, 2..32. Default: 16.
+.TP
+.BI \-\-ofdm\-low " hz"
+.TQ
+.BI \-\-ofdm\-high " hz"
+Set the occupied band edges. Defaults: 500 and 18000 Hz.
+The band must lie within 100..20000 Hz, span at least 1000 Hz,
+and contain at least 512 active frequency bins.
+.SS Encryption
+Encryption is off unless
+.B \-\-keyfile
+is supplied. Plaintext checksums detect corruption but do not authenticate.
+.TP
+.BI \-\-keyfile " file"
+Enable encryption using an existing Data Pump symmetric keyfile.
+Both peers must use the same key. See
+.B pump keygen
+for key creation.
+.TP
+.BI \-\-key\-name " name"
+Select a named key. The default is the first key in the file.
+.TP
+.BI \-\-pad " path"
+Supply the external pad for a pad-backed keyfile.
+.B \-\-key\-name
+and
+.B \-\-pad
+require a keyfile unless
+.B \-\-no\-encryption
+is given.
+.TP
+.B \-\-encrypt
+Require encryption and an explicit
+.BR \-\-keyfile .
+.TP
+.B \-\-no\-encryption
+Select plaintext and ignore all keyfile options. Conflicts with
+.BR \-\-encrypt .
+.SH EXAMPLES
+Write a text transfer to a WAV file, then receive and save it:
+.PP
+.nf
+pump fast-tx \-\-text 'Hello from Fast' \-\-output message.wav
+pump fast-rx \-\-input message.wav \-\-save message.txt
+.fi
+.PP
+Use the same modeled acoustic settings on both machines; start the listener
+before transmitting:
+.PP
+.nf
+pump fast-listen \-\-profile acoustic-short \-\-expected\-snr \-6 \e
+    \-\-save received.bin
+pump fast-tx \-\-profile acoustic-short \-\-expected\-snr \-6 \e
+    \-\-input source.bin \-\-device default
+.fi
+.PP
+Inspect a classic profile:
+.PP
+.nf
+pump fast-info \-\-format classic \-\-apsk 256 \-\-code\-rate 7/8
+.fi
+.SH EXIT STATUS
+.TP
+.B 0
+Help or information displayed, transmission succeeded, or reception completed.
+.TP
+.B 2
+Invalid arguments, input/output failure, cancelled live operation,
+or incomplete or failed reception.
+.SH SEE ALSO
+.BR pump (1),
+.BR datapump-gui (1)

@@ -137,6 +137,44 @@ def package_files(payload, backend):
                f'Comment=Portable audio modem\nExec=datapump-{backend}\nTerminal=false\n'
                'Icon=utilities-terminal\nCategories=AudioVideo;Audio;\n')
     result[f'usr/share/applications/datapump-{backend}.desktop'] = (desktop.encode(), 0o644)
+    result.update(manual_files(payload, backend))
+    return result
+
+
+def manual_files(payload, backend):
+    """Expose manuals under the coinstallable distribution command names."""
+    names = {'pump': f'datapump-cli-{backend}',
+             'pump-fast': f'datapump-cli-{backend}-fast',
+             'datapump-gui': f'datapump-{backend}'}
+    sources = {name: f'share/man/man1/{name}.1' for name in names}
+    if not any(path in payload for path in sources.values()):
+        # Repackaging a historical release must preserve its original payload.
+        return {}
+    missing = set(sources.values()) - payload.keys()
+    if missing:
+        raise ValueError('Portable archive has an incomplete manual set: ' + ', '.join(sorted(missing)))
+    # A single substitution avoids replacing "pump" inside a renamed command.
+    # Accept ordinary hyphens, roff's printable hyphen escape and inline fonts.
+    command_names = [spelling for name in sorted(names, key=len, reverse=True)
+                     for spelling in (name, name.upper())]
+    words = '|'.join(re.escape(name).replace(r'\-', r'(?:\\)?-') for name in command_names)
+    pattern = re.compile(r'(?:(?<![\w-])|(?<=\\fB)|(?<=\\fI)|(?<=\\fR))('
+                         + words + r')(?![\w-])')
+    result = {}
+    for name, path in sources.items():
+        text = payload[path][0].decode('utf-8')
+        def rename(match):
+            original = match[0].replace(r'\-', '-')
+            replacement = names[original.lower()]
+            if original.isupper():
+                replacement = replacement.upper()
+            return replacement.replace('-', r'\-') if r'\-' in match[0] else replacement
+        data = pattern.sub(rename, text).encode()
+        # Suppress gzip's timestamp and filename, including in generated recipes.
+        compressed = io.BytesIO()
+        with gzip.GzipFile(filename='', mode='wb', fileobj=compressed, mtime=0) as stream:
+            stream.write(data)
+        result[f'usr/share/man/man1/{names[name]}.1.gz'] = (compressed.getvalue(), 0o644)
     return result
 
 

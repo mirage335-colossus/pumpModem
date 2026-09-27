@@ -120,6 +120,16 @@ function(datapump_install_native)
     list(APPEND DATAPUMP_SEARCH_DIRS "$<TARGET_FILE_DIR:${target}>")
   endforeach()
   install(TARGETS ${PACKAGE_TARGETS} RUNTIME DESTINATION bin)
+  # Keep the manual beside the matching command in ordinary installations and
+  # in every portable archive, before the portable inventory is calculated.
+  set(manual_directory "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../docs/man")
+  if("pump" IN_LIST PACKAGE_TARGETS)
+    install(FILES "${manual_directory}/pump.1" "${manual_directory}/pump-fast.1"
+      DESTINATION share/man/man1)
+  endif()
+  if("datapump-gui" IN_LIST PACKAGE_TARGETS)
+    install(FILES "${manual_directory}/datapump-gui.1" DESTINATION share/man/man1)
+  endif()
   if(NOT DATAPUMP_PORTABLE)
     return()
   endif()

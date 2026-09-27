@@ -117,14 +117,15 @@ def arch_recipe(metadata, repository, backend, rows, extras):
     text += '\n'.join('  ' + line for line in normalization(destination).splitlines()) + '\n'
     for name, (_, mode) in sorted(extras.items()):
         target = (f'usr/share/licenses/{package}/LICENSE' if name == 'DataPump-Bundled' else
-                  f'usr/share/applications/{name}' if name.endswith('.desktop') else f'usr/bin/{name}')
+                  f'usr/share/applications/{name}' if name.endswith('.desktop') else
+                  f'usr/share/man/man1/{name}' if name.endswith('.1.gz') else f'usr/bin/{name}')
         text += f'  install -Dm{mode:04o} "$srcdir/{name}" "$pkgdir/{target}"\n'
     text += '}\n'
     srcinfo += f'\npkgname = {package}\n'
     return {'PKGBUILD': (text.encode(), 0o644), '.SRCINFO': (srcinfo.encode(), 0o644), **extras}
 
 
-def gentoo_recipe(metadata, repository, backend, rows):
+def gentoo_recipe(metadata, repository, backend, rows, extras):
     release = apt_module().release_module()
     version = distro_version(metadata)
     floor = '2.36' if metadata['linux_baseline'] == 'bookworm-sdk' else '2.35'
@@ -149,8 +150,13 @@ def gentoo_recipe(metadata, repository, backend, rows):
     text += '\n'.join('\t' + line + ' || die' for line in normalization(destination).splitlines()) + '\n'
     text += (f'\tdobin "${{FILESDIR}}/datapump-{backend}" "${{FILESDIR}}/datapump-cli-{backend}"\n'
              '\tinsinto /usr/share/applications\n'
-             f'\tdoins "${{FILESDIR}}/datapump-{backend}.desktop"\n'
-             f'\tdocompress -x /opt/datapump/{backend}\n}}\n')
+             f'\tdoins "${{FILESDIR}}/datapump-{backend}.desktop"\n')
+    manuals = sorted(name for name in extras if name.endswith('.1.gz'))
+    if manuals:
+        text += '\tinsinto /usr/share/man/man1\n'
+        for name in manuals:
+            text += f'\tdoins "${{FILESDIR}}/{name}"\n\tdocompress -x /usr/share/man/man1/{name}\n'
+    text += f'\tdocompress -x /opt/datapump/{backend}\n}}\n'
     manifest = ''
     for arch in ARCHES:
         row = rows[f'linux-{arch}-{backend}']
@@ -202,7 +208,7 @@ def expected(directory, metadata, repository):
         arch_files.update({f'datapump-{backend}-bin/{name}': value for name, value in
                            arch_recipe(metadata, repository, backend, rows, local).items()})
         package = f'media-radio/datapump-{backend}-bin'
-        gentoo_files.update({f'{package}/{name}': value for name, value in gentoo_recipe(metadata, repository, backend, rows).items()})
+        gentoo_files.update({f'{package}/{name}': value for name, value in gentoo_recipe(metadata, repository, backend, rows, extras).items()})
         gentoo_files.update({f'{package}/files/{name}': value for name, value in extras.items()})
     readme = (f'DataPump {metadata["tag"]}\n\nRelease: https://github.com/{repository}/releases/tag/{metadata["tag"]}\n'
               f'Application source: {metadata["source_sha"]}\nPackaging source: {metadata["packager_sha"]}\n'

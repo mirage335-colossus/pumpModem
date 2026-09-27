@@ -84,7 +84,7 @@ jobs:
         run: |
           cmake --build build --config Release --target package --parallel $env:NUMBER_OF_PROCESSORS
           if ($LASTEXITCODE -ne 0) { throw "Native packaging failed" }
-          cmake -DARCHIVE_DIR="$PWD/build/releases" -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P tools/verify-native-archives.cmake 2>&1 | Tee-Object -FilePath build/package-archives.log
+          cmake -DARCHIVE_DIR="$PWD/build/releases" -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DREQUIRE_MANUALS=ON -P tools/verify-native-archives.cmake 2>&1 | Tee-Object -FilePath build/package-archives.log
           if ($LASTEXITCODE -ne 0) { throw "Archive verification failed" }
           'Portable Release relocation, corruption and both archive GUI checks completed; any incomplete smoke coverage is listed in the retained reports. Independent regression/calibration jobs still determine the overall workflow result.' >> $env:GITHUB_STEP_SUMMARY
       - name: Upload Windows offline bundles

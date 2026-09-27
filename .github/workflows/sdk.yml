@@ -135,7 +135,7 @@ jobs:
           echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
       - name: Verify the identical archives on this distribution
         shell: bash
-        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/downloaded" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.36 -P tools/verify-native-archives.cmake 2>&1 | tee "$RUNNER_TEMP/sdk-compatibility.log"
+        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/downloaded" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.36 -DREQUIRE_MANUALS=ON -P tools/verify-native-archives.cmake 2>&1 | tee "$RUNNER_TEMP/sdk-compatibility.log"
       - name: Preserve copied-runtime logs and incomplete coverage
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

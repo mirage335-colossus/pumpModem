@@ -1,0 +1,229 @@
+.TH DATAPUMP-GUI 1 "September 2026" "Data Pump 001_00" "User Commands"
+.nh
+.ad l
+.nr HY 0
+.ds AD l
+.SH NAME
+datapump-gui \- graphical audio modem for text and files
+.SH SYNOPSIS
+.B datapump-gui
+.RI [ options ]
+.SH DESCRIPTION
+.B datapump-gui
+sends and receives text, exact bit strings and files through an audio interface.
+It provides a message editor, file attachments, clipboard actions, QR previews
+and live signal plots.
+.PP
+An ordinary launch opens Fast Modem and listens on the selected audio device.
+The Modem menu also offers Robust Modem and Legacy Modem.
+Robust uses binary patterns for weak signals; Legacy supports BPSK31,
+BPSK125 and Olivia-4/2k text.
+The modes have separate settings.
+Peers must select matching waveform, source, coding and key settings.
+.PP
+FLTK and Rev builds provide the same application controls.
+The backend is selected at build time and reported by
+.BR \-\-version ;
+it cannot be switched at runtime.
+.SH OPTIONS
+.TP
+.B \-\-help
+Print a brief usage summary and exit.
+.TP
+.B \-\-version
+Print the version and compiled GUI backend, then exit.
+.TP
+.B \-\-color
+Use color where supported; this is the default.
+.TP
+.B \-\-monochrome
+Use grayscale.
+The last color or monochrome option wins.
+.TP
+.B \-\-simulation
+Open Robust Modem with a continuous simulated noisy channel instead of live
+audio. Transmissions run at computation speed, then replay in the plots.
+.SS Robust link settings
+Supplying any link setting opens Robust Modem.
+These options also accept
+.BR \-\-option=value .
+Unspecified settings retain their startup defaults.
+Link power, path loss and noise describe the planner and simulated channel;
+they do not set a radio's RF output power.
+.TP
+.BI \-\-tx\-dbm " DBM"
+Transmit power for the link budget, from \-200 to 100 dBm.
+Default: 3.
+.TP
+.BI \-\-path\-loss\-db " DB"
+Path loss, from 0 to 500 dB.
+Default: 120.
+.TP
+.BI \-\-noise\-dbm\-hz " DENSITY"
+Receiver noise density, from \-250 to 0 dBm/Hz.
+Default: \-164.
+.TP
+.BI \-\-oscillator " ID"
+Oscillator model:
+.BR crystal " (default), " gpsdo-xo ,
+.BR gpsdo-tcxo " or " gpsdo-ocxo .
+.TP
+.BI \-\-target\-snr " DB-HZ"
+Set the planner, short-message and long-message target carrier-to-noise-density
+ratios, from \-200 to 200 dB-Hz.
+This is a planning target, not measured in-band SNR.
+.TP
+.BI \-\-short\-target\-snr " DB-HZ"
+Override the short-message target without changing the planner target.
+Default: 32.
+.TP
+.BI \-\-long\-target\-snr " DB-HZ"
+Override the long-message and attachment target without changing the planner
+target. Default: 55.
+.TP
+.BI \-\-rate " FREQUENCY"
+Set the nominal rate/bandwidth, from 0.01 Hz to 30 MHz.
+Default: 3.6 kHz.
+This is not the payload bit rate.
+.B \-\-bw
+is an alias.
+.TP
+.BI \-\-carrier " FREQUENCY"
+Set the carrier frequency, greater than zero and at most 30 MHz.
+Default: 1500 Hz.
+.TP
+.BI \-\-dsp\-workspace " PERCENT"
+Limit the Robust DSP workspace to 25%, 50% or 75% of available RAM.
+Default: 50%.
+The percent sign may be omitted.
+.TP
+.B \-\-auto\-pattern
+Select automatic pattern planning, the default.
+.TP
+.BI \-\-pattern " MODE"
+Select
+.BR auto-pattern ,
+.BR auto-keystream ,
+.BR auto-tone ,
+.BI pattern- N
+with N equal to 3, 4, 6, 8, 12 or 16, or
+.BI tone- N
+with N equal to 1, 2, 3, 4, 8, 32, 128, 1024, 4096 or 16384.
+Tone modes disable private spreading and encryption.
+.PP
+Frequencies accept Hz, kHz or MHz, case-insensitively; bare numbers mean Hz.
+Quote a value containing spaces.
+The complete combination must fit the local modem and workspace constraints.
+.SS Diagnostics
+.TP
+.B \-\-self\-check
+Run shared GUI and transfer checks, then exit.
+No display or audio hardware is required.
+.TP
+.B \-\-smoke\-test
+Run the native GUI workflow checks using simulated audio, then exit.
+A working graphical display is required.
+.TP
+.BI \-\-smoke\-dir " DIRECTORY"
+Store smoke-test fixtures in DIRECTORY.
+By default, use a temporary directory and remove it after success.
+.TP
+.BI \-\-smoke\-timeout " SECONDS"
+Set the smoke workload allowance, from 10 to 1200 seconds.
+Default: 100.
+.TP
+.BI \-\-smoke\-hold " SECONDS"
+Keep the window open after successful smoke checks, from 0 to 60 seconds.
+Default: 0.
+.TP
+.BI \-\-smoke\-view " NAME"
+Select the initial page and the page shown after successful smoke checks:
+.BR console " (default), " planner ,
+.BR compression ,
+.BR flow ,
+.BR transmission " or " fast-modem .
+.TP
+.BI \-\-smoke\-scroll " FRACTION"
+Set the page scroll position after successful smoke checks, from 0 (top) to
+1 (bottom). Default: 0.
+.SH OPERATION
+Choose an audio device and matching peer settings before transmitting.
+Use Message for text or Attach file for an attachment; Use text restores the
+text draft. Live audio reception pauses during transmission and resumes afterward.
+.PP
+In Fast Modem, Ctrl+Enter transmits; Enter inserts a newline.
+In Robust Modem, Enter transmits by default; the send preference can require
+Ctrl+Enter instead.
+Cancel stops the current transmission or simulation replay.
+.PP
+Robust text of 1\(en16 source bytes uses the fixed short dictionary.
+Explicit raw-bit input sends precisely its bits, preserving leading zeros and
+partial bytes. Neither short path adds a header, padding, FEC or MAC.
+Longer text and all attachments use fixed coding intervals.
+.PP
+Pending Robust receptions expose each newly accepted bit in the same row,
+retaining the first 4096 diagnostic bits.
+Reception completes only when consecutive fully scored absent symbols cover
+at least six seconds. A long symbol must finish before it can count as absent;
+cancellation or a decodable prefix does not complete a message.
+Pending content cannot be copied or saved as a completed message.
+.PP
+Completed text can be copied or pasted into the message draft.
+Received text and suggested filenames use a restricted ASCII presentation;
+disallowed source bytes appear as underscores.
+Exact completed attachment bytes remain available for an explicit save.
+Received files are never opened or executed automatically.
+.PP
+Developer mode reveals advanced controls and inspection pages.
+The Robust Link planner previews a link independently of the live targets.
+Its Launch command can be copied for reuse; Load applies validated settings
+without executing a shell command or starting a transmission.
+.SH FILES
+Keyfiles and attachment paths are chosen through the interface.
+Received content is kept in bounded RAM, with no receive cache or temporary
+source files on disk. Save needed content before clearing it or closing the
+application; older entries may be evicted at the memory limit.
+Saving received files and generating keyfiles do not overwrite existing files.
+.SH ENVIRONMENT
+.TP
+.B DISPLAY
+X display used by Linux desktop builds.
+.TP
+.B ALSA_PLUGIN_DIR
+ALSA plugin directory for Linux live audio.
+An explicit value takes precedence over portable-bundle host-plugin discovery.
+.SH EXIT STATUS
+.TP
+.B 0
+Normal exit, or successful requested check.
+This does not assert that every attempted reception succeeded.
+.TP
+.B 1
+Invalid arguments, startup failure or failed check.
+.TP
+.B 75
+The smoke workload allowance expired with recent sampled-transmission progress.
+The diagnostic begins with
+.BR "INCOMPLETE GUI_SMOKE_BUDGET:" .
+Coverage is incomplete; this is not a successful smoke test.
+.SH EXAMPLES
+Open the desktop console:
+.PP
+.nf
+    datapump-gui
+.fi
+.PP
+Simulate a Robust link with a common 40 dB-Hz target:
+.PP
+.nf
+    datapump-gui \-\-simulation \-\-target\-snr 40 \-\-rate 1.2kHz
+.fi
+.PP
+Check an installation without opening a window:
+.PP
+.nf
+    datapump-gui \-\-self\-check
+.fi
+.SH SEE ALSO
+.BR pump (1),
+.BR pump-fast (1)

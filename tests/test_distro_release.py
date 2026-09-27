@@ -31,6 +31,8 @@ def archive(path, metadata, target):
              'share/doc/datapump/LICENSE': (b'fixture license: terms retained\n', 0o444),
              'share/doc/datapump/third_party/rev/README.datapump.md': (b'Provenance is not a new license grant\n', 0o644),
              'share/doc/datapump/build-info.txt': (f'GUI: ON ({backend})\n'.encode(), 0o644)}
+    files.update({f'share/man/man1/{name}.1': ((ROOT / f'docs/man/{name}.1').read_bytes(), 0o644)
+                  for name in ('pump', 'pump-fast', 'datapump-gui')})
     sums = ''.join(f'{hashlib.sha256(data).hexdigest()}  {name}\n' for name, (data, _) in files.items())
     files['manifest.sha256'] = (sums.encode(), 0o644)
     with tarfile.open(path, 'w:gz') as stream:
@@ -163,6 +165,10 @@ class DistroReleaseTests(unittest.TestCase):
             '''
         subprocess.run(['bash', '-c', command, 'recipe-test', str(recipe)], env=env, check=True)
         distro.verify_installed(self.assets, self.metadata, backend, architecture, installed)
+        manual = installed / f'usr/share/man/man1/datapump-cli-{backend}.1.gz'
+        self.assertIn(f'datapump-cli-{backend}'.encode(), gzip.decompress(manual.read_bytes()))
+        self.assertEqual((installed / f'opt/datapump/{backend}/share/man/man1/pump.1').read_bytes(),
+                         (ROOT / 'docs/man/pump.1').read_bytes())
         return installed
 
     def test_arch_and_gentoo_install_phases_preserve_bytes_and_modes_for_both_arches(self):

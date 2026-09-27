@@ -1,0 +1,566 @@
+.TH PUMP 1 "September 2026" "Data Pump 001_00" "User Commands"
+.nh
+.ad l
+.nr HY 0
+.ds AD l
+.SH NAME
+pump \- transfer text and files over audio
+.SH SYNOPSIS
+.B pump
+.I command
+.RI [ options ]
+.br
+.B pump
+.BR \-\-help " | " \-\-version
+.SH DESCRIPTION
+.B pump
+sends and receives text, files and exact bit strings through an audio device
+or a WAV file. It also simulates links, estimates airtime and produces QR images.
+The desktop interface is
+.BR datapump-gui (1).
+.PP
+Both ends must use matching modem, source compression, error correction and
+key settings. Bandwidth is not the payload bit rate. Use
+.B estimate
+before sending at a slow setting.
+.PP
+This page describes the regular modem. The independent Fast commands and their
+options are documented in
+.BR pump-fast (1).
+.SH COMMANDS
+.TP
+.B tx
+Send text or a file. Requires
+.B \-\-output
+for a WAV file or
+.B \-\-device
+for live audio; choose one.
+.TP
+.B rx
+Decode a WAV selected by
+.BR \-\-input ,
+or record an audio device for
+.B \-\-seconds
+and decode the recording. Use
+.B \-\-save
+to write recovered source bytes.
+.TP
+.B listen
+Receive continuously from the default audio device, or the selected
+.BR \-\-device .
+Stop with Ctrl-C or set
+.BR \-\-seconds .
+With
+.B \-\-text
+or
+.BR \-\-input ,
+also transmit one message. A simulation preset selects a simulated channel.
+.TP
+.B simulate
+Transmit through a sampled channel and attempt blind reception. No audio device
+is used. Optionally save the simulated capture with
+.BR \-\-output .
+.TP
+.B estimate
+Print JSON containing encoded size, wire bits, airtime, modem settings and a
+relative low-probability-of-intercept model. Does not generate audio.
+Model estimates do not establish physical-link performance or secrecy.
+.TP
+.B analyze-link
+Print statistical link analysis as JSON. Requires
+.BR \-\-text ,
+.B \-\-input
+or
+.BR \-\-bits ,
+and either a simulation preset or both
+.B \-\-tx\-dbm
+and
+.BR \-\-attenuation\-db .
+Does not generate audio or run the receiver.
+.TP
+.B status-tx
+Send the exact 1\(en4096 binary digits given by
+.BR \-\-bits .
+Requires a WAV output or audio device. Leading zeros and partial bytes are
+significant; no header, padding, error correction or authentication is added.
+.TP
+.B status-rx
+Discover raw bits in a WAV, then compare them with
+.BR \-\-bits .
+Always prints JSON. The expected bits do not guide acquisition; a match is
+not authentication.
+.TP
+.B devices
+List audio device identifiers and descriptions, separated by tabs.
+.TP
+.B keygen
+Create a symmetric keyfile at
+.BR \-\-output .
+The file contains a 128 MiB random header and an encrypted named key collection.
+It is created with owner-only access and must not already exist.
+.TP
+.B keys
+List the names in
+.BR \-\-keyfile ,
+one per line.
+.TP
+.B qr
+Encode UTF-8 input as a QR Level L image, up to 500 Unicode characters.
+Writes SVG by default, to standard output or
+.BR \-\-output .
+QR input is plaintext; key and audio options do not apply.
+.TP
+.BR fast-info ", " fast-tx ", " fast-rx ", " fast-listen
+Inspect, send or receive with the independent Fast modem. See
+.BR pump-fast (1).
+.SH OPTIONS
+Options take the form
+.BI \-\-name " value"
+or
+.BI \-\-name= value .
+Flags take no value. Duplicate and unknown options are errors.
+.SS Input and output
+.TP
+.BI \-\-text " text"
+Text to send. Mutually exclusive with
+.BR \-\-input .
+.TP
+.BI \-\-input " path"
+Source file for transmission, or WAV for reception. A single
+.B \-
+reads standard input. Transmit commands without
+.B \-\-text
+or
+.B \-\-input
+read standard input.
+.TP
+.BI \-\-kind " text|file|screenshot"
+Source kind. Defaults to text for
+.B \-\-text
+or standard input, and file for a named input path.
+.TP
+.BI \-\-filename " name"
+Display filename for an attachment; a basename, not a destination path.
+Defaults to the input basename.
+.TP
+.BI \-\-output " path"
+Create a WAV, keyfile or QR image. Existing files are never overwritten.
+.TP
+.BI \-\-save " path"
+For
+.B rx
+only: save exact decoded source bytes after physical completion.
+Fails if there is no complete decoded source or the path already exists.
+.TP
+.B \-\-json
+Print received content and diagnostics as JSON. See
+.B OUTPUT
+for completion and event handling.
+.TP
+.BI \-\-callsign " text"
+.TQ
+.BI \-\-grid " text"
+Set local callsign and grid metadata. These fields are not transmitted;
+include them in the text to send them.
+.TP
+.B \-\-repeatable
+Apply the local repeatable-text eligibility limit: two seconds of wire-bit
+airtime, with a one-byte minimum allowance. This flag is not transmitted
+and does not start a repeating transmit loop.
+.TP
+.BI \-\-bits " digits"
+Exact binary input for the status commands or
+.BR analyze-link .
+Only
+.B 0
+and
+.B 1
+are allowed; length is 1\(en4096.
+.TP
+.BI \-\-format " svg|pbm"
+QR image format; default
+.BR svg .
+.SS Modem and reception
+.TP
+.BI \-\-bw " Hz"
+Nominal bandwidth, 0.01\(en30000000 Hz; default 1200.
+Decimal values and suffixes
+.BR Hz ,
+.BR k ,
+.B kHz
+and
+.B MHz
+are accepted. The usable audio-device passband still applies.
+.TP
+.BI \-\-target\-snr " dB-Hz"
+Transmit planning target C/N0; default 32. Selects automatic tuning.
+This is a configured target, not a measured signal-to-noise ratio.
+.TP
+.BI \-\-receive\-targets " list"
+Comma-separated receive C/N0 targets; default 32. Requires automatic tuning.
+Invalid lists reset to 32 with a diagnostic. Bandwidth and pattern stay fixed.
+For example:
+.BR "40,6,\-6" .
+.TP
+.BI \-\-pattern " mode"
+Select automatic tuning with
+.BR auto-keystream ,
+.B auto-pattern
+or
+.BR auto-tone ;
+or select
+.BI pattern- N
+with N = 3, 4, 6, 8, 12, 16, or
+.BI tone- N
+with N = 1, 2, 3, 4, 8, 32, 128, 1024, 4096, 16384.
+Defaults to auto-keystream with a keyfile, auto-pattern otherwise.
+Tone modes disable encryption and private spreading.
+.TP
+.BI \-\-sample\-rate " Hz"
+Manual internal DSP clock, 64\(en120000000 samples/second.
+Normally chosen from bandwidth and carrier, at least four times each.
+The usual 1200 Hz bandwidth and 1500 Hz carrier use 6000 samples/second.
+Audio hardware negotiates its own clock and resamples as needed.
+.TP
+.BI \-\-carrier " Hz"
+Manual carrier override. Default: the greater of 1500 Hz and 0.75 times bandwidth.
+.TP
+.BI \-\-spreading " N"
+Manual chips per symbol, 1\(en16384.
+.TP
+.B \-\-scramble
+Enable keyed pattern rotation. Requires a keyfile.
+.TP
+.B \-\-dsss
+Enable independent keyed direct-sequence spreading. Requires a keyfile.
+.PP
+Any manual sample-rate, carrier, spreading, scramble or DSSS option disables
+automatic tuning. These options cannot be combined with
+.B \-\-target\-snr
+or
+.BR \-\-pattern .
+.TP
+.BI \-\-fec " 20|60|off"
+Reed\(enSolomon parity overhead for interval sources; default 60.
+Does not add parity to short text or exact bit strings.
+.TP
+.B \-\-no\-compression
+Disable interval source compression. Both peers must select the same codec.
+The fixed short-text dictionary is unchanged.
+.TP
+.BI \-\-time " seconds"
+Local UNIX epoch in whole seconds; defaults to the current time.
+For saved keyed WAVs, supply the transmission epoch on reception, within
+the search window. Without an explicit epoch, live operation uses the actual
+transmit/capture start.
+.TP
+.BI \-\-search\-seconds " N"
+Search epochs within N seconds on either side, nearest first;
+0\(en32768, default 6.
+.TP
+.BI \-\-progress
+Report timing search to standard error. With
+.B listen \-\-json
+also emit signal and preview events.
+.SS Keys and resource limits
+.TP
+.BI \-\-keyfile " path"
+Load symmetric keys. Both peers need the same key set and any bound pad.
+Without a keyfile, operation is unencrypted.
+.TP
+.BI \-\-key\-name " name"
+Select a named key set; default the first.
+.B listen
+without this option tries all sets in the keyfile on reception.
+.TP
+.BI \-\-key\-names " list"
+Comma-separated names to create with
+.BR keygen ;
+default
+.BR Default .
+.TP
+.BI \-\-pad " path"
+Bind a keyfile to an external pad at creation, or supply its bound pad at load.
+The pad must be larger than 1 GiB and remains a separate file.
+.TP
+.BI \-\-memory\-mb " N"
+Batch PCM workspace, 1\(en4096 MiB; default 256.
+.TP
+.BI \-\-cache\-mb " N"
+Source input and received-content limit, 1\(en4096 MiB; default 256.
+.TP
+.BI \-\-dsp\-mb " N"
+Streaming DSP workspace, 1\(en1024 MiB; default 64.
+These separate limits are not a total process memory cap.
+.SS Recovery
+These options apply to
+.BR rx ,
+.B simulate
+and
+.BR listen .
+Additional hard-bit recovery begins only after physical completion.
+.TP
+.BI \-\-recovery\-seconds " N"
+Recovery time budget, 0\(en86400 seconds; default 300. Zero disables it.
+.TP
+.BI \-\-recovery\-threads " N"
+Recovery workers, 0\(en1024; default 0 selects available CPU cores.
+.TP
+.BI \-\-recovery\-bits " N"
+Retained hard-bit slots, 1024\(en1048576; default 65536.
+Separate from the displayed raw-bit prefix.
+.TP
+.BI \-\-recovery\-errors " N"
+Reed\(enSolomon capacity reserved for additional byte errors, 0\(en24; default 2.
+.SS Audio and simulation
+.TP
+.BI \-\-device " id"
+Audio endpoint from
+.BR devices .
+Use
+.B default
+for the system default.
+.TP
+.B \-\-right\-mono
+Transmit on the right channel instead of the default left channel.
+A mono device uses its sole channel.
+.TP
+.B \-\-no\-mono
+Transmit on both stereo channels. Conflicts with
+.BR \-\-right\-mono .
+.TP
+.BI \-\-device\-type " audio"
+Select analog audio, the only implemented device type.
+.TP
+.BI \-\-seconds " N"
+For live
+.BR rx ,
+recording duration; default 15 seconds.
+For
+.BR listen ,
+wall-clock run limit, 0\(en86400 seconds; default 0 means continuous.
+Stopping a capture does not complete a reception.
+.TP
+.BI \-\-tx\-delay " N"
+Delay after live transmission, 6\(en3600 seconds; default 6.
+Automatically extended when the symbol-absence interval requires more time.
+.TP
+.BI \-\-snr " dB"
+Simulated sample-power signal/noise ratio; default 20. For
+.B simulate
+only; mutually exclusive with a simulation preset.
+.TP
+.BI \-\-simulation " preset"
+Link preset for
+.BR simulate ,
+.B listen
+or
+.BR analyze-link .
+Quote the two-part name. Presets are
+.B "3dBm \-6dB"
+and 3dBm at \-60, \-90, \-120, \-170, \-200 or \-230dB;
+50dBm at \-200 or \-270dB; and 70dBm at \-250dB.
+In
+.BR listen ,
+.B no
+or
+.B off
+selects live audio.
+.TP
+.BI \-\-seed " N"
+Simulation or statistical-analysis seed; default 1.
+.TP
+.BI \-\-delay\-samples " N"
+Initial sampled-channel delay for
+.B simulate
+or the assumed delay for
+.BR analyze-link ;
+default 137.
+.TP
+.BI \-\-frequency\-offset " Hz"
+Frequency offset for
+.B simulate
+or
+.BR analyze-link ;
+default 0.
+.TP
+.BI \-\-receiver\-time " seconds"
+Independent receive epoch for
+.BR simulate ;
+default the transmit epoch.
+.TP
+.BI \-\-oscillator " model"
+Impairment model for simulation and analysis:
+.B crystal
+(default),
+.BR gpsdo-xo ,
+.B gpsdo-tcxo
+or
+.BR gpsdo-ocxo .
+Does not control hardware.
+.TP
+.BI \-\-clock\-error\-ppm " N"
+Override relative clock error; crystal default 100 ppm.
+.TP
+.BI \-\-phase\-noise " N"
+Override phase diffusion in degrees per square root second;
+crystal default 0.5.
+.SS Statistical link analysis
+The following options apply only to
+.BR analyze-link .
+.TP
+.BI \-\-tx\-dbm " N"
+.TQ
+.BI \-\-attenuation\-db " N"
+Transmit power and nonpositive channel attenuation. Supply both, or use
+.BR \-\-simulation .
+.TP
+.BI \-\-noise\-figure\-db " N"
+Receiver noise figure; default 10 dB.
+.TP
+.BI \-\-symbol\-seconds " N"
+Override the analyzed symbol duration; default the transmit plan.
+.TP
+.BI \-\-coherent\-seconds " N"
+Maximum coherent segment; default 3600 seconds.
+.TP
+.BI \-\-trials " N"
+Monte Carlo trials per reference model, 1\(en1000000; default 10000.
+.TP
+.BI \-\-hypotheses " N"
+Searched alternatives, including both bits; default 1000000.
+.TP
+.BI \-\-false\-alarm " P"
+Global reference false-alarm budget; default 0.000001.
+.TP
+.BI \-\-residual\-frequency\-hz " N"
+Frequency error after hypothetical acquisition; default 0.
+.TP
+.BI \-\-template\-correlation " N"
+Assumed normalized template correlation; default 0.
+.SS General
+.TP
+.B \-\-help
+Print command help and exit.
+.TP
+.B \-\-version
+Print the application version and exit.
+.SH RECEPTION
+Nonempty text of 1\(en16 source bytes uses a fixed short dictionary.
+Short text and explicit bit strings have no header, transmitted length,
+padding, error correction or MAC. Longer text and all attachments use fixed
+128-coded-byte intervals, each preceded by a 192-bit marker.
+.PP
+Only observed signal absence ends reception. Consecutive fully scored absent
+symbols must cover six seconds; a long symbol must finish before it can be
+classified absent. EOF, cancellation, successful decoding and authentication
+do not complete a stream. Generated WAVs include quiet tail samples;
+truncated input WAVs do not acquire an artificial tail.
+.PP
+Newly accepted bits appear on the next progress poll. The diagnostic prefix
+retains at most 4096 raw bits; counts can continue beyond it. Missing slots
+are zero placeholders, not observed zero bits. Recovery status is separate
+from physical completion.
+.SH OUTPUT
+Text reception writes restricted ASCII to standard output. Letters, digits,
+comma, period, @, space, hyphen, underscore, slash, equals and newline are
+preserved; other received bytes are shown as underscores. Received filenames
+use the same restriction. Use
+.B rx \-\-save
+for original bytes. Attachments are not saved automatically.
+Diagnostics go to standard error.
+.PP
+With
+.BR \-\-json ,
+inspect
+.BR stream_complete ,
+.BR content_validated ,
+.B short_text_decoded
+and
+.B authenticated
+separately. Decoded short text is not authenticated.
+.B estimate
+and
+.B analyze-link
+always produce JSON.
+.PP
+.B listen \-\-json
+produces one JSON object per line. Track each
+.B signal_id
+at its latest
+.BR revision ;
+clear the previous interpretation on revision and remove identities in
+.BR superseded_ids .
+A later receive profile may revise a completed interpretation back to pending.
+.B reception_update
+links an interpretation's
+.B reception_id
+to a completed payload's
+.BR id .
+.SH EXAMPLES
+Simulate a short message:
+.PP
+.nf
+.RS
+pump simulate \-\-text 'CQ hello' \-\-snr 12 \-\-json
+.RE
+.fi
+.PP
+Estimate a transmission, then send and receive a file using a fixed epoch:
+.PP
+.nf
+.RS
+pump estimate \-\-input note.txt
+pump tx \-\-input note.txt \-\-time 1800000000 \e
+    \-\-output transfer.wav
+pump rx \-\-input transfer.wav \-\-time 1800000000 \e
+    \-\-save received.txt
+.RE
+.fi
+.PP
+Receive live audio, or send on a separate invocation:
+.PP
+.nf
+.RS
+pump listen \-\-device default \-\-json
+pump tx \-\-text 'hello' \-\-device default
+.RE
+.fi
+.PP
+Create and inspect a shared keyfile:
+.PP
+.nf
+.RS
+pump keygen \-\-output shared.key \-\-key\-names Home,Portable
+pump keys \-\-keyfile shared.key
+.RE
+.fi
+.PP
+Add the same
+.B \-\-keyfile shared.key \-\-key\-name Home
+to both ends of an encrypted transfer.
+.SH EXIT STATUS
+.TP
+.B 0
+Command finished. This alone does not prove successful reception;
+check the JSON completion and validation fields.
+.TP
+.B 2
+Invalid arguments, input/output failure or another reported error.
+.SH FILES
+Input, output, keyfile and pad paths are explicit. Received content is retained
+in bounded memory; no receive disk cache is created. Output and save commands
+refuse to overwrite existing files.
+.SH ENVIRONMENT
+.TP
+.B ALSA_PLUGIN_DIR
+ALSA plugin directory for Linux live audio. An explicit value takes precedence
+over portable-bundle host-plugin discovery.
+.SH NOTES
+Keep keyed peers' clocks within the configured search window. Do not reuse a
+key and transmit schedule position: this can reveal relationships between
+plaintexts and permits replay. Interval authentication does not authenticate
+an intended whole-stream length.
+.SH SEE ALSO
+.BR pump-fast (1),
+.BR datapump-gui (1)

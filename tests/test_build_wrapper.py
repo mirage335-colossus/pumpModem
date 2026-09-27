@@ -317,6 +317,7 @@ if os.environ.get("FAIL_STEP") == ("build" if "--build" in sys.argv else "config
         self.assertIn("-DDATAPUMP_PORTABLE=ON", calls[0])
         self.assertIn("package", calls[1])
         self.assertTrue(calls[2][-1].endswith("/tools/verify-native-archives.cmake"))
+        self.assertIn("-DREQUIRE_MANUALS=ON", calls[2])
         self.assertFalse(any(arg.startswith("-DMAX_GLIBC=") for arg in calls[2]))
 
     def test_package_accepts_explicit_abi_ceiling(self):

@@ -289,7 +289,7 @@ if [ -n "$group" ]; then
             --no-tests=error --parallel "$jobs" -L "^$label$" -LE native_gui
     fi
 elif [ "$command_name" = package ]; then
-    set -- "-DARCHIVE_DIR=$build_dir/releases" "-DBUILD_DIR=$build_dir" -DGUI_SMOKE=OFF
+    set -- "-DARCHIVE_DIR=$build_dir/releases" "-DBUILD_DIR=$build_dir" -DGUI_SMOKE=OFF -DREQUIRE_MANUALS=ON
     if [ -n "${DATAPUMP_MAX_GLIBC:-}" ]; then
         set -- "$@" "-DMAX_GLIBC=$DATAPUMP_MAX_GLIBC"
     elif [ -n "$sdk_root" ]; then

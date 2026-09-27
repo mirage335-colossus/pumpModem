@@ -46,9 +46,9 @@ jobs:
             set -- "build/arm-rev-copied destination"/DataPump-*
             test "$#" -eq 1
             package_root=$PWD/$1
-            cmake -DPACKAGE_ROOT="$package_root" -DVERIFY_ONLY=ON -P tools/verify-native-package.cmake
+            cmake -DPACKAGE_ROOT="$package_root" -DVERIFY_ONLY=ON -DREQUIRE_MANUALS=ON -P tools/verify-native-package.cmake
             xvfb-run -a -s "-screen 0 2400x1800x24 -dpi 96" python3 tools/check-rev-graphics-startup.py "$package_root" "$PWD/build/arm-rev-graphics-startup.log"
-            cmake -DPACKAGE_ROOT="$package_root" -DVERIFY_ONLY=ON -P tools/verify-native-package.cmake
+            cmake -DPACKAGE_ROOT="$package_root" -DVERIFY_ONLY=ON -DREQUIRE_MANUALS=ON -P tools/verify-native-package.cmake
           '
       - name: Verify the same package and run its complete GUI smoke on Ubuntu 22.04 and Trixie
         if: inputs.smoke
@@ -85,10 +85,10 @@ jobs:
               set -- "$destination"/DataPump-*
               test "$#" -eq 1
               package_root=$1
-              cmake -DPACKAGE_ROOT="$package_root" -DVERIFY_ONLY=ON -P tools/verify-native-package.cmake
+              cmake -DPACKAGE_ROOT="$package_root" -DVERIFY_ONLY=ON -DREQUIRE_MANUALS=ON -P tools/verify-native-package.cmake
               cmake -DPACKAGE_ROOT="$package_root" -DMAX_GLIBC=2.35 -P tools/verify-linux-abi.cmake
-              xvfb-run -a -s "-screen 0 2400x1800x24 -dpi 96" cmake -DPACKAGE_ROOT="$package_root" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P tools/verify-native-package.cmake
-              cmake -DPACKAGE_ROOT="$package_root" -DVERIFY_ONLY=ON -P tools/verify-native-package.cmake
+              xvfb-run -a -s "-screen 0 2400x1800x24 -dpi 96" cmake -DPACKAGE_ROOT="$package_root" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DREQUIRE_MANUALS=ON -P tools/verify-native-package.cmake
+              cmake -DPACKAGE_ROOT="$package_root" -DVERIFY_ONLY=ON -DREQUIRE_MANUALS=ON -P tools/verify-native-package.cmake
               (cd build/arm-rev-package/releases && sha256sum --check SHA256SUMS.txt)
             ' 2>&1 | tee "$smoke_reports/verification.log"
           done

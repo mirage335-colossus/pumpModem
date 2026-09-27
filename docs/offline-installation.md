@@ -101,6 +101,7 @@ permissions on Linux. The layout is:
 | `bin/pump` | Native command-line modem; `.exe` on Windows |
 | `lib/` | Collected Linux shared libraries |
 | `bin/*.dll` | Any remaining Windows application DLLs |
+| `share/man/man1/` | UNIX manual pages for the installed commands and Fast subcommands |
 | `share/doc/datapump/` | Documentation, licenses, dependency provenance, and notices |
 | `manifest.sha256` | Checksums of the complete installed file inventory |
 
@@ -118,6 +119,40 @@ as owned files, so no link points back to the source computer. Windows locates
 the application's remaining DLLs beside its executables. Moving the installation
 does not require an environment variable, launcher script, registry entry, or
 regeneration step.
+
+## Manual pages
+
+The concise command references are `pump(1)`, `pump-fast(1)` and
+`datapump-gui(1)`. `pump-fast` is a manual for the `pump fast-*` subcommands,
+not a separate executable. CLI-only installations include the first two pages.
+
+With a UNIX manual reader, read a page directly from an extracted bundle:
+
+```sh
+man -l ./DataPump-portable/share/man/man1/pump.1
+man -l ./DataPump-portable/share/man/man1/pump-fast.1
+man -l ./DataPump-portable/share/man/man1/datapump-gui.1
+```
+
+Or search the bundle's manual directory with
+`man -M ./DataPump-portable/share/man pump`. A normal system-prefix installation
+provides `man pump`, `man pump-fast` and, when built, `man datapump-gui`.
+The roff source pages are included on Windows too; viewing them requires a
+manual reader.
+
+Debian, pacman, Arch recipes and Gentoo packages expose pages named after their
+coinstallable commands:
+
+```sh
+man datapump-cli-fltk
+man datapump-cli-fltk-fast
+man datapump-fltk
+```
+
+Replace `fltk` with `rev` for that backend. These copies use the installed
+command names in examples and cross-references. The canonical pages remain
+inside `/opt/datapump/BACKEND/share/man/man1/`. Manuals are included in new
+builds; repackaging an older release preserves its original documentation.
 
 Archive a known working installation before updating. Install and check a new
 complete release alongside it; avoid mixing executable and library files from

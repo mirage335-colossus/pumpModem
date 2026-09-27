@@ -379,7 +379,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Configure failed' }
           cmake --build build/release-windows --config Release --target package --parallel $env:NUMBER_OF_PROCESSORS
           if ($LASTEXITCODE -ne 0) { throw 'Packaging failed' }
-          cmake -DARCHIVE_DIR="$PWD/build/release-windows/releases" -DBUILD_DIR="$PWD/build/release-windows" -P tools/verify-native-archives.cmake
+          cmake -DARCHIVE_DIR="$PWD/build/release-windows/releases" -DBUILD_DIR="$PWD/build/release-windows" -DREQUIRE_MANUALS=ON -P tools/verify-native-archives.cmake
           if ($LASTEXITCODE -ne 0) { throw 'Archive checks failed' }
       - name: Upload this platform directly to the draft release
         shell: pwsh

@@ -31,6 +31,8 @@ def fixture_archive(path, metadata, target, additions=()):
              'bin/datapump-gui': b'#!/bin/sh\nexit 0\n',
              'lib/example.so': b'fixture private library',
              'share/doc/datapump/build-info.txt': f'GUI: ON ({backend})\n'.encode()}
+    files.update({f'share/man/man1/{name}.1': (ROOT / f'docs/man/{name}.1').read_bytes()
+                  for name in ('pump', 'pump-fast', 'datapump-gui')})
     sums = ''.join(f'{hashlib.sha256(data).hexdigest()}  {name}\n' for name, data in files.items())
     files['manifest.sha256'] = sums.encode()
     with tarfile.open(path, 'w:gz') as archive:
@@ -44,6 +46,32 @@ def fixture_archive(path, metadata, target, additions=()):
 
 
 class DesktopEntryTests(unittest.TestCase):
+    def test_manual_names_and_references_follow_the_coinstallable_wrappers(self):
+        source = (b'.TH PUMP 1 "September 2026" "Data Pump 001_00" "User Commands"\n'
+                  b'.SH NAME\npump \\- audio modem\n'
+                  b'.BR pump\\-fast (1),\n.BR datapump-gui (1)\n'
+                  b'\\fBpump\\fR --help\n')
+        payload = {f'share/man/man1/{name}.1': (source, 0o644)
+                   for name in ('pump', 'pump-fast', 'datapump-gui')}
+        for backend in apt.BACKENDS:
+            files = apt.package_files(payload, backend)
+            installed = f'usr/share/man/man1/datapump-cli-{backend}.1.gz'
+            text = gzip.decompress(files[installed][0]).decode()
+            self.assertIn(f'.TH DATAPUMP-CLI-{backend.upper()} 1', text)
+            self.assertIn('"Data Pump 001_00"', text)
+            self.assertIn(f'datapump-cli-{backend} \\- audio modem', text)
+            self.assertIn(f'.BR datapump\\-cli\\-{backend}\\-fast (1)', text)
+            self.assertIn(f'.BR datapump-{backend} (1)', text)
+            self.assertIn(f'\\fBdatapump-cli-{backend}\\fR --help', text)
+            self.assertEqual(files[installed][1], 0o644)
+            self.assertEqual(files[f'opt/datapump/{backend}/share/man/man1/pump.1'], (source, 0o644))
+            self.assertEqual(len([name for name in files if name.startswith('usr/share/man/')]), 3)
+
+    def test_historical_archives_remain_repackagable_but_partial_manuals_fail(self):
+        self.assertEqual(apt.manual_files({}, 'fltk'), {})
+        with self.assertRaisesRegex(ValueError, 'incomplete manual set'):
+            apt.manual_files({'share/man/man1/pump.1': (b'manual', 0o644)}, 'fltk')
+
     def test_audio_desktop_entries_include_the_required_parent_category(self):
         # Freedesktop's registered Audio category requires AudioVideo. This
         # shared entry is installed by Debian, Arch and Gentoo packaging.
@@ -102,7 +130,12 @@ class AptReleaseTests(unittest.TestCase):
                          {(arch, backend) for arch in apt.ARCHES for backend in apt.BACKENDS})
         files = []
         for backend in apt.BACKENDS:
-            files.append(set(apt.deb_files(self.base / apt.package_name(self.metadata, 'amd64', backend))))
+            packaged = apt.deb_files(self.base / apt.package_name(self.metadata, 'amd64', backend))
+            files.append(set(packaged))
+            manual = gzip.decompress(packaged[f'usr/share/man/man1/datapump-cli-{backend}.1.gz'][0])
+            self.assertIn(f'datapump-cli-{backend}'.encode(), manual)
+            self.assertEqual(packaged[f'opt/datapump/{backend}/share/man/man1/pump.1'][0],
+                             (ROOT / 'docs/man/pump.1').read_bytes())
         self.assertFalse(files[0] & files[1])
 
     def test_schema4_through_6_sign_all_distribution_assets(self):

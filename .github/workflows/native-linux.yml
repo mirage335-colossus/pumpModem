@@ -171,7 +171,7 @@ jobs:
           DATAPUMP_SMOKE_SCOPE: published/native-archives
         run: |
           cmake --build build --target package --parallel "$(nproc)"
-          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/build/releases" -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.35 -P tools/verify-native-archives.cmake 2>&1 | tee build/package-archives.log
+          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/build/releases" -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.35 -DREQUIRE_MANUALS=ON -P tools/verify-native-archives.cmake 2>&1 | tee build/package-archives.log
           echo 'Portable Release desktop, relocation, corruption, both archive formats and ABI checks completed; any incomplete smoke coverage is listed in the retained reports. Independent regression/calibration jobs still determine the overall workflow result.' >> "$GITHUB_STEP_SUMMARY"
       - name: Upload Linux offline bundles
         if: inputs.scope == 'package'

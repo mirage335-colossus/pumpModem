@@ -243,6 +243,14 @@ PRs changing automation run helper tests without creating releases or tags.
 
 ## Debian installation from GitHub Releases
 
+New builds include UNIX manual pages in every portable archive. Distribution
+packages install matching pages for `datapump-cli-fltk`,
+`datapump-cli-fltk-fast` and `datapump-fltk` (or `rev`), including rewritten
+examples and cross-references. Debian, pacman and Arch/Gentoo recipes retain
+the same private portable documentation. See [manual pages](offline-installation.md#manual-pages)
+for reading commands. Historical releases retain their original contents when
+repackaged; adding manuals requires a new source build.
+
 The release assets form a flat APT repository: four `.deb` packages (FLTK and
 Rev, each for `amd64` and `arm64`), `Packages`/`Packages.gz`, signed `InRelease`
 and `Release.gpg`, and their support metadata. No package pool, generated index

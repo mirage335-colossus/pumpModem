@@ -5,6 +5,11 @@
 for dependencies, stable profiles, focused tests and portable release limits.
 **Release with GitHub Actions:** follow [RELEASE](RELEASE), in order.
 
+**Manuals:** [pump(1)](docs/man/pump.1), [pump-fast(1)](docs/man/pump-fast.1)
+and [datapump-gui(1)](docs/man/datapump-gui.1). Read a source page with
+`man -l docs/man/pump.1`. Installations and portable releases include the pages;
+see [reading the manuals](docs/offline-installation.md#manual-pages).
+
 A C++20 audio modem for moving clipboard text, screenshots, and files between
 computers. It includes a compiled CLI, a native C++/FLTK desktop console, real
 waveform and sampled channel simulation, and a documented fixed-interval byte stream. Received source data uses bounded

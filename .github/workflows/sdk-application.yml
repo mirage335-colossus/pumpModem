@@ -131,7 +131,7 @@ jobs:
         run: |
           {
             ./build.sh package --sdk "$GITHUB_WORKSPACE/build/sdk" --backend "$SDK_BACKEND" --build-dir build/sdk-application --jobs 2 --build-jobs "$(nproc)"
-            xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' build/sdk/bin/cmake -DARCHIVE_DIR="$PWD/build/sdk-application/releases" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.36 -P tools/verify-native-archives.cmake
+            xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' build/sdk/bin/cmake -DARCHIVE_DIR="$PWD/build/sdk-application/releases" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.36 -DREQUIRE_MANUALS=ON -P tools/verify-native-archives.cmake
           } 2>&1 | tee "$SDK_LOG_DIR/packages.log"
       - name: Run build and packaging isolation regressions
         if: inputs.scope == 'tests'
