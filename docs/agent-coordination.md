@@ -23,12 +23,13 @@ procedures when their triggers apply, not as a repeated startup transcript.
 | Start, resume or change scope | Inspect baseline and complete claims; check your inbox; register or update exact claims before writing. |
 | Before each write | Confirm ownership and current contents, including notes and generated outputs; stop that write if the baseline changed unexpectedly. |
 | Before a test, build or generator | Identify its outputs, temporary files and caches; direct them into claimed directories before launching. |
-| Waiting or checkpointing | Read your inbox and current claims; replace stale status and timing fields; continue independent work. |
-| Handoff or finish | Finish/stop writers, release through the registry, match request ID and scope in the notice, and record disposition and next action. |
+| Waiting or checkpointing | Read your inbox and current claims; replace the current status/timing fields below, not just a progress bullet; continue independent work. |
+| Handoff or finish | Finish/stop writers, release through the registry, send the release notice with request ID and scope, and record disposition and next action. |
 
 Apply these checks at action boundaries, then return to research, implementation
-and required tests. Record actual results and unresolved limitations at handoff;
-completed coordination does not establish that the repair is correct.
+and required tests. In the existing handoff summary, connect requested behaviors
+to their checks, including emitted reports; mark failed or unchecked behavior.
+Completed coordination does not establish that the repair is correct.
 
 ## Start or resume a session
 
@@ -128,7 +129,7 @@ used, claim its exact sidecar and designate its sole writer first.
 Check your inbox at each checkpoint and before declaring a handoff blocked. While
 waiting in control, poll about every 60 seconds without busy-waiting; continue
 independent work and check again after a long command or resume. Record the last
-inbox check, pending request ID and concrete next check in your waiting status.
+inbox check and pending request ID; set the record's single `Next check` field.
 Before repeating a request or reporting blocked, read replies and current claims.
 File delivery does not wake another chat automatically; a harness notification
 prompts a check but never transfers ownership.
@@ -214,17 +215,20 @@ If a claim overlaps, leave that path alone and use this handoff:
    the registry mutex.
    Only afterward send a release notice to the requester's inbox with the request
    ID and exact scope.
-3. The recipient matches the notice's request ID, sender and exact scope to its
-   pending request, then rereads **all** claims under the mutex, including covering
-   directories. A mismatched reply does not fulfill the request. If the requested
-   scope is free, acquire it normally and acknowledge using the pending request ID;
-   seek clarification only if scope or disposition is unclear. If another session
-   owns it, request that owner's handoff.
-   A release notice is neither a reservation nor ownership.
+3. The recipient first rereads **all** claims under the mutex, including covering
+   directories. Decide from current ownership, not whether a reply ID matches:
+
+   - Still claimed: follow or request that owner's handoff; old notices grant no access.
+   - Release recorded, writers stopped, no overlapping claims, scope and disposition
+     clear: acquire now. A wrong or missing reply ID alone needs no clarification round trip.
+   - Writers still running, or ownership, scope or disposition unclear: leave that
+     path alone and resolve the handoff or follow recovery; continue independent work.
+
 4. After acquiring, send an acknowledgment to the previous owner's inbox with
-   the request ID and record it. Reread/hash the file and preserve the handed-off
-   edits. Apply the patch only against that current state.
-   Finish the write before releasing the claim; report any unexpected baseline.
+   the pending request ID, exact scope and any reply-ID mismatch. This reconciles
+   the request without waiting for a corrected notice. Reread/hash the file and
+   preserve handed-off edits; patch that current state. Finish before releasing
+   the claim; report any unexpected baseline. A notice alone never grants ownership.
 
 A parent directory claim cannot be narrowed by merely adding an exception in a
 message. Before handing a child path to another writer, replace the covering claim
@@ -282,11 +286,20 @@ its own claims. Instructions to help or a parent-owned directory are not a trans
 
 Use checkpoint mode unless the harness has a reliable supervised heartbeat hook.
 About every five minutes while in control, at scope changes, before long commands
-and before ending a turn, reconcile current state, jobs, inbox status and UTC
-timing fields in one record update. Keep one current value per field; appending
-progress does not update stale fields. Set updated/next-check times; advance last
-meaningful progress only when work advances. Preserve claims exactly unless using
-the registry procedure. Keep liveness separate from progress.
+and before ending a turn, replace the current state, jobs and UTC fields in one
+atomic record update. Keep these values in the template fields, not in appended
+progress entries:
+
+| Field | Value at this checkpoint |
+| --- | --- |
+| Updated | Now, even when only checking an inbox |
+| Last meaningful progress | Advance only when work advances |
+| Last inbox check | Actual read time, not intended poll time |
+| Next check / action | Earliest planned inbox, job or progress check; use a concrete UTC time, not "within 60 seconds" |
+
+Use that single next-check field when waiting too. Remove superseded current
+values; verify the saved record before continuing. Preserve claims exactly unless
+using the registry procedure. Keep liveness separate from progress.
 Before a blocking command, record its job identity, resources and expected duration.
 If the session worker identity is unavailable, say so; an ephemeral tool shell is
 not the session worker.
@@ -329,12 +342,19 @@ handoff information, then compact on closure as described above.
 - Checkout / coordination root (absolute physical paths):
 - Branch / starting HEAD / current HEAD:
 - Starting worktree and index changes (including work owned by others):
-- Updated / last meaningful progress (UTC):
-- Liveness mode: supervised heartbeat | checkpoint
-- Last heartbeat (UTC) / cadence / next check (UTC):
+
+## Current checkpoint
+
+- State: active | waiting | paused | done | failed | cancelled
+- Updated (UTC):
+- Last meaningful progress (UTC):
+- Last inbox check (UTC):
+- Next check (UTC) / action:
+- Liveness mode / cadence: <checkpoint or supervised heartbeat> / <interval>
+- Last heartbeat (UTC), if supervised:
 - Run token / heartbeat file and writer, if used:
 - Owner process: role / host / boot identity / PID namespace / PID / start identity (or unavailable):
-- State: active | waiting | paused | done | failed | cancelled
+- Running jobs: identities, claimed outputs/resources and expected duration (or none):
 - Closed (UTC), if terminal:
 - Delete after (UTC): closure + 30 days by default
 - Retention exception: none | exact material / live dependency / owner / review date
@@ -350,16 +370,14 @@ handoff information, then compact on closure as described above.
 - Other sessions, overlapping worktree paths, integrator and handoff order:
 
 ## Progress and checks
-- Completed / in progress / next:
+- Completed work / remaining work:
 - Commands, exact source/configuration, outcomes and logs:
-- Running jobs and their process identities, output paths, expected duration and resource claims:
 - Findings: links to notes/<session-id>/<topic>.md
 
 ## Blockers and handoff
 - Request ID / exact handoff scope / message and reply paths:
-- Last inbox check / next check (UTC), if waiting:
 - Uncommitted changes; validation still required:
-- Claims released/retained, recipient acknowledgment and next action:
+- Claims released/retained, recipient acknowledgment and recipient's next action:
 - Recovery evidence or useful surviving notes, if applicable:
 ```
 
