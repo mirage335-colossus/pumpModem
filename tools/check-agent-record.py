@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""Read-only checks for a proposed update to one current-template session record.
+"""Read-only current-template session scan or proposed record-update check.
 
-This is a formatting/timing aid, not a registry or ownership validator. It reads
-only the two explicit files and never publishes, locks, scans, or reclaims.
+This is a reading/formatting aid, not a registry or ownership validator. It never
+publishes, locks, reclaims or decides whether a path is free.
 Legacy/freeform records still use the manual coordination workflow.
 """
 import argparse
 from datetime import datetime, timedelta
+import json
+import os
 from pathlib import Path
 import re
+import stat
 import sys
 
 
@@ -22,6 +25,17 @@ REQUIRED_FIELDS = (
     'Retention exception', 'Contact',
 )
 TERMINAL = {'done', 'failed', 'cancelled'}
+PREAMBLE_FIELDS = (
+    'Tool / host / local chat reference', 'Parent / read-only helpers',
+    'Task and approach', 'Checkout / coordination root (absolute physical paths)',
+    'Branch / starting HEAD / current HEAD',
+    'Starting worktree and index changes (including work owned by others)',
+)
+SCAN_SECTIONS = ('Current checkpoint', 'Claims held', 'Baseline and dependencies',
+                 'Progress and checks', 'Blockers and handoff')
+SCAN_ADVISORY = ('Read-only observation, not an atomic snapshot or an ownership decision. '
+                 'Recheck complete claims under the registry mutex before changing claims. '
+                 'If incomplete, investigate every error; omitted records may hold claims.')
 
 
 def timestamp(value, field):
@@ -119,17 +133,131 @@ def check_transition(before, after):
         raise ValueError('nonterminal record needs none in closure/deletion fields')
 
 
+def scan_record(text, path):
+    """Extract named metadata and all claims; unknown layouts need manual review.
+
+    This intentionally does not use check_transition: terminal claims, old next
+    checks and unresolved jobs must remain visible rather than disappearing.
+    """
+    headings = list(re.finditer(r'^(#{1,6})[ \t]+([^\n]+)$', text, re.MULTILINE))
+    if not headings or headings[0].start() != 0 or headings[0].group(1) != '#':
+        raise ValueError('expected current-template session heading at start of file')
+    top = [h for h in headings if len(h.group(1)) <= 2]
+    if ([h.group(1) for h in top] != ['#'] + ['##'] * len(SCAN_SECTIONS) or
+            [h.group(2).strip() for h in top[1:]] != list(SCAN_SECTIONS)):
+        raise ValueError('unknown, missing, duplicate or reordered top-level sections; review manually')
+    if any(h.start() < top[1].start() for h in headings[1:]):
+        raise ValueError('unexpected preamble heading; review manually')
+    preamble = text[top[0].end():top[1].start()]
+    identity = {}
+    for line in preamble.splitlines():
+        if not line.strip():
+            continue
+        match = re.fullmatch(r'- ([^:]+):[ \t]*(\S.*)', line)
+        if not match or match[1] not in PREAMBLE_FIELDS or match[1] in identity:
+            raise ValueError('unknown, duplicate or malformed preamble field; review manually')
+        identity[match[1]] = match[2].strip()
+    if set(identity) != set(PREAMBLE_FIELDS):
+        raise ValueError('missing current-template preamble fields; review manually')
+    try:
+        session_id, checkpoint, claims = parse_record(text)
+    except ValueError as exc:
+        # Unknown field labels may themselves contain unrelated task details.
+        raise ValueError('malformed checkpoint or claims structure; review manually') from exc
+    if not re.fullmatch(r'[A-Za-z0-9._-]+', session_id) or path.name != session_id + '.md':
+        raise ValueError('session ID must use documented characters and match the record filename')
+    if set(checkpoint) != set(REQUIRED_FIELDS):
+        raise ValueError('unknown checkpoint fields; review manually')
+    if checkpoint['State'] not in TERMINAL | {'active', 'waiting', 'paused'}:
+        raise ValueError('unknown State; review manually')
+    for field in ('Updated (UTC)', 'Last meaningful progress (UTC)', 'Last inbox check (UTC)'):
+        timestamp(checkpoint[field], field)
+    next_check, separator, action = checkpoint['Next check (UTC) / action'].partition(' / ')
+    if not separator or not action.strip():
+        raise ValueError('Next check needs timestamp (or none) / action; review manually')
+    for field, value in [('Next check (UTC)', next_check)] + [
+            (key, checkpoint[key]) for key in ('Last heartbeat (UTC), if supervised',
+                                              'Closed (UTC), if terminal', 'Delete after (UTC)')]:
+        if value != 'none':
+            timestamp(value, field)
+    metadata = {key: identity[key] for key in PREAMBLE_FIELDS
+                if key not in ('Task and approach', PREAMBLE_FIELDS[-1])}
+    metadata.update({key: value for key, value in checkpoint.items()
+                     if key != 'Next check (UTC) / action'})
+    metadata['Next check (UTC)'] = next_check
+    return {'path': str(path), 'id': session_id, 'metadata': metadata, 'claims': claims}
+
+
+def record_identity(info):
+    # Reading may update atime; it is not evidence that the record changed.
+    return tuple(getattr(info, key) for key in
+                 ('st_dev', 'st_ino', 'st_mode', 'st_size', 'st_mtime_ns', 'st_ctime_ns'))
+
+
+def read_scan_record(path, before):
+    flags = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0)
+    with os.fdopen(os.open(path, flags), encoding='utf-8') as stream:
+        opened = os.fstat(stream.fileno())
+        if not stat.S_ISREG(opened.st_mode) or record_identity(opened) != record_identity(before):
+            raise ValueError('record replaced before read; retry after publication settles')
+        return stream.read()
+
+
+def scan_sessions(directory):
+    """Read only direct regular .md entries; never silently skip a possible owner."""
+    directory = directory.absolute()
+    result = {'complete': False, 'records': [], 'errors': [], 'advisory': SCAN_ADVISORY}
+    try:
+        if not stat.S_ISDIR(directory.lstat().st_mode):
+            raise ValueError('scan target must be a directory, not a symlink')
+        entries = sorted(directory.iterdir())
+    except (OSError, ValueError) as exc:
+        result['errors'].append({'path': str(directory), 'error': str(exc)})
+        return result
+    for path in entries:
+        try:
+            before = path.lstat()
+            if path.suffix != '.md' or not stat.S_ISREG(before.st_mode):
+                raise ValueError('expected direct regular .md record; no symlinks or subdirectories')
+            text = read_scan_record(path, before)
+            if record_identity(path.lstat()) != record_identity(before):
+                raise ValueError('record changed while being read; retry after publication settles')
+            result['records'].append(scan_record(text, path))
+        except (OSError, UnicodeError, ValueError) as exc:
+            result['errors'].append({'path': str(path), 'error': str(exc)})
+    try:
+        if sorted(directory.iterdir()) != entries:
+            raise ValueError('directory entries changed during scan; retry after publication settles')
+    except (OSError, ValueError) as exc:
+        result['errors'].append({'path': str(directory), 'error': str(exc)})
+    result['complete'] = not result['errors']
+    return result
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, epilog=(
-        'Both files must use the current guide template (exact checkpoint field labels). '
+        'Transition checking requires both files to use the current guide template '
+        '(exact checkpoint field labels); scan requires its complete preamble and sections, '
+        'with session ID matching the .md filename. '
         'Fenced examples are unsupported. '
         'Use ISO UTC timestamps; Next check uses "timestamp / action" ("none / action" '
         'only when paused or terminal). Empty claims use standalone "None.". '
         'Nonempty claims are opaque: paths, overlaps, blockers, receipts, real event times '
         'and stopped writers still require manual review. A pass never authorizes a write.'))
-    parser.add_argument('--before', type=Path, required=True, help='saved current record')
-    parser.add_argument('--after', type=Path, required=True, help='proposed complete replacement')
+    parser.add_argument('--before', type=Path, help='saved current record')
+    parser.add_argument('--after', type=Path, help='proposed complete replacement')
+    parser.add_argument('--scan', type=Path, metavar='SESSIONS_DIRECTORY', help=(
+        'emit JSON metadata and complete claims from direct current-template .md records; '
+        'unknown/unreadable entries produce incomplete output and exit 1; never follow symlinks'))
     args = parser.parse_args(argv)
+    if args.scan is not None:
+        if args.before is not None or args.after is not None:
+            parser.error('--scan cannot be combined with --before or --after')
+        result = scan_sessions(args.scan)
+        print(json.dumps(result, indent=2))
+        return 0 if result['complete'] else 1
+    if args.before is None or args.after is None:
+        parser.error('provide both --before and --after, or --scan')
     try:
         if args.before.resolve() == args.after.resolve():
             raise ValueError('before and after must be distinct files')

@@ -40,6 +40,15 @@ of repair correctness.
    worktree **and index** changes (`git status --short`, `git diff`, and
    `git diff --cached`). Existing edits may belong to another session or the user.
    Read them without resetting, stashing, cleaning or claiming them as your work.
+   Bind **every filesystem tool invocation**, including searches, to that
+   checkout or an explicitly selected absolute build/fixture directory. Set the
+   tool's working-directory parameter or use `cd "$checkout" || exit 1` in that
+   invocation; set test subprocess directories deliberately. Use absolute paths for editors
+   without a working-directory setting. A previous shell's `cd`, a path in a
+   prompt or a shared board override does not change another tool's default.
+   Recheck `pwd -P` and the Git root when attaching a tool, resuming or switching
+   checkouts. Give delegated workers both checkout and board paths explicitly.
+   Access an agreed board outside the checkout through its absolute path.
 2. Locate the agreed coordination directory. Read current session metadata and
    complete claims first, then relevant notes and messages addressed to you;
    follow the bounded-reading rules below. Ignored files need explicit access:
@@ -71,7 +80,8 @@ subdirectories without replacing existing contents. A POSIX-shell example:
 
 ```sh
 cd "$(git rev-parse --show-toplevel)" || exit 1
-coord_dir="${DATAPUMP_AGENT_DIR:-$PWD/.agent-work}"
+checkout="$(pwd -P)"
+coord_dir="${DATAPUMP_AGENT_DIR:-$checkout/.agent-work}"
 case "$coord_dir" in
   /*) ;;
   *) printf '%s\n' 'Use an absolute coordination directory.' >&2; exit 1 ;;
@@ -144,13 +154,28 @@ extract metadata, calculate ages and find relevant paths before sending content
 to a model. Do not recursively concatenate `.agent-work/`, inject it wholesale
 into prompts, or load closed histories, artifacts or legacy archives at startup.
 
-- For every file in `sessions/`, inspect ID, state, liveness/closure metadata and
-  the **complete** `Claims held` section, including claims mistakenly left in a
-  terminal record. Do not truncate claims to meet a token budget. Open the rest
-  only for overlaps, dependencies, handoffs or unclear ownership. Unreadable or
-  malformed records need investigation; do not silently skip them. Extract named
-  metadata fields; stop sections at the next same- or higher-level heading rather
-  than returning unrelated disposition text.
+From the explicitly selected checkout, use the read-only extractor or an
+equivalent bounded reader:
+
+```sh
+python3 -B "$checkout/tools/check-agent-record.py" --scan "$coord_dir/sessions"
+```
+
+It returns selected identity/liveness/closure metadata and complete claims for
+current-template records, including terminal ones; it omits task, progress and
+handoff summaries. Check both its exit status and `complete` result. Any failed
+record or unexpected entry makes the scan incomplete: inspect the named path's
+metadata and whole claims section directly, resolving ambiguous ownership before
+acquiring. Legacy formats need targeted manual reading, not forced migration or
+silent exclusion. Never treat partial output as a free registry. The reader does
+not lock, validate overlaps or grant ownership; reread under the registry mutex
+when changing claims. It does not scan notes, inboxes or archives for you.
+
+- A manual reader must likewise inspect every record's ID, state, liveness/closure
+  metadata and **complete** claims, including terminal claims. Extract named fields
+  and stop sections at the next same- or higher-level heading. Never truncate claims
+  to meet a token budget. Open other sections only for overlaps, dependencies,
+  handoffs or unclear ownership.
 - Search note titles, status and affected paths before opening relevant notes.
   Read your pending messages and selected evidence, not every session's inbox
   or logs. Old author/session attribution alone does not require loading history.
@@ -219,6 +244,10 @@ two files, compares the complete claims text conservatively and never publishes
 or grants ownership. Review blockers, actual event times and all current claims
 yourself under the procedure above; a pass does not replace that review. Legacy
 records and other harnesses can use the manual procedure without migration.
+If adopting the checker, put that command in your existing candidate-publication
+step so it needs no separate checkpoint. Do not generate a second record format
+or claim-update log for it. Both helper modes are conveniences, not prerequisites;
+measure their use and cost in exercises before adding more mandatory machinery.
 
 ### Contested files and handoffs
 
@@ -432,7 +461,20 @@ causes, failed approaches, environment quirks, workarounds, upstream issues and
 community advice. Separate observation, hypothesis and reported claims. Do not
 invent findings to populate the board or treat repeated claims as confirmation.
 Before repeating a failed workaround, inspect its failure evidence; use a small
-probe if the cause remains unclear. Record uncertainty and missing coverage.
+probe that distinguishes likely causes if the cause remains unclear. Reproducing
+the same error confirms the symptom, not its explanation. Repair a demonstrated
+local prerequisite within scope and rerun the affected checks; otherwise name
+the unresolved prerequisite and blocked coverage. A suite failing during setup
+before its first test ran no test assertions; report actual execution for partial
+runs. Direct or narrower passes do not replace the blocked suite.
+
+For example, `gpg-agent startup failed; zero tests ran` is an observation.
+`Socket path too long` remains a hypothesis until a controlled probe supports it.
+Test a shorter **claimed** temporary directory without changing unrelated inputs;
+retain both results and rerun the blocked scope after a successful fix. Share the
+focused note so peers can reuse evidence for matching inputs instead of repeating
+the same failed attempt. Keep research and required testing moving between
+coordination checkpoints; do not produce notes just to demonstrate activity.
 
 ```markdown
 # <topic>
@@ -440,13 +482,14 @@ probe if the cause remains unclear. Record uncertainty and missing coverage.
 - Status: observed | hypothesis | externally reported | verified | superseded
 - Affected files/components; revision, tool/dependency versions and environment:
 - Symptom or question:
-- Reproducer/command and actual result versus expected result:
+- Reproducer/command / exact error and log / actual versus expected result:
 - Evidence: log/artifact paths and relevant source locations:
 - External source: exact URL, title/author if known, publication/access dates:
-- Confidence and limits: reproduced locally? which inputs remain untested?
-- Attempts already made, including failures and counterevidence:
+- Established facts / hypotheses or unknown causes / counterevidence:
+- Attempts and probe results: what each demonstrates, including failures:
+- Coverage: passed, failed, skipped, setup-blocked or untested; rerun evidence:
 - Workaround: exact steps, scope, side effects, rollback and removal condition:
-- Next check / owner / conditions that require revalidation:
+- Next discriminating probe or fix / owner / conditions requiring revalidation:
 - Durable destination or superseding note, when available:
 - Retention review (UTC) / live dependency, if evidence must outlast its session:
 ```
@@ -480,3 +523,7 @@ follow [the lifecycle rules](agent-coordination-lifecycle.md); never discard unr
 findings simply because their author finished. A fresh clone starts with an
 empty board and recreates it from this guide. No application build, test or
 runtime behavior depends on these files.
+
+When evaluating this workflow with blinded agents, use the separate
+[exercise preparation and scoring guide](agent-coordination-evaluation.md).
+It is for evaluators, not additional routine worker reading.

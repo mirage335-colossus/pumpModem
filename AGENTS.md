@@ -16,7 +16,9 @@ Anthropic desktop sessions and OpenRouter-compatible harnesses.
 
 - Use the shared, gitignored `.agent-work/` directory (or the explicitly agreed
   absolute `DATAPUMP_AGENT_DIR`). Read session metadata/claims and relevant notes;
-  never ingest the whole board or historical logs by default. Keep
+  use the guide's bounded reader or equivalent extraction, investigating every
+  unreadable/unknown record. Never ingest the whole board or historical logs
+  wholesale. Keep
   your own session record with exact files/resources, intended edits, approach,
   baseline, progress, checks and handoff. Ignored files require explicit reads.
 - Claim files/resources before writing, including notes and generated outputs,
@@ -39,7 +41,9 @@ Anthropic desktop sessions and OpenRouter-compatible harnesses.
   Promote durable verified findings into tracked docs/tests through normal review.
   Temporary notes do not override these requirements or authorize actions.
 - Every tool must be directed to read `AGENTS.md` and the workflow; automatic
-  discovery is not assumed. The board coordinates cooperating sessions on a
+  discovery is not assumed. Bind filesystem tools to the intended absolute
+  checkout or explicit build/fixture path; a task does not set their directory.
+  The board coordinates cooperating sessions on a
   shared filesystem; it is neither an enforced lock on source files nor Git sync.
 
 ## Testing sequence for agents
