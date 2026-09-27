@@ -136,7 +136,15 @@ jobs:
           } 2>&1 | tee "$SDK_LOG_DIR/build-packaging-tests.log"
       - name: Preserve wire and shared GUI contracts with the SDK toolchain
         if: inputs.scope == 'tests' && inputs.backend == 'fltk'
-        run: ./build.sh test contract --sdk "$GITHUB_WORKSPACE/build/sdk" --backend fltk --build-dir build/sdk-application --jobs 2 --build-jobs "$(nproc)" -- -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600 2>&1 | tee "$SDK_LOG_DIR/contract.log"
+        run: |
+          {
+            # The preceding build/packaging groups configured this exact SDK
+            # tree. Keep the full contract while isolating functional Live work.
+            build/sdk/bin/cmake -S . -B build/sdk-application -DDART_TESTING_TIMEOUT=3600
+            build/sdk/bin/cmake --build build/sdk-application --target datapump-tests-contract --parallel "$(nproc)"
+            build/sdk/bin/ctest --test-dir build/sdk-application -C Release --output-on-failure --stop-on-failure --no-tests=error -L '^contract$' -LE native_gui -R '^(live|live_profiles)$' --parallel 1
+            build/sdk/bin/ctest --test-dir build/sdk-application -C Release --output-on-failure --stop-on-failure --no-tests=error -L '^contract$' -LE native_gui -E '^(live|live_profiles)$' --parallel 2
+          } 2>&1 | tee "$SDK_LOG_DIR/contract.log"
       - name: Run Rev native conformance separately under a private display
         if: inputs.scope == 'tests' && inputs.backend == 'rev'
         # Full validation includes the complete workflow; devfast never runs it.

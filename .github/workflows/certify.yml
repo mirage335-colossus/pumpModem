@@ -204,7 +204,7 @@ jobs:
             echo 'Released build wrapper has no --build-jobs; retaining two build/test jobs.'
           fi
           # Run adapter/package checks before the slower numerical calibration.
-          for group in build gui packaging contract; do
+          for group in build gui packaging; do
             set -- --backend "$GUI_BACKEND" --build-dir build/certify --jobs 2
             if [ "$separate_build_jobs" = true ]; then set -- "$@" --build-jobs "$(nproc)"; fi
             if [ "$USE_SDK" = true ]; then set -- "$@" --sdk "$GITHUB_WORKSPACE/build/sdk"; fi
@@ -213,6 +213,17 @@ jobs:
               xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' ./build.sh test native --stop-on-failure "$@" -- -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600 -DGUI_SMOKE_TIMEOUT=600
             fi
           done
+          contract_cmake=cmake
+          contract_ctest=ctest
+          if [ "$USE_SDK" = true ]; then
+            contract_cmake="$GITHUB_WORKSPACE/build/sdk/bin/cmake"
+            contract_ctest="$GITHUB_WORKSPACE/build/sdk/bin/ctest"
+          fi
+          "$contract_cmake" --build build/certify --target datapump-tests-contract --parallel "$(nproc)"
+          # Disjoint selections retain the complete immutable source contract.
+          # Live simulation gets the CPU alone; remaining tests keep concurrency.
+          "$contract_ctest" --test-dir build/certify -C Release --output-on-failure --stop-on-failure --no-tests=error -L '^contract$' -LE native_gui -R '^(live|live_profiles)$' --parallel 1
+          "$contract_ctest" --test-dir build/certify -C Release --output-on-failure --stop-on-failure --no-tests=error -L '^contract$' -LE native_gui -E '^(live|live_profiles)$' --parallel 2
       - name: Verify shared audio routing and both audio platform adapters
         env:
           USE_SDK: ${{ matrix.sdk }}

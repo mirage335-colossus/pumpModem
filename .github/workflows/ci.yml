@@ -60,10 +60,10 @@ on:
       diagnostic:
         description: 'Focused check used only with devfast=true'
         type: choice
-        options: [legacy, certification, windows-certification, windows-rev, graphics, arm-rev-package, arm-rev-smoke, gui-contract, sanitizer-gui, runner-capacity, arm-runner-capacity]
+        options: [legacy, certification, windows-certification, windows-rev, graphics, arm-rev-package, arm-rev-smoke, arm-rev-adapter, sdk-live, gui-contract, sanitizer-gui, runner-capacity, arm-runner-capacity]
         default: legacy
       diagnostic_release:
-        description: 'Published release tag for graphics diagnostics only; no binaries are rebuilt'
+        description: 'Published tag for graphics, or immutable source tag/ref for ARM adapter / SDK live diagnostics'
         type: string
         default: ''
 
@@ -105,10 +105,11 @@ jobs:
       windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
 
   certification-diagnostic:
-    if: github.event_name == 'workflow_dispatch' && inputs.devfast && (inputs.diagnostic == 'certification' || inputs.diagnostic == 'windows-certification')
+    if: github.event_name == 'workflow_dispatch' && inputs.devfast && (inputs.diagnostic == 'certification' || inputs.diagnostic == 'windows-certification' || inputs.diagnostic == 'arm-rev-adapter' || inputs.diagnostic == 'sdk-live')
     uses: ./.github/workflows/certification-diagnostic.yml
     with:
-      scope: ${{ inputs.diagnostic == 'windows-certification' && 'windows' || 'all' }}
+      scope: ${{ inputs.diagnostic == 'arm-rev-adapter' && 'arm-rev-adapter' || inputs.diagnostic == 'sdk-live' && 'sdk-live' || inputs.diagnostic == 'windows-certification' && 'windows' || 'all' }}
+      source_ref: ${{ inputs.diagnostic_release }}
       linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
       windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
       arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-h' }}

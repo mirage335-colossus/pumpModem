@@ -4,9 +4,13 @@ on:
   workflow_call:
     inputs:
       scope:
-        description: 'all checks, or windows only when unchanged Linux/ARM checks already passed'
+        description: 'all, windows, arm-rev-adapter, or sdk-live; focused diagnostics do not certify a release'
         type: string
         default: all
+      source_ref:
+        description: 'Optional immutable source tag/ref for ARM adapter or SDK live diagnostics'
+        type: string
+        default: ''
       linux_runner:
         type: string
         default: ubuntu-latest-h
@@ -22,21 +26,22 @@ permissions:
 
 jobs:
   linux-adapter:
-    if: inputs.scope == 'all'
-    name: Linux ${{ matrix.backend }} adapter (not certification)
+    if: inputs.scope == 'all' || inputs.scope == 'sdk-live'
+    name: Linux ${{ matrix.backend }} ${{ inputs.scope == 'sdk-live' && 'SDK live' || 'adapter' }} (not certification)
     runs-on: ${{ inputs.linux_runner }}
     container: debian:bookworm-slim
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        backend: [fltk, rev]
+        backend: ${{ inputs.scope == 'sdk-live' && fromJSON('["fltk"]') || fromJSON('["fltk", "rev"]') }}
     env:
       DEBIAN_FRONTEND: noninteractive
       GH_TOKEN: ${{ github.token }}
       LIBGL_ALWAYS_SOFTWARE: '1'
-      LP_NUM_THREADS: '2'
+      LP_NUM_THREADS: ${{ inputs.scope == 'sdk-live' && inputs.linux_runner == 'ubuntu-24.04' && '1' || '2' }}
       GUI_BACKEND: ${{ matrix.backend }}
+      DIAGNOSTIC_SCOPE: ${{ inputs.scope }}
     steps:
       - name: Load current package-fetch helper before installing Git
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -53,6 +58,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ inputs.scope == 'sdk-live' && inputs.source_ref || github.sha }}
       - name: Reuse the exact prepared SDK
         id: sdk
         run: python3 tools/sdk-release.py fetch --binary-only --repo "$GITHUB_REPOSITORY" --directory downloaded-sdk --github-output "$GITHUB_OUTPUT"
@@ -65,7 +71,7 @@ jobs:
           test "$#" -eq 1
           python3 tools/build-sdk.py install --archive "$1" --destination "$GITHUB_WORKSPACE/build/sdk"
           python3 tools/build-sdk.py verify "$GITHUB_WORKSPACE/build/sdk" --max-host-glibc 2.36
-      - name: Build only the adapter regression prerequisites
+      - name: Build only the selected regression prerequisites
         run: |
           export PATH="$GITHUB_WORKSPACE/build/sdk/bin:$PATH"
           cmake -S . -B build/adapter-diagnostic -G Ninja \
@@ -73,8 +79,13 @@ jobs:
             -DDATAPUMP_SDK_ROOT="$GITHUB_WORKSPACE/build/sdk" \
             -DCMAKE_BUILD_TYPE=Release -DDATAPUMP_PORTABLE=ON \
             -DDATAPUMP_GUI_BACKEND="$GUI_BACKEND" -DDATAPUMP_TEST_NATIVE_GUI=ON
-          cmake --build build/adapter-diagnostic --target "test_${GUI_BACKEND}_adapter" --parallel "$(nproc)"
+          if [ "$DIAGNOSTIC_SCOPE" = sdk-live ]; then
+            cmake --build build/adapter-diagnostic --target test_live test_live_profiles --parallel "$(nproc)"
+          else
+            cmake --build build/adapter-diagnostic --target "test_${GUI_BACKEND}_adapter" --parallel "$(nproc)"
+          fi
       - name: Run the existing native adapter assertions under a private display
+        if: inputs.scope == 'all'
         run: |
           if [ "$GUI_BACKEND" = rev ]; then selector=--inline-document; else selector=--estimate-colors; fi
           xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' \
@@ -83,8 +94,18 @@ jobs:
             build/sdk/bin/ctest --test-dir build/adapter-diagnostic --output-on-failure \
             -R '^gui_adapter_conformance$' --parallel 1 --stop-on-failure --no-tests=error
           echo "Linux $GUI_BACKEND adapter passed for $GITHUB_SHA. This focused result does not qualify a release." >> "$GITHUB_STEP_SUMMARY"
+      - name: Run the unchanged keyed acquisition and complete live fixtures serially
+        if: inputs.scope == 'sdk-live'
+        run: |
+          source_revision=$(git rev-parse HEAD)
+          echo "SDK live diagnostic source=$source_revision; one test at a time, all original deadlines unchanged"
+          timeout --kill-after=10s 120s build/adapter-diagnostic/test_live --keyed-acquisition-epoch
+          build/sdk/bin/ctest --test-dir build/adapter-diagnostic --output-on-failure \
+            -R '^(live|live_profiles)$' --parallel 1 --stop-on-failure --no-tests=error
+          echo "SDK keyed acquisition and complete live/live_profiles fixtures passed serially for $source_revision. Full SDK and release certification remain required." >> "$GITHUB_STEP_SUMMARY"
 
   windows-regressions:
+    if: inputs.scope == 'all' || inputs.scope == 'windows'
     name: Windows FLTK adapter and DSP regressions (not certification)
     runs-on: ${{ inputs.windows_runner }}
     timeout-minutes: 15
@@ -159,3 +180,60 @@ jobs:
           ctest --test-dir build/arm-cli-diagnostic --output-on-failure -R '^differential_probability$' --parallel 1 --stop-on-failure --no-tests=error
           python3 tests/test_cli.py build/arm-cli-diagnostic/pump StreamCLI.test_link_analysis_differential_receiver_estimate
           echo "ARM64 differential estimate passed for $GITHUB_SHA. No full CLI, calibration or release certification was run." >> "$GITHUB_STEP_SUMMARY"
+
+  arm-rev-adapter:
+    if: inputs.scope == 'arm-rev-adapter'
+    name: ARM64 complete Rev adapter workload (not certification)
+    runs-on: ${{ inputs.arm_runner }}
+    container: ubuntu:22.04
+    timeout-minutes: 20
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      LP_NUM_THREADS: ${{ inputs.arm_runner == 'ubuntu-24.04-arm' && '1' || '2' }}
+    steps:
+      - name: Load current package-fetch helper before installing Git
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .ci-bootstrap
+          sparse-checkout: tools/ci-apt.sh
+          sparse-checkout-cone-mode: false
+      - name: Install the same native baseline as ARM64 Rev certification
+        run: |
+          cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
+          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates curl git python3 file binutils make cmake ninja-build g++-11 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev xvfb xauth fonts-dejavu-core fontconfig-config libxtst6 libgl1 libopengl0 libgl1-mesa-dri
+      - name: Check out the requested source without changing its tests
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.source_ref || github.sha }}
+      - name: Prepare the same pinned compiler tools; do not build a source SDK
+        run: |
+          sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
+          python3 tools/install-release-rev.py "$GITHUB_WORKSPACE/build/ci-rev-tools"
+          echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
+          echo "$GITHUB_WORKSPACE/build/ci-rev-tools/bin" >> "$GITHUB_PATH"
+      - name: Build only the unchanged complete native adapter executable
+        run: |
+          cmake -S . -B build/arm-adapter-diagnostic -G Ninja \
+            -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19 \
+            -DCMAKE_BUILD_TYPE=Release -DDATAPUMP_PORTABLE=ON \
+            -DDATAPUMP_GUI_BACKEND=rev -DDATAPUMP_TEST_NATIVE_GUI=ON
+          cmake --build build/arm-adapter-diagnostic --target test_rev_adapter --parallel "$(nproc)"
+      - name: Measure all native adapter assertions with a bounded diagnostic allowance
+        run: |
+          source_revision=$(git rev-parse HEAD)
+          echo "ARM Rev adapter diagnostic source=$source_revision LP_NUM_THREADS=$LP_NUM_THREADS ordinary_limit=330s diagnostic_limit=600s"
+          started=$(date +%s)
+          result=0
+          timeout --kill-after=10s 600s xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' \
+            build/arm-adapter-diagnostic/test_rev_adapter || result=$?
+          elapsed=$(( $(date +%s) - started ))
+          echo "ARM Rev complete adapter elapsed=${elapsed}s exit=$result source=$source_revision"
+          if [ "$result" -ne 0 ]; then exit "$result"; fi
+          if [ "$elapsed" -gt 330 ]; then
+            echo "::warning title=Rev adapter diagnostic workload::All native adapter assertions completed in ${elapsed}s, exceeding the ordinary 330s CTest allowance. This diagnostic does not certify a release."
+          fi
+          echo "ARM Rev complete adapter assertions passed for $source_revision in ${elapsed}s with a 600s diagnostic cap. The ordinary 330s CTest limit is unchanged; full certification remains required." >> "$GITHUB_STEP_SUMMARY"
