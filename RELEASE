@@ -1,0 +1,28 @@
+# GitHub Actions: ordinary public release.
+# Repository -> Actions -> workflow below -> Run workflow.
+# Push the code first. Select the same branch for every run; keep it unchanged.
+# Wait for each run to succeed before continuing. Leave other inputs at defaults.
+
+1. Maintain base SDK (sdk-base.yml)                         [optional]
+   Run with platform=linux, then with platform=windows.
+   Keep source=auto and publish=true.
+   Skip either run if its current dependency recipe is already in base.
+
+2. Focused checks and full native regression (ci.yml)
+   devfast=false (unchecked).
+
+3. Application checks with the base SDK (sdk.yml)
+   devfast=false (unchecked).
+
+4. Manual portable release (release.yml)
+   experiment=false (uncheck it); publish=true (checked).
+   Leave version blank to use the application version plus a timestamp.
+   Copy the new release tag from the run summary.
+
+5. Certify published release (certify.yml)
+   release_tag=the new tag from step 4; devfast=false (unchecked).
+
+# Done: the certified ordinary release becomes Latest, with public Linux/Windows
+# binaries, Linux packages and retained build dependencies. Review any warnings
+# in its certification report; record the tag, run IDs and limits in docs/validation.md.
+# First-time signing setup and details: docs/releases.md
