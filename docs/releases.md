@@ -40,8 +40,8 @@ long preservation contract and GUI tests remain intact in that workflow.
 
 Leave `experiment` checked for builds users needing assurance should avoid.
 An ordinary release uses its version/date tag as the title. It becomes Latest
-only after complete separate certification without omitted graphics coverage; publication alone does not
-promote it. Hosted certification is limited to the tests listed below and
+only after successful separate hosted certification; documented runner capability
+warnings do not disqualify it. Publication alone does not promote it. Hosted certification is limited to the tests listed below and
 cannot establish physical-device compatibility.
 
 One `America/Chicago` timestamp supplies every platform's tag and filename:
@@ -125,7 +125,16 @@ Upload and certification check each archive's root
 and shipped build information, so relabeling an FLTK package as Rev is rejected.
 Full qualification of a new release requires coverage of every declared backend.
 The scoped Windows Rev WGL warning described below permits a green workflow with
-explicitly incomplete graphics coverage; that outcome does not promote Latest.
+explicitly incomplete graphics coverage. That known runner limitation does not
+block certification or Latest eligibility for an otherwise qualified ordinary release.
+The same policy applies to an exact typed GUI smoke workload limit with recent
+sampled-transmission progress. Certification records it as `passed_with_warnings`,
+retains `incomplete_smoke_coverage` by target and scope, and appends immutable
+`certification-RUN_ID-attempt-ATTEMPT-smoke-warnings.json` and `.log` assets. These
+are bound by SHA-256 to the main report and identify the exact source and binary
+inventory. Incomplete smoke is never reported as a smoke pass. Stalls, crashes,
+sanitizer errors, invalid evidence and external timeouts still fail. Experiment
+releases remain prereleases and never replace Latest.
 
 For the Ubuntu 22.04 x86_64 baseline, set `linux_baseline=ubuntu-22.04`.
 Clear `experiment` for an ordinary release. `publish=false` still reserves a
@@ -178,14 +187,15 @@ file from that exact tag, replacing `RELEASE_TAG` below. Check this fingerprint
 against a trusted copy of the maintainer's documentation before initial setup.
 
 The current package experiment is
-[`v001_00-2026-09-23-1322CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-23-1322CDT),
-including the signed Arch and Gentoo update channels below.
-It reuses the six archives built from application commit `88fb87b`.
-[Debian/Ubuntu installation checks](https://github.com/mirage335-colossus/pumpModem/actions/runs/35901986281)
-passed in all nine environments above; these are separate from full
-application certification. As of
-23 September 2026, no regular release has qualified for Latest, so use its
-explicit tag when opting into this experiment.
+[`v001_00-2026-09-26-1847CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-26-1847CDT),
+including signed Debian/Ubuntu, Arch and Gentoo update channels. Its six bundles
+were built from application commit `800da8c` on standard GitHub runners.
+All nine Debian/Ubuntu and both Arch/Gentoo install/update checks passed in
+[certification run 36281472303](https://github.com/mirage335-colossus/pumpModem/actions/runs/36281472303).
+That run also exposed source-test timeouts; successful package installation is
+separate from full application certification. See the [validation record](validation.md)
+for the current qualification outcome and coverage limits. This is a prerelease
+and has not replaced Latest; use its explicit tag when opting into the experiment.
 
 ```sh
 tag=RELEASE_TAG
@@ -300,9 +310,10 @@ release as a draft after signature/payload checks; public APT installation
 cannot run against a draft. The default `publish=true` publishes the experiment
 and then tests actual GitHub `apt-get update`, installation of both backends,
 installed-file hashes and bounded CLI/GUI self-checks across the Debian/Ubuntu
-matrix above. Native Arch and Gentoo recipe installation checks run separately. Its runner dropdowns contain the larger L/H tiers only.
-When called through `release.yml`, H selections are preserved and other runner
-selections use L; Windows and baseline selectors do not trigger builds.
+matrix above. Native Arch and Gentoo recipe installation checks run separately.
+The runner dropdowns include standard and larger hosts. Calls through
+`release.yml` preserve the selected Linux and ARM64 runners; Windows and
+baseline selectors do not trigger builds.
 This path always creates an experiment, regardless of the ordinary release's
 `experiment` checkbox. An optional `version` overrides its display label;
 otherwise the original label is retained. Once registered on the default
@@ -606,8 +617,10 @@ Unexpected output, different failures, crashes and timeouts still fail.
 If all remaining checks pass, GitHub displays a green check and the report says
 `passed_with_warnings`. A prominent summary, release notes and immutable
 `certification-RUN-attempt-N-warning.log` record the missing coverage. Existing
-release `warning.log` and earlier reports remain untouched. Such a result does
-not qualify Windows Rev desktop graphics or promote a regular release to Latest.
+release `warning.log` and earlier reports remain untouched. Such a result
+certifies the release within the documented hosted-runner scope and permits an
+otherwise qualified regular release to become Latest. It does not claim that
+omitted Windows Rev graphics tests passed. Experiments remain prereleases.
 The runner limitation is minor for build delivery, but a user machine with the
 same limitation cannot launch the Rev GUI; that is a functional limitation,
 with FLTK available as the alternative frontend.
@@ -838,10 +851,10 @@ their ARM64 jobs and diagnostics. The same input names work through GitHub CLI:
 The larger labels are the runners configured by `mirage335-colossus`. All
 architecture defaults and automatic fallbacks now use H pools, including helper,
 metadata and report jobs. Existing smaller choices remain available for an
-explicit manual selection in build workflows. Arch/Gentoo checks and release
-repository repackaging use L when explicitly selected and H otherwise, including
-when the parent build uses a standard or M runner. Certification's APT checks
-retain the selected larger runner and map standard runner choices to L.
+explicit manual selection in build workflows. Release repository repackaging,
+APT and Arch/Gentoo checks preserve those explicit selections through their
+reusable workflows. Selecting `ubuntu-24.04` and `ubuntu-24.04-arm` therefore
+keeps those jobs on standard hosts instead of silently substituting a paid pool.
 No job retries on a smaller runner.
 Each architecture has its own selector: an x86-64
 label cannot replace an ARM64 host. Existing Linux baseline containers, SDK
@@ -1120,5 +1133,12 @@ its existing 1 ms sleeps and restores it on exit, following Microsoft's
 [timer API contract](https://learn.microsoft.com/en-us/windows/win32/api/timeapi/nf-timeapi-timebeginperiod).
 Coarse timer rounding could otherwise leave fixture audio undelivered after
 30 seconds even with an empty decoder queue. The same audio chunks, 30-second
-deadline and all receiver assertions remain in place. Windows runs the full
-calibration after the other selected tests to report platform failures sooner.
+deadline and all receiver assertions remain in place. Full certification runs
+calibration in independent jobs for every Linux and Windows source target,
+alongside GUI, contract and published-package verification. Both scopes reuse
+the same pinned source, dependency recipe and build configuration. Calibration
+retains every section, seed, worker setting, assertion and process deadline;
+each applicable calibration job must succeed before certification is recorded.
+This duplicates only setup and the minimal calibration build, allowing its
+roughly 20–40 minutes of computation on standard runners to overlap the other
+checks; actual duration varies with the host.

@@ -106,7 +106,8 @@ For the full sequence on a slower software-rendered desktop, pass
 `-- -DGUI_SMOKE_TIMEOUT=600` to use the same overall allowance as hosted
 certification. Individual reception and presentation assertions still apply.
 Standard-runner GUI contracts allow `GUI_SMOKE_TIMEOUT=1200` and warn after a
-successful run exceeds 600 seconds; complete smoke remains mandatory.
+successful run exceeds 600 seconds. CI retains a typed progressing workload
+limit as incomplete coverage with a warning, as described below.
 With Mesa software rendering, set `LIBGL_ALWAYS_SOFTWARE=1 LP_NUM_THREADS=2`
 for H-sized hosts, or `LP_NUM_THREADS=1` as used on standard CI runners, so
 drawing leaves CPU time for sampled processing and GUI polling.
@@ -212,6 +213,12 @@ duration controls remain sequential. For an inexpensive scheduling check, run
 all 1..16 seed partitions without running the calibration. A direct invocation
 also accepts `--workers 1..16`. Avoid overlapping independent heavy build/test runs during timing
 and display qualification.
+
+Release certification runs this complete calibration in a separate job for each
+source target. GUI, contract and package checks run alongside it on independent
+runners, avoiding CPU contention within the target's main job. Both scopes are
+required, use the same source and dependency configuration, and retain separate
+logs. Ordinary local test groups still include calibration as before.
 
 Direct CMake remains supported, including on Windows:
 
@@ -374,7 +381,7 @@ For changes confined to Linux distribution packaging, start with
 the affected release/certification helper tests; `./build.sh test build` runs their normal group. Once complete, use
 `release.yml` with `source_release=SOURCE_RELEASE_TAG` to wrap existing verified archives in a new experiment and
 test the same packages on Debian/Ubuntu AMD64 and ARM64 and native Arch/Gentoo
-repositories with the larger runners. For update channels, also exercise a signed
+repositories with the selected runners. For update channels, also exercise a signed
 A-to-B update, idempotent refresh and rejected tampered/older metadata with the
 small local fixtures before native installation. Gentoo host dependencies must come from its
 binary repository; a missing binary fails with an actionable error instead of
@@ -393,8 +400,9 @@ organization's larger x86-64 runners. Defaults and automatic jobs now use
 certification default `arm_runner` to `ubuntu-24.04-arm-h`. Explicit smaller
 choices remain available when desired, but checks do not repeat on those pools.
 The ARM64 L and H tiers provide 8 and 32 CPUs respectively. The ARM64 selector
-does not affect x86-64 routing. Package-manager checks remain on larger L/H
-pools and use H unless L is explicitly selected.
+does not affect x86-64 routing. Package-manager checks and base-maintenance
+helper jobs preserve explicit standard or larger selections; H remains the
+default when no runner is supplied.
 Agents can pass these input names through `gh workflow run -f`.
 Use the [runner selection guide](releases.md#runner-selection-and-build-parallelism)
 to choose and verify access before a long run. `ci.yml` with `devfast=true` and
@@ -473,7 +481,7 @@ and queue-drain stabilization requirements are unchanged.
 
 The instrumented native GUI smoke is an independent optional job. Normal full
 CI omits it and explicitly records missing instrumented desktop coverage;
-Release/package GUI smoke remains mandatory. Select `sanitizer_smoke=true` to
+Release/package GUI smoke still runs. Select `sanitizer_smoke=true` to
 include it alongside full regression, or use the focused diagnostic below.
 It has a cumulative workload allowance,
 not a real-time receiver requirement. If that allowance expires while the same
@@ -484,13 +492,21 @@ polling or advancing wall-clock compute time cannot establish progress. The
 recent-progress window is 30 seconds; errors and non-transmission waits keep
 their ordinary failure result.
 
-Only native CI's optional Debug smoke job treats this exact result as a warning
-with **incomplete instrumented GUI coverage**. Its log is retained as a workflow
-artifact and its summary identifies the missing coverage; it is not a smoke
-pass. The wrapper rejects sanitizer diagnostics, crashes, external process
-timeouts and other failures. ASan/UBSan also halt on errors in that job. Release,
-SDK, packaging and certification remain strict, including for exit 75. This
-exception does not apply to calibration or other test timeouts.
+All CI smoke scopes, including Release, SDK, packaging and certification, treat
+this exact validated result as **incomplete GUI coverage with a warning**. The
+log and structured result are retained as workflow artifacts; certification also
+binds the warning to the exact source, checksum inventory, target and execution
+scope. It is not a smoke pass. This accepted workload limitation does not block
+workflow success or Latest eligibility for an otherwise qualified ordinary
+release. Local tests remain strict unless the CI helper is explicitly selected.
+
+The wrapper rejects malformed progress evidence, sanitizer diagnostics, crashes,
+external process timeouts and other failures. ASan/UBSan also halt on errors in
+the instrumented job. This exception does not apply to calibration or other test
+timeouts. Every ordinary assertion and physical completion requirement remains
+unchanged. `tools/run-native-tests.py` preserves the registered smoke command,
+environment, working directory and external timeout, and executes every other
+selected CTest case normally.
 
 To repeat the entire affected instrumented GUI workflow without
 repeating unrelated calibration or platform suites, use:
@@ -553,6 +569,36 @@ assertions and individual deadlines. No calibration, full smoke sequence,
 package publication or certification runs in this diagnostic. Once fixed,
 run the affected full checks and publish/certify new binaries when runtime
 changes must reach users.
+
+For a standard-runner timeout in the full ARM Rev adapter, or in the SDK's
+functional Live fixtures, select only the affected unchanged source tests:
+
+```sh
+gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=arm-rev-adapter \
+  -f diagnostic_release=RELEASE_TAG -f arm_runner=ubuntu-24.04-arm
+gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=sdk-live \
+  -f diagnostic_release=RELEASE_TAG -f linux_runner=ubuntu-24.04
+```
+
+`diagnostic_release` selects the exact source tag/ref; omitting it uses `REF`.
+The ARM diagnostic runs every existing adapter assertion with a 600-second
+outer diagnostic cap and warns only after complete success exceeds the normal
+330-second CTest cap. Failure or incomplete execution remains fatal. The SDK
+diagnostic runs the keyed acquisition reproducer, then both complete Live
+suites serially with their original deadlines. Neither runs general calibration
+or certifies a release. Full SDK and Linux certification also isolate these two
+Live suites before running the remaining contract cases with two test workers;
+the selections retain every contract case and assertion.
+
+Full certification gives only the standard ARM64 Rev adapter's cumulative
+workload a 900-second cap, after its unchanged assertions took 530 seconds in
+this diagnostic. Successful completion beyond the ordinary 330 seconds emits
+a timing warning. The source and published GUI smoke retain their 600-second
+caps; every adapter assertion and the other native cases remain mandatory.
+H runners retain the original adapter allowance. An incomplete adapter run,
+assertion or crash still fails certification. Independent certification attempts
+may test immutable source/assets concurrently; their final report uploads and
+release-note updates retain the per-release lock and never replace old reports.
 
 When Linux and ARM checks already passed and only the Windows fault is changing,
 reuse that evidence and retry the same three Windows regressions alone:

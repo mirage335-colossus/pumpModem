@@ -46,7 +46,8 @@ captures have their own documented provenance. Keep all checks below intact.
   Standard-runner GUI contracts permit a bounded 1200-second cumulative smoke
   workload, warning after complete success exceeds 600 seconds. H and portable
   package scopes keep their existing budgets. This changes no individual
-  assertion or physical deadline, and any incomplete Release smoke stays fatal.
+  assertion or physical deadline. The typed progressing workload limit follows
+  the explicit incomplete-coverage policy below.
 - Native CI excludes only `fast_session` and `gui_fast_live` from its instrumented
   Debug job unless `sanitizer_realtime=true` is explicitly requested. Their
   real-time audio budgets are sensitive to sanitizer overhead; this is omitted
@@ -54,12 +55,15 @@ captures have their own documented provenance. Keep all checks below intact.
   Keep both mandatory in Release and retain their existing assertions. The
   instrumented native GUI smoke is an independent opt-in job (`sanitizer_smoke`
   or the `sanitizer-gui` diagnostic); ordinary CI records that coverage as
-  omitted. When selected, it may report an exhausted cumulative
-  workload budget as **incomplete coverage with a warning** only for its typed
-  budget result with recent sampled-transmission progress. That is not a pass.
-  Stalls, assertions, sanitizer reports and other failures remain fatal; do not
-  extend this exception to other tests. Release, SDK, packaging and certification
-  keep the complete native smoke mandatory and its nonzero outcomes fatal.
+  omitted. Every CI smoke scope, including Release, SDK, packaging and
+  certification, may report an exhausted cumulative workload budget as
+  **incomplete coverage with a warning** only for exit 75 with the validated
+  typed budget result and recent sampled-transmission progress. That is not a
+  smoke pass, but does not block workflow success or an otherwise qualified
+  ordinary release from Latest. Retain the exact source/inventory identity,
+  progress evidence and omitted scope in logs and certification reports. Stalls,
+  assertions, sanitizer reports, external timeouts and other failures remain
+  fatal; do not extend this exception to other tests.
   Local tests remain available unchanged. See [sanitizer throughput scope](docs/building.md#sanitizer-throughput-scope).
 - Reuse the exact prepared Linux SDK and Windows dependency recipes from the
   durable `base` release where applicable in ordinary release, certification
@@ -85,8 +89,10 @@ captures have their own documented provenance. Keep all checks below intact.
   clipboard, compilation, headless GUI/CLI, modem, packaging and calibration
   remain required. Reports must say `passed_with_warnings`, enumerate omitted
   graphics coverage and retain a per-run warning log. Such a green workflow is
-  not full Windows Rev graphics qualification and must not promote Latest.
-  Other graphics errors, assertions, crashes and timeouts remain failures.
+  not full Windows Rev graphics qualification, but the documented hosted-runner
+  limitation does not block certification or Latest eligibility for an otherwise
+  qualified ordinary release. Experiments remain prereleases. Other graphics
+  errors, assertions, crashes and timeouts remain failures.
 
 See [testing stages](docs/building.md#testing-stages) and
 [release validation](docs/releases.md#diagnose-a-branch-before-full-validation).

@@ -1,6 +1,11 @@
 # Exercise the real verifier with the tiny packaging executables. Expanded CMake
 # traces expose the process deadline without making a fixture sleep for minutes.
 function(check_gui_smoke_timeouts package_directory archive_directory fixture_build)
+  # These cases prove the default strict path even inside opt-in CI jobs.
+  set(saved_warnings_directory "$ENV{DATAPUMP_CI_SMOKE_WARNINGS_DIR}")
+  set(saved_smoke_runner "$ENV{DATAPUMP_CI_SMOKE_RUNNER}")
+  unset(ENV{DATAPUMP_CI_SMOKE_WARNINGS_DIR})
+  unset(ENV{DATAPUMP_CI_SMOKE_RUNNER})
   set(package_verifier "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../tools/verify-native-package.cmake")
   set(archive_verifier "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../tools/verify-native-archives.cmake")
   set(relocation_verifier "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/package_native.cmake")
@@ -155,6 +160,8 @@ function(check_gui_smoke_timeouts package_directory archive_directory fixture_bu
     endif()
   endforeach()
   message(STATUS "GUI smoke timeout defaults, bounds, process deadlines, archive and relocation forwarding verified")
+  set(ENV{DATAPUMP_CI_SMOKE_WARNINGS_DIR} "${saved_warnings_directory}")
+  set(ENV{DATAPUMP_CI_SMOKE_RUNNER} "${saved_smoke_runner}")
 endfunction()
 
 check_gui_smoke_timeouts("${archive_source}/DataPump-fixture-native" "${archive_directory}" "${BINARY_DIR}")

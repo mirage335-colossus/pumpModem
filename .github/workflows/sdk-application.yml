@@ -27,9 +27,16 @@ jobs:
     container: ${{ inputs.image }}
     timeout-minutes: 120
     env:
+      DATAPUMP_CI_SMOKE_WARNINGS_DIR: ${{ github.workspace }}/build/ci-smoke-results
+      DATAPUMP_CI_SMOKE_RUNNER: ${{ github.workspace }}/tools/run-gui-smoke.py
+      DATAPUMP_SMOKE_TARGET: linux-x86_64-${{ inputs.backend }}
+      DATAPUMP_SMOKE_SCOPE: published/sdk-archives
+      DATAPUMP_SMOKE_SOURCE_SHA: ${{ github.sha }}
+      DATAPUMP_SMOKE_INVENTORY_SHA256: ''
       DEBIAN_FRONTEND: noninteractive
       LIBGL_ALWAYS_SOFTWARE: '1'
-      LP_NUM_THREADS: '2'
+      # Reserve CPU time for sampled DSP and GUI polling on standard runners.
+      LP_NUM_THREADS: ${{ inputs.linux_runner == 'ubuntu-24.04' && '1' || '2' }}
       SDK_SCOPE: ${{ inputs.scope }}
       SDK_BACKEND: ${{ inputs.backend }}
     defaults:
@@ -135,12 +142,27 @@ jobs:
           } 2>&1 | tee "$SDK_LOG_DIR/build-packaging-tests.log"
       - name: Preserve wire and shared GUI contracts with the SDK toolchain
         if: inputs.scope == 'tests' && inputs.backend == 'fltk'
-        run: ./build.sh test contract --sdk "$GITHUB_WORKSPACE/build/sdk" --backend fltk --build-dir build/sdk-application --jobs 2 --build-jobs "$(nproc)" -- -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600 2>&1 | tee "$SDK_LOG_DIR/contract.log"
+        run: |
+          {
+            # The preceding build/packaging groups configured this exact SDK
+            # tree. Keep the full contract while isolating functional Live work.
+            build/sdk/bin/cmake -S . -B build/sdk-application -DDART_TESTING_TIMEOUT=3600
+            build/sdk/bin/cmake --build build/sdk-application --target datapump-tests-contract --parallel "$(nproc)"
+            build/sdk/bin/ctest --test-dir build/sdk-application -C Release --output-on-failure --stop-on-failure --no-tests=error -L '^contract$' -LE native_gui -R '^(live|live_profiles)$' --parallel 1
+            build/sdk/bin/ctest --test-dir build/sdk-application -C Release --output-on-failure --stop-on-failure --no-tests=error -L '^contract$' -LE native_gui -E '^(live|live_profiles)$' --parallel 2
+          } 2>&1 | tee "$SDK_LOG_DIR/contract.log"
       - name: Run Rev native conformance separately under a private display
         if: inputs.scope == 'tests' && inputs.backend == 'rev'
         # Full validation includes the complete workflow; devfast never runs it.
-        # Only its overall allowance changes, not the internal assertions.
-        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' ./build.sh test native --sdk "$GITHUB_WORKSPACE/build/sdk" --backend rev --build-dir build/sdk-application --jobs 2 --build-jobs "$(nproc)" -- -DDATAPUMP_PORTABLE=ON -DGUI_SMOKE_TIMEOUT=600 2>&1 | tee "$SDK_LOG_DIR/native.log"
+        # A validated progressing workload limit records incomplete coverage.
+        env:
+          DATAPUMP_SMOKE_SCOPE: source/native
+        run: |
+          {
+            ./build.sh --sdk "$GITHUB_WORKSPACE/build/sdk" --backend rev --build-dir build/sdk-application --jobs 2 --build-jobs "$(nproc)" -- -DDATAPUMP_PORTABLE=ON -DDATAPUMP_TEST_NATIVE_GUI=ON -DGUI_SMOKE_TIMEOUT=600
+            build/sdk/bin/cmake --build build/sdk-application --target datapump-tests-native --parallel "$(nproc)"
+            xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' python3 tools/run-native-tests.py --allow-budget-exhaustion --build-dir build/sdk-application --ctest "$GITHUB_WORKSPACE/build/sdk/bin/ctest" --report-dir "$DATAPUMP_CI_SMOKE_WARNINGS_DIR"
+          } 2>&1 | tee "$SDK_LOG_DIR/native.log"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: inputs.scope == 'packages'
         with:
@@ -152,16 +174,17 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 1
-      - name: Preserve failed or cancelled qualification logs
-        if: failure() || cancelled()
+      - name: Preserve qualification logs and incomplete coverage
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: DataPump-SDK-${{ inputs.scope }}-${{ inputs.backend }}-failure-logs
+          name: DataPump-SDK-${{ inputs.scope }}-${{ inputs.backend }}-qualification-logs
           path: |
             ${{ env.SDK_LOG_DIR }}/*.log
             build/sdk-application/Testing/Temporary/*.log
             build/sdk-application/CMakeFiles/CMakeConfigureLog.yaml
             build/sdk-application/build-info.txt
+            ${{ github.workspace }}/build/ci-smoke-results/
           if-no-files-found: warn
           retention-days: 7
       - name: Summarize this qualification scope
@@ -172,7 +195,7 @@ jobs:
           {
             printf 'SDK **%s / %s**: **%s**.\n\n' "$SDK_SCOPE" "$SDK_BACKEND" "$RESULT"
             if [ "$SDK_SCOPE" = packages ]; then
-              echo 'This scope builds and verifies both portable archives, including full copied GUI smoke, and supplies the compatibility matrix.'
+              echo 'This scope builds and verifies both portable archives, including copied GUI smoke with any incomplete coverage recorded, and supplies the compatibility matrix.'
             else
               echo 'This scope runs build/packaging regressions plus the FLTK preservation contract or Rev native conformance. Source qualification runs independently of package delivery.'
             fi

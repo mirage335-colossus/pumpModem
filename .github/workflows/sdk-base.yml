@@ -52,7 +52,7 @@ concurrency:
 
 jobs:
   helper:
-    runs-on: ubuntu-latest-h
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -76,6 +76,7 @@ jobs:
     needs: helper
     uses: ./.github/workflows/windows-base.yml
     with:
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
       windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
       source: ${{ inputs.source }}
       publish: ${{ inputs.publish }}
