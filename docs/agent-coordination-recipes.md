@@ -18,6 +18,10 @@ Read AGENTS and the workflow separately, in bounded chunks if necessary. For
 example, request workflow lines 1–160, then 161–320 in separate calls; continue
 only if lines remain. Do not concatenate them with source, board records or logs.
 After startup, use the relevant checkpoint instead of rereading the whole guide.
+Apply the same output budgeting to source, test logs and web results. Independent
+calls can run in parallel without combining their large bodies into one truncated
+result. Retrieve every additional section/source needed for the task; these recipes
+do not change the harness's normal research breadth, tool choice or browsing policy.
 
 ```sh
 python3 -B "$checkout/tools/check-agent-record.py" --scan "$coord_dir/sessions" --compact
@@ -59,6 +63,111 @@ available without opening historical records:
 python3 -B "$checkout/tools/check-agent-record.py" --fields
 ```
 
+For temporary knowledge, first discover matching **filenames**, using a real task
+path or distinctive symptom. For example, if investigating `tools/release.py`:
+
+```sh
+rg --hidden --no-ignore -l -F -- 'tools/release.py' "$coord_dir/notes"
+```
+
+No matches means broaden by the relevant component/symptom if needed, not dump all
+note bodies. An absent notes directory is normal; an access error needs attention.
+Read titles/status/affected paths from the matching files, then only the relevant
+notes in full. Do not print sibling result summaries merely to discover a topic.
+This filter is for knowledge discovery only: registry ownership review still
+includes **every record and whole claim**, regardless of task relevance.
+
+## Check your inbox
+
+Choose your session ID before the startup inbox check. With the already-verified
+board path, this read-only discovery example distinguishes a missing inbox from
+failure. It creates no directory and never marks a nonempty inbox processed:
+
+```sh
+python3 -B - "$coord_dir" "$session" <<'PY'
+from datetime import datetime, timezone
+from pathlib import Path
+import json, sys
+board = Path(sys.argv[1])
+session = sys.argv[2]
+if not board.is_absolute() or not board.is_dir():
+    raise SystemExit('Use the verified, accessible absolute board path')
+if not session or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-' for c in session) or session in ('.', '..'):
+    raise SystemExit('Use a valid session ID')
+inbox = board / 'messages' / session
+if (board / 'messages').is_symlink() or inbox.is_symlink():
+    raise SystemExit('Unexpected inbox alias; inspect it')
+try:
+    names = sorted(p.name for p in inbox.iterdir())
+except FileNotFoundError:
+    if not board.is_dir():
+        raise SystemExit('Board became inaccessible; inbox check incomplete')
+    names = []
+now = datetime.now(timezone.utc).isoformat()
+print(json.dumps({'entries': names, 'listed_at': now,
+                  'empty_check_completed_at': now if not names else None}))
+PY
+```
+
+Permission errors, non-directory paths and unreadable messages are **not empty**.
+For a large inbox, use the harness's paged filename discovery; a truncated list is
+incomplete. Read complete new relevant message bodies, including every unresolved
+request/receipt, before deciding what they change. Publisher staging names are not
+delivered messages; unexpected final entries need investigation. Keep processed IDs
+in task context or a compact reference in your own record when needed for resuming.
+Do not rely on filename order or a filesystem timestamp to skip unknown messages.
+
+After processing, record that actual time as `Last inbox check`; enumeration alone
+does not advance it. A missing/empty inbox observed successfully does complete a
+check. Recover any omitted decision-relevant message text after truncation. When
+only some messages are processed, keep the last completed check time and name the
+remaining work. Complete the startup check before first registration; the current
+record format requires an actual timestamp, so do not invent one if that check is
+blocked. Continue independent read-only work while resolving access. Retain the
+last completed check time through unrelated record publications. Reading bytes is
+not resolving a receipt: record the actual outcome. Messages arriving afterward
+belong to the next checkpoint; do not
+wait for hypothetical future acknowledgments after all required handoffs are done.
+
+## Job and handoff checkpoints
+
+Use the existing record, not a second activity journal. Before launching a build,
+test or generator that may outlive a tool reply, prepare its claimed outputs and
+stable input identity and publish the launch checkpoint. At the first return to
+agent control, use the tool's explicit running/completion status; some tools return
+handles even for completed jobs. Record a handle as active only while completion
+is unconfirmed. A job may finish before the next check; report the
+observed completion without inventing its exact finish time. Do not poll solely to
+keep documentation busy or start a monitor the harness does not normally need.
+
+| Event | Replace these existing fields together |
+| --- | --- |
+| Before launch | `Running jobs: launch pending; TMPDIR=/work/tmp/session ./build.sh test build --cli --build-dir /work/build/session; claimed outputs /work/build/session and /work/tmp/session; expected about 30s; handle unavailable until reply`. Next check is the planned result/inbox check. |
+| Tool reports running job `job-17` | Replace launch pending with `Running jobs: build job job-17 via this harness on example-host; same claimed outputs; completion unconfirmed`. Keep other genuinely active jobs. A handle identifies the job, not the session worker. |
+| Tool returns completion | If no other jobs remain, `Running jobs: none`. Progress says, for example, `13/13 CTest entries passed; 3 internal ELF cases skipped (patchelf absent); source/configuration and log reference`. Remove the resolved blocker and set Next action to the actual remaining work. |
+| Shared summary released | Remove only that claim, record release/provenance/hashes and stopped writers, replace `awaiting`/`append next` with `released; separate evidence remains`, and stay active for that work. Notify after publication. |
+
+A short synchronous command that finishes within one invocation needs no fabricated
+running phase afterward. Record its relevant result at the next checkpoint; keep
+the launch status truthful if it might yield or block. Ordinary read/search calls
+do not each need a checkpoint. Combine job, inbox and scope changes into one update
+when they coincide. Never hold the registry mutex while a command runs.
+
+Three times have different meanings. For example, a completed job was observed at
+`10:02:00Z`, inbox messages processed at `10:02:57Z`, and the candidate published at
+`10:03:00.123Z`: Last meaningful progress, Last inbox check and Updated respectively.
+Do not copy the publication time into the two event fields. If preparing a candidate
+takes time, refresh Updated just before publication, not the earlier observed facts;
+make Next check/action current too. Fractional UTC precision allows distinct
+publication timestamps within one second without inventing time. Clock uncertainty
+remains explicit, not synthesized time.
+
+Inspect the underlying test summary and exit result, not just a green wrapper or
+the exit code of `tail`/`tee`. Distinguish internal skips and setup failures from
+executed assertions. Before replacing a log that explains a fix, keep a distinct
+relevant attempt log or a concise command/failure/correction summary in your existing
+evidence. No need to retain every transient output or copy logs into the record.
+
 ## Session record template
 
 These are **filled format examples**, not facts to copy unchanged. Replace IDs,
@@ -71,7 +180,7 @@ artifact directory. Do not write a candidate into `sessions/`.
 # example-session
 - Tool / host / local chat reference: local harness / example-host / current task
 - Parent / read-only helpers: root / none
-- Task and approach: inspect a reported build failure, research relevant primary documentation, implement and validate the requested fix
+- Task and approach: diagnose the reported build failure using the harness's normal research/tools, implement and validate the requested fix
 - Checkout / coordination root (absolute physical paths): /work/pumpModem / /work/pumpModem/.agent-work
 - Branch / starting HEAD / current HEAD: example-branch / aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa / aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 - Starting worktree and index changes (including work owned by others): clean
@@ -117,7 +226,7 @@ receipts are resolved. Real outcomes may instead be `failed` or `cancelled`.
 # example-session
 - Tool / host / local chat reference: local harness / example-host / current task
 - Parent / read-only helpers: root / none
-- Task and approach: inspect reported build failure, research, implement and validate
+- Task and approach: diagnose reported build failure, implement and validate
 - Checkout / coordination root (absolute physical paths): /work/pumpModem / /work/pumpModem/.agent-work
 - Branch / starting HEAD / current HEAD: example-branch / aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa / aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 - Starting worktree and index changes (including work owned by others): clean
@@ -141,7 +250,7 @@ None.
 ## Baseline and dependencies
 - Example outcome: diagnosis found no source fix necessary; no worktree/index changes.
 ## Progress and checks
-- Example local probe and required research completed; no remaining validation.
+- Example local probe and task-appropriate research/verification completed; no remaining validation.
 ## Blockers and handoff
 - All writers stopped, claims released; no integration or receipt pending.
 ```
@@ -164,7 +273,8 @@ of power-loss durability. Windows/native harnesses can follow the manual protoco
 with equivalent primitives; this helper is not cross-platform qualification.
 
 For an existing session, prepare the **whole** replacement in its claimed artifacts.
-Check it before acquiring the mutex:
+Check its structure/content before acquiring the mutex. This is a proposal, not an
+event that advances inbox/progress time or grants a claim:
 
 ```sh
 python3 -B "$checkout/tools/check-agent-record.py" \
@@ -191,6 +301,12 @@ metadata immediately, including a plain `- Session: YOUR_ID` line, host, UTC,
 lock-holder PID/start identity when available and intent. Review all current claims
 and relevant releases again under that mutex. If a prior snapshot changed, release
 and reassess; do not hold the mutex while investigating or waiting for another agent.
+Finalize Updated from the current UTC clock immediately before publication; keep
+actual inbox/progress times and reconcile current jobs, blockers and Next action.
+Refresh a prepared release's resulting hash from the verified edit. Do not reuse
+an old timestamp just because a proposed record passed earlier. The publisher
+validates the final bytes again; equivalent manual publication must do the same
+checks. This last metadata update is part of publication, not another checkpoint.
 
 For an update after the complete review:
 

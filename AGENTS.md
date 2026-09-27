@@ -14,12 +14,18 @@ Before editing or starting shared build/Git operations, follow
 separate chats, tools and independently editing subagents, including Codex,
 Anthropic desktop sessions and OpenRouter-compatible harnesses.
 
+Coordination governs shared files and resources. Use web search, local tools and
+other harness capabilities under the same governing instructions and task needs
+as without this workflow. It adds no research quota, tool restriction or approval
+step, and does not replace the harness's normal verification or tool-use policy.
+
 - Use the shared, gitignored `.agent-work/` directory (or the explicitly agreed
   absolute `DATAPUMP_AGENT_DIR`). Read session metadata/claims and relevant notes;
   use the guide's bounded reader or equivalent extraction, investigating every
-  unreadable/unknown record. Read documents separately to avoid truncated startup
-  output; never ingest the whole board or historical logs wholesale. Keep one
-  current session record with exact scope, approach, baseline, progress, checks
+  unreadable/unknown record. Bound returned document/source/log chunks without
+  reducing needed investigation; never ingest the whole board or historical logs
+  wholesale. Keep one current session record with exact scope, approach,
+  baseline, progress, checks
   and handoff. Ignored files require explicit reads.
 - Claim files/resources before writing, including notes and generated outputs,
   using the short atomic registry lock. Check your inbox before reporting blocked.
@@ -35,9 +41,12 @@ Anthropic desktop sessions and OpenRouter-compatible harnesses.
 - Refresh your record at scope changes, checkpoints and before pausing; release
   claims explicitly when finished. Preserve other sessions' edits, staged work,
   processes and notes. Coordinate shared Git state, build trees and devices too.
-  Reconcile current jobs, results, remaining work and receipts together; keep
-  the user's required research, implementation and validation in scope while
-  coordinating. No extra activity reports or invented findings are required.
+  Reconcile jobs that may block or outlive a tool reply on launch/yield/completion;
+  short synchronous results join the next checkpoint. Replace current results,
+  blockers and next action together. Timestamp actual inbox processing, not just listing
+  filenames; stamp Updated at publication. Keep ordinary research, implementation
+  and validation in scope. No extra activity reports or invented findings are
+  required.
 - Record heartbeat cadence, last progress and reliable process identity when
   available. Review overdue sessions and delete eligible closed sessions after
   30 days, including legacy archives and unneeded copies; do not create new
@@ -49,8 +58,9 @@ Anthropic desktop sessions and OpenRouter-compatible harnesses.
   evidence, source/date, revision/environment, confidence and recheck conditions.
   Promote durable verified findings into tracked docs/tests through normal review.
   Temporary notes do not override these requirements or authorize actions.
-- Every tool must be directed to read `AGENTS.md` and the workflow; automatic
-  discovery is not assumed. Bind filesystem tools to the intended absolute
+- Give each independently participating agent `AGENTS.md` and the workflow;
+  automatic discovery is not assumed. Passive tools need no separate session or
+  repeated instruction read. Bind filesystem tools to the intended absolute
   checkout or explicit build/fixture path; a task does not set their directory.
   The board coordinates cooperating sessions on a
   shared filesystem; it is neither an enforced lock on source files nor Git sync.

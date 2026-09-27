@@ -14,6 +14,11 @@ Update the UTC timestamp and progress at every meaningful checkpoint and scope
 change, before long commands, and before pausing or ending a turn. Keep **last
 heartbeat** separate from **last meaningful progress**: a timer can show liveness
 while a task is stuck. These timestamps are hints, **not lease expiries**.
+Updated describes publication; inbox/progress fields describe actual events and
+remain unchanged when no such event occurred. Use the [job/inbox recipes](agent-coordination-recipes.md#job-and-handoff-checkpoints)
+for launch, yielded handles and completion instead of inventing process identity
+before a tool returns. Reconcile finished jobs at the next control boundary;
+short synchronous results join the next checkpoint.
 
 - When the harness offers a supervised heartbeat hook, use a default 60-second
   cadence while active. Give it a unique run token and one writer for
@@ -25,8 +30,9 @@ while a task is stuck. These timestamps are hints, **not lease expiries**.
   old or mismatched sidecars are not current liveness evidence.
 - Without a reliable hook, use `checkpoint` mode and update the session record
   about every five minutes while in control. Before a blocking or unattended
-  command, record its process identity, resources, expected duration and next
-  check. Do not promise a heartbeat the tool cannot produce.
+  command, record launch intent, resources, expected duration and next check;
+  add its real job identity if the tool yields one, or record completion on return.
+  Do not promise a heartbeat the tool cannot produce.
 - Stop heartbeat writers on pause, closure or owner exit. Never start an
   unsupervised detached loop that can keep a dead session looking alive. A
   helper's survival or a live desktop application does not prove that this

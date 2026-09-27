@@ -1,8 +1,10 @@
 # Preparing and evaluating coordination exercises
 
 Read this when running a coordination study, not during ordinary development.
-The [fifth](agent-coordination-rerun5.md), [sixth](agent-coordination-rerun6.md)
-and [seventh](agent-coordination-rerun7.md) reruns motivate these checks. Use the
+The [fifth](agent-coordination-rerun5.md) informs the preparation safeguards. The
+[sixth](agent-coordination-rerun6.md) and [seventh](agent-coordination-rerun7.md)
+reruns used unchanged guidance; the
+[eighth](agent-coordination-rerun8.md) tested the subsequent revision. Use the
 [coordination workflow](agent-coordination.md) for the evaluator's own files,
 fixtures, observers, builds and handoffs too.
 
@@ -22,6 +24,11 @@ fixtures, observers, builds and handoffs too.
   A citation copied from another note, successful local repair or a later coached
   lookup does not satisfy the original independent-research criterion. If access
   is unavailable, report it as unmet/blocked; do not silently replace the worker.
+  This is a requested exercise criterion, not a change to ordinary harness policy.
+  Matched controls must receive the same research/tool instructions, available
+  capabilities and task scope. Do not infer normal browsing prevalence from a
+  trial whose prompt newly mandates it; page opens/finds and search queries are
+  distinct valid lookup evidence, and raw call count is not research quality.
 - Materialize each entire historical parent tree from Git's tracked inventory,
   including vendored files that current ignore rules might exclude. Verify file
   paths, modes, symlink targets and content against that tree before creating the
@@ -79,6 +86,13 @@ and records to distinguish entry readiness, request, acquisition, append, releas
 and receipt times; separate ownership waiting from independent repair/test time.
 Include a case where unrelated closure/evidence work remains after a shared edit;
 the worker should release that file promptly while keeping its session active.
+Include launch/yield/completion, a missing/empty/nonempty inbox, and a candidate
+prepared before publication. Compare observed job results and processed message IDs
+with the current record, not merely its parseability. A changed Updated is not
+proof of publication-time freshness. Capture event times/tool traces where the
+harness permits; do not impose extra worker messages or hold times to make sampling
+easier. Separate coordination reads from ordinary research/source reads and record
+truncation recovery and scope, not just whether a helper was used.
 
 For publication primitives, supplement sampling with deterministic concurrent
 writer/reader and injected-failure tests. Readers should see absent or complete
@@ -95,6 +109,12 @@ adaptations, exclusions and test-fixture repairs separately. Verify that adapted
 tests still exercise real candidate behavior. Baseline/fixed controls must
 discriminate the bug; passing both is not evidence of a repair. Do not imply actual
 Windows, device or live-service qualification from a simulation on another host.
+Audit coverage against each declared public behavior, not test counts: a publication
+success probe, for example, must check intended inventory and final state as well as
+destination ID. Preserve original results and label any post-freeze supplemental
+probe separately; do not call it preregistered evidence or send its findings back
+to a finished repair worker. Retain a compact useful failure/correction record
+instead of overwriting the only evidence of a fixture or environment error.
 
 Report passed, failed, skipped, setup-blocked and untested scopes separately.
 Score repair correctness, requested independent research, required validation and

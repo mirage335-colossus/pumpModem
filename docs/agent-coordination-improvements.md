@@ -1,12 +1,13 @@
-# Coordination guidance consolidation, 2026-09-27
+# Coordination guidance improvements, 2026-09-27
 
-This change addresses the recurring findings in the [sixth](agent-coordination-rerun6.md)
+The original consolidation, committed as `296eddf`, addresses the recurring findings in the [sixth](agent-coordination-rerun6.md)
 and [seventh](agent-coordination-rerun7.md) exercises, which used unchanged guidance,
 plus still-relevant evidence from the [original exercise](agent-coordination-exercises.md)
 and [reruns one](agent-coordination-rerun.md), [two](agent-coordination-rerun2.md),
 [three](agent-coordination-rerun3.md), [four](agent-coordination-rerun4.md) and
 [five](agent-coordination-rerun5.md). Historical reports remain unchanged.
 
+The original sections below describe that consolidation. The [follow-up after run 8](#follow-up-after-run-8) records the subsequent revision from baseline `aa9582e`.
 This is an implementation and regression report, not a new blinded worker trial.
 The entry point remains [AGENTS.md](../AGENTS.md) and the
 [routine workflow](agent-coordination.md). Workers do not need to read this report.
@@ -109,8 +110,76 @@ artifacts; this tracked report preserves the useful results after those expire.
 
 The publisher is optional and requires safe POSIX filesystem primitives. Tests do
 not qualify Windows, network/cloud-sync filesystems, independent vendor harnesses,
-uncooperative writers, physical devices or live release publication. The changed
-guidance has **not** undergone another blinded five-worker exercise in this change.
+uncooperative writers, physical devices or live release publication. At the original consolidation checkpoint, the changed
+guidance had **not yet** undergone another blinded five-worker exercise; the
+[eighth run](agent-coordination-rerun8.md) subsequently supplied that evidence.
 All actionable findings from the audited runs are addressed and regression checks
 pass; improved agent behavior and reduced overhead require a future measured trial,
 not a guarantee inferred from these implementation tests.
+
+
+## Follow-up after run 8
+
+The revision from `aa9582e7c8ac2f26e975e8c7d42f22294cc1a7ba` uses the unchanged-guidance
+pair **runs 6/7**, the later **run 8**, and the still-relevant earlier findings above.
+There was a guidance change between runs 7 and 8; those two are not an unchanged
+pair. Historical exercise reports were not rewritten. Evidence review included
+selected run-8 surveys and publication records, current helper implementations,
+their tests, build-group/CI wiring and instruction entry points. Two independent
+read-only reviewers checked the evidence and the executable guidance.
+
+Run 8 preserved the earlier successful ownership behavior and improved publisher
+adoption, temporary-record placement and prompt shared-file release. It still
+reported stale job/blocker text, unobserved inbox timestamps, later source/web read
+truncation in all five workers and one overwritten diagnostic log. Some evidence
+is reconstructed worker self-report rather than a captured full tool trace.
+Zero lost ledger edits in these runs never established collision immunity.
+
+| Remaining finding | Follow-up response |
+| --- | --- |
+| A/B/C/D recorded no jobs during short asynchronous builds; E retained a completed job; B/D retained obsolete handoff/next-action text | Existing-checkpoint launch/yield/completion/release sequence replaces jobs, results, blockers and next action together. Tool status governs completion, not mere presence of a handle. Short synchronous results join the next checkpoint. |
+| B/C/E startup inbox times were not based on checks; B enumerated messages before reading their bodies | Missing-directory-safe read-only discovery example distinguishes empty observation from enumeration and processing; unreadable/truncated content cannot advance the completed-check time. Session ID selection precedes inbox reading. |
+| A's acquisition Updated preceded publication by roughly 34 seconds | Prepare stable content early; finalize publication time and current action just before the existing atomic publication. Preserve actual progress/inbox event times. Formatting checks cannot certify factual freshness. |
+| Later oversized source/build/web results and overly broad sibling-note metadata | Bound returned chunks without reducing investigation depth, tool use or source diversity; discover task-matching note filenames before selected metadata/body reads. Ownership claims remain complete and unfiltered. |
+| Overwritten failure evidence and an initial no-skips claim corrected before closure | Keep a compact useful failure/correction summary or distinct relevant attempt log; inspect actual test summaries and exit results before claiming coverage. No duplicate journal or blanket log retention. |
+| Ordinary research could be misread as required only when explicitly requested | AGENTS/workflow explicitly preserve the governing harness's normal web search, browsing, local tools, delegation, approvals and verification. No quota, suppression, added approval or coordination prerequisite for read-only investigation. Passive tool invocations need no separate session or repeated guide read. |
+
+The evaluator guide now distinguishes exercise-specific research requirements from
+ordinary harness policy. Matched controls need identical task/tool conditions;
+page opens/finds are distinguished from search queries, and tool-call counts alone
+are not a measure of research effectiveness. It also calls for event-based status
+checks and public-contract coverage, and labels post-freeze supplemental probes.
+These are evaluator instructions, not added worker reporting obligations.
+
+No reader/publisher implementation change was warranted: neither can infer that
+an agent actually read a message or that a tool finished. Exact claims, complete
+legacy/terminal ownership, atomic publication, explicit release/acquire/acknowledge,
+stable build inputs, positive recovery evidence and 30-day retention remain intact.
+The routine guide grows by about 200 words; the detailed operational examples are
+on demand. The workflow adds no ownership phase, mandatory helper, service or
+per-search/per-command activity report. Word count alone does not measure distraction.
+
+Validation for this follow-up used claimed disposable fixtures on Linux:
+
+- **14 executable documentation/scenario checks passed:** filled records through
+  real publication/scanning; launch/yield/completion/active release with separate
+  event times; rejected unchanged-Updated claim change; missing/empty/nonempty
+  inboxes; injected access failure and disappearing board; non-directory/alias
+  rejection; path-filtered note discovery; shell syntax. A deliberate valid-format
+  but unobserved inbox claim demonstrates that the checker cannot certify truth.
+- **36 reader/checker and 26 publisher tests passed**, including their existing
+  race, interrupted publication, unknown/retained claims and stale-hash cases.
+  Helper sources, tests, application code, CMake and CI were unchanged. Therefore
+  this documentation-only follow-up used focused validation, not another full
+  application/build-group or historical repair exercise.
+- Relative links/anchors, whitespace, instruction scope and final diff were reviewed.
+  Review fixes covered session-ID ordering, completed jobs with handles, disappearing
+  boards, and avoiding extra updates for immediately completing synchronous checks.
+
+Evidence is retained in `.agent-work/artifacts/coord-guidance9-20260927/` under the
+normal lifecycle. This resolves the actionable documented issues reviewed here;
+it does not promise that future sessions cannot collide or that research/tool
+prevalence has been empirically proved identical. Other harnesses, filesystems,
+real shared-source/Git edits and interrupted jobs still require appropriately
+scoped evaluation. No new blinded trial or measured reduction in total distraction
+is claimed by these recipe and regression checks.
