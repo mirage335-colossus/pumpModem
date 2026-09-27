@@ -24,7 +24,7 @@ procedures when their triggers apply, not as a repeated startup transcript.
 | Before each write | Confirm ownership and current contents, including notes and generated outputs; stop that write if the baseline changed unexpectedly. |
 | Before a test, build or generator | Identify its outputs, temporary files and caches; direct them into claimed directories before launching. |
 | Waiting or checkpointing | Read your inbox and current claims; replace the current status/timing fields below, not just a progress bullet; continue independent work. |
-| Handoff or finish | Finish/stop writers, release through the registry, send the release notice with request ID and scope, and record disposition and next action. |
+| Handoff or finish | Finish/stop writers, record the release and disposition through the registry, then send its reference with the request ID and scope. |
 
 Apply these checks at action boundaries, then return to research, implementation
 and required tests. Before handoff, verify requested behavior against its contract
@@ -209,22 +209,46 @@ the same session-record owner; an optional supervised heartbeat writer uses its
 separate file, never the session record or claims. An unreadable or malformed
 record is unresolved ownership, not evidence that the paths it may cover are free.
 
+For current-template records, the optional read-only
+[record checker](../tools/check-agent-record.py) can catch stale claim-update
+timestamps, duplicate/missing sections or fields, elapsed next checks and retained
+terminal claims. Prepare a complete candidate in your claimed artifacts or unique
+record sibling; run `python3 -B tools/check-agent-record.py --before CURRENT --after CANDIDATE`
+before atomic publication. Use `--help` for accepted syntax. It reads only those
+two files, compares the complete claims text conservatively and never publishes
+or grants ownership. Review blockers, actual event times and all current claims
+yourself under the procedure above; a pass does not replace that review. Legacy
+records and other harnesses can use the manual procedure without migration.
+
 ### Contested files and handoffs
 
 Default to one writer per file, including append-only ledgers: different functions
 or entries can still be overwritten by an editor save. Prefer a per-session result
 file and one claimed integrator when several agents need to update the same report.
+Acquire a shared summary only when its entry is ready; append, check and release
+promptly. Run independent research/tests first. Keep source/build claims while
+their writers or validation still depend on them.
 If a claim overlaps, leave that path alone and use this handoff:
 
 1. Request the exact paths/resources in the owner's inbox with a unique request
    ID and intended edit. Record the request and continue independent work.
 2. The owner finishes/stops its writers, queued saves and generators, records
    dirty-file state and completed/pending checks, then removes the claims under
-   the registry mutex.
-   Only afterward send a release notice to the requester's inbox with the request
-   ID and exact scope.
+   the registry mutex. In the same handoff entry record a fresh release reference,
+   owner, exact scope, acquired-from reference (or initial ownership), and resulting
+   baseline: hashes/scoped diff covering the transferred files, or resource state
+   and stopped jobs. For example:
+   `release A-2; owner A; scope /p/results.md; acquired relay-1; baseline sha256:...; writers stopped`.
+   Keep the reference stable across checkpoints; retain evidence while an unresolved
+   handoff depends on it.
+   Only afterward send its reference, request ID and scope to the requester's inbox.
 3. The recipient first rereads **all** claims under the mutex, including covering
-   directories. Decide from current ownership, not whether a reply ID matches:
+   directories, and reconciles the release with relevant current handoff entries
+   for that scope. If relay released, A acquired/released, then you acquire,
+   acknowledge **A**, even if you only received relay's notice. An unchanged hash
+   does not erase A's ownership. Follow release/acquisition references; neither a
+   matching hash nor the newest timestamp selects the owner. Decide from current
+   ownership and disposition, not whether a reply ID matches:
 
    - Still claimed: follow or request that owner's handoff; old notices grant no access.
      If ownership changed, replace your pending request in the same record update:
@@ -232,15 +256,14 @@ If a claim overlaps, leave that path alone and use this handoff:
      request per scope, not contradictory pending entries.
    - Release recorded, writers stopped, no overlapping claims, scope and disposition
      clear: acquire now. A wrong or missing reply ID alone needs no clarification round trip.
-   - Writers still running, or ownership, scope or disposition unclear: leave that
+   - Writers still running, or ownership, release provenance, scope or disposition unclear: leave that
      path alone and resolve the handoff or follow recovery; continue independent work.
 
-4. After acquiring, send an acknowledgment to the inbox of the owner whose release
-   you acquired from, with the pending request ID, scope and any reply-ID mismatch.
+4. After acquiring, acknowledge that owner's release reference in its inbox, with
+   the pending request ID, scope and any reply-ID mismatch.
    Mark that request acquired in your record; do not wait for a corrected notice.
-   An earlier owner
-   can resolve a superseded request from the recorded reroute; no acquisition
-   acknowledgment is owed to an owner you never acquired from. Separate pending
+   An earlier owner can resolve a superseded request from the recorded reroute;
+   no acquisition acknowledgment is owed to an owner you never acquired from. Separate pending
    content integrations still require acknowledgment. Reread/hash the file and
    preserve handed-off edits; patch that current state. Finish before releasing;
    report unexpected changes. A notice alone never grants ownership.
@@ -349,7 +372,10 @@ optional cleanup advice.
 
 Copy this into `sessions/<session-id>.md`; fill in concrete values. Use `none`
 instead of silently omitting a field. Keep only bounded current progress and
-handoff information, then compact on closure as described above.
+handoff information, then compact on closure as described above. For the optional
+checker use ISO UTC timestamps (fractional seconds allowed), `timestamp / action`
+for Next check, or `none / action` when paused/terminal without a planned check.
+Empty Claims held is a standalone `None.`; keep release details in the handoff section.
 
 ```markdown
 # <session-id>
@@ -394,7 +420,7 @@ handoff information, then compact on closure as described above.
 ## Blockers and handoff
 - Current request ID / scope / owner / state (pending, acquired, released, superseded) / message paths:
 - Uncommitted changes; validation still required:
-- Claims released/retained, recipient acknowledgment and recipient's next action:
+- Claims released/retained, release/acquired-from references and baseline, acknowledgment and next action:
 - Recovery evidence or useful surviving notes, if applicable:
 ```
 
