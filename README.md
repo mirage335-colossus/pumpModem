@@ -3,6 +3,7 @@
 **Build:** `./build.sh` · **Test:** `./build.sh test contract` ·
 **Package:** `./build.sh package`. See the [build and maintenance guide](docs/building.md)
 for dependencies, stable profiles, focused tests and portable release limits.
+**Release with GitHub Actions:** follow [RELEASE](RELEASE), in order.
 
 A C++20 audio modem for moving clipboard text, screenshots, and files between
 computers. It includes a compiled CLI, a native C++/FLTK desktop console, real

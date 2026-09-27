@@ -1,5 +1,7 @@
 # Manual portable releases
 
+For the routine button-by-button sequence, follow [RELEASE](../RELEASE).
+
 The feature-complete application version is **001_00**. The CLI, GUI and build
 information use that display version, and an ordinary release dispatch defaults
 to the label `v001_00`. CMake, portable archive roots and distribution packages

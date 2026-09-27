@@ -1,5 +1,6 @@
 # Command reference: run the selected blocks from the repository root.
 # Prerequisites, profiles and portability: docs/building.md
+# GitHub Actions build/release checklist: RELEASE
 
 # Native toolchain: choose the test coverage needed; groups overlap.
 ./build.sh                 # Incremental FLTK GUI and CLI build
