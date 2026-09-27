@@ -19,17 +19,19 @@ Anthropic desktop sessions and OpenRouter-compatible harnesses.
   never ingest the whole board or historical logs by default. Keep
   your own session record with exact files/resources, intended edits, approach,
   baseline, progress, checks and handoff. Ignored files require explicit reads.
-- Claim files/resources before writing, using the short atomic registry lock
-  described in the workflow. Resolve overlapping claims with a recorded handoff
-  or an isolated checkout. An old timestamp alone never releases ownership.
+- Claim files/resources before writing, including notes and generated outputs,
+  using the short atomic registry lock. Check your inbox before reporting blocked.
+  Handoffs require recorded release, fresh claim acquisition and acknowledgment;
+  a message or old timestamp never grants ownership. Use an isolated checkout
+  when overlapping work cannot be handed off.
 - Refresh your record at scope changes, checkpoints and before pausing; release
   claims explicitly when finished. Preserve other sessions' edits, staged work,
   processes and notes. Coordinate shared Git state, build trees and devices too.
 - Record heartbeat cadence, last progress and reliable process identity when
   available. Review overdue sessions and delete eligible closed sessions after
   30 days, including legacy archives and unneeded copies; do not create new
-  archives. Follow the workflow's cleanup rules and keep useful unresolved facts
-  in compact notes. PID disappearance or an old timestamp alone never clears
+  archives. Follow the linked lifecycle procedures when triggered; keep useful
+  unresolved facts in compact notes. PID disappearance or an old timestamp alone never clears
   claims or authorizes deleting unresolved work.
 - Record discoveries not yet in maintained docs under `.agent-work/notes/`:
   bugs, hypotheses, failed attempts, workarounds and community references, with

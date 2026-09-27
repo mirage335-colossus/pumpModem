@@ -13,6 +13,18 @@ chat API or vendor-specific memory feature is required. These records supplement
 the [development contract](development.md) and [build guide](building.md); they
 never weaken compatibility requirements, tests or user instructions.
 
+## Routine checkpoints
+
+Read this guide at startup; use these checkpoints thereafter. Read linked lifecycle
+procedures when their triggers apply, not as a repeated startup transcript.
+
+| When | Required action |
+| --- | --- |
+| Start, resume or change scope | Inspect baseline and complete claims; check your inbox; register or update exact claims before writing. |
+| Before each write | Confirm ownership and current contents, including notes and generated outputs; stop that write if the baseline changed unexpectedly. |
+| Waiting for a file | Poll your inbox and current claims before reporting blocked; continue work on independent claims. |
+| Handoff or finish | Finish/stop writers, release through the registry, notify the recipient, and record disposition and next action. |
+
 ## Start or resume a session
 
 1. Identify the physical checkout path, branch, `git rev-parse HEAD`, and existing
@@ -34,8 +46,9 @@ never weaken compatibility requirements, tests or user instructions.
    abandoned-owner recovery, start with a fresh session ID and reacquire claims;
    never resume writing under the old record's ownership.
 4. Publish a session record using the template below and acquire the files and
-   resources you need through the registry procedure. Record the intended edit
-   and method, not just a broad task title. Read-only investigation needs no
+   resources you need through the registry procedure, including a session-specific note
+   directory and artifact directory if needed. Record the intended edit and method,
+   not just a broad task title. Read-only investigation needs no
    exclusive file claim, but record its scope and treat changing inputs as such.
 5. Re-read each target immediately before editing. Compare its current contents
    with the baseline you inspected; use a content hash or saved scoped diff when
@@ -82,22 +95,37 @@ integration handoffs instead of claiming simultaneous access is coordinated.
 .agent-work/
   sessions/<session-id>.md          # one writer; status and authoritative claims
   heartbeats/<session-id>.json      # optional supervised liveness writer only
-  notes/<session-id>-<topic>.md     # one writer; temporary findings
+  notes/<session-id>/<topic>.md     # claim this session directory before writing
   messages/<recipient>/<sender>-<unique-id>.md  # immutable local requests/replies
   artifacts/<session-id>/          # scoped logs, diffs and reproduction material
   cleanup.log                     # bounded deletion receipts; registry-lock writer
   registry.lock/owner.md           # exists only while registry changes are locked
 ```
 
-Do not use a single shared scratchpad that everyone overwrites. Each session owns
-its record, notes and artifacts. Write updates to a unique sibling temporary file,
-then rename it over your own record on the same filesystem so readers do not see
-a half-written file. Do not replace another session's record; deletion of an
-expired record is allowed only through the cleanup procedure below. For
-requests, create a uniquely named message and put the response in the sender's inbox;
-reference both in your records. Check messages at each checkpoint and while
-blocked. These local files are the cross-tool communication channel; delivery or
-acknowledgment is not automatic.
+Do not use a shared scratchpad. Register claims for your exact notes/artifacts or
+session-specific directories before their first write; a unique name alone is
+not a claim. Existing `notes/<session-id>-<topic>.md` files remain valid with exact
+file claims; no migration is needed. Never claim all of `notes/` or the board to
+reserve your own namespace. A claimed file includes its unique sibling temporary
+file used only for atomic replacement. Publish updates by writing that temporary
+file and renaming it on the same filesystem. Preserve other sessions' records;
+cross-session deletion follows [the cleanup procedure](agent-coordination-lifecycle.md#delete-expired-sessions-and-unnecessary-history).
+
+Your session record is created under the registry mutex as part of registration;
+it does not need a recursive claim on itself. Uniquely named immutable outbound
+messages also need no per-message claim: use your sender ID and a fresh suffix,
+create without replacing an existing message, and never edit a sent message.
+Publish complete messages atomically without replacement; do not use an
+existence check followed by an overwriting rename. These exceptions do not cover
+notes, artifacts, heartbeat sidecars or a shared ledger. If a supervised heartbeat is
+used, claim its exact sidecar and designate its sole writer first.
+
+Check your inbox at each checkpoint and before declaring a handoff blocked. While
+waiting in control, poll about every 60 seconds without busy-waiting; continue
+independent work and check again after a long command or resume. Record the last
+inbox check and concrete next check in your waiting status. File delivery does
+not wake another chat automatically. A harness notification may prompt an inbox
+check, but never transfers ownership.
 
 ### Limit routine reads and record size
 
@@ -165,13 +193,40 @@ the same session-record owner; an optional supervised heartbeat writer uses its
 separate file, never the session record or claims. An unreadable or malformed
 record is unresolved ownership, not evidence that the paths it may cover are free.
 
-If a claim overlaps, leave the contested paths alone. Offer a narrower disjoint
-scope, request a handoff through the owner's inbox, or use an isolated worktree
-with a designated integrator. Default to one writer per file; two agents changing
-different functions in the same file can still overwrite each other through a
-formatter or editor save. Separate worktrees permit independent edits but still
-need an integration plan for overlapping repository-relative paths. Assign one
-integrator and record dependencies, merge order and the checks to run afterward.
+### Contested files and handoffs
+
+Default to one writer per file, including append-only ledgers: different functions
+or entries can still be overwritten by an editor save. Prefer a per-session result
+file and one claimed integrator when several agents need to update the same report.
+If a claim overlaps, leave that path alone and use this handoff:
+
+1. Request the exact paths/resources in the owner's inbox with a unique request
+   ID and intended edit. Record the request and continue independent work.
+2. The owner finishes/stops its writers, queued saves and generators, records
+   dirty-file state and completed/pending checks, then removes the claims under
+   the registry mutex.
+   Only afterward send a release notice to the requester's inbox with the request
+   ID and exact scope.
+3. The recipient checks its inbox and rereads **all** claims under the mutex,
+   including covering directory claims. If free, publish its own claim; if another
+   session acquired the file, contact that current owner and keep waiting or
+   isolate the work. A release notice is neither a reservation nor ownership.
+4. After acquiring, send an acknowledgment to the previous owner's inbox with
+   the request ID and record it. Reread/hash the file and preserve the handed-off
+   edits. Apply the patch only against that current state.
+   Finish the write before releasing the claim; report any unexpected baseline.
+
+A parent directory claim cannot be narrowed by merely adding an exception in a
+message. Before handing a child path to another writer, replace the covering claim
+under the mutex with explicit disjoint claims, or have the current owner apply the
+small change. Do not leave a broad claim alongside a supposed child-file release.
+The same applies to delegated agents: parent and child cannot both own the file.
+
+If no timely handoff is possible, choose a disjoint scope or isolated checkout;
+never reclaim by timeout. Separate worktrees with overlapping repository-relative
+paths need a designated integrator, recorded dependencies, merge order and checks.
+Give each writing agent the board path and scoped task explicitly; it registers
+its own claims. Instructions to help or a parent-owned directory are not a transfer.
 
 ### Shared state beyond source files
 
@@ -210,157 +265,36 @@ integrator and record dependencies, merge order and the checks to run afterward.
 
 ### Progress, interruption and recovery
 
-Update the UTC timestamp and progress at every meaningful checkpoint and scope
-change, before long commands, and before pausing or ending a turn. Keep **last
-heartbeat** separate from **last meaningful progress**: a timer can show liveness
-while a task is stuck. These timestamps are hints, **not lease expiries**.
+Use checkpoint mode unless the harness has a reliable supervised heartbeat hook.
+Refresh UTC progress about every five minutes while in control, at scope changes,
+before long commands and before ending a turn. Record a concrete next-check time;
+keep liveness separate from meaningful progress. Before a blocking command, record
+its job identity, resources and expected duration. If the session worker identity
+is unavailable, say so; an ephemeral tool shell is not the session worker.
 
-- When the harness offers a supervised heartbeat hook, use a default 60-second
-  cadence while active. Give it a unique run token and one writer for
-  `heartbeats/<session-id>.json`. Include session ID, run token, host, UTC time
-  and an increasing sequence number. Publish it atomically via a sibling
-  temporary file. It reports liveness only; the agent updates work progress.
-  Refresh the run token and process identity on restart/resume. Readers accept
-  only heartbeats matching the current record's session, host and run token;
-  old or mismatched sidecars are not current liveness evidence.
-- Without a reliable hook, use `checkpoint` mode and update the session record
-  about every five minutes while in control. Before a blocking or unattended
-  command, record its process identity, resources, expected duration and next
-  check. Do not promise a heartbeat the tool cannot produce.
-- Stop heartbeat writers on pause, closure or owner exit. Never start an
-  unsupervised detached loop that can keep a dead session looking alive. A
-  helper's survival or a live desktop application does not prove that this
-  particular chat is working. This guide adds no daemon or scheduled cleanup;
-  agents or harnesses must perform the documented updates and checks.
+At startup/resume, before requesting an overlapping claim, and at completion,
+scan metadata for overdue owners and cleanup candidates, including legacy archive
+metadata for cleanup. Checkpoint mode uses the declared next check plus five
+minutes' grace; supervised heartbeats use three expected intervals (at least five
+minutes) and any announced next check. Missing timing, uncertain clocks or
+identity mean unknown ownership, never permission to reclaim.
 
-Record owner and job identity when the environment exposes it: host, boot
-identity, PID namespace/container, PID, and process creation time or equivalent
-OS start token. A stable process handle can supplement these where supported;
-its numeric value alone is not a portable cross-tool identity. Label the role
-(`session worker`, `heartbeat helper`, `build job`, `registry lock holder`) and
-record child/detached jobs separately. Do not use a throwaway tool shell's PID
-or a desktop process shared by several chats as the session worker. If the
-session owner cannot be identified, say `unavailable` and use checkpoints.
+Before pausing, release unneeded claims and record retained claims and next check.
+Before closure, resolve jobs and handoffs, stop heartbeat writers, preserve useful
+findings and uncommitted-work disposition, then release claims under the mutex.
+Record terminal state, closure time and deletion deadline (closure plus 30 days).
+A failed command alone is not terminal. Name the receiving integrator and record
+its acknowledgment for pending integrations; released files can still contain
+another session's uncommitted work.
 
-Inspect process identity only on the recorded host and in the matching namespace.
-Match start/boot identity as well as PID: a reused PID is a different process.
-Permission errors, an unreachable host or missing identity information mean
-`unknown`, not `exited`. A verified exit helps identify an interrupted run, but
-does not prove that its child jobs stopped or that a chat cannot resume. Process
-existence also does not prove progress. Do not infer elapsed time from a skewed
-or future timestamp; record clock uncertainty and investigate. An advancing
-heartbeat sequence is useful evidence when comparing successive observations.
-
-At startup/resume and before requesting an overlapping claim, review records
-whose heartbeat is overdue by three expected intervals (at least five minutes)
-**and** past any announced next check. In checkpoint mode, use the declared next
-check with a five-minute grace period. Missing cadence/next-check data means
-`unknown`. Record the observation in your own cleanup report or a message to the
-owner; do not rewrite its state as failed based on age.
-
-| Observation | Classification and next action |
-| --- | --- |
-| Fresh heartbeat or matching live worker/job | Possibly active; preserve claims and inspect progress if needed |
-| Overdue heartbeat, owner still live | Possibly stalled or paused; contact owner, keep claims |
-| Overdue heartbeat and verified owner exit/start mismatch | Interrupted-run candidate; inspect jobs and use recovery procedure |
-| Host/identity unavailable, clock uncertain or no declared cadence | Unknown; no automatic reclamation |
-| `done`, `failed` or `cancelled` with closure details | Cleanup candidate; check deletion conditions below |
-
-Before pausing, release what you no longer need and state which claims remain
-held and why, plus an expected return/check if known. On completion, failure or
-cancellation, publish results, unresolved questions, changed files and next
-action. Resolve jobs and handoffs, stop heartbeat writers, then release claims
-under the mutex and set a terminal state (`done`, `failed` or `cancelled`) with a
-closure timestamp and deletion deadline. A failed command alone does not make the
-whole session terminal. Pending integrations should name their receiving session
-and record an acknowledgment. Uncommitted edits survive a release of claims:
-record them so the next owner preserves or explicitly integrates them.
-
-Do not steal claims or remove a registry lock solely because it looks old. A chat
-may be suspended or running a long test. Contact its owner, inspect available
-session/process evidence, and obtain an explicit release. If the owner is gone,
-recovery requires positive evidence that the session and its jobs cannot resume
-writing, or a user-coordinated stop/handoff. A missing PID alone is insufficient
-across hosts or resumable chats. Record the evidence and designated recovery
-owner; suspend registry changes during lock recovery. Preserve the abandoned
-record/lock metadata in the recovery owner's artifacts before changing anything.
-After exclusive access is established, the recovery owner records the evidence,
-closes the abandoned session as failed or cancelled as appropriate, and releases
-its claims under the registry mutex, preserving the original snapshot. Record
-the closure time and handoff before applying the deletion rules below. A recovered
-session must register/reclaim before resuming edits.
-
-### Delete expired sessions and unnecessary history
-
-Delete eligible `done`, `failed` and `cancelled` sessions **30 days after verified
-closure**. Do not create new archives or require a separate owner opt-in for this
-default cleanup. Owners may discard their own resolved records sooner. This
-replaces the previous seven-day archive/indefinite retention policy, including
-old `archive-only` defaults. Existing `archive/sessions/` records have the same
-30-day deadline measured from closure, not archival or last access. Copying,
-moving or inspecting a record must not restart its age.
-
-At startup and task completion, use local metadata scans to identify due records,
-including legacy archives; keep routine claim reads limited to `sessions/`.
-Age selects candidates only. Before deletion, verify all of these:
-
-- The record is terminal, has a closure time and holds **no claims**. An old
-  `active`, `waiting` or `paused` record must go through recovery first.
-- Jobs and heartbeat writers have exited or been explicitly transferred to a
-  named live owner. No pending handoff or writer can update the closed record.
-- The final result, changed files, uncommitted/staged-work disposition, remaining
-  validation and useful findings have a destination where needed. Extract useful
-  unresolved facts into concise `notes/` with an owner, evidence and next action;
-  promote required durable evidence to maintained records. Do not preserve the
-  full session transcript as the note. Uncommitted edits themselves remain intact.
-- No active handoff, unresolved investigation or required evidence depends on
-  the material being deleted. Redirect essential references to the surviving
-  facts with their owners. Incidental author/session IDs and historical cleanup
-  links are provenance, not retention pins; keep brief attribution without
-  keeping entire histories or leaving misleading links to deleted files.
-
-For older records missing closure fields, the owner or designated recovery owner
-may add verified details under the registry mutex, preserving the original
-snapshot only while recovery needs it. A missing deletion date means closure
-plus 30 days; a missing trustworthy closure time needs investigation. Do not
-substitute filesystem modification time for verified closure.
-A deletion date beyond closure plus 30 days requires the retention exception
-below; a date field alone cannot extend the default lifetime.
-
-Retention exceptions must name a live dependency, responsible owner, exact
-material needed, reason and review date within seven days. Record these in a
-compact note and review them during cleanup; extend only while the dependency
-still exists. Prefer extracting the necessary facts so the session can expire.
-An old undated `keep` marker needs review, not perpetual retention. Age alone
-still cannot resolve unknown ownership or an unfinished dependency.
-
-Prepare an exact list of eligible paths, including the session record and its
-unneeded heartbeat files, messages, logs, original-record snapshots, copies and
-old cleanup reports. Do not leave a shadow archive under `artifacts/`. Check
-shared references and writers for each item; a session ID in a filename is not
-sufficient proof that it is disposable. Notes have their own useful lifetime:
-retain compact unresolved facts, and remove superseded/redundant notes after
-their useful content and references are handled.
-
-Acquire the registry mutex, reread eligibility and references, then delete only
-the listed eligible paths while still holding it. Skip anything changed or
-uncertain. Record UTC time, session ID, reason and deleted paths in `cleanup.log`
-without copying record contents. Keep at most the newest 100 receipts within
-16 KiB total, and none older than 30 days, dropping oldest receipts as needed.
-Rewrite atomically under the same mutex; do not rotate receipts into another
-archive. Recovery snapshots and migration reports expire with
-their resolved source session unless narrowly needed for a live investigation.
-Do not duplicate these receipts into every session's artifacts. Use small batches
-and release the mutex promptly.
-
-Cleanup never kills processes, edits source or Git state, deletes build trees,
-or releases claims just because they are old. It removes only the explicitly
-eligible coordination material. If cleanup is interrupted, inspect both the
-remaining candidate paths and recent receipt before retrying; recheck eligibility
-and record partial results. Do not create backup copies as part of routine
-deletion. All agents must coordinate new references with
-cleanup: recheck the target and publish the reference or preservation pin during
-the same registry mutex hold, so cleanup cannot delete it in between.
+Read [the lifecycle procedures](agent-coordination-lifecycle.md) before setting
+up supervised heartbeats, investigating overdue/unknown owners, recovering a
+session or registry lock, resolving missing closure metadata, or retaining/deleting
+coordination material. They retain the full process-identity, recovery, 30-day
+cleanup and bounded-receipt rules. Do not start detached heartbeat loops, steal
+claims, remove unfamiliar locks or delete records based only on age or PID
+absence. This workflow requires those procedures when triggered; they are not
+optional cleanup advice.
 
 ## Session record template
 
@@ -400,10 +334,11 @@ handoff information, then compact on closure as described above.
 - Completed / in progress / next:
 - Commands, exact source/configuration, outcomes and logs:
 - Running jobs and their process identities, output paths, expected duration and resource claims:
-- Findings: links to notes/<session-id>-<topic>.md
+- Findings: links to notes/<session-id>/<topic>.md
 
 ## Blockers and handoff
-- Questions and message/reply paths:
+- Request ID / exact handoff scope / message and reply paths:
+- Last inbox check / next check (UTC), if waiting:
 - Uncommitted changes; validation still required:
 - Claims released/retained, recipient acknowledgment and next action:
 - Recovery evidence or useful surviving notes, if applicable:
@@ -459,7 +394,7 @@ over shared scratch state.
 
 Keep notes compact and preserve useful handoffs and durable evidence before
 removing your own unneeded artifacts. Cross-session deletion must
-follow the eligibility, mutex and retention rules above; never discard unresolved
+follow [the lifecycle rules](agent-coordination-lifecycle.md); never discard unresolved
 findings simply because their author finished. A fresh clone starts with an
 empty board and recreates it from this guide. No application build, test or
 runtime behavior depends on these files.
