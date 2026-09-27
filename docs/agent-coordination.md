@@ -22,8 +22,13 @@ procedures when their triggers apply, not as a repeated startup transcript.
 | --- | --- |
 | Start, resume or change scope | Inspect baseline and complete claims; check your inbox; register or update exact claims before writing. |
 | Before each write | Confirm ownership and current contents, including notes and generated outputs; stop that write if the baseline changed unexpectedly. |
-| Waiting for a file | Poll your inbox and current claims before reporting blocked; continue work on independent claims. |
-| Handoff or finish | Finish/stop writers, release through the registry, notify the recipient, and record disposition and next action. |
+| Before a test, build or generator | Identify its outputs, temporary files and caches; direct them into claimed directories before launching. |
+| Waiting or checkpointing | Read your inbox and current claims; replace stale status and timing fields; continue independent work. |
+| Handoff or finish | Finish/stop writers, release through the registry, match request ID and scope in the notice, and record disposition and next action. |
+
+Apply these checks at action boundaries, then return to research, implementation
+and required tests. Record actual results and unresolved limitations at handoff;
+completed coordination does not establish that the repair is correct.
 
 ## Start or resume a session
 
@@ -123,9 +128,10 @@ used, claim its exact sidecar and designate its sole writer first.
 Check your inbox at each checkpoint and before declaring a handoff blocked. While
 waiting in control, poll about every 60 seconds without busy-waiting; continue
 independent work and check again after a long command or resume. Record the last
-inbox check and concrete next check in your waiting status. File delivery does
-not wake another chat automatically. A harness notification may prompt an inbox
-check, but never transfers ownership.
+inbox check, pending request ID and concrete next check in your waiting status.
+Before repeating a request or reporting blocked, read replies and current claims.
+File delivery does not wake another chat automatically; a harness notification
+prompts a check but never transfers ownership.
 
 ### Limit routine reads and record size
 
@@ -157,8 +163,9 @@ into prompts, or load closed histories, artifacts or legacy archives at startup.
 The `Claims held` section of each session record is the ownership ledger. Claims
 remain held until explicitly removed through this procedure, regardless of the
 record's phase or age. Claim exact files where practical. A directory claim
-covers all descendants, including files not created yet. Record absolute physical
-paths, respecting the filesystem's case rules and symlink aliases, so different
+covers all descendants, including files not created yet. Compare whole path
+components: sibling files do not overlap merely because they share a directory.
+Record absolute physical paths, respecting case rules and symlink aliases, so different
 tools cannot mistake one file for two. Record repository-relative paths too for
 readability. Renames require both the old and new paths; deletions, generators
 and formatters require the full set of paths they may modify.
@@ -207,10 +214,13 @@ If a claim overlaps, leave that path alone and use this handoff:
    the registry mutex.
    Only afterward send a release notice to the requester's inbox with the request
    ID and exact scope.
-3. The recipient checks its inbox and rereads **all** claims under the mutex,
-   including covering directory claims. If free, publish its own claim; if another
-   session acquired the file, contact that current owner and keep waiting or
-   isolate the work. A release notice is neither a reservation nor ownership.
+3. The recipient matches the notice's request ID, sender and exact scope to its
+   pending request, then rereads **all** claims under the mutex, including covering
+   directories. A mismatched reply does not fulfill the request. If the requested
+   scope is free, acquire it normally and acknowledge using the pending request ID;
+   seek clarification only if scope or disposition is unclear. If another session
+   owns it, request that owner's handoff.
+   A release notice is neither a reservation nor ownership.
 4. After acquiring, send an acknowledgment to the previous owner's inbox with
    the request ID and record it. Reread/hash the file and preserve the handed-off
    edits. Apply the patch only against that current state.
@@ -243,10 +253,15 @@ its own claims. Instructions to help or a parent-owned directory are not a trans
   common Git state before changing it. A claim does not authorize destructive
   operations, publication, or changes outside the user's task.
 - **Builds and tests:** claim each output tree for the full configure/build/test
-  operation, or choose `./build.sh test GROUP --build-dir
-  build/agents/SESSION/PROFILE` with actual group/session/profile values. Keep
-  compiler/toolchain configurations separate as the [build guide](building.md)
-  requires. Also claim shared generated fixtures, logs and packaging outputs.
+  operation, even when using `./build.sh test GROUP --build-dir
+  build/agents/SESSION/PROFILE`. Use actual group/session/profile values and
+  keep compiler/toolchain configurations separate as the [build guide](building.md)
+  requires. Put scratch fixtures and logs under your claimed artifact directory;
+  create its temporary subdirectory, then set process-local `TMPDIR` (or Windows
+  `TEMP`/`TMP`) to that absolute path before launch. Check output/cache settings too;
+  some tools ignore these variables. Claim any remaining output paths explicitly,
+  including packaging outputs; never claim the shared temporary root. Keep claims
+  until child processes and cleanup finish.
   Before compiling shared source, arrange a stable input window with its writers
   or build in an isolated checkout. Separate build directories alone do not
   isolate source changes. Record HEAD plus relevant dirty-file hashes/diff,
@@ -266,11 +281,15 @@ its own claims. Instructions to help or a parent-owned directory are not a trans
 ### Progress, interruption and recovery
 
 Use checkpoint mode unless the harness has a reliable supervised heartbeat hook.
-Refresh UTC progress about every five minutes while in control, at scope changes,
-before long commands and before ending a turn. Record a concrete next-check time;
-keep liveness separate from meaningful progress. Before a blocking command, record
-its job identity, resources and expected duration. If the session worker identity
-is unavailable, say so; an ephemeral tool shell is not the session worker.
+About every five minutes while in control, at scope changes, before long commands
+and before ending a turn, reconcile current state, jobs, inbox status and UTC
+timing fields in one record update. Keep one current value per field; appending
+progress does not update stale fields. Set updated/next-check times; advance last
+meaningful progress only when work advances. Preserve claims exactly unless using
+the registry procedure. Keep liveness separate from progress.
+Before a blocking command, record its job identity, resources and expected duration.
+If the session worker identity is unavailable, say so; an ephemeral tool shell is
+not the session worker.
 
 At startup/resume, before requesting an overlapping claim, and at completion,
 scan metadata for overdue owners and cleanup candidates, including legacy archive
