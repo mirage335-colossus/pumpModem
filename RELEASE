@@ -1,6 +1,45 @@
-# GitHub Actions: ordinary public release.
-# Repository -> Actions -> workflow below -> Run workflow.
-# Push the code first. Select the same branch for every run; keep it unchanged.
+# GitHub Actions: publish and certify a new ordinary Latest release.
+# Push the code first. The workflows must be registered on the default branch.
+# Configure the release signing secret/variable described in docs/releases.md.
+
+Repository -> Actions -> _Publish new Latest release -> Run workflow.
+Workflow file: .github/workflows/_release-latest.yml
+Select the branch containing the complete candidate; one dispatch pins every
+stage to that commit. The workflow name, run title and filename start with "_".
+
+Options:
+- version: blank uses the application version plus a timestamp.
+- linux_baseline: bookworm-sdk (default), or ubuntu-22.04 for x86_64.
+- linux_runner / arm_runner / windows_runner: organization H pools by default.
+  For standard runners choose ubuntu-24.04 / ubuntu-24.04-arm / windows-2022.
+  Standard hosted runners are free for public repositories; private-repository
+  allowances and billing vary. Larger runners are billed, including for public
+  repositories. L pools and the Linux M pool are also available.
+- maintain_base: none (default), linux, windows or both. Select maintenance only
+  when needed: source=auto reuses an existing recipe and builds a missing one.
+  Ordinary stages require the matching prepared base recipes; they do not
+  silently build missing dependencies.
+- sanitizer_smoke / sanitizer_realtime: optional extra instrumented coverage,
+  both off by default. All ordinary full regression checks remain required.
+
+The workflow calls the existing workflows below: selected base maintenance,
+full native and SDK checks in parallel, ordinary publication, then full
+certification of the exact published binaries. It always uses devfast=false,
+experiment=false and publish=true. The final job verifies that GitHub Latest
+is the new tag/release ID and matches this run's source, inventory and report.
+
+The previous Latest remains selected until all candidate assets and successful
+certification reports are ready. Certification pivots Latest in one release
+metadata update; it never moves, deletes or copies the previous release's assets.
+Separate client requests are not one atomic snapshot. Avoid independent manual
+promotions during this run; a competing promotion can fail final verification.
+
+Wait for the entire workflow to succeed, then review its linked certification
+report and warnings. Record the tag, run ID and limits in docs/validation.md.
+First-time signing setup, CLI examples and details: docs/releases.md.
+
+# Manual alternatives for troubleshooting or resuming individual stages.
+# Select the same branch for every run; keep it unchanged.
 # Wait for each run to succeed before continuing. Leave other inputs at defaults.
 
 1. Maintain base SDK (sdk-base.yml)                         [optional]
@@ -22,12 +61,5 @@
 5. Certify published release (certify.yml)
    release_tag=the new tag from step 4; devfast=false (unchecked).
 
-# Done: the certified ordinary release becomes Latest, with public Linux/Windows
-# binaries, Linux packages and retained build dependencies. Review any warnings
-# in its certification report; record the tag, run IDs and limits in docs/validation.md.
-# First-time signing setup and details: docs/releases.md
-
-
-
-
-
+# A successfully certified ordinary release becomes Latest, with public
+# Linux/Windows binaries, Linux packages and retained build dependencies.

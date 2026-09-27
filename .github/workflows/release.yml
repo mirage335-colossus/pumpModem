@@ -2,6 +2,48 @@ name: Manual portable release
 run-name: ${{ inputs.package_check && inputs.package_check != 'none' && format('Check {0} packages in {1}', inputs.package_check, inputs.source_release) || inputs.source_release && format('Linux packages from {0} (experiment)', inputs.source_release) || format('Build portable binaries ({0}, experiment={1})', inputs.linux_baseline, inputs.experiment) }}
 
 on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Optional release label; blank uses the application version (v001_00)'
+        type: string
+        default: ''
+      experiment:
+        description: 'Title exactly experiment; prerelease, never Latest'
+        type: boolean
+        default: true
+      publish:
+        description: 'Publish after packaging; unchecked leaves a draft release for inspection'
+        type: boolean
+        default: true
+      linux_baseline:
+        description: 'x86-64 SDK (glibc 2.36), or older Ubuntu baseline (glibc 2.35)'
+        type: string
+        default: bookworm-sdk
+      linux_runner:
+        description: 'x86-64 Linux runner'
+        type: string
+        default: ubuntu-latest-h
+      arm_runner:
+        description: 'Linux ARM64 runner for compilation and qualification'
+        type: string
+        default: ubuntu-24.04-arm-h
+      windows_runner:
+        description: 'Windows x64 runner'
+        type: string
+        default: windows-latest-h
+      package_check:
+        description: 'Read-only checks of source_release; none retains normal build/repackage behavior'
+        type: string
+        default: none
+      source_release:
+        description: 'Existing release to repackage, or to check when package_check is selected; blank builds apps'
+        type: string
+        default: ''
+    outputs:
+      release_tag:
+        description: 'Exact tag whose complete assets passed publication'
+        value: ${{ jobs.publish.outputs.release_tag }}
   workflow_dispatch:
     inputs:
       version:
@@ -349,6 +391,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }
 
   publish:
+    outputs:
+      release_tag: ${{ needs.metadata.outputs.tag }}
     needs: [metadata, linux, windows]
     runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
     timeout-minutes: 15

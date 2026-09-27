@@ -1,6 +1,40 @@
 name: Focused checks and full native regression
 
 on:
+  workflow_call:
+    inputs:
+      linux_runner:
+        description: 'Linux x86_64 runner for compilation and qualification'
+        type: string
+        default: ubuntu-latest-h
+      arm_runner:
+        description: 'Linux ARM64 runner for compilation and qualification'
+        type: string
+        default: ubuntu-24.04-arm-h
+      windows_runner:
+        description: 'Windows x64 runner for compilation and qualification'
+        type: string
+        default: windows-latest-h
+      devfast:
+        description: 'Run only the selected focused diagnostic; skip full regression and release work'
+        type: boolean
+        default: false
+      sanitizer_smoke:
+        description: 'Run the instrumented desktop smoke as a separate job (full runs only)'
+        type: boolean
+        default: false
+      sanitizer_realtime:
+        description: 'Include real-time Fast RX checks in the instrumented Debug job (full runs only)'
+        type: boolean
+        default: false
+      diagnostic:
+        description: 'Focused check used only with devfast=true'
+        type: string
+        default: legacy
+      diagnostic_release:
+        description: 'Published tag for graphics, or immutable source tag/ref for ARM adapter / SDK live diagnostics'
+        type: string
+        default: ''
   # Branch pushes are covered by their PR. Automatic work is deliberately
   # bounded; completed candidates use the explicit full manual dispatch.
   push:
@@ -95,6 +129,7 @@ jobs:
           python3 tests/test_gui_smoke_runner.py
           python3 tests/test_native_tests_runner.py
           python3 tests/test_ci_tests.py
+          python3 tests/test_verify_latest_release.py
       - name: Record the remaining candidate gate
         run: echo 'Automatic checks are focused feedback only. Completed runtime changes require explicit ci.yml devfast=false, applicable SDK qualification, and release certification when publishing.' >> "$GITHUB_STEP_SUMMARY"
 

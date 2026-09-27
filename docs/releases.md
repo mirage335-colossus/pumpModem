@@ -1,6 +1,7 @@
-# Manual portable releases
+# Portable releases
 
-For the routine button-by-button sequence, follow [RELEASE](../RELEASE).
+For the routine release entry point, follow [RELEASE](../RELEASE):
+**Actions → _Publish new Latest release → Run workflow**.
 
 The feature-complete application version is **001_00**. The CLI, GUI and build
 information use that display version, and an ordinary release dispatch defaults
@@ -28,7 +29,81 @@ flat APT repository with **certification pending**. The separate
 published downloads and attaches immutable reports to that same release. The
 long preservation contract and GUI tests remain intact in that workflow.
 
-## Dispatch inputs
+## Publish a new Latest release
+
+The [_Publish new Latest release workflow](../.github/workflows/_release-latest.yml)
+coordinates the existing release stages in one manual dispatch. Its filename,
+workflow name and run title start with an underscore for easy identification
+in the pinned workflow list. Push the complete candidate before dispatching.
+The workflow must be registered on the default branch; select the intended
+branch in the Run workflow form. Configure the
+[release signing secret and variable](#maintainer-signing-configuration) first.
+
+[Local reusable workflow calls](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows)
+use the same commit as the parent dispatch, so later branch changes cannot mix
+source revisions between stages. The sequence is:
+
+1. Check signing configuration and the release label; optionally maintain the
+   selected Linux/Windows dependency bases with `sdk-base.yml`.
+2. Run full native regression (`ci.yml`) and SDK qualification (`sdk.yml`) in
+   parallel, both with `devfast=false`.
+3. Publish new ordinary binaries and packages with `release.yml`, using
+   `experiment=false` and `publish=true`.
+4. Pass that workflow's exact release tag to `certify.yml`, with `devfast=false`,
+   to certify the published source and binary hashes and promote the release.
+5. Read back GitHub Latest and verify its tag, release ID, source SHA, inventory
+   SHA-256 and successful certification report for this run. A missing or
+   unsuccessful required stage cannot produce a successful final verification.
+
+| Input | Default | Meaning |
+| --- | --- | --- |
+| `version` | Empty | Use the application version plus a timestamp, or provide an explicit release label. |
+| `linux_baseline` | `bookworm-sdk` | Linux x86_64 baseline; `ubuntu-22.04` is also available. ARM64 keeps its Ubuntu 22.04 baseline. |
+| `linux_runner` | `ubuntu-latest-h` | Linux x86_64 host. Choose `ubuntu-24.04` for standard, or the organization M/L/H pools. |
+| `arm_runner` | `ubuntu-24.04-arm-h` | ARM64 host. Choose `ubuntu-24.04-arm` for standard, or the organization L/H pools. |
+| `windows_runner` | `windows-latest-h` | Windows x64 host. Choose `windows-2022` for standard, or the organization L/H pools. |
+| `maintain_base` | `none` | Explicitly maintain `linux`, `windows` or `both` before qualification. `source=auto` reuses matching recipes and builds missing ones; existing assets are never overwritten. |
+| `sanitizer_smoke` | Unchecked | Add the optional instrumented native desktop smoke. |
+| `sanitizer_realtime` | Unchecked | Add timing-sensitive Fast RX cases to instrumented native CI. |
+
+Runner selections are passed through to every applicable stage. Standard
+GitHub-hosted runners are free for public repositories; private repositories
+have account-specific allowances and billing. Larger runners are billed even
+for public repositories ([GitHub billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions)).
+See [runner selection](#runner-selection-and-build-parallelism)
+for the pool labels, costs and concurrency policy. The default H pools preserve
+the normal release configuration. Runner choice changes neither the full
+qualification requirements nor the documented warning policies.
+
+Leave `maintain_base=none` when the matching dependency recipes already exist.
+Ordinary qualification and publication require those prepared recipes and fail
+if they are missing; they do not start an implicit cold dependency build.
+Selecting maintenance explicitly authorizes the existing `source=auto` base
+workflow to prepare missing recipes before the other stages.
+
+The previous Latest remains selected while the complete candidate is built,
+published and certified. After all required delivery assets and successful
+certification reports are attached, the existing certification workflow uses
+one `gh release edit --latest=true --prerelease=false` update to pivot Latest.
+It does not move tags, delete prior releases or copy replacement assets into
+the old release. This is an atomic release metadata update, not a transaction
+across multiple client download requests; package indexes point to immutable
+versioned asset URLs. The final read-only check proves the expected release is
+Latest when verification completes.
+
+Runs through this entry point are serialized across branches without cancelling
+an active release. Independently dispatched certification or manual promotions
+can still change Latest; avoid them while this workflow runs. A competing
+promotion observed by the final verifier fails the run instead of claiming
+that the candidate is Latest. No workflow can prevent a later authorized
+promotion after it finishes.
+
+Review the linked certification report and any warnings in the successful run
+summary, then record the tag, run ID and coverage limits in
+[the validation record](validation.md). The standalone workflows below remain
+available for diagnosis, experiments and resuming individual stages.
+
+## Standalone publication dispatch inputs
 
 | Input | Default | Meaning |
 | --- | --- | --- |
@@ -61,6 +136,29 @@ must be registered on the default branch before normal manual dispatch; `--ref`
 selects the build source. The account needs repository write access. See
 [GitHub manual dispatch](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)
 and the [CLI reference](https://cli.github.com/manual/gh_workflow_run).
+
+Publish and certify an ordinary Latest release with the default H runners:
+
+```sh
+gh workflow run _release-latest.yml --ref main
+gh run list --workflow _release-latest.yml --limit 5
+gh run watch RUN_ID --exit-status
+```
+
+For standard runners, select all three architecture hosts explicitly:
+
+```sh
+gh workflow run _release-latest.yml --ref main \
+  -f linux_runner=ubuntu-24.04 -f arm_runner=ubuntu-24.04-arm \
+  -f windows_runner=windows-2022
+```
+
+Add `-f maintain_base=both` only when explicit dependency base maintenance is
+needed, or choose `linux` or `windows`. Leave `version` blank for the default
+application version/timestamp label. The run summary supplies the new tag and
+certification report; there is no manual tag handoff between stages.
+
+The following standalone commands are alternatives for individual stages.
 
 Prepare the Linux SDK and Windows dependencies once, or after changing the
 corresponding recipe:
@@ -839,10 +937,11 @@ These timings are observed hosted-runner results, not guarantees.
 
 ## Runner selection and build parallelism
 
-Manual portable release, native CI, SDK qualification, base maintenance and
-certification workflows expose x86-64 Linux and Windows runner dropdowns.
-Portable release, native CI and certification also expose `arm_runner` for
-their ARM64 jobs and diagnostics. The same input names work through GitHub CLI:
+The combined `_Publish new Latest release` entry point, manual portable release,
+native CI, SDK qualification, base maintenance and certification workflows expose
+x86-64 Linux and Windows runner dropdowns. The combined entry point, portable
+release, native CI and certification also expose `arm_runner` for their ARM64
+jobs and diagnostics. The same input names work through GitHub CLI:
 
 | Input | Choices | Default |
 | --- | --- | --- |

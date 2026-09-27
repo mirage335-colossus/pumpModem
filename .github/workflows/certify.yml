@@ -2,6 +2,35 @@ name: Certify published release
 run-name: ${{ inputs.devfast && 'devfast source diagnostics' || format('Certify {0} (published binary hashes)', inputs.release_tag) }}
 
 on:
+  workflow_call:
+    inputs:
+      release_tag:
+        description: 'Published release to certify (required unless devfast); binaries are never replaced'
+        type: string
+        required: false
+      devfast:
+        description: 'Diagnose current branch source only; skip expensive tests and all certification/release changes'
+        type: boolean
+        default: false
+      linux_runner:
+        description: 'x86-64 Linux runner'
+        type: string
+        default: ubuntu-latest-h
+      arm_runner:
+        description: 'Linux ARM64 runner for compilation and qualification'
+        type: string
+        default: ubuntu-24.04-arm-h
+      windows_runner:
+        description: 'Windows x64 runner'
+        type: string
+        default: windows-latest-h
+    outputs:
+      inventory_sha256:
+        description: 'Exact published inventory checked by this certification'
+        value: ${{ jobs.prepare.outputs.inventory_sha256 }}
+      report_attempt:
+        description: 'Run attempt that wrote the successful certification report'
+        value: ${{ jobs.record.outputs.report_attempt }}
   workflow_dispatch:
     inputs:
       release_tag:
@@ -565,6 +594,8 @@ jobs:
       linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
 
   record:
+    outputs:
+      report_attempt: ${{ steps.report.outputs.report_attempt }}
     needs: [prepare, linux-tests, windows-tests, compatibility, apt-repository, distro-recipes]
     if: ${{ always() && !inputs.devfast && needs.prepare.result == 'success' }}
     # Read-only tests may overlap earlier attempts. Only this job updates the
@@ -597,6 +628,7 @@ jobs:
           path: smoke-results
           merge-multiple: false
       - name: Record complete job outcomes without replacing binaries
+        id: report
         run: |
           python3 - <<'PYRESULTS'
           import json, os, runpy
@@ -618,3 +650,4 @@ jobs:
               json.dump(results, out)
           PYRESULTS
           python3 tools/certify-release.py record --repo "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --run-id "$GITHUB_RUN_ID" --results-json certification-results.json
+          echo "report_attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"

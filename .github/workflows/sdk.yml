@@ -1,6 +1,20 @@
 name: Application checks with the base SDK
 
 on:
+  workflow_call:
+    inputs:
+      linux_runner:
+        description: 'Linux x86_64 runner for compilation and qualification'
+        type: string
+        default: ubuntu-latest-h
+      windows_runner:
+        description: 'Windows x64 runner for compilation and qualification'
+        type: string
+        default: windows-latest-h
+      devfast:
+        description: 'Run only focused Legacy diagnostics; skip SDK, application and portability qualification'
+        type: boolean
+        default: false
   # SDK host-tool qualification remains a full maintenance gate. Do not repeat
   # its application/contract matrix for every push and PR; ci.yml owns automatic
   # feedback, and completed SDK/toolchain changes explicitly dispatch this run.
@@ -25,7 +39,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: source-sdk-${{ github.ref }}-${{ inputs.devfast && 'devfast' || 'full' }}
+  group: source-sdk-${{ github.workflow }}-${{ github.ref }}-${{ inputs.devfast && 'devfast' || 'full' }}
   cancel-in-progress: true
 
 jobs:

@@ -1,0 +1,205 @@
+name: _Publish new Latest release
+run-name: _Publish Latest from ${{ github.ref_name }} (${{ inputs.linux_baseline }})
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Optional release label; blank uses application version plus timestamp'
+        type: string
+        default: ''
+      linux_baseline:
+        description: 'Linux x86-64 compatibility baseline'
+        type: choice
+        options: [bookworm-sdk, ubuntu-22.04]
+        default: bookworm-sdk
+      linux_runner:
+        description: 'Linux x86-64: ubuntu-24.04 is standard; m/l/h are paid larger pools'
+        type: choice
+        options: [ubuntu-latest-h, ubuntu-latest-l, ubuntu-latest-m, ubuntu-24.04]
+        default: ubuntu-latest-h
+      arm_runner:
+        description: 'Linux ARM64: ubuntu-24.04-arm is standard; l/h are paid larger pools'
+        type: choice
+        options: [ubuntu-24.04-arm-h, ubuntu-24.04-arm-l, ubuntu-24.04-arm]
+        default: ubuntu-24.04-arm-h
+      windows_runner:
+        description: 'Windows x64: windows-2022 is standard; l/h are paid larger pools'
+        type: choice
+        options: [windows-latest-h, windows-latest-l, windows-2022]
+        default: windows-latest-h
+      maintain_base:
+        description: 'Explicit base maintenance: reuse existing recipes; build missing ones only'
+        type: choice
+        options: [none, linux, windows, both]
+        default: none
+      sanitizer_smoke:
+        description: 'Also run the optional instrumented desktop smoke in native CI'
+        type: boolean
+        default: false
+      sanitizer_realtime:
+        description: 'Also run timing-sensitive Fast RX cases under sanitizers in native CI'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Serialize this entry point across branches. Never reuse a called workflow's
+# lock here: the parent holds this one until all its children have finished.
+concurrency:
+  group: publish-new-latest
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: _Check release configuration
+    runs-on: ${{ inputs.linux_runner }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check signing configuration and release label before expensive work
+        env:
+          APT_SIGNING_KEY: ${{ secrets.DATAPUMP_APT_SIGNING_KEY }}
+          APT_FINGERPRINT: ${{ vars.DATAPUMP_APT_SIGNING_FINGERPRINT }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          LINUX_BASELINE: ${{ inputs.linux_baseline }}
+        run: |
+          if [ -z "$APT_SIGNING_KEY" ]; then
+            echo '::error::Configure DATAPUMP_APT_SIGNING_KEY before releasing.'
+            exit 1
+          fi
+          if ! [[ "$APT_FINGERPRINT" =~ ^[A-Fa-f0-9]{40}$ ]]; then
+            echo '::error::Configure DATAPUMP_APT_SIGNING_FINGERPRINT with the pinned public key fingerprint.'
+            exit 1
+          fi
+          unset APT_SIGNING_KEY
+          python3 tools/release.py metadata --version "$RELEASE_VERSION" \
+            --linux-baseline "$LINUX_BASELINE" --source-sha "$GITHUB_SHA" \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --output "$RUNNER_TEMP/preflight-metadata.json"
+      - name: Check the final release verifier
+        run: python3 tests/test_verify_latest_release.py
+      - name: Record the source shared by every stage
+        run: |
+          echo "All stages use source commit \`$GITHUB_SHA\`. Full native/SDK checks, publication, and exact-binary certification are required before Latest verification." >> "$GITHUB_STEP_SUMMARY"
+
+  base:
+    name: _Maintain selected dependency bases
+    needs: prepare
+    if: inputs.maintain_base != 'none'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/sdk-base.yml
+    with:
+      platform: ${{ inputs.maintain_base }}
+      source: auto
+      publish: true
+      linux_runner: ${{ inputs.linux_runner }}
+      windows_runner: ${{ inputs.windows_runner }}
+
+  native:
+    name: _Full native regression
+    needs: [prepare, base]
+    # Only optional base maintenance may be skipped. Failure/cancellation must
+    # never turn into an ordinary release with missing source qualification.
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && (needs.base.result == 'success' || needs.base.result == 'skipped') }}
+    uses: ./.github/workflows/ci.yml
+    with:
+      devfast: false
+      sanitizer_smoke: ${{ inputs.sanitizer_smoke }}
+      sanitizer_realtime: ${{ inputs.sanitizer_realtime }}
+      linux_runner: ${{ inputs.linux_runner }}
+      arm_runner: ${{ inputs.arm_runner }}
+      windows_runner: ${{ inputs.windows_runner }}
+
+  sdk:
+    name: _Full SDK qualification
+    needs: [prepare, base]
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && (needs.base.result == 'success' || needs.base.result == 'skipped') }}
+    uses: ./.github/workflows/sdk.yml
+    with:
+      devfast: false
+      linux_runner: ${{ inputs.linux_runner }}
+      windows_runner: ${{ inputs.windows_runner }}
+
+  publish:
+    name: _Publish candidate binaries and packages
+    needs: [native, sdk]
+    if: ${{ !cancelled() && needs.native.result == 'success' && needs.sdk.result == 'success' }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      version: ${{ inputs.version }}
+      experiment: false
+      publish: true
+      linux_baseline: ${{ inputs.linux_baseline }}
+      linux_runner: ${{ inputs.linux_runner }}
+      arm_runner: ${{ inputs.arm_runner }}
+      windows_runner: ${{ inputs.windows_runner }}
+    secrets: inherit
+
+  certify:
+    name: _Certify published bytes and promote Latest
+    needs: publish
+    if: ${{ !cancelled() && needs.publish.result == 'success' }}
+    permissions:
+      contents: write
+      actions: read
+    uses: ./.github/workflows/certify.yml
+    with:
+      release_tag: ${{ needs.publish.outputs.release_tag }}
+      devfast: false
+      linux_runner: ${{ inputs.linux_runner }}
+      arm_runner: ${{ inputs.arm_runner }}
+      windows_runner: ${{ inputs.windows_runner }}
+
+  latest:
+    name: _Verify Latest points to the certified release
+    needs: [prepare, base, native, sdk, publish, certify]
+    # A skipped prerequisite must not leave a green orchestration. This final
+    # job also makes the result explicit when a reusable workflow fails.
+    if: always()
+    runs-on: ${{ inputs.linux_runner }}
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      JOB_RESULTS: ${{ toJSON(needs) }}
+      RELEASE_TAG: ${{ needs.publish.outputs.release_tag }}
+      INVENTORY_SHA256: ${{ needs.certify.outputs.inventory_sha256 }}
+      REPORT_ATTEMPT: ${{ needs.certify.outputs.report_attempt }}
+    steps:
+      - name: Require every mandatory stage to have succeeded
+        run: |
+          python3 - <<'PY'
+          import json, os
+          results = json.loads(os.environ['JOB_RESULTS'])
+          required = ('prepare', 'native', 'sdk', 'publish', 'certify')
+          if (any(results[name]['result'] != 'success' for name in required)
+                  or results['base']['result'] not in ('success', 'skipped')):
+              raise SystemExit('Release pipeline incomplete or failed; Latest success is not established.')
+          if not all(os.environ[name] for name in ('RELEASE_TAG', 'INVENTORY_SHA256', 'REPORT_ATTEMPT')):
+              raise SystemExit('Missing publication/certification identity; cannot verify Latest.')
+          PY
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Confirm the atomic promotion and its source, inventory and report
+        run: |
+          python3 tools/verify-latest-release.py --repo "$GITHUB_REPOSITORY" \
+            --tag "$RELEASE_TAG" --source-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$REPORT_ATTEMPT" --inventory-sha256 "$INVENTORY_SHA256" \
+            > latest-verification.json
+          cat latest-verification.json
+          {
+            echo "Latest: [$RELEASE_TAG](https://github.com/$GITHUB_REPOSITORY/releases/tag/$RELEASE_TAG)"
+            echo
+            echo "Source: \`$GITHUB_SHA\`; inventory SHA-256: \`$INVENTORY_SHA256\`."
+            echo
+            echo "[Certification report](https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/certification-$GITHUB_RUN_ID-attempt-$REPORT_ATTEMPT.md)"
+            echo
+            echo 'The complete release was promoted in one GitHub release update after certification. Review its warning logs and any explicitly omitted or incomplete coverage. Hosted checks do not qualify physical audio hardware.'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -4,6 +4,31 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Latest release orchestration — 26 September 2026
+
+The new `_release-latest.yml` entry point connects optional explicit base
+maintenance, full native and SDK qualification, ordinary publication and
+hash-bound certification through local reusable workflow calls. It preserves
+the existing single-update Latest promotion and adds a read-only final check
+of the release ID/tag, source, inventory and successful certification report.
+No application runtime or wire behavior changed.
+
+Local validation: all 23 cases in `./build.sh test build --jobs 2 --build-jobs 2`
+have passing results. Four signing/mirror cases initially could not start
+temporary GPG agents inside the sandbox; their targeted CTest rerun outside
+the sandbox passed. Existing tool-dependent fixture skips retain their usual
+meaning and do not establish native Arch/Gentoo installation qualification.
+The new verifier passed 13 offline tests, including changed release identities,
+source/inventory/report mismatches, missing or unsuccessful required jobs,
+incorrect binary hashes and corrupt report bytes. The final workflow gate was
+also exercised with 37 success, failure, cancellation, skip and missing-output
+scenarios. All workflow files pass actionlint 1.7.12; whitespace checks pass.
+
+This is local tooling validation. The new orchestration has not been dispatched
+on GitHub, no new binaries have been published or certified by this change,
+and Latest has not been changed. A completed hosted run remains necessary to
+establish release qualification and the final API verification in production.
+
 ## Parallel CI qualification — 26 September 2026
 
 The native run recorded below took about 77 minutes. Its Linux Release archives

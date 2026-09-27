@@ -1,6 +1,32 @@
 name: Maintain base SDK
 
 on:
+  workflow_call:
+    inputs:
+      linux_runner:
+        description: 'Linux x86_64 runner for compilation and qualification'
+        type: string
+        default: ubuntu-latest-h
+      windows_runner:
+        description: 'Windows x64 runner for compilation and qualification'
+        type: string
+        default: windows-latest-h
+      platform:
+        description: 'Reusable Linux source SDK or Windows static application dependencies'
+        type: string
+        default: linux
+      source:
+        description: 'auto reuses base; base verifies durable reuse; rebuild compiles from source'
+        type: string
+        default: auto
+      jobs:
+        description: 'Cold SDK compilation jobs; 0 uses all available runner CPUs'
+        type: string
+        default: '0'
+      publish:
+        description: 'Preserve the verified SDK and sources in the base release'
+        type: boolean
+        default: true
   workflow_dispatch:
     inputs:
       linux_runner:
@@ -16,7 +42,7 @@ on:
       platform:
         description: 'Reusable Linux source SDK or Windows static application dependencies'
         type: choice
-        options: [linux, windows]
+        options: [linux, windows, both]
         default: linux
       source:
         description: 'auto reuses base; base verifies durable reuse; rebuild compiles from source'
@@ -72,8 +98,10 @@ jobs:
       publish_base: ${{ inputs.publish }}
 
   windows:
-    if: github.event_name == 'workflow_dispatch' && inputs.platform == 'windows'
-    needs: helper
+    # Both platforms publish to the same base release; serialize first-time
+    # creation too, while allowing Windows-only maintenance to skip Linux.
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && needs.helper.result == 'success' && (inputs.platform == 'windows' || (inputs.platform == 'both' && needs.sdk.result == 'success')) }}
+    needs: [helper, sdk]
     uses: ./.github/workflows/windows-base.yml
     with:
       linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
