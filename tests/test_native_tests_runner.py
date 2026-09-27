@@ -59,7 +59,9 @@ class NativeRunnerTests(unittest.TestCase):
         self.fixture.write_text(
             'import os,sys,time\nfrom pathlib import Path\n'
             'mode=sys.argv[1]\n'
-            f'assert Path.cwd()==Path({str(self.work)!r})\n'
+            # Windows may expand its temporary-directory 8.3 alias in cwd.
+            # Require the same directory identity, regardless of that spelling.
+            f'assert Path.cwd().samefile(Path({str(self.work)!r}))\n'
             'assert os.environ.get("PROBE_VALUE")=="hello world"\n'
             f'with open({str(self.stamp)!r},"a") as f:f.write(mode+"\\n")\n'
             f'if mode in ("budget","budget_sleep"):print({MARKER!r},flush=True)\n'
