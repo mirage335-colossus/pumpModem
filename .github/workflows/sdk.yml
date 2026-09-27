@@ -87,7 +87,8 @@ jobs:
     env:
       DEBIAN_FRONTEND: noninteractive
       LIBGL_ALWAYS_SOFTWARE: '1'
-      LP_NUM_THREADS: '2'
+      # Match the producer's software-rendering limit on the selected runner.
+      LP_NUM_THREADS: ${{ inputs.linux_runner == 'ubuntu-24.04' && '1' || '2' }}
     steps:
       - name: Load current package-fetch helper before installing Git
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

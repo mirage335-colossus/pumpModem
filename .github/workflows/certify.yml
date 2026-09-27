@@ -122,7 +122,8 @@ jobs:
     env:
       DEBIAN_FRONTEND: noninteractive
       LIBGL_ALWAYS_SOFTWARE: '1'
-      LP_NUM_THREADS: '2'
+      # Only the runner selected for this architecture controls rendering.
+      LP_NUM_THREADS: ${{ ((matrix.arch == 'aarch64' && inputs.arm_runner == 'ubuntu-24.04-arm') || (matrix.arch != 'aarch64' && inputs.linux_runner == 'ubuntu-24.04')) && '1' || '2' }}
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ inputs.release_tag }}
       GUI_BACKEND: ${{ matrix.backend }}
@@ -307,7 +308,8 @@ jobs:
     env:
       DEBIAN_FRONTEND: noninteractive
       LIBGL_ALWAYS_SOFTWARE: '1'
-      LP_NUM_THREADS: '2'
+      # Use the same architecture-specific limit for unchanged copied binaries.
+      LP_NUM_THREADS: ${{ ((matrix.arch == 'aarch64' && inputs.arm_runner == 'ubuntu-24.04-arm') || (matrix.arch != 'aarch64' && inputs.linux_runner == 'ubuntu-24.04')) && '1' || '2' }}
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ inputs.release_tag }}
       GUI_BACKEND: ${{ matrix.backend }}

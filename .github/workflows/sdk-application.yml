@@ -29,7 +29,8 @@ jobs:
     env:
       DEBIAN_FRONTEND: noninteractive
       LIBGL_ALWAYS_SOFTWARE: '1'
-      LP_NUM_THREADS: '2'
+      # Reserve CPU time for sampled DSP and GUI polling on standard runners.
+      LP_NUM_THREADS: ${{ inputs.linux_runner == 'ubuntu-24.04' && '1' || '2' }}
       SDK_SCOPE: ${{ inputs.scope }}
       SDK_BACKEND: ${{ inputs.backend }}
     defaults:
