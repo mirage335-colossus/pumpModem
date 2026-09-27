@@ -10,12 +10,11 @@ observation by itself releases ownership.
 
 ## Progress, interruption and recovery
 
-Update the UTC timestamp and progress at every meaningful checkpoint and scope
-change, before long commands, and before pausing or ending a turn. Keep **last
-heartbeat** separate from **last meaningful progress**: a timer can show liveness
-while a task is stuck. These timestamps are hints, **not lease expiries**.
-Updated describes publication; inbox/progress fields describe actual events and
-remain unchanged when no such event occurred. Use the [job/inbox recipes](agent-coordination-recipes.md#job-and-handoff-checkpoints)
+Publish a consistent snapshot at scope/progress checkpoints, before potentially
+blocking jobs and before pausing or ending a turn. Stamp Updated at publication;
+advance inbox/progress times only after those events. Keep heartbeat separate:
+a timer can show liveness while work is stuck. These are hints, **not lease expiries**.
+Use the [job/inbox recipes](agent-coordination-recipes.md#job-and-handoff-checkpoints)
 for launch, yielded handles and completion instead of inventing process identity
 before a tool returns. Reconcile finished jobs at the next control boundary;
 short synchronous results join the next checkpoint.
@@ -75,9 +74,13 @@ owner; do not rewrite its state as failed based on age.
 Release a completed shared-file edit before unrelated evidence formatting or
 whole-session closure. Keep the session nonterminal while required delivery
 acknowledgments or other work remain, without retaining an unneeded file claim.
-Prepare/check closure candidates in claimed artifacts, not `sessions/`; final
-review and atomic publication belong inside the short owned registry operation.
-Remove only your own failed unpublished staging files, never another owner's candidate or lock.
+Finish retained evidence and all output writers before closing their claims,
+including inherited stdout, logging/cleanup traps and the publisher's final output.
+The [closure recipe](agent-coordination-recipes.md#finish-output-before-releasing-its-claim)
+keeps these writes before release. Prepare/check candidates outside `sessions/`;
+final review/publication belong inside the short owned registry operation. Clean
+only owned staging/lock files. An error after publication does not restore claims:
+inspect actual bytes before retrying, especially after a terminal transition.
 
 Before pausing, release what you no longer need and state which claims remain
 held and why, plus an expected return/check if known. On completion, failure or

@@ -25,13 +25,13 @@ step, and does not replace the harness's normal verification or tool-use policy.
   unreadable/unknown record. Bound returned document/source/log chunks without
   reducing needed investigation; never ingest the whole board or historical logs
   wholesale. Keep one current session record with exact scope, approach,
-  baseline, progress, checks
-  and handoff. Ignored files require explicit reads.
+  baseline, progress, checks and handoff. Ignored files require explicit reads.
 - Claim files/resources before writing, including notes and generated outputs,
   using the short atomic registry lock. Check your inbox before reporting blocked.
   Handoffs require recorded release, fresh claim acquisition and acknowledgment;
-  a message or old timestamp never grants ownership. Use an isolated checkout
-  when overlapping work cannot be handed off.
+  a message or old timestamp never grants ownership. Failed publication stops
+  dependent writes/launches until saved state is reconciled. Use an isolated
+  checkout when overlapping work cannot be handed off.
 - Prepare/check record candidates in claimed artifacts (or memory for initial
   registration), outside `sessions/`; publish complete records atomically and
   messages atomically without replacement. The guide links optional tested
@@ -39,14 +39,15 @@ step, and does not replace the harness's normal verification or tool-use policy.
   complete-message publication. Release a verified shared-file edit before
   unrelated evidence formatting or whole-session closure.
 - Refresh your record at scope changes, checkpoints and before pausing; release
-  claims explicitly when finished. Preserve other sessions' edits, staged work,
-  processes and notes. Coordinate shared Git state, build trees and devices too.
+  claims after their last writer, including command output and cleanup. Preserve
+  other sessions' edits, staged work, processes and notes. Coordinate shared Git
+  state, build trees and devices too.
   Reconcile jobs that may block or outlive a tool reply on launch/yield/completion;
   short synchronous results join the next checkpoint. Replace current results,
-  blockers and next action together. Timestamp actual inbox processing, not just listing
-  filenames; stamp Updated at publication. Keep ordinary research, implementation
-  and validation in scope. No extra activity reports or invented findings are
-  required.
+  blockers and next action together; keep startup facts labeled as history.
+  Timestamp completed inbox processing; stamp Updated at publication. Keep research,
+  implementation and validation in scope. No extra activity reports or invented
+  findings are required.
 - Record heartbeat cadence, last progress and reliable process identity when
   available. Review overdue sessions and delete eligible closed sessions after
   30 days, including legacy archives and unneeded copies; do not create new

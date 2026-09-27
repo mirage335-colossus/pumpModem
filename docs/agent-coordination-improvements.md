@@ -8,6 +8,8 @@ and [reruns one](agent-coordination-rerun.md), [two](agent-coordination-rerun2.m
 [five](agent-coordination-rerun5.md). Historical reports remain unchanged.
 
 The original sections below describe that consolidation. The [follow-up after run 8](#follow-up-after-run-8) records the subsequent revision from baseline `aa9582e`.
+The [follow-up after run 9](#follow-up-after-run-9) covers the latest revision from
+`5d685b5`, including tested publication-failure and closure-output boundaries.
 This is an implementation and regression report, not a new blinded worker trial.
 The entry point remains [AGENTS.md](../AGENTS.md) and the
 [routine workflow](agent-coordination.md). Workers do not need to read this report.
@@ -183,3 +185,85 @@ prevalence has been empirically proved identical. Other harnesses, filesystems,
 real shared-source/Git edits and interrupted jobs still require appropriately
 scoped evaluation. No new blinded trial or measured reduction in total distraction
 is claimed by these recipe and regression checks.
+
+## Follow-up after run 9
+
+This revision starts at `5d685b5b8229f0a5113bc1cd8c3fc2d50de810eb`. It draws on the
+unchanged-guidance pair **runs 6/7**, **runs 8/9**, and the earlier still-relevant
+findings above. Guidance changed between 7 and 8 and between 8 and 9; runs 8/9
+are not an unchanged-guidance pair. Production helper hashes were identical in
+8/9. The audit examined their reports and selected raw surveys/status records,
+helper implementations and tests, instruction entry points, build/CI integration,
+and the run-9 consumer coverage supplement. Independent read-only reviews checked
+the evidence and operational instructions; a separately registered writer added
+publisher failure-boundary tests and handed off the exact file hash.
+
+Run 9 again observed no lost ledger edits or sampled overlapping output claims.
+All five workers reported independent primary-source research and released the
+shared ledger before separate reporting. Startup truncation remained absent;
+later truncation fell from five workers to one. Those observations do not establish
+a causal improvement, equal research effectiveness, or immunity to collisions.
+The remaining problems were execution and factual-state mistakes, often despite
+correct general rules already being present.
+
+| Evidence | Targeted change |
+| --- | --- |
+| Run-9 A's future-time claim candidate was rejected, but a combined script still launched an already-claimed build and created an unclaimed temporary directory | A checked caller sequence prevents every dependent write/launch after failed publication, verification or cleanup. Test both rejection and a successful acquisition. Separate checked tool calls remain sufficient. |
+| B's closing publisher redirected stdout into an artifact released by that same publication | Finish every output writer before release, including inherited descriptors, redirections, cleanup and publisher output. Send final closure output to the harness or memory; writing it later requires ownership. |
+| Helper code can commit a complete hard link or terminal record before staging cleanup or stdout fails | Inspect saved bytes after uncertain results; an error does not mean the old record survived. Never revive a terminal ID, restore claims or duplicate a message by blind retry. Regression tests now cover these actual boundaries. |
+| B sampled event times before inbox processing; C/E retained stale event/status fields; D/E retained resolved recovery text; B closed with evidence described as still next | Distinct filled timestamps, one launch/yield/completion/release sequence, processed-message disposition and an evidence-complete row make the current checkpoint concrete. Preserve completed-event times on unrelated publications. Label immutable startup facts as historical. |
+| C's custom atomic publisher omitted full validation/lock metadata; E's manual progress updates also lacked checks/identity | One on-demand equivalence recipe specifies full candidate/transition validation, lock identity, final review, safe staging, checked replacement and uncertainty handling. Helper use stays optional; the invariants remain required. |
+| Run-9 C's excluded private tests contained consumer-specific guards absent from the declared public acceptance criteria; one supplemental mock bypassed the intended downloader | Map each excluded guard for each consumer to a public probe or explicit omission. Freeze extra historical requirements before dispatch; classify undeclared historical gaps separately and retain evaluator fixture failures/corrections. |
+| Previous broad reads, ambiguous environment-note permissions and risk of measuring ceremony instead of useful work | Recipes are opened by need, without restarting startup. Frozen exercise prompts list allowed environment notes explicitly; evaluator traces measure overhead without a second worker journal or extra searches. |
+
+The routine guide is **3,300 words versus 3,304** at this baseline; detailed failure
+and closure examples live in the on-demand recipes (**3,976 versus 3,102 words**).
+AGENTS grows by 17 words. These counts describe reading volume, not measured
+cognitive load or tool-use prevalence. Existing checkpoints absorb the
+new examples. There is no additional ownership phase, daemon, mandatory helper,
+approval, per-tool record or research quota. Normal web search, browsing, local
+tools and delegation remain governed by the harness and task. Read-only work can
+continue while an affected write waits. Temporary facts keep their existing
+source/confidence/recheck and retention rules; no new archive was created.
+
+No production helper or application behavior changed. A formatter cannot know
+whether a message was understood or a job finished, and a publisher cannot stop
+its caller's next shell command. The changes therefore target the caller and
+examples, with regression coverage for the underlying publication boundaries.
+
+Validation used claimed isolated fixtures/build outputs on Linux:
+
+- **30 publisher tests passed**, including four new methods. The caller test
+  exercises future-event rejection, stale hashes, successful dependent work,
+  verification failure preserving exit status 7, and mutex cleanup failure
+  preserving foreign staging. Additional cases cover post-link cleanup failure
+  for records/messages, stdout failure after terminal release, and closure output
+  captured in memory with released-artifact bytes/mtime/ctime unchanged.
+- **36 reader/checker tests and 16 executable documentation/scenario checks passed**,
+  with no skips. The latter include actual CLI record/message publication, the
+  launch/yield/completion/release sequence, processed-message disposition carried
+  through an unrelated publication, distinct event times, historical baseline
+  consistency, inbox failures and shell syntax. They validate these constructed
+  scenarios; they do not prove that an arbitrary agent records facts honestly.
+- **All 25 configured build-group checks passed across the initial run and affected
+  rerun.** `./build.sh test build --cli --build-dir build/agents/coord-guidance10-20260927/cli --jobs 2 -- -DDATAPUMP_COMPILER_CACHE=OFF`
+  passed 21; four packaging suites failed during GPG setup. Direct Unix/loopback
+  socket probes established sandbox `EPERM`. With approved local socket access,
+  all four complete affected CTest suites passed; the unchanged 21 passes were
+  reused. Both attempts remain in evidence. **Five optional internal cases remain
+  skipped:** two native Arch integration cases and three source-SDK host ELF cases,
+  with the required pacman/patchelf environment unavailable. Those omissions are
+  not qualification, and this tooling check is not application release certification.
+- Local relative links/anchors, whitespace, unchanged testing/compatibility
+  requirements, source/helper/CI scope and untouched index were checked.
+  Final independent review corrected an ambiguous mutex requirement for messages
+  and progress-only updates and the distinction between starter assets and releases.
+
+Evidence is in `.agent-work/artifacts/coord-guidance10-20260927/` and the test writer's
+`coord10-tests-20260927` artifacts under the usual lifecycle. The root session also
+corrected copied `closed` cadence text before validation; ownership was unaffected.
+Historical reports remain unchanged. These changes address the actionable findings
+reviewed here without a new workflow phase. This was not another blinded five-worker
+trial, and no reduced collision rate or equal research effectiveness is inferred.
+Other harnesses/filesystems, actual shared-source/Git operations and interrupted
+external jobs remain outside this validation's measured scope.

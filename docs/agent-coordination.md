@@ -16,7 +16,7 @@ and task would otherwise warrant: neither more nor less because of coordination.
 It adds no tool quota, approval step or prerequisite to read-only investigation.
 Give these instructions to participating agents, not to every passive tool call.
 
-Read this guide once at startup; use the checkpoints below thereafter. Open the
+Read this guide once at startup; use its checkpoints thereafter. Open the
 [recipes](agent-coordination-recipes.md) when creating/updating records or sending
 messages, the [lifecycle procedures](agent-coordination-lifecycle.md) when their
 triggers apply, and the [evaluation guide](agent-coordination-evaluation.md) only
@@ -27,11 +27,11 @@ when running a study. Historical reports are not routine worker reading.
 | When | Action, then return to useful work |
 | --- | --- |
 | Start, resume or change scope | Inspect source/index baseline, complete claims and your inbox; register exact claims before writing. |
-| Before a write | Confirm ownership and current contents, including generated outputs and notes; stop that write on an unexpected change. |
+| Before a write | Confirm published ownership and current bytes, including generated outputs; stop dependent writes/launches on a failed or uncertain claim update. |
 | Build/test/generator may block or outlive a tool reply | Claim outputs/resources and stable inputs; record launch, running status/handle if yielded, then completion at the next control boundary. Short synchronous results join the next checkpoint. |
 | Waiting/checkpoint | Read inbox/current claims; replace current status, event times, next action and blockers together; continue independent work. |
 | Handoff | Prepare the entry/evidence first; acquire, acknowledge, write, verify, release and notify. Finish unrelated reporting after releasing the shared file. |
-| Finish | Resolve jobs/receipts, preserve useful facts and uncommitted-work disposition, release claims and publish a consistent terminal record. |
+| Finish | Resolve jobs/receipts and final output writers; retain useful facts/dirty-work disposition, release claims and publish consistent terminal state. |
 
 Keep the task's complete deliverables in the existing `Task and approach`/progress
 fields: required behavior, normal research/verification, validation and delivery.
@@ -135,11 +135,12 @@ state, liveness/closure and complete claims, stopping each section at the next
 same- or higher-level heading. Never truncate claims to fit an output budget.
 Read other sections only for overlaps, dependencies, handoffs or unclear ownership.
 
-Keep active records as current snapshots, at most ten short recent progress entries.
-On closure, compact to outcome, dates, empty claims, job/change disposition, final
-checks and useful references (aim around 2 KiB). Do not duplicate histories elsewhere.
-Never load the board, closed histories, old inboxes or archives wholesale. Historical
-lookups do not renew retention. Read selected evidence and messages addressed to you.
+Keep current snapshots with at most ten recent progress entries.
+Label startup facts in Baseline as historical; current ownership lives in Claims
+held. Replace obsolete jobs/blockers/next actions instead of appending corrections.
+On closure, compact to outcome, dates, empty claims, disposition, checks and
+references (aim around 2 KiB). Read selected evidence/inbox messages, not whole
+histories; copying or rereading history does not renew retention.
 
 ## Claim files and resources before writing
 
@@ -168,7 +169,8 @@ For registration, additions, releases or transfers:
 4. Confirm the saved record agrees with the reviewed candidate. Remove only your
    staging files and `owner.md`, then `rmdir` your empty mutex. Keep it for seconds,
    never while coding, researching, waiting, building or doing final reporting.
-   On publication failure, assume no new claim; inspect current bytes before retry.
+   On any failure, stop dependent writes/launches and inspect saved state: publication
+   may have succeeded before cleanup/output failed. Never infer ownership from an error.
    Never recursively remove an unfamiliar or nonempty lock.
 
 Re-read each target immediately before editing and compare with the inspected
@@ -185,11 +187,10 @@ mutex, stage complete validated bytes inside that lock and atomically publish to
 remain as a spurious possible owner in `sessions/`.
 
 The optional [publisher](../tools/agent-board.py) checks format and stale replacement
-using your already-held mutex and reviewed record hash (or explicit creation).
-**You still review all claims, provenance, stopped writers and facts**; it cannot
-grant/recover ownership. The [recipe](agent-coordination-recipes.md#publish-a-record)
-specifies its supported primitives and failure handling. Equivalent safe harness
-operations are allowed; unsupported publication has no direct-write fallback.
+under your mutex against reviewed bytes. **You still review all claims, provenance,
+stopped writers and facts**; it cannot grant/recover ownership. The [recipe](agent-coordination-recipes.md#publish-a-record)
+covers checked execution, uncertain results and equivalent harness operations.
+Unsupported publication has no direct-write fallback.
 
 Heartbeat/progress-only updates can omit the registry mutex only if claims remain
 exactly unchanged and the same atomic replacement rules are followed. The optional
@@ -306,12 +307,12 @@ errors but cannot establish semantic truth, actual work completion, inbox proces
 or wall-clock freshness. Changing a timestamp alone does not make a record current.
 
 Release unneeded claims before pausing; identify retained scope and next check.
-Before terminal closure, stop/resolve jobs and heartbeat writers, reconcile
-receipts, retain useful facts and dirty-work disposition, then release all claims
-and set terminal state/closure/deletion deadline together. Use standalone `None.`
-in Claims held; put release history in Blockers and handoff. Default deletion is
-closure plus 30 days. A failed command alone is not terminal. Pending integrations
-name their receiver and acknowledgment; released files can remain uncommitted.
+Before closure, resolve jobs/receipts and finish evidence, logs and cleanup writers.
+Send the closing command's output to the harness, not an artifact it releases;
+see [safe closure](agent-coordination-recipes.md#finish-output-before-releasing-its-claim).
+Publish terminal state, standalone `None.` claims, closure and closure-plus-30-day
+deletion together. Keep release/dirty-work disposition in handoff. A failed command
+alone is not terminal; pending integrations name their receiver and acknowledgment.
 
 Read [lifecycle procedures](agent-coordination-lifecycle.md) when investigating
 an overdue/unknown owner or lock, setting up heartbeats, recovering ownership,

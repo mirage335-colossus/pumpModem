@@ -3,7 +3,8 @@
 Use the relevant recipe after reading the [workflow](agent-coordination.md).
 This is an on-demand reference, not another startup checklist. The optional Python
 helpers reduce formatting and publication mistakes; they do not grant ownership.
-Other harnesses may use equivalent safe filesystem operations.
+Jump to the needed section; opening a recipe does not restart instruction reading.
+Other harnesses may use [equivalent safe operations](#equivalent-publication-without-the-helper).
 
 Every command below assumes its tool is explicitly bound to the intended checkout
 and defines `checkout`, `coord_dir` and `session` in that invocation. Use absolute
@@ -14,8 +15,8 @@ off limits. Never initialize a new board just because the expected one is missin
 
 ## Bounded reading
 
-Read AGENTS and the workflow separately, in bounded chunks if necessary. For
-example, request workflow lines 1–160, then 161–320 in separate calls; continue
+For the startup read, request AGENTS and the workflow separately, in bounded chunks
+if necessary. For example, request workflow lines 1–160, then 161–320; continue
 only if lines remain. Do not concatenate them with source, board records or logs.
 After startup, use the relevant checkpoint instead of rereading the whole guide.
 Apply the same output budgeting to source, test logs and web results. Independent
@@ -145,7 +146,9 @@ keep documentation busy or start a monitor the harness does not normally need.
 | Before launch | `Running jobs: launch pending; TMPDIR=/work/tmp/session ./build.sh test build --cli --build-dir /work/build/session; claimed outputs /work/build/session and /work/tmp/session; expected about 30s; handle unavailable until reply`. Next check is the planned result/inbox check. |
 | Tool reports running job `job-17` | Replace launch pending with `Running jobs: build job job-17 via this harness on example-host; same claimed outputs; completion unconfirmed`. Keep other genuinely active jobs. A handle identifies the job, not the session worker. |
 | Tool returns completion | If no other jobs remain, `Running jobs: none`. Progress says, for example, `13/13 CTest entries passed; 3 internal ELF cases skipped (patchelf absent); source/configuration and log reference`. Remove the resolved blocker and set Next action to the actual remaining work. |
+| Nonempty inbox processed | Read and interpret each pending message, then capture Last inbox check. For a verified release notice, replace `waiting for owner` with `release REF inspected; acquisition pending`, and set Next action to prepare/acquire. Reading a notice does not itself acquire the file. |
 | Shared summary released | Remove only that claim, record release/provenance/hashes and stopped writers, replace `awaiting`/`append next` with `released; separate evidence remains`, and stay active for that work. Notify after publication. |
+| Separate evidence completed | Replace `evidence next` everywhere in current status with its completed result. Resolve remaining jobs/receipts, then close using the output rule below. Historical startup facts remain labeled as history. |
 
 A short synchronous command that finishes within one invocation needs no fabricated
 running phase afterward. Record its relevant result at the next checkpoint; keep
@@ -153,14 +156,15 @@ the launch status truthful if it might yield or block. Ordinary read/search call
 do not each need a checkpoint. Combine job, inbox and scope changes into one update
 when they coincide. Never hold the registry mutex while a command runs.
 
-Three times have different meanings. For example, a completed job was observed at
-`10:02:00Z`, inbox messages processed at `10:02:57Z`, and the candidate published at
-`10:03:00.123Z`: Last meaningful progress, Last inbox check and Updated respectively.
-Do not copy the publication time into the two event fields. If preparing a candidate
-takes time, refresh Updated just before publication, not the earlier observed facts;
-make Next check/action current too. Fractional UTC precision allows distinct
-publication timestamps within one second without inventing time. Clock uncertainty
-remains explicit, not synthesized time.
+Capture event times **after** observing the result or processing messages, not at
+wrapper invocation start. A job result observed at `10:02:00Z` and a nonempty inbox
+processed at `10:02:57Z` give those two event fields. Publishing the reconciled
+record at `10:03:00.123Z` changes Updated only. An unrelated publication at
+`10:03:30Z` retains both earlier event times. Do not infer meaningful progress from
+changing a text section or mark an inbox processed by printing its bytes. Resolve
+what the messages change first; combine those decisions with jobs, blockers and
+Next action in the same snapshot. Fractional UTC times avoid invented clock ticks.
+Clock uncertainty remains explicit. The checker cannot establish these facts.
 
 Inspect the underlying test summary and exit result, not just a green wrapper or
 the exit code of `tail`/`tee`. Distinguish internal skips and setup failures from
@@ -187,8 +191,8 @@ artifact directory. Do not write a candidate into `sessions/`.
 ## Current checkpoint
 - State: active
 - Updated (UTC): 2026-09-27T10:00:00Z
-- Last meaningful progress (UTC): 2026-09-27T10:00:00Z
-- Last inbox check (UTC): 2026-09-27T10:00:00Z
+- Last meaningful progress (UTC): 2026-09-27T09:59:40Z
+- Last inbox check (UTC): 2026-09-27T09:59:55Z
 - Next check (UTC) / action: 2026-09-27T10:05:00Z / inspect failure and request exact source scope
 - Liveness mode / cadence: checkpoint / five minutes
 - Last heartbeat (UTC), if supervised: none
@@ -205,7 +209,7 @@ artifact directory. Do not write a candidate into `sessions/`.
 | directory | /work/pumpModem/.agent-work/artifacts/example-session | .agent-work/artifacts/example-session | candidates, isolated probes and logs |
 | directory | /work/pumpModem/.agent-work/notes/example-session | .agent-work/notes/example-session | relevant unresolved findings |
 ## Baseline and dependencies
-- No source or build claims yet; preserve any subsequently observed independent edits.
+- At startup: clean worktree/index; initial scope was read-only diagnosis. Current ownership is in Claims held.
 ## Progress and checks
 - Startup baseline and complete claims reviewed; implementation and validation pending.
 ## Blockers and handoff
@@ -232,25 +236,25 @@ receipts are resolved. Real outcomes may instead be `failed` or `cancelled`.
 - Starting worktree and index changes (including work owned by others): clean
 ## Current checkpoint
 - State: done
-- Updated (UTC): 2026-09-27T11:00:00Z
-- Last meaningful progress (UTC): 2026-09-27T11:00:00Z
-- Last inbox check (UTC): 2026-09-27T11:00:00Z
+- Updated (UTC): 2026-09-27T11:00:00.123Z
+- Last meaningful progress (UTC): 2026-09-27T10:59:25Z
+- Last inbox check (UTC): 2026-09-27T10:59:50Z
 - Next check (UTC) / action: none / closed; no pending work or receipts
 - Liveness mode / cadence: checkpoint / closed
 - Last heartbeat (UTC), if supervised: none
 - Run token / heartbeat file and writer, if used: none
 - Owner process: unavailable
 - Running jobs: none
-- Closed (UTC), if terminal: 2026-09-27T11:00:00Z
-- Delete after (UTC): 2026-10-27T11:00:00Z
+- Closed (UTC), if terminal: 2026-09-27T11:00:00.123Z
+- Delete after (UTC): 2026-10-27T11:00:00.123Z
 - Retention exception: none
 - Contact: messages/example-session/
 ## Claims held
 None.
 ## Baseline and dependencies
-- Example outcome: diagnosis found no source fix necessary; no worktree/index changes.
+- At startup: clean worktree/index; initial scope was read-only diagnosis. Current ownership is in Claims held.
 ## Progress and checks
-- Example local probe and task-appropriate research/verification completed; no remaining validation.
+- Example outcome: diagnosis found no source fix necessary; local probe and task-appropriate research/verification completed. No worktree/index changes or remaining validation.
 ## Blockers and handoff
 - All writers stopped, claims released; no integration or receipt pending.
 ```
@@ -261,6 +265,23 @@ time and deletion at closure plus 30 days; longer retention needs the explicit
 [lifecycle exception](agent-coordination-lifecycle.md#delete-expired-sessions-and-unnecessary-history).
 A closed ID cannot resume: create a new ID and acquire afresh. Legacy records need
 not be migrated just to make the helper accept them.
+
+### Finish output before releasing its claim
+
+Finish the separate evidence/logs first; stop or join their writers, including
+child processes, inherited output descriptors, `tee` and logging/cleanup traps.
+Then prepare the terminal candidate and publish with stdout/stderr going to the
+**harness response**, not into an artifact released by that publication. Shell
+redirection opens a file before the command starts, and the publisher prints its
+result after the record is installed. Both ends of that output lifetime need an
+owner. Capturing output in memory is also safe; writing it later needs ownership.
+
+The ordinary closing sequence is: finalize evidence → publish/verify closure →
+clean only owned registry staging/lock → report through the harness. The registry
+cleanup exception does not authorize more artifact/source writes. If another
+output or integration genuinely remains, release the completed shared file but
+keep that other scope claimed and the session active until its writers finish.
+Do not add an intermediate closure or retain the shared file merely to log closure.
 
 ## Publish a record
 
@@ -289,11 +310,11 @@ Do not recompute that value simply to override a stale-baseline rejection.
 If the **existing** record is malformed or legacy, the checker/publisher deliberately
 reject it even when the replacement is well formed. Review its complete claims and
 handoff manually, prepare the corrected candidate outside `sessions/`, and use the
-manual atomic replacement procedure under your mutex after rechecking those exact
+[equivalent publication procedure](#equivalent-publication-without-the-helper) under your mutex after rechecking those exact
 old bytes and all other claims. Preserve ownership, event times and unresolved
 work; do not delete/re-register the record to evade validation or lose its claims.
 Repairs to another or closed owner's metadata also require the lifecycle procedure.
-Return to the optional helper once the current record uses the supported format.
+The helper can be used again once the current record uses the supported format.
 
 The following publication commands run **only inside your already-held mutex**.
 Acquire it by one exclusive `mkdir "$coord_dir/registry.lock"`. Write its owner
@@ -334,10 +355,84 @@ compare-and-swap against uncooperative edits. Nothing is staged in `sessions/`.
 
 Confirm the saved record matches the candidate. In a finally/cleanup path, remove
 only your own remaining staging and `owner.md`, then `rmdir` your empty lock.
-Never recursively remove an unfamiliar/nonempty lock. On failure, inspect actual
-state before retrying; no error grants a claim. Keep failed proposals in claimed
-artifacts. The helper does **not** acquire/release the registry mutex, scan other
-claims, or close another session.
+Never recursively remove an unfamiliar/nonempty lock. Check failures through the
+caller as described below. The helper does **not** acquire/release the registry
+mutex, scan other claims, or close another session.
+
+### Stop dependent work on publication failure
+
+Treat publication as a checked operation. A separate tool call with its result
+inspected before the next dependent write is sufficient; no extra approval or
+checkpoint is required. In a combined script, explicitly gate **every** dependent
+mkdir, redirection, generator and job launch. Newlines, semicolons, the last command's
+exit status, or `set -e` alone are not a reliable substitute.
+
+This shell control-flow pattern uses caller operations, **not new helper commands**.
+`publish_and_verify` includes the already-required complete claims/facts review,
+checked publisher invocation and exact saved-byte comparison inside the owned
+mutex. `release_owned_mutex` performs only verified owned cleanup and fails on
+uncertainty. Each operation must propagate its own subcommand failures:
+
+```sh
+if publish_and_verify; then
+  release_owned_mutex || exit "$?"
+else
+  publication_status=$?
+  if ! release_owned_mutex; then
+    printf '%s\n' 'Owned lock cleanup incomplete; inspect before retrying.' >&2
+  fi
+  exit "$publication_status"
+fi
+# Only an active session with verified published claims reaches this operation.
+create_claimed_outputs_and_launch
+```
+
+Preserve the failing command's status in the `else` branch; `!` inverts it. Do not
+let successful cleanup mask failure. In Python, use
+[`subprocess.run(..., check=True)`](https://docs.python.org/3/library/subprocess.html#subprocess.run)
+inside the owned-lock cleanup context and leave the exception uncaught until after
+dependent work has been prevented. The shell example follows
+[conditional execution](https://www.gnu.org/software/bash/manual/html_node/Conditional-Constructs.html)
+and [command-list status](https://www.gnu.org/s/bash/manual/html_node/Lists.html).
+
+A nonzero result can occur **after** atomic publication, for example when deleting
+the private staging link or printing the result fails. Stop dependent work and
+inspect actual record/message bytes and ownership before retrying; do not assume
+the old state remains, restore an old claim, or recompute a hash to bypass rejection.
+A complete terminal record stays terminal even if its closing command reports an
+error; new work requires a new ID and fresh acquisition. Inspect an uncertain send
+before choosing another message ID, so a successful delivery is not duplicated.
+Retain failure evidence only within scope still owned after that inspection.
+
+### Equivalent publication without the helper
+
+Use equivalent filesystem primitives only where their required semantics are
+supported. Reusing the existing helper avoids reimplementing these steps, but is
+optional; a custom wrapper must preserve all of them, not just atomic visibility:
+
+1. Prepare the complete body in memory or already-claimed artifacts. For records,
+   validate the full record and transition, not only changed fields; the checker
+   is optional, its invariants are not. Keep the exact reviewed old bytes/hash.
+2. For registration or changed claims, exclusively create the mutex and record
+   session, host, UTC, lock-holder role, PID/start identity when available and intent.
+   Recheck all complete claims, provenance, stopped writers, target bytes and facts
+   under it. Investigate uncertainty after releasing your mutex; do not wait in it.
+   Messages need no registry mutex or claim scan. Unchanged-claim record updates
+   may omit it under the workflow's single-writer rule.
+3. For records, finalize Updated without replacing actual event times and revalidate
+   final bytes. Stage complete, closed bytes on the destination filesystem, outside
+   `sessions/`: records inside the owned mutex, or already-claimed artifacts for a
+   mutex-free update; messages in their destination inbox as private staging files.
+   Reject unsafe aliases/nonregular paths. Recheck directory identity, owned lock
+   identity when applicable, and the expected old record before publication.
+4. Use atomic no-replace publication for new records/messages; atomic replacement
+   for the exact reviewed existing record. Exclusive creation followed by writing
+   is not complete publication. The mutex-free operations retain the same
+   applicable validation and atomicity checks.
+5. Verify saved bytes. Preserve errors through narrow owned cleanup and follow the
+   uncertain-result procedure above. Never delete foreign staging/locks or use
+   direct writes as an unsupported-primitive fallback. Use the closure output rule
+   for every path capable of writing after the record transition.
 
 Atomic rename/replace and exclusive hard-link publication are distinct operations:
 replacement may overwrite a destination, while a link fails when that name already

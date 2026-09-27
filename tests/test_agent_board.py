@@ -203,6 +203,167 @@ class PublicationTests(unittest.TestCase):
         self.assertEqual(set(p.name for p in self.lock.iterdir()), {'owner.md', foreign.name})
         self.assertEqual(foreign.read_bytes(), b'untouched')
 
+    def test_post_link_cleanup_failure_leaves_complete_record_or_message(self):
+        # A nonzero result is not proof that publication never committed. Both
+        # no-replace paths link the final name before removing their staging name.
+        original_unlink = BOARD.os.unlink
+
+        def fail_staging_cleanup(name, **kwargs):
+            if str(name).startswith('.agent-board-'):
+                raise OSError(errno.EIO, 'injected staging cleanup failure')
+            return original_unlink(name, **kwargs)
+
+        self.owned_lock()
+        for kind in ('record', 'message'):
+            with self.subTest(kind=kind):
+                payload = record() if kind == 'record' else b'Complete delivered message.\n'
+                self.source.write_bytes(payload)
+                # Mocking unlink changes its identity in the capabilities set.
+                with mock.patch.object(BOARD, 'require_capabilities'), \
+                        mock.patch.object(BOARD.os, 'unlink', side_effect=fail_staging_cleanup):
+                    with self.assertRaisesRegex(OSError, 'staging cleanup failure'):
+                        if kind == 'record':
+                            self.publish(create=True)
+                        else:
+                            self.message()
+                target = self.target if kind == 'record' else (
+                    self.board / 'messages' / 'recipient' / 'sender-one.md')
+                staging_dir = self.lock if kind == 'record' else target.parent
+                self.assertEqual(target.read_bytes(), payload)
+                remaining = list(staging_dir.glob('.agent-board-*.tmp'))
+                self.assertEqual(len(remaining), 1)
+                self.assertEqual(remaining[0].read_bytes(), payload)
+                self.assertEqual(remaining[0].stat().st_ino, target.stat().st_ino)
+                self.assertTrue((self.lock / 'owner.md').is_file())
+
+    def test_rejected_publication_stops_dependent_commands(self):
+        # Exercise the real CLI and shell boundary, including a successful
+        # acquisition so unconditional failure cannot satisfy the negative cases.
+        script = '''
+python=$1 tool=$2 board=$3 candidate=$4 expected=$5 downstream=$6 verification=$7
+publish_and_verify() {
+    "$python" -B "$tool" record --board "$board" --session sender --candidate "$candidate" --expected-sha256 "$expected" || return $?
+    cmp -s "$board/sessions/sender.md" "$candidate" || return $?
+    if [ "$verification" = fail ]; then return 7; fi
+}
+release_owned_mutex() {
+    rm "$board/registry.lock/owner.md" && rmdir "$board/registry.lock"
+}
+if publish_and_verify; then
+    release_owned_mutex || exit 1
+else
+    status=$?
+    release_owned_mutex || printf 'inspect remaining mutex contents\\n' >&2
+    exit "$status"
+fi
+mkdir "$downstream" &&
+printf 'dependent write\\n' > "$downstream/writer" &&
+"$python" -B -c 'from pathlib import Path; import sys; Path(sys.argv[1]).write_text("job ran\\n")' "$downstream/job"
+'''
+        for outcome in ('future-event', 'stale-hash', 'valid', 'verification-failure',
+                        'cleanup-failure'):
+            with self.subTest(outcome=outcome):
+                self.owned_lock()
+                before = record()
+                self.target.write_bytes(before)
+                downstream = self.base / outcome
+                claim = f'- directory: {downstream}; claimed dependent outputs\n'.encode()
+                candidate = record(minute='01').replace(b'None.\n## Baseline',
+                                                        claim + b'## Baseline')
+                expected = hashlib.sha256(before).hexdigest()
+                if outcome == 'future-event':
+                    candidate = candidate.replace(
+                        b'Last meaningful progress (UTC): 2026-09-27T12:01:00Z',
+                        b'Last meaningful progress (UTC): 2026-09-27T12:02:00Z')
+                elif outcome == 'stale-hash':
+                    expected = '0' * 64
+                foreign = self.lock / '.agent-board-foreign.tmp'
+                if outcome == 'cleanup-failure':
+                    foreign.write_bytes(b'preserve another operation staging file')
+                self.source.write_bytes(candidate)
+                result = subprocess.run(
+                    ['/bin/sh', '-c', script, 'publication-check', sys.executable,
+                     str(TOOL), str(self.board), str(self.source), expected, str(downstream),
+                     'fail' if outcome == 'verification-failure' else 'pass'],
+                    cwd=self.base, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15)
+                if outcome == 'valid':
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(self.target.read_bytes(), candidate)
+                    self.assertEqual((downstream / 'writer').read_text(), 'dependent write\n')
+                    self.assertEqual((downstream / 'job').read_text(), 'job ran\n')
+                elif outcome == 'verification-failure':
+                    self.assertEqual(result.returncode, 7, result.stderr)
+                    self.assertEqual(self.target.read_bytes(), candidate)
+                    self.assertFalse(downstream.exists())
+                elif outcome == 'cleanup-failure':
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    self.assertEqual(self.target.read_bytes(), candidate)
+                    self.assertFalse(downstream.exists())
+                    self.assertEqual(list(self.lock.iterdir()), [foreign])
+                    self.assertEqual(foreign.read_bytes(), b'preserve another operation staging file')
+                else:
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    diagnostic = (b'later than Updated' if outcome == 'future-event'
+                                  else b'stale baseline')
+                    self.assertIn(diagnostic, result.stderr)
+                    self.assertEqual(self.target.read_bytes(), before)
+                    self.assertFalse(downstream.exists())
+                if outcome != 'cleanup-failure':
+                    self.assertFalse(self.lock.exists())
+                    self.no_temps()
+
+    def test_stdout_failure_after_closure_requires_inspecting_committed_record(self):
+        self.owned_lock()
+        before = record().replace(b'None.\n## Baseline',
+                                  f'- directory: {self.base}; fixture artifacts\n## Baseline'.encode())
+        self.target.write_bytes(before)
+        candidate = record(minute='01', state='done')
+        self.source.write_bytes(candidate)
+        with mock.patch.object(sys, 'stdout') as output:
+            output.write.side_effect = BrokenPipeError(errno.EPIPE, 'injected stdout failure')
+            with self.assertRaisesRegex(BrokenPipeError, 'stdout failure'):
+                BOARD.main(['record', '--board', str(self.board), '--session', 'sender',
+                            '--candidate', str(self.source), '--expected-sha256',
+                            hashlib.sha256(before).hexdigest()])
+        output.write.assert_called_once_with(str(self.target))
+        # The caller must inspect current bytes before deciding what may be
+        # retried or written: closure and claim release have already happened.
+        actual = self.target.read_bytes()
+        self.assertEqual(actual, candidate)
+        self.assertNotEqual(actual, before)
+        _, fields, claims = BOARD.record_checker().parse_record(actual.decode())
+        self.assertEqual(fields['State'], 'done')
+        self.assertEqual(claims, 'None.')
+        self.assertTrue((self.lock / 'owner.md').is_file())
+        self.no_temps()
+
+    def test_closure_output_captured_in_memory_does_not_write_released_artifacts(self):
+        self.owned_lock()
+        artifacts = self.base / 'artifacts'
+        artifacts.mkdir()
+        (artifacts / 'validation.log').write_bytes(b'Final validation is complete.\n')
+        self.source = artifacts / 'closure-candidate.md'
+        candidate = record(minute='01', state='done')
+        self.source.write_bytes(candidate)
+        before = record().replace(b'None.\n## Baseline',
+                                  f'- directory: {artifacts}; fixture artifacts\n## Baseline'.encode())
+        self.target.write_bytes(before)
+
+        def snapshot():
+            paths = [artifacts, *sorted(artifacts.iterdir())]
+            return [(path.name, path.stat().st_mtime_ns, path.stat().st_ctime_ns,
+                     path.read_bytes() if path.is_file() else None) for path in paths]
+
+        finished_artifacts = snapshot()
+        result = self.run_cli('record', '--board', self.board, '--session', 'sender',
+                              '--candidate', self.source, '--expected-sha256',
+                              hashlib.sha256(before).hexdigest())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, (str(self.target) + '\n').encode())
+        self.assertEqual(self.target.read_bytes(), candidate)
+        self.assertEqual(snapshot(), finished_artifacts)
+        self.no_temps()
+
     def test_registration_and_update_use_complete_current_checker_template(self):
         self.owned_lock()
         self.publish(create=True)

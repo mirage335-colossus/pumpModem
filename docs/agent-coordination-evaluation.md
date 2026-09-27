@@ -4,7 +4,8 @@ Read this when running a coordination study, not during ordinary development.
 The [fifth](agent-coordination-rerun5.md) informs the preparation safeguards. The
 [sixth](agent-coordination-rerun6.md) and [seventh](agent-coordination-rerun7.md)
 reruns used unchanged guidance; the
-[eighth](agent-coordination-rerun8.md) tested the subsequent revision. Use the
+[eighth](agent-coordination-rerun8.md) and [ninth](agent-coordination-rerun9.md)
+each tested a later guidance revision. Use the
 [coordination workflow](agent-coordination.md) for the evaluator's own files,
 fixtures, observers, builds and handoffs too.
 
@@ -45,6 +46,9 @@ fixtures, observers, builds and handoffs too.
   worker's permitted reading scope. Keep helpers available at documented paths.
   Use fresh conversation context. Restrict parent/history, peer code and evaluator
   artifacts when the harness permits; otherwise disclose instruction-only blinding.
+  List any permitted environment notes by exact path in the frozen prompt;
+  distinguish those from barred evaluator artifacts, answers and peer results.
+  Do not require note discovery in a location the same prompt forbids reading.
   If exposure occurs, stop and exclude that attempt, preserve its disclosure and
   replace it with a fresh worker/snapshot. Count every dispatched attempt.
 
@@ -76,6 +80,8 @@ and time blocked by ownership. Observe web research, primary sources, local
 applicability and repair/test outcomes. A post-run survey is self-report, not a
 complete tool trace. If comparing research effectiveness or distraction, use a
 matched no-coordination control or clearly state that no such conclusion follows.
+Use evaluator-side traces for these measures; do not burden workers with a second
+activity journal or extra ceremonial searches/publications.
 
 Count publication-helper use, incomplete scans, candidate files exposed in
 `sessions/`, partial/direct message writes, missing-inbox retries, truncated reads,
@@ -97,7 +103,14 @@ truncation recovery and scope, not just whether a helper was used.
 For publication primitives, supplement sampling with deterministic concurrent
 writer/reader and injected-failure tests. Readers should see absent or complete
 messages and complete old/new records; duplicate publication must not replace
-bytes. Keep unknown/stale/retained-claim scenarios too. Primitive tests do not
+bytes. Also test the caller: rejected claims must prevent dependent directory
+creation, redirection, generators and launches; include successful controls.
+Inject cleanup/output failure after publication and inspect saved state, including
+terminal release. Verify closure output cannot write into released artifacts.
+Exercise a processed nonempty inbox followed by an unrelated checkpoint: preserve
+actual event times and replace resolved blockers/next actions together.
+Custom publication is permitted; score its validation, identity and error handling,
+not helper non-use alone. Keep unknown/stale/retained-claim scenarios too. These tests do not
 replace blinded worker exercises or qualify other operating systems/filesystems.
 
 ## Score the finished candidate
@@ -111,7 +124,14 @@ discriminate the bug; passing both is not evidence of a repair. Do not imply act
 Windows, device or live-service qualification from a simulation on another host.
 Audit coverage against each declared public behavior, not test counts: a publication
 success probe, for example, must check intended inventory and final state as well as
-destination ID. Preserve original results and label any post-freeze supplemental
+destination ID. When excluding a private-interface test, map each guard and each
+consumer it covered to a public-behavior probe or an explicit coverage omission.
+A pagination probe does not also prove rejection of starter assets or missing
+digests in every consumer. Require such historical guards in the frozen behavioral
+contract if they are part of acceptance; otherwise report a historical-equivalence
+gap separately, without retroactively failing or coaching the finished worker.
+Ensure mocks exercise the real entry point/downloader they purport to test.
+Preserve original results and label any post-freeze supplemental
 probe separately; do not call it preregistered evidence or send its findings back
 to a finished repair worker. Retain a compact useful failure/correction record
 instead of overwriting the only evidence of a fixture or environment error.
