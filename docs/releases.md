@@ -40,8 +40,8 @@ long preservation contract and GUI tests remain intact in that workflow.
 
 Leave `experiment` checked for builds users needing assurance should avoid.
 An ordinary release uses its version/date tag as the title. It becomes Latest
-only after complete separate certification without omitted graphics coverage; publication alone does not
-promote it. Hosted certification is limited to the tests listed below and
+only after successful separate hosted certification; documented runner capability
+warnings do not disqualify it. Publication alone does not promote it. Hosted certification is limited to the tests listed below and
 cannot establish physical-device compatibility.
 
 One `America/Chicago` timestamp supplies every platform's tag and filename:
@@ -125,7 +125,16 @@ Upload and certification check each archive's root
 and shipped build information, so relabeling an FLTK package as Rev is rejected.
 Full qualification of a new release requires coverage of every declared backend.
 The scoped Windows Rev WGL warning described below permits a green workflow with
-explicitly incomplete graphics coverage; that outcome does not promote Latest.
+explicitly incomplete graphics coverage. That known runner limitation does not
+block certification or Latest eligibility for an otherwise qualified ordinary release.
+The same policy applies to an exact typed GUI smoke workload limit with recent
+sampled-transmission progress. Certification records it as `passed_with_warnings`,
+retains `incomplete_smoke_coverage` by target and scope, and appends immutable
+`certification-RUN_ID-attempt-ATTEMPT-smoke-warnings.json` and `.log` assets. These
+are bound by SHA-256 to the main report and identify the exact source and binary
+inventory. Incomplete smoke is never reported as a smoke pass. Stalls, crashes,
+sanitizer errors, invalid evidence and external timeouts still fail. Experiment
+releases remain prereleases and never replace Latest.
 
 For the Ubuntu 22.04 x86_64 baseline, set `linux_baseline=ubuntu-22.04`.
 Clear `experiment` for an ordinary release. `publish=false` still reserves a
@@ -178,14 +187,15 @@ file from that exact tag, replacing `RELEASE_TAG` below. Check this fingerprint
 against a trusted copy of the maintainer's documentation before initial setup.
 
 The current package experiment is
-[`v001_00-2026-09-23-1322CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-23-1322CDT),
-including the signed Arch and Gentoo update channels below.
-It reuses the six archives built from application commit `88fb87b`.
-[Debian/Ubuntu installation checks](https://github.com/mirage335-colossus/pumpModem/actions/runs/35901986281)
-passed in all nine environments above; these are separate from full
-application certification. As of
-23 September 2026, no regular release has qualified for Latest, so use its
-explicit tag when opting into this experiment.
+[`v001_00-2026-09-26-1847CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-26-1847CDT),
+including signed Debian/Ubuntu, Arch and Gentoo update channels. Its six bundles
+were built from application commit `800da8c` on standard GitHub runners.
+All nine Debian/Ubuntu and both Arch/Gentoo install/update checks passed in
+[certification run 36281472303](https://github.com/mirage335-colossus/pumpModem/actions/runs/36281472303).
+That run also exposed source-test timeouts; successful package installation is
+separate from full application certification. See the [validation record](validation.md)
+for the current qualification outcome and coverage limits. This is a prerelease
+and has not replaced Latest; use its explicit tag when opting into the experiment.
 
 ```sh
 tag=RELEASE_TAG
@@ -607,8 +617,10 @@ Unexpected output, different failures, crashes and timeouts still fail.
 If all remaining checks pass, GitHub displays a green check and the report says
 `passed_with_warnings`. A prominent summary, release notes and immutable
 `certification-RUN-attempt-N-warning.log` record the missing coverage. Existing
-release `warning.log` and earlier reports remain untouched. Such a result does
-not qualify Windows Rev desktop graphics or promote a regular release to Latest.
+release `warning.log` and earlier reports remain untouched. Such a result
+certifies the release within the documented hosted-runner scope and permits an
+otherwise qualified regular release to become Latest. It does not claim that
+omitted Windows Rev graphics tests passed. Experiments remain prereleases.
 The runner limitation is minor for build delivery, but a user machine with the
 same limitation cannot launch the Rev GUI; that is a functional limitation,
 with FLTK available as the alternative frontend.

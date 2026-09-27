@@ -192,6 +192,124 @@ Actionlint, whitespace checks and independent scope reviews passed. Final shared
 native/SDK workflow definitions total 969 lines versus 620 originally (1.56x).
 Existing release assets and certification reports are unchanged.
 
+### Complete standard-runner rerun and release checkpoint
+
+[Full native rerun 36280424718](https://github.com/mirage335-colossus/pumpModem/actions/runs/36280424718)
+passed all 29 required jobs on merged source
+`800da8c67611819c22236c7ef310cb518348ae2b`, using `ubuntu-24.04` and
+`windows-2022`, with `devfast=false`. Creation-to-completion was 42m47s,
+the active span 42m42s, and summed job duration 378m18s. Linux Release passed
+Core 90/90, Fast 33/33, Live 2/2 and CLI 29/29; Debug passed 87/87, 31/31,
+2/2 and 29/29 respectively; Windows passed 86/86, 33/33 and 2/2. FLTK GUI
+passed 40/40 plus 21/21 build-tool suites; Rev passed 43/43, including its
+complete smoke in 404.43 seconds without using the extended allowance.
+All calibration, package and copied Ubuntu checks passed. Debug shaped parts
+took 2031.88 and 2193.75 seconds; their mandatory aggregate retained all 64
+seeds per case and the unchanged probability/RMS assertions. Copied checks
+started four to five seconds after the Linux producer. The passed Debug Live
+fixture retained its normal-budget warning; no sanitizer failure or passing-test
+near-timeout warning appeared. The documented Debug real-time exclusions and
+default optional instrumented GUI omission remain explicit coverage limits.
+
+[Standard-runner release build 36280483610](https://github.com/mirage335-colossus/pumpModem/actions/runs/36280483610)
+passed nine required jobs in 8m44s, building all six application targets from
+the same source with the verified base recipes. It initially created a draft
+with `publish=false`. After explicit user approval, those exact assets were
+published as the experiment prerelease
+[v001_00-2026-09-26-1847CDT](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-26-1847CDT),
+without promoting Latest. Its inventory SHA256 is
+`108919411c4c0c600d6c653f705b4b68cad7936457f645e06968378eed4fb6d5`.
+Publication establishes available checked packages, not completed certification.
+
+The [Linux base reuse check 36280661870](https://github.com/mirage335-colossus/pumpModem/actions/runs/36280661870)
+and [Windows base reuse check 36280663649](https://github.com/mirage335-colossus/pumpModem/actions/runs/36280663649)
+passed on standard runners with active spans of 70 and 65 seconds respectively.
+They reused recipes `b8685ab239d7ac8650e6` and `1be51afd94ed0cb4555a`; these
+are reuse/verification timings, not cold dependency builds. The
+[commit-equivalent diagnostic 36280594113](https://github.com/mirage335-colossus/pumpModem/actions/runs/36280594113)
+passed its two standard-runner jobs in 87 seconds, repeating both focused
+Legacy cases three times per platform. This diagnostic is not full coverage.
+
+[Optional Debug GUI diagnostic 36281710992](https://github.com/mirage335-colossus/pumpModem/actions/runs/36281710992)
+completed with a green workflow under the existing typed warning policy, but
+its instrumented smoke is **incomplete coverage, not a pass**. It exhausted
+600.018200 seconds in phase 11, transmission 11 at fraction 0.225619, with
+sampled progress 2.343160 seconds old. Policy/argument checks passed; the
+remaining smoke assertions were not reached. At execution time this exception
+was limited to instrumented Debug. The user subsequently extended this exact
+validated progressing-workload warning to Release, SDK, packaging and
+certification, with explicit incomplete coverage and no Latest eligibility veto.
+
+[Initial standard SDK run 36280427034](https://github.com/mirage335-colossus/pumpModem/actions/runs/36280427034)
+failed the Rev package's then-mandatory 600-second smoke and the FLTK contract's
+pre-acquisition sampled-transmission fixture. Its copied-package jobs were
+skipped, not passed. The
+[full SDK follow-up 36281395096](https://github.com/mirage335-colossus/pumpModem/actions/runs/36281395096)
+finished with seven of eight required jobs passing. One renderer worker on
+standard hosts restored both complete Rev archive smokes and all four copied
+checks, with the original 600-second caps; Rev source qualification also passed.
+FLTK again failed only `live` (29/30 contract cases passed), which overlapped
+`weak_signal` throughout. Its active span was 38m03s and summed job duration
+146m22s. The [scheduling follow-up 36283431898](https://github.com/mirage335-colossus/pumpModem/actions/runs/36283431898)
+passed all eight required jobs on `ubuntu-24.04` in 33m00s from dispatch,
+32m56s active, and 121m15s summed job time. Both producers and all four copied
+checks verified both archive formats; together with Rev source, all 13 complete
+GUI workflows passed their existing 600-second caps. Eleven Rev cadence
+advisories remained visible; no incomplete-workload exception was used. FLTK
+passed both Live cases serially (37.52s and 118.11s), then all 28 remaining
+contract cases; the numerical probability suite took 1017.23s. Copied checks
+started three seconds after the final producer, while source qualification was
+still running.
+[Exact-release certification 36281472303](https://github.com/mirage335-colossus/pumpModem/actions/runs/36281472303)
+finished with three Linux source failures: both x86-64 backends' `live` fixture
+failed while overlapping `weak_signal`, and ARM64 Rev adapter conformance hit
+its unchanged 330-second timeout after its complete GUI smoke passed. These
+failures are not converted to warnings. Follow-up tooling `639c968` separates the existing two
+Live contract cases into serial execution, then runs the other 28 cases in
+parallel without modifying released sources or assertions. The focused
+pre-acquisition case passed locally with the exact verified SDK recipe in
+8.851 seconds. The [isolated standard-runner SDK diagnostic 36283037032](https://github.com/mirage335-colossus/pumpModem/actions/runs/36283037032)
+then passed that unchanged case in 15.1 seconds against its original 30-second
+cap, followed by complete `live` (58.62s) and `live_profiles` (134.79s) passes.
+Its source was the exact published `800da8c`; the earlier diagnostic attempts
+stopped before executing tests because of a container Git ownership check,
+corrected with per-command trust for the checked-out workspace.
+[The ARM64 adapter diagnostic 36283035627](https://github.com/mirage335-colossus/pumpModem/actions/runs/36283035627)
+passed every unchanged native adapter assertion on source `800da8c` in 530
+seconds, including the final empty-window check. This demonstrates an
+insufficient cumulative 330-second allowance in that configuration; it does
+not identify a particular rendering or DSP subsystem as the cause. Full
+certification consequently allows this standard ARM64 source adapter up to
+900 seconds, warning only after complete success beyond 330; other native
+checks and the 600-second GUI workload caps remain unchanged.
+[Full certification follow-up 36283925159](https://github.com/mirage335-colossus/pumpModem/actions/runs/36283925159)
+uses tooling `a8ef9ed` against the same approved source and asset inventory.
+Its immutable read-only checks started alongside the earlier run; only report
+publication retains the per-release lock, preserving the append-only report
+history and serialized release-note updates. The earlier run's Windows Rev
+child passed its required non-graphics checks and full calibration, but matched
+`Required WGL ARB extensions not available`; its four OpenGL source cases and
+published GUI smoke were omitted under the accepted hosted-environment policy.
+The user subsequently clarified that this documented standard-runner limitation
+must not block certification or Latest eligibility. The recording policy now
+keeps `passed_with_warnings` and the exact omitted-check list while allowing an
+otherwise qualified ordinary release to become Latest. Experiments remain
+prereleases, and unrelated failures still prevent certification. The earlier
+run's three Linux failures remain failures, and its old-policy reports are
+preserved. Omitted graphics checks are not represented as executed passes.
+Full SDK qualification is complete. Exact-release certification is still running at this checkpoint.
+
+The updated CI smoke policy retains source/target/scope, run identity, binary
+inventory and exact progress diagnostics in structured reports and per-run logs.
+Only validated exit 75 with a typed workload limit and recent sampled progress
+is nonblocking. Failed assertions, stalls, sanitizer diagnostics, ordinary external
+timeouts and malformed results remain fatal. Native source, SDK archive,
+relocation and copied-package scopes use the same classifier. Certification
+retains incomplete smoke as `passed_with_warnings`, with separate immutable
+warning assets bound to the main report; ordinary qualified releases remain
+eligible for Latest. These controller changes do not change application source,
+wire behavior, published files or individual test assertions.
+
 ## CI package recovery and replay interruption fixtures — 26 September 2026
 
 [Certification 36010161027](https://github.com/mirage335-colossus/pumpModem/actions/runs/36010161027)
@@ -524,8 +642,10 @@ message `[NativeWindow] Required WGL ARB extensions not available` as a hosted
 graphics warning. Compilation, clipboard, headless GUI/CLI, modem, calibration,
 and published-archive checks remain required. The four omitted OpenGL tests and
 published GUI smoke are listed in a per-run warning log and certificate. An
-otherwise successful run is green with `passed_with_warnings`; it does not
-qualify Windows Rev desktop graphics or promote the release to Latest. A user's
+otherwise successful run was green with `passed_with_warnings`; at that time,
+the policy also prohibited Latest promotion. The 26 September standard-runner
+follow-up above supersedes that promotion restriction while retaining the
+explicit graphics coverage omission. A user's
 machine with the same limitation cannot open the Rev GUI, so this is an
 environment limitation with a functional consequence, not merely poor cadence.
 

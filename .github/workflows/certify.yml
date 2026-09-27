@@ -74,6 +74,8 @@ jobs:
         with:
           persist-credentials: false
       - run: python3 tests/test_certify_release.py
+      - run: python3 tests/test_gui_smoke_runner.py
+      - run: python3 tests/test_native_tests_runner.py
       - run: python3 tests/test_ci_apt.py
       - run: python3 tests/test_release_dependencies.py
       - run: python3 tests/test_windows_certification.py
@@ -119,6 +121,12 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.linux_matrix) }}
     env:
+      DATAPUMP_CI_SMOKE_WARNINGS_DIR: ${{ github.workspace }}/build/ci-smoke-results
+      DATAPUMP_CI_SMOKE_RUNNER: ${{ github.workspace }}/.certification-tools/tools/run-gui-smoke.py
+      DATAPUMP_SMOKE_TARGET: ${{ matrix.target }}
+      DATAPUMP_SMOKE_SCOPE: source/native
+      DATAPUMP_SMOKE_SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+      DATAPUMP_SMOKE_INVENTORY_SHA256: ${{ needs.prepare.outputs.inventory_sha256 }}
       DEBIAN_FRONTEND: noninteractive
       LIBGL_ALWAYS_SOFTWARE: '1'
       # Only the runner selected for this architecture controls rendering.
@@ -151,7 +159,9 @@ jobs:
           persist-credentials: false
           ref: ${{ github.sha }}
           path: .certification-tools
-          sparse-checkout: tools
+          sparse-checkout: |
+            tools
+            cmake
       - name: Fetch this release's verified SDK (legacy base fallback, no compiler rebuild)
         if: matrix.sdk
         id: sdk
@@ -210,29 +220,17 @@ jobs:
             if [ "$USE_SDK" = true ]; then set -- "$@" --sdk "$GITHUB_WORKSPACE/build/sdk"; fi
             ./build.sh test "$group" --stop-on-failure "$@" -- -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600
             if [ "$group" = gui ]; then
-              if [ "$STANDARD_ARM_REV_ADAPTER" = true ]; then
-                # The unchanged full adapter completed in 530s on this runner.
-                # Keep every native case and its assertions; only this aggregate
-                # adapter workload receives a bounded allowance above 330s.
-                ./build.sh "$@" -- -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600 -DDATAPUMP_TEST_NATIVE_GUI=ON -DGUI_SMOKE_TIMEOUT=600
-                cmake --build build/certify --target datapump-tests-native --parallel "$(nproc)"
-                xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' \
-                  ctest --test-dir build/certify -C Release --output-on-failure --stop-on-failure --no-tests=error \
-                  -L '^native_gui$' -E '^gui_adapter_conformance$' --parallel 1
-                started=$(date +%s)
-                adapter_result=0
-                timeout --kill-after=10s 900s xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' \
-                  build/certify/test_rev_adapter || adapter_result=$?
-                elapsed=$(( $(date +%s) - started ))
-                echo "ARM Rev complete adapter elapsed=${elapsed}s exit=$adapter_result; original allowance=330s, bounded allowance=900s"
-                if [ "$adapter_result" -ne 0 ]; then exit "$adapter_result"; fi
-                if [ "$elapsed" -gt 330 ]; then
-                  echo "::warning title=Rev adapter workload::All original ARM Rev adapter assertions completed in ${elapsed}s, exceeding the ordinary 330s allowance; bounded allowance is 900s."
-                  echo "ARM Rev adapter completed every original assertion in ${elapsed}s, above the ordinary 330s workload allowance (900s maximum)." >> "$GITHUB_STEP_SUMMARY"
-                fi
-              else
-                xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' ./build.sh test native --stop-on-failure "$@" -- -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600 -DGUI_SMOKE_TIMEOUT=600
+              ./build.sh "$@" -- -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600 -DDATAPUMP_TEST_NATIVE_GUI=ON -DGUI_SMOKE_TIMEOUT=600
+              native_cmake=cmake
+              native_ctest=ctest
+              if [ "$USE_SDK" = true ]; then
+                native_cmake="$GITHUB_WORKSPACE/build/sdk/bin/cmake"
+                native_ctest="$GITHUB_WORKSPACE/build/sdk/bin/ctest"
               fi
+              "$native_cmake" --build build/certify --target datapump-tests-native --parallel "$(nproc)"
+              set -- --build-dir build/certify --config Release --ctest "$native_ctest" --report-dir "$DATAPUMP_CI_SMOKE_WARNINGS_DIR"
+              if [ "$STANDARD_ARM_REV_ADAPTER" = true ]; then set -- "$@" --adapter-timeout 900 --adapter-warn-after 330; fi
+              xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' python3 .certification-tools/tools/run-native-tests.py --allow-budget-exhaustion "$@"
             fi
           done
           contract_cmake=cmake
@@ -265,14 +263,35 @@ jobs:
         run: python3 .certification-tools/tools/certify-release.py download --repo "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --target "$RELEASE_TARGET" --directory published --inventory-sha256 "$INVENTORY_SHA256" --github-output "$GITHUB_OUTPUT"
       - name: Test published GUI, CLI, relocation and ELF dependencies
         env:
+          DATAPUMP_SMOKE_SCOPE: published/source-host
           PACKAGE_ROOT: ${{ steps.binary.outputs.package_root }}
           USE_SDK: ${{ matrix.sdk }}
           GLIBC_CEILING: ${{ matrix.glibc }}
         run: |
           scanner=cmake
           if [ "$USE_SDK" = true ]; then scanner="$GITHUB_WORKSPACE/build/sdk/bin/cmake"; fi
-          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' "$scanner" -DPACKAGE_ROOT="$PACKAGE_ROOT" -DBUILD_DIR="$PWD/build/certify" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P tools/verify-native-package.cmake
+          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' "$scanner" -DPACKAGE_ROOT="$PACKAGE_ROOT" -DBUILD_DIR="$PWD/build/certify" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P .certification-tools/tools/verify-native-package.cmake
           "$scanner" -DPACKAGE_ROOT="$PACKAGE_ROOT" -DMAX_GLIBC="$GLIBC_CEILING" -P tools/verify-linux-abi.cmake
+      - name: Identify this attempt's smoke coverage artifact
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          directory = Path(os.environ['DATAPUMP_CI_SMOKE_WARNINGS_DIR'])
+          directory.mkdir(parents=True, exist_ok=True)
+          (directory / 'job-coverage.json').write_text(json.dumps({
+              'run_id': os.environ['GITHUB_RUN_ID'],
+              'run_attempt': os.environ['GITHUB_RUN_ATTEMPT']}))
+          PY
+      - name: Retain smoke workload coverage and diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: certification-smoke-source-${{ matrix.target }}-attempt-${{ github.run_attempt }}
+          path: ${{ github.workspace }}/build/ci-smoke-results/
+          if-no-files-found: warn
+          retention-days: 7
 
   windows-fltk:
     if: ${{ !inputs.devfast }}
@@ -339,6 +358,12 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.compatibility_matrix) }}
     env:
+      DATAPUMP_CI_SMOKE_WARNINGS_DIR: ${{ github.workspace }}/build/ci-smoke-results
+      DATAPUMP_CI_SMOKE_RUNNER: ${{ github.workspace }}/.certification-tools/tools/run-gui-smoke.py
+      DATAPUMP_SMOKE_TARGET: ${{ matrix.target }}
+      DATAPUMP_SMOKE_SCOPE: published/${{ matrix.image }}
+      DATAPUMP_SMOKE_SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+      DATAPUMP_SMOKE_INVENTORY_SHA256: ${{ needs.prepare.outputs.inventory_sha256 }}
       DEBIAN_FRONTEND: noninteractive
       LIBGL_ALWAYS_SOFTWARE: '1'
       # Use the same architecture-specific limit for unchanged copied binaries.
@@ -376,7 +401,9 @@ jobs:
           persist-credentials: false
           ref: ${{ github.sha }}
           path: .certification-tools
-          sparse-checkout: tools
+          sparse-checkout: |
+            tools
+            cmake
       - name: Download and verify this target's published archive
         id: binary
         env:
@@ -391,8 +418,28 @@ jobs:
           PACKAGE_ROOT: ${{ steps.binary.outputs.package_root }}
           GLIBC_CEILING: ${{ matrix.glibc }}
         run: |
-          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DPACKAGE_ROOT="$PACKAGE_ROOT" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P tools/verify-native-package.cmake
+          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DPACKAGE_ROOT="$PACKAGE_ROOT" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P .certification-tools/tools/verify-native-package.cmake
           cmake -DPACKAGE_ROOT="$PACKAGE_ROOT" -DMAX_GLIBC="$GLIBC_CEILING" -P tools/verify-linux-abi.cmake
+      - name: Identify this attempt's smoke coverage artifact
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          directory = Path(os.environ['DATAPUMP_CI_SMOKE_WARNINGS_DIR'])
+          directory.mkdir(parents=True, exist_ok=True)
+          (directory / 'job-coverage.json').write_text(json.dumps({
+              'run_id': os.environ['GITHUB_RUN_ID'],
+              'run_attempt': os.environ['GITHUB_RUN_ATTEMPT']}))
+          PY
+      - name: Retain smoke workload coverage and diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: certification-smoke-copy-${{ strategy.job-index }}-attempt-${{ github.run_attempt }}
+          path: ${{ github.workspace }}/build/ci-smoke-results/
+          if-no-files-found: warn
+          retention-days: 7
 
   apt-repository:
     if: ${{ !inputs.devfast && needs.prepare.outputs.apt_repository == 'true' }}
@@ -439,10 +486,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Collect per-job smoke coverage evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: certification-smoke-*
+          path: smoke-results
+          merge-multiple: false
       - name: Record complete job outcomes without replacing binaries
         run: |
           python3 - <<'PYRESULTS'
-          import json, os
+          import json, os, runpy
+          from pathlib import Path
+          collect = runpy.run_path('tools/certify-release.py')['collect_smoke_warnings']
+          smoke_warnings = collect(Path('smoke-results'), os.environ['GITHUB_RUN_ID'], os.environ['GITHUB_RUN_ATTEMPT'])
           needs = json.loads(os.environ['JOB_RESULTS'])
           jobs = ['linux-tests', 'windows-tests', 'compatibility']
           if os.environ['APT_REPOSITORY'] == 'true':
@@ -452,6 +508,7 @@ jobs:
           results = {'source_sha': os.environ['SOURCE_SHA'], 'inventory_sha256': os.environ['INVENTORY_SHA256'],
                      'tested_targets': json.loads(os.environ['TESTED_TARGETS']),
                      'jobs': {name: needs[name]['result'] for name in jobs},
+                     'smoke_warnings': smoke_warnings,
                      'warnings': json.loads(needs['windows-tests'].get('outputs', {}).get('warnings') or '[]')}
           with open('certification-results.json', 'w') as out:
               json.dump(results, out)

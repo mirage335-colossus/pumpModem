@@ -1,0 +1,114 @@
+# Run the actual typed classifier around the tiny native packaging fixture.
+function(check_packaged_gui_budget package_directory archive_directory fixture_build)
+  set(package_verifier "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../tools/verify-native-package.cmake")
+  set(archive_verifier "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../tools/verify-native-archives.cmake")
+  file(REAL_PATH "${package_verifier}" package_verifier)
+  file(REAL_PATH "${archive_verifier}" archive_verifier)
+  file(REAL_PATH "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../tools/run-gui-smoke.py" smoke_runner)
+  set(evidence_root "${fixture_build}/gui budget evidence")
+  file(REMOVE_RECURSE "${evidence_root}")
+  string(REPEAT a 40 source_hash)
+  string(REPEAT b 64 inventory_hash)
+  set(identity "DATAPUMP_SMOKE_TARGET=linux-x86_64-rev"
+    "DATAPUMP_SMOKE_SCOPE=packaging" "DATAPUMP_SMOKE_SOURCE_SHA=${source_hash}"
+    "DATAPUMP_SMOKE_INVENTORY_SHA256=${inventory_hash}" "GITHUB_RUN_ID=23"
+    "GITHUB_RUN_ATTEMPT=2" "GITHUB_STEP_SUMMARY=${evidence_root}/summary.md")
+
+  foreach(mode IN ITEMS strict budget stale assertion sanitizer passed)
+    set(evidence "${evidence_root}/${mode}")
+    set(runner "${smoke_runner}")
+    set(fixture_mode "${mode}")
+    if(mode STREQUAL strict)
+      set(runner "")
+      set(fixture_mode budget)
+    elseif(mode STREQUAL passed)
+      set(fixture_mode "")
+    endif()
+    set(trace "${evidence_root}/${mode}.jsonl")
+    file(MAKE_DIRECTORY "${evidence_root}")
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E env ${identity}
+      "DATAPUMP_CI_SMOKE_WARNINGS_DIR=${evidence}" "DATAPUMP_CI_SMOKE_RUNNER=${runner}"
+      "DATAPUMP_PACKAGING_SMOKE_MODE=${fixture_mode}"
+      "${CMAKE_COMMAND}" --trace-expand --trace-format=json-v1
+      "--trace-source=${package_verifier}" "--trace-redirect=${trace}"
+      "-DPACKAGE_ROOT=${package_directory}" "-DBUILD_DIR=${fixture_build}"
+      -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P "${package_verifier}"
+      RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error)
+    if(mode MATCHES "^(budget|passed)$")
+      if(NOT status EQUAL 0)
+        message(FATAL_ERROR "Packaged GUI ${mode} fixture failed: ${output}\n${error}")
+      endif()
+    elseif(status EQUAL 0 OR NOT error MATCHES "Relocated native command failed")
+      message(FATAL_ERROR "Packaged GUI ${mode} outcome was not fatal: ${output}\n${error}")
+    endif()
+    file(GLOB reports "${evidence}/*.json")
+    list(LENGTH reports report_count)
+    if(mode STREQUAL strict)
+      if(NOT report_count EQUAL 0)
+        message(FATAL_ERROR "Strict default unexpectedly invoked the CI smoke classifier")
+      endif()
+      continue()
+    endif()
+    if(NOT report_count EQUAL 1)
+      message(FATAL_ERROR "Expected one retained ${mode} GUI report, found ${report_count}")
+    endif()
+    list(GET reports 0 report)
+    file(READ "${report}" contents)
+    string(JSON actual_status GET "${contents}" status)
+    if(mode STREQUAL budget)
+      if(NOT actual_status STREQUAL incomplete OR
+          NOT "${output}\n${error}" MATCHES "GUI smoke coverage incomplete")
+        message(FATAL_ERROR "Advancing-work result lost its incomplete-coverage status")
+      endif()
+      foreach(field IN ITEMS target scope source_sha inventory_sha256 run_id run_attempt)
+        string(JSON value GET "${contents}" warning "${field}")
+        if(value STREQUAL "")
+          message(FATAL_ERROR "Incomplete package report omitted identity field ${field}")
+        endif()
+      endforeach()
+      string(JSON actual_inventory GET "${contents}" warning inventory_sha256)
+      if(NOT actual_inventory STREQUAL inventory_hash)
+        message(FATAL_ERROR "Package verifier replaced the pinned release inventory identity")
+      endif()
+    elseif(mode STREQUAL passed)
+      if(NOT actual_status STREQUAL passed)
+        message(FATAL_ERROR "Complete packaged GUI was not reported passed")
+      endif()
+    elseif(NOT actual_status STREQUAL failed)
+      message(FATAL_ERROR "Rejected packaged GUI was not reported failed")
+    endif()
+    string(JSON log GET "${contents}" log)
+    if(NOT EXISTS "${log}")
+      message(FATAL_ERROR "Package report points to a missing smoke log")
+    endif()
+    file(READ "${trace}" traced)
+    if(NOT traced MATCHES "--allow-budget-exhaustion" OR NOT traced MATCHES "TIMEOUT\",\"630")
+      message(FATAL_ERROR "CI wrapper lost opt-in classification or the original process deadline")
+    endif()
+  endforeach()
+
+  # Each extracted format needs independent evidence even if both GUI budgets
+  # are exhausted. Repeated verification must not overwrite earlier reports.
+  set(evidence "${evidence_root}/archives")
+  foreach(attempt RANGE 1 2)
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E env ${identity}
+      "DATAPUMP_CI_SMOKE_WARNINGS_DIR=${evidence}" "DATAPUMP_CI_SMOKE_RUNNER=${smoke_runner}"
+      DATAPUMP_PACKAGING_SMOKE_MODE=budget
+      "${CMAKE_COMMAND}" "-DARCHIVE_DIR=${archive_directory}" "-DBUILD_DIR=${fixture_build}"
+      -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P "${archive_verifier}"
+      RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error)
+    if(NOT status EQUAL 0)
+      message(FATAL_ERROR "Archive incomplete-coverage fixture failed: ${output}\n${error}")
+    endif()
+  endforeach()
+  foreach(format IN ITEMS tar.gz zip)
+    file(GLOB reports "${evidence}/DataPump-fixture-native.${format}-*.json")
+    list(LENGTH reports count)
+    if(NOT count EQUAL 2)
+      message(FATAL_ERROR "${format} archive did not retain separate reports for both attempts")
+    endif()
+  endforeach()
+  message(STATUS "Packaged GUI strict/default, typed incomplete, fatal outcomes, isolated environment and per-archive evidence verified")
+endfunction()
+
+check_packaged_gui_budget("${archive_source}/DataPump-fixture-native" "${archive_directory}" "${BINARY_DIR}")

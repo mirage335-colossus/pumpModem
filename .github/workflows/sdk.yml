@@ -85,6 +85,12 @@ jobs:
         backend: [fltk, rev]
         image: [debian:bookworm-slim, ubuntu:24.04]
     env:
+      DATAPUMP_CI_SMOKE_WARNINGS_DIR: ${{ github.workspace }}/build/ci-smoke-results
+      DATAPUMP_CI_SMOKE_RUNNER: ${{ github.workspace }}/tools/run-gui-smoke.py
+      DATAPUMP_SMOKE_TARGET: linux-x86_64-${{ matrix.backend }}
+      DATAPUMP_SMOKE_SCOPE: published/${{ matrix.image }}
+      DATAPUMP_SMOKE_SOURCE_SHA: ${{ github.sha }}
+      DATAPUMP_SMOKE_INVENTORY_SHA256: ''
       DEBIAN_FRONTEND: noninteractive
       LIBGL_ALWAYS_SOFTWARE: '1'
       # Match the producer's software-rendering limit on the selected runner.
@@ -101,7 +107,7 @@ jobs:
       - name: Install runtime inspection and display tools only
         run: |
           cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
-          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates curl git cmake binutils xvfb xauth fonts-dejavu-core fontconfig-config libgl1 libopengl0 libgl1-mesa-dri libxtst6
+          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates curl git python3 cmake binutils xvfb xauth fonts-dejavu-core fontconfig-config libgl1 libopengl0 libgl1-mesa-dri libxtst6
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -116,12 +122,14 @@ jobs:
       - name: Verify the identical archives on this distribution
         shell: bash
         run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/downloaded" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.36 -P tools/verify-native-archives.cmake 2>&1 | tee "$RUNNER_TEMP/sdk-compatibility.log"
-      - name: Preserve failed or cancelled copied-runtime log
-        if: failure() || cancelled()
+      - name: Preserve copied-runtime logs and incomplete coverage
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: DataPump-SDK-compatibility-${{ strategy.job-index }}-failure-log
-          path: ${{ runner.temp }}/sdk-compatibility.log
+          name: DataPump-SDK-compatibility-${{ strategy.job-index }}-qualification-logs
+          path: |
+            ${{ runner.temp }}/sdk-compatibility.log
+            ${{ github.workspace }}/build/ci-smoke-results/
           if-no-files-found: warn
           retention-days: 7
       - name: Summarize copied-runtime qualification

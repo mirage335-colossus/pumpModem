@@ -93,6 +93,7 @@ jobs:
           python3 tests/test_sdk_build.py
           python3 tests/test_release_dependencies.py
           python3 tests/test_gui_smoke_runner.py
+          python3 tests/test_native_tests_runner.py
           python3 tests/test_ci_tests.py
       - name: Record the remaining candidate gate
         run: echo 'Automatic checks are focused feedback only. Completed runtime changes require explicit ci.yml devfast=false, applicable SDK qualification, and release certification when publishing.' >> "$GITHUB_STEP_SUMMARY"
@@ -159,6 +160,12 @@ jobs:
       matrix:
         backend: [fltk, rev]
     env:
+      DATAPUMP_CI_SMOKE_WARNINGS_DIR: ${{ github.workspace }}/build/ci-smoke-results
+      DATAPUMP_CI_SMOKE_RUNNER: ${{ github.workspace }}/tools/run-gui-smoke.py
+      DATAPUMP_SMOKE_TARGET: linux-x86_64-${{ matrix.backend }}
+      DATAPUMP_SMOKE_SCOPE: source/native
+      DATAPUMP_SMOKE_SOURCE_SHA: ${{ github.sha }}
+      DATAPUMP_SMOKE_INVENTORY_SHA256: ''
       DEBIAN_FRONTEND: noninteractive
       LIBGL_ALWAYS_SOFTWARE: "1"
       # Keep software rendering from saturating the UI polling thread's CPUs.
@@ -196,10 +203,10 @@ jobs:
           cmake --build build-gui --target datapump-tests-build --parallel "$(nproc)"
           ctest --test-dir build-gui --output-on-failure -L '^build$'
       - name: Test shared behavior, native contract and simulated workflow
-        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' python3 tools/run-ci-tests.py --build-dir build-gui --scope gui --jobs 1 --report build-gui/ci-test-report.json
+        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' python3 tools/run-native-tests.py --allow-budget-exhaustion --build-dir build-gui --label gui --report-dir "$DATAPUMP_CI_SMOKE_WARNINGS_DIR"
       - name: Record focused GUI scope
         if: inputs.devfast
-        run: echo 'This diagnostic runs both complete GUI contracts. It does not run general native regression, calibration, SDK or package qualification; skipped scopes are not passes.' >> "$GITHUB_STEP_SUMMARY"
+        run: echo 'This diagnostic runs both GUI contracts and records any incomplete smoke coverage. It does not run general native regression, calibration, SDK or package qualification; skipped scopes are not passes.' >> "$GITHUB_STEP_SUMMARY"
       - name: Retain GUI timing report and failure logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -208,6 +215,7 @@ jobs:
           path: |
             build-gui/ci-test-report.*
             build-gui/Testing/Temporary/
+            ${{ github.workspace }}/build/ci-smoke-results/
           if-no-files-found: warn
           retention-days: 7
 
@@ -306,6 +314,12 @@ jobs:
       matrix:
         ubuntu: ["22.04", "24.04"]
     env:
+      DATAPUMP_CI_SMOKE_WARNINGS_DIR: ${{ github.workspace }}/build/ci-smoke-results
+      DATAPUMP_CI_SMOKE_RUNNER: ${{ github.workspace }}/tools/run-gui-smoke.py
+      DATAPUMP_SMOKE_TARGET: linux-x86_64-fltk
+      DATAPUMP_SMOKE_SCOPE: published/ubuntu-${{ matrix.ubuntu }}
+      DATAPUMP_SMOKE_SOURCE_SHA: ${{ github.sha }}
+      DATAPUMP_SMOKE_INVENTORY_SHA256: ''
       DEBIAN_FRONTEND: noninteractive
     steps:
       # No application development libraries or compiler: only the display and
@@ -321,7 +335,7 @@ jobs:
       - name: Prepare compatibility checks
         run: |
           cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
-          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates curl git cmake binutils xvfb xauth fontconfig-config fonts-dejavu-core
+          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates curl git python3 cmake binutils xvfb xauth fontconfig-config fonts-dejavu-core
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -335,6 +349,14 @@ jobs:
           path: downloaded
       - name: Run copied archives with isolated runtime paths
         run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/downloaded" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.35 -P tools/verify-native-archives.cmake
+      - name: Retain smoke workload coverage and diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: CI-copied-Linux-${{ matrix.ubuntu }}-smoke-attempt-${{ github.run_attempt }}
+          path: ${{ github.workspace }}/build/ci-smoke-results/
+          if-no-files-found: warn
+          retention-days: 7
 
   windows-tests:
     if: github.event_name == 'workflow_dispatch' && !inputs.devfast

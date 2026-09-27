@@ -118,6 +118,7 @@ foreach(format TGZ ZIP)
 endforeach()
 set(archive_verifier "${CMAKE_CURRENT_LIST_DIR}/../tools/verify-native-archives.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/package_gui_smoke_timeout.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/package_gui_smoke_budget.cmake")
 execute_process(COMMAND "${CMAKE_COMMAND}" "-DARCHIVE_DIR=${archive_directory}" "-DBUILD_DIR=${BINARY_DIR}"
   -P "${archive_verifier}" RESULT_VARIABLE verified OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT verified EQUAL 0 OR NOT EXISTS "${archive_directory}/SHA256SUMS.txt")
