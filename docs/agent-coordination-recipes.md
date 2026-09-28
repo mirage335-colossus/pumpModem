@@ -2,9 +2,11 @@
 
 Use the relevant recipe after reading the [workflow](agent-coordination.md).
 This is an on-demand reference, not another startup checklist. The optional Python
-helpers reduce formatting and publication mistakes; they do not grant ownership.
+helpers reduce formatting and publication mistakes; they do not enforce subsequent
+source writes. Use their checked transaction or a qualified executable equivalent.
 Jump to the needed section; opening a recipe does not restart instruction reading.
-Other harnesses may use [equivalent safe operations](#equivalent-publication-without-the-helper).
+Other harnesses may implement [equivalent safe operations](#equivalent-publication-without-the-helper)
+in a tested wrapper; workers must not invent a new lock/unlock sequence per task.
 
 Every command below assumes its tool is explicitly bound to the intended checkout
 and defines `checkout`, `coord_dir` and `session` in that invocation. Use absolute
@@ -345,11 +347,31 @@ Do not add an intermediate closure or retain the shared file merely to log closu
 
 ## Checked session operations
 
-Prefer [agent-session.py](../tools/agent-session.py) for a supported board. It uses
+Use [agent-session.py](../tools/agent-session.py) for a supported board. It uses
 the same records and atomic publisher, creates full lock-owner identity, checks
 all claims under the mutex, verifies publication, and finishes owned-lock cleanup
 before returning a receipt or calling dependent work. It never chooses the last
 owner, stops jobs or infers that an inbox was processed.
+
+The checked helper supplies a fresh random token for each registry acquisition.
+The low-level publisher requires that token explicitly; matching the session ID
+alone cannot borrow another acquisition, including a later acquisition by the same
+session. `registry_mutex` yields an immutable `RegistryLock(fd, token)` for wrapper
+authors; `commit` passes the token automatically. A token is an accidental-misuse
+guard, not authentication against a participant that can read/alter the board.
+Do not extract one from an existing lock to bypass a rejection. Already-held
+tokenless locks remain owned: their holders finish/release normally or follow
+recovery; never retrofit a token into somebody else's lock.
+Keep the reader, publisher and transaction wrapper at a compatible tested revision
+through each operation. Coordinate helper upgrades while registry writers are
+quiescent; do not mix old callers with a new publisher mid-transaction. This is
+an integration dependency, not permission to edit another holder's metadata.
+
+For a worker that cannot reliably follow the protocol, its controller performs
+these operations and enforces allowed writes, or confines it to a private checkout
+and outputs. Test denied writes to shared source, board, build trees and common Git
+state through the actual available tools before treating this as enforced isolation.
+Keep integration serialized by ownership; textual merge success is not exclusion.
 
 When adopting changed helpers or a new board filesystem, qualify the helpers with
 their focused tests using a claimed temporary root on that filesystem as well as
@@ -405,7 +427,7 @@ that record's exact SHA-256, manually interpreted canonical claims and a concret
 review reason. Read its whole claims, relevant metadata and provenance first.
 Changed/missing bytes invalidate the interpretation; no automatic skip, forced
 migration or repeated approval is required. A legacy **own** record still uses
-the lower-level reviewed manual publication path until properly migrated. Unknown
+an explicitly qualified repair wrapper or coordinated recovery until properly migrated. Unknown
 alias/format/filesystem cases similarly use manual review or isolation, never a
 less safe fallback. Helpers cannot enumerate every hard-linked descendant or
 establish continuously stable inputs: retain the workflow's alias and snapshot rules.
@@ -420,13 +442,17 @@ old ID, and a successful closure receipt never authorizes another artifact write
 
 ## Publish a record
 
+This low-level interface is for qualified transaction implementations and
+maintenance. Ordinary workers use `commit` above; these commands do not acquire
+or release a mutex and must not be assembled into an improvised locking script.
+
 The optional [publisher](../tools/agent-board.py) requires POSIX descriptor-relative
 operations, no-follow path opens and same-filesystem hard links. Unsupported
 platforms/filesystems fail without a direct-write fallback. Resolve real paths
 before invoking it; it rejects symlinks in board/source paths. It provides complete
 atomic visibility, not a daemon, ownership arbiter, recovery mechanism or guarantee
-of power-loss durability. Windows/native harnesses can follow the manual protocol
-with equivalent primitives; this helper is not cross-platform qualification.
+of power-loss durability. Windows/native harnesses need a tested wrapper using
+equivalent primitives or isolated writes; this helper is not cross-platform qualification.
 
 For an existing session, prepare the **whole** replacement in its claimed artifacts.
 Check its structure/content before acquiring the mutex. This is a proposal, not an
@@ -454,7 +480,10 @@ The helper can be used again once the current record uses the supported format.
 The following publication commands run **only inside your already-held mutex**.
 Acquire it by one exclusive `mkdir "$coord_dir/registry.lock"`. Write its owner
 metadata immediately, including a plain `- Session: YOUR_ID` line, host, UTC,
-lock-holder PID/start identity when available and intent. Review all current claims
+lock-holder PID/start identity when available, intent and
+`- Acquisition token: RANDOM_32_LOWERCASE_HEX`. The acquiring wrapper generates
+and retains this fresh token as `lock_token`; it never reads a preexisting lock
+to obtain permission. Review all current claims
 and relevant releases again under that mutex. If a prior snapshot changed, release
 and reassess; do not hold the mutex while investigating or waiting for another agent.
 Finalize Updated from the current UTC clock immediately before publication; keep
@@ -470,7 +499,7 @@ For an update after the complete review:
 python3 -B "$checkout/tools/agent-board.py" record \
   --board "$coord_dir" --session "$session" \
   --candidate "$coord_dir/artifacts/$session/candidate.md" \
-  --expected-sha256 "$reviewed_sha256"
+  --expected-sha256 "$reviewed_sha256" --lock-token "$lock_token"
 ```
 
 For first registration, pipe the complete, filled candidate from memory/stdin
@@ -479,10 +508,11 @@ matching mutex already held, the command receiving that input is:
 
 ```sh
 python3 -B "$checkout/tools/agent-board.py" record \
-  --board "$coord_dir" --session "$session" --candidate - --create
+  --board "$coord_dir" --session "$session" --candidate - --create \
+  --lock-token "$lock_token"
 ```
 
-The helper validates candidate format, checks the lock owner, stages bytes **inside
+The helper validates candidate format, checks the owner and acquisition token, stages bytes **inside
 the owned mutex**, and publishes atomically. New records cannot replace an existing
 ID. Updates compare the reviewed hash and recheck the record/lock before replacement.
 They rely on cooperating writers honoring the mutex; this is not an operating-system
@@ -505,34 +535,16 @@ Failure diagnostics or a recovery request do not assert acquisition and may stil
 be sent. Newlines, semicolons, the last command's
 exit status, or `set -e` alone are not a reliable substitute.
 
-This shell control-flow pattern uses caller operations, **not new helper commands**.
-`publish_and_verify` includes the already-required complete claims/facts review,
-checked publisher invocation and exact saved-byte comparison inside the owned
-mutex. `release_owned_mutex` performs only verified owned cleanup and fails on
-uncertainty. Each operation must propagate its own subcommand failures:
-
-```sh
-if publish_and_verify; then
-  release_owned_mutex || exit "$?"
-else
-  publication_status=$?
-  if ! release_owned_mutex; then
-    printf '%s\n' 'Owned lock cleanup incomplete; inspect before retrying.' >&2
-  fi
-  exit "$publication_status"
-fi
-# Only an active session with verified published claims reaches these operations.
-send_acquired_acknowledgment || exit "$?"
-create_claimed_outputs_and_launch
-```
-
-Preserve the failing command's status in the `else` branch; `!` inverts it. Do not
-let successful cleanup mask failure. In Python, use
-[`subprocess.run(..., check=True)`](https://docs.python.org/3/library/subprocess.html#subprocess.run)
-inside the owned-lock cleanup context and leave the exception uncaught until after
-dependent work has been prevented. The shell example follows
-[conditional execution](https://www.gnu.org/software/bash/manual/html_node/Conditional-Constructs.html)
-and [command-list status](https://www.gnu.org/s/bash/manual/html_node/Lists.html).
+Use the checked helper's `after(receipt)` callback for composed dependent work,
+or inspect a successful `commit` result before a separate tool call. The helper
+finishes verified owned cleanup before either path proceeds. Inside a callback,
+propagate each failure so a failed acknowledgment stops subsequent writes/launches;
+for subprocesses use
+[`subprocess.run(..., check=True)`](https://docs.python.org/3/library/subprocess.html#subprocess.run).
+Do not ask a worker to invent `publish_and_verify` or `release_owned_mutex` shell
+functions. A controller needing custom composition must qualify the whole caller
+with the failure-ordering tests, including successful publication followed by
+cleanup failure. Preserve the original failure; successful cleanup is not success.
 
 A nonzero result can occur **after** atomic publication, for example when deleting
 the private staging link or printing the result fails. Stop dependent work and
@@ -551,15 +563,17 @@ the same immutable message ID before retrying, never blindly create another one.
 
 ### Equivalent publication without the helper
 
-Use equivalent filesystem primitives only where their required semantics are
-supported. Reusing the existing helper avoids reimplementing these steps, but is
-optional; a custom wrapper must preserve all of them, not just atomic visibility:
+This is an implementation/review specification for a qualified wrapper, not a
+worker fallback. Use equivalent filesystem primitives only where their required
+semantics are supported and tested. A custom wrapper must preserve all of these
+properties, not just atomic visibility; otherwise isolate writes:
 
 1. Prepare the complete body in memory or already-claimed artifacts. For records,
    validate the full record and transition, not only changed fields; the checker
    is optional, its invariants are not. Keep the exact reviewed old bytes/hash.
 2. For registration or changed claims, exclusively create the mutex and record
-   session, host, UTC, lock-holder role, PID/start identity when available and intent.
+   session, host, UTC, lock-holder role, PID/start identity when available, intent
+   and a fresh acquisition token passed explicitly to the publisher.
    Recheck all complete claims, provenance, stopped writers, target bytes and facts
    under it. Investigate uncertainty after releasing your mutex; do not wait in it.
    Messages need no registry mutex or claim scan. Unchanged-claim record updates

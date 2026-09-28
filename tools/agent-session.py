@@ -4,9 +4,10 @@
 This helper fails closed on unsupported records/claims. It cannot establish the
 truth of a handoff, stop another writer, or constrain uncooperative processes.
 Review scope-relevant handoffs before committing; a receipt is not a permission
-token. Manual workflows remain available for legacy records and other platforms.
+token. Qualified wrappers or isolated writes handle unsupported environments.
 """
 import argparse
+from collections import namedtuple
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
@@ -19,6 +20,7 @@ import re
 import socket
 import sys
 import time
+import uuid
 
 sys.dont_write_bytecode = True
 
@@ -33,6 +35,7 @@ def load_neighbor(name):
 
 BOARD = load_neighbor('agent-board')
 CHECK = BOARD.record_checker()
+RegistryLock = namedtuple('RegistryLock', 'fd token')
 
 
 class CoordinationError(ValueError):
@@ -62,7 +65,7 @@ def process_start():
 
 @contextmanager
 def registry_mutex(board, session, *, intent='checked record transaction', wait=0):
-    """Acquire once or wait boundedly; never steal, recurse-delete or run work here."""
+    """Yield an acquisition-specific handle; never steal or do work under the lock."""
     BOARD.require_capabilities()
     board = BOARD.absolute_path(board)
     BOARD.safe_id(session)
@@ -81,7 +84,9 @@ def registry_mutex(board, session, *, intent='checked record transaction', wait=
                     raise CoordinationError('registry busy; inspect or retry; never steal the lock') from exc
                 time.sleep(min(random.uniform(.02, .08), max(0, deadline - time.monotonic())))
         with BOARD.child_directory(root, 'registry.lock') as lock:
-            owner = (f'- Session: {session}\n- Host: {socket.gethostname()}\n'
+            token = uuid.uuid4().hex
+            owner = (f'- Session: {session}\n- Acquisition token: {token}\n'
+                     f'- Host: {socket.gethostname()}\n'
                      f'- UTC: {utc_now()}\n- Role: registry lock holder, not session worker\n'
                      f'- PID/start identity: {os.getpid()} / {process_start()}\n'
                      f'- Intent: {intent}\n').encode()
@@ -96,7 +101,7 @@ def registry_mutex(board, session, *, intent='checked record transaction', wait=
                     stream.flush()
                     os.fsync(stream.fileno())
                 _, version = BOARD.read_regular(lock, 'owner.md')
-                yield lock
+                yield RegistryLock(lock, token)
             finally:
                 BOARD.verify_board(board, root)
                 BOARD.verify_directory(root, 'registry.lock', lock)
@@ -323,9 +328,10 @@ def commit(board, session, candidate, reviewed, *, create=False, expected_sha256
                         raise CoordinationError(f'claim overlaps owner {owner["id"]}; request handoff')
         candidate = set_fields(candidate, {'Updated (UTC)': utc_now()})
         data = candidate.encode()
-        with BOARD.staged_bytes(lock, data) as temporary:
+        with BOARD.staged_bytes(lock.fd, data) as temporary:
             BOARD.publish_record(board, session, str(board / 'registry.lock' / temporary),
-                                 create=create, expected_sha256=expected_sha256)
+                                 create=create, expected_sha256=expected_sha256,
+                                 lock_token=lock.token)
         with BOARD.open_directory(board / 'sessions') as records:
             saved, _ = BOARD.read_regular(records, session + '.md')
         if saved != data:

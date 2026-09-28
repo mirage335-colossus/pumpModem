@@ -100,6 +100,13 @@ session terminal. Pending integrations should name their receiving session
 and record an acknowledgment. Uncommitted edits survive a release of claims:
 record them so the next owner preserves or explicitly integrates them.
 
+The mutex becomes available only after successful removal of its directory.
+Termination during initialization or cleanup can leave a lock with no owner file;
+that empty/partial lock still blocks acquisition. A killed process, missing token
+or failed unlock never makes it available. Do not manufacture ownership metadata,
+borrow a token, or run cleanup from a different acquisition with the same session ID.
+Inspect authoritative saved claims after failure and use the recovery rules below.
+
 Do not steal claims or remove a registry lock solely because it looks old. A chat
 may be suspended or running a long test. Contact its owner, inspect available
 session/process evidence, and obtain an explicit release. If the owner is gone,

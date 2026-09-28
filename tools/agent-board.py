@@ -3,7 +3,9 @@
 
 This does not acquire locks, inspect other claims, grant ownership, or recover
 abandoned work. The caller must review complete claims while holding its own
-registry mutex before publishing a record. Inputs must be in claimed files or
+registry mutex and pass its acquisition token before publishing a record. A token
+guards accidental borrowing/replay, not malicious access to the same filesystem.
+Inputs must be in claimed files or
 stdin; unvalidated candidates must never be prepared in sessions/. POSIX
 descriptor-relative filesystem operations and hard links are required. There is
 no unsafe fallback. Atomic visibility is not a promise of crash durability or a
@@ -177,18 +179,26 @@ def record_checker():
     return module
 
 
-def lock_owner(lock, session):
+def lock_owner(lock, session, lock_token):
     data, version = read_regular(lock, 'owner.md')
-    owners = re.findall(r'^- Session: ([^\r\n]+)$', data.decode('utf-8'), re.MULTILINE)
+    owners = re.findall(r'^- Session:[ \t]*([^\r\n]*)$', data.decode('utf-8'), re.MULTILINE)
     if owners != [session]:
         raise PublicationError('registry.lock/owner.md needs exactly one plain "- Session: ID" '
                                'line matching --session; caller must already hold this mutex')
+    tokens = re.findall(r'^- Acquisition token:[ \t]*([^\r\n]*)$', data.decode('utf-8'), re.MULTILINE)
+    if tokens != [lock_token]:
+        raise PublicationError('registry acquisition token differs or is missing; '
+                               'session identity alone is not proof of this lock acquisition')
     return data, version
 
 
-def publish_record(board, session, candidate, *, create=False, expected_sha256=None):
+def publish_record(board, session, candidate, *, create=False, expected_sha256=None,
+                   lock_token=None):
     require_capabilities()
     session = safe_id(session)
+    if not isinstance(lock_token, str) or not re.fullmatch('[0-9a-f]{32}', lock_token):
+        raise PublicationError('provide the acquisition token returned by your owned transaction; '
+                               'do not borrow a token from an existing lock')
     if create == (expected_sha256 is not None):
         raise PublicationError('choose exactly one of --create and --expected-sha256')
     if expected_sha256 is not None and not re.fullmatch('[0-9a-fA-F]{64}', expected_sha256):
@@ -201,7 +211,7 @@ def publish_record(board, session, candidate, *, create=False, expected_sha256=N
     checker.scan_record(text, board / 'sessions' / target)
     checker.check_transition(text, text)
     with open_directory(board) as root, child_directory(root, 'registry.lock') as lock:
-        owner = lock_owner(lock, session)
+        owner = lock_owner(lock, session, lock_token)
         with child_directory(root, 'sessions') as sessions:
             old = None
             if not create:
@@ -219,7 +229,7 @@ def publish_record(board, session, candidate, *, create=False, expected_sha256=N
                 verify_board(board, root)
                 verify_directory(root, 'registry.lock', lock)
                 verify_directory(root, 'sessions', sessions)
-                if lock_owner(lock, session) != owner:
+                if lock_owner(lock, session, lock_token) != owner:
                     raise PublicationError('registry lock owner changed during publication')
                 if create:
                     exclusive_publish(lock, temporary, sessions, target)
@@ -241,12 +251,13 @@ def main(argv=None):
         message.add_argument('--' + option, required=True)
     message.epilog = '--body is a claimed absolute regular file, or - for stdin.'
     record = sub.add_parser('record', help='publish a checked record under your already-held registry mutex')
-    for option in ('board', 'session', 'candidate'):
+    for option in ('board', 'session', 'candidate', 'lock-token'):
         record.add_argument('--' + option, required=True)
     mode = record.add_mutually_exclusive_group(required=True)
     mode.add_argument('--create', action='store_true')
     mode.add_argument('--expected-sha256')
     record.epilog = ('--candidate is a claimed absolute regular file outside sessions/, or - for stdin. '
+                     '--lock-token comes from this caller\'s owned acquisition, never an existing lock. '
                      'Review all complete claims yourself under registry.lock; this tool grants no ownership.')
     args = parser.parse_args(argv)
     try:
@@ -254,7 +265,7 @@ def main(argv=None):
             path = publish_message(args.board, args.sender, args.recipient, args.id, args.body)
         else:
             path = publish_record(args.board, args.session, args.candidate, create=args.create,
-                                  expected_sha256=args.expected_sha256)
+                                  expected_sha256=args.expected_sha256, lock_token=args.lock_token)
     except (OSError, ValueError) as exc:
         parser.exit(1, f'agent-board: {exc}\nPublication not confirmed; inspect current state. '
                     'No claims are granted by this tool.\n')

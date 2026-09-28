@@ -135,6 +135,9 @@ properties from an append-only ledger:
 | Completed job plus failed acquisition | Job completion/status reconciled independently; pending acquisition remains explicit |
 | Large board, malformed record and changed page snapshot | Complete machine scan, bounded whole-section pages, errors retained, stale pagination rejected |
 | 32 or more synthetic contenders and independent scopes | No simultaneous overlapping claim grants; unrelated work continues; bounded contention measured without assuming scheduling fairness |
+| Independent processes, repeated same-session acquisition and killed holder | One winner; old/missing/mismatched acquisition token rejected; death and partial cleanup never silently clear the mutex |
+| Owner inode replaced with identical bytes, lock directory replaced, unlink/rmdir fails | Preserve unfamiliar state and committed record; suppress dependent callbacks and require reconciliation |
+| Participant cannot reliably follow instructions | Controller actually denies shared source/board/build/Git writes through available tools; private work still succeeds; no reliance on prompts or clean merges for exclusion |
 
 Use synchronization barriers or injected hooks for deterministic failure ordering;
 arbitrary sleeps are not proof. Keep successful and failing controls, record actual

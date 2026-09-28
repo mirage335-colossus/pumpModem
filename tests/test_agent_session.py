@@ -6,6 +6,8 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import selectors
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -83,7 +85,7 @@ class Transactions(unittest.TestCase):
     def test_complete_mutex_identity_and_bounded_contention(self):
         with SESSION.registry_mutex(self.board, 'worker'):
             text = (self.board / 'registry.lock/owner.md').read_text()
-            for field in ('Session', 'Host', 'UTC', 'Role', 'PID/start identity', 'Intent'):
+            for field in ('Session', 'Acquisition token', 'Host', 'UTC', 'Role', 'PID/start identity', 'Intent'):
                 self.assertIn('- ' + field + ': ', text)
             with self.assertRaisesRegex(ValueError, 'busy'):
                 with SESSION.registry_mutex(self.board, 'other', wait=.01):
@@ -92,6 +94,155 @@ class Transactions(unittest.TestCase):
         with self.assertRaises(ValueError):
             with SESSION.registry_mutex(self.board, 'worker', wait=31):
                 self.fail('unbounded wait accepted')
+
+    def test_same_session_cannot_reenter_or_reuse_a_previous_acquisition(self):
+        source = self.base / 'candidate'
+        source.write_text(record())
+        with SESSION.registry_mutex(self.board, 'worker') as first:
+            owner = (self.board / 'registry.lock/owner.md').read_bytes()
+            with self.assertRaisesRegex(ValueError, 'busy'):
+                with SESSION.registry_mutex(self.board, 'worker'):
+                    self.fail('same-session reentry must not bypass exclusive acquisition')
+            self.assertEqual((self.board / 'registry.lock/owner.md').read_bytes(), owner)
+        with SESSION.registry_mutex(self.board, 'worker') as second:
+            self.assertNotEqual(first.token, second.token)
+            with self.assertRaisesRegex(ValueError, 'token'):
+                SESSION.BOARD.publish_record(self.board, 'worker', str(source),
+                                           create=True, lock_token=first.token)
+            self.assertFalse((self.board / 'sessions/worker.md').exists())
+            SESSION.BOARD.publish_record(self.board, 'worker', str(source),
+                                       create=True, lock_token=second.token)
+        self.assertFalse((self.board / 'registry.lock').exists())
+
+    def process(self, code, *arguments):
+        prefix = ('import sys\nfrom pathlib import Path\n'
+                  f'sys.path.insert(0, {str(ROOT / "tests")!r})\n'
+                  'from test_agent_session import SESSION, record\n')
+        child = subprocess.Popen([sys.executable, '-B', '-c', prefix + code, *map(str, arguments)],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            cwd=self.base)
+        def cleanup():
+            if child.poll() is None:
+                child.kill()
+            child.communicate(timeout=5)
+        self.addCleanup(cleanup)
+        return child
+
+    def ready(self, children):
+        # A bounded pipe barrier, not a timing sleep masquerading as concurrency.
+        with selectors.DefaultSelector() as selector:
+            for child in children:
+                selector.register(child.stdout, selectors.EVENT_READ)
+            deadline = time.monotonic() + 15
+            while selector.get_map():
+                events = selector.select(max(0, deadline - time.monotonic()))
+                self.assertTrue(events, 'child did not reach fixture barrier')
+                for key, _ in events:
+                    self.assertEqual(key.fileobj.readline(), 'ready\n')
+                    selector.unregister(key.fileobj)
+
+    def test_independent_processes_have_one_claim_and_one_dependent_write(self):
+        code = '''
+board, target, output = map(Path, sys.argv[1:4])
+name = sys.argv[4]
+scope = {'kind': 'file', 'value': str(target)}
+reviewed = SESSION.review(board, scopes=[scope])
+print('ready', flush=True)
+assert sys.stdin.readline() == 'go\\n'
+try:
+    SESSION.commit(board, name, record(name, claims=f'- file: {target}'), reviewed,
+        create=True, wait=10, after=lambda receipt: output.write_text(name))
+except SESSION.CoordinationError:
+    raise SystemExit(2)
+'''
+        output = self.target
+        children = [self.process(code, self.board, self.target, output, f'process-{i}')
+                    for i in range(8)]
+        self.ready(children)
+        for child in children:
+            child.stdin.write('go\n')
+            child.stdin.flush()
+        outcomes = [child.communicate(timeout=15) for child in children]
+        codes = [child.returncode for child in children]
+        self.assertEqual(codes.count(0), 1, (codes, outcomes))
+        self.assertEqual(codes.count(2), 7, (codes, outcomes))
+        winner = 'process-' + str(codes.index(0))
+        self.assertEqual(output.read_text(), winner)
+        self.assertEqual([p.stem for p in (self.board / 'sessions').iterdir()], [winner])
+        self.assertFalse((self.board / 'registry.lock').exists())
+
+    def test_killed_holder_leaves_lock_and_blocks_reentry_without_reclamation(self):
+        child = self.process('''
+with SESSION.registry_mutex(Path(sys.argv[1]), 'worker'):
+    print('ready', flush=True)
+    sys.stdin.readline()
+''', self.board)
+        self.ready([child])
+        lock = self.board / 'registry.lock'
+        owner = (lock / 'owner.md').read_bytes()
+        child.kill()
+        child.communicate(timeout=5)
+        os.utime(lock, (1, 1))  # Neither age nor observed death permits stealing.
+        for name in ('worker', 'other'):
+            with self.assertRaisesRegex(ValueError, 'busy'):
+                with SESSION.registry_mutex(self.board, name, wait=.01):
+                    self.fail('abandoned lock was silently stolen')
+        self.assertEqual((lock / 'owner.md').read_bytes(), owner)
+
+    def test_cleanup_rejects_identically_replaced_owner_and_replaced_directory(self):
+        for kind in ('owner', 'directory'):
+            with self.subTest(kind=kind):
+                real = SESSION.BOARD.publish_record
+                def replace(*args, **kwargs):
+                    result = real(*args, **kwargs)
+                    lock = self.board / 'registry.lock'
+                    if kind == 'owner':
+                        sibling = lock / 'replacement'
+                        sibling.write_bytes((lock / 'owner.md').read_bytes())
+                        sibling.replace(lock / 'owner.md')
+                    else:
+                        lock.rename(self.board / 'original-lock')
+                        lock.mkdir()
+                        (lock / 'owner.md').write_text('foreign replacement')
+                    return result
+                actions = mock.Mock()
+                with mock.patch.object(SESSION.BOARD, 'publish_record', side_effect=replace):
+                    with self.assertRaisesRegex(ValueError, 'changed'):
+                        self.create(after=actions)
+                actions.assert_not_called()
+                self.assertTrue((self.board / 'sessions/worker.md').exists())
+                self.assertTrue((self.board / 'registry.lock/owner.md').exists())
+                if kind == 'directory':
+                    self.assertIn('- Session: worker',
+                                  (self.board / 'original-lock/owner.md').read_text())
+                    self.assertEqual((self.board / 'registry.lock/owner.md').read_text(),
+                                     'foreign replacement')
+                # Reset only the owned fixture between injected failures.
+                shutil.rmtree(self.board)
+                (self.board / 'sessions').mkdir(parents=True)
+
+    def test_cleanup_unlink_or_rmdir_failure_suppresses_callback_and_preserves_lock(self):
+        for operation in ('unlink', 'rmdir'):
+            with self.subTest(operation=operation):
+                original = getattr(SESSION.os, operation)
+                def fail(name, *args, **kwargs):
+                    if name == ('owner.md' if operation == 'unlink' else 'registry.lock'):
+                        raise OSError('injected unlock failure')
+                    return original(name, *args, **kwargs)
+                actions = mock.Mock()
+                # Patching an os function changes capability-set membership.
+                with mock.patch.object(SESSION.BOARD, 'require_capabilities'), \
+                        mock.patch.object(SESSION.os, operation, side_effect=fail):
+                    with self.assertRaisesRegex(OSError, 'unlock failure'):
+                        self.create(after=actions)
+                actions.assert_not_called()
+                self.assertTrue((self.board / 'sessions/worker.md').exists())
+                self.assertTrue((self.board / 'registry.lock').is_dir())
+                with self.assertRaisesRegex(ValueError, 'busy'):
+                    with SESSION.registry_mutex(self.board, 'other'):
+                        self.fail('partly cleaned mutex treated as available')
+                shutil.rmtree(self.board)
+                (self.board / 'sessions').mkdir(parents=True)
 
     def test_precondition_failure_stops_ack_output_and_job(self):
         for precondition in (lambda: False, lambda: 1,
@@ -112,8 +263,8 @@ class Transactions(unittest.TestCase):
             return [] if held and path == held[0] else real(path)
         with mock.patch.object(SESSION.os, 'listdir', side_effect=listing):
             with SESSION.registry_mutex(self.board, 'worker') as lock:
-                held.append(lock)
-                self.assertEqual(SESSION.os.listdir(lock), [])
+                held.append(lock.fd)
+                self.assertEqual(SESSION.os.listdir(lock.fd), [])
                 self.assertTrue((self.board / 'registry.lock/owner.md').exists())
         self.assertFalse((self.board / 'registry.lock').exists())
 

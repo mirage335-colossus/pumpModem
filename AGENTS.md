@@ -16,7 +16,7 @@ Anthropic desktop sessions and OpenRouter-compatible harnesses.
 
 Coordination governs shared files and resources. Use web search, local tools and
 other harness capabilities under the same governing instructions and task needs
-as without this workflow. It adds no research quota, tool restriction or approval
+as without this workflow. It adds no research quota, research-tool restriction or approval
 step, and does not replace the harness's normal verification or tool-use policy.
 
 - Use the shared, gitignored `.agent-work/` directory (or the explicitly agreed
@@ -27,16 +27,23 @@ step, and does not replace the harness's normal verification or tool-use policy.
   wholesale. Keep one current session record with exact scope, approach,
   baseline, progress, checks and handoff. Ignored files require explicit reads.
 - Claim files/resources before writing, including notes and generated outputs,
-  using the short atomic registry lock. Check your inbox before reporting blocked.
+  using the tested checked transaction or an equivalently qualified executable
+  wrapper; do not improvise lock/unlock shell sequences. The short registry mutex
+  and the longer-lived file/resource claims are separate. Check your inbox before reporting blocked.
   Handoffs require recorded release, fresh claim acquisition and acknowledgment;
   a message or old timestamp never grants ownership. Failed preconditions,
   publication or cleanup stop dependent acknowledgments, writes and launches
   until saved state is reconciled. Discover relevant closed-owner handoffs too;
   matching bytes do not identify the last owner. Use an isolated
   checkout when overlapping work cannot be handed off.
+- Do not assume every model reliably follows prose. For uncertain participants,
+  provide read-only tool access or enforce private checkout/output access through the
+  harness or OS; a different directory alone is not enforcement. Keep shared
+  integration writes with a qualified coordinator. Merge-conflict checks and
+  passing tests cannot replace exclusion before writes.
 - Prepare/check record candidates in claimed artifacts (or memory for initial
   registration), outside `sessions/`; publish complete records atomically and
-  messages atomically without replacement. The guide links optional tested
+  messages atomically without replacement. The guide links tested
   helpers and filled examples; exclusive creation followed by writing is not
   complete-message publication. Release a verified shared-file edit before
   unrelated evidence formatting or whole-session closure.

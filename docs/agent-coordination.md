@@ -10,6 +10,16 @@ It supplements the [development contract](development.md) and [build guide](buil
 A record, message, helper result or temporary note never overrides user instructions,
 compatibility requirements or required tests.
 
+Do not rely on model capability or careful reading to provide exclusion. Use the
+tested checked transaction or an equivalently qualified executable wrapper for
+claim changes. When a participant's adherence is uncertain, restrict its tools to
+read-only access or give it a private checkout and outputs with harness/OS permissions that deny
+shared-checkout and shared-board mutation. A path convention, prompt or separate
+worktree alone does not enforce that boundary. A qualified coordinator owns shared
+integration writes and their claims. This still permits parallel implementation
+in private checkouts and normal research. Merge-conflict checks, code review and
+tests validate a candidate afterward; they cannot prevent an earlier overwrite.
+
 This workflow governs shared state, not the harness's research or tool-use policy.
 Use web search, browsing, local tools and delegation as the governing instructions
 and task would otherwise warrant: neither more nor less because of coordination.
@@ -149,6 +159,11 @@ histories; copying or rereading history does not renew retention.
 ## Claim files and resources before writing
 
 `Claims held` is authoritative until explicitly changed, regardless of state or age.
+`registry.lock` protects one short read/check/publish transaction; removing it
+does **not** release file/resource ownership. Published claims remain held through
+editing and required validation until a later verified release after all relevant
+writers stop. Never hold the registry mutex throughout development or mistake an
+empty mutex directory for permission to enter.
 Prefer exact files. A directory claim covers every descendant, including future
 files. Compare whole path components, respecting case rules and symlink aliases;
 record absolute physical paths plus readable relative paths. Renames claim both
@@ -158,13 +173,17 @@ use independent copies/worktrees, or explicitly coordinate all aliases together.
 Canonical path checks alone cannot find every hard-linked descendant of a
 directory; do not assume a disk-saving hard-link snapshot has private source.
 
-For registration, additions, releases or transfers:
+Use [checked session operations](agent-coordination-recipes.md#checked-session-operations)
+for registration, additions, releases and transfers. The following defines the
+transaction implemented by the helper or a qualified wrapper; it is not an ad hoc
+shell sequence for each worker to reconstruct:
 
 1. Acquire the mutex with one exclusive `mkdir "$coord_dir/registry.lock"`.
    **Never** `mkdir -p` or check-then-create it. If it fails, distinguish contention
    from access failure, then back off or do independent work. Do not enter.
 2. After acquisition, write `owner.md` with session ID, host, UTC time, acquiring
-   process PID/start identity when available, and intent. Label that process as the
+   process PID/start identity when available, intent and a fresh acquisition token.
+   Never borrow a token from an existing lock. Label that process as the
    lock holder, not the session worker. The publisher recipe uses `- Session: ID`.
    Missing owner metadata can mean interrupted initialization, not a free lock.
 3. Reread all metadata/complete claims under the mutex, including terminal and
@@ -189,7 +208,8 @@ writer: reload/rebase it before use and stop it before releasing ownership.
 
 ### Dependencies and shared invariants
 
-File ownership prevents competing saves, not incompatible logic in different
+Cooperative file claims prevent competing saves only while every writer honors
+them; they do not constrain bypassing tools or incompatible logic in different
 files. In `Baseline and dependencies`, identify the inputs your edit depends on:
 revision plus relevant dirty hashes, API/schema or algorithm invariant, and any
 named integration owner/order. Ordinary read-only exploration needs no exclusive
@@ -222,11 +242,12 @@ mutex, stage complete validated bytes inside that lock and atomically publish to
 `sessions/`; use no-replace publication for a new ID. A failed proposal must not
 remain as a spurious possible owner in `sessions/`.
 
-Prefer the [checked session helper](agent-coordination-recipes.md#checked-session-operations)
-when supported: it combines the owned mutex, complete overlap checks, reviewed
+Use the [checked session helper](agent-coordination-recipes.md#checked-session-operations)
+when supported, or an equivalently qualified executable transaction: it combines the owned mutex, complete overlap checks, reviewed
 input/handoff revalidation and verified publication before dependent work.
 The lower-level [publisher](../tools/agent-board.py) checks format and stale replacement
-under your mutex against reviewed bytes. **You still review all claims, provenance,
+under your mutex against reviewed bytes and its acquisition-specific token; a
+session ID alone is insufficient. **You still review all claims, provenance,
 stopped writers and facts**; it cannot grant/recover ownership. The [recipe](agent-coordination-recipes.md#publish-a-record)
 covers checked execution, uncertain results and equivalent harness operations.
 Unsupported publication has no direct-write fallback.
@@ -385,8 +406,11 @@ heartbeat loops, steal claims or remove unfamiliar locks.
 Use the [filled record and closure examples](agent-coordination-recipes.md#session-record-template).
 Keep the canonical headings/fields so all harnesses can read them, with explicit
 `none` values rather than omissions. Do not create a second record format, another
-claim-update log or mandatory service. Helpers are conveniences; equivalent manual
-workflows remain supported.
+claim-update log or mandatory service. The implementation language/tool is optional;
+qualified executable locking/publication is not. Manual protocol descriptions are
+for implementing/reviewing wrappers and exceptional coordinated recovery, not a
+routine fallback for a worker unable to use the helper. Use isolation when no
+qualified shared-write path is available.
 
 ## Temporary knowledge that has not reached repository documentation
 

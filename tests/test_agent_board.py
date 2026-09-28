@@ -11,6 +11,7 @@ import tempfile
 import threading
 import time
 import unittest
+import uuid
 from unittest import mock
 
 
@@ -71,10 +72,12 @@ class PublicationTests(unittest.TestCase):
         self.source.write_bytes(b'A complete message.\n')
         self.target = self.board / 'sessions' / 'sender.md'
         self.lock = self.board / 'registry.lock'
+        self.token = uuid.uuid4().hex
 
     def owned_lock(self, session='sender'):
         self.lock.mkdir()
         (self.lock / 'owner.md').write_text(f'- Session: {session}\n'
+                                           f'- Acquisition token: {self.token}\n'
                                            '- Host: freeform host metadata stays supported\n'
                                            '- PID/start identity: optional here\n')
 
@@ -85,6 +88,7 @@ class PublicationTests(unittest.TestCase):
 
     def publish(self, data=None, **kwargs):
         self.source.write_bytes(record() if data is None else data)
+        kwargs.setdefault('lock_token', self.token)
         return BOARD.publish_record(self.board, 'sender', str(self.source), **kwargs)
 
     def update(self, data=None, expected=None):
@@ -95,6 +99,8 @@ class PublicationTests(unittest.TestCase):
         self.assertEqual(list(self.board.rglob('.agent-board-*.tmp')), [])
 
     def run_cli(self, *args, input=None):
+        if args and args[0] == 'record':
+            args = (*args, '--lock-token', self.token)
         return subprocess.run([sys.executable, '-B', str(TOOL), *map(str, args)],
                               input=input, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                               cwd=self.base, timeout=15)
@@ -240,9 +246,9 @@ class PublicationTests(unittest.TestCase):
         # Exercise the real CLI and shell boundary, including a successful
         # acquisition so unconditional failure cannot satisfy the negative cases.
         script = '''
-python=$1 tool=$2 board=$3 candidate=$4 expected=$5 downstream=$6 verification=$7
+python=$1 tool=$2 board=$3 candidate=$4 expected=$5 downstream=$6 verification=$7 token=$8
 publish_and_verify() {
-    "$python" -B "$tool" record --board "$board" --session sender --candidate "$candidate" --expected-sha256 "$expected" || return $?
+    "$python" -B "$tool" record --board "$board" --session sender --candidate "$candidate" --expected-sha256 "$expected" --lock-token "$token" || return $?
     cmp -s "$board/sessions/sender.md" "$candidate" || return $?
     if [ "$verification" = fail ]; then return 7; fi
 }
@@ -284,7 +290,7 @@ printf 'dependent write\\n' > "$downstream/writer" &&
                 result = subprocess.run(
                     ['/bin/sh', '-c', script, 'publication-check', sys.executable,
                      str(TOOL), str(self.board), str(self.source), expected, str(downstream),
-                     'fail' if outcome == 'verification-failure' else 'pass'],
+                     'fail' if outcome == 'verification-failure' else 'pass', self.token],
                     cwd=self.base, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15)
                 if outcome == 'valid':
                     self.assertEqual(result.returncode, 0, result.stderr)
@@ -324,7 +330,7 @@ printf 'dependent write\\n' > "$downstream/writer" &&
             with self.assertRaisesRegex(BrokenPipeError, 'stdout failure'):
                 BOARD.main(['record', '--board', str(self.board), '--session', 'sender',
                             '--candidate', str(self.source), '--expected-sha256',
-                            hashlib.sha256(before).hexdigest()])
+                            hashlib.sha256(before).hexdigest(), '--lock-token', self.token])
         output.write.assert_called_once_with(str(self.target))
         # The caller must inspect current bytes before deciding what may be
         # retried or written: closure and claim release have already happened.
@@ -417,7 +423,7 @@ printf 'dependent write\\n' > "$downstream/writer" &&
         (self.lock / 'owner.md').write_text('- Session: sender\n- Session: sender\n')
         with self.assertRaisesRegex(BOARD.PublicationError, 'exactly one'):
             self.publish(create=True)
-        (self.lock / 'owner.md').write_text('- Session: sender\n')
+        (self.lock / 'owner.md').write_text(f'- Session: sender\n- Acquisition token: {self.token}\n')
         with self.assertRaisesRegex(ValueError, 'session ID'):
             self.publish(record('different'), create=True)
         self.assertFalse(self.target.exists())
@@ -438,6 +444,32 @@ printf 'dependent write\\n' > "$downstream/writer" &&
             self.assertEqual(list((self.board / 'sessions').iterdir()), [])
             self.no_temps()
 
+    def test_acquisition_token_required_even_for_matching_session(self):
+        self.owned_lock()
+        owner = (self.lock / 'owner.md').read_bytes()
+        for token in (None, '', 'wrong', 'A' * 32, '0' * 32):
+            with self.subTest(token=token), self.assertRaisesRegex(ValueError, 'token'):
+                self.publish(create=True, lock_token=token)
+            self.assertFalse(self.target.exists())
+            self.assertEqual((self.lock / 'owner.md').read_bytes(), owner)
+            self.no_temps()
+        self.publish(create=True, lock_token=self.token)
+        self.assertEqual(self.target.read_bytes(), record())
+
+    def test_missing_duplicate_or_empty_owner_token_refuses_publication(self):
+        self.owned_lock()
+        for fields in ('', '- Acquisition token:\n',
+                       f'- Acquisition token: {self.token}\n- Acquisition token:\n',
+                       f'- Acquisition token: {self.token}\n- Acquisition token: {self.token}\n',
+                       '- Acquisition token: invalid\n'):
+            owner = ('- Session: sender\n' + fields).encode()
+            (self.lock / 'owner.md').write_bytes(owner)
+            with self.subTest(fields=fields), self.assertRaisesRegex(ValueError, 'token'):
+                self.publish(create=True)
+            self.assertFalse(self.target.exists())
+            self.assertEqual((self.lock / 'owner.md').read_bytes(), owner)
+            self.no_temps()
+
     def test_terminal_session_and_backwards_transition_rejected(self):
         self.owned_lock()
         self.target.write_bytes(record(minute='01'))
@@ -453,7 +485,7 @@ printf 'dependent write\\n' > "$downstream/writer" &&
         self.owned_lock()
         self.target.write_bytes(record())
         with self.assertRaisesRegex(BOARD.PublicationError, 'never sessions'):
-            BOARD.publish_record(self.board, 'sender', str(self.target), create=True)
+            BOARD.publish_record(self.board, 'sender', str(self.target), create=True, lock_token=self.token)
         self.assertEqual(self.target.read_bytes(), record())
 
     def test_lock_or_record_change_after_validation_rejected(self):
@@ -463,7 +495,7 @@ printf 'dependent write\\n' > "$downstream/writer" &&
         for kind in ('lock', 'record'):
             with self.subTest(kind=kind):
                 self.target.write_bytes(record())
-                (self.lock / 'owner.md').write_text('- Session: sender\n')
+                (self.lock / 'owner.md').write_text(f'- Session: sender\n- Acquisition token: {self.token}\n')
 
                 def change(fd):
                     original(fd)

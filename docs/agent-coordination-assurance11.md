@@ -144,3 +144,59 @@ The [evaluation guide](agent-coordination-evaluation.md#broader-collisions-and-m
 now requires broader source/dependency and large-board scenarios rather than
 inferring those properties from a successful shared ledger. Preserve the observed
 limits when deciding whether further empirical assurance is needed.
+
+## Follow-up: participants that cannot reliably follow the protocol
+
+The follow-up starts from committed `7415fd3`; the earlier validation above remains
+historical evidence for its original candidate. A stronger model, clean merge or
+passing test cannot replace exclusion before a shared write. Routine claim changes
+now require the checked transaction or an equivalently qualified executable wrapper.
+The ad hoc shell-lock example was removed. The guide distinguishes the short
+registry mutex from claims held throughout editing and validation. Uncertain
+participants require read-only tool access or permissions that actually deny shared
+source/board/build/common-Git writes while allowing private implementation. These
+repository tools do not install those boundaries in other harnesses.
+
+The low-level publisher previously checked session identity alone. It now also
+requires an acquisition-specific random 32-hex token, generated and passed by the
+checked mutex context. The immutable `RegistryLock(fd, token)` handle changes on
+every acquisition, even for the same session. Missing, malformed, duplicated or
+stale tokens fail before staging; successful explicit delegation to a publisher
+subprocess remains supported. Custom callers must supply `lock_token` or CLI
+`--lock-token`; routine callers use `commit`, which handles it automatically.
+Existing tokenless locks stay owned and are not silently migrated or removed.
+This prevents accidental session-only borrowing and stale-token replay, but is not
+authentication: a participant able to read/alter the current board can copy a token.
+Enforced isolation remains necessary when that participant cannot honor the rules.
+
+New failure controls cover independent processes racing one source claim, same-ID
+reentry and stale acquisition, killed holders, owner replacement with identical
+bytes, directory replacement, and failures of owner unlink or final `rmdir`.
+Successful publication remains authoritative when cleanup fails; dependent work
+is suppressed and the lock stays blocking, including an empty partially cleaned
+lock. Recovery still needs positive evidence and exclusive coordination, not age
+or PID death alone. The Linux [mkdir](https://man7.org/linux/man-pages/man2/mkdir.2.html)
+and [rmdir](https://man7.org/linux/man-pages/man2/rmdir.2.html) references, checked
+2026-09-27, document existing-name rejection, empty-directory removal and NFS
+caveats; testing a local filesystem does not qualify network/cloud synchronization.
+
+Final validation used an independent copy of all 3,944 tracked inputs, including
+current dirty bytes, modes, symlinks and tracked ignored sources. Before/after
+comparison verified the copy; inventory SHA-256:
+`07ab250c6def28bbdc802e6f6f64d09b48de1706fe8b50654000295a643c57ea`.
+Only documentation changed afterward. The normal
+`./build.sh test build --cli --build-dir /tmp/dp-lock12/build --jobs 2` group passed
+**26/26 CTest entries** in 17.99 seconds, including **53 reader, 32 publisher and
+30 session tests**. Five prerequisite omissions remain the same as above: three
+ELF SDK cases without `patchelf` and two native pacman cases. Local GPG fixture IPC
+used approved execution; no real release was changed.
+
+Both changed suites also passed on the workspace filesystem (32 publisher and
+30 session cases); the two process cases were rerun after making their working
+directory explicit. Eight independent processes raced from a pipe barrier with
+one successful claim/write; the existing 32-thread contest and eight-disjoint-worker
+fixtures remain. Independent code and guidance reviews found no remaining blocker.
+Logs, frozen inventory and final source comparisons are in
+`.agent-work/artifacts/coord-lock12-20260927/` under ordinary retention.
+This is helper/process evidence, not a trial of less capable reasoning models or
+proof of permissions in another harness. No modem runtime behavior changed.
