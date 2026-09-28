@@ -5,7 +5,8 @@ datapump-tui \- Data Pump terminal interface
 .B datapump-tui
 .RI [ options ]
 .SH DESCRIPTION
-Runs the shared Data Pump application in a terminal using ncurses.
+Runs the shared Data Pump application using ncurses on POSIX systems or the
+native Windows console API on Windows.
 It uses the same commands, settings, receive restrictions and modem behavior as
 the other frontends. A display server is not required.
 Use an interactive terminal, including an SSH session allocated with ssh -t.
@@ -34,11 +35,11 @@ terminal profiles itself.
 Editable choices accept typed values as well as selections from presets.
 The shared presentation supplies the interaction hints for the focused control.
 .PP
-Correctly framed terminal bracketed paste is handled as one text event, including
+The POSIX host handles correctly framed bracketed paste as one text event, including
 embedded newlines. Pastes exceeding 4 MiB are rejected completely, preserving
 the draft and selection. The terminal protocol cannot authenticate an embedded
 paste-ending sequence; shared received-text filtering removes its control bytes.
-Old terminals without bracketed paste cannot
+The Windows console host and terminals without bracketed paste cannot
 reliably distinguish pasted keys from typed keys. Use a terminal with bracketed
 paste for multiline or untrusted clipboard contents.
 .SH MOUSE
@@ -49,16 +50,23 @@ Hold the terminal emulator's selection modifier (usually Shift) to select text
 for its clipboard. Data Pump does not send OSC52 clipboard sequences or launch
 folder openers from a terminal session.
 .SH DISPLAY
-The baseline is ASCII, including grayscale intensity characters for plots.
+Waterfall and constellation plots use colored ASCII intensity characters when
+the terminal supports color, with a grayscale fallback.
+QR images use fixed half-block glyphs on capable terminals, or two ASCII columns
+per module, and preserve the quiet zone. Enlarge the plot when prompted; a QR
+code cannot be reduced below one sample per module. QR terminal rendering uses
+full contrast while retaining the explicit off setting.
 Unsupported display bytes become underscores; local UTF-8 editor data is kept
 independently of the terminal's display capability. Received content retains the
-shared ASCII restriction before reaching the terminal sink.
+shared ASCII restriction before reaching the terminal sink. The renderer's fixed
+block glyphs do not permit untrusted Unicode or terminal-control bytes.
 .PP
 Resize the terminal to change the layout. Large terminals are bounded to a
-400-column by 160-row application surface. Output is buffered with a fixed
+400-column by 160-row application surface. POSIX ncurses output is buffered with a fixed
 upper bound and drained without blocking receiver polling. On a slow connection
 newer presentation waits for earlier terminal output while application polling
-continues.
+continues. The Windows host writes the bounded surface using the native console
+API; blocked-reader behavior through ConPTY remains unqualified.
 .SH OPTIONS
 Use
 .B --help

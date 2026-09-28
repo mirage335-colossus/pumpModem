@@ -36,7 +36,9 @@ def prepare(args):
     # Use installed, exactly matching runtime packages, not libraries salvaged
     # from an old DataPump bundle. Record the actual files and hashes as well.
     for item in manifest['runtime_libraries']:
-        package = item['package']
+        # Unqualified names match every installed architecture and concatenate
+        # versions/paths on a multiarch host. Select the declared SDK ABI.
+        package = item['package'] + ':' + manifest['architecture']
         version = command('dpkg-query', '-W', '-f=${Version}', package)
         expected = versions[item['development']]
         if version != expected:

@@ -1,6 +1,7 @@
 #include "../src/gui/framebuffer.hpp"
 #include "../src/gui/framebuffer_ui.hpp"
 #include "../src/gui/theme.hpp"
+#include "../src/gui/plot_render.hpp"
 #include <algorithm>
 #include <array>
 #include <iostream>
@@ -62,6 +63,28 @@ void clipping_and_mono() {
     })));
     rejects([&]{renderer.render(scene);},"out-of-grid producer accepted");
     require(renderer.frame()!=nullptr,"failed render destroyed existing frame");
+}
+void growing_waterfall() {
+    plots::SpectrumHistory history;
+    for (unsigned count : {1U, 20U, 80U, 160U}) {
+        while (history.rows().size() < count) history.push(std::vector<double>{0., -20.}, 20);
+        for (unsigned height : {80U, 160U, 320U}) {
+            surface::Scene scene; scene.width=4; scene.height=static_cast<int>(height);
+            const BitmapSource source=plots::PlotSnapshot::waterfall(history);
+            scene.primitives.push_back(image({0,0,4,static_cast<int>(height)},source));
+            framebuffer::Renderer renderer({4,height,1,true});
+            const auto frame=renderer.render(scene);
+            BitmapImage native(4,height);
+            source.paint(full_bitmap_request(4,height,false,true),[&](unsigned x,unsigned y,PixelBlock block){native.blit(x,y,block);});
+            for(unsigned y=0;y<height;++y)for(unsigned x=0;x<4;++x) {
+                const auto offset=(y*4+x)*3;
+                require(at(*frame,x,y)==std::array<unsigned,4>{native.pixels()[offset],native.pixels()[offset+1],native.pixels()[offset+2],255},
+                        "framebuffer stretched startup history differently from native GUI");
+            }
+            require(at(*frame,0,height-1)[0]!=0,"newest waterfall row disappeared");
+            if(count<std::min(height,160U))require(at(*frame,0,0)[0]==0,"unfilled waterfall area is not blank");
+        }
+    }
 }
 void copy_formats() {
     framebuffer::Frame frame;frame.width=2;frame.height=2;frame.stride_bytes=12;
@@ -255,6 +278,6 @@ void dropdown_chrome() {
 
 }
 int main() {
-    try{render_and_lifetime();clipping_and_mono();copy_formats();glyphs();widget_raster();pixel_interaction();pixel_presets();minimal_embedding();overlay_focus_policy();popup_live_options();overlay_keyboard_scope();dropdown_chrome();std::cout<<"Framebuffer pixel, damage, ownership, clipping, format and interaction checks passed\n";return 0;}
+    try{render_and_lifetime();clipping_and_mono();growing_waterfall();copy_formats();glyphs();widget_raster();pixel_interaction();pixel_presets();minimal_embedding();overlay_focus_policy();popup_live_options();overlay_keyboard_scope();dropdown_chrome();std::cout<<"Framebuffer pixel, damage, ownership, clipping, format and interaction checks passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

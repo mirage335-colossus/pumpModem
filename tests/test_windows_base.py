@@ -51,7 +51,7 @@ class WindowsBaseTests(unittest.TestCase):
         self.fetched = self.root / 'fetched'
         self.provenance_path = self.root / 'provenance.json'
         self.recipe = {'schema': 1, 'vcpkg_ref': '9e593bb18ea69cc5095e012465dcd675a822ed0d',
-                       'triplet': 'x64-windows-static', 'ports': ['openssl', 'glew', 'freetype[core]'],
+                       'triplet': 'x64-windows-static', 'ports': ['openssl', 'glew', 'freetype[core]', 'sdl2[core]'],
                        'toolset': 'v143', 'configurations': ['Debug', 'Release'],
                        'crt_linkage': 'static', 'library_linkage': 'static', 'lto': False}
         self.recipe_files = {'tools/windows-base.py': b'preserved helper\n',
@@ -70,9 +70,12 @@ class WindowsBaseTests(unittest.TestCase):
         files = {base.TOOLCHAIN: b'# relocatable vcpkg toolchain\n', '.vcpkg-root': b'',
                  'installed/x64-windows-static/lib/libcrypto.lib': b'static library'}
         files.update({f'installed/x64-windows-static/share/{port}/copyright': b'license'
-                      for port in ('openssl', 'glew', 'freetype')})
+                      for port in ('openssl', 'glew', 'freetype', 'sdl2')})
         files.update({f'installed/vcpkg/info/{port}_1.0_x64-windows-static.list': b'fixture export list'
-                      for port in ('openssl', 'glew', 'freetype')})
+                      for port in ('openssl', 'glew', 'freetype', 'sdl2')})
+        files.update({f'installed/x64-windows-static/{name}': b'fixture SDL dependency'
+                      for name in ('include/SDL2/SDL.h', 'lib/SDL2-static.lib', 'debug/lib/SDL2-staticd.lib',
+                                   'share/sdl2/SDL2Config.cmake')})
         for name, data in files.items():
             path = self.export / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -192,6 +195,23 @@ class WindowsBaseTests(unittest.TestCase):
             archive.comment = b'wrong source commit'
         with self.assertRaisesRegex(ValueError, 'pinned vcpkg commit'):
             self.assemble(self.root / 'wrong-source')
+
+    def test_sdl_export_requires_both_configurations_headers_and_cmake_target(self):
+        for name in ('include/SDL2/SDL.h', 'lib/SDL2-static.lib', 'debug/lib/SDL2-staticd.lib',
+                     'share/sdl2/SDL2Config.cmake', 'share/sdl2/copyright'):
+            with self.subTest(name=name):
+                path = self.export / 'installed/x64-windows-static' / name
+                original = path.read_bytes()
+                path.unlink()
+                with self.assertRaisesRegex(ValueError, 'installed static dependencies'):
+                    self.assemble(self.root / 'missing-sdl')
+                path.write_bytes(original)
+
+    def test_recipe_requires_sdl_for_new_base(self):
+        self.recipe['ports'].remove('sdl2[core]')
+        self.recipe_files['third_party/build-support/windows-base.json'] = json.dumps(self.recipe).encode()
+        with self.assertRaisesRegex(ValueError, 'Unsupported Windows base recipe'):
+            base.recipe_identity()
 
     def test_invalid_provenance_and_lto_recipe_are_rejected(self):
         for key, value in (('source_sha', 'main'), ('linker_version', 'latest'), ('runner_image', 'bad\nvalue')):

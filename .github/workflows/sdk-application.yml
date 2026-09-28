@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       scope:
-        description: 'packages builds and verifies archives; tests runs source qualification'
+        description: 'packages builds archives; tests runs source qualification; frontends independently checks TUI and framebuffer'
         type: string
         required: true
       backend:
@@ -45,7 +45,7 @@ jobs:
     steps:
       - name: Validate qualification scope and prepare logs
         run: |
-          case "$SDK_SCOPE" in packages|tests) ;; *) echo '::error::Invalid SDK qualification scope'; exit 2 ;; esac
+          case "$SDK_SCOPE" in packages|tests|frontends) ;; *) echo '::error::Invalid SDK qualification scope'; exit 2 ;; esac
           case "$SDK_BACKEND" in fltk|rev) ;; *) echo '::error::Invalid GUI backend'; exit 2 ;; esac
           SDK_LOG_DIR="$RUNNER_TEMP/datapump-sdk-$SDK_SCOPE-$SDK_BACKEND"
           mkdir -p "$SDK_LOG_DIR"
@@ -130,15 +130,15 @@ jobs:
         if: inputs.scope == 'packages'
         run: |
           {
-            ./build.sh package --sdk "$GITHUB_WORKSPACE/build/sdk" --backend "$SDK_BACKEND" --build-dir build/sdk-application --jobs 2 --build-jobs "$(nproc)"
-            xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' build/sdk/bin/cmake -DARCHIVE_DIR="$PWD/build/sdk-application/releases" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.36 -DREQUIRE_MANUALS=ON -P tools/verify-native-archives.cmake
+            ./build.sh package --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --backend "$SDK_BACKEND" --build-dir build/sdk-application --jobs 2 --build-jobs "$(nproc)"
+            xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' build/sdk/bin/cmake -DARCHIVE_DIR="$PWD/build/sdk-application/releases" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.36 -DREQUIRE_MANUALS=ON -DREQUIRE_FRONTENDS=ON -P tools/verify-native-archives.cmake
           } 2>&1 | tee "$SDK_LOG_DIR/packages.log"
       - name: Run build and packaging isolation regressions
         if: inputs.scope == 'tests'
         run: |
           {
-            ./build.sh test build --sdk "$GITHUB_WORKSPACE/build/sdk" --backend "$SDK_BACKEND" --build-dir build/sdk-application --jobs 2 --build-jobs "$(nproc)" -- -DDATAPUMP_PORTABLE=ON
-            ./build.sh test packaging --sdk "$GITHUB_WORKSPACE/build/sdk" --backend "$SDK_BACKEND" --build-dir build/sdk-application --jobs 2 --build-jobs "$(nproc)" -- -DDATAPUMP_PORTABLE=ON
+            ./build.sh test build --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --backend "$SDK_BACKEND" --build-dir build/sdk-application --jobs 2 --build-jobs "$(nproc)" -- -DDATAPUMP_PORTABLE=ON
+            ./build.sh test packaging --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --backend "$SDK_BACKEND" --build-dir build/sdk-application --jobs 2 --build-jobs "$(nproc)" -- -DDATAPUMP_PORTABLE=ON
           } 2>&1 | tee "$SDK_LOG_DIR/build-packaging-tests.log"
       - name: Preserve wire and shared GUI contracts with the SDK toolchain
         if: inputs.scope == 'tests' && inputs.backend == 'fltk'
@@ -159,10 +159,14 @@ jobs:
           DATAPUMP_SMOKE_SCOPE: source/native
         run: |
           {
-            ./build.sh --sdk "$GITHUB_WORKSPACE/build/sdk" --backend rev --build-dir build/sdk-application --jobs 2 --build-jobs "$(nproc)" -- -DDATAPUMP_PORTABLE=ON -DDATAPUMP_TEST_NATIVE_GUI=ON -DGUI_SMOKE_TIMEOUT=600
+            ./build.sh --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --backend rev --build-dir build/sdk-application --jobs 2 --build-jobs "$(nproc)" -- -DDATAPUMP_PORTABLE=ON -DDATAPUMP_TEST_NATIVE_GUI=ON -DGUI_SMOKE_TIMEOUT=600
             build/sdk/bin/cmake --build build/sdk-application --target datapump-tests-native --parallel "$(nproc)"
             xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' python3 tools/run-native-tests.py --allow-budget-exhaustion --build-dir build/sdk-application --ctest "$GITHUB_WORKSPACE/build/sdk/bin/ctest" --report-dir "$DATAPUMP_CI_SMOKE_WARNINGS_DIR"
           } 2>&1 | tee "$SDK_LOG_DIR/native.log"
+      - name: Check terminal and framebuffer independently of native GUI and modem suites
+        if: inputs.scope == 'frontends'
+        run: |
+          ./build.sh test frontends --cli --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --build-dir build/sdk-frontends --jobs 1 --build-jobs "$(nproc)" -- -DDATAPUMP_PORTABLE=ON 2>&1 | tee "$SDK_LOG_DIR/frontends.log"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: inputs.scope == 'packages'
         with:
@@ -182,6 +186,7 @@ jobs:
           path: |
             ${{ env.SDK_LOG_DIR }}/*.log
             build/sdk-application/Testing/Temporary/*.log
+            build/sdk-frontends/Testing/Temporary/*.log
             build/sdk-application/CMakeFiles/CMakeConfigureLog.yaml
             build/sdk-application/build-info.txt
             ${{ github.workspace }}/build/ci-smoke-results/
@@ -196,8 +201,10 @@ jobs:
             printf 'SDK **%s / %s**: **%s**.\n\n' "$SDK_SCOPE" "$SDK_BACKEND" "$RESULT"
             if [ "$SDK_SCOPE" = packages ]; then
               echo 'This scope builds and verifies both portable archives, including copied GUI smoke with any incomplete coverage recorded, and supplies the compatibility matrix.'
+            elif [ "$SDK_SCOPE" = frontends ]; then
+              echo 'This independent scope runs every registered TUI and framebuffer case with SDK dependencies and no native GUI toolkit.'
             else
               echo 'This scope runs build/packaging regressions plus the FLTK preservation contract or Rev native conformance. Source qualification runs independently of package delivery.'
             fi
-            echo 'The complete SDK workflow requires both source scopes, both package scopes and every copied-runtime check; a partial scope is not full qualification.'
+            echo 'The complete SDK workflow requires both source scopes, both package scopes, the independent frontend scope and every copied-runtime check; a partial scope is not full qualification.'
           } >> "$GITHUB_STEP_SUMMARY"

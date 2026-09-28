@@ -146,6 +146,8 @@ def required_coverage(metadata):
     linux = ['Debian 12', 'Debian 13', 'Ubuntu 24.04', 'Ubuntu 26.04']
     checks = ['SHA-256', 'package manifest', 'CLI commands', 'GUI self-check and smoke',
               'relocation to a path with spaces', 'runtime dependency closure']
+    if metadata.get('frontends'):
+        checks += ['required TUI and framebuffer binaries/manuals', 'TUI and framebuffer self-checks']
     platforms = {
         'source_tests': {
             'linux-x86_64': {'environment': 'Debian 12 (source SDK)' if sdk else 'Ubuntu 22.04',
@@ -164,6 +166,9 @@ def required_coverage(metadata):
         },
     }
     coverage = {section: {} for section in platforms}
+    if metadata.get('frontends'):
+        for source in platforms['source_tests'].values():
+            source['groups'] = source['groups'] + ['frontends (independent job)']
     for target in release.application_targets(metadata):
         platform = release.target_platform(metadata, target)
         backend = release.target_backend(metadata, target)
@@ -471,6 +476,7 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
         if metadata['schema'] >= 6:
             evidence['dependencies'] = metadata['dependencies']
             evidence['dependency_assets'] = {name: state['inventory'][name] for name in sorted(release.dependency_assets(metadata))}
+        evidence['frontends'] = metadata.get('frontends', [])
         stem = f'certification-{run_id}-attempt-{run_attempt}'
         if any(stem + suffix in state['assets'] for suffix in (
                 '.json', '.md', '-warning.log', '-smoke-warnings.json', '-smoke-warnings.log')):
@@ -511,6 +517,9 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
             f'# Release certification: {status_label}\n\n'
             f'Release `{tag}`; source `{metadata["source_sha"]}`; '
             f'[workflow run {run_id}, attempt {run_attempt}]({run_url}/attempts/{run_attempt}).\n\n{SCOPE}\n\n'
+            + ('TUI and framebuffer delivery and independent source checks are required by this release inventory.\n\n'
+               if metadata.get('frontends') else
+               'Historical release: TUI/framebuffer delivery is not declared; no frontend coverage is claimed.\n\n')
             + ('**Windows Rev graphics coverage unavailable.** '
                + ('Hosted certification passed with documented exclusions. ' if passed
                   else 'Hosted certification failed. ')
@@ -603,6 +612,7 @@ def output_values(state, output):
               'apt_repository': str(metadata['schema'] >= 3).lower(),
               'distro_recipes': str(metadata['schema'] >= 4).lower(),
               'distro_channels': str(metadata['schema'] >= 5).lower(),
+              'frontends': str(bool(metadata.get('frontends'))).lower(),
               'gui_backends': json.dumps(metadata.get('gui_backends', ['fltk']), separators=(',', ':')),
               'application_targets': json.dumps(list(release.application_targets(metadata)), separators=(',', ':'))}
     for name in ('archive', 'package_root'):

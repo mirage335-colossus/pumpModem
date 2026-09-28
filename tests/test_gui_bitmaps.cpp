@@ -1,6 +1,7 @@
 #include "../src/gui/plot_render.hpp"
 #include "../src/gui/theme.hpp"
 #include "../src/gui/bitmap_sources.hpp"
+#include "../src/gui/terminal_bitmap.hpp"
 #include "../src/signal_view.hpp"
 #include "datapump/channel.hpp"
 #include "datapump/pattern_code.hpp"
@@ -508,6 +509,31 @@ void qr_and_patterns() {
     const auto normal = render(PlotSnapshot::qr(code, plots::QrBrightness::normal), full_bitmap_request(side, side));
     const auto dark = render(PlotSnapshot::qr(code), full_bitmap_request(side, side, false, true));
     const auto gray = render(PlotSnapshot::qr(code), full_bitmap_request(side, side));
+    const BitmapSource terminal_source=PlotSnapshot::qr(code);
+    check(terminal_source.sampling()==BitmapSampling::discrete &&
+          terminal_source.minimum_extent().width==static_cast<unsigned>(code.size()+8) &&
+          terminal_source.minimum_extent().height==static_cast<unsigned>(code.size()+8),
+          "QR source lost discrete sampling or its quiet-zone extent");
+    const auto binary=render(PlotSnapshot::qr(code),full_bitmap_request(side,side,true));
+    check(binary.pixels()==normal.pixels(),"binary display lost QR contrast at default dark brightness");
+    const auto modules=static_cast<unsigned>(code.size()+8);
+    for(bool blocks:{false,true}) {
+        const auto cells=terminal::bitmap_cells(terminal_source,blocks?modules:modules*2,
+                                               blocks?(modules+1)/2:modules,0,blocks);
+        check(cells.notice.empty(),"A fitting QR was replaced by a size notice");
+        for(unsigned y=0;y<modules;++y)for(unsigned x=0;x<modules;++x) {
+            const auto& cell=cells.cells[static_cast<std::size_t>(blocks?y/2:y)*cells.width+(blocks?x:x*2)];
+            const bool lit=cell.reverse||cell.glyph==(y%2?U'\u2584':U'\u2580');
+            const bool quiet=x<4||y<4||x>=modules-4||y>=modules-4;
+            const bool expected=quiet||!code.dark(static_cast<int>(x)-4,static_cast<int>(y)-4);
+            check(lit==expected,"Terminal rendering changed an actual QR module or quiet-zone sample");
+        }
+    }
+    auto rectangular_request=full_bitmap_request(side,side*2,true);
+    rectangular_request.sample_aspect_ratio=2;
+    const auto rectangular=render(PlotSnapshot::qr(code),rectangular_request);
+    for(unsigned y=0;y<side*2;++y)for(unsigned x=0;x<side;++x)
+        check(red(rectangular,x,y)==red(binary,x,y/2),"QR did not preserve square modules on rectangular samples");
     for (unsigned y = 0; y < side; ++y) for (unsigned x = 0; x < side; ++x) {
         const auto offset = (static_cast<std::size_t>(y) * side + x) * 3;
         const bool black = red(normal, x, y) == 0;
@@ -518,6 +544,8 @@ void qr_and_patterns() {
     }
     const auto off = render(PlotSnapshot::qr(code, plots::QrBrightness::off), full_bitmap_request(side, side, false, true));
     check(std::all_of(off.pixels().begin(), off.pixels().end(), [](auto value) { return value == 0; }), "off QR must be entirely black");
+    const auto binary_off=render(PlotSnapshot::qr(code,plots::QrBrightness::off),full_bitmap_request(side,side,true));
+    check(binary_off.pixels()==off.pixels(),"binary QR mode overrode explicit off setting");
     const auto small = render(PlotSnapshot::qr(code, plots::QrBrightness::normal), full_bitmap_request(10, 10));
     check(std::all_of(small.pixels().begin(), small.pixels().end(), [](auto value) { return value == 255; }), "undersized QR must not crop modules/quiet zone");
     const auto fixture = pattern_fixture();

@@ -6,7 +6,7 @@ consoles. `datapump-fb` presents a software framebuffer through SDL2; the same
 framebuffer library can be embedded in an engine without SDL or a native window.
 
 The terminal and framebuffer implementations are deliberately separate below
-`Application`. The terminal uses cell layout and ASCII plot sampling. The
+`Application`. The terminal uses cell layout and colored ASCII plot sampling. The
 framebuffer uses pixel layout, software widgets, full-resolution plot sources and
 pointer input. Neither implements modem functionality. Adding ordinary fields,
 actions and documents to the shared declarations reaches both interfaces without
@@ -15,10 +15,12 @@ support in each relevant renderer, as it does for FLTK and Rev.
 
 ## Building
 
-Install ncurses development files for the terminal application, and SDL2
+On POSIX systems, install ncurses development files for the terminal application, and SDL2
 development files for its framebuffer host. On Debian these are `libncurses-dev`
 and `libsdl2-dev`. They are optional; ordinary GUI/CLI builds do not require them.
-Build configuration never downloads dependencies.
+Windows uses its native console API for the TUI and SDL2 for the framebuffer;
+the prepared Windows dependency recipe supplies SDL2. Build configuration never
+downloads dependencies.
 
 ```sh
 ./build.sh --cli --tui --fb
@@ -30,7 +32,9 @@ Build configuration never downloads dependencies.
 Omit `--cli` to also build the selected desktop GUI. `--backend fltk|rev` selects
 only that GUI; it never selects TUI or framebuffer behavior. The corresponding
 CMake options are `DATAPUMP_BUILD_TUI`, `DATAPUMP_BUILD_FB`,
-`DATAPUMP_TUI_BACKEND=ncurses` and `DATAPUMP_FB_HOST=sdl`.
+`DATAPUMP_TUI_BACKEND=auto` and `DATAPUMP_FB_HOST=sdl`. `auto` chooses `ncurses`
+on POSIX and `winconsole` on Windows; either may be selected explicitly on its
+matching platform. Windows binaries are `datapump-tui.exe` and `datapump-fb.exe`.
 Use a new build directory when changing dependencies/toolchains.
 
 For engine integration without a window library:
@@ -65,24 +69,36 @@ depends on ncurses/GPM availability. A remote Linux VT does not automatically
 forward its local GPM daemon over SSH. Use `ssh -t` for an interactive session.
 The modem uses the machine running the program, including that machine's audio.
 
-The display has a mandatory ASCII fallback. Received text still uses the stricter
+The display has a mandatory ASCII fallback. QR images use fixed half-block glyphs
+on capable terminals, preserving two module rows per terminal row and a complete
+quiet zone. The ASCII fallback uses two character columns per module. If the
+available area cannot hold every module, the plot asks for more space instead of
+showing a misleading uniform image. Binary terminal QR rendering uses full
+contrast; the explicit QR off setting still blanks the image.
+Received text still uses the stricter
 shared allowlist. Other untrusted display text is converted to literal cells;
 terminal controls cannot be introduced through labels, paths, errors or messages.
-Only ncurses and the host's fixed terminal-control sequences can control the
-terminal. Correctly framed bracketed paste is handled as a single text event.
+Only the host renderer's fixed glyphs and terminal-control sequences can control
+the terminal. The Windows host writes literal console cells. Correctly framed
+POSIX bracketed paste is handled as a single text event.
 The terminal protocol cannot authenticate an embedded paste-ending sequence;
 the received-text policy removes such control bytes before copying or display.
-Pastes exceeding the host's 4 MiB limit are rejected completely, with a visible
+POSIX framed pastes exceeding the host's 4 MiB limit are rejected completely, with a visible
 reason and without changing the editor draft or selection.
-Terminals without bracketed-paste reporting cannot distinguish pasted keys from
-typed keys; paste into an editor and use explicit action controls.
+Terminals without bracketed-paste reporting, including the Windows console host,
+cannot distinguish pasted keys from typed keys; paste into an editor and use
+explicit action controls.
 
-Terminal output is queued with a bounded nonblocking transport. Slow SSH output
-does not stop application progress polling. Shutdown restores terminal modes on
-normal exit and handled termination signals. Abrupt process termination cannot
-run cleanup. Plot painting can drop intermediate display frames; receiver state
-and accepted pending bits retain their original shared behavior.
+The POSIX ncurses host queues output with a bounded nonblocking transport, so
+slow SSH output does not stop application progress polling. The Windows host
+writes a bounded surface through the native console API; blocked-reader behavior
+through ConPTY remains unqualified. Shutdown restores terminal modes on normal
+exit and handled termination signals. Abrupt process termination cannot run
+cleanup. Plot painting can drop intermediate display frames; receiver state and
+accepted pending bits retain their original shared behavior.
 
+Waterfall and constellation cells retain producer colors where the terminal
+supports them, with a grayscale ASCII fallback for monochrome terminals.
 Waterfall downsampling requests a full retained extent and peak-pools in both
 dimensions, preserving brief carriers between destination samples. This is a
 generic producer capability, not a terminal-side modem interpretation. Other
@@ -124,6 +140,8 @@ default font and shared native widget colors. Dropdown arrows and checkmarks are
 drawn as geometry. Unsupported locally typed Unicode glyphs appear as placeholders
 while text bytes remain in the model.
 Framebuffer plots retain their pixel resolution and color; they are not ASCII art.
+Waterfall startup leaves the unused history area blank and fills it progressively,
+using the same viewport scale as FLTK and Rev.
 
 The committed atlas comes from the existing Rev font resource (DejaVu Sans Mono
 Book 2.37, despite its `DejaVuSans.ttf` filename). Its source checksum, FreeType
@@ -147,16 +165,24 @@ hosts must qualify their display memory, scheduling, audio and modem resources.
 
 ## Packaging and verification
 
-`./build.sh package --tui --fb` includes both optional executables and manuals in
-the ordinary portable bundle. Distribution wrappers place them under the existing
+`./build.sh package --tui --fb` includes both executables and manuals in
+the portable bundle. New release and package-manager builds enable both, and
+verify their binary/manual inventory. Distribution wrappers place them under the existing
 `/opt/datapump/fltk/bin/` or `/opt/datapump/rev/bin/` bundle. The FLTK package owns
 `datapump-tui-ncurses` and `datapump-fb-sdl`; a coinstalled Rev bundle uses
 `datapump-tui-ncurses-rev` and `datapump-fb-sdl-rev`. This package ownership does
 not introduce an FLTK/Rev dependency into either frontend. Historical release
 payloads acquire no new commands unless they contain the corresponding binaries.
+Portable ncurses packages carry common Linux-console, xterm, screen and tmux
+terminfo descriptions alongside the executable, retaining normal user/system
+lookup for other terminal types. New SDK and Windows base recipes include the
+frontend dependencies; older published recipes remain immutable and require
+explicit base maintenance before building the new release configuration.
 
 The `frontends` test group covers independent UI/renderer behavior and, when
-selected, terminal PTY transport and SDL/headless launch. The existing shared GUI,
+selected, terminal PTY or Windows-console transport and SDL/headless launch.
+CI schedules this group in independent jobs alongside the existing regressions,
+including SDK and Windows builds. The existing shared GUI,
 wire-vector, physical-end, pending-bit, security, build and packaging checks remain
 required. The architecture guard traverses the new implementation files and
 rejects domain bindings below the facade or native-toolkit dependencies above it.

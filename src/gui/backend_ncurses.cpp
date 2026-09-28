@@ -3,6 +3,7 @@
 #endif
 #include "backend_ncurses.hpp"
 #include "terminal_ui.hpp"
+#include "terminal_bitmap.hpp"
 #define NCURSES_NOMACROS 1
 #include <ncurses.h>
 #include <algorithm>
@@ -14,7 +15,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cwchar>
 #include <fcntl.h>
+#include <filesystem>
 #include <iostream>
 #include <limits>
 #include <poll.h>
@@ -42,6 +45,23 @@ constexpr int maximum_columns=400,maximum_rows=160;
 constexpr std::size_t maximum_output=4*1024*1024,maximum_paste=4*1024*1024;
 volatile std::sig_atomic_t interrupted=0;
 void on_signal(int signal) { interrupted=signal; }
+
+void bundled_terminfo(const char* executable) {
+    // A portable package carries the terminal descriptions from its prepared
+    // SDK. Preserve TERMINFO and every caller-supplied search directory; the
+    // empty entry retains ncurses' normal system database lookup.
+    std::error_code error;
+    auto path=std::filesystem::read_symlink("/proc/self/exe",error);
+    if(error) {error.clear();path=std::filesystem::absolute(executable,error);}
+    if(error)return;
+    const auto database=(path.parent_path()/"../share/terminfo").lexically_normal();
+    if(!std::filesystem::is_directory(database,error)||error)return;
+    std::string search;
+    if(const auto* configured=std::getenv("TERMINFO_DIRS"))search=configured;
+    if(!search.empty())search+=':';
+    search+=database.string();search+=':';
+    setenv("TERMINFO_DIRS",search.c_str(),1);
+}
 
 // Only the trusted ncurses renderer writes control sequences. Even command-line
 // diagnostics go through this literal sink, since a filename can contain ESC.
@@ -162,7 +182,11 @@ public:
                 start_color();use_default_colors();
                 init_pair(1,COLOR_WHITE,-1);init_pair(2,COLOR_CYAN,-1);
                 init_pair(3,COLOR_GREEN,-1);init_pair(4,COLOR_YELLOW,-1);init_pair(5,COLOR_RED,-1);
+                plot_colors_=COLORS>=256&&COLOR_PAIRS>272?256:COLORS>=8&&COLOR_PAIRS>32?16:0;
+                for(unsigned color_index=0;color_index<plot_colors_;++color_index)
+                    init_pair(static_cast<short>(16+color_index),static_cast<short>(COLORS>=16?color_index:color_index%8),COLOR_BLACK);
             }
+            half_blocks_=MB_CUR_MAX>1&&wcwidth(L'\u2580')==1&&wcwidth(L'\u2584')==1;
             curs_set(0);
             if(fcntl(output_fd_,F_SETFL,flags_|O_NONBLOCK)<0)
                 throw std::runtime_error("Cannot make terminal output nonblocking");
@@ -234,24 +258,24 @@ public:
                     ++x;
                 }
             } else if(primitive.kind==Primitive::Kind::bitmap) {
-                // Render a two-by-two sample grid for each tall terminal cell,
-                // then aggregate it. The producer owns all plot semantics.
-                const auto width=static_cast<unsigned>(std::min(box.w,maximum_columns)*2);
-                const auto height=static_cast<unsigned>(std::min(box.h,maximum_rows)*2);
-                if(!width||!height)continue;
-                BitmapImage samples(width,height,PixelFormat::gray8);
-                auto request=full_bitmap_request(width,height,false,false);
-                request.sample_aspect_ratio=0.5;
-                request.fit_content=true;
-                primitive.bitmap.paint(request,[&](unsigned x,unsigned y,PixelBlock pixels){samples.blit(x,y,pixels);},false);
-                constexpr char shades[]=" .:-=+*#%@";
-                const auto& pixels=samples.pixels();
+                const auto cells=terminal::bitmap_cells(primitive.bitmap,
+                    static_cast<unsigned>(std::min(box.w,maximum_columns)),
+                    static_cast<unsigned>(std::min(box.h,maximum_rows)),plot_colors_,half_blocks_);
                 for(int y=y0;y<y1;++y)for(int x=x0;x<x1;++x) {
-                    const unsigned sx=static_cast<unsigned>(x-box.x)*2,sy=static_cast<unsigned>(y-box.y)*2;
-                    if(sx+1>=width||sy+1>=height)continue;
-                    const unsigned sum=pixels[sy*width+sx]+pixels[sy*width+sx+1]+
-                        pixels[(sy+1)*width+sx]+pixels[(sy+1)*width+sx+1];
-                    mvaddch(y,x,shades[sum*9/(4*255)]);
+                    const auto sx=static_cast<unsigned>(x-box.x),sy=static_cast<unsigned>(y-box.y);
+                    if(sx>=cells.width||sy>=cells.height)continue;
+                    const auto& cell=cells.cells[static_cast<std::size_t>(sy)*cells.width+sx];
+                    auto attribute=cell.reverse?A_REVERSE:A_NORMAL;
+                    if(plot_colors_) {
+                        attribute|=COLOR_PAIR(16+cell.color);
+                        if(COLORS<16&&cell.color>=8)attribute|=A_BOLD;
+                    }
+                    attrset(attribute);
+                    if(cell.glyph<=126)mvaddch(y,x,static_cast<chtype>(cell.glyph));
+                    else {
+                        const wchar_t glyph[]{static_cast<wchar_t>(cell.glyph),0};
+                        mvaddnwstr(y,x,glyph,1);
+                    }
                 }
             }
         }
@@ -332,6 +356,8 @@ private:
     termios saved_mode_{};
     int flags_=-1,output_fd_=-1,columns_=0,rows_=0;
     bool output_nonblocking_=false,colors_=false,disconnected_=false,pasting_=false,paste_overflow_=false,resized_=false;
+    bool half_blocks_=false;
+    unsigned plot_colors_=0;
     const std::array<int,4> signals_{SIGINT,SIGTERM,SIGHUP,SIGPIPE};
     std::array<struct sigaction,4> saved_signals_{};
     std::size_t signal_count_=0;
@@ -491,6 +517,7 @@ int run_terminal(Launch launch) {return run_application(std::move(launch));}
 #ifndef DATAPUMP_NCURSES_ADAPTER_TEST
 int main(int argc,char** argv) {
     std::setlocale(LC_CTYPE,"");
+    datapump::gui::bundled_terminfo(argv[0]);
     datapump::gui::LiteralStream safe_out(std::cout),safe_err(std::cerr);
     return datapump::gui::gui_main(argc,argv,"ncurses",datapump::gui::run_terminal,"datapump-tui");
 }
@@ -501,7 +528,7 @@ int main() {
     using namespace datapump::gui;
     std::setlocale(LC_CTYPE,"");
     try {
-        Terminal terminal(false);bool finished=false,dirty=true;unsigned ticks=0,events=0,pastes=0;
+        Terminal terminal(std::getenv("DATAPUMP_TEST_COLOR")!=nullptr);bool finished=false,dirty=true;unsigned ticks=0,events=0,pastes=0;
         std::string last="ready",text;
         auto next_paint=std::chrono::steady_clock::now();
         while(!finished&&!interrupted&&!terminal.disconnected()) {
@@ -543,6 +570,28 @@ int main() {
                     sink(0,0,{request.width,request.height,request.width,PixelFormat::gray8,pixels.data()});
                 });scene.primitives.push_back(plot);
                 plot.bounds={30,5,20,3};plot.clip=ui::Rect{35,5,10,2};scene.primitives.push_back(std::move(plot));
+                if(text=="binary") {
+                    terminal::Primitive binary;binary.kind=terminal::Primitive::Kind::bitmap;binary.bounds={0,10,32,8};
+                    binary.bitmap=BitmapSource([](const BitmapRequest& request,const BitmapSink& sink,bool) {
+                        if(!request.monochrome||request.sample_aspect_ratio!=1)throw std::runtime_error("Binary terminal geometry lost");
+                        std::vector<unsigned char> pixels(request.width*request.height);
+                        for(unsigned y=0;y<request.height;++y)for(unsigned x=0;x<request.width;++x)
+                            pixels[y*request.width+x]=(x/2+y)%2?255:0;
+                        sink(0,0,{request.width,request.height,request.width,PixelFormat::gray8,pixels.data()});
+                    },BitmapSampling::discrete,{0,0,12,12});scene.primitives.push_back(std::move(binary));
+                }
+                if(text=="colors") {
+                    terminal::Primitive color;color.kind=terminal::Primitive::Kind::bitmap;color.bounds={0,10,32,3};
+                    color.bitmap=BitmapSource([](const BitmapRequest& request,const BitmapSink& sink,bool enabled) {
+                        if(!enabled||!request.supports_rgb24)throw std::runtime_error("Terminal RGB color support lost");
+                        std::vector<unsigned char> pixels(request.width*request.height*3);
+                        for(unsigned y=0;y<request.height;++y)for(unsigned x=0;x<request.width;++x) {
+                            const auto offset=(y*request.width+x)*3;
+                            pixels[offset+x/(request.width/3+1)]=255;
+                        }
+                        sink(0,0,{request.width,request.height,request.width*3,PixelFormat::rgb24,pixels.data()});
+                    });scene.primitives.push_back(std::move(color));
+                }
                 terminal.paint(scene);dirty=false;
             }
             terminal.flush();pollfd input{STDIN_FILENO,POLLIN,0};poll(&input,1,4);

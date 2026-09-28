@@ -10,7 +10,7 @@ on:
         type: string
         default: Release
       scope:
-        description: 'core, fast, live, calibration, calibration-aggregate, package, or sanitizer-gui'
+        description: 'core, fast, live, calibration, calibration-aggregate, frontends, package, or sanitizer-gui'
         type: string
         required: true
       calibration_section:
@@ -64,7 +64,7 @@ jobs:
       - name: Prepare build dependencies
         run: |
           cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
-          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates curl git cmake ninja-build make g++-11 binutils libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev xvfb xauth fontconfig-config fonts-dejavu-core python3
+          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates curl git cmake ninja-build make g++-11 binutils libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev libncurses-dev libsdl2-dev xvfb xauth fontconfig-config fonts-dejavu-core python3
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -72,22 +72,25 @@ jobs:
         run: |
           sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
           echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
-      - name: Configure native application without Python
+      - name: Configure native application and selected test scope
         run: >-
           cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc-11 -DCMAKE_CXX_COMPILER=g++-11
           -DCMAKE_BUILD_TYPE=${{ inputs.build_type }}
           -DDATAPUMP_SANITIZERS=${{ inputs.build_type == 'Debug' && 'ON' || 'OFF' }}
           -DDATAPUMP_PORTABLE=${{ inputs.build_type == 'Release' && 'ON' || 'OFF' }}
           -DBUILD_TESTING=${{ inputs.scope == 'package' && 'OFF' || 'ON' }}
+          -DDATAPUMP_BUILD_TUI=${{ (inputs.scope == 'package' || inputs.scope == 'frontends') && 'ON' || 'OFF' }}
+          -DDATAPUMP_BUILD_FB=${{ (inputs.scope == 'package' || inputs.scope == 'frontends') && 'ON' || 'OFF' }}
           -DDATAPUMP_CALIBRATION_SECTION=${{ inputs.calibration_section }}
           -DDATAPUMP_CALIBRATION_SHARD=${{ inputs.calibration_shard }}
           -DDART_TESTING_TIMEOUT=3600
-          -DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE
+          -DCMAKE_DISABLE_FIND_PACKAGE_Python3=${{ inputs.scope == 'frontends' && 'FALSE' || 'TRUE' }}
       - name: Build this shard's prerequisites
         run: |
           case "$CI_SCOPE" in
             calibration|calibration-aggregate) targets=(test_differential_receiver_probability) ;;
             package) targets=(datapump-apps) ;;
+            frontends) targets=(datapump-tests-frontends) ;;
             sanitizer-gui) targets=(datapump-apps test_gui_smoke_budget test_gui_launch_command) ;;
             core) targets=(datapump-apps datapump-tests-ci-core) ;;
             fast) targets=(datapump-tests-fast) ;;
@@ -96,7 +99,7 @@ jobs:
           esac
           cmake --build build --target "${targets[@]}" --parallel "$(nproc)"
       - name: Run the selected native tests
-        if: inputs.scope == 'core' || inputs.scope == 'fast' || inputs.scope == 'live' || inputs.scope == 'calibration'
+        if: inputs.scope == 'core' || inputs.scope == 'fast' || inputs.scope == 'live' || inputs.scope == 'calibration' || inputs.scope == 'frontends'
         run: |
           options=()
           if [ "$DATAPUMP_SANITIZERS" = ON ]; then
@@ -106,7 +109,7 @@ jobs:
             options+=(--sanitizer-realtime)
           fi
           jobs=2
-          if [ "$CI_SCOPE" = live ]; then jobs=1; fi
+          if [ "$CI_SCOPE" = live ] || [ "$CI_SCOPE" = frontends ]; then jobs=1; fi
           python3 tools/run-ci-tests.py --build-dir build --scope "$CI_SCOPE" --jobs "$jobs" --report build/ci-test-report.json "${options[@]}"
       - name: Record partial capture scope
         if: inputs.calibration_shard != ''
@@ -171,7 +174,7 @@ jobs:
           DATAPUMP_SMOKE_SCOPE: published/native-archives
         run: |
           cmake --build build --target package --parallel "$(nproc)"
-          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/build/releases" -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.35 -DREQUIRE_MANUALS=ON -P tools/verify-native-archives.cmake 2>&1 | tee build/package-archives.log
+          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/build/releases" -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.35 -DREQUIRE_MANUALS=ON -DREQUIRE_FRONTENDS=ON -P tools/verify-native-archives.cmake 2>&1 | tee build/package-archives.log
           echo 'Portable Release desktop, relocation, corruption, both archive formats and ABI checks completed; any incomplete smoke coverage is listed in the retained reports. Independent regression/calibration jobs still determine the overall workflow result.' >> "$GITHUB_STEP_SUMMARY"
       - name: Upload Linux offline bundles
         if: inputs.scope == 'package'

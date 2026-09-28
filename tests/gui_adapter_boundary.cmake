@@ -4,14 +4,14 @@ cmake_minimum_required(VERSION 3.21)
 # helper must not bypass the boundary. New application fields/pages/producers
 # do not require changes to this list; a new public primitive does.
 set(contract_headers
-  ui_surface.hpp terminal_ui.hpp framebuffer.hpp framebuffer_ui.hpp framebuffer_font.hpp
+  ui_surface.hpp terminal_ui.hpp terminal_bitmap.hpp framebuffer.hpp framebuffer_ui.hpp framebuffer_font.hpp
   application.hpp launch_command.hpp bitmap.hpp ui_contract.hpp ui_document.hpp
   desktop_layout.hpp control_layout.hpp document_layout.hpp document_actions.hpp
   control_binding.hpp record_interactions.hpp presentation_palette.hpp
   text_policy.hpp utf8_policy.hpp control_interactions.hpp record_scroll.hpp service_queue.hpp chrome_layout.hpp theme.hpp
   binding_state.hpp record_reconciliation.hpp document_presentation.hpp overlay.hpp)
 set(native_headers backend_fltk_document.hpp backend_rev_document.hpp
-  bitmap_fltk.hpp theme_fltk.hpp backend_rev_theme.hpp rev_platform.hpp backend_ncurses.hpp)
+  bitmap_fltk.hpp theme_fltk.hpp backend_rev_theme.hpp rev_platform.hpp backend_ncurses.hpp backend_winconsole.hpp)
 
 # Public headers may depend only on each other and the standard library. An
 # unknown angle include is not automatically a system header: that used to let
@@ -135,10 +135,10 @@ function(check_gui_boundary path native)
   set_property(GLOBAL APPEND PROPERTY gui_boundary_visited "${path}")
   read_gui_source("${path}" source)
   get_filename_component(name "${path}" NAME)
-  if(name MATCHES "^(framebuffer|backend_sdl)" AND source MATCHES "#[ \t]*include[^\n]*(terminal_ui|backend_ncurses)")
+  if(name MATCHES "^(framebuffer|backend_sdl)" AND source MATCHES "#[ \t]*include[^\n]*(terminal_ui|terminal_bitmap|backend_ncurses|backend_winconsole)")
     message(FATAL_ERROR "${name} depends on the terminal implementation; framebuffer interaction must remain independent.")
   endif()
-  if(name MATCHES "^(terminal_ui|backend_ncurses)" AND source MATCHES "#[ \t]*include[^\n]*(framebuffer|backend_sdl)")
+  if(name MATCHES "^(terminal_ui|terminal_bitmap|backend_ncurses|backend_winconsole)" AND source MATCHES "#[ \t]*include[^\n]*(framebuffer|backend_sdl)")
     message(FATAL_ERROR "${name} depends on the framebuffer implementation; terminal interaction must remain independent.")
   endif()
   if(native)
@@ -192,7 +192,7 @@ function(check_gui_boundary path native)
       check_gui_boundary("${ROOT}/src/gui/${header}" FALSE)
     elseif(native AND header IN_LIST native_headers)
       check_gui_boundary("${ROOT}/src/gui/${header}" TRUE)
-    elseif(native AND include MATCHES "<" AND header MATCHES "^(FL/|X11/|sys/|windows\\.h$|shellapi\\.h$|unistd\\.h$|SDL[^/]*\\.h$|ncurses\\.h$|curses\\.h$|poll\\.h$|termios\\.h$|fcntl\\.h$)")
+    elseif(native AND include MATCHES "<" AND header MATCHES "^(FL/|X11/|sys/|windows\\.h$|shellapi\\.h$|io\\.h$|unistd\\.h$|SDL[^/]*\\.h$|ncurses\\.h$|curses\\.h$|poll\\.h$|termios\\.h$|fcntl\\.h$)")
       continue() # Toolkit drawing and native platform services.
     else()
       message(FATAL_ERROR "${name} includes '${header}' outside the public GUI/native helper boundary.")

@@ -138,14 +138,17 @@ class SourceSdkTests(unittest.TestCase):
                                  'sha256': sdk.digest(bootstrap)},
                     'glibc_source': {'file': libc.name, 'sha256': sdk.digest(libc)}}
         generated_locales = ''
+        missing_feature = ''
         def configure(args, **kwargs):
             output = Path(next(str(arg)[2:] for arg in args if str(arg).startswith('O=')))
             output.mkdir(parents=True, exist_ok=True)
             (output / '.config').write_text('\n'.join([
                 'BR2_GCC_VERSION_15_X=y', 'BR2_PACKAGE_LIBGLEW=y',
                 'BR2_PACKAGE_XLIB_LIBXFT=y', 'BR2_PACKAGE_LIBOPENSSL=y',
+                'BR2_PACKAGE_NCURSES=y', 'BR2_PACKAGE_NCURSES_WCHAR=y',
+                'BR2_PACKAGE_SDL2=y', 'BR2_PACKAGE_SDL2_X11=y',
                 'BR2_TOOLCHAIN_BUILDROOT_GLIBC=y', f'BR2_GENERATE_LOCALE="{generated_locales}"',
-            ]) + '\n')
+            ]).replace(missing_feature, '') + '\n')
         # This fixture simulates the initial x86_64 recipe on every test host;
         # it does not run Buildroot or qualify an ARM-hosted SDK build.
         with patch.object(sdk.platform, 'system', return_value='Linux'), \
@@ -153,6 +156,12 @@ class SourceSdkTests(unittest.TestCase):
                 patch.object(sdk, 'patch_buildroot'), patch.object(sdk, 'run', side_effect=configure), \
                 patch.object(sdk.urllib.request, 'urlopen', side_effect=AssertionError('network')):
             command, _ = sdk.prepare(self.cache, manifest, 'fixture-id', False, 2)
+            for missing_feature in ('BR2_PACKAGE_NCURSES=y', 'BR2_PACKAGE_NCURSES_WCHAR=y',
+                                    'BR2_PACKAGE_SDL2=y', 'BR2_PACKAGE_SDL2_X11=y'):
+                with self.subTest(missing_feature=missing_feature), self.assertRaisesRegex(
+                        ValueError, missing_feature):
+                    sdk.prepare(self.cache, manifest, 'fixture-id', False, 2)
+            missing_feature = ''
             # Newer Buildroot's host-localedef cannot generate this older libc's
             # locale data. The SDK deliberately uses destination-system locales.
             generated_locales = 'en_US.UTF-8'

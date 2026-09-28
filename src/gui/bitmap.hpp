@@ -11,6 +11,9 @@
 
 namespace datapump::gui {
 enum class PixelFormat { gray8, mono1, rgb24 };
+// Discrete artwork has indivisible cells (for example a machine-readable code).
+// Hosts can preserve those cells instead of applying a continuous shade ramp.
+enum class BitmapSampling { continuous, discrete };
 struct PixelBlock {
     unsigned width = 0, height = 0;
     std::size_t stride_bytes = 0;
@@ -43,9 +46,13 @@ class BitmapSource {
 public:
     using Paint = std::function<void(const BitmapRequest&,const BitmapSink&,bool)>;
     BitmapSource() = default;
-    explicit BitmapSource(Paint paint) {
+    explicit BitmapSource(Paint paint, BitmapSampling sampling = BitmapSampling::continuous,
+                          PixelRect minimum_extent = {})
+        : sampling_(sampling), minimum_extent_(minimum_extent) {
         if(paint)paint_=std::make_shared<const Paint>(std::move(paint));
     }
+    BitmapSampling sampling() const { return sampling_; }
+    PixelRect minimum_extent() const { return minimum_extent_; }
     void paint(const BitmapRequest& request,const BitmapSink& sink,bool color_enabled=true) const {
         // A receiver may release or replace its source during synchronous
         // delivery. Retain the executing producer and its captures until return.
@@ -54,6 +61,8 @@ public:
     }
 private:
     std::shared_ptr<const Paint> paint_;
+    BitmapSampling sampling_ = BitmapSampling::continuous;
+    PixelRect minimum_extent_;
 };
 inline std::size_t pixel_row_bytes(unsigned width, PixelFormat format) {
     switch (format) {

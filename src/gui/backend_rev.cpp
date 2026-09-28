@@ -343,17 +343,33 @@ struct BitmapView : theme::RevBox {
             std::max(0.0f,rect.w-resolved.pad.l.val-resolved.pad.r.val),
             std::max(0.0f,rect.h-resolved.pad.t.val-resolved.pad.b.val)};
     }
-    unsigned sample_width() const {
+    Rev::Core::Rect pixel_rect() const {
         const auto area=drawing_rect();const auto dpi=scale();
-        return static_cast<unsigned>(std::max(0.0f,std::round((area.x+area.w)*dpi)-std::round(area.x*dpi)));
+        const auto* window=shared->canvas->window;
+        const auto edge=[dpi](float logical,int extent) {
+            // Rev truncates its logical client size at fractional DPI. Keep
+            // client edges on the actual framebuffer boundary, including the
+            // physical row or column lost by that truncation.
+            if(extent>0 && logical==static_cast<float>(static_cast<int>(extent/dpi)))
+                return static_cast<float>(extent);
+            return std::round(logical*dpi);
+        };
+        const int client_width=window?window->size.w:0,client_height=window?window->size.h:0;
+        const float left=edge(area.x,client_width),top=edge(area.y,client_height);
+        return {left,top,std::max(0.0f,edge(area.x+area.w,client_width)-left),
+            std::max(0.0f,edge(area.y+area.h,client_height)-top)};
+    }
+    unsigned sample_width() const {
+        return static_cast<unsigned>(pixel_rect().w);
     }
     void computePrimitives(re::Event& e) override {
         re::Box::computePrimitives(e);
         const float dpi=scale();
-        const auto area=drawing_rect();
-        const unsigned w=sample_width();
-        const unsigned h=static_cast<unsigned>(std::max(0.0f,std::round((area.y+area.h)*dpi)-std::round(area.y*dpi)));
-        video->data->rect=area;video->data->opacity=1;
+        const auto pixels=pixel_rect();
+        const unsigned w=static_cast<unsigned>(pixels.w),h=static_cast<unsigned>(pixels.h);
+        // Use the same snapped bounds for upload and drawing so each source
+        // sample covers exactly one physical pixel.
+        video->data->rect={pixels.x/dpi,pixels.y/dpi,pixels.w/dpi,pixels.h/dpi};video->data->opacity=1;
         if(!w||!h) {video->data->opacity=0;width=height=0;needs_upload=true;return;}
         if(!needs_upload && width==w && height==h) return;
         BitmapImage image(w,h);

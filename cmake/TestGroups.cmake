@@ -32,6 +32,7 @@ set(_aliases
   "gui_workflow=datapump-gui"
   "tui_self_check=datapump-tui"
   "tui_terminal=datapump_tui_adapter_test"
+  "tui_winconsole=test_winconsole"
   "fb_self_check=datapump-fb"
   "fb_headless=datapump-fb"
   "fb_sdl=datapump-fb"
@@ -72,7 +73,7 @@ foreach(_test IN LISTS _tests)
     list(APPEND _labels build)
   elseif(_test MATCHES "^packaging_" OR _test STREQUAL "native_relocation" OR _test STREQUAL "sdk_packaging")
     list(APPEND _labels packaging)
-  elseif(NOT "gui" IN_LIST _labels AND NOT _test STREQUAL "rev_utf8")
+  elseif(NOT "gui" IN_LIST _labels AND NOT "frontends" IN_LIST _labels AND NOT _test STREQUAL "rev_utf8")
     list(APPEND _labels regular)
   endif()
   if(_test STREQUAL "rev_utf8")
@@ -105,7 +106,7 @@ foreach(_test IN LISTS _tests)
   endforeach()
   if(_test IN_LIST _ci_live_tests)
     list(APPEND _ci_live_targets ${_dependencies})
-  elseif(NOT "fast" IN_LIST _labels AND NOT "calibration" IN_LIST _labels)
+  elseif(NOT "fast" IN_LIST _labels AND NOT "calibration" IN_LIST _labels AND NOT "frontends" IN_LIST _labels)
     list(APPEND _ci_core_targets ${_dependencies})
   endif()
   list(APPEND _all_test_targets ${_dependencies})

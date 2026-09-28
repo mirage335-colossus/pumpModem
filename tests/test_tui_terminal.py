@@ -20,6 +20,7 @@ class Screen:
         self.cells = [[" "] * width for _ in range(height)]
         self.x = self.y = 0
         self.pending = b""
+        self.color_commands = []
 
     def feed(self, data):
         self.pending += data
@@ -79,6 +80,8 @@ class Screen:
                         character = self.cells[self.y][max(0, self.x - 1)]
                         for _ in range(n):
                             self.put(character)
+                    elif final == b"m":
+                        self.color_commands.append(tuple(values))
                     continue
                 if self.pending[1] in b"()*+":
                     if len(self.pending) < 3:
@@ -88,6 +91,17 @@ class Screen:
                     raise AssertionError("Unexpected OSC terminal control sequence")
                 else:
                     self.pending = self.pending[2:]
+                continue
+            if b >= 128:
+                # Only the renderer's two fixed binary-artwork glyphs are
+                # allowed; arbitrary received Unicode still uses literal '_'.
+                if len(self.pending) < 3:
+                    return
+                block = {b"\xe2\x96\x80": "\u2580", b"\xe2\x96\x84": "\u2584"}.get(self.pending[:3])
+                if block is None:
+                    raise AssertionError("Untrusted non-ASCII byte escaped the terminal cell sink")
+                self.pending = self.pending[3:]
+                self.put(block)
                 continue
             self.pending = self.pending[1:]
             if b == 13:
@@ -115,14 +129,16 @@ class Screen:
 
 
 class Pty:
-    def __init__(self, binary, terminal="xterm-256color", width=80, height=24):
+    def __init__(self, binary, terminal="xterm-256color", width=80, height=24, color=False, locale="C.UTF-8"):
         self.master, self.slave = os.openpty()
         self.original_mode = termios.tcgetattr(self.slave)
         self.original_flags = fcntl.fcntl(self.slave, fcntl.F_GETFL)
         self.resize(width, height, notify=False)
         self.screen = Screen(width, height)
         self.raw = bytearray()
-        env = dict(os.environ, TERM=terminal, LC_ALL="C.UTF-8")
+        env = dict(os.environ, TERM=terminal, LC_ALL=locale)
+        if color:
+            env["DATAPUMP_TEST_COLOR"] = "1"
         # A PTY models terminal bytes, not a physical Linux VT or its GPM
         # daemon. Keep that separate device integration out of this fixture.
         # In particular, libgpm retains its console-name allocation when the
@@ -309,6 +325,41 @@ def run(binary):
     finally:
         console.close()
 
+    artwork = Pty(binary)
+    try:
+        artwork.wait_for("Terminal contract ticks=")
+        artwork.send(b"\x1b[200~binary\x1b[201~")
+        artwork.wait_for("\u2580")
+        row = artwork.screen.text().splitlines()[10][:32]
+        assert "\u2580" in row and "\u2584" in row, row
+        assert b"\x1b]52" not in artwork.raw
+        artwork.finish()
+    finally:
+        artwork.close()
+    ascii_art = Pty(binary, terminal="linux", locale="C")
+    try:
+        ascii_art.wait_for("Terminal contract ticks=")
+        ascii_art.send(b"\x1b[200~binary\x1b[201~")
+        ascii_art.wait_for("Enlarge plot (24x12 cells)")
+        assert all(byte < 128 for byte in ascii_art.raw), "ASCII fallback emitted Unicode"
+        ascii_art.finish()
+    finally:
+        ascii_art.close()
+    for kind in ("xterm-256color", "linux"):
+        colored = Pty(binary, terminal=kind, color=True)
+        try:
+            colored.wait_for("Terminal contract ticks=")
+            colored.send(b"\x1b[200~colors\x1b[201~")
+            colored.wait_for("@" * 10)
+            commands = colored.screen.color_commands
+            assert any(31 in value or 91 in value or value[:2] == (38, 5) for value in commands), commands
+            assert any(32 in value or 92 in value or value[:2] == (38, 5) for value in commands), commands
+            assert any(34 in value or 94 in value or value[:2] == (38, 5) for value in commands), commands
+            assert all(byte < 128 for byte in colored.raw), "Colored continuous plots must remain ASCII"
+            colored.finish()
+        finally:
+            colored.close()
+
     stalled = Pty(binary, width=180, height=70)
     try:
         stalled.wait_for("Terminal contract ticks=")
@@ -322,7 +373,7 @@ def run(binary):
         assert time.monotonic() - started < 2, "Output backpressure blocked shutdown"
     finally:
         stalled.close()
-    print("TUI PTY contract passed: ASCII sink, keyboard, paste, terminal mouse, resize, VT terminfo, restoration, backpressure; physical GPM not exercised")
+    print("TUI PTY contract passed: literal sink, fixed binary half-blocks/ASCII fallback, color plots, keyboard, paste, terminal mouse, resize, VT terminfo, restoration, backpressure; physical GPM not exercised")
 
 
 if __name__ == "__main__":

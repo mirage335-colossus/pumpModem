@@ -74,6 +74,12 @@ jobs:
               --metadata /release/release-metadata.json --backend "$backend" --architecture amd64 --root /
             timeout 30 "datapump-cli-$backend" --version
             timeout 120 "datapump-$backend" --self-check
+            suffix=""
+            if [ "$backend" != fltk ]; then suffix="-$backend"; fi
+            for interface in tui-ncurses fb-sdl; do
+              command="datapump-$interface$suffix"
+              if command -v "$command" >/dev/null; then timeout 30 "$command" --version; fi
+            done
           done
           ARCH
       - name: Install signed Arch release packages through pacman
@@ -102,6 +108,12 @@ jobs:
               --metadata /release/release-metadata.json --backend "$backend" --architecture amd64 --root /
             timeout 30 "datapump-cli-$backend" --version
             timeout 120 "datapump-$backend" --self-check
+            suffix=""
+            if [ "$backend" != fltk ]; then suffix="-$backend"; fi
+            for interface in tui-ncurses fb-sdl; do
+              command="datapump-$interface$suffix"
+              if command -v "$command" >/dev/null; then timeout 30 "$command" --version; fi
+            done
           done
           ARCH
       - name: Merge Gentoo binary ebuilds using only prebuilt host dependencies
@@ -188,6 +200,12 @@ jobs:
               --metadata /release/release-metadata.json --backend "$backend" --architecture amd64 --root /
             timeout 30 "datapump-cli-$backend" --version
             timeout 120 "datapump-$backend" --self-check
+            suffix=""
+            if [ "$backend" != fltk ]; then suffix="-$backend"; fi
+            for interface in tui-ncurses fb-sdl; do
+              command="datapump-$interface$suffix"
+              if command -v "$command" >/dev/null; then timeout 30 "$command" --version; fi
+            done
           done
           # Portage metadata/cache work during installation must not prevent the
           # next normal authenticated overlay refresh.

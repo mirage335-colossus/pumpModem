@@ -313,10 +313,35 @@ class CertificationWorkflowTests(unittest.TestCase):
         needs['windows-rev']['outputs']['warnings'] = json.dumps([certify.windows_certification.warning_record()])
         return needs
 
-    def collect_windows(self, needs, targets=None):
+    def collect_windows(self, needs, targets=None, frontends=False):
         if targets is None:
             targets = ['windows-x86_64-fltk', 'windows-x86_64-rev']
-        return self.run_workflow_python('PYWINDOWS', JOB_RESULTS=json.dumps(needs), TARGETS=json.dumps(targets))
+        return self.run_workflow_python('PYWINDOWS', JOB_RESULTS=json.dumps(needs), TARGETS=json.dumps(targets),
+                                       FRONTENDS=str(frontends).lower())
+
+    def test_declared_frontend_windows_scope_is_mandatory(self):
+        for state in ('success', 'failure', 'cancelled', 'skipped', None):
+            needs = self.windows_jobs()
+            if state is not None:
+                needs['windows-frontends'] = {'result': state, 'outputs': {}}
+            result, _ = self.collect_windows(needs, frontends=True)
+            self.assertEqual(result.returncode == 0, state == 'success')
+
+    def test_declared_frontend_linux_jobs_are_independent_matrix_scopes(self):
+        (self.root / 'tools').mkdir()
+        for name in ('release.py', 'release-dependencies.py'):
+            shutil.copyfile(ROOT / 'tools' / name, self.root / 'tools' / name)
+        (self.root / 'release-info').mkdir()
+        metadata = certify.release.make_metadata(source_sha='a' * 40, run_id='123', run_attempt='1',
+            cmake_version='1.0.0', dependencies={'linux-sdk': '1' * 20, 'windows-base': '2' * 20},
+            frontends=['tui', 'framebuffer'])
+        (self.root / 'release-info/release-metadata.json').write_text(json.dumps(metadata))
+        result, matrices = self.run_workflow_python('PYMATRIX')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        original = certify.release.build_matrices(metadata)
+        self.assertCountEqual(matrices['linux_matrix']['include'],
+            [dict(row, scope=scope) for row in original['linux_matrix']['include']
+             for scope in ('main', 'calibration', 'frontends')])
 
     def test_windows_main_warning_survives_empty_or_unrelated_calibration_outputs(self):
         for output in ({}, {'warnings': '[]'}, {'warnings': '[{"code":"not-the-main-probe"}]'}):

@@ -33,6 +33,11 @@ def fixture_archive(path, metadata, target, additions=()):
              'share/doc/datapump/build-info.txt': f'GUI: ON ({backend})\n'.encode()}
     files.update({f'share/man/man1/{name}.1': (ROOT / f'docs/man/{name}.1').read_bytes()
                   for name in ('pump', 'pump-fast', 'datapump-gui')})
+    if metadata.get('frontends'):
+        files['share/doc/datapump/build-info.txt'] += b'TUI: ON (ncurses)\nFramebuffer: ON (sdl)\n'
+        for name in ('datapump-tui', 'datapump-fb'):
+            files[f'bin/{name}'] = b'#!/bin/sh\nexit 0\n'
+            files[f'share/man/man1/{name}.1'] = (ROOT / f'docs/man/{name}.1').read_bytes()
     sums = ''.join(f'{hashlib.sha256(data).hexdigest()}  {name}\n' for name, data in files.items())
     files['manifest.sha256'] = sums.encode()
     with tarfile.open(path, 'w:gz') as archive:
@@ -133,6 +138,33 @@ class AptReleaseTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.temp.cleanup()
+
+    def test_declared_frontends_survive_signed_debian_repository_packaging(self):
+        directory = self.root / 'frontend-release'
+        directory.mkdir()
+        values = release.make_metadata(source_sha='a' * 40, run_id='123', run_attempt='1',
+            cmake_version='0.7.2', version='v001_00', experiment=True,
+            frontends=['tui', 'framebuffer'],
+            dependencies={'linux-sdk': '1' * 20, 'windows-base': '2' * 20},
+            now=datetime.now(timezone.utc).replace(microsecond=0))
+        for target, name in release.application_names(values).items():
+            if target.startswith('linux-'):
+                fixture_archive(directory / name, values, target)
+        # Native recipe/channel semantics have their own suites; the APT
+        # signature must bind their exact retained bytes too.
+        for name in release.distribution_assets(values):
+            (directory / name).write_bytes(('distribution fixture ' + name).encode())
+        apt.build(directory, values, 'test-owner/test-repo', self.key, self.fingerprint)
+        apt.verify(directory, values, 'test-owner/test-repo', self.fingerprint)
+        for backend in apt.BACKENDS:
+            suffix = '' if backend == 'fltk' else '-rev'
+            for arch in apt.ARCHES:
+                entries = apt.deb_files(directory / apt.package_name(values, arch, backend))
+                for binary, adapter in (('datapump-tui', 'ncurses'), ('datapump-fb', 'sdl')):
+                    command = f'{binary}-{adapter}{suffix}'
+                    self.assertIn(f'opt/datapump/{backend}/bin/{binary}', entries)
+                    self.assertIn(f'usr/bin/{command}', entries)
+                    self.assertIn(f'usr/share/man/man1/{command}.1.gz', entries)
 
     def copy_repository(self):
         temporary = tempfile.TemporaryDirectory(prefix='apt-case-')

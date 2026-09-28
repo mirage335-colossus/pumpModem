@@ -7,7 +7,7 @@ on:
         type: string
         default: windows-latest-h
       scope:
-        description: 'core, fast, live, calibration, or package'
+        description: 'core, fast, live, calibration, frontends, or package'
         type: string
         required: true
       calibration_section:
@@ -44,21 +44,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: ./tools/use-windows-base.ps1 -Repository "$env:GITHUB_REPOSITORY" -Destination "$PWD/build/windows-base"
-      - name: Configure native application without Python
+      - name: Configure native application and selected test scope
         run: >-
           cmake -S . -B build -A x64
           -DCMAKE_TOOLCHAIN_FILE="$env:DATAPUMP_WINDOWS_TOOLCHAIN"
           -DVCPKG_TARGET_TRIPLET=x64-windows-static
           -DDATAPUMP_PORTABLE=ON -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
           -DBUILD_TESTING=${{ inputs.scope == 'package' && 'OFF' || 'ON' }}
+          -DDATAPUMP_BUILD_TUI=${{ (inputs.scope == 'package' || inputs.scope == 'frontends') && 'ON' || 'OFF' }}
+          -DDATAPUMP_BUILD_FB=${{ (inputs.scope == 'package' || inputs.scope == 'frontends') && 'ON' || 'OFF' }}
           -DDATAPUMP_CALIBRATION_SECTION=${{ inputs.calibration_section }}
           -DDART_TESTING_TIMEOUT=3600
-          -DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE
+          -DCMAKE_DISABLE_FIND_PACKAGE_Python3=${{ inputs.scope == 'frontends' && 'FALSE' || 'TRUE' }}
       - name: Build this shard's prerequisites
         run: |
           switch ($env:CI_SCOPE) {
             'calibration' { $targets = @('test_differential_receiver_probability') }
             'package' { $targets = @('datapump-apps') }
+            'frontends' { $targets = @('datapump-tests-frontends') }
             'core' { $targets = @('datapump-apps', 'datapump-tests-ci-core') }
             'fast' { $targets = @('datapump-tests-fast') }
             'live' { $targets = @('datapump-tests-ci-live') }
@@ -84,7 +87,7 @@ jobs:
         run: |
           cmake --build build --config Release --target package --parallel $env:NUMBER_OF_PROCESSORS
           if ($LASTEXITCODE -ne 0) { throw "Native packaging failed" }
-          cmake -DARCHIVE_DIR="$PWD/build/releases" -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DREQUIRE_MANUALS=ON -P tools/verify-native-archives.cmake 2>&1 | Tee-Object -FilePath build/package-archives.log
+          cmake -DARCHIVE_DIR="$PWD/build/releases" -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DREQUIRE_MANUALS=ON -DREQUIRE_FRONTENDS=ON -P tools/verify-native-archives.cmake 2>&1 | Tee-Object -FilePath build/package-archives.log
           if ($LASTEXITCODE -ne 0) { throw "Archive verification failed" }
           'Portable Release relocation, corruption and both archive GUI checks completed; any incomplete smoke coverage is listed in the retained reports. Independent regression/calibration jobs still determine the overall workflow result.' >> $env:GITHUB_STEP_SUMMARY
       - name: Upload Windows offline bundles

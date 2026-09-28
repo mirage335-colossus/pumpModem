@@ -317,7 +317,7 @@ jobs:
       - name: Install native baseline dependencies and pinned scanner
         if: ${{ !matrix.sdk }}
         run: |
-          sh "$RUNNER_TEMP/ci-apt.sh" install cmake ninja-build g++-11 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev
+          sh "$RUNNER_TEMP/ci-apt.sh" install cmake ninja-build g++-11 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev libncurses-dev libsdl2-dev
           sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
           echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
       - name: Install native Rev compiler and module-aware Ninja
@@ -332,11 +332,11 @@ jobs:
           DATAPUMP_MAX_GLIBC: ${{ matrix.glibc }}
         run: |
           if [ "$USE_SDK" = true ]; then
-            ./build.sh package --sdk "$GITHUB_WORKSPACE/build/sdk" --backend "$GUI_BACKEND" --build-dir build/release-app --jobs "$(nproc)"
+            ./build.sh package --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --backend "$GUI_BACKEND" --build-dir build/release-app --jobs "$(nproc)"
           elif [ "$GUI_BACKEND" = rev ]; then
-            CC=clang-19 CXX=clang++-19 ./build.sh package --backend rev --build-dir build/release-app --jobs "$(nproc)"
+            CC=clang-19 CXX=clang++-19 ./build.sh package --tui --fb --backend rev --build-dir build/release-app --jobs "$(nproc)"
           else
-            CC=gcc-11 CXX=g++-11 ./build.sh package --backend fltk --build-dir build/release-app --jobs "$(nproc)"
+            CC=gcc-11 CXX=g++-11 ./build.sh package --tui --fb --backend fltk --build-dir build/release-app --jobs "$(nproc)"
           fi
       - name: Upload this platform directly to the draft release
         env:
@@ -375,7 +375,7 @@ jobs:
       - name: Build and package with the Windows SDK and static runtime
         shell: pwsh
         run: |
-          cmake -S . -B build/release-windows -A x64 -DCMAKE_TOOLCHAIN_FILE="$env:DATAPUMP_WINDOWS_TOOLCHAIN" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DDATAPUMP_GUI_BACKEND="$env:GUI_BACKEND" -DDATAPUMP_PORTABLE=ON -DBUILD_TESTING=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          cmake -S . -B build/release-windows -A x64 -DCMAKE_TOOLCHAIN_FILE="$env:DATAPUMP_WINDOWS_TOOLCHAIN" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DDATAPUMP_GUI_BACKEND="$env:GUI_BACKEND" -DDATAPUMP_BUILD_TUI=ON -DDATAPUMP_BUILD_FB=ON -DDATAPUMP_PORTABLE=ON -DBUILD_TESTING=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
           if ($LASTEXITCODE -ne 0) { throw 'Configure failed' }
           cmake --build build/release-windows --config Release --target package --parallel $env:NUMBER_OF_PROCESSORS
           if ($LASTEXITCODE -ne 0) { throw 'Packaging failed' }

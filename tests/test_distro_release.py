@@ -33,6 +33,12 @@ def archive(path, metadata, target):
              'share/doc/datapump/build-info.txt': (f'GUI: ON ({backend})\n'.encode(), 0o644)}
     files.update({f'share/man/man1/{name}.1': ((ROOT / f'docs/man/{name}.1').read_bytes(), 0o644)
                   for name in ('pump', 'pump-fast', 'datapump-gui')})
+    if metadata.get('frontends'):
+        data, mode = files['share/doc/datapump/build-info.txt']
+        files['share/doc/datapump/build-info.txt'] = (data + b'TUI: ON (ncurses)\nFramebuffer: ON (sdl)\n', mode)
+        for name in ('datapump-tui', 'datapump-fb'):
+            files[f'bin/{name}'] = (b'#!/bin/sh\nexit 0\n', 0o755)
+            files[f'share/man/man1/{name}.1'] = ((ROOT / f'docs/man/{name}.1').read_bytes(), 0o644)
     sums = ''.join(f'{hashlib.sha256(data).hexdigest()}  {name}\n' for name, (data, _) in files.items())
     files['manifest.sha256'] = (sums.encode(), 0o644)
     with tarfile.open(path, 'w:gz') as stream:
@@ -177,6 +183,29 @@ class DistroReleaseTests(unittest.TestCase):
                 for architecture in distro.ARCHES:
                     with self.subTest(kind=kind, backend=backend, arch=architecture):
                         self.execute_recipe(kind, backend, architecture)
+
+    def test_declared_frontends_install_through_both_native_recipe_formats(self):
+        self.assets = self.root / 'frontend-release'
+        self.assets.mkdir()
+        self.metadata = release.make_metadata(source_sha='a' * 40, run_id='123', run_attempt='2',
+            cmake_version='0.7.2', experiment=True, version='v001_00',
+            dependencies={'linux-sdk': '1' * 20, 'windows-base': '2' * 20},
+            frontends=['tui', 'framebuffer'], now=datetime(2026, 9, 23, 12, 0, tzinfo=timezone.utc))
+        for target, name in release.application_names(self.metadata).items():
+            if target.startswith('linux-'):
+                archive(self.assets / name, self.metadata, target)
+        self.manifest = distro.build(self.assets, self.metadata, self.repository)
+        for kind in distro.ROOTS:
+            for backend in distro.BACKENDS:
+                for architecture in distro.ARCHES:
+                    installed = self.execute_recipe(kind, backend, architecture)
+                    suffix = '' if backend == 'fltk' else '-rev'
+                    for binary, adapter in (('datapump-tui', 'ncurses'), ('datapump-fb', 'sdl')):
+                        command = f'{binary}-{adapter}{suffix}'
+                        self.assertTrue((installed / f'opt/datapump/{backend}/bin/{binary}').is_file())
+                        self.assertTrue(os.access(installed / f'usr/bin/{command}', os.X_OK))
+                        manual = installed / f'usr/share/man/man1/{command}.1.gz'
+                        self.assertIn(command.encode(), gzip.decompress(manual.read_bytes()))
 
     def test_tampered_bundle_manifest_or_recipe_is_rejected(self):
         for filename in ('distro-packages.json', 'datapump-arch-recipes.tar.gz', 'datapump-gentoo-overlay.tar.gz'):

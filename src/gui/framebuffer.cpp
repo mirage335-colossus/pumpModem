@@ -149,7 +149,8 @@ void bitmap(Frame& frame,const surface::Primitive& primitive,bool color) {
     if(rect.w<=0||rect.h<=0||clip.w<=0||clip.h<=0)return;
     BitmapRequest request{static_cast<unsigned>(rect.w),static_cast<unsigned>(rect.h),
         {static_cast<unsigned>(clip.x-rect.x),static_cast<unsigned>(clip.y-rect.y),static_cast<unsigned>(clip.w),static_cast<unsigned>(clip.h)},1,false,color};
-    request.fit_content=true;
+    // Pixel displays keep the producer's native viewport: unfilled history
+    // remains blank and grows at a stable scale, just as in the native GUI.
     primitive.bitmap.paint(request,[&](unsigned bx,unsigned by,PixelBlock block) {
         validate_pixel_block(block);
         if(bx>request.width||by>request.height||block.width>request.width-bx||block.height>request.height-by)

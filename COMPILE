@@ -10,7 +10,7 @@
 ./build.sh test fast       # Fast coding, modem and shared GUI coverage
 ./build.sh test all        # All configured non-display tests, including slow calibration
 ./build.sh sanitize        # ASan/UBSan contract tests in a separate native build
-./build.sh package         # Build and verify portable TGZ/ZIP archives
+./build.sh package --tui --fb # Portable archives with all interfaces (ncurses/SDL2 dev files)
 
 # Optional TUI/framebuffer interfaces: ncurses and SDL2 development files.
 # Details: docs/frontend-interfaces.md. These commands reuse a stable build path.
@@ -38,15 +38,16 @@ python3 tools/build-sdk.py verify "$datapump_sdk"
 # SDK paths must have no spaces; unset conflicting compiler/search overrides.
 # An SDK upgrade or relocation requires fresh application build directories.
 
-# Default FLTK application and CLI, tests, and portable TGZ/ZIP archives.
-./build.sh --sdk "$datapump_sdk"
+# CLI and all interfaces, tests, and portable TGZ/ZIP archives.
+./build.sh --sdk "$datapump_sdk" --tui --fb
 ./build.sh test build --sdk "$datapump_sdk"
 ./build.sh test contract --sdk "$datapump_sdk"
-./build.sh package --sdk "$datapump_sdk"
+./build.sh test frontends --sdk "$datapump_sdk" --tui --fb
+./build.sh package --sdk "$datapump_sdk" --tui --fb
 
 # Optional Rev backend, using the same SDK's compiler and dependencies.
-./build.sh --backend rev --sdk "$datapump_sdk"
-./build.sh package --backend rev --sdk "$datapump_sdk"
+./build.sh --backend rev --sdk "$datapump_sdk" --tui --fb
+./build.sh package --backend rev --sdk "$datapump_sdk" --tui --fb
 
 # Bookworm build-host qualification only (not required for ordinary local use).
 # Target glibc is 2.36; SDK tools built on newer hosts can require newer glibc.

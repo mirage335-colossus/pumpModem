@@ -123,6 +123,7 @@ jobs:
       application_targets: ${{ steps.release.outputs.application_targets }}
       apt_repository: ${{ steps.release.outputs.apt_repository }}
       distro_recipes: ${{ steps.release.outputs.distro_recipes }}
+      frontends: ${{ steps.release.outputs.frontends }}
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ inputs.release_tag }}
@@ -149,7 +150,7 @@ jobs:
           matrices['linux_matrix']['include'] = [
               dict(row, scope=scope)
               for row in matrices['linux_matrix']['include']
-              for scope in ('main', 'calibration')]
+              for scope in (('main', 'calibration', 'frontends') if metadata.get('frontends') else ('main', 'calibration'))]
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               for name, value in {'metadata_json': metadata, **matrices}.items():
                   output.write(name + '=' + json.dumps(value, separators=(',', ':')) + '\n')
@@ -181,6 +182,7 @@ jobs:
       GUI_BACKEND: ${{ matrix.backend }}
       RELEASE_TARGET: ${{ matrix.target }}
       INVENTORY_SHA256: ${{ needs.prepare.outputs.inventory_sha256 }}
+      BUILD_FRONTENDS: ${{ needs.prepare.outputs.frontends }}
     steps:
       - name: Load current package-fetch helper before installing Git
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -232,7 +234,7 @@ jobs:
       - name: Install native baseline dependencies and pinned scanner
         if: ${{ !matrix.sdk }}
         run: |
-          sh "$RUNNER_TEMP/ci-apt.sh" install cmake ninja-build g++-11 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev
+          sh "$RUNNER_TEMP/ci-apt.sh" install cmake ninja-build g++-11 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev libncurses-dev libsdl2-dev
           sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
           echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
       - name: Install native Rev compiler and module-aware Ninja
@@ -262,6 +264,7 @@ jobs:
           # Run adapter/package checks before the slower numerical calibration.
           for group in build gui packaging; do
             set -- --backend "$GUI_BACKEND" --build-dir build/certify --jobs 2
+            if [ "$BUILD_FRONTENDS" = true ]; then set -- "$@" --tui --fb; fi
             if [ "$separate_build_jobs" = true ]; then set -- "$@" --build-jobs "$(nproc)"; fi
             if [ "$USE_SDK" = true ]; then set -- "$@" --sdk "$GITHUB_WORKSPACE/build/sdk"; fi
             ./build.sh test "$group" --stop-on-failure "$@" -- -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600
@@ -291,6 +294,32 @@ jobs:
           # required sibling scope and remaining tests keep concurrency.
           "$contract_ctest" --test-dir build/certify -C Release --output-on-failure --stop-on-failure --no-tests=error -L '^contract$' -LE native_gui -R '^(live|live_profiles)$' --parallel 1
           "$contract_ctest" --test-dir build/certify -C Release --output-on-failure --stop-on-failure --no-tests=error -L '^contract$' -LE native_gui -E '^(live|live_profiles|differential_receiver_probability)$' --parallel 2
+      - name: Run required terminal and framebuffer source checks independently
+        if: matrix.scope == 'frontends'
+        env:
+          USE_SDK: ${{ matrix.sdk }}
+          DATAPUMP_MAX_GLIBC: ${{ matrix.glibc }}
+        run: |
+          if [ "$USE_SDK" != true ]; then
+            if [ "$GUI_BACKEND" = rev ]; then export CC=clang-19 CXX=clang++-19;
+            else export CC=gcc-11 CXX=g++-11; fi
+          fi
+          set -- --cli --tui --fb --backend "$GUI_BACKEND" --build-dir build/certify-frontends --jobs 1 --build-jobs "$(nproc)"
+          if [ "$USE_SDK" = true ]; then set -- "$@" --sdk "$GITHUB_WORKSPACE/build/sdk"; fi
+          ./build.sh test frontends --stop-on-failure "$@" -- -DDATAPUMP_PORTABLE=ON
+      - name: Retain independent frontend evidence
+        if: ${{ always() && matrix.scope == 'frontends' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: certification-frontends-${{ matrix.target }}-attempt-${{ github.run_attempt }}
+          path: |
+            build/certify-frontends/build-info.txt
+            build/certify-frontends/Testing/Temporary/
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Record historical frontend coverage
+        if: matrix.scope == 'main' && needs.prepare.outputs.frontends != 'true'
+        run: echo 'This historical release does not declare TUI/framebuffer delivery. No frontend source coverage is claimed.' >> "$GITHUB_STEP_SUMMARY"
       - name: Run the complete registered differential calibration independently
         if: matrix.scope == 'calibration'
         env:
@@ -402,6 +431,7 @@ jobs:
     uses: ./.github/workflows/certify-windows.yml
     with:
       scope: main
+      frontends: ${{ needs.prepare.outputs.frontends == 'true' }}
       backend: fltk
       target: ${{ contains(needs.prepare.outputs.application_targets, 'windows-x86_64-fltk') && 'windows-x86_64-fltk' || 'windows-x86_64' }}
       source_sha: ${{ needs.prepare.outputs.source_sha }}
@@ -416,6 +446,7 @@ jobs:
     uses: ./.github/workflows/certify-windows.yml
     with:
       scope: main
+      frontends: ${{ needs.prepare.outputs.frontends == 'true' }}
       backend: rev
       target: windows-x86_64-rev
       source_sha: ${{ needs.prepare.outputs.source_sha }}
@@ -452,10 +483,29 @@ jobs:
       inventory_sha256: ${{ needs.prepare.outputs.inventory_sha256 }}
       windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
 
+  windows-frontends:
+    if: ${{ !inputs.devfast && needs.prepare.outputs.frontends == 'true' }}
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [fltk, rev]
+    uses: ./.github/workflows/certify-windows.yml
+    with:
+      scope: frontends
+      frontends: true
+      backend: ${{ matrix.backend }}
+      target: windows-x86_64-${{ matrix.backend }}
+      source_sha: ${{ needs.prepare.outputs.source_sha }}
+      tooling_sha: ${{ github.sha }}
+      release_tag: ${{ inputs.release_tag }}
+      inventory_sha256: ${{ needs.prepare.outputs.inventory_sha256 }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
+
   windows-tests:
     name: Collect Windows certification results and warnings
     if: ${{ always() && !inputs.devfast && needs.prepare.result == 'success' }}
-    needs: [prepare, windows-fltk, windows-rev, windows-fltk-calibration, windows-rev-calibration]
+    needs: [prepare, windows-fltk, windows-rev, windows-fltk-calibration, windows-rev-calibration, windows-frontends]
     runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
     timeout-minutes: 5
     outputs:
@@ -466,6 +516,7 @@ jobs:
         env:
           JOB_RESULTS: ${{ toJSON(needs) }}
           TARGETS: ${{ needs.prepare.outputs.application_targets }}
+          FRONTENDS: ${{ needs.prepare.outputs.frontends }}
         run: |
           python3 - <<'PYWINDOWS'
           import json, os
@@ -476,6 +527,8 @@ jobs:
           required = ['windows-fltk', 'windows-fltk-calibration']
           if 'windows-x86_64-rev' in json.loads(os.environ['TARGETS']):
               required.extend(['windows-rev', 'windows-rev-calibration'])
+          if os.environ.get('FRONTENDS') == 'true':
+              required.append('windows-frontends')
           if any(needs.get(name, {}).get('result') != 'success' for name in required):
               raise SystemExit('A required Windows certification job failed or did not complete')
           PYWINDOWS

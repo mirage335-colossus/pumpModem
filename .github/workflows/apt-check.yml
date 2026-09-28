@@ -96,6 +96,16 @@ jobs:
             cmp "$expected/usr/bin/datapump-$backend" "/usr/bin/datapump-$backend"
             cmp "$expected/usr/bin/datapump-cli-$backend" "/usr/bin/datapump-cli-$backend"
             cmp "$expected/usr/share/applications/datapump-$backend.desktop" "/usr/share/applications/datapump-$backend.desktop"
+            suffix=""
+            if [ "$backend" != fltk ]; then suffix="-$backend"; fi
+            for interface in tui-ncurses fb-sdl; do
+              command="datapump-$interface$suffix"
+              if test -f "$expected/usr/bin/$command"; then
+                cmp "$expected/usr/bin/$command" "/usr/bin/$command"
+                cmp "$expected/usr/share/man/man1/$command.1.gz" "/usr/share/man/man1/$command.1.gz"
+                timeout 30 "$command" --version
+              fi
+            done
             rm -rf "$expected"
             timeout 30 "datapump-cli-$backend" --version
             # This includes a real modem simulation. Keep the same bound as

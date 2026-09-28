@@ -21,6 +21,8 @@ Options:
   when needed: source=auto reuses an existing recipe and builds a missing one.
   Ordinary stages require the matching prepared base recipes; they do not
   silently build missing dependencies.
+  The TUI/framebuffer recipes add ncurses/SDL2 to Linux and SDL2 to Windows;
+  maintain both bases once for these new recipe identities.
 - sanitizer_smoke / sanitizer_realtime: optional extra instrumented coverage,
   both off by default. All ordinary full regression checks remain required.
 
@@ -29,6 +31,9 @@ full native and SDK checks in parallel, ordinary publication, then full
 certification of the exact published binaries. It always uses devfast=false,
 experiment=false and publish=true. The final job verifies that GitHub Latest
 is the new tag/release ID and matches this run's source, inventory and report.
+All six new bundles include CLI, GUI, TUI and framebuffer binaries. Independent
+frontend regression jobs run alongside the existing suites. Debian, Arch and
+Gentoo packages retain both additional interfaces and their manuals.
 
 The previous Latest remains selected until all candidate assets and successful
 certification reports are ready. Certification pivots Latest in one release

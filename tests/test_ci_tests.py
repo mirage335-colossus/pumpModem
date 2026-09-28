@@ -30,7 +30,8 @@ class Selection(unittest.TestCase):
         inventory = [test('unlabelled'), test('gui', ('gui', 'contract')),
                      test('fast', ('fast', 'contract')), test('legacy', ('legacy',)),
                      test('live', ('regular', 'contract')), test('live_profiles', ('regular', 'contract')),
-                     test('calibration', ('regular', 'contract', 'calibration'))]
+                     test('calibration', ('regular', 'contract', 'calibration')),
+                     test('terminal', ('frontends',)), test('framebuffer', ('frontends',))]
         owners = []
         for scope in runner.SCOPES:
             selected, omitted, counts = runner.select_tests(inventory, scope)
@@ -39,6 +40,16 @@ class Selection(unittest.TestCase):
             owners += [item['name'] for item in selected]
         self.assertCountEqual(owners, [item['name'] for item in inventory])
         self.assertEqual(len(owners), len(set(owners)))
+
+    def test_frontends_are_disjoint_from_core_and_fast(self):
+        inventory = [test('core'), test('terminal', ('gui', 'frontends')),
+                     test('framebuffer', ('frontends',)), test('fast', ('fast',))]
+        selected, omitted, _ = runner.select_tests(inventory, 'frontends')
+        self.assertEqual([item['name'] for item in selected], ['terminal', 'framebuffer'])
+        self.assertFalse(omitted)
+        for scope in ('core', 'fast'):
+            selected, _, _ = runner.select_tests(inventory, scope)
+            self.assertEqual([item['name'] for item in selected], [scope])
 
     def test_live_scope_is_exact_and_mandatory_in_every_configuration(self):
         inventory = [test(name, ('regular', 'contract'))

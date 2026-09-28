@@ -41,8 +41,8 @@ def recipe_identity():
     if (recipe.get('schema') != 1
             or not re.fullmatch(r'[0-9a-f]{40}', recipe.get('vcpkg_ref', ''))
             or recipe.get('triplet') != 'x64-windows-static'
-            or set(recipe.get('ports', [])) != {'openssl', 'glew', 'freetype[core]'}
-            or len(recipe['ports']) != 3 or recipe.get('toolset') != 'v143'
+            or set(recipe.get('ports', [])) != {'openssl', 'glew', 'freetype[core]', 'sdl2[core]'}
+            or len(recipe['ports']) != 4 or recipe.get('toolset') != 'v143'
             or recipe.get('configurations') != ['Debug', 'Release']
             or recipe.get('crt_linkage') != 'static' or recipe.get('library_linkage') != 'static'
             or recipe.get('lto') is not False):
@@ -134,11 +134,16 @@ def write_archive(path, root, files, *, compressed=True):
 
 def verify_export_inventory(files):
     required = {TOOLCHAIN, '.vcpkg-root'} | {
-        f'installed/x64-windows-static/share/{port}/copyright' for port in ('openssl', 'glew', 'freetype')}
+        f'installed/x64-windows-static/share/{port}/copyright' for port in ('openssl', 'glew', 'freetype', 'sdl2')}
+    # Require the frontend's headers, both static configurations and imported
+    # target metadata, so a partial export cannot qualify by notices alone.
+    required |= {f'installed/x64-windows-static/{name}' for name in (
+        'include/SDL2/SDL.h', 'lib/SDL2-static.lib', 'debug/lib/SDL2-staticd.lib',
+        'share/sdl2/SDL2Config.cmake')}
     # vcpkg export --raw copies package listfiles, not the installation status database.
     if not required <= set(files) or any(not any(re.fullmatch(
             rf'installed/vcpkg/info/{port}_[^/]+_x64-windows-static\.list', name)
-            for name in files) for port in ('openssl', 'glew', 'freetype')):
+            for name in files) for port in ('openssl', 'glew', 'freetype', 'sdl2')):
         raise ValueError('Raw export must contain the vcpkg toolchain and installed static dependencies')
 
 

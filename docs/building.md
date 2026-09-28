@@ -56,7 +56,8 @@ relocation. The default native build remains available.
 Manual releases with version/date tags, an experiment checkbox and six portable
 application downloads are documented in [manual portable releases](releases.md).
 Windows release and full CI jobs reuse a checksummed dependency bundle from the
-durable `base` release: static OpenSSL, GLEW and FreeType for both GUI backends.
+durable `base` release: static OpenSSL, GLEW, FreeType and SDL2. The terminal host
+uses the Windows console API and needs no curses library.
 Schema-6 certification uses the target binary release's retained copy, verified
 against its pinned inventory; older schemas keep the base lookup. The runner
 supplies MSVC and the Windows SDK separately.
@@ -74,13 +75,19 @@ that the consuming linker is at least as new as the recorded builder. Keep
 the compiler at least as new too, within v143; the bundle contains no LTO
 objects. This dependency handoff uses neither Actions cache nor artifacts.
 
-The independent `--tui` and `--fb` options add `datapump-tui` (ncurses) and
+The independent `--tui` and `--fb` options add `datapump-tui` (ncurses on POSIX,
+native console on Windows) and
 `datapump-fb` (SDL2 software framebuffer). Combine with `--cli` for no native GUI.
 `./build.sh test frontends --cli --tui --fb` runs their focused integration group;
 normal full regression requirements still apply. The TUI and framebuffer have
 separate presentation/interaction implementations behind the common application.
 See [frontend interfaces](frontend-interfaces.md) for dependencies and the small
 single-framebuffer engine API.
+New release producers enable both frontends in Linux SDK and Windows archives,
+which also supplies them to the Debian, Arch and Gentoo package pipelines.
+Their `frontends` regression group runs in separate CI jobs parallel to existing
+regressions. New dependency recipe IDs require explicit base maintenance; routine
+release jobs never rebuild missing dependencies implicitly.
 
 ## Commands and profiles
 

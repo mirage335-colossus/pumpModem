@@ -8,7 +8,7 @@ tables are already vendored; see [the inventory](../README.md).
 
 The opt-in [source SDK recipe](source-sdk/manifest.json) uses Buildroot 2026.08
 to build an x86_64 Linux compiler, target sysroot, CMake, Ninja and the development
-libraries needed by FLTK and Rev. It pins a maintained upstream glibc 2.36
+libraries needed by FLTK, Rev, the ncurses TUI and SDL2 framebuffer host. It pins a maintained upstream glibc 2.36
 snapshot and GCC 15; it does not reconstruct a Debian installation or download
 old Debian development packages. The manifest identifies source locations,
 versions, commits and SHA-256 hashes. Buildroot's pinned package recipes retain
@@ -20,9 +20,17 @@ destination's glibc/loader, display server and graphics drivers. This does not
 cover musl-based systems, another CPU architecture, missing desktop facilities,
 or every possible driver/audio configuration. The separate
 [SDK workflow](../../.github/workflows/sdk.yml) qualifies SDK tools on Bookworm
-and Ubuntu 24.04, builds both frontends and runs the same application archives on
+and Ubuntu 24.04, builds both native GUI backends plus TUI/framebuffer hosts and runs the same application archives on
 both systems. Successful qualification is required before making a release
 compatibility claim; adding a recipe is not a substitute for running it.
+
+The terminal dependency includes wide-character ncurses and its terminfo data
+in `sysroot/usr/share/terminfo`; portable packages retain that data for relocated
+SSH/console use. The SDL2 host supports software surfaces through X11/XWayland
+and the dummy video driver used by headless tests. The CPU framebuffer embedding
+library requires neither SDL nor a display server. This recipe does not enable
+SDL's EGL/OpenGL/Wayland drivers; native SDL installations can supply additional
+window-system support without changing the framebuffer API.
 
 ### Use an archived SDK
 
@@ -37,8 +45,8 @@ python3 tools/build-sdk.py install \
   --destination "$PWD/third_party/build-support/cache/sdk-ID"
 python3 tools/build-sdk.py verify \
   "$PWD/third_party/build-support/cache/sdk-ID" --max-host-glibc 2.36
-./build.sh --sdk "$PWD/third_party/build-support/cache/sdk-ID"
-./build.sh package --sdk "$PWD/third_party/build-support/cache/sdk-ID"
+./build.sh --tui --fb --sdk "$PWD/third_party/build-support/cache/sdk-ID"
+./build.sh package --tui --fb --sdk "$PWD/third_party/build-support/cache/sdk-ID"
 ./build.sh --backend rev --sdk "$PWD/third_party/build-support/cache/sdk-ID"
 ```
 
@@ -163,6 +171,14 @@ from the unchanged SDK helper and recipe inputs. Reuse is independent of
 Actions cache/artifact quotas. Old recipes are retained and existing asset
 bytes cannot be overwritten.
 
+Adding the terminal/framebuffer dependencies changes both the Linux SDK and
+Windows base recipe identities. Run explicit base maintenance with
+`platform=both` before ordinary CI or release consumers; missing new recipes fail
+without starting an implicit dependency build. Earlier recipe assets remain
+unchanged. The Windows base pins static SDL2 alongside OpenSSL, GLEW and FreeType
+for Debug and Release; its relocation probe presents an SDL software surface.
+The Windows TUI uses the system console API and needs no curses dependency.
+
 Dispatch `source=auto` to reuse the current recipe or build if missing;
 `source=base` verifies reuse only; `source=rebuild` performs a cold build.
 `jobs=0` uses all CPUs reported by `nproc`; a positive value overrides it.
@@ -182,10 +198,11 @@ conformance under private Xvfb. Small application artifacts last one day for
 cross-host copy checks; they do not contain the large SDK or preserved sources.
 
 The [application release workflow](../../.github/workflows/release.yml) builds
-and publishes three application bundles with basic packaging checks.
+and publishes six application bundles with basic packaging checks.
 [Certification](../../.github/workflows/certify.yml) runs later against those
 exact published assets and attaches hash-bound reports without replacing them.
-Developer SDKs remain in `base` instead of being duplicated in every app release.
+Each binary release retains the exact dependency binary/source archives and
+checksums it used; `base` remains the reusable maintenance shelf.
 See [release instructions](../../docs/releases.md) for dispatch commands.
 
 For upgrades, change [the manifest](source-sdk/manifest.json),
@@ -199,15 +216,15 @@ with a new recipe. Retain the previous release artifacts for reconstruction.
 
 Run the build-tool tests, a complete source fetch/build/archive cycle, offline
 replay from the source archive, SDK relocation and host/target ABI verification,
-both GUI builds and copied-artifact compatibility checks. Review the collected
-license inventory before publishing. Source retention makes reconstruction
+both native GUI builds, TUI/framebuffer hosts and copied-artifact compatibility
+checks. Review the collected license inventory before publishing. Source retention makes reconstruction
 possible; it is not a claim of bit-identical output or indefinite compatibility
 with every future bootstrap toolchain.
 
 ## Native Debian 13 dependency supplement
 
 For machines without permission to install development packages, the optional
-`debian-13-amd64.json` manifest records 16 official Debian development/display
+`debian-13-amd64.json` manifest records 18 official Debian development/display
 archives: package versions, original URLs and SHA-256 hashes. This is a native
 Debian 13 amd64 fallback, **not** a portable binary distribution or a complete
 cross-compilation sysroot. Other distributions should use their native packages
@@ -216,7 +233,10 @@ or supply their own existing prefix with `-DDATAPUMP_DEPENDENCY_PREFIX=/path/usr
 ### Prepare once, then build offline
 
 Python 3.8+, dpkg and dpkg-deb are needed only for this preparation helper.
-The matching runtime packages must already be installed. No root access is used.
+The matching runtime packages must already be installed, including `libncursesw6`,
+`libtinfo6` and `libsdl2-2.0-0` for the terminal/framebuffer hosts. No root access
+is used. The private `libtinfow.so` linker alias uses the verified Debian
+`libtinfo6` runtime so CMake can resolve wide ncurses after relocation.
 
 ```sh
 # Fully offline, using previously downloaded archives:

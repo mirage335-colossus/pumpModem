@@ -85,9 +85,16 @@ struct PlotSnapshot::Data {
 PlotSnapshot::PlotSnapshot() : data_(std::make_shared<Data>(std::monostate{})) {}
 PlotSnapshot::PlotSnapshot(std::shared_ptr<const Data> data) : data_(std::move(data)) {}
 PlotSnapshot::operator BitmapSource() const {
+    PixelRect minimum;
+    auto sampling = BitmapSampling::continuous;
+    if (const auto* qr = std::get_if<Qr>(&data_->value)) {
+        sampling = BitmapSampling::discrete;
+        if (qr->code && qr->brightness != QrBrightness::off)
+            minimum.width = minimum.height = static_cast<unsigned>(qr->code->size() + 8);
+    }
     return BitmapSource([snapshot=*this](const BitmapRequest& request,const BitmapSink& sink,bool color) {
         snapshot.paint(request,sink,color);
-    });
+    }, sampling, minimum);
 }
 PlotSnapshot PlotSnapshot::waveform(std::vector<float> samples, modem::Config config, double zoom) {
     if (!(zoom > 0) || !std::isfinite(zoom)) throw Error("invalid waveform zoom");
@@ -313,19 +320,28 @@ void PlotSnapshot::paint(const BitmapRequest& request, const BitmapSink& sink, b
                 return color ? theme::waterfall_palette[intensity] : gray(intensity);
             });
         } else if constexpr (std::is_same_v<Type, Qr>) {
-            const unsigned char level = data.brightness == QrBrightness::normal ? 255 : data.brightness == QrBrightness::dim ? 64 :
+            const unsigned char level = request.monochrome || data.brightness == QrBrightness::normal ? 255 : data.brightness == QrBrightness::dim ? 64 :
                 data.brightness == QrBrightness::dark ? 32 : 0;
             const bool red = color && data.brightness != QrBrightness::normal;
             const auto background = red ? Rgb{level, 0, 0} : gray(level);
             const int size = data.code ? data.code->size() + 8 : 0;
             // Never shrink modules below one sample or crop the quiet zone.
             // A too-small view remains background until a suitable size exists.
-            const int pitch = size ? std::min(width, height) / size : 0;
-            const int left = (width - pitch * size) / 2 + 4 * pitch, top = (height - pitch * size) / 2 + 4 * pitch;
+            const auto aspect = static_cast<long double>(request.sample_aspect_ratio);
+            int pitch_x=0, pitch_y=0;
+            if(size && aspect>=1) {
+                pitch_x=static_cast<int>(std::min<long double>(width / size, height / size / aspect));
+                pitch_y=static_cast<int>(std::min<long double>(height / size, std::round(pitch_x * aspect)));
+            } else if(size) {
+                pitch_y=static_cast<int>(std::min<long double>(height / size, width / size * aspect));
+                pitch_x=static_cast<int>(std::min<long double>(width / size, std::round(pitch_y / aspect)));
+            }
+            const int left = (width - pitch_x * size) / 2 + 4 * pitch_x;
+            const int top = (height - pitch_y * size) / 2 + 4 * pitch_y;
             rows(request, sink, red, [&](unsigned x, unsigned y) {
                 if (data.brightness == QrBrightness::off) return gray(0);
-                if (pitch && data.code && static_cast<int>(x) >= left && static_cast<int>(y) >= top) {
-                    const auto col = (static_cast<int>(x) - left) / pitch, row = (static_cast<int>(y) - top) / pitch;
+                if (pitch_x && pitch_y && data.code && static_cast<int>(x) >= left && static_cast<int>(y) >= top) {
+                    const auto col = (static_cast<int>(x) - left) / pitch_x, row = (static_cast<int>(y) - top) / pitch_y;
                     if (col < data.code->size() && row < data.code->size() && data.code->dark(col, row)) return gray(0);
                 }
                 return background;

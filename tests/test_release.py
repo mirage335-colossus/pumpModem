@@ -27,13 +27,20 @@ def metadata(**options):
     return release.make_metadata(**defaults)
 
 
-def backend_archive(path, base, backend, *, include_info=True, duplicate_info=False):
+def backend_archive(path, base, backend, *, include_info=True, duplicate_info=False,
+                    frontends=False, windows=False, omitted=(), frontend_host=None):
     entries = [(f'{base}/bin/pump', b'fixture executable')]
+    if frontends:
+        for name in ('datapump-tui', 'datapump-fb'):
+            entries.append((f'{base}/bin/{name}' + ('.exe' if windows else ''), b'frontend executable'))
+            entries.append((f'{base}/share/man/man1/{name}.1', b'frontend manual'))
     if include_info:
         entries.append((f'{base}/share/doc/datapump/build-info.txt',
-                        f'DataPump 0.7.2\nGUI: ON ({backend})\n'.encode()))
+                        (f'DataPump 0.7.2\nGUI: ON ({backend})\n' +
+                         (f'TUI: ON ({frontend_host or ("winconsole" if windows else "ncurses")})\nFramebuffer: ON (sdl)\n' if frontends else '')).encode()))
         if duplicate_info:
             entries.append(entries[-1])
+    entries = [(name, content) for name, content in entries if name.removeprefix(base + '/') not in omitted]
     if path.name.endswith('.tar.gz'):
         with tarfile.open(path, 'w:gz') as archive:
             for name, content in entries:
@@ -44,6 +51,48 @@ def backend_archive(path, base, backend, *, include_info=True, duplicate_info=Fa
         with zipfile.ZipFile(path, 'w') as archive:
             for name, content in entries:
                 archive.writestr(name, content)
+
+
+class FrontendInventory(unittest.TestCase):
+    def test_metadata_capability_is_exact_and_historical_metadata_stays_unchanged(self):
+        values = metadata(schema=6, frontends=['tui', 'framebuffer'])
+        self.assertEqual(values['frontends'], ['tui', 'framebuffer'])
+        self.assertNotIn('frontends', metadata(schema=6))
+        for invalid in ([], ['tui'], ['framebuffer', 'tui'], ['tui', 'framebuffer', 'unknown'], True):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, 'Frontend inventory'):
+                metadata(schema=6, frontends=invalid)
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'metadata.json'
+            release.write_json(path, values)
+            self.assertEqual(release.load_metadata(path), values)
+            with patch.object(release, 'project_version', return_value='1.0.0'), patch.object(release, 'display_version', return_value='001_00'):
+                release.main(['metadata', '--source-sha', 'a' * 40,
+                    '--run-id', '123', '--output', str(path)])
+            self.assertEqual(release.load_metadata(path)['frontends'], ['tui', 'framebuffer'])
+
+    def test_required_frontends_are_present_in_both_archive_formats_and_operating_systems(self):
+        values = metadata(schema=6, frontends=['tui', 'framebuffer'])
+        with tempfile.TemporaryDirectory() as temporary:
+            for target in ('linux-x86_64-fltk', 'windows-x86_64-rev'):
+                windows = target.startswith('windows-')
+                backend = release.target_backend(values, target)
+                base = release.package_bases(values, target)[0]
+                for extension in ('.tar.gz', '.zip'):
+                    path = Path(temporary) / (base + extension)
+                    backend_archive(path, base, backend, frontends=True, windows=windows)
+                    release.verify_archive_backend(path, values, target)
+                    backend_archive(path, base, backend, frontends=True, windows=windows,
+                                    frontend_host='ncurses' if windows else 'winconsole')
+                    with self.assertRaisesRegex(ValueError, 'frontend build-info'):
+                        release.verify_archive_backend(path, values, target)
+                    for missing in ('bin/datapump-tui' + ('.exe' if windows else ''),
+                                    'share/man/man1/datapump-fb.1'):
+                        backend_archive(path, base, backend, frontends=True, windows=windows, omitted=[missing])
+                        with self.subTest(target=target, extension=extension, missing=missing), self.assertRaisesRegex(ValueError, 'required frontend'):
+                            release.verify_archive_backend(path, values, target)
+                    backend_archive(path, base, backend)
+                    with self.assertRaisesRegex(ValueError, 'required frontend'):
+                        release.verify_archive_backend(path, values, target)
 
 
 APT_NAMES = {'Packages', 'Packages.gz', 'Release', 'InRelease', 'Release.gpg',

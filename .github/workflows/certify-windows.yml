@@ -25,9 +25,13 @@ on:
         type: string
         default: windows-latest-h
       scope:
-        description: 'main source/package checks or the independent full calibration case'
+        description: 'main source/package checks, independent calibration, or independent frontends'
         type: string
         default: main
+      frontends:
+        description: 'Release inventory requires the terminal and framebuffer applications'
+        type: boolean
+        default: false
     outputs:
       warnings:
         description: 'Exact, scoped hosted-graphics exceptions for the certificate'
@@ -63,7 +67,7 @@ jobs:
       - name: Validate certification scope
         shell: pwsh
         run: |
-          if ($env:CERTIFICATION_SCOPE -notin @('main', 'calibration')) { throw 'Unsupported certification scope' }
+          if ($env:CERTIFICATION_SCOPE -notin @('main', 'calibration', 'frontends')) { throw 'Unsupported certification scope' }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -92,7 +96,9 @@ jobs:
       - name: Configure the pinned Windows source and dependency recipe
         shell: pwsh
         run: |
-          cmake -S . -B build/release-windows -A x64 -DCMAKE_TOOLCHAIN_FILE="$env:DATAPUMP_WINDOWS_TOOLCHAIN" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DDATAPUMP_GUI_BACKEND="$env:GUI_BACKEND" -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600 -DDATAPUMP_TEST_NATIVE_GUI=ON -DGUI_SMOKE_TIMEOUT=600 -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          $frontendOptions = @()
+          if ('${{ inputs.frontends }}' -eq 'true') { $frontendOptions = @('-DDATAPUMP_BUILD_TUI=ON', '-DDATAPUMP_BUILD_FB=ON') }
+          cmake -S . -B build/release-windows -A x64 -DCMAKE_TOOLCHAIN_FILE="$env:DATAPUMP_WINDOWS_TOOLCHAIN" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DDATAPUMP_GUI_BACKEND="$env:GUI_BACKEND" -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600 -DDATAPUMP_TEST_NATIVE_GUI=ON -DGUI_SMOKE_TIMEOUT=600 -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded @frontendOptions
           if ($LASTEXITCODE -ne 0) { throw 'Configure failed' }
           if ($env:CERTIFICATION_SCOPE -eq 'main' -and $env:GUI_BACKEND -eq 'rev') {
             cmake --build build/release-windows --config Release --target test_rev_coordinates --parallel $env:NUMBER_OF_PROCESSORS
@@ -136,6 +142,19 @@ jobs:
             ctest --test-dir build/release-windows -C Release --output-on-failure -L '^(contract|gui|packaging)$' -L '^calibration$' -E '^differential_receiver_probability$' --parallel 1 --stop-on-failure --no-tests=error
             if ($LASTEXITCODE -ne 0) { throw 'Remaining calibration tests failed' }
           }
+      - name: Build and run terminal and framebuffer checks independently
+        if: inputs.scope == 'frontends'
+        shell: pwsh
+        run: |
+          if ('${{ inputs.frontends }}' -ne 'true') { throw 'Frontend scope requires declared release inventory' }
+          cmake --build build/release-windows --config Release --target datapump-tests-frontends --parallel $env:NUMBER_OF_PROCESSORS
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed' }
+          ctest --test-dir build/release-windows -C Release --output-on-failure -L '^frontends$' --parallel 1 --stop-on-failure --no-tests=error
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend tests failed' }
+      - name: Record historical frontend coverage
+        if: inputs.scope == 'main' && !inputs.frontends
+        shell: pwsh
+        run: "'This historical release does not declare TUI/framebuffer delivery. No frontend source coverage is claimed.' >> $env:GITHUB_STEP_SUMMARY"
       - name: Build and run the full differential receiver calibration
         if: inputs.scope == 'calibration'
         shell: pwsh
@@ -199,5 +218,15 @@ jobs:
             build/release-windows/CMakeCache.txt
             build/release-windows/Testing/Temporary/
             build/release-windows/CMakeFiles/CMakeConfigureLog.yaml
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Retain independent terminal and framebuffer diagnostics
+        if: always() && inputs.scope == 'frontends'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: certification-frontends-windows-${{ inputs.backend }}-attempt-${{ github.run_attempt }}
+          path: |
+            build/release-windows/build-info.txt
+            build/release-windows/Testing/Temporary/
           if-no-files-found: warn
           retention-days: 7

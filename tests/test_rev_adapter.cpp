@@ -17,6 +17,11 @@ int run_native_probes(std::string_view selected={}) {
     if(selected=="--inline-document") {
         RevApp probe(windows,launch);probe.verify_inline_document_editor();return 0;
     }
+    if(selected=="--expanded-bitmap") {
+        RevApp probe(windows,launch);
+        probe.application.toggle(ui::Field::developer_mode,true);probe.apply();
+        probe.verify_expanded_bitmap();return 0;
+    }
     if(selected=="--layout-lifecycle") {
         auto controls=test::layout_lifecycle_controls();
         RevApp probe(windows,launch,controls);probe.verify_layout_lifecycle(controls);return 0;

@@ -13,7 +13,8 @@ and the remaining automatic HF frequency-tuning work.
 
 The [release workflow](../.github/workflows/release.yml) builds and publishes
 six portable application bundles: separate **FLTK** and **Rev** builds for Linux
-x86_64, Linux aarch64 and Windows x64. Each contains its selected GUI, the CLI,
+x86_64, Linux aarch64 and Windows x64. Each new bundle contains its selected GUI,
+the CLI, `datapump-tui` and `datapump-fb` (`.exe` on Windows),
 required application libraries and notices. Backend names appear in both the
 download filename and extracted directory, so the two installations can coexist.
 Unpack the whole archive and keep `bin/`, `lib/` and `share/` together. Nothing needs to
@@ -221,6 +222,11 @@ dependency bundle, its complete sources and per-recipe checksum file. Releases
 using `bookworm-sdk` require the corresponding Linux SDK triplet too. The final
 `SHA256SUMS.txt` binds every retained dependency asset to the release. Older
 metadata remains readable; this policy does not add assets to older releases.
+New releases also declare `frontends: [tui, framebuffer]`. This requires both
+binaries, their manuals and matching enabled build provenance in every archive.
+Repackaging preserves this declaration and the original bytes. Older releases
+without it retain their original checks and explicitly report that terminal and
+framebuffer coverage is not claimed.
 Upload and certification check each archive's root
 and shipped build information, so relabeling an FLTK package as Rev is rejected.
 Full qualification of a new release requires coverage of every declared backend.
@@ -262,10 +268,16 @@ the application or SDK again.
 complete private `bin/`, `lib/` and `share/` trees under `/opt/datapump/fltk/`
 and `/opt/datapump/rev/`, with application-menu entries and these commands:
 
-| Package | GUI | CLI |
-| --- | --- | --- |
-| `datapump-fltk` | `datapump-fltk` | `datapump-cli-fltk` |
-| `datapump-rev` | `datapump-rev` | `datapump-cli-rev` |
+| Package | GUI | CLI | TUI | Framebuffer |
+| --- | --- | --- | --- | --- |
+| `datapump-fltk` | `datapump-fltk` | `datapump-cli-fltk` | `datapump-tui-ncurses` | `datapump-fb-sdl` |
+| `datapump-rev` | `datapump-rev` | `datapump-cli-rev` | `datapump-tui-ncurses-rev` | `datapump-fb-sdl-rev` |
+
+The terminal and framebuffer commands are included in newly built releases.
+Arch and Gentoo delivery uses the same private binaries, wrappers and manuals.
+The TUI requires a terminal; the framebuffer application uses SDL2 to present
+the independent software renderer. Neither requires the native GUI toolkit to
+open its interface.
 
 The same `.deb` files target Debian 12 Bookworm and newer glibc-based Debian
 systems, and Ubuntu 24.04 and newer. The installation matrix covers Bookworm,
@@ -1043,8 +1055,9 @@ the exact existing base instead of rebuilding it. Larger runners do not change
 Select `platform=windows` in [Maintain base SDK](../.github/workflows/sdk-base.yml).
 Its [Windows build workflow](../.github/workflows/windows-base.yml) preserves a relocatable, precompiled dependency bundle in the same `base`
 release. Its [recipe](../third_party/build-support/windows-base.json) pins
-vcpkg and the shared union of static OpenSSL, GLEW and FreeType dependencies
-for both FLTK and Rev, including Debug and Release configurations. The runner
+vcpkg and the shared union of static OpenSSL, GLEW, FreeType and SDL2 dependencies
+for both GUI backends and the framebuffer host, including Debug and Release
+configurations. The Windows TUI uses the native console API. The runner
 already supplies Visual Studio/MSVC and the Windows SDK. The cold step
 compiles these third-party dependencies; it does not rebuild or redistribute
 Microsoft's compiler or SDK.
@@ -1083,6 +1096,14 @@ checksums and build provenance; `publish=false` leaves durable storage alone.
 Cold dependency compilation uses the available runner cores. Existing recipe
 assets are immutable: an upgrade needs a new recipe identity, and rebuilding
 an existing recipe does not authorize replacing its bytes.
+
+The frontend-enabled Linux SDK recipe adds wide ncurses, terminal descriptions
+and SDL2; the Windows recipe adds SDL2. These produce new recipe identities.
+Maintain both bases explicitly before the first full CI/release run using these
+recipes (`maintain_base=both` in the combined release entry point, or the
+corresponding base workflows). Prior recipe assets remain unchanged. A missing
+new recipe is a maintenance prerequisite, never permission for routine jobs to
+build dependencies implicitly.
 
 The consuming MSVC compiler/linker must be the same version or newer than the
 one recorded for the bundle, within the supported v143 toolset. Installation
@@ -1251,3 +1272,11 @@ each applicable calibration job must succeed before certification is recorded.
 This duplicates only setup and the minimal calibration build, allowing its
 roughly 20–40 minutes of computation on standard runners to overlap the other
 checks; actual duration varies with the host.
+
+Terminal and framebuffer regressions run in independent native Linux Release
+and Debug jobs, a Windows job, and an SDK job. Releases declaring both interfaces
+also require independent frontend certification jobs for each source target.
+They run alongside the existing modem, native GUI, calibration and package jobs;
+their tests are excluded from the core/native-GUI test selection. Each frontend
+job runs its cases serially to preserve terminal input timing. Package producers
+still include and verify both binaries and their runtime resources.

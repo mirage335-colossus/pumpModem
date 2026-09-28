@@ -77,7 +77,7 @@ def chicago_time(instant):
 
 def make_metadata(*, source_sha, run_id, run_attempt, version='', experiment=False,
                   linux_baseline='bookworm-sdk', now=None, cmake_version=None, schema=6,
-                  packager_sha=None, repackaged_from=None, dependencies=None):
+                  packager_sha=None, repackaged_from=None, dependencies=None, frontends=None):
     if type(schema) is not int or schema not in (1, 2, 3, 4, 5, 6):
         raise ValueError('Unsupported release metadata schema')
     if cmake_version is None:
@@ -144,6 +144,10 @@ def make_metadata(*, source_sha, run_id, run_attempt, version='', experiment=Fal
         value['dependencies'] = dict(dependencies)
     elif dependencies is not None:
         raise ValueError('Preserved dependency identities require release metadata schema 6')
+    if frontends is not None:
+        if schema < 6 or frontends != ['tui', 'framebuffer']:
+            raise ValueError('Frontend inventory requires both tui and framebuffer in schema 6')
+        value['frontends'] = list(frontends)
     return value
 
 
@@ -157,6 +161,7 @@ def load_metadata(path):
                                  cmake_version=value['project_version'], schema=value['schema'],
                                  packager_sha=value.get('packager_sha'),
                                  repackaged_from=value.get('repackaged_from'),
+                                 frontends=value.get('frontends'),
                                  dependencies=(value.get('dependencies') or {}) if value['schema'] >= 6 else value.get('dependencies'))
     except (KeyError, TypeError, AttributeError) as error:
         raise ValueError('Incomplete or invalid release metadata') from error
@@ -276,6 +281,7 @@ def verify_archive_backend(archive, metadata, target):
     provenance = 'share/doc/datapump/build-info.txt'
     contents = None
     roots = set()
+    regular_paths = set()
 
     def inspect(name, size, regular, read):
         nonlocal contents
@@ -285,6 +291,8 @@ def verify_archive_backend(archive, metadata, target):
                 or '\\' in name or parts[0] not in bases):
             raise ValueError(f'Archive has an unexpected package root or path for {target}')
         roots.add(parts[0])
+        if regular:
+            regular_paths.add('/'.join(parts[1:]))
         if '/'.join(parts[1:]) == provenance:
             if contents is not None or not regular or size > 65536:
                 raise ValueError(f'Archive has duplicate or unsafe backend build-info for {target}')
@@ -311,6 +319,16 @@ def verify_archive_backend(archive, metadata, target):
         backend = target_backend(metadata, target)
         if len(lines) != 1 or not re.fullmatch(rf'GUI: (?:ON|TRUE|YES|1) \({backend}\)', lines[0]):
             raise ValueError(f'Archive backend build-info does not match {target}')
+        if metadata.get('frontends'):
+            extension = '.exe' if target.startswith('windows-') else ''
+            required = {f'bin/{name}{extension}' for name in ('datapump-tui', 'datapump-fb')}
+            required.update(f'share/man/man1/{name}.1' for name in ('datapump-tui', 'datapump-fb'))
+            if not required <= regular_paths:
+                raise ValueError(f'Archive lacks required frontend binaries/manuals for {target}')
+            for label, adapter in (('TUI', 'winconsole' if extension else 'ncurses'), ('Framebuffer', 'sdl')):
+                values = [line for line in contents.decode('utf-8').splitlines() if line.startswith(label + ':')]
+                if len(values) != 1 or not re.fullmatch(rf'{label}: (?:ON|TRUE|YES|1) \({adapter}\)', values[0]):
+                    raise ValueError(f'Archive frontend build-info does not match {target}: {label}')
     except (tarfile.TarError, zipfile.BadZipFile, UnicodeError) as error:
         raise ValueError(f'Invalid application archive or backend build-info for {target}') from error
 
@@ -807,6 +825,7 @@ def repackage(source_tag, repository, directory, *, version='', run_id, run_atte
                                  linux_baseline=original['linux_baseline'], cmake_version=original['project_version'],
                                  packager_sha=packager_sha,
                                  dependencies=dependencies,
+                                 frontends=original.get('frontends'),
                                  repackaged_from={'tag': source_tag,
                                                  'inventory_sha256': digest(source / 'SHA256SUMS.txt')})
         if extra and not extra <= dependency_assets(metadata):
@@ -894,7 +913,8 @@ def main(argv=None):
         if args.command == 'metadata':
             value = make_metadata(source_sha=args.source_sha, run_id=args.run_id,
                                   run_attempt=args.run_attempt, version=args.version,
-                                  experiment=args.experiment, linux_baseline=args.linux_baseline)
+                                  experiment=args.experiment, linux_baseline=args.linux_baseline,
+                                  frontends=['tui', 'framebuffer'])
             write_json(args.output, value)
             if args.github_output:
                 with args.github_output.open('a', encoding='utf-8') as output:

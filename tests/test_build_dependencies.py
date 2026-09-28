@@ -59,6 +59,7 @@ class OfflineDependencies(unittest.TestCase):
             'Package: datapump-sdk-fixture\nVersion: 1.0\nArchitecture: all\n'
             'Maintainer: DataPump tests <nobody@example.invalid>\nDescription: offline fixture\n')
         (package / 'usr/include').mkdir(parents=True)
+        (package / 'usr/lib/unused').mkdir(parents=True)
         (package / 'usr/include/fixture.h').write_text('/* intact */\n')
         self.packages = self.root / 'input archives'
         self.packages.mkdir()
@@ -115,6 +116,38 @@ class OfflineDependencies(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'symlink SDK'):
             deps.prepare(self.args)
         self.assertTrue(self.archive.exists())
+
+    def test_multiple_frontend_link_aliases_use_verified_matching_runtimes(self):
+        library = self.root / 'installed-runtime.so.6'
+        library.write_bytes(b'fixture runtime')
+        self.record['runtime_libraries'] = [
+            dict(development='fixture-dev', package='fixture-runtime',
+                 link='libncursesw.so', soname=library.name),
+            dict(development='fixture-dev', package='fixture-runtime',
+                 link='libtinfo.so', soname=library.name),
+            dict(development='fixture-dev', package='fixture-runtime',
+                 link='libtinfow.so', soname=library.name),
+            dict(development='fixture-dev', package='fixture-runtime',
+                 link='libSDL2.so', soname=library.name)]
+        self.manifest.write_text(json.dumps(self.record))
+        def query(*args):
+            if args[0] == 'dpkg':
+                return self.record['architecture']
+            if args[1] == '-W':
+                return '1.0' if args[-1] == 'fixture-runtime:' + self.record['architecture'] else '1.02.0'
+            self.assertEqual(args[-1], 'fixture-runtime:' + self.record['architecture'])
+            return str(library)
+        with patch.object(deps, 'command', side_effect=query), patch.object(
+                deps.urllib.request, 'urlopen', side_effect=AssertionError('network')):
+            deps.prepare(self.args)
+        prefix = self.args.cache_dir / 'sysroot/usr/lib/unused'
+        for item in self.record['runtime_libraries']:
+            alias = prefix / item['link']
+            self.assertTrue(alias.is_symlink())
+            self.assertEqual(alias.resolve(), library)
+        metadata = json.loads((self.args.cache_dir / 'sysroot/prepared.json').read_text())
+        self.assertEqual({item['link'] for item in metadata['runtime_libraries']},
+                         {'libncursesw.so', 'libtinfo.so', 'libtinfow.so', 'libSDL2.so'})
 
     def test_runtime_version_mismatch_is_rejected(self):
         self.record['runtime_libraries'] = [dict(development='fixture-dev', package='fixture-runtime')]

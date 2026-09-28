@@ -11,3 +11,7 @@ HOST_PYTHON3_CONF_ENV += \
 	py_cv_module__dbm=n/a \
 	py_cv_module__gdbm=n/a \
 	py_cv_module_readline=n/a
+
+# Exercise the actual SDL software-window host in headless frontend tests.
+# Buildroot disables this driver by default; no graphics API is needed.
+SDL2_CONF_OPTS := $(filter-out --disable-video-dummy,$(SDL2_CONF_OPTS)) --enable-video-dummy

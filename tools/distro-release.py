@@ -180,6 +180,7 @@ def expected(directory, metadata, repository):
         linux_baseline=metadata['linux_baseline'], now=datetime.fromisoformat(metadata['created_at'].replace('Z', '+00:00')),
         cmake_version=metadata['project_version'], schema=metadata['schema'], packager_sha=metadata['packager_sha'],
         repackaged_from=metadata.get('repackaged_from'),
+        frontends=metadata.get('frontends'),
         dependencies=metadata.get('dependencies', {}) if metadata['schema'] >= 6 else metadata.get('dependencies'))
     if checked != metadata:
         raise ValueError('Distribution release metadata differs from its canonical identity')

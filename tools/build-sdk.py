@@ -226,6 +226,8 @@ def prepare(cache, manifest, identity, download, jobs):
     config = (output / '.config').read_text()
     for option in ('BR2_GCC_VERSION_15_X=y', 'BR2_PACKAGE_LIBGLEW=y',
                    'BR2_PACKAGE_XLIB_LIBXFT=y', 'BR2_PACKAGE_LIBOPENSSL=y',
+                   'BR2_PACKAGE_NCURSES=y', 'BR2_PACKAGE_NCURSES_WCHAR=y',
+                   'BR2_PACKAGE_SDL2=y', 'BR2_PACKAGE_SDL2_X11=y',
                    'BR2_TOOLCHAIN_BUILDROOT_GLIBC=y', 'BR2_GENERATE_LOCALE=""'):
         if option not in config.splitlines():
             raise ValueError(f'Required SDK feature disappeared during configuration: {option}')
