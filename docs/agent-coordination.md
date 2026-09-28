@@ -16,6 +16,8 @@ and task would otherwise warrant: neither more nor less because of coordination.
 It adds no tool quota, approval step or prerequisite to read-only investigation.
 Give these instructions to participating agents, not to every passive tool call.
 
+Read AGENTS and this guide separately, in bounded results (for example 120 lines
+per result, continuing to EOF); never concatenate them with source or board data.
 Read this guide once at startup; use its checkpoints thereafter. Open the
 [recipes](agent-coordination-recipes.md) when creating/updating records or sending
 messages, the [lifecycle procedures](agent-coordination-lifecycle.md) when their
@@ -27,7 +29,7 @@ when running a study. Historical reports are not routine worker reading.
 | When | Action, then return to useful work |
 | --- | --- |
 | Start, resume or change scope | Inspect source/index baseline, complete claims and your inbox; register exact claims before writing. |
-| Before a write | Confirm published ownership and current bytes, including generated outputs; stop dependent writes/launches on a failed or uncertain claim update. |
+| Before a write | Confirm published ownership, current bytes and relevant dependencies; failed/uncertain preconditions, publication or cleanup stop dependent acknowledgments, writes and launches. |
 | Build/test/generator may block or outlive a tool reply | Claim outputs/resources and stable inputs; record launch, running status/handle if yielded, then completion at the next control boundary. Short synchronous results join the next checkpoint. |
 | Waiting/checkpoint | Read inbox/current claims; replace current status, event times, next action and blockers together; continue independent work. |
 | Handoff | Prepare the entry/evidence first; acquire, acknowledge, write, verify, release and notify. Finish unrelated reporting after releasing the shared file. |
@@ -125,8 +127,10 @@ Check exit status and `complete`. Failed, unknown, unreadable or unexpected entr
 make the scan incomplete. Inspect the named record's bounded metadata and entire
 claims; resolve uncertainty before acquiring. Do not convert a partial scan into
 a free registry, silently ignore temporary files, or force legacy migration.
-The reader neither locks nor grants ownership; recheck under the mutex when
-changing claims. It does not scan notes, inboxes or archives for you.
+The checked session helper may perform the complete machine ownership checks and
+return bounded relevant evidence; this does not permit skipping an owner/error or
+using a stale cache. The reader neither locks nor grants ownership; recheck under
+the mutex when changing claims. It does not scan notes, inboxes or archives for you.
 
 For a changing entry, retry after publication settles; for a leftover candidate,
 contact its owner to remove only its own unpublished file. Investigate persistent
@@ -149,6 +153,10 @@ Prefer exact files. A directory claim covers every descendant, including future
 files. Compare whole path components, respecting case rules and symlink aliases;
 record absolute physical paths plus readable relative paths. Renames claim both
 paths; deletions, generators and formatters claim every path they may modify.
+Hard-linked mutable files across separately claimed trees are not isolation:
+use independent copies/worktrees, or explicitly coordinate all aliases together.
+Canonical path checks alone cannot find every hard-linked descendant of a
+directory; do not assume a disk-saving hard-link snapshot has private source.
 
 For registration, additions, releases or transfers:
 
@@ -176,6 +184,34 @@ For registration, additions, releases or transfers:
 Re-read each target immediately before editing and compare with the inspected
 baseline, using a hash/scoped diff when useful. Apply small patches. Unexpected
 changes stop that write; resolve ownership, preserving independent work elsewhere.
+An editor buffer, queued save, formatter or generator prepared earlier is also a
+writer: reload/rebase it before use and stop it before releasing ownership.
+
+### Dependencies and shared invariants
+
+File ownership prevents competing saves, not incompatible logic in different
+files. In `Baseline and dependencies`, identify the inputs your edit depends on:
+revision plus relevant dirty hashes, API/schema or algorithm invariant, and any
+named integration owner/order. Ordinary read-only exploration needs no exclusive
+claim. Before applying its conclusions, revalidate those inputs; changed inputs
+require rereading/replanning, not just refreshing the hash to make a check pass.
+
+For coupled changes, agree on an invariant resource (for example
+`invariant:project:receiver-search`) or work from isolated snapshots with one
+integrator. Acquire the resource along with files when intermediate combinations
+would be unsafe. Changes to loop bounds, candidate ranking, pruning, termination
+or mutable search state must preserve their combined invariant; separate files or
+functions are not proof of independence. Test the combined behavior and boundaries,
+not only each patch in isolation. The development contract remains authoritative.
+
+Hashes detect a changed snapshot; they do not freeze it or detect an intervening
+change that was reverted. If inputs must remain stable during a build, test or
+iterative investigation, coordinate their writers for that interval or use an
+isolated snapshot containing the intended dirty inputs; a worktree from HEAD
+alone omits uncommitted changes. Record exact tested inputs/configuration; integration changes
+invalidate affected evidence. A clean merge and two passing isolated suites do not
+qualify the combined candidate. Have its integrator inspect the merged invariants
+and run the required affected and general checks before delivery.
 
 ### Atomic records and messages
 
@@ -186,14 +222,19 @@ mutex, stage complete validated bytes inside that lock and atomically publish to
 `sessions/`; use no-replace publication for a new ID. A failed proposal must not
 remain as a spurious possible owner in `sessions/`.
 
-The optional [publisher](../tools/agent-board.py) checks format and stale replacement
+Prefer the [checked session helper](agent-coordination-recipes.md#checked-session-operations)
+when supported: it combines the owned mutex, complete overlap checks, reviewed
+input/handoff revalidation and verified publication before dependent work.
+The lower-level [publisher](../tools/agent-board.py) checks format and stale replacement
 under your mutex against reviewed bytes. **You still review all claims, provenance,
 stopped writers and facts**; it cannot grant/recover ownership. The [recipe](agent-coordination-recipes.md#publish-a-record)
 covers checked execution, uncertain results and equivalent harness operations.
 Unsupported publication has no direct-write fallback.
 
-Heartbeat/progress-only updates can omit the registry mutex only if claims remain
-exactly unchanged and the same atomic replacement rules are followed. The optional
+Heartbeat/progress-only updates can omit the registry mutex only if claims and
+ownership/dependency handoff facts remain exactly unchanged and the same atomic
+replacement rules are followed. Publish provenance changes/compaction under the
+mutex too; a status-only shortcut must not change an acquisition baseline. The optional
 publisher always requires the mutex. No two processes may write one session record;
 a supervised liveness helper writes only its separately claimed sidecar.
 
@@ -221,10 +262,14 @@ Keep source/build claims only while their writers or validation still need them.
    state and completed/pending checks, and removes the claim under the mutex.
    In the same update record a fresh stable release reference, owner, exact scope,
    acquired-from reference (or initial ownership), resulting hashes/scoped diff
-   or resource state, and stopped jobs. Retain evidence while a handoff depends
+   or resource state, and stopped jobs. Include a discoverable line such as
+   `- Scope: file: /absolute/path` (`directory`/`resource` also supported).
+   Retain evidence while a handoff depends
    on it. Only then send the reference, request ID and scope to the requester.
 3. The recipient checks **all** claims under the mutex and reconciles relevant
-   release/acquisition history. If relay released, A acquired/released, and you
+   release/acquisition history, including closed records absent from its inbox.
+   Use the [scope discovery recipe](agent-coordination-recipes.md#discover-scope-handoffs)
+   before deciding which handoff to inspect. If relay released, A acquired/released, and you
    acquire next, acknowledge A even if the bytes are unchanged and you only saw
    relay's notice. Neither a matching hash nor newest timestamp selects the owner.
    - Still claimed: leave it alone, request the actual owner's handoff and replace
@@ -247,7 +292,19 @@ work or an isolated checkout; never reclaim by timeout. Overlapping relative pat
 in separate checkouts need a designated integrator, dependencies, merge order and
 checks. Instructions to help or a parent-owned directory are not a transfer.
 
+With many agents, request related scopes together and publish additions only when
+the complete set is available; never wait holding the registry mutex. Avoid
+hold-and-wait cycles between partial claims: agree on integration order, release
+unneeded scope, or use isolated work. Keep requests stable and reroute them to the
+actual owner instead of broadcasting duplicate requests. Use bounded backoff on
+mutex contention, separate result files and one integrator per shared output.
+Do not create a hot shared progress ledger or skip owners to reduce scan cost.
+More workers do not make a single shared writer faster; partition independent
+components and coordinate their shared invariants explicitly.
+
 Check your inbox at checkpoints and before reporting blocked/repeating requests.
+Do not wait solely for a harness reply: a filesystem receipt may arrive without
+waking the chat. An optional harness notification should reference that receipt.
 While waiting in control, poll about every 60 seconds without busy-waiting; do
 independent work and check after long commands or resume. Record the actual last
 completed inbox check, pending request and one concrete Next check/action.

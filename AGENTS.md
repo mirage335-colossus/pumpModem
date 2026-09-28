@@ -29,8 +29,10 @@ step, and does not replace the harness's normal verification or tool-use policy.
 - Claim files/resources before writing, including notes and generated outputs,
   using the short atomic registry lock. Check your inbox before reporting blocked.
   Handoffs require recorded release, fresh claim acquisition and acknowledgment;
-  a message or old timestamp never grants ownership. Failed publication stops
-  dependent writes/launches until saved state is reconciled. Use an isolated
+  a message or old timestamp never grants ownership. Failed preconditions,
+  publication or cleanup stop dependent acknowledgments, writes and launches
+  until saved state is reconciled. Discover relevant closed-owner handoffs too;
+  matching bytes do not identify the last owner. Use an isolated
   checkout when overlapping work cannot be handed off.
 - Prepare/check record candidates in claimed artifacts (or memory for initial
   registration), outside `sessions/`; publish complete records atomically and
@@ -48,6 +50,11 @@ step, and does not replace the harness's normal verification or tool-use policy.
   Timestamp completed inbox processing; stamp Updated at publication. Keep research,
   implementation and validation in scope. No extra activity reports or invented
   findings are required.
+- Coordinate read dependencies and shared invariants as well as edited files.
+  Record the relevant revision/dirty hashes and integration order; reread and
+  replan if they change. Disjoint file claims do not make a shared API, schema,
+  search-loop invariant or final test result independent. Use a stable snapshot
+  or an agreed invariant resource when changes must be validated together.
 - Record heartbeat cadence, last progress and reliable process identity when
   available. Review overdue sessions and delete eligible closed sessions after
   30 days, including legacy archives and unneeded copies; do not create new

@@ -561,5 +561,247 @@ class TargetedInspection(unittest.TestCase):
                 self.assertNotIn('Traceback', result.stderr)
 
 
+class ScopedDiscovery(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name).resolve()
+        self.sessions = self.root / 'sessions'
+        self.sessions.mkdir()
+        self.target = self.root / 'project' / 'ledger.md'
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def save(self, name, handoff='- Current request: none', claims='None.', state='done'):
+        text = scan_record(claims=claims, State=state).replace('test-session', name)
+        text = text.replace('- Current request: none', handoff)
+        text = text.replace('Checkout / coordination root (absolute physical paths): value',
+                            f'Checkout / coordination root (absolute physical paths): {self.root / "project"} / {self.root}')
+        path = self.sessions / (name + '.md')
+        path.write_text(text, encoding='utf-8')
+        return path
+
+    def lookup(self):
+        return checker.scan_sessions(self.sessions, [checker.canonical_scope('file', str(self.target))])
+
+    def test_closed_intervening_unchanged_owner_and_covering_scope_are_returned(self):
+        for name, scope, acquired in (
+                ('relay', self.target, 'initial'), ('quiet-owner', self.target, 'relay-release'),
+                ('covering', self.target.parent, 'quiet-owner-release')):
+            kind = 'directory' if name == 'covering' else 'file'
+            self.save(name, f'- Scope: {kind}: {scope}\n- Release: {name}-release; acquired from {acquired}; unchanged bytes\n'
+                            '### Evidence\nAll writers stopped; hash 0000; keep this whole section.')
+        self.save('sibling', f'- Scope: file: {self.target}2\n- Release: sibling-release')
+        result = self.lookup()
+        self.assertTrue(result['complete'], result)
+        self.assertEqual([entry['id'] for entry in result['records']], ['covering', 'quiet-owner', 'relay'])
+        for entry in result['records']:
+            self.assertIn('### Evidence', entry['handoff'])
+            self.assertEqual(entry['state'], 'done')
+        self.assertNotIn('owner', result)  # Discovery does not choose a lineage tip.
+
+    def test_query_aliases_resolve_but_recorded_alias_claims_are_rejected(self):
+        project = self.root / 'project'
+        project.mkdir()
+        alias = self.root / 'alias'
+        alias.symlink_to(project, target_is_directory=True)
+        self.assertEqual(checker.canonical_scope('file', str(alias / 'ledger.md'))['value'], str(self.target))
+        self.save('owner', claims=f'- file: {alias / "ledger.md"}')
+        result = self.lookup()
+        self.assertFalse(result['complete'])
+        self.assertIn('canonical physical paths', result['errors'][0]['error'])
+
+    def test_exact_resource_and_quoted_path_with_spaces(self):
+        scope = checker.canonical_scope('resource', 'device:host:audio')
+        self.save('resource', '- Scope: resource: device:host:audio\n- Release: release-1; writers stopped')
+        self.save('other', '- Scope: resource: device:host:audio-extra\n- Release: release-2')
+        result = checker.scan_sessions(self.sessions, [scope])
+        self.assertEqual([entry['id'] for entry in result['records']], ['resource'])
+        spaced = self.root / 'project' / 'file with spaces'
+        text = self.save('spaced', f'- Scope: file: {spaced}\n- Released `{spaced}` unchanged').read_text()
+        self.assertTrue(checker.handoff_relevance(text, [checker.canonical_scope('file', str(spaced))]))
+
+    def test_opaque_or_mixed_legacy_handoff_is_explicitly_uncertain(self):
+        self.save('ambiguous', '- Released /unrelated/file; also released ledger unchanged.')
+        self.save('legacy', '- Scope: ledger\n- Release: unknown')
+        self.save('opaque', '- R1 previous work handed back; inspect owner note.')
+        result = self.lookup()
+        self.assertFalse(result['complete'])
+        self.assertEqual(len(result['errors']), 3)
+        self.assertEqual(len(result['records']), 3)
+        self.assertTrue(all(entry['relevance_uncertain'] for entry in result['records']))
+        self.assertIn('also released ledger unchanged', result['records'][0]['handoff'])
+
+    def test_unknown_claims_and_unreadable_or_legacy_records_never_disappear(self):
+        self.save('malformed', claims='- claim a file somehow')
+        legacy = self.save('legacy')
+        legacy.write_text(legacy.read_text().replace('## Baseline and dependencies', '## Old baseline'))
+        (self.sessions / 'unreadable.md').write_bytes(b'\xff')
+        (self.sessions / 'candidate.tmp').write_text('not a record')
+        result = self.lookup()
+        self.assertFalse(result['complete'])
+        self.assertEqual({Path(item['path']).name for item in result['errors']},
+                         {'malformed.md', 'legacy.md', 'unreadable.md', 'candidate.tmp'})
+
+    def test_terminal_retained_claim_remains_visible(self):
+        self.save('terminal', claims=f'- directory: {self.target.parent}', state='done')
+        result = self.lookup()
+        self.assertTrue(result['complete'], result)
+        self.assertEqual(result['records'][0]['claims'], f'- directory: {self.target.parent}')
+
+    def test_component_boundaries_and_hard_link_aliases(self):
+        directory = checker.canonical_scope('directory', str(self.root / 'a'))
+        self.assertTrue(checker.scopes_overlap(directory, checker.canonical_scope('file', str(self.root / 'a/x'))))
+        self.assertFalse(checker.scopes_overlap(directory, checker.canonical_scope('file', str(self.root / 'ab/x'))))
+        a, b = self.root / 'one', self.root / 'two'
+        a.write_text('same')
+        os.link(a, b)
+        self.assertTrue(checker.scopes_overlap(checker.canonical_scope('file', str(a)),
+                                              checker.canonical_scope('file', str(b))))
+        with self.assertRaisesRegex(ValueError, 'hard-linked'):
+            checker.parse_claims(f'- file: {a}')
+
+    def test_strict_claim_tables_keep_nested_and_all_rows(self):
+        claims = (f'| Kind | Absolute path | Relative | Use |\n| --- | --- | --- | --- |\n'
+                  f'| directory | {self.root / "a"} | a | outputs |\n'
+                  f'### More\n- file: {self.root / "b"}\n- resource: git:common')
+        self.assertEqual(len(checker.parse_claims(claims)), 3)
+        for bad in ('None.\n- file: /x', '| Kind | Absolute path | Relative | Use |',
+                    '- file: relative', '- file: /tmp/*', '- file: /tmp/x; extra',
+                    '| file | /x | x | use |'):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                checker.parse_claims(bad)
+
+    def test_permission_uncertainty_does_not_become_no_overlap(self):
+        with mock.patch.object(checker.os.path, 'samefile', side_effect=PermissionError('denied')):
+            with self.assertRaises(PermissionError):
+                checker.scopes_overlap(checker.canonical_scope('file', str(self.root / 'x')),
+                                        checker.canonical_scope('file', str(self.root / 'y')))
+
+    def test_future_case_and_unicode_aliases_conflict_conservatively(self):
+        pairs = [(self.root / 'Root/Foo', self.root / 'root/foo/child'),
+                 (self.root / 'caf\u00e9', self.root / 'cafe\u0301/child')]
+        for directory, child in pairs:
+            with self.subTest(directory=directory):
+                self.assertTrue(checker.scopes_overlap(checker.canonical_scope('directory', str(directory)),
+                                                      checker.canonical_scope('file', str(child))))
+
+    @unittest.skipUnless(os.name == 'posix', 'undecodable byte filenames are POSIX-specific')
+    def test_undecodable_names_remain_visible_errors_and_page_identity(self):
+        bad = self.sessions / os.fsdecode(b'unknown-\xff.md')
+        bad.write_text('not a valid session record', encoding='utf-8')
+        first = self.lookup()
+        self.assertFalse(first['complete'])
+        self.assertEqual([item['path'] for item in first['errors']], [str(bad)])
+        page = checker.page_result(first, 0, 1)
+        self.assertEqual(page['errors'], first['errors'])
+        renamed = self.sessions / os.fsdecode(b'unknown-\xfe.md')
+        bad.rename(renamed)
+        with self.assertRaisesRegex(ValueError, 'snapshot changed'):
+            checker.page_result(self.lookup(), 0, 1, first['snapshot'])
+        self.assertEqual(checker.read_document(renamed)['content'], 'not a valid session record')
+
+    def test_large_scan_pages_all_records_and_all_errors_without_dropping_sections(self):
+        for number in range(75):
+            self.save(f'owner-{number:03}', f'- Scope: file: {self.target}\n- Release: R{number}\n' + 'detail ' * 40)
+        (self.sessions / 'unknown.tmp').write_text('unknown')
+        result = self.lookup()
+        snapshot = result['snapshot']
+        records, errors, offset = [], [], 0
+        while True:
+            page = checker.page_result(self.lookup(), offset, 7, snapshot if offset else None)
+            self.assertFalse(page['complete'])
+            self.assertEqual(page['total_errors'], 1)
+            self.assertLessEqual(len(page['records']) + len(page['errors']), 7)
+            records.extend(page['records']); errors.extend(page['errors'])
+            if page['next_offset'] is None:
+                break
+            offset = page['next_offset']
+        self.assertEqual(len(records), 75)
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(len({entry['id'] for entry in records}), 75)
+        self.assertTrue(all('detail ' * 39 in entry['handoff'] for entry in records))
+
+    def test_changed_snapshot_and_unbound_later_page_are_rejected(self):
+        path = self.save('owner', f'- Scope: file: {self.target}\n- Release: R1')
+        first = self.lookup()
+        with self.assertRaisesRegex(ValueError, 'require --snapshot'):
+            checker.page_result(first, 1, 1)
+        path.write_text(path.read_text().replace('Release: R1', 'Release: R2; unchanged bytes'))
+        with self.assertRaisesRegex(ValueError, 'snapshot changed'):
+            checker.page_result(self.lookup(), 1, 1, first['snapshot'])
+
+    def test_unreadable_entry_change_also_invalidates_snapshot(self):
+        path = self.sessions / 'broken.md'
+        path.write_bytes(b'\xff')
+        first = self.lookup()
+        path.write_bytes(b'\xff\xff')
+        with self.assertRaisesRegex(ValueError, 'snapshot changed'):
+            checker.page_result(self.lookup(), 0, 1, first['snapshot'])
+        # Even changing an unrelated record must not be silently mixed into pages.
+        first = self.lookup()
+        self.save('new-unrelated')
+        with self.assertRaisesRegex(ValueError, 'snapshot changed'):
+            checker.page_result(self.lookup(), 1, 1, first['snapshot'])
+
+    def test_document_pages_round_trip_long_unicode_lines_and_reject_changes(self):
+        document = self.root / 'guide.md'
+        body = 'intro\r\n' + '\u03bb' * 12000 + '\r\nlast\n'
+        document.write_bytes(body.encode())
+        first = checker.read_document(document, limit=137)
+        parts, current = [], first
+        while True:
+            parts.append(current['content'])
+            self.assertLessEqual(len(current['content']), 137)
+            if current['next_offset'] is None:
+                break
+            current = checker.read_document(document, current['next_offset'], 137, first['snapshot'])
+        self.assertEqual(''.join(parts), body)
+        document.write_text(body + 'changed')
+        with self.assertRaisesRegex(ValueError, 'snapshot changed'):
+            checker.read_document(document, 137, 137, first['snapshot'])
+        alias = self.root / 'alias.md'
+        alias.symlink_to(document)
+        with self.assertRaisesRegex(ValueError, 'not a symlink'):
+            checker.read_document(alias)
+
+    def test_symlink_loop_and_bad_document_input_fail_explicitly(self):
+        a, b = self.root / 'loop-a', self.root / 'loop-b'
+        a.symlink_to(b); b.symlink_to(a)
+        with self.assertRaises((OSError, ValueError)):
+            checker.canonical_scope('file', str(a / 'future'))
+        document = self.root / 'bad.txt'
+        document.write_bytes(b'\xff')
+        failed = subprocess.run([sys.executable, '-B', str(TOOL), '--read', str(document)],
+                                cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(failed.returncode, 1)
+        self.assertFalse(json.loads(failed.stdout)['complete'])
+        self.assertNotIn('Traceback', failed.stderr)
+
+    def test_cli_modes_pages_and_errors(self):
+        self.save('one', f'- Scope: file: {self.target}\n- Release: R1')
+        self.save('two', f'- Scope: file: {self.target}\n- Release: R2')
+        base = [sys.executable, '-B', str(TOOL), '--handoffs', str(self.sessions), '--scope', str(self.target),
+                '--limit', '1', '--compact']
+        first = subprocess.run(base, cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        page = json.loads(first.stdout)
+        self.assertEqual(page['next_offset'], 1)
+        self.assertFalse(page['all_returned'])
+        second = subprocess.run(base + ['--offset', '1', '--snapshot', page['snapshot']],
+                                cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertIsNone(json.loads(second.stdout)['next_offset'])
+        for args in (['--handoffs', str(self.sessions)], ['--scope', str(self.target)],
+                     ['--fields', '--limit', '1'], ['--read', 'x', '--inspect', 'y']):
+            with self.subTest(args=args):
+                bad = subprocess.run([sys.executable, '-B', str(TOOL)] + args,
+                                     cwd=ROOT, capture_output=True, text=True)
+                self.assertEqual(bad.returncode, 2)
+        bad = subprocess.run(base + ['--offset', '1'], cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(bad.returncode, 1)
+        self.assertIn('require --snapshot', bad.stdout)
+
+
 if __name__ == '__main__':
     unittest.main()

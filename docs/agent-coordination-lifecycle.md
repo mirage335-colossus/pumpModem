@@ -81,6 +81,10 @@ keeps these writes before release. Prepare/check candidates outside `sessions/`;
 final review/publication belong inside the short owned registry operation. Clean
 only owned staging/lock files. An error after publication does not restore claims:
 inspect actual bytes before retrying, especially after a terminal transition.
+Retain claims if a child, queued save, output descriptor or cleanup writer cannot
+be shown stopped. A successful parent command does not prove every descendant
+finished. A failed acquisition must not delay recording a known job completion
+with unchanged claims; its failed dependency remains separately pending.
 
 Before pausing, release what you no longer need and state which claims remain
 held and why, plus an expected return/check if known. On completion, failure or
@@ -114,9 +118,14 @@ session must register/reclaim before resuming edits.
 
 Delete eligible `done`, `failed` and `cancelled` sessions **30 days after verified
 closure**. Do not create new archives or require a separate owner opt-in for this
-default cleanup. Owners may discard their own resolved records sooner. This
-replaces the previous seven-day archive/indefinite retention policy, including
-old `archive-only` defaults. Existing `archive/sessions/` records have the same
+default cleanup. Owners may discard their own resolved records sooner only after
+needed provenance is transferred or consolidated, not merely because claims are
+empty. No deletion/rewrite may erase the latest ownership/release facts while a
+relevant notice, pending acquisition or review/integration depends on them. Under
+the mutex, preserve a discoverable current baseline/lineage anchor and redirect
+live references before removing predecessors. This replaces the previous seven-day
+archive/indefinite retention policy, including old `archive-only` defaults.
+Existing `archive/sessions/` records have the same
 30-day deadline measured from closure, not archival or last access. Copying,
 moving or inspecting a record must not restart its age.
 
@@ -138,6 +147,16 @@ Age selects candidates only. Before deletion, verify all of these:
   facts with their owners. Incidental author/session IDs and historical cleanup
   links are provenance, not retention pins; keep brief attribution without
   keeping entire histories or leaving misleading links to deleted files.
+
+When a release/acquisition chain still establishes current provenance, keep its
+necessary references resolvable or consolidate the relevant ownership/disposition
+facts under the mutex with the receiving owner before deleting the source record.
+Check live dependencies by exact scope as well as explicit session/reference IDs:
+a waiting recipient may not yet know an intervening owner's ID. Do not delete or
+compact away that transition merely because nobody named its record. Do not
+mistake unchanged file bytes for a redundant ownership transition. Once
+the handoff is resolved and no live dependency needs the chain, ordinary retention
+applies; this is not a reason to keep an unbounded ownership log.
 
 For older records missing closure fields, the owner or designated recovery owner
 may add verified details under the registry mutex, preserving the original

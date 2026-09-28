@@ -5,7 +5,10 @@ The [fifth](agent-coordination-rerun5.md) informs the preparation safeguards. Th
 [sixth](agent-coordination-rerun6.md) and [seventh](agent-coordination-rerun7.md)
 reruns used unchanged guidance; the
 [eighth](agent-coordination-rerun8.md) and [ninth](agent-coordination-rerun9.md)
-each tested a later guidance revision. Use the
+each tested a later guidance revision. The
+[tenth](agent-coordination-rerun10.md) exposed execution gaps in failed
+preconditions, unseen closed-owner handoffs, event times and bounded reading.
+Use the
 [coordination workflow](agent-coordination.md) for the evaluator's own files,
 fixtures, observers, builds and handoffs too.
 
@@ -103,8 +106,10 @@ truncation recovery and scope, not just whether a helper was used.
 For publication primitives, supplement sampling with deterministic concurrent
 writer/reader and injected-failure tests. Readers should see absent or complete
 messages and complete old/new records; duplicate publication must not replace
-bytes. Also test the caller: rejected claims must prevent dependent directory
-creation, redirection, generators and launches; include successful controls.
+bytes. Also test the caller: failed preconditions and rejected claims must prevent
+dependent acknowledgments as well as directory creation, redirection, generators
+and launches; include successful controls. An assertion before publication and
+a following message command reproduce a different failure from publisher rejection.
 Inject cleanup/output failure after publication and inspect saved state, including
 terminal release. Verify closure output cannot write into released artifacts.
 Exercise a processed nonempty inbox followed by an unrelated checkpoint: preserve
@@ -112,6 +117,33 @@ actual event times and replace resolved blockers/next actions together.
 Custom publication is permitted; score its validation, identity and error handling,
 not helper non-use alone. Keep unknown/stale/retained-claim scenarios too. These tests do not
 replace blinded worker exercises or qualify other operating systems/filesystems.
+
+## Broader collisions and many-agent validation
+
+Add deterministic cases alongside blinded useful-work trials; do not infer these
+properties from an append-only ledger:
+
+| Scenario | Required evidence |
+| --- | --- |
+| Unchanged-byte intervening owner, no notice | Exact-scope discovery finds its closed handoff; no timestamp/hash-only ownership choice |
+| Source/header/config changes during compilation, including edit then revert | Stable snapshot or invalidated evidence; matching endpoint hashes alone are insufficient |
+| Disjoint scheduler/caller or schema/consumer edits | Dependencies/invariant and integrator identified; combined-candidate behavior checked |
+| Nested iterative search | Exactly-once coverage, scratch ownership, cancellation/resume, deterministic result and completion invariants preserved together |
+| Two sessions hold mutually needed resources | Quiescent release, agreed integration order or isolation; no mutex held while waiting and no timeout theft |
+| Parent finishes before child/logging/queued save | Claim remains until every writer is stopped or explicitly handed off |
+| Alias, rename, ancestor or future child scope | Canonical component overlap detected, including case rules supported by the actual filesystem |
+| Completed job plus failed acquisition | Job completion/status reconciled independently; pending acquisition remains explicit |
+| Large board, malformed record and changed page snapshot | Complete machine scan, bounded whole-section pages, errors retained, stale pagination rejected |
+| 32 or more synthetic contenders and independent scopes | No simultaneous overlapping claim grants; unrelated work continues; bounded contention measured without assuming scheduling fairness |
+
+Use synchronization barriers or injected hooks for deterministic failure ordering;
+arbitrary sleeps are not proof. Keep successful and failing controls, record actual
+participant/concurrency counts, and join all fixture children before releasing
+outputs. Distinguish linear full-board work from bounded model-visible output;
+pagination alone is not a faster scan. Vary aliases and filesystems only when
+actually available, and label unavailable platform/network cases. A helper stress
+run is not evidence that 32 independent reasoning agents will use the protocol
+correctly, nor a replacement for a matched distraction/useful-work study.
 
 ## Score the finished candidate
 

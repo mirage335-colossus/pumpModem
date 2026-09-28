@@ -15,9 +15,16 @@ off limits. Never initialize a new board just because the expected one is missin
 
 ## Bounded reading
 
-For the startup read, request AGENTS and the workflow separately, in bounded chunks
-if necessary. For example, request workflow lines 1–160, then 161–320; continue
-only if lines remain. Do not concatenate them with source, board records or logs.
+For the startup read, request AGENTS and the workflow separately. For example:
+
+```sh
+python3 -B "$checkout/tools/check-agent-record.py" --read "$checkout/AGENTS.md" --limit 8000
+```
+
+Continue at returned `next_offset` using `--offset` and `--snapshot` from that
+response until `next_offset` is null, then read the workflow the same way. A
+changed snapshot fails instead of mixing pages. Equivalent bounded line reads
+are fine; continue to EOF and recover decision-relevant truncation. Do not concatenate them with source, board records or logs.
 After startup, use the relevant checkpoint instead of rereading the whole guide.
 Apply the same output budgeting to source, test logs and web results. Independent
 calls can run in parallel without combining their large bodies into one truncated
@@ -30,10 +37,21 @@ python3 -B "$checkout/tools/check-agent-record.py" --scan "$coord_dir/sessions" 
 
 Both exit status and the JSON `complete` field matter. Compact output has exactly
 the same decoded metadata, whole claims and errors as ordinary scan output.
-If it still exceeds a tool's output limit, read the identified records individually
-without dropping any record or splitting away part of its claims. One incomplete
+For larger boards add `--limit 8`; continue with returned `next_offset` and
+`--snapshot` until null. The helper scans all records on every page, returns whole
+records/errors and rejects a changed snapshot. `complete` describes the scan,
+while `all_returned`/`next_offset` describe delivery: an error can be on a later
+page. Reduce the entry limit or inspect one record if the harness truncates output;
+never discard part of its claims. A huge single record needs bounded manual
+section reading, not a falsely complete truncated machine decision. One incomplete
 record means the registry still needs review; other records' visible claims remain
 authoritative. The scan is an observation, not an atomic snapshot.
+On a busy board, pages may repeatedly invalidate. Do not hold the mutex across
+model/tool turns to read them. Use the checked helper's complete machine ownership
+checks and bounded relevant evidence, or an immutable capture in a claimed artifact
+with its review identity; revalidate current state in the short commit operation.
+Every owner and error must still be checked, but unrelated bodies need not be
+printed into the model context. A cached capture never becomes the authority.
 
 ```sh
 python3 -B "$checkout/tools/check-agent-record.py" \
@@ -77,6 +95,41 @@ Read titles/status/affected paths from the matching files, then only the relevan
 notes in full. Do not print sibling result summaries merely to discover a topic.
 This filter is for knowledge discovery only: registry ownership review still
 includes **every record and whole claim**, regardless of task relevance.
+
+## Discover scope handoffs
+
+Before acquiring a previously used scope, discover its relevant release/acquisition
+records even when no current claim or inbox notice points to them:
+
+```sh
+python3 -B "$checkout/tools/check-agent-record.py" \
+  --handoffs "$coord_dir/sessions" --scope-kind file \
+  --scope "$checkout/path/to/target" --limit 8
+```
+
+Use `directory` for covering scopes and `resource` for an agreed exact resource ID.
+The helper examines every record, including terminal owners, and returns **whole
+matching handoff sections** and unresolved errors. It recognizes canonical paths,
+covering scopes and conservative historical mentions; uncertain prose/legacy
+records require manual inspection. It does not choose the last owner, prove stopped
+writers or authorize acquisition. Follow pagination exactly as above; a partial
+page collection is incomplete even if the underlying scan was valid.
+
+For new releases/acquisitions include a plain discoverable line inside the existing
+`Blockers and handoff` section, alongside release reference, acquired-from chain,
+hashes, stopped writers and pending request disposition:
+
+```text
+- Scope: file: /work/project/src/example.cpp
+```
+
+Use one line per exact scope; `directory` and `resource` are also valid kinds. This
+is an aid within the same authoritative record, not another registry. Keep live
+handoff references discoverable during compaction. A complete search can find both
+relay and quiet intervening owner: follow their acquired-from/release chain and
+current claims, not timestamp sorting or equal content hashes. Recheck the relevant
+snapshots under the mutex. Scope filtering never replaces the **complete claims**
+scan; ambiguous or missing evidence must not be treated as free scope.
 
 ## Check your inbox
 
@@ -165,6 +218,13 @@ changing a text section or mark an inbox processed by printing its bytes. Resolv
 what the messages change first; combine those decisions with jobs, blockers and
 Next action in the same snapshot. Fractional UTC times avoid invented clock ticks.
 Clock uncertainty remains explicit. The checker cannot establish these facts.
+
+Do not defer an observed job completion or processed request until a contested
+acquisition succeeds. Publish the truthful status with unchanged claims first
+when that acquisition cannot proceed; preserve the pending acquisition as the
+remaining work. Use semantic stopped-writer evidence from the release, not an
+assertion that another agent used one exact English phrase. Missing or ambiguous
+evidence still stops acquisition.
 
 Inspect the underlying test summary and exit result, not just a green wrapper or
 the exit code of `tail`/`tee`. Distinguish internal skips and setup failures from
@@ -283,6 +343,81 @@ output or integration genuinely remains, release the completed shared file but
 keep that other scope claimed and the session active until its writers finish.
 Do not add an intermediate closure or retain the shared file merely to log closure.
 
+## Checked session operations
+
+Prefer [agent-session.py](../tools/agent-session.py) for a supported board. It uses
+the same records and atomic publisher, creates full lock-owner identity, checks
+all claims under the mutex, verifies publication, and finishes owned-lock cleanup
+before returning a receipt or calling dependent work. It never chooses the last
+owner, stops jobs or infers that an inbox was processed.
+
+When adopting changed helpers or a new board filesystem, qualify the helpers with
+their focused tests using a claimed temporary root on that filesystem as well as
+normal regression coverage; `/tmp` success alone may miss mount-specific behavior.
+Reuse that environment evidence at startup rather than rerunning tests per agent.
+An unsupported or failing primitive requires investigation or isolation, never
+weaker publication/cleanup checks.
+
+| Operation | Required caller input and result |
+| --- | --- |
+| `review(board, scopes=..., handoffs=..., inputs=...)` | Exact added scopes, relevant owner IDs and stable input files; returns complete ownership/relevant handoff evidence and a snapshot token, including absent input identity |
+| `checkpoint(before, state=..., running_jobs=..., progress=..., handoff=..., next_check=...)` | Replace the complete current status together; claims remain unchanged, inbox/progress event times preserved unless explicit `inbox_at`/`progress_at` are supplied |
+| `commit(board, session, candidate, reviewed, ...)` | Filled complete candidate, frozen review and exact own-record hash (or `create=True`); rechecks snapshots/overlaps, stamps Updated, publishes/verifies and cleans the mutex |
+
+For imports, use `importlib.util.spec_from_file_location` with the helper's
+absolute path, as its [tests](../tests/test_agent_session.py) demonstrate. Keep
+review tokens in memory or an already-claimed artifact; do not print the complete
+board token into the model context. Use the bounded reader to inspect the relevant
+sections, and freeze the reviewed input/handoff identity **before** preparing the
+edit. Recomputing a token/hash after a rejection without reconsidering the changed
+facts defeats the check. Ordinary unrelated progress timestamps are excluded from
+the ownership fingerprint, but handoff changes conservatively require re-review.
+All claims are scanned; output pagination does not make this an indexed registry.
+
+The CLI accepts a JSON object containing the function's named arguments. For
+example, after preparing a claimed operation file with the actual reviewed token,
+complete candidate and replacement hash:
+
+```sh
+python3 -B "$checkout/tools/agent-session.py" commit \
+  --input "$coord_dir/artifacts/$session/operation.json"
+```
+
+Inspect this result before a **separate** dependent tool call. Do not put a bare
+acknowledgment/build command after it in the same shell. In Python, put dependent
+work in `after(receipt)` or directly after `commit` with no exception-swallowing
+fallback. `precondition` runs outside the mutex and must explicitly return `True`;
+its exception/false result prevents publication and `after`. The helper rechecks
+the frozen board/input evidence under the mutex afterward. No callback or command
+runs while holding that mutex. If an acknowledgment or callback itself fails,
+stop the rest and inspect the actual saved message/record before retrying; a
+receipt is evidence of one completed operation, not a reusable ownership lease.
+
+Pass `handoffs_reviewed` with the IDs whose returned candidate/uncertain handoffs
+you actually inspected when adding scope. This includes an intervening closed
+owner even if the original notice named another owner. Review release references,
+parent-directory scope, stopped writers and acquired-from chain; checking IDs
+alone does not establish those facts. Ambiguous prose requires resolution, not
+blindly copying all IDs to satisfy the API. New scope lines make discovery easier.
+
+Legacy errors never mean empty claims. An explicit `legacy_reviews` entry carries
+that record's exact SHA-256, manually interpreted canonical claims and a concrete
+review reason. Read its whole claims, relevant metadata and provenance first.
+Changed/missing bytes invalidate the interpretation; no automatic skip, forced
+migration or repeated approval is required. A legacy **own** record still uses
+the lower-level reviewed manual publication path until properly migrated. Unknown
+alias/format/filesystem cases similarly use manual review or isolation, never a
+less safe fallback. Helpers cannot enumerate every hard-linked descendant or
+establish continuously stable inputs: retain the workflow's alias and snapshot rules.
+
+Use `checkpoint` to clear a completed job and reconcile current requests even if
+an acquisition failed. Supply observed event times only when those events occurred;
+a successfully processed empty inbox is an event, a nonempty filename listing is
+not. The builder cannot close a session: prepare the full terminal candidate with
+empty claims and stopped writers, then use `commit` without `after` (terminal callbacks are rejected).
+Send its final output to the harness. Failed/uncertain closure does not reopen the
+old ID, and a successful closure receipt never authorizes another artifact write.
+
 ## Publish a record
 
 The optional [publisher](../tools/agent-board.py) requires POSIX descriptor-relative
@@ -361,10 +496,13 @@ mutex, scan other claims, or close another session.
 
 ### Stop dependent work on publication failure
 
-Treat publication as a checked operation. A separate tool call with its result
-inspected before the next dependent write is sufficient; no extra approval or
+Treat the whole acquisition as a checked operation, starting with its
+preconditions. A separate tool call with its result inspected before the next
+dependent action is sufficient; no extra approval or
 checkpoint is required. In a combined script, explicitly gate **every** dependent
-mkdir, redirection, generator and job launch. Newlines, semicolons, the last command's
+acknowledgment, ownership assertion, mkdir, redirection, generator and job launch.
+Failure diagnostics or a recovery request do not assert acquisition and may still
+be sent. Newlines, semicolons, the last command's
 exit status, or `set -e` alone are not a reliable substitute.
 
 This shell control-flow pattern uses caller operations, **not new helper commands**.
@@ -383,7 +521,8 @@ else
   fi
   exit "$publication_status"
 fi
-# Only an active session with verified published claims reaches this operation.
+# Only an active session with verified published claims reaches these operations.
+send_acquired_acknowledgment || exit "$?"
 create_claimed_outputs_and_launch
 ```
 
@@ -403,6 +542,12 @@ A complete terminal record stays terminal even if its closing command reports an
 error; new work requires a new ID and fresh acquisition. Inspect an uncertain send
 before choosing another message ID, so a successful delivery is not duplicated.
 Retain failure evidence only within scope still owned after that inspection.
+
+This includes failure before invoking the publisher: an assertion about the
+reviewed owner, expected hash or stopped writers must stop a following shell
+command too. An acknowledgment is not harmless merely because it edits no source;
+other agents can act on its ownership assertion. After an uncertain send, inspect
+the same immutable message ID before retrying, never blindly create another one.
 
 ### Equivalent publication without the helper
 
