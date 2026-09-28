@@ -2,10 +2,8 @@
 # Prerequisites, profiles and portability: docs/building.md
 # GitHub Actions build/release checklist: RELEASE
 
-# Native toolchain: build and run.
+# Native toolchain: build.
 ./build.sh                 # Incremental FLTK GUI and CLI build
-./build/dev/pump --help    # CLI commands and options
-./build/dev/datapump-gui
 
 # Choose the test coverage needed; groups overlap.
 ./build.sh test contract   # Preservation-contract coverage
@@ -17,10 +15,6 @@
 # Optional TUI/framebuffer interfaces: ncurses and SDL2 development files.
 # Details: docs/frontend-interfaces.md. These commands reuse a stable build path.
 ./build.sh --cli --tui --fb
-./build/dev-cli-tui-fb/pump --help
-./build/dev-cli-tui-fb/datapump-tui
-./build/dev-cli-tui-fb/datapump-fb
-# Add --simulation to either interactive interface to test without live audio.
 
 # Source SDK: prepare once on x86_64 Linux with the Buildroot prerequisites.
 # Only fetch uses the network; build and sources use the verified local cache.
@@ -46,18 +40,22 @@ python3 tools/build-sdk.py verify "$datapump_sdk"
 
 # Default FLTK application and CLI, tests, and portable TGZ/ZIP archives.
 ./build.sh --sdk "$datapump_sdk"
-./build/dev-sdk/pump --help
-./build/dev-sdk/datapump-gui
 ./build.sh test build --sdk "$datapump_sdk"
 ./build.sh test contract --sdk "$datapump_sdk"
 ./build.sh package --sdk "$datapump_sdk"
 
 # Optional Rev backend, using the same SDK's compiler and dependencies.
 ./build.sh --backend rev --sdk "$datapump_sdk"
-./build/rev-sdk/pump --help
-./build/rev-sdk/datapump-gui
 ./build.sh package --backend rev --sdk "$datapump_sdk"
 
 # Bookworm build-host qualification only (not required for ordinary local use).
 # Target glibc is 2.36; SDK tools built on newer hosts can require newer glibc.
 # python3 tools/build-sdk.py verify "$datapump_sdk" --max-host-glibc 2.36
+
+# Run separately after building (uncomment one example):
+# ./build/dev/pump --help       # CLI commands and options
+# ./build/dev/datapump-gui      # Desktop GUI
+# ./build/dev-cli-tui-fb/datapump-tui
+# ./build/dev-cli-tui-fb/datapump-fb
+# For SDK/Rev/custom profiles, use the executable paths printed by build.sh.
+# Add --simulation to an interactive interface to test without live audio.
