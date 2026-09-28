@@ -96,6 +96,7 @@ function(datapump_setup_sdk_build_runtime)
         "-DBUILD_ROOT=${CMAKE_BINARY_DIR}"
         "-DPROJECT_LIBRARIES=${project_libraries}" "-DPROJECT_SONAMES=${project_sonames}"
         "-DDESTINATION=$<TARGET_FILE_DIR:${target}>/sdk-runtime"
+        "-DSTAGE_TERMINFO=$<BOOL:$<TARGET_PROPERTY:${target},DATAPUMP_NEEDS_TERMINFO>>"
         -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../tools/stage-sdk-runtime.cmake"
       COMMENT "Staging SDK runtime libraries for ${target}" VERBATIM)
   endforeach()

@@ -54,13 +54,18 @@ void bundled_terminfo(const char* executable) {
     auto path=std::filesystem::read_symlink("/proc/self/exe",error);
     if(error) {error.clear();path=std::filesystem::absolute(executable,error);}
     if(error)return;
-    const auto database=(path.parent_path()/"../share/terminfo").lexically_normal();
-    if(!std::filesystem::is_directory(database,error)||error)return;
     std::string search;
     if(const auto* configured=std::getenv("TERMINFO_DIRS"))search=configured;
-    if(!search.empty())search+=':';
-    search+=database.string();search+=':';
-    setenv("TERMINFO_DIRS",search.c_str(),1);
+    bool found=false;
+    for(const auto* relative:{"../share/terminfo","sdk-runtime/terminfo"}) {
+        const auto database=(path.parent_path()/relative).lexically_normal();
+        error.clear();
+        if(!std::filesystem::is_directory(database,error)||error)continue;
+        // Retain even an empty caller entry (normal system lookup), including
+        // its priority, before adding either executable-relative resource.
+        search+=':';search+=database.string();found=true;
+    }
+    if(found) {search+=':';setenv("TERMINFO_DIRS",search.c_str(),1);}
 }
 
 // Only the trusted ncurses renderer writes control sequences. Even command-line
@@ -527,9 +532,11 @@ int main(int argc,char** argv) {
 #else
 // The PTY contract exercises the real terminal adapter with generic scene and
 // input fixtures. It deliberately has no modem field, command or page IDs.
-int main() {
+int main(int argc,char** argv) {
     using namespace datapump::gui;
+    (void)argc;
     std::setlocale(LC_CTYPE,"");
+    bundled_terminfo(argv[0]);
     try {
         Terminal terminal(std::getenv("DATAPUMP_TEST_COLOR")!=nullptr);bool finished=false,dirty=true;unsigned ticks=0,events=0,pastes=0;
         std::string last="ready",text;

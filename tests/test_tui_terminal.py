@@ -4,12 +4,15 @@ import argparse
 import errno
 import fcntl
 import os
+from pathlib import Path
 import re
 import select
+import shutil
 import signal
 import struct
 import subprocess
 import termios
+import tempfile
 import time
 
 
@@ -129,7 +132,7 @@ class Screen:
 
 
 class Pty:
-    def __init__(self, binary, terminal="xterm-256color", width=80, height=24, color=False, locale="C.UTF-8"):
+    def __init__(self, binary, terminal="xterm-256color", width=80, height=24, color=False, locale="C.UTF-8", extra_env=None):
         self.master, self.slave = os.openpty()
         self.original_mode = termios.tcgetattr(self.slave)
         self.original_flags = fcntl.fcntl(self.slave, fcntl.F_GETFL)
@@ -137,6 +140,8 @@ class Pty:
         self.screen = Screen(width, height)
         self.raw = bytearray()
         env = dict(os.environ, TERM=terminal, LC_ALL=locale)
+        if extra_env:
+            env.update(extra_env)
         if color:
             env["DATAPUMP_TEST_COLOR"] = "1"
         # A PTY models terminal bytes, not a physical Linux VT or its GPM
@@ -383,7 +388,61 @@ def run(binary):
     print("TUI PTY contract passed: literal sink, fixed binary half-blocks/ASCII fallback, color plots, keyboard, paste, terminal mouse, resize, VT terminfo, restoration, backpressure; physical GPM not exercised")
 
 
+def bundled_database_contract(binary):
+    binary = Path(binary)
+    runtime = binary.parent / "sdk-runtime"
+    staged = runtime / "terminfo/x/xterm-256color"
+    if os.environ.get("DATAPUMP_TEST_REQUIRE_BUNDLED_TERMINFO"):
+        assert staged.is_file(), "SDK frontend did not stage its terminal descriptions"
+    candidates = [staged, binary.parent / "../share/terminfo/x/xterm-256color"]
+    candidates += [Path(root) / suffix / "xterm-256color"
+                   for root in ("/usr/share/terminfo", "/lib/terminfo", "/etc/terminfo")
+                   for suffix in ("x", "78")]
+    source = next((path for path in candidates if path.is_file()), None)
+    assert source is not None, "Missing xterm fixture description"
+    with tempfile.TemporaryDirectory(prefix="datapump-terminfo-") as temporary:
+        root = Path(temporary)
+        # No host database can provide this unique name. Test actual ncurses
+        # lookup after relocation, then require failure when the entry is gone.
+        name = f"datapump-test-xterm-{root.name}"
+        for layout in ("source", "installed"):
+            prefix = root / layout
+            executable = prefix / "bin" / binary.name
+            executable.parent.mkdir(parents=True)
+            shutil.copy2(binary, executable)
+            if runtime.is_dir():
+                shutil.copytree(runtime, executable.parent / "sdk-runtime")
+            copied_data = executable.parent / "sdk-runtime/terminfo"
+            if copied_data.exists():
+                shutil.rmtree(copied_data)
+            database = copied_data if layout == "source" else prefix / "share/terminfo"
+            entry = database / "d" / name
+            entry.parent.mkdir(parents=True)
+            shutil.copyfile(source, entry)
+            environment = {"HOME": str(root / "empty-home"),
+                           "TERMINFO": str(root / "empty-user-database"),
+                           "TERMINFO_DIRS": str(root / "empty-search") + "::"}
+            terminal = Pty(str(executable), terminal=name, extra_env=environment)
+            try:
+                terminal.wait_for("Terminal contract ticks=")
+                terminal.send(b"\t")
+                terminal.wait_for("events=1 pastes=0 key 4")
+                terminal.finish()
+            finally:
+                terminal.close()
+            entry.unlink()
+            missing = Pty(str(executable), terminal=name, extra_env=environment)
+            try:
+                missing.wait_for("Cannot initialize terminal")
+                assert missing.process.wait(timeout=3) == 1
+            finally:
+                missing.close()
+    print("Relocated build/installed terminfo lookup passed without host terminal entries")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", required=True)
-    run(os.path.abspath(parser.parse_args().binary))
+    binary = os.path.abspath(parser.parse_args().binary)
+    run(binary)
+    bundled_database_contract(binary)

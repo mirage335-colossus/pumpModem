@@ -1,0 +1,26 @@
+include_guard(GLOBAL)
+
+set(DATAPUMP_TERMINFO_NAMES ansi vt100 vt102 linux xterm xterm-256color
+  screen screen-256color tmux tmux-256color)
+
+function(datapump_terminfo_source terminal sysroot result)
+  if(sysroot)
+    set(roots "${sysroot}/usr/share/terminfo")
+  else()
+    set(roots /usr/share/terminfo /lib/terminfo /etc/terminfo)
+  endif()
+  string(SUBSTRING "${terminal}" 0 1 initial)
+  string(HEX "${initial}" initial_hex)
+  unset(terminal_file)
+  find_file(terminal_file NAMES "${initial}/${terminal}" "${initial_hex}/${terminal}"
+    PATHS ${roots} NO_DEFAULT_PATH NO_CACHE)
+  if(NOT terminal_file)
+    message(FATAL_ERROR "Portable TUI requires terminfo entry ${terminal}; install ncurses data or rebuild the matching source SDK")
+  endif()
+  if(sysroot)
+    include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/SdkRuntime.cmake")
+    datapump_sdk_validate_path("${terminal_file}" "${sysroot}")
+  endif()
+  file(REAL_PATH "${terminal_file}" real)
+  set(${result} "${real}" PARENT_SCOPE)
+endfunction()
