@@ -1,0 +1,81 @@
+.TH DATAPUMP-FB 1 "September 2026" "Data Pump 001_00" "User Commands"
+.nh
+.ad l
+.SH NAME
+datapump-fb \- software framebuffer audio modem interface
+.SH SYNOPSIS
+.B datapump-fb
+.RI [ options ]
+.SH DESCRIPTION
+The framebuffer interface shares Data Pump's application controls, message
+policies, modem workers and plots. A CPU renderer draws the entire interface
+into an owned RGBA framebuffer. The SDL2 host displays that buffer through a
+software window surface and translates keyboard and mouse events.
+It does not use FLTK, Rev, OpenGL or an SDL 3D renderer.
+.PP
+The framebuffer uses independent pixel widgets and the shared desktop/document
+geometry, separate from the terminal layout. Small viewports can pan while
+keyboard focus reveals controls. Tab and Shift+Tab change focus; arrows navigate; Enter activates or commits;
+Escape dismisses a popup; F1 opens keyboard help; Ctrl+Q closes the application.
+Editable fields accept typed values as well as offered presets. Mouse clicks
+focus and activate controls; dragging selects editor text; the wheel scrolls.
+Shift+wheel pans a small viewport horizontally. Ctrl+V pastes clipboard text
+as data without activating commands.
+.PP
+The bundled font displays printable ASCII. Unsupported local Unicode glyphs
+appear as question marks while the original editor bytes remain intact.
+Received text retains Data Pump's stricter shared received-byte policy.
+.SH OPTIONS
+.TP
+.B \-\-headless
+Run without initializing SDL video. By default, produce one rendering iteration
+and close. With \-\-smoke-test, run the complete shared application smoke workload.
+.TP
+.BI \-\-capture " FILE.ppm"
+Write the final framebuffer as a binary RGB PPM image. An existing file is replaced.
+.TP
+.BI \-\-frames " N"
+Close after N event-loop rendering iterations. A stable scene may reuse its
+previous framebuffer; modem polling remains independent of drawing.
+.TP
+.BI \-\-size " WIDTHxHEIGHT"
+Initial framebuffer dimensions, default 1200x1048. Each dimension is limited
+to 8192 and the entire surface to 16 megapixels.
+.TP
+.BI \-\-font-scale " N"
+Integer bitmap font scale from 1 through 4, default 2.
+.TP
+.B \-\-simulation
+Use the shared simulated Robust Modem session instead of ordinary live audio.
+.TP
+.B \-\-color, \-\-monochrome
+Select shared color or grayscale presentation.
+.TP
+.B \-\-self-check, \-\-smoke-test
+Run the shared display-free check or full application workflow smoke.
+The shared link-setting and smoke options described in datapump-gui(1) also apply.
+.SH EMBEDDING
+The datapump_framebuffer library and framebuffer.hpp expose a host-owned Runtime.
+Construct one Runtime and call update(width, height, events) at least every
+40 milliseconds. Each call returns one complete, immutable framebuffer containing
+all widgets, menus, dialogs and plots. Upload it as a single texture or copy it
+to a display. No per-widget callbacks or multiple render targets are required.
+Optional clipboard and folder services are declined with an in-frame notice
+when using this minimal interface. Advanced hosts can use tick and explicit
+service methods instead. Width, height, stride, byte
+format, revision and damage rectangles are explicit. Frames remain valid across
+later rendering, resizing and runtime destruction.
+.PP
+Output uses RGBA8888 bytes; copy_frame also converts to BGRA8888 or RGB565
+little-endian surfaces with caller-supplied strides. Damage is relative to the
+immediately preceding frame revision. A host that skips a revision copies the
+whole frame. Calls on a Runtime must be serialized by the host.
+.PP
+SDL belongs only to the executable host; the library has no window-system
+dependency. A game-engine host can upload the frame as a texture and translate
+ray intersections into pointer coordinates. This interface does not implement
+a VR engine, physical Linux framebuffer driver, or microcontroller modem port.
+.SH SEE ALSO
+.BR datapump-gui (1),
+.BR datapump-tui (1),
+.BR pump (1)

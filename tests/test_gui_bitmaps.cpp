@@ -438,6 +438,31 @@ void simulation_waterfall_calibration() {
               "An attenuated carrier lost visible contrast in the calibrated grayscale or color spectrum");
     }
 }
+void fitted_history() {
+    plots::SpectrumHistory history;
+    for(unsigned row=0;row<160;++row) {
+        std::array<double,8> bins;bins.fill(-100);
+        if(row==1)bins[3]=0;
+        if(row==78)bins[6]=-20;
+        history.push(bins,10);
+    }
+    const auto source=PlotSnapshot::waterfall(history);
+    auto request=full_bitmap_request(4,4);
+    const auto cropped=render(source,request,false);
+    check(red(cropped,1,0)==0,"Default native history cropping changed");
+    request.fit_content=true;
+    const auto fitted=render(source,request,false);
+    check(red(fitted,1,0)==255,"Fit discarded an old short carrier between sampled rows");
+    check(red(fitted,3,1)==204,"Fit discarded a later carrier during temporal pooling");
+    BitmapImage tiled(4,4);
+    for(unsigned y=0;y<4;++y) {
+        request.damage={0,y,4,1};
+        source.paint(request,[&](unsigned x,unsigned py,PixelBlock block){tiled.blit(x,py,block);},false);
+    }
+    check(tiled.pixels()==fitted.pixels(),"Fitted history damage changed sample identity");
+    check(render(PlotSnapshot::waterfall({}),request,false).pixels()==std::vector<unsigned char>(48,0),
+          "Empty fitted history invented pixels");
+}
 void waterfall_resize() {
     plots::SpectrumHistory history;
     for (unsigned row = 0; row < 160; ++row)
@@ -756,7 +781,7 @@ void sampled_pattern_score_clouds() {
 }
 int main() {
     try {
-        transfer_contract(); producer_lifetime(); tiled_replay(); measured_plots(); simulation_waterfall_reference(); simulation_waterfall_calibration(); waterfall_resize(); qr_and_patterns(); pattern_scores(); sampled_pattern_score_clouds();
+        transfer_contract(); producer_lifetime(); tiled_replay(); measured_plots(); simulation_waterfall_reference(); simulation_waterfall_calibration(); waterfall_resize(); fitted_history(); qr_and_patterns(); pattern_scores(); sampled_pattern_score_clouds();
         std::cout << "GUI bitmap contract and shared producer tests passed\n";
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

@@ -296,6 +296,15 @@ copied or explicitly saved. Pattern evidence, RS corrections, unknown slots and
 keyed authentication remain separate statuses; public source validation is not
 authentication. Physical audio endpoints need matching local modem/source settings.
 
+
+Terminal and software-framebuffer interfaces are independent optional binaries:
+`./build.sh --cli --tui --fb` builds `datapump-tui` for SSH/local consoles and
+`datapump-fb` for SDL2 desktop evaluation. The framebuffer library also embeds as
+one resizable texture with normalized input, without SDL. See
+[terminal and framebuffer interfaces](docs/frontend-interfaces.md) for build,
+keyboard, engine integration and packaging details.
+
+
 ## Build and run
 
 Build with a C++20 compiler, CMake 3.21+, OpenSSL 3 development files, and the

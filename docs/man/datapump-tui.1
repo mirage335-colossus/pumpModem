@@ -1,0 +1,58 @@
+.TH DATAPUMP-TUI 1 "September 2026" "Data Pump" "User Commands"
+.SH NAME
+datapump-tui \- Data Pump terminal interface
+.SH SYNOPSIS
+.B datapump-tui
+.RI [ options ]
+.SH DESCRIPTION
+Runs the shared Data Pump application in a terminal using ncurses.
+It uses the same commands, settings, receive restrictions and modem behavior as
+the other frontends. A display server is not required.
+Use an interactive terminal, including an SSH session allocated with ssh -t.
+Audio devices are those of the computer running Data Pump.
+.SH KEYBOARD
+Tab and Shift-Tab move focus. Arrow keys navigate choices and lists and edit
+text. Home, End, Backspace and Delete retain their usual editing roles.
+F1 shows help. F2 sends Ctrl-Enter and F3 sends Shift-Enter for terminals that
+cannot distinguish these modified Enter keys. F4 opens choices and editable
+presets when Alt-Up or Alt-Down is unavailable. Ctrl-Q closes the application.
+Editable choices accept typed values as well as selections from presets.
+The shared presentation supplies the interaction hints for the focused control.
+.PP
+Correctly framed terminal bracketed paste is handled as one text event, including
+embedded newlines. Pastes exceeding 4 MiB are rejected completely, preserving
+the draft and selection. The terminal protocol cannot authenticate an embedded
+paste-ending sequence; shared received-text filtering removes its control bytes.
+Old terminals without bracketed paste cannot
+reliably distinguish pasted keys from typed keys. Use a terminal with bracketed
+paste for multiline or untrusted clipboard contents.
+.SH MOUSE
+Konsole and other terminals with mouse reporting support pointer selection and
+scrolling. Local Linux virtual-console mouse support depends on ncurses and an
+available GPM service. Keyboard operation does not require mouse support.
+Hold the terminal emulator's selection modifier (usually Shift) to select text
+for its clipboard. Data Pump does not send OSC52 clipboard sequences or launch
+folder openers from a terminal session.
+.SH DISPLAY
+The baseline is ASCII, including grayscale intensity characters for plots.
+Unsupported display bytes become underscores; local UTF-8 editor data is kept
+independently of the terminal's display capability. Received content retains the
+shared ASCII restriction before reaching the terminal sink.
+.PP
+Resize the terminal to change the layout. Large terminals are bounded to a
+400-column by 160-row application surface. Output is buffered with a fixed
+upper bound and drained without blocking receiver polling. On a slow connection
+newer presentation waits for earlier terminal output while application polling
+continues.
+.SH OPTIONS
+Use
+.B --help
+for shared launch options,
+.B --simulation
+for simulated audio, and
+.B --monochrome
+for an uncolored display.
+.SH SEE ALSO
+.BR datapump-gui (1),
+.BR ssh (1),
+.BR ncurses (3)

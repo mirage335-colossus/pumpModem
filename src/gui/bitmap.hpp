@@ -25,6 +25,10 @@ struct BitmapRequest {
     // Physical sample width / height; pixel displays normally supply 1.
     double sample_aspect_ratio = 1;
     bool monochrome = false, supports_rgb24 = false;
+    // Preserve the producer's full retained extent when the destination is
+    // small. Producers aggregate samples rather than cropping useful history.
+    // False preserves the existing native viewport behavior.
+    bool fit_content = false;
 };
 inline BitmapRequest full_bitmap_request(unsigned width, unsigned height,
                                          bool monochrome = false, bool supports_rgb24 = false) {

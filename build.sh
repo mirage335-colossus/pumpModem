@@ -8,10 +8,12 @@ Usage: ./build.sh [build|test GROUP|sanitize [GROUP]|package] [OPTIONS] [-- CMAK
 
   build                Build pump and the FLTK GUI (default).
   test GROUP           Build then run contract, regular, fast, legacy, gui,
-                       native, packaging, build, or all tests.
+                       frontends, native, packaging, build, or all tests.
   sanitize [GROUP]     Run instrumented headless tests (default: contract).
   package              Build and verify portable TGZ and ZIP bundles.
 
+  --tui                Also build datapump-tui (ncurses; combine with --cli for no GUI).
+  --fb                 Also build datapump-fb (software renderer with SDL2 host).
   --cli                Omit the native GUI (shared GUI tests remain available).
   --backend fltk|rev   Select a GUI backend; Rev needs its own suitable toolchain.
   --jobs N, -j N       Parallel build/test limit (default: 2).
@@ -40,6 +42,8 @@ group=
 backend=fltk
 backend_explicit=no
 cli=no
+tui=OFF
+framebuffer=OFF
 jobs=${DATAPUMP_JOBS:-${CMAKE_BUILD_PARALLEL_LEVEL:-2}}
 build_jobs=
 build_jobs_explicit=no
@@ -50,6 +54,8 @@ while [ "$#" -gt 0 ]; do
     case "$1" in
         --help|-h) usage; exit 0 ;;
         --cli) cli=yes; shift ;;
+        --tui) tui=ON; shift ;;
+        --fb) framebuffer=ON; shift ;;
         --stop-on-failure) stop_on_failure=yes; shift ;;
         --backend) need_value "$@"; backend=$2; backend_explicit=yes; shift 2 ;;
         --jobs|-j) need_value "$@"; jobs=$2; shift 2 ;;
@@ -87,7 +93,7 @@ case "$command_name" in
     sanitize) group=${group:-contract} ;;
 esac
 if [ -n "$group" ]; then
-    case "$group" in contract|regular|fast|legacy|gui|native|packaging|build|all) ;;
+    case "$group" in contract|regular|fast|legacy|gui|frontends|native|packaging|build|all) ;;
         *) die "unknown test group: $group" ;;
     esac
 fi
@@ -151,6 +157,8 @@ if [ -z "$build_dir" ]; then
     if [ "$preset" = sanitize ] && [ "$gui" = ON ] && [ "$backend" = fltk ]; then
         build_dir=$build_dir-gui
     fi
+    if [ "$tui" = ON ]; then build_dir=$build_dir-tui; fi
+    if [ "$framebuffer" = ON ]; then build_dir=$build_dir-fb; fi
     if [ -n "$sdk_root" ]; then build_dir=$build_dir-sdk; fi
 fi
 
@@ -262,6 +270,7 @@ done
 printf 'Configuring %s in %s\n' "$preset" "$build_dir"
 if ! cmake --preset "$preset" -S "$source_dir" -B "$build_dir" \
     "-DDATAPUMP_BUILD_GUI=$gui" "-DDATAPUMP_GUI_BACKEND=$backend" \
+    "-DDATAPUMP_BUILD_TUI=$tui" "-DDATAPUMP_BUILD_FB=$framebuffer" \
     "-DDATAPUMP_PORTABLE=$portable" "-DOPENSSL_USE_STATIC_LIBS=$portable" \
     "-DDATAPUMP_TEST_NATIVE_GUI=$native" "$@"; then
     die "configuration failed; check dependencies and use a new --build-dir for a different compiler/generator"
@@ -309,5 +318,7 @@ else
         if [ -n "$configurations" ]; then executable_dir=$build_dir/$build_config; fi
     fi
     printf 'Application: %s/pump\n' "$executable_dir"
+    if [ "$tui" = ON ]; then printf 'TUI: %s/datapump-tui\n' "$executable_dir"; fi
+    if [ "$framebuffer" = ON ]; then printf 'Framebuffer: %s/datapump-fb\n' "$executable_dir"; fi
     if [ "$gui" = ON ]; then printf 'GUI: %s/datapump-gui\n' "$executable_dir"; fi
 fi

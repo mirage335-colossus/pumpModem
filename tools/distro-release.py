@@ -148,8 +148,9 @@ def gentoo_recipe(metadata, repository, backend, rows, extras):
     destination = '${ED}/opt/datapump/' + backend
     text += f'\tdodir /opt/datapump/{backend}\n\tcp -a "${{root}}/." "{destination}/" || die\n'
     text += '\n'.join('\t' + line + ' || die' for line in normalization(destination).splitlines()) + '\n'
-    text += (f'\tdobin "${{FILESDIR}}/datapump-{backend}" "${{FILESDIR}}/datapump-cli-{backend}"\n'
-             '\tinsinto /usr/share/applications\n'
+    wrappers = sorted(name for name, (_, mode) in extras.items() if mode & 0o111)
+    text += '\tdobin ' + ' '.join(f'"${{FILESDIR}}/{name}"' for name in wrappers) + '\n'
+    text += ('\tinsinto /usr/share/applications\n'
              f'\tdoins "${{FILESDIR}}/datapump-{backend}.desktop"\n')
     manuals = sorted(name for name in extras if name.endswith('.1.gz'))
     if manuals:

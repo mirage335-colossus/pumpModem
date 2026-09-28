@@ -67,6 +67,24 @@ class DesktopEntryTests(unittest.TestCase):
             self.assertEqual(files[f'opt/datapump/{backend}/share/man/man1/pump.1'], (source, 0o644))
             self.assertEqual(len([name for name in files if name.startswith('usr/share/man/')]), 3)
 
+    def test_optional_frontends_get_independent_coinstallable_commands(self):
+        payload = {f'share/man/man1/{name}.1': (f'.TH {name.upper()} 1\n{name}\n'.encode(), 0o644)
+                   for name in ('pump', 'pump-fast', 'datapump-gui', 'datapump-tui', 'datapump-fb')}
+        for name in ('datapump-tui', 'datapump-fb'):
+            payload[f'bin/{name}'] = (b'frontend', 0o755)
+        first, second = (apt.package_files(payload, backend) for backend in ('fltk', 'rev'))
+        self.assertFalse(set(p for p in first if p.startswith('usr/bin/')) &
+                         set(p for p in second if p.startswith('usr/bin/')))
+        for backend, files, suffix in (('fltk', first, ''), ('rev', second, '-rev')):
+            for binary, adapter in (('datapump-tui', 'ncurses'), ('datapump-fb', 'sdl')):
+                command = f'{binary}-{adapter}{suffix}'
+                self.assertIn(f'/opt/datapump/{backend}/bin/{binary}'.encode(), files[f'usr/bin/{command}'][0])
+                manual = gzip.decompress(files[f'usr/share/man/man1/{command}.1.gz'][0])
+                self.assertIn(command.encode(), manual)
+        del payload['share/man/man1/datapump-tui.1']
+        with self.assertRaisesRegex(ValueError, 'incomplete manual set'):
+            apt.package_files(payload, 'fltk')
+
     def test_historical_archives_remain_repackagable_but_partial_manuals_fail(self):
         self.assertEqual(apt.manual_files({}, 'fltk'), {})
         with self.assertRaisesRegex(ValueError, 'incomplete manual set'):

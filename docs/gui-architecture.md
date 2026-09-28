@@ -7,6 +7,16 @@ formats signal data, or defines inspection sections. The former FLTK
 `main.cpp`, live widgets and procedural inspection implementation have been
 removed.
 
+The independent terminal and framebuffer frontends also consume `Application`.
+`terminal_ui.*` owns terminal cell layout and interaction; `framebuffer_ui.*` owns
+pixel layout and interaction; `framebuffer.*` rasterizes a complete owned frame.
+They share passive `ui_surface.hpp` event/drawing vocabulary and existing generic
+policies, but neither depends on the other implementation. `backend_ncurses.*`
+and `backend_sdl.cpp` implement their host interfaces. Adding ordinary application
+features still changes shared declarations/models only. The boundary test checks
+both dependency directions and prevents either frontend from acquiring the
+other's implementation. See [frontend interfaces](frontend-interfaces.md).
+
 ## Ownership
 
 | Shared module | Responsibility |

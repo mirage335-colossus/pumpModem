@@ -62,6 +62,20 @@ if os.environ.get("FAIL_STEP") == ("build" if "--build" in sys.argv else "config
         self.assertIn("datapump-apps", calls[1])
         self.assertNotIn("ctest", [call[0] for call in calls])
 
+    def test_independent_interactive_frontends(self):
+        result, calls = self.run_wrapper('--cli', '--tui', '--fb')
+        self.assertIn('-DDATAPUMP_BUILD_GUI=OFF', calls[0])
+        self.assertIn('-DDATAPUMP_BUILD_TUI=ON', calls[0])
+        self.assertIn('-DDATAPUMP_BUILD_FB=ON', calls[0])
+        self.assertIn(str(self.source / 'build/dev-cli-tui-fb'), calls[0])
+        self.assertIn('datapump-tui', result.stdout)
+        self.assertIn('datapump-fb', result.stdout)
+
+    def test_frontend_test_group_builds_prerequisites(self):
+        _, calls = self.run_wrapper('test', 'frontends', '--cli', '--tui', '--fb')
+        self.assertIn('datapump-tests-frontends', calls[1])
+        self.assertIn('^frontends$', calls[2])
+
     def prepare_sdk(self):
         sdk = self.root / "SDK with spaces"
         metadata = sdk / "share/datapump-sdk"

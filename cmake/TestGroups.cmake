@@ -30,6 +30,11 @@ set(_aliases
   "fast_acoustic_short_convolutional=test_fast_acoustic_short_weak"
   "gui_self_check=datapump-gui"
   "gui_workflow=datapump-gui"
+  "tui_self_check=datapump-tui"
+  "tui_terminal=datapump_tui_adapter_test"
+  "fb_self_check=datapump-fb"
+  "fb_headless=datapump-fb"
+  "fb_sdl=datapump-fb"
   "gui_adapter_conformance=test_${DATAPUMP_GUI_BACKEND}_adapter"
   "gui_document_conformance=test_fltk_document"
   "gui_platform_conformance=test_rev_platform"
@@ -109,7 +114,7 @@ endforeach()
 add_custom_target(datapump-tests DEPENDS ${_all_test_targets})
 add_custom_target(datapump-tests-ci-core DEPENDS ${_ci_core_targets})
 add_custom_target(datapump-tests-ci-live DEPENDS ${_ci_live_targets})
-foreach(_group contract regular fast legacy gui native packaging build)
+foreach(_group contract regular fast legacy gui frontends native packaging build)
   if(_group STREQUAL "native")
     set(_label native_gui)
   else()

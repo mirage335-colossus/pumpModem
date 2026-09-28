@@ -98,6 +98,7 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 // Identical flags, defaults and display-free checks for every selected backend.
-int gui_main(int argc,char** argv,const char* backend,const std::function<int(Launch)>& run);
+int gui_main(int argc,char** argv,const char* backend,const std::function<int(Launch)>& run,
+             const char* program_name="datapump-gui");
 void gui_self_check();
 }

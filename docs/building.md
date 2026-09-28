@@ -74,6 +74,14 @@ that the consuming linker is at least as new as the recorded builder. Keep
 the compiler at least as new too, within v143; the bundle contains no LTO
 objects. This dependency handoff uses neither Actions cache nor artifacts.
 
+The independent `--tui` and `--fb` options add `datapump-tui` (ncurses) and
+`datapump-fb` (SDL2 software framebuffer). Combine with `--cli` for no native GUI.
+`./build.sh test frontends --cli --tui --fb` runs their focused integration group;
+normal full regression requirements still apply. The TUI and framebuffer have
+separate presentation/interaction implementations behind the common application.
+See [frontend interfaces](frontend-interfaces.md) for dependencies and the small
+single-framebuffer engine API.
+
 ## Commands and profiles
 
 | Command | Output/configuration | Work performed |
@@ -193,6 +201,7 @@ test prerequisites before invoking CTest**; CTest by itself does not rebuild.
 | `fast` | Fast coding, transfer, modem and shared Fast GUI tests |
 | `legacy` | Legacy waveform/session and shared Legacy GUI tests |
 | `gui` | All shared GUI tests and native executable self-check; no display tests |
+| `frontends` | Terminal and framebuffer interactions, pixels and optional ncurses/SDL hosts |
 | `native` | Selected backend's display-dependent workflow and conformance probes |
 | `packaging` | Runtime collection, checksums, corruption detection and relocation |
 | `build` | Build orchestration, dependency preparation and vendored source integrity |

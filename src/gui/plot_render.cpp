@@ -287,6 +287,20 @@ void PlotSnapshot::paint(const BitmapRequest& request, const BitmapSink& sink, b
             // Missing startup history stays blank at the top at the same scale.
             const auto visible_rows = std::min<std::size_t>(request.height, SpectrumHistory::capacity);
             rows(request, sink, color, [&](unsigned x, unsigned y) {
+                if(request.fit_content) {
+                    if(history.empty())return gray(0);
+                    const auto begin=static_cast<std::size_t>(y)*history.size()/request.height;
+                    const auto end=std::min(history.size(),std::max(begin+1,static_cast<std::size_t>(y+1)*history.size()/request.height));
+                    double peak=-std::numeric_limits<double>::infinity();
+                    for(auto source=begin;source<end;++source) {
+                        const auto& row=history[source];
+                        const auto first=static_cast<std::size_t>(x)*row.size()/request.width;
+                        const auto last=std::min(row.size(),std::max(first+1,static_cast<std::size_t>(x+1)*row.size()/request.width));
+                        peak=std::max(peak,*std::max_element(row.begin()+static_cast<std::ptrdiff_t>(first),row.begin()+static_cast<std::ptrdiff_t>(last)));
+                    }
+                    const auto intensity=static_cast<unsigned char>(data.history.intensity(peak)*255);
+                    return color?theme::waterfall_palette[intensity]:gray(intensity);
+                }
                 const auto source = data.overview ? static_cast<std::ptrdiff_t>(static_cast<std::size_t>(y) * history.size() / request.height) :
                     static_cast<std::ptrdiff_t>(history.size()) - static_cast<std::ptrdiff_t>(visible_rows) +
                     static_cast<std::ptrdiff_t>(static_cast<std::size_t>(y) * visible_rows / request.height);

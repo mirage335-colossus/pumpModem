@@ -4,13 +4,14 @@ cmake_minimum_required(VERSION 3.21)
 # helper must not bypass the boundary. New application fields/pages/producers
 # do not require changes to this list; a new public primitive does.
 set(contract_headers
+  ui_surface.hpp terminal_ui.hpp framebuffer.hpp framebuffer_ui.hpp
   application.hpp launch_command.hpp bitmap.hpp ui_contract.hpp ui_document.hpp
   desktop_layout.hpp control_layout.hpp document_layout.hpp document_actions.hpp
   control_binding.hpp record_interactions.hpp presentation_palette.hpp
   text_policy.hpp utf8_policy.hpp control_interactions.hpp record_scroll.hpp service_queue.hpp chrome_layout.hpp theme.hpp
   binding_state.hpp record_reconciliation.hpp document_presentation.hpp overlay.hpp)
 set(native_headers backend_fltk_document.hpp backend_rev_document.hpp
-  bitmap_fltk.hpp theme_fltk.hpp backend_rev_theme.hpp rev_platform.hpp)
+  bitmap_fltk.hpp theme_fltk.hpp backend_rev_theme.hpp rev_platform.hpp backend_ncurses.hpp)
 
 # Public headers may depend only on each other and the standard library. An
 # unknown angle include is not automatically a system header: that used to let
@@ -134,6 +135,12 @@ function(check_gui_boundary path native)
   set_property(GLOBAL APPEND PROPERTY gui_boundary_visited "${path}")
   read_gui_source("${path}" source)
   get_filename_component(name "${path}" NAME)
+  if(name MATCHES "^(framebuffer|backend_sdl)" AND source MATCHES "#[ \t]*include[^\n]*(terminal_ui|backend_ncurses)")
+    message(FATAL_ERROR "${name} depends on the terminal implementation; framebuffer interaction must remain independent.")
+  endif()
+  if(name MATCHES "^(terminal_ui|backend_ncurses)" AND source MATCHES "#[ \t]*include[^\n]*(framebuffer|backend_sdl)")
+    message(FATAL_ERROR "${name} depends on the framebuffer implementation; terminal interaction must remain independent.")
+  endif()
   if(native)
     string(REGEX REPLACE "\"([^\"\\\\]|\\\\.)*\"|'([^'\\\\]|\\\\.)*'" " " color_source "${source}")
     if(color_source MATCHES "(rgba|fl_rgb_color)[ \t\r\n]*\\([ \t\r\n]*[0-9]")
@@ -170,7 +177,7 @@ function(check_gui_boundary path native)
     if(header IN_LIST standard_headers)
       continue()
     endif()
-    if(header MATCHES "^(FL/|Rev/|third_party/(rev|fltk)/)" AND NOT native)
+    if(header MATCHES "^(FL/|Rev/|SDL|ncurses|curses|lvgl|third_party/(rev|fltk)/)" AND NOT native)
       message(FATAL_ERROR "Public GUI header ${name} depends on a native toolkit.")
     endif()
     # Native regression methods are compiled only into the dedicated test
@@ -185,7 +192,7 @@ function(check_gui_boundary path native)
       check_gui_boundary("${ROOT}/src/gui/${header}" FALSE)
     elseif(native AND header IN_LIST native_headers)
       check_gui_boundary("${ROOT}/src/gui/${header}" TRUE)
-    elseif(native AND include MATCHES "<" AND header MATCHES "^(FL/|X11/|sys/|windows\\.h$|shellapi\\.h$|unistd\\.h$)")
+    elseif(native AND include MATCHES "<" AND header MATCHES "^(FL/|X11/|sys/|windows\\.h$|shellapi\\.h$|unistd\\.h$|SDL[^/]*\\.h$|ncurses\\.h$|curses\\.h$|poll\\.h$|termios\\.h$|fcntl\\.h$)")
       continue() # Toolkit drawing and native platform services.
     else()
       message(FATAL_ERROR "${name} includes '${header}' outside the public GUI/native helper boundary.")
@@ -203,6 +210,9 @@ list(APPEND adapters "${ROOT}/src/gui/bitmap_fltk.hpp" "${ROOT}/src/gui/theme_fl
   "${ROOT}/src/gui/rev_platform.cpp" "${ROOT}/src/gui/rev_platform.hpp" "${ROOT}/src/gui/rev_entry_win.cpp")
 foreach(path IN LISTS adapters)
   check_gui_boundary("${path}" TRUE)
+endforeach()
+foreach(name terminal_ui.cpp framebuffer_ui.cpp framebuffer.cpp)
+  check_gui_boundary("${ROOT}/src/gui/${name}" FALSE)
 endforeach()
 foreach(name IN LISTS contract_headers)
   check_gui_boundary("${ROOT}/src/gui/${name}" FALSE)
@@ -239,13 +249,13 @@ foreach(path IN LISTS gui_sources)
     continue()
   endif()
   read_gui_source("${path}" source)
-  if(source MATCHES "(#[ \t]*include|import[ \t]+)[^\n]*(FL/|backend_|bitmap_fltk|theme_fltk|rev_platform|third_party/(rev|fltk))|import[ \t]+Rev\\.|Rev[ \t\r\n]*::|(^|[^A-Za-z_0-9])Fl_[A-Za-z_]")
+  if(source MATCHES "(#[ \t]*include|import[ \t]+)[^\n]*(FL/|SDL|ncurses|curses|lvgl|backend_|bitmap_fltk|theme_fltk|rev_platform|third_party/(rev|fltk))|import[ \t]+Rev\\.|Rev[ \t\r\n]*::|(^|[^A-Za-z_0-9])Fl_[A-Za-z_]")
     message(FATAL_ERROR "Shared GUI source ${path} depends on a native adapter/toolkit.")
   endif()
   if(source MATCHES "#[ \t]*include[ \t]+[^<\" \t\r\n]")
     message(FATAL_ERROR "Shared GUI source ${path} has a nonliteral include; dependencies must be explicit.")
   endif()
-  if(source MATCHES "#[ \t]*(if|ifdef|ifndef|elif)[^\n]*(DATAPUMP_GUI_BACKEND|DATAPUMP_(FLTK|REV)_ADAPTER|FLTK_VERSION|FL_MAJOR_VERSION)")
+  if(source MATCHES "#[ \t]*(if|ifdef|ifndef|elif)[^\n]*(DATAPUMP_GUI_BACKEND|DATAPUMP_(FLTK|REV|NCURSES)_ADAPTER|DATAPUMP_TUI_BACKEND|DATAPUMP_FB_HOST|FLTK_VERSION|FL_MAJOR_VERSION|SDL_MAJOR_VERSION)")
     message(FATAL_ERROR "Shared GUI source ${path} branches on a native backend; feature behavior must be shared.")
   endif()
 endforeach()
