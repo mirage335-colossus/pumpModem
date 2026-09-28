@@ -198,6 +198,11 @@ of `main`. It pins `SHA256SUMS.txt` before testing and refuses certification if
 the source, tag, checksum inventory or published asset hashes change. It never
 rebuilds or replaces the published downloads. Source unit tests compile from
 the recorded revision; archive/GUI/CLI tests execute the released binaries.
+After a certification-harness correction, finish the older run before dispatching
+full certification again for the same tag. For the final read-only check,
+`tools/verify-latest-release.py` accepts `--certification-run-id` for that later
+report; `--run-id` still identifies the original publication. The certification
+ID defaults to the publication ID for the combined release workflow.
 For schema-6 releases, source certification retrieves the retained dependencies
 from that same release and verifies them against the pinned inventory. It does
 not need the original `base` release. Older schemas retain the existing exact

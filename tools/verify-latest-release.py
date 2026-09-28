@@ -14,11 +14,15 @@ certify = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(certify)
 
 
-def verify(repository, tag, source_sha, run_id, run_attempt, inventory_sha256=None):
+def verify(repository, tag, source_sha, run_id, run_attempt, inventory_sha256=None,
+           certification_run_id=None):
     certify.validate_location(repository, tag)
     if not certify.release.SHA.fullmatch(source_sha):
         raise ValueError('Expected source must be a full commit SHA')
-    if any(not re.fullmatch(r'[1-9][0-9]*', value) for value in (run_id, run_attempt)):
+    if certification_run_id is None:
+        certification_run_id = run_id
+    if any(not re.fullmatch(r'[1-9][0-9]*', value)
+           for value in (run_id, run_attempt, certification_run_id)):
         raise ValueError('Expected run ID and certification attempt must be positive integers')
     if inventory_sha256 is not None and not re.fullmatch(r'[0-9a-f]{64}', inventory_sha256):
         raise ValueError('Expected inventory must be a SHA-256 digest')
@@ -30,12 +34,12 @@ def verify(repository, tag, source_sha, run_id, run_attempt, inventory_sha256=No
             raise ValueError('Published metadata differs from this ordinary release run')
         if published.get('prerelease') is not False or published.get('draft') is not False:
             raise ValueError('Latest candidate must be a published ordinary release')
-        report_name = f'certification-{run_id}-attempt-{run_attempt}.json'
+        report_name = f'certification-{certification_run_id}-attempt-{run_attempt}.json'
         report_path = certify.download_asset(repository, tag, report_name,
                                               state['directory'], state['assets'])
         report = json.loads(report_path.read_text(encoding='utf-8'))
         identity = {'repository': repository, 'tag': tag, 'source_sha': source_sha,
-                    'run_id': run_id, 'run_attempt': run_attempt,
+                    'run_id': certification_run_id, 'run_attempt': run_attempt,
                     'inventory_sha256': state['inventory_sha256'], 'schema': metadata['schema']}
         if not isinstance(report, dict) or any(report.get(key) != value for key, value in identity.items()):
             raise ValueError('Certification report differs from the expected release, source, inventory or run')
@@ -58,7 +62,8 @@ def verify(repository, tag, source_sha, run_id, run_attempt, inventory_sha256=No
                 or latest.get('tag_name') != tag or latest.get('draft') is not False
                 or latest.get('prerelease') is not False):
             raise ValueError('GitHub Latest does not point to this certified release')
-        return {**identity, 'release_id': published['id'], 'status': report['status'],
+        return {**identity, 'run_id': run_id, 'certification_run_id': certification_run_id,
+                'release_id': published['id'], 'status': report['status'],
                 'release_url': published['html_url'], 'latest': True}
 
 
@@ -67,10 +72,12 @@ def main(argv=None):
     for name in ('repo', 'tag', 'source-sha', 'run-id', 'run-attempt'):
         parser.add_argument('--' + name, required=True)
     parser.add_argument('--inventory-sha256')
+    parser.add_argument('--certification-run-id',
+                        help='Separate certification run; defaults to the publication --run-id')
     args = parser.parse_args(argv)
     try:
         result = verify(args.repo, args.tag, args.source_sha, args.run_id,
-                        args.run_attempt, args.inventory_sha256)
+                        args.run_attempt, args.inventory_sha256, args.certification_run_id)
         print(json.dumps(result, sort_keys=True))
     except (ValueError, KeyError, OSError, RuntimeError, subprocess.CalledProcessError) as error:
         parser.exit(1, f'verify-latest: {certify.release.failure_message(error)}\n')

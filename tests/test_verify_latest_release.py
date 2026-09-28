@@ -102,6 +102,27 @@ class VerifyLatestReleaseTests(unittest.TestCase):
         self.report['status'] = 'passed_with_warnings'
         self.assertEqual(self.verify()['status'], 'passed_with_warnings')
 
+    def test_later_certification_binds_both_run_identities(self):
+        self.report_name = f'certification-456-attempt-{self.attempt}.json'
+        self.report['run_id'] = '456'
+        result = self.verify(certification_run_id='456')
+        self.assertEqual(result['run_id'], self.run_id)
+        self.assertEqual(result['certification_run_id'], '456')
+        self.assertEqual(self.downloads[-1], self.report_name)
+        with self.assertRaisesRegex(ValueError, 'metadata differs'):
+            self.verify(run_id='124', certification_run_id='456')
+
+    def test_later_certification_cannot_substitute_report_identity(self):
+        self.report_name = f'certification-456-attempt-{self.attempt}.json'
+        for report_run in (self.run_id, '457'):
+            with self.subTest(report_run=report_run), self.assertRaisesRegex(ValueError, 'report differs'):
+                self.report['run_id'] = report_run
+                self.verify(certification_run_id='456')
+
+    def test_missing_later_certification_cannot_borrow_publisher_report(self):
+        with self.assertRaisesRegex(ValueError, 'Missing published asset'):
+            self.verify(certification_run_id='456')
+
     def test_wrong_latest_tag_or_release_identity_is_rejected(self):
         for changes in ({'id': 457}, {'id': True}, {'tag_name': 'other-tag'},
                         {'draft': True}, {'prerelease': True}):
@@ -183,7 +204,8 @@ class VerifyLatestReleaseTests(unittest.TestCase):
 
     def test_invalid_expected_identity_is_rejected_before_network_access(self):
         for changes in ({'source_sha': 'main'}, {'run_id': '0'}, {'run_attempt': '../1'},
-                        {'inventory_sha256': 'invalid'}):
+                        {'inventory_sha256': 'invalid'}, {'certification_run_id': ''},
+                        {'certification_run_id': '0'}, {'certification_run_id': '../1'}):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 self.verify(**changes)
         self.assertFalse(self.calls)

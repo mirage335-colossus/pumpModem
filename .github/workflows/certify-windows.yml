@@ -98,7 +98,9 @@ jobs:
         run: |
           $frontendOptions = @()
           if ('${{ inputs.frontends }}' -eq 'true') { $frontendOptions = @('-DDATAPUMP_BUILD_TUI=ON', '-DDATAPUMP_BUILD_FB=ON') }
-          cmake -S . -B build/release-windows -A x64 -DCMAKE_TOOLCHAIN_FILE="$env:DATAPUMP_WINDOWS_TOOLCHAIN" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DDATAPUMP_GUI_BACKEND="$env:GUI_BACKEND" -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600 -DDATAPUMP_TEST_NATIVE_GUI=ON -DGUI_SMOKE_TIMEOUT=600 -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded @frontendOptions
+          # This exact source is immutable after configure. Avoid parallel VS
+          # projects racing to restore CMake's shared regeneration timestamp.
+          cmake -S . -B build/release-windows -A x64 -DCMAKE_SUPPRESS_REGENERATION=ON -DCMAKE_TOOLCHAIN_FILE="$env:DATAPUMP_WINDOWS_TOOLCHAIN" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DDATAPUMP_GUI_BACKEND="$env:GUI_BACKEND" -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600 -DDATAPUMP_TEST_NATIVE_GUI=ON -DGUI_SMOKE_TIMEOUT=600 -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded @frontendOptions
           if ($LASTEXITCODE -ne 0) { throw 'Configure failed' }
           if ($env:CERTIFICATION_SCOPE -eq 'main' -and $env:GUI_BACKEND -eq 'rev') {
             cmake --build build/release-windows --config Release --target test_rev_coordinates --parallel $env:NUMBER_OF_PROCESSORS

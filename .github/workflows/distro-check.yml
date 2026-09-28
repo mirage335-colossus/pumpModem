@@ -89,6 +89,7 @@ jobs:
             --mount "type=bind,source=$PWD/distro-assets,target=/release,readonly" \
             --mount "type=bind,source=$PWD/tools,target=/tools,readonly" \
             --mount "type=bind,source=$PWD/tests,target=/tests,readonly" \
+            --mount "type=bind,source=$PWD/docs/man,target=/docs/man,readonly" \
             archlinux:base bash -euo pipefail <<'ARCH'
           pacman -Syu --noconfirm --needed python
           python3 /tests/test_arch_release.py

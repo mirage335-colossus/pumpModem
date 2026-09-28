@@ -88,7 +88,12 @@ jobs:
             set -- apt-assets/datapump-"$backend"_*_"$EXPECTED_ARCH".deb
             test "$#" -eq 1 && test -f "$1"
             version=$(dpkg-deb --field "$1" Version)
-            sh "$RUNNER_TEMP/ci-apt.sh" install "datapump-$backend=$version"
+            # Slim images exclude manuals by default. Retain DataPump's pages
+            # so the installed-byte checks below exercise the complete package.
+            sh "$RUNNER_TEMP/ci-apt.sh" install \
+              -o 'Dpkg::Options::=--path-include=/usr/share/man/man1' \
+              -o 'Dpkg::Options::=--path-include=/usr/share/man/man1/datapump-*.1.gz' \
+              "datapump-$backend=$version"
             test "$(dpkg-query -W -f='${Status}' "datapump-$backend")" = 'install ok installed'
             expected=$(mktemp -d)
             dpkg-deb --extract "$1" "$expected"
