@@ -24,8 +24,10 @@ struct Event {
     bool double_click=false,paste=false;
 };
 enum class Tone { normal,muted,accent,positive,caution,negative,data,inverse };
+enum class Icon { chevron_down,check };
+enum class Fill { surface,canvas,hover,selection,disabled };
 struct Primitive {
-    enum class Kind { fill,text,bitmap };
+    enum class Kind { fill,text,bitmap,icon };
     Kind kind=Kind::text;
     ui::Rect bounds;
     std::string text;
@@ -34,6 +36,8 @@ struct Primitive {
     bool focused=false,selected=false,enabled=true,border=false;
     // Clip without changing source sampling coordinates or text positions.
     std::optional<ui::Rect> clip;
+    Icon icon=Icon::chevron_down;
+    Fill fill=Fill::surface;
 };
 struct Scene {
     int width=0,height=0;

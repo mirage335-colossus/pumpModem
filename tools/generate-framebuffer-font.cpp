@@ -1,0 +1,98 @@
+// Offline asset maintenance only; ordinary builds consume the committed atlas.
+// Example (with FreeType/OpenSSL development files installed):
+// c++ -std=c++20 tools/generate-framebuffer-font.cpp $(pkg-config --cflags --libs freetype2 openssl) -o /tmp/font-generator
+// /tmp/font-generator third_party/rev/resources/DejaVuSans.ttf src/gui/framebuffer_font.hpp
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include <openssl/evp.h>
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <iterator>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+namespace {
+constexpr const char* source_sha256="54bf827eb99404e8f430c330ad30f063334f637eba0109b6a18d4f566a8e9dd8";
+void require(bool condition,const char* message) {if(!condition)throw std::runtime_error(message);}
+struct Glyph {int left,top,width,height;std::vector<unsigned char> pixels;};
+struct Size {int advance,width,height,left;std::size_t offset;};
+}
+int main(int argc,char** argv) {
+    try {
+        require(argc==3,"Usage: font-generator SOURCE.ttf OUTPUT.hpp");
+        std::ifstream input(argv[1],std::ios::binary);
+        require(static_cast<bool>(input),"Cannot open source font");
+        const std::vector<unsigned char> source((std::istreambuf_iterator<char>(input)),{});
+        std::array<unsigned char,32> digest{};unsigned digest_size=0;
+        require(EVP_Digest(source.data(),source.size(),digest.data(),&digest_size,EVP_sha256(),nullptr)==1&&digest_size==digest.size(),"Cannot hash font");
+        std::ostringstream hash;for(auto byte:digest)hash<<std::hex<<std::setw(2)<<std::setfill('0')<<static_cast<unsigned>(byte);
+        require(hash.str()==source_sha256,"Font checksum differs from retained DejaVu Sans Mono 2.37 source");
+        FT_Library library=nullptr;require(FT_Init_FreeType(&library)==0,"Cannot initialize FreeType");
+        FT_Face face=nullptr;
+        require(FT_New_Memory_Face(library,source.data(),static_cast<FT_Long>(source.size()),0,&face)==0,"Cannot load retained font");
+        std::vector<unsigned char> coverage;std::array<Size,4> sizes{};
+        constexpr std::array<int,4> pixels{7,13,20,26};
+        for(unsigned scale=1;scale<=4;++scale) {
+            require(FT_Set_Pixel_Sizes(face,0,static_cast<unsigned>(pixels[scale-1]))==0,"Cannot select font size");
+            std::array<Glyph,95> glyphs;int advance=0,left=0,right=0,top=0,bottom=0;
+            for(unsigned character=32;character<127;++character) {
+                require(FT_Load_Char(face,character,FT_LOAD_RENDER|FT_LOAD_TARGET_NORMAL)==0,"Cannot render glyph");
+                const auto& bitmap=face->glyph->bitmap;
+                require(bitmap.pixel_mode==FT_PIXEL_MODE_GRAY,"Unexpected glyph coverage format");
+                auto& glyph=glyphs[character-32];
+                glyph.left=face->glyph->bitmap_left;glyph.top=face->glyph->bitmap_top;
+                glyph.width=static_cast<int>(bitmap.width);glyph.height=static_cast<int>(bitmap.rows);
+                glyph.pixels.resize(bitmap.width*bitmap.rows);
+                for(unsigned y=0;y<bitmap.rows;++y)std::copy_n(bitmap.buffer+static_cast<int>(y)*bitmap.pitch,bitmap.width,glyph.pixels.data()+y*bitmap.width);
+                advance=std::max(advance,static_cast<int>((face->glyph->advance.x+32)/64));
+                left=std::min(left,glyph.left);right=std::max(right,glyph.left+glyph.width);
+                top=std::max(top,glyph.top);bottom=std::min(bottom,glyph.top-glyph.height);
+            }
+            const int height=static_cast<int>(scale)*9,baseline=(height-(top-bottom))/2+top;
+            require(top-bottom<=height,"Font exceeds line height");
+            // Retain hinted glyph overhangs separately from the monospace advance.
+            const int width=std::max(advance,right)-left;
+            const Size size{advance,width,height,left,coverage.size()};sizes[scale-1]=size;
+            for(const auto& glyph:glyphs) {
+                const auto offset=coverage.size();coverage.resize(offset+static_cast<std::size_t>(width*height));
+                for(int y=0;y<glyph.height;++y)for(int x=0;x<glyph.width;++x) {
+                    const auto alpha=glyph.pixels[static_cast<std::size_t>(y*glyph.width+x)];
+                    if(!alpha)continue;
+                    const int px=glyph.left-left+x,py=baseline-glyph.top+y;
+                    require(px>=0&&px<width&&py>=0&&py<height,"Glyph exceeds its fixed cell");
+                    coverage[offset+static_cast<std::size_t>(py*width+px)]=static_cast<unsigned char>((static_cast<unsigned>(alpha)+8)/17);
+                }
+            }
+        }
+        int major=0,minor=0,patch=0;FT_Library_Version(library,&major,&minor,&patch);
+        FT_Done_Face(face);FT_Done_FreeType(library);
+        std::ofstream out(argv[2],std::ios::binary|std::ios::trunc);require(static_cast<bool>(out),"Cannot open atlas output");
+        out<<"// DataPump framebuffer atlas; generated by tools/generate-framebuffer-font.cpp.\n"
+           <<"// Source: bundled DejaVu Sans Mono Book 2.37 (Rev's DejaVuSans.ttf).\n"
+           <<"// SHA256: "<<source_sha256<<"\n"
+           <<"// FreeType "<<major<<'.'<<minor<<'.'<<patch<<"; FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL.\n"
+           <<"// Sizes 7/13/20/26px; grayscale coverage quantized to 16 levels, two pixels/byte.\n"
+           <<"// Copyright (c) 2003 Bitstream, Inc.; DejaVu changes public domain.\n"
+           <<"// Redistribution notice: third_party/rev/resources/DejaVu-LICENSE.\n"
+           <<"#pragma once\n#include <array>\n#include <cstddef>\n#include <cstdint>\n\n"
+           <<"namespace datapump::gui::framebuffer::font {\n"
+           <<"struct Size { int advance,width,height,left; std::size_t offset; };\n"
+           <<"inline constexpr std::array<Size,4> sizes{{\n";
+        for(auto size:sizes)out<<"    {"<<size.advance<<','<<size.width<<','<<size.height<<','<<size.left<<','<<size.offset<<"},\n";
+        out<<"}};\ninline constexpr std::array<std::uint8_t,"<<(coverage.size()+1)/2<<"> pixels{\n";
+        for(std::size_t p=0;p<coverage.size();p+=2) {
+            if(p%32==0)out<<"    ";
+            const unsigned value=static_cast<unsigned>(coverage[p])<<4|(p+1<coverage.size()?coverage[p+1]:0U);
+            out<<"0x"<<std::hex<<std::setw(2)<<std::setfill('0')<<value<<',';
+            if(p%32==30)out<<'\n';
+        }
+        out<<"\n};\n}\n";out.close();require(static_cast<bool>(out),"Cannot write atlas");
+        std::cout<<"Generated "<<coverage.size()<<" coverage samples in four font sizes\n";
+    }catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
+}

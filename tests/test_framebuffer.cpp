@@ -1,5 +1,6 @@
 #include "../src/gui/framebuffer.hpp"
 #include "../src/gui/framebuffer_ui.hpp"
+#include "../src/gui/theme.hpp"
 #include <algorithm>
 #include <array>
 #include <iostream>
@@ -83,16 +84,50 @@ void copy_formats() {
     target.stride_bytes=6;target.pixels=std::span(output).first(5);rejects([&]{framebuffer::copy_frame(frame,target);},"undersized storage accepted");
 }
 void glyphs() {
-    framebuffer::Renderer renderer({600,18,1,false});surface::Scene scene;scene.width=600;scene.height=18;
-    surface::Primitive text;text.bounds={0,0,600,9};for(char c=32;c<127;++c)text.text+=c;scene.primitives.push_back(text);
-    const auto frame=renderer.render(scene);
-    for(unsigned glyph_index=1;glyph_index<95;++glyph_index) {
-        bool visible=false;for(unsigned y=0;y<9;++y)for(unsigned x=0;x<5;++x)visible|=at(*frame,glyph_index*6+x,y)[0]!=0;
-        require(visible,"printable ASCII glyph missing");
+    for(unsigned scale=1;scale<=4;++scale) {
+        framebuffer::Renderer renderer({1600,40,scale,false});const auto metrics=renderer.metrics();
+        surface::Scene scene;scene.width=metrics.cell_width*95;scene.height=metrics.line_height;
+        surface::Primitive text;text.bounds={0,0,scene.width,scene.height};
+        for(char c=32;c<127;++c)text.text+=c;
+        scene.primitives.push_back(text);const auto frame=renderer.render(scene);
+        bool antialiased=false;
+        for(int glyph_index=1;glyph_index<95;++glyph_index) {
+            bool visible=false;
+            for(int y=0;y<metrics.line_height;++y)for(int x=0;x<metrics.cell_width;++x) {
+                const auto pixel=at(*frame,static_cast<unsigned>(glyph_index*metrics.cell_width+x),static_cast<unsigned>(y));
+                visible|=pixel[0]!=0;antialiased|=pixel[0]>0&&pixel[0]<theme::text;
+                require(pixel[0]==pixel[1]&&pixel[1]==pixel[2]&&pixel[3]==255,"font grayscale/opacity lost");
+            }
+            require(visible,"printable ASCII glyph missing");
+        }
+        require(antialiased,"font lost antialiased coverage");
+        if(scale==2)require(metrics.cell_width==8&&metrics.line_height==18,"default native-sized font metrics changed");
+        scene.primitives[0].clip=ui::Rect{3,2,17,5};const auto clipped=renderer.render(scene);
+        for(int y=0;y<scene.height;++y)for(int x=0;x<scene.width;++x)
+            if(x<3||x>=20||y<2||y>=7)require(at(*clipped,static_cast<unsigned>(x),static_cast<unsigned>(y))[0]==0,"font escaped clip");
     }
     rejects([]{framebuffer::Renderer bad({0,5,1,true});},"zero width accepted");
     rejects([]{framebuffer::Renderer bad({8192,8192,1,true});},"allocation cap bypassed");
     rejects([]{framebuffer::Renderer bad({12,12,5,true});},"invalid font scale accepted");
+}
+void widget_raster() {
+    framebuffer::Renderer renderer({40,20,2,false});surface::Scene scene;scene.width=40;scene.height=20;
+    surface::Primitive base;base.kind=surface::Primitive::Kind::fill;base.bounds={0,0,40,20};base.fill=surface::Fill::hover;
+    scene.primitives.push_back(base);
+    surface::Primitive arrow;arrow.kind=surface::Primitive::Kind::icon;arrow.bounds={0,0,20,20};arrow.icon=surface::Icon::chevron_down;
+    scene.primitives.push_back(arrow);arrow.bounds.x=20;arrow.icon=surface::Icon::check;scene.primitives.push_back(arrow);
+    const auto frame=renderer.render(scene);const auto background=theme::widget_rgb(theme::WidgetRole::hover).red;
+    for(unsigned origin:{0U,20U}) {
+        unsigned changed=0;bool blended=false;
+        for(unsigned y=0;y<20;++y)for(unsigned x=origin;x<origin+20;++x) {
+            const auto value=at(*frame,x,y)[0];changed+=value!=background;blended|=value>background&&value<theme::text;
+        }
+        require(changed>15&&changed<130&&blended,"widget icon missing or not antialiased");
+    }
+    scene.primitives.resize(1);scene.primitives[0].enabled=false;scene.primitives[0].border=true;scene.primitives[0].focused=true;
+    const auto disabled=renderer.render(scene);
+    require(at(*disabled,0,0)[0]==theme::widget_rgb(theme::WidgetRole::disabled_border).red,"disabled border ignored");
+    require(at(*disabled,1,1)[0]==theme::widget_rgb(theme::WidgetRole::disabled_background).red,"disabled fill ignored");
 }
 const ui::Control& declaration(ui::Field field) {
     for(const auto& value:ui::console_screen())if(value.field==field)return value;
@@ -192,8 +227,34 @@ void overlay_keyboard_scope() {
     key(session,surface::Key::tab);key(session,surface::Key::space);
     require(app.field(toggle.field).checked,"visible blocked background tab captured overlay focus");app.close();
 }
+void dropdown_chrome() {
+    Application app({});app.toggle(ui::Field::developer_mode,true);
+    auto choice=declaration(ui::Field::fast_coding);choice.label="Long dropdown label";
+    choice.placement={20,100,0,0,80,30};choice.open_upward=true;
+    const auto options=app.field(choice.field).options;require(options.size()>=2,"dropdown fixture has too few options");
+    app.select(choice.field,options.front().id);
+    ui::OverlayDefinition overlay;overlay.controls={choice};app.show_overlay(overlay);
+    framebuffer::Session session(app);session.resize({320,240,{8,18}});session.tick();
+    const auto& closed=session.scene().primitives;
+    require(std::any_of(closed.begin(),closed.end(),[](const auto& p){return p.kind==surface::Primitive::Kind::icon&&p.icon==surface::Icon::chevron_down&&p.bounds.y>=100&&p.bounds.y+p.bounds.h<=130;}),"dropdown has no independent arrow chrome");
+    require(std::any_of(closed.begin(),closed.end(),[](const auto& p){return p.kind==surface::Primitive::Kind::text&&p.bounds.y>=100&&p.bounds.y+p.bounds.h<=130&&p.text.ends_with("...");}),"narrow dropdown did not shorten its value on one baseline");
+    click(session,24,104);
+    const auto option=std::find_if(session.scene().primitives.begin(),session.scene().primitives.end(),[&](const auto& p){return p.text==options[1].label;});
+    require(option!=session.scene().primitives.end(),"popup width cropped an available option label");
+    require(option->bounds.y+option->bounds.h<100,"upward dropdown ignored its declared direction");
+    const auto second=option->bounds;
+    click(session,second.x+2,second.y+2,surface::Event::Type::pointer_move);
+    require(app.field(choice.field).selected==options.front().id,"hover committed dropdown value");
+    key(session,surface::Key::enter);require(app.field(choice.field).selected==options[1].id,"popup hover did not select the visible option");
+    click(session,24,104);session.resize({80,65,{8,18}});session.tick();
+    const auto panel=std::find_if(session.scene().primitives.rbegin(),session.scene().primitives.rend(),[](const auto& p){return p.kind==surface::Primitive::Kind::fill&&p.border;});
+    require(panel!=session.scene().primitives.rend()&&panel->bounds.x>=0&&panel->bounds.y>=0&&panel->bounds.x+panel->bounds.w<=80&&panel->bounds.y+panel->bounds.h<=65,"resized dropdown panel escaped framebuffer");
+    key(session,surface::Key::enter);require(app.field(choice.field).selected==options[1].id,"resized popup lost selected option identity");
+    app.close();
+}
+
 }
 int main() {
-    try{render_and_lifetime();clipping_and_mono();copy_formats();glyphs();pixel_interaction();pixel_presets();minimal_embedding();overlay_focus_policy();popup_live_options();overlay_keyboard_scope();std::cout<<"Framebuffer pixel, damage, ownership, clipping, format and interaction checks passed\n";return 0;}
+    try{render_and_lifetime();clipping_and_mono();copy_formats();glyphs();widget_raster();pixel_interaction();pixel_presets();minimal_embedding();overlay_focus_policy();popup_live_options();overlay_keyboard_scope();dropdown_chrome();std::cout<<"Framebuffer pixel, damage, ownership, clipping, format and interaction checks passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

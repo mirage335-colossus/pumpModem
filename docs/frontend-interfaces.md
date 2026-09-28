@@ -119,9 +119,19 @@ A VR/game host maps ray intersections on its interface surface into pixel
 coordinates, passes those as pointer events and uploads frame pixels to a texture.
 The host owns its game loop, GPU API, texture lifetime and any physical display
 flush. SDL types and window/event-loop ownership never enter the embedding API.
-The initial software rasterizer uses a small ASCII font; unsupported locally typed
-Unicode glyphs appear as placeholders while text bytes remain in the model.
+The software rasterizer uses an antialiased DejaVu Sans Mono atlas, with a 13px
+default font and shared native widget colors. Dropdown arrows and checkmarks are
+drawn as geometry. Unsupported locally typed Unicode glyphs appear as placeholders
+while text bytes remain in the model.
 Framebuffer plots retain their pixel resolution and color; they are not ASCII art.
+
+The committed atlas comes from the existing Rev font resource (DejaVu Sans Mono
+Book 2.37, despite its `DejaVuSans.ttf` filename). Its source checksum, FreeType
+version and raster settings are recorded in `src/gui/framebuffer_font.hpp`;
+`tools/generate-framebuffer-font.cpp` reproduces it offline. Ordinary builds and
+embedded hosts need neither FreeType nor Rev. Framebuffer distributions include
+`share/doc/datapump/framebuffer/DejaVu-LICENSE`; derived embeddings must retain
+that notice with the atlas.
 
 Clipboard/folder services are explicit host requests, carrying the same revocable
 permission token as the existing adapters. Text/path prompts remain bounded.

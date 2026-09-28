@@ -146,7 +146,7 @@ int run(Launch launch,const HostOptions& options) {
                     surface::Event input;input.type=surface::Event::Type::text;input.text=event.text.text;runtime.input(input);
                 } else if(!closing&&event.type==SDL_MOUSEBUTTONDOWN&&event.button.button==SDL_BUTTON_LEFT) {
                     SDL_CaptureMouse(SDL_TRUE);surface::Event input;input.type=surface::Event::Type::pointer;input.x=event.button.x;input.y=event.button.y;input.double_click=event.button.clicks>=2;input.shift=(SDL_GetModState()&KMOD_SHIFT)!=0;runtime.input(input);
-                } else if(!closing&&event.type==SDL_MOUSEMOTION&&(event.motion.state&SDL_BUTTON_LMASK)) {
+                } else if(!closing&&event.type==SDL_MOUSEMOTION) {
                     surface::Event input;input.type=surface::Event::Type::pointer_move;input.x=event.motion.x;input.y=event.motion.y;runtime.input(input);
                 } else if(event.type==SDL_MOUSEBUTTONUP&&event.button.button==SDL_BUTTON_LEFT) {
                     SDL_CaptureMouse(SDL_FALSE);surface::Event input;input.type=surface::Event::Type::pointer_up;input.x=event.button.x;input.y=event.button.y;runtime.input(input);

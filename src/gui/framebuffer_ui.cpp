@@ -1,6 +1,7 @@
 #include "framebuffer_ui.hpp"
 #include "binding_state.hpp"
 #include "control_binding.hpp"
+#include "chrome_layout.hpp"
 #include "document_layout.hpp"
 #include "document_presentation.hpp"
 #include "record_interactions.hpp"
@@ -49,6 +50,7 @@ Tone tone(ui::TextTone value) {
     default:return Tone::normal;
     }
 }
+Tone field_tone(ui::TextTone value) {return value==ui::TextTone::normal?Tone::data:tone(value);}
 Tone tone(ui::DocumentTone value) {
     switch(value) {
     case ui::DocumentTone::muted:return Tone::muted;case ui::DocumentTone::accent:case ui::DocumentTone::comparison:return Tone::accent;
@@ -90,7 +92,7 @@ struct Session::Impl {
         Kind kind;ui::Rect bounds;int index;
     };
     Application& app;
-    Viewport viewport{1200,1048,{6,18}};
+    Viewport viewport{1200,1048,{8,18}};
     Scene scene;
     std::vector<Item> items;
     std::vector<Hit> hits;
@@ -136,13 +138,41 @@ struct Session::Impl {
         Primitive p{kind,r,std::move(value),std::move(source),tone,focused,selected,enabled,border,paint_clip};
         scene.primitives.push_back(std::move(p));
     }
-    void fill(ui::Rect r,bool selected=false,bool focused=false,bool border=false) {
-        primitive(Primitive::Kind::fill,r,{},Tone::normal,focused,selected,true,border);
+    void fill(ui::Rect r,bool selected=false,bool focused=false,bool border=false,bool enabled=true,Fill color=Fill::surface) {
+        if(r.w<=0||r.h<=0)return;
+        primitive(Primitive::Kind::fill,r,{},Tone::normal,focused,selected,enabled,border);
+        scene.primitives.back().fill=color;
+    }
+    void icon(ui::Rect r,Icon shape,bool enabled=true,Tone color=Tone::normal) {
+        if(r.w<=0||r.h<=0)return;
+        primitive(Primitive::Kind::icon,r,{},color,false,false,enabled);
+        scene.primitives.back().icon=shape;
     }
     void text(ui::Rect r,std::string_view value,Tone color=Tone::normal,bool enabled=true) {
         const auto wrapped=lines(value,std::max(1,r.w/cw()));
         for(int n=0;n<static_cast<int>(wrapped.size())&&n*lh()<r.h;++n)
             primitive(Primitive::Kind::text,{r.x,r.y+n*lh(),r.w,std::min(lh(),r.h-n*lh())},wrapped[n].text,color,false,false,enabled);
+    }
+    // Control chrome never wraps into a second baseline. Preserve scalar
+    // boundaries when shortening a label; editable bytes are never truncated.
+    void line_text(ui::Rect r,std::string_view value,Tone color=Tone::normal,bool enabled=true,bool centered=false) {
+        const int columns=r.w/cw();if(columns<1||r.h<=0)return;
+        const auto first=value.substr(0,value.find('\n'));std::string label(first);
+        if(glyphs(first)>columns) {
+            const int dots=std::min(3,columns);
+            label=std::string(first.substr(0,glyph_offset(first,columns-dots)))+std::string(static_cast<std::size_t>(dots),'.');
+        }
+        const int height=std::min(lh(),r.h),offset=centered?std::max(0,(r.w-glyphs(label)*cw())/2):0;
+        primitive(Primitive::Kind::text,{r.x+offset,r.y+(r.h-height)/2,r.w-offset,height},std::move(label),color,false,false,enabled);
+    }
+    void dropdown(ui::Rect rect,std::string_view value,bool focused,bool enabled,Tone color,bool menu=false) {
+        fill(rect,false,focused,true,enabled,menu?Fill::surface:Fill::canvas);
+        const int gutter=std::min(23,rect.w);
+        const ui::Rect arrow{rect.x+rect.w-gutter,rect.y,gutter,rect.h};
+        line_text({rect.x+5,rect.y+2,std::max(0,rect.w-gutter-9),std::max(0,rect.h-4)},value,color,enabled,menu);
+        if(gutter>2&&rect.h>8)fill({arrow.x,rect.y+4,1,rect.h-8},true,false,false,enabled);
+        const int width=std::min(10,std::max(0,gutter-6)),height=std::min(6,std::max(0,rect.h-8));
+        icon({arrow.x+(gutter-width)/2,rect.y+(rect.h-height)/2,width,height},Icon::chevron_down,enabled);
     }
     void hit(Hit::Kind kind,ui::Rect rect,int index) {
         if(paint_clip)rect=intersection(rect,*paint_clip);
@@ -158,12 +188,15 @@ struct Session::Impl {
         // before every event, including pointer motion during a selection drag.
         e.history_revision=state.text_history_revision;return e;
     }
-    static ui::Rect editor_content(ui::Rect r){return {r.x+4,r.y+2,std::max(1,r.w-8),std::max(1,r.h-4)};}
+    ui::Rect editor_content(ui::Rect r,bool multiline=true) const {
+        const int height=multiline?std::max(1,r.h-4):std::min(lh(),std::max(1,r.h-4));
+        return {r.x+4,r.y+(multiline?2:(r.h-height)/2),std::max(1,r.w-8),height};
+    }
     std::vector<Line> editor_lines(const Editor& e,ui::Rect r,bool multiline) const {
         return lines(e.text,multiline?std::max(1,r.w/cw()):std::max(1,static_cast<int>(e.text.size())+1));
     }
     void render_editor(Editor& e,ui::Rect outer,bool focused,bool enabled,bool multiline,Tone color) {
-        fill(outer,false,focused,true);auto r=editor_content(outer);
+        fill(outer,false,focused,true,enabled,Fill::canvas);auto r=editor_content(outer,multiline);
         const auto old_clip=paint_clip;paint_clip=old_clip?intersection(r,*old_clip):r;
         const auto wrapped=editor_lines(e,r,multiline);int caret_line=0;
         for(int n=0;n<static_cast<int>(wrapped.size());++n)if(e.selection.cursor>=wrapped[n].begin)caret_line=n;
@@ -247,24 +280,41 @@ struct Session::Impl {
         const auto& label=plot&&!plot->title.empty()?plot->title:item.label;
         const bool focused=focus&&*focus==identity(item);paint_clip=item.clip;
         if(c.kind!=ui::Kind::label&&item.enabled)hit(Hit::Kind::item,geometry.widget,index);
-        if(geometry.has_label&&!label.empty()&&item.menu.empty())text(geometry.label,label,c.kind==ui::Kind::label?tone(state.text_tone):Tone::muted,item.enabled);
-        if(!item.menu.empty()) {fill(geometry.widget,false,focused,true);text(editor_content(geometry.widget),item.label+" v",Tone::accent,item.enabled);paint_clip.reset();return;}
+        if(geometry.has_label&&!label.empty()&&item.menu.empty()) {
+            if(c.kind==ui::Kind::label)text(geometry.label,label,tone(state.text_tone),item.enabled);
+            else line_text(geometry.label,label,Tone::normal,item.enabled);
+        }
+        if(!item.menu.empty()) {dropdown(geometry.widget,item.label,focused,item.enabled,Tone::normal,true);paint_clip.reset();return;}
         switch(c.kind) {
         case ui::Kind::label:if(!geometry.has_label)text(geometry.widget,item.label,tone(state.text_tone),item.enabled);break;
-        case ui::Kind::action:fill(geometry.widget,false,focused,true);text(editor_content(geometry.widget),item.label,Tone::accent,item.enabled);break;
-        case ui::Kind::toggle:fill(geometry.widget,false,focused,focused);text(editor_content(geometry.widget),std::string(state.checked?"[x] ":"[ ] ")+item.label,Tone::normal,item.enabled);break;
+        case ui::Kind::action:fill(geometry.widget,false,focused,true,item.enabled);line_text(editor_content(geometry.widget),item.label,Tone::normal,item.enabled,true);break;
+        case ui::Kind::toggle: {
+            const auto chrome=ui::checkbox_layout(geometry.widget.w,geometry.widget.h);
+            const ui::Rect box{geometry.widget.x+chrome.box.x,geometry.widget.y+chrome.box.y,chrome.box.w,chrome.box.h};
+            fill(box,state.checked,focused,true,item.enabled,Fill::canvas);
+            if(state.checked)icon({box.x+4,box.y+4,std::max(0,box.w-8),std::max(0,box.h-8)},Icon::check,item.enabled);
+            line_text({geometry.widget.x+chrome.label.x,geometry.widget.y+chrome.label.y,chrome.label.w,chrome.label.h},item.label,Tone::normal,item.enabled);break;
+        }
         case ui::Kind::choice: {
-            std::string value=state.display_text.empty()?state.selected:state.display_text;
+            std::string value=state.display_text;
             for(const auto& option:state.options)if(option.id==state.selected&&state.display_text.empty())value=option.label;
-            fill(geometry.widget,false,focused,true);text(editor_content(geometry.widget),value+" v",tone(state.text_tone),item.enabled);break;
+            dropdown(geometry.widget,value.empty()?ui::choice_placeholder:value,focused,item.enabled,field_tone(state.text_tone));break;
         }
         case ui::Kind::text: {
-            render_editor(editor(item),geometry.widget,focused,item.enabled,c.multiline,tone(state.text_tone));
-            if(state.text.empty()&&c.empty_text[0])text(editor_content(geometry.widget),c.empty_text,Tone::muted,item.enabled);
-            if(geometry.has_suggestions) {fill(geometry.suggestions,false,focused,true);text(editor_content(geometry.suggestions),"v",Tone::accent,item.enabled);if(item.enabled)hit(Hit::Kind::suggestion,geometry.suggestions,index);}break;
+            render_editor(editor(item),geometry.widget,focused,item.enabled,c.multiline,field_tone(state.text_tone));
+            if(state.text.empty()&&c.empty_text[0]) {
+                if(c.multiline)text(editor_content(geometry.widget),c.empty_text,Tone::muted,item.enabled);
+                else line_text(editor_content(geometry.widget,false),c.empty_text,Tone::muted,item.enabled);
+            }
+            if(geometry.has_suggestions) {
+                const auto r=geometry.suggestions;fill(r,false,focused,true,item.enabled);
+                const int width=std::min(10,std::max(0,r.w-6)),height=std::min(6,std::max(0,r.h-8));
+                icon({r.x+(r.w-width)/2,r.y+(r.h-height)/2,width,height},Icon::chevron_down,item.enabled);
+                if(item.enabled)hit(Hit::Kind::suggestion,r,index);
+            }break;
         }
         case ui::Kind::list: {
-            const auto rect=geometry.widget;fill(rect,false,focused,true);paint_clip=item.clip?intersection(rect,*item.clip):rect;
+            const auto rect=geometry.widget;fill(rect,false,focused,true,item.enabled,Fill::canvas);paint_clip=item.clip?intersection(rect,*item.clip):rect;
             auto& scrolling=list_scroll[identity(item)];const int row_height=std::max(1,c.list_row_height);
             const auto maximum=std::max(0,static_cast<int>(state.records.size())*row_height-rect.h);
             const auto offset=static_cast<int>(scrolling.target(maximum,c.follow_tail));scrolling.capture(offset,maximum);
@@ -278,7 +328,10 @@ struct Session::Impl {
         case ui::Kind::bitmap: {
             if(geometry.border)fill(geometry.frame,false,focused,true);
             primitive(Primitive::Kind::bitmap,geometry.widget,{},Tone::normal,focused,false,item.enabled,false,plot->source);
-            if(geometry.has_caption)text(geometry.caption,plot->caption,tone(plot->caption_tone));
+            if(geometry.has_caption) {
+                if(geometry.caption_overlay)text(geometry.caption,plot->caption,tone(plot->caption_tone),item.enabled);
+                else line_text(geometry.caption,plot->caption,tone(plot->caption_tone),item.enabled);
+            }
             break;
         }
         }
@@ -293,18 +346,45 @@ struct Session::Impl {
         if(options.empty()){popup.reset();return;}
         const auto selected=std::find_if(options.begin(),options.end(),[&](const auto& option){return option.id==selected_id;});
         popup_selected=selected==options.end()?0:static_cast<int>(selected-options.begin());
-        const int rows=std::max(1,std::min(12,(viewport.height-8)/lh()));
-        const int count=std::min(rows,std::max(1,static_cast<int>(options.size()))),h=count*lh()+8;
+        const int row_height=lh()+8,padding=4;
+        const int margin_x=std::min(4,viewport.width/2),margin_y=std::min(4,viewport.height/2);
+        const int available_width=std::max(1,viewport.width-2*margin_x),available_height=std::max(1,viewport.height-2*margin_y);
+        const int check_width=std::max(16,cw()+8);
+        int label_width=0;
+        for(const auto& option:options)label_width=std::max(label_width,std::min(glyphs(option.label),available_width/cw()+1)*cw());
+        const int desired_height=std::min(12,static_cast<int>(options.size()))*row_height+2*padding;
+        const auto anchor=item.geometry.frame;
+        const int above=std::clamp(anchor.y-margin_y-2,0,available_height);
+        const int below=std::clamp(viewport.height-margin_y-anchor.y-anchor.h-2,0,available_height);
+        bool upward=item.geometry.popup_upward;
+        if((upward?above:below)<desired_height&&(upward?below:above)>(upward?above:below))upward=!upward;
+        const int room=std::max(row_height+2*padding,upward?above:below);
+        const int rows=std::max(1,std::min(12,(std::min(available_height,room)-2*padding)/row_height));
+        const int count=std::min(rows,static_cast<int>(options.size())),h=std::min(available_height,count*row_height+2*padding);
         popup_scroll=std::max(0,std::min(popup_scroll,popup_selected));if(popup_selected>=popup_scroll+count)popup_scroll=popup_selected-count+1;
-        const int w=std::min(viewport.width-8,std::max(240,item.geometry.frame.w));
-        const int x=std::clamp(item.geometry.frame.x,4,std::max(4,viewport.width-w-4));
-        const int y=std::clamp(item.geometry.frame.y+item.geometry.frame.h,4,std::max(4,viewport.height-h-4));
-        paint_clip.reset();fill({x,y,w,h},false,true,true);
+        const bool scrolling=static_cast<int>(options.size())>count;const int scroll_width=scrolling?8:0;
+        const int w=std::min(available_width,std::max(anchor.w,label_width+check_width+2*padding+8+scroll_width));
+        const int x=std::clamp(anchor.x,margin_x,std::max(margin_x,viewport.width-w-margin_x));
+        const int y=std::clamp(upward?anchor.y-h-2:anchor.y+anchor.h+2,margin_y,std::max(margin_y,viewport.height-h-margin_y));
+        paint_clip.reset();fill({x,y,w,h},false,false,true);
+        paint_clip=ui::Rect{x+1,y+1,std::max(0,w-2),std::max(0,h-2)};
+        const auto& current_id=app.control(item.control).state.selected;
         for(int n=popup_scroll;n<std::min(static_cast<int>(options.size()),popup_scroll+count);++n) {
-            const ui::Rect row{x+4,y+4+(n-popup_scroll)*lh(),w-8,lh()};if(n==popup_selected)fill(row,true);
-            text(row,options[n].label,Tone::normal,options[n].enabled);hit(Hit::Kind::option,row,n);
+            const ui::Rect row{x+padding,y+padding+(n-popup_scroll)*row_height,std::max(0,w-2*padding-scroll_width),row_height};
+            const bool chosen=!current_id.empty()&&options[n].id==current_id;
+            if(chosen||n==popup_selected)fill(row,chosen,false,false,true,Fill::hover);
+            if(chosen)icon({row.x+3,row.y+(row_height-10)/2,10,10},Icon::check,options[n].enabled);
+            line_text({row.x+check_width,row.y,std::max(0,row.w-check_width-4),row.h},options[n].label,Tone::normal,options[n].enabled);
+            hit(Hit::Kind::option,row,n);
         }
-        scene.caret.reset();
+        if(scrolling) {
+            const ui::Rect rail{x+w-padding-4,y+padding,3,std::max(1,h-2*padding)};
+            fill(rail,false,false,false,true,Fill::canvas);
+            const int thumb=std::min(rail.h,std::max(8,rail.h*count/static_cast<int>(options.size())));
+            const int offset=(rail.h-thumb)*popup_scroll/std::max(1,static_cast<int>(options.size())-count);
+            fill({rail.x,rail.y+offset,rail.w,thumb},true);
+        }
+        paint_clip.reset();scene.caret.reset();
     }
     void render_dialog() {
         if(!dialog)return;
@@ -313,8 +393,8 @@ struct Session::Impl {
         text({x+12,y+10,w-24,2*lh()},dialog->title,Tone::accent);
         prompt_bounds={x+12,y+2*lh()+20,w-24,2*lh()+4};render_editor(prompt,prompt_bounds,prompt_button==0,true,false,Tone::normal);hit(Hit::Kind::prompt,prompt_bounds,0);
         const ui::Rect accept{x+12,y+h-2*lh()-12,110,lh()+6},cancel{x+134,y+h-2*lh()-12,110,lh()+6};
-        fill(accept,false,prompt_button==1,true);text(editor_content(accept),"Accept",Tone::accent);
-        fill(cancel,false,prompt_button==2,true);text(editor_content(cancel),"Cancel",Tone::accent);
+        fill(accept,false,prompt_button==1,true);line_text(editor_content(accept),"Accept",Tone::normal,true,true);
+        fill(cancel,false,prompt_button==2,true);line_text(editor_content(cancel),"Cancel",Tone::normal,true,true);
         hit(Hit::Kind::accept,accept,0);hit(Hit::Kind::cancel,cancel,0);
         text({x+12,y+h-lh()-4,w-24,lh()},notice.empty()?"Enter accepts; Escape cancels":notice,notice.empty()?Tone::muted:Tone::negative);
     }
@@ -349,7 +429,7 @@ struct Session::Impl {
                 const auto p=std::find_if(ui::pages().begin(),ui::pages().end(),[&](const auto& page){return page.id==tab.page;});
                 if(p==ui::pages().end())continue;
                 const auto r=screen(tab.frame);const int n=static_cast<int>(pages.size());pages.push_back(tab.page);
-                fill(r,app.page()==tab.page,focus_tab==n,true);text(editor_content(r),p->name,Tone::accent,layers.enable_background);
+                fill(r,app.page()==tab.page,focus_tab==n,true,layers.enable_background);line_text(editor_content(r),p->name,Tone::normal,layers.enable_background,true);
                 if(layers.enable_background)hit(Hit::Kind::tab,r,n);
             }
             declarations(ui::console_screen(),layers.enable_background,false);
@@ -387,7 +467,7 @@ struct Session::Impl {
         paint_clip.reset();fill({0,viewport.height-22,viewport.width,22});
         std::string footer=notice.empty()?"Tab focus | Alt+Down presets | F1 help | Ctrl+Q quit":notice;
         const int selected=find(focus);if(notice.empty()&&selected>=0&&items[selected].control.help[0])footer=items[selected].control.help;
-        text({4,viewport.height-20,viewport.width-8,20},footer,notice.empty()?Tone::muted:Tone::negative);
+        line_text({4,viewport.height-20,viewport.width-8,20},footer,notice.empty()?Tone::muted:Tone::negative);
         render_popup();
         if(help) {
             const ui::Rect r{24,24,std::max(1,viewport.width-48),std::max(1,viewport.height-48)};fill(r,false,true,true);
@@ -493,7 +573,7 @@ struct Session::Impl {
         if(move){if(!event.shift)e.selection.anchor=target;e.selection.cursor=target;e.selection.end=target;dirty=true;}
     }
     void editor_pointer(Editor& e,ui::Rect outer,const Event& event,bool multiline,bool extend) {
-        const auto r=editor_content(outer);const auto wrapped=editor_lines(e,r,multiline);
+        const auto r=editor_content(outer,multiline);const auto wrapped=editor_lines(e,r,multiline);
         const int row=std::clamp((event.y-r.y)/lh()+e.first_line,0,static_cast<int>(wrapped.size())-1);
         const int column=std::max(0,(event.x-r.x)/cw()+e.first_column);
         const int target=wrapped[row].begin+glyph_offset(wrapped[row].text,column);
@@ -569,6 +649,13 @@ struct Session::Impl {
         if(help){if(event.type==Event::Type::key&&(event.key==Key::help||event.key==Key::escape)){help=false;dirty=true;}return;}
         if(event.type==Event::Type::key&&event.key==Key::help){help=true;dirty=true;return;}
         if(popup) {
+            if(event.type==Event::Type::pointer_move) {
+                for(auto h=hits.rbegin();h!=hits.rend();++h)
+                    if(h->kind==Hit::Kind::option&&contains(h->bounds,event.x,event.y)&&options[h->index].enabled) {
+                        if(popup_selected!=h->index){popup_selected=h->index;dirty=true;}break;
+                    }
+                return;
+            }
             if(event.type==Event::Type::pointer) {
                 for(auto h=hits.rbegin();h!=hits.rend();++h)if(h->kind==Hit::Kind::option&&contains(h->bounds,event.x,event.y)){popup_selected=h->index;choose_popup();return;}
                 popup.reset();dirty=true;return;

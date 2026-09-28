@@ -11,11 +11,26 @@ the other frontends. A display server is not required.
 Use an interactive terminal, including an SSH session allocated with ssh -t.
 Audio devices are those of the computer running Data Pump.
 .SH KEYBOARD
-Tab and Shift-Tab move focus. Arrow keys navigate choices and lists and edit
+Tab and Shift-Tab move focus, stopping at the first or last available control.
+This also applies to the input and buttons in file dialogs.
+Page-Up and Page-Down scroll about 10 percent of the visible content height,
+with a minimum of one line. Arrow keys navigate choices and lists and edit
 text. Home, End, Backspace and Delete retain their usual editing roles.
 F1 shows help. F2 sends Ctrl-Enter and F3 sends Shift-Enter for terminals that
 cannot distinguish these modified Enter keys. F4 opens choices and editable
 presets when Alt-Up or Alt-Down is unavailable. Ctrl-Q closes the application.
+Ctrl-Enter sends the focused Fast or Legacy draft through its shared send policy.
+Distinct modified-Enter sequences in CSI-u and xterm modifyOtherKeys format are
+recognized. Terminal configurations that send ordinary Return for Ctrl-Enter,
+including the default Konsole key table and usual Linux console mappings,
+require F2 instead.
+For a custom Konsole keyboard profile, map
+.B Return+Ctrl-Shift
+to
+.B \eE[13;5u
+in Settings, Edit Current Profile, Keyboard. This mapping makes Ctrl-Enter
+distinct while leaving plain Return unchanged; Data Pump does not modify
+terminal profiles itself.
 Editable choices accept typed values as well as selections from presets.
 The shared presentation supplies the interaction hints for the focused control.
 .PP

@@ -15,6 +15,11 @@ target_link_libraries(datapump_framebuffer PUBLIC datapump_gui_application)
 if(DATAPUMP_BUILD_FRAMEBUFFER_LIBRARY)
   set_property(TARGET datapump_framebuffer PROPERTY EXCLUDE_FROM_ALL FALSE)
 endif()
+if(DATAPUMP_BUILD_FB OR DATAPUMP_BUILD_FRAMEBUFFER_LIBRARY)
+  # The committed glyph atlas needs its notice even when Rev is not built.
+  install(FILES third_party/rev/resources/DejaVu-LICENSE
+    DESTINATION share/doc/datapump/framebuffer)
+endif()
 foreach(target datapump_terminal_ui datapump_framebuffer)
   target_compile_features(${target} PUBLIC cxx_std_20)
   if(MSVC)

@@ -1,8 +1,10 @@
 #include "framebuffer.hpp"
 #include "framebuffer_ui.hpp"
+#include "framebuffer_font.hpp"
 #include "theme.hpp"
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <string_view>
@@ -50,108 +52,6 @@ theme::Rgb foreground(surface::Tone tone,bool color,bool enabled) {
     }
     return theme::text_rgb(color);
 }
-// Original, deliberately small 5x7 ASCII glyphs. Each row uses five low bits,
-// leftmost pixel at bit four. There is no external font loader or text parser.
-std::array<unsigned char,7> glyph(unsigned char c) {
-    switch(c) {
-    case ' ':return {0,0,0,0,0,0,0};
-    case '!':return {4,4,4,4,4,0,4};
-    case '"':return {10,10,10,0,0,0,0};
-    case '#':return {10,10,31,10,31,10,10};
-    case '$':return {4,15,20,14,5,30,4};
-    case '%':return {25,25,2,4,8,19,19};
-    case '&':return {12,18,20,8,21,18,13};
-    case '\'':return {4,4,8,0,0,0,0};
-    case '(':return {2,4,8,8,8,4,2};
-    case ')':return {8,4,2,2,2,4,8};
-    case '*':return {0,21,14,31,14,21,0};
-    case '+':return {0,4,4,31,4,4,0};
-    case ',':return {0,0,0,0,0,4,8};
-    case '-':return {0,0,0,31,0,0,0};
-    case '.':return {0,0,0,0,0,0,4};
-    case '/':return {1,2,2,4,8,8,16};
-    case '0':return {14,17,19,21,25,17,14};
-    case '1':return {4,12,4,4,4,4,14};
-    case '2':return {14,17,1,2,4,8,31};
-    case '3':return {30,1,1,14,1,1,30};
-    case '4':return {2,6,10,18,31,2,2};
-    case '5':return {31,16,16,30,1,1,30};
-    case '6':return {6,8,16,30,17,17,14};
-    case '7':return {31,1,2,4,8,8,8};
-    case '8':return {14,17,17,14,17,17,14};
-    case '9':return {14,17,17,15,1,2,12};
-    case ':':return {0,4,0,0,4,0,0};
-    case ';':return {0,4,0,0,4,4,8};
-    case '<':return {1,2,4,8,4,2,1};
-    case '=':return {0,0,31,0,31,0,0};
-    case '>':return {16,8,4,2,4,8,16};
-    case '?':return {14,17,1,2,4,0,4};
-    case '@':return {14,17,23,21,23,16,14};
-    case 'A':return {14,17,17,31,17,17,17};
-    case 'B':return {30,17,17,30,17,17,30};
-    case 'C':return {14,17,16,16,16,17,14};
-    case 'D':return {30,17,17,17,17,17,30};
-    case 'E':return {31,16,16,30,16,16,31};
-    case 'F':return {31,16,16,30,16,16,16};
-    case 'G':return {14,17,16,23,17,17,15};
-    case 'H':return {17,17,17,31,17,17,17};
-    case 'I':return {14,4,4,4,4,4,14};
-    case 'J':return {7,2,2,2,18,18,12};
-    case 'K':return {17,18,20,24,20,18,17};
-    case 'L':return {16,16,16,16,16,16,31};
-    case 'M':return {17,27,21,21,17,17,17};
-    case 'N':return {17,25,25,21,19,19,17};
-    case 'O':return {14,17,17,17,17,17,14};
-    case 'P':return {30,17,17,30,16,16,16};
-    case 'Q':return {14,17,17,17,21,18,13};
-    case 'R':return {30,17,17,30,20,18,17};
-    case 'S':return {15,16,16,14,1,1,30};
-    case 'T':return {31,4,4,4,4,4,4};
-    case 'U':return {17,17,17,17,17,17,14};
-    case 'V':return {17,17,17,17,17,10,4};
-    case 'W':return {17,17,17,21,21,21,10};
-    case 'X':return {17,17,10,4,10,17,17};
-    case 'Y':return {17,17,10,4,4,4,4};
-    case 'Z':return {31,1,2,4,8,16,31};
-    case '[':return {14,8,8,8,8,8,14};
-    case '\\':return {16,8,8,4,2,2,1};
-    case ']':return {14,2,2,2,2,2,14};
-    case '^':return {4,10,17,0,0,0,0};
-    case '_':return {0,0,0,0,0,0,31};
-    case '`':return {8,4,2,0,0,0,0};
-    case 'a':return {0,0,14,1,15,17,15};
-    case 'b':return {16,16,30,17,17,17,30};
-    case 'c':return {0,0,15,16,16,16,15};
-    case 'd':return {1,1,15,17,17,17,15};
-    case 'e':return {0,0,14,17,31,16,14};
-    case 'f':return {6,8,8,30,8,8,8};
-    case 'g':return {0,15,17,17,15,1,14};
-    case 'h':return {16,16,30,17,17,17,17};
-    case 'i':return {4,0,12,4,4,4,14};
-    case 'j':return {2,0,6,2,2,18,12};
-    case 'k':return {16,16,18,20,24,20,18};
-    case 'l':return {12,4,4,4,4,4,14};
-    case 'm':return {0,0,26,21,21,21,21};
-    case 'n':return {0,0,30,17,17,17,17};
-    case 'o':return {0,0,14,17,17,17,14};
-    case 'p':return {0,30,17,17,30,16,16};
-    case 'q':return {0,15,17,17,15,1,1};
-    case 'r':return {0,0,22,25,16,16,16};
-    case 's':return {0,0,15,16,14,1,30};
-    case 't':return {8,8,30,8,8,9,6};
-    case 'u':return {0,0,17,17,17,19,13};
-    case 'v':return {0,0,17,17,17,10,4};
-    case 'w':return {0,0,17,17,21,21,10};
-    case 'x':return {0,0,17,10,4,10,17};
-    case 'y':return {0,17,17,17,15,1,14};
-    case 'z':return {0,0,31,2,4,8,31};
-    case '{':return {3,4,4,8,4,4,3};
-    case '|':return {4,4,4,4,4,4,4};
-    case '}':return {24,4,4,2,4,4,24};
-    case '~':return {0,0,9,22,0,0,0};
-    default:return glyph('?');
-    }
-}
 void pixel(Frame& frame,int x,int y,theme::Rgb color) {
     if(x<0||y<0||static_cast<unsigned>(x)>=frame.width||static_cast<unsigned>(y)>=frame.height)return;
     auto* output=frame.pixels.data()+static_cast<std::size_t>(y)*frame.stride_bytes+static_cast<std::size_t>(x)*4;
@@ -170,29 +70,79 @@ void border(Frame& frame,ui::Rect rectangle,theme::Rgb color,const std::optional
     if(bottom>=0&&bottom<frame.height)fill(frame,{rectangle.x,static_cast<int>(bottom),rectangle.w,1},color,clip);
     if(right>=0&&right<frame.width)fill(frame,{static_cast<int>(right),rectangle.y,1,rectangle.h},color,clip);
 }
+void blend(Frame& frame,int x,int y,theme::Rgb ink,unsigned coverage) {
+    auto* output=frame.pixels.data()+static_cast<std::size_t>(y)*frame.stride_bytes+static_cast<std::size_t>(x)*4;
+    const auto mix=[coverage](unsigned foreground,unsigned background) {
+        return static_cast<std::uint8_t>((foreground*coverage+background*(255-coverage)+127)/255);
+    };
+    output[0]=mix(ink.red,output[0]);output[1]=mix(ink.green,output[1]);output[2]=mix(ink.blue,output[2]);output[3]=255;
+}
 void text(Frame& frame,const surface::Primitive& primitive,unsigned scale,bool color) {
     const auto clip=clipped(clip_to(primitive.bounds,primitive.clip),frame.width,frame.height);
     if(!clip.w||!clip.h)return;
     const auto ink=foreground(primitive.tone,color,primitive.enabled);
-    const unsigned horizontal=(scale+1)/2;
-    int x=primitive.bounds.x,y=primitive.bounds.y+static_cast<int>(scale);
+    const auto size=font::sizes[scale-1];
+    long long x=primitive.bounds.x,y=primitive.bounds.y;
     for(std::size_t i=0;i<primitive.text.size();) {
         auto c=static_cast<unsigned char>(primitive.text[i++]);
-        if(c=='\n') {x=primitive.bounds.x;y+=static_cast<int>(9*scale);continue;}
+        if(c=='\n') {x=primitive.bounds.x;y+=size.height;continue;}
         if(c>=128) {
             while(i<primitive.text.size()&&(static_cast<unsigned char>(primitive.text[i])&0xc0)==0x80)++i;
             c='?';
         }
-        const auto rows=glyph(c);
-        for(unsigned row=0;row<7;++row)for(unsigned col=0;col<5;++col)if(rows[row]&(16U>>col))
-            for(unsigned sy=0;sy<scale;++sy)for(unsigned sx=0;sx<horizontal;++sx) {
-                const int px=x+static_cast<int>(col*horizontal+sx),py=y+static_cast<int>(row*scale+sy);
-                if(px>=clip.x&&px<clip.x+clip.w&&py>=clip.y&&py<clip.y+clip.h)pixel(frame,px,py,ink);
-            }
-        x+=static_cast<int>(6*horizontal);
+        if(c<32||c>126)c='?';
+        const auto start=size.offset+static_cast<std::size_t>(c-32)*size.width*size.height;
+        for(int row=0;row<size.height;++row)for(int col=0;col<size.width;++col) {
+            const auto px=x+size.left+col,py=y+row;
+            if(px<clip.x||px>=clip.x+clip.w||py<clip.y||py>=clip.y+clip.h)continue;
+            const auto index=start+static_cast<std::size_t>(row*size.width+col);
+            const auto packed=font::pixels[index/2];
+            const unsigned coverage=((index%2)?(packed&15):(packed>>4))*17U;
+            if(coverage)blend(frame,static_cast<int>(px),static_cast<int>(py),ink,coverage);
+        }
+        x+=size.advance;
         // Session has already wrapped text; avoid scanning oversized hidden tails.
         if(x>=clip.x+clip.w)break;
     }
+}
+void icon(Frame& frame,const surface::Primitive& primitive,bool color) {
+    const auto area=clipped(clip_to(primitive.bounds,primitive.clip),frame.width,frame.height);
+    if(!area.w||!area.h)return;
+    const double size=std::min(primitive.bounds.w,primitive.bounds.h);
+    const bool chevron=primitive.icon==surface::Icon::chevron_down;
+    const double width=chevron?primitive.bounds.w:size,height=chevron?primitive.bounds.h:size;
+    const double left=primitive.bounds.x+(primitive.bounds.w-width)/2,top=primitive.bounds.y+(primitive.bounds.h-height)/2;
+    const auto ink=foreground(primitive.tone,color,primitive.enabled);
+    struct Point {double x,y;};
+    const std::array<Point,3> points=primitive.icon==surface::Icon::check?
+        std::array<Point,3>{{{.20,.52},{.43,.72},{.82,.25}}}:
+        std::array<Point,3>{{{.10,.20},{.50,.80},{.90,.20}}};
+    const double radius=std::max(.6,size*.045);
+    auto distance=[&](double x,double y,Point a,Point b) {
+        a={left+a.x*width,top+a.y*height};b={left+b.x*width,top+b.y*height};
+        const double dx=b.x-a.x,dy=b.y-a.y;
+        const double t=std::clamp(((x-a.x)*dx+(y-a.y)*dy)/(dx*dx+dy*dy),0.,1.);
+        return std::hypot(x-a.x-t*dx,y-a.y-t*dy);
+    };
+    for(int y=area.y;y<area.y+area.h;++y)for(int x=area.x;x<area.x+area.w;++x) {
+        unsigned covered=0;
+        for(int sy=0;sy<4;++sy)for(int sx=0;sx<4;++sx) {
+            const double px=x+(sx+.5)/4,py=y+(sy+.5)/4;
+            if(std::min(distance(px,py,points[0],points[1]),distance(px,py,points[1],points[2]))<=radius)++covered;
+        }
+        if(covered)blend(frame,x,y,ink,(covered*255+8)/16);
+    }
+}
+theme::WidgetRole fill_role(const surface::Primitive& primitive) {
+    if(!primitive.enabled||primitive.fill==surface::Fill::disabled)return theme::WidgetRole::disabled_background;
+    if(primitive.selected)return theme::WidgetRole::selection;
+    switch(primitive.fill) {
+    case surface::Fill::canvas:return theme::WidgetRole::canvas;
+    case surface::Fill::hover:return theme::WidgetRole::hover;
+    case surface::Fill::selection:return theme::WidgetRole::selection;
+    case surface::Fill::surface:case surface::Fill::disabled:return theme::WidgetRole::surface_fill;
+    }
+    return theme::WidgetRole::surface_fill;
 }
 void bitmap(Frame& frame,const surface::Primitive& primitive,bool color) {
     const auto rect=primitive.bounds,clip=clipped(clip_to(rect,primitive.clip),frame.width,frame.height);
@@ -240,7 +190,7 @@ Renderer::Renderer(Config config):config_(config) {
     dimensions(config.width,config.height);
     if(config.font_scale<1||config.font_scale>4)throw std::invalid_argument("Framebuffer font scale must be 1 through 4");
 }
-surface::Metrics Renderer::metrics() const {return {static_cast<int>(6*((config_.font_scale+1)/2)),static_cast<int>(9*config_.font_scale)};}
+surface::Metrics Renderer::metrics() const {const auto size=font::sizes[config_.font_scale-1];return {size.advance,size.height};}
 FrameHandle Renderer::render(const surface::Scene& scene) {
     if(scene.width<=0||scene.height<=0)throw std::invalid_argument("Framebuffer scene must have positive dimensions");
     dimensions(static_cast<unsigned>(scene.width),static_cast<unsigned>(scene.height));
@@ -251,11 +201,12 @@ FrameHandle Renderer::render(const surface::Scene& scene) {
         if(primitive.bounds.w<=0||primitive.bounds.h<=0)continue;
         switch(primitive.kind) {
         case surface::Primitive::Kind::fill:
-            fill(*next,primitive.bounds,theme::widget_rgb(primitive.selected?theme::WidgetRole::selection:theme::WidgetRole::surface_fill,config_.color),primitive.clip);break;
+            fill(*next,primitive.bounds,theme::widget_rgb(fill_role(primitive),config_.color),primitive.clip);break;
         case surface::Primitive::Kind::text:text(*next,primitive,config_.font_scale,config_.color);break;
         case surface::Primitive::Kind::bitmap:bitmap(*next,primitive,config_.color);break;
+        case surface::Primitive::Kind::icon:icon(*next,primitive,config_.color);break;
         }
-        if(primitive.border)border(*next,primitive.bounds,theme::widget_rgb(primitive.focused?theme::WidgetRole::focus:theme::WidgetRole::border,config_.color),primitive.clip);
+        if(primitive.border)border(*next,primitive.bounds,theme::widget_rgb(!primitive.enabled?theme::WidgetRole::disabled_border:(primitive.focused?theme::WidgetRole::focus:theme::WidgetRole::border),config_.color),primitive.clip);
     }
     if(scene.caret)fill(*next,*scene.caret,theme::widget_rgb(theme::WidgetRole::focus,config_.color));
     if(frame_&&frame_->width==next->width&&frame_->height==next->height) {

@@ -36,6 +36,8 @@ using terminal::Tone;
 using Clock=std::chrono::steady_clock;
 constexpr int paste_begin=KEY_MAX+11,modified_begin=KEY_MAX+32;
 constexpr std::array<Key,6> modified_keys{Key::up,Key::down,Key::right,Key::left,Key::home,Key::end};
+constexpr int modified_enter_begin=modified_begin+7*6;
+constexpr std::array<int,3> enter_modifiers{2,5,6}; // Shift, Ctrl, Ctrl+Shift.
 constexpr int maximum_columns=400,maximum_rows=160;
 constexpr std::size_t maximum_output=4*1024*1024,maximum_paste=4*1024*1024;
 volatile std::sig_atomic_t interrupted=0;
@@ -144,6 +146,16 @@ public:
             for(int modifier=2;modifier<=8;++modifier)for(int key=0;key<6;++key) {
                 const auto sequence="\033[1;"+std::to_string(modifier)+suffixes[key];
                 define_key(sequence.c_str(),modified_begin+(modifier-2)*6+key);
+            }
+            // Recognize modified Enter when the terminal supplies a distinct
+            // sequence. Plain CR/LF stays Enter; F2/F3 remain the portable
+            // fallback without enabling a different keyboard protocol.
+            for(std::size_t i=0;i<enter_modifiers.size();++i) {
+                const auto modifier=std::to_string(enter_modifiers[i]);
+                const auto csi_u="\033[13;"+modifier+"u";
+                const auto modify_other_keys="\033[27;"+modifier+";13~";
+                const int code=modified_enter_begin+static_cast<int>(i);
+                define_key(csi_u.c_str(),code);define_key(modify_other_keys.c_str(),code);
             }
             colors_=color&&has_colors();
             if(colors_) {
@@ -272,6 +284,9 @@ public:
                     const unsigned modifiers=index/6+1;
                     event.key=modified_keys[index%6];event.shift=(modifiers&1)!=0;
                     event.alt=(modifiers&2)!=0;event.ctrl=(modifiers&4)!=0;
+                } else if(code>=modified_enter_begin&&code<modified_enter_begin+enter_modifiers.size()) {
+                    const unsigned modifiers=static_cast<unsigned>(enter_modifiers[code-modified_enter_begin]-1);
+                    event.key=Key::enter;event.shift=(modifiers&1)!=0;event.ctrl=(modifiers&4)!=0;
                 } else switch(code) {
                 case KEY_LEFT:event.key=Key::left;break;
                 case KEY_RIGHT:event.key=Key::right;break;

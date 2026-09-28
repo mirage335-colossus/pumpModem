@@ -403,7 +403,7 @@ struct Session::Impl {
         if(help) {
             fill({0,header_height,columns(),std::max(1,rows()-header_height-1)},Tone::inverse);
             text({1,header_height+1,std::max(1,columns()-2),std::max(1,rows()-header_height-2)},
-                "Keyboard: Tab / Shift+Tab moves focus. Arrow keys edit text or select records; Left/Right scrolls long record rows. Enter activates the focused control. Space toggles checkboxes. Alt+Down or F4 opens choices or editable presets; Enter accepts, Escape preserves the draft. Ctrl+A selects editor text. Shift+arrows extends selection. Home/End moves within a line; Ctrl+Home/End moves to text boundaries. PgUp/PgDn scrolls the page. Ctrl+Left/Right changes page. Space expands a focused plot; Escape returns. Pasted text is inserted as data and never submits. Mouse clicks focus and activate; wheel scrolls. File dialogs accept a typed path. F1 or Escape closes help. F2 sends Ctrl+Enter; F3 sends Shift+Enter. Ctrl+Q closes the application.",Tone::normal);
+                "Keyboard: Tab / Shift+Tab moves focus and stops at either end. Arrow keys edit text or select records; Left/Right scrolls long record rows. Enter activates the focused control. Space toggles checkboxes. Alt+Down or F4 opens choices or editable presets; Enter accepts, Escape preserves the draft. Ctrl+A selects editor text. Shift+arrows extends selection. Home/End moves within a line; Ctrl+Home/End moves to text boundaries. PgUp/PgDn scrolls about 10% of the visible page, at least one line. Ctrl+Left/Right changes page. Space expands a focused plot; Escape returns. Pasted text is inserted as data and never submits. Mouse clicks focus and activate; wheel scrolls. File dialogs accept a typed path. F1 or Escape closes help. Ctrl+Enter follows the focused editor's send policy; F2 provides the same key on terminals that cannot distinguish it. F3 sends Shift+Enter. Ctrl+Q closes the application.",Tone::normal);
             scene.caret.reset();
         }
         render_dialog();
@@ -424,8 +424,9 @@ struct Session::Impl {
         for(int n=0;n<static_cast<int>(items.size());++n)if(focusable(items[n]))order.push_back(n);
         if(order.empty())return;
         const int current=focus_tab>=0?-focus_tab-1:(focus?focused():-1000000);auto found=std::find(order.begin(),order.end(),current);
-        int index=found==order.end()?(direction>0?-1:0):static_cast<int>(found-order.begin());
-        index=(index+direction+static_cast<int>(order.size()))%static_cast<int>(order.size());const int target=order[index];
+        const int last=static_cast<int>(order.size())-1;
+        const int index=found==order.end()?(direction>0?0:last):std::clamp(static_cast<int>(found-order.begin())+direction,0,last);
+        const int target=order[index];
         if(target<0){focus.reset();focus_tab=-target-1;}else{focus_tab=-1;focus=ui::document_control_identity(items[target].control);ensure_visible(target);}
         popup=-1;dirty=true;
     }
@@ -560,7 +561,7 @@ struct Session::Impl {
                 prompt_button=0;dirty=true;return;
             }
             if(event.type==Event::Type::key&&event.key==Key::escape){finish_dialog(true);return;}
-            if(event.type==Event::Type::key&&event.key==Key::tab){prompt_button=(prompt_button+(event.shift?2:1))%3;dirty=true;return;}
+            if(event.type==Event::Type::key&&event.key==Key::tab){prompt_button=std::clamp(prompt_button+(event.shift?-1:1),0,2);dirty=true;return;}
             if(event.type==Event::Type::key&&event.key==Key::enter){finish_dialog(prompt_button==2);return;}
             if(prompt_button==0) {
                 const auto policy=ui::service_input_policy(dialogs.front());
@@ -593,7 +594,10 @@ struct Session::Impl {
         }
         if(event.type==Event::Type::key) {
             if(event.key==Key::tab){move_focus(event.shift?-1:1);return;}
-            if(event.key==Key::page_up||event.key==Key::page_down) {scroll=std::max(0,scroll+(event.key==Key::page_up?-1:1)*std::max(1,rows()-header_height-2));dirty=true;return;}
+            if(event.key==Key::page_up||event.key==Key::page_down) {
+                const int step=std::max(1,(rows()-header_height-1)/10);
+                scroll=std::max(0,scroll+(event.key==Key::page_up?-1:1)*step);dirty=true;return;
+            }
             if(event.ctrl&&(event.key==Key::left||event.key==Key::right)&&!pages.empty()) {
                 auto found=std::find(pages.begin(),pages.end(),app.page());int n=found==pages.end()?0:static_cast<int>(found-pages.begin());
                 n=(n+(event.key==Key::left?-1:1)+static_cast<int>(pages.size()))%static_cast<int>(pages.size());

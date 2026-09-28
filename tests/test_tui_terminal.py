@@ -254,10 +254,26 @@ def run(binary):
         terminal.wait_for("key 8 shift=0 ctrl=0 alt=1")
         terminal.send(b" ")
         terminal.wait_for("key 3 shift=0 ctrl=0 alt=0")
+        # Distinct Enter encodings from CSI-u and xterm modifyOtherKeys retain
+        # their modifiers; ordinary Return remains an unmodified key.
+        modified_enter = [
+            (b"\x1b[13;5u", "key 2 shift=0 ctrl=1 alt=0"),
+            (b"\x1b[27;5;13~", "key 2 shift=0 ctrl=1 alt=0"),
+            (b"\x1b[13;2u", "key 2 shift=1 ctrl=0 alt=0"),
+            (b"\x1b[27;2;13~", "key 2 shift=1 ctrl=0 alt=0"),
+            (b"\x1b[13;6u", "key 2 shift=1 ctrl=1 alt=0"),
+            (b"\x1b[27;6;13~", "key 2 shift=1 ctrl=1 alt=0"),
+            (b"\r", "key 2 shift=0 ctrl=0 alt=0"),
+            (b"\x1b[5~", "key 13 shift=0 ctrl=0 alt=0"),
+            (b"\x1b[6~", "key 14 shift=0 ctrl=0 alt=0"),
+        ]
+        for count, (encoded, expected) in enumerate(modified_enter, start=13):
+            terminal.send(encoded)
+            terminal.wait_for(f"events={count} pastes=0 {expected}")
         # Paste contains newline, tab, quit, and an OSC-shaped sequence. It must
         # reach the presenter as one data event; no key or quit is synthesized.
-        terminal.send(b"\x1b[200~paste\n\t\x11\x1b]52;c;INJECT\x07\x1b[201~")
-        terminal.wait_for("events=13 pastes=1 paste")
+        terminal.send(b"\x1b[200~paste\n\t\x11\x1b[13;5u\x1b[27;5;13~\x1b]52;c;INJECT\x07\x1b[201~")
+        terminal.wait_for("events=22 pastes=1 paste")
         assert terminal.process.poll() is None
         assert b"\x1b]52" not in terminal.raw
         terminal.send(b"\x1b[<0;12;7M\x1b[<0;12;7m")

@@ -22,7 +22,8 @@ focus and activate controls; dragging selects editor text; the wheel scrolls.
 Shift+wheel pans a small viewport horizontally. Ctrl+V pastes clipboard text
 as data without activating commands.
 .PP
-The bundled font displays printable ASCII. Unsupported local Unicode glyphs
+The bundled antialiased DejaVu Sans Mono font displays printable ASCII.
+Unsupported local Unicode glyphs
 appear as question marks while the original editor bytes remain intact.
 Received text retains Data Pump's stricter shared received-byte policy.
 .SH OPTIONS
@@ -43,7 +44,8 @@ Initial framebuffer dimensions, default 1200x1048. Each dimension is limited
 to 8192 and the entire surface to 16 megapixels.
 .TP
 .BI \-\-font-scale " N"
-Integer bitmap font scale from 1 through 4, default 2.
+Font size preset from 1 through 4, default 2 (13 pixels).
+Each preset uses separately rasterized glyphs.
 .TP
 .B \-\-simulation
 Use the shared simulated Robust Modem session instead of ordinary live audio.
