@@ -10,6 +10,13 @@
 ./build.sh sanitize        # ASan/UBSan contract tests in a separate native build
 ./build.sh package         # Build and verify portable TGZ/ZIP archives
 
+# Optional TUI/framebuffer interfaces: ncurses and SDL2 development files.
+# Details: docs/frontend-interfaces.md. These commands reuse a stable build path.
+./build.sh --cli --tui --fb
+./build/dev-cli-tui-fb/datapump-tui
+./build/dev-cli-tui-fb/datapump-fb
+# Add --simulation to either run command to test without live audio.
+
 # Source SDK: prepare once on x86_64 Linux with the Buildroot prerequisites.
 # Only fetch uses the network; build and sources use the verified local cache.
 # Preparation, upgrades and offline reconstruction:
