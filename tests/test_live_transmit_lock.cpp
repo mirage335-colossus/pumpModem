@@ -25,14 +25,19 @@ template<class F> void rejected(F operation,const char* message) {
     try {operation();}catch(const Error&) {error=true;}
     check(error,message);
 }
+struct Playback;
+Playback* script=nullptr;
 struct Playback {
+    // Declare this fixture before Session so its callbacks have joined before
+    // clearing their binding. Session::stop() only requests cancellation.
+    Playback() { script=this; }
+    ~Playback() { script=nullptr; }
     std::atomic<std::uint64_t> released{0},delivered{0};
     std::atomic<unsigned> opened{0},started{0},closed{0},captures{0};
     std::atomic<bool> finish{false};
     std::atomic<double> gain{0};
     std::atomic<bool> exclusive{false};
 };
-Playback* script=nullptr;
 live::Settings slow_settings() {
     live::Settings settings;
     settings.device="epoch guard test";
@@ -98,7 +103,7 @@ void shaped_future_exposure() {
     check(datapump::detail::exposed_transmit_epoch(config,epoch,zero->total_samples(),zero->total_samples())==epoch+1600,
           "tail extended protection beyond actual payload symbols");
 
-    Playback playback;script=&playback;
+    Playback playback;
     std::atomic<double> now{static_cast<double>(epoch)+1000};
     live::Session session([&]{return now.load();});
     session.start(settings);
@@ -195,10 +200,9 @@ void shaped_future_exposure() {
         check(fresh.snapshot().transmit_key_lock_seconds==0,"new session inherited prior process history");
         fresh.stop();
     }
-    script=nullptr;
 }
 void queued_request_rechecks() {
-    Playback playback;script=&playback;
+    Playback playback;
     auto settings=faster(slow_settings());
     settings.transfer.timestamp=epoch+1000;
     const auto total=transfer::binary_transmitter(Bytes{0},settings.transfer)->total_samples();
@@ -216,10 +220,10 @@ void queued_request_rechecks() {
     await([&]{return playback.closed>=2;},"queued ordinary request did not finish its guarded recheck",12s);
     check(playback.started==1,"queued ordinary request reused a later-reserved epoch");
     check(session.snapshot().transmit_key_lock_seconds>990,"queued request lost future history");
-    session.stop();script=nullptr;
+    session.stop();
 }
 void normal_quiet_override() {
-    Playback playback;script=&playback;
+    Playback playback;
     auto settings=faster(slow_settings());settings.transfer.timestamp=epoch;
     const auto total=transfer::binary_transmitter(Bytes{0},settings.transfer)->total_samples();
     live::Session session([]{return static_cast<double>(epoch);});
@@ -247,10 +251,10 @@ void normal_quiet_override() {
     check(session.snapshot().transmit_separation_seconds>0,
           "override erased the existing quiet deadline");
     rejected([&]{session.transmit_bits(Bytes{0});},"quiet override became a persistent key bypass");
-    session.stop();script=nullptr;
+    session.stop();
 }
 void unkeyed_slow_quiet_override() {
-    Playback playback;script=&playback;
+    Playback playback;
     auto settings=slow_settings();
     settings.transfer.key.reset();
     settings.transfer.modem.scramble=false;
@@ -306,7 +310,7 @@ void unkeyed_slow_quiet_override() {
         std::this_thread::sleep_for(1ms);
     }
     session.cancel_transmit();
-    session.stop();script=nullptr;
+    session.stop();
 }
 }
 namespace datapump::audio {
