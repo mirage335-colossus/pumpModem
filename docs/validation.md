@@ -4,6 +4,101 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Portable terminal and framebuffer release — 28 September 2026
+
+[Release
+`v001_00-2026-09-28-1246CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-28-1246CDT)
+is the verified official Latest release, with six Linux/Windows archives,
+TUI/framebuffer binaries, signed Debian/Arch packages and Gentoo package-manager
+support. New Linux and Windows dependency recipes are published in
+[base](https://github.com/mirage335-colossus/pumpModem/releases/tag/base) and retained
+with the application release. Full certification passed with the documented Windows Rev
+graphics exclusion described below.
+
+Published application source `2382f4e68607c4b0616ae11dc24511985121418a` adds the
+independent terminal/framebuffer binaries, rendering and input fixes, SDK and package
+coverage, and parallel frontend jobs. The full native and SDK qualification stages of
+[publication run
+36455727999](https://github.com/mirage335-colossus/pumpModem/actions/runs/36455727999)
+passed, including instrumented/native frontend cases, both GUI contracts, calibration
+with complete aggregate assertions, portable package producers and copied Debian/Ubuntu
+archives. All six official application producers then passed and published
+`v001_00-2026-09-28-1246CDT`. The enclosing orchestration was later cancelled during
+failed certification; its completed native, SDK and publication stages remain valid
+evidence, but the run as a whole did not qualify the release. The common application
+boundary and physical/wire contracts remain unchanged.
+
+The release retains Linux SDK recipe `6c4884fdff9c745ab0a0` and Windows dependency
+recipe `929016c86c9609704043`, both published through explicit base maintenance.
+Previous assets were preserved. Integration checks repaired flat wide-ncurses header
+discovery, a ncurses wheel-queue issue, terminal data staging, and SDL dependency
+closure. Native Linux uses the pinned CPU-only SDL host; SDK SDL links X11 directly.
+Local native-Linux framebuffer-only TGZ and ZIP fixtures passed relocated dummy/X11
+checks without relying on GUI dependencies; these host-built fixtures do not establish
+the older SDK glibc baseline. The unique-terminal PTY fixture proves build/install
+terminal-data lookup without host fallback.
+
+Initial certification encountered package-harness and Windows build failures:
+slim-container dpkg rules excluded installed manuals, the Arch fixture lacked its
+read-only manual mount, and a Windows Rev build could not replace CMake's shared
+regeneration timestamp. The last failure was consistent with file locking during
+parallel regeneration; the lock holder was not identified. Harness commit
+`38659a1e618d5c8f6e00e28bee26d9c51f6230ce` retains the manual byte comparisons, supplies
+the fixture mount, and suppresses unneeded regeneration for explicitly configured
+immutable Windows source while retaining parallel compilation and all tests. It also
+permits an independently identified later certification in the final Latest verifier.
+Six focused helper suites passed, including sixteen verifier fixtures, and a real
+isolated dpkg fixture reproduced and repaired filtering without retaining unrelated
+manuals. Original publication run and failed report completed before the new
+certification; application and dependency bytes were not replaced.
+
+The follow-up also exposed the Arch image's global manual-page exclusion. Harness
+`0e30452dbd0552a86a1623691c1e0352f9fea6a4` narrowly re-includes DataPump pages and their
+parent directories while preserving all integrity checks. [Focused Arch
+installation/update check
+36465949119](https://github.com/mirage335-colossus/pumpModem/actions/runs/36465949119)
+passed. Superseded certification 36464360229 and its failed report were terminal before
+the final run; partial and cancelled checks are not qualification.
+
+Certification then encountered an Arch prerequisite GitHub API response failure and a
+Windows Rev `live_transmit_lock` segmentation fault. A deterministic ASan/UBSan
+reproduction identified a fixture lifetime defect: fake-device state was cleared before
+session workers joined. The original Windows crash had no stack trace, so attribution
+remains an inference. Test-only main commit `d68de3d` fixes that lifetime, passes the
+complete fixture under ASan/UBSan, and preserves every assertion and deadline.
+Application runtime sources and published bytes are unchanged; the release's original
+test source subsequently passed its complete Windows Rev source and published-package
+scope in attempt 2, without patching the released test or runtime.
+
+[Full certification
+36466691708](https://github.com/mirage335-colossus/pumpModem/actions/runs/36466691708)
+attempt 1 completed with 49 successful jobs, two failed scopes and their two dependent
+reports. Its complete logs were retained before retrying only failed jobs in attempt 2,
+using the same original source and harness. Attempt 2 passed all five required aggregate
+scopes on the default H runners with `devfast=false`: Linux, Windows, copied-archive
+compatibility, signed APT, and Arch/Gentoo installation. All six independent frontend
+jobs and every calibration job passed. It binds the original source and all six
+application hashes through inventory SHA-256
+`f44864272f1a9bae1f9192b8579dedb172318d17bad6277bb047879bc0470f00`. The [final
+report](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/certification-36466691708-attempt-2.md)
+records `passed_with_warnings`. Independent `verify-latest-release.py` verification
+confirmed Latest release ID `398483822`, the exact published source and six application
+hashes, publication run `36455727999`, and certification run `36466691708` attempt `2`.
+The base release also retains all six required dependency/source/checksum assets with
+matching SHA-256 digests.
+
+The sole certification exclusion is the recognized Windows Rev `Required WGL ARB
+extensions not available` probe result. It omits source `gui_workflow`,
+`gui_adapter_conformance`, `gui_coordinates_1x`, `gui_coordinates_2x`, and published GUI
+smoke; compilation, clipboard, headless GUI/CLI, modem, package integrity and relocation
+remain qualified. No typed smoke-budget exhaustion is reported.
+
+Other coverage limits: native Arch/Gentoo package-manager installation is x86-64; ARM
+packages are built and hash-verified. Native SDL currently uses X11/XWayland for
+software windows. Physical audio/VT-GPM/VR hardware is not qualified by hosted tests.
+Default optional instrumented GUI smoke and sanitizer-sensitive real-time cases retain
+their documented omissions; mandatory Release scopes are unchanged.
+
 ## Latest release orchestration — 26 September 2026
 
 The new `_release-latest.yml` entry point connects optional explicit base
