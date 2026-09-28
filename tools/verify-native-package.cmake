@@ -226,6 +226,14 @@ foreach(frontend datapump-tui datapump-fb)
 endforeach()
 if(EXISTS "${PACKAGE_ROOT}/bin/datapump-fb${extension}")
   check_command(30 "${PACKAGE_ROOT}/bin/datapump-fb${extension}" --simulation --headless --frames 3)
+  check_command(30 "${CMAKE_COMMAND}" -E env SDL_VIDEODRIVER=dummy
+    "${PACKAGE_ROOT}/bin/datapump-fb${extension}" --simulation --frames 3)
+  if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" AND NOT "$ENV{DISPLAY}" STREQUAL "")
+    # Exercise the copied software host itself; FLTK/Rev success cannot prove
+    # SDL's X11 dependencies are present in the relocated closure.
+    check_command(30 "${CMAKE_COMMAND}" -E env SDL_VIDEODRIVER=x11
+      "${PACKAGE_ROOT}/bin/datapump-fb${extension}" --simulation --frames 3)
+  endif()
 endif()
 if(package_gui_smoke_incomplete)
   message(STATUS "Native package inventory and dependency closure verified; GUI smoke coverage incomplete (see retained warning report)")

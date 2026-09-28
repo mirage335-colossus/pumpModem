@@ -83,6 +83,15 @@ normal full regression requirements still apply. The TUI and framebuffer have
 separate presentation/interaction implementations behind the common application.
 See [frontend interfaces](frontend-interfaces.md) for dependencies and the small
 single-framebuffer engine API.
+Portable native Linux producers explicitly run `python3 tools/prepare-native-sdl.py
+/absolute/new/preparation-directory --jobs N`, then configure with
+`-DDATAPUMP_NATIVE_SDL_ROOT=/absolute/new/preparation-directory/install` (or that
+environment variable). This verifies and builds the pinned SDL source with only
+the CPU presentation dependencies, retaining its source, license and build
+provenance in the package. Ordinary development may use system SDL; Linux SDK
+and Windows builds continue to use their prepared bases. The SDL2 software host
+uses X11, including XWayland on Wayland desktops; native Wayland software surfaces
+require a future host adapter.
 New release producers enable both frontends in Linux SDK and Windows archives,
 which also supplies them to the Debian, Arch and Gentoo package pipelines.
 Their `frontends` regression group runs in separate CI jobs parallel to existing

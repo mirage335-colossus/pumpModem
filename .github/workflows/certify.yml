@@ -242,6 +242,11 @@ jobs:
         run: |
           python3 tools/install-release-rev.py "$GITHUB_WORKSPACE/build/ci-rev-tools"
           echo "$GITHUB_WORKSPACE/build/ci-rev-tools/bin" >> "$GITHUB_PATH"
+      - name: Prepare the released source's pinned CPU framebuffer host
+        if: ${{ !matrix.sdk && needs.prepare.outputs.frontends == 'true' && (matrix.scope == 'main' || matrix.scope == 'frontends') }}
+        run: |
+          python3 -B tools/prepare-native-sdl.py "$GITHUB_WORKSPACE/build/native-sdl" --cc gcc-11 --cxx g++-11 --jobs "$(nproc)"
+          echo "DATAPUMP_NATIVE_SDL_ROOT=$GITHUB_WORKSPACE/build/native-sdl/install" >> "$GITHUB_ENV"
       - name: Run source GUI, packaging and non-calibration contract suites
         if: matrix.scope == 'main'
         env:

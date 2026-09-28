@@ -292,10 +292,17 @@ def run(binary):
         terminal.wait_for("events=22 pastes=1 paste")
         assert terminal.process.poll() is None
         assert b"\x1b]52" not in terminal.raw
-        terminal.send(b"\x1b[<0;12;7M\x1b[<0;12;7m")
-        terminal.wait_for("pointer 11,6")
-        terminal.send(b"\x1b[<64;12;7M")
-        terminal.wait_for("wheel 1")
+        # Keep press/release adjacent, then require every wheel step in order.
+        # Repeating past the mouse queue's wrap catches stale or dropped events.
+        count = 22
+        for x, y in ((12, 7), (13, 8)):
+            terminal.send(f"\x1b[<0;{x};{y}M\x1b[<0;{x};{y}m".encode())
+            count += 1
+            terminal.wait_for(f"events={count} pastes=1 pointer {x - 1},{y - 1}")
+            for code, direction in ((64, 1), (64, 1), (65, -1), (65, -1)):
+                terminal.send(f"\x1b[<{code};{x};{y}M".encode())
+                count += 1
+                terminal.wait_for(f"events={count} pastes=1 wheel {direction}")
         terminal.resize(100, 32)
         terminal.wait_for("size=100x32")
         terminal.send(b"\x1b[200~saved draft\x1b[201~")

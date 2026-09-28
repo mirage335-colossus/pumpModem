@@ -72,6 +72,11 @@ jobs:
         run: |
           sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
           echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
+      - name: Prepare the pinned CPU framebuffer host
+        if: inputs.scope == 'package' || inputs.scope == 'frontends'
+        run: |
+          python3 -B tools/prepare-native-sdl.py "$GITHUB_WORKSPACE/build/native-sdl" --cc gcc-11 --cxx g++-11 --jobs "$(nproc)"
+          echo "DATAPUMP_NATIVE_SDL_ROOT=$GITHUB_WORKSPACE/build/native-sdl/install" >> "$GITHUB_ENV"
       - name: Configure native application and selected test scope
         run: >-
           cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc-11 -DCMAKE_CXX_COMPILER=g++-11

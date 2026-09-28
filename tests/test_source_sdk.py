@@ -494,6 +494,47 @@ HOST_TEST_TOOLS = {
 }
 
 
+@unittest.skipUnless(HOST_TEST_TOOLS['cxx'] and HOST_TEST_TOOLS['readelf'], 'ELF compilation tools')
+class SdlRuntimeClosureTests(unittest.TestCase):
+    def test_sdl_direct_link_is_required_for_sdk_runtime_collection(self):
+        with tempfile.TemporaryDirectory(prefix='datapump-sdl-closure-') as temporary:
+            root = Path(temporary)
+            sysroot = root / 'sysroot'
+            libraries = sysroot / 'usr/lib'
+            libraries.mkdir(parents=True)
+            headers = sysroot / 'usr/include/SDL2'
+            headers.mkdir(parents=True)
+            header = headers / 'SDL_config.h'
+            header.write_text('#define SDL_VIDEO_DRIVER_X11 1\n')
+            readelf = HOST_TEST_TOOLS['readelf']
+            # Historical SDKs without SDL remain verifiable.
+            sdk.verify_sdl_runtime(sysroot, readelf)
+            source = root / 'fixture.cpp'
+            def compile_library(text, output, *options):
+                source.write_text(text)
+                subprocess.run([HOST_TEST_TOOLS['cxx'], '-shared', '-fPIC', str(source),
+                                *options, '-o', str(output)], check=True, capture_output=True)
+            sdl_library = libraries / 'libSDL2.so'
+            compile_library('extern "C" int SDL_Init(unsigned){return 0;}\n', sdl_library)
+            with self.assertRaisesRegex(ValueError, 'link X11 directly'):
+                sdk.verify_sdl_runtime(sysroot, readelf)
+            compile_library('extern "C" int XOpenDisplay(){return 0;}\n',
+                            libraries / 'libX11.so.6', '-Wl,-soname,libX11.so.6')
+            compile_library('extern "C" int XOpenDisplay();\n'
+                            'extern "C" int SDL_Init(unsigned){return XOpenDisplay();}\n',
+                            sdl_library, f'-L{libraries}', '-l:libX11.so.6')
+            sdk.verify_sdl_runtime(sysroot, readelf)
+            header.write_text('#define SDL_VIDEO_DRIVER_X11 1\n'
+                              '#define SDL_VIDEO_DRIVER_X11_DYNAMIC_XRANDR "libXrandr.so.2"\n')
+            with self.assertRaisesRegex(ValueError, 'directly linked X11 and its extensions'):
+                sdk.verify_sdl_runtime(sysroot, readelf)
+            outside = root / 'outside.so'
+            sdl_library.rename(outside)
+            sdl_library.symlink_to(outside)
+            with self.assertRaisesRegex(ValueError, 'escapes'):
+                sdk.verify_sdl_runtime(sysroot, readelf)
+
+
 @unittest.skipUnless(platform.system() == 'Linux' and platform.machine() == 'x86_64'
                      and all(HOST_TEST_TOOLS.values()),
                      'Host runtime ELF fixtures require x86_64 Linux, C++, readelf and patchelf')

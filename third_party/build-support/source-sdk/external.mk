@@ -15,3 +15,7 @@ HOST_PYTHON3_CONF_ENV += \
 # Exercise the actual SDL software-window host in headless frontend tests.
 # Buildroot disables this driver by default; no graphics API is needed.
 SDL2_CONF_OPTS := $(filter-out --disable-video-dummy,$(SDL2_CONF_OPTS)) --enable-video-dummy
+
+# Make X11 and its enabled extensions visible to the SDK runtime collector.
+# dlopen would let framebuffer-only bundles silently use unverified host libs.
+SDL2_CONF_OPTS += --disable-x11-shared

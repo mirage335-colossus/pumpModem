@@ -158,7 +158,10 @@ public:
             mode.c_cflag=(mode.c_cflag&~(CSIZE|PARENB))|CS8;
             mode.c_cc[VMIN]=1;mode.c_cc[VTIME]=0;
             if(tcsetattr(STDIN_FILENO,TCSANOW,&mode)!=0)throw std::runtime_error("Cannot set terminal input mode");
-            intrflush(stdscr,FALSE);typeahead(-1);set_escdelay(25);mouseinterval(0);
+            intrflush(stdscr,FALSE);typeahead(-1);set_escdelay(25);
+            // A zero click interval loses queued mouse events in ncurses 6.6.
+            // One millisecond keeps clicks responsive without its zero path.
+            mouseinterval(1);
             mousemask(ALL_MOUSE_EVENTS,nullptr);
             define_key("\033[200~",paste_begin);
             define_key("\033[1;2Z",KEY_BTAB);

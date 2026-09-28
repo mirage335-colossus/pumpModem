@@ -560,6 +560,26 @@ def glibc_versions(path, readelf):
     return [tuple(map(int, v.split('.'))) for v in re.findall(r'\bGLIBC_([0-9]+(?:\.[0-9]+)+)', result.stdout)]
 
 
+def verify_sdl_runtime(sysroot, readelf):
+    library = sysroot / 'usr/lib/libSDL2.so'
+    if not library.exists():
+        # Historical SDKs predate the separate framebuffer application.
+        return
+    library = library.resolve()
+    if sysroot.resolve() not in library.parents:
+        raise ValueError('SDL runtime escapes the SDK sysroot')
+    header = (sysroot / 'usr/include/SDL2/SDL_config.h').resolve()
+    if sysroot.resolve() not in header.parents:
+        raise ValueError('SDL configuration escapes the SDK sysroot')
+    configuration = header.read_text()
+    if (not re.search(r'^#define SDL_VIDEO_DRIVER_X11 1$', configuration, re.M)
+            or re.search(r'^#define SDL_VIDEO_DRIVER_X11_DYNAMIC', configuration, re.M)):
+        raise ValueError('SDL must enable directly linked X11 and its extensions')
+    output = subprocess.check_output([str(readelf), '--dynamic', '--wide', str(library)], text=True)
+    if not re.search(r'\(NEEDED\).*\[libX11\.so(?:\.[^\]]+)?\]', output):
+        raise ValueError('SDL must link X11 directly so its complete runtime is packaged')
+
+
 def verify_sdk(root, max_host):
     root = root.resolve()
     meta = root / 'share/datapump-sdk'
@@ -575,6 +595,7 @@ def verify_sdk(root, max_host):
     compiler = root / manifest['target']['cxx_compiler']
     member(manifest['target']['cxx_compiler'])
     readelf = member(f'bin/{manifest["target"]["triple"]}-readelf')
+    verify_sdl_runtime(sysroot, readelf)
     required = {'host': (0,), 'target': (0,)}
     seen = set()
     for path in sorted(root.rglob('*')):

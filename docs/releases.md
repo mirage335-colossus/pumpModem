@@ -278,6 +278,11 @@ Arch and Gentoo delivery uses the same private binaries, wrappers and manuals.
 The TUI requires a terminal; the framebuffer application uses SDL2 to present
 the independent software renderer. Neither requires the native GUI toolkit to
 open its interface.
+Native Linux producers prepare the pinned minimal SDL host explicitly, retaining
+its source archive, license and build provenance in each package. This avoids
+unused distribution SDL audio dependencies without relaxing runtime-closure or
+static-compression checks. The Linux SDL2 software window uses X11/XWayland;
+Linux SDK and Windows dependency recipes still come from the prepared bases.
 
 The same `.deb` files target Debian 12 Bookworm and newer glibc-based Debian
 systems, and Ubuntu 24.04 and newer. The installation matrix covers Bookworm,
