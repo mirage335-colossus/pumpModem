@@ -56,6 +56,9 @@ jobs:
             --mount "type=bind,source=$PWD/tools,target=/tools,readonly" \
             archlinux:base bash -euo pipefail <<'ARCH'
           pacman -Syu --noconfirm --needed base-devel python
+          # The minimal image excludes manuals. Restore only this package's
+          # pages and parent directories so installed-byte checks cover them.
+          printf '\n[options]\nNoExtract = !usr/share/man !usr/share/man/ !usr/share/man/man1 !usr/share/man/man1/ !usr/share/man/man1/datapump-*.1.gz\n' >> /etc/pacman.conf
           useradd --create-home --shell /bin/bash datapump-packager
           printf '%s\n' 'datapump-packager ALL=(root) NOPASSWD: /usr/bin/pacman' > /etc/sudoers.d/datapump-packager
           chmod 0440 /etc/sudoers.d/datapump-packager
@@ -92,6 +95,9 @@ jobs:
             --mount "type=bind,source=$PWD/docs/man,target=/docs/man,readonly" \
             archlinux:base bash -euo pipefail <<'ARCH'
           pacman -Syu --noconfirm --needed python
+          # Later negated patterns override the image's manual-page exclusion
+          # without changing unrelated filters or weakening pacman -Qkk.
+          printf '\n[options]\nNoExtract = !usr/share/man !usr/share/man/ !usr/share/man/man1 !usr/share/man/man1/ !usr/share/man/man1/datapump-*.1.gz\n' >> /etc/pacman.conf
           python3 /tests/test_arch_release.py
           pacman-key --init
           pacman-key --add /release/datapump-pacman-keyring.gpg
