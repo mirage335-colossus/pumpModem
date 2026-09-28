@@ -1,5 +1,10 @@
 # Shared-source coordination stress study, 2026-09-28 UTC
 
+This report describes the original study and its then-unimplemented proposals.
+The subsequent [implementation and decentralized validation](agent-coordination-decentralized-validation.md)
+records the fixes, additional regressions and follow-up evidence. Historical
+counts and limitations below have not been rewritten as later results.
+
 Real shared-source handoffs and larger process workloads completed without losing
 accepted repairs. The investigation also found warranted improvements: claim-kind
 validation, incomplete handoff discovery, automatic transaction-test coverage, and

@@ -803,7 +803,7 @@ all required notices and ordinary documentation remain installed. See
 | Shared GUI behavior | [GUI architecture](gui-architecture.md), `src/gui/application.cpp`, `src/gui/controller.cpp` | `gui`, then affected native backends |
 | Native widgets/platform services | `src/gui/backend_fltk*`, `src/gui/backend_rev*` | `gui`, `native` |
 | Build/dependencies/packaging | `CMakeLists.txt`, `cmake/`, `build.sh`, `third_party/README.md` | `build`, `packaging` |
-| Simultaneous agents, records and local messages | [coordination workflow](agent-coordination.md), [recipes](agent-coordination-recipes.md), `tools/check-agent-record.py`, `tools/agent-board.py` | `python3 -B tests/test_agent_record.py` and `python3 -B tests/test_agent_board.py`, then `build` |
+| Simultaneous agents, reservations, guarded edits and messages | [coordination workflow](agent-coordination.md), [recipes](agent-coordination-recipes.md), `tools/check-agent-record.py`, `tools/agent-board.py`, `tools/agent-session.py`, `tools/agent-edit.py` | `python3 -B tests/test_agent_record.py`, `test_agent_board.py`, `test_agent_session.py`, `test_agent_edit.py` and `test_agent_stress.py` under `tests/`, then `build` |
 
 Search maintained `src/`, `include/`, `tests/` and `cmake/` first. Vendored trees
 and `docs/validation-data` are reference material; old plans and recorded build

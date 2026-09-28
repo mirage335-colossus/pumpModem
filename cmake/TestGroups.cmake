@@ -12,7 +12,7 @@ endforeach()
 # executable prerequisite are listed explicitly so new cases cannot silently
 # run without their required build step.
 set(_script_tests legacy_boundary fast_boundary vendored_lzma_source packaging_cxx_runtime
-  build_agent_record build_agent_board build_agent_session
+  build_agent_record build_agent_board build_agent_session build_agent_edit build_agent_stress
   gui_adapter_boundary gui_boundary_regression packaging_support sdk_packaging build_wrapper build_gui_smoke_runner build_native_tests_runner build_ci_tests build_dependencies build_source_sdk build_sdk_runtime build_release build_release_dependencies build_sdk_release build_certify_release build_verify_latest_release build_windows_certification build_release_rev_tools build_windows_base build_ci_apt build_apt_release build_distro_release build_arch_release build_gentoo_sync)
 set(_aliases
   "gui_document_layout=test_document_layout"

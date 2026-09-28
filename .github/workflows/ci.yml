@@ -131,6 +131,9 @@ jobs:
           python3 tests/test_ci_tests.py
           python3 -B tests/test_agent_record.py
           python3 -B tests/test_agent_board.py
+          python3 -B tests/test_agent_session.py
+          python3 -B tests/test_agent_edit.py
+          python3 -B tests/test_agent_stress.py
           python3 tests/test_verify_latest_release.py
       - name: Record the remaining candidate gate
         run: echo 'Automatic checks are focused feedback only. Completed runtime changes require explicit ci.yml devfast=false, applicable SDK qualification, and release certification when publishing.' >> "$GITHUB_STEP_SUMMARY"

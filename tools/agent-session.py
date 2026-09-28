@@ -39,7 +39,39 @@ RegistryLock = namedtuple('RegistryLock', 'fd token')
 
 
 class CoordinationError(ValueError):
-    pass
+    """Machine-readable failure; messages are explanatory, never retry selectors."""
+    def __init__(self, message, *, code='invalid_request', phase='validation',
+                 uncertain=False, retry_action='correct_request'):
+        super().__init__(message)
+        self.code = code
+        self.phase = phase
+        self.uncertain = uncertain
+        self.retry_action = 'reconcile_saved_state' if uncertain else retry_action
+
+    def as_dict(self):
+        return {'code': self.code, 'phase': self.phase, 'uncertain': self.uncertain,
+                'retry_action': self.retry_action, 'message': str(self)}
+
+
+def retry_delay(error, attempt, *, max_attempts=8):
+    """Bounded jitter advice, not a retry loop or permission to replay a request.
+
+    Only a clean busy/stale rejection qualifies. For stale_review, reread and
+    resolve changed ownership, inputs and handoffs, then rebuild the candidate.
+    Do not refresh a hash on a stale prepared edit. Exhaustion returns None;
+    uncertain/other errors require their explicit action, never generic retry.
+    """
+    if (not isinstance(error, CoordinationError) or error.uncertain or
+            error.code not in {'registry_busy', 'stale_review'}):
+        raise ValueError('only clean registry_busy or stale_review permits retry advice')
+    if type(attempt) is not int or type(max_attempts) is not int or not 1 <= attempt or not 1 <= max_attempts <= 32:
+        raise ValueError('attempt must be positive and max_attempts must be 1–32')
+    if attempt >= max_attempts:
+        return None
+    # Equal jitter keeps a saturated client from repeatedly drawing very short
+    # delays and flooding full-board readers. No worker-count oracle is needed.
+    window = min(4.0, .05 * 2 ** min(attempt - 1, 7))
+    return random.uniform(window / 2, window)
 
 
 def utc_now():
@@ -64,7 +96,7 @@ def process_start():
 
 
 @contextmanager
-def registry_mutex(board, session, *, intent='checked record transaction', wait=0):
+def _registry_mutex(board, session, *, intent='checked record transaction', wait=0):
     """Yield an acquisition-specific handle; never steal or do work under the lock."""
     BOARD.require_capabilities()
     board = BOARD.absolute_path(board)
@@ -81,7 +113,9 @@ def registry_mutex(board, session, *, intent='checked record transaction', wait=
                 break
             except FileExistsError as exc:
                 if time.monotonic() >= deadline:
-                    raise CoordinationError('registry busy; inspect or retry; never steal the lock') from exc
+                    raise CoordinationError('registry busy; inspect or retry; never steal the lock',
+                                            code='registry_busy', phase='acquisition',
+                                            retry_action='bounded_backoff') from exc
                 time.sleep(min(random.uniform(.02, .08), max(0, deadline - time.monotonic())))
         with BOARD.child_directory(root, 'registry.lock') as lock:
             token = uuid.uuid4().hex
@@ -103,25 +137,54 @@ def registry_mutex(board, session, *, intent='checked record transaction', wait=
                 _, version = BOARD.read_regular(lock, 'owner.md')
                 yield RegistryLock(lock, token)
             finally:
-                BOARD.verify_board(board, root)
-                BOARD.verify_directory(root, 'registry.lock', lock)
-                if created:
-                    current, current_version = BOARD.read_regular(lock, 'owner.md')
-                    if current != owner or (version is not None and current_version != version):
-                        raise CoordinationError('lock owner changed; cleanup refused; inspect state')
-                    # Some mounted filesystems retain the directory listing as
-                    # of open(). Reopen relative to the verified lock, keeping
-                    # descriptor-relative identity and unknown-entry protection.
-                    with BOARD.child_directory(lock, '.') as fresh:
-                        if BOARD.identity(os.fstat(fresh)) != BOARD.identity(os.fstat(lock)):
-                            raise CoordinationError('mutex identity changed; cleanup refused')
-                        entries = sorted(os.listdir(fresh))
-                    if entries != ['owner.md']:
-                        raise CoordinationError(f'unexpected mutex contents {entries!r}; '
-                                                'preserve owner and inspect state')
+                try:
+                    BOARD.verify_board(board, root)
                     BOARD.verify_directory(root, 'registry.lock', lock)
-                    os.unlink('owner.md', dir_fd=lock)
-                os.rmdir('registry.lock', dir_fd=root)
+                    if created:
+                        current, current_version = BOARD.read_regular(lock, 'owner.md')
+                        if current != owner or (version is not None and current_version != version):
+                            raise CoordinationError('lock owner changed; cleanup refused; inspect state')
+                        # Some mounted filesystems retain the directory listing as
+                        # of open(). Reopen relative to the verified lock, keeping
+                        # descriptor-relative identity and unknown-entry protection.
+                        with BOARD.child_directory(lock, '.') as fresh:
+                            if BOARD.identity(os.fstat(fresh)) != BOARD.identity(os.fstat(lock)):
+                                raise CoordinationError('mutex identity changed; cleanup refused')
+                            entries = sorted(os.listdir(fresh))
+                        if entries != ['owner.md']:
+                            raise CoordinationError(f'unexpected mutex contents {entries!r}; '
+                                                    'preserve owner and inspect state')
+                        BOARD.verify_directory(root, 'registry.lock', lock)
+                        os.unlink('owner.md', dir_fd=lock)
+                    os.rmdir('registry.lock', dir_fd=root)
+                except BaseException as exc:
+                    raise CoordinationError(str(exc), code='cleanup_uncertain',
+                                            phase='cleanup', uncertain=True) from exc
+
+
+@contextmanager
+def registry_mutex(board, session, *, intent='checked record transaction', wait=0):
+    """Owned mutex with explicit clean-contention versus uncertain-cleanup errors."""
+    entered = False
+    body_error = None
+    try:
+        with _registry_mutex(board, session, intent=intent, wait=wait) as lock:
+            entered = True
+            try:
+                yield lock
+            except BaseException as exc:
+                body_error = exc
+                raise
+    except CoordinationError:
+        raise
+    except BaseException as exc:
+        if entered and exc is body_error:
+            raise  # The caller body failed after acquisition; cleanup succeeded.
+        if entered:
+            raise CoordinationError(str(exc), code='cleanup_uncertain',
+                                    phase='cleanup', uncertain=True) from exc
+        raise CoordinationError(str(exc), code='mutex_uncertain',
+                                phase='acquisition', uncertain=True) from exc
 
 
 def replace_section(text, name, value):
@@ -172,6 +235,21 @@ def checkpoint(before, *, state, running_jobs, progress, handoff, next_check,
     return result
 
 
+def _read_observed_regular(parent, name):
+    """Keep publisher read guarantees and type only an observed identity change."""
+    before = os.stat(name, dir_fd=parent, follow_symlinks=False)
+    try:
+        return BOARD.read_regular(parent, name)
+    except (BOARD.PublicationError, FileNotFoundError) as exc:
+        try:
+            current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        except FileNotFoundError:
+            raise CHECK.SnapshotChanged('observed file disappeared during read') from exc
+        if BOARD.file_version(before) != BOARD.file_version(current):
+            raise CHECK.SnapshotChanged('observed file changed during read') from exc
+        raise
+
+
 def input_state(value):
     """Exact observed baseline, including absence/identity; not an input lease.
 
@@ -182,15 +260,19 @@ def input_state(value):
     physical = original.resolve(strict=False)
     try:
         with BOARD.open_directory(physical.parent) as parent:
-            data, version = BOARD.read_regular(parent, physical.name)
+            data, version = _read_observed_regular(parent, physical.name)
         if original.resolve(strict=False) != physical:
-            raise CoordinationError(f'{original}: alias changed during input observation')
+            raise CoordinationError(f'{original}: alias changed during input observation',
+                                    code='stale_review', phase='review',
+                                    retry_action='rereview_and_replan')
         return {'path': str(original), 'physical': str(physical), 'kind': 'file',
                 'sha256': digest(data), 'version': list(version)}
     except FileNotFoundError:
         # Resolve again to catch an ancestor/link changing while checking absence.
         if original.resolve(strict=False) != physical or original.exists():
-            raise CoordinationError(f'{original}: changed during missing-input observation')
+            raise CoordinationError(f'{original}: changed during missing-input observation',
+                                    code='stale_review', phase='review',
+                                    retry_action='rereview_and_replan')
         return {'path': str(original), 'physical': str(physical), 'kind': 'missing'}
 
 
@@ -201,28 +283,39 @@ def normalized_scopes(scopes):
 def read_record_bytes(path):
     """Keep exact publication bytes while matching the reader's newline semantics."""
     with BOARD.open_directory(path.parent) as parent:
-        data, _ = BOARD.read_regular(parent, path.name)
+        try:
+            data, _ = _read_observed_regular(parent, path.name)
+        except FileNotFoundError as exc:
+            raise CHECK.SnapshotChanged('observed record disappeared before supplemental read') from exc
     text = data.decode('utf-8').replace('\r\n', '\n').replace('\r', '\n')
     return data, text
 
 
-def review(board, *, scopes=(), handoffs=(), inputs=(), legacy_reviews=None):
+def _review(board, *, scopes=(), handoffs=(), inputs=(), legacy_reviews=None):
     """Return a review token; no lock or ownership decision is made here.
 
     All current ownership is scanned. Selected handoffs are exact snapshots;
-    All handoff sections are fingerprinted to detect unchanged-byte intervening
-    ownership, including in an already-existing record. This conservative check
-    can retry on unrelated handoff edits; ordinary progress timestamps do not.
+    Every handoff is fingerprinted for the conservative fallback. A second scoped
+    fingerprint includes overlapping owners and every relevant/uncertain handoff,
+    including legacy records. Commit uses it only when the reviewed scopes cover
+    all prior and proposed claims; ordinary progress timestamps are excluded.
     """
     board = BOARD.absolute_path(board)
     scopes = normalized_scopes(scopes)
+    inputs = tuple(inputs)
+    watched_scopes = scopes + normalized_scopes(
+        [{'kind': 'file', 'value': str(path)} for path in inputs])
     with BOARD.open_directory(board) as opened:
         board_identity = list(BOARD.identity(os.fstat(opened)))
     legacy_reviews = legacy_reviews or {}
     scan = CHECK.scan_sessions(board / 'sessions')
     ownership, hashes, relevant, all_handoffs = [], {}, {}, {}
     interpreted = set()
+    transient_errors = []
     for error in scan['errors']:
+        if error.get('code') == 'snapshot_changed':
+            transient_errors.append(error)
+            continue
         path = Path(error['path'])
         session = path.stem
         assessment = legacy_reviews.get(session)
@@ -231,13 +324,16 @@ def review(board, *, scopes=(), handoffs=(), inputs=(), legacy_reviews=None):
                 not assessment['reason'].strip() or session in interpreted or
                 any(r['id'] == session for r in scan['records'])):
             raise CoordinationError('incomplete registry; inspect every reported entry: ' +
-                                    json.dumps(scan['errors'], separators=(',', ':')))
+                                    json.dumps(scan['errors'], separators=(',', ':')),
+                                    code='registry_invalid', phase='review',
+                                    retry_action='inspect_registry')
         BOARD.safe_id(session)
         raw, text = read_record_bytes(path)
         hashed = digest(raw)
         if hashed != assessment.get('sha256'):
             raise CoordinationError('legacy record differs from exact manually reviewed bytes')
-        claims = normalized_scopes(assessment['claims'])
+        claims = [CHECK.validate_claim_scope(entry['kind'], entry['value'])
+                  for entry in assessment['claims']]
         ownership.append({'id': session, 'claims': claims})
         hashes[session] = hashed
         all_handoffs[session] = {'manual_record_sha256': hashed}
@@ -245,6 +341,10 @@ def review(board, *, scopes=(), handoffs=(), inputs=(), legacy_reviews=None):
         interpreted.add(session)
     if interpreted != set(legacy_reviews):
         raise CoordinationError('legacy review is absent, duplicate, or no longer needed; review again')
+    if transient_errors:
+        raise CoordinationError('registry snapshot changed; reread after publication settles',
+                                code='stale_review', phase='review',
+                                retry_action='rereview_and_replan')
     for record in scan['records']:
         claims = CHECK.parse_claims(record['claims'])
         ownership.append({'id': record['id'], 'claims': claims})
@@ -252,15 +352,16 @@ def review(board, *, scopes=(), handoffs=(), inputs=(), legacy_reviews=None):
         raw, text = read_record_bytes(path)
         # Reject changing ownership between the scan and this selective reread.
         if CHECK.parse_record(text)[2] != record['claims']:
-            raise CoordinationError('claims changed during review; retry')
+            raise CoordinationError('claims changed during review; retry', code='stale_review',
+                                    phase='review', retry_action='rereview_and_replan')
         hashes[record['id']] = digest(raw)
         handoff = CHECK.section_text(text, CHECK.headings_in(text), 'Blockers and handoff')
         all_handoffs[record['id']] = handoff
         selected = record['id'] in handoffs
         error = None
-        if scopes:
+        if watched_scopes:
             try:
-                selected = CHECK.handoff_relevance(text, scopes) or selected
+                selected = CHECK.handoff_relevance(text, watched_scopes) or selected
             except ValueError as exc:
                 selected, error = True, str(exc)
         if selected:
@@ -279,11 +380,35 @@ def review(board, *, scopes=(), handoffs=(), inputs=(), legacy_reviews=None):
     token['fingerprint'] = fingerprint({key: token[key] for key in
                                       ('board', 'board_identity', 'scopes', 'ownership',
                                        'handoff_fingerprint', 'inputs')})
+    # Discovery uncertainty is never filtered out. In particular a partial or
+    # opaque handoff remains relevant even when a typed row names another file.
+    # Recompute from the full under-mutex scan, not an index or cached subset.
+    scoped_owners = [owner for owner in ownership
+                     if any(CHECK.scopes_overlap(claim, scope)
+                            for claim in owner['claims'] for scope in watched_scopes)]
+    token['scope_fingerprint'] = fingerprint({
+        'board': token['board'], 'board_identity': board_identity, 'scopes': scopes,
+        'ownership': scoped_owners, 'handoffs': relevant, 'inputs': token['inputs']})
     return token
 
 
-def commit(board, session, candidate, reviewed, *, create=False, expected_sha256=None,
-           precondition=None, after=None, wait=0, handoffs_reviewed=()):
+def review(board, *, scopes=(), handoffs=(), inputs=(), legacy_reviews=None):
+    """Read a complete snapshot; only typed observed races permit bounded retry."""
+    try:
+        return _review(board, scopes=scopes, handoffs=handoffs, inputs=inputs,
+                       legacy_reviews=legacy_reviews)
+    except CoordinationError:
+        raise
+    except CHECK.SnapshotChanged as exc:
+        raise CoordinationError(str(exc), code='stale_review', phase='review',
+                                retry_action='rereview_and_replan') from exc
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise CoordinationError(str(exc), code='registry_invalid', phase='review',
+                                retry_action='inspect_registry') from exc
+
+
+def _commit(board, session, candidate, reviewed, *, create=False, expected_sha256=None,
+            precondition=None, after=None, wait=0, handoffs_reviewed=(), _state):
     """Publish/verify/clean up, then run dependent work outside the mutex.
 
     precondition performs read-only semantic review *before* locking and must
@@ -300,8 +425,11 @@ def commit(board, session, candidate, reviewed, *, create=False, expected_sha256
         raise CoordinationError('choose create or exact reviewed own-record SHA-256')
     if not create and reviewed['record_hashes'].get(session) != expected_sha256:
         raise CoordinationError('own record hash does not match the reviewed snapshot')
+    _state['phase'] = 'precondition'
     if precondition is not None and precondition() is not True:
-        raise CoordinationError('precondition failed; no acquisition or dependent action')
+        raise CoordinationError('precondition failed; no acquisition or dependent action',
+                                code='precondition_failed', phase='precondition')
+    _state['phase'] = 'validation'
     CHECK.scan_record(candidate, board / 'sessions' / (session + '.md'))
     _, candidate_fields, candidate_claims = CHECK.parse_record(candidate)
     if candidate_fields['State'] in CHECK.TERMINAL and after is not None:
@@ -312,12 +440,34 @@ def commit(board, session, candidate, reviewed, *, create=False, expected_sha256
     for scope in proposed:
         if scope not in prior and scope not in reviewed['scopes']:
             raise CoordinationError('every added claim requires exact scope review')
+    _state['phase'] = 'acquisition'
     with registry_mutex(board, session, wait=wait) as lock:
+        _state['phase'] = 'review'
         current = review(board, scopes=reviewed['scopes'], handoffs=reviewed['handoffs'],
                          inputs=[entry['path'] for entry in reviewed['inputs']],
                          legacy_reviews=reviewed['legacy_reviews'])
-        if current['fingerprint'] != reviewed['fingerprint']:
-            raise CoordinationError('reviewed ownership, handoff or input changed; review again')
+        # The candidate may introduce an absent path not present in any current
+        # record. Revalidate its filesystem kind/aliases inside the mutex too.
+        # A changed normalization never authorizes a newly redirected proposal.
+        if CHECK.parse_claims(candidate_claims) != proposed:
+            raise CoordinationError('proposed claim identity changed; reread and replan',
+                                    code='stale_review', phase='review',
+                                    retry_action='rereview_and_replan')
+        # Empty/narrow scope reviews retain the conservative global baseline.
+        # This is especially important when releasing previously held scope:
+        # proposed claims alone cannot describe its remaining dependencies.
+        complete_scope = bool(reviewed['scopes']) and all(
+            scope in reviewed['scopes'] for scope in prior + proposed)
+        fingerprint_key = ('scope_fingerprint' if complete_scope and
+                           'scope_fingerprint' in reviewed else 'fingerprint')
+        if current[fingerprint_key] != reviewed[fingerprint_key]:
+            raise CoordinationError('reviewed ownership, handoff or input changed; review again',
+                                    code='stale_review', phase='review',
+                                    retry_action='rereview_and_replan')
+        if not create and current['record_hashes'].get(session) != expected_sha256:
+            raise CoordinationError('stale baseline: own record changed; review again',
+                                    code='stale_review', phase='review',
+                                    retry_action='rereview_and_replan')
         if additions and set(handoffs_reviewed) != set(reviewed['relevant_handoffs']):
             raise CoordinationError('read and resolve every returned candidate/uncertain handoff; '
                                     'pass their exact IDs as handoffs_reviewed; no last owner is inferred')
@@ -325,9 +475,31 @@ def commit(board, session, candidate, reviewed, *, create=False, expected_sha256
             if owner['id'] != session:
                 for theirs in owner['claims']:
                     if any(CHECK.scopes_overlap(ours, theirs) for ours in proposed):
-                        raise CoordinationError(f'claim overlaps owner {owner["id"]}; request handoff')
+                        raise CoordinationError(f'claim overlaps owner {owner["id"]}; request handoff',
+                                                code='claim_conflict', phase='review',
+                                                retry_action='request_handoff')
         candidate = set_fields(candidate, {'Updated (UTC)': utc_now()})
+        # Validate lifecycle semantics before any candidate staging/publication.
+        # A malformed close or backwards event time is a clean caller error,
+        # while publisher revalidation still guards the actual save boundary.
+        _state['phase'] = 'validation'
+        CHECK.check_transition(candidate, candidate)
+        if create:
+            if session in current['record_hashes']:
+                raise CoordinationError('session already exists; choose a fresh session ID')
+        else:
+            with BOARD.open_directory(board / 'sessions') as records:
+                previous, _ = BOARD.read_regular(records, session + '.md')
+            if digest(previous) != expected_sha256:
+                raise CoordinationError('own record changed during transition validation',
+                                        code='stale_review', phase='review',
+                                        retry_action='rereview_and_replan')
+            previous = previous.decode('utf-8')
+            if CHECK.parse_record(previous)[1]['State'] in CHECK.TERMINAL:
+                raise CoordinationError('terminal session cannot publish again; register a fresh session ID')
+            CHECK.check_transition(previous, candidate)
         data = candidate.encode()
+        _state['phase'] = 'publication'
         with BOARD.staged_bytes(lock.fd, data) as temporary:
             BOARD.publish_record(board, session, str(board / 'registry.lock' / temporary),
                                  create=create, expected_sha256=expected_sha256,
@@ -338,28 +510,123 @@ def commit(board, session, candidate, reviewed, *, create=False, expected_sha256
             raise CoordinationError('saved record differs; publication unconfirmed')
         receipt = {'board': str(board), 'session': session, 'record_sha256': digest(saved),
                    'claims': proposed, 'updated': CHECK.parse_record(candidate)[1]['Updated (UTC)']}
+        _state['phase'] = 'cleanup'
     # No user callback or command executes while holding the registry mutex.
     if after is not None:
+        _state['phase'] = 'callback'
         after(receipt)
     return receipt
 
 
+def commit(board, session, candidate, reviewed, *, create=False, expected_sha256=None,
+           precondition=None, after=None, wait=0, handoffs_reviewed=()):
+    """Checked transaction; uncertain failures must be reconciled, never replayed.
+
+    A clean registry_busy can use bounded backoff. stale_review requires rereading
+    and replanning, claim_conflict requires a handoff. Publication, cleanup and
+    callback failures may follow durable changes and never permit automatic retry.
+    Success receipts retain the existing API and authorize only their saved claims.
+    """
+    state = {'phase': 'validation'}
+    try:
+        return _commit(board, session, candidate, reviewed, create=create,
+                       expected_sha256=expected_sha256, precondition=precondition,
+                       after=after, wait=wait, handoffs_reviewed=handoffs_reviewed,
+                       _state=state)
+    except BaseException as exc:
+        phase = state['phase']
+        if isinstance(exc, CoordinationError) and exc.uncertain:
+            raise
+        if phase in {'publication', 'cleanup', 'callback'}:
+            raise CoordinationError(str(exc), code=phase + '_uncertain',
+                                    phase=phase, uncertain=True) from exc
+        if isinstance(exc, CoordinationError):
+            raise
+        code = 'precondition_failed' if phase == 'precondition' else 'invalid_request'
+        raise CoordinationError(str(exc), code=code, phase=phase) from exc
+
+
+def acknowledgment(receipt, *, scope, previous_owner, release_reference,
+                   request_id, review_note):
+    """Format a complete acquisition acknowledgment; do not publish or acquire.
+
+    The caller must resolve the real predecessor, keep its claim held, publish
+    this message atomically, and stop dependent edits if publication fails.
+    A supplied receipt is historical evidence, not a continuing ownership lease.
+    Free-text references/review notes are not machine-verified release lineage.
+    """
+    def line(value, field):
+        if (not isinstance(value, str) or not value.strip() or value != value.strip()
+                or len(value) > 2048 or any(ord(c) < 32 or ord(c) == 127 for c in value)
+                or len(value.splitlines()) != 1):
+            raise CoordinationError(field + ' must be a nonempty bounded single line')
+        return value
+
+    if not isinstance(receipt, dict):
+        raise CoordinationError('provide the successful acquisition receipt')
+    owner = BOARD.safe_id(line(receipt.get('session'), 'receipt session'))
+    previous_owner = BOARD.safe_id(line(previous_owner, 'previous owner'))
+    board = str(BOARD.absolute_path(line(receipt.get('board'), 'receipt board')))
+    record_hash = line(receipt.get('record_sha256'), 'receipt record SHA256')
+    if not re.fullmatch('[0-9a-f]{64}', record_hash):
+        raise CoordinationError('receipt record SHA256 must be exact lowercase SHA256')
+    updated = line(receipt.get('updated'), 'receipt timestamp')
+    CHECK.timestamp(updated, 'receipt timestamp')
+    if not isinstance(scope, dict) or set(scope) != {'kind', 'value'}:
+        raise CoordinationError('provide one exact typed granted scope')
+    canonical = CHECK.canonical_scope(line(scope['kind'], 'scope kind'),
+                                      line(scope['value'], 'scope value'))
+    if scope != canonical or not isinstance(receipt.get('claims'), list) or scope not in receipt['claims']:
+        raise CoordinationError('scope must exactly match a canonical claim in the acquisition receipt')
+    release_reference = line(release_reference, 'release reference')
+    request_id = line(request_id, 'request ID or explicit no-request explanation')
+    if request_id.lower() in {'none', 'none.', 'n/a'}:
+        raise CoordinationError('explain why no request exists; do not invent an ID')
+    review_note = line(review_note, 'review note')
+    return (f'Acquisition acknowledgment\n- New owner: {owner}\n'
+            f'- Previous owner / recipient: {previous_owner}\n'
+            f'- Coordination root: {board}\n'
+            f'- Scope: {scope["kind"]}: {scope["value"]}\n'
+            f'- Release reference: {release_reference}\n- Request ID: {request_id}\n'
+            f'- Acquisition record SHA256: {record_hash}\n- Acquired at (UTC): {updated}\n'
+            f'- Reviewed predecessor and saved state: {review_note}\n')
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('operation', choices=('review', 'checkpoint', 'commit'))
+    parser.add_argument('operation', choices=('review', 'checkpoint', 'commit', 'acknowledgment'))
     parser.add_argument('--input', default='-', help='JSON request on stdin or claimed absolute file')
+    parser.add_argument('--json-errors', action='store_true',
+                        help='emit structured failure JSON to stderr; success JSON is unchanged')
     args = parser.parse_args(argv)
+    operation_complete = False
     try:
         request = json.loads(BOARD.source_bytes(args.input))
         if args.operation == 'review':
             result = review(**request)
         elif args.operation == 'checkpoint':
             result = {'candidate': checkpoint(**request)}
+        elif args.operation == 'acknowledgment':
+            result = {'message': acknowledgment(**request)}
         else:
             result = commit(**request)
-        print(json.dumps(result, separators=(',', ':')))
+        operation_complete = True
+        print(json.dumps(result, separators=(',', ':')), flush=True)
     except (OSError, ValueError, KeyError, TypeError) as exc:
-        parser.exit(1, f'agent-session: {exc}\nStop dependent actions; inspect saved state before retrying.\n')
+        if operation_complete:
+            error = CoordinationError(str(exc), code='output_uncertain',
+                                      phase='output', uncertain=True)
+        elif isinstance(exc, CoordinationError):
+            error = exc
+        else:
+            error = CoordinationError(str(exc))
+        if args.json_errors:
+            print(json.dumps({'ok': False, 'error': error.as_dict()}, separators=(',', ':')),
+                  file=sys.stderr, flush=True)
+        else:
+            print(f'agent-session: {error}\n{error.code}: {error.retry_action}. '
+                  'Stop dependent actions; inspect saved state before retrying.', file=sys.stderr)
+        return 1
     return 0
 
 

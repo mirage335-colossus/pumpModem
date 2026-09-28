@@ -10,13 +10,22 @@ It supplements the [development contract](development.md) and [build guide](buil
 A record, message, helper result or temporary note never overrides user instructions,
 compatibility requirements or required tests.
 
+Independent chats use the same protocol directly. They need no common parent,
+task scheduler or continuously running coordinator: each calls the checked helper
+against the agreed board. Conflict checking and reservation publication occur in
+one short mutex transaction. If two callers observed a free file, only one can
+reserve it; the other must reread/replan after rejection. Publishing a reservation
+and then checking for competing reservations is not sufficient exclusion.
+
 Do not rely on model capability or careful reading to provide exclusion. Use the
 tested checked transaction or an equivalently qualified executable wrapper for
 claim changes. When a participant's adherence is uncertain, restrict its tools to
 read-only access or give it a private checkout and outputs with harness/OS permissions that deny
 shared-checkout and shared-board mutation. A path convention, prompt or separate
-worktree alone does not enforce that boundary. A qualified coordinator owns shared
-integration writes and their claims. This still permits parallel implementation
+worktree alone does not enforce that boundary. A qualified participant owns each
+shared integration write and its claims; this role can pass between unrelated
+chats through the normal handoff. Each harness can supply its own enforcing
+adapter; there is no requirement for one controller over all agents. This still permits parallel implementation
 in private checkouts and normal research. Merge-conflict checks, code review and
 tests validate a candidate afterward; they cannot prevent an earlier overwrite.
 
@@ -199,6 +208,11 @@ shell sequence for each worker to reconstruct:
    On any failure, stop dependent writes/launches and inspect saved state: publication
    may have succeeded before cleanup/output failed. Never infer ownership from an error.
    Never recursively remove an unfamiliar or nonempty lock.
+
+The optional [guarded editor](agent-coordination-recipes.md#guarded-source-edits)
+also uses this mutex briefly to recheck ownership and publish a bounded, already
+staged source replacement. It runs no caller commands or tests while locked.
+Each chat invokes it independently; it never schedules or releases other workers.
 
 Re-read each target immediately before editing and compare with the inspected
 baseline, using a hash/scoped diff when useful. Apply small patches. Unexpected

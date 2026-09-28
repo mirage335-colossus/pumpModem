@@ -51,6 +51,17 @@ LEGACY_METADATA_FIELDS = (
 )
 
 
+class SnapshotChanged(ValueError):
+    """A detected observation race; callers may restart the entire observation."""
+
+
+def scan_error(path, error):
+    detail = {'path': str(path), 'error': str(error)}
+    if isinstance(error, SnapshotChanged):
+        detail['code'] = 'snapshot_changed'
+    return detail
+
+
 def canonical_scope(kind, value):
     """Normalize an explicit scope, without deciding ownership or expanding globs."""
     if kind not in SCOPE_KINDS or not isinstance(value, str) or not value or value != value.strip():
@@ -71,6 +82,31 @@ def canonical_scope(kind, value):
     except RuntimeError as exc:
         raise ValueError('scope alias cannot be resolved; inspect its symlink chain') from exc
     return {'kind': kind, 'value': os.path.normcase(str(physical))}
+
+
+def validate_claim_scope(kind, value):
+    """Validate an actual claim against the current filesystem, including its kind.
+
+    Absent paths retain their declared kind; callers must repeat this check when
+    reviewing/publishing claims, since materialization or replacement can change
+    the answer. Historical scope discovery and query normalization deliberately
+    keep using canonical_scope: an old file may now be a directory or absent.
+    This observation does not freeze a path or enumerate hard-linked descendants.
+    """
+    scope = canonical_scope(kind, value)
+    if kind == 'resource':
+        return scope
+    try:
+        info = Path(scope['value']).stat()
+    except FileNotFoundError:
+        return scope
+    matches = stat.S_ISREG(info.st_mode) if kind == 'file' else stat.S_ISDIR(info.st_mode)
+    if not matches:
+        raise ValueError('claim kind does not match the existing filesystem entry; '
+                         'use file for a regular file and directory for a directory')
+    if kind == 'file' and info.st_nlink > 1:
+        raise ValueError('hard-linked file claim needs manual alias review; automatic scope checks cannot enumerate aliases')
+    return scope
 
 
 def scopes_overlap(left, right):
@@ -130,17 +166,10 @@ def parse_claims(text):
             if not match:
                 raise ValueError('unknown claim syntax; inspect the entire Claims held section')
             kind, value = match.groups()
-        scope = canonical_scope(kind, value)
+        scope = validate_claim_scope(kind, value)
         if kind != 'resource':
             if os.path.normcase(value) != scope['value']:
                 raise ValueError('recorded claims must use canonical physical paths; resolve aliases before publication')
-            try:
-                info = Path(value).stat()
-            except FileNotFoundError:
-                pass
-            else:
-                if stat.S_ISREG(info.st_mode) and info.st_nlink > 1:
-                    raise ValueError('hard-linked file claim needs manual alias review; automatic scope checks cannot enumerate aliases')
         result.append(scope)
     if not result:
         raise ValueError('empty claim table/headings are not standalone None.')
@@ -150,56 +179,54 @@ def parse_claims(text):
 def handoff_relevance(text, scopes):
     """Conservative discovery, never a selection of the most recent owner.
 
-    Explicit Scope rows preserve paths with spaces and resource IDs. Historical
-    prose is searched for path mentions, including relative paths when its
-    checkout is known. A path mention may be a covering directory. Unknown scope
-    declarations or a release with no discoverable scope require manual review.
+    Explicit typed rows preserve paths with spaces and resource IDs. The version-1
+    ``- Scope inventory: complete`` producer assertion says those rows enumerate
+    every historical scope in this section; it is not semantic proof. With that
+    assertion explanatory prose is unrestricted and is never mined for paths.
+    Unmarked non-neutral history needs manual review even beside some Scope rows:
+    a partial inventory must not conceal another owner. Old records stay readable.
     """
     handoff = section_text(text, headings_in(text), 'Blockers and handoff')
     mentions = []
     declared_scopes = False
+    declared_none = False
+    inventories = []
     remaining = []
     for line in handoff.splitlines():
+        line = line.strip()
+        if re.match(r'- Scope inventory\b', line):
+            inventories.append(line)
+            continue
         declared = re.fullmatch(r'- (?:Scope|Release scope|Acquired scope|Retained scope): (.+)', line)
         if declared:
             declared_scopes = True
             body = declared[1]
             if body.lower() in ('none', 'none.'):
+                declared_none = True
                 continue
             typed = re.fullmatch(r'(file|directory|resource): (.+)', body)
             if not typed:
                 raise ValueError('ambiguous handoff scope; use "- Scope: file|directory|resource: VALUE"')
             mentions.append(canonical_scope(*typed.groups()))
         else:
+            if re.match(r'- (?:Scope|Release scope|Acquired scope|Retained scope)\b', line):
+                raise ValueError('malformed handoff scope row; use "- Scope: file|directory|resource: VALUE"')
             remaining.append(line)
-    prose = '\n'.join(remaining)
-    # Quoted mentions support spaces; unquoted paths stop at prose delimiters.
-    quoted = re.findall(r'`(/[^`\n]+)`|"(/[^"\n]+)"', prose)
-    for pair in quoted:
-        mentions.append(canonical_scope('directory', next(value for value in pair if value)))
-    prose = re.sub(r'`[^`\n]*`|"[^"\n]*"', ' ', prose)
-    for value in re.findall(r'(?<![\w/])/(?:[^\s;,|()<>"`]+)', prose):
-        # Trailing punctuation in prose is not a reliable path delimiter. Match
-        # both spellings conservatively; no match grants ownership.
-        for spelling in {value, value.rstrip('.:')}:
-            if spelling:
-                mentions.append(canonical_scope('directory', spelling))
-    checkout = re.search(r'^- Checkout / coordination root \(absolute physical paths\): (.+?) / ', text, re.M)
-    if checkout and Path(checkout[1]).is_absolute():
-        for value in re.findall(r'(?<![\w/])(?:\.?[\w.-]+/)+[\w.-]+', prose):
-            mentions.append(canonical_scope('directory', str(Path(checkout[1]) / value)))
-    for scope in scopes:
-        if scope['kind'] == 'resource' and re.search(
-                r'(?<![\w:./-])' + re.escape(scope['value']) + r'(?![\w:./-])', prose):
-            mentions.append(scope)
-    if not declared_scopes:
-        # Do not guess which synonyms mean a transfer. Any opaque history could
-        # describe another owner without using the words release or acquire.
-        neutral = re.fullmatch(
-            r'\s*-?\s*(?:no pending handoffs?\.?|current request: none\.?|none\.?|'
-            r'none; no pending requests\.?)\s*', prose, re.I)
+    if inventories and inventories != ['- Scope inventory: complete']:
+        raise ValueError('need one exact "- Scope inventory: complete" assertion, not duplicate or unknown inventory markers')
+    if inventories and not declared_scopes:
+        raise ValueError('complete Scope inventory needs explicit typed Scope rows or standalone "- Scope: none"')
+    if declared_none and mentions:
+        raise ValueError('Scope: none contradicts a nonempty declared handoff scope')
+    if not inventories:
+        # A declaration beside legacy prose does not assert that it enumerates
+        # all the prose's history. Never guess scopes from filenames or wording.
+        neutral = all(not line or re.fullmatch(
+            r'-?\s*(?:no pending handoffs?\.?|current request: none\.?|none\.?|'
+            r'none; no pending requests\.?)', line, re.I) for line in remaining)
         if not neutral:
-            raise ValueError('freeform handoff may omit scopes; inspect manually and preserve all relevant provenance')
+            raise ValueError('freeform handoff may omit scopes; inspect manually and preserve all relevant provenance; '
+                             'assert Scope inventory: complete only after reviewing every historical scope')
     return any(scopes_overlap(scope, mention) for scope in scopes for mention in mentions)
 
 
@@ -384,10 +411,10 @@ def read_scan_record(path, before, *, preserve_newlines=False):
                    newline='' if preserve_newlines else None) as stream:
         opened = os.fstat(stream.fileno())
         if not stat.S_ISREG(opened.st_mode) or record_identity(opened) != record_identity(before):
-            raise ValueError('record replaced before read; retry after publication settles')
+            raise SnapshotChanged('record replaced before read; retry after publication settles')
         text = stream.read()
         if record_identity(os.fstat(stream.fileno())) != record_identity(opened):
-            raise ValueError('record changed while being read; retry after publication settles')
+            raise SnapshotChanged('record changed while being read; retry after publication settles')
         return text
 
 
@@ -398,7 +425,7 @@ def read_record(path):
         raise ValueError('expected direct regular .md record; no symlinks or subdirectories')
     text = read_scan_record(path, before)
     if record_identity(path.lstat()) != record_identity(before):
-        raise ValueError('record changed while being read; retry after publication settles')
+        raise SnapshotChanged('record changed while being read; retry after publication settles')
     return text, before
 
 
@@ -489,7 +516,7 @@ def scan_sessions(directory, scopes=None):
             raise ValueError('scan target must be a directory, not a symlink')
         entries = sorted(directory.iterdir())
     except (OSError, ValueError) as exc:
-        result['errors'].append({'path': str(directory), 'error': str(exc)})
+        result['errors'].append(scan_error(directory, exc))
         return result
     observed = {}
     fingerprint = hashlib.sha256()
@@ -505,7 +532,7 @@ def scan_sessions(directory, scopes=None):
             fingerprint.update(repr(record_identity(before_entry)).encode())
             text, before = read_record(path)
             if record_identity(before) != record_identity(before_entry):
-                raise ValueError('record changed before read during scan; retry after publication settles')
+                raise SnapshotChanged('record changed before read during scan; retry after publication settles')
             observed[path] = before
             fingerprint.update(hashlib.sha256(text.encode()).digest())
             entry = scan_record(text, path)
@@ -532,21 +559,21 @@ def scan_sessions(directory, scopes=None):
                         selected['relevance_uncertain'] = True
                     result['records'].append(selected)
         except (OSError, UnicodeError, ValueError) as exc:
-            result['errors'].append({'path': str(path), 'error': str(exc)})
+            result['errors'].append(scan_error(path, exc))
             fingerprint.update(os.fsencode(path.name))
             fingerprint.update(str(exc).encode('utf-8', errors='backslashreplace'))
     try:
         if (sorted(directory.iterdir()) != entries or
                 record_identity(directory.lstat()) != record_identity(directory_before)):
-            raise ValueError('directory entries changed during scan; retry after publication settles')
+            raise SnapshotChanged('directory entries changed during scan; retry after publication settles')
     except (OSError, ValueError) as exc:
-        result['errors'].append({'path': str(directory), 'error': str(exc)})
+        result['errors'].append(scan_error(directory, exc))
     for path, before in observed.items():
         try:
             if record_identity(path.lstat()) != record_identity(before):
-                raise ValueError('record changed after read during scan; retry after publication settles')
+                raise SnapshotChanged('record changed after read during scan; retry after publication settles')
         except (OSError, ValueError) as exc:
-            result['errors'].append({'path': str(path), 'error': str(exc)})
+            result['errors'].append(scan_error(path, exc))
     result['complete'] = not result['errors']
     if scopes is not None:
         fingerprint.update(json.dumps(scopes, sort_keys=True).encode())

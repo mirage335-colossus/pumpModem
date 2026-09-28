@@ -14,6 +14,11 @@ fixtures, observers, builds and handoffs too.
 
 ## Prepare before dispatch
 
+The historical repair comparison below and the shared-source stress recipe are
+different studies. Use the former for blinded repair/research comparisons. Use
+the latter to qualify reservation races and preservation of overlapping edits;
+do not count seeded regressions as distinct historical commits.
+
 - Give at least five fresh workers problems drawn from different historical
   commits, with behavioral requirements and complete externally visible output
   contracts. State required artifact fields and meanings; withhold solution
@@ -43,6 +48,11 @@ fixtures, observers, builds and handoffs too.
   before dispatch. Verify held-out test hashes against their original revisions.
   A fixture defect is an evaluator failure to fix before reuse, not an agent
   repair failure. Keep any unavoidable coverage gap explicit.
+- Initialize ordinary board containers, including the shared artifact parent,
+  under the evaluator's setup ownership before dispatch. Check filled seed
+  records against the actual checkout, control results and stopped writers;
+  remove fixture-template baseline/progress placeholders before freezing them.
+  Exercise the same registration/artifact initialization path workers will use.
 - Give each worker absolute physical checkout and shared-board paths, require
   explicit tool working directories, and provide current AGENTS/workflow files.
   Supply board ignore verification when its containing checkout is outside the
@@ -93,6 +103,13 @@ each observation came from a tool trace, sampling or a post-run self-report. Do
 not call exclusive creation an atomic complete publication. Use existing messages
 and records to distinguish entry readiness, request, acquisition, append, release
 and receipt times; separate ownership waiting from independent repair/test time.
+Check acknowledgment content as well as atomic publication and ordering: actual
+recipient, exact release reference, typed absolute scope, acquisition receipt
+identity and request correlation (or explicit no-request explanation). Prefer
+the checked helper's acknowledgment builder. Matching bytes and message presence
+alone do not establish complete handoff compliance. Preserve false success
+reports and later corrections as separate observations; a successful retry does
+not erase a failed precondition or a release summary for tests that never ran.
 Include a case where unrelated closure/evidence work remains after a shared edit;
 the worker should release that file promptly while keeping its session active.
 Include launch/yield/completion, a missing/empty/nonempty inbox, and a candidate
@@ -147,6 +164,49 @@ pagination alone is not a faster scan. Vary aliases and filesystems only when
 actually available, and label unavailable platform/network cases. A helper stress
 run is not evidence that 32 independent reasoning agents will use the protocol
 correctly, nor a replacement for a matched distraction/useful-work study.
+
+## Independent shared-source stress recipe
+
+Run this in a complete disposable checkout with independent Git state. Preserve
+and hash the original source/index before and after. Overlay the exact candidate
+helpers/guidance explicitly, qualify them on the actual fixture filesystem, and
+freeze prompts, public contracts, mutations and clean/failing controls before
+launch. Record copied inventory and every overlay; never edit original production
+source to create exercise failures.
+
+Give unrelated worker loops the same physical board, different related tasks,
+the helper interface and its failure rules. Each worker chooses when to acquire,
+edit, validate, release and request scope. A start barrier may create contention;
+do not assign turns, select a winner or send acquisition instructions after launch.
+Workers must resolve conflicts through the board, including an unseen closed
+owner. The evaluator observes and validates; it does not grant reservations.
+Per-agent adapters can enforce allowed edits without scheduling the other agents.
+
+Use one or more actual source files with overlapping functions and shared
+invariants. Include repeated acquisitions, a pre-acquisition prepared candidate,
+an independent task that remains available while shared scope is occupied, and
+post-release evidence work. Verify every recorded save's exact preimage/postimage
+chain and all preserved behavioral contributions, not only a final sum or clean
+Git merge. Retain failed attempts and any evaluator intervention. Source tests
+must distinguish each seeded defect from the clean control.
+
+Supplement genuine model workers with `tests/test_agent_stress.py`. Its independent
+processes acquire, edit and release without a turn scheduler; the normal test uses
+a modest population, and `DATAPUMP_AGENT_STRESS_WORKERS=64` requests the larger
+qualification run. Exercise both shared and disjoint files. Check every process
+joined, exact contributor/value mappings, full final registry scans, no retained
+claims, and appropriate saved-state handling after failures. Timing and retry
+counts are observations, not fairness guarantees. Test successful controls for
+stale saves, malformed scopes, mixed handoff declarations, interrupted staging,
+after-publication errors, and a completed parent with a live child writer.
+
+Report actual concurrent model workers separately from assignments and deterministic
+processes. Disclose reused conversations, common versus mixed harnesses, blinding,
+per-command versus enforced tool restrictions, and whether the evaluator could
+intervene. A same-harness trial with three models is not a mixed-provider or
+64-model trial. Do not claim generic descendant supervision, network filesystem
+safety, hostile-tool exclusion or power-loss durability from cooperative local
+source editing. Unknown capability limits remain explicit, not scored as passes.
 
 ## Score the finished candidate
 

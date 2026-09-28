@@ -122,11 +122,20 @@ For new releases/acquisitions include a plain discoverable line inside the exist
 hashes, stopped writers and pending request disposition:
 
 ```text
+- Scope inventory: complete
 - Scope: file: /work/project/src/example.cpp
 ```
 
 Use one line per exact scope; `directory` and `resource` are also valid kinds. This
-is an aid within the same authoritative record, not another registry. Keep live
+is an aid within the same authoritative record, not another registry. The inventory
+marker asserts that these typed rows enumerate **every** scope mentioned by the
+section's acquisition/release history, including earlier still-needed handoffs.
+Use `- Scope: none` only when there is no such scope. Do not add the marker to an
+old record without actually checking its whole history. It is a producer assertion,
+not machine proof that prose is truthful. Without it, non-neutral prose remains
+uncertain even if some explicit scope lines are present; inspect it manually.
+Duplicate/invalid markers and contradictory inventories do not permit filtering.
+Keep live
 handoff references discoverable during compaction. A complete search can find both
 relay and quiet intervening owner: follow their acquired-from/release chain and
 current claims, not timestamp sorting or equal content hashes. Recheck the relevant
@@ -367,7 +376,8 @@ through each operation. Coordinate helper upgrades while registry writers are
 quiescent; do not mix old callers with a new publisher mid-transaction. This is
 an integration dependency, not permission to edit another holder's metadata.
 
-For a worker that cannot reliably follow the protocol, its controller performs
+Each unrelated chat can call this helper directly; it needs no parent controller.
+For a worker that cannot reliably follow the protocol, its harness adapter performs
 these operations and enforces allowed writes, or confines it to a private checkout
 and outputs. Test denied writes to shared source, board, build trees and common Git
 state through the actual available tools before treating this as enforced isolation.
@@ -385,6 +395,7 @@ weaker publication/cleanup checks.
 | `review(board, scopes=..., handoffs=..., inputs=...)` | Exact added scopes, relevant owner IDs and stable input files; returns complete ownership/relevant handoff evidence and a snapshot token, including absent input identity |
 | `checkpoint(before, state=..., running_jobs=..., progress=..., handoff=..., next_check=...)` | Replace the complete current status together; claims remain unchanged, inbox/progress event times preserved unless explicit `inbox_at`/`progress_at` are supplied |
 | `commit(board, session, candidate, reviewed, ...)` | Filled complete candidate, frozen review and exact own-record hash (or `create=True`); rechecks snapshots/overlaps, stamps Updated, publishes/verifies and cleans the mutex |
+| `acknowledgment(receipt, scope=..., previous_owner=..., release_reference=..., request_id=..., review_note=...)` | Formats complete correlated text from an acquisition receipt; does not acquire, publish or infer the predecessor |
 
 For imports, use `importlib.util.spec_from_file_location` with the helper's
 absolute path, as its [tests](../tests/test_agent_session.py) demonstrate. Keep
@@ -393,8 +404,12 @@ board token into the model context. Use the bounded reader to inspect the releva
 sections, and freeze the reviewed input/handoff identity **before** preparing the
 edit. Recomputing a token/hash after a rejection without reconsidering the changed
 facts defeats the check. Ordinary unrelated progress timestamps are excluded from
-the ownership fingerprint, but handoff changes conservatively require re-review.
-All claims are scanned; output pagination does not make this an indexed registry.
+the ownership fingerprint. When the explicit review scopes cover every prior and
+proposed claim, a scoped fingerprint permits unrelated, fully declared ownership
+and handoff changes. Relevant input ownership and uncertain/legacy handoffs still
+invalidate the review. Narrow or empty scope reviews retain the global fallback;
+own-record replacement always checks its exact reviewed hash. All records and
+claims are rescanned under the mutex; this is not a cached ownership index.
 
 The CLI accepts a JSON object containing the function's named arguments. For
 example, after preparing a claimed operation file with the actual reviewed token,
@@ -402,7 +417,7 @@ complete candidate and replacement hash:
 
 ```sh
 python3 -B "$checkout/tools/agent-session.py" commit \
-  --input "$coord_dir/artifacts/$session/operation.json"
+  --input "$coord_dir/artifacts/$session/operation.json" --json-errors
 ```
 
 Inspect this result before a **separate** dependent tool call. Do not put a bare
@@ -414,6 +429,67 @@ the frozen board/input evidence under the mutex afterward. No callback or comman
 runs while holding that mutex. If an acknowledgment or callback itself fails,
 stop the rest and inspect the actual saved message/record before retrying; a
 receipt is evidence of one completed operation, not a reusable ownership lease.
+
+Build a successful release summary only after the guarded save and required
+checks actually succeed. Run dependent subprocesses with `check=True` (or inspect
+their exit status explicitly). Keep the sequence straight-line: acquire,
+acknowledge, save, verify, stop/join writers, then construct and publish the release.
+Never publish a prewritten success summary from `finally` or a separate command
+after an unchecked failed patch/test. A failure may still be released after saved
+state is reconciled and all writers stop, but the record must identify the failed
+step and the exact unchanged or partially changed source; it must not claim tests
+that never ran. The helper cannot verify the truth of a caller's free-text report.
+
+After a successful acquisition, use the acknowledgment builder to avoid omitting
+correlation fields. For example, while the exact file and artifact claims remain held:
+
+```python
+message = session.acknowledgment(
+    receipt, scope={"kind": "file", "value": "/work/pumpModem/src/receiver.cpp"},
+    previous_owner="prior-session", release_reference="receiver-release-3",
+    request_id="request-17",
+    review_note="Resolved full owner chain; inspected stopped-writer release and saved source SHA256.")
+ack_candidate.write_text(message)  # already-claimed artifact outside sessions/
+board.publish_message(coord_dir, receipt["session"], "prior-session", "ack-17",
+                      str(ack_candidate))
+# Only after successful atomic message publication: guarded source edit.
+```
+
+Use actual values from the reviewed handoff. For an unsolicited acquisition, use
+an explicit explanation such as `none: independent acquisition after release` for
+`request_id`. The scope must exactly match a canonical granted receipt claim;
+the builder rejects missing, blank, malformed and multiline fields. It includes
+the acquisition record hash and timestamp. The CLI operation `acknowledgment`
+accepts the same JSON arguments and returns `{"message": "..."}`. Neither form
+publishes the message, proves a supplied receipt authentic/current, nor verifies
+free-text release lineage; the caller still resolves the actual predecessor,
+checks saved ownership and uses atomic publication before editing. Formatting or
+publication failure stops dependent work.
+
+`CoordinationError` remains a `ValueError`, and now exposes `code`, `phase`,
+`uncertain`, `retry_action` and `as_dict()`. The CLI's `--json-errors` emits that
+structured failure on stderr; success receipts are unchanged. Only clean
+`registry_busy` and `stale_review` failures qualify for `retry_delay` advice.
+It supplies bounded jitter, not an automatic retry loop: reread/replan changed
+ownership, handoffs and inputs before constructing another request. A claim
+conflict requires handoff or independent work. Publication, mutex cleanup,
+callback or output uncertainty requires saved-state reconciliation; never replay
+a candidate or dependent action just because the command failed. A witnessed
+changing scan is typed `stale_review` only when every unresolved scan error is a
+typed snapshot race; a concurrent malformed/unreadable record still blocks review.
+Complete candidate lifecycle and previous-to-proposed transition validation occur
+before staging/publication classification, so malformed closure or backwards
+timestamps are clean caller errors. Publisher checks remain in place at the save
+boundary; actual publication and cleanup failures stay uncertain.
+
+The delay starts at 25–50 ms and doubles its window, with equal jitter within
+the upper half and a saturated 2–4-second range. Retain the pending operation's
+attempt count across busy/stale rejections; a successful observation alone is
+not a completed operation. Reset after completion or an explicit new plan. This
+reduces full-board reader traffic at high contention without a controller or
+worker-count oracle. The default eight-attempt limit and explicit maximum of 32
+are unchanged; exhaustion still stops. A bounded deadline remains necessary,
+and this policy does not guarantee fairness.
 
 Pass `handoffs_reviewed` with the IDs whose returned candidate/uncertain handoffs
 you actually inspected when adding scope. This includes an intervening closed
@@ -439,6 +515,60 @@ not. The builder cannot close a session: prepare the full terminal candidate wit
 empty claims and stopped writers, then use `commit` without `after` (terminal callbacks are rejected).
 Send its final output to the harness. Failed/uncertain closure does not reopen the
 old ID, and a successful closure receipt never authorizes another artifact write.
+
+## Guarded source edits
+
+[agent-edit.py](../tools/agent-edit.py) provides a bounded synchronous save for
+separate chats and harnesses. First acquire the file normally. Supply the exact
+current own-record hash, the source hash inspected while preparing the edit, and
+complete replacement bytes. The Python entry point is:
+
+```python
+receipt = editor.edit(board, session, source_path, expected_sha256, content_bytes,
+                      record_sha256=current_record_sha256,
+                      legacy_reviews=exact_manual_assessments)
+```
+
+Import it by its absolute path as with the session helper. For the JSON CLI,
+`content` is UTF-8 text; the remaining keys match the function arguments:
+
+```sh
+python3 -B "$checkout/tools/agent-edit.py"   --input "$coord_dir/artifacts/$session/edit-request.json"
+```
+
+Prepare that request in memory or an already-claimed artifact. The editor checks
+your current file/covering-directory reservation and every competing claim,
+stages complete bytes, then under the short registry mutex rechecks the exact
+record, source bytes/inode and staging identity before atomic replacement. It
+verifies saved bytes and flushes the directory before returning. This guards
+against stale buffers and avoids a partially truncated source after interruption
+during staging. It does not claim power-loss durability on every filesystem.
+
+The supported scope is existing regular files of at most 8 MiB, canonical paths,
+one hard link, ordinary permission bits, current effective uid/gid and no extended
+attributes/ACLs. Mode is preserved; inode identity changes. Board paths are
+excluded: records/messages still use their dedicated publication primitives.
+Unsupported metadata, aliases or filesystems fail without a direct-write fallback.
+Use an appropriately qualified metadata-preserving editor for those cases.
+
+Success reports source preimage/postimage hashes and `claims_released: false`.
+Failures expose `EditError.code`, `uncertain` and `as_dict()`. The CLI reports
+operation errors as JSON on stderr; argument-parser usage errors remain text.
+An uncertain replacement, cleanup or missing receipt means
+inspect saved source, staging and reservations before doing anything dependent.
+Keep the reservation through required validation and release it separately.
+Clean `registry_busy` or `stale_review` errors preserve their code only if no source
+replacement was attempted and staging cleanup completed. They permit bounded
+backoff and fresh ownership/source review; changed inputs still require replanning.
+Do not retry every `EditError`, nor treat a busy timeout as a released reservation.
+
+This is an edit adapter, not arbitrary job supervision or a security boundary.
+Never release/change your own reservation concurrently with an edit invocation,
+including staging before its mutex acquisition. Join all outstanding edits,
+queued saves, generators and child/output writers first. A resumable editor or
+unrestricted tool can bypass the adapter; each harness must enforce its own
+permissions when that risk needs exclusion. A common task controller is unnecessary,
+but agreement on one board and compatible reservation semantics remains essential.
 
 ## Publish a record
 

@@ -324,6 +324,7 @@ class SessionScan(unittest.TestCase):
             self.assertFalse(output['complete'])
             self.assertEqual(output['records'], [])
             self.assertIn('changed while being read', output['errors'][0]['error'])
+            self.assertEqual(output['errors'][0]['code'], 'snapshot_changed')
 
     def test_read_access_time_change_does_not_invalidate_unchanged_record(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -391,7 +392,29 @@ class SessionScan(unittest.TestCase):
                 output = checker.scan_sessions(root)
             self.assertFalse(output['complete'])
             self.assertTrue(any('directory entries changed' in e['error'] for e in output['errors']))
+            self.assertTrue(all(e.get('code') == 'snapshot_changed' for e in output['errors']))
             self.assertNotIn('secret', json.dumps(output))
+
+    def test_snapshot_race_does_not_reclassify_malformed_entries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'test-session.md').write_text(scan_record(), encoding='utf-8')
+            (root / 'malformed.md').write_text('unknown owner format', encoding='utf-8')
+            original = checker.read_scan_record
+
+            def changed(path, *args):
+                text = original(path, *args)
+                info = root.stat()
+                os.utime(root, ns=(info.st_atime_ns, info.st_mtime_ns + 1_000_000_000))
+                return text
+
+            with mock.patch.object(checker, 'read_scan_record', changed):
+                result = checker.scan_sessions(root)
+            self.assertFalse(result['complete'])
+            self.assertTrue(any(e.get('code') == 'snapshot_changed' for e in result['errors']))
+            malformed = [e for e in result['errors'] if e['path'] == str(root / 'malformed.md')]
+            self.assertTrue(malformed)
+            self.assertTrue(all('code' not in e for e in malformed))
 
     def test_replaced_record_descriptor_is_rejected_before_read(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -572,7 +595,9 @@ class ScopedDiscovery(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
-    def save(self, name, handoff='- Current request: none', claims='None.', state='done'):
+    def save(self, name, handoff='- Current request: none', claims='None.', state='done', *, complete=False):
+        if complete:
+            handoff = '- Scope inventory: complete\n' + handoff
         text = scan_record(claims=claims, State=state).replace('test-session', name)
         text = text.replace('- Current request: none', handoff)
         text = text.replace('Checkout / coordination root (absolute physical paths): value',
@@ -590,8 +615,8 @@ class ScopedDiscovery(unittest.TestCase):
                 ('covering', self.target.parent, 'quiet-owner-release')):
             kind = 'directory' if name == 'covering' else 'file'
             self.save(name, f'- Scope: {kind}: {scope}\n- Release: {name}-release; acquired from {acquired}; unchanged bytes\n'
-                            '### Evidence\nAll writers stopped; hash 0000; keep this whole section.')
-        self.save('sibling', f'- Scope: file: {self.target}2\n- Release: sibling-release')
+                            '### Evidence\nAll writers stopped; hash 0000; keep this whole section.', complete=True)
+        self.save('sibling', f'- Scope: file: {self.target}2\n- Release: sibling-release', complete=True)
         result = self.lookup()
         self.assertTrue(result['complete'], result)
         self.assertEqual([entry['id'] for entry in result['records']], ['covering', 'quiet-owner', 'relay'])
@@ -613,12 +638,12 @@ class ScopedDiscovery(unittest.TestCase):
 
     def test_exact_resource_and_quoted_path_with_spaces(self):
         scope = checker.canonical_scope('resource', 'device:host:audio')
-        self.save('resource', '- Scope: resource: device:host:audio\n- Release: release-1; writers stopped')
-        self.save('other', '- Scope: resource: device:host:audio-extra\n- Release: release-2')
+        self.save('resource', '- Scope: resource: device:host:audio\n- Release: release-1; writers stopped', complete=True)
+        self.save('other', '- Scope: resource: device:host:audio-extra\n- Release: release-2', complete=True)
         result = checker.scan_sessions(self.sessions, [scope])
         self.assertEqual([entry['id'] for entry in result['records']], ['resource'])
         spaced = self.root / 'project' / 'file with spaces'
-        text = self.save('spaced', f'- Scope: file: {spaced}\n- Released `{spaced}` unchanged').read_text()
+        text = self.save('spaced', f'- Scope: file: {spaced}\n- Released `{spaced}` unchanged', complete=True).read_text()
         self.assertTrue(checker.handoff_relevance(text, [checker.canonical_scope('file', str(spaced))]))
 
     def test_opaque_or_mixed_legacy_handoff_is_explicitly_uncertain(self):
@@ -631,6 +656,119 @@ class ScopedDiscovery(unittest.TestCase):
         self.assertEqual(len(result['records']), 3)
         self.assertTrue(all(entry['relevance_uncertain'] for entry in result['records']))
         self.assertIn('also released ledger unchanged', result['records'][0]['handoff'])
+
+    def test_partial_explicit_inventory_never_hides_opaque_history(self):
+        histories = {
+            'partial': '- Scope: file: /unrelated/file\n- Release: R1; also released ledger unchanged.',
+            'none': '- Scope: none\n- R1 previous work handed back; inspect owner note.',
+            'named': f'- Scope: file: {self.target}\n- Release: R2; another unnamed file also released.',
+        }
+        for name, handoff in histories.items():
+            self.save(name, handoff)
+        result = self.lookup()
+        self.assertFalse(result['complete'])
+        self.assertEqual(len(result['errors']), len(histories))
+        self.assertEqual({entry['id'] for entry in result['records']}, set(histories))
+        for entry in result['records']:
+            self.assertTrue(entry['relevance_uncertain'])
+            self.assertEqual(entry['handoff'], histories[entry['id']])
+
+    def test_complete_inventory_allows_prose_without_guessing_path_mentions(self):
+        prose = ('\n### Evidence\nPrevious release R1 was unchanged; all writers stopped. '
+                 f'Reference only: `{self.target}`; syntax /tmp/[example] is not another scope.')
+        self.save('unrelated', '- Scope: file: /unrelated/file' + prose, complete=True)
+        self.save('related', f'- Scope: file: {self.target}' + prose, complete=True)
+        result = self.lookup()
+        self.assertTrue(result['complete'], result)
+        self.assertEqual([entry['id'] for entry in result['records']], ['related'])
+        self.assertIn(prose.strip(), result['records'][0]['handoff'])
+
+    def test_simple_unmarked_scope_rows_and_neutral_history_remain_supported(self):
+        self.save('related', f'- Scope: file: {self.target}\n- Current request: none')
+        self.save('unrelated', '- Scope: file: /unrelated/file')
+        self.save('empty', '- Scope: none\n- No pending handoffs.')
+        result = self.lookup()
+        self.assertTrue(result['complete'], result)
+        self.assertEqual([entry['id'] for entry in result['records']], ['related'])
+
+    def test_incomplete_or_contradictory_inventory_assertions_are_uncertain(self):
+        declarations = (
+            '- Scope inventory: complete\n- Scope inventory: complete\n- Scope: none',
+            '- Scope inventory: partial\n- Scope: none',
+            '- Scope inventory: complete\n- Scope inventory: partial\n- Scope: none',
+            '- Scope inventory: complete',
+            f'- Scope inventory: complete\n- Scope: none\n- Scope: file: {self.target}',
+            f'- Scope: none\n- Acquired scope: file: {self.target}',
+            '- Scope inventory: complete\n- Scope: ledger',
+            f'- Scope inventory: complete\n- Scope: file: {self.target}\n- Retained scope:',
+            f'- Scope inventory: complete\n- Scope: file: {self.target}\n- Scope file: /omitted',
+            f'- Scope inventory complete\n- Scope: file: {self.target}',
+        )
+        for number, declaration in enumerate(declarations):
+            self.save(f'invalid-{number}', declaration)
+        result = self.lookup()
+        self.assertFalse(result['complete'])
+        self.assertEqual(len(result['errors']), len(declarations))
+        self.assertEqual(len(result['records']), len(declarations))
+        self.assertTrue(all(entry['relevance_uncertain'] for entry in result['records']))
+
+    def test_explicit_empty_complete_inventory_allows_explanatory_prose(self):
+        self.save('empty', '- Scope: none\n- This session only read documents; no ownership history.', complete=True)
+        result = self.lookup()
+        self.assertTrue(result['complete'], result)
+        self.assertEqual(result['records'], [])
+
+    def test_actual_claim_kind_must_match_existing_filesystem_type(self):
+        directory = self.root / 'owned-directory'
+        directory.mkdir()
+        child = directory / 'source.py'
+        child.write_text('source')
+        for kind, path in (('file', directory), ('directory', child)):
+            with self.subTest(kind=kind, path=path), self.assertRaisesRegex(ValueError, 'claim kind'):
+                checker.parse_claims(f'- {kind}: {path}')
+        self.save('owner', claims=f'- file: {directory}')
+        result = checker.scan_sessions(self.sessions, [checker.canonical_scope('file', str(child))])
+        self.assertFalse(result['complete'])
+        self.assertEqual([entry['path'] for entry in result['errors']], [str(self.sessions / 'owner.md')])
+        self.assertIn('claim kind', result['errors'][0]['error'])
+
+    def test_future_claim_types_are_revalidated_after_materialization_or_replacement(self):
+        future = self.root / 'future'
+        for kind in ('file', 'directory'):
+            self.assertEqual(checker.parse_claims(f'- {kind}: {future}')[0]['kind'], kind)
+        future.mkdir()
+        with self.assertRaisesRegex(ValueError, 'claim kind'):
+            checker.parse_claims(f'- file: {future}')
+        self.assertEqual(checker.parse_claims(f'- directory: {future}')[0]['kind'], 'directory')
+        future.rmdir()
+        future.write_text('replacement')
+        with self.assertRaisesRegex(ValueError, 'claim kind'):
+            checker.parse_claims(f'- directory: {future}')
+        self.assertEqual(checker.parse_claims(f'- file: {future}')[0]['kind'], 'file')
+
+    def test_claim_validation_does_not_change_historical_scope_interpretation(self):
+        self.target.parent.mkdir()
+        self.target.mkdir()
+        scope = checker.canonical_scope('file', str(self.target))
+        self.assertEqual(scope['kind'], 'file')
+        text = self.save('history', f'- Scope: file: {self.target}\n- Released before it became a directory.',
+                         complete=True).read_text()
+        self.assertTrue(checker.handoff_relevance(text, [scope]))
+        with self.assertRaisesRegex(ValueError, 'claim kind'):
+            checker.validate_claim_scope('file', str(self.target))
+
+    def test_claim_type_permission_uncertainty_is_not_absence(self):
+        with mock.patch.object(checker, 'canonical_scope', return_value={'kind': 'file', 'value': str(self.target)}), \
+                mock.patch.object(checker.Path, 'stat', side_effect=PermissionError('denied')):
+            with self.assertRaises(PermissionError):
+                checker.validate_claim_scope('file', str(self.target))
+
+    @unittest.skipUnless(hasattr(os, 'mkfifo'), 'FIFO fixture needs POSIX')
+    def test_nonregular_file_claim_fails_without_opening_it(self):
+        fifo = self.root / 'fifo'
+        os.mkfifo(fifo)
+        with self.assertRaisesRegex(ValueError, 'claim kind'):
+            checker.parse_claims(f'- file: {fifo}')
 
     def test_unknown_claims_and_unreadable_or_legacy_records_never_disappear(self):
         self.save('malformed', claims='- claim a file somehow')
@@ -703,7 +841,7 @@ class ScopedDiscovery(unittest.TestCase):
 
     def test_large_scan_pages_all_records_and_all_errors_without_dropping_sections(self):
         for number in range(75):
-            self.save(f'owner-{number:03}', f'- Scope: file: {self.target}\n- Release: R{number}\n' + 'detail ' * 40)
+            self.save(f'owner-{number:03}', f'- Scope: file: {self.target}\n- Release: R{number}\n' + 'detail ' * 40, complete=True)
         (self.sessions / 'unknown.tmp').write_text('unknown')
         result = self.lookup()
         snapshot = result['snapshot']
@@ -723,7 +861,7 @@ class ScopedDiscovery(unittest.TestCase):
         self.assertTrue(all('detail ' * 39 in entry['handoff'] for entry in records))
 
     def test_changed_snapshot_and_unbound_later_page_are_rejected(self):
-        path = self.save('owner', f'- Scope: file: {self.target}\n- Release: R1')
+        path = self.save('owner', f'- Scope: file: {self.target}\n- Release: R1', complete=True)
         first = self.lookup()
         with self.assertRaisesRegex(ValueError, 'require --snapshot'):
             checker.page_result(first, 1, 1)
@@ -779,8 +917,8 @@ class ScopedDiscovery(unittest.TestCase):
         self.assertNotIn('Traceback', failed.stderr)
 
     def test_cli_modes_pages_and_errors(self):
-        self.save('one', f'- Scope: file: {self.target}\n- Release: R1')
-        self.save('two', f'- Scope: file: {self.target}\n- Release: R2')
+        self.save('one', f'- Scope: file: {self.target}\n- Release: R1', complete=True)
+        self.save('two', f'- Scope: file: {self.target}\n- Release: R2', complete=True)
         base = [sys.executable, '-B', str(TOOL), '--handoffs', str(self.sessions), '--scope', str(self.target),
                 '--limit', '1', '--compact']
         first = subprocess.run(base, cwd=ROOT, capture_output=True, text=True)
