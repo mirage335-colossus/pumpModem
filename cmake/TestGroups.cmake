@@ -13,9 +13,11 @@ endforeach()
 # run without their required build step.
 set(_script_tests legacy_boundary fast_boundary vendored_lzma_source packaging_cxx_runtime
   build_agent_record build_agent_board build_agent_session build_agent_edit build_agent_stress
-  build_native_sdl
+  build_native_sdl web_renderer build_wasm_sdk build_package_wasm
   gui_adapter_boundary gui_boundary_regression packaging_support sdk_packaging build_wrapper build_gui_smoke_runner build_native_tests_runner build_ci_tests build_dependencies build_source_sdk build_sdk_runtime build_release build_release_dependencies build_sdk_release build_certify_release build_verify_latest_release build_windows_certification build_release_rev_tools build_windows_base build_ci_apt build_apt_release build_distro_release build_arch_release build_gentoo_sync)
 set(_aliases
+  "web_worker=datapump-worker"
+  "wasm_runtime=datapump-wasm-page"
   "gui_document_layout=test_document_layout"
   "gui_record_reconciliation=test_record_reconciliation"
   "gui_document_presentation=test_document_presentation"
@@ -74,7 +76,7 @@ foreach(_test IN LISTS _tests)
     list(APPEND _labels build)
   elseif(_test MATCHES "^packaging_" OR _test STREQUAL "native_relocation" OR _test STREQUAL "sdk_packaging")
     list(APPEND _labels packaging)
-  elseif(NOT "gui" IN_LIST _labels AND NOT "frontends" IN_LIST _labels AND NOT _test STREQUAL "rev_utf8")
+  elseif(NOT "gui" IN_LIST _labels AND NOT "frontends" IN_LIST _labels AND NOT "web" IN_LIST _labels AND NOT _test STREQUAL "rev_utf8")
     list(APPEND _labels regular)
   endif()
   if(_test STREQUAL "rev_utf8")
@@ -116,7 +118,7 @@ endforeach()
 add_custom_target(datapump-tests DEPENDS ${_all_test_targets})
 add_custom_target(datapump-tests-ci-core DEPENDS ${_ci_core_targets})
 add_custom_target(datapump-tests-ci-live DEPENDS ${_ci_live_targets})
-foreach(_group contract regular fast legacy gui frontends native packaging build)
+foreach(_group contract regular fast legacy gui frontends web native packaging build)
   if(_group STREQUAL "native")
     set(_label native_gui)
   else()

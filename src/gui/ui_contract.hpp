@@ -169,5 +169,12 @@ struct ServiceResult {
     bool cancelled = false;
     std::string value; // UTF-8 path or entered text
     std::string error;
+    // Opt in when a platform must wait for the controller's actual file write
+    // before consuming/exporting it. Existing native selectors need no event.
+    bool track_completion = false;
+};
+struct ServiceCompletion {
+    std::uint64_t id = 0;
+    std::string error; // Empty only after the requested operation completed.
 };
 }

@@ -1,4 +1,5 @@
 #pragma once
+#include "datapump/execution.hpp"
 #include "datapump/streaming_modem.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include <algorithm>
@@ -19,10 +20,13 @@ struct ScheduledTransmission {
 // longer than anticipated, so retry with a later origin before emitting audio.
 template<class Factory, class EpochClock>
 ScheduledTransmission schedule_transmission(const modem::Config& config, Factory make,
-        EpochClock clock, std::stop_token stop = {}, std::uint64_t minimum_epoch = 0) {
+        EpochClock clock, std::stop_token stop = {}, std::uint64_t minimum_epoch = 0,
+        double delivery_margin_seconds = 0) {
+    if (!std::isfinite(delivery_margin_seconds) || delivery_margin_seconds < 0)
+        throw Error("invalid audio delivery margin");
     const auto prefix = (static_cast<double>(modem::training_sample_count(config)) +
         static_cast<double>(modem::pattern_pulse_padding_samples(config))) / config.sample_rate;
-    double lead = .05;
+    double lead = delivery_margin_seconds + .05;
     for (unsigned attempt = 0; attempt < 8; ++attempt) {
         if (stop.stop_requested()) throw Error("transmission cancelled");
         const auto now = clock();
@@ -36,8 +40,8 @@ ScheduledTransmission schedule_transmission(const modem::Config& config, Factory
         result.transmitter = make(result.epoch);
         const auto ready = clock();
         if (!std::isfinite(ready) || ready < now) throw Error("transmit clock moved backwards during preparation");
-        if (ready < result.playback_epoch) return result;
-        lead = std::max(2 * lead, ready - now + .05);
+        if (ready + delivery_margin_seconds < result.playback_epoch) return result;
+        lead = std::max(2 * lead, ready - now + delivery_margin_seconds + .05);
     }
     throw Error("could not prepare transmission before its scheduled whole second");
 }
@@ -55,7 +59,7 @@ void wait_for_playback(double epoch, EpochClock clock, std::stop_token stop = {}
         if (!std::isfinite(remaining) || remaining < -.25)
             throw Error("transmit clock missed the scheduled start");
         if (remaining <= 0) return;
-        std::this_thread::sleep_for(std::chrono::duration<double>(std::min(.01, remaining)));
+        execution::sleep_for(std::chrono::duration<double>(std::min(.01, remaining)));
     }
 }
 }

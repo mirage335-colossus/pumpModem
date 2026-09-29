@@ -4,6 +4,24 @@ Normal builds use the host's installed development packages. CMake and
 `build.sh` never download or install dependencies. FLTK, XZ, QR and the LDPC
 tables are already vendored; see [the inventory](../README.md).
 
+## Browser SDK family
+
+The [separate Wasm recipe](wasm-sdk/README.md) pins official Emscripten compiler
+inputs and source-builds static OpenSSL for `wasm32-emscripten`. Its explicit
+`fetch --download` and offline `prepare` commands preserve the source/prebuilt
+inputs and SHA-256 provenance. `./build.sh --wasm-sdk PATH` uses only the prepared
+Wasm target dependencies and a frozen compiler cache. It never consumes the
+Linux source SDK's native libraries or a FLTK/Rev development prefix. The
+initial compiler-host recipe covers Linux x86_64; host relocation and broader
+browser/device qualification remain separately required.
+
+The native pipe worker adds no dependency to the Linux SDK recipe below. It uses
+the same C++ application and selects a host-fed audio provider at its composition
+boundary; the existing host application owns the browser network connection.
+Ordinary release/CI use of a missing durable SDK recipe still requires explicit
+base maintenance. Adding these local browser preparation tools does not publish
+or replace a base asset.
+
 ## Source SDK for the Bookworm ABI baseline
 
 The opt-in [source SDK recipe](source-sdk/manifest.json) uses Buildroot 2026.08

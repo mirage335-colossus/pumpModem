@@ -1,9 +1,11 @@
 #include "search_parallel.hpp"
+#include "datapump/execution.hpp"
 
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <exception>
+#include <iterator>
 #include <limits>
 #include <mutex>
 #include <stdexcept>
@@ -25,17 +27,25 @@ std::size_t available_cpus() {
         if (count > 0) return static_cast<std::size_t>(count);
     }
 #endif
-    return std::max<std::size_t>(1, std::thread::hardware_concurrency());
+    return std::max<std::size_t>(1, execution::concurrency());
 }
 
-thread_local bool executing_search = false;
+// Cooperative tasks share one OS thread. Track admission nesting by execution
+// context so a yielded search cannot make an unrelated task look recursive.
+thread_local std::vector<execution::Context> executing_search;
+bool in_search() {
+    return std::find(executing_search.begin(), executing_search.end(), execution::current_context()) != executing_search.end();
+}
 
 class ExecutionScope {
 public:
-    ExecutionScope() : previous_(executing_search) { executing_search = true; }
-    ~ExecutionScope() { executing_search = previous_; }
+    ExecutionScope() : context_(execution::current_context()) { executing_search.push_back(context_); }
+    ~ExecutionScope() {
+        const auto found = std::find(executing_search.rbegin(), executing_search.rend(), context_);
+        if (found != executing_search.rend()) executing_search.erase(std::next(found).base());
+    }
 private:
-    bool previous_;
+    execution::Context context_;
 };
 
 using RangeWork = std::function<void(std::size_t, std::size_t, std::size_t)>;
@@ -51,6 +61,7 @@ void serial_search_ranges(std::size_t count, std::size_t grain, const RangeWork&
             if (!error) error = std::current_exception();
         }
         begin = end;
+        execution::checkpoint();
     }
     if (error) std::rethrow_exception(error);
 }
@@ -147,15 +158,16 @@ private:
                     error_ = std::current_exception();
                 }
             }
+            execution::checkpoint();
         }
     }
 
-    std::mutex submission_mutex_;
-    std::mutex state_mutex_;
-    std::mutex error_mutex_;
-    std::condition_variable changed_;
-    std::condition_variable finished_;
-    std::vector<std::thread> workers_;
+    execution::Mutex submission_mutex_;
+    execution::Mutex state_mutex_;
+    execution::Mutex error_mutex_;
+    execution::Condition changed_;
+    execution::Condition finished_;
+    std::vector<execution::Thread> workers_;
     const RangeWork* work_ = nullptr;
     std::size_t count_ = 0;
     std::size_t grain_ = 1;
@@ -186,7 +198,7 @@ void parallel_search_ranges(std::size_t count, std::size_t concurrency,
                             std::size_t grain, const RangeWork& work) {
     if (grain == 0) throw std::invalid_argument("search range grain must be nonzero");
     if (count == 0) return;
-    if (executing_search) {
+    if (in_search()) {
         serial_search_ranges(count, grain, work);
         return;
     }

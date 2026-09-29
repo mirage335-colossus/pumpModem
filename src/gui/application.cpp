@@ -72,7 +72,9 @@ struct Application::Impl {
     bool auxiliary_active() const {return fast_controller.active()||legacy_controller.active();}
     ui::Page regular_page=ui::Page::console;
     std::uint64_t mode_generation=0,next_service=0;
-    struct ServiceRoute {std::uint64_t original,generation;bool fast;std::shared_ptr<bool> valid;};
+    struct ServiceRoute {std::uint64_t original,generation;bool fast;std::shared_ptr<bool> valid;ui::ServiceKind kind;};
+    bool service_completions_enabled=false;
+    std::map<std::pair<bool,std::uint64_t>,std::uint64_t> service_completion_routes;
     std::map<std::uint64_t,ServiceRoute> service_routes;
     ui::Page page=ui::Page::console;
     struct Document {
@@ -142,7 +144,7 @@ bool Application::tick() {
 }
 bool Application::finished() const { return impl_->controller.ready_to_close()&&impl_->fast_controller.ready_to_close()&&impl_->legacy_controller.ready_to_close(); }
 int Application::result() const { return launch.smoke&&!impl_->passed?1:0; }
-void Application::close() { dismiss_overlay();impl_->controller.close();impl_->fast_controller.close();impl_->legacy_controller.close();impl_->service_routes.clear(); }
+void Application::close() { dismiss_overlay();impl_->controller.close();impl_->fast_controller.close();impl_->legacy_controller.close();impl_->service_routes.clear();impl_->service_completion_routes.clear(); }
 bool Application::closing() const { return impl_->controller.closing(); }
 void Application::edit(ui::Field field,std::string text) {
     if(closing()||field==ui::Field::count||!this->field(field).visible)return;
@@ -396,12 +398,35 @@ std::string Application::command_label(ui::Command command) const {
 void Application::complete_service(ui::ServiceResult result) {
     const auto found=impl_->service_routes.find(result.id);
     if(found==impl_->service_routes.end())return;
+    const auto global=result.id;
     const auto route=found->second;impl_->service_routes.erase(found);result.id=route.original;
     if(route.generation!=impl_->mode_generation||!(route.fast?impl_->fast_selected():impl_->regular_selected()))result.cancelled=true;
+    result.track_completion=result.track_completion&&impl_->service_completions_enabled&&
+        route.kind==ui::ServiceKind::save_file&&!result.cancelled;
+    if(result.track_completion)impl_->service_completion_routes[{route.fast,route.original}]=global;
     if(route.fast)impl_->fast_controller.complete_service(std::move(result));
     else impl_->controller.complete_service(std::move(result));
 }
+void Application::enable_service_completions(bool enabled) {
+    impl_->service_completions_enabled=enabled;
+    if(!enabled) {impl_->service_completion_routes.clear();take_service_completions();}
+}
+std::vector<ui::ServiceCompletion> Application::take_service_completions() {
+    std::vector<ui::ServiceCompletion> result;
+    const auto collect=[&](std::vector<ui::ServiceCompletion> incoming,bool fast) {
+        for(auto& completion:incoming) {
+            const auto found=impl_->service_completion_routes.find({fast,completion.id});
+            if(found==impl_->service_completion_routes.end())continue;
+            completion.id=found->second;impl_->service_completion_routes.erase(found);
+            if(impl_->service_completions_enabled)result.push_back(std::move(completion));
+        }
+    };
+    collect(impl_->controller.take_service_completions(),false);
+    collect(impl_->fast_controller.take_service_completions(),true);
+    return result;
+}
 std::vector<ui::ServiceRequest> Application::take_services() {
+    if(!impl_->service_completions_enabled)take_service_completions();
     std::vector<ui::ServiceRequest> result;
     const auto collect=[&](std::vector<ui::ServiceRequest> incoming,bool fast) {
         for(auto& request:incoming) {
@@ -414,7 +439,7 @@ std::vector<ui::ServiceRequest> Application::take_services() {
             const auto id=++impl_->next_service;
             auto valid=request.kind==ui::ServiceKind::clipboard?std::make_shared<bool>(true):nullptr;
             request.valid=valid;
-            impl_->service_routes.emplace(id,Impl::ServiceRoute{request.id,impl_->mode_generation,fast,std::move(valid)});
+            impl_->service_routes.emplace(id,Impl::ServiceRoute{request.id,impl_->mode_generation,fast,std::move(valid),request.kind});
             request.id=id;result.push_back(std::move(request));
         }
     };
@@ -436,22 +461,27 @@ void Application::select_page(ui::Page page) {
 }
 ui::Page Application::page() const { return impl_->page; }
 bool Application::smoke_passed() const { return impl_->passed; }
-bool Application::submit(const ui::Control& control,bool ctrl,bool shift) {
+bool Application::submit_gesture(const ui::Control& control,bool ctrl,bool shift) const {
     if(control.read_only)return false;
+    if(control.kind==ui::Kind::text&&(control.field==ui::Field::snr||control.field==ui::Field::long_snr||
+        control.field==ui::Field::receive_snr||control.field==ui::Field::planner_target)&&!ctrl&&!shift)return true;
+    if(control.submit==ui::Command::none||shift)return false;
+    if(control.field==ui::Field::legacy_text&&control.submit==ui::Command::legacy_transmit)return ctrl;
+    const bool wants_ctrl=(control.field==ui::Field::fast_text&&control.submit==ui::Command::fast_transmit)||
+        (control.submit_mode!=ui::Field::count&&impl_->controller.field(control.submit_mode).selected=="ctrl-enter");
+    return ctrl==wants_ctrl;
+}
+bool Application::submit(const ui::Control& control,bool ctrl,bool shift) {
+    if(!submit_gesture(control,ctrl,shift))return false;
     if(control.kind==ui::Kind::text&&(control.field==ui::Field::snr||control.field==ui::Field::long_snr||
         control.field==ui::Field::receive_snr||control.field==ui::Field::planner_target)&&!ctrl&&!shift) {
         if(accepts_input(control))impl_->controller.commit_target(control.field);
         return true;
     }
-    if(control.submit==ui::Command::none||shift)return false;
     if(control.field==ui::Field::legacy_text&&control.submit==ui::Command::legacy_transmit) {
-        if(!ctrl)return false;
         if(accepts_input(control)&&impl_->legacy_selected())impl_->legacy_controller.transmit();
         return true;
     }
-    const bool wants_ctrl=(control.field==ui::Field::fast_text&&control.submit==ui::Command::fast_transmit)||
-        (control.submit_mode!=ui::Field::count&&impl_->controller.field(control.submit_mode).selected=="ctrl-enter");
-    if(ctrl!=wants_ctrl)return false;
     if(accepts_input(control)&&enabled(control.submit))activate(control.submit);
     return true; // Consume the declared submit gesture even when unavailable.
 }

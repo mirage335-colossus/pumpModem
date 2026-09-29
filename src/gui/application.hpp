@@ -79,6 +79,8 @@ public:
     bool enabled(ui::Command command) const;
     std::string command_label(ui::Command command) const;
     void complete_service(ui::ServiceResult result);
+    void enable_service_completions(bool enabled);
+    std::vector<ui::ServiceCompletion> take_service_completions();
     std::vector<ui::ServiceRequest> take_services();
     void report_error(std::string message);
     std::uint64_t revision() const;
@@ -86,6 +88,9 @@ public:
     void select_page(ui::Page page);
     ui::Page page() const;
     bool smoke_passed() const;
+    // Pure shared keyboard policy for asynchronous renderers that must decide
+    // whether to consume the native key event before dispatch can complete.
+    bool submit_gesture(const ui::Control& control,bool ctrl,bool shift) const;
     bool submit(const ui::Control& control,bool ctrl,bool shift);
     void activate_record(const ui::Control& control,const std::string& id);
     BitmapPresentation bitmap(const ui::Control& control,unsigned pixel_width=640) const;

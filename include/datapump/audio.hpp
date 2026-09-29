@@ -23,18 +23,19 @@ enum class ChannelMode { left_mono, right_mono, stereo };
 // Applied only at the final hardware PCM boundary, after rate conversion.
 // Unity gain preserves the original conversion exactly; capture is not scaled.
 struct Options {double transmit_gain=1.0; bool exclusive=false;};
-constexpr bool exclusive_supported() {
-#ifdef _WIN32
-    return false; // WinMM does not expose an exclusive-device mode.
-#else
-    return true;
-#endif
-}
+// Capabilities belong to the selected audio provider, not the UI or target OS.
+bool exclusive_supported();
+std::string default_device_description();
+// Delivery time required before a scheduled first output sample. Native output
+// waits locally; a buffered provider can schedule early and enforce that exact
+// presentation time at its device. Call only from the active playback callback.
+double minimum_lead_seconds();
+void schedule_output(double epoch_seconds,std::stop_token stop={});
 inline void validate_options(const Options& options) {
     if(!std::isfinite(options.transmit_gain) || options.transmit_gain<0.0001 || options.transmit_gain>1.75)
         throw Error("transmit volume must be between 0.01% and 175%");
     if(options.exclusive && !exclusive_supported())
-        throw Error("exclusive audio is unavailable with the Windows WinMM backend");
+        throw Error("exclusive audio is unavailable with the selected audio provider");
 }
 // Compatibility callers can still disable mono with the existing boolean.
 constexpr ChannelMode output_channels(bool mono, ChannelMode selected=ChannelMode::left_mono) {

@@ -8,12 +8,13 @@ Usage: ./build.sh [build|test GROUP|sanitize [GROUP]|package] [OPTIONS] [-- CMAK
 
   build                Build pump and the FLTK GUI (default).
   test GROUP           Build then run contract, regular, fast, legacy, gui,
-                       frontends, native, packaging, build, or all tests.
+                       frontends, web, native, packaging, build, or all tests.
   sanitize [GROUP]     Run instrumented headless tests (default: contract).
   package              Build and verify portable TGZ and ZIP bundles.
 
   --tui                Also build datapump-tui (ncurses; combine with --cli for no GUI).
   --fb                 Also build datapump-fb (software renderer with SDL2 host).
+  --web-worker         Also build the socket-free inherited-pipe datapump-worker.
   --cli                Omit the native GUI (shared GUI tests remain available).
   --backend fltk|rev   Select a GUI backend; Rev needs its own suitable toolchain.
   --jobs N, -j N       Parallel build/test limit (default: 2).
@@ -21,6 +22,7 @@ Usage: ./build.sh [build|test GROUP|sanitize [GROUP]|package] [OPTIONS] [-- CMAK
   --stop-on-failure   Stop a test run after its first failed test (CI feedback).
   --build-dir PATH     Separate output tree, e.g. for another compiler/toolchain.
   --sdk PATH           Use a prepared source SDK; keep host dependencies separate.
+  --wasm-sdk PATH      Build browser C++ using a separately prepared Wasm SDK.
   --help, -h           Show this help.
 
 Environment: DATAPUMP_JOBS (or CMAKE_BUILD_PARALLEL_LEVEL), CC, CXX,
@@ -44,11 +46,13 @@ backend_explicit=no
 cli=no
 tui=OFF
 framebuffer=OFF
+web_worker=OFF
 jobs=${DATAPUMP_JOBS:-${CMAKE_BUILD_PARALLEL_LEVEL:-2}}
 build_jobs=
 build_jobs_explicit=no
 build_dir=
 sdk_root=
+wasm_sdk_root=
 stop_on_failure=no
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -56,11 +60,13 @@ while [ "$#" -gt 0 ]; do
         --cli) cli=yes; shift ;;
         --tui) tui=ON; shift ;;
         --fb) framebuffer=ON; shift ;;
+        --web-worker) web_worker=ON; shift ;;
         --stop-on-failure) stop_on_failure=yes; shift ;;
         --backend) need_value "$@"; backend=$2; backend_explicit=yes; shift 2 ;;
         --jobs|-j) need_value "$@"; jobs=$2; shift 2 ;;
         --build-jobs) need_value "$@"; build_jobs=$2; build_jobs_explicit=yes; shift 2 ;;
         --build-dir) need_value "$@"; build_dir=$2; shift 2 ;;
+        --wasm-sdk) need_value "$@"; [ -n "$2" ] || die "--wasm-sdk needs a nonempty path"; wasm_sdk_root=$2; shift 2 ;;
         --sdk) need_value "$@"; [ -n "$2" ] || die "--sdk needs a nonempty path"; sdk_root=$2; shift 2 ;;
         --) shift; break ;;
         build|test|sanitize|package)
@@ -93,10 +99,11 @@ case "$command_name" in
     sanitize) group=${group:-contract} ;;
 esac
 if [ -n "$group" ]; then
-    case "$group" in contract|regular|fast|legacy|gui|frontends|native|packaging|build|all) ;;
+    case "$group" in contract|regular|fast|legacy|gui|frontends|web|native|packaging|build|all) ;;
         *) die "unknown test group: $group" ;;
     esac
 fi
+[ "$group" != web ] || [ -n "$wasm_sdk_root" ] || web_worker=ON
 [ "$stop_on_failure" = no ] || [ -n "$group" ] || die "--stop-on-failure requires test or sanitize"
 [ "$group" != native ] || [ "$cli" != yes ] || die "native tests require the GUI; omit --cli"
 
@@ -124,6 +131,27 @@ if [ -n "$sdk_root" ]; then
     PATH=$sdk_root/bin:$PATH
     export PATH
 fi
+if [ -n "$wasm_sdk_root" ]; then
+    [ -z "$sdk_root" ] && [ "$web_worker" = OFF ] && [ "$tui" = OFF ] && [ "$framebuffer" = OFF ] && [ "$backend_explicit" = no ] ||
+        die "--wasm-sdk selects a separate browser target; remove native backend/SDK options"
+    { [ -z "$group" ] || [ "$group" = web ]; } && [ "$command_name" != sanitize ] || die "Only test web is available in the Wasm profile; native groups use a native tree"
+    [ -z "${CC:-}${CXX:-}${CMAKE_TOOLCHAIN_FILE:-}${EM_CONFIG:-}${EM_CACHE:-}${EMCC_CFLAGS:-}${EMMAKEN_CFLAGS:-}" ] ||
+        die "--wasm-sdk owns compiler and Emscripten configuration; unset competing overrides"
+    [ -z "${CPATH:-}${C_INCLUDE_PATH:-}${CPLUS_INCLUDE_PATH:-}${OBJC_INCLUDE_PATH:-}${LIBRARY_PATH:-}" ] ||
+        die "--wasm-sdk requires compiler search-path environment overrides to be unset"
+    [ -d "$wasm_sdk_root" ] || die "Wasm SDK directory is missing"
+    wasm_sdk_root=$(CDPATH= cd -- "$wasm_sdk_root" && pwd -P)
+    [ -f "$wasm_sdk_root/share/datapump-wasm-sdk/manifest.json" ] || die "Prepare the Wasm SDK explicitly with tools/build-wasm-sdk.py"
+    relocated_root=
+    if [ -f "$wasm_sdk_root/share/datapump-wasm-sdk/relocated-root.txt" ]; then
+        IFS= read -r relocated_root < "$wasm_sdk_root/share/datapump-wasm-sdk/relocated-root.txt" || :
+    fi
+    [ "$relocated_root" = "$wasm_sdk_root" ] || die "Wasm SDK moved or preparation is incomplete"
+    EM_CONFIG=$wasm_sdk_root/.emscripten
+    EM_CACHE=$wasm_sdk_root/cache
+    EM_FROZEN_CACHE=1
+    export EM_CONFIG EM_CACHE EM_FROZEN_CACHE
+fi
 cd "$source_dir"
 preset=dev
 build_config=Release
@@ -142,6 +170,7 @@ if [ "$backend_explicit" = yes ] || [ "$group" = native ]; then gui=ON; fi
 if [ "$cli" = yes ]; then gui=OFF; fi
 if [ "$group" = native ]; then native=ON; fi
 if [ "$group" = packaging ]; then portable=ON; fi
+if [ -n "$wasm_sdk_root" ]; then preset=wasm; gui=OFF; portable=OFF; fi
 if [ -z "$build_dir" ]; then
     build_dir=$source_dir/build/$preset
     if [ "$group" = packaging ]; then
@@ -159,6 +188,7 @@ if [ -z "$build_dir" ]; then
     fi
     if [ "$tui" = ON ]; then build_dir=$build_dir-tui; fi
     if [ "$framebuffer" = ON ]; then build_dir=$build_dir-fb; fi
+    if [ "$web_worker" = ON ]; then build_dir=$build_dir-web; fi
     if [ -n "$sdk_root" ]; then build_dir=$build_dir-sdk; fi
 fi
 
@@ -166,6 +196,8 @@ fi
 # the SDK manifest fingerprint so upgrading it in place needs a fresh tree.
 if [ -f "$build_dir/CMakeCache.txt" ]; then
     cached_sdk=$(sed -n 's/^DATAPUMP_CONFIGURED_SDK_ROOT:[^=]*=//p' "$build_dir/CMakeCache.txt")
+    cached_wasm_sdk=$(sed -n 's/^DATAPUMP_CONFIGURED_WASM_SDK_ROOT:[^=]*=//p' "$build_dir/CMakeCache.txt")
+    [ "$cached_wasm_sdk" = "$wasm_sdk_root" ] || die "Wasm SDK differs from the configured tree; use a new --build-dir"
     [ "$cached_sdk" = "$sdk_root" ] ||
         die "SDK differs from the configured tree; use --build-dir with a new directory"
 fi
@@ -187,11 +219,12 @@ for arg do
         -B|-B?*|-S|-S?*|--preset|--preset=*)
             die "use --build-dir for output paths; source and preset are selected by this script" ;;
     esac
-    if [ -n "$sdk_root" ]; then
+    if [ -n "$sdk_root$wasm_sdk_root" ]; then
         case "$option" in
             --toolchain|--toolchain=*|-DCMAKE_TOOLCHAIN_FILE=*|-DCMAKE_TOOLCHAIN_FILE:*=*|\
             -DCMAKE_C_COMPILER=*|-DCMAKE_C_COMPILER:*=*|-DCMAKE_CXX_COMPILER=*|-DCMAKE_CXX_COMPILER:*=*|\
             -DCMAKE_SYSROOT=*|-DCMAKE_SYSROOT:*=*|-DDATAPUMP_SDK_ROOT=*|-DDATAPUMP_SDK_ROOT:*=*|\
+            -DDATAPUMP_WASM_SDK_ROOT=*|-DDATAPUMP_WASM_SDK_ROOT:*=*|\
             -DDATAPUMP_DEPENDENCY_PREFIX=*|-DDATAPUMP_DEPENDENCY_PREFIX:*=*)
                 die "--sdk selects the compiler, toolchain and dependency root; remove the competing CMake option: $option" ;;
         esac
@@ -204,6 +237,12 @@ if [ -n "$generator" ] && [ "$generator" != explicit ]; then set -- -G "$generat
 if [ -n "$sdk_root" ]; then
     set -- "-DCMAKE_TOOLCHAIN_FILE=$source_dir/cmake/toolchains/source-sdk.cmake" \
         "-DDATAPUMP_SDK_ROOT=$sdk_root" "$@"
+fi
+
+if [ -n "$wasm_sdk_root" ]; then
+    if [ "$group" = web ]; then set -- -DBUILD_TESTING=ON "$@"; fi
+    set -- "-DCMAKE_TOOLCHAIN_FILE=$source_dir/cmake/toolchains/wasm-sdk.cmake" \
+        "-DDATAPUMP_WASM_SDK_ROOT=$wasm_sdk_root" "$@"
 fi
 
 # Match CMake's simple compiler-name + raw PROGRAM_ARGS form without evaluating
@@ -271,6 +310,7 @@ printf 'Configuring %s in %s\n' "$preset" "$build_dir"
 if ! cmake --preset "$preset" -S "$source_dir" -B "$build_dir" \
     "-DDATAPUMP_BUILD_GUI=$gui" "-DDATAPUMP_GUI_BACKEND=$backend" \
     "-DDATAPUMP_BUILD_TUI=$tui" "-DDATAPUMP_BUILD_FB=$framebuffer" \
+    "-DDATAPUMP_BUILD_WEB_WORKER=$web_worker" \
     "-DDATAPUMP_PORTABLE=$portable" "-DOPENSSL_USE_STATIC_LIBS=$portable" \
     "-DDATAPUMP_TEST_NATIVE_GUI=$native" "$@"; then
     die "configuration failed; check dependencies and use a new --build-dir for a different compiler/generator"
@@ -298,6 +338,11 @@ if [ -n "$group" ]; then
             --no-tests=error --parallel "$jobs" -L "^$label$" -LE native_gui
     fi
 elif [ "$command_name" = package ]; then
+    if [ -n "$wasm_sdk_root" ]; then
+        python3 "$source_dir/tools/package-wasm.py" --verify-archives "$build_dir/releases"
+        printf 'Verified browser archives: %s/releases\n' "$build_dir"
+        exit 0
+    fi
     set -- "-DARCHIVE_DIR=$build_dir/releases" "-DBUILD_DIR=$build_dir" -DGUI_SMOKE=OFF -DREQUIRE_MANUALS=ON
     if [ -n "${DATAPUMP_MAX_GLIBC:-}" ]; then
         set -- "$@" "-DMAX_GLIBC=$DATAPUMP_MAX_GLIBC"
@@ -317,8 +362,13 @@ else
         configurations=$(sed -n 's/^CMAKE_CONFIGURATION_TYPES:[^=]*=//p' "$build_dir/CMakeCache.txt")
         if [ -n "$configurations" ]; then executable_dir=$build_dir/$build_config; fi
     fi
-    printf 'Application: %s/pump\n' "$executable_dir"
+    if [ -n "$wasm_sdk_root" ]; then
+        printf 'Browser application: %s/web/datapump-wasm.html\n' "$build_dir"
+    else
+        printf 'Application: %s/pump\n' "$executable_dir"
+    fi
     if [ "$tui" = ON ]; then printf 'TUI: %s/datapump-tui\n' "$executable_dir"; fi
     if [ "$framebuffer" = ON ]; then printf 'Framebuffer: %s/datapump-fb\n' "$executable_dir"; fi
+    if [ "$web_worker" = ON ]; then printf 'Pipe worker: %s/datapump-worker\n' "$executable_dir"; fi
     if [ "$gui" = ON ]; then printf 'GUI: %s/datapump-gui\n' "$executable_dir"; fi
 fi

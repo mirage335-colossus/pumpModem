@@ -11,6 +11,7 @@ foreach(source IN LISTS legacy_sources)
     endif()
     if(NOT dependency MATCHES "^datapump/legacy/[A-Za-z_]+\\.hpp$"
        AND NOT dependency STREQUAL "datapump/audio.hpp"
+       AND NOT dependency STREQUAL "datapump/execution.hpp"
        AND NOT dependency STREQUAL "olivia_codec.hpp")
       message(FATAL_ERROR "Legacy source imports a non-Legacy dependency: ${source}: ${include}")
     endif()

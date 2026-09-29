@@ -1,4 +1,5 @@
 #include "datapump/fast/session.hpp"
+#include "datapump/execution.hpp"
 #include "session_state.hpp"
 #include "datapump/fast/codec.hpp"
 #include "datapump/fast/compression.hpp"
@@ -28,10 +29,10 @@ void check_format(const Settings& s,const audio::StreamFormat& f) {
 }
 }
 struct Session::Impl {
-    mutable std::mutex mutex;
+    mutable execution::Mutex mutex;
     Settings settings;
     Snapshot current;
-    std::jthread worker;
+    execution::Task worker;
     bool closing=false;
     Clock::time_point started{};
 
@@ -48,11 +49,11 @@ struct Session::Impl {
         Receiver receiver(s.profile,[&](std::span<const float> interval) {decoder.push_interval(interval);},
             [&](std::complex<float> symbol) noexcept {telemetry.record_symbol(symbol);},
             [&](std::complex<float> input) noexcept {telemetry.record_input(input);});
-        std::mutex queue_mutex;std::condition_variable_any changed;
+        execution::Mutex queue_mutex;execution::StopCondition changed;
         std::deque<std::vector<float>> queue;std::size_t queued_samples=0;
         bool done=false,overrun=false;std::string capture_error;
         const auto queue_limit=static_cast<std::size_t>(s.profile.sample_rate)*(s.profile.acoustic_ofdm?4:1);
-        std::jthread capture([&](std::stop_token capture_stop) {
+        execution::Task capture([&](std::stop_token capture_stop) {
             try {
                 audio::capture(s.profile.sample_rate,s.device,[&](std::span<const float> samples) {
                     std::lock_guard lock(queue_mutex);
@@ -72,6 +73,7 @@ struct Session::Impl {
         });
         std::stop_callback cancel_capture(stop,[&]{capture.request_stop();changed.notify_all();});
         while(!stop.stop_requested()) {
+            execution::checkpoint();
             std::vector<float> samples;
             {
                 std::unique_lock lock(queue_mutex);
@@ -179,7 +181,7 @@ struct Session::Impl {
             current.status=tx?"Preparing fast transmission":"Opening fast audio input";started=Clock::now();
         }
         if(worker.joinable())worker.join();
-        worker=std::jthread([this,s=std::move(s),tx,path,text=std::move(text),stream_id](std::stop_token stop) {
+        worker=execution::Task([this,s=std::move(s),tx,path,text=std::move(text),stream_id](std::stop_token stop) {
             try {
                 if(!tx)receive(stop,s,stream_id);
                 else if(text)send(stop,s,prepare_xz_source(byte_source(Bytes(text->begin(),text->end())),s.quota_bytes,stop),true,stream_id);

@@ -28,6 +28,7 @@ public:
     const ui::FieldState& field(ui::Field) const;
     void complete_service(ui::ServiceResult);
     std::vector<ui::ServiceRequest> take_services();
+    std::vector<ui::ServiceCompletion> take_service_completions();
     void report_error(std::string);
     std::uint64_t revision() const;
     BitmapSource bitmap(ui::Bitmap) const;

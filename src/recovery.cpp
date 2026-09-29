@@ -1,4 +1,5 @@
 #include "datapump/recovery.hpp"
+#include "datapump/execution.hpp"
 #include "datapump/boundary_sync.hpp"
 #include "datapump/speculation.h"
 #include <algorithm>
@@ -71,8 +72,8 @@ struct RecoveryJob::Impl {
     };
     RecoveryInput input;
     RecoveryOptions options;
-    mutable std::mutex mutex;
-    std::mutex run_mutex;
+    mutable execution::Mutex mutex;
+    execution::Mutex run_mutex;
     RecoveryProgress status;
     std::vector<Plan> plans;
     std::vector<DecodedInterval> accepted;
@@ -102,7 +103,7 @@ struct RecoveryJob::Impl {
         if(matches>(maximum-base)/per_match)return;
         base+=matches*per_match;
         if(base>options.workspace_bytes)return;
-        const auto available=std::max(1U,std::thread::hardware_concurrency());
+        const auto available=std::max(1U,execution::concurrency());
         const auto requested=std::max(1U,std::min(available,options.workers?options.workers:available));
         worker_limit=static_cast<unsigned>(std::min<std::size_t>(requested,(options.workspace_bytes-base)/worker_scratch));
         if(!worker_limit)return;
@@ -331,11 +332,12 @@ struct RecoveryJob::Impl {
                             for(std::uint64_t i=0;i<count;++i)
                                 if(auto match=evaluate(plan,original,configured,guesses,first+i))merge(plan,std::move(*match));
                             {std::lock_guard lock(mutex);status.attempts+=count;}
+                            execution::checkpoint();
                         }
                     } catch(...) {failed.store(true,std::memory_order_relaxed);}
                 };
                 {
-                    std::vector<std::jthread> threads;threads.reserve(workers);
+                    std::vector<execution::Task> threads;threads.reserve(workers);
                     try {for(unsigned i=0;i<workers;++i)threads.emplace_back(work);}
                     catch(...) {failed.store(true,std::memory_order_relaxed);}
                     for(auto& thread:threads)thread.join();

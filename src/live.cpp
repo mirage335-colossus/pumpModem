@@ -1,4 +1,5 @@
 #include "datapump/live.hpp"
+#include "datapump/execution.hpp"
 #include "datapump/audio.hpp"
 #include "datapump/channel.hpp"
 #include "datapump/runtime.hpp"
@@ -274,8 +275,8 @@ struct Session::Impl {
     }
     EpochClock epoch_clock;
     ReplayClock replay_clock;
-    std::mutex mutex;
-    std::condition_variable_any changed;
+    execution::Mutex mutex;
+    execution::StopCondition changed;
     Settings settings;
     Snapshot current;
     std::uint64_t generation = 0, decoder_generation = 0, tx_serial = 0, receive_revision = 0, next_signal = 1, next_event = 1;
@@ -314,7 +315,7 @@ struct Session::Impl {
     std::size_t first_visible_replay_frame = 0;
     double replay_bin_hz = 0;
     std::stop_source capture_stop, tx_stop, decode_stop;
-    std::jthread source, encoder, decoder, recovery_worker;
+    execution::Task source, encoder, decoder, recovery_worker;
 
     explicit Impl(EpochClock clock, ReplayClock presentation_clock)
         : epoch_clock(clock ? std::move(clock) : EpochClock(epoch_now)),
@@ -323,10 +324,10 @@ struct Session::Impl {
         // Local cache identity only: this namespace never enters the wire.
         std::random_device random;
         for(auto& byte:reception_namespace)byte=static_cast<std::uint8_t>(random());
-        source = std::jthread([this](std::stop_token stop) { source_loop(stop); });
-        encoder = std::jthread([this](std::stop_token stop) { encode_loop(stop); });
-        decoder = std::jthread([this](std::stop_token stop) { decode_loop(stop); });
-        recovery_worker = std::jthread([this](std::stop_token stop) { recovery_loop(stop); });
+        source = execution::Task([this](std::stop_token stop) { source_loop(stop); });
+        encoder = execution::Task([this](std::stop_token stop) { encode_loop(stop); });
+        decoder = execution::Task([this](std::stop_token stop) { decode_loop(stop); });
+        recovery_worker = execution::Task([this](std::stop_token stop) { recovery_loop(stop); });
     }
     ~Impl() {
         halt(); source.request_stop(); encoder.request_stop(); decoder.request_stop(); recovery_worker.request_stop(); changed.notify_all();
@@ -869,6 +870,7 @@ struct Session::Impl {
     }
     void recovery_loop(std::stop_token stop) {
         while(!stop.stop_requested()) {
+            execution::checkpoint();
             std::shared_ptr<RecoveryTask> task;
             transfer::Received result;
             {
@@ -1013,6 +1015,7 @@ struct Session::Impl {
         // weaker profile processed first could close the shared pending row.
         for(unsigned phase=0;phase<2;++phase) {
             for (auto& receiver : bank.receivers) {
+                execution::checkpoint();
                 if (stop.stop_requested()) return;
                 auto accounted = receiver_workspace(receiver);
                 const auto update_workspace = [&] {
@@ -1307,6 +1310,7 @@ struct Session::Impl {
         unsigned idle_fraction = 0;
         auto last_plot = Clock::time_point{};
         while (!stop.stop_requested()) {
+            execution::checkpoint();
             Settings value; std::uint64_t version; std::stop_token capture_token, processing_token;
             bool new_burst = false;
             {
@@ -1417,7 +1421,7 @@ struct Session::Impl {
                                 collect_replay(*wave, transmit_modem, plot_window, value.simulation_spectrum_gain_db);
                             complete_tx(*wave); wave.reset();
                         }
-                        std::this_thread::yield();
+                        execution::yield();
                     } else {
                         // Idle media continues during stream preparation and
                         // replay. Noise and burst audio use the same RX clock.
@@ -1593,11 +1597,10 @@ struct Session::Impl {
                                 }
                             }
                             auto scheduled=datapump::detail::schedule_transmission(options.modem,make,
-                                [this]{return current_epoch();},wave.stop,minimum);
+                                [this]{return current_epoch();},wave.stop,minimum,audio::minimum_lead_seconds());
                             wave.transmitter=std::move(scheduled.transmitter);
                             if(!key.empty())wave.protected_epoch=scheduled.epoch;
-                            datapump::detail::wait_for_playback(scheduled.playback_epoch,
-                                [this]{return current_epoch();},wave.stop);
+                            audio::schedule_output(scheduled.playback_epoch,wave.stop);
                         } else {
                             wave.transmitter=make(options.timestamp);
                             if(!key.empty())wave.protected_epoch=options.timestamp;

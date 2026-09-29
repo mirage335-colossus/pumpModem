@@ -1,9 +1,16 @@
-# Proposed browser frontends with no socket I/O
+# Browser frontends with no socket I/O
 
-Status: design proposal, 2026-09-28. Source review used clean revision
-`91e3e0e3495ba842a380b4ea907a691c3a5b253a`. Neither frontend, the proposed build
-options, nor the packages described here is implemented or qualified yet.
-This proposal leaves runtime behavior unchanged.
+The optional native `datapump-worker` and static `datapump-wasm` compositions use
+the existing C++ application, a shared declaration bridge and browser audio.
+The initial implementation is under qualification; a successful compile does not
+establish browser, mobile-device or physical acoustic qualification. The original
+design review used `91e3e0e3495ba842a380b4ea907a691c3a5b253a` on 2026-09-28.
+
+Use [the build guide](building.md) for the separate native and Wasm builds,
+[the local protocol](web-protocol.md) for embedding, and
+[the browser adapter guide](../web/README.md) for preloaded assets and platform
+services. No web server or listening helper is included. CGI, persistent browser
+storage and a threaded Wasm profile remain future work.
 
 ## Mandatory security boundary
 
@@ -39,10 +46,10 @@ its authentication and network exposure do not become Data Pump functionality.
 
 ## Two products using the same application
 
-Both uses are feasible architectural directions. They should be independent of
-the FLTK/Rev selection, like the existing terminal and framebuffer frontends.
-Compile the existing C++ application and modem code for each execution host;
-share a declarative HTML renderer and browser audio adapter between them.
+Both compositions are independent of the FLTK/Rev selection, like the existing
+terminal and framebuffer frontends. They compile the existing C++ application
+and modem code for each execution host and share a declarative HTML renderer
+and browser audio adapter.
 JavaScript supplies DOM, browser API and local message glue, not another implementation
 of message handling, compression, cryptography, framing or DSP.
 
@@ -96,20 +103,22 @@ validated against the current declarations and capabilities before dispatch.
 Delayed edits, duplicate action delivery, revoked services and old-generation
 callbacks must not replay transmission or restore withdrawn content.
 
-Local session setup negotiates a protocol/schema version and application asset
-identity. A host relay reconnect obtains a complete snapshot and fresh audio
-generation; it never automatically repeats the last action or splices separate
-audio streams.
+Local session snapshots and events carry the checked protocol/schema version.
+The package manifest records application asset hashes for host deployment checks.
+A UI reconnect obtains a complete snapshot and withdraws pending file services;
+it does not reset audio. When replacing an audio endpoint, the host must explicitly
+interrupt it, await the stopped acknowledgment, and configure a fresh audio
+generation. Reconnection must never repeat an action or splice separate streams.
 The C++ application remains authoritative for enablement, formatting, validation,
 pending/completed state and save eligibility.
 
-Three host interfaces need development beneath presentation:
+Three platform interfaces beneath presentation provide the host differences:
 
-| Interface | Existing constraint | Required direction |
+| Interface | Shared contract | Host implementation |
 | --- | --- | --- |
-| Audio provider | [audio.hpp](../include/datapump/audio.hpp) has global blocking operations and compile-time native capabilities | Per-session provider with capture/playback, device capabilities, format, discontinuity, cancellation and drain completion; native compatibility wrappers can remain |
-| Storage/services | Choosers return a path; controllers open attachments/keyfiles and write received bytes directly | Generic file handles or bounded readers/writers with asynchronous request/completion, cancellation and explicit save outcome; native paths stay inside a host adapter |
-| Execution/resources | Live, Fast, Legacy, preparation, recovery and search create threads; memory probing is native | Portable task execution, cancellation, clocks and resource budgets, with native-thread and browser-compatible implementations |
+| Audio provider | [audio.hpp](../include/datapump/audio.hpp): capabilities, capture/playback, format and scheduled output | Native audio remains at native leaves; browser compositions use one bounded [AudioEndpoint](../include/datapump/host/audio.hpp) per process/Worker, with discontinuity, cancellation/flush and drain acknowledgments |
+| Storage/services | Generic chooser request/result and opt-in actual-operation completion | Trusted server chooser on its own pipe, or private Wasm filesystem import/export; only an explicit current save capability exports raw bytes, after the controller reports actual write completion |
+| Execution/resources | [execution.hpp](../include/datapump/execution.hpp): tasks, cancellation, waits, mutexes and checkpoints | Native standard-library aliases; cooperative Emscripten fibers with bounded stacks, task-context search nesting and an embedding event-loop pump |
 
 These are shared platform interfaces, not branches such as `if (browser)` in
 controllers or modem logic. Application composition selects providers. Audio
@@ -164,7 +173,7 @@ The host supplies already loaded asset bytes; Data Pump has no endpoint URL or
 port. Authenticate the sending frame/MessagePort as well as the message schema;
 an opaque frame's `null` origin is not sufficient peer identity.
 
-One candidate is an opaque sandboxed renderer with host-owned microphone
+The hosted adapter uses an opaque sandboxed renderer with host-owned microphone
 permission/capture and playback, passed through the narrow audio interface.
 An opaque frame cannot itself simply request microphone access. A dedicated
 origin with explicit permissions is another candidate, requiring its own
@@ -186,9 +195,12 @@ device or issue conflicting transmission commands. Multiple users need separate
 application instances/providers, bounded aggregate resources and deliberate
 file/key access policy. This avoids global audio-provider cross-talk.
 
-The embedding host supplies authorized bounded file readers/writers or a rooted
-server chooser. It performs host filesystem opens and passes only approved
-streams/handles; the worker has no general remote file-management interface.
+The embedding host supplies authorized bounded file streams or a rooted server
+chooser on a separate inherited anonymous pipe (`--file-events-fd N`). The
+ordinary UI/audio pipe cannot complete a file request with a pathname or submit
+file-transfer frames. On the trusted pipe a scoped file request may be completed
+with an authorized server pathname, or imported/exported in bounded byte chunks;
+the worker has no general remote file-management interface.
 Opening/saving means opening/saving on that host. Browser file upload is a
 separate optional action, not the implementation of server file selection.
 Validate handles and enforce the intended directory boundary at open/write time,
@@ -207,8 +219,9 @@ AI chats remain the larger application's features and authority.
 The existing host owns Origin validation, authentication, CSRF protection and
 any reverse-proxy configuration. The pipe protocol still validates every type,
 length, identifier, quota and allowed operation; a local pipe does not make
-payloads trustworthy. Malformed input closes/fails that session, never falls
-back to another transport. Keep control messages distinct from captured audio
+payloads trustworthy. Invalid framing closes the session. A framed operation with
+invalid fields or unavailable authority is rejected with an operation error and
+may leave the session running. Neither outcome selects another transport. Keep control messages distinct from captured audio
 and received attachment data. A hostile attachment cannot become a host request.
 
 ## Browser audio and physical correctness
@@ -353,8 +366,10 @@ bytes into Data Pump. Audit generated Emscripten initialization: no automatic
 `.wasm` fetch, socket emulation, network filesystem, telemetry, beacon,
 service-worker transport or lazy network asset loading is allowed. Worker and
 worklet code can be created from supplied local bytes; validate CSP/loading on
-each target browser. This is a build/qualification requirement, not a tested
-single-file export today. Emscripten documents supplying `wasmBinary` explicitly.
+each target browser. The packager creates a self-contained HTML file from the
+compiled factory, Wasm, renderer, Worker and worklet bytes; its manifest records
+exact hashes. Browser qualification is separate from that build. Emscripten
+documents supplying `wasmBinary` explicitly.
 [Emscripten module loading](https://emscripten.org/docs/compiling/WebAssembly.html).
 
 Use restrictive CSP, including `connect-src 'none'` and appropriate restrictions
@@ -383,16 +398,16 @@ browser-backed entropy path; never substitute weak randomness to get a build.
 
 ## Build, SDK and package identity
 
-Keep `DATAPUMP_GUI_BACKEND=fltk|rev` unchanged. A proposed independent native
-`DATAPUMP_BUILD_WEB_WORKER` option can build `datapump-worker` without either
-toolkit. Wasm needs a separate target/toolchain/profile and build directory;
-it is not another native GUI library selection. Expose supported operations
-through `./build.sh` when implemented. None of these proposed switches exists yet.
+`DATAPUMP_GUI_BACKEND=fltk|rev` remains unchanged. The independent native
+`DATAPUMP_BUILD_WEB_WORKER` option builds `datapump-worker` without either toolkit;
+`./build.sh --cli --web-worker` selects it. Wasm uses a separate prepared SDK,
+target/profile and build directory through `./build.sh --wasm-sdk PATH`; it is
+not another native GUI library selection.
 
-Current CMake links native audio, OpenSSL and threads into the core target.
-Separate portable algorithms/application from native runtime providers and
-native packaging at the build graph boundary. Preserve existing arithmetic and
-isolation checks. The current source SDK explicitly targets Linux/GCC/glibc;
+CMake separates portable algorithms/application from the native audio provider
+at its link boundary. Native consumers explicitly link their native provider;
+the pipe and Wasm targets explicitly link the host PCM provider instead. Existing
+arithmetic and isolation checks remain required. The source SDK targets Linux/GCC/glibc;
 do not repurpose that sysroot or weaken its dependency containment checks.
 
 Prepare a distinct pinned Emscripten/Wasm SDK recipe with host-tool requirements,
@@ -406,7 +421,7 @@ and published assets remain immutable.
 
 Recommended layout follows [current package ownership](frontend-interfaces.md#packaging-and-verification):
 
-| Payload | Proposed location/command |
+| Payload | Location/command |
 | --- | --- |
 | Native worker in an existing bundle | `/opt/datapump/fltk/bin/datapump-worker` or `/opt/datapump/rev/bin/datapump-worker` |
 | Host integration assets | Bundle-relative `share/datapump/web/hosted/` |
@@ -482,7 +497,11 @@ modes without feature-specific renderer edits. Release delivery, if undertaken,
 must certify exact source and binary/asset hashes under the existing release
 policy, with browser limitations recorded explicitly.
 
-This proposal was checked against source boundaries and upstream documentation.
-No browser prototype, performance measurement, build or runtime test was performed;
-feasibility of low-cost-device throughput and uninterrupted operation remains an
-implementation/qualification question.
+The implementation has separate native pipe/audio/bridge tests, a compiled-Wasm
+application test with network APIs denied, and generic DOM/worklet fixtures.
+Those tests do not establish physical microphone/speaker behavior, smartphone
+throughput or mobile background operation. Record exact browser/device coverage
+before making such claims. The current development harness rejects local
+`file://` browser navigation, so its offline runtime/DOM checks do not substitute
+for real-browser testing. No server or alternate browser was started to bypass
+that restriction.

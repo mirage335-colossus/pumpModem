@@ -172,7 +172,8 @@ Bytes encoded_intervals(const Message& message,const Options& options,StreamLayo
             trace->compressed_bits.push_back((source[i]>>(7-bit))&1U);
     }
     const auto count=source.size()/capacity;
-    if(count>Bytes{}.max_size()/stream_interval_bytes)throw Error("encoded source exceeds address space");
+    if(count>Bytes{}.max_size()/(boundary_sync::interval_bits+boundary_sync::marker_bits))
+        throw Error("encoded source exceeds address space");
     Bytes wire;wire.reserve(count*stream_interval_bytes);
     for(std::size_t i=0;i<count;++i) {
         const auto first=i*(boundary_sync::marker_bits+boundary_sync::interval_bits)+boundary_sync::marker_bits;
@@ -190,6 +191,7 @@ Bytes encoded_intervals(const Message& message,const Options& options,StreamLayo
     return wire;
 }
 Bytes byte_bits(std::span<const std::uint8_t> bytes) {
+    if(bytes.size()>Bytes{}.max_size()/8)throw Error("source bits exceed address space");
     Bytes bits;bits.reserve(bytes.size()*8);
     for(auto byte:bytes)for(unsigned i=0;i<8;++i)bits.push_back((byte>>(7-i))&1);
     return bits;
@@ -205,9 +207,15 @@ std::size_t source_storage_limit(std::size_t content_limit) {
 }
 std::size_t pattern_bit_limit(std::size_t content_limit) {
     const auto limit=source_storage_limit(content_limit);
-    if(limit>(Bytes{}.max_size()-boundary_sync::interval_bits+1)/32)throw Error("source bit limit exceeds address space");
-    const auto intervals=(limit*32+boundary_sync::interval_bits-1)/boundary_sync::interval_bits;
-    return boundary_sync::encoded_size(intervals*boundary_sync::interval_bits);
+    // This is a ceiling for locally configured storage, not an allocation or
+    // received length. A large content allowance must still admit small files
+    // on a 32-bit host. Divide before multiplying and cap at whole, representable
+    // fixed intervals; actual allocations remain subject to their memory quota.
+    static_assert(boundary_sync::interval_bits%32==0);
+    constexpr auto source_per_interval=boundary_sync::interval_bits/32;
+    constexpr auto encoded_interval=boundary_sync::interval_bits+boundary_sync::marker_bits;
+    const auto intervals=1+(limit-1)/source_per_interval;
+    return std::min(intervals,Bytes{}.max_size()/encoded_interval)*encoded_interval;
 }
 modem::Config seeded_config(const Options& input_options, std::uint64_t timestamp) {
     const auto options=effective_options(input_options);

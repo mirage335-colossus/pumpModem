@@ -140,6 +140,9 @@ def package_files(payload, backend):
         if f'bin/{executable}' in payload:
             name = f'{executable}-{adapter}' + ('' if backend == 'fltk' else f'-{backend}')
             result[f'usr/bin/{name}'] = (f'#!/bin/sh\nexec /{prefix}/bin/{executable} "$@"\n'.encode(), 0o755)
+    if 'bin/datapump-worker' in payload:
+        name = 'datapump-worker' + ('' if backend == 'fltk' else f'-{backend}')
+        result[f'usr/bin/{name}'] = (f'#!/bin/sh\nexec /{prefix}/bin/datapump-worker "$@"\n'.encode(), 0o755)
     desktop = (f'[Desktop Entry]\nType=Application\nName=DataPump ({backend.upper()})\n'
                f'Comment=Portable audio modem\nExec=datapump-{backend}\nTerminal=false\n'
                'Icon=utilities-terminal\nCategories=AudioVideo;Audio;\n')
@@ -156,6 +159,8 @@ def manual_files(payload, backend):
     for executable, adapter in (('datapump-tui', 'ncurses'), ('datapump-fb', 'sdl')):
         if f'bin/{executable}' in payload:
             names[executable] = f'{executable}-{adapter}' + ('' if backend == 'fltk' else f'-{backend}')
+    if 'bin/datapump-worker' in payload:
+        names['datapump-worker'] = 'datapump-worker' + ('' if backend == 'fltk' else f'-{backend}')
     sources = {name: f'share/man/man1/{name}.1' for name in names}
     if not any(path in payload for path in sources.values()):
         # Repackaging a historical release must preserve its original payload.

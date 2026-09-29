@@ -50,13 +50,26 @@
       "inherits": "defaults",
       "binaryDir": "${sourceDir}/build/rev",
       "cacheVariables": { "DATAPUMP_GUI_BACKEND": "rev" }
+    },
+    {
+      "name": "wasm",
+      "displayName": "Offline single Worker browser application",
+      "inherits": "defaults",
+      "binaryDir": "${sourceDir}/build/wasm",
+      "cacheVariables": {
+        "DATAPUMP_BUILD_WASM": "ON", "DATAPUMP_BUILD_CLI": "OFF",
+        "DATAPUMP_BUILD_GUI": "OFF", "DATAPUMP_PORTABLE": "OFF",
+        "BUILD_TESTING": "OFF", "OPENSSL_USE_STATIC_LIBS": "ON",
+        "DATAPUMP_COMPILER_CACHE": "OFF"
+      }
     }
   ],
   "buildPresets": [
     { "name": "dev", "configurePreset": "dev", "targets": ["datapump-apps"] },
     { "name": "release", "configurePreset": "release", "targets": ["datapump-apps"] },
     { "name": "sanitize", "configurePreset": "sanitize", "targets": ["datapump-apps"] },
-    { "name": "rev", "configurePreset": "rev", "targets": ["datapump-apps"] }
+    { "name": "rev", "configurePreset": "rev", "targets": ["datapump-apps"] },
+    { "name": "wasm", "configurePreset": "wasm", "targets": ["datapump-apps"] }
   ],
   "testPresets": [
     {

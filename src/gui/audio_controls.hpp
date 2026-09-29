@@ -21,7 +21,7 @@ inline bool exclusive_supported() {return audio::exclusive_supported();}
 inline void set_device_options(ui::FieldState& state,const std::vector<audio::Device>& devices) {
     if(state.selected.empty())state.selected=state.text.empty()?"default":state.text;
     state.text=state.selected;
-    state.options={{"default","System default"}};
+    state.options={{"default",audio::default_device_description()}};
     for(const auto& device:devices) {
         if(device.id.empty()||device.id=="default")continue;
         auto description=device.description;

@@ -1,4 +1,5 @@
 #include "datapump/fast/codec.hpp"
+#include "datapump/execution.hpp"
 #include "datapump/fast/compression.hpp"
 #include "datapump/fast/attachment.hpp"
 #include "datapump/fast/modem.hpp"
@@ -286,7 +287,7 @@ Bytes capacity_decode(const Profile& p,std::span<const float> wire,DecodeSnapsho
     } else {
     const auto& rotations=capacity_rotations(p);
     const auto workers=p.acoustic_ofdm?
-        std::min({4U,p.interleave_depth,std::max(1U,std::thread::hardware_concurrency())}):1U;
+        std::min({4U,p.interleave_depth,std::max(1U,execution::concurrency())}):1U;
     if(workers==1) {
         // Preserve the cable decoder's sequential path and scratch lifetime.
         std::vector<float> block_soft(p.ldpc_frame_bits);
@@ -301,6 +302,7 @@ Bytes capacity_decode(const Profile& p,std::span<const float> wire,DecodeSnapsho
             for(std::size_t bit=0;bit<result.bytes.size()*8;++bit)
                 if(input[bit]!=0 && ((input[bit]>0)!=bool((result.bytes[bit/8]>>(7-bit%8))&1U)))++stats.ldpc_changed_bits;
             append(decoded,result.bytes);
+            execution::checkpoint();
         }
     } else {
         struct Frame {
@@ -324,13 +326,14 @@ Bytes capacity_decode(const Profile& p,std::span<const float> wire,DecodeSnapsho
                     for(std::size_t bit=0;bit<frame.result.bytes.size()*8;++bit)
                         if(input[bit]!=0 && ((input[bit]>0)!=bool((frame.result.bytes[bit/8]>>(7-bit%8))&1U)))++frame.changed_bits;
                 }catch(...) {frame.error=std::current_exception();}
+                execution::checkpoint();
             }
         };
         {
             // The caller is one worker. Join all others before touching shared
             // output/statistics, including when thread creation itself throws.
-            std::array<std::jthread,3> threads;
-            for(unsigned i=1;i<workers;++i)threads[i-1]=std::jthread(work);
+            std::array<execution::Task,3> threads;
+            for(unsigned i=1;i<workers;++i)threads[i-1]=execution::Task(work);
             work();
         }
         // Input order determines output, diagnostics and the first exception;

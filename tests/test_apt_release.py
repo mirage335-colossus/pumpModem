@@ -90,6 +90,24 @@ class DesktopEntryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'incomplete manual set'):
             apt.package_files(payload, 'fltk')
 
+    def test_pipe_worker_commands_and_manuals_can_coexist(self):
+        payload = {f'share/man/man1/{name}.1': (f'.TH {name.upper()} 1\n{name}\n'.encode(), 0o644)
+                   for name in ('pump', 'pump-fast', 'datapump-gui', 'datapump-worker')}
+        payload['bin/datapump-worker'] = (b'worker', 0o755)
+        first, second = (apt.package_files(payload, backend) for backend in ('fltk', 'rev'))
+        for backend, files, command in (('fltk', first, 'datapump-worker'),
+                                        ('rev', second, 'datapump-worker-rev')):
+            wrapper = files[f'usr/bin/{command}'][0]
+            self.assertIn(f'/opt/datapump/{backend}/bin/datapump-worker'.encode(), wrapper)
+            manual = gzip.decompress(files[f'usr/share/man/man1/{command}.1.gz'][0])
+            self.assertIn(command.encode(), manual)
+            self.assertFalse(any('systemd' in path for path in files))
+        self.assertFalse({p for p in first if p.startswith('usr/bin/')} &
+                         {p for p in second if p.startswith('usr/bin/')})
+        del payload['share/man/man1/datapump-worker.1']
+        with self.assertRaisesRegex(ValueError, 'incomplete manual set'):
+            apt.package_files(payload, 'fltk')
+
     def test_historical_archives_remain_repackagable_but_partial_manuals_fail(self):
         self.assertEqual(apt.manual_files({}, 'fltk'), {})
         with self.assertRaisesRegex(ValueError, 'incomplete manual set'):

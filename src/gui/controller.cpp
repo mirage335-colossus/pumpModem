@@ -1,4 +1,6 @@
 #include "datapump/attachment.hpp"
+#include "datapump/execution.hpp"
+#include <utility>
 #include "datapump/compression.hpp"
 #include "controller.hpp"
 #include "audio_controls.hpp"
@@ -203,6 +205,7 @@ struct Controller::Impl {
     std::optional<std::string> attached_message_draft;
     std::optional<std::filesystem::path> pending_key,pending_file;
     std::vector<std::string> pending_names;
+    std::uint64_t pending_key_completion=0;
     std::optional<transfer::Estimate> estimate;
     std::shared_ptr<const Inspection> inspection;
     planner::Inputs planner_inputs;
@@ -217,6 +220,7 @@ struct Controller::Impl {
     struct Prepared {
         PrepKind kind=PrepKind::estimate;
         std::uint64_t revision=0;
+        std::uint64_t completion_id=0;
         std::shared_ptr<const Inspection> inspection;
         std::optional<simulation::Estimate> simulation_estimate;
         std::vector<KeyEntry> keys;
@@ -227,14 +231,15 @@ struct Controller::Impl {
         bool image=false,generate=false,created=false;
         std::string error;
     };
-    std::jthread worker;
-    std::mutex mutex;
+    execution::Task worker;
+    execution::Mutex mutex;
     std::optional<Prepared> prepared;
     enum class Purpose { open_key,generate_names,generate_path,attach,save,clipboard,folder,
         planner_target,planner_power,planner_loss,planner_noise };
     struct Pending { Purpose purpose; std::shared_ptr<const Bytes> bytes; std::vector<std::string> names; std::uint64_t attachment_revision=0; };
     std::map<std::uint64_t,Pending> pending_services;
     std::vector<ui::ServiceRequest> services;
+    std::vector<ui::ServiceCompletion> service_completions;
 
     ui::FieldState& f(UiField id) { return fields.at(static_cast<std::size_t>(id)); }
     const ui::FieldState& f(UiField id) const { return fields.at(static_cast<std::size_t>(id)); }
@@ -1031,10 +1036,12 @@ struct Controller::Impl {
     void start_worker(std::function<void(Prepared&,std::stop_token)> work,Prepared result) {
         preparing=true;
         const auto kind=result.kind;
-        try { worker=std::jthread([this,work=std::move(work),result=std::move(result)](std::stop_token stop) mutable {
+        const auto completion_id=result.completion_id;
+        try { worker=execution::Task([this,work=std::move(work),result=std::move(result)](std::stop_token stop) mutable {
             try { work(result,stop); if(stop.stop_requested()) throw Error("Operation cancelled"); } catch(const std::exception& e) { result.error=e.what(); }
             std::lock_guard lock(mutex); prepared=std::move(result);
         }); } catch(...) {
+            if(completion_id)service_completions.push_back({completion_id,"Could not start file operation"});
             preparing=false;
             if(kind==PrepKind::keys) { key_loading=false; key_failed=true; }
             if(kind==PrepKind::file) file_loading=false;
@@ -1047,6 +1054,7 @@ struct Controller::Impl {
         Prepared result;
         if(pending_key) {
             result.kind=PrepKind::keys; result.path=*pending_key; pending_key.reset(); result.names=std::move(pending_names); pending_names.clear(); result.generate=!result.names.empty();
+            result.completion_id=std::exchange(pending_key_completion,0);
             start_worker([](Prepared& value,std::stop_token stop) { if(stop.stop_requested()) throw Error("Operation cancelled"); if(value.generate) { create_keyring(value.path,value.names); value.created=true; } value.keys=load_keyring(value.path); },std::move(result));
         } else if(pending_file) {
             result.kind=PrepKind::file; result.path=*pending_file; result.revision=attachment_revision; pending_file.reset();
@@ -1094,6 +1102,7 @@ struct Controller::Impl {
     void accept(Prepared result) {
         if(worker.joinable()) worker.join();
         preparing=false;
+        if(result.completion_id)service_completions.push_back({result.completion_id,result.error});
         if(result.kind==PrepKind::keys) key_loading=pending_key.has_value();
         if(result.kind==PrepKind::file) file_loading=pending_file.has_value();
         if(result.kind==PrepKind::file&&result.revision!=attachment_revision) return;
@@ -1221,10 +1230,11 @@ struct Controller::Impl {
     void request(Purpose purpose,ui::ServiceKind kind,std::string title,std::string value={},std::shared_ptr<const Bytes> bytes={},std::vector<std::string> names={}) {
         const auto id=++service_id; pending_services.emplace(id,Pending{purpose,std::move(bytes),std::move(names),attachment_revision}); services.push_back({id,kind,std::move(title),std::move(value)});
     }
-    void begin_key(std::filesystem::path path,std::vector<std::string> names={}) {
+    void begin_key(std::filesystem::path path,std::vector<std::string> names={},std::uint64_t completion_id=0) {
         if(key_loading) throw Error("Wait for the current keyfile operation");
         if(!names.empty()&&(std::filesystem::exists(path)||std::filesystem::is_symlink(path))) throw Error("Choose a new filename; existing keyfiles are never overwritten");
         pending_key=std::move(path); pending_names=std::move(names); key_loading=true; key_failed=false;
+        pending_key_completion=completion_id;
         f(UiField::key_path).text=pending_names.empty()?"Loading key entries...":"Generating 128 MiB keyfile..."; dirty(); notice(f(UiField::key_path).text,10);
     }
     std::size_t last_pattern_page() const { const auto size=inspection&&inspection->pattern_space?inspection->pattern_space->code.size():0; return size?((size-1)/page_size)*page_size:0; }
@@ -1366,6 +1376,7 @@ struct Controller::Impl {
         auto pending=std::move(found->second); pending_services.erase(found);
         if(closing||result.cancelled) return;
         if(pending.purpose==Purpose::attach&&pending.attachment_revision!=attachment_revision) return;
+        try {
         if(!result.error.empty()) throw Error(result.error);
         switch(pending.purpose) {
         case Purpose::planner_target: planner_target(number(result.value,"Planner target"));break;
@@ -1374,12 +1385,16 @@ struct Controller::Impl {
         case Purpose::planner_noise: edit_link_budget(UiField::link_noise,result.value);break;
         case Purpose::open_key: begin_key(path_from_text(result.value)); break;
         case Purpose::generate_names: request(Purpose::generate_path,ui::ServiceKind::save_file,"Save new encryption keyfile","shared.key",{},key_entry_names(result.value)); break;
-        case Purpose::generate_path: begin_key(path_from_text(result.value),std::move(pending.names)); break;
+        case Purpose::generate_path: begin_key(path_from_text(result.value),std::move(pending.names),result.track_completion?result.id:0); break;
         case Purpose::attach:
             pending_file=path_from_text(result.value); file_loading=true; dirty(); notice("Loading attachment..."); break;
-        case Purpose::save: write_new_file(result.value,*pending.bytes); notice("Saved "+result.value); break;
+        case Purpose::save: write_new_file(result.value,*pending.bytes); if(result.track_completion)service_completions.push_back({result.id,{}}); notice("Saved "+result.value); break;
         case Purpose::clipboard: notice("Selected received content copied to the clipboard."); break;
         case Purpose::folder: break;
+        }
+        }catch(const std::exception& error) {
+            if(result.track_completion)service_completions.push_back({result.id,error.what()});
+            throw;
         }
     }
 };
@@ -1413,7 +1428,10 @@ void Controller::poll() {
         if(!p.closing && !p.transmit_requested && !p.snapshot.transmitting &&
            p.receive_targets_due && Clock::now()>=*p.receive_targets_due)p.configure();
         if(prepared) {
-            if(p.closing) { if(p.worker.joinable()) p.worker.join(); p.preparing=false; }
+            if(p.closing) {
+                if(p.worker.joinable()) p.worker.join(); p.preparing=false;
+                if(prepared->completion_id)p.service_completions.push_back({prepared->completion_id,prepared->error});
+            }
             else p.accept(std::move(*prepared));
         }
         if(!p.closing) { if(p.started) p.accept_snapshot(p.session.snapshot()); p.dispatch(); }
@@ -1421,7 +1439,11 @@ void Controller::poll() {
     catch(const std::exception& e) { p.notice(e.what(),10); }
     p.controls();
 }
-void Controller::close() { auto& p=*impl_; p.closing=true; p.session.stop(); p.worker.request_stop(); p.pending_services.clear(); p.services.clear(); p.controls(); }
+void Controller::close() {
+    auto& p=*impl_; p.closing=true; p.session.stop(); p.worker.request_stop(); p.pending_services.clear(); p.services.clear();
+    if(p.pending_key_completion)p.service_completions.push_back({std::exchange(p.pending_key_completion,0),"Operation cancelled"});
+    p.controls();
+}
 bool Controller::try_suspend_capture() {
     auto& p=*impl_;
     if(p.transmit_requested||p.snapshot.transmitting||p.closing)return false;
@@ -1562,6 +1584,7 @@ void Controller::toggle(UiField field,bool value) {
 void Controller::activate(Command command) { try { impl_->action(command); } catch(const std::exception& e) { impl_->notice(e.what(),10); } impl_->controls(); }
 void Controller::complete_service(ui::ServiceResult result) { try { impl_->complete(std::move(result)); } catch(const std::exception& e) { impl_->notice(e.what(),10); } impl_->controls(); }
 std::vector<ui::ServiceRequest> Controller::take_services() { auto result=std::move(impl_->services); impl_->services.clear(); return result; }
+std::vector<ui::ServiceCompletion> Controller::take_service_completions() {std::vector<ui::ServiceCompletion> result;result.swap(impl_->service_completions);return result;}
 const ui::FieldState& Controller::field(UiField field) const { return impl_->f(field); }
 bool Controller::enabled(Command command) const { return impl_->enabled(command); }
 std::string Controller::command_label(Command command) const {

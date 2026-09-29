@@ -42,6 +42,7 @@ public:
     void activate(ui::Command command);
     void complete_service(ui::ServiceResult result);
     std::vector<ui::ServiceRequest> take_services();
+    std::vector<ui::ServiceCompletion> take_service_completions();
     const ui::FieldState& field(ui::Field field) const;
     bool enabled(ui::Command command) const;
     std::string command_label(ui::Command command) const; // Empty keeps the declaration label.

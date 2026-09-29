@@ -76,6 +76,62 @@ if os.environ.get("FAIL_STEP") == ("build" if "--build" in sys.argv else "config
         self.assertIn('datapump-tests-frontends', calls[1])
         self.assertIn('^frontends$', calls[2])
 
+    def test_web_worker_keeps_gui_selection_independent(self):
+        result, calls = self.run_wrapper('--cli', '--web-worker')
+        self.assertIn('-DDATAPUMP_BUILD_GUI=OFF', calls[0])
+        self.assertIn('-DDATAPUMP_BUILD_WEB_WORKER=ON', calls[0])
+        self.assertIn(str(self.source / 'build/dev-cli-web'), calls[0])
+        self.assertIn('datapump-worker', result.stdout)
+
+    def test_web_group_enables_worker_and_builds_prerequisites(self):
+        _, calls = self.run_wrapper('test', 'web', '--cli')
+        self.assertIn('-DDATAPUMP_BUILD_WEB_WORKER=ON', calls[0])
+        self.assertIn('datapump-tests-web', calls[1])
+        self.assertIn('^web$', calls[2])
+
+    def prepare_wasm_sdk(self):
+        sdk = self.root / 'Wasm SDK with spaces'
+        metadata = sdk / 'share/datapump-wasm-sdk'
+        metadata.mkdir(parents=True)
+        (metadata / 'manifest.json').write_text('{}')
+        (metadata / 'relocated-root.txt').write_text(str(sdk) + '\n')
+        return sdk
+
+    def test_wasm_profile_uses_its_own_sdk_and_no_native_frontends(self):
+        sdk = self.prepare_wasm_sdk()
+        result, calls = self.run_wrapper('--wasm-sdk', str(sdk))
+        self.assertIn('wasm', calls[0])
+        self.assertIn('-DDATAPUMP_BUILD_GUI=OFF', calls[0])
+        self.assertIn('-DDATAPUMP_WASM_SDK_ROOT=' + str(sdk), calls[0])
+        self.assertIn(str(self.source / 'build/wasm'), calls[0])
+        self.assertIn('web/datapump-wasm.html', result.stdout)
+        self.assertNotIn('Application:', result.stdout)
+
+    def test_wasm_profile_rejects_native_options_and_environment(self):
+        sdk = self.prepare_wasm_sdk()
+        for options in [('--web-worker',), ('--backend', 'rev'), ('test', 'contract'), ('--tui',)]:
+            _, calls = self.run_wrapper('--wasm-sdk', str(sdk), *options, success=False)
+            self.assertFalse(calls)
+        for variable in ('CC', 'EM_CONFIG', 'EM_CACHE', 'EMCC_CFLAGS', 'CPATH'):
+            _, calls = self.run_wrapper('--wasm-sdk', str(sdk), success=False, **{variable:'injected'})
+            self.assertFalse(calls)
+
+    def test_wasm_web_group_runs_real_module_without_native_worker(self):
+        sdk = self.prepare_wasm_sdk()
+        _, calls = self.run_wrapper('test', 'web', '--wasm-sdk', str(sdk))
+        self.assertIn('-DBUILD_TESTING=ON', calls[0])
+        self.assertIn('-DDATAPUMP_BUILD_WEB_WORKER=OFF', calls[0])
+        self.assertIn('datapump-tests-web', calls[1])
+        self.assertIn('^web$', calls[2])
+
+    def test_wasm_sdk_is_never_mixed_into_a_native_cache(self):
+        sdk = self.prepare_wasm_sdk()
+        build = self.source / 'build/wasm'
+        build.mkdir(parents=True)
+        (build / 'CMakeCache.txt').write_text('DATAPUMP_CONFIGURED_SDK_ROOT:INTERNAL=/native-sdk\n')
+        _, calls = self.run_wrapper('--wasm-sdk', str(sdk), success=False)
+        self.assertFalse(calls)
+
     def prepare_sdk(self):
         sdk = self.root / "SDK with spaces"
         metadata = sdk / "share/datapump-sdk"

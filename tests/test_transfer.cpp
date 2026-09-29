@@ -43,6 +43,18 @@ transfer::Received consume(const Bytes& wire,const transfer::Options& value,bool
     }
     if(complete)result=receiver.push(chunk({},wire.size(),true));return result;
 }
+void representable_pattern_ceiling() {
+    constexpr auto stride=boundary_sync::interval_bits+boundary_sync::marker_bits;
+    const auto ordinary=transfer::pattern_bit_limit(default_memory_limit);
+    check(ordinary>=stride&&ordinary<=Bytes{}.max_size()&&ordinary%stride==0,
+          "default source allowance must retain a representable fixed-interval ceiling");
+    const auto large=(Bytes{}.max_size()-4096)/2;
+    check(transfer::pattern_bit_limit(large)==(Bytes{}.max_size()/stride)*stride,
+          "large local allowance must saturate without overflow or partial framing");
+    auto value=options();value.content_limit=default_memory_limit;
+    check(!transfer::message_wire_bits(sample(16),value).empty(),
+          "default memory allowance must admit a small attachment on32bit hosts");
+}
 void fixed_pipeline_and_local_metadata() {
     const auto sent=sample();
     for(bool encrypted:{false,true})for(auto fec:{FecMode::off,FecMode::rs20,FecMode::rs60})for(bool compressed:{false,true}) {
@@ -210,6 +222,10 @@ void exact_raw_masking_and_scheduling() {
     const auto prefix=(static_cast<double>(modem::training_sample_count(value.modem))+static_cast<double>(modem::pattern_pulse_padding_samples(value.modem)))/value.modem.sample_rate;
     const auto scheduled=detail::schedule_transmission(value.modem,[&](std::uint64_t epoch){++builds;value.timestamp=epoch;now+=builds==1?2.:.125;return transfer::binary_transmitter(Bytes{0,1},value);},[&]{return now;});
     check(builds==2 && scheduled.playback_epoch>now && std::abs(scheduled.playback_epoch+prefix-static_cast<double>(scheduled.epoch))<1e-6,"prepared source retains its actual scheduled epoch");
+    now=1800000000.375;builds=0;
+    const auto queued=detail::schedule_transmission(value.modem,[&](std::uint64_t epoch){++builds;value.timestamp=epoch;now+=builds==1?2.:.125;return transfer::binary_transmitter(Bytes{0,1},value);},[&]{return now;},{},0,.5);
+    check(builds==2 && queued.playback_epoch>now+.5 && std::abs(queued.playback_epoch+prefix-static_cast<double>(queued.epoch))<1e-6,"prepared source leaves the audio delivery margin before its actual epoch");
+    rejects([&]{detail::schedule_transmission(value.modem,[](std::uint64_t){return std::unique_ptr<modem::StreamingTransmitter>{};},[&]{return now;},{},0,-1);},"negative audio delivery margin rejected");
 }
 void protection_and_cancellation() {
     auto value=options(true);value.modem.dsss=true;const auto config=transfer::seeded_config(value,value.timestamp);
@@ -372,4 +388,4 @@ void transmission_generation_trace() {
           "trace-aware memory admission must allow the actual bounded TX without changing airtime or wire geometry");
 }
 }
-int main(){try{fixed_pipeline_and_local_metadata();short_text_uses_exact_dictionary_bits();keys_and_unknown_slots();content_limits_and_streaming_storage();exact_raw_masking_and_scheduling();protection_and_cancellation();transmission_generation_trace();std::cout<<"stream transfer passed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{representable_pattern_ceiling();fixed_pipeline_and_local_metadata();short_text_uses_exact_dictionary_bits();keys_and_unknown_slots();content_limits_and_streaming_storage();exact_raw_masking_and_scheduling();protection_and_cancellation();transmission_generation_trace();std::cout<<"stream transfer passed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

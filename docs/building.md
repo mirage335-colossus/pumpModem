@@ -16,7 +16,8 @@ development files are required. The normal FLTK GUI also needs X11/Xft and font
 development packages on Linux. FLTK, XZ/liblzma, QR and LDPC sources are vendored.
 Python is optional for CLI/build-tool tests, and required only by the opt-in Rev
 resource builder or optional dependency preparation helper. Python is not part
-of the installed application.
+of the installed application. The browser profile additionally uses Python to
+assemble its self-contained static page; it is not a browser runtime dependency.
 
 For Debian/Ubuntu, see the package list in the [README](../README.md#build-and-run).
 On Fedora/RHEL-family systems, the corresponding development packages include
@@ -98,12 +99,86 @@ Their `frontends` regression group runs in separate CI jobs parallel to existing
 regressions. New dependency recipe IDs require explicit base maintenance; routine
 release jobs never rebuild missing dependencies implicitly.
 
+
+## Browser application and pipe worker
+
+The optional `datapump-worker` and `datapump-wasm` compositions reuse the common
+C++ application with browser audio. The worker has no HTTP server or socket
+transport. An existing embedding application supplies actual inherited anonymous
+pipes and owns all network connections. The worker closes unrelated inherited
+descriptors and installs a no-socket boundary before starting the application.
+Unsupported enforcement platforms fail closed. The initial worker implementation
+is Linux-specific; Windows/macOS worker qualification is not implied by a
+successful build of their existing native frontends.
+
+```sh
+./build.sh --cli --web-worker
+./build.sh test web --cli
+./build/dev-cli-web/datapump-worker --self-check
+# Prepared Linux source SDK remains a separate choice for native binaries:
+./build.sh package --cli --web-worker --sdk /absolute/prepared/linux-sdk
+```
+
+`--web-worker` is independent of `--backend`; it adds an executable named
+`datapump-worker` and hosted browser assets under `share/datapump/web/hosted`.
+Existing coinstallable native package ownership is retained: Debian commands are
+`datapump-worker` for the FLTK-owned package and `datapump-worker-rev` for the
+Rev-owned package, each pointing into its own `/opt/datapump/<backend>/bin`.
+The worker itself links neither toolkit nor a native audio provider. There is no
+service installer, listener or CGI socket helper. Direct interactive terminal
+input is not a worker transport; use the embedding application's pipe launcher.
+Host file selection is a separate explicit inherited-pipe capability.
+
+The browser-only product requires an independently prepared
+[Wasm SDK recipe](../third_party/build-support/wasm-sdk/README.md). Preparation
+pins official Emscripten inputs and cross-builds static OpenSSL with socket,
+dynamic loading and thread support disabled. It preserves inputs and checksums;
+ordinary application builds run offline with a frozen compiler cache.
+
+```sh
+python3 tools/build-wasm-sdk.py fetch --download --sources /absolute/wasm-inputs
+python3 tools/build-wasm-sdk.py prepare --sources /absolute/wasm-inputs \
+  --destination /absolute/new/wasm-sdk --jobs 4
+./build.sh --wasm-sdk /absolute/new/wasm-sdk
+./build.sh test web --wasm-sdk /absolute/new/wasm-sdk
+./build.sh package --wasm-sdk /absolute/new/wasm-sdk
+```
+
+The Wasm profile creates `build/wasm/web/datapump-wasm.html`, an ordinary static
+page with preloaded compiled C++, browser adapters and AudioWorklet bytes. Its
+adjacent `web-manifest.json` records the exact input hashes and Wasm imports;
+`manifest.sha256` covers those generated page artifacts. Static packages install
+these files under `share/datapump/web/wasm`, with no native executable or desktop
+launcher. Keep Wasm and native output trees separate. Compiler-host support is
+initially Linux x86_64; other host SDK recipes need separate qualification.
+
+The page uses a single Worker and cooperative execution, without pthreads,
+SharedArrayBuffer or cross-origin isolation headers. Its CSP forbids connections;
+module and worklet bytes are supplied locally after page loading. HTTPS static
+hosting, including GitHub Pages, can provide the browser secure context needed
+for audio. A user action and the browser's ordinary microphone permission remain
+required. Frame embedding also depends on the host's permission policy. Browser
+files use explicit import and download; host file access belongs to the pipe
+worker case. See [web frontend contracts](web-frontends.md) for the integration
+boundary and remaining browser/device qualification.
+
+The native `web` CTest group covers execution, host audio, the C++ bridge, protocol worker,
+renderer and SDK/package tools. With `--wasm-sdk`, the same group builds the actual
+module and exercises its application frames through an isolated Node VM using
+preloaded assets and denied network globals. It also runs the cooperative fiber
+lifecycle/stack-alignment tests compiled for Wasm. It supplements the normal contract/general
+regressions. Successful C++ compilation, Node tests and static import checks do
+not certify microphone, playback timing or file-download behavior in a real
+browser; those require the actual browser/device matrix.
+
 ## Commands and profiles
 
 | Command | Output/configuration | Work performed |
 | --- | --- | --- |
 | `./build.sh` | `build/dev`, FLTK Release, system runtime linkage | Application targets only; test cases remain available |
 | `./build.sh --cli` | `build/dev-cli` | CLI without the native GUI toolkit |
+| `./build.sh --cli --web-worker` | `build/dev-cli-web` | Native pipe worker plus CLI, without a GUI toolkit |
+| `./build.sh --wasm-sdk PATH` | `build/wasm` | Compiled C++ and self-contained static browser page using a prepared Wasm SDK |
 | `./build.sh test GROUP` | `build/dev` normally | Builds the group's prerequisites, then runs CTest |
 | `./build.sh sanitize GROUP` | `build/sanitize`, Debug + ASan/UBSan, headless | Instrumented tests; default group is `contract` |
 | `./build.sh package` | `build/release`, portable Release, tests disabled | Creates TGZ/ZIP and verifies both archives and relocation |

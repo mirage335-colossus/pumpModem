@@ -1,4 +1,5 @@
 #include "datapump/legacy/session.hpp"
+#include "datapump/execution.hpp"
 #include "datapump/audio.hpp"
 #include <algorithm>
 #include <condition_variable>
@@ -18,10 +19,10 @@ void check_format(const Settings& s,const audio::StreamFormat& f) {
 }
 }
 struct Session::Impl {
-    mutable std::mutex mutex;
+    mutable execution::Mutex mutex;
     Settings settings;
     Snapshot current;
-    std::jthread worker;
+    execution::Task worker;
     bool closing=false;
     std::uint64_t event_serial=0;
     std::size_t retained_text=0;
@@ -50,10 +51,10 @@ struct Session::Impl {
     }
     void receive(std::stop_token stop,const Settings& s) {
         Receiver receiver(s.config,[&](std::string_view text){append(text,false);});
-        std::mutex queue_mutex;std::condition_variable_any changed;
+        execution::Mutex queue_mutex;execution::StopCondition changed;
         std::deque<std::vector<float>> queue;std::size_t queued_samples=0;
         bool done=false,overrun=false;std::string capture_error;
-        std::jthread capture([&](std::stop_token capture_stop) {
+        execution::Task capture([&](std::stop_token capture_stop) {
             try {
                 audio::capture(sample_rate,s.device,[&](std::span<const float> block) {
                     std::lock_guard lock(queue_mutex);
@@ -68,6 +69,7 @@ struct Session::Impl {
         });
         std::stop_callback stop_capture(stop,[&]{capture.request_stop();changed.notify_all();});
         while(!stop.stop_requested()) {
+            execution::checkpoint();
             std::vector<float> block;
             {
                 std::unique_lock lock(queue_mutex);
@@ -110,7 +112,7 @@ struct Session::Impl {
             current.status=tx?"Transmitting · simplex":"Listening · simplex";++current.revision;
         }
         if(worker.joinable())worker.join();
-        worker=std::jthread([this,s,tx,text=std::move(text)](std::stop_token stop) {
+        worker=execution::Task([this,s,tx,text=std::move(text)](std::stop_token stop) {
             try {if(tx)send(stop,s,text);else receive(stop,s);}
             catch(const std::exception& e) {if(!stop.stop_requested())update([&](auto& out){out.error=e.what();});}
             update([&](auto& out) {

@@ -1,0 +1,30 @@
+.TH DATAPUMP-WORKER 1 "2026-09-28" "DataPump 001_00" "User Commands"
+.SH NAME
+datapump-worker \- socket-free Data Pump application worker
+.SH SYNOPSIS
+.B datapump-worker
+.br
+.B datapump-worker \-\-version
+.br
+.B datapump-worker \-\-self-check
+.SH DESCRIPTION
+Runs the common C++ application using browser audio supplied by an embedding
+host over inherited anonymous pipes. The host owns process lifetime, browser
+transport, authentication and authorized file access. Data Pump opens no socket
+and provides no HTTP server, URL, listening port or network fallback.
+.PP
+Standard input and output carry the versioned binary host protocol. Diagnostics
+use standard error. Socket-backed descriptors and unqualified containment
+platforms are rejected. Do not invoke the protocol interactively in a terminal.
+.SH SECURITY
+The embedding application must supply only the documented pipe endpoints and
+approved file streams. Received data is never an executable command or a host
+filesystem path. Receiving an attachment does not save or open it automatically.
+The platform-specific no-socket boundary must pass qualification before use.
+.SH FILES
+.I share/datapump/web/hosted/
+contains the declarative browser renderer and audio adapter for a host loader.
+The renderer does not provide network transport.
+.SH SEE ALSO
+.BR datapump-gui (1),
+.BR pump (1)

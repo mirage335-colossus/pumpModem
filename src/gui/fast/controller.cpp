@@ -1,4 +1,5 @@
 #include "controller.hpp"
+#include "datapump/execution.hpp"
 #include "screen.hpp"
 #include "presentation.hpp"
 #include "../audio_controls.hpp"
@@ -84,13 +85,14 @@ struct Controller::Impl {
     bool closing=false,key_loading=false;
     C pending_start=C::none;
     std::chrono::steady_clock::time_point acquire_deadline;
-    struct Loaded {std::vector<KeyEntry> keys;std::filesystem::path path;std::string error;bool saved=false;};
-    std::jthread worker;
-    std::mutex mutex;
+    struct Loaded {std::vector<KeyEntry> keys;std::filesystem::path path;std::string error;bool saved=false;std::uint64_t completion_id=0;};
+    execution::Task worker;
+    execution::Mutex mutex;
     std::optional<Loaded> loaded;
     struct Pending {C command;std::shared_ptr<const fast::ReceivedFile> file;};
     std::map<std::uint64_t,Pending> pending;
     std::vector<ui::ServiceRequest> services;
+    std::vector<ui::ServiceCompletion> service_completions;
     ui::FieldState& f(F field) {return fields.at(static_cast<std::size_t>(field));}
     const ui::FieldState& f(F field) const {return fields.at(static_cast<std::size_t>(field));}
     explicit Impl(std::function<bool()> acquire):acquire_audio(std::move(acquire)) {
@@ -423,10 +425,10 @@ struct Controller::Impl {
         const auto id=++service_id;pending.emplace(id,Pending{command,command==C::fast_save?selected_file():nullptr});
         services.push_back({id,kind,std::move(title),std::move(value)});
     }
-    void load(std::filesystem::path path,bool generate) {
+    void load(std::filesystem::path path,bool generate,std::uint64_t completion_id=0) {
         key_loading=true;f(F::fast_status).text=generate?"Generating fast keyfile…":"Loading fast keyfile…";
-        worker=std::jthread([this,path=std::move(path),generate] {
-            Loaded result;result.path=path;
+        worker=execution::Task([this,path=std::move(path),generate,completion_id] {
+            Loaded result;result.path=path;result.completion_id=completion_id;
             try {if(generate)create_keyring(path,{"Fast"});result.keys=load_keyring(path);}
             catch(const std::exception& e) {result.error=e.what();}
             std::lock_guard lock(mutex);loaded=std::move(result);
@@ -441,6 +443,7 @@ void Controller::poll() {
     {std::lock_guard lock(p.mutex);loaded.swap(p.loaded);}
     if(loaded) {
         p.key_loading=false;if(p.worker.joinable())p.worker.join();
+        if(loaded->completion_id)p.service_completions.push_back({loaded->completion_id,loaded->error});
         if(!p.closing) {
             if(!loaded->error.empty())report_error(loaded->error);
             else if(loaded->saved)p.f(F::fast_status).text="Saved complete received bytes.";
@@ -650,17 +653,17 @@ void Controller::complete_service(ui::ServiceResult result) {
     auto& p=*impl_;const auto found=p.pending.find(result.id);if(found==p.pending.end())return;
     const auto pending=found->second;p.pending.erase(found);
     if(p.closing||result.cancelled)return;
-    if(!result.error.empty()) {report_error(result.error);return;}
+    if(!result.error.empty()) {if(result.track_completion)p.service_completions.push_back({result.id,result.error});report_error(result.error);return;}
     try {
         switch(pending.command) {
-        case C::fast_open_key:case C::fast_generate_key:p.load(path_from_text(result.value),pending.command==C::fast_generate_key);break;
+        case C::fast_open_key:case C::fast_generate_key:p.load(path_from_text(result.value),pending.command==C::fast_generate_key,result.track_completion?result.id:0);break;
         case C::fast_choose_file:
             p.f(F::fast_file).text=std::move(result.value);p.f(F::fast_source).selected="file";p.inspect_file();break;
         case C::fast_copy_signal:p.f(F::fast_status).text="Received text copied to the clipboard.";break;
         case C::fast_save:if(pending.file) {
             p.key_loading=true;p.f(F::fast_status).text="Saving complete received bytes…";
-            p.worker=std::jthread([&p,file=pending.file,path=path_from_text(result.value)] {
-                Impl::Loaded saved;saved.saved=true;
+            p.worker=execution::Task([&p,file=pending.file,path=path_from_text(result.value),completion_id=result.track_completion?result.id:0] {
+                Impl::Loaded saved;saved.saved=true;saved.completion_id=completion_id;
                 try {file->save(path);}catch(const std::exception& e) {saved.error=e.what();}
                 std::lock_guard lock(p.mutex);p.loaded=std::move(saved);
             });
@@ -668,9 +671,10 @@ void Controller::complete_service(ui::ServiceResult result) {
         default:break;
         }
         ++p.revision;p.refresh();
-    }catch(const std::exception& e) {report_error(e.what());}
+    }catch(const std::exception& e) {if(result.track_completion)p.service_completions.push_back({result.id,e.what()});report_error(e.what());}
 }
 std::vector<ui::ServiceRequest> Controller::take_services() {std::vector<ui::ServiceRequest> result;result.swap(impl_->services);return result;}
+std::vector<ui::ServiceCompletion> Controller::take_service_completions() {std::vector<ui::ServiceCompletion> result;result.swap(impl_->service_completions);return result;}
 void Controller::report_error(std::string message) {impl_->f(F::fast_status).text=std::move(message);++impl_->revision;}
 std::uint64_t Controller::revision() const {return impl_->revision;}
 BitmapSource Controller::bitmap(ui::Bitmap id) const {return id==ui::Bitmap::fast_qr?BitmapSource(impl_->qr):impl_->plots.source(id);}
