@@ -228,7 +228,7 @@ struct Runtime::Impl {
     Renderer renderer;
     bool started=false,dirty=true;
     unsigned width,height;
-    Impl(Launch launch,Config config):application(std::move(launch)),session(application),renderer(config),width(config.width),height(config.height) {
+    Impl(Launch launch,Config config):application(std::move(launch)),session(application,config.mfd,config.mfd_buttons),renderer(config),width(config.width),height(config.height) {
         session.resize({static_cast<int>(config.width),static_cast<int>(config.height),renderer.metrics()});
     }
 };
@@ -250,6 +250,7 @@ FrameHandle Runtime::update(unsigned width,unsigned height,std::span<const surfa
     tick();return frame();
 }
 void Runtime::input(const surface::Event& event) {impl_->session.input(event);impl_->dirty=true;}
+void Runtime::press_mfd_button(unsigned number) {impl_->session.press_mfd_button(number);impl_->dirty=true;}
 bool Runtime::tick() {
     if(!impl_->started){impl_->application.start();impl_->started=true;}
     const bool changed=impl_->session.tick();

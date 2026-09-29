@@ -26,7 +26,42 @@ The bundled antialiased DejaVu Sans Mono font displays printable ASCII.
 Unsupported local Unicode glyphs
 appear as question marks while the original editor bytes remain intact.
 Received text retains Data Pump's stricter shared received-byte policy.
+.SH MFD / AMPCD BEZEL
+The default color display has rectangular inner label and outer button rings.
+Five reusable keys total provide TUNE, ACTIONS and VIEWS banks. Button 1 changes
+bank; 2/3 select a setting, action or view; 4/5 choose the displayed previous/next
+preset in TUNE. Button 5 executes the selected action or opens the selected view.
+Only numbered outer buttons are clickable. F5 through F9 also press keys 1
+through 5. Unused key positions are empty.
+.PP
+The three-key variant uses button 1 to cycle individual functions; 2/3 adjust
+settings, and 3 executes an action. In VIEWS, 2 advances the tab and 3 opens it.
+Button 1 becomes Back/Cancel for help, popups and services, or Escape for an
+overlay that declares an Escape binding. Other bezel actions remain inactive
+while modal input is owned. Changing bezel banks does not change the usual GUI tab. Labels, choices and
+action availability come from the active modem declarations. No setting value
+is invented by the backend. Below 480x320 the bezel asks for enlargement and
+does not accept keys. The full GUI is not a watch-size interface.
+.PP
+This is a prototype for constrained embedded display ports and simulated VR,
+and an example of consistent application functionality through few physical
+buttons. Arduino-class derivatives would generally implement only a high-SNR
+wired Fast Modem, transmit-only Robust sensor reporting, or specialized limited
+Robust listening/transmitting such as a slow mesh repeater. Most receive
+processing exceeds typical microcontroller compute. A watch-like news receiver
+or repeater may need no text input; otherwise occasional keyboard/mouse setup
+remains useful. Encryption and other deployment defaults may live in firmware,
+EEPROM, command-line settings or ordinary widgets. The avionics convention does
+not imply use on fast-moving vehicles: the modems intentionally lack Doppler
+tracking. All bezel behavior is inside the framebuffer backend, below the
+application abstraction.
 .SH OPTIONS
+.TP
+.B \-\-no-mfd
+Disable both bezel rings and restore the ordinary framebuffer layout.
+.TP
+.BI \-\-mfd-buttons " 3|5"
+Select three or five physical-style keys total; default 5.
 .TP
 .B \-\-headless
 Run without initializing SDL video. By default, produce one rendering iteration
@@ -51,13 +86,16 @@ Each preset uses separately rasterized glyphs.
 Use the shared simulated Robust Modem session instead of ordinary live audio.
 .TP
 .B \-\-color, \-\-monochrome
-Select shared color or grayscale presentation.
+Select shared color (default AMPCD) or grayscale presentation.
 .TP
 .B \-\-self-check, \-\-smoke-test
 Run the shared display-free check or full application workflow smoke.
 The shared link-setting and smoke options described in datapump-gui(1) also apply.
 .SH EMBEDDING
 The datapump_framebuffer library and framebuffer.hpp expose a host-owned Runtime.
+Config defaults to mfd=true, mfd_buttons=5 and color=true. Set mfd=false to
+disable the bezel. press_mfd_button(number) dispatches a displayed 1-based key
+without mouse coordinates. Hosts debounce switches and dispatch once per press.
 Construct one Runtime and call update(width, height, events) at least every
 40 milliseconds. Each call returns one complete, immutable framebuffer containing
 all widgets, menus, dialogs and plots. Upload it as a single texture or copy it

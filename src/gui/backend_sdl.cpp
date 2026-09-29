@@ -124,6 +124,10 @@ int run(Launch launch,const HostOptions& options) {
                 } else if(!closing&&event.type==SDL_KEYDOWN) {
                     const auto modifiers=event.key.keysym.mod;
                     if((modifiers&KMOD_CTRL)&&event.key.keysym.sym==SDLK_q) {runtime.close();closing=true;continue;}
+                    if(!(modifiers&(KMOD_CTRL|KMOD_SHIFT|KMOD_ALT|KMOD_GUI))&&event.key.keysym.sym>=SDLK_F5&&event.key.keysym.sym<=SDLK_F9) {
+                        if(!event.key.repeat)runtime.press_mfd_button(static_cast<unsigned>(event.key.keysym.sym-SDLK_F5)+1);
+                        continue;
+                    }
                     surface::Event input;input.type=surface::Event::Type::key;input.key=key(event.key.keysym.sym);
                     input.ctrl=(modifiers&KMOD_CTRL)!=0;input.shift=(modifiers&KMOD_SHIFT)!=0;input.alt=(modifiers&KMOD_ALT)!=0;
                     if(input.ctrl&&event.key.keysym.sym==SDLK_v) {
@@ -177,6 +181,12 @@ int main(int argc,char** argv) {
             const std::string_view arg=argv[i];
             const auto next=[&]() -> std::string_view {if(i+1>=argc)throw std::invalid_argument("Missing framebuffer option value");return argv[++i];};
             if(arg=="--headless")options.headless=true;
+            else if(arg=="--no-mfd")options.config.mfd=false;
+            else if(arg=="--mfd-buttons") {
+                options.config.mfd_buttons=number(next(),5);
+                if(options.config.mfd_buttons!=3&&options.config.mfd_buttons!=5)
+                    throw std::invalid_argument("MFD button count must be 3 or 5");
+            }
             else if(arg=="--capture") {
                 const auto value=next();std::u8string utf8;utf8.reserve(value.size());
                 for(const auto byte:value)utf8.push_back(static_cast<char8_t>(static_cast<unsigned char>(byte)));
@@ -190,7 +200,7 @@ int main(int argc,char** argv) {
                 options.config.width=number(value.substr(0,split),8192);options.config.height=number(value.substr(split+1),8192);
             } else {arguments.push_back(argv[i]);if(arg=="--help")help=true;}
         }
-        if(help)std::cout<<"Framebuffer host options: --headless --capture FILE.ppm --frames N\n  --size WIDTHxHEIGHT --font-scale 1..4\nKeyboard: Tab / Shift+Tab, arrows, Enter, Escape, F1 help, Ctrl+Q quit.\nSDL2 software surface; no OpenGL renderer. Headless defaults to one frame,\nexcept --smoke-test, which runs the complete shared smoke workload.\n";
+        if(help)std::cout<<"Framebuffer host options: --headless --capture FILE.ppm --frames N\n  --size WIDTHxHEIGHT --font-scale 1..4 --no-mfd --mfd-buttons 3|5\nColor MFD rings default on; --monochrome selects monochrome.\nKeyboard: Tab / Shift+Tab, arrows, Enter, Escape, F1 help, Ctrl+Q quit.\nSDL2 software surface; no OpenGL renderer. Headless defaults to one frame,\nexcept --smoke-test, which runs the complete shared smoke workload.\n";
         return gui_main(static_cast<int>(arguments.size()),arguments.data(),"sdl2 software framebuffer",
             [&](Launch launch){return run(std::move(launch),options);},"datapump-fb");
     } catch(const std::exception& error) {std::cerr<<"Data Pump framebuffer: "<<error.what()<<'\n';return 1;}

@@ -36,6 +36,8 @@ struct Config {
     unsigned width=1200,height=1048;
     unsigned font_scale=2;
     bool color=true;
+    bool mfd=true;
+    unsigned mfd_buttons=5; // 3: cycle individual functions; 5: grouped banks.
 };
 class Renderer {
 public:
@@ -63,6 +65,8 @@ public:
     // notice, so embedding needs no callbacks to keep the interface usable.
     FrameHandle update(unsigned width,unsigned height,std::span<const surface::Event> events={});
     void input(const surface::Event&);
+    // Physical bezel keys, numbered as drawn (1..3 or 1..5). No pointer needed.
+    void press_mfd_button(unsigned number);
     bool tick();
     FrameHandle frame() const;
     std::vector<ui::ServiceRequest> take_host_services();

@@ -7,13 +7,14 @@ namespace datapump::gui::framebuffer {
 // selections, menus and scrolling, independently of the terminal interface.
 class Session {
 public:
-    explicit Session(Application&);
+    explicit Session(Application&,bool mfd=true,unsigned mfd_buttons=5);
     ~Session();
     Session(const Session&)=delete;
     Session& operator=(const Session&)=delete;
     void resize(surface::Viewport);
     bool tick();
     void input(const surface::Event&);
+    void press_mfd_button(unsigned number);
     const surface::Scene& scene() const;
     std::vector<ui::ServiceRequest> take_host_services();
     void complete_host_service(ui::ServiceResult);

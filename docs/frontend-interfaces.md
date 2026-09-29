@@ -114,6 +114,77 @@ dimensions, preserving brief carriers between destination samples. This is a
 generic producer capability, not a terminal-side modem interpretation. Other
 plots use shared opaque bitmap producers and respect sample aspect ratio.
 
+## Framebuffer MFD / AMPCD prototype
+
+`datapump-fb` opens with a rectangular MFD bezel: an inner ring of changing
+labels aligned with an outer ring of clickable, numbered buttons. Color is the
+default (AMPCD, Advanced Color Multi Purpose Display); `--monochrome` selects
+grayscale, and `--no-mfd` removes both rings and restores the ordinary framebuffer
+layout. `--mfd-buttons 3` selects the constrained three-button variant; the default
+is five buttons **total**, never more than five labels/buttons on any edge. Unused
+positions stay empty. Click the outer numbered buttons, or use F5 through F9
+for buttons 1 through 5 (F5 through F7 in three-button mode).
+
+The design borrows the simulated-aircraft convention of fixed bezel keys with
+adjacent context-dependent labels. It groups common operations into MFD pages,
+called banks here to distinguish them from the application's tabs:
+
+| Bank | Five-button behavior |
+| --- | --- |
+| TUNE | Button 1 changes bank; 2/3 choose a setting; 4/5 select the previous/next offered value. The label previews the exact target value. |
+| ACTIONS | 2/3 choose an action; 5 executes it. Changing the selection never executes it. Persistent controls and the editor's transmit-action row come first. |
+| VIEWS | 2/3 choose an application tab; 5 opens it. Selecting or browsing a tab does not open it until OPEN is pressed. |
+
+TUNE includes the modem selector and available settings such as Expected SNR
+and Rate (initially 3.6 kHz for Robust Modem). ACTIONS exposes the current modem's
+declared actions, including Transmit, Transmit noise where supported, Cancel TX,
+and Clear received. Modem changes regenerate the banks from the active
+application declarations. Labels and enabled states follow the application;
+an unavailable action stays disabled. Plain numeric presets are traversed in
+numeric order; other options retain their declared order. Endpoints stop, and
+labels show the offered destination rather than promising a fixed numeric step.
+The accepted value is displayed even when the application normalizes a preset.
+
+With three buttons, button 1 cycles individual functions through TUNE, ACTIONS,
+and VIEWS. Buttons 2/3 adjust the displayed setting; actions need only button 3
+(EXECUTE). In VIEWS, button 2 advances the candidate tab and button 3 opens it.
+This trades more navigation presses for fewer physical switches. Changing the
+MFD bank/function changes only bezel labels, leaving the usual GUI and its tab
+in place. Text editing and occasional setup remain available through ordinary
+widgets. Background MFD operations are inactive while help, a popup, a modal application
+overlay, or a host-service dialog owns input. Button 1 becomes BACK / CANCEL
+for help, popups and services, or ESCAPE when the overlay declares that key;
+it follows the shared overlay binding without bypassing its policy. Bezel labels and unused areas do
+not activate anything. Below 480 by 320 pixels the bezel requests enlargement
+and its keys are inactive; the full GUI is **not** a watch-size layout. Larger
+windows give the inset GUI more room; its normal panning/focus behavior remains
+available when the interior is smaller than the desktop layout.
+
+This is a prototype for future display-hardware ports or simulated VR use,
+not an Arduino modem implementation. Its other purpose is to demonstrate the
+application's functionality through a consistent, reusable interface that other
+applications can follow. All MFD configuration, rings, hit testing, page/function
+selection and preset navigation belong to the framebuffer backend. The backend
+projects opaque shared declarations and invokes their existing scoped callbacks;
+it contains no modem field/command lookup, radio calculations or application-side
+MFD menu. Ordinary application maintenance does not require MFD-specific code.
+Grouped setup menus and arbitrary text entry need not be reachable from the bezel.
+
+The intended derivatives are inexpensive embedded radios that seldom have a
+touchscreen or keyboard/mouse: a watch-like news receiver, a configurable radio
+used to retune from a new location, or a device with only two or three switches.
+A physical two-button adaptation can use the same function-cycling pattern;
+this prototype implements three and five. Typical Arduino-class projects would
+implement only a high-SNR Fast Modem for wired links, a transmit-only Robust Modem
+for sensor reports, or a specialized Robust Modem with narrowly limited listening
+and transmitting, such as a slow mesh repeater. They generally lack the compute
+for much of Data Pump's receive processing. A receiver/repeater may need no text
+entry at all; otherwise occasional keyboard/mouse setup is reasonable.
+Encryption and other deployment choices can be configured beforehand by command
+line, ordinary GUI, firmware defaults or EEPROM in the derivative. Avionics-style
+presentation does not imply suitability for fast-moving vehicles: these modems
+intentionally lack Doppler tracking.
+
 ## Framebuffer and engine integration
 
 `framebuffer::Runtime` owns one application instance and a separate pixel UI.
@@ -127,6 +198,12 @@ framebuffer::Runtime panel;
 auto image = panel.update(width, height, events);
 // Upload image->pixels using image->width, height and stride_bytes to one texture.
 ```
+
+`framebuffer::Config` defaults to `mfd=true`, `mfd_buttons=5`, and `color=true`.
+Set `mfd=false` for the unframed layout. An embedded host can call
+`Runtime::press_mfd_button(number)` with the displayed 1-based button number,
+then `update`/`tick`; this needs neither mouse coordinates nor a keyboard. Debounce
+physical switches in the host and dispatch once per press.
 
 The returned frame is complete. Resizing, widgets, popups, dialogs and plots all
 remain inside this one surface. The host does not need per-widget callbacks,

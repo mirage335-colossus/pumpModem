@@ -9,6 +9,9 @@
 #include "service_queue.hpp"
 #include "text_policy.hpp"
 #include <algorithm>
+#include <array>
+#include <charconv>
+#include <cmath>
 #include <deque>
 #include <map>
 #include <set>
@@ -93,6 +96,22 @@ struct Session::Impl {
     };
     Application& app;
     Viewport viewport{1200,1048,{8,18}};
+    Viewport outer_viewport=viewport;
+    bool mfd=true;
+    unsigned mfd_buttons=5;
+    ui::Rect interior{};
+    struct MfdEntry {
+        ui::Control control{};
+        std::optional<ui::Page> page;
+        std::string label;
+        bool enabled=false;
+    };
+    struct MfdKey {ui::Rect bounds;unsigned number;bool enabled;};
+    std::array<std::vector<MfdEntry>,3> mfd_entries;
+    std::array<std::size_t,3> mfd_selected{};
+    std::map<ControlIdentity,std::pair<std::string,std::string>> mfd_presets;
+    std::vector<MfdKey> mfd_keys;
+    unsigned mfd_bank=0;
     Scene scene;
     std::vector<Item> items;
     std::vector<Hit> hits;
@@ -118,7 +137,17 @@ struct Session::Impl {
     Editor prompt;
     int prompt_button=0;
     ui::Rect prompt_bounds;
-    explicit Impl(Application& application):app(application) {}
+    explicit Impl(Application& application,bool bezel,unsigned buttons):app(application),mfd(bezel),mfd_buttons(buttons) {
+        if(buttons!=3&&buttons!=5)throw std::invalid_argument("MFD button count must be 3 or 5");
+        resize(outer_viewport);
+    }
+    void resize(Viewport value) {
+        outer_viewport=value;
+        const int x=mfd?std::min(std::max(104,value.metrics.cell_width*17),value.width/4):0;
+        const int y=mfd?std::min(2*value.metrics.line_height+46,value.height/4):0;
+        interior={x,y,value.width-2*x,value.height-2*y};
+        viewport={interior.w,interior.h,value.metrics};dirty=true;
+    }
     int width() const {return std::max(ui::min_width,viewport.width);}
     int height() const {return std::max(ui::min_height,viewport.height-22);}
     int cw() const {return viewport.metrics.cell_width;}
@@ -398,6 +427,196 @@ struct Session::Impl {
         hit(Hit::Kind::accept,accept,0);hit(Hit::Kind::cancel,cancel,0);
         text({x+12,y+h-lh()-4,w-24,lh()},notice.empty()?"Enter accepts; Escape cancels":notice,notice.empty()?Tone::muted:Tone::negative);
     }
+    // Bezel pages project the same opaque declarations as ordinary widgets.
+    // No field/command IDs, label matching or modem-setting calculations live here.
+    static std::optional<double> numeric(std::string_view value) {
+        double number=0;
+        const auto parsed=std::from_chars(value.data(),value.data()+value.size(),number);
+        if(parsed.ec==std::errc{}&&parsed.ptr==value.data()+value.size()&&std::isfinite(number))return number;
+        return std::nullopt;
+    }
+    void collect_mfd() {
+        auto previous=std::move(mfd_entries);mfd_entries={};
+        for(const auto& c:ui::console_screen()) {
+            if(c.document_only||(!c.persistent&&c.page!=app.page())||c.menu!=ui::Menu::none)continue;
+            const auto view=app.control(c);if(!view.visible)continue;
+            const bool tune=c.kind==ui::Kind::choice||
+                (c.kind==ui::Kind::text&&!c.multiline&&!c.read_only&&view.state.options.size()>1);
+            if(!tune&&c.kind!=ui::Kind::action)continue;
+            std::string label=view.label;
+            if(label.empty()) {
+                for(const auto& option:view.state.options)if(option.id==view.state.selected){label=option.label;break;}
+                if(label.empty())label=view.state.text;
+            }
+            if(label.empty())continue;
+            mfd_entries[tune?0:1].push_back({c,{},std::move(label),view.enabled});
+        }
+        // Persistent controls and the action row containing an editor's submit
+        // command come first. This is declaration structure, not radio policy.
+        auto& actions=mfd_entries[1];
+        const auto rank=[&](const MfdEntry& entry) {
+            if(entry.control.persistent)return 0;
+            for(const auto& c:ui::console_screen())if(c.submit!=ui::Command::none&&app.control(c).visible&&c.submit==entry.control.command)return 1;
+            for(const auto& c:ui::console_screen())if(c.submit!=ui::Command::none&&app.control(c).visible)
+                for(const auto& action:actions)if(action.control.command==c.submit&&action.control.row==entry.control.row)return 2;
+            return 3;
+        };
+        // Compute priorities before sorting: the comparator must not inspect a
+        // vector while the sort is moving its elements.
+        std::vector<std::pair<int,MfdEntry>> ranked;
+        for(const auto& entry:actions)ranked.emplace_back(rank(entry),entry);
+        std::stable_sort(ranked.begin(),ranked.end(),[](const auto& a,const auto& b){return a.first<b.first;});
+        actions.clear();for(auto& entry:ranked)actions.push_back(std::move(entry.second));
+        for(const auto& tab:app.tab_layout(width(),height()))if(tab.visible) {
+            const auto found=std::find_if(ui::pages().begin(),ui::pages().end(),[&](const auto& page){return page.id==tab.page;});
+            if(found!=ui::pages().end())mfd_entries[2].push_back({{},tab.page,found->title,true});
+        }
+        for(unsigned bank=0;bank<3;++bank) {
+            auto& selected=mfd_selected[bank];const auto& entries=mfd_entries[bank];
+            if(selected<previous[bank].size()) {
+                const auto& old=previous[bank][selected];
+                const auto found=std::find_if(entries.begin(),entries.end(),[&](const auto& entry) {
+                    return bank==2?entry.page==old.page:ui::document_control_identity(entry.control)==ui::document_control_identity(old.control);
+                });
+                selected=found==entries.end()?0:static_cast<std::size_t>(found-entries.begin());
+            } else selected=0;
+        }
+        // Bound normalization memory to declarations still available in TUNE.
+        for(auto it=mfd_presets.begin();it!=mfd_presets.end();) {
+            const auto& entries=mfd_entries[0];
+            if(std::none_of(entries.begin(),entries.end(),[&](const auto& e){return ui::document_control_identity(e.control)==it->first;}))it=mfd_presets.erase(it);
+            else ++it;
+        }
+    }
+    const MfdEntry* mfd_entry() const {
+        const auto& entries=mfd_entries[mfd_bank];const auto at=mfd_selected[mfd_bank];
+        return at<entries.size()?&entries[at]:nullptr;
+    }
+    std::optional<ui::Option> mfd_target(int direction) const {
+        const auto* entry=mfd_entry();if(!entry||mfd_bank!=0||!entry->enabled)return {};
+        const auto& c=entry->control;const auto& state=app.control(c).state;
+        auto values=state.options;
+        values.erase(std::remove_if(values.begin(),values.end(),[](const auto& option){return !option.enabled;}),values.end());
+        if(values.empty())return {};
+        const bool numbers=c.kind==ui::Kind::text&&std::all_of(values.begin(),values.end(),[](const auto& o){return numeric(o.label).has_value();});
+        if(numbers)std::stable_sort(values.begin(),values.end(),[](const auto& a,const auto& b){return *numeric(a.label)<*numeric(b.label);});
+        std::string current=c.kind==ui::Kind::choice?state.selected:state.text;
+        const auto saved=mfd_presets.find(ui::document_control_identity(c));
+        if(c.kind==ui::Kind::text&&saved!=mfd_presets.end()&&saved->second.second==state.text)current=saved->second.first;
+        const auto found=std::find_if(values.begin(),values.end(),[&](const auto& o){return o.id==current||(c.kind==ui::Kind::text&&o.label==current);});
+        if(found!=values.end()) {
+            const auto at=found-values.begin()+direction;
+            if(at>=0&&at<static_cast<std::ptrdiff_t>(values.size()))return values[static_cast<std::size_t>(at)];
+            return {};
+        }
+        // A keyboard-edited number may lie between presets. Choose the next
+        // greater/lower declared value; never invent an application value.
+        if(numbers)if(const auto value=numeric(state.text)) {
+            if(direction>0) {for(const auto& option:values)if(*numeric(option.label)>*value)return option;}
+            else {for(auto it=values.rbegin();it!=values.rend();++it)if(*numeric(it->label)<*value)return *it;}
+            return {};
+        }
+        return direction>0?values.front():values.back();
+    }
+    bool mfd_available() const {
+        return mfd&&outer_viewport.width>=480&&outer_viewport.height>=320&&
+            !dialog&&!host_wait&&!help&&!popup&&app.overlay_layers().enable_background;
+    }
+    bool mfd_back() const {
+        const auto overlay=app.overlay();
+        return dialog||host_wait||help||popup||
+            ui::overlay_key_action(overlay.get(),{ui::Key::escape,false,false,false}).command!=ui::Command::none;
+    }
+    void mfd_move(int direction) {
+        const auto count=mfd_entries[mfd_bank].size();if(!count)return;
+        auto& index=mfd_selected[mfd_bank];
+        index=static_cast<std::size_t>((static_cast<int>(index)+direction+static_cast<int>(count))%static_cast<int>(count));
+    }
+    void mfd_press(unsigned number) {
+        if(mfd&&outer_viewport.width>=480&&outer_viewport.height>=320&&number==1&&mfd_back()) {
+            if(dialog)finish_dialog(true);
+            else if(host_wait) {
+                app.complete_service({host_wait->id,true,{},{}});host_wait.reset();host_services.clear();app.set_service_active(false);
+            } else if(help)help=false;
+            else if(popup)popup.reset();
+            else app.overlay_key({ui::Key::escape,false,false,false},false,false);
+            dirty=true;return;
+        }
+        if(!mfd_available()||number<1||number>mfd_buttons)return;
+        if(number==1) {
+            if(mfd_buttons==3&&mfd_selected[mfd_bank]+1<mfd_entries[mfd_bank].size())++mfd_selected[mfd_bank];
+            else {mfd_bank=(mfd_bank+1)%3;if(mfd_buttons==3)mfd_selected[mfd_bank]=0;}
+        } else if(mfd_buttons==5&&(number==2||number==3))mfd_move(number==2?-1:1);
+        else if(const auto* entry=mfd_entry();entry&&entry->enabled) {
+            const bool next=number==mfd_buttons;
+            if(mfd_bank==0) {
+                if(const auto option=mfd_target(next?1:-1)) {
+                    const auto control=entry->control;
+                    if(control.kind==ui::Kind::choice)app.select(control,option->id);
+                    else {app.preset(control,option->id);mfd_presets[ui::document_control_identity(control)]={option->id,app.control(control).state.text};}
+                }
+            } else if(mfd_bank==2) {
+                if(next) {app.navigate(*entry->page);document_scroll=0;}
+                else if(mfd_buttons==3)mfd_move(1);
+            } else if(next)app.activate(entry->control);
+        }
+        dirty=true;
+    }
+    void compose_mfd() {
+        mfd_keys.clear();if(!mfd)return;
+        // Ordinary widgets retain local coordinates, including popup placement,
+        // pan, modal dialogs and caret. Only composition sees the outer display.
+        for(auto& p:scene.primitives) {
+            p.bounds.x+=interior.x;p.bounds.y+=interior.y;
+            if(p.clip){p.clip->x+=interior.x;p.clip->y+=interior.y;p.clip=intersection(*p.clip,interior);}
+            else p.clip=interior;
+        }
+        if(scene.caret){scene.caret->x+=interior.x;scene.caret->y+=interior.y;scene.caret=intersection(*scene.caret,interior);}
+        scene.width=outer_viewport.width;scene.height=outer_viewport.height;paint_clip.reset();
+        const int w=scene.width,h=scene.height,x=interior.x,y=interior.y;
+        fill({0,0,w,y});fill({0,h-y,w,y});fill({0,y,x,h-2*y});fill({w-x,y,x,h-2*y});
+        if(w<480||h<320) {line_text({0,0,w,std::min(y,lh()+4)},"Enlarge MFD (480 x 320)",Tone::caution,true,true);return;}
+        collect_mfd();const bool enabled=mfd_available(),back=mfd_back();const auto* entry=mfd_entry();
+        const char* banks[]={"TUNE","ACTIONS","VIEWS"};
+        const int button=32,pad=8,label_w=std::max(1,x-button-3*pad);
+        const auto key=[&](unsigned number,ui::Rect box,ui::Rect label,std::string caption,bool active,bool centered=false) {
+            const bool available=active&&(enabled||(number==1&&back));
+            fill(box,false,false,true,available,Fill::canvas);
+            line_text(box,std::to_string(number),Tone::normal,available,true);
+            if(centered)line_text(label,caption,Tone::accent,available,true);
+            else text(label,caption,Tone::accent,available);
+            mfd_keys.push_back({box,number,available});
+        };
+        key(1,{w/2-button/2,pad,button,button},{w/2-140,pad+button+4,280,2*lh()},
+            back?(dialog||host_wait||help||popup?"BACK / CANCEL":"ESCAPE"):
+                std::string(mfd_buttons==3?"NEXT FUNCTION | ":"PAGE | ")+banks[mfd_bank],true,true);
+        if(mfd_buttons==5) {
+            key(2,{pad,h/2-button/2,button,button},{pad*2+button,h/2-lh(),label_w,2*lh()},"PREV\nITEM",entry);
+            key(3,{w-pad-button,h/2-button/2,button,button},{w-x+pad,h/2-lh(),label_w,2*lh()},"NEXT\nITEM",entry);
+        }
+        const int bottom=h-y;
+        std::string title=entry?entry->label:"No controls on this page";
+        if(entry&&mfd_bank==0) {
+            const auto& state=app.control(entry->control).state;std::string value=state.text;
+            if(entry->control.kind==ui::Kind::choice)for(const auto& option:state.options)if(option.id==state.selected){value=option.label;break;}
+            if(value!=title&&!value.empty())title+=" | "+value;
+        }
+        line_text({x,bottom+2,w-2*x,lh()},std::string(banks[mfd_bank])+" "+
+            std::to_string(mfd_selected[mfd_bank]+(entry?1:0))+"/"+std::to_string(mfd_entries[mfd_bank].size())+" | "+title,Tone::data,true,true);
+        const int left=w/3,right=w*2/3;const int label_width=std::max(1,w/3-12);
+        const auto down=[&](unsigned number,int center,std::string caption,bool active) {
+            key(number,{center-button/2,h-pad-button,button,button},
+                {center-label_width/2,bottom+lh()+4,label_width,lh()},std::move(caption),active,true);
+        };
+        if(mfd_bank==0) {
+            const auto previous=mfd_target(-1),next=mfd_target(1);
+            down(mfd_buttons-1,left,previous?"< "+previous->label:"< LIMIT",previous.has_value());
+            down(mfd_buttons,right,next?next->label+" >":"LIMIT >",next.has_value());
+        } else {
+            if(mfd_bank==2&&mfd_buttons==3)down(2,left,"NEXT VIEW",entry);
+            down(mfd_buttons,right,mfd_bank==2?"OPEN":"EXECUTE",entry&&entry->enabled);
+        }
+    }
     void rebuild() {
         dirty=false;scene={viewport.width,viewport.height,{},{}};items.clear();hits.clear();pages.clear();paint_clip.reset();document_height=0;
         pan_x=std::clamp(pan_x,0,std::max(0,width()-viewport.width));pan_y=std::clamp(pan_y,0,std::max(0,height()-viewport.height+22));
@@ -479,6 +698,7 @@ struct Session::Impl {
         if(focus&&find(focus)<0)focus.reset();
         if(popup&&find(popup)<0)popup.reset();
         presented_revision=app.revision();
+        compose_mfd();
     }
     void reveal(int index) {
         if(index<0||index>=static_cast<int>(items.size()))return;
@@ -627,10 +847,18 @@ struct Session::Impl {
             dirty=true;break;
         }
     }
-    void input(const Event& event) {
+    void input(Event event) {
         app.tick();services();rebuild();
         if(event.type==Event::Type::input_rejected){notice=event.text;dirty=true;return;}
         if(event.type==Event::Type::pointer_up){drag.reset();return;}
+        if(mfd&&(event.type==Event::Type::pointer||event.type==Event::Type::pointer_move||event.type==Event::Type::wheel)) {
+            if(!contains(interior,event.x,event.y)) {
+                if(event.type==Event::Type::pointer)for(const auto& key:mfd_keys)
+                    if(key.enabled&&contains(key.bounds,event.x,event.y)){mfd_press(key.number);break;}
+                return; // Inactive bezel/labels never fall through to the GUI.
+            }
+            event.x-=interior.x;event.y-=interior.y;
+        }
         if(host_wait)return;
         if(dialog) {
             if(event.type==Event::Type::pointer) {
@@ -723,14 +951,17 @@ struct Session::Impl {
         else if(c.kind==ui::Kind::choice&&event.type==Event::Type::key&&(event.key==Key::up||event.key==Key::down))open_popup(n);
     }
 };
-Session::Session(Application& app):impl_(std::make_unique<Impl>(app)){}
+Session::Session(Application& app,bool mfd,unsigned buttons):impl_(std::make_unique<Impl>(app,mfd,buttons)){}
 Session::~Session()=default;
 void Session::resize(Viewport viewport) {
     if(viewport.width<1||viewport.height<1||viewport.metrics.cell_width<1||viewport.metrics.line_height<1)throw std::invalid_argument("Invalid framebuffer viewport");
-    impl_->viewport=viewport;impl_->dirty=true;
+    impl_->resize(viewport);
 }
 bool Session::tick(){const bool changed=impl_->app.tick();impl_->services();if(changed||impl_->dirty||impl_->app.revision()!=impl_->presented_revision){impl_->rebuild();return true;}return false;}
 void Session::input(const Event& event){impl_->input(event);}
+void Session::press_mfd_button(unsigned number) {
+    impl_->app.tick();impl_->services();impl_->rebuild();impl_->mfd_press(number);
+}
 const Scene& Session::scene() const{return impl_->scene;}
 std::vector<ui::ServiceRequest> Session::take_host_services(){auto result=std::move(impl_->host_services);impl_->host_services.clear();return result;}
 void Session::complete_host_service(ui::ServiceResult result) {

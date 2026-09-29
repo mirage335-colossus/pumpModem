@@ -167,7 +167,7 @@ void pixel_interaction() {
     Application app({});auto edit=declaration(ui::Field::fast_text);edit.label="Pixel editor";edit.byte_limit=32;edit.placement={20,40,0,0,300,76};
     auto toggle=declaration(ui::Field::developer_mode);toggle.label="Pixel toggle";toggle.placement={350,40,0,0,200,28};
     ui::OverlayDefinition overlay;overlay.controls={edit,toggle};app.show_overlay(std::move(overlay));
-    framebuffer::Session session(app);session.resize({1200,1048,{6,18}});session.tick();
+    framebuffer::Session session(app,false);session.resize({1200,1048,{6,18}});session.tick();
     click(session,24,44);input(session,"abcdef");require(app.field(edit.field).text=="abcdef","pixel editor input");
     click(session,30,44);click(session,48,44,surface::Event::Type::pointer_move);click(session,48,44,surface::Event::Type::pointer_up);
     input(session,"Z");require(app.field(edit.field).text=="aZef","pixel drag selection did not replace selected bytes");
@@ -190,7 +190,7 @@ void pixel_interaction() {
 void pixel_presets() {
     Application app({});app.select(ui::Field::fast_mode,"robust");auto edit=declaration(ui::Field::carrier);edit.label="Pixel preset";edit.placement={20,40,0,0,300,30};
     ui::OverlayDefinition overlay;overlay.controls={edit};app.show_overlay(std::move(overlay));
-    framebuffer::Session session(app);session.resize({1200,1048,{6,18}});session.tick();click(session,24,44);select_all(session);input(session,"1234");
+    framebuffer::Session session(app,false);session.resize({1200,1048,{6,18}});session.tick();click(session,24,44);select_all(session);input(session,"1234");
     key(session,surface::Key::down,true);key(session,surface::Key::down);key(session,surface::Key::escape);
     require(app.field(edit.field).text=="1234","cancelled pixel preset discarded draft");
     key(session,surface::Key::down,true);const auto wanted=app.field(edit.field).options.front().id;key(session,surface::Key::enter);
@@ -214,7 +214,7 @@ void minimal_embedding() {
     require(first->pixels.size()==320*240*4&&second->pixels.size()==640*480*4,"runtime destruction invalidated frame handles");
 }
 void overlay_focus_policy() {
-    Application app({});framebuffer::Session session(app);session.resize({1200,1048,{6,18}});session.tick();
+    Application app({});framebuffer::Session session(app,false);session.resize({1200,1048,{6,18}});session.tick();
     const auto& c=declaration(ui::Field::fast_text);const auto rect=app.control_layout(c,1200,1026).widget;
     click(session,rect.x+4,rect.y+3);input(session,"base");
     auto overlay_control=c;overlay_control.placement={20,40,0,0,300,60};
@@ -232,7 +232,7 @@ void popup_live_options() {
     Application app({});app.toggle(ui::Field::developer_mode,true);
     auto choice=declaration(ui::Field::fast_coding);choice.placement={20,40,0,0,300,30};
     ui::OverlayDefinition overlay;overlay.controls={choice};app.show_overlay(overlay);
-    framebuffer::Session session(app);session.resize({1200,1048,{6,18}});session.tick();click(session,24,44);
+    framebuffer::Session session(app,false);session.resize({1200,1048,{6,18}});session.tick();click(session,24,44);
     key(session,surface::Key::down); // three-quarters, initially index one
     app.select(ui::Field::fast_profile,"wire");session.tick();
     require(std::any_of(session.scene().primitives.begin(),session.scene().primitives.end(),[](const auto& p){return p.text=="LDPC 2/3";}),"open pixel popup did not refresh options");
@@ -241,7 +241,7 @@ void popup_live_options() {
 }
 void overlay_keyboard_scope() {
     Application app({});app.select(ui::Field::fast_mode,"robust");
-    framebuffer::Session session(app);session.resize({1200,1048,{6,18}});session.tick();
+    framebuffer::Session session(app,false);session.resize({1200,1048,{6,18}});session.tick();
     key(session,surface::Key::tab);key(session,surface::Key::enter);
     require(app.page()==ui::Page::console,"initial Tab skipped the first page tab");
     auto toggle=declaration(ui::Field::developer_mode);toggle.placement={20,40,0,0,200,28};
@@ -257,7 +257,7 @@ void dropdown_chrome() {
     const auto options=app.field(choice.field).options;require(options.size()>=2,"dropdown fixture has too few options");
     app.select(choice.field,options.front().id);
     ui::OverlayDefinition overlay;overlay.controls={choice};app.show_overlay(overlay);
-    framebuffer::Session session(app);session.resize({320,240,{8,18}});session.tick();
+    framebuffer::Session session(app,false);session.resize({320,240,{8,18}});session.tick();
     const auto& closed=session.scene().primitives;
     require(std::any_of(closed.begin(),closed.end(),[](const auto& p){return p.kind==surface::Primitive::Kind::icon&&p.icon==surface::Icon::chevron_down&&p.bounds.y>=100&&p.bounds.y+p.bounds.h<=130;}),"dropdown has no independent arrow chrome");
     require(std::any_of(closed.begin(),closed.end(),[](const auto& p){return p.kind==surface::Primitive::Kind::text&&p.bounds.y>=100&&p.bounds.y+p.bounds.h<=130&&p.text.ends_with("...");}),"narrow dropdown did not shorten its value on one baseline");
@@ -276,8 +276,111 @@ void dropdown_chrome() {
     app.close();
 }
 
+std::string mfd_status(const framebuffer::Session& session) {
+    for(const auto& p:session.scene().primitives)if(!p.clip&&p.kind==surface::Primitive::Kind::text&&
+        (p.text.starts_with("TUNE ")||p.text.starts_with("ACTIONS ")||p.text.starts_with("VIEWS ")))return p.text;
+    return {};
+}
+bool scene_text(const framebuffer::Session& session,std::string_view value) {
+    return std::any_of(session.scene().primitives.begin(),session.scene().primitives.end(),[&](const auto& p){return p.text.find(value)!=std::string::npos;});
+}
+void bezel(framebuffer::Session& session,unsigned number) {session.press_mfd_button(number);session.tick();}
+void mfd_choose(framebuffer::Session& session,std::string_view bank,std::string_view label) {
+    for(int i=0;i<3&&!mfd_status(session).starts_with(bank);++i)bezel(session,1);
+    require(mfd_status(session).starts_with(bank),"missing MFD bank");
+    for(int i=0;i<100;++i) {
+        const auto status=mfd_status(session);const auto start=status.find(" | ");
+        if(start!=std::string::npos&&status.substr(start+3).starts_with(label))return;
+        bezel(session,3);
+    }
+    throw std::runtime_error("missing MFD function: "+std::string(label)+"; last "+mfd_status(session));
+}
+void mfd_tuning_and_pages() {
+    require(framebuffer::Config{}.mfd&&framebuffer::Config{}.color&&framebuffer::Config{}.mfd_buttons==5,"MFD/color defaults");
+    Launch launch;launch.smoke=true;Application app(launch);
+    framebuffer::Session session(app);session.resize({1480,1220,{8,18}});session.tick();
+    const auto page=app.page();
+    require(mfd_status(session).find("Robust Modem")!=std::string::npos,"MFD initial modem selector");
+    bezel(session,4);require(app.field(ui::Field::fast_mode).selected=="fast","MFD previous modem");
+    bezel(session,4);require(app.field(ui::Field::fast_mode).selected=="fast","MFD modem endpoint wrapped");
+    mfd_choose(session,"TUNE","Expected SNR");const auto snr=app.field(ui::Field::fast_expected_snr).selected;
+    bezel(session,5);require(app.field(ui::Field::fast_expected_snr).selected!=snr,"MFD Fast SNR preset not selected");
+    mfd_choose(session,"TUNE","Fast Modem");bezel(session,5);bezel(session,5);
+    require(app.field(ui::Field::fast_mode).selected=="legacy","MFD next modem");
+    require(!scene_text(session,"Expected SNR"),"stale Fast tuning in Legacy bank");
+    bezel(session,4);require(app.field(ui::Field::fast_mode).selected=="robust","MFD return to Robust");
+    mfd_choose(session,"TUNE","Rate");require(app.field(ui::Field::bandwidth).text=="3.6 kHz","Robust initial rate");
+    bezel(session,4);require(app.field(ui::Field::bandwidth).text=="2.4 kHz","MFD lower rate");
+    bezel(session,5);require(app.field(ui::Field::bandwidth).text=="3.6 kHz","MFD higher rate");
+    mfd_choose(session,"TUNE","Short");const auto before=std::stod(app.field(ui::Field::snr).text);
+    bezel(session,5);const auto higher=std::stod(app.field(ui::Field::snr).text);
+    require(higher>before,"MFD numeric presets followed descending declaration order");
+    bezel(session,4);require(std::stod(app.field(ui::Field::snr).text)<higher,"MFD normalized preset did not step back");
+    app.edit(ui::Field::snr,"17");session.tick();bezel(session,5);
+    require(std::stod(app.field(ui::Field::snr).text)>17,"MFD custom numeric value did not advance");
+    mfd_choose(session,"ACTIONS","Transmit");require(app.page()==page,"MFD bank navigation changed application tab");
+    mfd_choose(session,"ACTIONS","Transmit noise");mfd_choose(session,"ACTIONS","Clear received");
+    bezel(session,5);require(!app.closing(),"MFD clear dispatched wrong action");
+    app.toggle(ui::Field::developer_mode,true);session.tick();
+    mfd_choose(session,"VIEWS","Compression");require(app.page()==page,"MFD view browsing navigated early");
+    bezel(session,5);require(app.page()==ui::Page::compression,"MFD OPEN did not navigate");
+    framebuffer::Session plain(app,false);plain.resize({1480,1220,{8,18}});plain.tick();
+    require(mfd_status(plain).empty(),"disabled MFD still rendered");
+    const auto selected=app.page();bezel(plain,1);require(app.page()==selected,"disabled MFD accepted hardware input");
+    rejects([&]{framebuffer::Session invalid(app,true,4);},"invalid bezel count accepted");app.close();
+}
+void mfd_input_and_modality() {
+    Launch launch;launch.smoke=true;Application app(launch);app.select(ui::Field::fast_mode,"fast");
+    framebuffer::Session session(app);session.resize({1480,1220,{8,18}});session.tick();
+    // Button ring and label ring are separate. A label click is inert.
+    const auto before=mfd_status(session);click(session,700,48);require(mfd_status(session)==before,"MFD label was clickable");
+    click(session,740,20);require(mfd_status(session).starts_with("ACTIONS"),"outer bezel hit missed");
+    bezel(session,3);require(mfd_status(session).find(" | Transmit")!=std::string::npos,"MFD transmit not prioritized after Clear");
+    mfd_choose(session,"ACTIONS","Open keyfile");bezel(session,5);
+    require(!scene_text(session,"BACK / CANCEL"),"MFD bypassed disabled keyfile action");
+    app.toggle(ui::Field::fast_encryption,true);session.tick();bezel(session,5);
+    require(scene_text(session,"BACK / CANCEL"),"MFD opened dialog without bezel escape");
+    const auto mode=app.field(ui::Field::fast_mode).selected;bezel(session,4);bezel(session,5);
+    require(app.field(ui::Field::fast_mode).selected==mode,"modal MFD input reached background");
+    bezel(session,1);require(!scene_text(session,"BACK / CANCEL"),"MFD failed to cancel service dialog");
+    auto edit=declaration(ui::Field::fast_text);edit.label="Inset editor";edit.placement={20,40,0,0,300,76};
+    ui::OverlayDefinition overlay;overlay.controls={edit};overlay.policy.keys={{{ui::Key::escape,false,false,false},ui::Command::dismiss_overlay}};
+    app.show_overlay(std::move(overlay));session.tick();
+    const auto editor=std::find_if(session.scene().primitives.begin(),session.scene().primitives.end(),[](const auto& p){return p.text=="Inset editor";});
+    require(editor!=session.scene().primitives.end()&&editor->clip&&editor->clip->x>0,"MFD did not inset/clip ordinary GUI");
+    // Actual editor has its own label above it: derive its shared content frame.
+    const auto inset=*editor->clip;const auto& placed=app.overlay()->controls.front();
+    const auto geometry=app.control_layout(placed,inset.w,inset.h,app.overlay()->controls);
+    click(session,inset.x+geometry.widget.x+4,inset.y+geometry.widget.y+4);select_all(session);input(session,"bezel editor");
+    require(app.field(edit.field).text=="bezel editor","MFD pointer was not translated to inner coordinates");
+    const auto caret=session.scene().caret;require(caret&&caret->x>=inset.x&&caret->y>=inset.y,"MFD caret not translated");
+    bezel(session,5);require(app.overlay()!=nullptr,"blocked MFD action dismissed overlay");
+    bezel(session,1);require(!app.overlay(),"MFD overlay Escape ignored shared binding");
+    key(session,surface::Key::help);require(scene_text(session,"BACK / CANCEL"),"help lacks MFD escape");bezel(session,1);
+    for(const auto size:{std::pair{480,320},std::pair{300,160},std::pair{1,1}}) {
+        session.resize({size.first,size.second,{8,18}});session.tick();
+        require(session.scene().width==size.first&&session.scene().height==size.second,"MFD outer resize lost");
+        framebuffer::Renderer renderer;const auto frame=renderer.render(session.scene());require(frame->width==static_cast<unsigned>(size.first),"small MFD failed to rasterize");
+    }
+    const auto tiny_mode=app.field(ui::Field::fast_mode).selected;bezel(session,5);require(app.field(ui::Field::fast_mode).selected==tiny_mode,"tiny unreadable MFD accepted input");
+    app.close();
+}
+void mfd_three_buttons() {
+    Launch launch;launch.smoke=true;Application app(launch);
+    framebuffer::Session session(app,true,3);session.resize({1480,1220,{8,18}});session.tick();
+    bezel(session,2);require(app.field(ui::Field::fast_mode).selected=="fast","3-key decrement");
+    bezel(session,3);require(app.field(ui::Field::fast_mode).selected=="robust","3-key increment");
+    const auto first=mfd_status(session);bezel(session,4);require(mfd_status(session)==first,"3-key mode accepted nonexistent key");
+    bezel(session,1);require(mfd_status(session)!=first&&mfd_status(session).starts_with("TUNE"),"3-key function cycling");
+    for(int n=0;n<200&&!mfd_status(session).starts_with("ACTIONS");++n)bezel(session,1);
+    require(mfd_status(session).starts_with("ACTIONS"),"3-key actions unreachable");
+    bezel(session,3);require(!app.closing(),"3-key clear action failed");
+    for(int n=0;n<200&&!mfd_status(session).starts_with("VIEWS");++n)bezel(session,1);
+    require(mfd_status(session).starts_with("VIEWS"),"3-key views unreachable");app.close();
+}
+
 }
 int main() {
-    try{render_and_lifetime();clipping_and_mono();growing_waterfall();copy_formats();glyphs();widget_raster();pixel_interaction();pixel_presets();minimal_embedding();overlay_focus_policy();popup_live_options();overlay_keyboard_scope();dropdown_chrome();std::cout<<"Framebuffer pixel, damage, ownership, clipping, format and interaction checks passed\n";return 0;}
+    try{render_and_lifetime();clipping_and_mono();growing_waterfall();copy_formats();glyphs();widget_raster();pixel_interaction();pixel_presets();minimal_embedding();overlay_focus_policy();popup_live_options();overlay_keyboard_scope();dropdown_chrome();mfd_tuning_and_pages();mfd_input_and_modality();mfd_three_buttons();std::cout<<"Framebuffer pixel, damage, ownership, clipping, format, interaction and MFD checks passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }
