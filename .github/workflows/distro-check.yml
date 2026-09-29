@@ -11,7 +11,7 @@ on:
         required: true
       linux_runner:
         type: string
-        default: ubuntu-latest-h
+        default: ubuntu-24.04
       distro:
         description: Native package check to run (all, arch, or gentoo)
         type: string
@@ -23,7 +23,7 @@ permissions:
 jobs:
   install:
     name: ${{ matrix.distro }} release packages / x86-64 / both backends
-    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
     timeout-minutes: 20
     strategy:
       fail-fast: false

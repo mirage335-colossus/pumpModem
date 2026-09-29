@@ -17,17 +17,17 @@ on:
         description: 'Linux x86-64: ubuntu-24.04 is standard; m/l/h are paid larger pools'
         type: choice
         options: [ubuntu-latest-h, ubuntu-latest-l, ubuntu-latest-m, ubuntu-24.04]
-        default: ubuntu-latest-h
+        default: ubuntu-24.04
       arm_runner:
         description: 'Linux ARM64: ubuntu-24.04-arm is standard; l/h are paid larger pools'
         type: choice
         options: [ubuntu-24.04-arm-h, ubuntu-24.04-arm-l, ubuntu-24.04-arm]
-        default: ubuntu-24.04-arm-h
+        default: ubuntu-24.04-arm
       windows_runner:
         description: 'Windows x64: windows-2022 is standard; l/h are paid larger pools'
         type: choice
         options: [windows-latest-h, windows-latest-l, windows-2022]
-        default: windows-latest-h
+        default: windows-2022
       maintain_base:
         description: 'Explicit base maintenance: reuse existing recipes; build missing ones only'
         type: choice

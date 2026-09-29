@@ -60,9 +60,9 @@ source revisions between stages. The sequence is:
 | --- | --- | --- |
 | `version` | Empty | Use the application version plus a timestamp, or provide an explicit release label. |
 | `linux_baseline` | `bookworm-sdk` | Linux x86_64 baseline; `ubuntu-22.04` is also available. ARM64 keeps its Ubuntu 22.04 baseline. |
-| `linux_runner` | `ubuntu-latest-h` | Linux x86_64 host. Choose `ubuntu-24.04` for standard, or the organization M/L/H pools. |
-| `arm_runner` | `ubuntu-24.04-arm-h` | ARM64 host. Choose `ubuntu-24.04-arm` for standard, or the organization L/H pools. |
-| `windows_runner` | `windows-latest-h` | Windows x64 host. Choose `windows-2022` for standard, or the organization L/H pools. |
+| `linux_runner` | `ubuntu-24.04` | Standard Linux x86_64 host; explicitly select an organization M/L/H pool when desired. |
+| `arm_runner` | `ubuntu-24.04-arm` | Standard ARM64 host; explicitly select an organization L/H pool when desired. |
+| `windows_runner` | `windows-2022` | Standard Windows x64 host; explicitly select an organization L/H pool when desired. |
 | `maintain_base` | `none` | Explicitly maintain `linux`, `windows` or `both` before qualification. `source=auto` reuses matching recipes and builds missing ones; existing assets are never overwritten. |
 | `sanitizer_smoke` | Unchecked | Add the optional instrumented native desktop smoke. |
 | `sanitizer_realtime` | Unchecked | Add timing-sensitive Fast RX cases to instrumented native CI. |
@@ -72,8 +72,8 @@ GitHub-hosted runners are free for public repositories; private repositories
 have account-specific allowances and billing. Larger runners are billed even
 for public repositories ([GitHub billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions)).
 See [runner selection](#runner-selection-and-build-parallelism)
-for the pool labels, costs and concurrency policy. The default H pools preserve
-the normal release configuration. Runner choice changes neither the full
+for the pool labels, costs and concurrency policy. Standard hosts are the default;
+heavy pools require explicit selection. Runner choice changes neither the full
 qualification requirements nor the documented warning policies.
 
 Leave `maintain_base=none` when the matching dependency recipes already exist.
@@ -112,7 +112,7 @@ available for diagnosis, experiments and resuming individual stages.
 | `experiment` | Checked | Title exactly `experiment`; GitHub prerelease; never Latest, even after certification passes. |
 | `publish` | Checked | Publish after all six platform/backend packages pass basic checks. Uncheck to retain a draft with its assets for inspection. |
 | `linux_baseline` | `bookworm-sdk` | Source SDK/glibc 2.36 for x86_64, or `ubuntu-22.04`/glibc 2.35. ARM64 always uses the Ubuntu 22.04 baseline. |
-| `arm_runner` | `ubuntu-24.04-arm-h` | ARM64 host: organization L or H tier, or standard `ubuntu-24.04-arm`. See [runner selection](#runner-selection-and-build-parallelism) for all three architecture selectors. |
+| `arm_runner` | `ubuntu-24.04-arm` | ARM64 host: standard by default, or an explicitly selected organization L or H tier. See [runner selection](#runner-selection-and-build-parallelism) for all three architecture selectors. |
 | `source_release` | Empty | Build normally when blank. Otherwise reuse that complete release's six archives to create a new APT experiment; application/SDK builds are skipped. |
 | `package_check` | `none` | Read-only checks of a published `source_release`: `all`, `apt`, `arch` or `gentoo`. Creates no release and rebuilds no application or SDK. |
 
@@ -138,7 +138,7 @@ selects the build source. The account needs repository write access. See
 [GitHub manual dispatch](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)
 and the [CLI reference](https://cli.github.com/manual/gh_workflow_run).
 
-Publish and certify an ordinary Latest release with the default H runners:
+Publish and certify an ordinary Latest release with the default standard runners:
 
 ```sh
 gh workflow run _release-latest.yml --ref main
@@ -146,12 +146,12 @@ gh run list --workflow _release-latest.yml --limit 5
 gh run watch RUN_ID --exit-status
 ```
 
-For standard runners, select all three architecture hosts explicitly:
+For heavy runners, select all three architecture hosts explicitly:
 
 ```sh
 gh workflow run _release-latest.yml --ref main \
-  -f linux_runner=ubuntu-24.04 -f arm_runner=ubuntu-24.04-arm \
-  -f windows_runner=windows-2022
+  -f linux_runner=ubuntu-latest-h -f arm_runner=ubuntu-24.04-arm-h \
+  -f windows_runner=windows-latest-h
 ```
 
 Add `-f maintain_base=both` only when explicit dependency base maintenance is
@@ -975,18 +975,19 @@ jobs and diagnostics. The same input names work through GitHub CLI:
 
 | Input | Choices | Default |
 | --- | --- | --- |
-| `linux_runner` | `ubuntu-24.04`, `ubuntu-latest-m`, `ubuntu-latest-l`, `ubuntu-latest-h` | `ubuntu-latest-h` |
-| `arm_runner` | `ubuntu-24.04-arm-l`, `ubuntu-24.04-arm-h`, `ubuntu-24.04-arm` | `ubuntu-24.04-arm-h` |
-| `windows_runner` | `windows-2022`, `windows-latest-l`, `windows-latest-h` | `windows-latest-h` |
+| `linux_runner` | `ubuntu-24.04`, `ubuntu-latest-m`, `ubuntu-latest-l`, `ubuntu-latest-h` | `ubuntu-24.04` |
+| `arm_runner` | `ubuntu-24.04-arm-l`, `ubuntu-24.04-arm-h`, `ubuntu-24.04-arm` | `ubuntu-24.04-arm` |
+| `windows_runner` | `windows-2022`, `windows-latest-l`, `windows-latest-h` | `windows-2022` |
 
-The larger labels are the runners configured by `mirage335-colossus`. All
-architecture defaults and automatic fallbacks now use H pools, including helper,
-metadata and report jobs. Existing smaller choices remain available for an
-explicit manual selection in build workflows. Release repository repackaging,
-APT and Arch/Gentoo checks preserve those explicit selections through their
-reusable workflows. Selecting `ubuntu-24.04` and `ubuntu-24.04-arm` therefore
-keeps those jobs on standard hosts instead of silently substituting a paid pool.
-No job retries on a smaller runner.
+The larger labels are the runners configured by `mirage335-colossus`. Every
+workflow default and automatic push/PR fallback uses standard GitHub-hosted
+runners, including helper, metadata and report jobs. Heavy H pools require an
+explicit runner selection. Agents should select them when expected to save
+elapsed time; no separate user request is required for that choice. An ordinary
+push or an omitted dispatch input does not opt into a paid pool.
+Release repository repackaging, APT and Arch/Gentoo checks preserve the selected
+hosts through their reusable workflows. Jobs do not automatically retry on a
+different pool.
 Each architecture has its own selector: an x86-64
 label cannot replace an ARM64 host. Existing Linux baseline containers, SDK
 recipes and portable ABI ceilings remain unchanged.
@@ -1076,7 +1077,7 @@ The [runner toolchain selector](../tools/select-windows-toolchain.ps1) prefers
 VS2022 when installed. The current larger Windows images supply VS2026; on
 those images it selects the installed v143 14.44 tools and the VS2026 CMake
 generator, which requires CMake 4.2 or newer. It does not silently adopt the
-newer default toolset. The optional `windows-2022` image continues using VS2022.
+newer default toolset. The default `windows-2022` image continues using VS2022.
 Run logs identify the selected generator, toolset and linker version.
 This selection leaves the existing base recipe identity and assets unchanged;
 its hosted compile results must still be checked before claiming qualification.
@@ -1198,7 +1199,7 @@ Read the attached report before describing a particular release as tested.
 | Linux x86_64, `bookworm-sdk` | SDK, glibc 2.36 | Debian 12 and 13; Ubuntu 24.04 and 26.04; Arch Linux |
 | Linux x86_64, `ubuntu-22.04` | Ubuntu 22.04, glibc 2.35 | Debian 12 and 13; Ubuntu 22.04, 24.04 and 26.04; Arch Linux |
 | Linux aarch64 | Ubuntu 22.04, glibc 2.35 | Debian 12 and 13; Ubuntu 22.04, 24.04 and 26.04 |
-| Windows x64 | MSVC v143 with static CRT | Selected Windows x64 hosted runner and archive relocation; the default is `windows-latest-h`, currently using VS2026 with v143 |
+| Windows x64 | MSVC v143 with static CRT | Selected Windows x64 hosted runner and archive relocation; the default is `windows-2022`, using VS2022 with v143 |
 
 Linux package verification audits all shipped ELF libraries for the selected
 glibc ceiling and checks relocation, checksums, CLI operation and the GUI
@@ -1234,7 +1235,7 @@ outside the hosted tests.
 For the supported VS2022/v143 toolchain, Microsoft documents the ability to build
 desktop applications
 for [Windows 10 and 11](https://learn.microsoft.com/en-us/visualstudio/releases/2022/compatibility?view=vs-2022).
-The optional `windows-2022` runner uses Windows Server 2022. The default
+The default `windows-2022` runner uses Windows Server 2022. An explicitly selected
 organization H runner uses its configured image; consult that run's image/toolchain logs.
 Windows 10 and Windows 11 client installations are not directly tested by this
 workflow.

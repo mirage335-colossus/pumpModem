@@ -65,7 +65,7 @@ supplies MSVC and the Windows SDK separately.
 The [toolchain selector](../tools/select-windows-toolchain.ps1) prefers an
 installed Visual Studio 2022, or uses Visual Studio 2026 with its installed
 v143 tools. The current larger Windows images have VS2026 and v143 14.44;
-the optional `windows-2022` image retains VS2022. The selector sets the matching
+the default `windows-2022` image retains VS2022. The selector sets the matching
 CMake generator and pins v143 instead of adopting VS2026's default toolset.
 VS2026 requires CMake 4.2 or newer. This host selection does not change the
 dependency recipe or rebuild the existing base.
@@ -497,11 +497,12 @@ SDK package producers likewise run independently of source qualification, so
 copied SDK binaries can be checked as soon as the packages are ready. Every
 required scope still contributes to the workflow result.
 
-H pools remain the defaults. Standard runners can be selected explicitly:
+Standard GitHub-hosted runners are the defaults. Agents should explicitly select
+H pools when they expect them to save elapsed time:
 
 ```sh
-gh workflow run ci.yml --ref REF -f devfast=false -f linux_runner=ubuntu-24.04 -f windows_runner=windows-2022
-gh workflow run sdk.yml --ref REF -f devfast=false -f linux_runner=ubuntu-24.04
+gh workflow run ci.yml --ref REF -f devfast=false -f linux_runner=ubuntu-latest-h -f windows_runner=windows-latest-h
+gh workflow run sdk.yml --ref REF -f devfast=false -f linux_runner=ubuntu-latest-h
 ```
 
 For changes confined to Linux distribution packaging, start with
@@ -523,16 +524,17 @@ Follow publication with full `certify.yml`, `devfast=false`, for that new
 release; packaging-only checks are not a substitute for release certification. See
 [APT packaging and validation](releases.md#package-an-existing-release-without-rebuilding-it).
 
-Manual workflows expose `linux_runner` and `windows_runner` dropdowns for the
-organization's larger x86-64 runners. Defaults and automatic jobs now use
-`ubuntu-latest-h` and `windows-latest-h`; native CI, portable release and
-certification default `arm_runner` to `ubuntu-24.04-arm-h`. Explicit smaller
-choices remain available when desired, but checks do not repeat on those pools.
+Manual workflows expose `linux_runner`, `windows_runner` and, where applicable,
+`arm_runner` dropdowns. Defaults and automatic push/PR jobs use standard
+GitHub-hosted runners: `ubuntu-24.04`, `windows-2022` and `ubuntu-24.04-arm`.
+These hosts are free for public repositories. Heavy H pools require an explicit
+selection; agents should select them when expected to save elapsed time, without
+requiring a separate user request. Pass the chosen inputs through
+`gh workflow run -f`; merely pushing a change does not select heavy runners.
 The ARM64 L and H tiers provide 8 and 32 CPUs respectively. The ARM64 selector
-does not affect x86-64 routing. Package-manager checks and base-maintenance
-helper jobs preserve explicit standard or larger selections; H remains the
-default when no runner is supplied.
-Agents can pass these input names through `gh workflow run -f`.
+does not affect x86-64 routing. Package-manager checks, reusable workflows and
+base-maintenance helper jobs preserve explicit selections and use standard hosts
+when no runner is supplied.
 Use the [runner selection guide](releases.md#runner-selection-and-build-parallelism)
 to choose and verify access before a long run. `ci.yml` with `devfast=true` and
 `diagnostic=runner-capacity` checks routing, visible CPUs and small production
@@ -546,7 +548,8 @@ gh workflow run ci.yml --ref REF -f devfast=true \
   -f diagnostic=arm-runner-capacity -f arm_runner=ubuntu-24.04-arm-h
 ```
 
-Reuse the earlier runner-capacity evidence instead of retesting smaller pools.
+Reuse matching runner-capacity evidence instead of repeating checks solely to
+compare pools.
 Keep the applicable full regression and release certification sequence below
 after the focused checks.
 
@@ -644,7 +647,7 @@ repeating unrelated calibration or platform suites, use:
 gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=sanitizer-gui
 ```
 
-This uses the same Debug compiler, sanitizer flags, default H runner and
+This uses the same Debug compiler, sanitizer flags, selected runner and
 600-second smoke allowance. It additionally checks the budget classifier
 and strict runner policy with bounded fixtures. A successful diagnostic with an
 incomplete warning is not full native qualification. Ordinary automatic CI
@@ -771,8 +774,8 @@ gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=arm-rev-smoke
 This mode retains the Ubuntu 22.04 build baseline, verifies archive/package
 hashes and the glibc 2.35 ceiling, then runs both copied GUI smokes with their
 600-second allowances and the same display prerequisites as certification.
-It uses the H ARM64 runner by default and the pinned runtime dependency scanner;
-it does not rebuild an SDK, run calibration or a general matrix, upload artifacts,
+It defaults to the standard ARM64 runner and uses the pinned runtime dependency
+scanner; it does not rebuild an SDK, run calibration or a general matrix, upload artifacts,
 publish or certify a release. Rerunning an older release cannot test this new
 checker; this diagnostic rebuilds the selected branch's package explicitly.
 

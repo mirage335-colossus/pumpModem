@@ -6,15 +6,15 @@ on:
       linux_runner:
         description: 'Linux x86_64 runner for compilation and qualification'
         type: string
-        default: ubuntu-latest-h
+        default: ubuntu-24.04
       arm_runner:
         description: 'Linux ARM64 runner for compilation and qualification'
         type: string
-        default: ubuntu-24.04-arm-h
+        default: ubuntu-24.04-arm
       windows_runner:
         description: 'Windows x64 runner for compilation and qualification'
         type: string
-        default: windows-latest-h
+        default: windows-2022
       devfast:
         description: 'Run only the selected focused diagnostic; skip full regression and release work'
         type: boolean
@@ -68,17 +68,17 @@ on:
         description: 'Linux x86_64 runner for compilation and qualification'
         type: choice
         options: [ubuntu-24.04, ubuntu-latest-m, ubuntu-latest-l, ubuntu-latest-h]
-        default: ubuntu-latest-h
+        default: ubuntu-24.04
       arm_runner:
         description: 'Linux ARM64 runner for compilation and qualification'
         type: choice
         options: [ubuntu-24.04-arm-l, ubuntu-24.04-arm-h, ubuntu-24.04-arm]
-        default: ubuntu-24.04-arm-h
+        default: ubuntu-24.04-arm
       windows_runner:
         description: 'Windows x64 runner for compilation and qualification'
         type: choice
         options: [windows-2022, windows-latest-l, windows-latest-h]
-        default: windows-latest-h
+        default: windows-2022
       devfast:
         description: 'Run only the selected focused diagnostic; skip full regression and release work'
         type: boolean
@@ -105,14 +105,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: native-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ inputs.diagnostic || 'legacy' }}-${{ inputs.devfast && 'devfast' || 'full' }}-${{ !inputs.devfast && inputs.sanitizer_realtime && 'realtime' || 'standard' }}-${{ inputs.sanitizer_smoke && 'sanitizer-smoke' || 'no-sanitizer-smoke' }}-${{ inputs.linux_runner || 'ubuntu-latest-h' }}-${{ inputs.windows_runner || 'windows-latest-h' }}-${{ inputs.arm_runner || 'ubuntu-24.04-arm-h' }}
+  group: native-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ inputs.diagnostic || 'legacy' }}-${{ inputs.devfast && 'devfast' || 'full' }}-${{ !inputs.devfast && inputs.sanitizer_realtime && 'realtime' || 'standard' }}-${{ inputs.sanitizer_smoke && 'sanitizer-smoke' || 'no-sanitizer-smoke' }}-${{ inputs.linux_runner || 'ubuntu-24.04' }}-${{ inputs.windows_runner || 'windows-2022' }}-${{ inputs.arm_runner || 'ubuntu-24.04-arm' }}
   cancel-in-progress: true
 
 jobs:
   tooling:
     if: github.event_name != 'workflow_dispatch'
     name: Lightweight build and SDK helper checks (not full regression)
-    runs-on: ubuntu-latest-h
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -142,8 +142,8 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || (inputs.devfast && inputs.diagnostic == 'legacy')
     uses: ./.github/workflows/devfast.yml
     with:
-      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
-      windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
 
   certification-diagnostic:
     if: github.event_name == 'workflow_dispatch' && inputs.devfast && (inputs.diagnostic == 'certification' || inputs.diagnostic == 'windows-certification' || inputs.diagnostic == 'arm-rev-adapter' || inputs.diagnostic == 'sdk-live')
@@ -151,48 +151,48 @@ jobs:
     with:
       scope: ${{ inputs.diagnostic == 'arm-rev-adapter' && 'arm-rev-adapter' || inputs.diagnostic == 'sdk-live' && 'sdk-live' || inputs.diagnostic == 'windows-certification' && 'windows' || 'all' }}
       source_ref: ${{ inputs.diagnostic_release }}
-      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
-      windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
-      arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-h' }}
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
+      arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm' }}
 
   windows-rev-diagnostic:
     if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'windows-rev'
     uses: ./.github/workflows/windows-rev-diagnostic.yml
     with:
-      windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
 
   runner-capacity:
     if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'runner-capacity'
     uses: ./.github/workflows/runner-capacity.yml
     with:
-      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
-      windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
 
   arm-runner-capacity:
     if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'arm-runner-capacity'
     uses: ./.github/workflows/arm-runner-capacity.yml
     with:
-      arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-h' }}
+      arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm' }}
 
   graphics-diagnostic:
     if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'graphics'
     uses: ./.github/workflows/graphics-diagnostic.yml
     with:
-      arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-h' }}
-      windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
+      arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm' }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
       release_tag: ${{ inputs.diagnostic_release }}
 
   arm-rev-package-diagnostic:
     if: github.event_name == 'workflow_dispatch' && inputs.devfast && (inputs.diagnostic == 'arm-rev-package' || inputs.diagnostic == 'arm-rev-smoke')
     uses: ./.github/workflows/arm-rev-package-diagnostic.yml
     with:
-      arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-h' }}
+      arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm' }}
       smoke: ${{ inputs.diagnostic == 'arm-rev-smoke' }}
 
   gui-contract:
     if: github.event_name == 'workflow_dispatch' && (!inputs.devfast || inputs.diagnostic == 'gui-contract')
     name: GUI contract (${{ matrix.backend }})
-    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
     container: debian:trixie-slim
     timeout-minutes: ${{ inputs.linux_runner == 'ubuntu-24.04' && 45 || 30 }}
     strategy:
@@ -267,7 +267,7 @@ jobs:
     name: Linux portable package (glibc 2.35)
     uses: ./.github/workflows/native-linux.yml
     with:
-      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
       build_type: Release
       scope: package
 
@@ -276,7 +276,7 @@ jobs:
     name: Windows portable package (static CRT)
     uses: ./.github/workflows/native-windows.yml
     with:
-      windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
       scope: package
 
   linux-tests:
@@ -300,7 +300,7 @@ jobs:
             shard: {scope: calibration, section: shaped}
     uses: ./.github/workflows/native-linux.yml
     with:
-      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
       build_type: ${{ matrix.build_type }}
       scope: ${{ matrix.shard.scope }}
       calibration_section: ${{ matrix.shard.section }}
@@ -315,7 +315,7 @@ jobs:
         part: ['0', '1']
     uses: ./.github/workflows/native-linux.yml
     with:
-      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
       build_type: Debug
       scope: calibration
       calibration_section: shaped
@@ -327,7 +327,7 @@ jobs:
     needs: linux-shaped
     uses: ./.github/workflows/native-linux.yml
     with:
-      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
       build_type: Debug
       scope: calibration-aggregate
       calibration_section: shaped
@@ -337,7 +337,7 @@ jobs:
     name: Separate instrumented desktop smoke
     uses: ./.github/workflows/native-linux.yml
     with:
-      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
       build_type: Debug
       scope: sanitizer-gui
 
@@ -345,7 +345,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && !inputs.devfast
     name: Copied Linux binaries on Ubuntu ${{ matrix.ubuntu }}
     needs: linux-package
-    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
     container: ubuntu:${{ matrix.ubuntu }}
     # Both archive formats run the full workflow; measured checks exceed ten
     # minutes even though devfast never runs these compatibility jobs.
@@ -416,6 +416,6 @@ jobs:
           - {scope: calibration, section: default-window}
     uses: ./.github/workflows/native-windows.yml
     with:
-      windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
       scope: ${{ matrix.shard.scope }}
       calibration_section: ${{ matrix.shard.section }}

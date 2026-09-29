@@ -15,7 +15,7 @@ on:
         required: true
       linux_runner:
         type: string
-        default: ubuntu-latest-h
+        default: ubuntu-24.04
 
 permissions:
   contents: read

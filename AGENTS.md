@@ -99,8 +99,11 @@ step, and does not replace the harness's normal verification or tool-use policy.
   affected full checks. Do not count skipped, cancelled or queued jobs as passes.
   Automatic CI is deliberately lightweight on PRs and pushes to main; full
   native and SDK qualification require explicit manual dispatch after fixes.
-  Runner defaults use the organization's H pools; do not repeat checks on
-  smaller runners unless specifically requested.
+  Workflow defaults and automatic push/PR jobs use standard GitHub-hosted
+  runners (free for public repositories). Heavy H pools require an explicit
+  runner selection. Agents should explicitly select heavy runners when they
+  expect them to save elapsed time; that decision needs no separate user request.
+  Reuse matching evidence instead of repeating checks solely to compare pools.
 - Optimize CI elapsed time with independent package producers and disjoint test
   jobs. Keep the serial Live scope, calibration sections and expensive sanitizer
   GUI simulation off the dependency path for ordinary regressions and

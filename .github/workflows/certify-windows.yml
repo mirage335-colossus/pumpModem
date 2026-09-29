@@ -23,7 +23,7 @@ on:
         required: true
       windows_runner:
         type: string
-        default: windows-latest-h
+        default: windows-2022
       scope:
         description: 'main source/package checks, independent calibration, or independent frontends'
         type: string

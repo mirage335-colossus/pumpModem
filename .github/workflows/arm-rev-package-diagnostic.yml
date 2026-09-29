@@ -10,7 +10,7 @@ on:
       arm_runner:
         description: 'Linux ARM64 runner label'
         type: string
-        default: ubuntu-24.04-arm-h
+        default: ubuntu-24.04-arm
 
 permissions:
   contents: read
@@ -18,7 +18,7 @@ permissions:
 jobs:
   package:
     name: ARM64 Rev package / ${{ inputs.smoke && 'full Ubuntu 22.04 and Trixie GUI smoke' || 'Ubuntu startup' }} (not certification)
-    runs-on: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-h' }}
+    runs-on: ${{ inputs.arm_runner || 'ubuntu-24.04-arm' }}
     timeout-minutes: ${{ inputs.smoke && 30 || 15 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

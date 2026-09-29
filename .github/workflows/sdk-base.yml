@@ -6,11 +6,11 @@ on:
       linux_runner:
         description: 'Linux x86_64 runner for compilation and qualification'
         type: string
-        default: ubuntu-latest-h
+        default: ubuntu-24.04
       windows_runner:
         description: 'Windows x64 runner for compilation and qualification'
         type: string
-        default: windows-latest-h
+        default: windows-2022
       platform:
         description: 'Reusable Linux source SDK or Windows static application dependencies'
         type: string
@@ -33,12 +33,12 @@ on:
         description: 'Linux x86_64 runner for compilation and qualification'
         type: choice
         options: [ubuntu-24.04, ubuntu-latest-m, ubuntu-latest-l, ubuntu-latest-h]
-        default: ubuntu-latest-h
+        default: ubuntu-24.04
       windows_runner:
         description: 'Windows x64 runner for compilation and qualification'
         type: choice
         options: [windows-2022, windows-latest-l, windows-latest-h]
-        default: windows-latest-h
+        default: windows-2022
       platform:
         description: 'Reusable Linux source SDK or Windows static application dependencies'
         type: choice
@@ -78,7 +78,7 @@ concurrency:
 
 jobs:
   helper:
-    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -92,7 +92,7 @@ jobs:
     needs: helper
     uses: ./.github/workflows/sdk-build.yml
     with:
-      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
       source: ${{ inputs.source }}
       jobs: ${{ inputs.jobs }}
       publish_base: ${{ inputs.publish }}
@@ -104,7 +104,7 @@ jobs:
     needs: [helper, sdk]
     uses: ./.github/workflows/windows-base.yml
     with:
-      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
-      windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
       source: ${{ inputs.source }}
       publish: ${{ inputs.publish }}

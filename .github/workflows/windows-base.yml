@@ -6,11 +6,11 @@ on:
       linux_runner:
         description: 'Linux x86-64 runner label for helper checks'
         type: string
-        default: ubuntu-latest-h
+        default: ubuntu-24.04
       windows_runner:
         description: 'Windows x64 runner label'
         type: string
-        default: windows-latest-h
+        default: windows-2022
       source:
         description: 'auto reuses base; base requires reuse; rebuild compiles without overwriting an existing recipe'
         type: string
@@ -37,7 +37,7 @@ permissions:
 
 jobs:
   helpers:
-    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -48,7 +48,7 @@ jobs:
   dependencies:
     if: github.event_name == 'workflow_dispatch'
     needs: helpers
-    runs-on: ${{ inputs.windows_runner || 'windows-latest-h' }}
+    runs-on: ${{ inputs.windows_runner || 'windows-2022' }}
     defaults:
       run:
         shell: pwsh

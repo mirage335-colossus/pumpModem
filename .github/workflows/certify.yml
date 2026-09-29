@@ -15,15 +15,15 @@ on:
       linux_runner:
         description: 'x86-64 Linux runner'
         type: string
-        default: ubuntu-latest-h
+        default: ubuntu-24.04
       arm_runner:
         description: 'Linux ARM64 runner for compilation and qualification'
         type: string
-        default: ubuntu-24.04-arm-h
+        default: ubuntu-24.04-arm
       windows_runner:
         description: 'Windows x64 runner'
         type: string
-        default: windows-latest-h
+        default: windows-2022
     outputs:
       inventory_sha256:
         description: 'Exact published inventory checked by this certification'
@@ -45,17 +45,17 @@ on:
         description: 'x86-64 Linux runner'
         type: choice
         options: [ubuntu-24.04, ubuntu-latest-m, ubuntu-latest-l, ubuntu-latest-h]
-        default: ubuntu-latest-h
+        default: ubuntu-24.04
       arm_runner:
         description: 'Linux ARM64 runner for compilation and qualification'
         type: choice
         options: [ubuntu-24.04-arm-l, ubuntu-24.04-arm-h, ubuntu-24.04-arm]
-        default: ubuntu-24.04-arm-h
+        default: ubuntu-24.04-arm
       windows_runner:
         description: 'Windows x64 runner'
         type: choice
         options: [windows-2022, windows-latest-l, windows-latest-h]
-        default: windows-latest-h
+        default: windows-2022
 
   pull_request:
     paths:
@@ -91,12 +91,12 @@ jobs:
       cancel-in-progress: false
     uses: ./.github/workflows/devfast.yml
     with:
-      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
-      windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
 
   helpers:
     if: ${{ !inputs.devfast }}
-    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -112,7 +112,7 @@ jobs:
   prepare:
     if: github.event_name == 'workflow_dispatch' && !inputs.devfast
     needs: helpers
-    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
     timeout-minutes: 10
     outputs:
       source_sha: ${{ steps.release.outputs.source_sha }}
@@ -160,7 +160,7 @@ jobs:
     name: Linux ${{ matrix.arch }} / ${{ matrix.backend }} / ${{ matrix.scope }} qualification
     if: ${{ !inputs.devfast }}
     needs: prepare
-    runs-on: ${{ matrix.arch == 'aarch64' && (inputs.arm_runner || 'ubuntu-24.04-arm-h') || inputs.linux_runner || 'ubuntu-latest-h' }}
+    runs-on: ${{ matrix.arch == 'aarch64' && (inputs.arm_runner || 'ubuntu-24.04-arm') || inputs.linux_runner || 'ubuntu-24.04' }}
     container: ${{ matrix.image }}
     timeout-minutes: 120
     strategy:
@@ -443,7 +443,7 @@ jobs:
       tooling_sha: ${{ github.sha }}
       release_tag: ${{ inputs.release_tag }}
       inventory_sha256: ${{ needs.prepare.outputs.inventory_sha256 }}
-      windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
 
   windows-rev:
     if: ${{ !inputs.devfast && contains(needs.prepare.outputs.application_targets, 'windows-x86_64-rev') }}
@@ -458,7 +458,7 @@ jobs:
       tooling_sha: ${{ github.sha }}
       release_tag: ${{ inputs.release_tag }}
       inventory_sha256: ${{ needs.prepare.outputs.inventory_sha256 }}
-      windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
 
   windows-fltk-calibration:
     if: ${{ !inputs.devfast }}
@@ -472,7 +472,7 @@ jobs:
       tooling_sha: ${{ github.sha }}
       release_tag: ${{ inputs.release_tag }}
       inventory_sha256: ${{ needs.prepare.outputs.inventory_sha256 }}
-      windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
 
   windows-rev-calibration:
     if: ${{ !inputs.devfast && contains(needs.prepare.outputs.application_targets, 'windows-x86_64-rev') }}
@@ -486,7 +486,7 @@ jobs:
       tooling_sha: ${{ github.sha }}
       release_tag: ${{ inputs.release_tag }}
       inventory_sha256: ${{ needs.prepare.outputs.inventory_sha256 }}
-      windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
 
   windows-frontends:
     if: ${{ !inputs.devfast && needs.prepare.outputs.frontends == 'true' }}
@@ -505,13 +505,13 @@ jobs:
       tooling_sha: ${{ github.sha }}
       release_tag: ${{ inputs.release_tag }}
       inventory_sha256: ${{ needs.prepare.outputs.inventory_sha256 }}
-      windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
 
   windows-tests:
     name: Collect Windows certification results and warnings
     if: ${{ always() && !inputs.devfast && needs.prepare.result == 'success' }}
     needs: [prepare, windows-fltk, windows-rev, windows-fltk-calibration, windows-rev-calibration, windows-frontends]
-    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
     timeout-minutes: 5
     outputs:
       warnings: ${{ steps.result.outputs.warnings }}
@@ -542,7 +542,7 @@ jobs:
     name: Published ${{ matrix.target }} on ${{ matrix.image }}
     if: ${{ !inputs.devfast }}
     needs: prepare
-    runs-on: ${{ matrix.arch == 'aarch64' && (inputs.arm_runner || 'ubuntu-24.04-arm-h') || inputs.linux_runner || 'ubuntu-latest-h' }}
+    runs-on: ${{ matrix.arch == 'aarch64' && (inputs.arm_runner || 'ubuntu-24.04-arm') || inputs.linux_runner || 'ubuntu-24.04' }}
     container: ${{ matrix.image }}
     timeout-minutes: 30
     strategy:
@@ -639,8 +639,8 @@ jobs:
     with:
       release_tag: ${{ inputs.release_tag }}
       inventory_sha256: ${{ needs.prepare.outputs.inventory_sha256 }}
-      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
-      arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm-h' }}
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+      arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm' }}
 
   distro-recipes:
     if: ${{ !inputs.devfast && needs.prepare.outputs.distro_recipes == 'true' }}
@@ -649,7 +649,7 @@ jobs:
     with:
       release_tag: ${{ inputs.release_tag }}
       inventory_sha256: ${{ needs.prepare.outputs.inventory_sha256 }}
-      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
 
   record:
     outputs:
@@ -661,7 +661,7 @@ jobs:
     concurrency:
       group: certify-release-${{ inputs.devfast && github.ref || inputs.release_tag }}-${{ inputs.devfast && 'devfast' || 'full' }}
       cancel-in-progress: false
-    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
     timeout-minutes: 15
     permissions:
       contents: write

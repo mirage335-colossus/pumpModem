@@ -5,7 +5,7 @@ on:
     inputs:
       windows_runner:
         type: string
-        default: windows-latest-h
+        default: windows-2022
       scope:
         description: 'core, fast, live, calibration, frontends, or package'
         type: string

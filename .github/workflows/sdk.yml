@@ -6,11 +6,11 @@ on:
       linux_runner:
         description: 'Linux x86_64 runner for compilation and qualification'
         type: string
-        default: ubuntu-latest-h
+        default: ubuntu-24.04
       windows_runner:
         description: 'Windows x64 runner for compilation and qualification'
         type: string
-        default: windows-latest-h
+        default: windows-2022
       devfast:
         description: 'Run only focused Legacy diagnostics; skip SDK, application and portability qualification'
         type: boolean
@@ -24,12 +24,12 @@ on:
         description: 'Linux x86_64 runner for compilation and qualification'
         type: choice
         options: [ubuntu-24.04, ubuntu-latest-m, ubuntu-latest-l, ubuntu-latest-h]
-        default: ubuntu-latest-h
+        default: ubuntu-24.04
       windows_runner:
         description: 'Windows x64 runner for compilation and qualification'
         type: choice
         options: [windows-2022, windows-latest-l, windows-latest-h]
-        default: windows-latest-h
+        default: windows-2022
       devfast:
         description: 'Run only focused Legacy diagnostics; skip SDK, application and portability qualification'
         type: boolean
@@ -47,8 +47,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.devfast
     uses: ./.github/workflows/devfast.yml
     with:
-      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
-      windows_runner: ${{ inputs.windows_runner || 'windows-latest-h' }}
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
 
   packages:
     if: ${{ !inputs.devfast }}
@@ -66,7 +66,7 @@ jobs:
       scope: packages
       backend: ${{ matrix.backend }}
       image: ${{ matrix.image }}
-      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
 
   tests:
     if: ${{ !inputs.devfast }}
@@ -84,7 +84,7 @@ jobs:
       scope: tests
       backend: ${{ matrix.backend }}
       image: ${{ matrix.image }}
-      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
 
   frontends:
     if: ${{ !inputs.devfast }}
@@ -94,13 +94,13 @@ jobs:
       scope: frontends
       backend: fltk
       image: debian:bookworm-slim
-      linux_runner: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
 
   compatibility:
     if: ${{ !inputs.devfast }}
     name: Copied SDK-built ${{ matrix.backend }} on ${{ matrix.image }}
     needs: packages
-    runs-on: ${{ inputs.linux_runner || 'ubuntu-latest-h' }}
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
     container: ${{ matrix.image }}
     timeout-minutes: 45
     strategy:

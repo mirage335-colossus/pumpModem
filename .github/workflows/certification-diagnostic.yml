@@ -13,13 +13,13 @@ on:
         default: ''
       linux_runner:
         type: string
-        default: ubuntu-latest-h
+        default: ubuntu-24.04
       windows_runner:
         type: string
-        default: windows-latest-h
+        default: windows-2022
       arm_runner:
         type: string
-        default: ubuntu-24.04-arm-h
+        default: ubuntu-24.04-arm
 
 permissions:
   contents: read
