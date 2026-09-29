@@ -258,6 +258,13 @@ struct Controller::Impl {
             const auto& capture=entry.snapshot;
             auto label=transfer_stage(capture)+" · "+std::to_string(capture.source_bytes)+" bytes";
             if(capture.active&&!capture.transmitting)label+=" · "+std::to_string(capture.intervals)+" intervals";
+            if(!capture.active&&!capture.complete&&!capture.cancelled&&!capture.error.empty()) {
+                // Automatic relistening replaces the status field. Keep the
+                // final diagnostic with its signal, bounded and text-filtered.
+                constexpr std::size_t error_limit=512;
+                label+=" · "+received_text(std::string_view(capture.error).substr(0,error_limit));
+                if(capture.error.size()>error_limit)label+="…";
+            }
             if(capture.file) {
                 const auto bytes=capture.file->bytes();
                 if(!capture.file->is_attachment()&&bytes.size()<=fast::text_byte_limit) {

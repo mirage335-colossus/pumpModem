@@ -107,9 +107,9 @@ function nativeTransport(fds,onBytes,onFailure,metrics) {
 function wasmTransport(factoryPath,wasmPath,onBytes,onFailure,metrics) {
     const factorySource=fs.readFileSync(factoryPath,'utf8'),wasmBytes=new Uint8Array(fs.readFileSync(wasmPath));
     const thread=new Worker(new URL(import.meta.url),{workerData:{factoryPath,factorySource,workerSource:readAsset('wasm_worker.js')}});
-    let readyResolve,readyReject,next=0,closing=false,diagnostic='';const pending=new Map();
+    let readyResolve,readyReject,next=0,pendingBytes=0,closing=false,diagnostic='';const pending=new Map();
     const ready=new Promise((resolve,reject)=>{readyResolve=resolve;readyReject=reject;});
-    const fail=error=>{readyReject(error);for(const p of pending.values())p.reject(error);pending.clear();onFailure(error);};
+    const fail=error=>{readyReject(error);for(const p of pending.values())p.reject(error);pending.clear();pendingBytes=0;onFailure(error);};
     thread.on('error',fail);thread.on('exit',code=>{if(!closing)fail(new Error(`Wasm worker ended (${code}): ${diagnostic}`));});
     thread.on('message',message=>{
         try {
@@ -117,7 +117,7 @@ function wasmTransport(factoryPath,wasmPath,onBytes,onFailure,metrics) {
             else if(message.type==='ready')readyResolve();
             else if(message.type==='bytes'){onBytes(message.bytes);thread.postMessage({type:'output_consumed',size:message.bytes.length});}
             else if(message.type==='accepted') {
-                const item=pending.get(message.id);assert(item,'unknown Worker input acknowledgment');pending.delete(message.id);
+                const item=pending.get(message.id);assert(item,'unknown Worker input acknowledgment');pending.delete(message.id);pendingBytes-=item.size;
                 metrics.maxFeedMs=Math.max(metrics.maxFeedMs,performance.now()-item.start);item.resolve();
             } else if(message.type==='fixture_timing') {
                 metrics.maxExportMs=Math.max(metrics.maxExportMs,message.milliseconds);
@@ -128,10 +128,15 @@ function wasmTransport(factoryPath,wasmPath,onBytes,onFailure,metrics) {
     });
     return {
         ready,
-        send(bytes){const id=++next,start=performance.now();return new Promise((resolve,reject)=>{
-            pending.set(id,{resolve,reject,start});thread.postMessage({type:'feed',id,bytes},[bytes.buffer]);
+        send(bytes){
+            // Match the actual page's admission bounds: an unbounded harness
+            // would conceal a browser failure before C++ ever receives PCM.
+            if(pending.size>=128||pendingBytes+bytes.byteLength>16*1024*1024)return Promise.reject(new Error('Local input queue exceeded its bound'));
+            const id=++next,start=performance.now();pendingBytes+=bytes.byteLength;
+            return new Promise((resolve,reject)=>{
+            pending.set(id,{resolve,reject,start,size:bytes.byteLength});thread.postMessage({type:'feed',id,bytes},[bytes.buffer]);
         });},
-        async close(){closing=true;for(const p of pending.values())p.reject(new Error('Fixture closed'));pending.clear();await thread.terminate();},
+        async close(){closing=true;for(const p of pending.values())p.reject(new Error('Fixture closed'));pending.clear();pendingBytes=0;await thread.terminate();},
         diagnostic:()=>diagnostic
     };
 }
@@ -157,7 +162,10 @@ function physicalAudio(rate,metrics,fail) {
                     for(let i=0;i<input.length;i++){
                         noise^=noise<<13;noise^=noise>>>17;noise^=noise<<5;
                         const position=replay?this.frame+i-replay.start:-1;
-                        input[i]=position>=0?(replay.samples[position]||0):.002*(noise/2147483648);
+                        // Continue microphone noise through data and absence;
+                        // a perfect codeword followed by digital zero misses
+                        // noisy correction and live end-of-transmission work.
+                        input[i]=position>=0?.65*(replay.samples[position]||0)+.04*(noise/2147483648):.002*(noise/2147483648);
                     }
                     for(const node of this.nodes)if(node.connected){
                         const left=new Float32Array(128),right=new Float32Array(128);
@@ -197,13 +205,13 @@ function physicalAudio(rate,metrics,fail) {
                 if(copy.kind==='playback_endpoint')metrics.endpoints++;
                 if(copy.kind==='interrupted'||copy.kind==='playback_failed')fail(new Error(`AudioWorklet: ${copy.reason}`));
                 // A busy browser can delay main-thread delivery while the
-                // AudioWorklet continues sampling. Retain bounded 1.2s
+                // AudioWorklet continues sampling. Retain bounded 1.3s
                 // bursts during training and absence, then deliver every original
                 // packet in order; neither PCM nor sample time changes.
                 if(copy.kind==='capture'&&replay&&this.burstsFinished<2&&copy.position>=replay.start+rate*(.5+4*this.burstsFinished)){
                     if(this.burstStart===null)this.burstStart=copy.position;
-                    this.burst.push(copy);assert(this.burst.length<=122,'capture burst exceeded its fixture bound');
-                    if(copy.position-this.burstStart<rate*1.2)return;
+                    this.burst.push(copy);assert(this.burst.length<=132,'capture burst exceeded its fixture bound');
+                    if(copy.position-this.burstStart<rate*1.3)return;
                     this.burstsFinished++;metrics.captureBursts=this.burstsFinished;metrics.captureBurstPackets=(metrics.captureBurstPackets||0)+this.burst.length;this.burstStart=null;
                     for(const held of this.burst)setImmediate(()=>this.port.onmessage?.({data:held}));
                     this.burst=[];return;
@@ -298,6 +306,7 @@ async function scenario(options,rate) {
         const control=label=>snapshot.controls.find(c=>c.label===label);
         const modem=snapshot.controls.find(c=>c.options?.some(o=>o.label==='Fast Modem'));
         assert(modem&&modem.options.find(o=>o.id===modem.selected)?.label==='Fast Modem','fixture must start in default Fast live mode');
+        assert.equal(control('Expected SNR')?.selected,'-6','fixture must use the default short acoustic Fast preset');
         assert(!snapshot.controls.some(c=>c.label==='Simulation'&&c.options?.find(o=>o.id===c.selected)?.label==='Yes'),'simulation must remain disabled');
         await audio.enable(readAsset('audio_worklet.js'),{microphone:true});
         await wait(()=>metrics.captureStarts===1&&metrics.captureFrames>=rate/5&&audio.clockOffset!==null,'live microphone subscription and clock');
@@ -357,7 +366,7 @@ async function scenario(options,rate) {
         assert.equal(received.id,pendingId,'completed reception replaced the pending row');
         assert(physical.frame()>=replay.absenceEnd,'received content escaped the six-second physical absence boundary');
         assert(metrics.captureStarts<=streams+1,'receiver restarted more than once while completing incoming reception');
-        assert(metrics.captureBursts===2&&metrics.captureBurstPackets>=240,'incoming reception did not exercise repeated delayed capture delivery');
+        assert(metrics.captureBursts===2&&metrics.captureBurstPackets>=260,'incoming reception did not exercise repeated delayed capture delivery');
         metrics.receivedMessages=1;metrics.replayedFrames=replay.end-replay.start;
         metrics.elapsedMs=performance.now()-started;
         console.log(JSON.stringify({passed:true,mode:options.fds?'native':'wasm',...metrics}));

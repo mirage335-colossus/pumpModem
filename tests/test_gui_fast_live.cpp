@@ -24,6 +24,7 @@ audio::ChannelMode last_channels=audio::ChannelMode::stereo;
 std::atomic<unsigned> capture_opens=0,capture_active=0;
 std::atomic<bool> capture_overlap=false;
 std::string last_device;
+std::string capture_error;
 audio::Options last_options;
 }
 // Only hardware is replaced. The real Fast encoder, sampled modem, receiver,
@@ -47,6 +48,10 @@ void capture(std::uint32_t rate,const std::string&,const CaptureCallback& consum
     while(!stop.stop_requested()) {
         std::vector<float> block;
         {std::lock_guard lock(fixture::mutex);
+            if(!fixture::capture_error.empty()) {
+                auto error=std::move(fixture::capture_error);fixture::capture_error.clear();
+                throw Error(error);
+            }
             const auto count=std::min<std::size_t>(rate/20,fixture::input.size()-fixture::position);
             block.assign(fixture::input.begin()+static_cast<std::ptrdiff_t>(fixture::position),
                          fixture::input.begin()+static_cast<std::ptrdiff_t>(fixture::position+count));
@@ -385,6 +390,66 @@ void continuous_console() {
     controller.close();
 }
 
+void incomplete_history_reason() {
+    using F=ui::Field;using C=ui::Command;
+    {
+        std::lock_guard lock(fixture::mutex);
+        fixture::transmitted.clear();fixture::input.clear();fixture::position=0;fixture::capture_error.clear();
+    }
+    fast_ui::Controller controller([] {return true;});
+    controller.select(F::fast_profile,"wire");controller.edit(F::fast_device,"fixture");
+    controller.edit(F::fast_text,"hi");controller.activate(C::fast_transmit);
+    const auto wait=[&](auto predicate,const char* message) {
+        const auto deadline=std::chrono::steady_clock::now()+15s;
+        do {
+            controller.poll();if(predicate())return;
+            check(std::chrono::steady_clock::now()<deadline,message);std::this_thread::sleep_for(5ms);
+        }while(true);
+    };
+    wait([&] {return !controller.active();},"Incomplete-history fixture transmission did not finish");
+    {
+        std::lock_guard lock(fixture::mutex);
+        check(!fixture::transmitted.empty(),"Incomplete-history fixture produced no PCM");
+        fixture::input=fixture::transmitted;fixture::position=0;
+    }
+    controller.set_selected(true);
+    wait([&] {return !controller.field(F::fast_history).records.empty();},
+        "Incomplete-history fixture never acquired actual PCM");
+    const auto pending=controller.field(F::fast_history).records.front();
+    check(!pending.activatable&&pending.cells.front().text.find("RECEIVING / PENDING")!=std::string::npos,
+        "Incomplete-history fixture did not fail during pending reception");
+    const std::string reason="Capture frame position discontinuity before physical absence";
+    const auto opens=fixture::capture_opens.load();
+    {
+        std::lock_guard lock(fixture::mutex);
+        // Fail the real capture worker, then leave the next continuous listener
+        // open without another transmission. Include unsafe/oversized backend
+        // diagnostic bytes to exercise the bounded history presentation.
+        fixture::capture_error=reason+";\x1b"+std::string(600,'x');
+        fixture::input.clear();fixture::position=0;
+    }
+    wait([&] {return controller.field(F::fast_history).records.front().cells.front().text.starts_with("INCOMPLETE");},
+        "Capture failure did not retain an incomplete Signals row");
+    const auto failed=controller.field(F::fast_history).records.front();
+    check(failed.id==pending.id&&!failed.activatable&&failed.cells.front().text.find(reason)!=std::string::npos,
+        "Incomplete Signals lost its identity, failure reason or content restriction");
+    check(failed.cells.front().text.size()<600&&failed.cells.front().text.find('\x1b')==std::string::npos&&
+        failed.cells.front().text.find(';')==std::string::npos,
+        "Incomplete diagnostic bypassed bounded, restricted text presentation");
+    wait([&] {return controller.active()&&fixture::capture_opens>opens;},
+        "Incomplete reception did not automatically relisten");
+    const auto& retained=controller.field(F::fast_history).records;
+    check(retained.size()==1&&retained.front().id==pending.id&&retained.front().cells.front().text==failed.cells.front().text&&
+        controller.field(F::fast_status).text.find(reason)==std::string::npos,
+        "Automatic relistening erased or replaced the final capture failure explanation");
+    controller.select(F::fast_history,pending.id);
+    check(!controller.enabled(C::fast_copy_signal)&&!controller.enabled(C::fast_paste_signal)&&
+        !controller.enabled(C::fast_save)&&controller.field(F::fast_files).records.empty(),
+        "An incomplete diagnostic exposed copy, paste or save content");
+    controller.close();wait([&] {return controller.ready_to_close();},"Incomplete-history listener did not close");
+    std::cout<<"Fast incomplete history retains capture failure after automatic relistening\n";
+}
+
 void completion_between_polls() {
     using F=ui::Field;using C=ui::Command;
     // Reuse the independent complete waveform produced and received by the
@@ -450,9 +515,12 @@ void completion_between_polls() {
 }
 
 }
-int main() {
+int main(int argc,char** argv) {
     try {
+        if(argc==2&&std::string_view(argv[1])=="--incomplete-history") {incomplete_history_reason();return 0;}
+        check(argc==1,"Unknown Fast GUI live test selector");
         audio_reconfiguration();continuous_console();completion_between_polls();
+        incomplete_history_reason();
         // Exercise the ordinary controller/session path for cable and both
         // separate acoustic profiles, including their startup, coding cycle
         // and physical-end geometry.

@@ -15,6 +15,7 @@ export class BrowserAudio {
         if(typeof send!=='function')throw new TypeError('A local audio callback is required');
         this.send=send;this.status=status;this.env=environment;this.generation=0n;
         this.context=null;this.node=null;this.stream=null;this.failed=false;this.pendingDrain=null;this.clockOffset=null;this.clockPending=new Map();this.nextNonce=0n;this.sessions=new Map();this.pendingStart=null;this.playbackStream=null;this.failedPlayback=null;
+        this.captureDelivery={queue:[],active:0,frames:0};
     }
     async enable(workletSource,{microphone=true}={}) {
         if(typeof workletSource!=='string'||workletSource.length>256*1024)throw new TypeError('Preloaded bounded worklet source is required');
@@ -27,6 +28,7 @@ export class BrowserAudio {
             if(!Context)throw new Error('Web Audio is unavailable in this browser');
             // Invoke both APIs in the activation call, before awaiting either.
             context=new Context({latencyHint:'interactive'});this.context=context;
+            this.captureDelivery={queue:[],active:0,frames:0};
             this.sessions.set(generation,{context,configured:false,closed:null,idle:false,resolve:null});
             // Retain only a small history for already flushed late messages.
             this.pruneSessions();
@@ -129,6 +131,40 @@ export class BrowserAudio {
         this.status({state:'clock-ready',uncertainty:this.clockUncertainty});
         if(this.pendingStart){const message=this.pendingStart;this.pendingStart=null;this.env.clearTimeout(this.startTimer);this.node?.port.postMessage(message);}
     }
+    capture(event,context) {
+        const delivery=this.captureDelivery,node=this.node;
+        // All pending and in-flight PCM is still charged to the worklet's
+        // original sample-credit limit. Leave ample input slots for controls.
+        if(delivery.frames+event.samples.length>192000)throw new Error('Capture delivery exceeded its sample bound');
+        delivery.frames+=event.samples.length;
+        return new Promise(resolve=>{
+            delivery.queue.push({event,context,node,resolve});this.flushCapture(delivery);
+        });
+    }
+    flushCapture(delivery) {
+        // A window permits a relay to batch PCM across an ownership round trip.
+        // A single outstanding 10ms packet would require sub-10ms host latency.
+        while(delivery.active<32&&delivery.queue.length) {
+            const item=delivery.queue.shift(),{event,context,node}=item;
+            if(context!==this.context||this.failed) {delivery.frames-=event.samples.length;item.resolve();continue;}
+            ++delivery.active;
+            (async()=>{
+                try {
+                    await this.send(event);
+                    if(node===this.node&&!this.failed)node.port.postMessage({kind:'capture_ack',generation:event.generation,frames:event.samples.length});
+                } catch(error) {if(this.context===context)this.interrupt(error?.message||'Audio consumer rejected a block');}
+                finally {
+                    --delivery.active;delivery.frames-=event.samples.length;item.resolve();this.flushCapture(delivery);
+                }
+            })();
+        }
+    }
+    discardQueuedCapture() {
+        const delivery=this.captureDelivery;
+        for(const item of delivery.queue.splice(0)) {
+            delivery.frames-=item.event.samples.length;item.resolve();
+        }
+    }
     async message(event) {
         const context=this.context;
         if(!this.context||String(event.generation)!==String(this.generation)||this.failed)return;
@@ -139,8 +175,9 @@ export class BrowserAudio {
            (String(event.stream)!==this.playbackStream||String(event.stream)===this.failedPlayback))return;
         try {
             if(event.kind==='capture') {
-                const node=this.node;await this.send(event);
-                if(node===this.node)node.port.postMessage({kind:'capture_ack',generation:String(this.generation),frames:event.samples.length});
+                // Delayed worklet events keep their order without flooding the
+                // host's independent message-count bound.
+                await this.capture(event,context);
             } else if(event.kind==='playback_failed') {this.playbackFailure(event.stream,event.reason);
             } else if(event.kind==='playback_endpoint') {
                 if(this.pendingDrain)throw new Error('Previous output drain is still pending');
@@ -214,6 +251,7 @@ export class BrowserAudio {
     interrupt(reason) {
         const generation=String(this.generation);
         if(this.failed)return;this.failed=true;this.pendingDrain=null;this.pendingStart=null;this.env.clearTimeout(this.startTimer);this.env.clearTimeout(this.drainTimer);this.env.clearTimeout(this.clockTimer);
+        this.discardQueuedCapture();
         this.node?.disconnect();this.input?.disconnect();this.stream?.getTracks().forEach(track=>track.stop());
         this.status({state:'interrupted',reason:String(reason)});
         Promise.resolve().then(()=>this.send({kind:'interrupted',generation,reason:boundedReason(reason)})).catch(()=>{});
@@ -221,6 +259,7 @@ export class BrowserAudio {
     async stop() {
         const context=this.context,generation=String(this.generation),session=this.sessions.get(generation);
         this.context=null;this.pendingDrain=null;this.pendingStart=null;this.playbackStream=null;this.failedPlayback=null;this.env.clearTimeout(this.startTimer);this.env.clearTimeout(this.drainTimer);this.env.clearTimeout(this.clockTimer);this.clockPending.clear();
+        this.discardQueuedCapture();
         if(this.node){this.node.port.onmessage=null;this.node.disconnect();this.node=null;}
         this.input?.disconnect();this.input=null;this.stream?.getTracks().forEach(track=>track.stop());this.stream=null;
         if(!context)return this.stopping;

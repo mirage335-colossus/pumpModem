@@ -1,10 +1,13 @@
 #include "web_bridge.hpp"
 #include "web_pixels.hpp"
+#include "plot_render.hpp"
 #include "datapump/transfer.hpp"
+#include <array>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 using namespace datapump::gui;
 namespace {
@@ -33,6 +36,33 @@ void pixel_runs() {
         }
         check(rgb_runs(pixels)==expected,"Bounded RGB run vector differs");
     }
+}
+void bitmap_history() {
+    // The HTML backend must preserve the native producer's startup time
+    // window. Fitting a partially filled history stretches its first rows.
+    for(const unsigned count:{0U,1U,2U,40U,160U}) {
+        plots::SpectrumHistory history;
+        for(unsigned row=0;row<count;++row)history.push(std::array<double,2>{0,0},20);
+        const BitmapSource source=plots::PlotSnapshot::waterfall(history);
+        for(const auto& [width,height]:{std::pair{8,4},std::pair{6,160},std::pair{9,320},std::pair{1200,600}}) {
+            const auto actual=web::detail::render_bitmap(source,width,height);
+            check(actual.width()==static_cast<unsigned>(std::min(width,640))&&
+                  actual.height()==static_cast<unsigned>(std::min(height,320)),"Web bitmap raster bounds changed");
+            BitmapImage native(actual.width(),actual.height(),PixelFormat::rgb24);
+            source.paint(full_bitmap_request(native.width(),native.height(),false,true),
+                         [&](unsigned x,unsigned y,PixelBlock block){native.blit(x,y,block);});
+            check(actual.pixels()==native.pixels(),"Web waterfall differs from native startup/history fitting");
+            const auto visible=std::min<std::size_t>(actual.height(),plots::SpectrumHistory::capacity);
+            for(unsigned y=0;y<actual.height();++y) {
+                const bool missing=count<visible-static_cast<std::size_t>(y)*visible/actual.height();
+                const auto begin=actual.pixels().begin()+static_cast<std::size_t>(y)*actual.width()*3;
+                const bool blank=std::all_of(begin,begin+actual.width()*3,[](auto value){return value==0;});
+                check(blank==missing,"Startup waterfall invented history or lost a captured row");
+            }
+        }
+    }
+    const auto single=web::detail::render_bitmap({},-1,0);
+    check(single.width()==1&&single.height()==1,"Web bitmap lower raster bound changed");
 }
 void envelopes_and_edits() {
     Application app({});web::Bridge bridge(app);
@@ -164,7 +194,7 @@ void shared_geometry_and_stable_snapshots() {
 int main(int argc,char** argv) {
     try {
         if(argc==2&&std::string(argv[1])=="--snapshot") {Application app({});web::Bridge bridge(app);std::cout<<bridge.snapshot(360,640);app.close();return 0;}
-        pixel_runs();envelopes_and_edits();layers_and_services();document_withdrawal();service_completion_routing();shared_submit_policy();shared_geometry_and_stable_snapshots();
+        pixel_runs();bitmap_history();envelopes_and_edits();layers_and_services();document_withdrawal();service_completion_routing();shared_submit_policy();shared_geometry_and_stable_snapshots();
         std::cout<<"web bridge envelopes, literal text, declarations, generations, layers and services passed\n";return 0;
     } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

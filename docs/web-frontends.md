@@ -295,6 +295,19 @@ callback timing, with at most 50 ms of accumulated delivery credit and 2% catch-
 headroom. This changes callback delivery timing only: sample values, order,
 resampling and physical-absence scoring remain unchanged. A browser/relay stall
 can therefore delay reception completion; genuine buffer overflow still fails.
+Before that C++ boundary, the browser adapter submits capture packets in order
+with at most 32 awaiting host ownership. This window permits relay batching across
+an HTTP round trip while keeping delayed microphone events below the page's
+separate in-flight message-count limit. Queued and in-flight packets still consume
+the AudioWorklet's existing 192000-frame credit allowance; no samples are credited
+early or discarded to make room. Control and playback messages do not wait behind
+that capture backlog.
+
+Fast reception can also end incomplete because the captured signal fails coding
+or integrity checks. The shared Signals history retains a bounded failure reason
+on its incomplete row after automatic listening resumes, so a capture overrun can
+be distinguished from a rejected acoustic transfer. Incomplete content remains
+ineligible for copying or saving.
 
 Preserve these invariants in both deployments:
 

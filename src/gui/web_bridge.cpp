@@ -77,13 +77,9 @@ void geometry(std::ostream& out,const ui::ControlLayout& layout) {
        <<",\"captionOverlay\":"<<(layout.caption_overlay?"true":"false")<<'}';
 }
 void bitmap(std::ostream& out,const BitmapSource& source,int width,int height,std::uint64_t revision) {
-    const unsigned w=static_cast<unsigned>(std::clamp(width,1,640));
-    const unsigned h=static_cast<unsigned>(std::clamp(height,1,320));
-    BitmapImage image(w,h,PixelFormat::rgb24);
-    auto request=full_bitmap_request(w,h,false,true);request.fit_content=true;
-    source.paint(request,[&](unsigned x,unsigned y,PixelBlock block){image.blit(x,y,block);});
+    const auto image=detail::render_bitmap(source,width,height);
     const auto runs=detail::rgb_runs(image.pixels());
-    out<<"{\"revision\":"<<identifier(revision)<<",\"width\":"<<w<<",\"height\":"<<h<<",\"sampling\":"
+    out<<"{\"revision\":"<<identifier(revision)<<",\"width\":"<<image.width()<<",\"height\":"<<image.height()<<",\"sampling\":"
        <<json_string(source.sampling()==BitmapSampling::discrete?"discrete":"continuous")
        // This generated alphabet has no JSON-significant characters. Source
        // text still always passes through json_string; pixel bytes never do.
