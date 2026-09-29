@@ -161,6 +161,22 @@ capabilities must also replace assumptions such as non-Windows implying exclusiv
 audio support. Unavailable services are reported through shared capability/state
 data. The browser implementation must not silently use the server sound card.
 
+The Wasm worker services the cooperative runtime every 4 ms, retaining its
+bounded pump and one pending tick. A slower 10 ms service interval can accumulate
+capture backlog when a DSP turn consumes the pump budget. The shared Fast
+matched filter walks contiguous history segments in the original arithmetic
+order, avoiding a 64-bit remainder for each tap without changing its samples,
+filter coefficients or receiver decisions. Capture bounds remain unchanged.
+
+The Wasm live regression includes 180 seconds of uninterrupted default Fast
+reception at each of 44.1 and 48 kHz, then a real message in that same capture
+stream. Early and late microphone-level steps must reach the consumed-input
+diagnostics promptly; a UI edit must also remain responsive. The fixture uses
+Node's baseline Wasm compiler and a 2 ms runtime clock to exercise limited
+processing headroom. Its simulated physical device and assertion deadlines
+retain a separate high-resolution clock. This is a throughput regression,
+not Firefox or physical-device qualification.
+
 ## Server-side lifetime, embedding and files
 
 Use a persistent `datapump-worker` C++ process with a versioned stdin/stdout

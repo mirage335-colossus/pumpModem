@@ -53,10 +53,13 @@ if(DATAPUMP_BUILD_WASM)
       "${CMAKE_SOURCE_DIR}/tests/test_wasm_runtime.mjs"
       "$<TARGET_FILE:datapump-wasm>" "${CMAKE_CURRENT_BINARY_DIR}/datapump-wasm.wasm")
     set_tests_properties(wasm_runtime PROPERTIES LABELS "web" TIMEOUT 240)
-    add_test(NAME wasm_live COMMAND "${DATAPUMP_NODE_EXECUTABLE}"
+    # Baseline compilation supplies a reproducible slower-engine workload;
+    # this is not an emulation or qualification of a particular browser.
+    add_test(NAME wasm_live COMMAND "${DATAPUMP_NODE_EXECUTABLE}" --liftoff-only
       "${CMAKE_SOURCE_DIR}/tests/test_web_live.mjs" --wasm
-      "$<TARGET_FILE:datapump-wasm>" "${CMAKE_CURRENT_BINARY_DIR}/datapump-wasm.wasm")
-    set_tests_properties(wasm_live PROPERTIES LABELS "web" TIMEOUT 180 RUN_SERIAL TRUE)
+      "$<TARGET_FILE:datapump-wasm>" "${CMAKE_CURRENT_BINARY_DIR}/datapump-wasm.wasm"
+      --idle-seconds 180 --clock-resolution-ms 2)
+    set_tests_properties(wasm_live PROPERTIES LABELS "web" TIMEOUT 600 RUN_SERIAL TRUE)
     add_test(NAME browser_audio COMMAND "${DATAPUMP_NODE_EXECUTABLE}"
       "${CMAKE_SOURCE_DIR}/tests/test_browser_audio.mjs")
     set_tests_properties(browser_audio PROPERTIES LABELS "web" TIMEOUT 30)

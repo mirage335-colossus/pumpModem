@@ -1,8 +1,11 @@
 #include "datapump/fast/modem.hpp"
+#include "datapump/fast/preset.hpp"
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <iostream>
+#include <numbers>
 #include <random>
 #include <stdexcept>
 
@@ -52,6 +55,53 @@ Reception receive(Profile p,std::span<const float> pcm,std::size_t chunk,bool si
     require(rx.workspace_bytes()==workspace,"RX workspace grows with stream");
     result.progress=rx.progress();return result;
 }
+void matched_filter_reference(Profile p) {
+    // An independent linear convolution checks startup and three history
+    // wraps, including the default Fast profile used by continuous browser RX.
+    // Reference only the public RRC primitive; do not reuse receiver indexing.
+    using Complex=std::complex<double>;
+    const auto sps=static_cast<double>(p.sample_rate)/p.symbol_rate;
+    require(!p.acoustic_ofdm&&(!p.capacity_mode||p.symbol_rate>=1000||p.sample_rate/(p.symbol_rate*32)<2),"FIR reference requires full-rate SC");
+    const auto radius=p.capacity_mode?std::ceil(6.4/p.rolloff):8.;
+    const auto half=static_cast<std::size_t>(std::ceil(radius*sps)),count=2*half+1;
+    std::vector<double> taps(count);
+    for(std::size_t k=0;k<count;++k)taps[k]=root_raised_cosine((static_cast<double>(k)-half)/sps,p.rolloff)/sps;
+    std::vector<float> pcm(3*count+17);
+    std::uint32_t noise=0x741c53a9;
+    for(auto& f:pcm) {noise^=noise<<13;noise^=noise>>17;noise^=noise<<5;f=(static_cast<int>(noise&65535)-32768)/1048576.f;}
+    for(const auto n:{std::size_t{0},count-1,count,count+1,2*count})pcm[n]=.125f;
+    std::vector<Complex> mixed(pcm.size());
+    const auto omega=2*std::numbers::pi*p.carrier_hz/p.sample_rate;
+    for(std::size_t n=0;n<pcm.size();++n)mixed[n]=2.*static_cast<double>(pcm[n])*std::polar(1.,-omega*static_cast<double>(n));
+    std::vector<std::complex<float>> expected;
+    double next=0;
+    for(std::size_t n=0;n<pcm.size();++n)if(static_cast<double>(n)>=next) {
+        Complex sum=0;
+        for(std::size_t k=0;k<count&&k<=n;++k)sum+=mixed[n-k]*taps[k];
+        expected.push_back(static_cast<std::complex<float>>(sum));next+=sps*.5;
+    }
+    for(const bool irregular:{false,true}) {
+        std::vector<std::complex<float>> observed;observed.reserve(expected.size());
+        std::size_t intervals=0;
+        Receiver rx(p,[&](auto){++intervals;},{},[&](auto value){observed.push_back(value);});
+        const auto workspace=rx.workspace_bytes();
+        const std::array<std::size_t,6> chunks{1,127,480,count-1,count+1,17};
+        for(std::size_t at=0,part=0;at<pcm.size();++part) {
+            const auto size=std::min(irregular?chunks[part%chunks.size()]:1,pcm.size()-at);
+            rx.push(std::span<const float>(pcm).subspan(at,size));at+=size;
+        }
+        // Observer exceptions are intentionally swallowed by Receiver, so
+        // compare outside the callback to make every mismatch test-fatal.
+        require(observed.size()==expected.size(),"matched-filter observation cadence changed");
+        for(std::size_t i=0;i<expected.size();++i) {
+            require(std::bit_cast<std::uint32_t>(observed[i].real())==std::bit_cast<std::uint32_t>(expected[i].real()),"matched-filter real output differs from linear convolution");
+            require(std::bit_cast<std::uint32_t>(observed[i].imag())==std::bit_cast<std::uint32_t>(expected[i].imag()),"matched-filter imaginary output differs from linear convolution");
+        }
+        rx.finish();
+        require(!rx.progress().acquired&&!rx.progress().physical_complete&&!intervals,"FIR noise fixture acquired or completed a message");
+        require(rx.workspace_bytes()==workspace,"FIR history grows with stream");
+    }
+}
 }
 int main() {try {
     // Independent numerical filter and wire mapping vectors, not a shared
@@ -62,6 +112,9 @@ int main() {try {
     require(std::abs(qpsk[0]-std::complex<double>(.7071067811865476,.7071067811865476))<1e-12,"QPSK label zero vector");
     require(std::abs(qpsk[2]-std::complex<double>(.7071067811865476,-.7071067811865476))<1e-12,"QPSK Gray label vector");
     require(sync_symbol(0)==std::complex<double>(.7071067811865475244,.7071067811865475244),"fixed marker vector");
+    for(const auto rate:{44100u,48000u})for(auto profile:{classic_profile(Channel::wire),resolve_snr_preset(Channel::acoustic_short,-6).profile}) {
+        profile.sample_rate=rate;matched_filter_reference(profile);
+    }
     const auto input=data(5);
     {
         const auto cable=classic_profile(Channel::wire);

@@ -977,18 +977,14 @@ struct Receiver::Impl {
     void process_baseband(Complex mixed) {
         raw[sample%raw.size()]=mixed;
         Complex filtered_value=0;
-        if(low_rate_factor>1) {
-            // Keep the original summation order while avoiding one integer
-            // division per tap in the longer narrow-band matched filter.
-            const auto latest=static_cast<std::size_t>(sample%raw.size());
-            const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(taps.size(),sample+1));
-            const auto first=std::min(count,latest+1);
-            for(std::size_t i=0;i<first;++i)filtered_value+=raw[latest-i]*taps[i];
-            for(std::size_t i=first;i<count;++i)filtered_value+=raw[latest+raw.size()-i]*taps[i];
-        } else {
-            for(std::size_t i=0;i<taps.size() && i<=sample;++i)
-                filtered_value+=raw[(sample-i)%raw.size()]*taps[i];
-        }
+        // Walk the two contiguous parts of the history in the original tap
+        // order. A remainder per tap is particularly expensive in Wasm and
+        // needlessly limits continuous reception even at full sample rate.
+        const auto latest=static_cast<std::size_t>(sample%raw.size());
+        const auto count=sample<taps.size()?static_cast<std::size_t>(sample)+1:taps.size();
+        const auto first=std::min(count,latest+1);
+        for(std::size_t i=0;i<first;++i)filtered_value+=raw[latest-i]*taps[i];
+        for(std::size_t i=first;i<count;++i)filtered_value+=raw[latest+raw.size()-i]*taps[i];
         filtered[sample%filtered.size()]=filtered_value;
         if(input_observer && static_cast<double>(sample)>=next_input_time) {
             // A separate free-running tap remains useful before lock. It

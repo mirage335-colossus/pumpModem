@@ -20,9 +20,14 @@ const denied=()=>{throw new Error('Live regression forbids network and remote as
 
 async function wasmThread() {
     const blobs=new Map();let nextBlob=0;
+    // Coarsen only the runtime clock, never the physical audio clock or the
+    // fixture's deadlines. Browsers need not expose Node's clock precision.
+    const resolution=workerData.clockResolutionMs;
+    const runtimePerformance=resolution?{timeOrigin:performance.timeOrigin,
+        now:()=>Math.floor(performance.now()/resolution)*resolution}:performance;
     const sandbox={console,WebAssembly,ArrayBuffer,Uint8Array,Int8Array,Uint16Array,Int16Array,
         Uint32Array,Int32Array,Float32Array,Float64Array,BigInt64Array,BigUint64Array,TextEncoder,TextDecoder,
-        performance,crypto:webcrypto,setTimeout,clearTimeout,setInterval,clearInterval,
+        performance:runtimePerformance,crypto:webcrypto,setTimeout,clearTimeout,setInterval,clearInterval,
         WorkerGlobalScope:function(){},location:{href:'blob:preloaded-live-test'},SharedArrayBuffer:undefined,
         Blob:class {constructor(parts){this.source=parts.join('');}},
         URL:{createObjectURL(blob){const id=`blob:fixture-${++nextBlob}`;blobs.set(id,blob.source);return id;},revokeObjectURL(id){blobs.delete(id);}},
@@ -54,7 +59,7 @@ async function wasmThread() {
 // and the native executable. The launcher itself inherits ordinary stdio.
 const nativeLauncher=String.raw`
 import os, subprocess, sys, tempfile
-binary,node,script,rate,temp_root=sys.argv[1:]
+binary,node,script,rate,temp_root,idle_seconds=sys.argv[1:]
 with tempfile.TemporaryDirectory(prefix='datapump-web-live-',dir=temp_root or None) as workspace:
     ir,iw=os.pipe();orr,ow=os.pipe();er,ew=os.pipe()
     environment=dict(os.environ,TMPDIR=workspace)
@@ -62,7 +67,7 @@ with tempfile.TemporaryDirectory(prefix='datapump-web-live-',dir=temp_root or No
     os.close(ir);os.close(ow);os.close(ew)
     fixture=None
     try:
-        fixture=subprocess.Popen([node,script,'--native-fds',str(iw),str(orr),str(er),'--rate',rate],pass_fds=(iw,orr,er),env=environment)
+        fixture=subprocess.Popen([node,script,'--native-fds',str(iw),str(orr),str(er),'--rate',rate,'--idle-seconds',idle_seconds],pass_fds=(iw,orr,er),env=environment)
         os.close(iw);os.close(orr);os.close(er)
         result=fixture.wait()
     finally:
@@ -104,9 +109,9 @@ function nativeTransport(fds,onBytes,onFailure,metrics) {
     };
 }
 
-function wasmTransport(factoryPath,wasmPath,onBytes,onFailure,metrics) {
+function wasmTransport(factoryPath,wasmPath,onBytes,onFailure,metrics,clockResolutionMs) {
     const factorySource=fs.readFileSync(factoryPath,'utf8'),wasmBytes=new Uint8Array(fs.readFileSync(wasmPath));
-    const thread=new Worker(new URL(import.meta.url),{workerData:{factoryPath,factorySource,workerSource:readAsset('wasm_worker.js')}});
+    const thread=new Worker(new URL(import.meta.url),{workerData:{factoryPath,factorySource,workerSource:readAsset('wasm_worker.js'),clockResolutionMs}});
     let readyResolve,readyReject,next=0,pendingBytes=0,closing=false,diagnostic='';const pending=new Map();
     const ready=new Promise((resolve,reject)=>{readyResolve=resolve;readyReject=reject;});
     const fail=error=>{readyReject(error);for(const p of pending.values())p.reject(error);pending.clear();pendingBytes=0;onFailure(error);};
@@ -142,7 +147,7 @@ function wasmTransport(factoryPath,wasmPath,onBytes,onFailure,metrics) {
 }
 
 function physicalAudio(rate,metrics,fail) {
-    const contexts=[],recorded=[];let Processor,noise=0x51b4ca97,replay=null;
+    const contexts=[],recorded=[];let Processor,noise=0x51b4ca97,replay=null,noiseGain=.002;
     const realm=vm.createContext({AudioWorkletProcessor:class {constructor(){this.port={postMessage:()=>{}};}},
         registerProcessor:(_,value)=>{Processor=value;},Float32Array,Math,Number,String,BigInt,currentFrame:0,sampleRate:rate});
     vm.runInContext(readAsset('audio_worklet.js'),realm,{filename:'web/audio_worklet.js'});
@@ -165,7 +170,7 @@ function physicalAudio(rate,metrics,fail) {
                         // Continue microphone noise through data and absence;
                         // a perfect codeword followed by digital zero misses
                         // noisy correction and live end-of-transmission work.
-                        input[i]=position>=0?.65*(replay.samples[position]||0)+.04*(noise/2147483648):.002*(noise/2147483648);
+                        input[i]=position>=0?.65*(replay.samples[position]||0)+.04*(noise/2147483648):noiseGain*(noise/2147483648);
                     }
                     for(const node of this.nodes)if(node.connected){
                         const left=new Float32Array(128),right=new Float32Array(128);
@@ -252,12 +257,13 @@ function physicalAudio(rate,metrics,fail) {
             let lastSignal=samples.length-1;while(lastSignal>=0&&Math.abs(samples[lastSignal])<1e-6)--lastSignal;
             return {start:replay.start,end:replay.start+samples.length,absenceEnd:replay.start+lastSignal+6*rate};
         },
+        noiseLevel(gain){noiseGain=gain;},
         frame:()=>contexts.at(-1)?.frame||0,
         close:()=>Promise.all(contexts.map(context=>context.close()))};
 }
 
 async function scenario(options,rate) {
-    const metrics={rate,quanta:0,capturePackets:0,captureFrames:0,playedFrames:0,nonzeroFrames:0,progressMessages:0,endpoints:0,drains:0,captureStarts:0,captureStops:0,pcmFrames:0,maxFeedMs:0,maxExportMs:0,maxEditMs:0,tickCount:0,tickMilliseconds:0,receivedBytes:0,snapshotCount:0};
+    const metrics={rate,idleSeconds:options.idleSeconds,clockResolutionMs:options.clockResolutionMs,quanta:0,capturePackets:0,captureFrames:0,playedFrames:0,nonzeroFrames:0,progressMessages:0,endpoints:0,drains:0,captureStarts:0,captureStops:0,pcmFrames:0,maxFeedMs:0,maxExportMs:0,maxEditMs:0,maxInputLevelMs:0,tickCount:0,tickMilliseconds:0,receivedBytes:0,snapshotCount:0};
     let failure=null,snapshot=null,sequence=0n,audio,transport,closing=false,incoming=null;
     const histories=[];const fail=error=>{if(!closing&&!failure)failure=error instanceof Error?error:new Error(String(error));};
     const physical=physicalAudio(rate,metrics,fail);
@@ -287,7 +293,7 @@ async function scenario(options,rate) {
     const bytes=data=>{metrics.receivedBytes+=data.length;decoder.push(data);};
     const started=performance.now();
     try {
-        transport=options.fds?nativeTransport(options.fds,bytes,fail,metrics):wasmTransport(options.factory,options.wasm,bytes,fail,metrics);
+        transport=options.fds?nativeTransport(options.fds,bytes,fail,metrics):wasmTransport(options.factory,options.wasm,bytes,fail,metrics,options.clockResolutionMs);
         audio=new BrowserAudio(event=>{
             if(event.kind==='playback_progress'&&event.drained)metrics.drains++;
             return transport.send(encodeAudio(event));
@@ -347,8 +353,33 @@ async function scenario(options,rate) {
         const resumed=metrics.captureFrames,streams=metrics.captureStarts;
         await edit('ready');await wait(()=>metrics.captureFrames>=resumed+rate*2,'RX after transmission',10000);
         assert.equal(metrics.captureStarts,streams,'post-transmission receiver restarted after audio failure');
+        const inputDb=()=>{
+            const caption=snapshot.controls.find(c=>/RMS -?\d+ dBFS/.test(c.caption||''))?.caption;
+            return Number(caption?.match(/RMS (-?\d+) dBFS/)?.[1]??NaN);
+        };
+        const levelStep=async()=>{
+            await wait(()=>inputDb()< -50,'initial consumed microphone noise level');
+            const start=performance.now();physical.noiseLevel(.02);
+            await wait(()=>inputDb()> -45&&inputDb()< -30,'consumed microphone level step',2000);
+            const elapsed=performance.now()-start;
+            (metrics.inputLevelMs??=[]).push(elapsed);
+            metrics.maxInputLevelMs=Math.max(metrics.maxInputLevelMs,elapsed);
+            physical.noiseLevel(.002);
+            await wait(()=>inputDb()< -50,'consumed microphone level recovery',2000);
+        };
+        await levelStep();
+        const idleStart=metrics.captureFrames,idleClock=performance.now(),idleTicks=metrics.tickMilliseconds;
+        await wait(()=>metrics.captureFrames>=idleStart+rate*options.idleSeconds,
+            `${options.idleSeconds} seconds of sustained RX`,options.idleSeconds*1000+10000);
+        metrics.idleElapsedMs=performance.now()-idleClock;
+        metrics.idleTickMs=metrics.tickMilliseconds-idleTicks;
+        assert.equal(metrics.captureStarts,streams,'sustained idle receiver restarted');
+        await edit('listening');await levelStep();
+        assert.equal(metrics.captureStarts,streams,'receiver restarted during the late input/UI checks');
         // Replay the actual physical output into the microphone. A tone-only
         // capture probe misses acquisition, FEC and physical-end processing.
+        // Use this same capture stream: a new local TX would cancel RX and
+        // discard accumulated backlog, concealing sustained throughput failure.
         const replay=incoming=physical.replay();let pendingId=null,received=null;
         await wait(()=>{
             const rows=control('Signals')?.records||[];
@@ -375,20 +406,23 @@ async function scenario(options,rate) {
 }
 
 async function main() {
-    const args=process.argv.slice(2),options={};let rates=[48000,44100];
+    const args=process.argv.slice(2),options={idleSeconds:20,clockResolutionMs:0};let rates=[48000,44100];
     for(let i=0;i<args.length;i++){
         if(args[i]==='--native')options.native=path.resolve(args[++i]);
         else if(args[i]==='--wasm'){options.factory=path.resolve(args[++i]);options.wasm=path.resolve(args[++i]);}
         else if(args[i]==='--native-fds')options.fds=[Number(args[++i]),Number(args[++i]),Number(args[++i])];
         else if(args[i]==='--rate'){const rate=Number(args[++i]);assert([48000,44100].includes(rate));rates=[rate];}
         else if(args[i]==='--temp-root')options.tempRoot=path.resolve(args[++i]);
+        else if(args[i]==='--idle-seconds'){options.idleSeconds=Number(args[++i]);assert(Number.isInteger(options.idleSeconds)&&options.idleSeconds>=5&&options.idleSeconds<=300);}
+        else if(args[i]==='--clock-resolution-ms'){options.clockResolutionMs=Number(args[++i]);assert([0,1,2].includes(options.clockResolutionMs));}
         else throw new Error(`Unknown option: ${args[i]}`);
     }
     assert.equal(Number(Boolean(options.native))+Number(Boolean(options.factory))+Number(Boolean(options.fds)),1,
-        'usage: node tests/test_web_live.mjs --native WORKER | --wasm FACTORY WASM [--rate 48000|44100] [--temp-root DIR]');
+        'usage: node tests/test_web_live.mjs --native WORKER | --wasm FACTORY WASM [--rate 48000|44100] [--temp-root DIR] [--idle-seconds 5..300] [--clock-resolution-ms 0|1|2]');
+    assert(options.factory||options.clockResolutionMs===0,'clock coarsening requires Wasm');
     for(const rate of rates){
         if(options.native){
-            const child=spawn(process.env.PYTHON||'python3',['-B','-c',nativeLauncher,options.native,process.execPath,fileURLToPath(import.meta.url),String(rate),options.tempRoot||process.env.TMPDIR||''],{stdio:'inherit'});
+            const child=spawn(process.env.PYTHON||'python3',['-B','-c',nativeLauncher,options.native,process.execPath,fileURLToPath(import.meta.url),String(rate),options.tempRoot||process.env.TMPDIR||'',String(options.idleSeconds)],{stdio:'inherit'});
             const code=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',resolve);});
             assert.equal(code,0,`native live ${rate}Hz fixture failed`);
         }else await scenario(options,rate);

@@ -42,7 +42,10 @@ async function process(message) {
             print:()=>{},printErr:line=>postMessage({type:'diagnostic',message:String(line).slice(0,4096)}),
             onAbort:reason=>fatal(new Error(String(reason)))});
         await call('datapump_web_create');flush();
-        timer=setInterval(()=>{if(!tickPending){tickPending=true;enqueue({type:'tick'});}},10);
+        // The cooperative pump has a 4ms budget. A 10ms service interval can
+        // fall behind continuous capture when a DSP turn exhausts that budget.
+        // Keep one pending tick and leave input callbacks between bounded turns.
+        timer=setInterval(()=>{if(!tickPending){tickPending=true;enqueue({type:'tick'});}},4);
         postMessage({type:'ready'});return;
     }
     if(!runtime)throw new Error('Application is not initialized');
