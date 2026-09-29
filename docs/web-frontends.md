@@ -100,6 +100,15 @@ behavior. Responsive layout, touch, focus, accessibility and text composition
 belong in generic rendering/layout support. A new presentation primitive can
 require support in each renderer, as it does today.
 
+Browser controls use the shared C++ desktop rectangles, tab frames, document
+layout and record geometry. A narrow viewport scrolls the shared logical desktop;
+browser zoom remains available. The renderer retains input/record nodes across
+polls, long records retain horizontal scrolling, and revision-based bitmap
+caches avoid repainting unchanged images.
+Complete presentation snapshots coalesce before painting; PCM and clock handling
+do not wait for that DOM work. Lossless bounded pixel runs reduce plot traffic
+without changing bitmap content; noisy images retain a raw RGB fallback.
+
 One C++ bridge materializes owned snapshots from the facade; it must not serialize
 C++ pointers, references, callback objects or `shared_ptr` lifetime tokens. Use
 opaque control/service IDs, stable record IDs, revisions and surface generations.

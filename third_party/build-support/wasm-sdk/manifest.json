@@ -46,5 +46,17 @@
       "url": "https://github.com/openssl/openssl/releases/download/openssl-3.5.7/openssl-3.5.7.tar.gz",
       "sha256": "a8c0d28a529ca480f9f36cf5792e2cd21984552a3c8e4aa11a24aa31aeac98e8"
     }
-  ]
+  ],
+  "entropy": {
+    "capability": "emscripten-getentropy-webcrypto-v1",
+    "patch": "openssl-emscripten-entropy.patch",
+    "patch_sha256": "419d00744dd9dbf9bf1b6131a59ddaf60053977f9d289c29b9c1f06195f23e9f",
+    "source": "providers/implementations/rands/seeding/rand_unix.c",
+    "source_sha256": "488e3d6c9ff70159168d47b216a3604a17d95c58eced3fff139a4a23b2e866dd",
+    "patched_sha256": "fe096921b8be34b450e28837d8d7c9ffab902a304bbd3ecb1e5e6e9a5e6649d7",
+    "probe_sources": [
+      "entropy-probe.cpp",
+      "entropy-probe.mjs"
+    ]
+  }
 }

@@ -15,7 +15,7 @@ inline constexpr std::size_t max_text=1024*1024;
 enum class Type : std::uint32_t {
     viewport=1,event=2,audio_configure=3,audio_capture=4,audio_ready=5,
     audio_progress=6,audio_error=7,audio_cancelled=8,reconnect=9,
-    upload_begin=10,upload_chunk=11,upload_commit=12,download_prepare=13,clock_ping=15,
+    upload_begin=10,upload_chunk=11,upload_commit=12,download_prepare=13,clock_ping=15,audio_playback_error=16,
     snapshot=101,audio=102,error=103,closed=104,
     file_begin=105,file_chunk=106,file_end=107,clock_reply=108
 };

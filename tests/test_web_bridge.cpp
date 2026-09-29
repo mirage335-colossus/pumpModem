@@ -1,6 +1,8 @@
 #include "web_bridge.hpp"
+#include "web_pixels.hpp"
 #include "datapump/transfer.hpp"
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -16,6 +18,21 @@ std::uint64_t id(const std::string& json,const std::string& label) {
 }
 web::Event event(const web::Bridge& bridge,web::EventKind kind,std::uint64_t target,std::uint64_t sequence) {
     web::Event value;value.generation=bridge.generation();value.sequence=sequence;value.kind=kind;value.target=target;return value;
+}
+void pixel_runs() {
+    using web::detail::rgb_runs;
+    check(rgb_runs({1,2,3}).empty(),"One pixel must use raw fallback");
+    check(rgb_runs({1,2,3,4,5,6,7,8,9,10,11,12}).empty(),"Distinct pixels expanded");
+    check(rgb_runs({1,2,3,1,2,3,4,5,6,7,8,9}).empty(),"Equal-size encoding must use raw");
+    for(const auto count:{2U,255U,256U,257U,640U*320U}) {
+        std::vector<unsigned char> pixels;
+        for(unsigned i=0;i<count;++i)pixels.insert(pixels.end(),{0,127,255});
+        std::vector<unsigned char> expected;
+        for(unsigned remaining=count;remaining;) {
+            const auto n=std::min(remaining,256U);expected.insert(expected.end(),{static_cast<unsigned char>(n-1),0,127,255});remaining-=n;
+        }
+        check(rgb_runs(pixels)==expected,"Bounded RGB run vector differs");
+    }
 }
 void envelopes_and_edits() {
     Application app({});web::Bridge bridge(app);
@@ -110,11 +127,44 @@ void shared_submit_policy() {
     }
     app.close();
 }
+std::string rect(ui::Rect value) {
+    std::ostringstream out;out<<"{\"x\":"<<value.x<<",\"y\":"<<value.y<<",\"w\":"<<value.w<<",\"h\":"<<value.h<<'}';return out.str();
+}
+void shared_geometry_and_stable_snapshots() {
+    Launch launch;launch.simulation=true;Application app(launch);web::Bridge bridge(app);
+    const auto small=bridge.snapshot(360,640);
+    check(small.find("\"layout\":{\"width\":"+std::to_string(ui::min_width)+",\"height\":"+std::to_string(ui::min_height))!=std::string::npos,
+          "Small browser viewport must preserve shared minimum desktop extent");
+    check(small==bridge.snapshot(360,640),"Unchanged polling repainted bitmaps or advanced presentation revision");
+    const int width=ui::default_width,height=ui::default_height;
+    const auto snapshot=bridge.snapshot(width,height);
+    check(snapshot.find("\"page\":"+rect(app.page_bounds(width,height)))!=std::string::npos,"Shared page rectangle omitted");
+    for(const auto& group:ui::control_groups(ui::console_screen())) {
+        const auto& c=*group.control;
+        if(c.document_only||(!c.persistent&&c.page!=app.page())||
+           (group.menu_items.empty()?!app.control(c).visible:!app.menu(group.menu_items).visible))continue;
+        const auto geometry=app.control_layout(c,width,height);
+        check(snapshot.find("\"geometry\":{\"frame\":"+rect(geometry.frame)+",\"widget\":"+rect(geometry.widget))!=std::string::npos,
+              "Browser geometry differs from shared native control geometry");
+        if(!group.menu_items.empty())check(snapshot.find("\"kind\":\"menu\",\"label\":\""+std::string(c.menu_label)+'"')!=std::string::npos,
+              "Shared action group was expanded instead of rendered as a menu");
+    }
+    for(const auto& tab:app.tab_layout(width,height))if(tab.visible)
+        check(snapshot.find("\"frame\":"+rect(tab.frame))!=std::string::npos,"Shared tab geometry omitted");
+    check(snapshot==bridge.snapshot(width,height),"Full unchanged snapshot is not stable");
+    app.select(ui::Field::fast_mode,"fast");const auto fast=bridge.snapshot(width,height);
+    const auto message=id(fast,"Message");auto edit=event(bridge,web::EventKind::edit,message,1);edit.value="layout";
+    check(bridge.accept(edit).accepted,"Geometry-aware snapshot lost editable target");
+    const auto updated=bridge.snapshot(width,height);
+    check(updated!=snapshot&&updated.find("\"ack\":\"1\"")!=std::string::npos,"Actual edit/ack was suppressed by snapshot cache");
+    check(updated==bridge.snapshot(width,height),"Edited presentation remains unstable after acknowledgment");
+    app.close();
+}
 }
 int main(int argc,char** argv) {
     try {
         if(argc==2&&std::string(argv[1])=="--snapshot") {Application app({});web::Bridge bridge(app);std::cout<<bridge.snapshot(360,640);app.close();return 0;}
-        envelopes_and_edits();layers_and_services();document_withdrawal();service_completion_routing();shared_submit_policy();
+        pixel_runs();envelopes_and_edits();layers_and_services();document_withdrawal();service_completion_routing();shared_submit_policy();shared_geometry_and_stable_snapshots();
         std::cout<<"web bridge envelopes, literal text, declarations, generations, layers and services passed\n";return 0;
     } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

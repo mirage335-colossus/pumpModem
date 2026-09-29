@@ -1,4 +1,5 @@
 #include "web_bridge.hpp"
+#include "web_pixels.hpp"
 #include "control_interactions.hpp"
 #include "document_presentation.hpp"
 #include "service_queue.hpp"
@@ -28,13 +29,13 @@ std::string json_string(std::string_view value) {
 std::string identifier(std::uint64_t id) {return json_string(std::to_string(id));}
 std::string base64(const std::vector<unsigned char>& bytes) {
     constexpr char alphabet[]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::string out;out.reserve((bytes.size()+2)/3*4);
+    std::string out((bytes.size()+2)/3*4,'\0');std::size_t at=0;
     for(std::size_t i=0;i<bytes.size();i+=3) {
         const auto n=static_cast<unsigned>(bytes[i])<<16|
             (i+1<bytes.size()?static_cast<unsigned>(bytes[i+1])<<8:0U)|
             (i+2<bytes.size()?static_cast<unsigned>(bytes[i+2]):0U);
-        out+=alphabet[n>>18];out+=alphabet[(n>>12)&63];
-        out+=i+1<bytes.size()?alphabet[(n>>6)&63]:'=';out+=i+2<bytes.size()?alphabet[n&63]:'=';
+        out[at++]=alphabet[n>>18];out[at++]=alphabet[(n>>12)&63];
+        out[at++]=i+1<bytes.size()?alphabet[(n>>6)&63]:'=';out[at++]=i+2<bytes.size()?alphabet[n&63]:'=';
     }
     return out;
 }
@@ -60,15 +61,33 @@ std::string identity(const ui::Control& c) {
         std::to_string(static_cast<int>(c.command))+":"+std::to_string(static_cast<int>(c.bitmap))+":"+
         std::to_string(static_cast<int>(c.menu))+":"+std::to_string(c.instance);
 }
-void bitmap(std::ostream& out,const BitmapSource& source,int width,int height) {
+void rectangle(std::ostream& out,ui::Rect r) {
+    out<<"{\"x\":"<<r.x<<",\"y\":"<<r.y<<",\"w\":"<<r.w<<",\"h\":"<<r.h<<'}';
+}
+void geometry(std::ostream& out,const ui::ControlLayout& layout) {
+    out<<"{\"frame\":";rectangle(out,layout.frame);
+    out<<",\"widget\":";rectangle(out,layout.widget);
+    out<<",\"label\":";rectangle(out,layout.label);
+    out<<",\"suggestions\":";rectangle(out,layout.suggestions);
+    out<<",\"caption\":";rectangle(out,layout.caption);
+    out<<",\"hasLabel\":"<<(layout.has_label?"true":"false")
+       <<",\"hasSuggestions\":"<<(layout.has_suggestions?"true":"false")
+       <<",\"hasCaption\":"<<(layout.has_caption?"true":"false")
+       <<",\"border\":"<<(layout.border?"true":"false")
+       <<",\"captionOverlay\":"<<(layout.caption_overlay?"true":"false")<<'}';
+}
+void bitmap(std::ostream& out,const BitmapSource& source,int width,int height,std::uint64_t revision) {
     const unsigned w=static_cast<unsigned>(std::clamp(width,1,640));
     const unsigned h=static_cast<unsigned>(std::clamp(height,1,320));
     BitmapImage image(w,h,PixelFormat::rgb24);
     auto request=full_bitmap_request(w,h,false,true);request.fit_content=true;
     source.paint(request,[&](unsigned x,unsigned y,PixelBlock block){image.blit(x,y,block);});
-    out<<"{\"width\":"<<w<<",\"height\":"<<h<<",\"sampling\":"
+    const auto runs=detail::rgb_runs(image.pixels());
+    out<<"{\"revision\":"<<identifier(revision)<<",\"width\":"<<w<<",\"height\":"<<h<<",\"sampling\":"
        <<json_string(source.sampling()==BitmapSampling::discrete?"discrete":"continuous")
-       <<",\"rgb\":"<<json_string(base64(image.pixels()))<<'}';
+       // This generated alphabet has no JSON-significant characters. Source
+       // text still always passes through json_string; pixel bytes never do.
+       <<(runs.empty()?",\"rgb\":\"":",\"rgbRuns\":\"")<<base64(runs.empty()?image.pixels():runs)<<"\"}";
 }
 ui::Key key(int value) {
     if(value<static_cast<int>(ui::Key::other)||value>static_cast<int>(ui::Key::del))return ui::Key::other;
@@ -94,9 +113,28 @@ struct Bridge::Impl {
     std::map<std::uint64_t,Target> targets;
     std::map<std::string,unsigned> occurrences;
     std::string signature;
+    std::string previous_payload;
+    std::uint64_t presentation_revision=0;
+    struct CachedBitmap {std::uint64_t revision=0;int width=0,height=0;std::string json;};
+    std::map<std::string,CachedBitmap> bitmaps;
+    std::map<std::string,bool> used_bitmaps;
+    std::uint64_t bitmap_serial=0,document_revision=0;
+    std::shared_ptr<const ui::DocumentNode> document_source;
     ui::ServiceQueue services;
     int width=1000,height=760;
     bool initialized=false;
+    void picture(std::ostream& out,const std::string& key,const BitmapSource& source,
+                 std::uint64_t revision,int w,int h) {
+        w=std::clamp(w,1,640);h=std::clamp(h,1,320);used_bitmaps[key]=true;
+        auto& cached=bitmaps[key];
+        if(cached.json.empty()||cached.revision!=revision||cached.width!=w||cached.height!=h) {
+            std::ostringstream encoded;bitmap(encoded,source,w,h,++bitmap_serial);
+            cached={revision,w,h,encoded.str()};
+        }
+        // Every snapshot remains independently usable after queue coalescing.
+        // Reuse the whole encoding, including JSON quoting, on unchanged polls.
+        out<<cached.json;
+    }
     std::uint64_t fresh() {
         if(next_id==std::numeric_limits<std::uint64_t>::max())throw std::overflow_error("web identifier space exhausted");
         return next_id++;
@@ -140,15 +178,17 @@ struct Bridge::Impl {
         out<<']';
     }
     void control(std::ostream& out,const ui::Control& c,bool overlay=false,
-                 std::string document_key={},bool inherited_enabled=true) {
+                 std::string document_key={},bool inherited_enabled=true,
+                 std::span<const ui::Control* const> menu_items={}) {
         const auto p=app.control(c);const auto& s=p.state;
-        if(!p.visible)return;
+        const auto menu=menu_items.empty()?std::optional<MenuPresentation>{}:app.menu(menu_items);
+        if(menu?!menu->visible:!p.visible)return;
         Target t;t.control=c;t.document_key=document_key;t.enabled=inherited_enabled;
         const auto id=target(document_key.empty()?identity(c):document_key,t);
         const auto layout=app.control_layout(c,width,height);
-        out<<"{\"id\":"<<identifier(id)<<",\"kind\":"<<json_string(kind_name(c.kind))
-           <<",\"label\":"<<json_string(p.label)<<",\"help\":"<<json_string(c.help)
-           <<",\"enabled\":"<<(p.enabled&&inherited_enabled?"true":"false")<<",\"persistent\":"<<(c.persistent?"true":"false")
+        out<<"{\"id\":"<<identifier(id)<<",\"kind\":"<<json_string(menu?"menu":kind_name(c.kind))
+           <<",\"label\":"<<json_string(menu?c.menu_label:p.label)<<",\"help\":"<<json_string(c.help)
+           <<",\"enabled\":"<<((menu?menu->enabled:p.enabled)&&inherited_enabled?"true":"false")<<",\"persistent\":"<<(c.persistent?"true":"false")
            <<",\"overlay\":"<<(overlay?"true":"false")<<",\"row\":"<<c.row
            <<",\"stretch\":"<<c.stretch<<",\"multiline\":"<<(c.multiline?"true":"false")
            <<",\"readOnly\":"<<(c.read_only?"true":"false")<<",\"byteLimit\":"<<c.byte_limit
@@ -160,8 +200,24 @@ struct Bridge::Impl {
            <<",\"text\":"<<json_string(s.text)<<",\"displayText\":"<<json_string(s.display_text)
            <<",\"selected\":"<<json_string(s.selected)<<",\"checked\":"<<(s.checked?"true":"false")
            <<",\"tone\":"<<static_cast<int>(s.text_tone)<<",\"history\":"<<identifier(s.text_history_revision)
-           <<",\"cursorEnd\":"<<identifier(s.text_cursor_end_revision)<<",\"options\":";
-        options(out,s);
+           <<",\"cursorEnd\":"<<identifier(s.text_cursor_end_revision)
+           <<",\"fontSize\":"<<c.font_size<<",\"rowHeight\":"<<c.list_row_height
+           <<",\"emptyText\":"<<json_string(c.empty_text)<<",\"geometry\":";
+        geometry(out,layout);
+        out<<",\"options\":";
+        if(menu) {
+            out<<'[';bool first=true;
+            for(const auto* item:menu_items) {
+                const auto presented=app.control(*item);if(!presented.visible)continue;
+                auto item_id=id;
+                if(item!=&c) {Target action;action.control=*item;action.enabled=inherited_enabled;item_id=target(identity(*item),action);}
+                if(!first)out<<',';
+                first=false;
+                out<<"{\"id\":"<<identifier(item_id)<<",\"label\":"<<json_string(presented.label)
+                   <<",\"enabled\":"<<(presented.enabled&&inherited_enabled?"true":"false")<<'}';
+            }
+            out<<']';
+        } else options(out,s);
         out<<",\"records\":[";bool first=true;
         for(const auto& record:s.records) {
             if(!first)out<<',';
@@ -173,7 +229,8 @@ struct Bridge::Impl {
                 if(!first_cell)out<<',';
                 first_cell=false;
                 out<<"{\"text\":"<<json_string(cell.text)<<",\"tone\":"<<static_cast<int>(cell.tone)
-                   <<",\"bold\":"<<(cell.bold?"true":"false")<<'}';
+                   <<",\"bold\":"<<(cell.bold?"true":"false")<<",\"fontSize\":"<<cell.font_size
+                   <<",\"x\":"<<cell.x<<",\"y\":"<<cell.y<<",\"w\":"<<cell.w<<",\"h\":"<<cell.h<<'}';
             }
             out<<"]}";
         }
@@ -181,7 +238,7 @@ struct Bridge::Impl {
         if(c.kind==ui::Kind::bitmap) {
             const auto picture=app.bitmap(c,static_cast<unsigned>(std::clamp(width,1,640)));
             out<<",\"caption\":"<<json_string(picture.caption)<<",\"bitmap\":";
-            bitmap(out,picture.source,std::max(layout.widget.w,240),std::max(layout.widget.h,80));
+            this->picture(out,"control:"+std::to_string(id),picture.source,picture.revision,layout.widget.w,layout.widget.h);
             out<<",\"click\":"<<(c.click!=ui::Command::none?"true":"false")
                <<",\"doubleClick\":"<<(c.double_click!=ui::Command::none?"true":"false")
                <<",\"wheel\":"<<((c.wheel_up!=ui::Command::none||c.wheel_down!=ui::Command::none)?"true":"false");
@@ -215,13 +272,18 @@ struct Bridge::Impl {
         if(current.root())visit(visit,*current.root(),0);
         return result;
     }
-    void document(std::ostream& out,const ui::DocumentPresentation::Node& presented,unsigned depth=0) {
+    void document(std::ostream& out,const ui::DocumentPresentation::Node& presented,unsigned depth=0,
+                  std::string path="root") {
         if(depth>64)throw std::length_error("web document nesting limit exceeded");
         const auto& node=*presented.source;
         constexpr const char* kinds[]={"column","row","text","bitmap","action","control"};
         out<<"{\"kind\":"<<json_string(kinds[static_cast<unsigned>(node.kind)])<<",\"text\":"<<json_string(node.text)
            <<",\"tone\":"<<static_cast<int>(node.tone)<<",\"bold\":"<<(node.bold?"true":"false")
-           <<",\"border\":"<<(node.border?"true":"false")<<",\"enabled\":"<<(presented.enabled?"true":"false");
+           <<",\"border\":"<<(node.border?"true":"false")<<",\"enabled\":"<<(presented.enabled?"true":"false")
+           <<",\"width\":"<<node.width<<",\"height\":"<<node.height<<",\"padding\":"<<node.padding
+           <<",\"top\":"<<node.top<<",\"bottom\":"<<node.bottom<<",\"right\":"<<node.right
+           <<",\"fontSize\":"<<node.font_size<<",\"fill\":"<<static_cast<unsigned>(node.fill)
+           <<",\"equalHeight\":"<<(node.equal_height?"true":"false");
         if(node.kind==ui::DocumentKind::control&&node.control&&ui::document_control_supported(*node.control)) {
             out<<",\"control\":";
             if(app.control(*node.control).visible) {
@@ -236,11 +298,12 @@ struct Bridge::Impl {
             out<<",\"id\":"<<identifier(id)<<",\"available\":"<<(presented.enabled&&app.enabled(node.command)?"true":"false");
         }
         if(node.kind==ui::DocumentKind::bitmap) {
-            out<<",\"bitmap\":";bitmap(out,node.plot,static_cast<int>(node.width>0?node.width:width),
-                static_cast<int>(node.height>0?node.height:200));
+            out<<",\"bitmap\":";picture(out,"document:"+path,node.plot,document_revision,
+                static_cast<int>(node.width>0?node.width:width),static_cast<int>(node.height>0?node.height:200));
         }
         out<<",\"children\":[";bool first=true;
-        for(const auto& child:presented.children) {if(!first)out<<',';first=false;document(out,child,depth+1);}
+        std::size_t index=0;
+        for(const auto& child:presented.children) {if(!first)out<<',';first=false;document(out,child,depth+1,path+":"+std::to_string(index++));}
         out<<"]}";
     }
 };
@@ -255,7 +318,7 @@ void Bridge::reconnect() {
         if(s.services.complete(result))s.app.complete_service(std::move(result));
     }
     s.service_id=0;s.app.set_service_active(false);++s.epoch;s.signature.clear();s.initialized=false;
-    s.targets.clear();s.identities.clear();s.sequence=0;
+    s.targets.clear();s.identities.clear();s.bitmaps.clear();s.document_source.reset();s.sequence=0;
 }
 std::optional<ui::ServiceRequest> Bridge::service(std::uint64_t id) const {
     const auto& s=*impl_;const auto* request=s.services.current();
@@ -263,13 +326,19 @@ std::optional<ui::ServiceRequest> Bridge::service(std::uint64_t id) const {
     return *request;
 }
 std::string Bridge::snapshot(int width,int height) {
-    auto& s=*impl_;s.width=std::clamp(width,240,4096);s.height=std::clamp(height,240,4096);
+    // Shared desktop geometry assumes its declared minimum extent. A small
+    // browser viewport scrolls this same surface, rather than rearranging the
+    // application's controls according to a second backend-specific layout.
+    auto& s=*impl_;s.width=std::clamp(width,ui::min_width,4096);s.height=std::clamp(height,ui::min_height,4096);
     s.synchronize_services();
     if(s.initialized&&s.current_signature()!=s.signature)++s.epoch;
-    s.retained.clear();s.targets.clear();s.occurrences.clear();s.document_occurrences.clear();
+    s.retained.clear();s.targets.clear();s.occurrences.clear();s.document_occurrences.clear();s.used_bitmaps.clear();
     std::ostringstream body;
-    body<<",\"title\":"<<json_string(ui::window_title())<<",\"revision\":"<<identifier(s.app.revision())
-        <<",\"ack\":"<<identifier(s.sequence)<<",\"closing\":"<<(s.app.closing()?"true":"false")<<",\"tabs\":[";
+    body<<",\"title\":"<<json_string(ui::window_title())
+        <<",\"ack\":"<<identifier(s.sequence)<<",\"closing\":"<<(s.app.closing()?"true":"false")
+        <<",\"layout\":{\"width\":"<<s.width<<",\"height\":"<<s.height<<",\"page\":";
+    rectangle(body,s.app.page_bounds(s.width,s.height));
+    body<<"},\"tabs\":[";
     bool first=true;
     for(const auto& tab:s.app.tab_layout(s.width,s.height)) {
         if(!tab.visible)continue;
@@ -279,18 +348,22 @@ std::string Bridge::snapshot(int width,int height) {
         if(!first)body<<',';
         first=false;
         body<<"{\"id\":"<<identifier(id)<<",\"label\":"<<json_string(definition.title)
-            <<",\"selected\":"<<(s.app.page()==tab.page?"true":"false")<<'}';
+            <<",\"selected\":"<<(s.app.page()==tab.page?"true":"false")<<",\"frame\":";
+        rectangle(body,tab.frame);body<<'}';
     }
     body<<"],\"controls\":[";first=true;
-    for(const auto& c:ui::console_screen()) {
-        if(c.document_only||(!c.persistent&&c.page!=s.app.page())||!s.app.control(c).visible)continue;
+    for(const auto& group:ui::control_groups(ui::console_screen())) {
+        const auto& c=*group.control;
+        if(c.document_only||(!c.persistent&&c.page!=s.app.page())||
+            (group.menu_items.empty()?!s.app.control(c).visible:!s.app.menu(group.menu_items).visible))continue;
         if(!first)body<<',';
-        first=false;s.control(body,c);
+        first=false;s.control(body,c,false,{},true,group.menu_items);
     }
     body<<"],\"document\":";
     const auto page=std::find_if(ui::pages().begin(),ui::pages().end(),[&](const auto& p){return p.id==s.app.page();});
     if(page!=ui::pages().end()&&page->document) {
-        const auto document=s.app.document(s.app.page(),s.width);
+        const auto document=s.app.document(s.app.page(),ui::document_content_width(s.app.page_bounds(s.width,s.height).w));
+        if(document!=s.document_source){s.document_source=document;++s.document_revision;}
         ui::DocumentPresentation presentation;presentation.reset(document);
         if(presentation.root())s.document(body,*presentation.root());else body<<"null";
     } else body<<"null";
@@ -299,10 +372,11 @@ std::string Bridge::snapshot(int width,int height) {
         <<",\"enableBackground\":"<<(layers.enable_background?"true":"false")
         <<",\"showOverlay\":"<<(layers.show_overlay?"true":"false")
         <<",\"enableOverlay\":"<<(layers.enable_overlay?"true":"false")<<"},\"overlay\":[";
-    if(overlay) {first=true;for(const auto& c:overlay->controls) {
-        if(!s.app.control(c).visible)continue;
+    if(overlay) {first=true;for(const auto& group:ui::control_groups(overlay->controls)) {
+        const auto& c=*group.control;
+        if(group.menu_items.empty()?!s.app.control(c).visible:!s.app.menu(group.menu_items).visible)continue;
         if(!first)body<<',';
-        first=false;s.control(body,c,true);
+        first=false;s.control(body,c,true,{},true,group.menu_items);
     }}
     body<<"],\"service\":";
     if(const auto request=service(s.service_id);request&&layers.present_services) {
@@ -311,7 +385,13 @@ std::string Bridge::snapshot(int width,int height) {
             <<",\"byteLimit\":"<<request->byte_limit<<'}';
     } else body<<"null";
     body<<'}';s.identities=std::move(s.retained);s.signature=s.current_signature();s.initialized=true;
-    std::string result="{\"version\":"+std::to_string(protocol_version)+",\"generation\":"+identifier(s.epoch)+body.str();
+    for(auto i=s.bitmaps.begin();i!=s.bitmaps.end();) {
+        if(!s.used_bitmaps.contains(i->first))i=s.bitmaps.erase(i);else ++i;
+    }
+    const std::string payload=",\"generation\":"+identifier(s.epoch)+body.str();
+    if(payload!=s.previous_payload){s.previous_payload=payload;++s.presentation_revision;}
+    std::string result="{\"version\":"+std::to_string(protocol_version)+",\"revision\":"+
+        identifier(s.presentation_revision)+payload;
     if(result.size()>maximum_snapshot)throw std::length_error("web snapshot exceeds bounded message size");
     return result;
 }

@@ -28,7 +28,7 @@ struct AudioEndpoint::Impl {
     std::uint64_t generation=0,next_stream=0,capture_stream=0,input_position=0;
     std::uint32_t rate=0;
     bool closed=false,capturing=false,input_seen=false,retiring=false;
-    std::string failure;
+    std::string failure,playback_failure;
     std::deque<std::vector<float>> capture_queue;
     std::size_t capture_frames=0,event_frames=0;
     std::deque<Event> events;
@@ -44,6 +44,10 @@ struct AudioEndpoint::Impl {
     void fail(std::string reason) {
         failure=std::move(reason);capture_queue.clear();capture_frames=0;
         changed.notify_all();
+    }
+    void valid_playback(std::uint64_t expected,std::stop_token stop={}) const {
+        valid(expected,stop);
+        if(!playback_failure.empty())throw Error(playback_failure);
     }
     void retired() {
         if(retiring&&!capturing&&!playback_stream&&!cancelling_stream) {
@@ -65,7 +69,7 @@ void AudioEndpoint::configure(std::uint64_t generation,std::uint32_t rate) {
     check_rate(rate);auto& p=*impl_;std::lock_guard lock(p.mutex);
     if(!generation || generation<=p.generation || p.closed)throw Error("invalid host audio generation");
     if(p.capturing || p.playback_stream || p.cancelling_stream)throw Error("stop and flush active audio before changing its generation");
-    p.generation=generation;p.rate=rate;p.failure.clear();p.input_seen=false;p.input_position=0;
+    p.generation=generation;p.rate=rate;p.failure.clear();p.playback_failure.clear();p.input_seen=false;p.input_position=0;
     p.capture_queue.clear();p.capture_frames=0;p.events.clear();p.event_frames=0;p.changed.notify_all();
 }
 void AudioEndpoint::capture_samples(std::uint64_t generation,std::uint64_t stream,std::uint64_t position,std::span<const float> samples) {
@@ -99,8 +103,15 @@ void AudioEndpoint::playback_cancelled(std::uint64_t generation,std::uint64_t st
     if(generation!=p.generation || !stream || stream!=p.cancelling_stream)throw Error("invalid playback flush acknowledgment");
     p.cancelling_stream=0;p.changed.notify_all();p.retired();
 }
+void AudioEndpoint::playback_failed(std::uint64_t generation,std::uint64_t stream,std::string reason) {
+    auto& p=*impl_;std::lock_guard lock(p.mutex);p.valid(generation);
+    if(stream==p.cancelling_stream)return;
+    if(!stream || stream!=p.playback_stream)throw Error("invalid failed playback stream");
+    p.playback_failure=reason.empty()?"host playback interrupted":reason.substr(0,512);
+    p.changed.notify_all();
+}
 void AudioEndpoint::schedule_output(double epoch,std::stop_token stop) {
-    auto& p=*impl_;std::lock_guard lock(p.mutex);p.valid(p.generation,stop);
+    auto& p=*impl_;std::lock_guard lock(p.mutex);p.valid_playback(p.generation,stop);
     if(!p.playback_stream || p.sent || p.scheduled_epoch || !std::isfinite(epoch) || epoch-epoch_now()<.25)
         throw Error("cannot meet scheduled host output time");
     p.scheduled_epoch=epoch;
@@ -147,6 +158,7 @@ void AudioEndpoint::capture(std::uint32_t logical,const audio::CaptureCallback& 
                 auto progress=converter.process(std::span<const float>(input).subspan(offset),output);
                 offset+=progress.consumed;if(progress.produced)more=callback(std::span<const float>(output.data(),progress.produced));
                 if(!progress.consumed && !progress.produced)throw Error("capture resampler made no progress");
+                execution::checkpoint();
             }
         }
     } catch(...) {finish();throw;}
@@ -159,14 +171,14 @@ void AudioEndpoint::playback(std::uint32_t logical,const audio::PlaybackCallback
         generation=p.generation;p.valid(generation,stop);rate=p.rate;
         if(p.playback_stream || p.cancelling_stream)throw Error("host playback is in use or awaits a flush acknowledgment");
         stream=++p.next_stream;p.playback_stream=stream;p.sent=p.played=0;p.ready=p.ending=p.drained=false;
-        p.scheduled_epoch=0;
+        p.scheduled_epoch=0;p.playback_failure.clear();
         p.event({Kind::playback_start,generation,stream,0,rate,channels,options.transmit_gain,{}});
     }
     try {
         {
             std::unique_lock lock(p.mutex);
-            auto ready=p.changed.wait_for(lock,stop,std::chrono::seconds(3),[&]{return p.closed || !p.failure.empty() || p.ready;});
-            p.valid(generation,stop);if(!ready)throw Error("host playback readiness timed out");
+            auto ready=p.changed.wait_for(lock,stop,std::chrono::seconds(3),[&]{return p.closed || !p.failure.empty() || !p.playback_failure.empty() || p.ready;});
+            p.valid_playback(generation,stop);if(!ready)throw Error("host playback readiness timed out");
         }
         audio::Resampler converter(logical,rate);std::vector<float> input(std::max<std::size_t>(1,std::min<std::size_t>(4096,logical/20))),output(std::min<std::size_t>(2048,rate/20));
         if(format)format({logical,rate,converter.passband_hz(),converter.workspace_bytes()+(input.capacity()+output.capacity()+max_queue_frames)*sizeof(float)});
@@ -177,10 +189,10 @@ void AudioEndpoint::playback(std::uint32_t logical,const audio::PlaybackCallback
             auto progress=converter.process(std::span<const float>(input.data()+offset,count-offset),output,ending);offset+=progress.consumed;
             if(!progress.produced)continue;
             auto samples=std::span<const float>(output.data(),progress.produced);check_pcm(samples);
-            std::unique_lock lock(p.mutex);p.valid(generation,stop);
+            std::unique_lock lock(p.mutex);p.valid_playback(generation,stop);
             const auto limit=std::min<std::uint64_t>(max_queue_frames,rate/4);
-            auto writable=p.changed.wait_for(lock,stop,std::chrono::seconds(3),[&]{return p.closed || !p.failure.empty() || p.sent-p.played+samples.size()<=limit;});
-            p.valid(generation,stop);if(!writable)throw Error("host playback stopped consuming samples");
+            auto writable=p.changed.wait_for(lock,stop,std::chrono::seconds(3),[&]{return p.closed || !p.failure.empty() || !p.playback_failure.empty() || p.sent-p.played+samples.size()<=limit;});
+            p.valid_playback(generation,stop);if(!writable)throw Error("host playback stopped consuming samples");
             Event event{Kind::playback_pcm,generation,stream,p.sent,rate,channels,options.transmit_gain,{samples.begin(),samples.end()}};
             if(!p.sent) {
                 if(!p.scheduled_epoch)p.scheduled_epoch=epoch_now()+.5;
@@ -189,9 +201,9 @@ void AudioEndpoint::playback(std::uint32_t logical,const audio::PlaybackCallback
             }
             p.event(std::move(event));p.sent+=samples.size();
         }
-        std::unique_lock lock(p.mutex);p.valid(generation,stop);p.ending=true;p.event({Kind::playback_end,generation,stream,p.sent,rate,channels,options.transmit_gain,{}});
-        auto drained=p.changed.wait_for(lock,stop,std::chrono::seconds(3),[&]{return p.closed || !p.failure.empty() || p.drained;});
-        p.valid(generation,stop);if(!drained)throw Error("host playback drain timed out");
+        std::unique_lock lock(p.mutex);p.valid_playback(generation,stop);p.ending=true;p.event({Kind::playback_end,generation,stream,p.sent,rate,channels,options.transmit_gain,{}});
+        auto drained=p.changed.wait_for(lock,stop,std::chrono::seconds(3),[&]{return p.closed || !p.failure.empty() || !p.playback_failure.empty() || p.drained;});
+        p.valid_playback(generation,stop);if(!drained)throw Error("host playback drain timed out");
         p.playback_stream=0;
     } catch(...) {
         std::unique_lock lock(p.mutex);

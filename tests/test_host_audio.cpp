@@ -81,5 +81,37 @@ void cancellation() {
     fails([&]{endpoint.configure(2,8000);});fails([&]{endpoint.playback_cancelled(1,stream+1);});
     endpoint.playback_cancelled(1,stream);require(task.wait_for(2s)==std::future_status::ready,"flush acknowledgment failed to release cancellation");task.get();until(endpoint,[](const auto& e){return e.kind==AudioEndpoint::Kind::stopped;});endpoint.configure(2,8000);
 }
+void failed_output_keeps_capture() {
+    AudioEndpoint endpoint;endpoint.configure(1,48000);
+    std::atomic<std::size_t> captured=0;std::atomic<bool> done=false;
+    auto input=std::async(std::launch::async,[&]{endpoint.capture(48000,[&](auto samples){captured+=samples.size();return !done;},{},{});});
+    std::uint64_t capture=0;
+    until(endpoint,[&](const auto& e){if(e.kind!=AudioEndpoint::Kind::capture_start)return false;capture=e.stream;return true;});
+    const std::vector<float> pcm(128,.25f);
+    endpoint.capture_samples(1,capture,0,pcm);
+    auto output=std::async(std::launch::async,[&]{fails([&]{endpoint.playback(48000,[](auto samples){std::fill(samples.begin(),samples.end(),.25f);return samples.size();},{},{},audio::ChannelMode::left_mono,{});});});
+    std::uint64_t playback=0;
+    until(endpoint,[&](const auto& e){if(e.kind!=AudioEndpoint::Kind::playback_start)return false;playback=e.stream;endpoint.playback_failed(1,playback,"output clock unavailable");return true;});
+    until(endpoint,[&](const auto& e){return e.kind==AudioEndpoint::Kind::playback_cancel&&e.stream==playback;});
+    require(output.wait_for(10ms)==std::future_status::timeout,"failed output returned before device flush");
+    endpoint.capture_samples(1,capture,128,pcm);
+    endpoint.playback_cancelled(1,playback);
+    require(output.wait_for(2s)==std::future_status::ready,"failed output did not finish after flush");output.get();
+    // A fresh output in the same audio generation must succeed, while input
+    // retains its exact original stream and contiguous sample positions.
+    auto retry=std::async(std::launch::async,[&]{endpoint.playback(48000,[](auto){return std::size_t(0);},{},{},audio::ChannelMode::left_mono,{});});
+    until(endpoint,[&](const auto& e){
+        if(e.kind==AudioEndpoint::Kind::playback_start){require(e.stream>playback,"output stream reused");endpoint.playback_ready(1,e.stream);}
+        if(e.kind==AudioEndpoint::Kind::playback_end){endpoint.playback_progress(1,e.stream,e.position,true);return true;}
+        return false;
+    });
+    require(retry.wait_for(2s)==std::future_status::ready,"output retry failed");retry.get();
+    const auto deadline=std::chrono::steady_clock::now()+2s;
+    while(captured<256&&std::chrono::steady_clock::now()<deadline)std::this_thread::sleep_for(1ms);
+    require(captured==256,"continuous capture stalled after output failure");
+    done=true;endpoint.capture_samples(1,capture,256,pcm);
+    require(input.wait_for(2s)==std::future_status::ready,"output failure interrupted capture");input.get();
+    require(captured==384,"output failure lost or manufactured input samples");
 }
-int main(){try{playback(8000);playback(44100);playback(48000);gap_and_close();capture_restart();stopped_capture();cancellation();std::cout<<"Host audio bounds, continuity, resampling, readiness, drain and cancellation passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+}
+int main(){try{playback(8000);playback(44100);playback(48000);gap_and_close();capture_restart();stopped_capture();cancellation();failed_output_keeps_capture();std::cout<<"Host audio bounds, continuity, resampling, readiness, drain, cancellation and output recovery passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

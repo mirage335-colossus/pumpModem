@@ -45,6 +45,7 @@ struct Runtime::Impl {
     std::deque<Download> downloads;
     std::uint64_t object=0,workspace_bytes=0;
     std::size_t queued_bytes=0;
+    std::string last_snapshot;
     int width=1000,height=760;
     bool force_snapshot=true,closed_sent=false;
     explicit Impl(std::filesystem::path path,bool simulation):application([&]{gui::Launch launch;launch.simulation=simulation;return launch;}()),bridge(application),workspace(std::move(path)) {application.start();}
@@ -57,7 +58,13 @@ struct Runtime::Impl {
         }
         auto bytes=protocol::encode(frame);
         if(bytes.size()>2*protocol::max_frame-queued_bytes)throw Error("host stopped consuming bounded output");
-        queued_bytes+=bytes.size();queue.push_back({frame.type,std::move(bytes),0});
+        queued_bytes+=bytes.size();
+        // Audio and clock messages may pass a whole, unsent presentation, but
+        // never a partly written frame or another ordered audio message.
+        auto at=queue.end();
+        if(frame.type==Type::audio || frame.type==Type::clock_reply)
+            at=std::find_if(queue.begin(),queue.end(),[](const Output& out){return out.type==Type::snapshot && !out.offset;});
+        queue.insert(at,{frame.type,std::move(bytes),0});
     }
     void error(const std::string& value) {application.report_error(value);Writer out;out.text(value);send(Type::error,std::move(out));force_snapshot=true;}
     void file_end(std::uint64_t target,const std::string& error) {Writer out;out.u64(target);out.text(error);send(Type::file_end,std::move(out));}
@@ -115,13 +122,14 @@ void Runtime::accept(const Frame& frame,bool file_authority) {
     auto& p=*impl_;Reader in(frame.payload);
     try {
         switch(frame.type) {
-        case Type::viewport:{const auto width=in.u32(),height=in.u32();in.end();if(width<240||width>4096||height<240||height>4096)throw Error("invalid viewport");p.width=static_cast<int>(width);p.height=static_cast<int>(height);p.force_snapshot=true;break;}
+        case Type::viewport:{const auto width=in.u32(),height=in.u32();in.end();if(width<240||width>4096||height<240||height>4096)throw Error("invalid viewport");if(p.width!=static_cast<int>(width)||p.height!=static_cast<int>(height)){p.width=static_cast<int>(width);p.height=static_cast<int>(height);p.force_snapshot=true;}break;}
         case Type::event:{auto event=read_event(in);in.end();p.accept_event(std::move(event),file_authority);break;}
         case Type::audio_configure:{const auto generation=in.u64();const auto rate=in.u32();in.end();audio_endpoint().configure(generation,rate);break;}
         case Type::audio_capture:{const auto generation=in.u64(),stream=in.u64(),position=in.u64();const auto count=in.u32();if(!count||count>AudioEndpoint::max_packet_frames)throw Error("invalid capture block");std::vector<float> samples(count);for(auto& x:samples)x=in.f32();in.end();audio_endpoint().capture_samples(generation,stream,position,samples);break;}
         case Type::audio_ready:{const auto generation=in.u64(),stream=in.u64();in.end();audio_endpoint().playback_ready(generation,stream);break;}
         case Type::audio_progress:{const auto generation=in.u64(),stream=in.u64(),position=in.u64();const auto drained=in.u32();in.end();if(drained>1)throw Error("invalid audio drain flag");audio_endpoint().playback_progress(generation,stream,position,drained!=0);break;}
         case Type::audio_error:{const auto generation=in.u64();const auto error=in.text(512);in.end();audio_endpoint().interrupted(generation,error);break;}
+        case Type::audio_playback_error:{const auto generation=in.u64(),stream=in.u64();const auto error=in.text(512);in.end();audio_endpoint().playback_failed(generation,stream,error);break;}
         case Type::audio_cancelled:{const auto generation=in.u64(),stream=in.u64();in.end();audio_endpoint().playback_cancelled(generation,stream);break;}
         case Type::reconnect:in.end();p.upload.reset();for(const auto& [id,save]:p.saves){(void)id;p.file_end(save.target,"File export cancelled by reconnection");}p.saves.clear();for(const auto& download:p.downloads)p.file_end(download.save.target,"File export cancelled by reconnection");p.downloads.clear();p.bridge.reconnect();p.force_snapshot=true;break;
         case Type::clock_ping:{const auto nonce=in.u64();const auto time=in.f64();in.end();if(!std::isfinite(time))throw Error("invalid clock probe");Writer out;out.u64(nonce);out.f64(time);out.f64(epoch_now());out.f64(epoch_now());p.send(Type::clock_reply,std::move(out));break;}
@@ -173,7 +181,14 @@ void Runtime::tick() {
         Writer out;out.u32(static_cast<std::uint32_t>(event.kind));out.u64(event.generation);out.u64(event.stream);out.u64(event.position);out.u32(event.rate);out.u32(static_cast<std::uint32_t>(event.channels));out.f64(event.gain);out.f64(event.presentation_epoch);out.u32(static_cast<std::uint32_t>(event.samples.size()));for(float sample:event.samples)out.f32(sample);p.send(Type::audio,std::move(out));
     }
     p.completed_files();
-    if(changed||p.force_snapshot) {const auto value=p.bridge.snapshot(p.width,p.height);const auto bytes=std::as_bytes(std::span(value));p.send_frame({Type::snapshot,{bytes.begin(),bytes.end()}});p.force_snapshot=false;}
+    if(changed||p.force_snapshot) {
+        auto value=p.bridge.snapshot(p.width,p.height);
+        if(p.force_snapshot || value!=p.last_snapshot) {
+            const auto bytes=std::as_bytes(std::span(value));p.send_frame({Type::snapshot,{bytes.begin(),bytes.end()}});
+            p.last_snapshot=std::move(value);
+        }
+        p.force_snapshot=false;
+    }
     if(p.application.closing()&&p.application.finished()&&!p.closed_sent){Writer out;out.u32(static_cast<std::uint32_t>(p.application.result()));p.send(Type::closed,std::move(out));p.closed_sent=true;}
 }
 void Runtime::close(){audio_endpoint().close();impl_->application.close();}

@@ -1,0 +1,36 @@
+--- a/providers/implementations/rands/seeding/rand_unix.c
++++ b/providers/implementations/rands/seeding/rand_unix.c
+@@ -329,6 +329,25 @@
+  */
+ static ssize_t syscall_random(void *buf, size_t buflen)
+ {
++#if defined(__EMSCRIPTEN__)
++    /* Emscripten supplies secure browser entropy through WASI random_get.
++     * Its getentropy() implementation accepts at most 256 bytes per call.
++     * Use a direct reference: the Unix weak-symbol/DSO discovery below cannot
++     * resolve this libc function in a statically linked WebAssembly module.
++     */
++    size_t offset = 0;
++
++    while (offset < buflen) {
++        size_t length = buflen - offset;
++
++        if (length > 256)
++            length = 256;
++        if (getentropy((unsigned char *)buf + offset, length) != 0)
++            return -1;
++        offset += length;
++    }
++    return (ssize_t)buflen;
++#else
+     /*
+      * Note: 'buflen' equals the size of the buffer which is used by the
+      * get_entropy() callback of the RAND_DRBG. It is roughly bounded by
+@@ -402,6 +421,7 @@
+     errno = ENOSYS;
+     return -1;
+ #endif
++#endif /* __EMSCRIPTEN__ */
+ }
+ #endif /* defined(OPENSSL_RAND_SEED_GETRANDOM) */
+ 

@@ -36,6 +36,9 @@ public:
     void playback_progress(std::uint64_t generation,std::uint64_t stream,
                            std::uint64_t position,bool drained);
     void playback_cancelled(std::uint64_t generation,std::uint64_t stream);
+    // A failed output stream must flush before reuse, but must not interrupt
+    // an independently continuous input stream.
+    void playback_failed(std::uint64_t generation,std::uint64_t stream,std::string reason);
     void schedule_output(double epoch_seconds,std::stop_token stop);
     void interrupted(std::uint64_t generation,std::string reason);
     std::vector<Event> take_events();

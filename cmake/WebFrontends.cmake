@@ -53,6 +53,23 @@ if(DATAPUMP_BUILD_WASM)
       "${CMAKE_SOURCE_DIR}/tests/test_wasm_runtime.mjs"
       "$<TARGET_FILE:datapump-wasm>" "${CMAKE_CURRENT_BINARY_DIR}/datapump-wasm.wasm")
     set_tests_properties(wasm_runtime PROPERTIES LABELS "web" TIMEOUT 240)
+    add_test(NAME wasm_live COMMAND "${DATAPUMP_NODE_EXECUTABLE}"
+      "${CMAKE_SOURCE_DIR}/tests/test_web_live.mjs" --wasm
+      "$<TARGET_FILE:datapump-wasm>" "${CMAKE_CURRENT_BINARY_DIR}/datapump-wasm.wasm")
+    set_tests_properties(wasm_live PROPERTIES LABELS "web" TIMEOUT 180 RUN_SERIAL TRUE)
+    add_test(NAME browser_audio COMMAND "${DATAPUMP_NODE_EXECUTABLE}"
+      "${CMAKE_SOURCE_DIR}/tests/test_browser_audio.mjs")
+    set_tests_properties(browser_audio PROPERTIES LABELS "web" TIMEOUT 30)
+    add_executable(test_wasm_entropy third_party/build-support/wasm-sdk/entropy-probe.cpp)
+    target_link_libraries(test_wasm_entropy PRIVATE OpenSSL::Crypto)
+    target_link_options(test_wasm_entropy PRIVATE --no-entry -sMODULARIZE=1
+      -sEXPORT_NAME=DatapumpEntropyProbe -sENVIRONMENT=web,worker
+      -sEXPORTED_FUNCTIONS=_datapump_entropy_probe)
+    set_target_properties(test_wasm_entropy PROPERTIES SUFFIX ".js")
+    add_test(NAME wasm_entropy COMMAND "${DATAPUMP_NODE_EXECUTABLE}"
+      "${CMAKE_SOURCE_DIR}/third_party/build-support/wasm-sdk/entropy-probe.mjs"
+      "$<TARGET_FILE:test_wasm_entropy>" "${CMAKE_CURRENT_BINARY_DIR}/test_wasm_entropy.wasm")
+    set_tests_properties(wasm_entropy PROPERTIES LABELS "web" TIMEOUT 30)
     # Exercise the actual fiber implementation, including its repeated stack
     # alignment/RAII lifetime cases. This Node harness is never installed.
     add_executable(test_execution_wasm tests/test_execution.cpp src/execution_fibers.cpp)
@@ -97,6 +114,13 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   endif()
   find_program(DATAPUMP_NODE_EXECUTABLE node)
   if(DATAPUMP_NODE_EXECUTABLE)
+    add_test(NAME browser_audio COMMAND "${DATAPUMP_NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_browser_audio.mjs")
+    set_tests_properties(browser_audio PROPERTIES LABELS "web" TIMEOUT 30)
+    if(DATAPUMP_BUILD_WEB_WORKER)
+      add_test(NAME web_live COMMAND "${DATAPUMP_NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_web_live.mjs"
+        --native "$<TARGET_FILE:datapump-worker>")
+      set_tests_properties(web_live PROPERTIES LABELS "web" TIMEOUT 180 RUN_SERIAL TRUE)
+    endif()
     add_test(NAME web_renderer COMMAND "${DATAPUMP_NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_web_renderer.mjs")
     set_tests_properties(web_renderer PROPERTIES LABELS "web")
     add_test(NAME web_preview_client COMMAND "${DATAPUMP_NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_preview_client.mjs")

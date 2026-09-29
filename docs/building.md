@@ -148,6 +148,11 @@ The browser-only product requires an independently prepared
 pins official Emscripten inputs and cross-builds static OpenSSL with socket,
 dynamic loading and thread support disabled. It preserves inputs and checksums;
 ordinary application builds run offline with a frozen compiler cache.
+The SDK entropy adapter uses browser WebCrypto through Emscripten `getentropy`,
+including subsequent OpenSSL reseeds. Preparation tests real random generation,
+repeated reseeding, and failure when secure browser entropy is unavailable.
+SDKs prepared before this adapter must be rebuilt into a new directory from
+the retained inputs; use a fresh application build tree with the new SDK.
 
 ```sh
 python3 tools/build-wasm-sdk.py fetch --download --sources /absolute/wasm-inputs
@@ -181,7 +186,12 @@ renderer, preview lifecycle/file transfers and SDK/package tools. With
 `--wasm-sdk`, the same group builds the actual
 module and exercises its application frames through an isolated Node VM using
 preloaded assets and denied network globals. It also runs the cooperative fiber
-lifecycle/stack-alignment tests compiled for Wasm. It supplements the normal contract/general
+lifecycle/stack-alignment and secure-entropy tests compiled for Wasm. Both web
+profiles also drive production browser audio and actual C++ Fast live RX/TX/RX
+at 44.1 and 48 kHz with a simulated physical device. The native fixture caps its
+anonymous-pipe relay at 10 Mbit/s to exercise backpressure and concurrent edits.
+These wall-clock tests run serially; do not overlap native and Wasm live suites
+on the same host. They check every emitted sample and physical-drain acknowledgment. They supplement the normal contract/general
 regressions. Successful C++ compilation, Node tests and static import checks do
 not certify microphone, playback timing or file-download behavior in a real
 browser; those require the actual browser/device matrix.

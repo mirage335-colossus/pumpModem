@@ -81,6 +81,7 @@ it is not a browser event flag.
 | 12 file import commit | `u64 target` |
 | 13 prepare explicit file export | `Event` with desired basename in value |
 | 15 clock probe | `u64 nonce; float64 client_epoch_seconds` |
+| 16 playback failed | `u64 generation, stream; string reason` (512-byte limit) |
 
 On native builds, types 10–13 are accepted only from `--file-events-fd`. A type-2
 successful file chooser reply containing a server path also requires that trusted
@@ -111,7 +112,10 @@ from received audio. Existing controller file-size/format checks still apply.
 | 108 clock reply | `u64 nonce; float64 client_epoch, server_receive_epoch, server_send_epoch` |
 
 Output queues are bounded to 16 MiB; wholly unsent snapshots can coalesce, audio
-and partial frames cannot. A native output stall exceeding three seconds closes
+and partial frames cannot. Audio/clock messages take priority over an entirely
+unsent snapshot. Identical presentations are omitted; their revision advances
+only when their contents change, including event acknowledgments and services.
+A native output stall exceeding three seconds closes
 the worker. File bytes are never included in ordinary snapshots. An accepted
 save request first chooses an isolated output object; bytes become exportable
 only after the C++ controller reports actual completion of the synchronous or
@@ -147,6 +151,16 @@ rejects an unachievable start. Clock probes use bounded round-trip offset/uncert
 measurement; stale mappings and excessive jitter fail instead of silently moving
 an encrypted transmission's epoch.
 
+Clock qualification happens before playback readiness. A noisy probe is retried
+without stopping input; if no qualified mapping is available within the readiness
+deadline, that output fails. Playback failure (type 16) belongs to its stream:
+it wakes the C++ producer and follows the normal cancel/flush handshake while
+continuous capture remains available. It never acknowledges drain or completion.
+Capture discontinuity, device suspension and whole-context failure still interrupt
+the audio generation. Capture batches retain the first device-frame position and
+every sample; an unstarted input graph is not mistaken for an established-stream
+gap, and no samples are invented during startup.
+
 Playback buffers at most a quarter-second ahead of acknowledged consumed frames.
 `playback_end` is not completion: the device must acknowledge consumption of the
 exact final frame and drain. After cancellation, `playback_cancel` requires an
@@ -164,3 +178,10 @@ capture exits and any playback cancellation is acknowledged as flushed. A new
 browser audio configuration waits for that event. Retired-context cancellation
 must be acknowledged only after the old output context is closed; it is not an
 error to receive the corresponding retired capture-stop event while closing.
+
+Bitmap objects carry bounded dimensions and exactly one base64 payload: `rgb`
+contains row-major RGB bytes, or `rgbRuns` contains four-byte records (repeat
+count minus one, red, green, blue). Runs span 1–256 pixels and may cross rows;
+the decoded pixel count must equal width × height. The encoder selects runs only
+when smaller than raw RGB. Snapshots remain independently decodable after relay
+coalescing or reconnection; compression changes no image pixels or progress text.

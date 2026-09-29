@@ -30,7 +30,7 @@ export async function boot({root,factorySource,wasmBytes,workletSource,workerSou
     };
     const audio=new BrowserAudio(event=>send(encodeAudio(event)),{environment,status:value=>{
         if(value.state==='ready')status.textContent=`Audio enabled at ${value.rate} Hz. Keep this page in the foreground. Microphone processing depends on the browser and device.`;
-        else if(value.state==='interrupted')status.textContent=value.reason;
+        else if(value.state==='interrupted'||value.state==='playback-failed')status.textContent=value.reason;
     }});
     const chooseFile=signal=>new Promise((resolve,reject)=>{
         const input=node(document,'input');input.type='file';input.hidden=true;root.append(input);
@@ -75,9 +75,23 @@ export async function boot({root,factorySource,wasmBytes,workletSource,workerSou
         }
         throw new Error('This browser profile has no folder-opening capability');
     };
-    const renderer=new Renderer(surface,event=>{send(encodeEvent(event)).catch(fail);},{platformService,resize:(width,height)=>{if(alive)send(encodeViewport(Math.max(240,width),Math.max(240,height))).catch(fail);}});
+    const renderer=new Renderer(surface,event=>{send(encodeEvent(event)).catch(fail);},{platformService,resize:(width,height)=>{if(alive)send(encodeViewport(Math.max(240,Math.min(4096,width)),Math.max(240,Math.min(4096,height)))).catch(fail);}});
+    let presentation=null,paintPending=false;
+    const present=snapshot=>{
+        presentation=snapshot;
+        if(paintPending)return;
+        paintPending=true;
+        // A complete snapshot supersedes an older pending snapshot. Yield the
+        // main thread so clock and audio messages are handled before painting.
+        (environment.requestAnimationFrame?.bind(environment)||environment.setTimeout.bind(environment))(()=>{
+            paintPending=false;
+            if(!alive)return;
+            const next=presentation;presentation=null;
+            try{renderer.apply(next);}catch(error){fail(error);audio.interrupt(error.message);}
+        });
+    };
     const decoder=new FrameDecoder(message=>{
-        if(message.type==='snapshot')renderer.apply(message.snapshot);
+        if(message.type==='snapshot')present(message.snapshot);
         else if(message.type==='audio')audio.accept(message.event);
         else if(message.type==='clock')audio.clock(message);
         else if(message.type==='error'){renderer.error(message.error);for(const download of downloads.values())download.reject(new Error(message.error));downloads.clear();}

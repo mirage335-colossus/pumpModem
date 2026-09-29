@@ -12,10 +12,14 @@ sources by SHA-256. These inputs were obtained from the URLs in that manifest on
 2026-09-28. The Emscripten compiler archive is an upstream binary toolchain, not
 a claim that LLVM was rebuilt locally. OpenSSL is cross-compiled locally with
 socket support, dynamic engines/modules, threads and assembly disabled. Browser
-entropy uses Emscripten's `getrandom` implementation. The application continues
+entropy uses a pinned OpenSSL dependency patch that calls Emscripten's
+`getentropy` in chunks of at most 256 bytes. Emscripten routes each request to
+the browser's `crypto.getRandomValues`, including later OpenSSL reseeds. Missing
+or denied secure entropy fails closed. No application or UI feature supplies
+seeds. The application continues
 to compile its pinned vendored XZ sources.
 
-Preparation requires host Python 3.12+, Perl, Make, and a Linux x86_64 host able
+Preparation requires host Python 3.12+, Perl, Make, Patch, and a Linux x86_64 host able
 to run the pinned upstream compiler and Node. Application builds also require
 CMake 3.21+ and Ninja or Make. This recipe does not install system packages or
 modify the user's shell setup. Host-tool ABI relocation and a reusable release
@@ -33,7 +37,16 @@ python3 tools/build-wasm-sdk.py prepare --sources /path/to/wasm-inputs \
 ```
 
 The prepared SDK retains all input archives, recipe metadata and OpenSSL
-licensing. Compiler cache variants are populated during explicit preparation;
+licensing, plus the exact entropy patch and qualification probe sources with
+their hashes. Preparation checks the pinned source before and after patching,
+then runs the compiled OpenSSL `RAND_bytes`, `RAND_priv_bytes` and repeated
+prediction-resistant reseeds in a browser-like VM backed by WebCrypto. The probe
+counts fresh entropy requests and checks initial denial, denial after successful
+generation, and missing WebCrypto. It opens no browser, listener or network
+connection. Only successful preparation records the required entropy capability;
+the toolchain rejects earlier SDKs whose Unix entropy discovery did not work in
+WebAssembly. Prepare a new destination to replace those SDKs.
+Compiler cache variants are populated during explicit preparation;
 `build.sh` then sets `EM_FROZEN_CACHE=1`. A missing variant fails instead of
 silently preparing a dependency during an application build. Keep prepared SDKs
 at their original location; use a new destination for a changed recipe. Keep

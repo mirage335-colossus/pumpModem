@@ -1,11 +1,20 @@
 // The embedding host provides a bounded local callback. It must resolve only
 // after taking ownership of the PCM block, and must not retain an unbounded queue.
 // This module never creates network connections or loads a remote worklet.
+function boundedReason(value) {
+    let result='',bytes=0;
+    for(const character of String(value)) {
+        const code=character.codePointAt(0),size=code<0x80?1:code<0x800?2:code<0x10000?3:4;
+        if(bytes+size>512)break;
+        result+=character;bytes+=size;
+    }
+    return result;
+}
 export class BrowserAudio {
     constructor(send, {status=()=>{},environment=globalThis}={}) {
         if(typeof send!=='function')throw new TypeError('A local audio callback is required');
         this.send=send;this.status=status;this.env=environment;this.generation=0n;
-        this.context=null;this.node=null;this.stream=null;this.failed=false;this.pendingDrain=null;this.clockOffset=null;this.clockPending=new Map();this.nextNonce=0n;this.sessions=new Map();
+        this.context=null;this.node=null;this.stream=null;this.failed=false;this.pendingDrain=null;this.clockOffset=null;this.clockPending=new Map();this.nextNonce=0n;this.sessions=new Map();this.pendingStart=null;this.playbackStream=null;this.failedPlayback=null;
     }
     async enable(workletSource,{microphone=true}={}) {
         if(typeof workletSource!=='string'||workletSource.length>256*1024)throw new TypeError('Preloaded bounded worklet source is required');
@@ -20,7 +29,7 @@ export class BrowserAudio {
             context=new Context({latencyHint:'interactive'});this.context=context;
             this.sessions.set(generation,{context,configured:false,closed:null,idle:false,resolve:null});
             // Retain only a small history for already flushed late messages.
-            while(this.sessions.size>8)this.sessions.delete(this.sessions.keys().next().value);
+            this.pruneSessions();
             const resumed=Promise.resolve(context.resume());resumed.catch(()=>{});
             const acquired=microphone?this.env.navigator.mediaDevices?.getUserMedia({audio:{channelCount:1,echoCancellation:false,noiseSuppression:false,autoGainControl:false},video:false}):Promise.resolve(null);
             if(!acquired)throw new Error('Microphone access requires a secure browser context');
@@ -60,13 +69,48 @@ export class BrowserAudio {
             if(url)this.env.URL.revokeObjectURL(url);
         }
     }
+    pruneSessions() {
+        for(const [generation,session] of this.sessions) {
+            if(this.sessions.size<=8)break;
+            if(session.closeComplete&&(!session.configured||session.idle))this.sessions.delete(generation);
+        }
+    }
     now() {return (this.env.performance.timeOrigin+this.env.performance.now())/1000;}
     ping() {
         if(!this.context||this.failed)return;
         const context=this.context,nonce=String(++this.nextNonce),clientEpoch=this.now();
         this.clockPending.clear();this.clockPending.set(nonce,clientEpoch);
         Promise.resolve().then(()=>this.send({kind:'clock_ping',nonce,clientEpoch})).catch(error=>{if(this.context===context)this.interrupt(error.message);});
-        this.clockTimer=this.env.setTimeout(()=>this.ping(),10000);
+        this.env.clearTimeout(this.clockTimer);
+        this.clockTimer=this.env.setTimeout(()=>this.ping(),this.clockQualified()?10000:250);
+    }
+    clockQualified() {return this.clockOffset!==null&&this.now()-this.clockAt<=30;}
+    retryClock(reason) {
+        this.status({state:'clock-waiting',reason});
+        this.env.clearTimeout(this.clockTimer);
+        this.clockTimer=this.env.setTimeout(()=>this.ping(),250);
+    }
+    startPlayback(message) {
+        this.playbackStream=String(message.stream);this.failedPlayback=null;
+        if(this.clockQualified()){this.node.port.postMessage(message);return;}
+        // Readiness authorizes C++ waveform preparation and its scheduled epoch.
+        // Hold that handshake until the clock is qualified, so an immediate
+        // Transmit click cannot schedule against an unmeasured clock.
+        this.pendingStart=message;this.ping();
+        this.startTimer=this.env.setTimeout(()=>{
+            if(this.pendingStart===message)this.playbackFailure(message.stream,'Audio output clock could not be qualified before transmission');
+        },2000);
+    }
+    playbackFailure(stream,reason) {
+        stream=String(stream);
+        if(this.failedPlayback===stream)return;
+        this.failedPlayback=stream;this.pendingStart=null;this.pendingDrain=null;
+        this.env.clearTimeout(this.startTimer);this.env.clearTimeout(this.drainTimer);
+        this.node?.port.postMessage({kind:'playback_abort',generation:String(this.generation),stream});
+        this.status({state:'playback-failed',reason:String(reason)});
+        const context=this.context,generation=String(this.generation),description=boundedReason(reason);
+        Promise.resolve().then(()=>this.send({kind:'playback_failed',generation,stream,reason:description}))
+            .catch(error=>{if(this.context===context)this.interrupt(error?.message||'Audio host failed');});
     }
     clock(reply) {
         const t4=this.now(),t1=this.clockPending.get(reply.nonce);
@@ -74,19 +118,30 @@ export class BrowserAudio {
         this.clockPending.delete(reply.nonce);
         const elapsed=t4-t1,serverElapsed=reply.serverSendEpoch-reply.serverReceiveEpoch;
         const roundTrip=elapsed-serverElapsed;
-        if(elapsed<0||roundTrip<-.001||roundTrip>.1||serverElapsed<0) {this.interrupt('Audio clock synchronization exceeded its timing bound');return;}
+        if(elapsed<0||roundTrip<-.001||roundTrip>.1||serverElapsed<0) {this.retryClock('Waiting for a bounded audio clock measurement');return;}
         const offset=((reply.serverReceiveEpoch-t1)+(reply.serverSendEpoch-t4))/2;
-        if(this.clockOffset!==null&&Math.abs(offset-this.clockOffset)>.05){this.interrupt('Audio clock changed during the session');return;}
+        if(this.clockOffset!==null&&Math.abs(offset-this.clockOffset)>.05){
+            this.clockOffset=null;
+            if(this.playbackStream)this.playbackFailure(this.playbackStream,'Audio clock changed during transmission');
+            this.retryClock('Rechecking a changed audio output clock');return;
+        }
         this.clockOffset=offset;this.clockAt=t4;this.clockUncertainty=Math.max(0,roundTrip)/2;
         this.status({state:'clock-ready',uncertainty:this.clockUncertainty});
+        if(this.pendingStart){const message=this.pendingStart;this.pendingStart=null;this.env.clearTimeout(this.startTimer);this.node?.port.postMessage(message);}
     }
     async message(event) {
         const context=this.context;
         if(!this.context||String(event.generation)!==String(this.generation)||this.failed)return;
+        // Worklet output already queued before a cancel/failure can arrive
+        // after C++ has flushed that stream. It cannot restore a drain or
+        // acknowledge progress for a retired transmission.
+        if(['playback_ready','playback_progress','playback_started','playback_endpoint','playback_failed'].includes(event.kind)&&
+           (String(event.stream)!==this.playbackStream||String(event.stream)===this.failedPlayback))return;
         try {
             if(event.kind==='capture') {
                 const node=this.node;await this.send(event);
                 if(node===this.node)node.port.postMessage({kind:'capture_ack',generation:String(this.generation),frames:event.samples.length});
+            } else if(event.kind==='playback_failed') {this.playbackFailure(event.stream,event.reason);
             } else if(event.kind==='playback_endpoint') {
                 if(this.pendingDrain)throw new Error('Previous output drain is still pending');
                 this.pendingDrain=event;this.waitDrain(event);
@@ -105,7 +160,7 @@ export class BrowserAudio {
             context.currentTime-(context.baseLatency||0)-(context.outputLatency||0)-256/context.sampleRate;
         if(context.state!=='running'){this.interrupt('Audio stopped before output drain');return;}
         if(event.empty||cursor>=deadline) {
-            this.pendingDrain=null;
+            this.pendingDrain=null;this.playbackStream=null;
             Promise.resolve().then(()=>this.send({kind:'playback_progress',generation:event.generation,stream:event.stream,position:event.position,drained:true})).catch(error=>{if(this.context===context)this.interrupt(error.message);});
         } else this.drainTimer=this.env.setTimeout(()=>this.waitDrain(event),10);
     }
@@ -115,7 +170,7 @@ export class BrowserAudio {
         const generation=String(event.generation),session=this.sessions.get(generation);
         if(message.kind==='stopped') {
             if(!session)return;
-            session.idle=true;session.resolve?.();return;
+            session.idle=true;session.resolve?.();this.pruneSessions();return;
         }
         if(session&&(session.closed||this.failed||generation!==String(this.generation))) {
             if(message.kind==='playback_cancel') {
@@ -129,16 +184,20 @@ export class BrowserAudio {
         }
         if(!this.node||!this.context||this.failed)throw new Error('Enable browser audio before starting the stream');
         if(generation!==String(this.generation))throw new Error('Stale browser audio generation');
-        if(message.kind==='playback_cancel') {this.pendingDrain=null;this.env.clearTimeout(this.drainTimer);}
+        if(message.kind==='playback_cancel') {this.pendingDrain=null;this.pendingStart=null;this.playbackStream=null;this.failedPlayback=null;this.env.clearTimeout(this.drainTimer);this.env.clearTimeout(this.startTimer);}
         if(message.kind==='capture_start'&&!this.stream){this.interrupt('This audio session has no microphone grant');return;}
-        if(message.kind==='playback_start'&&event.rate!==this.context.sampleRate){this.interrupt('Audio sample rate changed');return;}
+        if(message.kind==='playback_start') {
+            if(event.rate!==this.context.sampleRate){this.playbackFailure(event.stream,'Audio sample rate changed');return;}
+            this.startPlayback(message);return;
+        }
+        if(this.failedPlayback===String(event.stream)&&message.kind!=='playback_cancel')return;
         // Readiness precedes C++ preparation. The first PCM packet carries the
         // scheduled epoch; never attempt to schedule the readiness handshake.
         if(message.kind==='playback_pcm'&&event.position===0) {
-            if(event.rate!==this.context.sampleRate){this.interrupt('Audio sample rate changed');return;}
-            if(this.clockOffset===null||this.now()-this.clockAt>30){this.interrupt('Audio clock has not been qualified');return;}
+            if(event.rate!==this.context.sampleRate){this.playbackFailure(event.stream,'Audio sample rate changed');return;}
+            if(!this.clockQualified()){this.playbackFailure(event.stream,'Audio clock has not been qualified');return;}
             const delay=event.presentationEpoch-this.clockOffset-this.now();
-            if(!Number.isFinite(delay)||delay<this.clockUncertainty+512/event.rate||delay>10){this.interrupt('Scheduled audio start is late or outside the bounded horizon');return;}
+            if(!Number.isFinite(delay)||delay<this.clockUncertainty+512/event.rate||delay>10){this.playbackFailure(event.stream,'Scheduled audio start is late or outside the bounded horizon');return;}
             const output=this.context.getOutputTimestamp?.();
             // Map the requested physical output epoch through the device clock,
             // rather than treating the render-ahead currentTime as audible time.
@@ -147,27 +206,27 @@ export class BrowserAudio {
                 output.contextTime+clientEpoch-(this.env.performance.timeOrigin+output.performanceTime)/1000:
                 this.context.currentTime+delay-(this.context.baseLatency||0)-(this.context.outputLatency||0);
             message.startFrame=Math.round(contextTime*event.rate);
-            if(message.startFrame<this.context.currentTime*event.rate+256){this.interrupt('Output latency leaves insufficient scheduled start lead');return;}
+            if(message.startFrame<this.context.currentTime*event.rate+256){this.playbackFailure(event.stream,'Output latency leaves insufficient scheduled start lead');return;}
         }
         const transfers=message.samples instanceof Float32Array?[message.samples.buffer]:[];
         this.node.port.postMessage(message,transfers);
     }
     interrupt(reason) {
         const generation=String(this.generation);
-        if(this.failed)return;this.failed=true;this.pendingDrain=null;this.env.clearTimeout(this.drainTimer);this.env.clearTimeout(this.clockTimer);
+        if(this.failed)return;this.failed=true;this.pendingDrain=null;this.pendingStart=null;this.env.clearTimeout(this.startTimer);this.env.clearTimeout(this.drainTimer);this.env.clearTimeout(this.clockTimer);
         this.node?.disconnect();this.input?.disconnect();this.stream?.getTracks().forEach(track=>track.stop());
         this.status({state:'interrupted',reason:String(reason)});
-        Promise.resolve().then(()=>this.send({kind:'interrupted',generation,reason:String(reason).slice(0,512)})).catch(()=>{});
+        Promise.resolve().then(()=>this.send({kind:'interrupted',generation,reason:boundedReason(reason)})).catch(()=>{});
     }
     async stop() {
         const context=this.context,generation=String(this.generation),session=this.sessions.get(generation);
-        this.context=null;this.pendingDrain=null;this.env.clearTimeout(this.drainTimer);this.env.clearTimeout(this.clockTimer);this.clockPending.clear();
+        this.context=null;this.pendingDrain=null;this.pendingStart=null;this.playbackStream=null;this.failedPlayback=null;this.env.clearTimeout(this.startTimer);this.env.clearTimeout(this.drainTimer);this.env.clearTimeout(this.clockTimer);this.clockPending.clear();
         if(this.node){this.node.port.onmessage=null;this.node.disconnect();this.node=null;}
         this.input?.disconnect();this.input=null;this.stream?.getTracks().forEach(track=>track.stop());this.stream=null;
         if(!context)return this.stopping;
         context.onstatechange=null;
         const closed=context.state==='closed'?Promise.resolve():Promise.resolve().then(()=>context.close());
-        if(session)session.closed=closed;
+        if(session){session.closed=closed;closed.then(()=>{session.closeComplete=true;this.pruneSessions();},()=>{});}
         let timer;
         const idle=session?.configured&&!session.idle?new Promise((resolve,reject)=>{
             session.resolve=resolve;
@@ -176,7 +235,7 @@ export class BrowserAudio {
         // Notifications cannot prevent local microphone/output cleanup.
         Promise.resolve().then(()=>this.send({kind:'interrupted',generation,reason:'Browser audio stopped'})).catch(()=>{});
         const stopping=Promise.all([this.stopping,closed,idle]);this.stopping=stopping;
-        try {await stopping;}
+        try {await stopping;this.pruneSessions();}
         finally {if(timer!==undefined)this.env.clearTimeout(timer);if(session)session.resolve=null;if(this.stopping===stopping)this.stopping=null;}
     }
 }

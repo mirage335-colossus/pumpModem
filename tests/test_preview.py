@@ -51,6 +51,17 @@ class HostTests(unittest.TestCase):
         with self.assertRaisesRegex(preview.PreviewError, 'gone'):
             output.get()
 
+    def test_playback_failure_uses_audio_authority(self):
+        written=[]
+        host=SimpleNamespace(write=written.append)
+        failed=preview.frame(16,struct.pack('<QQ',1,2)+preview.string('output underrun'))
+        preview.Worker.input(host,failed)
+        self.assertEqual(written,[failed])
+        for forbidden in (9,10,11,12,13,14,17,101):
+            with self.assertRaises(preview.PreviewError):
+                preview.Worker.input(host,failed+preview.frame(forbidden))
+            self.assertEqual(written,[failed],'invalid batch was partly forwarded')
+
     @unittest.skipUnless(sys.platform.startswith('linux'), 'descriptor file policy belongs to Linux worker')
     def test_host_paths_and_pinned_input(self):
         directory = self.root/'allowed';directory.mkdir()

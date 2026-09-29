@@ -20,6 +20,13 @@ string(JSON _wasm_target GET "${_wasm_manifest}" target)
 if(NOT _wasm_schema EQUAL 1 OR NOT _wasm_target STREQUAL "wasm32-emscripten")
   message(FATAL_ERROR "Unsupported Wasm SDK manifest")
 endif()
+string(JSON _wasm_entropy ERROR_VARIABLE _wasm_entropy_error GET "${_wasm_manifest}" entropy_capability)
+string(JSON _wasm_entropy_probe ERROR_VARIABLE _wasm_probe_error GET "${_wasm_manifest}" entropy_probe)
+if(_wasm_entropy_error OR _wasm_probe_error OR
+   NOT _wasm_entropy STREQUAL "emscripten-getentropy-webcrypto-v1" OR
+   NOT _wasm_entropy_probe STREQUAL "passed")
+  message(FATAL_ERROR "Wasm SDK lacks qualified browser entropy; prepare a new SDK destination with the current recipe (existing SDKs must not be modified)")
+endif()
 foreach(field ROOT MANIFEST)
   if(field STREQUAL "ROOT")
     set(value "${DATAPUMP_WASM_SDK_ROOT}")

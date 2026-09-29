@@ -335,7 +335,7 @@ class Worker:
 
     def input(self, data):
         blocks = frames(data)
-        if any(kind not in (1, 2, 3, 4, 5, 6, 7, 8, 15) for kind, _ in blocks):
+        if any(kind not in (1, 2, 3, 4, 5, 6, 7, 8, 15, 16) for kind, _ in blocks):
             raise PreviewError('Frame exceeds presentation/audio authority')
         for kind, block in blocks:
             if kind == 2:

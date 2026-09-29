@@ -29,18 +29,22 @@ window.addEventListener('message',event=>{
  port=event.ports[0];
  const input=bytes=>port.postMessage({type:'input',bytes},[bytes.buffer]);
  renderer=new Renderer(document.getElementById('root'),event=>input(encodeEvent(event)),{
-  resize:(width,height)=>{const bytes=encodeViewport(Math.max(240,width),Math.max(240,height));input(bytes);},
+  resize:(width,height)=>{const bytes=encodeViewport(Math.max(240,Math.min(4096,width)),Math.max(240,Math.min(4096,height)));input(bytes);},
   platformService:(request,signal,authorize)=>new Promise((resolve,reject)=>{
    const id=++nextService;pendingService={id,resolve,reject};
    const abort=()=>{if(pendingService?.id===id){pendingService=null;port.postMessage({type:'service-cancel',id});reject(new Error('Service withdrawn'));}};
    signal.addEventListener('abort',abort,{once:true});
    port.postMessage({type:'service',id,request,event:authorize(request.value)});
   })});
+ let presentation=null,paintPending=false,closed=false;
  port.onmessage=message=>{const data=message.data;
-  if(data?.type==='snapshot')renderer.apply(data.snapshot);
+  if(data?.type==='snapshot'){
+   presentation=data.snapshot;
+   if(!paintPending){paintPending=true;requestAnimationFrame(()=>{paintPending=false;if(!closed){const next=presentation;presentation=null;renderer.apply(next);}});}
+  }
   else if(data?.type==='error')renderer.error(String(data.error));
   else if(data?.type==='service-result'&&pendingService?.id===data.id){const job=pendingService;pendingService=null;job.resolve(data.result);}
-  else if(data?.type==='close'){renderer.destroy();port.close();}
+  else if(data?.type==='close'){closed=true;renderer.destroy();port.close();}
  };
  port.start();port.postMessage({type:'bound'});
 });

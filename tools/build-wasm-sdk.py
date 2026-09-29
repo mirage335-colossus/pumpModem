@@ -13,6 +13,7 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 RECIPE = ROOT / 'third_party/build-support/wasm-sdk/manifest.json'
+ENTROPY_CAPABILITY = 'emscripten-getentropy-webcrypto-v1'
 RUNTIME_NOTICES = {
     'Emscripten-LICENSE.txt': 'LICENSE',
     'Emscripten-AUTHORS.txt': 'AUTHORS',
@@ -51,7 +52,42 @@ def recipe():
     for item in value['inputs']:
         if Path(item['file']).name != item['file'] or len(item['sha256']) != 64:
             raise ValueError('Invalid pinned input')
+    entropy = value.get('entropy', {})
+    if entropy.get('capability') != ENTROPY_CAPABILITY:
+        raise ValueError('Unsupported Wasm SDK entropy adapter')
+    for field in ('patch', 'source'):
+        name = PurePosixPath(entropy.get(field, ''))
+        if not name.parts or name.is_absolute() or '..' in name.parts:
+            raise ValueError('Invalid entropy adapter path')
+    patch = RECIPE.parent / entropy['patch']
+    if patch.is_symlink() or digest(patch) != entropy.get('patch_sha256'):
+        raise ValueError('Wasm SDK entropy patch checksum mismatch')
+    if entropy.get('probe_sources') != ['entropy-probe.cpp', 'entropy-probe.mjs']:
+        raise ValueError('Unsupported Wasm SDK entropy probe')
     return value
+
+
+def patch_openssl_entropy(openssl, value):
+    """Apply only the exact reviewed source transformation during preparation."""
+    entropy = value['entropy']
+    source = openssl / entropy['source']
+    if source.is_symlink() or digest(source) != entropy['source_sha256']:
+        raise ValueError('OpenSSL entropy source differs from the pinned patch input')
+    run(['patch', '--batch', '--fuzz=0', '--no-backup-if-mismatch', '-p1',
+         '-i', RECIPE.parent / entropy['patch']], cwd=openssl)
+    if digest(source) != entropy['patched_sha256']:
+        raise ValueError('OpenSSL entropy patch output checksum mismatch')
+
+
+def qualify_entropy(em, node, target, unpack, env):
+    """Exercise real OpenSSL and repeated browser WebCrypto reseeding offline."""
+    output = unpack / 'entropy-probe.js'
+    run([em / 'em++', RECIPE.parent / 'entropy-probe.cpp', '-std=c++20', '-O2',
+         '-I' + str(target / 'include'), target / 'lib/libcrypto.a', '--no-entry',
+         '-sMODULARIZE=1', '-sEXPORT_NAME=DatapumpEntropyProbe',
+         '-sENVIRONMENT=web,worker', '-sFILESYSTEM=1',
+         '-sEXPORTED_FUNCTIONS=["_datapump_entropy_probe"]', '-o', output], env=env)
+    run([node, RECIPE.parent / 'entropy-probe.mjs', output, output.with_suffix('.wasm')], env=env)
 
 
 def source_inputs(sources, download=False):
@@ -135,12 +171,14 @@ def prepare(sources, destination, jobs):
     run([em / 'emcc', '--version'], env=env)
     extract(sources / by_name['openssl']['file'], unpack)
     openssl = unpack / ('openssl-' + value['openssl_version'])
+    patch_openssl_entropy(openssl, value)
     target = destination / 'target'
     ssl_env = env | {'CC': str(em / 'emcc'), 'AR': str(em / 'emar'), 'RANLIB': str(em / 'emranlib')}
     run(['perl', 'Configure', 'linux-generic32', '--prefix=' + str(target), '--libdir=lib',
          *value['openssl_options']], cwd=openssl, env=ssl_env)
     run(['make', '-j' + str(jobs), 'build_libs'], cwd=openssl, env=ssl_env)
     run(['make', 'install_dev'], cwd=openssl, env=ssl_env)
+    qualify_entropy(em, destination / 'node/bin/node', target, unpack, env)
     # Populate the exact libc/C++/exception variant before freezing the cache.
     probe = unpack / 'cache-probe.cpp'
     probe.write_text('#include <filesystem>\n#include <iostream>\n#include <stdexcept>\n#include <emscripten/fiber.h>\nint main(){ try { throw std::runtime_error("probe"); } catch(...) {std::cout << std::filesystem::path("/");} }\n')
@@ -150,7 +188,13 @@ def prepare(sources, destination, jobs):
     share.mkdir(parents=True)
     shutil.copy2(RECIPE, share / 'recipe.json')
     shutil.copy2(Path(__file__), share / 'build-wasm-sdk.py')
-    (share / 'preparation-provenance.json').write_text(json.dumps({'builder_sha256':digest(Path(__file__)), 'recipe_sha256':digest(RECIPE)}, indent=2, sort_keys=True) + '\n')
+    support = [value['entropy']['patch'], *value['entropy']['probe_sources']]
+    for name in support:
+        shutil.copy2(RECIPE.parent / name, share / name)
+    support_hashes = {name: digest(RECIPE.parent / name) for name in support}
+    (share / 'preparation-provenance.json').write_text(json.dumps({
+        'builder_sha256': digest(Path(__file__)), 'recipe_sha256': digest(RECIPE),
+        'support_sha256': support_hashes, 'entropy_probe': 'passed'}, indent=2, sort_keys=True) + '\n')
     copy_runtime_notices(em, openssl, share / 'licenses')
     # Preserve every exact source/prebuilt input for offline reconstruction.
     (share / 'sources').mkdir()
@@ -162,6 +206,9 @@ def prepare(sources, destination, jobs):
                 'toolchain': 'emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake',
                 'openssl_include': 'target/include', 'openssl_crypto': 'target/lib/libcrypto.a',
                 'openssl_crypto_sha256': digest(target / 'lib/libcrypto.a'),
+                'entropy_capability': ENTROPY_CAPABILITY,
+                'entropy_patch_sha256': value['entropy']['patch_sha256'],
+                'entropy_probe': 'passed', 'support_sha256': support_hashes,
                 'sources': value['inputs'], 'cache_frozen': True}
     (share / 'manifest.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n')
     (share / 'relocated-root.txt').write_text(str(destination) + '\n')

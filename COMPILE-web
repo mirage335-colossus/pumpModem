@@ -10,13 +10,18 @@ python3 tools/preview.py worker
 # python3 tools/preview.py worker --simulation --files /absolute/test-directory
 
 # Browser-only WebAssembly; requires a prepared SDK.
+# Rebuild older SDKs using the current recipe and retained source archives:
+# python3 tools/build-wasm-sdk.py prepare --sources /absolute/wasm-inputs \
+#   --destination /absolute/new/wasm-sdk --jobs 4
+# Use a fresh --build-dir when switching SDKs. See docs/building.md.
 datapump_wasm_sdk=/absolute/path/to/wasm-sdk
 ./build.sh --wasm-sdk "$datapump_wasm_sdk"
 ./build.sh test web --wasm-sdk "$datapump_wasm_sdk"
 python3 tools/preview.py wasm
 
 # Open the printed localhost URL. Ctrl-C stops the preview.
-# Choose Robust Modem and Simulation = Yes to try without audio hardware.
+# Simulation = Yes tries the modem without audio hardware.
+# The web test group also checks actual C++ live RX/TX/RX using a fixture device.
 # Type a short message, click Transmit, and inspect Signals.
 # For live operation, select No and enable microphone/audio; stay in foreground.
 # Worker file choices use --files DIR; Wasm uses browser import/download.

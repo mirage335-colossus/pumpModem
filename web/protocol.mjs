@@ -42,6 +42,7 @@ export function encodeAudio(event) {
     if(event.kind==='playback_ready'||event.kind==='playback_cancelled'){w.u64(event.stream);return w.frame(event.kind==='playback_ready'?5:8);}
     if(event.kind==='playback_progress'){w.u64(event.stream);w.u64(event.position);w.u32(event.drained?1:0);return w.frame(6);}
     if(event.kind==='interrupted'){w.string(event.reason);return w.frame(7);}
+    if(event.kind==='playback_failed'){w.u64(event.stream);w.string(event.reason);return w.frame(16);}
     throw new TypeError('Unknown audio input primitive');
 }
 export function decodeFrame(bytes) {
