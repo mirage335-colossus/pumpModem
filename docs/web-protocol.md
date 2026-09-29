@@ -30,7 +30,9 @@ pipes. Normal launch checks its pipes and uses a private temporary workspace for
 imported/exported file objects. That workspace is removed on orderly exit;
 abnormal process termination can leave a private directory for host cleanup.
 The host owns web authentication, transport backpressure, HTTPS, file policy,
-resource limits and child termination. No network relay implementation is shipped.
+resource limits and child termination. Application packages ship no network relay.
+For a temporary repository host using these pipes, see [COMPILE-web](../COMPILE-web)
+and `tools/preview.py`.
 
 ## Encoding and bounds
 

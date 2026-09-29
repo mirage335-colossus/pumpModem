@@ -129,6 +129,20 @@ service installer, listener or CGI socket helper. Direct interactive terminal
 input is not a worker transport; use the embedding application's pipe launcher.
 Host file selection is a separate explicit inherited-pipe capability.
 
+For repository experiments, [COMPILE-web](../COMPILE-web) is the short build,
+test and run reference. After building, `python3 tools/preview.py worker` opens
+a temporary loopback host for the native worker; `python3 tools/preview.py wasm`
+serves the built static page. Open the printed URL and stop with Ctrl-C. Python's
+standard library is sufficient; neither mode installs a service or builds for you.
+Use `--build-dir PATH` for custom builds and `--port N` for a fixed port.
+
+Worker mode optionally accepts `--simulation` and `--files DIR`. File choices
+are relative to that explicitly permitted directory, individual files only,
+at most 256 MiB; symlinks and overwrites are rejected. One tab owns one worker;
+closing it or losing its heartbeat stops the child. The preview's authenticated
+HTTP relay belongs to this development tool, outside the no-socket worker and
+isolated renderer. It is loopback-only and is not included in application packages.
+
 The browser-only product requires an independently prepared
 [Wasm SDK recipe](../third_party/build-support/wasm-sdk/README.md). Preparation
 pins official Emscripten inputs and cross-builds static OpenSSL with socket,
@@ -163,7 +177,8 @@ worker case. See [web frontend contracts](web-frontends.md) for the integration
 boundary and remaining browser/device qualification.
 
 The native `web` CTest group covers execution, host audio, the C++ bridge, protocol worker,
-renderer and SDK/package tools. With `--wasm-sdk`, the same group builds the actual
+renderer, preview lifecycle/file transfers and SDK/package tools. With
+`--wasm-sdk`, the same group builds the actual
 module and exercises its application frames through an isolated Node VM using
 preloaded assets and denied network globals. It also runs the cooperative fiber
 lifecycle/stack-alignment tests compiled for Wasm. It supplements the normal contract/general

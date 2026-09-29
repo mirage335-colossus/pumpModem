@@ -73,6 +73,12 @@ anonymous pipes. File selection means the host's authorized server files; it is
 not implemented by a browser upload widget. The host must validate paths/handles
 within its existing filesystem policy, including symlinks and concurrent changes.
 
+For a local experiment, [COMPILE-web](../COMPILE-web) uses the repository-only
+`python3 tools/preview.py worker` launcher. Its trusted parent page owns the
+loopback relay, child lifetime and optional `--files DIR` policy; these are not
+part of the renderer, worker or installed browser assets. The same helper's
+`wasm` mode simply serves the compiled static page.
+
 The renderer is an opaque `sandbox="allow-scripts"` frame with
 `connect-src 'none'`, no parent DOM access, no forms, no popup or navigation
 permissions. Preloaded code is installed inside that frame; received text is

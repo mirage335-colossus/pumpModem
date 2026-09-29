@@ -1,0 +1,24 @@
+# Web build/run reference: run selected blocks from the repository root.
+# Prerequisites and Wasm SDK preparation: docs/building.md
+
+# Native worker with browser UI/audio (Linux).
+./build.sh --cli --web-worker
+./build.sh test web --cli
+python3 tools/preview.py worker
+
+# Optional: simulation and explicitly permitted host files.
+# python3 tools/preview.py worker --simulation --files /absolute/test-directory
+
+# Browser-only WebAssembly; requires a prepared SDK.
+datapump_wasm_sdk=/absolute/path/to/wasm-sdk
+./build.sh --wasm-sdk "$datapump_wasm_sdk"
+./build.sh test web --wasm-sdk "$datapump_wasm_sdk"
+python3 tools/preview.py wasm
+
+# Open the printed localhost URL. Ctrl-C stops the preview.
+# Choose Robust Modem and Simulation = Yes to try without audio hardware.
+# Type a short message, click Transmit, and inspect Signals.
+# For live operation, select No and enable microphone/audio; stay in foreground.
+# Worker file choices use --files DIR; Wasm uses browser import/download.
+# Custom builds: pass the same --build-dir PATH to build.sh and preview.py MODE.
+# Options: python3 tools/preview.py --help

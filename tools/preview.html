@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' blob:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-src 'self' about:; worker-src blob:; media-src blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Data Pump — native worker preview</title>
+<style>
+body{margin:16px;font:15px system-ui;background:#171b21;color:#eee}
+button,input{font:inherit;padding:8px}header{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+#status{white-space:pre-wrap}dialog{max-width:80vw}dialog input{width:min(65vw,40rem)}
+</style>
+<header><strong>Native Data Pump worker</strong>
+<button id="audio" disabled>Enable microphone and audio</button>
+<button id="stop" disabled>Stop worker</button></header>
+<p id="status" role="status">Connecting…</p><main id="root"></main>
+<dialog id="chooser"><h3 id="choice-title"></h3>
+<p id="file-root"></p><input id="path" autocomplete="off" aria-label="Host path">
+<p><button id="choose-path" type="button">Use this path</button> <button id="cancel-path" type="button">Cancel</button></p></dialog>
+<script type="module" src="/tools/preview.mjs"></script>
+</html>

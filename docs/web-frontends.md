@@ -9,7 +9,10 @@ design review used `91e3e0e3495ba842a380b4ea907a691c3a5b253a` on 2026-09-28.
 Use [the build guide](building.md) for the separate native and Wasm builds,
 [the local protocol](web-protocol.md) for embedding, and
 [the browser adapter guide](../web/README.md) for preloaded assets and platform
-services. No web server or listening helper is included. CGI, persistent browser
+services. Application packages contain no web server or listening helper.
+[COMPILE-web](../COMPILE-web) and `tools/preview.py` provide an explicit,
+temporary loopback host for repository experiments, outside the worker process.
+CGI, persistent browser
 storage and a threaded Wasm profile remain future work.
 
 ## Mandatory security boundary
@@ -21,7 +24,9 @@ standard input/output. There is no bind-address setting or network fallback.
 A loopback-only configuration cannot satisfy this requirement: a bind bug must
 not be able to turn Data Pump into a network service.
 
-Only the user's existing web server/embedding application owns network transport.
+Only the user's existing web server/embedding application owns network transport
+in deployment. The separately invoked repository preview tool owns it during
+local development; the worker and renderer retain the same boundaries.
 Data Pump receives an explicitly bounded local interface: actual anonymous pipes
 for the native worker, or local Worker messages for Wasm. Do not ship a Data Pump
 HTTP daemon, socket broker, CGI-to-socket client or hidden networking helper.
