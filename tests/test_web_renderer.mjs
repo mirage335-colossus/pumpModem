@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import {Renderer,validText,eventKinds} from '../web/renderer.mjs';
 import {encodeEvent,encodeViewport,encodeAudio,FrameDecoder,decodeFrame,maxFrame} from '../web/protocol.mjs';
 class Node {
-    constructor(doc,tag){this.ownerDocument=doc;this.tagName=tag;this.children=[];this.parentNode=null;this.listeners={};this.style={};this.attributes={};this.classList={add:()=>{}};this.value='';this.selectionStart=this.selectionEnd=this.scrollTop=0;this.clientHeight=this.scrollHeight=this.scrollWidth=100;this.textContent='';this.hidden=false;}
+    constructor(doc,tag){this.ownerDocument=doc;this.tagName=tag;this.children=[];this.parentNode=null;this.listeners={};this.style={};this.attributes={};const classes=new Set();this.classList={add:(...names)=>names.forEach(name=>classes.add(name)),contains:name=>classes.has(name)};this.value='';this.selectionStart=this.selectionEnd=this.scrollTop=0;this.clientHeight=this.scrollHeight=this.scrollWidth=100;this.textContent='';this.hidden=false;}
     set innerHTML(_){throw new Error('Renderer must never interpret HTML');}
     get isConnected(){return this===this.ownerDocument.root||Boolean(this.parentNode?.isConnected);}
     get scrollTop(){for(let node=this;node;node=node.parentNode)if(node.hidden)return 0;return this._scrollTop??0;}
@@ -156,6 +156,9 @@ const hostedDoc={defaultView:hostWindow,createElement(tag){const n=new Node(this
 hostedDoc.root=new Node(hostedDoc,'root');
 const hosted=createHostedFrontend({container:hostedDoc.root,rendererSource:'fixture',protocolSource:'fixture',styleText:'',workletSource:'fixture',send:async bytes=>hostSent.push(bytes),handleService:async request=>{hostServices.push(request);return {cancelled:true};},status:state=>hostStatus.push(state)});
 assert.equal(hosted.frame.attributes.sandbox,'allow-scripts');assert(hosted.frame.srcdoc.includes("connect-src 'none'"));assert(!hosted.frame.attributes.sandbox.includes('allow-same-origin'));
+assert.equal(hosted.frame.style.height,'var(--datapump-viewport-height,100dvh)','hosted viewport must follow its containing browser/panel height');
+assert.equal(hosted.frame.style.minHeight,'0','a fixed iframe minimum must not override the allocated viewport');
+assert.equal(hosted.frame.style.display,'block');
 const nonce=hosted.frame.srcdoc.match(/const nonce="([0-9a-f]+)"/)[1];
 windowListeners.message({source:{},data:{type:'datapump-ready',nonce}});assert.equal(channels.length,0);
 windowListeners.message({source:hosted.frame.contentWindow,data:{type:'datapump-ready',nonce}});assert.equal(channels.length,1);
@@ -167,6 +170,31 @@ hosted.feed(output(101,new TextEncoder().encode(JSON.stringify(serviceSnapshot))
 await channels[0].port1.onmessage({data:{type:'service',id:1,request:{...serviceSnapshot.service,id:'78'},event:{version:1,generation:'3',sequence:'1',target:'78',kind:13}}});assert.equal(hostServices.length,0);
 await channels[0].port1.onmessage({data:{type:'service',id:2,request:{...serviceSnapshot.service,value:'untrusted path'},event:{version:1,generation:'3',sequence:'2',target:'77',kind:13,value:'untrusted path'}}});assert.equal(hostServices.length,1);assert.equal(hostServices[0].event.value,'safe');hosted.dispose();
 console.log('Record prefixes, serialized Asyncify dispatch and isolated-host authority checks passed');
+// The standalone shell reserves real space for the audio toolbar; an embedded
+// client only changes its own root. The same measured surface reaches C++.
+const {boot:bootWasm}=await import('../web/wasm_client.mjs');
+for(const embedding of ['standalone','body','panel']) {
+    const standalone=embedding==='standalone';
+    let sizeChanged;const forwarded=[];
+    const clientEnvironment={navigator:{},Blob,setTimeout,clearTimeout,addEventListener(){},
+        URL:{createObjectURL:()=> 'blob:fixture',revokeObjectURL(){}},
+        ResizeObserver:class {constructor(callback){sizeChanged=callback;}observe(){}disconnect(){}},
+        Worker:class {postMessage(message){
+            if(message.type==='init')queueMicrotask(()=>this.onmessage({data:{type:'ready'}}));
+            if(message.type==='feed'){forwarded.push(message.bytes);queueMicrotask(()=>this.onmessage({data:{type:'accepted',id:message.id}}));}
+        }terminate(){}}};
+    const clientDocument={defaultView:clientEnvironment,createElement(tag){return new Node(this,tag);}};
+    clientDocument.body=new Node(clientDocument,'body');clientDocument.root=clientDocument.body;
+    const containingPanel=new Node(clientDocument,'section'),clientRoot=new Node(clientDocument,'main');
+    if(embedding==='panel'){clientDocument.body.append(containingPanel);containingPanel.append(clientRoot);}else clientDocument.body.append(clientRoot);
+    const client=await bootWasm({root:clientRoot,factorySource:'fixture',wasmBytes:new Uint8Array(),workletSource:'fixture',workerSource:'fixture',...(standalone?{standalone:true}:{})});
+    assert(clientRoot.classList.contains('dp-client'));assert.equal(clientRoot.children[0].className,'dp-toolbar');
+    assert.equal(clientDocument.body.classList.contains('dp-page'),standalone,'an embedded client must preserve the containing application layout');
+    for(const [width,height] of [[1600,1200],[900,640],[1600,1200]])sizeChanged([{contentRect:{width,height}}]);
+    assert.deepEqual(forwarded.map(bytes=>{const v=new DataView(bytes.buffer,bytes.byteOffset);return [v.getUint32(12,true),v.getUint32(16,true)];}),[[1600,1200],[900,640],[1600,1200]]);
+    await Promise.resolve();client.close();
+}
+console.log('Standalone and embedded viewport shell ownership and resize delivery passed');
 const {BrowserAudio}=await import('../web/browser_audio.mjs');
 const scheduled=[];const clockEnvironment={performance:{timeOrigin:1000000,now:()=>0},clearTimeout:()=>{}};
 const browserAudio=new BrowserAudio(()=>{}, {environment:clockEnvironment});browserAudio.generation=1n;browserAudio.clockOffset=1;browserAudio.clockAt=1000;browserAudio.clockUncertainty=.005;

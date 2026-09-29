@@ -137,7 +137,7 @@ function wasmTransport(factoryPath,wasmPath,onBytes,onFailure,metrics) {
 }
 
 function physicalAudio(rate,metrics,fail) {
-    const contexts=[];let Processor;
+    const contexts=[],recorded=[];let Processor,noise=0x51b4ca97,replay=null;
     const realm=vm.createContext({AudioWorkletProcessor:class {constructor(){this.port={postMessage:()=>{}};}},
         registerProcessor:(_,value)=>{Processor=value;},Float32Array,Math,Number,String,BigInt,currentFrame:0,sampleRate:rate});
     vm.runInContext(readAsset('audio_worklet.js'),realm,{filename:'web/audio_worklet.js'});
@@ -154,7 +154,11 @@ function physicalAudio(rate,metrics,fail) {
                 while(this.frame+128<=end){
                     realm.currentFrame=this.frame;
                     const input=new Float32Array(128);
-                    for(let i=0;i<input.length;i++)input[i]=.002*Math.sin(2*Math.PI*997*(this.frame+i)/rate);
+                    for(let i=0;i<input.length;i++){
+                        noise^=noise<<13;noise^=noise>>>17;noise^=noise<<5;
+                        const position=replay?this.frame+i-replay.start:-1;
+                        input[i]=position>=0?(replay.samples[position]||0):.002*(noise/2147483648);
+                    }
                     for(const node of this.nodes)if(node.connected){
                         const left=new Float32Array(128),right=new Float32Array(128);
                         node.processor.process([[input]],[[left,right]]);
@@ -167,7 +171,7 @@ function physicalAudio(rate,metrics,fail) {
     }
     class AudioNode {
         constructor(context,_name,options){
-            this.context=context;this.processor=new Processor({processorOptions:options.processorOptions});this.connected=false;this.expected=null;this.capturePositions=new Map();context.nodes.push(this);
+            this.context=context;this.processor=new Processor({processorOptions:options.processorOptions});this.connected=false;this.expected=null;this.capturePositions=new Map();this.burst=[];this.burstStart=null;this.burstsFinished=0;context.nodes.push(this);
             this.port={onmessage:null,postMessage:message=>{
                 const copy=structuredClone(message);
                 if(copy.kind==='playback_start')this.expected={stream:String(copy.stream),gain:copy.gain,channels:copy.channels,start:null,blocks:[],index:0,end:null};
@@ -192,13 +196,25 @@ function physicalAudio(rate,metrics,fail) {
                 if(copy.kind==='playback_progress')metrics.progressMessages++;
                 if(copy.kind==='playback_endpoint')metrics.endpoints++;
                 if(copy.kind==='interrupted'||copy.kind==='playback_failed')fail(new Error(`AudioWorklet: ${copy.reason}`));
+                // A busy browser can delay main-thread delivery while the
+                // AudioWorklet continues sampling. Retain bounded 1.2s
+                // bursts during training and absence, then deliver every original
+                // packet in order; neither PCM nor sample time changes.
+                if(copy.kind==='capture'&&replay&&this.burstsFinished<2&&copy.position>=replay.start+rate*(.5+4*this.burstsFinished)){
+                    if(this.burstStart===null)this.burstStart=copy.position;
+                    this.burst.push(copy);assert(this.burst.length<=122,'capture burst exceeded its fixture bound');
+                    if(copy.position-this.burstStart<rate*1.2)return;
+                    this.burstsFinished++;metrics.captureBursts=this.burstsFinished;metrics.captureBurstPackets=(metrics.captureBurstPackets||0)+this.burst.length;this.burstStart=null;
+                    for(const held of this.burst)setImmediate(()=>this.port.onmessage?.({data:held}));
+                    this.burst=[];return;
+                }
                 setImmediate(()=>this.port.onmessage?.({data:copy}));
             };
         }
         connect(){this.connected=true;}
         disconnect(){this.connected=false;}
         verify(frame,left,right){
-            const e=this.expected;
+            const e=this.expected,played=[];
             for(let i=0;i<128;i++){
                 const position=e?.start===null?-1:frame+i-(e?.start??Infinity);let expected=0;
                 if(e&&position>=0&&(e.end===null||position<e.end)){
@@ -207,22 +223,34 @@ function physicalAudio(rate,metrics,fail) {
                     assert(block&&position>=block.position,`physical playback lacks sample ${position}`);
                     expected=Math.fround(Math.max(-1,Math.min(1,block.samples[position-block.position]*e.gain)));
                     metrics.playedFrames++;if(Math.abs(expected)>1e-6)metrics.nonzeroFrames++;
+                    played.push(e.channels===1?right[i]:left[i]);
                 }
                 assert.equal(left[i],e&&e.channels!==1?expected:0,'left output differs from emitted PCM/routing');
                 assert.equal(right[i],e&&e.channels!==0?expected:0,'right output differs from emitted PCM/routing');
             }
+            if(played.length)recorded.push(Float32Array.from(played));
         }
     }
     const track={stop(){},addEventListener(){},getSettings:()=>({sampleRate:rate})};
     const stream={getTracks:()=>[track],getAudioTracks:()=>[track]};
     return {environment:{AudioContext:Context,AudioWorkletNode:AudioNode,performance,setTimeout,clearTimeout,
         navigator:{mediaDevices:{getUserMedia:async()=>stream}},URL:{createObjectURL:()=> 'blob:preloaded-worklet',revokeObjectURL(){}},Blob:class{}},
+        replay(){
+            assert(!replay,'only one incoming recording is expected');
+            const samples=new Float32Array(metrics.playedFrames);let at=0;
+            for(const block of recorded){samples.set(block,at);at+=block.length;}
+            assert.equal(at,samples.length);assert(samples.length>6*rate,'recorded transmission lacks physical absence tail');
+            const context=contexts.at(-1);replay={samples,start:context.frame+Math.ceil(rate/2)};
+            let lastSignal=samples.length-1;while(lastSignal>=0&&Math.abs(samples[lastSignal])<1e-6)--lastSignal;
+            return {start:replay.start,end:replay.start+samples.length,absenceEnd:replay.start+lastSignal+6*rate};
+        },
+        frame:()=>contexts.at(-1)?.frame||0,
         close:()=>Promise.all(contexts.map(context=>context.close()))};
 }
 
 async function scenario(options,rate) {
     const metrics={rate,quanta:0,capturePackets:0,captureFrames:0,playedFrames:0,nonzeroFrames:0,progressMessages:0,endpoints:0,drains:0,captureStarts:0,captureStops:0,pcmFrames:0,maxFeedMs:0,maxExportMs:0,maxEditMs:0,tickCount:0,tickMilliseconds:0,receivedBytes:0,snapshotCount:0};
-    let failure=null,snapshot=null,sequence=0n,audio,transport,closing=false;
+    let failure=null,snapshot=null,sequence=0n,audio,transport,closing=false,incoming=null;
     const histories=[];const fail=error=>{if(!closing&&!failure)failure=error instanceof Error?error:new Error(String(error));};
     const physical=physicalAudio(rate,metrics,fail);
     const decoder=new FrameDecoder(message=>{
@@ -237,7 +265,10 @@ async function scenario(options,rate) {
             if(error)fail(new Error(`Application audio failure: ${error.text}`));
         }else if(message.type==='audio'){
             assert(audio,'audio event before configuration');const e=message.event;
-            if(e.kind===0)metrics.captureStarts++;
+            if(e.kind===0){
+                metrics.captureStarts++;
+                if(incoming)assert(physical.frame()>=incoming.absenceEnd,'receiver restarted before incoming physical absence');
+            }
             if(e.kind===1)metrics.captureStops++;
             if(e.kind===3){metrics.pcmFrames+=e.samples.length;assert(metrics.pcmFrames<=rate*120,'unbounded fixture transmission');}
             audio.accept(e);
@@ -280,7 +311,7 @@ async function scenario(options,rate) {
         };
         for(const value of ['l','li','live']){await edit(value);await pause(150);}
         const initialSamples=metrics.captureFrames;
-        await wait(()=>metrics.captureFrames>=initialSamples+rate*2,'two seconds of uninterrupted RX',10000);
+        await wait(()=>metrics.captureFrames>=initialSamples+rate*20,'twenty seconds of uninterrupted broadband-noise RX',30000);
         assert.equal(metrics.captureStarts,1,'receiver silently restarted after capture failure');
         await edit('hi');
         await wait(()=>control('Transmit text')?.enabled,'live transmit enabled');
@@ -307,6 +338,27 @@ async function scenario(options,rate) {
         const resumed=metrics.captureFrames,streams=metrics.captureStarts;
         await edit('ready');await wait(()=>metrics.captureFrames>=resumed+rate*2,'RX after transmission',10000);
         assert.equal(metrics.captureStarts,streams,'post-transmission receiver restarted after audio failure');
+        // Replay the actual physical output into the microphone. A tone-only
+        // capture probe misses acquisition, FEC and physical-end processing.
+        const replay=incoming=physical.replay();let pendingId=null,received=null;
+        await wait(()=>{
+            const rows=control('Signals')?.records||[];
+            for(const row of rows){
+                const text=row.cells.map(cell=>cell.text).join(' ');
+                if(text.startsWith('RECEIVING / PENDING')){
+                    if(pendingId===null)pendingId=row.id;
+                    assert.equal(row.id,pendingId,'reception row identity changed while pending');
+                }
+                if(text.startsWith('RECEIVED')&&text.endsWith(' · 2 bytes · hi'))received=row;
+            }
+            return received;
+        },'complete incoming live message after physical absence',30000);
+        assert(pendingId!==null,'incoming message was never exposed as pending');
+        assert.equal(received.id,pendingId,'completed reception replaced the pending row');
+        assert(physical.frame()>=replay.absenceEnd,'received content escaped the six-second physical absence boundary');
+        assert(metrics.captureStarts<=streams+1,'receiver restarted more than once while completing incoming reception');
+        assert(metrics.captureBursts===2&&metrics.captureBurstPackets>=240,'incoming reception did not exercise repeated delayed capture delivery');
+        metrics.receivedMessages=1;metrics.replayedFrames=replay.end-replay.start;
         metrics.elapsedMs=performance.now()-started;
         console.log(JSON.stringify({passed:true,mode:options.fds?'native':'wasm',...metrics}));
     }catch(error){throw new Error(`${error.message}\nLive metrics: ${JSON.stringify(metrics)}\nRecent status: ${histories.join('\n')}\n${transport?.diagnostic()||''}`,{cause:error});}

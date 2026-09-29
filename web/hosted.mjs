@@ -10,11 +10,13 @@ export function createHostedFrontend({container,rendererSource,protocolSource,st
     const document=container.ownerDocument,window=document.defaultView;
     const nonce=Array.from(window.crypto.getRandomValues(new Uint8Array(32)),byte=>byte.toString(16).padStart(2,'0')).join('');
     const frame=document.createElement('iframe');frame.setAttribute('sandbox','allow-scripts');frame.setAttribute('title','Data Pump');
-    frame.style.width='100%';frame.style.minHeight='36rem';frame.style.border='0';
+    // The containing application owns the available viewport. A percentage
+    // override fills its allocated panel; the default follows the browser.
+    frame.style.display='block';frame.style.width='100%';frame.style.height='var(--datapump-viewport-height,100dvh)';frame.style.minHeight='0';frame.style.border='0';
     const assets={renderer:encoded(rendererSource),protocol:encoded(protocolSource),style:encoded(styleText)};
     // Only reviewed static code assets and generated hex nonce are interpolated.
     // Acoustic text, filenames, fields and host file paths never enter srcdoc.
-    frame.srcdoc=`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; style-src 'unsafe-inline'; connect-src 'none'; img-src data: blob:; form-action 'none'; base-uri 'none'"><main id="root"></main><script type="module">
+    frame.srcdoc=`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; style-src 'unsafe-inline'; connect-src 'none'; img-src data: blob:; form-action 'none'; base-uri 'none'"><style>html,body{margin:0;height:100%;overflow:hidden}#root.datapump{height:100%;min-height:0}</style><main id="root"></main><script type="module">
 const nonce=${JSON.stringify(nonce)},assets=${JSON.stringify(assets)};
 window.addEventListener('error',event=>parent.postMessage({type:'datapump-init-error',nonce,message:String(event.message).slice(0,512)},'*'));
 const decode=s=>new TextDecoder().decode(Uint8Array.from(atob(s),c=>c.charCodeAt(0)));

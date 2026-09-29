@@ -5,10 +5,12 @@ import {FrameDecoder,encodeEvent,encodeViewport,encodeAudio,encodeUploadBegin,
 const maximumFile=256*1024*1024;
 function node(document,tag,text){const element=document.createElement(tag);if(text!==undefined)element.textContent=text;return element;}
 function basename(value){const name=String(value).split(/[\\/]/).at(-1).replace(/[\x00-\x1f\x7f]/g,'_');return name&&name!=='.'&&name!=='..'?name:'download.bin';}
-export async function boot({root,factorySource,wasmBytes,workletSource,workerSource}) {
+export async function boot({root,factorySource,wasmBytes,workletSource,workerSource,standalone=false}) {
     if(!root?.ownerDocument||typeof factorySource!=='string'||!(wasmBytes instanceof Uint8Array)||typeof workerSource!=='string')throw new TypeError('Preloaded application assets and root are required');
     const document=root.ownerDocument,environment=document.defaultView;
     const toolbar=node(document,'section'),status=node(document,'p'),surface=node(document,'section');
+    root.classList.add('dp-client');toolbar.className='dp-toolbar';
+    if(standalone)document.body.classList.add('dp-page');
     const enable=node(document,'button','Enable microphone and audio'),stop=node(document,'button','Stop audio');
     for(const button of [enable,stop])button.type='button';
     status.setAttribute('role','status');toolbar.append(enable,stop,status);root.replaceChildren(toolbar,surface);

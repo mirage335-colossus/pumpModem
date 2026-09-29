@@ -113,5 +113,26 @@ void failed_output_keeps_capture() {
     require(input.wait_for(2s)==std::future_status::ready,"output failure interrupted capture");input.get();
     require(captured==384,"output failure lost or manufactured input samples");
 }
+void paced_capture_stops() {
+    for(bool interrupted:{false,true}) {
+        AudioEndpoint endpoint;endpoint.configure(1,8000);std::stop_source stop;
+        std::atomic<std::size_t> frames=0;std::string error;
+        auto task=std::async(std::launch::async,[&]{
+            try {endpoint.capture(8000,[&](auto samples){frames+=samples.size();return true;},stop.get_token(),{});}
+            catch(const std::exception& e){error=e.what();}
+        });
+        std::uint64_t stream=0;
+        until(endpoint,[&](const auto& e){if(e.kind!=AudioEndpoint::Kind::capture_start)return false;stream=e.stream;return true;});
+        const std::vector<float> pcm(400,.25f);
+        for(std::uint64_t position=0;position<8000;position+=pcm.size())endpoint.capture_samples(1,stream,position,pcm);
+        const auto deadline=std::chrono::steady_clock::now()+2s;
+        while(frames<1200&&std::chrono::steady_clock::now()<deadline)std::this_thread::sleep_for(1ms);
+        const auto before=frames.load();
+        if(interrupted)endpoint.interrupted(1,"fixture input interrupted");else stop.request_stop();
+        require(task.wait_for(2s)==std::future_status::ready,"paced capture did not wake on cancellation/interruption");task.get();
+        require(before>=1200&&before<8000,"host forwarded the entire delayed capture burst immediately");
+        require(error==(interrupted?"fixture input interrupted":"audio operation cancelled"),"paced capture reported the wrong stop reason");
+    }
 }
-int main(){try{playback(8000);playback(44100);playback(48000);gap_and_close();capture_restart();stopped_capture();cancellation();failed_output_keeps_capture();std::cout<<"Host audio bounds, continuity, resampling, readiness, drain, cancellation and output recovery passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+}
+int main(){try{playback(8000);playback(44100);playback(48000);gap_and_close();capture_restart();stopped_capture();cancellation();failed_output_keeps_capture();paced_capture_stops();std::cout<<"Host audio bounds, continuity, resampling, readiness, drain, cancellation and output recovery passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

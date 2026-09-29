@@ -144,6 +144,7 @@ void AudioEndpoint::capture(std::uint32_t logical,const audio::CaptureCallback& 
         audio::Resampler converter(rate,logical);std::vector<float> output(std::max<std::size_t>(1,std::min<std::size_t>(4096,logical/20)));
         if(format)format({logical,rate,converter.passband_hz(),converter.workspace_bytes()+output.capacity()*sizeof(float)+max_queue_frames*sizeof(float)});
         bool more=true;
+        auto delivery=execution::Clock::now();
         while(more) {
             std::vector<float> input;
             {
@@ -156,9 +157,30 @@ void AudioEndpoint::capture(std::uint32_t logical,const audio::CaptureCallback& 
             while(offset<input.size() && more) {
                 if(stop.stop_requested())throw Error("audio operation cancelled");
                 auto progress=converter.process(std::span<const float>(input).subspan(offset),output);
-                offset+=progress.consumed;if(progress.produced)more=callback(std::span<const float>(output.data(),progress.produced));
+                offset+=progress.consumed;
+                if(progress.produced) {
+                    // Restore a bounded device-like cadence after a host
+                    // delivery stall. Elapsed idle time cannot accumulate an
+                    // unlimited burst into a downstream receiver's queue.
+                    // Small catch-up headroom also accommodates device-clock
+                    // drift; it changes delivery timing, never sample time.
+                    delivery=std::max(delivery,execution::Clock::now()-std::chrono::milliseconds(50));
+                    {
+                        std::unique_lock lock(p.mutex);
+                        p.changed.wait_until(lock,stop,delivery,[&]{return p.closed || !p.failure.empty() || generation!=p.generation;});
+                        p.valid(generation,stop);
+                    }
+                    more=callback(std::span<const float>(output.data(),progress.produced));
+                    delivery+=std::chrono::ceil<execution::Clock::duration>(
+                        std::chrono::duration<double>(progress.produced/(logical*1.02)));
+                }
                 if(!progress.consumed && !progress.produced)throw Error("capture resampler made no progress");
-                execution::checkpoint();
+                // A host can deliver a bounded backlog after a browser/relay
+                // stall. Give the downstream consumer a turn after every
+                // converted block: draining that backlog for an entire task
+                // quantum can overflow its smaller queue without losing any
+                // input samples or exceeding the host's own capture bound.
+                execution::yield();
             }
         }
     } catch(...) {finish();throw;}
@@ -222,7 +244,7 @@ void AudioEndpoint::playback(std::uint32_t logical,const audio::PlaybackCallback
 
 namespace datapump::audio {
 bool exclusive_supported(){return false;}
-std::string default_device_description(){return "Host audio";}
+std::string default_device_description(){return "Browser audio";}
 double minimum_lead_seconds(){return .5;}
 void schedule_output(double epoch,std::stop_token stop){host::audio_endpoint().schedule_output(epoch,stop);}
 std::vector<Device> devices(){return {{"default",default_device_description()}};}

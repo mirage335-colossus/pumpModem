@@ -132,7 +132,7 @@ try {
         client=client.replaceAll("'./"+name+"'",JSON.stringify(url)).replaceAll('"./'+name+'"',JSON.stringify(url));
     }
     const {boot}=await import(localModule(client));
-    await boot({root:document.getElementById('app'),factorySource:source('factory'),
+    await boot({root:document.getElementById('app'),standalone:true,factorySource:source('factory'),
         wasmBytes:bytes('wasm'),workletSource:source('audio_worklet.js'),workerSource:source('wasm_worker.js')});
 } catch(error) {
     const message=document.getElementById('failure');message.hidden=false;message.textContent=String(error);

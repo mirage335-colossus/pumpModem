@@ -72,6 +72,20 @@ encoding/decoding and file operations. For the thin client, selecting a file
 imports it locally into the application; it need not upload anything to the
 website's server. Received files are offered for download to that device.
 
+The audio selector says **Browser audio** in both shipped compositions: capture
+and playback use the browser's selected microphone and output. It does not
+enumerate the server's sound cards. Server hardware remains a possible explicit
+host audio adapter over the same bounded PCM pipe interface; no such adapter or
+device-selection capability is supplied yet. The common application and modem
+would continue using the audio-provider interface.
+
+The ordinary native audio provider cannot simply be enabled in the worker: its
+configured ALSA routes and PulseAudio/PipeWire fallbacks may use sockets. A direct
+server-hardware provider needs qualified hardware-only routing, portable dependency
+provenance, and busy-device, permission, disconnect and live RX/TX checks while
+retaining the worker's socket prohibition. It must never silently fall back to a
+sound server or change the browser's audio source.
+
 ```mermaid
 flowchart LR
     B[Browser UI and audio adapter] <-->|Local callbacks| H[Existing host page]
@@ -105,6 +119,13 @@ layout and record geometry. A narrow viewport scrolls the shared logical desktop
 browser zoom remains available. The renderer retains input/record nodes across
 polls, long records retain horizontal scrolling, and revision-based bitmap
 caches avoid repainting unchanged images.
+The hosted iframe follows the available viewport instead of a fixed-height
+scrollbox. An embedding container with an allocated height can set
+`--datapump-viewport-height: 100%`, or use an explicit CSS length. The renderer
+fills that frame and owns scrolling for the shared minimum desktop size.
+The generated standalone Wasm page passes `standalone: true` to `boot`, which
+allocates the remaining height after the audio controls and notices. Embedded
+`boot` calls leave the surrounding document's layout alone.
 Complete presentation snapshots coalesce before painting; PCM and clock handling
 do not wait for that DOM work. Lossless bounded pixel runs reduce plot traffic
 without changing bitmap content; noisy images retain a raw RGB fallback.
@@ -269,6 +290,11 @@ Keep PCM queues bounded independently of UI/plot traffic. Use flow control and
 an explicit maximum queued sample duration; measure a suitable jitter buffer on
 the target Wi-Fi/device. Do not let a slow bitmap consumer block application
 polling, and do not solve overload by unbounded buffering or dropped PCM.
+The pipe/Wasm audio provider meters delayed input batches back to device-like
+callback timing, with at most 50 ms of accumulated delivery credit and 2% catch-up
+headroom. This changes callback delivery timing only: sample values, order,
+resampling and physical-absence scoring remain unchanged. A browser/relay stall
+can therefore delay reception completion; genuine buffer overflow still fails.
 
 Preserve these invariants in both deployments:
 

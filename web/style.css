@@ -1,7 +1,14 @@
 :root { color-scheme:light dark; font:13px system-ui,sans-serif; }
-/* C++ supplies the desktop geometry. Small viewports scroll the same surface;
-   browser pinch zoom remains available. Embedders may override this height. */
-.datapump { box-sizing:border-box; width:100%; height:var(--datapump-viewport-height,85dvh); min-height:240px; overflow:auto; position:relative; background:Canvas; color:CanvasText; }
+/* C++ supplies the desktop geometry. The containing shell allocates its real
+   viewport; only this surface scrolls when the shared desktop is larger. */
+.datapump { box-sizing:border-box; width:100%; height:var(--datapump-viewport-height,100dvh); min-height:0; overflow:auto; position:relative; background:Canvas; color:CanvasText; }
+.dp-client { box-sizing:border-box; display:flex; flex-direction:column; width:100%; height:var(--datapump-viewport-height,100dvh); min-height:0; overflow:hidden; }
+.dp-client>.datapump { flex:1 1 0; height:auto; min-height:0; }
+.dp-toolbar { flex:0 0 auto; display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:8px; }
+.dp-toolbar>[role=status] { flex:1 1 20rem; margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
+body.dp-page { margin:0; height:100dvh; display:flex; flex-direction:column; overflow:hidden; }
+.dp-page>.dp-client { flex:1 1 0; height:auto; }
+.dp-page>details,.dp-page>[role=alert] { flex:0 1 auto; max-height:40%; overflow:auto; margin:0; }
 .datapump * { box-sizing:border-box; }
 .dp-stage { position:relative; margin:0; }
 .datapump nav,.dp-controls { position:absolute; inset:0; pointer-events:none; }
