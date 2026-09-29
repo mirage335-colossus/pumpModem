@@ -115,7 +115,14 @@ belong in generic rendering/layout support. A new presentation primitive can
 require support in each renderer, as it does today.
 
 Browser controls use the shared C++ desktop rectangles, tab frames, document
-layout and record geometry. A narrow viewport scrolls the shared logical desktop;
+layout and record geometry. Document flow is computed by `DocumentPresentation`
+in C++; HTML receives explicit outer/content rectangles and allocation state,
+and clips descendants to those shared parent bounds. The browser sends
+bounded glyph-height measurements keyed by opaque text/font/width identities.
+Those measurements refine the shared layout without moving application rules
+into CSS. Until a measurement arrives the bridge uses a conservative estimate.
+Resize/font changes update measurements; unchanged documents retain their nodes,
+editing state and measurement cache. CSS only paints the allocated geometry. A narrow viewport scrolls the shared logical desktop;
 browser zoom remains available. The renderer retains input/record nodes across
 polls, long records retain horizontal scrolling, and revision-based bitmap
 caches avoid repainting unchanged images.

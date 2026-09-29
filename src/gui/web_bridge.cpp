@@ -5,6 +5,8 @@
 #include "service_queue.hpp"
 #include "text_policy.hpp"
 #include <algorithm>
+#include <charconv>
+#include <cmath>
 #include <deque>
 #include <limits>
 #include <map>
@@ -64,6 +66,7 @@ std::string identity(const ui::Control& c) {
 void rectangle(std::ostream& out,ui::Rect r) {
     out<<"{\"x\":"<<r.x<<",\"y\":"<<r.y<<",\"w\":"<<r.w<<",\"h\":"<<r.h<<'}';
 }
+ui::Rect rectangle(ui::DocumentRect r) {return {r.x,r.y,r.width,r.height};}
 void geometry(std::ostream& out,const ui::ControlLayout& layout) {
     out<<"{\"frame\":";rectangle(out,layout.frame);
     out<<",\"widget\":";rectangle(out,layout.widget);
@@ -96,7 +99,7 @@ struct Bridge::Impl {
         enum class Type {control,page,action};
         Type type=Type::control;
         ui::Control control{};
-        ui::Page page=ui::Page::console;
+        ui::Page page=ui::Page::count;
         ui::Command action=ui::Command::none;
         bool enabled=true;
         std::string document_key;
@@ -116,6 +119,9 @@ struct Bridge::Impl {
     std::map<std::string,bool> used_bitmaps;
     std::uint64_t bitmap_serial=0,document_revision=0;
     std::shared_ptr<const ui::DocumentNode> document_source;
+    struct TextMeasure {std::uint64_t id=0;int width=0,height=-1;bool used=false;};
+    std::map<std::string,TextMeasure> text_measures;
+    std::map<const ui::DocumentNode*,TextMeasure*> node_measures;
     ui::ServiceQueue services;
     int width=1000,height=760;
     bool initialized=false;
@@ -175,13 +181,13 @@ struct Bridge::Impl {
     }
     void control(std::ostream& out,const ui::Control& c,bool overlay=false,
                  std::string document_key={},bool inherited_enabled=true,
-                 std::span<const ui::Control* const> menu_items={}) {
+                 std::span<const ui::Control* const> menu_items={},const ui::ControlLayout* document_geometry=nullptr) {
         const auto p=app.control(c);const auto& s=p.state;
         const auto menu=menu_items.empty()?std::optional<MenuPresentation>{}:app.menu(menu_items);
         if(menu?!menu->visible:!p.visible)return;
         Target t;t.control=c;t.document_key=document_key;t.enabled=inherited_enabled;
         const auto id=target(document_key.empty()?identity(c):document_key,t);
-        const auto layout=app.control_layout(c,width,height);
+        const auto layout=document_geometry?*document_geometry:app.control_layout(c,width,height);
         out<<"{\"id\":"<<identifier(id)<<",\"kind\":"<<json_string(menu?"menu":kind_name(c.kind))
            <<",\"label\":"<<json_string(menu?c.menu_label:p.label)<<",\"help\":"<<json_string(c.help)
            <<",\"enabled\":"<<((menu?menu->enabled:p.enabled)&&inherited_enabled?"true":"false")<<",\"persistent\":"<<(c.persistent?"true":"false")
@@ -242,16 +248,50 @@ struct Bridge::Impl {
         out<<'}';
     }
     std::map<std::string,unsigned> document_occurrences;
+    int document_width() const {return ui::document_content_width(app.page_bounds(width,height).w,16);}
+    int measure_text(const ui::DocumentNode& node,int available) {
+        const int font=std::max(1,ui::document_extent(node.font_size));
+        const auto key=std::to_string(available)+":"+std::to_string(font)+":"+(node.bold?"1:":"0:")+node.text;
+        auto [found,added]=text_measures.try_emplace(key);
+        auto& value=found->second;
+        if(added){value.id=fresh();value.width=available;}
+        value.used=true;node_measures[&node]=&value;
+        if(text_measures.size()>8192)throw std::length_error("too many web text measurements");
+        if(value.height>=0)return value.height;
+        // First paint only: the browser supplies its actual wrapped glyph height
+        // next. All parent allocation, padding and clipping remain shared C++.
+        const int columns=std::max(1,available/font),line=std::max(1,static_cast<int>(std::ceil(font*1.25)));
+        std::size_t count=0,lines=1;
+        for(const unsigned char c:node.text)if(c=='\n'){++lines;count=0;}else if((c&0xc0)!=0x80&&++count>static_cast<std::size_t>(columns)){++lines;count=1;}
+        return static_cast<int>(std::min<std::size_t>(16384,lines*line));
+    }
+    ui::DocumentPresentation::Layout document_layout(const ui::DocumentPresentation& presentation) {
+        return presentation.layout(document_width(),[this](const auto& node,int available){return measure_text(node,available);});
+    }
+    bool document_control_enabled(const ui::DocumentPresentation::Placement& item) const {
+        const auto& node=*item.node->source;
+        if(!item.enabled||!node.control)return false;
+        const auto& r=item.absolute;
+        const auto geometry=ui::document_control_layout(*node.control,app.control(*node.control).state,{r.x,r.y,r.width,r.height});
+        const auto& w=geometry.widget;
+        const auto visible=ui::document_intersection(item.clip,{w.x,w.y,w.w,w.h});
+        return visible.width>0&&visible.height>0;
+    }
     static std::string action_key(ui::DocumentActionIdentity identity) {
         return "document-action:"+std::to_string(static_cast<int>(identity.command))+":"+
             std::to_string(identity.instance)+":"+std::to_string(identity.occurrence);
     }
     std::optional<Target> current_document_target(const Target& wanted) {
-        ui::DocumentPresentation current;current.reset(app.document(app.page(),width));
+        ui::DocumentPresentation current;current.reset(app.document(app.page(),document_width()));
+        const auto layout=document_layout(current);
+        const auto allocated=[&](const ui::DocumentNode* node) {
+            return std::any_of(layout.nodes.begin(),layout.nodes.end(),[&](const auto& item){return item.node->source==node&&
+                (node->kind==ui::DocumentKind::control?document_control_enabled(item):item.enabled);});
+        };
         if(wanted.document_action) {
             const auto* action=current.actions().find(*wanted.document_action);
             if(!action)return {};
-            auto result=wanted;result.enabled=action->enabled;result.action=action->node->command;return result;
+            auto result=wanted;result.enabled=action->enabled&&allocated(action->node);result.action=action->node->command;return result;
         }
         std::map<std::string,unsigned> occurrences;
         std::optional<Target> result;
@@ -261,45 +301,53 @@ struct Bridge::Impl {
             if(node.kind==ui::DocumentKind::control&&node.control&&ui::document_control_supported(*node.control)&&app.control(*node.control).visible) {
                 const auto base="document-control:"+identity(*node.control);
                 const auto key=base+":"+std::to_string(occurrences[base]++);
-                if(key==wanted.document_key) {result=wanted;result->control=*node.control;result->enabled=presented.enabled;}
+                if(key==wanted.document_key) {result=wanted;result->control=*node.control;result->enabled=presented.enabled&&allocated(&node);}
             }
             for(const auto& child:presented.children)self(self,child,depth+1);
         };
         if(current.root())visit(visit,*current.root(),0);
         return result;
     }
-    void document(std::ostream& out,const ui::DocumentPresentation::Node& presented,unsigned depth=0,
+    void document(std::ostream& out,const ui::DocumentPresentation::Layout& layout,std::size_t& cursor,unsigned depth=0,
                   std::string path="root") {
         if(depth>64)throw std::length_error("web document nesting limit exceeded");
+        const auto& placement=layout.nodes.at(cursor++);const auto& presented=*placement.node;
         const auto& node=*presented.source;
         constexpr const char* kinds[]={"column","row","text","bitmap","action","control"};
         out<<"{\"kind\":"<<json_string(kinds[static_cast<unsigned>(node.kind)])<<",\"text\":"<<json_string(node.text)
            <<",\"tone\":"<<static_cast<int>(node.tone)<<",\"bold\":"<<(node.bold?"true":"false")
-           <<",\"border\":"<<(node.border?"true":"false")<<",\"enabled\":"<<(presented.enabled?"true":"false")
+           <<",\"border\":"<<(node.border?"true":"false")<<",\"enabled\":"<<(placement.enabled?"true":"false")
            <<",\"width\":"<<node.width<<",\"height\":"<<node.height<<",\"padding\":"<<node.padding
            <<",\"top\":"<<node.top<<",\"bottom\":"<<node.bottom<<",\"right\":"<<node.right
            <<",\"fontSize\":"<<node.font_size<<",\"fill\":"<<static_cast<unsigned>(node.fill)
            <<",\"equalHeight\":"<<(node.equal_height?"true":"false");
+        out<<",\"geometry\":{\"frame\":";rectangle(out,rectangle(placement.relative));
+        out<<",\"content\":";rectangle(out,rectangle(placement.content));
+        out<<",\"allocated\":"<<(placement.allocated?"true":"false")<<'}';
+        if(const auto found=node_measures.find(&node);found!=node_measures.end())
+            out<<",\"measure\":{\"id\":"<<identifier(found->second->id)<<",\"width\":"<<found->second->width<<",\"height\":"<<found->second->height<<'}';
         if(node.kind==ui::DocumentKind::control&&node.control&&ui::document_control_supported(*node.control)) {
             out<<",\"control\":";
             if(app.control(*node.control).visible) {
                 const auto base="document-control:"+identity(*node.control);
-                control(out,*node.control,false,base+":"+std::to_string(document_occurrences[base]++),presented.enabled);
+                const auto geometry=ui::document_control_layout(*node.control,app.control(*node.control).state,
+                    {0,0,placement.absolute.width,placement.absolute.height});
+                control(out,*node.control,false,base+":"+std::to_string(document_occurrences[base]++),document_control_enabled(placement),{},&geometry);
             } else out<<"null";
         }
         if(node.kind==ui::DocumentKind::action&&presented.action) {
-            Target t;t.type=Target::Type::action;t.action=node.command;t.enabled=presented.enabled;
+            Target t;t.type=Target::Type::action;t.action=node.command;t.enabled=placement.enabled;
             t.document_action=presented.action;t.document_key=action_key(*presented.action);
             const auto id=target(t.document_key,t);
-            out<<",\"id\":"<<identifier(id)<<",\"available\":"<<(presented.enabled&&app.enabled(node.command)?"true":"false");
+            out<<",\"id\":"<<identifier(id)<<",\"available\":"<<(placement.enabled&&app.enabled(node.command)?"true":"false");
         }
         if(node.kind==ui::DocumentKind::bitmap) {
             out<<",\"bitmap\":";picture(out,"document:"+path,node.plot,document_revision,
-                static_cast<int>(node.width>0?node.width:width),static_cast<int>(node.height>0?node.height:200));
+                placement.content.width,placement.content.height);
         }
         out<<",\"children\":[";bool first=true;
         std::size_t index=0;
-        for(const auto& child:presented.children) {if(!first)out<<',';first=false;document(out,child,depth+1,path+":"+std::to_string(index++));}
+        for(std::size_t child=0;child<presented.children.size();++child) {if(!first)out<<',';first=false;document(out,layout,cursor,depth+1,path+":"+std::to_string(index++));}
         out<<"]}";
     }
 };
@@ -314,7 +362,7 @@ void Bridge::reconnect() {
         if(s.services.complete(result))s.app.complete_service(std::move(result));
     }
     s.service_id=0;s.app.set_service_active(false);++s.epoch;s.signature.clear();s.initialized=false;
-    s.targets.clear();s.identities.clear();s.bitmaps.clear();s.document_source.reset();s.sequence=0;
+    s.targets.clear();s.identities.clear();s.bitmaps.clear();s.document_source.reset();s.text_measures.clear();s.node_measures.clear();s.sequence=0;
 }
 std::optional<ui::ServiceRequest> Bridge::service(std::uint64_t id) const {
     const auto& s=*impl_;const auto* request=s.services.current();
@@ -329,12 +377,14 @@ std::string Bridge::snapshot(int width,int height) {
     s.synchronize_services();
     if(s.initialized&&s.current_signature()!=s.signature)++s.epoch;
     s.retained.clear();s.targets.clear();s.occurrences.clear();s.document_occurrences.clear();s.used_bitmaps.clear();
+    s.node_measures.clear();for(auto& [key,value]:s.text_measures)value.used=false;
     std::ostringstream body;
     body<<",\"title\":"<<json_string(ui::window_title())
         <<",\"ack\":"<<identifier(s.sequence)<<",\"closing\":"<<(s.app.closing()?"true":"false")
         <<",\"layout\":{\"width\":"<<s.width<<",\"height\":"<<s.height<<",\"page\":";
     rectangle(body,s.app.page_bounds(s.width,s.height));
-    body<<"},\"tabs\":[";
+    body<<",\"documentPadding\":{\"side\":"<<ui::document_side_padding<<",\"top\":"<<ui::document_top_padding
+        <<",\"bottom\":"<<ui::document_bottom_padding<<"}},\"tabs\":[";
     bool first=true;
     for(const auto& tab:s.app.tab_layout(s.width,s.height)) {
         if(!tab.visible)continue;
@@ -358,11 +408,12 @@ std::string Bridge::snapshot(int width,int height) {
     body<<"],\"document\":";
     const auto page=std::find_if(ui::pages().begin(),ui::pages().end(),[&](const auto& p){return p.id==s.app.page();});
     if(page!=ui::pages().end()&&page->document) {
-        const auto document=s.app.document(s.app.page(),ui::document_content_width(s.app.page_bounds(s.width,s.height).w));
+        const auto document=s.app.document(s.app.page(),s.document_width());
         if(document!=s.document_source){s.document_source=document;++s.document_revision;}
         ui::DocumentPresentation presentation;presentation.reset(document);
-        if(presentation.root())s.document(body,*presentation.root());else body<<"null";
+        if(presentation.root()){const auto layout=s.document_layout(presentation);std::size_t cursor=0;s.document(body,layout,cursor);}else body<<"null";
     } else body<<"null";
+    std::erase_if(s.text_measures,[](const auto& entry){return !entry.second.used;});
     const auto overlay=s.app.overlay();const auto layers=s.app.overlay_layers(s.service_id!=0);
     body<<",\"layers\":{\"showBackground\":"<<(layers.show_background?"true":"false")
         <<",\"enableBackground\":"<<(layers.enable_background?"true":"false")
@@ -403,6 +454,25 @@ Result Bridge::accept(const Event& e) {
     // Consume every admitted envelope once, including invalid operations. A
     // rejected action cannot later become a valid replay under the same number.
     s.sequence=e.sequence;
+    if(e.kind==EventKind::measure) {
+        if(e.target!=0||e.value.size()>32768)return reject("Invalid web measurement batch");
+        std::map<std::uint64_t,Impl::TextMeasure*> pending;
+        for(auto& [key,value]:s.text_measures)pending.emplace(value.id,&value);
+        std::map<std::uint64_t,int> values;std::string_view remaining=e.value;
+        while(!remaining.empty()) {
+            std::uint64_t id=0;int measured=0;
+            auto parsed=std::from_chars(remaining.data(),remaining.data()+remaining.size(),id);
+            if(parsed.ec!=std::errc{}||parsed.ptr==remaining.data()+remaining.size()||*parsed.ptr!=' ')return reject("Malformed web measurement");
+            remaining.remove_prefix(static_cast<std::size_t>(parsed.ptr-remaining.data())+1);
+            parsed=std::from_chars(remaining.data(),remaining.data()+remaining.size(),measured);
+            if(parsed.ec!=std::errc{}||parsed.ptr==remaining.data()+remaining.size()||*parsed.ptr!='\n'||measured<0||measured>16384||!pending.contains(id)||values.contains(id))
+                return reject("Unknown or out-of-range web measurement");
+            remaining.remove_prefix(static_cast<std::size_t>(parsed.ptr-remaining.data())+1);values.emplace(id,measured);
+            if(values.size()>512)return reject("Too many web measurements");
+        }
+        for(const auto& [id,value]:values)pending.at(id)->height=value;
+        return {true,{}};
+    }
     if(e.kind==EventKind::close) {s.app.close();return {true,{}};}
     if(e.kind==EventKind::key) {
         if(e.amount<0||e.amount>static_cast<int>(ui::Key::del))return reject("Unknown key primitive");

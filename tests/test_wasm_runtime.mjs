@@ -80,6 +80,22 @@ const modem=snapshot.controls.find(item=>item.options?.some(option=>option.label
 assert(modem,'modem selector missing');
 await act(2,modem.id,modem.options.find(option=>option.label==='Robust Modem').id);
 await wait(()=>control('Simulation')?.enabled);
+// Exercise browser glyph measurement through the compiled C++/libc++ parser,
+// then verify the common document engine refines its published geometry.
+const planner=snapshot.tabs.find(tab=>tab.label==='Link planner');
+assert(planner,'document page missing');await act(11,planner.id);
+assert(snapshot.document,'document navigation did not publish a document');
+const paragraph=snapshot.document.children.find(node=>node.kind==='text'&&node.height===0&&node.geometry?.allocated&&node.measure);
+assert(paragraph,'document has no measurable auto-height paragraph');
+const priorHeight=paragraph.geometry.frame.h,measurementId=paragraph.measure.id,glyphHeight=priorHeight+37;
+assert(glyphHeight<=16384);await act(15,'0',`${measurementId} ${glyphHeight}\n`);
+const refined=snapshot.document.children.find(node=>node.measure?.id===measurementId);
+assert(refined,'measurement lost its published identity');
+assert.equal(refined.measure.height,glyphHeight,'Wasm did not retain the browser glyph measurement');
+assert(refined.geometry.frame.h>priorHeight,'Browser measurement did not refine shared C++ geometry');
+const consoleTab=snapshot.tabs.find(tab=>tab.label==='Console');assert(consoleTab);
+await act(11,consoleTab.id);assert.equal(snapshot.document,null);
+await wait(()=>control('Simulation')?.enabled);
 const simulation=control('Simulation');assert(simulation,'simulation selector missing');
 await act(2,simulation.id,simulation.options.find(option=>option.label==='Yes').id);
 const loss=control('Path loss');assert(loss,'link loss control missing');await act(1,loss.id,'6 dB');

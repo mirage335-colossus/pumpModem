@@ -6,11 +6,21 @@ consoles. `datapump-fb` presents a software framebuffer through SDL2; the same
 framebuffer library can be embedded in an engine without SDL or a native window.
 
 The terminal and framebuffer implementations are deliberately separate below
-`Application`. The terminal uses cell layout and colored ASCII plot sampling. The
+`Application`. The terminal projects shared application rectangles into cells and uses colored ASCII plot sampling. The
 framebuffer uses pixel layout, software widgets, full-resolution plot sources and
 pointer input. Neither implements modem functionality. Adding ordinary fields,
 actions and documents to the shared declarations reaches both interfaces without
-field-specific adapter code. A new generic presentation primitive requires
+field-specific adapter code. Shared slot positions, declaration rows and stretch
+weights also reach the terminal: a generic cell projection preserves geometric
+reading order and relative widths, measures label height, and wraps neighbors
+when their minimum usable cell widths do not fit. It retains the editor identity
+through reflow. Terminal documents use the common document layout engine with
+cell metrics, including declared padding, margins, heights and clipping; the
+page itself participates in shared desktop placement. Narrow document rows wrap
+when the next fixed width or minimum remaining width cannot fit. This adaptation
+is deterministic and contains no modem-specific layout rules.
+
+A new generic presentation primitive requires
 support in each relevant renderer, as it does for FLTK and Rev.
 
 ## Building

@@ -1,5 +1,6 @@
 #include "terminal_ui.hpp"
 #include "control_binding.hpp"
+#include "cell_layout.hpp"
 #include "document_presentation.hpp"
 #include "service_queue.hpp"
 #include "text_policy.hpp"
@@ -72,6 +73,7 @@ struct Session::Impl {
         std::vector<const ui::Control*> menu;
         bool enabled=true;
         std::string label;
+        std::optional<ui::Rect> clip;
     };
     struct Hit {enum class Kind { item,tab,option,accept,cancel };Kind kind;ui::Rect bounds;int index;};
     Application& app;
@@ -96,6 +98,7 @@ struct Session::Impl {
     int popup=-1,popup_selected=0,popup_scroll=0;
     std::vector<ui::Option> options;
     bool dirty=true,help=false,content_clip=false;
+    std::optional<ui::Rect> document_clip;
     std::string notice;
     std::deque<ui::ServiceRequest> dialogs;
     std::deque<ui::ServiceRequest> pending_services;
@@ -117,8 +120,15 @@ struct Session::Impl {
     bool focusable(const Item& item) const {return item.enabled&&item.control.kind!=ui::Kind::label;}
     void primitive(Primitive::Kind kind,ui::Rect r,std::string text={},Tone color=Tone::normal,bool focused=false,bool selected=false,bool enabled=true,bool border=false,BitmapSource bitmap={}) {
         if(r.w<=0||r.h<=0||r.x>=columns()||r.y>=rows()||r.y+r.h<=0)return;
+        auto clip=content_clip?std::optional<ui::Rect>({0,header_height,columns(),std::max(0,rows()-header_height-1)}):std::nullopt;
+        if(document_clip) {
+            const auto c=*document_clip;
+            const auto bounds=clip.value_or(ui::Rect{0,0,columns(),rows()});
+            const auto x=std::max(c.x,bounds.x),y=std::max(c.y,bounds.y);
+            clip=ui::Rect{x,y,std::max(0,std::min(c.x+c.w,bounds.x+bounds.w)-x),std::max(0,std::min(c.y+c.h,bounds.y+bounds.h)-y)};
+        }
         scene.primitives.push_back({kind,pixels(r),std::move(text),std::move(bitmap),color,focused,selected,enabled,border,
-            content_clip?std::optional<ui::Rect>(pixels({0,header_height,columns(),std::max(0,rows()-header_height-1)})):std::nullopt});
+            clip?std::optional<ui::Rect>(pixels(*clip)):std::nullopt});
     }
     void fill(ui::Rect r,Tone color=Tone::normal,bool selected=false,bool focused=false,bool border=false) {
         primitive(Primitive::Kind::fill,r,{},color,focused,selected,true,border);
@@ -138,86 +148,105 @@ struct Session::Impl {
         // an adapter undo command or by a stale whole-buffer editor callback.
         e.history_revision=s.text_history_revision;return e;
     }
-    int control_height(const ui::Control& c) const {
-        const int label=c.kind!=ui::Kind::label&&c.kind!=ui::Kind::toggle&&c.kind!=ui::Kind::action&&c.label[0]?1:0;
-        if(c.kind==ui::Kind::bitmap)return label+10;
-        if(c.kind==ui::Kind::list)return label+6;
-        if(c.kind==ui::Kind::text&&c.multiline)return label+5;
-        return label+1;
-    }
     int append_control(const ui::Control& control,ui::Rect bounds,std::vector<const ui::Control*> menu={}) {
         const auto presentation=app.control(control);
         if(!presentation.visible)return 0;
         std::string label=presentation.label;bool enabled=presentation.enabled;
         if(!menu.empty()) {const auto value=app.menu(menu);if(!value.visible)return 0;label=control.menu_label;enabled=value.enabled;}
-        items.push_back({control,bounds,std::move(menu),enabled,std::move(label)});
+        items.push_back({control,bounds,std::move(menu),enabled,std::move(label),{}});
         if(control.kind==ui::Kind::text)editor(items.back());
         return bounds.h;
     }
-    int document(const ui::DocumentPresentation::Node& presented,int x,int y,int width,ui::Page page,unsigned& occurrence) {
-        const auto& node=*presented.source;
-        if(width<=0)return 0;
-        // Small surfaces reflow document rows to columns using the exact same
-        // declarations. No second screen definition or application identifiers.
-        const int padding=node.padding>0||node.border?1:0;
-        const int available=std::max(1,width-2*padding);
-        int height=0;
-        switch(node.kind) {
-        case ui::DocumentKind::column:case ui::DocumentKind::row: {
-            const bool row=node.kind==ui::DocumentKind::row&&width>=100;
-            int dx=0,dy=0;
-            for(const auto& child_presented:presented.children) {
-                const auto& child=*child_presented.source;
-                const int w=row?std::max(1,std::min(available-dx,child.width>0?static_cast<int>((child.width+7)/8):available-dx)):available;
-                const int h=document(child_presented,x+padding+dx,y+padding+dy,w,page,occurrence);
-                if(row){dx+=w+1;height=std::max(height,h);}else{dy+=h+1;height=dy;}
+    int document(const ui::DocumentPresentation& presentation,int x,int y,int width,ui::Page page) {
+        const auto layout=presentation.layout(width,[](const ui::DocumentNode& node,int available) {
+            return static_cast<int>(lines(node.text,available).size());
+        },x,y,{8,18,12});
+        for(const auto& placed:layout.nodes) {
+            if(!placed.allocated)continue;
+            const auto& presented=*placed.node;const auto& node=*presented.source;
+            const auto& outer=placed.absolute;const auto& inner=placed.content;
+            const ui::Rect clip{placed.clip.x,placed.clip.y-scroll,placed.clip.width,placed.clip.height};
+            document_clip=clip;
+            const ui::Rect content{outer.x+inner.x,outer.y+inner.y-scroll,inner.width,inner.height};
+            if(node.border)fill({outer.x,outer.y-scroll,outer.width,outer.height},Tone::muted,false,false,true);
+            if(node.kind==ui::DocumentKind::text)text(content,node.text,tone(node.tone),false,false,placed.enabled);
+            else if(node.kind==ui::DocumentKind::bitmap)
+                primitive(Primitive::Kind::bitmap,content,{},Tone::normal,false,false,placed.enabled,false,node.plot);
+            else if(node.kind==ui::DocumentKind::action||node.kind==ui::DocumentKind::control) {
+                ui::Control control{};
+                if(node.kind==ui::DocumentKind::control) {
+                    if(!node.control||!ui::document_control_supported(*node.control))continue;
+                    control=*node.control;
+                } else {
+                    control.kind=ui::Kind::action;control.page=page;control.command=node.command;control.scope=ui::ScreenScope::shared;
+                    if(presented.action) {
+                        const auto& identity=*presented.action;
+                        const auto key=std::tuple(page,identity.command,identity.instance,identity.occurrence);
+                        auto [entry,inserted]=document_instances.try_emplace(key,static_cast<unsigned>(document_instances.size()+1));
+                        (void)inserted;control.instance=entry->second;
+                    }
+                }
+                const bool has_label=control.kind!=ui::Kind::label&&control.kind!=ui::Kind::action&&control.kind!=ui::Kind::toggle&&control.label[0];
+                const int label_lines=has_label?static_cast<int>(lines(app.control(control).label,content.w).size()):0;
+                const int top=std::max(content.y+label_lines,clip.y),bottom=std::min(content.y+content.h,clip.y+clip.h);
+                const bool usable=content.w>0&&content.h>0&&top<bottom&&std::max(content.x,clip.x)<std::min(content.x+content.w,clip.x+clip.w);
+                if(usable&&append_control(control,{content.x,content.y+scroll,content.w,content.h})) {
+                    if(node.kind==ui::DocumentKind::action)items.back().label=node.text;
+                    items.back().enabled=items.back().enabled&&placed.enabled;
+                    items.back().clip=ui::Rect{placed.clip.x,placed.clip.y,placed.clip.width,placed.clip.height};
+                }
             }
-            height+=2*padding;break;
         }
-        case ui::DocumentKind::text: {
-            height=static_cast<int>(lines(node.text,available).size())+2*padding;
-            text({x+padding,y+padding-scroll,available,height-2*padding},node.text,tone(node.tone),false,false,presented.enabled);break;
-        }
-        case ui::DocumentKind::bitmap: {
-            height=std::clamp(static_cast<int>((node.height+17)/18),6,20);
-            primitive(Primitive::Kind::bitmap,{x,y-scroll,width,height},{},Tone::normal,false,false,presented.enabled,false,node.plot);
-            if(!node.text.empty()) {text({x,y+height-scroll,width,1},node.text,tone(node.tone));++height;}break;
-        }
-        case ui::DocumentKind::action: {
-            ui::Control c{};c.kind=ui::Kind::action;c.page=page;c.command=node.command;
-            if(presented.action) {
-                const auto& identity=*presented.action;
-                const auto key=std::tuple(page,identity.command,identity.instance,identity.occurrence);
-                auto [entry,inserted]=document_instances.try_emplace(key,static_cast<unsigned>(document_instances.size()+1));
-                (void)inserted;c.instance=entry->second;
-            }else c.instance=++occurrence;
-            c.scope=ui::ScreenScope::shared;
-            height=1;if(append_control(c,{x,y,width,height})) {items.back().label=node.text;items.back().enabled=items.back().enabled&&presented.enabled;}break;
-        }
-        case ui::DocumentKind::control:
-            if(node.control&&ui::document_control_supported(*node.control)) {
-                height=control_height(*node.control);if(append_control(*node.control,{x,y,width,height}))items.back().enabled=items.back().enabled&&presented.enabled;
-            }break;
-        }
-        return std::max(1,height);
+        document_clip.reset();return layout.height;
     }
-    void declarations(std::span<const ui::Control> controls,int& y,bool overlay) {
-        int x=1,row_height=0;unsigned prior_row=0;bool first=true;
+    void declarations(std::span<const ui::Control> controls,int& y,bool overlay,const ui::DocumentPresentation* page_document=nullptr) {
+        const int logical_width=std::max(ui::min_width,columns()*8);
+        // Extra terminal rows reveal more content; they must not recursively
+        // enlarge flexible desktop panels and push the footer out of reach.
+        const int logical_height=std::max(ui::min_height,std::min(ui::default_height,rows()*18));
+        std::vector<ui::ControlGroup> visible;
+        std::vector<ui::CellLayoutItem> projected;
         for(const auto& group:ui::control_groups(controls)) {
             const auto& c=*group.control;
             if(c.document_only||(!overlay&&!c.persistent&&c.page!=app.page()))continue;
-            if(!app.control(c).visible)continue;
-            if(!first&&c.row!=prior_row) {y+=row_height+1;x=1;row_height=0;}
-            first=false;prior_row=c.row;
-            const bool wide=c.kind==ui::Kind::bitmap||c.kind==ui::Kind::list||(c.kind==ui::Kind::text&&c.multiline);
-            int width=wide?std::max(1,columns()-2):std::min(std::max(20,columns()/2-2),std::max(1,columns()-2));
-            if(c.kind==ui::Kind::label)width=std::max(1,columns()-2);
-            if(x>1&&x+width>columns()-1){y+=row_height+1;x=1;row_height=0;}
-            const int height=control_height(c);
-            append_control(c,{x,y,width,height},group.menu_items);
-            row_height=std::max(row_height,height);x+=width+2;
+            const auto state=app.control(c);
+            if(group.menu_items.empty()?!state.visible:!app.menu(group.menu_items).visible)continue;
+            const auto geometry=app.control_layout(c,logical_width,logical_height,controls);
+            auto rect=geometry.frame;
+            if(geometry.has_label) {
+                rect.h+=std::max(0,rect.y-geometry.label.y);
+            }
+            rect.x=std::max(0,rect.x-ui::margin);
+            if(rect.w<=0||rect.h<=0)continue;
+            const int label_width=glyphs(group.menu_items.empty()?state.label:c.menu_label);
+            const int minimum_width=std::max(8,std::min(24,label_width+4));
+            const int minimum_height=(geometry.has_label?1:0)+(c.kind==ui::Kind::bitmap||c.kind==ui::Kind::list?3:1);
+            const auto label=group.menu_items.empty()?state.label:std::string(c.menu_label);
+            const auto kind=c.kind;const int base=(rect.h+17)/18;
+            const bool above=kind!=ui::Kind::label&&kind!=ui::Kind::action&&kind!=ui::Kind::toggle&&!label.empty();
+            visible.push_back(group);projected.push_back({rect,minimum_width,minimum_height,[label,kind,base,above](int width) {
+                const int count=static_cast<int>(lines((kind==ui::Kind::action||kind==ui::Kind::toggle?"[ ] ":"")+label,width).size());
+                return above?base+count-1:std::max(base,count);
+            }});
         }
-        y+=row_height+1;
+        if(page_document) {
+            auto rect=app.page_bounds(logical_width,logical_height);rect.x=std::max(0,rect.x-ui::margin);
+            projected.push_back({rect,std::max(1,columns()-2),1,[page_document](int width) {
+                return page_document->layout(width,[](const ui::DocumentNode& node,int available){return static_cast<int>(lines(node.text,available).size());},0,0,{8,18,12}).height;
+            }});
+        }
+        const auto positions=ui::cell_layout(projected,std::max(1,columns()-2),logical_width-2*ui::margin);
+        // Geometry determines reading/focus order; declaration order breaks ties.
+        std::vector<std::size_t> order(positions.size());std::iota(order.begin(),order.end(),0);
+        std::stable_sort(order.begin(),order.end(),[&](auto a,auto b){return std::tie(positions[a].y,positions[a].x)<std::tie(positions[b].y,positions[b].x);});
+        int bottom=y;
+        for(auto index:order) {
+            auto rect=positions[index];rect.x+=1;rect.y+=y;
+            if(index==visible.size())document(*page_document,rect.x,rect.y,rect.w,app.page());
+            else append_control(*visible[index].control,rect,visible[index].menu_items);
+            bottom=std::max(bottom,rect.y+rect.h+1);
+        }
+        y=bottom;
     }
     void render_editor(Editor& e,ui::Rect r,bool focused,bool enabled,Tone color) {
         const auto wrapped=lines(e.text,r.w);int caret_line=0;
@@ -241,19 +270,27 @@ struct Session::Impl {
         if(focused&&caret_line>=e.first_line&&caret_line<e.first_line+r.h) {
             const int column=glyphs(std::string_view(e.text).substr(wrapped[caret_line].begin,e.selection.cursor-wrapped[caret_line].begin));
             auto caret=ui::Rect{r.x+std::min(column,std::max(0,r.w-1)),r.y+caret_line-e.first_line,1,1};
-            if(caret.y>=header_height&&caret.y<rows()-1)scene.caret=pixels(caret);
+            if(caret.y>=header_height&&caret.y<rows()-1&&(!document_clip||contains(*document_clip,caret.x,caret.y)))scene.caret=pixels(caret);
         }
     }
     void render_item(int index) {
         auto& item=items[index];const auto& c=item.control;const auto view=app.control(c);const auto& state=view.state;
         const bool selected=focus&&*focus==ui::document_control_identity(c);auto r=item.bounds;r.y-=scroll;
-        hits.push_back({Hit::Kind::item,r,index});
+        document_clip=item.clip;
+        if(document_clip)document_clip->y-=scroll;
+        auto hit=r;
+        if(document_clip) {
+            const auto clip=*document_clip;const int x=std::max(hit.x,clip.x),y=std::max(hit.y,clip.y);
+            hit={x,y,std::max(0,std::min(hit.x+hit.w,clip.x+clip.w)-x),std::max(0,std::min(hit.y+hit.h,clip.y+clip.h)-y)};
+        }
+        hits.push_back({Hit::Kind::item,hit,index});
         if(r.y+r.h<=header_height||r.y>=rows()-1)return;
         std::optional<BitmapPresentation> bitmap;
         if(c.kind==ui::Kind::bitmap)bitmap=app.bitmap(c,static_cast<unsigned>(std::max(1,r.w*viewport.metrics.cell_width)));
         const auto& label_text=bitmap?bitmap->title:item.label;
         const bool label=c.kind!=ui::Kind::label&&c.kind!=ui::Kind::toggle&&c.kind!=ui::Kind::action&&!label_text.empty();
-        if(label){text({r.x,r.y,r.w,1},label_text,Tone::muted,selected,false,item.enabled);++r.y;--r.h;}
+        if(label){const int height=std::min(std::max(0,r.h-1),static_cast<int>(lines(label_text,r.w).size()));
+            text({r.x,r.y,r.w,height},label_text,Tone::muted,selected,false,item.enabled);r.y+=height;r.h-=height;}
         if(!item.menu.empty()) {text(r,"[ "+item.label+" v ]",Tone::accent,selected,false,item.enabled);return;}
         switch(c.kind) {
         case ui::Kind::label:text(r,item.label,tone(state.text_tone),false,false,item.enabled);break;
@@ -345,16 +382,21 @@ struct Session::Impl {
         }
         content_clip=true;int y=header_height+1;
         if(layers.show_background) {
-            declarations(ui::console_screen(),y,false);
             const auto page=std::find_if(ui::pages().begin(),ui::pages().end(),[&](const auto& p){return p.id==app.page();});
-            if(page!=ui::pages().end()&&page->document) {
-                const auto doc=app.document(app.page(),std::max(220,(columns()-2)*8));unsigned occurrence=0;
-                ui::DocumentPresentation presentation;presentation.reset(doc);
-                if(presentation.root())y+=document(*presentation.root(),1,y,std::max(1,columns()-2),app.page(),occurrence);
-            }
+            ui::DocumentPresentation presentation;
+            if(page!=ui::pages().end()&&page->document)
+                presentation.reset(app.document(app.page(),std::max(220,(columns()-2)*8)));
+            declarations(ui::console_screen(),y,false,presentation.root()?&presentation:nullptr);
         }
         if(overlay&&layers.show_overlay)declarations(overlay->controls,y,true);
-        content_height=y;scroll=std::clamp(scroll,0,std::max(0,content_height-rows()+1));
+        content_height=y;
+        const int clamped_scroll=std::clamp(scroll,0,std::max(0,content_height-rows()+1));
+        if(scroll!=clamped_scroll) {
+            // Documents were painted during layout using the previous offset.
+            // A larger viewport can shorten content and clamp that offset; redo
+            // the scene once so document primitives and controls stay aligned.
+            scroll=clamped_scroll;rebuild();return;
+        }
         if(restore_editor) {
             const int index=focused();
             if(index>=0&&items[index].control.kind==ui::Kind::text) {
@@ -378,6 +420,7 @@ struct Session::Impl {
             if(popup<0){options.clear();popup_identity.reset();}
         }
         for(int n=0;n<static_cast<int>(items.size());++n)render_item(n);
+        document_clip.reset();
         if(expanded) {
             const auto found=std::find_if(items.begin(),items.end(),[&](const auto& item){return ui::document_control_identity(item.control)==*expanded;});
             if(found!=items.end()) {
@@ -414,7 +457,11 @@ struct Session::Impl {
     }
     void ensure_visible(int index) {
         if(index<0||index>=static_cast<int>(items.size()))return;
-        const auto r=items[index].bounds;
+        auto r=items[index].bounds;
+        if(items[index].clip) {
+            const auto clip=*items[index].clip;const int x=std::max(r.x,clip.x),y=std::max(r.y,clip.y);
+            r={x,y,std::max(0,std::min(r.x+r.w,clip.x+clip.w)-x),std::max(0,std::min(r.y+r.h,clip.y+clip.h)-y)};
+        }
         if(r.y-scroll<header_height)scroll=std::max(0,r.y-header_height);
         if(r.y+r.h-scroll>rows()-1)scroll=std::max(0,r.y+r.h-rows()+1);
         dirty=true;
@@ -626,7 +673,7 @@ struct Session::Impl {
             if(index<0||!focusable(items[index]))return;
             focus=ui::document_control_identity(items[index].control);focus_tab=-1;
             const auto& item=items[index];const auto& c=item.control;const auto& state=app.control(c).state;
-            int top=item.bounds.y-scroll;const bool label=c.kind!=ui::Kind::action&&c.kind!=ui::Kind::toggle&&!item.label.empty();if(label)++top;
+            int top=item.bounds.y-scroll;const bool label=c.kind!=ui::Kind::action&&c.kind!=ui::Kind::toggle&&!item.label.empty();if(label)top+=std::min(std::max(0,item.bounds.h-1),static_cast<int>(lines(item.label,item.bounds.w).size()));
             if(c.kind==ui::Kind::text) {
                 if(!state.options.empty()&&x>=item.bounds.x+item.bounds.w-3){open_popup(index);return;}
                 auto& e=editor(item);const auto wrapped=lines(e.text,item.bounds.w-(state.options.empty()?0:3));

@@ -12,7 +12,7 @@ inline constexpr std::uint32_t protocol_version=1;
 enum class EventKind : std::uint32_t {
     edit=1, select=2, toggle=3, activate=4, preset=5, submit=6,
     record=7, click=8, double_click=9, wheel=10, navigate=11,
-    key=12, service=13, close=14
+    key=12, service=13, close=14, measure=15
 };
 struct Event {
     std::uint32_t version=protocol_version;

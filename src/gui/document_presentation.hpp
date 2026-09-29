@@ -30,9 +30,9 @@ public:
     }
     const Node* root() const {return root_?&*root_:nullptr;}
     const DocumentActions& actions() const {return actions_;}
-    template<class MeasureText> Layout layout(int width,MeasureText measure,int x=0,int y=0) const {
+    template<class MeasureText> Layout layout(int width,MeasureText measure,int x=0,int y=0,DocumentLayoutMetrics metrics={}) const {
         Layout result;if(!root_)return result;
-        const auto geometry=layout_document(*source_,width,std::move(measure));result.height=geometry.height;
+        const auto geometry=layout_document(*source_,width,std::move(measure),metrics);result.height=geometry.height;
         const auto& bounds=geometry.root.bounds;
         append(result,*root_,geometry.root,x,y,x,y,
             {x+bounds.x,y+bounds.y,bounds.width,bounds.height});return result;

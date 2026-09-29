@@ -50,7 +50,7 @@ An `Event` payload is:
 | --- | --- |
 | Version | `u32`, currently 1 |
 | UI generation, sequence, opaque target | Three `u64` values |
-| Primitive kind | `u32`: edit=1, select=2, toggle=3, activate=4, preset=5, submit=6, record=7, click=8, double click=9, wheel=10, navigate=11, key=12, service=13, close=14 |
+| Primitive kind | `u32`: edit=1, select=2, toggle=3, activate=4, preset=5, submit=6, record=7, click=8, double click=9, wheel=10, navigate=11, key=12, service=13, close=14, measure=15 |
 | Flags | `u32`: checked=1, cancelled=2, Ctrl=4, Shift=8, Alt=16; other bits rejected |
 | Amount | Signed 32-bit integer encoded as its bits |
 | Value, error | Two counted strings; at most 1 MiB and 4096 bytes respectively, with tighter declaration limits afterward |
@@ -62,6 +62,16 @@ services, never pointers, feature enums or filesystem paths. A rejected admitted
 event also consumes its sequence. Reconnect requires a fresh snapshot and cannot
 replay old events. Only the local trusted host can request tracked file completion;
 it is not a browser event flag.
+
+Document glyph measurements use kind 15 with target `0`, the current UI
+generation and an ordinary increasing sequence. Value contains newline-separated
+`<opaque measurement id> <glyph height>` decimal pairs. At most 512 entries and
+32 KiB are accepted per event; each height is 0–16384 logical pixels. IDs identify
+current text/font/width measurement requests, not application fields. Duplicate,
+unknown, stale or malformed entries reject the entire batch before cache updates.
+The shared C++ document engine owns placement and clipping; the browser supplies
+only glyph measurement. Snapshot geometry and measurement requests are generic
+presentation metadata used by both native-worker and Wasm compositions.
 
 ## Incoming frames
 

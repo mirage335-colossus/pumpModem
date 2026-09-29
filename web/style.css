@@ -31,12 +31,10 @@ body.dp-page { margin:0; height:100dvh; display:flex; flex-direction:column; ove
 .dp-bitmap canvas { display:block; }
 .dp-bitmap p { margin:0; overflow:hidden; font-size:11px; white-space:pre-wrap; }
 .dp-caption-overlay { pointer-events:none; }
-.dp-document { overflow:auto; padding:18px 20px 24px; }
-.dp-document-row { display:flex; flex-wrap:nowrap; }
-.dp-document-column { display:flex; flex-direction:column; }
-.dp-document-text { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.25; margin:0; }
-.dp-document-action { align-self:start; min-height:25px; }
-.dp-document-control { display:flex; flex-direction:column; min-height:45px; flex:1 1 0; }
+.dp-document { overflow:auto; scrollbar-gutter:stable; }
+.dp-document-text>span,.dp-document-action>span,.dp-document-measure { display:block; white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.25; }
+.dp-document-measure { position:fixed; top:0; left:0; visibility:hidden; pointer-events:none; padding:0; border:0; margin:0; height:auto; }
+.dp-document-control { display:flex; flex-direction:column; min-height:0; }
 .dp-document-control>input,.dp-document-control>select,.dp-document-control>textarea { width:100%; flex:1 1 0; }
 .dp-document-control>label { flex:0 0 16px; }
 .dp-document-control>select[aria-label="Text presets"] { width:23px; position:absolute; right:0; bottom:0; height:27px; }

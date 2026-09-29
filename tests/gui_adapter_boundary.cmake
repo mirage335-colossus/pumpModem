@@ -4,9 +4,9 @@ cmake_minimum_required(VERSION 3.21)
 # helper must not bypass the boundary. New application fields/pages/producers
 # do not require changes to this list; a new public primitive does.
 set(contract_headers
-  ui_surface.hpp terminal_ui.hpp terminal_bitmap.hpp framebuffer.hpp framebuffer_ui.hpp framebuffer_font.hpp
+  web_bridge.hpp web_pixels.hpp ui_surface.hpp terminal_ui.hpp terminal_bitmap.hpp framebuffer.hpp framebuffer_ui.hpp framebuffer_font.hpp
   application.hpp launch_command.hpp bitmap.hpp ui_contract.hpp ui_document.hpp
-  desktop_layout.hpp control_layout.hpp document_layout.hpp document_actions.hpp
+  desktop_layout.hpp control_layout.hpp cell_layout.hpp document_layout.hpp document_actions.hpp
   control_binding.hpp record_interactions.hpp presentation_palette.hpp
   text_policy.hpp utf8_policy.hpp control_interactions.hpp record_scroll.hpp service_queue.hpp chrome_layout.hpp theme.hpp
   binding_state.hpp record_reconciliation.hpp document_presentation.hpp overlay.hpp)
@@ -211,7 +211,7 @@ list(APPEND adapters "${ROOT}/src/gui/bitmap_fltk.hpp" "${ROOT}/src/gui/theme_fl
 foreach(path IN LISTS adapters)
   check_gui_boundary("${path}" TRUE)
 endforeach()
-foreach(name terminal_ui.cpp framebuffer_ui.cpp framebuffer.cpp)
+foreach(name terminal_ui.cpp framebuffer_ui.cpp framebuffer.cpp web_bridge.cpp)
   check_gui_boundary("${ROOT}/src/gui/${name}" FALSE)
 endforeach()
 foreach(name IN LISTS contract_headers)

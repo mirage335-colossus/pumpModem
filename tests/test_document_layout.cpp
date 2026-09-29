@@ -1,5 +1,7 @@
 #include "document_layout.hpp"
 #include "document_actions.hpp"
+#include "document_presentation.hpp"
+#include "document_geometry_fixture.hpp"
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -85,6 +87,27 @@ void text_and_equal_height() {
     action.text="Action";action.padding=3;
     require(ui::layout_document(action,100,glyph_height).height==31,"Action clearance or padding became toolkit policy");
 }
+void coarse_document_geometry() {
+    const auto fixture=datapump::gui::test::document_geometry_fixture();
+    const auto normal=ui::layout_document(fixture,400,glyph_height);
+    for(std::size_t i=0;i<datapump::gui::test::document_geometry_rows.size();++i) {
+        const auto& expected=datapump::gui::test::document_geometry_rows[i];
+        require(normal.root.children[i].bounds==ui::DocumentRect{expected[0],expected[1],expected[2],expected[3]},"default shared native geometry changed");
+    }
+    ui::DocumentNode row;row.kind=ui::DocumentKind::row;row.equal_height=true;row.padding=8;
+    auto first=fixed(160,36);first.right=8;auto second=fixed(160,72);second.top=18;
+    row.children={first,second};const auto measure=[](const auto&,int){return 1;};
+    const auto wide=ui::layout_document(row,60,measure,{8,18,12});
+    require(wide.root.children[0].bounds.x==1&&wide.root.children[1].bounds.x==22,"cell document lost shared widths/padding/right margin");
+    const auto narrow=ui::layout_document(row,24,measure,{8,18,12});
+    require(narrow.root.children[1].bounds.x==1&&narrow.root.children[1].bounds.y>narrow.root.children[0].bounds.y+1,"cell document did not wrap oversized row");
+    row.children[0].width=80;const auto changed=ui::layout_document(row,60,measure,{8,18,12});
+    require(changed.root.children[1].bounds.x==12,"shared child width edit did not alter projected sibling position");
+    ui::DocumentNode root;root.height=18;root.padding=18;root.children={row};
+    ui::DocumentPresentation presentation;presentation.reset(std::make_shared<ui::DocumentNode>(root));
+    const auto clipped=presentation.layout(60,measure,0,0,{8,18,12});
+    require(std::none_of(clipped.nodes.begin()+1,clipped.nodes.end(),[](const auto& p){return p.allocated;}),"coarse document padding exposed clipped descendants");
+}
 void action_identity_and_eligibility() {
     ui::DocumentNode action;action.kind=ui::DocumentKind::action;action.command=ui::Command::clear_received;
     ui::DocumentNode root;root.children={action,text("heading"),action};
@@ -130,7 +153,7 @@ void action_identity_and_eligibility() {
 }
 }
 int main() {
-    try {relative_widths();padding_and_columns();text_and_equal_height();action_identity_and_eligibility();
+    try {relative_widths();padding_and_columns();text_and_equal_height();coarse_document_geometry();action_identity_and_eligibility();
         std::cout<<"Shared document layout checks passed.\n";
     }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

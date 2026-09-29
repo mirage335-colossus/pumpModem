@@ -8,7 +8,7 @@ formats signal data, or defines inspection sections. The former FLTK
 removed.
 
 The independent terminal and framebuffer frontends also consume `Application`.
-`terminal_ui.*` owns terminal cell layout and interaction; `framebuffer_ui.*` owns
+`terminal_ui.*` owns terminal measurement, drawing and interaction; `framebuffer_ui.*` owns
 pixel layout and interaction; `framebuffer.*` rasterizes a complete owned frame.
 They share passive `ui_surface.hpp` event/drawing vocabulary and existing generic
 policies, but neither depends on the other implementation. `backend_ncurses.*`
@@ -39,7 +39,7 @@ other's implementation. See [frontend interfaces](frontend-interfaces.md).
 | `text_policy.hpp`, `utf8_policy.hpp` | Atomic UTF-8 replacement proposals, caret/selection boundaries and declaration-specific byte limits. |
 | `theme.hpp`, `presentation_palette.hpp` | Shared widget states (border, hover, focus, selection, disabled and dialog colors), semantic text/document tones and fills. |
 | `screen_console.cpp` | Window/page titles, controls, bindings, menus, help, submit/activation/gesture policies. |
-| `desktop_layout.hpp`, `control_layout.hpp` | Desktop geometry, label/editor/preset/caption placement, and record cell/content extents in logical units. |
+| `desktop_layout.hpp`, `control_layout.hpp`, `cell_layout.hpp` | Desktop geometry, label/editor/preset/caption placement, and record cell/content extents in logical units. |
 | `controller.cpp` | Authoritative drafts, validation, settings, workers, commands, key/file state, reception and eligibility. |
 | `record_presentations.hpp` | Signal/file records, including frequency, status, reception quality, text, tone and activation eligibility. |
 | `inspection_page.hpp` | Inspection section order, cards, tables, pagination and native text around plot snapshots. |
@@ -133,7 +133,16 @@ through the list's horizontal scroll container.
    in shared bitmap code.
 4. Test the shared behavior and run the same workflow in both backend builds.
 
-These edits require no adapter changes when they use existing primitives. A new
+These edits require no adapter changes when they use existing primitives and
+layout metadata. FLTK, Rev, framebuffer and HTML desktop controls consume the
+same control rectangles. The terminal projects those rectangles generically
+into cells, preserving their reading order and relative widths while wrapping
+for measured minimum sizes. A slot or ordinary row/stretch change therefore
+reaches the terminal without a second placement edit. Documents share one flow
+engine; optional cell metrics convert dimensions and allow narrow rows to wrap.
+Browser glyph heights are measured by the browser, while C++ retains document
+allocation, margins, padding, equal heights and clipping. Changes to those rules
+are not reimplemented in CSS. A new
 primitive requires generic support in each adapter once. Ordinary combinations
 of existing metadata, including multiline presets, gestures on any control,
 enabled choices with effective labels and padded bitmap documents, are covered

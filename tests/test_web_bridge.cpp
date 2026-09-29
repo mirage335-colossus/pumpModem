@@ -1,9 +1,12 @@
 #include "web_bridge.hpp"
 #include "web_pixels.hpp"
 #include "plot_render.hpp"
+#include "document_presentation.hpp"
 #include "datapump/transfer.hpp"
 #include <array>
 #include <iostream>
+#include <map>
+#include <regex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -117,9 +120,9 @@ void document_withdrawal() {
     const auto snapshot=bridge.snapshot(1000,760);
     const auto text=snapshot.find("\"text\":\"Use target for short messages\"");
     check(text!=std::string::npos,"Planner fixture requires an available apply action");
-    const auto begin=snapshot.find("\"id\":\"",text);
+    const auto begin=snapshot.find(",\"id\":\"",text);
     check(begin!=std::string::npos,"Document action has no opaque identity");
-    const auto target=std::stoull(snapshot.substr(begin+6));
+    const auto target=std::stoull(snapshot.substr(begin+7));
     // The previously rendered action disappears before another snapshot. Its
     // local document eligibility must be checked independently of old handles.
     app.edit(ui::Field::planner_target,"invalid target");
@@ -190,11 +193,49 @@ void shared_geometry_and_stable_snapshots() {
     check(updated==bridge.snapshot(width,height),"Edited presentation remains unstable after acknowledgment");
     app.close();
 }
+void measured_document_geometry() {
+    Launch launch;launch.page=ui::Page::planner;Application app(launch);web::Bridge bridge(app);
+    constexpr int width=1200,height=1000;
+    auto snapshot=bridge.snapshot(width,height);
+    const std::regex request("\\\"measure\\\":\\{\\\"id\\\":\\\"([0-9]+)\\\",\\\"width\\\":([0-9]+),\\\"height\\\":(-?[0-9]+)\\}");
+    std::map<std::uint64_t,int> requests;
+    for(auto i=std::sregex_iterator(snapshot.begin(),snapshot.end(),request);i!=std::sregex_iterator();++i)
+        requests.emplace(std::stoull((*i)[1]),std::stoi((*i)[2]));
+    check(!requests.empty()&&requests.size()<=512,"Document did not request bounded browser glyph measurements");
+    std::uint64_t sequence=1;
+    auto measured=event(bridge,web::EventKind::measure,0,sequence++);
+    const auto first=requests.begin()->first;
+    for(const auto value:{std::to_string(first)+" -1\n",std::to_string(first)+" 16385\n",std::to_string(first)+" 37",std::to_string(first)+" 37\n999999 37\n",std::to_string(first)+" 37\n"+std::to_string(first)+" 37\n"}) {
+        measured.sequence=sequence++;measured.value=value;
+        check(!bridge.accept(measured).accepted,"Malformed, duplicate or unknown measurement was accepted");
+    }
+    measured.sequence=sequence++;measured.value.clear();
+    for(const auto& [target,available]:requests){(void)available;measured.value+=std::to_string(target)+" 37\n";}
+    check(bridge.accept(measured).accepted,"Browser text measurement batch was rejected");
+    snapshot=bridge.snapshot(width,height);
+    ui::DocumentPresentation presentation;
+    const int content_width=ui::document_content_width(app.page_bounds(width,height).w,16);
+    presentation.reset(app.document(app.page(),content_width));
+    const auto geometry=presentation.layout(content_width,[](const auto&,int){return 37;});
+    for(const auto& item:geometry.nodes) {
+        const auto r=item.relative,c=item.content;
+        const auto expected="\"geometry\":{\"frame\":"+rect({r.x,r.y,r.width,r.height})+",\"content\":"+rect({c.x,c.y,c.width,c.height});
+        check(snapshot.find(expected)!=std::string::npos,"Web document diverged from the shared measured C++ layout");
+    }
+    check(snapshot==bridge.snapshot(width,height),"Measured document geometry did not stabilize");
+    bridge.snapshot(width+400,height);
+    measured.sequence=sequence++;measured.value=std::to_string(first)+" 44\n";
+    // The first auto-width paragraph changes its measurement identity on resize.
+    check(!bridge.accept(measured).accepted,"Resized document accepted a retired glyph-width measurement");
+    bridge.reconnect();bridge.snapshot(width,height);measured.sequence=sequence++;
+    check(!bridge.accept(measured).accepted,"Reconnected document accepted an old measurement generation");
+    app.close();
+}
 }
 int main(int argc,char** argv) {
     try {
         if(argc==2&&std::string(argv[1])=="--snapshot") {Application app({});web::Bridge bridge(app);std::cout<<bridge.snapshot(360,640);app.close();return 0;}
-        pixel_runs();bitmap_history();envelopes_and_edits();layers_and_services();document_withdrawal();service_completion_routing();shared_submit_policy();shared_geometry_and_stable_snapshots();
+        pixel_runs();bitmap_history();envelopes_and_edits();layers_and_services();document_withdrawal();service_completion_routing();shared_submit_policy();shared_geometry_and_stable_snapshots();measured_document_geometry();
         std::cout<<"web bridge envelopes, literal text, declarations, generations, layers and services passed\n";return 0;
     } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

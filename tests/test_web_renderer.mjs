@@ -21,6 +21,8 @@ class Node {
     removeEventListener(type,fn){this.listeners[type]=(this.listeners[type]||[]).filter(f=>f!==fn);}
     dispatch(type,extra={}){const event={target:this,preventDefault(){this.prevented=true;},...extra};for(const fn of this.listeners[type]||[])fn(event);return event;}
     focus(){this.ownerDocument.activeElement=this;}
+    blur(){if(this.ownerDocument.activeElement===this)this.ownerDocument.activeElement=null;}
+    getBoundingClientRect(){return {height:this.ownerDocument.measureText?.(this)||0};}
     setSelectionRange(start,end){this.selectionStart=start;this.selectionEnd=end;}
     getContext(){return {createImageData:(w,h)=>({data:new Uint8ClampedArray(w*h*4)}),putImageData:image=>{this.image=image;this.paints=(this.paints||0)+1;}};}
 }
@@ -84,6 +86,59 @@ assert.equal(documentEditor.parentNode.parentNode,documentParent);assert.equal(d
 layoutRenderer.apply({...layoutSnapshot,controls:[laidOut,choice,{...plotted,bitmap:{...plotted.bitmap,revision:'8',rgb:'/wAA'}},menu]});assert.equal(canvas.paints,2,'Changed bitmap revision was suppressed');
 const menuInput=layoutRenderer.views.get('5').input;menuInput.value='50';menuInput.dispatch('change');assert.equal(layoutEvents.at(-1).target,'50');assert.equal(layoutEvents.at(-1).kind,eventKinds.activate);
 layoutRenderer.destroy();
+// C++ owns document flow; browser text metrics must never replace its margins,
+// equal-height allocation or inherited clipping with CSS flex calculations.
+const measuredEvents=[];
+const geometryDoc={createElement(tag){return new Node(this,tag);},defaultView:{navigator:{}},measureText(probe){return Number.parseInt(probe.style.width)<100?45:30;}};
+geometryDoc.root=new Node(geometryDoc,'root');
+const geometryRenderer=new Renderer(geometryDoc.root,event=>measuredEvents.push(event));
+const box=(x,y,w,h,allocated=true)=>({frame:{x,y,w,h},content:{x:3,y:4,w:Math.max(0,w-6),h:Math.max(0,h-8)},allocated});
+const paragraph={kind:'text',text:'Literal <text> that wraps',fontSize:12,bold:true,geometry:box(7,9,90,52),measure:{id:'300',width:84,height:-1}};
+const action={kind:'action',id:'301',text:'Clipped action',available:false,enabled:false,geometry:box(110,70,80,30,false)};
+const documentSnapshot={...snapshot,controls:[],layout:{width:1000,height:760,page:{x:16,y:100,w:968,h:500},documentPadding:{side:22,top:17,bottom:23}},document:{kind:'column',geometry:box(0,0,300,60),children:[paragraph,action]}};
+geometryRenderer.apply(documentSnapshot);
+const paragraphView=geometryRenderer.documentViews.get('root:0'),actionView=geometryRenderer.documentViews.get('action:301');
+assert.equal(paragraphView.node.style.left,'7px');assert.equal(paragraphView.node.style.top,'9px');assert.equal(paragraphView.node.style.height,'52px');
+assert.equal(paragraphView.content.style.left,'3px');assert.equal(paragraphView.content.style.width,'84px');assert.equal(paragraphView.content.textContent,paragraph.text);
+assert.equal(geometryRenderer.document.style.padding,'17px 22px 23px');assert.equal(actionView.node.hidden,true);assert.equal(actionView.node.disabled,true);
+assert.equal(measuredEvents.length,1);assert.equal(measuredEvents[0].kind,eventKinds.measure);assert.equal(measuredEvents[0].target,'0');assert.equal(measuredEvents[0].value,'300 45\n');
+geometryRenderer.apply(documentSnapshot);assert.equal(measuredEvents.length,1,'Unchanged polling repeated browser measurements');
+const resizedParagraph={...paragraph,geometry:box(17,19,206,37),measure:{id:'302',width:200,height:-1}};
+geometryRenderer.apply({...documentSnapshot,document:{...documentSnapshot.document,children:[resizedParagraph,action]}});
+assert.equal(paragraphView.node.style.left,'17px');assert.equal(paragraphView.node.style.width,'206px');assert.equal(measuredEvents.at(-1).value,'302 30\n');
+assert.equal(geometryRenderer.documentViews.get('root:0'),paragraphView,'Resize discarded retained document content');
+geometryRenderer.apply({...documentSnapshot,document:{...documentSnapshot.document,geometry:box(0,0,300,40000),children:[{...resizedParagraph,geometry:box(7,20000,206,37)}]}});
+assert.equal(geometryRenderer.documentViews.get('root').node.style.height,'40000px');assert.equal(paragraphView.node.style.top,'20000px','Tall document was incorrectly limited by desktop viewport bounds');
+assert.throws(()=>geometryRenderer.apply({...documentSnapshot,document:{...documentSnapshot.document,geometry:box(0,0,300,16*1024*1024+1)}}),RangeError);
+const clippedControl={...control,id:'303',geometry:{frame:{x:0,y:0,w:200,h:45},widget:{x:0,y:20,w:200,h:25},label:{x:0,y:0,w:200,h:20},hasLabel:true}};
+const editorNode={kind:'control',geometry:box(0,0,200,45),control:clippedControl};
+geometryRenderer.apply({...documentSnapshot,document:{...documentSnapshot.document,children:[editorNode]}});
+const clippedEditor=geometryRenderer.views.get('303');clippedEditor.input.focus();clippedEditor.input.dispatch('compositionstart');
+geometryRenderer.apply({...documentSnapshot,document:{...documentSnapshot.document,geometry:box(0,0,300,12),children:[{...editorNode,control:{...clippedControl,enabled:false}}]}});
+assert.equal(clippedEditor.input.style.top,'20px');assert.equal(clippedEditor.input.disabled,true);assert.notEqual(geometryDoc.activeElement,clippedEditor.input);
+const beforeClipped=measuredEvents.length;clippedEditor.input.dispatch('compositionend');clippedEditor.input.dispatch('input');assert.equal(measuredEvents.length,beforeClipped,'Clipped editor emitted a late input event');
+geometryRenderer.destroy();
+const batchScheduled=[],batchEvents=[];let measureCalls=0;
+const batchDoc={createElement(tag){return new Node(this,tag);},defaultView:{navigator:{},requestAnimationFrame:callback=>batchScheduled.push(callback)},measureText(){++measureCalls;return 30;}};
+batchDoc.root=new Node(batchDoc,'root');const batchRenderer=new Renderer(batchDoc.root,event=>batchEvents.push(event));
+const manyNodes=Array.from({length:1025},(_,index)=>({...paragraph,measure:{id:String(1000+index),width:90,height:-1}}));
+const manySnapshot={...documentSnapshot,document:{...documentSnapshot.document,children:manyNodes}};
+batchRenderer.apply(manySnapshot);assert.equal(measureCalls,512);assert.equal(batchEvents.length,1);assert.equal(batchScheduled.length,1);
+batchScheduled.shift()();assert.equal(measureCalls,1024);assert.equal(batchScheduled.length,1);
+batchScheduled.shift()();assert.equal(measureCalls,1025);assert.equal(batchScheduled.length,0);assert.deepEqual(batchEvents.map(event=>event.value.trim().split('\n').length),[512,512,1]);
+batchRenderer.apply(manySnapshot);assert.equal(measureCalls,1025,'Acknowledgment polling repeated cached text measurement');
+batchRenderer.measured.clear();batchDoc.measureText=()=>{++measureCalls;return 0;};batchRenderer.apply(manySnapshot);
+while(batchScheduled.length)batchScheduled.shift()();assert.equal(measureCalls,2050,'Hidden text measurement did not stop after one bounded pass');
+batchRenderer.destroy();
+const slowScheduled=[],slowEvents=[];let slowTime=0,slowCalls=0;
+const slowDoc={createElement(tag){return new Node(this,tag);},defaultView:{navigator:{},performance:{now:()=>slowTime},requestAnimationFrame:callback=>slowScheduled.push(callback)},measureText(){slowTime+=2;++slowCalls;return 30;}};
+slowDoc.root=new Node(slowDoc,'root');const slowRenderer=new Renderer(slowDoc.root,event=>slowEvents.push(event));
+slowRenderer.apply({...manySnapshot,document:{...manySnapshot.document,children:manyNodes.slice(0,5)}});
+assert.equal(slowCalls,2,'Slow text measurement exceeded the frame time budget');
+assert.equal(slowScheduled.length,1);slowScheduled.shift()();assert.equal(slowCalls,4);
+slowScheduled.shift()();assert.equal(slowCalls,5);assert.equal(slowScheduled.length,0);
+assert.deepEqual(slowEvents.map(event=>event.value.trim().split('\n').length),[2,2,1]);
+slowRenderer.destroy();
 const encoded=encodeEvent({version:1,generation:'18446744073709551615',sequence:'2',target:'3',kind:1,value:'literal',amount:-1});
 assert.equal(new TextDecoder().decode(encoded.subarray(0,4)),'DPW1');assert.equal(new DataView(encoded.buffer).getUint32(4,true),2);
 assert.equal(new DataView(encoded.buffer).getBigUint64(16,true),0xffffffffffffffffn);

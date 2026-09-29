@@ -1,4 +1,5 @@
 #include "terminal_ui.hpp"
+#include "cell_layout.hpp"
 #include <iostream>
 #include <stdexcept>
 
@@ -28,9 +29,63 @@ void click(terminal::Session& session,int x,int y) {
 void editor_focus(terminal::Session& session,std::string_view label,int line_height=1) {
     const auto bounds=find(session,label).bounds;click(session,bounds.x,bounds.y+line_height);
 }
+// These test overlays are real shared declarations: give their former terminal
+// rows explicit logical geometry so native/web adapters see the same fixtures.
+void show_overlay(Application& app,ui::OverlayDefinition overlay) {
+    int y=0,height=0;unsigned previous=0;bool first=true;
+    for(auto& control:overlay.controls) {
+        if(control.placement.height>0)continue;
+        if(!first&&control.row!=previous)y+=height+18;
+        first=false;previous=control.row;
+        height=control.kind==ui::Kind::label?18:control.multiline||control.kind==ui::Kind::bitmap||control.kind==ui::Kind::list?90:27;
+        control.placement={0,y,0,0,600,height};
+    }
+    app.show_overlay(std::move(overlay));
+}
+void shared_layout_changes() {
+    Application app({});auto editor=declaration(ui::Field::fast_text);editor.label="Layout editor";editor.placement={16,18,0,0,300,72};
+    auto toggle=declaration(ui::Field::developer_mode);toggle.label="Layout toggle";toggle.placement={350,18,0,0,200,27};
+    ui::OverlayDefinition overlay;overlay.controls={editor,toggle};app.show_overlay(overlay);
+    terminal::Session session(app);session.resize({120,40,{1,1}});
+    auto left=find(session,"Layout editor").bounds,right=find(session,"[ ] Layout toggle").bounds;
+    check(left.y==right.y&&left.x<right.x,"shared side-by-side placement was replaced by declaration rows");
+    editor_focus(session,"Layout editor");session.input(input("kept"));
+    session.resize({24,40,{1,1}});
+    left=find(session,"Layout editor").bounds;right=find(session,"[ ] Layout toggle").bounds;
+    check(right.y>left.y,"narrow cell projection failed to wrap shared neighbors");
+    session.input(input("!"));check(app.field(editor.field).text=="kept!","layout reflow lost focused editor state");
+    session.resize({120,40,{1,1}});check(find(session,"[ ] Layout toggle").bounds.y==find(session,"Layout editor").bounds.y,"widening did not restore shared row");
+    std::swap(overlay.controls[0].placement.left,overlay.controls[1].placement.left);app.show_overlay(overlay);session.tick();
+    check(find(session,"[ ] Layout toggle").bounds.x<find(session,"Layout editor").bounds.x,"changing only shared placement failed to move existing controls");
+    editor.label="A shared editor label that wraps onto several terminal lines";
+    editor.placement={0,0,0,0,120,45};toggle.placement={0,70,0,0,200,27};overlay.controls={editor,toggle};app.show_overlay(overlay);
+    session.resize({24,40,{1,1}});
+    int label_bottom=0;std::string joined;
+    for(const auto& p:session.scene().primitives)if(p.kind==terminal::Primitive::Kind::text&&p.text!="[ ] Layout toggle"&&p.bounds.y>0&&p.text!="kept!") {
+        if(p.text.starts_with("A shared")||(!joined.empty()&&joined.size()<std::string(editor.label).size())) {joined+=p.text;label_bottom=std::max(label_bottom,p.bounds.y+1);}
+    }
+    check(joined==editor.label,"shared long label was clipped instead of measured and wrapped");
+    check(find(session,"[ ] Layout toggle").bounds.y>label_bottom,"wrapped label covered the following shared control");
+    app.close();
+
+    // The projection consumes the result of shared row/stretch and slot rules.
+    std::vector<ui::Control> controls(2);for(auto& c:controls){c.kind=ui::Kind::text;c.scope=ui::ScreenScope::shared;}
+    const auto project=[&]{std::vector<ui::CellLayoutItem> items;for(const auto& c:controls)items.push_back({ui::control_layout(c,{},1200,1000,controls).frame,1,1,{}});return ui::cell_layout(items,120,1200);};
+    const auto equal=project();controls[1].stretch=3;const auto weighted=project();
+    check(weighted[1].w>equal[1].w&&weighted[0].w<equal[0].w,"shared stretch changes did not reach cell widths");
+    controls[0].slot=ui::Slot::fast_device;controls[1].slot=ui::Slot::fast_text;const auto slots=project();
+    check(slots[1].y<slots[0].y,"cell reading order ignored shared slot geometry");
+    std::swap(controls[0].slot,controls[1].slot);const auto moved=project();check(moved[0].y<moved[1].y,"shared slot edit required a terminal layout edit");
+    for(int width=1;width<100;++width) {
+        std::vector<ui::CellLayoutItem> items{{{0,0,400,45},8,2,{}},{{410,0,500,45},12,2,{}},{{0,100,900,72},4,3,{}}};
+        auto boxes=ui::cell_layout(items,width,1000);
+        for(std::size_t a=0;a<boxes.size();++a) {const auto one=boxes[a];check(one.x>=0&&one.w>0&&one.x+one.w<=width,"cell reflow escaped viewport");
+            for(std::size_t b=a+1;b<boxes.size();++b){const auto two=boxes[b];check(one.x+one.w<=two.x||two.x+two.w<=one.x||one.y+one.h<=two.y||two.y+two.h<=one.y,"cell reflow overlapped controls");}}
+    }
+}
 void editing_and_security() {
     Application app({});auto c=declaration(ui::Field::fast_text);c.label="Portable editor";c.row=0;c.byte_limit=24;
-    ui::OverlayDefinition overlay;overlay.controls={c};app.show_overlay(std::move(overlay));
+    ui::OverlayDefinition overlay;overlay.controls={c};show_overlay(app,std::move(overlay));
     terminal::Session session(app);session.resize({80,24,{1,1}});editor_focus(session,"Portable editor");
     session.input(input("alpha\nbeta",true));
     check(app.field(c.field).text=="alpha\nbeta","pasted newlines did not remain data");
@@ -62,7 +117,7 @@ void editable_presets() {
     Application app({});app.select(ui::Field::fast_mode,"robust");
     auto c=declaration(ui::Field::carrier);c.label="Editable preset";c.row=0;
     check(!app.field(c.field).options.empty(),"preset fixture has no options");
-    ui::OverlayDefinition overlay;overlay.controls={c};app.show_overlay(std::move(overlay));
+    ui::OverlayDefinition overlay;overlay.controls={c};show_overlay(app,std::move(overlay));
     terminal::Session session(app);session.resize({80,24,{1,1}});editor_focus(session,"Editable preset");
     select_all(session);session.input(input("1234"));const auto draft=app.field(c.field).text;
     session.input(key(terminal::Key::down,false,false,true));session.input(key(terminal::Key::down));session.input(key(terminal::Key::escape));
@@ -76,7 +131,7 @@ void focus_choices_and_scroll() {
     Application app({});auto edit=declaration(ui::Field::fast_text);edit.label="First editor";edit.row=0;
     auto toggle=declaration(ui::Field::developer_mode);toggle.label="Generic toggle";toggle.row=1;
     auto choice=declaration(ui::Field::fast_mode);choice.label="Generic choice";choice.row=2;
-    ui::OverlayDefinition overlay;overlay.controls={edit,toggle,choice};app.show_overlay(std::move(overlay));
+    ui::OverlayDefinition overlay;overlay.controls={edit,toggle,choice};show_overlay(app,std::move(overlay));
     terminal::Session session(app);session.resize({80,24,{1,1}});editor_focus(session,"First editor");
     session.input(key(terminal::Key::tab));session.input(input(" "));
     check(app.field(toggle.field).checked,"Tab and Space did not toggle generic control");
@@ -99,7 +154,7 @@ void focus_boundaries() {
     ui::Control disabled{};disabled.kind=ui::Kind::action;disabled.command=ui::Command::fast_cancel;disabled.label="Disabled action";disabled.row=3;disabled.scope=ui::ScreenScope::shared;
     const auto command_label=app.command_label(disabled.command);
     const auto disabled_label="[ "+(command_label.empty()?std::string(disabled.label):command_label)+" ]";
-    ui::OverlayDefinition overlay;overlay.controls={edit,label,toggle,disabled};app.show_overlay(overlay);
+    ui::OverlayDefinition overlay;overlay.controls={edit,label,toggle,disabled};show_overlay(app,overlay);
     terminal::Session session(app);session.resize({80,24,{1,1}});
     session.input(key(terminal::Key::tab));
     check(find(session,"First editor").focused,"forward traversal did not start at the first control");
@@ -111,7 +166,7 @@ void focus_boundaries() {
     check(!find(session,disabled_label).enabled&&!find(session,disabled_label).focused,"Tab focused an unavailable control");
     session.input(key(terminal::Key::tab,false,true));
     check(find(session,"First editor").focused,"reverse traversal did not skip the label");
-    app.show_overlay(overlay);session.tick();session.input(key(terminal::Key::tab,false,true));
+    show_overlay(app,overlay);session.tick();session.input(key(terminal::Key::tab,false,true));
     check(find(session,"[ ] Last control").focused,"reverse traversal with no focus did not start at the last control");
     app.close();
 
@@ -128,9 +183,9 @@ void incremental_page_scroll() {
     ui::OverlayDefinition overlay;
     for(unsigned n=0;n<60;++n) {
         labels.push_back("Scroll row "+std::to_string(n));
-        ui::Control c{};c.kind=ui::Kind::label;c.label=labels.back().c_str();c.row=n;c.instance=n+1;c.scope=ui::ScreenScope::shared;overlay.controls.push_back(c);
+        ui::Control c{};c.kind=ui::Kind::label;c.label=labels.back().c_str();c.row=n;c.instance=n+1;c.placement={0,static_cast<int>(n)*14,0,0,600,12};c.scope=ui::ScreenScope::shared;overlay.controls.push_back(c);
     }
-    app.show_overlay(std::move(overlay));terminal::Session session(app);session.resize({80,24,{1,1}});
+    show_overlay(app,std::move(overlay));terminal::Session session(app);session.resize({80,24,{1,1}});
     const int original=find(session,"Scroll row 2").bounds.y;
     const auto clip=find(session,"Scroll row 2").clip;
     check(clip.has_value(),"scroll fixture lacks content clipping");
@@ -148,6 +203,25 @@ void incremental_page_scroll() {
     for(int n=0;n<200;++n)session.input(key(terminal::Key::page_down));
     const int bottom=find(session,"Scroll row 59").bounds.y;session.input(key(terminal::Key::page_down));
     check(find(session,"Scroll row 59").bounds.y==bottom,"PageDown scrolled beyond the final content");app.close();
+}
+void document_resize_scroll() {
+    Launch launch;launch.page=ui::Page::planner;Application app(launch);
+    check(app.page()==ui::Page::planner,"resize fixture did not enter its document page");
+    terminal::Session session(app);session.resize({80,160,{1,1}});find(session,"Link planner");
+    session.resize({24,8,{1,1}});
+    for(int n=0;n<200;++n)session.input(key(terminal::Key::page_down));
+    session.resize({160,1000,{1,1}});
+    terminal::Session fresh(app);fresh.resize({160,1000,{1,1}});
+    const auto& actual=session.scene().primitives;const auto& expected=fresh.scene().primitives;
+    check(actual.size()==expected.size(),"resize left scrolled document primitives missing");
+    for(std::size_t i=0;i<actual.size();++i) {
+        check(actual[i].kind==expected[i].kind&&actual[i].text==expected[i].text,
+            "resize changed document primitive order or text");
+        const auto a=actual[i].bounds,b=expected[i].bounds;
+        check(a.x==b.x&&a.y==b.y&&a.w==b.w&&a.h==b.h,
+            "resize painted document primitives with a stale scroll offset");
+    }
+    app.close();
 }
 void draft_submit_shortcuts() {
     for(bool legacy:{false,true}) {
@@ -177,7 +251,7 @@ void plot_expansion() {
     auto plot=declaration(ui::Field::fast_qr_brightness);
     for(const auto& control:ui::console_screen())if(control.kind==ui::Kind::bitmap&&control.bitmap==ui::Bitmap::fast_qr)plot=control;
     plot.label="Portable plot";plot.row=0;
-    ui::OverlayDefinition overlay;overlay.controls={plot};app.show_overlay(std::move(overlay));
+    ui::OverlayDefinition overlay;overlay.controls={plot};show_overlay(app,std::move(overlay));
     const auto generation=app.overlay()->generation;
     terminal::Session session(app);session.resize({80,24,{1,1}});
     const auto area=[&] {int largest=0;for(const auto& primitive:session.scene().primitives)if(primitive.kind==terminal::Primitive::Kind::bitmap)largest=std::max(largest,primitive.bounds.w*primitive.bounds.h);return largest;};
@@ -194,8 +268,8 @@ void overlay_focus_policy() {
         Application app({});app.edit(ui::Field::fast_text,"origin");terminal::Session session(app);session.resize({80,300,{1,1}});
         editor_focus(session,"Message");session.input(key(terminal::Key::end,true));
         auto control=declaration(ui::Field::developer_mode);control.label="Temporary toggle";control.row=0;
-        ui::OverlayDefinition first;first.controls={control};first.policy.restore_focus=restore;app.show_overlay(first);session.resize({80,300,{1,1}});
-        ui::OverlayDefinition replacement=first;app.show_overlay(replacement);session.resize({80,300,{1,1}});
+        ui::OverlayDefinition first;first.controls={control};first.policy.restore_focus=restore;show_overlay(app,first);session.resize({80,300,{1,1}});
+        ui::OverlayDefinition replacement=first;show_overlay(app,replacement);session.resize({80,300,{1,1}});
         app.dismiss_overlay();session.resize({80,300,{1,1}});session.input(input("X"));
         check(app.field(ui::Field::fast_text).text==(restore?"originX":"origin"),"overlay replacement did not preserve declared focus/caret restoration policy");
         app.close();
@@ -212,7 +286,7 @@ void popup_binding_identity() {
 }
 void empty_record_placeholder() {
     Application app({});auto list=declaration(ui::Field::fast_files);list.row=0;
-    ui::OverlayDefinition overlay;overlay.controls={list};app.show_overlay(std::move(overlay));
+    ui::OverlayDefinition overlay;overlay.controls={list};show_overlay(app,std::move(overlay));
     terminal::Session session(app);session.resize({80,24,{1,1}});find(session,list.empty_text);app.close();
 }
 void path_dialog_policy() {
@@ -233,6 +307,6 @@ void path_dialog_policy() {
 }
 }
 int main() {
-    try {editing_and_security();editable_presets();focus_choices_and_scroll();focus_boundaries();incremental_page_scroll();draft_submit_shortcuts();path_dialog_policy();plot_expansion();overlay_focus_policy();popup_binding_identity();empty_record_placeholder();std::cout<<"Terminal UI interaction checks passed\n";return 0;}
+    try {shared_layout_changes();editing_and_security();editable_presets();focus_choices_and_scroll();focus_boundaries();incremental_page_scroll();document_resize_scroll();draft_submit_shortcuts();path_dialog_policy();plot_expansion();overlay_focus_policy();popup_binding_identity();empty_record_placeholder();std::cout<<"Terminal UI interaction checks passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

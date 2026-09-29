@@ -3,9 +3,10 @@
 export const protocolVersion = 1;
 export const eventKinds = Object.freeze({edit:1, select:2, toggle:3, activate:4,
     preset:5, submit:6, record:7, click:8, double_click:9, wheel:10,
-    navigate:11, key:12, service:13, close:14});
+    navigate:11, key:12, service:13, close:14, measure:15});
 const decimal = value => typeof value === 'string' && /^(0|[1-9][0-9]{0,19})$/.test(value);
 const utf8 = new TextEncoder();
+const documentExtent=16*1024*1024;
 export function validText(value, limit, multiline = true) {
     return typeof value === 'string' && !value.includes('\0') &&
         utf8.encode(value).byteLength <= limit && (multiline || !/[\r\n]/.test(value));
@@ -16,9 +17,9 @@ function element(doc, tag, text) {
     return node;
 }
 function text(node,value) {if(node.textContent!==value)node.textContent=value;}
-function place(node,rect,origin={x:0,y:0}) {
+function place(node,rect,origin={x:0,y:0},limit=16384) {
     if(!rect)return;
-    for(const key of ['x','y','w','h'])if(!Number.isFinite(rect[key])||Math.abs(rect[key])>16384)throw new RangeError('Invalid presentation rectangle');
+    for(const key of ['x','y','w','h'])if(!Number.isFinite(rect[key])||Math.abs(rect[key])>limit)throw new RangeError('Invalid presentation rectangle');
     Object.assign(node.style,{position:'absolute',left:`${rect.x-origin.x}px`,top:`${rect.y-origin.y}px`,width:`${Math.max(0,rect.w)}px`,height:`${Math.max(0,rect.h)}px`});
 }
 function children(parent,nodes) {
@@ -31,6 +32,10 @@ export class Renderer {
         this.root=root; this.doc=root.ownerDocument; this.send=send;
         this.platformService=platformService; this.generation='0'; this.sequence=0n;
         this.views=new Map();this.tabViews=new Map();this.documentViews=new Map();this.painted=new WeakMap(); this.serviceState=null; this.lastSnapshot=null;
+        this.measured=new Map();this.measurements=new Map();
+        this.measurePass=0;
+        this.onFonts=()=>{this.measured.clear();if(this.lastSnapshot)this.apply(this.lastSnapshot);};
+        this.doc.fonts?.addEventListener?.('loadingdone',this.onFonts);
         this.tabs=element(this.doc,'nav'); this.tabs.setAttribute('aria-label','Application pages');
         this.background=element(this.doc,'main'); this.controls=element(this.doc,'section');
         this.document=element(this.doc,'section'); this.overlay=element(this.doc,'section');
@@ -65,7 +70,7 @@ export class Renderer {
         const envelope=this.envelope(kind,target,extra);this.send(envelope);return envelope.sequence;
     }
     controlEvent(view,kind,target,extra={}) {
-        if(this.views.get(target)!==view||!view.node.isConnected||!view.data.enabled)return '0';
+        if(this.views.get(target)!==view||!view.node.isConnected||!view.enabled)return '0';
         return this.event(kind,target,extra);
     }
     error(message) {this.status.textContent=String(message);}
@@ -82,13 +87,15 @@ export class Renderer {
            BigInt(snapshot.revision)<BigInt(this.lastSnapshot.revision))return false;
         const changed=this.generation!==snapshot.generation;
         // A generation withdraws all outstanding edits, dialogs and callbacks.
-        if(changed) {this.cancelService();for(const view of this.views.values())view.invalidate=true;}
+        if(changed) {this.cancelService();this.measured.clear();for(const view of this.views.values())view.invalidate=true;}
         this.generation=snapshot.generation;this.sequence=this.sequence>BigInt(snapshot.ack)?this.sequence:BigInt(snapshot.ack);
         this.lastSnapshot=snapshot;this.doc.title=String(snapshot.title);
         if(snapshot.layout) {
             this.background.style.width=`${snapshot.layout.width}px`;this.background.style.height=`${snapshot.layout.height}px`;
             this.overlay.style.width=`${snapshot.layout.width}px`;this.overlay.style.height=`${snapshot.layout.height}px`;
             place(this.document,snapshot.layout.page);
+            const padding=snapshot.layout.documentPadding;
+            if(padding)Object.assign(this.document.style,{padding:`${padding.top}px ${padding.side}px ${padding.bottom}px`});
         }
         const tabs=new Set();
         children(this.tabs,snapshot.tabs.map(tab=>{
@@ -103,6 +110,7 @@ export class Renderer {
         const used=new Set();
         this.renderControls(this.controls,snapshot.controls,used, snapshot.layers.enableBackground);
         const documents=new Set();
+        this.measurements.clear();
         children(this.document,snapshot.document?[this.renderDocument(snapshot.document,used,snapshot.layers.enableBackground,0,'root',documents)]:[]);
         this.document.hidden=!snapshot.document;
         for(const [id] of this.documentViews)if(!documents.has(id))this.documentViews.delete(id);
@@ -114,6 +122,8 @@ export class Renderer {
         this.overlay.inert=!snapshot.layers.enableOverlay;
         this.renderService(snapshot.service);
         this.layoutLists();
+        this.measureQueue=[...this.measurements];this.measureCursor=0;++this.measurePass;
+        this.measureDocument();
     }
     layoutLists() {
         for(const view of this.views.values()) {
@@ -147,19 +157,21 @@ export class Renderer {
         view.data=c;view.history=c.history;view.invalidate=false;
         view.node.className=`dp-control dp-${c.kind}${inDocument?' dp-document-control':''}`;
         view.node.style.fontSize=`${c.fontSize||13}px`;text(view.label,c.label);view.node.title=c.help||'';
-        if(c.geometry&&!inDocument) {
-            const g=c.geometry;place(view.node,g.frame);
-            if(view.input)place(view.input,g.widget,g.frame);
-            if(view.value)place(view.value,g.widget,g.frame);
-            place(view.label,g.label,g.frame);view.label.hidden=!g.hasLabel||c.kind==='label'||c.kind==='menu';
-            if(c.kind==='toggle'){view.label.hidden=false;place(view.label,{...g.widget,x:g.widget.x+24,w:g.widget.w-24},g.frame);}
-            if(view.presets)place(view.presets,g.suggestions,g.frame);
-            if(view.caption){place(view.caption,g.caption,g.frame);view.caption.hidden=!g.hasCaption;view.caption.className=g.captionOverlay?'dp-caption-overlay':'dp-caption';}
+        if(c.geometry) {
+            const g=c.geometry,limit=inDocument?documentExtent:16384;place(view.node,g.frame,undefined,limit);
+            if(view.input)place(view.input,g.widget,g.frame,limit);
+            if(view.value)place(view.value,g.widget,g.frame,limit);
+            place(view.label,g.label,g.frame,limit);view.label.hidden=!g.hasLabel||c.kind==='label'||c.kind==='menu';
+            if(c.kind==='toggle'){view.label.hidden=false;place(view.label,{...g.widget,x:g.widget.x+24,w:g.widget.w-24},g.frame,limit);}
+            if(view.presets)place(view.presets,g.suggestions,g.frame,limit);
+            if(view.caption){place(view.caption,g.caption,g.frame,limit);view.caption.hidden=!g.hasCaption;view.caption.className=g.captionOverlay?'dp-caption-overlay':'dp-caption';}
         } else if(inDocument) {
             view.node.style.position='relative';view.node.style.width='100%';view.node.style.height='100%';
         }
         const enabled=Boolean(c.enabled&&layerEnabled);
+        view.enabled=enabled;
         if(view.input)view.input.disabled=!enabled;
+        if(!enabled&&this.doc.activeElement===view.input)view.input.blur?.();
         if(c.kind==='text') {
             view.input.readOnly=Boolean(c.readOnly);
             const pending=BigInt(view.pending||'0')>BigInt(this.lastSnapshot.ack);
@@ -227,7 +239,7 @@ export class Renderer {
         const input=(tag,type)=>{const item=element(this.doc,tag);if(type)item.type=type;item.id=`dp-${c.id}`;view.input=item;view.node.append(item);return item;};
         if(c.kind==='text') {
             const edit=input(c.multiline?'textarea':'input',c.multiline?null:'text');edit.spellcheck=false;edit.autocomplete='off';
-            const commit=()=>{const d=view.data;if(view.composing||this.views.get(d.id)!==view||!view.node.isConnected)return;if(!validText(edit.value,d.byteLimit,d.multiline)){this.error('Text exceeds this field’s input policy');edit.value=d.text;return;}view.pending=this.event('edit',d.id,{value:edit.value});};
+            const commit=()=>{const d=view.data;if(view.composing||!view.enabled||this.views.get(d.id)!==view||!view.node.isConnected)return;if(!validText(edit.value,d.byteLimit,d.multiline)){this.error('Text exceeds this field’s input policy');edit.value=d.text;return;}view.pending=this.event('edit',d.id,{value:edit.value});};
             edit.addEventListener('compositionstart',()=>{view.composing=true;});
             edit.addEventListener('compositionend',()=>{view.composing=false;commit();});
             edit.addEventListener('input',event=>{if(!event.isComposing)commit();});
@@ -285,27 +297,58 @@ export class Renderer {
     renderDocument(node,used,enabled,depth=0,path='root',retained=new Set()) {
         if(depth>64)throw new RangeError('Document nesting limit exceeded');
         enabled=enabled&&node.enabled!==false;
-        if(node.kind==='control'&&node.control) {
-            const result=this.renderControl(node.control,used,enabled,true);
-            Object.assign(result.style,{width:node.width>0?`${node.width}px`:'100%',height:`${node.height>0?node.height:45}px`,
-                flex:node.width>0?'0 1 auto':'1 1 0',marginTop:`${node.top||0}px`,marginBottom:`${node.bottom||0}px`,marginRight:`${node.right||0}px`});
-            return result;
-        }
-        const tag=node.kind==='action'?'button':node.kind==='bitmap'?'canvas':node.kind==='text'?'p':'div';
+        const tag=node.kind==='action'?'button':'div';
         const key=node.id?`action:${node.id}`:path;retained.add(key);
         let view=this.documentViews.get(key);
         if(!view||view.kind!==node.kind){view={kind:node.kind,node:element(this.doc,tag)};this.documentViews.set(key,view);
+            if(['text','action','bitmap'].includes(node.kind)){view.content=element(this.doc,node.kind==='bitmap'?'canvas':'span');view.node.append(view.content);}
             if(node.kind==='action'){view.node.type='button';view.node.addEventListener('click',()=>{if(view.node.isConnected&&this.documentViews.get(key)===view&&!view.node.disabled)this.event('activate',view.data.id);});}}
         view.data=node;const result=view.node;result.className=`dp-document-${node.kind} dp-tone-${node.tone} dp-fill-${node.fill||0}`;
-        Object.assign(result.style,{width:node.width>0?`${node.width}px`:'100%',height:node.height>0?`${node.height}px`:'auto',
-            flex:node.width>0?'0 1 auto':'1 1 0',minWidth:'0',fontSize:`${node.fontSize||12}px`,fontWeight:node.bold?'bold':'normal',
-            padding:`${Math.max(node.padding||0,node.border?1:0)}px`,marginTop:`${node.top||0}px`,marginBottom:`${node.bottom||0}px`,marginRight:`${node.right||0}px`,
-            border:node.border?'1px solid GrayText':'0',overflow:node.height>0?'hidden':'visible',alignItems:node.equalHeight?'stretch':'start'});
+        Object.assign(result.style,{minWidth:'0',fontSize:`${Math.max(1,Math.round(node.fontSize??12))}px`,fontWeight:node.bold?'bold':'normal',
+            padding:'0',margin:'0',border:'0',overflow:'hidden',outline:node.border?'1px solid GrayText':'none',outlineOffset:'-1px'});
+        if(node.geometry) {
+            place(result,node.geometry.frame,undefined,documentExtent);result.hidden=!node.geometry.allocated;
+            // A relatively positioned root contributes its measured height to
+            // scrolling. Descendants use only shared parent-relative rectangles.
+            if(depth===0)result.style.position='relative';
+            if(view.content)place(view.content,node.geometry.content,undefined,documentExtent);
+        }
         if(node.kind==='action')result.disabled=!enabled||node.available===false;
-        if(node.kind==='bitmap')this.paint(result,node.bitmap);
-        else if(node.kind==='text'||node.kind==='action')text(result,node.text||'');
+        if(node.kind==='bitmap')this.paint(view.content,node.bitmap);
+        else if(node.kind==='text'||node.kind==='action') {
+            text(view.content,node.text||'');
+            if(node.measure){if(!decimal(node.measure.id)||!Number.isInteger(node.measure.width)||node.measure.width<1||node.measure.width>4096)throw new RangeError('Invalid text measurement request');this.measurements.set(node.measure.id,node);}
+        } else if(node.kind==='control')children(result,node.control?[this.renderControl(node.control,used,enabled,true)]:[]);
         else children(result,(node.children||[]).map((child,index)=>this.renderDocument(child,used,enabled,depth+1,`${path}:${index}`,retained)));
         return result;
+    }
+    measureDocument() {
+        for(const id of this.measured.keys())if(!this.measurements.has(id))this.measured.delete(id);
+        const values=[];let attempted=0;
+        const clock=this.doc.defaultView?.performance;
+        const now=clock?.now?.bind(clock),deadline=now?now()+4:Infinity;
+        // Yield even on a slow glyph engine so audio forwarding and input can
+        // run between batches. Always attempt one item to guarantee progress.
+        while(this.measureCursor<this.measureQueue.length&&attempted<512&&(!attempted||!now||now()<deadline)) {
+            const [id,node]=this.measureQueue[this.measureCursor++];
+            if(this.measured.has(id))continue;
+            ++attempted;
+            if(!this.measureProbe){this.measureProbe=element(this.doc,'div');this.measureProbe.className='dp-document-measure';this.measureProbe.setAttribute('aria-hidden','true');this.root.append(this.measureProbe);}
+            const probe=this.measureProbe;
+            Object.assign(probe.style,{width:`${node.measure.width}px`,fontSize:`${Math.max(1,Math.round(node.fontSize??12))}px`,fontWeight:node.bold?'bold':'normal'});
+            text(probe,node.text||'');
+            const height=Math.ceil(probe.getBoundingClientRect?.().height||0);
+            if(!Number.isFinite(height)||height<=0)continue; // Hidden host; retry when visible.
+            if(height>16384)throw new RangeError('Wrapped text exceeds its measurement bound');
+            this.measured.set(id,height);
+            if(height!==node.measure.height)values.push(`${id} ${height}\n`);
+        }
+        if(values.length)this.event('measure','0',{value:values.join('')});
+        if(this.measureCursor<this.measureQueue.length) {
+            const pass=this.measurePass,environment=this.doc.defaultView;
+            const schedule=environment?.requestAnimationFrame?.bind(environment)||environment?.setTimeout?.bind(environment);
+            schedule?.(()=>{if(this.measurePass===pass)this.measureDocument();});
+        }
     }
     cancelService() {
         this.serviceState?.abort.abort();this.serviceState=null;this.services.replaceChildren();this.services.hidden=true;
@@ -336,5 +379,5 @@ export class Renderer {
         }
         this.services.append(cancel);
     }
-    destroy() {this.cancelService();this.observer?.disconnect();this.root.removeEventListener('keydown',this.onKey);this.root.replaceChildren();this.views.clear();this.tabViews.clear();this.documentViews.clear();}
+    destroy() {++this.measurePass;this.cancelService();this.observer?.disconnect();this.doc.fonts?.removeEventListener?.('loadingdone',this.onFonts);this.root.removeEventListener('keydown',this.onKey);this.root.replaceChildren();this.views.clear();this.tabViews.clear();this.documentViews.clear();this.measured.clear();}
 }
