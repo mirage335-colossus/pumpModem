@@ -22,6 +22,8 @@ GIT_SHA = re.compile(r'[0-9a-f]{40}|[0-9a-f]{64}')
 WINDOWS_FILES = ('tools/windows-base.py', 'third_party/build-support/windows-base.json')
 SDK_HELPER = 'tools/build-sdk.py'
 SDK_PREFIX = 'third_party/build-support/source-sdk/'
+WASM_HELPER = 'tools/build-wasm-sdk.py'
+WASM_PREFIX = 'third_party/build-support/wasm-sdk/'
 
 
 @lru_cache(maxsize=None)
@@ -47,7 +49,7 @@ def _kinds(linux_baseline):
     return {'windows-base', 'linux-sdk'} if linux_baseline == 'bookworm-sdk' else {'windows-base'}
 
 
-def _recipe_ids(files, linux_baseline):
+def _recipe_ids(files, linux_baseline, web=False):
     _kinds(linux_baseline)
     if not all(name in files for name in WINDOWS_FILES):
         raise ValueError('Historical Windows dependency provenance absent: exact recipe/helper required')
@@ -62,21 +64,31 @@ def _recipe_ids(files, linux_baseline):
             digest.update(name.encode() + b'\0')
             digest.update(files[name])
         result['linux-sdk'] = digest.hexdigest()[:20]
+    if web:
+        if WASM_HELPER not in files or WASM_PREFIX + 'manifest.json' not in files:
+            raise ValueError('Historical Wasm SDK dependency provenance absent: exact recipe/helper required')
+        digest = hashlib.sha256()
+        for name in [WASM_HELPER, *sorted(name for name in files if name.startswith(WASM_PREFIX))]:
+            digest.update(name.encode() + b'\0')
+            digest.update(files[name])
+        result['wasm-sdk'] = digest.hexdigest()[:20]
     return result
 
 
-def recipe_ids(root, linux_baseline):
+def recipe_ids(root, linux_baseline, web=False):
     """Match existing recipe identities without importing platform build tools."""
     _kinds(linux_baseline)
     root = Path(root)
     paths = [root / name for name in WINDOWS_FILES]
     if linux_baseline == 'bookworm-sdk':
         paths += [root / SDK_HELPER, *sorted((root / SDK_PREFIX).rglob('*'))]
+    if web:
+        paths += [root / WASM_HELPER, *sorted((root / WASM_PREFIX).rglob('*'))]
     return _recipe_ids({path.relative_to(root).as_posix(): path.read_bytes()
-                        for path in paths if path.is_file()}, linux_baseline)
+                        for path in paths if path.is_file()}, linux_baseline, web)
 
 
-def remote_recipe_ids(repository, source_sha, linux_baseline):
+def remote_recipe_ids(repository, source_sha, linux_baseline, web=False):
     """Hash recipe blobs from the exact source commit, never its current branch."""
     _kinds(linux_baseline)
     release = release_tool()
@@ -101,7 +113,8 @@ def remote_recipe_ids(repository, source_sha, linux_baseline):
         if not isinstance(name, str):
             raise ValueError('Historical dependency source tree has an invalid path')
         wanted = name in WINDOWS_FILES or (linux_baseline == 'bookworm-sdk' and
-                  (name == SDK_HELPER or name.startswith(SDK_PREFIX)))
+                  (name == SDK_HELPER or name.startswith(SDK_PREFIX))) or (web and
+                  (name == WASM_HELPER or name.startswith(WASM_PREFIX)))
         if not wanted or entry.get('type') == 'tree':
             continue
         if (name in entries or entry.get('type') != 'blob' or entry.get('mode') not in ('100644', '100755')
@@ -126,10 +139,13 @@ def remote_recipe_ids(repository, source_sha, linux_baseline):
         if actual != sha or blob.get('size') != len(data):
             raise ValueError('Historical dependency recipe blob checksum mismatch')
         files[name] = data
-    return _recipe_ids(files, linux_baseline)
+    return _recipe_ids(files, linux_baseline, web)
 
 
 def _names(kind, identity):
+    if kind == 'wasm-sdk':
+        return (f'datapump-wasm-sdk-{identity}-linux-x86_64.tar.gz',
+                f'datapump-wasm-sdk-sources-{identity}.tar.gz', f'wasm-sdk-{identity}-SHA256SUMS.txt')
     if kind == 'windows-base':
         return (f'windows-base-{identity}-x64-windows-static.zip',
                 f'windows-base-sources-{identity}.zip', f'windows-base-{identity}-SHA256SUMS.txt')
@@ -139,6 +155,8 @@ def _names(kind, identity):
 
 def _groups(dependencies, linux_baseline):
     required = _kinds(linux_baseline)
+    if isinstance(dependencies, dict) and 'wasm-sdk' in dependencies:
+        required = required | {'wasm-sdk'}
     if (not isinstance(dependencies, dict) or set(dependencies) != required
             or any(not isinstance(value, str) or not IDENTITY.fullmatch(value) for value in dependencies.values())):
         raise ValueError('Release dependencies require exact kinds and 20-character hexadecimal recipe identities')
@@ -255,7 +273,7 @@ def preserve(repository, directory, dependencies, linux_baseline, *, source_asse
 
 def fetch(repository, tag, kind, directory, inventory_sha256=None, *, binary_only=False):
     """Restore a release's own preserved archives for bootstrap/certification."""
-    if kind not in ('linux-sdk', 'windows-base'):
+    if kind not in ('linux-sdk', 'windows-base', 'wasm-sdk'):
         raise ValueError('Unknown dependency kind')
     if inventory_sha256 is not None and (not isinstance(inventory_sha256, str)
                                            or not SHA256.fullmatch(inventory_sha256)):
@@ -290,7 +308,7 @@ def main(argv=None):
     command = commands.add_parser('fetch', help="Restore dependencies preserved by a published release")
     command.add_argument('--repo', required=True)
     command.add_argument('--tag', required=True)
-    command.add_argument('--kind', choices=('linux-sdk', 'windows-base'), required=True)
+    command.add_argument('--kind', choices=('linux-sdk', 'windows-base', 'wasm-sdk'), required=True)
     command.add_argument('--directory', type=Path, required=True)
     command.add_argument('--inventory-sha256')
     command.add_argument('--github-output', type=Path)

@@ -16,6 +16,7 @@ import tempfile
 import threading
 import unittest
 from urllib.parse import unquote, urlparse
+from web_delivery_fixture import WEB, payload as web_payload
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location('arch_release', ROOT / 'tools/arch-release.py')
@@ -34,9 +35,13 @@ def fixture_archive(path, metadata, target):
              'lib/example.so': (b'private binary library\x00', 0o644),
              'share/doc/datapump/LICENSE': (b'fixture original license\n', 0o444),
              'share/doc/datapump/license with spaces.txt': (b'preserve names and bytes\n', 0o644),
-             'share/doc/datapump/build-info.txt': (f'GUI: ON ({backend})\n'.encode(), 0o644)}
+             'share/doc/datapump/build-info.txt': (f'Source commit: {metadata["source_sha"]}\nGUI: ON ({backend})\n'.encode(), 0o644)}
     files.update({f'share/man/man1/{name}.1': ((ROOT / f'docs/man/{name}.1').read_bytes(), 0o644)
                   for name in ('pump', 'pump-fast', 'datapump-gui')})
+    if metadata.get('web'):
+        files.update(web_payload(metadata))
+        data, mode = files['share/doc/datapump/build-info.txt']
+        files['share/doc/datapump/build-info.txt'] = (data + b'Web worker: ON (inherited-pipes; no sockets)\n', mode)
     sums = ''.join(f'{hashlib.sha256(data).hexdigest()}  {name}\n' for name, (data, _) in files.items())
     files['manifest.sha256'] = (sums.encode(), 0o644)
     with tarfile.open(path, 'w:gz') as archive:
@@ -152,6 +157,35 @@ class ArchReleaseTests(unittest.TestCase):
         tampered = dict(value, dependencies={'linux-sdk': '3' * 20, 'windows-base': '2' * 20})
         with self.assertRaisesRegex(ValueError, 'identity'):
             arch.verify(directory, tampered, self.repository, self.fingerprint)
+
+    def test_web_delivery_is_bound_into_signed_packages_and_pacman_databases(self):
+        directory = self.root / 'web-release'
+        directory.mkdir()
+        metadata = release.make_metadata(source_sha='a' * 40, run_id='123', run_attempt='2',
+            cmake_version='0.7.2', version='v001_00', experiment=True, web=WEB,
+            dependencies={'linux-sdk': '1' * 20, 'windows-base': '2' * 20, 'wasm-sdk': '3' * 20},
+            now=datetime.now(timezone.utc).replace(microsecond=0))
+        for target, name in release.application_names(metadata).items():
+            if target.startswith('linux-'):
+                fixture_archive(directory / name, metadata, target)
+        manifest = arch.build(directory, metadata, self.repository, self.key, self.fingerprint)
+        arch.verify(directory, metadata, self.repository, self.fingerprint)
+        for row in manifest['packages'].values():
+            backend = row['backend']
+            suffix = '' if backend == 'fltk' else '-rev'
+            files = tar_files(directory / row['name'])
+            for name, expected in web_payload(metadata).items():
+                self.assertEqual(files[f'opt/datapump/{backend}/{name}'], expected)
+            for command in ('datapump-html', 'datapump-worker'):
+                self.assertEqual(files[f'usr/bin/{command}{suffix}'][1], 0o755)
+            self.assertIn('xdg-utils', row['dependencies'])
+            descs = tar_files(directory / f'datapump-{row["architecture"]}.db')
+            desc = database_fields(descs[f'{row["package"]}-{row["version"]}/desc'][0])
+            self.assertIn('xdg-utils', desc['DEPENDS'])
+            files_db = tar_files(directory / f'datapump-{row["architecture"]}.files')
+            listing = database_fields(files_db[f'{row["package"]}-{row["version"]}/files'][0])['FILES']
+            self.assertIn(f'opt/datapump/{backend}/share/datapump/web/wasm/datapump-wasm.html', listing)
+            self.assertIn(f'usr/share/applications/datapump-html{suffix}.desktop', listing)
 
     def test_native_payload_mtree_and_modes_preserve_the_portable_archive(self):
         for row in self.manifest['packages'].values():
@@ -287,7 +321,8 @@ class NativePacmanTests(unittest.TestCase):
         for index, label in enumerate(('A', 'B')):
             metadata = release.make_metadata(source_sha='a' * 40, packager_sha='b' * 40,
                 run_id=str(123 + index), run_attempt='1', cmake_version='0.7.2', experiment=False,
-                schema=5, now=instant + timedelta(minutes=index))
+                web=WEB, dependencies={'linux-sdk': '1' * 20, 'windows-base': '2' * 20, 'wasm-sdk': '3' * 20},
+                now=instant + timedelta(minutes=index))
             directory = cls.root / label
             directory.mkdir()
             for target, name in release.application_names(metadata).items():
@@ -378,6 +413,11 @@ class NativePacmanTests(unittest.TestCase):
             package = f'datapump-{backend}-bin'
             self.assertEqual(self.pacman('-Q', package).stdout.strip(), f'{package} {wanted}')
             self.assertTrue((self.installed / f'root/opt/datapump/{backend}/lib/example.so').is_file())
+            for name, (data, _) in web_payload(self.metadata[label]).items():
+                self.assertEqual((self.installed / f'root/opt/datapump/{backend}/{name}').read_bytes(), data)
+            suffix = '' if backend == 'fltk' else '-rev'
+            self.assertTrue(os.access(self.installed / f'root/usr/bin/datapump-html{suffix}', os.X_OK))
+            self.assertTrue((self.installed / f'root/usr/share/applications/datapump-html{suffix}.desktop').is_file())
 
     def test_native_latest_upgrade_and_bad_database_rejection(self):
         self.sync('datapump-fltk-bin', 'datapump-rev-bin')

@@ -16,6 +16,7 @@ import tempfile
 import threading
 import unittest
 from urllib.parse import unquote
+from web_delivery_fixture import WEB, payload as web_payload
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location('apt_release', ROOT / 'tools/apt-release.py')
@@ -30,7 +31,7 @@ def fixture_archive(path, metadata, target, additions=()):
     files = {'bin/pump': b'#!/bin/sh\nprintf "fixture CLI\\n"\n',
              'bin/datapump-gui': b'#!/bin/sh\nexit 0\n',
              'lib/example.so': b'fixture private library',
-             'share/doc/datapump/build-info.txt': f'GUI: ON ({backend})\n'.encode()}
+             'share/doc/datapump/build-info.txt': f'Source commit: {metadata["source_sha"]}\nGUI: ON ({backend})\n'.encode()}
     files.update({f'share/man/man1/{name}.1': (ROOT / f'docs/man/{name}.1').read_bytes()
                   for name in ('pump', 'pump-fast', 'datapump-gui')})
     if metadata.get('frontends'):
@@ -38,6 +39,9 @@ def fixture_archive(path, metadata, target, additions=()):
         for name in ('datapump-tui', 'datapump-fb'):
             files[f'bin/{name}'] = b'#!/bin/sh\nexit 0\n'
             files[f'share/man/man1/{name}.1'] = (ROOT / f'docs/man/{name}.1').read_bytes()
+    if metadata.get('web'):
+        files.update({name: data for name, (data, _) in web_payload(metadata).items()})
+        files['share/doc/datapump/build-info.txt'] += b'Web worker: ON (inherited-pipes; no sockets)\n'
     sums = ''.join(f'{hashlib.sha256(data).hexdigest()}  {name}\n' for name, data in files.items())
     files['manifest.sha256'] = sums.encode()
     with tarfile.open(path, 'w:gz') as archive:
@@ -51,6 +55,35 @@ def fixture_archive(path, metadata, target, additions=()):
 
 
 class DesktopEntryTests(unittest.TestCase):
+    def test_browser_launchers_open_only_the_coinstalled_page(self):
+        payload = {'share/datapump/web/wasm/datapump-wasm.html': (b'local HTML fixture', 0o644)}
+        commands = []
+        for backend, command in (('fltk', 'datapump-html'), ('rev', 'datapump-html-rev')):
+            files = apt.package_files(payload, backend)
+            commands.append(command)
+            wrapper, mode = files[f'usr/bin/{command}']
+            self.assertEqual(mode, 0o755)
+            self.assertEqual(wrapper.decode(), '#!/bin/sh\nexec xdg-open '
+                             f'/opt/datapump/{backend}/share/datapump/web/wasm/datapump-wasm.html\n')
+            desktop = files[f'usr/share/applications/{command}.desktop'][0].decode()
+            self.assertIn(f'Exec={command}\n', desktop)
+            self.assertIn('TryExec=xdg-open\n', desktop)
+            self.assertIn('Categories=AudioVideo;Audio;\n', desktop)
+            with tempfile.TemporaryDirectory(prefix='html-launcher-') as temporary:
+                root = Path(temporary)
+                launcher = root / command
+                launcher.write_bytes(wrapper)
+                opener = root / 'xdg-open'
+                opener.write_text('#!/bin/sh\nprintf "%s\\n" "$#" "$@"\n')
+                opener.chmod(0o755)
+                opened = subprocess.run([shutil.which('sh'), str(launcher), 'https://unused.invalid'],
+                    env=dict(os.environ, PATH=str(root)), capture_output=True, text=True, check=True)
+                self.assertEqual(opened.stdout.splitlines(), ['1',
+                    f'/opt/datapump/{backend}/share/datapump/web/wasm/datapump-wasm.html'])
+        self.assertEqual(len(set(commands)), 2)
+        historical = apt.package_files({}, 'fltk')
+        self.assertNotIn('usr/bin/datapump-html', historical)
+
     def test_manual_names_and_references_follow_the_coinstallable_wrappers(self):
         source = (b'.TH PUMP 1 "September 2026" "Data Pump 001_00" "User Commands"\n'
                   b'.SH NAME\npump \\- audio modem\n'
@@ -183,6 +216,35 @@ class AptReleaseTests(unittest.TestCase):
                     self.assertIn(f'opt/datapump/{backend}/bin/{binary}', entries)
                     self.assertIn(f'usr/bin/{command}', entries)
                     self.assertIn(f'usr/share/man/man1/{command}.1.gz', entries)
+
+    def test_web_payload_and_launchers_survive_the_signed_debian_repository(self):
+        directory = self.root / 'web-release'
+        directory.mkdir()
+        values = release.make_metadata(source_sha='a' * 40, run_id='123', run_attempt='1',
+            cmake_version='0.7.2', version='v001_00', experiment=True, web=WEB,
+            frontends=['tui', 'framebuffer'],
+            dependencies={'linux-sdk': '1' * 20, 'windows-base': '2' * 20, 'wasm-sdk': '3' * 20},
+            now=datetime.now(timezone.utc).replace(microsecond=0))
+        for target, name in release.application_names(values).items():
+            if target.startswith('linux-'):
+                fixture_archive(directory / name, values, target)
+        for name in release.distribution_assets(values):
+            (directory / name).write_bytes(('distribution fixture ' + name).encode())
+        apt.build(directory, values, 'test-owner/test-repo', self.key, self.fingerprint)
+        apt.verify(directory, values, 'test-owner/test-repo', self.fingerprint)
+        for backend in apt.BACKENDS:
+            suffix = '' if backend == 'fltk' else '-rev'
+            for architecture in apt.ARCHES:
+                package = directory / apt.package_name(values, architecture, backend)
+                entries = apt.deb_files(package)
+                for name, (data, mode) in web_payload(values).items():
+                    self.assertEqual(entries[f'opt/datapump/{backend}/{name}'], (data, mode))
+                for command in ('datapump-html', 'datapump-worker'):
+                    self.assertIn(f'usr/bin/{command}{suffix}', entries)
+                self.assertIn(f'usr/share/applications/datapump-html{suffix}.desktop', entries)
+                depends = apt.run('dpkg-deb', '--field', package, 'Depends').stdout.decode()
+                self.assertIn('xdg-utils', depends)
+        self.assertNotIn('xdg-utils', apt.control(self.metadata, 'amd64', 'fltk', 1))
 
     def copy_repository(self):
         temporary = tempfile.TemporaryDirectory(prefix='apt-case-')

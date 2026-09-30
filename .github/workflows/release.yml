@@ -97,6 +97,11 @@ on:
       - '.github/workflows/distro-check.yml'
       - '.github/workflows/certify.yml'
       - 'tools/release.py'
+      - 'tools/release-web.py'
+      - 'tests/test_release_web.py'
+      - 'tools/wasm-sdk-release.py'
+      - 'tests/test_wasm_sdk_release.py'
+      - '.github/workflows/wasm-application.yml'
       - 'tools/release-dependencies.py'
       - 'tests/test_release_dependencies.py'
       - 'tools/apt-release.py'
@@ -198,6 +203,8 @@ jobs:
           persist-credentials: false
       - run: |
           python3 tests/test_release.py
+          python3 tests/test_release_web.py
+          python3 tests/test_wasm_sdk_release.py
           python3 tests/test_ci_apt.py
           python3 tests/test_release_dependencies.py
           python3 tests/test_apt_release.py
@@ -252,12 +259,12 @@ jobs:
           python3 tools/release.py metadata --version "$RELEASE_VERSION" \
             --linux-baseline "$LINUX_BASELINE" --source-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" \
             --run-attempt "$GITHUB_RUN_ATTEMPT" --output release-metadata.json \
-            --github-output "$GITHUB_OUTPUT" "${args[@]}"
+            --github-output "$GITHUB_OUTPUT" --web "${args[@]}"
           python3 tools/release.py matrices --metadata release-metadata.json --github-output "$GITHUB_OUTPUT"
       - name: Reserve a draft for direct release-asset uploads
         run: |
           cat > release-details.md <<NOTES
-          Download the archive matching your operating system, architecture and GUI backend (fltk or rev), or install the signed Debian packages from this release's flat APT repository. Each backend has a separate bundle and extraction directory. Unpack the whole archive and keep bin/, lib/ and share/ together; required application libraries are bundled. Host audio/graphics services and drivers remain required. Debian installation instructions are in the release documentation linked below.
+          Download the archive matching your operating system, architecture and GUI backend (fltk or rev), or install the signed Debian packages from this release's flat APT repository. Each backend has a separate bundle and extraction directory. All bundles include the TUI, framebuffer and the same static HTML/Wasm page under share/datapump/web/wasm; Linux also includes the inherited-pipe worker and hosted browser assets. The static page runs in Windows and Linux browsers. Unpack the whole archive and keep bin/, lib/ and share/ together; required application libraries are bundled. Host audio/graphics services and drivers remain required. Debian installation instructions are in the release documentation linked below.
 
           The attached warning.log describes known nonfatal Rev replay/waterfall display-cadence warnings. They do not fail builds or certification; data integrity, pending-message identity and physical-completion checks remain mandatory.
 
@@ -337,20 +344,23 @@ jobs:
           DATAPUMP_MAX_GLIBC: ${{ matrix.glibc }}
         run: |
           if [ "$USE_SDK" = true ]; then
-            ./build.sh package --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --backend "$GUI_BACKEND" --build-dir build/release-app --jobs "$(nproc)"
+            ./build.sh package --tui --fb --web-worker --sdk "$GITHUB_WORKSPACE/build/sdk" --backend "$GUI_BACKEND" --build-dir build/release-app --jobs "$(nproc)"
           elif [ "$GUI_BACKEND" = rev ]; then
-            CC=clang-19 CXX=clang++-19 ./build.sh package --tui --fb --backend rev --build-dir build/release-app --jobs "$(nproc)"
+            CC=clang-19 CXX=clang++-19 ./build.sh package --tui --fb --web-worker --backend rev --build-dir build/release-app --jobs "$(nproc)"
           else
-            CC=gcc-11 CXX=g++-11 ./build.sh package --tui --fb --backend fltk --build-dir build/release-app --jobs "$(nproc)"
+            CC=gcc-11 CXX=g++-11 ./build.sh package --tui --fb --web-worker --backend fltk --build-dir build/release-app --jobs "$(nproc)"
           fi
-      - name: Upload this platform directly to the draft release
-        env:
-          RELEASE_TARGET: ${{ matrix.target }}
-        run: |
-          printf '%s\n' "$RELEASE_METADATA" > release-metadata.json
-          mkdir build/upload
-          cp build/release-app/releases/*.tar.gz build/release-app/releases/*.zip build/release-app/releases/SHA256SUMS.txt build/upload/
-          python3 tools/release.py upload --metadata release-metadata.json --repo "$GITHUB_REPOSITORY" --target "$RELEASE_TARGET" --directory build/upload
+      - name: Preserve native output for parallel browser assembly
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            build/release-app/releases/*.tar.gz
+            build/release-app/releases/*.zip
+            build/release-app/releases/SHA256SUMS.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
 
   windows:
     name: Windows x64 / ${{ matrix.backend }}
@@ -386,19 +396,31 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Packaging failed' }
           cmake -DARCHIVE_DIR="$PWD/build/release-windows/releases" -DBUILD_DIR="$PWD/build/release-windows" -DREQUIRE_MANUALS=ON -P tools/verify-native-archives.cmake
           if ($LASTEXITCODE -ne 0) { throw 'Archive checks failed' }
-      - name: Upload this platform directly to the draft release
-        shell: pwsh
-        run: |
-          $env:RELEASE_METADATA | Set-Content -Encoding utf8 release-metadata.json
-          New-Item -ItemType Directory build/upload | Out-Null
-          Copy-Item build/release-windows/releases/*.tar.gz, build/release-windows/releases/*.zip, build/release-windows/releases/SHA256SUMS.txt build/upload/
-          python tools/release.py upload --metadata release-metadata.json --repo "$env:GITHUB_REPOSITORY" --target "$env:RELEASE_TARGET" --directory build/upload
-          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }
+      - name: Preserve Windows output for parallel browser assembly
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            build/release-windows/releases/*.tar.gz
+            build/release-windows/releases/*.zip
+            build/release-windows/releases/SHA256SUMS.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  wasm:
+    name: Platform-independent HTML application
+    needs: metadata
+    uses: ./.github/workflows/wasm-application.yml
+    with:
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+      scope: packages
+      artifact_name: DataPump-Wasm
 
   publish:
     outputs:
       release_tag: ${{ needs.metadata.outputs.tag }}
-    needs: [metadata, linux, windows]
+    needs: [metadata, linux, windows, wasm]
     runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
     timeout-minutes: 15
     permissions:
@@ -411,7 +433,22 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Verify all uploaded bytes, sign the APT repository and publish
+      - name: Collect independent native producers
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: '*-*-fltk'
+          path: downloaded-native
+      - name: Collect independent Rev producers
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: '*-*-rev'
+          path: downloaded-native
+      - name: Collect the identical static HTML product for every operating system
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: DataPump-Wasm
+          path: downloaded-wasm
+      - name: Assemble browser assets, verify bytes, sign APT and publish
         env:
           APT_SIGNING_KEY: ${{ secrets.DATAPUMP_APT_SIGNING_KEY }}
           APT_FINGERPRINT: ${{ vars.DATAPUMP_APT_SIGNING_FINGERPRINT }}
@@ -425,7 +462,7 @@ jobs:
           printf '%s\n' "$APT_SIGNING_KEY" > "$signing_key"
           unset APT_SIGNING_KEY
           python3 tools/release.py finalize --metadata release-metadata.json --repo "$GITHUB_REPOSITORY" \
-            --directory release-assets --apt-signing-key "$signing_key" \
+            --directory release-assets --artifacts downloaded-native --wasm-artifacts downloaded-wasm --apt-signing-key "$signing_key" \
             --apt-signing-fingerprint "$APT_FINGERPRINT" "${args[@]}"
           python3 - <<'PYSUMMARY'
           import json, os

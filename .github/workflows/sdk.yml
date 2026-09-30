@@ -96,6 +96,29 @@ jobs:
       image: debian:bookworm-slim
       linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
 
+  web:
+    if: ${{ !inputs.devfast }}
+    name: SDK native pipe worker and browser adapters
+    uses: ./.github/workflows/sdk-application.yml
+    with:
+      scope: web
+      backend: fltk
+      image: debian:bookworm-slim
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+
+  wasm:
+    if: ${{ !inputs.devfast }}
+    name: Browser SDK / ${{ matrix.scope }}
+    strategy:
+      fail-fast: false
+      matrix:
+        scope: [packages, tests]
+    uses: ./.github/workflows/wasm-application.yml
+    with:
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+      scope: ${{ matrix.scope }}
+      artifact_name: DataPump-SDK-Wasm
+
   compatibility:
     if: ${{ !inputs.devfast }}
     name: Copied SDK-built ${{ matrix.backend }} on ${{ matrix.image }}

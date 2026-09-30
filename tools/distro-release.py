@@ -87,6 +87,8 @@ def arch_recipe(metadata, repository, backend, rows, extras):
     package = f'datapump-{backend}-bin'
     version = distro_version(metadata)
     depends = ['alsa-plugins', 'fontconfig', 'ttf-dejavu', 'libglvnd', 'mesa']
+    if metadata.get('web'):
+        depends.append('xdg-utils')
     options = ['!strip', '!debug', '!lto', '!zipman', '!purge', 'staticlibs', 'libtool']
     local_names = sorted(extras)
     fields = [('pkgdesc', f'Portable audio modem with the {backend.upper()} GUI (prebuilt)'),
@@ -129,6 +131,7 @@ def gentoo_recipe(metadata, repository, backend, rows, extras):
     release = apt_module().release_module()
     version = distro_version(metadata)
     floor = '2.36' if metadata['linux_baseline'] == 'bookworm-sdk' else '2.35'
+    browser_dependency = '\tx11-misc/xdg-utils\n' if metadata.get('web') else ''
     text = ('# Generated DataPump binary recipe; packaging instructions are CC0-1.0.\n'
             '# Bundled application components retain their individual licenses.\n\nEAPI=8\n\n'
             f'DESCRIPTION="Portable audio modem with the {backend.upper()} GUI (prebuilt)"\n'
@@ -138,7 +141,8 @@ def gentoo_recipe(metadata, repository, backend, rows, extras):
              'RESTRICT="strip mirror"\nQA_PREBUILT="*"\nS="${WORKDIR}"\n\n'
              f'RDEPEND="\n\tamd64? ( >=sys-libs/glibc-{floor} )\n\tarm64? ( >=sys-libs/glibc-2.35 )\n'
              '\tmedia-libs/fontconfig\n\tmedia-fonts/dejavu\n\tmedia-libs/libglvnd[X]\n\tmedia-libs/mesa[X]\n'
-             '\t|| ( media-video/pipewire[pipewire-alsa] media-plugins/alsa-plugins[pulseaudio] )\n"\n\n'
+             '\t|| ( media-video/pipewire[pipewire-alsa] media-plugins/alsa-plugins[pulseaudio] )\n'
+             f'{browser_dependency}"\n\n'
              '# EAPI 8 requires the user-patch hook even for a prebuilt payload.\n'
              'src_prepare() { eapply_user; }\nsrc_configure() { :; }\nsrc_compile() { :; }\n\n'
              'src_install() {\n\tlocal root\n\tcase "${ARCH}" in\n')
@@ -150,8 +154,9 @@ def gentoo_recipe(metadata, repository, backend, rows, extras):
     text += '\n'.join('\t' + line + ' || die' for line in normalization(destination).splitlines()) + '\n'
     wrappers = sorted(name for name, (_, mode) in extras.items() if mode & 0o111)
     text += '\tdobin ' + ' '.join(f'"${{FILESDIR}}/{name}"' for name in wrappers) + '\n'
-    text += ('\tinsinto /usr/share/applications\n'
-             f'\tdoins "${{FILESDIR}}/datapump-{backend}.desktop"\n')
+    text += '\tinsinto /usr/share/applications\n'
+    for name in sorted(name for name in extras if name.endswith('.desktop')):
+        text += f'\tdoins "${{FILESDIR}}/{name}"\n'
     manuals = sorted(name for name in extras if name.endswith('.1.gz'))
     if manuals:
         text += '\tinsinto /usr/share/man/man1\n'
@@ -181,6 +186,7 @@ def expected(directory, metadata, repository):
         cmake_version=metadata['project_version'], schema=metadata['schema'], packager_sha=metadata['packager_sha'],
         repackaged_from=metadata.get('repackaged_from'),
         frontends=metadata.get('frontends'),
+        web=metadata.get('web'),
         dependencies=metadata.get('dependencies', {}) if metadata['schema'] >= 6 else metadata.get('dependencies'))
     if checked != metadata:
         raise ValueError('Distribution release metadata differs from its canonical identity')

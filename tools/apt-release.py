@@ -147,6 +147,16 @@ def package_files(payload, backend):
                f'Comment=Portable audio modem\nExec=datapump-{backend}\nTerminal=false\n'
                'Icon=utilities-terminal\nCategories=AudioVideo;Audio;\n')
     result[f'usr/share/applications/datapump-{backend}.desktop'] = (desktop.encode(), 0o644)
+    if 'share/datapump/web/wasm/datapump-wasm.html' in payload:
+        name = 'datapump-html' + ('' if backend == 'fltk' else f'-{backend}')
+        # The page contains its Wasm, scripts and notices. Open that exact local
+        # file; the launcher neither starts a server nor accepts a remote URL.
+        result[f'usr/bin/{name}'] = (
+            f'#!/bin/sh\nexec xdg-open /{prefix}/share/datapump/web/wasm/datapump-wasm.html\n'.encode(), 0o755)
+        entry = (f'[Desktop Entry]\nType=Application\nName=DataPump HTML ({backend.upper()} package)\n'
+                 f'Comment=Portable audio modem in your browser\nExec={name}\nTryExec=xdg-open\n'
+                 'Terminal=false\nIcon=utilities-terminal\nCategories=AudioVideo;Audio;\n')
+        result[f'usr/share/applications/{name}.desktop'] = (entry.encode(), 0o644)
     result.update(manual_files(payload, backend))
     return result
 
@@ -197,9 +207,10 @@ def control(metadata, arch, backend, installed_size):
     floor = '2.36' if arch == 'amd64' and metadata['linux_baseline'] == 'bookworm-sdk' else '2.35'
     # libasound2-plugins supplies the host PulseAudio bridge (including Crostini).
     # Mesa supplies host drivers, which intentionally are not in the portable payload.
+    browser_dependency = ', xdg-utils' if metadata.get('web') else ''
     return (f'Package: datapump-{backend}\nVersion: {debian_version(metadata)}\nArchitecture: {arch}\n'
             'Maintainer: DataPump maintainers <noreply@github.com>\nSection: sound\nPriority: optional\n'
-            f'Installed-Size: {installed_size}\nDepends: libc6 (>= {floor}), libasound2-plugins, fonts-dejavu-core, fontconfig-config, libgl1, libopengl0, libgl1-mesa-dri, libglx-mesa0\n'
+            f'Installed-Size: {installed_size}\nDepends: libc6 (>= {floor}), libasound2-plugins, fonts-dejavu-core, fontconfig-config, libgl1, libopengl0, libgl1-mesa-dri, libglx-mesa0{browser_dependency}\n'
             'Homepage: https://github.com/mirage335-colossus/pumpModem\n'
             f'Description: DataPump audio modem with the {backend.upper()} GUI\n'
             ' Contains the portable CLI and GUI with private bundled libraries.\n'

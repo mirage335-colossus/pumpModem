@@ -99,6 +99,10 @@ permissions on Linux. The layout is:
 | --- | --- |
 | `bin/datapump-gui` | Native desktop application; `.exe` on Windows |
 | `bin/pump` | Native command-line modem; `.exe` on Windows |
+| `bin/datapump-tui`, `bin/datapump-fb` | Terminal and software framebuffer applications; `.exe` on Windows |
+| `bin/datapump-worker` | Linux inherited-pipe browser worker in web-enabled releases |
+| `share/datapump/web/wasm/datapump-wasm.html` | Self-contained browser application, including on Windows |
+| `share/datapump/web/hosted/` | Linux pipe-worker browser adapters; the embedding application owns transport |
 | `lib/` | Collected Linux shared libraries |
 | `bin/*.dll` | Any remaining Windows application DLLs |
 | `share/man/man1/` | UNIX manual pages for the installed commands and Fast subcommands |
@@ -119,6 +123,15 @@ as owned files, so no link points back to the source computer. Windows locates
 the application's remaining DLLs beside its executables. Moving the installation
 does not require an environment variable, launcher script, registry entry, or
 regeneration step.
+
+Web-enabled release archives include the standalone HTML page and all of its
+compiled code and notices. Open it in a compatible browser; microphone access
+still depends on a supported secure context and user permission. A static HTTPS
+host can also serve the same file. Installed Debian, pacman/Arch and Gentoo
+packages provide `datapump-html` or `datapump-html-rev` and an HTML desktop entry.
+Their `xdg-open` launcher starts the browser and installs no local server.
+The Windows bundle uses the same standalone HTML payload; the Linux-only pipe
+worker is not included on Windows.
 
 ## Manual pages
 
@@ -239,21 +252,26 @@ scripts are not required to run the transferred software.
 
 ## GitHub Actions binaries
 
-The **Portable native binaries** workflow runs on pushes, pull requests, and
-manual dispatch. Its successful jobs attach these downloadable build artifacts
-to the Actions run:
+The **Portable native binaries** workflow runs lightweight checks on pushes and
+pull requests. A full manual dispatch (`devfast=false`) produces these
+downloadable build artifacts on the Actions run:
 
 | Artifact | Build and validation |
 | --- | --- |
 | `DataPump-Linux-x86_64-glibc-2.35` | GCC 11 on Ubuntu 22.04; native tests, GUI workflow, relocation, ELF ABI audit, and copies tested on Ubuntu 22.04/24.04 |
 | `DataPump-Windows-x86_64` | Visual Studio 2022 x64; static CRT and OpenSSL, native tests, GUI workflow, and relocation |
+| `DataPump-CI-Wasm` | Prepared Wasm SDK; static browser archives and an independent browser regression job |
 
 Each artifact contains the application TGZ and ZIP archives and an outer
-`SHA256SUMS.txt` inventory. Both archive formats are extracted and tested before
-upload, including empty `PATH`, dependency closure, the native GUI self-check,
-and a simulated GUI transfer. The Linux sanitizer job also runs independently.
-Archives are retained for 30 days; copy a verified release into local storage for
-long-term offline use. The workflow does not publish GitHub Releases.
+`SHA256SUMS.txt` inventory. Both native archive formats are extracted and tested
+before upload, including empty `PATH`, dependency closure, the native GUI
+self-check, and a simulated GUI transfer. Browser archives receive their own
+payload and hash checks. The Linux sanitizer job also runs independently.
+The CI browser artifact is separate; release finalization adds its validated
+HTML payload to every native release bundle. Native CI archives are retained
+for one day and browser archives for seven days; copy a verified release into
+local storage for long-term offline use. This workflow does not publish GitHub
+Releases.
 
 GitHub Actions and the Windows vcpkg registry are pinned to upstream commit IDs.
 CI may download its compiler/development dependencies while preparing a build.

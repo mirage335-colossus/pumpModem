@@ -77,7 +77,7 @@ def chicago_time(instant):
 
 def make_metadata(*, source_sha, run_id, run_attempt, version='', experiment=False,
                   linux_baseline='bookworm-sdk', now=None, cmake_version=None, schema=6,
-                  packager_sha=None, repackaged_from=None, dependencies=None, frontends=None):
+                  packager_sha=None, repackaged_from=None, dependencies=None, frontends=None, web=None):
     if type(schema) is not int or schema not in (1, 2, 3, 4, 5, 6):
         raise ValueError('Unsupported release metadata schema')
     if cmake_version is None:
@@ -137,10 +137,16 @@ def make_metadata(*, source_sha, run_id, run_attempt, version='', experiment=Fal
         value['distro_channels'] = {
             'schema': 1, 'formats': ['pacman', 'gentoo-sync'],
             'architectures': ['x86_64', 'aarch64'], 'gui_backends': list(GUI_BACKENDS)}
+    if web is not None:
+        if schema < 6 or web != web_tool().CAPABILITY or type(web.get('schema')) is not int:
+            raise ValueError('Web inventory requires the exact browser and Linux worker capability in schema 6')
+        value['web'] = dict(web)
     if schema >= 6:
         if dependencies is None:
-            dependencies = dependency_tool().recipe_ids(ROOT, linux_baseline)
+            dependencies = dependency_tool().recipe_ids(ROOT, linux_baseline, web=web is not None)
         dependency_tool().asset_names(dependencies, linux_baseline)
+        if ('wasm-sdk' in dependencies) != (web is not None):
+            raise ValueError('Web inventory and preserved Wasm SDK dependency must be declared together')
         value['dependencies'] = dict(dependencies)
     elif dependencies is not None:
         raise ValueError('Preserved dependency identities require release metadata schema 6')
@@ -161,7 +167,7 @@ def load_metadata(path):
                                  cmake_version=value['project_version'], schema=value['schema'],
                                  packager_sha=value.get('packager_sha'),
                                  repackaged_from=value.get('repackaged_from'),
-                                 frontends=value.get('frontends'),
+                                 frontends=value.get('frontends'), web=value.get('web'),
                                  dependencies=(value.get('dependencies') or {}) if value['schema'] >= 6 else value.get('dependencies'))
     except (KeyError, TypeError, AttributeError) as error:
         raise ValueError('Incomplete or invalid release metadata') from error
@@ -272,6 +278,13 @@ def package_bases(metadata, target):
             for arch in architectures]
 
 
+def web_tool():
+    spec = importlib.util.spec_from_file_location('datapump_release_web', ROOT / 'tools/release-web.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def verify_archive_backend(archive, metadata, target):
     """Check new bundles' root and shipped build provenance without extracting."""
     target_platform(metadata, target)
@@ -329,6 +342,8 @@ def verify_archive_backend(archive, metadata, target):
                 values = [line for line in contents.decode('utf-8').splitlines() if line.startswith(label + ':')]
                 if len(values) != 1 or not re.fullmatch(rf'{label}: (?:ON|TRUE|YES|1) \({adapter}\)', values[0]):
                     raise ValueError(f'Archive frontend build-info does not match {target}: {label}')
+        if metadata.get('web'):
+            web_tool().verify_native(archive, metadata, target)
     except (tarfile.TarError, zipfile.BadZipFile, UnicodeError) as error:
         raise ValueError(f'Invalid application archive or backend build-info for {target}') from error
 
@@ -479,16 +494,21 @@ def release_notes(metadata, details):
 
 
 def assemble(artifacts, metadata_path, notes, output, sdk_artifacts=None, *, repository=None,
-             apt_signing_key=None, apt_signing_fingerprint=None, dependency_artifacts=None):
+             apt_signing_key=None, apt_signing_fingerprint=None, dependency_artifacts=None, wasm_artifacts=None):
     metadata = load_metadata(metadata_path)
     if not notes.is_file() or notes.is_symlink() or not notes.read_text(encoding='utf-8').strip():
         raise ValueError('Release notes must be a nonempty regular UTF-8 file')
     if output.exists():
         raise ValueError(f'Refusing to replace an existing output directory: {output}')
+    if bool(metadata.get('web')) != (wasm_artifacts is not None):
+        raise ValueError('Web releases require --wasm-artifacts; historical releases must not add browser payloads')
+    browser = web_tool().browser_payload(wasm_artifacts, metadata) if wasm_artifacts is not None else None
+    producer_metadata = dict(metadata)
+    producer_metadata.pop('web', None)  # The parallel producer has not received the browser payload yet.
     copies = []
     for target in application_targets(metadata):
         directory = artifacts / target
-        copies.append((native_pair(directory, metadata, target), application_names(metadata)[target]))
+        copies.append((native_pair(directory, producer_metadata, target), application_names(metadata)[target]))
     if sdk_artifacts:
         if metadata['schema'] >= 6:
             raise ValueError('Use --dependency-artifacts with complete SDK and Windows dependency triplets')
@@ -502,7 +522,10 @@ def assemble(artifacts, metadata_path, notes, output, sdk_artifacts=None, *, rep
         staged = Path(temporary) / 'assets'
         staged.mkdir()
         for source, name in copies:
-            shutil.copyfile(source, staged / name)
+            if browser is not None:
+                web_tool().bundle(source, staged / name, browser)
+            else:
+                shutil.copyfile(source, staged / name)
         write_json(staged / 'release-metadata.json', metadata)
         (staged / 'release-notes.md').write_text(
             release_notes(metadata, notes.read_text(encoding='utf-8')), encoding='utf-8')
@@ -704,13 +727,20 @@ def upload(metadata_path, repository, target, directory):
 
 
 def finalize(metadata_path, repository, directory, publish_now=False, *,
-             apt_signing_key=None, apt_signing_fingerprint=None):
+             apt_signing_key=None, apt_signing_fingerprint=None, artifacts=None, wasm_artifacts=None):
     metadata = load_metadata(metadata_path)
+    if bool(metadata.get('web')) != (artifacts is not None and wasm_artifacts is not None):
+        raise ValueError('Web finalization requires native and browser producer artifacts')
+    if (artifacts is None) != (wasm_artifacts is None):
+        raise ValueError('Native and browser producer artifacts must be provided together')
+    browser = web_tool().browser_payload(wasm_artifacts, metadata) if wasm_artifacts is not None else None
     if directory.exists() or directory.is_symlink():
         raise ValueError('Refusing to replace an existing final release directory')
     assets = draft_info(metadata, repository)
-    expected = set(application_names(metadata).values()) | support_files(metadata)
+    expected = support_files(metadata) if browser is not None else set(application_names(metadata).values()) | support_files(metadata)
     if set(assets) != expected:
+        if browser is not None:
+            raise ValueError('Web finalization requires a support-only draft; existing assets are never overwritten')
         count = 'three' if metadata['schema'] == 1 else 'six'
         raise ValueError(f'Draft is missing one or more of the {count} portable targets')
     directory.parent.mkdir(parents=True, exist_ok=True)
@@ -721,6 +751,13 @@ def finalize(metadata_path, repository, directory, publish_now=False, *,
         if {path.name for path in staged.iterdir()} != expected:
             raise ValueError('Downloaded final release inventory contains unexpected files')
         check_draft_metadata(metadata, staged)
+        if browser is not None:
+            producer_metadata = dict(metadata)
+            producer_metadata.pop('web')
+            for target, name in application_names(metadata).items():
+                source = native_pair(artifacts / target, producer_metadata, target)
+                web_tool().bundle(source, staged / name, browser)
+                verify_archive_backend(staged / name, metadata, target)
         preserve_dependencies(metadata, repository, staged)
         build_delivery_assets(staged, metadata, repository, apt_signing_key, apt_signing_fingerprint)
         sums = ''.join(f'{digest(path)}  {path.name}\n' for path in sorted(staged.iterdir()))
@@ -728,7 +765,8 @@ def finalize(metadata_path, repository, directory, publish_now=False, *,
         verify_release(staged)
         staged.rename(directory)
     gh(['release', 'upload', metadata['tag'], '--repo', repository,
-        *[str(directory / name) for name in sorted(apt_assets(metadata) | distribution_assets(metadata) | dependency_assets(metadata))],
+        *[str(directory / name) for name in sorted(apt_assets(metadata) | distribution_assets(metadata) | dependency_assets(metadata)
+            | (set(application_names(metadata).values()) if browser is not None else set()))],
         str(directory / 'SHA256SUMS.txt')])
     if publish_now:
         gh(['release', 'edit', metadata['tag'], '--repo', repository, '--draft=false', '--latest=false'])
@@ -825,7 +863,7 @@ def repackage(source_tag, repository, directory, *, version='', run_id, run_atte
                                  linux_baseline=original['linux_baseline'], cmake_version=original['project_version'],
                                  packager_sha=packager_sha,
                                  dependencies=dependencies,
-                                 frontends=original.get('frontends'),
+                                 frontends=original.get('frontends'), web=original.get('web'),
                                  repackaged_from={'tag': source_tag,
                                                  'inventory_sha256': digest(source / 'SHA256SUMS.txt')})
         if extra and not extra <= dependency_assets(metadata):
@@ -861,6 +899,7 @@ def main(argv=None):
     metadata.add_argument('--run-attempt', default='1')
     metadata.add_argument('--experiment', action='store_true')
     metadata.add_argument('--linux-baseline', choices=('bookworm-sdk', 'ubuntu-22.04'), default='bookworm-sdk')
+    metadata.add_argument('--web', action='store_true', help='Require browser payload and Linux pipe worker on every release target')
     metadata.add_argument('--output', type=Path, required=True)
     metadata.add_argument('--github-output', type=Path)
     matrices = commands.add_parser('matrices', help='Select schema-aware build and compatibility jobs')
@@ -871,6 +910,7 @@ def main(argv=None):
     stage.add_argument('--metadata', type=Path, required=True)
     stage.add_argument('--notes', type=Path, required=True)
     stage.add_argument('--output', type=Path, required=True)
+    stage.add_argument('--wasm-artifacts', type=Path, help='Verified independent browser TGZ/ZIP producer output')
     stage.add_argument('--sdk-artifacts', type=Path)
     stage.add_argument('--dependency-artifacts', type=Path,
                        help='Complete recorded SDK/dependency triplets; otherwise fetch them from base')
@@ -905,6 +945,8 @@ def main(argv=None):
             command.add_argument('--target', required=True,
                                  help='Platform identity, including -fltk or -rev for schemas 2 and newer')
         if name == 'finalize':
+            command.add_argument('--artifacts', type=Path)
+            command.add_argument('--wasm-artifacts', type=Path)
             command.add_argument('--publish', action='store_true')
             command.add_argument('--apt-signing-key', type=Path)
             command.add_argument('--apt-signing-fingerprint')
@@ -914,7 +956,7 @@ def main(argv=None):
             value = make_metadata(source_sha=args.source_sha, run_id=args.run_id,
                                   run_attempt=args.run_attempt, version=args.version,
                                   experiment=args.experiment, linux_baseline=args.linux_baseline,
-                                  frontends=['tui', 'framebuffer'])
+                                  frontends=['tui', 'framebuffer'], web=web_tool().CAPABILITY if args.web else None)
             write_json(args.output, value)
             if args.github_output:
                 with args.github_output.open('a', encoding='utf-8') as output:
@@ -932,7 +974,7 @@ def main(argv=None):
             value = assemble(args.artifacts, args.metadata, args.notes, args.output, args.sdk_artifacts,
                              repository=args.repo, apt_signing_key=args.apt_signing_key,
                              apt_signing_fingerprint=args.apt_signing_fingerprint,
-                             dependency_artifacts=args.dependency_artifacts)
+                             dependency_artifacts=args.dependency_artifacts, wasm_artifacts=args.wasm_artifacts)
         elif args.command == 'repackage':
             value = repackage(args.source_tag, args.repo, args.directory, version=args.version,
                               run_id=args.run_id, run_attempt=args.run_attempt, packager_sha=args.packager_sha,
@@ -950,7 +992,8 @@ def main(argv=None):
         elif args.command == 'finalize':
             value = finalize(args.metadata, args.repo, args.directory, args.publish,
                              apt_signing_key=args.apt_signing_key,
-                             apt_signing_fingerprint=args.apt_signing_fingerprint)
+                             apt_signing_fingerprint=args.apt_signing_fingerprint,
+                             artifacts=args.artifacts, wasm_artifacts=args.wasm_artifacts)
         else:
             value = publish(args.directory, args.repo, publish_now=args.publish)
     except (ValueError, OSError, RuntimeError, subprocess.CalledProcessError) as error:

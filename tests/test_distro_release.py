@@ -13,6 +13,7 @@ import subprocess
 import tarfile
 import tempfile
 import unittest
+from web_delivery_fixture import WEB, payload as web_payload
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location('distro', ROOT / 'tools/distro-release.py')
@@ -30,7 +31,7 @@ def archive(path, metadata, target):
              'lib/example.so': (b'private binary library\x00', 0o644),
              'share/doc/datapump/LICENSE': (b'fixture license: terms retained\n', 0o444),
              'share/doc/datapump/third_party/rev/README.datapump.md': (b'Provenance is not a new license grant\n', 0o644),
-             'share/doc/datapump/build-info.txt': (f'GUI: ON ({backend})\n'.encode(), 0o644)}
+             'share/doc/datapump/build-info.txt': (f'Source commit: {metadata["source_sha"]}\nGUI: ON ({backend})\n'.encode(), 0o644)}
     files.update({f'share/man/man1/{name}.1': ((ROOT / f'docs/man/{name}.1').read_bytes(), 0o644)
                   for name in ('pump', 'pump-fast', 'datapump-gui')})
     if metadata.get('frontends'):
@@ -39,6 +40,10 @@ def archive(path, metadata, target):
         for name in ('datapump-tui', 'datapump-fb'):
             files[f'bin/{name}'] = (b'#!/bin/sh\nexit 0\n', 0o755)
             files[f'share/man/man1/{name}.1'] = ((ROOT / f'docs/man/{name}.1').read_bytes(), 0o644)
+    if metadata.get('web'):
+        files.update(web_payload(metadata))
+        data, mode = files['share/doc/datapump/build-info.txt']
+        files['share/doc/datapump/build-info.txt'] = (data + b'Web worker: ON (inherited-pipes; no sockets)\n', mode)
     sums = ''.join(f'{hashlib.sha256(data).hexdigest()}  {name}\n' for name, (data, _) in files.items())
     files['manifest.sha256'] = (sums.encode(), 0o644)
     with tarfile.open(path, 'w:gz') as stream:
@@ -112,6 +117,7 @@ class DistroReleaseTests(unittest.TestCase):
                 subprocess.run(['bash', '-n'], input=script, text=True, check=True)
                 self.assertNotIn('cmake', script)
                 self.assertNotIn('ninja', script)
+                self.assertNotIn('xdg-utils', script)
             self.assertIn("'!strip'", arch)
             self.assertIn("'!purge'", arch)
             self.assertIn('depends_x86_64 = glibc>=2.36', srcinfo)
@@ -206,6 +212,36 @@ class DistroReleaseTests(unittest.TestCase):
                         self.assertTrue(os.access(installed / f'usr/bin/{command}', os.X_OK))
                         manual = installed / f'usr/share/man/man1/{command}.1.gz'
                         self.assertIn(command.encode(), gzip.decompress(manual.read_bytes()))
+
+    def test_web_pages_worker_and_launchers_install_through_arch_and_gentoo(self):
+        self.assets = self.root / 'web-release'
+        self.assets.mkdir()
+        self.metadata = release.make_metadata(source_sha='a' * 40, run_id='123', run_attempt='2',
+            cmake_version='0.7.2', experiment=True, version='v001_00', web=WEB,
+            dependencies={'linux-sdk': '1' * 20, 'windows-base': '2' * 20, 'wasm-sdk': '3' * 20},
+            frontends=['tui', 'framebuffer'], now=datetime(2026, 9, 23, 12, 0, tzinfo=timezone.utc))
+        for target, name in release.application_names(self.metadata).items():
+            if target.startswith('linux-'):
+                archive(self.assets / name, self.metadata, target)
+        self.manifest = distro.build(self.assets, self.metadata, self.repository)
+        trees, _ = distro.expected(self.assets, self.metadata, self.repository)
+        for backend in distro.BACKENDS:
+            srcinfo = trees['arch'][f'datapump-{backend}-bin/.SRCINFO'][0].decode()
+            self.assertIn('depends = xdg-utils\n', srcinfo)
+            ebuild = next(data.decode() for name, (data, _) in trees['gentoo'].items()
+                          if f'datapump-{backend}-bin/' in name and name.endswith('.ebuild'))
+            self.assertIn('x11-misc/xdg-utils', ebuild)
+            for kind in distro.ROOTS:
+                for architecture in distro.ARCHES:
+                    installed = self.execute_recipe(kind, backend, architecture)
+                    for name, (data, mode) in web_payload(self.metadata).items():
+                        path = installed / f'opt/datapump/{backend}/{name}'
+                        self.assertEqual(path.read_bytes(), data)
+                        self.assertEqual(path.stat().st_mode & 0o777, mode)
+                    suffix = '' if backend == 'fltk' else '-rev'
+                    for command in ('datapump-html', 'datapump-worker'):
+                        self.assertTrue(os.access(installed / f'usr/bin/{command}{suffix}', os.X_OK))
+                    self.assertTrue((installed / f'usr/share/applications/datapump-html{suffix}.desktop').is_file())
 
     def test_tampered_bundle_manifest_or_recipe_is_rejected(self):
         for filename in ('distro-packages.json', 'datapump-arch-recipes.tar.gz', 'datapump-gentoo-overlay.tar.gz'):

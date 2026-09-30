@@ -1376,5 +1376,22 @@ class ChannelCertificationTests(DistroCertificationTests):
             self.assertEqual(certify.main(args), 1)
 
 
+class WebCertification(unittest.TestCase):
+    def test_web_release_requires_parallel_scope_and_records_limits(self):
+        release = certify.release
+        values = release.make_metadata(source_sha='a' * 40, run_id='1', run_attempt='1',
+                                       web=release.web_tool().CAPABILITY)
+        self.assertIn('web-tests', certify.required_jobs(values))
+        coverage = certify.required_coverage(values)
+        self.assertIn('Wasm web (independent job)', coverage['source_tests']['linux-x86_64-fltk']['groups'])
+        self.assertIn('web worker (independent job)', coverage['source_tests']['linux-aarch64-rev']['groups'])
+        self.assertNotIn('web worker (independent job)', coverage['source_tests']['windows-x86_64-rev']['groups'])
+        state = {'metadata': values, 'inventory_sha256': 'b' * 64}
+        self.assertEqual(certify.output_values(state, None)['web'], 'true')
+        historical = dict(values)
+        historical.pop('web')
+        self.assertNotIn('web-tests', certify.required_jobs(historical))
+
+
 if __name__ == '__main__':
     unittest.main()

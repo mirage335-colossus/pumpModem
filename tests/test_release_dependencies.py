@@ -104,6 +104,35 @@ class ReleaseDependencyTests(unittest.TestCase):
         self.assertEqual(dependencies.recipe_ids(ROOT, 'ubuntu-22.04'),
                          {'windows-base': windows.recipe_identity()[1]})
 
+    def test_wasm_recipe_identity_matches_reusable_sdk_producer(self):
+        wasm = load_tool('wasm-sdk-release')
+        identities = dependencies.recipe_ids(ROOT, 'bookworm-sdk', web=True)
+        self.assertEqual(identities['wasm-sdk'], wasm.identity())
+        self.assertEqual(set(identities), {'linux-sdk', 'windows-base', 'wasm-sdk'})
+        self.assertEqual(len(dependencies.asset_names(identities, 'bookworm-sdk')), 9)
+
+    def test_wasm_triplet_is_preserved_and_recovered_without_base(self):
+        recipes = dict(RECIPES, **{'wasm-sdk': 'a' * 20})
+        group = dependencies._groups(recipes, 'bookworm-sdk')['wasm-sdk']
+        binary, source, checksum = group
+        data = {binary: b'compiled Wasm SDK', source: b'exact sources and recipe'}
+        data[checksum] = ''.join(f'{sha(data[name])}  {name}\n' for name in (binary, source)).encode()
+        for name, content in data.items():
+            asset_id = len(self.assets) + 1
+            self.assets[name] = {'id': asset_id, 'name': name, 'state': 'uploaded',
+                                 'digest': 'sha256:' + sha(content), 'size': len(content)}
+            self.payloads[asset_id] = content
+        inventory = {name: asset['digest'][7:] for name, asset in self.assets.items()}
+        self.base_releases = []
+        dependencies.preserve(REPO, self.directory, recipes, 'bookworm-sdk',
+                              source_assets=self.assets, source_inventory=inventory)
+        dependencies.verify(self.directory, recipes, 'bookworm-sdk')
+        self.assertEqual(self.api_calls, [])
+        self.assertEqual(len(list(self.directory.iterdir())), 9)
+        (self.directory / binary).write_bytes(b'modified')
+        with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
+            dependencies.verify(self.directory, recipes, 'bookworm-sdk')
+
     def test_asset_names_require_exact_baseline_kinds_and_identities(self):
         self.assertEqual(dependencies.asset_names(RECIPES, 'bookworm-sdk'), set(self.assets))
         self.assertEqual(len(dependencies.asset_names({'windows-base': WINDOWS}, 'ubuntu-22.04')), 3)

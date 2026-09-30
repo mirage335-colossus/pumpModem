@@ -138,7 +138,8 @@ def collect_smoke_warnings(directory, run_id, run_attempt):
 
 def required_jobs(metadata):
     return (REQUIRED_JOBS | ({'apt-repository'} if metadata['schema'] >= 3 else set())
-            | ({'distro-recipes'} if metadata['schema'] >= 4 else set()))
+            | ({'distro-recipes'} if metadata['schema'] >= 4 else set())
+            | ({'web-tests'} if metadata.get('web') else set()))
 
 
 def required_coverage(metadata):
@@ -148,6 +149,8 @@ def required_coverage(metadata):
               'relocation to a path with spaces', 'runtime dependency closure']
     if metadata.get('frontends'):
         checks += ['required TUI and framebuffer binaries/manuals', 'TUI and framebuffer self-checks']
+    if metadata.get('web'):
+        checks += ['required standalone HTML/Wasm payload, source/SDK identity, notices and checksums']
     platforms = {
         'source_tests': {
             'linux-x86_64': {'environment': 'Debian 12 (source SDK)' if sdk else 'Ubuntu 22.04',
@@ -169,6 +172,11 @@ def required_coverage(metadata):
     if metadata.get('frontends'):
         for source in platforms['source_tests'].values():
             source['groups'] = source['groups'] + ['frontends (independent job)']
+    if metadata.get('web'):
+        for platform, source in platforms['source_tests'].items():
+            if platform.startswith('linux-'):
+                source['groups'] += ['web worker (independent job)']
+        platforms['source_tests']['linux-x86_64']['groups'] += ['Wasm web (independent job)']
     for target in release.application_targets(metadata):
         platform = release.target_platform(metadata, target)
         backend = release.target_backend(metadata, target)
@@ -477,6 +485,9 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
             evidence['dependencies'] = metadata['dependencies']
             evidence['dependency_assets'] = {name: state['inventory'][name] for name in sorted(release.dependency_assets(metadata))}
         evidence['frontends'] = metadata.get('frontends', [])
+        if metadata.get('web'):
+            evidence['web'] = metadata['web']
+            evidence['browser_device_qualification'] = 'Not covered: real browser microphone, playback and download behavior'
         stem = f'certification-{run_id}-attempt-{run_attempt}'
         if any(stem + suffix in state['assets'] for suffix in (
                 '.json', '.md', '-warning.log', '-smoke-warnings.json', '-smoke-warnings.log')):
@@ -520,6 +531,9 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
             + ('TUI and framebuffer delivery and independent source checks are required by this release inventory.\n\n'
                if metadata.get('frontends') else
                'Historical release: TUI/framebuffer delivery is not declared; no frontend coverage is claimed.\n\n')
+            + ('Standalone HTML/Wasm delivery and independent Linux worker/Wasm source checks are required. '
+               'Physical browser microphone, playback and download behavior remains unqualified.\n\n'
+               if metadata.get('web') else '')
             + ('**Windows Rev graphics coverage unavailable.** '
                + ('Hosted certification passed with documented exclusions. ' if passed
                   else 'Hosted certification failed. ')
@@ -613,6 +627,7 @@ def output_values(state, output):
               'distro_recipes': str(metadata['schema'] >= 4).lower(),
               'distro_channels': str(metadata['schema'] >= 5).lower(),
               'frontends': str(bool(metadata.get('frontends'))).lower(),
+              'web': str(bool(metadata.get('web'))).lower(),
               'gui_backends': json.dumps(metadata.get('gui_backends', ['fltk']), separators=(',', ':')),
               'application_targets': json.dumps(list(release.application_targets(metadata)), separators=(',', ':'))}
     for name in ('archive', 'package_root'):

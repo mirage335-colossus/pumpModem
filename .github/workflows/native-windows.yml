@@ -7,7 +7,7 @@ on:
         type: string
         default: windows-2022
       scope:
-        description: 'core, fast, live, calibration, frontends, or package'
+        description: 'core, fast, live, calibration, frontends, web, or package'
         type: string
         required: true
       calibration_section:
@@ -62,6 +62,7 @@ jobs:
             'calibration' { $targets = @('test_differential_receiver_probability') }
             'package' { $targets = @('datapump-apps') }
             'frontends' { $targets = @('datapump-tests-frontends') }
+            'web' { $targets = @('datapump-tests-web') }
             'core' { $targets = @('datapump-apps', 'datapump-tests-ci-core') }
             'fast' { $targets = @('datapump-tests-fast') }
             'live' { $targets = @('datapump-tests-ci-live') }

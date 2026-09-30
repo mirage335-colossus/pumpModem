@@ -13,7 +13,7 @@ import time
 import xml.etree.ElementTree as ET
 
 
-SCOPES = ('core', 'fast', 'live', 'calibration', 'frontends')
+SCOPES = ('core', 'fast', 'live', 'calibration', 'frontends', 'web')
 REALTIME = {'fast_session', 'gui_fast_live'}
 LIVE = {'live', 'live_profiles'}
 
@@ -26,6 +26,8 @@ def scope_for(test):
     if test['name'] in LIVE:
         return 'live'
     labels = properties(test).get('LABELS', [])
+    if 'web' in labels:
+        return 'web'
     if 'frontends' in labels:
         return 'frontends'
     if 'calibration' in labels:

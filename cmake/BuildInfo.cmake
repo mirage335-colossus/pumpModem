@@ -47,7 +47,11 @@ if(NOT _helper_target)
 endif()
 find_package(Git QUIET)
 set(_revision "source archive (Git unavailable)")
+set(_source_commit "unavailable")
 if(GIT_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
+  execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    OUTPUT_VARIABLE _source_commit OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
   execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse --short=12 HEAD
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     OUTPUT_VARIABLE _revision OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
@@ -58,7 +62,7 @@ if(GIT_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
     string(APPEND _revision " (working tree modified)")
   endif()
 endif()
-set(_build_info "DataPump ${DATAPUMP_VERSION}\nPackage version: ${PROJECT_VERSION}\nRevision at configuration: ${_revision}\nSystem: ${CMAKE_SYSTEM_NAME} ${CMAKE_SYSTEM_PROCESSOR}\nCompiler: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}\nGenerator: ${CMAKE_GENERATOR}\nBuild type: ${CMAKE_BUILD_TYPE}\nGUI: ${DATAPUMP_BUILD_GUI} (${DATAPUMP_GUI_BACKEND})\nTUI: ${DATAPUMP_BUILD_TUI} (${DATAPUMP_TUI_BACKEND})\nFramebuffer: ${DATAPUMP_BUILD_FB} (${DATAPUMP_FB_HOST})\nFramebuffer library: ${DATAPUMP_BUILD_FRAMEBUFFER_LIBRARY}\nWeb worker: ${DATAPUMP_BUILD_WEB_WORKER} (inherited-pipes; no sockets)\nWebAssembly: ${DATAPUMP_BUILD_WASM} (local messages; no sockets)\nPortable: ${DATAPUMP_PORTABLE}\nSanitizers: ${DATAPUMP_SANITIZERS}\nTests configured: ${BUILD_TESTING}\nDependency prefix: ${DATAPUMP_DEPENDENCY_PREFIX}\nC++ launcher: ${CMAKE_CXX_COMPILER_LAUNCHER}\n")
+set(_build_info "DataPump ${DATAPUMP_VERSION}\nPackage version: ${PROJECT_VERSION}\nRevision at configuration: ${_revision}\nSource commit: ${_source_commit}\nSystem: ${CMAKE_SYSTEM_NAME} ${CMAKE_SYSTEM_PROCESSOR}\nCompiler: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}\nGenerator: ${CMAKE_GENERATOR}\nBuild type: ${CMAKE_BUILD_TYPE}\nGUI: ${DATAPUMP_BUILD_GUI} (${DATAPUMP_GUI_BACKEND})\nTUI: ${DATAPUMP_BUILD_TUI} (${DATAPUMP_TUI_BACKEND})\nFramebuffer: ${DATAPUMP_BUILD_FB} (${DATAPUMP_FB_HOST})\nFramebuffer library: ${DATAPUMP_BUILD_FRAMEBUFFER_LIBRARY}\nWeb worker: ${DATAPUMP_BUILD_WEB_WORKER} (inherited-pipes; no sockets)\nWebAssembly: ${DATAPUMP_BUILD_WASM} (local messages; no sockets)\nPortable: ${DATAPUMP_PORTABLE}\nSanitizers: ${DATAPUMP_SANITIZERS}\nTests configured: ${BUILD_TESTING}\nDependency prefix: ${DATAPUMP_DEPENDENCY_PREFIX}\nC++ launcher: ${CMAKE_CXX_COMPILER_LAUNCHER}\n")
 if(DATAPUMP_SDK_ROOT)
   string(APPEND _build_info "Source SDK: ${DATAPUMP_SDK_ID}\nSDK manifest SHA-256: ${DATAPUMP_CONFIGURED_SDK_MANIFEST}\nSDK target: ${DATAPUMP_SDK_TARGET}\nSDK glibc ceiling: ${DATAPUMP_SDK_GLIBC_MAX}\n")
 endif()

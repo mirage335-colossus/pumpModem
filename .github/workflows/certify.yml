@@ -124,6 +124,7 @@ jobs:
       apt_repository: ${{ steps.release.outputs.apt_repository }}
       distro_recipes: ${{ steps.release.outputs.distro_recipes }}
       frontends: ${{ steps.release.outputs.frontends }}
+      web: ${{ steps.release.outputs.web }}
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ inputs.release_tag }}
@@ -147,10 +148,15 @@ jobs:
           matrices = release['build_matrices'](metadata)
           # Expand include-only rows explicitly; each published target requires
           # both independent scopes with the same compiler and recipe identity.
+          scopes = ['main', 'calibration']
+          if metadata.get('frontends'):
+              scopes.append('frontends')
+          if metadata.get('web'):
+              scopes.append('web')
           matrices['linux_matrix']['include'] = [
               dict(row, scope=scope)
               for row in matrices['linux_matrix']['include']
-              for scope in (('main', 'calibration', 'frontends') if metadata.get('frontends') else ('main', 'calibration'))]
+              for scope in scopes]
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               for name, value in {'metadata_json': metadata, **matrices}.items():
                   output.write(name + '=' + json.dumps(value, separators=(',', ':')) + '\n')
@@ -183,6 +189,7 @@ jobs:
       RELEASE_TARGET: ${{ matrix.target }}
       INVENTORY_SHA256: ${{ needs.prepare.outputs.inventory_sha256 }}
       BUILD_FRONTENDS: ${{ needs.prepare.outputs.frontends }}
+      BUILD_WEB: ${{ needs.prepare.outputs.web }}
     steps:
       - name: Load current package-fetch helper before installing Git
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -270,6 +277,7 @@ jobs:
           for group in build gui packaging; do
             set -- --backend "$GUI_BACKEND" --build-dir build/certify --jobs 2
             if [ "$BUILD_FRONTENDS" = true ]; then set -- "$@" --tui --fb; fi
+            if [ "$BUILD_WEB" = true ]; then set -- "$@" --web-worker; fi
             if [ "$separate_build_jobs" = true ]; then set -- "$@" --build-jobs "$(nproc)"; fi
             if [ "$USE_SDK" = true ]; then set -- "$@" --sdk "$GITHUB_WORKSPACE/build/sdk"; fi
             ./build.sh test "$group" --stop-on-failure "$@" -- -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600
@@ -299,6 +307,31 @@ jobs:
           # required sibling scope and remaining tests keep concurrency.
           "$contract_ctest" --test-dir build/certify -C Release --output-on-failure --stop-on-failure --no-tests=error -L '^contract$' -LE native_gui -R '^(live|live_profiles)$' --parallel 1
           "$contract_ctest" --test-dir build/certify -C Release --output-on-failure --stop-on-failure --no-tests=error -L '^contract$' -LE native_gui -E '^(live|live_profiles|differential_receiver_probability)$' --parallel 2
+      - name: Prepare the JavaScript host for independent web source checks
+        if: matrix.scope == 'web'
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24.19.0'
+      - name: Run every native pipe worker and browser adapter case independently
+        if: matrix.scope == 'web'
+        env:
+          USE_SDK: ${{ matrix.sdk }}
+          DATAPUMP_MAX_GLIBC: ${{ matrix.glibc }}
+        run: |
+          if [ "$USE_SDK" != true ]; then export CC=gcc-11 CXX=g++-11; fi
+          set -- --cli --web-worker --build-dir build/certify-web --jobs 1 --build-jobs "$(nproc)"
+          if [ "$USE_SDK" = true ]; then set -- "$@" --sdk "$GITHUB_WORKSPACE/build/sdk"; fi
+          ./build.sh test web --stop-on-failure "$@" -- -DDATAPUMP_PORTABLE=ON
+      - name: Retain independent native web evidence
+        if: ${{ always() && matrix.scope == 'web' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: certification-web-${{ matrix.target }}-attempt-${{ github.run_attempt }}
+          path: |
+            build/certify-web/build-info.txt
+            build/certify-web/Testing/Temporary/
+          if-no-files-found: warn
+          retention-days: 7
       - name: Run required terminal and framebuffer source checks independently
         if: matrix.scope == 'frontends'
         env:
@@ -632,6 +665,35 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  wasm-tests:
+    if: ${{ !inputs.devfast && needs.prepare.outputs.web == 'true' }}
+    needs: prepare
+    name: Exact-source browser WebAssembly qualification
+    uses: ./.github/workflows/wasm-application.yml
+    with:
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+      scope: tests
+      artifact_name: certification-Wasm
+      source_ref: ${{ needs.prepare.outputs.source_sha }}
+      release_tag: ${{ inputs.release_tag }}
+      inventory_sha256: ${{ needs.prepare.outputs.inventory_sha256 }}
+
+  web-tests:
+    if: ${{ always() && !inputs.devfast && needs.prepare.outputs.web == 'true' }}
+    needs: [prepare, linux-tests, wasm-tests]
+    name: Require all independent worker and Wasm scopes
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+    timeout-minutes: 5
+    env:
+      NATIVE_RESULT: ${{ needs.linux-tests.result }}
+      WASM_RESULT: ${{ needs.wasm-tests.result }}
+    steps:
+      - name: Reject failed, skipped or cancelled web qualification
+        run: |
+          test "$NATIVE_RESULT" = success
+          test "$WASM_RESULT" = success
+          echo 'Every native worker scope and the release-retained Wasm SDK source suite passed independently. Physical browser/device qualification remains separate.' >> "$GITHUB_STEP_SUMMARY"
+
   apt-repository:
     if: ${{ !inputs.devfast && needs.prepare.outputs.apt_repository == 'true' }}
     needs: prepare
@@ -654,7 +716,7 @@ jobs:
   record:
     outputs:
       report_attempt: ${{ steps.report.outputs.report_attempt }}
-    needs: [prepare, linux-tests, windows-tests, compatibility, apt-repository, distro-recipes]
+    needs: [prepare, linux-tests, windows-tests, compatibility, apt-repository, distro-recipes, web-tests]
     if: ${{ always() && !inputs.devfast && needs.prepare.result == 'success' }}
     # Read-only tests may overlap earlier attempts. Only this job updates the
     # release, and retains the original per-release lock and no-cancel policy.
@@ -675,6 +737,7 @@ jobs:
       TESTED_TARGETS: ${{ needs.prepare.outputs.application_targets }}
       APT_REPOSITORY: ${{ needs.prepare.outputs.apt_repository }}
       DISTRO_RECIPES: ${{ needs.prepare.outputs.distro_recipes }}
+      WEB: ${{ needs.prepare.outputs.web }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -699,6 +762,8 @@ jobs:
               jobs.append('apt-repository')
           if os.environ['DISTRO_RECIPES'] == 'true':
               jobs.append('distro-recipes')
+          if os.environ['WEB'] == 'true':
+              jobs.append('web-tests')
           results = {'source_sha': os.environ['SOURCE_SHA'], 'inventory_sha256': os.environ['INVENTORY_SHA256'],
                      'tested_targets': json.loads(os.environ['TESTED_TARGETS']),
                      'jobs': {name: needs[name]['result'] for name in jobs},

@@ -169,7 +169,28 @@ adjacent `web-manifest.json` records the exact input hashes and Wasm imports;
 `manifest.sha256` covers those generated page artifacts. Static packages install
 these files under `share/datapump/web/wasm`, with no native executable or desktop
 launcher. Keep Wasm and native output trees separate. Compiler-host support is
-initially Linux x86_64; other host SDK recipes need separate qualification.
+Linux x86_64; the generated browser page is portable to Windows and Linux.
+The reusable [Wasm SDK](../third_party/build-support/wasm-sdk/README.md) has its
+own immutable `base` recipe, source archive and checksums. Ordinary CI and release
+jobs fetch and relocate that prepared SDK; they never prepare missing dependencies.
+Use explicit `sdk-base.yml` maintenance with `platform=wasm` (or `all`) when a
+new Wasm recipe needs publishing.
+
+Full native CI runs a separate `web` shard beside core, Live, calibration and
+frontend shards. Wasm package and regression jobs run independently as well.
+The `web` label is excluded from `ci-core` in both its build prerequisites and
+test selection. SDK and release certification use the same separation; native
+and Wasm live tests therefore never compete on one runner. Automatic push/PR
+checks remain lightweight and include changes under `web/`.
+
+Release producers build native archives and the browser archive pair in parallel.
+The finalizer checks the browser source commit, prepared SDK recipe, notices and
+file hashes, then adds the identical browser payload to all six native bundles.
+Linux bundles also include the pipe worker and hosted adapters. The Windows
+bundle includes the standalone page; it does not advertise an unsupported native
+pipe worker. Debian/APT, pacman/Arch and Gentoo packages retain those same files.
+Their `datapump-html` and `datapump-html-rev` commands open the coinstalled page
+with the user's browser; the desktop menu also provides an HTML entry.
 
 The page uses a single Worker and cooperative execution, without pthreads,
 SharedArrayBuffer or cross-origin isolation headers. Its CSP forbids connections;
@@ -491,7 +512,7 @@ qualification. Reuse completed checks only for their unchanged source/configurat
 Package and test jobs share reusable workflow definitions, not configured build
 trees. This repeats a small amount of setup/compilation while avoiding brittle
 build-tree relocation and keeping test work disjoint. Linux retains two CTest
-slots, except Live uses one; Windows also uses one. Calibration detects
+slots, except Live, frontend and web scopes use one; Windows also uses one. Calibration detects
 available CPUs, capped at 16.
 SDK package producers likewise run independently of source qualification, so
 copied SDK binaries can be checked as soon as the packages are ready. Every

@@ -12,7 +12,7 @@ on:
         type: string
         default: windows-2022
       platform:
-        description: 'Reusable Linux source SDK or Windows static application dependencies'
+        description: 'Reusable Linux/Windows dependencies or the separate Wasm SDK'
         type: string
         default: linux
       source:
@@ -40,9 +40,9 @@ on:
         options: [windows-2022, windows-latest-l, windows-latest-h]
         default: windows-2022
       platform:
-        description: 'Reusable Linux source SDK or Windows static application dependencies'
+        description: 'Reusable Linux/Windows dependencies or the separate Wasm SDK'
         type: choice
-        options: [linux, windows, both]
+        options: [linux, windows, wasm, both, all]
         default: linux
       source:
         description: 'auto reuses base; base verifies durable reuse; rebuild compiles from source'
@@ -64,6 +64,11 @@ on:
       - 'tests/test_ci_apt.py'
       - '.github/workflows/sdk-base.yml'
       - '.github/workflows/sdk-build.yml'
+      - '.github/workflows/wasm-base.yml'
+      - 'tools/wasm-sdk-release.py'
+      - 'tools/build-wasm-sdk.py'
+      - 'third_party/build-support/wasm-sdk/**'
+      - 'tests/test_wasm_sdk_release.py'
       - '.github/workflows/windows-base.yml'
       - 'tools/sdk-release.py'
       - 'tests/test_sdk_release.py'
@@ -85,10 +90,11 @@ jobs:
         with:
           persist-credentials: false
       - run: python3 tests/test_sdk_release.py
+      - run: python3 tests/test_wasm_sdk_release.py
       - run: python3 tests/test_ci_apt.py
 
   sdk:
-    if: github.event_name == 'workflow_dispatch' && inputs.platform != 'windows'
+    if: github.event_name == 'workflow_dispatch' && (inputs.platform == 'linux' || inputs.platform == 'both' || inputs.platform == 'all')
     needs: helper
     uses: ./.github/workflows/sdk-build.yml
     with:
@@ -100,11 +106,22 @@ jobs:
   windows:
     # Both platforms publish to the same base release; serialize first-time
     # creation too, while allowing Windows-only maintenance to skip Linux.
-    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && needs.helper.result == 'success' && (inputs.platform == 'windows' || (inputs.platform == 'both' && needs.sdk.result == 'success')) }}
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && needs.helper.result == 'success' && (inputs.platform == 'windows' || ((inputs.platform == 'both' || inputs.platform == 'all') && needs.sdk.result == 'success')) }}
     needs: [helper, sdk]
     uses: ./.github/workflows/windows-base.yml
     with:
       linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
       windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
       source: ${{ inputs.source }}
+      publish: ${{ inputs.publish }}
+
+  wasm:
+    # Publication uses the same durable shelf; serialize only explicit base maintenance.
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && needs.helper.result == 'success' && (inputs.platform == 'wasm' || (inputs.platform == 'all' && needs.windows.result == 'success')) }}
+    needs: [helper, windows]
+    uses: ./.github/workflows/wasm-base.yml
+    with:
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+      source: ${{ inputs.source }}
+      jobs: ${{ inputs.jobs }}
       publish: ${{ inputs.publish }}

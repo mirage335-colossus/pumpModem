@@ -45,6 +45,20 @@ def digest(path):
     return result.hexdigest()
 
 
+def recipe_files():
+    return {str(path.relative_to(ROOT)): path.read_bytes()
+            for path in [Path(__file__).resolve(), *sorted(RECIPE.parent.rglob('*'))]
+            if path.is_file()}
+
+
+def recipe_id():
+    result = hashlib.sha256()
+    for name, data in recipe_files().items():
+        result.update(name.encode() + b'\0')
+        result.update(data)
+    return result.hexdigest()[:20]
+
+
 def recipe():
     value = json.loads(RECIPE.read_text())
     if value.get('schema_version') != 1 or value.get('target') != 'wasm32-emscripten':
@@ -187,6 +201,10 @@ def prepare(sources, destination, jobs):
     share = destination / 'share/datapump-wasm-sdk'
     share.mkdir(parents=True)
     shutil.copy2(RECIPE, share / 'recipe.json')
+    for name, data in recipe_files().items():
+        path = share / 'recipe' / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
     shutil.copy2(Path(__file__), share / 'build-wasm-sdk.py')
     support = [value['entropy']['patch'], *value['entropy']['probe_sources']]
     for name in support:
@@ -201,6 +219,7 @@ def prepare(sources, destination, jobs):
     for item in value['inputs']:
         shutil.copy2(sources / item['file'], share / 'sources' / item['file'])
     manifest = {'schema_version': 1, 'target': value['target'], 'host': 'linux-x86_64',
+                'recipe_id': recipe_id(),
                 'emscripten_version': value['emscripten_version'], 'recipe_sha256': digest(RECIPE),
                 'compiler': 'emsdk/upstream/emscripten/emcc', 'cxx_compiler': 'emsdk/upstream/emscripten/em++',
                 'toolchain': 'emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake',
@@ -211,7 +230,11 @@ def prepare(sources, destination, jobs):
                 'entropy_probe': 'passed', 'support_sha256': support_hashes,
                 'sources': value['inputs'], 'cache_frozen': True}
     (share / 'manifest.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n')
+    # pkg-config metadata must resolve after a verified archive installation.
+    for metadata in (target / 'lib/pkgconfig').glob('*.pc'):
+        metadata.write_text(metadata.read_text().replace(str(target), '${pcfiledir}/../..'))
     (share / 'relocated-root.txt').write_text(str(destination) + '\n')
+    shutil.rmtree(unpack)
     print('Prepared offline Wasm SDK:', destination)
 
 

@@ -31,7 +31,8 @@ class Selection(unittest.TestCase):
                      test('fast', ('fast', 'contract')), test('legacy', ('legacy',)),
                      test('live', ('regular', 'contract')), test('live_profiles', ('regular', 'contract')),
                      test('calibration', ('regular', 'contract', 'calibration')),
-                     test('terminal', ('frontends',)), test('framebuffer', ('frontends',))]
+                     test('terminal', ('frontends',)), test('framebuffer', ('frontends',)),
+                     test('web_worker', ('web',)), test('wasm_live', ('web',))]
         owners = []
         for scope in runner.SCOPES:
             selected, omitted, counts = runner.select_tests(inventory, scope)
@@ -50,6 +51,17 @@ class Selection(unittest.TestCase):
         for scope in ('core', 'fast'):
             selected, _, _ = runner.select_tests(inventory, scope)
             self.assertEqual([item['name'] for item in selected], [scope])
+
+    def test_web_scope_does_not_extend_native_core_or_frontend_jobs(self):
+        inventory = [test('core'), test('terminal', ('frontends',)),
+                     test('execution', ('web',)), test('web_live', ('web',)),
+                     test('build_wasm_sdk', ('web', 'build')), test('wasm_live', ('web',))]
+        selected, omitted, _ = runner.select_tests(inventory, 'web')
+        self.assertEqual([item['name'] for item in selected],
+                         ['execution', 'web_live', 'build_wasm_sdk', 'wasm_live'])
+        self.assertFalse(omitted)
+        self.assertEqual([item['name'] for item in runner.select_tests(inventory, 'core')[0]], ['core'])
+        self.assertEqual([item['name'] for item in runner.select_tests(inventory, 'frontends')[0]], ['terminal'])
 
     def test_live_scope_is_exact_and_mandatory_in_every_configuration(self):
         inventory = [test(name, ('regular', 'contract'))
@@ -107,6 +119,33 @@ class Reports(unittest.TestCase):
             self.path.write_text(f'<testsuite>{contents}</testsuite>')
             with self.assertRaises(ValueError):
                 runner.read_results(self.path, [test('wanted')], 3600, .8)
+
+
+@unittest.skipUnless(shutil.which('cmake'), 'CMake is needed for target partition fixtures')
+class BuildPartitions(unittest.TestCase):
+    def test_core_compilation_does_not_build_web_prerequisites(self):
+        import subprocess
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            group_file = (ROOT / 'cmake/TestGroups.cmake').as_posix()
+            (root / 'CMakeLists.txt').write_text(
+                'cmake_minimum_required(VERSION 3.21)\nproject(Partitions NONE)\nenable_testing()\n'
+                'add_custom_target(test_ordinary COMMAND ${CMAKE_COMMAND} -E touch ordinary-built)\n'
+                'add_custom_target(test_browser COMMAND ${CMAKE_COMMAND} -E touch browser-built)\n'
+                'add_test(NAME ordinary COMMAND ${CMAKE_COMMAND} -E true)\n'
+                'add_test(NAME browser COMMAND ${CMAKE_COMMAND} -E true)\n'
+                'set_tests_properties(browser PROPERTIES LABELS "web")\n'
+                f'include("{group_file}")\n')
+            build = root / 'build'
+            subprocess.run(['cmake', '-S', str(root), '-B', str(build)],
+                           check=True, capture_output=True, text=True)
+            subprocess.run(['cmake', '--build', str(build), '--target', 'datapump-tests-ci-core'],
+                           check=True, capture_output=True, text=True)
+            self.assertTrue((build / 'ordinary-built').is_file())
+            self.assertFalse((build / 'browser-built').exists())
+            subprocess.run(['cmake', '--build', str(build), '--target', 'datapump-tests-web'],
+                           check=True, capture_output=True, text=True)
+            self.assertTrue((build / 'browser-built').is_file())
 
 
 @unittest.skipUnless(shutil.which('ctest'), 'CTest is needed for temporary integration fixtures')

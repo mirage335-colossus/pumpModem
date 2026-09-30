@@ -15,11 +15,14 @@ The [release workflow](../.github/workflows/release.yml) builds and publishes
 six portable application bundles: separate **FLTK** and **Rev** builds for Linux
 x86_64, Linux aarch64 and Windows x64. Each new bundle contains its selected GUI,
 the CLI, `datapump-tui` and `datapump-fb` (`.exe` on Windows),
+the self-contained HTML/Wasm page under `share/datapump/web/wasm/`,
 required application libraries and notices. Backend names appear in both the
 download filename and extracted directory, so the two installations can coexist.
 Unpack the whole archive and keep `bin/`, `lib/` and `share/` together. Nothing needs to
 be copied into the system `/lib` directory. Linux uses `.tar.gz`; Windows uses
-`.zip`. Compatible distributions share the same binary.
+`.zip`. Compatible distributions share the same binary. Linux bundles also include
+`datapump-worker` and its inherited-pipe browser adapters; Windows uses the
+standalone browser page for HTML operation.
 
 Publication and extensive testing are separate operations. Publication checks
 build success, both package formats, checksums, relocation, CLI/self-check
@@ -45,7 +48,7 @@ use the same commit as the parent dispatch, so later branch changes cannot mix
 source revisions between stages. The sequence is:
 
 1. Check signing configuration and the release label; optionally maintain the
-   selected Linux/Windows dependency bases with `sdk-base.yml`.
+   selected Linux/Windows/Wasm dependency bases with `sdk-base.yml`.
 2. Run full native regression (`ci.yml`) and SDK qualification (`sdk.yml`) in
    parallel, both with `devfast=false`.
 3. Publish new ordinary binaries and packages with `release.yml`, using
@@ -63,7 +66,7 @@ source revisions between stages. The sequence is:
 | `linux_runner` | `ubuntu-24.04` | Standard Linux x86_64 host; explicitly select an organization M/L/H pool when desired. |
 | `arm_runner` | `ubuntu-24.04-arm` | Standard ARM64 host; explicitly select an organization L/H pool when desired. |
 | `windows_runner` | `windows-2022` | Standard Windows x64 host; explicitly select an organization L/H pool when desired. |
-| `maintain_base` | `none` | Explicitly maintain `linux`, `windows` or `both` before qualification. `source=auto` reuses matching recipes and builds missing ones; existing assets are never overwritten. |
+| `maintain_base` | `none` | Explicitly maintain `linux`, `windows`, `wasm`, `both` (Linux/Windows), or `all` before qualification. `source=auto` reuses matching recipes and builds missing ones; existing assets are never overwritten. |
 | `sanitizer_smoke` | Unchecked | Add the optional instrumented native desktop smoke. |
 | `sanitizer_realtime` | Unchecked | Add timing-sensitive Fast RX cases to instrumented native CI. |
 
@@ -232,6 +235,17 @@ binaries, their manuals and matching enabled build provenance in every archive.
 Repackaging preserves this declaration and the original bytes. Older releases
 without it retain their original checks and explicitly report that terminal and
 framebuffer coverage is not claimed.
+The optional schema-6 `web` inventory declares the Wasm browser and Linux worker
+platforms. New publication enables it and requires the exact `wasm-sdk` dependency
+triplet, HTML inventory, notices, full source commit and matching SDK recipe.
+Native producers and the browser producer run in parallel; finalization verifies
+both browser archive formats and merges the same payload into each native bundle,
+regenerating its complete package manifest before signed package conversion.
+Temporary native/browser producer outputs use Actions artifacts. Only completed
+combined archives are uploaded to the reserved draft, once; existing assets are
+never overwritten. Certification adds independent native-worker and Wasm source
+jobs and a required `web-tests` aggregate. Real browser/device microphone,
+playback and download behavior remains outside simulated-device qualification.
 Upload and certification check each archive's root
 and shipped build information, so relabeling an FLTK package as Rev is rejected.
 Full qualification of a new release requires coverage of every declared backend.
@@ -835,6 +849,24 @@ older release. A diagnostic pass does not qualify either release, and an
 experimental release remains a prerelease and never Latest even after full
 certification passes.
 
+## Browser packages
+
+Every new release bundle carries `share/datapump/web/wasm/datapump-wasm.html`.
+Open that page in a compatible browser on Windows or Linux. Debian/APT, pacman,
+Arch recipes and Gentoo expose `datapump-html` for FLTK-owned files and
+`datapump-html-rev` for Rev-owned files, plus separate application-menu entries.
+These launchers use `xdg-open` and the packages depend on `xdg-utils`; they install
+no HTTP service. Browser audio still needs a supported secure context and ordinary
+microphone permission. HTTPS static hosting is also supported. Actual browser and
+physical audio-device qualification is separate from the automated tests.
+
+Explicit Wasm base maintenance uses `sdk-base.yml` with `platform=wasm`; `all`
+maintains Linux, Windows and Wasm recipes. `both` retains its historical meaning
+of Linux plus Windows. Routine workflows fail if the exact Wasm base is missing;
+select maintenance explicitly before the first web-enabled release. Preparation,
+archive checks and installation/relocation commands are in the
+[Wasm SDK guide](../third_party/build-support/wasm-sdk/README.md).
+
 ## Durable SDK storage and compilation time
 
 The [base maintenance workflow](../.github/workflows/sdk-base.yml) owns the
@@ -861,6 +893,7 @@ Before finalizing a new binary release, publication copies the exact source
 recipe's compiled dependencies, complete source archives and per-recipe checksum
 files from `base` into that release. Every new release retains the Windows
 dependency triplet; `bookworm-sdk` releases also retain the Linux SDK triplet.
+Web-enabled releases retain the Wasm SDK binary/source/checksum triplet too.
 Ubuntu-baseline releases do not claim to have used the Linux SDK. Each copy keeps
 its original recipe filename and bytes and joins the release's final
 `SHA256SUMS.txt`. Missing, incomplete or inconsistent dependencies prevent
@@ -869,10 +902,11 @@ publication. SDK compilation remains an explicit base-maintenance operation.
 The retained assets cover the reusable SDK/dependency recipes required by the
 binary build. Native Linux builders still use their documented distribution
 toolchains and packages; Windows runners supply MSVC and the Windows SDK
-separately. Microsoft's compiler and SDK are not redistributed. Neither
-publication, certification nor base maintenance uses Actions cache or artifact
-storage: platform builds upload directly to a draft, and certification downloads
-the published assets.
+separately. Microsoft's compiler and SDK are not redistributed. Dependency bases
+use durable release assets, never an Actions cache. Web-enabled publication uses
+short-lived Actions artifacts for independent native/browser producers, then
+uploads verified combined archives to the draft. Certification downloads the exact
+published assets and release-retained dependency recipes.
 The separate native and SDK/Rev regression workflows retain small application
 artifacts for one day for CI inspection and copied-binary checks on other hosts.
 Those are not durable releases.

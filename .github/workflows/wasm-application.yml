@@ -1,0 +1,111 @@
+name: Browser application with the prepared Wasm SDK
+
+on:
+  workflow_call:
+    inputs:
+      linux_runner:
+        type: string
+        default: ubuntu-24.04
+      scope:
+        description: 'Independent packages or tests scope'
+        type: string
+        required: true
+      artifact_name:
+        type: string
+        default: DataPump-Wasm
+      source_ref:
+        description: 'Immutable release source for certification; empty uses this run source'
+        type: string
+        default: ''
+      release_tag:
+        type: string
+        default: ''
+      inventory_sha256:
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  browser:
+    name: Wasm ${{ inputs.scope }}
+    runs-on: ${{ inputs.linux_runner }}
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+      WASM_SCOPE: ${{ inputs.scope }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      INVENTORY_SHA256: ${{ inputs.inventory_sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.source_ref || github.sha }}
+      - name: Validate independent scope
+        run: |
+          case "$WASM_SCOPE" in packages|tests) ;; *) exit 2 ;; esac
+          if [ -n "$RELEASE_TAG" ] && [ -z "$INVENTORY_SHA256" ]; then
+            echo '::error::Certification requires the exact release inventory hash.'
+            exit 2
+          fi
+      - name: Read current dependency verification tools for certification
+        if: inputs.release_tag != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .certification-tools
+          sparse-checkout: |
+            tools
+            cmake
+            third_party/build-support
+      - name: Reuse the exact prepared Wasm base (no cold preparation)
+        if: inputs.release_tag == ''
+        run: python3 -B tools/wasm-sdk-release.py fetch --binary-only --require --repo "$GITHUB_REPOSITORY" --directory downloaded-wasm-sdk
+      - name: Reuse the release-retained Wasm SDK and inventory
+        if: inputs.release_tag != ''
+        run: |
+          python3 -B .certification-tools/tools/release-dependencies.py fetch --repo "$GITHUB_REPOSITORY" \
+            --tag "$RELEASE_TAG" --kind wasm-sdk --directory downloaded-wasm-sdk \
+            --inventory-sha256 "$INVENTORY_SHA256" --binary-only > release-wasm-sdk.json
+          python3 -c 'import json; assert json.load(open("release-wasm-sdk.json"))["found"], "Release has no retained Wasm SDK"'
+      - name: Install and verify the relocated SDK
+        run: python3 -B tools/wasm-sdk-release.py install --directory downloaded-wasm-sdk --destination "$GITHUB_WORKSPACE/build/wasm-sdk"
+      - name: Build and verify both static browser archive formats
+        if: inputs.scope == 'packages'
+        run: |
+          set -o pipefail
+          ./build.sh package --wasm-sdk "$GITHUB_WORKSPACE/build/wasm-sdk" --build-dir build/wasm-package --jobs 2 --build-jobs "$(nproc)" 2>&1 | tee wasm-package.log
+      - name: Run every Wasm web case independently of native regressions
+        if: inputs.scope == 'tests'
+        run: |
+          set -o pipefail
+          ./build.sh test web --wasm-sdk "$GITHUB_WORKSPACE/build/wasm-sdk" --build-dir build/wasm-tests --jobs 1 --build-jobs "$(nproc)" 2>&1 | tee wasm-tests.log
+      - name: Preserve the platform-independent browser product
+        if: inputs.scope == 'packages'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: |
+            build/wasm-package/releases/*.tar.gz
+            build/wasm-package/releases/*.zip
+            build/wasm-package/releases/SHA256SUMS.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+      - name: Retain exact-source browser qualification evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.artifact_name }}-${{ inputs.scope }}-logs-attempt-${{ github.run_attempt }}
+          path: |
+            wasm-*.log
+            build/wasm-*/build-info.txt
+            build/wasm-*/Testing/Temporary/
+            build/wasm-*/web/web-manifest.json
+          if-no-files-found: warn
+          retention-days: 7
+      - name: State the browser scope
+        if: always()
+        run: echo 'Wasm packaging and source tests run in independent jobs. This static HTML product supports Windows and Linux browsers; simulated device tests do not qualify physical browser audio devices.' >> "$GITHUB_STEP_SUMMARY"

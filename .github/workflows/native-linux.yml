@@ -10,7 +10,7 @@ on:
         type: string
         default: Release
       scope:
-        description: 'core, fast, live, calibration, calibration-aggregate, frontends, package, or sanitizer-gui'
+        description: 'core, fast, live, calibration, calibration-aggregate, frontends, web, package, or sanitizer-gui'
         type: string
         required: true
       calibration_section:
@@ -77,6 +77,11 @@ jobs:
         run: |
           python3 -B tools/prepare-native-sdl.py "$GITHUB_WORKSPACE/build/native-sdl" --cc gcc-11 --cxx g++-11 --jobs "$(nproc)"
           echo "DATAPUMP_NATIVE_SDL_ROOT=$GITHUB_WORKSPACE/build/native-sdl/install" >> "$GITHUB_ENV"
+      - name: Prepare the JavaScript test host
+        if: inputs.scope == 'web'
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24.19.0'
       - name: Configure native application and selected test scope
         run: >-
           cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc-11 -DCMAKE_CXX_COMPILER=g++-11
@@ -86,16 +91,18 @@ jobs:
           -DBUILD_TESTING=${{ inputs.scope == 'package' && 'OFF' || 'ON' }}
           -DDATAPUMP_BUILD_TUI=${{ (inputs.scope == 'package' || inputs.scope == 'frontends') && 'ON' || 'OFF' }}
           -DDATAPUMP_BUILD_FB=${{ (inputs.scope == 'package' || inputs.scope == 'frontends') && 'ON' || 'OFF' }}
+          -DDATAPUMP_BUILD_WEB_WORKER=${{ (inputs.scope == 'package' || inputs.scope == 'web') && 'ON' || 'OFF' }}
           -DDATAPUMP_CALIBRATION_SECTION=${{ inputs.calibration_section }}
           -DDATAPUMP_CALIBRATION_SHARD=${{ inputs.calibration_shard }}
           -DDART_TESTING_TIMEOUT=3600
-          -DCMAKE_DISABLE_FIND_PACKAGE_Python3=${{ inputs.scope == 'frontends' && 'FALSE' || 'TRUE' }}
+          -DCMAKE_DISABLE_FIND_PACKAGE_Python3=${{ (inputs.scope == 'frontends' || inputs.scope == 'web') && 'FALSE' || 'TRUE' }}
       - name: Build this shard's prerequisites
         run: |
           case "$CI_SCOPE" in
             calibration|calibration-aggregate) targets=(test_differential_receiver_probability) ;;
             package) targets=(datapump-apps) ;;
             frontends) targets=(datapump-tests-frontends) ;;
+            web) targets=(datapump-tests-web) ;;
             sanitizer-gui) targets=(datapump-apps test_gui_smoke_budget test_gui_launch_command) ;;
             core) targets=(datapump-apps datapump-tests-ci-core) ;;
             fast) targets=(datapump-tests-fast) ;;
@@ -104,7 +111,7 @@ jobs:
           esac
           cmake --build build --target "${targets[@]}" --parallel "$(nproc)"
       - name: Run the selected native tests
-        if: inputs.scope == 'core' || inputs.scope == 'fast' || inputs.scope == 'live' || inputs.scope == 'calibration' || inputs.scope == 'frontends'
+        if: inputs.scope == 'core' || inputs.scope == 'fast' || inputs.scope == 'live' || inputs.scope == 'calibration' || inputs.scope == 'frontends' || inputs.scope == 'web'
         run: |
           options=()
           if [ "$DATAPUMP_SANITIZERS" = ON ]; then
@@ -114,7 +121,7 @@ jobs:
             options+=(--sanitizer-realtime)
           fi
           jobs=2
-          if [ "$CI_SCOPE" = live ] || [ "$CI_SCOPE" = frontends ]; then jobs=1; fi
+          if [ "$CI_SCOPE" = live ] || [ "$CI_SCOPE" = frontends ] || [ "$CI_SCOPE" = web ]; then jobs=1; fi
           python3 tools/run-ci-tests.py --build-dir build --scope "$CI_SCOPE" --jobs "$jobs" --report build/ci-test-report.json "${options[@]}"
       - name: Record partial capture scope
         if: inputs.calibration_shard != ''

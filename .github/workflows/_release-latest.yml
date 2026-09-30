@@ -31,7 +31,7 @@ on:
       maintain_base:
         description: 'Explicit base maintenance: reuse existing recipes; build missing ones only'
         type: choice
-        options: [none, linux, windows, both]
+        options: [none, linux, windows, wasm, both, all]
         default: none
       sanitizer_smoke:
         description: 'Also run the optional instrumented desktop smoke in native CI'

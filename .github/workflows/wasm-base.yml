@@ -1,0 +1,66 @@
+name: Maintain the prepared Wasm SDK
+
+on:
+  workflow_call:
+    inputs:
+      linux_runner:
+        type: string
+        default: ubuntu-24.04
+      source:
+        description: 'auto reuses base; base requires it; rebuild explicitly prepares a new SDK'
+        type: string
+        default: auto
+      jobs:
+        type: string
+        default: '0'
+      publish:
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  wasm:
+    runs-on: ${{ inputs.linux_runner }}
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SDK_SOURCE: ${{ inputs.source }}
+      SDK_JOBS: ${{ inputs.jobs }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Select explicit maintenance operation
+        id: selection
+        run: |
+          case "$SDK_SOURCE" in auto|base|rebuild) ;; *) exit 2 ;; esac
+          case "$SDK_JOBS" in ''|*[!0-9]*) exit 2 ;; esac
+          if [ "$SDK_JOBS" = 0 ]; then SDK_JOBS=$(nproc); fi
+          echo "jobs=$SDK_JOBS" >> "$GITHUB_OUTPUT"
+          found=false
+          if [ "$SDK_SOURCE" != rebuild ]; then
+            status=0
+            python3 -B tools/wasm-sdk-release.py fetch --repo "$GITHUB_REPOSITORY" --directory wasm-sdk-archives || status=$?
+            if [ "$status" = 0 ]; then found=true;
+            elif [ "$status" != 3 ] || [ "$SDK_SOURCE" = base ]; then exit "$status"; fi
+          fi
+          echo "found=$found" >> "$GITHUB_OUTPUT"
+      - name: Explicitly fetch pinned preparation inputs
+        if: steps.selection.outputs.found != 'true'
+        run: python3 -B tools/build-wasm-sdk.py fetch --download --sources "$GITHUB_WORKSPACE/build/wasm-inputs"
+      - name: Prepare and preserve the exact reusable SDK and sources
+        if: steps.selection.outputs.found != 'true'
+        env:
+          PREPARE_JOBS: ${{ steps.selection.outputs.jobs }}
+        run: |
+          python3 -B tools/build-wasm-sdk.py prepare --sources "$GITHUB_WORKSPACE/build/wasm-inputs" --destination "$GITHUB_WORKSPACE/build/wasm-prepared" --jobs "$PREPARE_JOBS"
+          python3 -B tools/wasm-sdk-release.py archive --sdk "$GITHUB_WORKSPACE/build/wasm-prepared" --directory wasm-sdk-archives
+      - name: Qualify relocation and actual browser application tests
+        run: |
+          python3 -B tools/wasm-sdk-release.py install --directory wasm-sdk-archives --destination "$GITHUB_WORKSPACE/build/wasm-qualified"
+          ./build.sh test web --wasm-sdk "$GITHUB_WORKSPACE/build/wasm-qualified" --build-dir build/wasm-qualification --jobs 1 --build-jobs "$(nproc)"
+      - name: Preserve immutable recipe assets in base
+        if: inputs.publish
+        run: python3 -B tools/wasm-sdk-release.py publish --repo "$GITHUB_REPOSITORY" --directory wasm-sdk-archives --source-sha "$GITHUB_SHA"

@@ -42,6 +42,7 @@ on:
     paths:
       - '.github/workflows/**'
       - 'src/**'
+      - 'web/**'
       - 'include/**'
       - 'tests/**'
       - 'cmake/**'
@@ -54,6 +55,7 @@ on:
     paths:
       - '.github/workflows/**'
       - 'src/**'
+      - 'web/**'
       - 'include/**'
       - 'tests/**'
       - 'cmake/**'
@@ -129,6 +131,9 @@ jobs:
           python3 tests/test_gui_smoke_runner.py
           python3 tests/test_native_tests_runner.py
           python3 tests/test_ci_tests.py
+          python3 tests/test_wasm_sdk.py
+          python3 tests/test_package_wasm.py
+          python3 tests/test_wasm_sdk_release.py
           python3 -B tests/test_agent_record.py
           python3 -B tests/test_agent_board.py
           python3 -B tests/test_agent_session.py
@@ -291,6 +296,7 @@ jobs:
           - {scope: fast, section: all}
           - {scope: live, section: all}
           - {scope: frontends, section: all}
+          - {scope: web, section: all}
           - {scope: calibration, section: matrix}
           - {scope: calibration, section: shaped}
           - {scope: calibration, section: "null"}
@@ -305,6 +311,19 @@ jobs:
       scope: ${{ matrix.shard.scope }}
       calibration_section: ${{ matrix.shard.section }}
       sanitizer_realtime: ${{ inputs.sanitizer_realtime }}
+
+  wasm:
+    if: github.event_name == 'workflow_dispatch' && !inputs.devfast
+    name: Browser Wasm / ${{ matrix.scope }}
+    strategy:
+      fail-fast: false
+      matrix:
+        scope: [packages, tests]
+    uses: ./.github/workflows/wasm-application.yml
+    with:
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+      scope: ${{ matrix.scope }}
+      artifact_name: DataPump-CI-Wasm
 
   linux-shaped:
     if: github.event_name == 'workflow_dispatch' && !inputs.devfast
@@ -410,6 +429,7 @@ jobs:
           - {scope: fast, section: all}
           - {scope: live, section: all}
           - {scope: frontends, section: all}
+          - {scope: web, section: all}
           - {scope: calibration, section: matrix}
           - {scope: calibration, section: shaped}
           - {scope: calibration, section: "null"}
