@@ -8,6 +8,7 @@ get_filename_component(SOURCE_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 find_package(Threads REQUIRED)
 enable_testing()
 add_library(legacy_diagnostic_common STATIC
+  "${SOURCE_ROOT}/src/audio_policy.cpp"
   "${SOURCE_ROOT}/src/gui/legacy/controller.cpp"
   "${SOURCE_ROOT}/src/gui/legacy/plots.cpp"
   "${SOURCE_ROOT}/src/legacy/modem.cpp"
