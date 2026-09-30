@@ -1,5 +1,6 @@
 #include "datapump/fast/modem.hpp"
 #include "acoustic_ofdm.hpp"
+#include "filter_history.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -452,15 +453,8 @@ struct Receiver::Impl {
         }
         return at_cubic(time);
     }
-    Complex at_cubic(double time) const {
-        if(time<2 || time+2>=static_cast<double>(sample))return 0;
-        const auto i=static_cast<std::uint64_t>(time);
-        if(sample-i+2>filtered.size())return 0;
-        const auto f=time-static_cast<double>(i);
-        const auto a=filtered[(i-1)%filtered.size()],b=filtered[i%filtered.size()];
-        const auto c=filtered[(i+1)%filtered.size()],d=filtered[(i+2)%filtered.size()];
-        // Cubic interpolation preserves fractional sample/clock coordinates.
-        return b+.5*f*(c-a+f*(2.*a-5.*b+4.*c-d+f*(3.*(b-c)+d-a)));
+    DATAPUMP_FAST_INLINE Complex at_cubic(double time) const {
+        return detail::cubic_history(filtered,sample,time);
     }
     Correlation correlation(double end,bool precise=true) const {
         Complex sum=0;double energy=0;
@@ -983,8 +977,25 @@ struct Receiver::Impl {
         const auto latest=static_cast<std::size_t>(sample%raw.size());
         const auto count=sample<taps.size()?static_cast<std::size_t>(sample)+1:taps.size();
         const auto first=std::min(count,latest+1);
-        for(std::size_t i=0;i<first;++i)filtered_value+=raw[latest-i]*taps[i];
-        for(std::size_t i=first;i<count;++i)filtered_value+=raw[latest+raw.size()-i]*taps[i];
+        const auto* history=raw.data();const auto* coefficients=taps.data();
+        const auto history_size=raw.size();
+        auto previous=history+latest+1;
+#if defined(DATAPUMP_FAST_SSE2)
+        // Keep real/imaginary components in separate binary64 lanes. Each
+        // tap still multiplies then adds in order; never reduce across taps.
+        // complex<double> guarantees adjacent real/imaginary double storage.
+        auto sum=_mm_setzero_pd();
+        for(std::size_t i=0;i<first;++i)
+            sum=_mm_add_pd(sum,_mm_mul_pd(_mm_loadu_pd(reinterpret_cast<const double*>(--previous)),_mm_set1_pd(coefficients[i])));
+        previous=history+history_size;
+        for(std::size_t i=first;i<count;++i)
+            sum=_mm_add_pd(sum,_mm_mul_pd(_mm_loadu_pd(reinterpret_cast<const double*>(--previous)),_mm_set1_pd(coefficients[i])));
+        filtered_value={_mm_cvtsd_f64(sum),_mm_cvtsd_f64(_mm_unpackhi_pd(sum,sum))};
+#else
+        for(std::size_t i=0;i<first;++i)filtered_value+=*--previous*coefficients[i];
+        previous=history+history_size;
+        for(std::size_t i=first;i<count;++i)filtered_value+=*--previous*coefficients[i];
+#endif
         filtered[sample%filtered.size()]=filtered_value;
         if(input_observer && static_cast<double>(sample)>=next_input_time) {
             // A separate free-running tap remains useful before lock. It

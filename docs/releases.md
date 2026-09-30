@@ -888,6 +888,15 @@ count through Buildroot's internal parallelism. A positive number overrides it.
 Application packaging also uses available runner cores; time-sensitive test
 concurrency remains controlled independently.
 
+Base maintenance qualifies the archived SDK after installation/relocation.
+Linux builds both FLTK and Rev with the relocated SDK, runs their native
+conformance/self-check cases, the complete terminal/framebuffer group and an
+X11 software-window probe. This checks the actual cold-built archive when
+`source=rebuild`; a later application run would otherwise fetch the existing
+published archive. Full GUI workflow, modem and calibration qualification stays
+in the separate SDK/release workflows. Windows maintenance verifies the retained
+source archive as well as the compiled dependency bundle before reuse.
+
 Routine app builds download only the compiled SDK and checksum inventory.
 Before finalizing a new binary release, publication copies the exact source
 recipe's compiled dependencies, complete source archives and per-recipe checksum

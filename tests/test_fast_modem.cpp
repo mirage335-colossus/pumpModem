@@ -1,5 +1,6 @@
 #include "datapump/fast/modem.hpp"
 #include "datapump/fast/preset.hpp"
+#include "../src/fast/filter_history.hpp"
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -54,6 +55,54 @@ Reception receive(Profile p,std::span<const float> pcm,std::size_t chunk,bool si
     rx.finish();
     require(rx.workspace_bytes()==workspace,"RX workspace grows with stream");
     result.progress=rx.progress();return result;
+}
+void cubic_history_reference() {
+    using Complex=std::complex<double>;
+    const auto reference=[](const auto& history,std::uint64_t sample,double time)->Complex {
+        if(time<2||time+2>=static_cast<double>(sample))return 0;
+        const auto i=static_cast<std::uint64_t>(time);
+        if(sample-i+2>history.size())return 0;
+        const auto f=time-static_cast<double>(i);
+        const auto a=history[(i-1)%history.size()],b=history[i%history.size()];
+        const auto c=history[(i+1)%history.size()],d=history[(i+2)%history.size()];
+        return b+.5*f*(c-a+f*(2.*a-5.*b+4.*c-d+f*(3.*(b-c)+d-a)));
+    };
+    const auto check=[&](const auto& history,std::uint64_t sample,double time) {
+        const auto expected=reference(history,sample,time);
+        const auto actual=detail::cubic_history(history,sample,time);
+        require(std::bit_cast<std::uint64_t>(actual.real())==std::bit_cast<std::uint64_t>(expected.real()),"cubic ring real output differs from modulo reference");
+        require(std::bit_cast<std::uint64_t>(actual.imag())==std::bit_cast<std::uint64_t>(expected.imag()),"cubic ring imaginary output differs from modulo reference");
+    };
+    std::vector<std::size_t> sizes{5,7,64,8192};
+    for(const auto rate:{44100u,48000u}) {
+        auto p=resolve_snr_preset(Channel::acoustic_short,-6).profile;p.sample_rate=rate;
+        const auto marker=compact_acoustic_framing(p)?192:sync_symbols;
+        const auto sps=static_cast<double>(p.sample_rate)/p.symbol_rate;
+        sizes.push_back(static_cast<std::size_t>(std::ceil((marker+32+(p.capacity_mode?preamble_symbols(p):0))*sps))+64);
+    }
+    for(const auto size:sizes) {
+        std::vector<Complex> history(size);
+        for(std::size_t k=0;k<size;++k)
+            history[k]={k%5?static_cast<double>(static_cast<int>(k%73)-36)/17:-0.,
+                        k%7?static_cast<double>(static_cast<int>(k%59)-29)/13:0.};
+        for(const auto origin:{std::uint64_t{0},std::uint64_t{1}<<32,std::uint64_t{1}<<40})
+            for(const auto index:{std::uint64_t{2},std::uint64_t{size-1},std::uint64_t{size},
+                                 std::uint64_t{size+1},std::uint64_t{3*size-2},std::uint64_t{3*size+1}})
+                for(const auto fraction:{0.,.125,.39,.5,std::nextafter(1.,0.)}) {
+                    const auto i=origin-origin%size+index;const auto time=static_cast<double>(i)+fraction;
+                    for(const auto sample:{i+2,i+3,i+size-2,i+size-1}) {
+                        check(history,sample,time);
+                    }
+                }
+        for(unsigned pattern=0;pattern<4;++pattern) {
+            for(std::size_t k=0;k<size;++k)
+                history[k]={pattern&1?-0.:0.,pattern&2?(k%2?-0.:0.):-0.};
+            for(const auto index:{size-1,size,size+1})for(const double fraction:{0.,.125,.5,std::nextafter(1.,0.)})
+                check(history,index+3,static_cast<double>(index)+fraction);
+        }
+        for(const double time:{-1.,0.,1.,std::nextafter(2.,0.)})
+            require(detail::cubic_history(history,20,time)==Complex{},"cubic startup validity guard changed");
+    }
 }
 void matched_filter_reference(Profile p) {
     // An independent linear convolution checks startup and three history
@@ -115,6 +164,7 @@ int main() {try {
     for(const auto rate:{44100u,48000u})for(auto profile:{classic_profile(Channel::wire),resolve_snr_preset(Channel::acoustic_short,-6).profile}) {
         profile.sample_rate=rate;matched_filter_reference(profile);
     }
+    cubic_history_reference();
     const auto input=data(5);
     {
         const auto cable=classic_profile(Channel::wire);
