@@ -1,0 +1,47 @@
+{
+  "started": "2026-09-30T20:19:24.829564+00:00",
+  "source_sha": "db31ad1b3109c0d7c9a1b87c0db9ab4d3093ce02",
+  "worker_sha256": "26a752f7260a3c932579fbf3ee0f48287a5b05cf88ab6481194883d10ca2e75c",
+  "network_namespace": "net:[4026532424]",
+  "routes": "",
+  "node18": "v18.20.4",
+  "node24": "v24.19.0",
+  "python": "/srv/recovery/native-sdk/bin/python3",
+  "steps": [
+    {
+      "name": "native-live-node18-idle-retry",
+      "started": "2026-09-30T20:19:25.513717+00:00",
+      "exit_code": 0,
+      "seconds": 138.7
+    },
+    {
+      "name": "native-live-node24-same-worker",
+      "started": "2026-09-30T20:21:44.213812+00:00",
+      "exit_code": 0,
+      "seconds": 137.66
+    },
+    {
+      "name": "native-web-node24-full-idle",
+      "started": "2026-09-30T20:24:01.906799+00:00",
+      "exit_code": 0,
+      "seconds": 158.11
+    },
+    {
+      "name": "wasm-web-full-idle",
+      "started": "2026-09-30T20:26:40.018619+00:00",
+      "exit_code": 8,
+      "seconds": 515.58
+    },
+    {
+      "name": "copied-fltk-tgz-full-idle",
+      "started": "2026-09-30T20:39:30.024882+00:00",
+      "exit_code": 0,
+      "seconds": 463.11
+    }
+  ],
+  "harness_interruption": "Original retry driver stopped after four completed steps because its scratch-directory glob also selected the earlier non-GUI verification copy. No runtime test was launched by the failed precondition. Resume only pending copied test using exact original fatal-failure root.",
+  "copied_root": "/srv/recovery/build-fltk/releases/verification-83c064b972a1/DataPump-1.0.0-Linux-x86_64-native-fltk.tar.gz/offline destination with spaces/DataPump-1.0.0-Linux-x86_64-native-fltk",
+  "copied_manifest_sha256": "3a5fb317088544f0476335f2e7ecca54cc5c305bfc14b877361e42b6c96eec8d",
+  "worker_sha256_after": "26a752f7260a3c932579fbf3ee0f48287a5b05cf88ab6481194883d10ca2e75c",
+  "finished": "2026-09-30T20:47:13.163582+00:00"
+}

@@ -1,0 +1,85 @@
+COMMAND ["./build.sh", "test", "web", "--wasm-sdk", "/srv/recovery/wasm-sdk-with-retained-python", "--build-dir", "/srv/recovery/build-wasm-recovered", "--jobs", "1", "--build-jobs", "1"]
+Configuring wasm in /srv/recovery/build-wasm-recovered
+Preset CMake variables:
+
+  CMAKE_BUILD_TYPE="Release"
+  CMAKE_EXPORT_COMPILE_COMMANDS="ON"
+  DATAPUMP_BUILD_CLI="OFF"
+  DATAPUMP_BUILD_WASM="ON"
+  DATAPUMP_COMPILER_CACHE="OFF"
+  DATAPUMP_SANITIZERS="OFF"
+
+-- Could NOT find Gettext (missing: GETTEXT_MSGMERGE_EXECUTABLE GETTEXT_MSGFMT_EXECUTABLE) 
+-- DataPump build: /srv/recovery/build-wasm-recovered (Release, fltk, portable=OFF)
+-- DataPump targeted receive mitigation: index=unsupported - architectural bounds only; barrier=unsupported - no CPU speculation barrier
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /srv/recovery/build-wasm-recovered
+Building datapump-tests-web with 1 compile jobs
+[1/8] Building CXX object CMakeFiles/test_wasm_entropy.dir/third_party/build-support/wasm-sdk/entropy-probe.cpp.o
+[2/8] Linking CXX executable test_wasm_entropy.js
+[3/8] Building CXX object CMakeFiles/test_execution_wasm.dir/tests/test_execution.cpp.o
+[4/8] Building CXX object CMakeFiles/test_execution_wasm.dir/src/execution_fibers.cpp.o
+[5/8] Linking CXX executable test_execution_wasm.js
+[6/8] Checking Legacy modem isolation
+[7/8] Checking regular/fast DSP isolation
+-- Regular/fast DSP dependency boundary passed
+[8/8] Checking the shared GUI/native adapter boundary
+Internal ctest changing into directory: /srv/recovery/build-wasm-recovered
+Test project /srv/recovery/build-wasm-recovered
+    Start 1: wasm_runtime
+1/5 Test #1: wasm_runtime .....................   Passed   13.22 sec
+    Start 2: wasm_live
+2/5 Test #2: wasm_live ........................***Failed   25.13 sec
+file:///srv/recovery/source/tests/test_web_live.mjs:404
+    }catch(error){throw new Error(`${error.message}\nLive metrics: ${JSON.stringify(metrics)}\nRecent status: ${histories.join('\n')}\n${transport?.diagnostic()||''}`,{cause:error});}
+                        ^
+
+Error: AudioWorklet: Playback underrun; transmission did not complete
+Live metrics: {"rate":48000,"idleSeconds":180,"clockResolutionMs":2,"quanta":8954,"capturePackets":2082,"captureFrames":999296,"playedFrames":117600,"nonzeroFrames":117589,"progressMessages":114,"endpoints":0,"drains":0,"captureStarts":1,"captureStops":1,"pcmFrames":117600,"maxFeedMs":333.5746199999994,"maxExportMs":312.973691,"maxEditMs":40.873017000000004,"maxInputLevelMs":0,"tickCount":3120,"tickMilliseconds":18637.01898299994,"receivedBytes":43094466,"snapshotCount":223}
+Recent status: Transmitting 15% · ≈ 8.4 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmitting 16% · ≈ 8.3 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmitting 17% · ≈ 8.2 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmitting 18% · ≈ 8.1 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmitting 19% · ≈ 7.9 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmitting 20% · ≈ 7.9 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmitting 21% · ≈ 7.8 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmitting 22% · ≈ 7.7 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmitting 23% · ≈ 7.5 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmitting 24% · ≈ 7.5 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmitting 25% · ≈ 7.4 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmitting 25% · ≈ 7.3 s left | default | No fast key loaded | Transmitting fast unencrypted text
+
+    at scenario (file:///srv/recovery/source/tests/test_web_live.mjs:404:25)
+    at async main (file:///srv/recovery/source/tests/test_web_live.mjs:428:15)
+    at async file:///srv/recovery/source/tests/test_web_live.mjs:433:6 {
+  [cause]: Error: AudioWorklet: Playback underrun; transmission did not complete
+      at AudioNode.processor.port.postMessage (file:///srv/recovery/source/tests/test_web_live.mjs:211:82)
+      at DataPumpAudio.notify (web/audio_worklet.js:9:51)
+      at DataPumpAudio.failPlayback (web/audio_worklet.js:21:14)
+      at DataPumpAudio.process (web/audio_worklet.js:103:18)
+      at Context.advance (file:///srv/recovery/source/tests/test_web_live.mjs:177:40)
+      at Timeout.<anonymous> (file:///srv/recovery/source/tests/test_web_live.mjs:155:292)
+      at listOnTimeout (node:internal/timers:635:17)
+      at process.processTimers (node:internal/timers:571:7)
+}
+
+Node.js v24.19.0
+
+    Start 3: browser_audio
+3/5 Test #3: browser_audio ....................   Passed    0.50 sec
+    Start 4: wasm_entropy
+4/5 Test #4: wasm_entropy .....................   Passed    0.46 sec
+    Start 5: execution_wasm
+5/5 Test #5: execution_wasm ...................   Passed    0.70 sec
+
+80% tests passed, 1 tests failed out of 5
+
+Label Time Summary:
+web    =  40.01 sec*proc (5 tests)
+
+Total Test time (real) =  40.02 sec
+
+The following tests FAILED:
+	  2 - wasm_live (Failed)
+Errors while running CTest

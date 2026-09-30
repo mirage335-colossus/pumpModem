@@ -1,0 +1,11 @@
+COMMAND ["/srv/recovery/native-sdk/bin/python3", "tools/wasm-sdk-release.py", "install", "--directory", "/srv/recovery/inputs/wasm", "--destination", "/srv/recovery/wasm-sdk-with-retained-python"]
++ /srv/recovery/wasm-sdk-with-retained-python/emsdk/upstream/emscripten/emcc --version
+emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 6.0.10-git (d6c521a7f05449857c76bd99e396895583cf2083)
+Copyright (C) 2026 the Emscripten authors (see AUTHORS.txt)
+This is free and open source software under the MIT license.
+There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
++ /srv/recovery/wasm-sdk-with-retained-python/emsdk/upstream/emscripten/em++ /srv/recovery/source/third_party/build-support/wasm-sdk/entropy-probe.cpp -std=c++20 -O2 -I/srv/recovery/wasm-sdk-with-retained-python/target/include /srv/recovery/wasm-sdk-with-retained-python/target/lib/libcrypto.a --no-entry -sMODULARIZE=1 -sEXPORT_NAME=DatapumpEntropyProbe -sENVIRONMENT=web,worker -sFILESYSTEM=1 -sEXPORTED_FUNCTIONS=["_datapump_entropy_probe"] -o /srv/recovery/.wasm-install-8c1vgmah/entropy-probe.js
++ /srv/recovery/wasm-sdk-with-retained-python/node/bin/node /srv/recovery/source/third_party/build-support/wasm-sdk/entropy-probe.mjs /srv/recovery/.wasm-install-8c1vgmah/entropy-probe.js /srv/recovery/.wasm-install-8c1vgmah/entropy-probe.wasm
+{"result":"passed","capability":"emscripten-getentropy-webcrypto-v1","successfulWebCryptoCalls":10,"forcedReseeds":3,"deniedInitialEntropy":"failed-closed","deniedReseed":"failed-closed","missingWebCrypto":"failed-closed"}
+{"destination": "/srv/recovery/wasm-sdk-with-retained-python", "installed": true, "recipe_id": "e66e98abb90b466cab32"}

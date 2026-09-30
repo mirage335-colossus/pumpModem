@@ -1,0 +1,12 @@
+COMMAND ["python3", "tools/wasm-sdk-release.py", "install", "--directory", "/srv/recovery/inputs/wasm", "--destination", "/srv/recovery/wasm-sdk"]
+Traceback (most recent call last):
+  File "/srv/recovery/source/tools/wasm-sdk-release.py", line 378, in <module>
+    main()
+  File "/srv/recovery/source/tools/wasm-sdk-release.py", line 362, in main
+    result = install(directory, args.destination.absolute())
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/srv/recovery/source/tools/wasm-sdk-release.py", line 254, in install
+    sdk.extract(directory / binary, staged)
+  File "/srv/recovery/source/tools/build-wasm-sdk.py", line 147, in extract
+    source.extract(member, destination, filter='fully_trusted')
+TypeError: TarFile.extract() got an unexpected keyword argument 'filter'

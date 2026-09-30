@@ -1,0 +1,22 @@
+COMMAND ["xvfb-run", "-a", "-s", "-screen 0 2400x1800x24 -dpi 96", "/srv/recovery/native-sdk/bin/cmake", "-DARCHIVE_DIR=/srv/recovery/build-rev/releases", "-DGUI_SMOKE=ON", "-DGUI_SMOKE_TIMEOUT=600", "-DMAX_GLIBC=2.36", "-DREQUIRE_MANUALS=ON", "-DREQUIRE_FRONTENDS=ON", "-P", "tools/verify-native-archives.cmake"]
+CMake Error at tools/verify-native-package.cmake:201 (message):
+  Relocated native command failed:
+  /srv/recovery/build-rev/releases/verification-ae36940d40ea/DataPump-1.0.0-Linux-x86_64-native-rev.tar.gz/offline
+  destination with
+  spaces/DataPump-1.0.0-Linux-x86_64-native-rev/bin/datapump-gui;--smoke-test;--smoke-timeout;600
+
+
+
+  INCOMPLETE GUI_SMOKE_BUDGET: phase=11 elapsed=600.034474 budget=600.000000
+  tx_id=11 fraction=0.501029 media_seconds=67.491944 samples=976081 tail=0
+  progress_age=0.406977 result=incomplete
+
+Call Stack (most recent call first):
+  tools/verify-native-package.cmake:231 (check_command)
+
+
+CMake Error at tools/verify-native-archives.cmake:68 (message):
+  Native archive verification failed:
+  DataPump-1.0.0-Linux-x86_64-native-rev.tar.gz
+
+

@@ -1,0 +1,2 @@
+COMMAND ["python3", "tools/sdk-release.py", "verify", "--directory", "/srv/recovery/inputs/native"]
+{"recipe_id": "6c4884fdff9c745ab0a0", "verified": true}

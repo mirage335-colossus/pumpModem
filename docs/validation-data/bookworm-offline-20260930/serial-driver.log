@@ -1,0 +1,9 @@
+{"name": "native-live-node18-idle-retry", "started": "2026-09-30T20:19:25.513717+00:00", "exit_code": 0, "seconds": 138.7}
+{"name": "native-live-node24-same-worker", "started": "2026-09-30T20:21:44.213812+00:00", "exit_code": 0, "seconds": 137.66}
+{"name": "native-web-node24-full-idle", "started": "2026-09-30T20:24:01.906799+00:00", "exit_code": 0, "seconds": 158.11}
+{"name": "wasm-web-full-idle", "started": "2026-09-30T20:26:40.018619+00:00", "exit_code": 8, "seconds": 515.58}
+Traceback (most recent call last):
+  File "/srv/recovery/serial-retries.py", line 25, in <module>
+    assert len(roots)==1,'Expected exact failed copied FLTK package root'
+           ^^^^^^^^^^^^^
+AssertionError: Expected exact failed copied FLTK package root

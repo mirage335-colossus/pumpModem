@@ -1,0 +1,422 @@
+{
+  "schema": 1,
+  "assessment": "Ready for retained-SDK offline build recovery and portable-binary regeneration on the tested Debian Bookworm x86_64 host, using the documented combined-SDK Python installation step.",
+  "recorded_utc": "2026-09-30T21:15:16.148561+00:00",
+  "source_sha": "db31ad1b3109c0d7c9a1b87c0db9ab4d3093ce02",
+  "source_clean_on_remote_collection": true,
+  "sdk_origin": {
+    "release": "v001_00-2026-09-30-0648CDT",
+    "released_source_sha": "dce9138d27a2e6941b4304af2cf035c4ac2a6c9b",
+    "release_inventory_sha256": "bac799b36e8df8685b70ba2cdf53611fa249aa3b1a31e7ed20a976b9048cbadc",
+    "native_recipe": "6c4884fdff9c745ab0a0",
+    "wasm_recipe": "e66e98abb90b466cab32",
+    "input_triplets_verified_offline": true
+  },
+  "dependency_preservation": {
+    "application_source": "Matching repository source vendors FLTK and selected Rev modules/resources, GLM/NanoSVG, XZ/liblzma, QR and LDPC. Native SDK supplies compiler/build tools and target development/runtime dependency closure.",
+    "native_source_replay": "Retained source archive contains resolved host/target downloads, pinned Buildroot, helpers, recipe, patches and checksums; cold replay still requires an existing bootstrap compiler and ordinary host utilities and was not retested here.",
+    "portable_host_requirements": "glibc2.36+, compatible kernel, display facilities/fonts, graphics drivers/capabilities for Rev, and ALSA configuration/plugins/devices.",
+    "rev_redistribution": "Verbal redistribution agreement between mirage335 and upstream Rev developer confirmed; accepted as resolved for this readiness assessment."
+  },
+  "host": {
+    "provider": "Linode",
+    "type": "g6-standard-4",
+    "vcpus": 4,
+    "ram_gb": 8,
+    "region": "us-central",
+    "hourly_usd": 0.072,
+    "os_release": "PRETTY_NAME=\"Debian GNU/Linux 12 (bookworm)\"\nNAME=\"Debian GNU/Linux\"\nVERSION_ID=\"12\"\nVERSION=\"12 (bookworm)\"\nVERSION_CODENAME=bookworm\nID=debian\nHOME_URL=\"https://www.debian.org/\"\nSUPPORT_URL=\"https://www.debian.org/support\"\nBUG_REPORT_URL=\"https://bugs.debian.org/\"\n",
+    "kernel": "Linux localhost 6.1.0-47-amd64 #1 SMP PREEMPT_DYNAMIC Debian 6.1.170-3 (2026-05-08) x86_64 GNU/Linux",
+    "ambient_compilers": {
+      "cc": null,
+      "gcc": null,
+      "g++": null,
+      "clang": null,
+      "clang++": null
+    },
+    "setup": "Ordinary Bookworm packages plus public source and retained binary/source/checksum SDK assets staged online, then ordinary builder in loopback-only unshare --net namespaces with empty routes.",
+    "network_probe": "ENETUNREACH"
+  },
+  "original_run": {
+    "source_sha": "db31ad1b3109c0d7c9a1b87c0db9ab4d3093ce02",
+    "started": "2026-09-30T19:15:39.632942+00:00",
+    "steps": [
+      {
+        "name": "native-retained-inputs",
+        "exit_code": 0,
+        "seconds": 7.37
+      },
+      {
+        "name": "native-sdk-install",
+        "exit_code": 0,
+        "seconds": 27.94
+      },
+      {
+        "name": "native-sdk-verify",
+        "exit_code": 0,
+        "seconds": 4.14
+      },
+      {
+        "name": "package-fltk",
+        "exit_code": 0,
+        "seconds": 410.49
+      },
+      {
+        "name": "package-rev",
+        "exit_code": 0,
+        "seconds": 401.4
+      },
+      {
+        "name": "test-frontends",
+        "exit_code": 0,
+        "seconds": 69.68
+      },
+      {
+        "name": "test-web",
+        "exit_code": 8,
+        "seconds": 65.45
+      },
+      {
+        "name": "test-packaging",
+        "exit_code": 0,
+        "seconds": 126.6
+      },
+      {
+        "name": "native-fltk",
+        "exit_code": 0,
+        "seconds": 509.83
+      },
+      {
+        "name": "copied-portable-fltk",
+        "exit_code": 1,
+        "seconds": 543.8
+      },
+      {
+        "name": "native-rev",
+        "exit_code": 8,
+        "seconds": 788.05
+      },
+      {
+        "name": "copied-portable-rev",
+        "exit_code": 1,
+        "seconds": 659.71
+      },
+      {
+        "name": "wasm-retained-inputs",
+        "exit_code": 0,
+        "seconds": 26.29
+      },
+      {
+        "name": "wasm-sdk-install-stock-bookworm",
+        "exit_code": 1,
+        "seconds": 26.09
+      }
+    ],
+    "excluded_scopes": [
+      "full regression/calibration",
+      "physical audio",
+      "Windows",
+      "ARM64",
+      "cold toolchain reconstruction"
+    ],
+    "os_release": "PRETTY_NAME=\"Debian GNU/Linux 12 (bookworm)\"\nNAME=\"Debian GNU/Linux\"\nVERSION_ID=\"12\"\nVERSION=\"12 (bookworm)\"\nVERSION_CODENAME=bookworm\nID=debian\nHOME_URL=\"https://www.debian.org/\"\nSUPPORT_URL=\"https://www.debian.org/support\"\nBUG_REPORT_URL=\"https://bugs.debian.org/\"\n",
+    "network_namespace": "net:[4026532424]",
+    "routes": "",
+    "python": "3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]",
+    "node": "v18.20.4",
+    "internet_probe": "ENETUNREACH",
+    "ambient_compilers": {
+      "cc": null,
+      "gcc": null,
+      "g++": null,
+      "clang": null,
+      "clang++": null
+    },
+    "finished": "2026-09-30T20:16:46.583873+00:00",
+    "failed": [
+      "test-web",
+      "copied-portable-fltk",
+      "native-rev",
+      "copied-portable-rev",
+      "wasm-sdk-install-stock-bookworm"
+    ]
+  },
+  "wasm_recovery": {
+    "started": "2026-09-30T19:42:25.865654+00:00",
+    "source_sha": "db31ad1b3109c0d7c9a1b87c0db9ab4d3093ce02",
+    "path": "Use retained native SDK Python only for Wasm install, then stock Bookworm host tools for application/package tests",
+    "network_namespace": "net:[4026532479]",
+    "routes": "",
+    "steps": [
+      {
+        "name": "wasm-install-retained-python",
+        "exit_code": 0,
+        "seconds": 142.2
+      },
+      {
+        "name": "wasm-package-bookworm-retained-python",
+        "exit_code": 0,
+        "seconds": 377.13
+      },
+      {
+        "name": "wasm-web-bookworm-retained-python",
+        "exit_code": 8,
+        "seconds": 63.82
+      }
+    ],
+    "finished": "2026-09-30T19:52:09.018785+00:00"
+  },
+  "serial_retries": {
+    "started": "2026-09-30T20:19:24.829564+00:00",
+    "source_sha": "db31ad1b3109c0d7c9a1b87c0db9ab4d3093ce02",
+    "worker_sha256": "26a752f7260a3c932579fbf3ee0f48287a5b05cf88ab6481194883d10ca2e75c",
+    "network_namespace": "net:[4026532424]",
+    "routes": "",
+    "node18": "v18.20.4",
+    "node24": "v24.19.0",
+    "python": "/srv/recovery/native-sdk/bin/python3",
+    "steps": [
+      {
+        "name": "native-live-node18-idle-retry",
+        "started": "2026-09-30T20:19:25.513717+00:00",
+        "exit_code": 0,
+        "seconds": 138.7
+      },
+      {
+        "name": "native-live-node24-same-worker",
+        "started": "2026-09-30T20:21:44.213812+00:00",
+        "exit_code": 0,
+        "seconds": 137.66
+      },
+      {
+        "name": "native-web-node24-full-idle",
+        "started": "2026-09-30T20:24:01.906799+00:00",
+        "exit_code": 0,
+        "seconds": 158.11
+      },
+      {
+        "name": "wasm-web-full-idle",
+        "started": "2026-09-30T20:26:40.018619+00:00",
+        "exit_code": 8,
+        "seconds": 515.58
+      },
+      {
+        "name": "copied-fltk-tgz-full-idle",
+        "started": "2026-09-30T20:39:30.024882+00:00",
+        "exit_code": 0,
+        "seconds": 463.11
+      }
+    ],
+    "harness_interruption": "Original retry driver stopped after four completed steps because its scratch-directory glob also selected the earlier non-GUI verification copy. No runtime test was launched by the failed precondition. Resume only pending copied test using exact original fatal-failure root.",
+    "copied_root": "/srv/recovery/build-fltk/releases/verification-83c064b972a1/DataPump-1.0.0-Linux-x86_64-native-fltk.tar.gz/offline destination with spaces/DataPump-1.0.0-Linux-x86_64-native-fltk",
+    "copied_manifest_sha256": "3a5fb317088544f0476335f2e7ecca54cc5c305bfc14b877361e42b6c96eec8d",
+    "worker_sha256_after": "26a752f7260a3c932579fbf3ee0f48287a5b05cf88ab6481194883d10ca2e75c",
+    "finished": "2026-09-30T20:47:13.163582+00:00"
+  },
+  "complete_portable": {
+    "started": "2026-09-30T20:53:32.304827+00:00",
+    "source_sha": "db31ad1b3109c0d7c9a1b87c0db9ab4d3093ce02",
+    "network_namespace": "net:[4026532424]",
+    "routes": "",
+    "scope": "Existing release-web library assembly and full non-GUI copied-package/ABI checks; no publication and no replacement of original producers. GUI reception evidence remains from original exact native executable bytes.",
+    "steps": [
+      {
+        "name": "bundle-fltk",
+        "exit_code": 0,
+        "seconds": 27.05,
+        "archives": [
+          {
+            "name": "DataPump-1.0.0-Linux-x86_64-native-fltk.tar.gz",
+            "sha256": "64a04ad1dcd238dbcfc953f6c14883e4a79d68e92165dcc78fb4799140890bbe",
+            "bytes": 37176661,
+            "native_files_unchanged": 49
+          },
+          {
+            "name": "DataPump-1.0.0-Linux-x86_64-native-fltk.zip",
+            "sha256": "58f9a9cf4d9a42fcb2771d6111af7a866d30a6fecc0f5d5f7437ecc2d18c3bd2",
+            "bytes": 37849629,
+            "native_files_unchanged": 49
+          }
+        ]
+      },
+      {
+        "name": "verify-complete-fltk",
+        "exit_code": 0,
+        "seconds": 173.98
+      },
+      {
+        "name": "bundle-rev",
+        "exit_code": 0,
+        "seconds": 28.28,
+        "archives": [
+          {
+            "name": "DataPump-1.0.0-Linux-x86_64-native-rev.tar.gz",
+            "sha256": "238c2a7c879b0fdbf8e16bd108ad62aac392b0af014af993b20edf97a4b67a7d",
+            "bytes": 37005731,
+            "native_files_unchanged": 39
+          },
+          {
+            "name": "DataPump-1.0.0-Linux-x86_64-native-rev.zip",
+            "sha256": "88c537378876a3559e16bac8ac48ac934722df57d307cdd1148f5d81d0b372e0",
+            "bytes": 37668970,
+            "native_files_unchanged": 39
+          }
+        ]
+      },
+      {
+        "name": "verify-complete-rev",
+        "exit_code": 0,
+        "seconds": 176.54
+      }
+    ],
+    "serial_tested_wasm_inputs": {
+      "factory": "4a88f94dab0d01594657d2174be06a9bfd09b88cc9f3500e56ca30e9594024eb",
+      "wasm": "24f034e3f263490961d3baa5675be919a743798e510dc3e7fdd895ee15c125ba"
+    },
+    "finished": "2026-09-30T21:00:18.667302+00:00"
+  },
+  "test_counts": {
+    "test-frontends": {
+      "passed": 9,
+      "total": 9
+    },
+    "test-web": {
+      "passed": 12,
+      "total": 13
+    },
+    "test-packaging": {
+      "passed": 4,
+      "total": 4
+    },
+    "native-fltk": {
+      "passed": 3,
+      "total": 3
+    },
+    "native-rev": {
+      "passed": 4,
+      "total": 5
+    },
+    "wasm-web-bookworm-retained-python": {
+      "passed": 4,
+      "total": 5
+    },
+    "native-web-node24-full-idle": {
+      "passed": 13,
+      "total": 13
+    },
+    "wasm-web-full-idle": {
+      "passed": 4,
+      "total": 5
+    }
+  },
+  "findings": [
+    {
+      "status": "passed",
+      "fact": "Native retained source/binary inventory verification, SDK install/host ABI verification and FLTK/Rev portable TGZ+ZIP production with non-GUI copied-package checks passed without an ambient compiler or external network."
+    },
+    {
+      "status": "recovered_with_workaround",
+      "fact": "Tested Bookworm Python3.11.2 fails Wasm install at TarFile.extract(filter=...). Retained native SDK Python installs it offline; stock Bookworm CMake3.25/Ninja1.11 then built and packaged Wasm. This combined-SDK install route is not automatically selected by --wasm-sdk."
+    },
+    {
+      "status": "intermittent_failure",
+      "fact": "Original native web group12/13 failed playback underrun. Idle originalNode18 and archivedNode24 same-worker Live retries pass, and fullNode24 native web13/13 passes. Original failure remains preserved; no cause is established."
+    },
+    {
+      "status": "failed",
+      "fact": "Wasm web4/5 failed initially with playback underrun during overlapping compilation. Idle fullWasm group also4/5 fails, at48000Hz after180sec RX because second consumed-microphone-level response missed2000ms. Subsequent incoming-message/pending-identity/physical-absence assertions and44100Hz scenario were not reached. Overlap and Node18 cannot explain all failures."
+    },
+    {
+      "status": "failed_original_then_retried",
+      "fact": "Original copiedFLTK TGZ GUI phase21 received only the final17 of32 raw Help bits. Exact same extracted package was retried on idle host; original fatal failure and fixture remain retained.",
+      "retry_exit_code": 0
+    },
+    {
+      "status": "incomplete",
+      "fact": "Rev source4/5 cases passed; GUI reported progressing typed workload limit at600sec. CopiedRev TGZ likewise reported incomplete workload coverage. Direct local ctest/verifier exited nonzero. CI uses a separate validated warning classifier and Mesa thread limits; this experiment is not a green CI-equivalent Rev smoke pass. ZIP GUI scopes were not reached."
+    },
+    {
+      "status": "passed",
+      "fact": "Existing release-web APIs assembled the serial-tested Wasm bytes into fresh native FLTK/Rev archive pairs offline. All original native bytes/modes remained identical; complete archive inventory/provenance, copied CLI/frontend/dependency closure and glibc2.36 ABI checks passed. GUI evidence remains from those exact unchanged native executable bytes."
+    },
+    {
+      "status": "untested",
+      "fact": "Windows dependency base requires separately supplied Microsoft v143 compiler19.44.35229/linker14.44.35229 or newer and Windows SDK. A complete saved Microsoft offline installer layout was not restored here. Current Microsoft supported build-host requirements do not justify a blanket old-Windows assurance."
+    }
+  ],
+  "limits": [
+    "No full source cold SDK/compiler reconstruction in this experiment; Wasm compiler/Binaryen/Node inputs are retained upstream binaries.",
+    "No fresh Windows or ARM64 build recovery, physical audio/browser hardware tests, full modem calibration/regression or new release certification.",
+    "Published certified release is an earlier exact source/inventory; tested source has only lightweight automatic CI plus these independent diagnostic scopes.",
+    "Original overlap was a diagnostic scheduling mistake; serial outcomes are separate evidence and do not erase failures."
+  ],
+  "existing_ci": {
+    "current_head_focused": "https://github.com/mirage335-colossus/pumpModem/actions/runs/36758141356",
+    "published_release_full": "https://github.com/mirage335-colossus/pumpModem/actions/runs/36704181844",
+    "published_result": "passed_with_warnings; recognized Windows WGL graphics omissions; no claim of fresh full current-HEAD certification",
+    "live_snapshot": {
+      "checked_utc": "2026-09-30T20:49:19.292794+00:00",
+      "published_run": {
+        "conclusion": "success",
+        "head_sha": "dce9138d27a2e6941b4304af2cf035c4ac2a6c9b",
+        "html_url": "https://github.com/mirage335-colossus/pumpModem/actions/runs/36704181844",
+        "id": 36704181844,
+        "run_attempt": 2,
+        "status": "completed"
+      },
+      "focused_run": {
+        "conclusion": "success",
+        "head_sha": "db31ad1b3109c0d7c9a1b87c0db9ab4d3093ce02",
+        "html_url": "https://github.com/mirage335-colossus/pumpModem/actions/runs/36758141356",
+        "id": 36758141356,
+        "run_attempt": 1,
+        "status": "completed"
+      },
+      "latest_release": {
+        "draft": false,
+        "html_url": "https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-30-0648CDT",
+        "id": 399992872,
+        "prerelease": false,
+        "published_at": "2026-09-30T12:01:12Z",
+        "tag_name": "v001_00-2026-09-30-0648CDT"
+      }
+    }
+  },
+  "references": [
+    "https://learn.microsoft.com/en-us/visualstudio/releases/2022/system-requirements",
+    "https://learn.microsoft.com/en-us/visualstudio/install/create-an-offline-installation-of-visual-studio?view=vs-2022",
+    "https://nodejs.org/learn/asynchronous-work/event-loop-timers-and-nexttick"
+  ],
+  "cleanup": {
+    "provider": "Linode",
+    "instance_id": 107160425,
+    "label": "codex-bookworm-recovery-20260930",
+    "instance_created_utc": "2026-09-30T19:10:35Z",
+    "instance_deleted": true,
+    "instance_deleted_utc": "2026-09-30T21:13:19.704531+00:00",
+    "instance_verified_absent": true,
+    "token_label": "codex-bookworm-recovery-20260930",
+    "token_revoked": true,
+    "token_revoked_utc": "2026-09-30T21:14:37.242301+00:00",
+    "local_secrets_removed": true,
+    "hourly_usd": 0.072
+  },
+  "private_full_evidence_archive": {
+    "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/codex-cloud-recovery-20260930/bookworm-recovery-evidence.tar.gz",
+    "sha256": "789c174e28f437517f9bd1f4c3f2ffc417d1cd7a3c6fa5b9a7b4bd661fcce50d",
+    "contains": "Complete logs/configuration, produced portable archives and original synthetic failed GUI fixture; no API token/private SSH key."
+  },
+  "assessment_revised_utc": "2026-09-30T21:28:23.765647+00:00",
+  "readiness_scope": {
+    "standard": "Reasonably available Debian Bookworm distro packages, reasonably recent Microsoft freeware build tools, adequate hardware and working devices/drivers are expected host prerequisites.",
+    "demonstrated": "Offline native/Wasm build recovery and complete portable bundle regeneration using retained source/binary SDK resources, without project redevelopment.",
+    "installation_step": "Use retained native SDK Python to install Wasm SDK on the tested Bookworm Python3.11.2 host; no newer OS or upstream download required after staging.",
+    "qualification_limits": "Hardware-intensive GUI/simulation/live workloads retain their measured failures or incomplete coverage. Less intensive coverage and CLI/FLTK alternatives support recovery readiness; no hardware-only cause is established. Windows older-host restoration was not performed here; existing CI covers its prepared dependency recipe and separately supplied Microsoft tools."
+  },
+  "maintainer_clarification": {
+    "date": "2026-09-30",
+    "source": "User clarification in this assessment conversation",
+    "rev_redistribution": "Verbal redistribution agreement between mirage335 and upstream Rev developer confirmed; accepted as resolved for this readiness assessment.",
+    "expected_prerequisites": "Adequate hardware for intensive tests and reasonably recent Microsoft freeware are acceptable prerequisites under the requested readiness standard."
+  }
+}

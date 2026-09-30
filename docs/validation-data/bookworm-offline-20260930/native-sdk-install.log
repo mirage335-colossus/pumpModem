@@ -1,0 +1,4 @@
+COMMAND ["python3", "tools/build-sdk.py", "install", "--archive", "/srv/recovery/inputs/native/datapump-sdk-6c4884fdff9c745ab0a0-linux-x86_64.tar.gz", "--destination", "/srv/recovery/native-sdk"]
++ /srv/recovery/native-sdk/relocate-sdk.sh
+Relocating the buildroot SDK from /__w/pumpModem/pumpModem/build/sdk-replay/datapump-sdk-sources-6c4884fdff9c745ab0a0/third_party/build-support/cache/source-sdk/work/6c4884fdff9c745ab0a0/output/host to /srv/recovery/native-sdk ...
+Installed SDK: /srv/recovery/native-sdk

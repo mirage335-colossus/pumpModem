@@ -1,0 +1,25 @@
+{
+  "started": "2026-09-30T19:42:25.865654+00:00",
+  "source_sha": "db31ad1b3109c0d7c9a1b87c0db9ab4d3093ce02",
+  "path": "Use retained native SDK Python only for Wasm install, then stock Bookworm host tools for application/package tests",
+  "network_namespace": "net:[4026532479]",
+  "routes": "",
+  "steps": [
+    {
+      "name": "wasm-install-retained-python",
+      "exit_code": 0,
+      "seconds": 142.2
+    },
+    {
+      "name": "wasm-package-bookworm-retained-python",
+      "exit_code": 0,
+      "seconds": 377.13
+    },
+    {
+      "name": "wasm-web-bookworm-retained-python",
+      "exit_code": 8,
+      "seconds": 63.82
+    }
+  ],
+  "finished": "2026-09-30T19:52:09.018785+00:00"
+}

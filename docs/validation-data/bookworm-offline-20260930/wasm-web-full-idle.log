@@ -1,0 +1,359 @@
+COMMAND ["./build.sh", "test", "web", "--wasm-sdk", "/srv/recovery/wasm-sdk-with-retained-python", "--build-dir", "/srv/recovery/build-wasm-recovered", "--jobs", "1", "--build-jobs", "1"]
+procs -----------memory---------- ---swap-- -----io---- -system-- ------cpu-----
+ r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st
+ 1  0   1536 961940  79616 6918020    0    0    21   494  581  802 52  4 42  0  2
+ 1  0   1536 961940  79616 6918020    0    0     0     0   62   44  0  0 100  0  0
+Configuring wasm in /srv/recovery/build-wasm-recovered
+-- Found OpenSSL: /srv/recovery/wasm-sdk-with-retained-python/target/lib/libcrypto.a (found suitable version "3.5.7", minimum required is "3.0") found components: Crypto
+-- Could NOT find Gettext (missing: GETTEXT_MSGMERGE_EXECUTABLE GETTEXT_MSGFMT_EXECUTABLE) 
+-- Found Python3: /srv/recovery/native-sdk/bin/python3.14 (found version "3.14.7") found components: Interpreter
+-- DataPump build: /srv/recovery/build-wasm-recovered (Release, fltk, portable=OFF)
+-- DataPump targeted receive mitigation: index=unsupported - architectural bounds only; barrier=unsupported - no CPU speculation barrier
+-- Configuring done (1.3s)
+-- Generating done (0.0s)
+-- Build files have been written to: /srv/recovery/build-wasm-recovered
+Building datapump-tests-web with 1 compile jobs
+[1/138] Building CXX object CMakeFiles/datapump.dir/src/crypto.cpp.o
+[2/138] Building CXX object CMakeFiles/datapump.dir/src/stream_codec.cpp.o
+[3/138] Building CXX object CMakeFiles/datapump.dir/src/recovery.cpp.o
+/srv/recovery/source/src/recovery.cpp:21:53: warning: operand of ? changes signedness: 'int' to 'unsigned int' [-Wsign-conversion]
+   21 | unsigned ceil_log2(std::uint64_t n) { return n<=1?0:std::bit_width(n-1); }
+      |                                       ~~~~~~        ^~~~~~~~~~~~~~~~~~~
+/srv/recovery/source/src/recovery.cpp:53:32: warning: implicit conversion changes signedness: 'int' to 'std::uint64_t' (aka 'unsigned long long') [-Wsign-conversion]
+   53 |         region.received_bits+=8-missing;region.missing_bits+=missing;
+      |                             ~~~^~~~~~~~
+/srv/recovery/source/src/recovery.cpp:53:62: warning: implicit conversion changes signedness: 'const int' to 'std::uint64_t' (aka 'unsigned long long') [-Wsign-conversion]
+   53 |         region.received_bits+=8-missing;region.missing_bits+=missing;
+      |                                                            ~~^~~~~~~
+/srv/recovery/source/src/recovery.cpp:54:32: warning: implicit conversion changes signedness: 'int' to 'std::uint64_t' (aka 'unsigned long long') [-Wsign-conversion]
+   54 |         region.corrected_bits+=std::popcount(static_cast<std::uint8_t>(changed&~original.masks[i]));
+      |                              ~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/srv/recovery/source/src/recovery.cpp:120:29: warning: result of comparison of constant 95578984837873324 with expression of type 'size_type' (aka 'unsigned long') is always false [-Wtautological-constant-out-of-range-compare]
+  120 |         if(input.bits.size()>std::numeric_limits<std::uint64_t>::max()/(boundary_sync::marker_bits+1))return false;
+      |            ~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/srv/recovery/source/src/recovery.cpp:206:19: warning: implicit conversion changes signedness: 'const int' to 'size_type' (aka 'unsigned long') [-Wsign-conversion]
+  206 |             masks[byte]&=static_cast<std::uint8_t>(~mask);
+      |             ~~~~~ ^~~~
+/srv/recovery/source/src/recovery.cpp:207:40: warning: implicit conversion changes signedness: 'const int' to 'size_type' (aka 'unsigned long') [-Wsign-conversion]
+  207 |             if((assignment>>i)&1U)word[byte]|=mask;
+      |                                   ~~~~ ^~~~
+7 warnings generated.
+[4/138] Building CXX object CMakeFiles/datapump.dir/src/attachment.cpp.o
+/srv/recovery/source/src/attachment.cpp:14:78: warning: implicit conversion changes signedness: 'const unsigned char' to 'char' [-Wsign-conversion]
+   14 |         if(first<0x20 || first==0x7f || std::string_view("/\\:<>\"|?*").find(first)!=std::string_view::npos)return false;
+      |                                                                         ~~~~ ^~~~~
+1 warning generated.
+[5/138] Building CXX object CMakeFiles/datapump.dir/src/boundary_sync.cpp.o
+[6/138] Building CXX object CMakeFiles/datapump.dir/src/compression_short.cpp.o
+[7/138] Building CXX object CMakeFiles/datapump.dir/src/compression_lzma.cpp.o
+[8/138] Building CXX object CMakeFiles/datapump.dir/src/modem.cpp.o
+/srv/recovery/source/src/modem.cpp:243:32: warning: implicit conversion turns floating-point number into integer: 'const double' to 'bool' [-Wfloat-conversion]
+  243 |             if(position<0) {if(diffusion)phase+=phase_step(phase_random)*diffusion;continue;}
+      |                             ~~ ^~~~~~~~~
+/srv/recovery/source/src/modem.cpp:255:16: warning: implicit conversion turns floating-point number into integer: 'double' to 'bool' [-Wfloat-conversion]
+  255 |             if(weight)value/=weight;
+      |             ~~ ^~~~~~
+/srv/recovery/source/src/modem.cpp:259:16: warning: implicit conversion turns floating-point number into integer: 'const double' to 'bool' [-Wfloat-conversion]
+  259 |             if(diffusion)phase+=phase_step(phase_random)*diffusion;
+      |             ~~ ^~~~~~~~~
+3 warnings generated.
+[9/138] Building CXX object CMakeFiles/datapump.dir/src/streaming_modem.cpp.o
+[10/138] Building CXX object CMakeFiles/datapump.dir/src/pattern_code.cpp.o
+[11/138] Building CXX object CMakeFiles/datapump.dir/src/pattern_receiver.cpp.o
+/srv/recovery/source/src/pattern_receiver.cpp:349:36: warning: implicit conversion loses integer precision: 'std::uint64_t' (aka 'unsigned long long') to 'size_type' (aka 'unsigned long') [-Wshorten-64-to-32]
+  349 |         if(cached?cached_templates[index].valid:(templates_valid&&prepared_template_index==index))return;
+      |                   ~~~~~~~~~~~~~~~~ ^~~~~
+/srv/recovery/source/src/pattern_receiver.cpp:351:44: warning: implicit conversion loses integer precision: 'std::uint64_t' (aka 'unsigned long long') to 'size_type' (aka 'unsigned long') [-Wshorten-64-to-32]
+  351 |         auto& rows=cached?cached_templates[index].rows:templates;
+      |                           ~~~~~~~~~~~~~~~~ ^~~~~
+/srv/recovery/source/src/pattern_receiver.cpp:352:48: warning: implicit conversion loses integer precision: 'std::uint64_t' (aka 'unsigned long long') to 'size_type' (aka 'unsigned long') [-Wshorten-64-to-32]
+  352 |         auto& energies=cached?cached_templates[index].energy:template_energy;
+      |                               ~~~~~~~~~~~~~~~~ ^~~~~
+/srv/recovery/source/src/pattern_receiver.cpp:353:47: warning: implicit conversion loses integer precision: 'std::uint64_t' (aka 'unsigned long long') to 'size_type' (aka 'unsigned long') [-Wshorten-64-to-32]
+  353 |         auto& squares=cached?cached_templates[index].square:template_square;
+      |                              ~~~~~~~~~~~~~~~~ ^~~~~
+/srv/recovery/source/src/pattern_receiver.cpp:367:36: warning: implicit conversion loses integer precision: 'std::uint64_t' (aka 'unsigned long long') to 'size_type' (aka 'unsigned long') [-Wshorten-64-to-32]
+  367 |         if(cached)cached_templates[index].valid=true;
+      |                   ~~~~~~~~~~~~~~~~ ^~~~~
+5 warnings generated.
+[12/138] Building CXX object CMakeFiles/datapump.dir/src/pattern_correlator.cpp.o
+[13/138] Building CXX object CMakeFiles/datapump.dir/src/search_parallel.cpp.o
+[14/138] Building CXX object CMakeFiles/datapump.dir/src/channel.cpp.o
+/srv/recovery/source/src/channel.cpp:76:12: warning: implicit conversion turns floating-point number into integer: 'double' to 'bool' [-Wfloat-conversion]
+   76 |         if(diffusion)oscillator*=phase_rotation(diffusion*phase_normal(phase_random));
+      |         ~~ ^~~~~~~~~
+/srv/recovery/source/src/channel.cpp:79:28: warning: implicit conversion turns floating-point number into integer: 'double' to 'bool' [-Wfloat-conversion]
+   79 |     double noise() {return sigma?noise_normal(noise_random)*sigma:0.;}
+      |                            ^~~~~~
+/srv/recovery/source/src/channel.cpp:217:29: warning: implicit conversion turns floating-point number into integer: 'double' to 'bool' [-Wfloat-conversion]
+  217 |         const auto change=s.diffusion?normal(s.phase_random)*s.diffusion*std::sqrt(duration):0.;
+      |                           ~~^~~~~~~~~~
+/srv/recovery/source/src/channel.cpp:259:16: warning: implicit conversion turns floating-point number into integer: 'double' to 'bool' [-Wfloat-conversion]
+  259 |             if(weight)value/=weight;
+      |             ~~ ^~~~~~
+4 warnings generated.
+[15/138] Building CXX object CMakeFiles/datapump.dir/src/runtime.cpp.o
+/srv/recovery/source/src/runtime.cpp:146:24: warning: implicit conversion changes signedness: 'const char' to 'unsigned char' [-Wsign-conversion]
+  146 |     for(unsigned char c:value) switch(c) {
+      |                       ~^
+1 warning generated.
+[16/138] Building CXX object CMakeFiles/datapump.dir/src/resampler.cpp.o
+[17/138] Building CXX object CMakeFiles/datapump.dir/src/qr.cpp.o
+[18/138] Building CXX object CMakeFiles/datapump.dir/src/transfer.cpp.o
+/srv/recovery/source/src/transfer.cpp:139:71: warning: implicit conversion changes signedness: 'int' to 'std::uint64_t' (aka 'unsigned long long') [-Wsign-conversion]
+  139 |             if(evidence+8*(parity-erased)<required_evidence+15*errors+std::bit_width(errors))continue;
+      |                                                                      ~^~~~~~~~~~~~~~~~~~~~~~
+1 warning generated.
+[19/138] Building CXX object CMakeFiles/datapump.dir/src/tuning.cpp.o
+[20/138] Building CXX object CMakeFiles/datapump.dir/src/live.cpp.o
+In file included from /srv/recovery/source/src/live.cpp:12:
+/srv/recovery/source/src/live_receptions.hpp:151:86: warning: implicit conversion changes signedness: 'std::size_t' (aka 'unsigned long') to 'difference_type' (aka 'long') [-Wsign-conversion]
+  151 |         std::sort(entry.superseded_ids.begin(), entry.superseded_ids.begin() + entry.superseded_count);
+      |                                                                              ~ ~~~~~~^~~~~~~~~~~~~~~~
+/srv/recovery/source/src/live.cpp:272:50: warning: implicit conversion changes signedness: 'const int' to 'std::size_t' (aka 'unsigned long') [-Wsign-conversion]
+  272 |         return receiver.modem->working_bytes() + margin + sizeof(Receiver) + burst_bytes +
+      |                                                ~ ^~~~~~
+In file included from /srv/recovery/source/src/live.cpp:11:
+/srv/recovery/source/src/live_pattern_scores.hpp:31:85: warning: implicit conversion changes signedness: 'std::size_t' (aka 'unsigned long') to 'difference_type' (aka 'long') [-Wsign-conversion]
+   31 |             const auto previous = std::find_if(entries_.begin(), entries_.begin() + size_, same);
+      |                                                                                   ~ ^~~~~
+/srv/recovery/source/src/live.cpp:1040:60: note: in instantiation of function template specialization 'datapump::live::detail::PatternScoreHistory::update<(lambda at /srv/recovery/source/src/live.cpp:1040:95)>' requested here
+ 1040 |                             receiver.pattern_score_history.update(candidates, replay_clock(), [&] {
+      |                                                            ^
+/srv/recovery/source/src/live.cpp:1245:13: note: in instantiation of function template specialization 'datapump::live::Session::Impl::feed_bank<(lambda at /srv/recovery/source/src/live.cpp:1245:53)>' requested here
+ 1245 |             feed_bank(bank,value,version,stop,count,[&](auto& receiver){return receiver.push(raw,mixed,stop);},wave);
+      |             ^
+In file included from /srv/recovery/source/src/live.cpp:11:
+/srv/recovery/source/src/live_pattern_scores.hpp:32:78: warning: implicit conversion changes signedness: 'std::size_t' (aka 'unsigned long') to 'difference_type' (aka 'long') [-Wsign-conversion]
+   32 |             const auto duplicate = std::find_if(next.begin(), next.begin() + count, same);
+      |                                                                            ~ ^~~~~
+/srv/recovery/source/src/live_pattern_scores.hpp:33:69: warning: implicit conversion changes signedness: 'std::size_t' (aka 'unsigned long') to 'difference_type' (aka 'long') [-Wsign-conversion]
+   33 |             const auto observation = previous != entries_.begin() + size_ ? previous->observation :
+      |                                                                   ~ ^~~~~
+/srv/recovery/source/src/live_pattern_scores.hpp:34:45: warning: implicit conversion changes signedness: 'std::size_t' (aka 'unsigned long') to 'difference_type' (aka 'long') [-Wsign-conversion]
+   34 |                 duplicate != next.begin() + count ? duplicate->observation :
+      |                                           ~ ^~~~~
+6 warnings generated.
+[21/138] Building CXX object CMakeFiles/datapump.dir/src/signal_view.cpp.o
+[22/138] Building CXX object CMakeFiles/datapump.dir/third_party/qrcodegen/qrcodegen.cpp.o
+[23/138] Building CXX object CMakeFiles/datapump.dir/src/pattern_correlator_batch.cpp.o
+[24/138] Building CXX object CMakeFiles/datapump.dir/src/pattern_fft_batch.cpp.o
+[25/138] Building CXX object CMakeFiles/datapump.dir/src/simulation_estimate.cpp.o
+[26/138] Building CXX object CMakeFiles/datapump.dir/src/lpi_estimate.cpp.o
+[27/138] Building CXX object CMakeFiles/datapump.dir/src/pattern_search.cpp.o
+[28/138] Building CXX object CMakeFiles/datapump.dir/src/correlation_experiment.cpp.o
+[29/138] Building CXX object CMakeFiles/datapump.dir/src/receiver_probability.cpp.o
+[30/138] Building CXX object CMakeFiles/datapump.dir/src/receiver_probability_differential.cpp.o
+[31/138] Building CXX object CMakeFiles/datapump.dir/src/execution_fibers.cpp.o
+[32/138] Building CXX object CMakeFiles/datapump_host_audio.dir/src/host/audio.cpp.o
+[33/138] Building CXX object CMakeFiles/test_wasm_entropy.dir/third_party/build-support/wasm-sdk/entropy-probe.cpp.o
+[34/138] Linking CXX executable test_wasm_entropy.js
+[35/138] Building CXX object CMakeFiles/test_execution_wasm.dir/tests/test_execution.cpp.o
+[36/138] Building CXX object CMakeFiles/test_execution_wasm.dir/src/execution_fibers.cpp.o
+[37/138] Linking CXX executable test_execution_wasm.js
+[38/138] Checking Legacy modem isolation
+[39/138] Building CXX object CMakeFiles/datapump_legacy.dir/src/legacy/modem.cpp.o
+[40/138] Building CXX object CMakeFiles/datapump_legacy.dir/src/legacy/psk.cpp.o
+[41/138] Building CXX object CMakeFiles/datapump_legacy.dir/src/legacy/olivia.cpp.o
+/srv/recovery/source/src/legacy/olivia.cpp:13:42: warning: unused variable 'pulse_samples' [-Wunused-const-variable]
+   13 | constexpr std::size_t symbol_samples=16, pulse_samples=32, block_samples=1024;
+      |                                          ^~~~~~~~~~~~~
+1 warning generated.
+[42/138] Building CXX object CMakeFiles/datapump_legacy.dir/src/legacy/session.cpp.o
+[43/138] Checking regular/fast DSP isolation
+-- Regular/fast DSP dependency boundary passed
+[44/138] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/profile.cpp.o
+[45/138] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/preset.cpp.o
+[46/138] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/codec.cpp.o
+[47/138] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/compression.cpp.o
+[48/138] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/attachment.cpp.o
+[49/138] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/modem.cpp.o
+[50/138] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/acoustic_ofdm.cpp.o
+[51/138] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/session.cpp.o
+[52/138] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/file_transfer.cpp.o
+[53/138] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/telemetry.cpp.o
+[54/138] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/ldpc.cpp.o
+[55/138] Checking the shared GUI/native adapter boundary
+[56/138] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/application.cpp.o
+/srv/recovery/source/src/gui/application.cpp:585:90: warning: 'u8path<char *, 0>' is deprecated [-Wdeprecated-declarations]
+  585 |             else if(arg=="--smoke-dir"&&i+1<argc)launch.smoke_directory=std::filesystem::u8path(argv[++i]);
+      |                                                                                          ^
+/srv/recovery/wasm-sdk-with-retained-python/cache/sysroot/include/c++/v1/__filesystem/u8path.h:73:37: note: 'u8path<char *, 0>' has been explicitly marked deprecated here
+   73 | [[nodiscard]] _LIBCPP_HIDE_FROM_ABI _LIBCPP_DEPRECATED_WITH_CHAR8_T path u8path(const _Source& __s) {
+      |                                     ^
+/srv/recovery/wasm-sdk-with-retained-python/cache/sysroot/include/c++/v1/__config:566:45: note: expanded from macro '_LIBCPP_DEPRECATED_WITH_CHAR8_T'
+  566 | #    define _LIBCPP_DEPRECATED_WITH_CHAR8_T _LIBCPP_DEPRECATED
+      |                                             ^
+/srv/recovery/wasm-sdk-with-retained-python/cache/sysroot/include/c++/v1/__config:504:49: note: expanded from macro '_LIBCPP_DEPRECATED'
+  504 | #      define _LIBCPP_DEPRECATED __attribute__((__deprecated__))
+      |                                                 ^
+1 warning generated.
+[57/138] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/controller.cpp.o
+[58/138] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/gui_smoke.cpp.o
+[59/138] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/launch_command.cpp.o
+[60/138] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/screen_console.cpp.o
+[61/138] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/plot_render.cpp.o
+[62/138] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/state.cpp.o
+[63/138] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/fast/controller.cpp.o
+[64/138] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/fast/screen.cpp.o
+[65/138] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/fast/plots.cpp.o
+[66/138] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/legacy/controller.cpp.o
+[67/138] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/legacy/screen.cpp.o
+[68/138] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/legacy/plots.cpp.o
+[69/138] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/inspection_model.cpp.o
+[70/138] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/link_planner_model.cpp.o
+[71/138] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/link_planner_page.cpp.o
+[72/138] Building CXX object CMakeFiles/datapump_web_bridge.dir/src/gui/web_bridge.cpp.o
+[73/138] Building CXX object CMakeFiles/datapump-wasm.dir/src/host/wasm.cpp.o
+[74/138] Building CXX object CMakeFiles/datapump-wasm.dir/src/host/runtime.cpp.o
+[75/138] Building CXX object CMakeFiles/datapump-wasm.dir/src/host/protocol.cpp.o
+[76/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/common/tuklib_physmem.c.o
+[77/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/check/check.c.o
+[78/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/block_util.c.o
+[79/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/common.c.o
+[80/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/easy_preset.c.o
+[81/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/filter_common.c.o
+[82/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/hardware_physmem.c.o
+[83/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/index.c.o
+[84/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/stream_flags_common.c.o
+[85/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/string_conversion.c.o
+[86/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/vli_size.c.o
+[87/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/check/crc32_fast.c.o
+[88/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/alone_encoder.c.o
+[89/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/block_buffer_encoder.c.o
+[90/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/block_encoder.c.o
+[91/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/block_header_encoder.c.o
+[92/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/easy_buffer_encoder.c.o
+[93/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/easy_encoder.c.o
+[94/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/easy_encoder_memusage.c.o
+[95/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/filter_buffer_encoder.c.o
+[96/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/filter_encoder.c.o
+[97/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/filter_flags_encoder.c.o
+[98/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/index_encoder.c.o
+[99/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/stream_buffer_encoder.c.o
+[100/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/stream_encoder.c.o
+[101/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/stream_flags_encoder.c.o
+[102/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/vli_encoder.c.o
+[103/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/lzma_encoder.c.o
+[104/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/lzma_encoder_optimum_fast.c.o
+[105/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/lzma_encoder_optimum_normal.c.o
+[106/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lz/lz_encoder.c.o
+[107/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lz/lz_encoder_mf.c.o
+[108/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/rangecoder/price_table.c.o
+[109/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/fastpos_table.c.o
+[110/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/lzma2_encoder.c.o
+[111/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/alone_decoder.c.o
+[112/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/auto_decoder.c.o
+[113/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/block_buffer_decoder.c.o
+[114/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/block_decoder.c.o
+[115/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/block_header_decoder.c.o
+[116/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/easy_decoder_memusage.c.o
+[117/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/file_info.c.o
+[118/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/filter_buffer_decoder.c.o
+[119/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/filter_decoder.c.o
+[120/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/filter_flags_decoder.c.o
+[121/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/index_decoder.c.o
+[122/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/index_hash.c.o
+[123/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/stream_buffer_decoder.c.o
+[124/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/stream_decoder.c.o
+[125/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/stream_flags_decoder.c.o
+[126/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/vli_decoder.c.o
+[127/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/lzma_decoder.c.o
+[128/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lz/lz_decoder.c.o
+[129/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/lzma2_decoder.c.o
+[130/138] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/lzma_encoder_presets.c.o
+[131/138] Linking C static library third_party/xz/liblzma.a
+[132/138] Linking CXX static library libdatapump.a
+[133/138] Linking CXX static library libdatapump_legacy.a
+[134/138] Linking CXX static library libdatapump_fast.a
+[135/138] Linking CXX static library libdatapump_gui_application.a
+[136/138] Linking CXX static library libdatapump_web_bridge.a
+[137/138] Linking CXX executable datapump-wasm.js
+[138/138] Auditing and packaging the self-contained browser application
+Test project /srv/recovery/build-wasm-recovered
+    Start 1: wasm_runtime
+1/5 Test #1: wasm_runtime .....................   Passed   12.28 sec
+    Start 2: wasm_live
+2/5 Test #2: wasm_live ........................***Failed  216.28 sec
+file:///srv/recovery/source/tests/test_web_live.mjs:404
+    }catch(error){throw new Error(`${error.message}\nLive metrics: ${JSON.stringify(metrics)}\nRecent status: ${histories.join('\n')}\n${transport?.diagnostic()||''}`,{cause:error});}
+                        ^
+
+Error: consumed microphone level step exceeded 2000ms; Transmitting 91% · ≈ 0.9 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmitting 92% · ≈ 0.8 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmitting 93% · ≈ 0.7 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmitting 94% · ≈ 0.6 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmitting 95% · ≈ 0.5 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmitting 96% · ≈ 0.4 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmitting 97% · ≈ 0.3 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmitting 98% · ≈ 0.2 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmitting 99% · ≈ 0.1 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmitting 100% · ≈ 0.0 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmit ≈ 9.8 s | default | No fast key loaded | Transmission sent; receiver observes physical absence
+Transmit ≈ 9.8 s | default | No fast key loaded | Listening for Fast modem training; 
+Live metrics: {"rate":48000,"idleSeconds":180,"clockResolutionMs":2,"quanta":80866,"capturePackets":20516,"captureFrames":9847616,"playedFrames":472513,"nonzeroFrames":156844,"progressMessages":461,"endpoints":1,"drains":1,"captureStarts":2,"captureStops":1,"pcmFrames":472513,"maxFeedMs":186.14285299999756,"maxExportMs":262.31904199999997,"maxEditMs":78.67692700000043,"maxInputLevelMs":71.2021390000009,"tickCount":28701,"tickMilliseconds":177729.9945520001,"receivedBytes":489615866,"snapshotCount":2050,"inputLevelMs":[71.2021390000009],"idleElapsedMs":179993.797283,"idleTickMs":154674.63747300007}
+Recent status: Transmitting 91% · ≈ 0.9 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmitting 92% · ≈ 0.8 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmitting 93% · ≈ 0.7 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmitting 94% · ≈ 0.6 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmitting 95% · ≈ 0.5 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmitting 96% · ≈ 0.4 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmitting 97% · ≈ 0.3 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmitting 98% · ≈ 0.2 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmitting 99% · ≈ 0.1 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmitting 100% · ≈ 0.0 s left | default | No fast key loaded | Transmitting fast unencrypted text
+Transmit ≈ 9.8 s | default | No fast key loaded | Transmission sent; receiver observes physical absence
+Transmit ≈ 9.8 s | default | No fast key loaded | Listening for Fast modem training
+
+    at scenario (file:///srv/recovery/source/tests/test_web_live.mjs:404:25)
+    at runNextTicks (node:internal/process/task_queues:65:5)
+    at process.processTimers (node:internal/timers:568:9)
+    at async main (file:///srv/recovery/source/tests/test_web_live.mjs:428:15)
+    at async file:///srv/recovery/source/tests/test_web_live.mjs:433:6 {
+  [cause]: AssertionError [ERR_ASSERTION]: consumed microphone level step exceeded 2000ms; Transmitting 91% · ≈ 0.9 s left | default | No fast key loaded | Transmitting fast unencrypted text
+  Transmitting 92% · ≈ 0.8 s left | default | No fast key loaded | Transmitting fast unencrypted text
+  Transmitting 93% · ≈ 0.7 s left | default | No fast key loaded | Transmitting fast unencrypted text
+  Transmitting 94% · ≈ 0.6 s left | default | No fast key loaded | Transmitting fast unencrypted text
+  Transmitting 95% · ≈ 0.5 s left | default | No fast key loaded | Transmitting fast unencrypted text
+  Transmitting 96% · ≈ 0.4 s left | default | No fast key loaded | Transmitting fast unencrypted text
+  Transmitting 97% · ≈ 0.3 s left | default | No fast key loaded | Transmitting fast unencrypted text
+  Transmitting 98% · ≈ 0.2 s left | default | No fast key loaded | Transmitting fast unencrypted text
+  Transmitting 99% · ≈ 0.1 s left | default | No fast key loaded | Transmitting fast unencrypted text
+  Transmitting 100% · ≈ 0.0 s left | default | No fast key loaded | Transmitting fast unencrypted text
+  Transmit ≈ 9.8 s | default | No fast key loaded | Transmission sent; receiver observes physical absence
+  Transmit ≈ 9.8 s | default | No fast key loaded | Listening for Fast modem training; 
+      at wait (file:///srv/recovery/source/tests/test_web_live.mjs:305:17)
+      at runNextTicks (node:internal/process/task_queues:65:5)
+      at process.processTimers (node:internal/timers:568:9)
+      at async levelStep (file:///srv/recovery/source/tests/test_web_live.mjs:363:13)
+      at async scenario (file:///srv/recovery/source/tests/test_web_live.mjs:377:33)
+      at async main (file:///srv/recovery/source/tests/test_web_live.mjs:428:15)
+      at async file:///srv/recovery/source/tests/test_web_live.mjs:433:6 {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+}
+
+Node.js v24.19.0
+
+    Start 3: browser_audio
+3/5 Test #3: browser_audio ....................   Passed    0.24 sec
+    Start 4: wasm_entropy
+4/5 Test #4: wasm_entropy .....................   Passed    0.14 sec
+    Start 5: execution_wasm
+5/5 Test #5: execution_wasm ...................   Passed    0.41 sec
+
+80% tests passed, 1 tests failed out of 5
+
+Label Time Summary:
+web    = 229.34 sec*proc (5 tests)
+
+Total Test time (real) = 229.35 sec
+
+The following tests FAILED:
+	  2 - wasm_live (Failed)                                web
+Errors while running CTest

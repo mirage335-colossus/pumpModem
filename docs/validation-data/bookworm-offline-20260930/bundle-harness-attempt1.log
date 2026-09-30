@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "/srv/recovery/bundle-offline.py", line 17, in <module>
+    browser=web.browser_payload(wasm_tree/'releases',metadata)
+  File "/srv/recovery/source/tools/release-web.py", line 118, in browser_payload
+    raise ValueError('Expected one browser TGZ/ZIP pair and its checksum inventory')
+ValueError: Expected one browser TGZ/ZIP pair and its checksum inventory

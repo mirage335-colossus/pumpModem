@@ -1,0 +1,422 @@
+COMMAND ["./build.sh", "package", "--wasm-sdk", "/srv/recovery/wasm-sdk-with-retained-python", "--build-dir", "/srv/recovery/build-wasm-recovered", "--jobs", "1", "--build-jobs", "1"]
+Configuring wasm in /srv/recovery/build-wasm-recovered
+Preset CMake variables:
+
+  BUILD_TESTING="OFF"
+  CMAKE_BUILD_TYPE="Release"
+  CMAKE_EXPORT_COMPILE_COMMANDS="ON"
+  DATAPUMP_BUILD_CLI="OFF"
+  DATAPUMP_BUILD_WASM="ON"
+  DATAPUMP_COMPILER_CACHE="OFF"
+  DATAPUMP_SANITIZERS="OFF"
+
+-- Found OpenSSL: /srv/recovery/wasm-sdk-with-retained-python/target/lib/libcrypto.a (found suitable version "3.5.7", minimum required is "3.0") found components: Crypto 
+-- Performing Test TUKLIB_LARGE_FILE_SUPPORT_BY_DEFAULT
+-- Performing Test TUKLIB_LARGE_FILE_SUPPORT_BY_DEFAULT - Success
+-- Performing Test HAVE___BUILTIN_BSWAPXX
+-- Performing Test HAVE___BUILTIN_BSWAPXX - Success
+-- Check if unaligned memory access should be used
+-- Check if unaligned memory access should be used - no
+-- Performing Test HAVE___BUILTIN_ASSUME_ALIGNED
+-- Performing Test HAVE___BUILTIN_ASSUME_ALIGNED - Success
+-- Looking for clock_gettime
+-- Looking for clock_gettime - found
+-- Looking for CLOCK_MONOTONIC
+-- Looking for CLOCK_MONOTONIC - found
+-- Found Intl: built in to C library  
+-- Could NOT find Gettext (missing: GETTEXT_MSGMERGE_EXECUTABLE GETTEXT_MSGFMT_EXECUTABLE) 
+-- Performing Test HAVE_COMPILER_OPTION_-Wall
+-- Performing Test HAVE_COMPILER_OPTION_-Wall - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wextra
+-- Performing Test HAVE_COMPILER_OPTION_-Wextra - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wvla
+-- Performing Test HAVE_COMPILER_OPTION_-Wvla - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wformat_2
+-- Performing Test HAVE_COMPILER_OPTION_-Wformat_2 - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Winit-self
+-- Performing Test HAVE_COMPILER_OPTION_-Winit-self - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wmissing-include-dirs
+-- Performing Test HAVE_COMPILER_OPTION_-Wmissing-include-dirs - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wshift-overflow_2
+-- Performing Test HAVE_COMPILER_OPTION_-Wshift-overflow_2 - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wstrict-overflow_3
+-- Performing Test HAVE_COMPILER_OPTION_-Wstrict-overflow_3 - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Walloc-zero
+-- Performing Test HAVE_COMPILER_OPTION_-Walloc-zero - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wduplicated-cond
+-- Performing Test HAVE_COMPILER_OPTION_-Wduplicated-cond - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wfloat-equal
+-- Performing Test HAVE_COMPILER_OPTION_-Wfloat-equal - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wundef
+-- Performing Test HAVE_COMPILER_OPTION_-Wundef - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wshadow
+-- Performing Test HAVE_COMPILER_OPTION_-Wshadow - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wpointer-arith
+-- Performing Test HAVE_COMPILER_OPTION_-Wpointer-arith - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wbad-function-cast
+-- Performing Test HAVE_COMPILER_OPTION_-Wbad-function-cast - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wwrite-strings
+-- Performing Test HAVE_COMPILER_OPTION_-Wwrite-strings - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wdate-time
+-- Performing Test HAVE_COMPILER_OPTION_-Wdate-time - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wsign-conversion
+-- Performing Test HAVE_COMPILER_OPTION_-Wsign-conversion - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wfloat-conversion
+-- Performing Test HAVE_COMPILER_OPTION_-Wfloat-conversion - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wlogical-op
+-- Performing Test HAVE_COMPILER_OPTION_-Wlogical-op - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Waggregate-return
+-- Performing Test HAVE_COMPILER_OPTION_-Waggregate-return - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wstrict-prototypes
+-- Performing Test HAVE_COMPILER_OPTION_-Wstrict-prototypes - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wold-style-definition
+-- Performing Test HAVE_COMPILER_OPTION_-Wold-style-definition - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wmissing-prototypes
+-- Performing Test HAVE_COMPILER_OPTION_-Wmissing-prototypes - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wmissing-declarations
+-- Performing Test HAVE_COMPILER_OPTION_-Wmissing-declarations - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wredundant-decls
+-- Performing Test HAVE_COMPILER_OPTION_-Wredundant-decls - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wimplicit-fallthrough
+-- Performing Test HAVE_COMPILER_OPTION_-Wimplicit-fallthrough - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wimplicit-fallthrough_5
+-- Performing Test HAVE_COMPILER_OPTION_-Wimplicit-fallthrough_5 - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wc99-compat
+-- Performing Test HAVE_COMPILER_OPTION_-Wc99-compat - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wc11-extensions
+-- Performing Test HAVE_COMPILER_OPTION_-Wc11-extensions - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wc2x-compat
+-- Performing Test HAVE_COMPILER_OPTION_-Wc2x-compat - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wc2x-extensions
+-- Performing Test HAVE_COMPILER_OPTION_-Wc2x-extensions - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Warray-bounds-pointer-arithmetic
+-- Performing Test HAVE_COMPILER_OPTION_-Warray-bounds-pointer-arithmetic - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wassign-enum
+-- Performing Test HAVE_COMPILER_OPTION_-Wassign-enum - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wconditional-uninitialized
+-- Performing Test HAVE_COMPILER_OPTION_-Wconditional-uninitialized - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wdocumentation
+-- Performing Test HAVE_COMPILER_OPTION_-Wdocumentation - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wduplicate-enum
+-- Performing Test HAVE_COMPILER_OPTION_-Wduplicate-enum - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wempty-translation-unit
+-- Performing Test HAVE_COMPILER_OPTION_-Wempty-translation-unit - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wextra-semi-stmt
+-- Performing Test HAVE_COMPILER_OPTION_-Wextra-semi-stmt - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wflexible-array-extensions
+-- Performing Test HAVE_COMPILER_OPTION_-Wflexible-array-extensions - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wmissing-variable-declarations
+-- Performing Test HAVE_COMPILER_OPTION_-Wmissing-variable-declarations - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wnewline-eof
+-- Performing Test HAVE_COMPILER_OPTION_-Wnewline-eof - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wshift-sign-overflow
+-- Performing Test HAVE_COMPILER_OPTION_-Wshift-sign-overflow - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wstring-conversion
+-- Performing Test HAVE_COMPILER_OPTION_-Wstring-conversion - Success
+-- Checking how to detect the number of available CPU cores
+-- Performing Test TUKLIB_CPUCORES_SCHED_GETAFFINITY
+-- Performing Test TUKLIB_CPUCORES_SCHED_GETAFFINITY - Failed
+-- Performing Test TUKLIB_CPUCORES_CPUSET
+-- Performing Test TUKLIB_CPUCORES_CPUSET - Failed
+-- Looking for sys/param.h
+-- Looking for sys/param.h - found
+-- Performing Test TUKLIB_CPUCORES_SYSCTL
+-- Performing Test TUKLIB_CPUCORES_SYSCTL - Failed
+-- Performing Test TUKLIB_CPUCORES_SYSCONF
+-- Performing Test TUKLIB_CPUCORES_SYSCONF - Success
+-- Checking how to detect the amount of physical memory
+-- Performing Test TUKLIB_PHYSMEM_SPECIAL
+-- Performing Test TUKLIB_PHYSMEM_SPECIAL - Failed
+-- Performing Test TUKLIB_PHYSMEM_AIX
+-- Performing Test TUKLIB_PHYSMEM_AIX - Failed
+-- Performing Test TUKLIB_PHYSMEM_SYSCONF
+-- Performing Test TUKLIB_PHYSMEM_SYSCONF - Success
+-- Performing Test HAVE_FUNC_ATTRIBUTE_CONSTRUCTOR
+-- Performing Test HAVE_FUNC_ATTRIBUTE_CONSTRUCTOR - Success
+-- Looking for cpuid.h
+-- Looking for cpuid.h - not found
+-- Looking for immintrin.h
+-- Looking for immintrin.h - found
+-- Performing Test HAVE__MM_MOVEMASK_EPI8
+-- Performing Test HAVE__MM_MOVEMASK_EPI8 - Failed
+-- Performing Test HAVE_USABLE_CLMUL
+-- Performing Test HAVE_USABLE_CLMUL - Failed
+-- Performing Test HAVE_ARM64_CRC32
+-- Performing Test HAVE_ARM64_CRC32 - Failed
+-- Performing Test HAVE_LOONGARCH_CRC32
+-- Performing Test HAVE_LOONGARCH_CRC32 - Failed
+-- Looking for getopt_long
+-- Looking for getopt_long - found
+-- Found Python3: /usr/bin/python3 (found version "3.11.2") found components: Interpreter 
+-- DataPump build: /srv/recovery/build-wasm-recovered (Release, fltk, portable=OFF)
+-- DataPump targeted receive mitigation: index=unsupported - architectural bounds only; barrier=unsupported - no CPU speculation barrier
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /srv/recovery/build-wasm-recovered
+Building package with 1 compile jobs
+[1/134] Building CXX object CMakeFiles/datapump.dir/src/crypto.cpp.o
+[2/134] Building CXX object CMakeFiles/datapump.dir/src/stream_codec.cpp.o
+[3/134] Building CXX object CMakeFiles/datapump.dir/src/recovery.cpp.o
+/srv/recovery/source/src/recovery.cpp:21:53: warning: operand of ? changes signedness: 'int' to 'unsigned int' [-Wsign-conversion]
+   21 | unsigned ceil_log2(std::uint64_t n) { return n<=1?0:std::bit_width(n-1); }
+      |                                       ~~~~~~        ^~~~~~~~~~~~~~~~~~~
+/srv/recovery/source/src/recovery.cpp:53:32: warning: implicit conversion changes signedness: 'int' to 'std::uint64_t' (aka 'unsigned long long') [-Wsign-conversion]
+   53 |         region.received_bits+=8-missing;region.missing_bits+=missing;
+      |                             ~~~^~~~~~~~
+/srv/recovery/source/src/recovery.cpp:53:62: warning: implicit conversion changes signedness: 'const int' to 'std::uint64_t' (aka 'unsigned long long') [-Wsign-conversion]
+   53 |         region.received_bits+=8-missing;region.missing_bits+=missing;
+      |                                                            ~~^~~~~~~
+/srv/recovery/source/src/recovery.cpp:54:32: warning: implicit conversion changes signedness: 'int' to 'std::uint64_t' (aka 'unsigned long long') [-Wsign-conversion]
+   54 |         region.corrected_bits+=std::popcount(static_cast<std::uint8_t>(changed&~original.masks[i]));
+      |                              ~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/srv/recovery/source/src/recovery.cpp:120:29: warning: result of comparison of constant 95578984837873324 with expression of type 'size_type' (aka 'unsigned long') is always false [-Wtautological-constant-out-of-range-compare]
+  120 |         if(input.bits.size()>std::numeric_limits<std::uint64_t>::max()/(boundary_sync::marker_bits+1))return false;
+      |            ~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/srv/recovery/source/src/recovery.cpp:206:19: warning: implicit conversion changes signedness: 'const int' to 'size_type' (aka 'unsigned long') [-Wsign-conversion]
+  206 |             masks[byte]&=static_cast<std::uint8_t>(~mask);
+      |             ~~~~~ ^~~~
+/srv/recovery/source/src/recovery.cpp:207:40: warning: implicit conversion changes signedness: 'const int' to 'size_type' (aka 'unsigned long') [-Wsign-conversion]
+  207 |             if((assignment>>i)&1U)word[byte]|=mask;
+      |                                   ~~~~ ^~~~
+7 warnings generated.
+[4/134] Building CXX object CMakeFiles/datapump.dir/src/attachment.cpp.o
+/srv/recovery/source/src/attachment.cpp:14:78: warning: implicit conversion changes signedness: 'const unsigned char' to 'char' [-Wsign-conversion]
+   14 |         if(first<0x20 || first==0x7f || std::string_view("/\\:<>\"|?*").find(first)!=std::string_view::npos)return false;
+      |                                                                         ~~~~ ^~~~~
+1 warning generated.
+[5/134] Building CXX object CMakeFiles/datapump.dir/src/boundary_sync.cpp.o
+[6/134] Building CXX object CMakeFiles/datapump.dir/src/compression_short.cpp.o
+[7/134] Building CXX object CMakeFiles/datapump.dir/src/compression_lzma.cpp.o
+[8/134] Building CXX object CMakeFiles/datapump.dir/src/modem.cpp.o
+/srv/recovery/source/src/modem.cpp:243:32: warning: implicit conversion turns floating-point number into integer: 'const double' to 'bool' [-Wfloat-conversion]
+  243 |             if(position<0) {if(diffusion)phase+=phase_step(phase_random)*diffusion;continue;}
+      |                             ~~ ^~~~~~~~~
+/srv/recovery/source/src/modem.cpp:255:16: warning: implicit conversion turns floating-point number into integer: 'double' to 'bool' [-Wfloat-conversion]
+  255 |             if(weight)value/=weight;
+      |             ~~ ^~~~~~
+/srv/recovery/source/src/modem.cpp:259:16: warning: implicit conversion turns floating-point number into integer: 'const double' to 'bool' [-Wfloat-conversion]
+  259 |             if(diffusion)phase+=phase_step(phase_random)*diffusion;
+      |             ~~ ^~~~~~~~~
+3 warnings generated.
+[9/134] Building CXX object CMakeFiles/datapump.dir/src/streaming_modem.cpp.o
+[10/134] Building CXX object CMakeFiles/datapump.dir/src/pattern_code.cpp.o
+[11/134] Building CXX object CMakeFiles/datapump.dir/src/pattern_receiver.cpp.o
+/srv/recovery/source/src/pattern_receiver.cpp:349:36: warning: implicit conversion loses integer precision: 'std::uint64_t' (aka 'unsigned long long') to 'size_type' (aka 'unsigned long') [-Wshorten-64-to-32]
+  349 |         if(cached?cached_templates[index].valid:(templates_valid&&prepared_template_index==index))return;
+      |                   ~~~~~~~~~~~~~~~~ ^~~~~
+/srv/recovery/source/src/pattern_receiver.cpp:351:44: warning: implicit conversion loses integer precision: 'std::uint64_t' (aka 'unsigned long long') to 'size_type' (aka 'unsigned long') [-Wshorten-64-to-32]
+  351 |         auto& rows=cached?cached_templates[index].rows:templates;
+      |                           ~~~~~~~~~~~~~~~~ ^~~~~
+/srv/recovery/source/src/pattern_receiver.cpp:352:48: warning: implicit conversion loses integer precision: 'std::uint64_t' (aka 'unsigned long long') to 'size_type' (aka 'unsigned long') [-Wshorten-64-to-32]
+  352 |         auto& energies=cached?cached_templates[index].energy:template_energy;
+      |                               ~~~~~~~~~~~~~~~~ ^~~~~
+/srv/recovery/source/src/pattern_receiver.cpp:353:47: warning: implicit conversion loses integer precision: 'std::uint64_t' (aka 'unsigned long long') to 'size_type' (aka 'unsigned long') [-Wshorten-64-to-32]
+  353 |         auto& squares=cached?cached_templates[index].square:template_square;
+      |                              ~~~~~~~~~~~~~~~~ ^~~~~
+/srv/recovery/source/src/pattern_receiver.cpp:367:36: warning: implicit conversion loses integer precision: 'std::uint64_t' (aka 'unsigned long long') to 'size_type' (aka 'unsigned long') [-Wshorten-64-to-32]
+  367 |         if(cached)cached_templates[index].valid=true;
+      |                   ~~~~~~~~~~~~~~~~ ^~~~~
+5 warnings generated.
+[12/134] Building CXX object CMakeFiles/datapump.dir/src/pattern_correlator.cpp.o
+[13/134] Building CXX object CMakeFiles/datapump.dir/src/search_parallel.cpp.o
+[14/134] Building CXX object CMakeFiles/datapump.dir/src/channel.cpp.o
+/srv/recovery/source/src/channel.cpp:76:12: warning: implicit conversion turns floating-point number into integer: 'double' to 'bool' [-Wfloat-conversion]
+   76 |         if(diffusion)oscillator*=phase_rotation(diffusion*phase_normal(phase_random));
+      |         ~~ ^~~~~~~~~
+/srv/recovery/source/src/channel.cpp:79:28: warning: implicit conversion turns floating-point number into integer: 'double' to 'bool' [-Wfloat-conversion]
+   79 |     double noise() {return sigma?noise_normal(noise_random)*sigma:0.;}
+      |                            ^~~~~~
+/srv/recovery/source/src/channel.cpp:217:29: warning: implicit conversion turns floating-point number into integer: 'double' to 'bool' [-Wfloat-conversion]
+  217 |         const auto change=s.diffusion?normal(s.phase_random)*s.diffusion*std::sqrt(duration):0.;
+      |                           ~~^~~~~~~~~~
+/srv/recovery/source/src/channel.cpp:259:16: warning: implicit conversion turns floating-point number into integer: 'double' to 'bool' [-Wfloat-conversion]
+  259 |             if(weight)value/=weight;
+      |             ~~ ^~~~~~
+4 warnings generated.
+[15/134] Building CXX object CMakeFiles/datapump.dir/src/runtime.cpp.o
+/srv/recovery/source/src/runtime.cpp:146:24: warning: implicit conversion changes signedness: 'const char' to 'unsigned char' [-Wsign-conversion]
+  146 |     for(unsigned char c:value) switch(c) {
+      |                       ~^
+1 warning generated.
+[16/134] Building CXX object CMakeFiles/datapump.dir/src/resampler.cpp.o
+[17/134] Building CXX object CMakeFiles/datapump.dir/src/qr.cpp.o
+[18/134] Building CXX object CMakeFiles/datapump.dir/src/transfer.cpp.o
+/srv/recovery/source/src/transfer.cpp:139:71: warning: implicit conversion changes signedness: 'int' to 'std::uint64_t' (aka 'unsigned long long') [-Wsign-conversion]
+  139 |             if(evidence+8*(parity-erased)<required_evidence+15*errors+std::bit_width(errors))continue;
+      |                                                                      ~^~~~~~~~~~~~~~~~~~~~~~
+1 warning generated.
+[19/134] Building CXX object CMakeFiles/datapump.dir/src/tuning.cpp.o
+[20/134] Building CXX object CMakeFiles/datapump.dir/src/live.cpp.o
+In file included from /srv/recovery/source/src/live.cpp:12:
+/srv/recovery/source/src/live_receptions.hpp:151:86: warning: implicit conversion changes signedness: 'std::size_t' (aka 'unsigned long') to 'difference_type' (aka 'long') [-Wsign-conversion]
+  151 |         std::sort(entry.superseded_ids.begin(), entry.superseded_ids.begin() + entry.superseded_count);
+      |                                                                              ~ ~~~~~~^~~~~~~~~~~~~~~~
+/srv/recovery/source/src/live.cpp:272:50: warning: implicit conversion changes signedness: 'const int' to 'std::size_t' (aka 'unsigned long') [-Wsign-conversion]
+  272 |         return receiver.modem->working_bytes() + margin + sizeof(Receiver) + burst_bytes +
+      |                                                ~ ^~~~~~
+In file included from /srv/recovery/source/src/live.cpp:11:
+/srv/recovery/source/src/live_pattern_scores.hpp:31:85: warning: implicit conversion changes signedness: 'std::size_t' (aka 'unsigned long') to 'difference_type' (aka 'long') [-Wsign-conversion]
+   31 |             const auto previous = std::find_if(entries_.begin(), entries_.begin() + size_, same);
+      |                                                                                   ~ ^~~~~
+/srv/recovery/source/src/live.cpp:1040:60: note: in instantiation of function template specialization 'datapump::live::detail::PatternScoreHistory::update<(lambda at /srv/recovery/source/src/live.cpp:1040:95)>' requested here
+ 1040 |                             receiver.pattern_score_history.update(candidates, replay_clock(), [&] {
+      |                                                            ^
+/srv/recovery/source/src/live.cpp:1245:13: note: in instantiation of function template specialization 'datapump::live::Session::Impl::feed_bank<(lambda at /srv/recovery/source/src/live.cpp:1245:53)>' requested here
+ 1245 |             feed_bank(bank,value,version,stop,count,[&](auto& receiver){return receiver.push(raw,mixed,stop);},wave);
+      |             ^
+In file included from /srv/recovery/source/src/live.cpp:11:
+/srv/recovery/source/src/live_pattern_scores.hpp:32:78: warning: implicit conversion changes signedness: 'std::size_t' (aka 'unsigned long') to 'difference_type' (aka 'long') [-Wsign-conversion]
+   32 |             const auto duplicate = std::find_if(next.begin(), next.begin() + count, same);
+      |                                                                            ~ ^~~~~
+/srv/recovery/source/src/live_pattern_scores.hpp:33:69: warning: implicit conversion changes signedness: 'std::size_t' (aka 'unsigned long') to 'difference_type' (aka 'long') [-Wsign-conversion]
+   33 |             const auto observation = previous != entries_.begin() + size_ ? previous->observation :
+      |                                                                   ~ ^~~~~
+/srv/recovery/source/src/live_pattern_scores.hpp:34:45: warning: implicit conversion changes signedness: 'std::size_t' (aka 'unsigned long') to 'difference_type' (aka 'long') [-Wsign-conversion]
+   34 |                 duplicate != next.begin() + count ? duplicate->observation :
+      |                                           ~ ^~~~~
+6 warnings generated.
+[21/134] Building CXX object CMakeFiles/datapump.dir/src/signal_view.cpp.o
+[22/134] Building CXX object CMakeFiles/datapump.dir/third_party/qrcodegen/qrcodegen.cpp.o
+[23/134] Building CXX object CMakeFiles/datapump.dir/src/pattern_correlator_batch.cpp.o
+[24/134] Building CXX object CMakeFiles/datapump.dir/src/pattern_fft_batch.cpp.o
+[25/134] Building CXX object CMakeFiles/datapump.dir/src/simulation_estimate.cpp.o
+[26/134] Building CXX object CMakeFiles/datapump.dir/src/lpi_estimate.cpp.o
+[27/134] Building CXX object CMakeFiles/datapump.dir/src/pattern_search.cpp.o
+[28/134] Building CXX object CMakeFiles/datapump.dir/src/correlation_experiment.cpp.o
+[29/134] Building CXX object CMakeFiles/datapump.dir/src/receiver_probability.cpp.o
+[30/134] Building CXX object CMakeFiles/datapump.dir/src/receiver_probability_differential.cpp.o
+[31/134] Building CXX object CMakeFiles/datapump.dir/src/execution_fibers.cpp.o
+[32/134] Building CXX object CMakeFiles/datapump_host_audio.dir/src/host/audio.cpp.o
+[33/134] Checking Legacy modem isolation
+[34/134] Building CXX object CMakeFiles/datapump_legacy.dir/src/legacy/modem.cpp.o
+[35/134] Building CXX object CMakeFiles/datapump_legacy.dir/src/legacy/psk.cpp.o
+[36/134] Building CXX object CMakeFiles/datapump_legacy.dir/src/legacy/olivia.cpp.o
+/srv/recovery/source/src/legacy/olivia.cpp:13:42: warning: unused variable 'pulse_samples' [-Wunused-const-variable]
+   13 | constexpr std::size_t symbol_samples=16, pulse_samples=32, block_samples=1024;
+      |                                          ^~~~~~~~~~~~~
+1 warning generated.
+[37/134] Building CXX object CMakeFiles/datapump_legacy.dir/src/legacy/session.cpp.o
+[38/134] Checking regular/fast DSP isolation
+-- Regular/fast DSP dependency boundary passed
+[39/134] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/profile.cpp.o
+[40/134] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/preset.cpp.o
+[41/134] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/codec.cpp.o
+[42/134] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/compression.cpp.o
+[43/134] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/attachment.cpp.o
+[44/134] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/modem.cpp.o
+[45/134] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/acoustic_ofdm.cpp.o
+[46/134] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/session.cpp.o
+[47/134] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/file_transfer.cpp.o
+[48/134] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/telemetry.cpp.o
+[49/134] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/ldpc.cpp.o
+[50/134] Checking the shared GUI/native adapter boundary
+[51/134] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/application.cpp.o
+/srv/recovery/source/src/gui/application.cpp:585:90: warning: 'u8path<char *, 0>' is deprecated [-Wdeprecated-declarations]
+  585 |             else if(arg=="--smoke-dir"&&i+1<argc)launch.smoke_directory=std::filesystem::u8path(argv[++i]);
+      |                                                                                          ^
+/srv/recovery/wasm-sdk-with-retained-python/cache/sysroot/include/c++/v1/__filesystem/u8path.h:73:37: note: 'u8path<char *, 0>' has been explicitly marked deprecated here
+   73 | [[nodiscard]] _LIBCPP_HIDE_FROM_ABI _LIBCPP_DEPRECATED_WITH_CHAR8_T path u8path(const _Source& __s) {
+      |                                     ^
+/srv/recovery/wasm-sdk-with-retained-python/cache/sysroot/include/c++/v1/__config:566:45: note: expanded from macro '_LIBCPP_DEPRECATED_WITH_CHAR8_T'
+  566 | #    define _LIBCPP_DEPRECATED_WITH_CHAR8_T _LIBCPP_DEPRECATED
+      |                                             ^
+/srv/recovery/wasm-sdk-with-retained-python/cache/sysroot/include/c++/v1/__config:504:49: note: expanded from macro '_LIBCPP_DEPRECATED'
+  504 | #      define _LIBCPP_DEPRECATED __attribute__((__deprecated__))
+      |                                                 ^
+1 warning generated.
+[52/134] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/controller.cpp.o
+[53/134] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/gui_smoke.cpp.o
+[54/134] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/launch_command.cpp.o
+[55/134] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/screen_console.cpp.o
+[56/134] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/plot_render.cpp.o
+[57/134] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/state.cpp.o
+[58/134] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/fast/controller.cpp.o
+[59/134] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/fast/screen.cpp.o
+[60/134] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/fast/plots.cpp.o
+[61/134] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/legacy/controller.cpp.o
+[62/134] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/legacy/screen.cpp.o
+[63/134] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/legacy/plots.cpp.o
+[64/134] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/inspection_model.cpp.o
+[65/134] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/link_planner_model.cpp.o
+[66/134] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/link_planner_page.cpp.o
+[67/134] Building CXX object CMakeFiles/datapump_web_bridge.dir/src/gui/web_bridge.cpp.o
+[68/134] Building CXX object CMakeFiles/datapump-wasm.dir/src/host/wasm.cpp.o
+[69/134] Building CXX object CMakeFiles/datapump-wasm.dir/src/host/runtime.cpp.o
+[70/134] Building CXX object CMakeFiles/datapump-wasm.dir/src/host/protocol.cpp.o
+[71/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/common/tuklib_physmem.c.o
+[72/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/check/check.c.o
+[73/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/block_util.c.o
+[74/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/common.c.o
+[75/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/easy_preset.c.o
+[76/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/filter_common.c.o
+[77/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/hardware_physmem.c.o
+[78/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/index.c.o
+[79/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/stream_flags_common.c.o
+[80/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/string_conversion.c.o
+[81/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/vli_size.c.o
+[82/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/check/crc32_fast.c.o
+[83/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/alone_encoder.c.o
+[84/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/block_buffer_encoder.c.o
+[85/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/block_encoder.c.o
+[86/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/block_header_encoder.c.o
+[87/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/easy_buffer_encoder.c.o
+[88/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/easy_encoder.c.o
+[89/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/easy_encoder_memusage.c.o
+[90/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/filter_buffer_encoder.c.o
+[91/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/filter_encoder.c.o
+[92/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/filter_flags_encoder.c.o
+[93/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/index_encoder.c.o
+[94/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/stream_buffer_encoder.c.o
+[95/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/stream_encoder.c.o
+[96/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/stream_flags_encoder.c.o
+[97/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/vli_encoder.c.o
+[98/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/lzma_encoder.c.o
+[99/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/lzma_encoder_optimum_fast.c.o
+[100/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/lzma_encoder_optimum_normal.c.o
+[101/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lz/lz_encoder.c.o
+[102/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lz/lz_encoder_mf.c.o
+[103/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/rangecoder/price_table.c.o
+[104/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/fastpos_table.c.o
+[105/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/lzma2_encoder.c.o
+[106/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/alone_decoder.c.o
+[107/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/auto_decoder.c.o
+[108/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/block_buffer_decoder.c.o
+[109/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/block_decoder.c.o
+[110/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/block_header_decoder.c.o
+[111/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/easy_decoder_memusage.c.o
+[112/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/file_info.c.o
+[113/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/filter_buffer_decoder.c.o
+[114/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/filter_decoder.c.o
+[115/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/filter_flags_decoder.c.o
+[116/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/index_decoder.c.o
+[117/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/index_hash.c.o
+[118/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/stream_buffer_decoder.c.o
+[119/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/stream_decoder.c.o
+[120/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/stream_flags_decoder.c.o
+[121/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/vli_decoder.c.o
+[122/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/lzma_decoder.c.o
+[123/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lz/lz_decoder.c.o
+[124/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/lzma2_decoder.c.o
+[125/134] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/lzma_encoder_presets.c.o
+[126/134] Linking C static library third_party/xz/liblzma.a
+[127/134] Linking CXX static library libdatapump.a
+[128/134] Linking CXX static library libdatapump_legacy.a
+[129/134] Linking CXX static library libdatapump_fast.a
+[130/134] Linking CXX static library libdatapump_gui_application.a
+[131/134] Linking CXX static library libdatapump_web_bridge.a
+[132/134] Linking CXX executable datapump-wasm.js
+[133/134] Auditing and packaging the self-contained browser application
+[133/134] Run CPack packaging tool...
+CPack: Create package using TGZ
+CPack: Install projects
+CPack: - Install project: DataPump []
+CPack: Create package
+CPack: - package: /srv/recovery/build-wasm-recovered/releases/DataPump-1.0.0-wasm.tar.gz generated.
+CPack: Create package using ZIP
+CPack: Install projects
+CPack: - Install project: DataPump []
+CPack: Create package
+CPack: - package: /srv/recovery/build-wasm-recovered/releases/DataPump-1.0.0-wasm.zip generated.
+Verified browser archive: DataPump-1.0.0-wasm.tar.gz
+Verified browser archive: DataPump-1.0.0-wasm.zip
+Verified browser archives: /srv/recovery/build-wasm-recovered/releases

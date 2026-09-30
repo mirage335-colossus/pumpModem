@@ -4,6 +4,85 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Independent Bookworm offline recovery — 30 September 2026
+
+At source `db31ad1b3109c0d7c9a1b87c0db9ab4d3093ce02`, an independent Linode
+`g6-standard-4` host (four shared vCPUs, 8 GB RAM, USD0.072/hour) rebuilt
+portable Linux x86_64 and Wasm packages on Debian 12 Bookworm. Public source,
+ordinary distro prerequisites and the exact native/Wasm binary, input-source
+and checksum triplets from the linked certified release record below were staged first.
+The recipes were `6c4884fdff9c745ab0a0` and `e66e98abb90b466cab32`.
+Actual installation, compilation and tests ran as an ordinary user in separate
+loopback-only network namespaces: routes were empty, an external TCP probe
+returned `ENETUNREACH`, and no ambient compiler was installed. No upstream
+dependency download was needed after staging.
+
+The matching application source retains FLTK and selected Rev modules/resources;
+the native source SDK retains resolved dependency downloads and exact replay
+tools. Cold SDK reconstruction still needs an ordinary bootstrap compiler and
+host utilities and was not retested here. Portable runtime packages retain their
+non-OS dependency closure; glibc 2.36+, display facilities, graphics drivers for
+Rev and ALSA configuration/plugins/devices remain host requirements. The
+maintainer-provided clarification on 30 September 2026 confirms a verbal
+redistribution agreement between mirage335 and the upstream Rev developer;
+Rev permission is treated as resolved for this assessment. The pinned-source
+[provenance](../third_party/rev/README.datapump.md) retains its original snapshot
+information.
+
+| Scope | Measured result |
+| --- | --- |
+| Retained inputs and native SDK | Both complete SDK/input inventories verified; native install and host glibc ceiling 2.36 passed. |
+| Native producers | FLTK and Rev TGZ/ZIP packages built and passed non-GUI inventory, copied dependency closure, CLI/frontend/manual and ABI checks. |
+| Frontends and packaging | All 9 frontend and all 4 packaging cases passed. |
+| FLTK source GUI | All 3 native cases passed, including full workflow smoke. |
+| Native web | Initially 12/13 passed with Node18.20.4; playback underrun failed Live. Idle Node18 and retained Node24.19.0 Live retries both passed with the same worker hash; full Node24 web group passed 13/13. |
+| Wasm bootstrap | Tested Bookworm Python3.11.2 failed install: `TarFile.extract()` rejected `filter`. Retained native SDK Python restored it offline; stock Bookworm CMake/Ninja built and packaged it. |
+| Wasm web | Each group run failed one of five tests; four passed. Initially Live had an underrun during overlap. On idle retry, after 180 seconds RX, consumed microphone-level response missed its 2000 ms deadline. Later receive/absence assertions and 44.1 kHz scenario were not reached. |
+| Copied FLTK TGZ GUI | Initially phase21 received only the last 17 of 32 raw `Help` bits; passed on the idle retry in 463.11 seconds; the initial suffix loss remains an intermittent fatal failure. |
+| Rev GUI | Source 4/5 passed; source and copied TGZ smoke reported progressing typed workload-budget incomplete coverage at 600 seconds. Direct local commands failed; this is not a smoke pass. Both backends' ZIP GUI checks were not reached. |
+| Complete browser/native bundles | Existing finalizer library assembled the tested Wasm bytes into fresh FLTK/Rev TGZ/ZIP pairs offline. Original payload bytes/modes stayed unchanged; the package inventory was regenerated. Full non-GUI copied package and ABI checks passed. |
+
+The verified combined-SDK Wasm recovery command is:
+
+```sh
+/path/native-sdk/bin/python3 tools/wasm-sdk-release.py install \
+  --directory /path/retained-wasm-inputs --destination /path/wasm-sdk
+```
+
+That route requires both retained SDKs and is not automatically selected by
+`--wasm-sdk`. The native SDK does not include Node; this experiment reused the
+Wasm SDK's exact CI-pinned Node for native web tests. Initial failures
+remain in evidence. The initial Wasm/copy runs overlapped compilation, but the
+idle Wasm failure prevents attributing all failures to that overlap. Rev CI
+uses explicit Mesa thread limits and validated typed-warning wrappers, unlike
+these direct local commands; no new green full-CI claim follows from this run.
+
+Under the requested readiness standard, retained-SDK offline build recovery
+and portable-binary regeneration are ready on this tested Bookworm x86_64 host,
+with the documented combined-SDK Python installation step. Reasonably available
+distro packages, reasonably recent Microsoft freeware and adequate hardware are
+expected host prerequisites. Intensive GUI, simulation and live-test outcomes
+remain qualification limits alongside the passing less intensive coverage and
+CLI/FLTK recovery paths. Their failure mechanisms remain unproven; all measured
+outcomes above are retained. This was not a cold compiler/source replay,
+Windows/ARM64 recovery, physical audio/browser-device qualification, full
+calibration/regression or new exact-hash release certification. Wasm inputs
+retain precompiled upstream LLVM/Binaryen/Node, rather than their native-source
+reconstruction. Windows requires separately supplied MSVC and Windows SDK.
+Bootstrapping a host without them offline additionally requires a complete retained
+Microsoft [offline installer layout](https://learn.microsoft.com/en-us/visualstudio/install/create-an-offline-installation-of-visual-studio?view=vs-2022),
+which the dependency base does not include; its restoration was not tested.
+[Current VS2022 build-host requirements](https://learn.microsoft.com/en-us/visualstudio/releases/2022/system-requirements)
+do not imply blanket support for an older Windows installation. Existing exact
+published-release certification below retains its original identity and limits.
+
+[Measured report and identities](validation-data/bookworm-offline-20260930/report.json)
+and [checksum inventory](validation-data/bookworm-offline-20260930/SHA256SUMS.txt)
+retain complete step logs and exact experiment scripts. Full generated archives
+and the original synthetic failed GUI fixture were additionally preserved in
+the local ignored evidence archive identified by that report. The temporary
+Linode, API token and local private credentials were removed after collection.
+
 ## Superseded release cleanup — 30 September 2026
 
 At the maintainer's request, four superseded published releases and one failed

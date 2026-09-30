@@ -1,0 +1,57 @@
+COMMAND ["xvfb-run", "-a", "-s", "-screen 0 2400x1800x24 -dpi 96", "./build.sh", "test", "native", "--sdk", "/srv/recovery/native-sdk", "--backend", "rev", "--tui", "--fb", "--web-worker", "--build-dir", "/srv/recovery/build-rev", "--jobs", "1", "--build-jobs", "3", "--", "-DDATAPUMP_PORTABLE=ON", "-DGUI_SMOKE_TIMEOUT=600"]
+Configuring rev in /srv/recovery/build-rev
+-- DataPump compiler cache: ccache unavailable (optional)
+-- Could NOT find Gettext (missing: GETTEXT_MSGMERGE_EXECUTABLE GETTEXT_MSGFMT_EXECUTABLE) 
+Staged 46 Rev modules and embedded 18 resources
+-- DataPump GUI backend: rev
+-- DataPump build: /srv/recovery/build-rev (Release, rev, portable=ON)
+-- DataPump targeted receive mitigation: index=compiler target supported; barrier=compiler target supported
+-- Configuring done (6.6s)
+-- Generating done (0.3s)
+-- Build files have been written to: /srv/recovery/build-rev
+Building datapump-tests-native with 3 compile jobs
+[0/2] Re-checking globbed directories...
+[1/70] Checking Legacy modem isolation
+[2/70] Generating CXX dyndep file CMakeFiles/datapump_rev.dir/CXX.dd
+[3/22] Checking regular/fast DSP isolation
+-- Regular/fast DSP dependency boundary passed
+[4/22] Scanning /srv/recovery/source/tests/test_rev_coordinates.cpp for CXX dependencies
+[5/22] Generating CXX dyndep file CMakeFiles/test_rev_coordinates.dir/CXX.dd
+[6/22] Checking the shared GUI/native adapter boundary
+[7/22] Scanning /srv/recovery/source/tests/test_rev_adapter.cpp for CXX dependencies
+[8/22] Scanning /srv/recovery/source/src/gui/rev_platform.cpp for CXX dependencies
+[9/22] Generating CXX dyndep file CMakeFiles/datapump-gui.dir/CXX.dd
+[10/19] Generating CXX dyndep file CMakeFiles/test_rev_adapter.dir/CXX.dd
+[11/19] Building CXX object CMakeFiles/test_rev_coordinates.dir/tests/test_rev_coordinates.cpp.o
+[12/19] Building CXX object CMakeFiles/test_rev_platform.dir/tests/test_rev_platform.cpp.o
+[13/19] Building CXX object CMakeFiles/test_rev_adapter.dir/src/gui/rev_platform.cpp.o
+[14/19] Building CXX object CMakeFiles/test_rev_platform.dir/src/gui/rev_platform.cpp.o
+[15/19] Linking CXX executable test_rev_coordinates; Staging SDK runtime libraries for test_rev_coordinates
+[16/19] Linking CXX executable test_rev_platform; Staging SDK runtime libraries for test_rev_platform
+[17/19] Building CXX object CMakeFiles/test_rev_adapter.dir/tests/test_rev_adapter.cpp.o
+[18/19] Linking CXX executable test_rev_adapter; Staging SDK runtime libraries for test_rev_adapter
+Test project /srv/recovery/build-rev
+    Start 132: gui_workflow
+1/5 Test #132: gui_workflow .....................***Failed  600.51 sec
+INCOMPLETE GUI_SMOKE_BUDGET: phase=11 elapsed=600.135613 budget=600.000000 tx_id=11 fraction=0.498917 media_seconds=67.207431 samples=972705 tail=0 progress_age=1.213416 result=incomplete
+
+    Start 133: gui_adapter_conformance
+2/5 Test #133: gui_adapter_conformance ..........   Passed  114.63 sec
+    Start 134: gui_platform_conformance
+3/5 Test #134: gui_platform_conformance .........   Passed    6.21 sec
+    Start 135: gui_coordinates_1x
+4/5 Test #135: gui_coordinates_1x ...............   Passed    5.26 sec
+    Start 136: gui_coordinates_2x
+5/5 Test #136: gui_coordinates_2x ...............   Passed    5.18 sec
+
+80% tests passed, 1 tests failed out of 5
+
+Label Time Summary:
+gui           = 731.78 sec*proc (5 tests)
+native_gui    = 731.78 sec*proc (5 tests)
+
+Total Test time (real) = 731.82 sec
+
+The following tests FAILED:
+	132 - gui_workflow (Failed)                             gui native_gui
+Errors while running CTest

@@ -1,0 +1,31 @@
+COMMAND ["xvfb-run", "-a", "-s", "-screen 0 2400x1800x24 -dpi 96", "/srv/recovery/native-sdk/bin/cmake", "-DARCHIVE_DIR=/srv/recovery/build-fltk/releases", "-DGUI_SMOKE=ON", "-DGUI_SMOKE_TIMEOUT=600", "-DMAX_GLIBC=2.36", "-DREQUIRE_MANUALS=ON", "-DREQUIRE_FRONTENDS=ON", "-P", "tools/verify-native-archives.cmake"]
+CMake Error at tools/verify-native-package.cmake:201 (message):
+  Relocated native command failed:
+  /srv/recovery/build-fltk/releases/verification-83c064b972a1/DataPump-1.0.0-Linux-x86_64-native-fltk.tar.gz/offline
+  destination with
+  spaces/DataPump-1.0.0-Linux-x86_64-native-fltk/bin/datapump-gui;--smoke-test;--smoke-timeout;600
+
+
+
+  Fontconfig warning: using without calling FcInit()
+
+  Data Pump fltk: Shared GUI smoke phase 21: Binary-edited bytes did not
+  arrive as exact copyable text; error=; transmission=17;
+  fixture=/tmp/datapump-shared-smoke-1905729668717 [id=17 status=binary
+  pending bits=131 expected=0 score=13526.245540 copy=unavailable
+  text=11101000000111001010110001010111010111011111111100110001111110101110101010100000111110000100000011101000000111001010110001010111010]
+  [id=26 status=binary pending bits=131 expected=0 score=13947.793952
+  copy=unavailable
+  text=11101000000111001010110001010111010111011111111100110001111110101110101010100000111110000100000011101000000111001010110001010111010]
+  [id=37 status=binary received bits=17 expected=0 score=3807.532134
+  copy=unavailable text=10110110001110000]
+
+Call Stack (most recent call first):
+  tools/verify-native-package.cmake:231 (check_command)
+
+
+CMake Error at tools/verify-native-archives.cmake:68 (message):
+  Native archive verification failed:
+  DataPump-1.0.0-Linux-x86_64-native-fltk.tar.gz
+
+

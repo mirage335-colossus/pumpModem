@@ -1,0 +1,62 @@
+{
+  "started": "2026-09-30T20:53:32.304827+00:00",
+  "source_sha": "db31ad1b3109c0d7c9a1b87c0db9ab4d3093ce02",
+  "network_namespace": "net:[4026532424]",
+  "routes": "",
+  "scope": "Existing release-web library assembly and full non-GUI copied-package/ABI checks; no publication and no replacement of original producers. GUI reception evidence remains from original exact native executable bytes.",
+  "steps": [
+    {
+      "name": "bundle-fltk",
+      "exit_code": 0,
+      "seconds": 27.05,
+      "archives": [
+        {
+          "name": "DataPump-1.0.0-Linux-x86_64-native-fltk.tar.gz",
+          "sha256": "64a04ad1dcd238dbcfc953f6c14883e4a79d68e92165dcc78fb4799140890bbe",
+          "bytes": 37176661,
+          "native_files_unchanged": 49
+        },
+        {
+          "name": "DataPump-1.0.0-Linux-x86_64-native-fltk.zip",
+          "sha256": "58f9a9cf4d9a42fcb2771d6111af7a866d30a6fecc0f5d5f7437ecc2d18c3bd2",
+          "bytes": 37849629,
+          "native_files_unchanged": 49
+        }
+      ]
+    },
+    {
+      "name": "verify-complete-fltk",
+      "exit_code": 0,
+      "seconds": 173.98
+    },
+    {
+      "name": "bundle-rev",
+      "exit_code": 0,
+      "seconds": 28.28,
+      "archives": [
+        {
+          "name": "DataPump-1.0.0-Linux-x86_64-native-rev.tar.gz",
+          "sha256": "238c2a7c879b0fdbf8e16bd108ad62aac392b0af014af993b20edf97a4b67a7d",
+          "bytes": 37005731,
+          "native_files_unchanged": 39
+        },
+        {
+          "name": "DataPump-1.0.0-Linux-x86_64-native-rev.zip",
+          "sha256": "88c537378876a3559e16bac8ac48ac934722df57d307cdd1148f5d81d0b372e0",
+          "bytes": 37668970,
+          "native_files_unchanged": 39
+        }
+      ]
+    },
+    {
+      "name": "verify-complete-rev",
+      "exit_code": 0,
+      "seconds": 176.54
+    }
+  ],
+  "serial_tested_wasm_inputs": {
+    "factory": "4a88f94dab0d01594657d2174be06a9bfd09b88cc9f3500e56ca30e9594024eb",
+    "wasm": "24f034e3f263490961d3baa5675be919a743798e510dc3e7fdd895ee15c125ba"
+  },
+  "finished": "2026-09-30T21:00:18.667302+00:00"
+}

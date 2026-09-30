@@ -1,0 +1,104 @@
+{
+  "source_sha": "db31ad1b3109c0d7c9a1b87c0db9ab4d3093ce02",
+  "started": "2026-09-30T19:15:39.632942+00:00",
+  "steps": [
+    {
+      "name": "native-retained-inputs",
+      "exit_code": 0,
+      "seconds": 7.37
+    },
+    {
+      "name": "native-sdk-install",
+      "exit_code": 0,
+      "seconds": 27.94
+    },
+    {
+      "name": "native-sdk-verify",
+      "exit_code": 0,
+      "seconds": 4.14
+    },
+    {
+      "name": "package-fltk",
+      "exit_code": 0,
+      "seconds": 410.49
+    },
+    {
+      "name": "package-rev",
+      "exit_code": 0,
+      "seconds": 401.4
+    },
+    {
+      "name": "test-frontends",
+      "exit_code": 0,
+      "seconds": 69.68
+    },
+    {
+      "name": "test-web",
+      "exit_code": 8,
+      "seconds": 65.45
+    },
+    {
+      "name": "test-packaging",
+      "exit_code": 0,
+      "seconds": 126.6
+    },
+    {
+      "name": "native-fltk",
+      "exit_code": 0,
+      "seconds": 509.83
+    },
+    {
+      "name": "copied-portable-fltk",
+      "exit_code": 1,
+      "seconds": 543.8
+    },
+    {
+      "name": "native-rev",
+      "exit_code": 8,
+      "seconds": 788.05
+    },
+    {
+      "name": "copied-portable-rev",
+      "exit_code": 1,
+      "seconds": 659.71
+    },
+    {
+      "name": "wasm-retained-inputs",
+      "exit_code": 0,
+      "seconds": 26.29
+    },
+    {
+      "name": "wasm-sdk-install-stock-bookworm",
+      "exit_code": 1,
+      "seconds": 26.09
+    }
+  ],
+  "excluded_scopes": [
+    "full regression/calibration",
+    "physical audio",
+    "Windows",
+    "ARM64",
+    "cold toolchain reconstruction"
+  ],
+  "os_release": "PRETTY_NAME=\"Debian GNU/Linux 12 (bookworm)\"\nNAME=\"Debian GNU/Linux\"\nVERSION_ID=\"12\"\nVERSION=\"12 (bookworm)\"\nVERSION_CODENAME=bookworm\nID=debian\nHOME_URL=\"https://www.debian.org/\"\nSUPPORT_URL=\"https://www.debian.org/support\"\nBUG_REPORT_URL=\"https://bugs.debian.org/\"\n",
+  "network_namespace": "net:[4026532424]",
+  "routes": "",
+  "python": "3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]",
+  "node": "v18.20.4",
+  "internet_probe": "ENETUNREACH",
+  "ambient_compilers": {
+    "cc": null,
+    "gcc": null,
+    "g++": null,
+    "clang": null,
+    "clang++": null
+  },
+  "finished": "2026-09-30T20:16:46.583873+00:00",
+  "failed": [
+    "test-web",
+    "copied-portable-fltk",
+    "native-rev",
+    "copied-portable-rev",
+    "wasm-sdk-install-stock-bookworm"
+  ]
+}

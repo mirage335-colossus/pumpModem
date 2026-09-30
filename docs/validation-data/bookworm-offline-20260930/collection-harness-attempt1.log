@@ -1,0 +1,14 @@
+fatal: detected dubious ownership in repository at '/srv/recovery/source'
+To add an exception for this directory, call:
+
+	git config --global --add safe.directory /srv/recovery/source
+Traceback (most recent call last):
+  File "/srv/recovery/collect-remote.py", line 30, in <module>
+    'source_sha': subprocess.check_output(['git', '-C', str(ROOT / 'source'), 'rev-parse', 'HEAD'], text=True).strip(),
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 466, in check_output
+    return run(*popenargs, stdout=PIPE, timeout=timeout, check=True,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['git', '-C', '/srv/recovery/source', 'rev-parse', 'HEAD']' returned non-zero exit status 128.

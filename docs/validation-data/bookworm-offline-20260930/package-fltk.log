@@ -1,0 +1,638 @@
+COMMAND ["./build.sh", "package", "--sdk", "/srv/recovery/native-sdk", "--backend", "fltk", "--tui", "--fb", "--web-worker", "--build-dir", "/srv/recovery/build-fltk", "--jobs", "1", "--build-jobs", "3"]
+Configuring release in /srv/recovery/build-fltk
+-- The C compiler identification is GNU 15.3.0
+-- The CXX compiler identification is GNU 15.3.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /srv/recovery/native-sdk/bin/x86_64-buildroot-linux-gnu-gcc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /srv/recovery/native-sdk/bin/x86_64-buildroot-linux-gnu-g++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- DataPump compiler cache: ccache unavailable (optional)
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+-- Found Threads: TRUE
+-- Found OpenSSL: /srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/sysroot/usr/lib64/libcrypto.a (found suitable version "3.6.4", minimum required is "3.0") found components: Crypto
+-- Looking for __i386__
+-- Looking for __i386__ - not found
+-- Performing Test TUKLIB_LARGE_FILE_SUPPORT_BY_DEFAULT
+-- Performing Test TUKLIB_LARGE_FILE_SUPPORT_BY_DEFAULT - Success
+-- Performing Test HAVE___BUILTIN_BSWAPXX
+-- Performing Test HAVE___BUILTIN_BSWAPXX - Success
+-- Check if unaligned memory access should be used
+-- Check if unaligned memory access should be used - yes
+-- Performing Test HAVE___BUILTIN_ASSUME_ALIGNED
+-- Performing Test HAVE___BUILTIN_ASSUME_ALIGNED - Success
+-- Looking for clock_gettime
+-- Looking for clock_gettime - found
+-- Looking for CLOCK_MONOTONIC
+-- Looking for CLOCK_MONOTONIC - found
+-- Found Intl: built in to C library
+-- Could NOT find Gettext (missing: GETTEXT_MSGMERGE_EXECUTABLE GETTEXT_MSGFMT_EXECUTABLE) 
+-- Performing Test HAVE_COMPILER_OPTION_-Wall
+-- Performing Test HAVE_COMPILER_OPTION_-Wall - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wextra
+-- Performing Test HAVE_COMPILER_OPTION_-Wextra - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wvla
+-- Performing Test HAVE_COMPILER_OPTION_-Wvla - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wformat_2
+-- Performing Test HAVE_COMPILER_OPTION_-Wformat_2 - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Winit-self
+-- Performing Test HAVE_COMPILER_OPTION_-Winit-self - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wmissing-include-dirs
+-- Performing Test HAVE_COMPILER_OPTION_-Wmissing-include-dirs - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wshift-overflow_2
+-- Performing Test HAVE_COMPILER_OPTION_-Wshift-overflow_2 - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wstrict-overflow_3
+-- Performing Test HAVE_COMPILER_OPTION_-Wstrict-overflow_3 - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Walloc-zero
+-- Performing Test HAVE_COMPILER_OPTION_-Walloc-zero - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wduplicated-cond
+-- Performing Test HAVE_COMPILER_OPTION_-Wduplicated-cond - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wfloat-equal
+-- Performing Test HAVE_COMPILER_OPTION_-Wfloat-equal - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wundef
+-- Performing Test HAVE_COMPILER_OPTION_-Wundef - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wshadow
+-- Performing Test HAVE_COMPILER_OPTION_-Wshadow - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wpointer-arith
+-- Performing Test HAVE_COMPILER_OPTION_-Wpointer-arith - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wbad-function-cast
+-- Performing Test HAVE_COMPILER_OPTION_-Wbad-function-cast - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wwrite-strings
+-- Performing Test HAVE_COMPILER_OPTION_-Wwrite-strings - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wdate-time
+-- Performing Test HAVE_COMPILER_OPTION_-Wdate-time - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wsign-conversion
+-- Performing Test HAVE_COMPILER_OPTION_-Wsign-conversion - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wfloat-conversion
+-- Performing Test HAVE_COMPILER_OPTION_-Wfloat-conversion - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wlogical-op
+-- Performing Test HAVE_COMPILER_OPTION_-Wlogical-op - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Waggregate-return
+-- Performing Test HAVE_COMPILER_OPTION_-Waggregate-return - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wstrict-prototypes
+-- Performing Test HAVE_COMPILER_OPTION_-Wstrict-prototypes - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wold-style-definition
+-- Performing Test HAVE_COMPILER_OPTION_-Wold-style-definition - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wmissing-prototypes
+-- Performing Test HAVE_COMPILER_OPTION_-Wmissing-prototypes - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wmissing-declarations
+-- Performing Test HAVE_COMPILER_OPTION_-Wmissing-declarations - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wredundant-decls
+-- Performing Test HAVE_COMPILER_OPTION_-Wredundant-decls - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wimplicit-fallthrough
+-- Performing Test HAVE_COMPILER_OPTION_-Wimplicit-fallthrough - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wimplicit-fallthrough_5
+-- Performing Test HAVE_COMPILER_OPTION_-Wimplicit-fallthrough_5 - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wc99-compat
+-- Performing Test HAVE_COMPILER_OPTION_-Wc99-compat - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wc11-extensions
+-- Performing Test HAVE_COMPILER_OPTION_-Wc11-extensions - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wc2x-compat
+-- Performing Test HAVE_COMPILER_OPTION_-Wc2x-compat - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wc2x-extensions
+-- Performing Test HAVE_COMPILER_OPTION_-Wc2x-extensions - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Warray-bounds-pointer-arithmetic
+-- Performing Test HAVE_COMPILER_OPTION_-Warray-bounds-pointer-arithmetic - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wassign-enum
+-- Performing Test HAVE_COMPILER_OPTION_-Wassign-enum - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wconditional-uninitialized
+-- Performing Test HAVE_COMPILER_OPTION_-Wconditional-uninitialized - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wdocumentation
+-- Performing Test HAVE_COMPILER_OPTION_-Wdocumentation - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wduplicate-enum
+-- Performing Test HAVE_COMPILER_OPTION_-Wduplicate-enum - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wempty-translation-unit
+-- Performing Test HAVE_COMPILER_OPTION_-Wempty-translation-unit - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wextra-semi-stmt
+-- Performing Test HAVE_COMPILER_OPTION_-Wextra-semi-stmt - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wflexible-array-extensions
+-- Performing Test HAVE_COMPILER_OPTION_-Wflexible-array-extensions - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wmissing-variable-declarations
+-- Performing Test HAVE_COMPILER_OPTION_-Wmissing-variable-declarations - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wnewline-eof
+-- Performing Test HAVE_COMPILER_OPTION_-Wnewline-eof - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wshift-sign-overflow
+-- Performing Test HAVE_COMPILER_OPTION_-Wshift-sign-overflow - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wstring-conversion
+-- Performing Test HAVE_COMPILER_OPTION_-Wstring-conversion - Failed
+-- Performing Test IS_LINUX_WITH_GLIBC
+-- Performing Test IS_LINUX_WITH_GLIBC - Success
+-- Performing Test HAVE_LINKER_FLAG_UNDEFINED_VERSION
+-- Performing Test HAVE_LINKER_FLAG_UNDEFINED_VERSION - Success
+-- Checking how to detect the number of available CPU cores
+-- Performing Test TUKLIB_CPUCORES_SCHED_GETAFFINITY
+-- Performing Test TUKLIB_CPUCORES_SCHED_GETAFFINITY - Success
+-- Checking how to detect the amount of physical memory
+-- Performing Test TUKLIB_PHYSMEM_SPECIAL
+-- Performing Test TUKLIB_PHYSMEM_SPECIAL - Failed
+-- Performing Test TUKLIB_PHYSMEM_AIX
+-- Performing Test TUKLIB_PHYSMEM_AIX - Failed
+-- Performing Test TUKLIB_PHYSMEM_SYSCONF
+-- Performing Test TUKLIB_PHYSMEM_SYSCONF - Success
+-- Performing Test HAVE_FUNC_ATTRIBUTE_CONSTRUCTOR
+-- Performing Test HAVE_FUNC_ATTRIBUTE_CONSTRUCTOR - Success
+-- Looking for cpuid.h
+-- Looking for cpuid.h - found
+-- Looking for immintrin.h
+-- Looking for immintrin.h - found
+-- Performing Test HAVE__MM_MOVEMASK_EPI8
+-- Performing Test HAVE__MM_MOVEMASK_EPI8 - Success
+-- Performing Test HAVE_USABLE_CLMUL
+-- Performing Test HAVE_USABLE_CLMUL - Success
+-- Performing Test HAVE_ARM64_CRC32
+-- Performing Test HAVE_ARM64_CRC32 - Failed
+-- Performing Test HAVE_LOONGARCH_CRC32
+-- Performing Test HAVE_LOONGARCH_CRC32 - Failed
+-- Looking for getopt_long
+-- Looking for getopt_long - found
+-- Looking for sys/types.h
+-- Looking for sys/types.h - found
+-- Looking for stdint.h
+-- Looking for stdint.h - found
+-- Looking for stddef.h
+-- Looking for stddef.h - found
+-- Check size of short
+-- Check size of short - done
+-- Check size of int
+-- Check size of int - done
+-- Check size of long
+-- Check size of long - done
+-- Check size of long long
+-- Check size of long long - done
+-- Found PkgConfig: /srv/recovery/native-sdk/bin/pkg-config (found version "2.3.0")
+-- Looking for POSIX compatible scandir
+-- POSIX compatible scandir - found
+-- Could NOT find Doxygen (missing: DOXYGEN_EXECUTABLE) 
+-- Found X11: /srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/sysroot/usr/include
+-- Looking for XOpenDisplay in /srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/sysroot/usr/lib/libX11.so;/srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/sysroot/usr/lib/libXext.so
+-- Looking for XOpenDisplay in /srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/sysroot/usr/lib/libX11.so;/srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/sysroot/usr/lib/libXext.so - found
+-- Looking for gethostbyname
+-- Looking for gethostbyname - found
+-- Looking for connect
+-- Looking for connect - found
+-- Looking for remove
+-- Looking for remove - found
+-- Looking for shmat
+-- Looking for shmat - found
+-- Looking for IceConnectionNumber in ICE
+-- Looking for IceConnectionNumber in ICE - found
+-- Warning: fluid not found on the build system!
+
+-- Configuration Summary for FLTK 1.4.5 generated by CMake 4.4.0 --
+
+-- The following OPTIONAL packages have been found:
+
+ * Intl
+
+-- The following REQUIRED packages have been found:
+
+ * OpenSSL (required version >= 3.0)
+ * Threads
+
+-- The following OPTIONAL packages have not been found:
+
+ * Gettext
+ * Doxygen
+
+-- Static libraries    will be built in: /srv/recovery/build-fltk/third_party/fltk/lib
+-- Shared libraries    will not be built (set FLTK_BUILD_SHARED_LIBS=ON to build)
+-- The forms library   will not be built (set FLTK_BUILD_FORMS=ON to build)
+-- The OpenGL library  will not be built (set FLTK_BUILD_GL=ON to build)
+-- fluid               will not be built (set FLTK_BUILD_FLUID=ON to build)
+-- fltk-options        will not be built (set FLTK_BUILD_FLTK_OPTIONS=ON to build)
+-- Test programs       will not be built (set FLTK_BUILD_TEST=ON to build)
+-- Example programs    will not be built (set FLTK_BUILD_EXAMPLES=ON to build)
+-- 
+-- Build configuration      Release
+-- Installation prefix      /usr/local
+
+-- Bundled Libraries        JPEG     = Bundled
+--                          PNG      = Bundled
+--                          ZLIB     = Bundled
+
+-- Use Wayland              No (X11 is used)
+-- All drawing uses Cairo   No
+-- Use Pango                No
+-- Use Xft                  Yes
+-- Fl_Cairo_Window support  No
+-- Use std::                No
+
+-- End of Configuration Summary --
+
+-- DataPump GUI backend: fltk
+-- Looking for wsyncup in /srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/sysroot/usr/lib/libcurses.so
+-- Looking for wsyncup in /srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/sysroot/usr/lib/libcurses.so - found
+-- Looking for cbreak in /srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/sysroot/usr/lib/libncursesw.so
+-- Looking for cbreak in /srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/sysroot/usr/lib/libncursesw.so - found
+-- Looking for nodelay in /srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/sysroot/usr/lib/libncursesw.so
+-- Looking for nodelay in /srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/sysroot/usr/lib/libncursesw.so - found
+-- Found Curses: /srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/sysroot/usr/lib/libncursesw.so
+-- DataPump build: /srv/recovery/build-fltk (Release, fltk, portable=ON)
+-- DataPump targeted receive mitigation: index=compiler target supported; barrier=compiler target supported
+-- Configuring done (13.4s)
+-- Generating done (0.1s)
+-- Build files have been written to: /srv/recovery/build-fltk
+Building package with 3 compile jobs
+[1/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/common/tuklib_physmem.c.o
+[2/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/check/check.c.o
+[3/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/block_util.c.o
+[4/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/easy_preset.c.o
+[5/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/hardware_physmem.c.o
+[6/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/common.c.o
+[7/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/filter_common.c.o
+[8/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/stream_flags_common.c.o
+[9/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/vli_size.c.o
+[10/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/index.c.o
+[11/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/alone_encoder.c.o
+[12/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/string_conversion.c.o
+[13/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/block_buffer_encoder.c.o
+[14/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/block_encoder.c.o
+[15/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/block_header_encoder.c.o
+[16/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/easy_buffer_encoder.c.o
+[17/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/easy_encoder.c.o
+[18/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/easy_encoder_memusage.c.o
+[19/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/filter_buffer_encoder.c.o
+[20/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/filter_encoder.c.o
+[21/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/filter_flags_encoder.c.o
+[22/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/stream_buffer_encoder.c.o
+[23/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/index_encoder.c.o
+[24/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/stream_flags_encoder.c.o
+[25/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/check/crc32_fast.c.o
+[26/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/stream_encoder.c.o
+[27/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/vli_encoder.c.o
+[28/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/lzma_encoder.c.o
+[29/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/lzma_encoder_optimum_fast.c.o
+[30/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lz/lz_encoder.c.o
+[31/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/rangecoder/price_table.c.o
+[32/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/lzma_encoder_optimum_normal.c.o
+[33/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/fastpos_table.c.o
+[34/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/lzma2_encoder.c.o
+[35/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lz/lz_encoder_mf.c.o
+[36/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/block_buffer_decoder.c.o
+[37/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/auto_decoder.c.o
+[38/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/block_header_decoder.c.o
+[39/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/block_decoder.c.o
+[40/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/easy_decoder_memusage.c.o
+[41/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/filter_buffer_decoder.c.o
+[42/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/file_info.c.o
+[43/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/filter_decoder.c.o
+[44/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/filter_flags_decoder.c.o
+[45/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/index_decoder.c.o
+[46/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/index_hash.c.o
+[47/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/stream_buffer_decoder.c.o
+[48/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/alone_decoder.c.o
+[49/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/stream_flags_decoder.c.o
+[50/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/stream_decoder.c.o
+[51/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/vli_decoder.c.o
+[52/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lz/lz_decoder.c.o
+[53/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/lzma_encoder_presets.c.o
+[54/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/lzma2_decoder.c.o
+[55/339] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/lzma_decoder.c.o
+[56/339] Building CXX object CMakeFiles/datapump.dir/src/stream_codec.cpp.o
+[57/339] Building CXX object CMakeFiles/datapump.dir/src/attachment.cpp.o
+[58/339] Building CXX object CMakeFiles/datapump.dir/src/crypto.cpp.o
+[59/339] Building CXX object CMakeFiles/datapump.dir/src/recovery.cpp.o
+[60/339] Building CXX object CMakeFiles/datapump.dir/src/boundary_sync.cpp.o
+[61/339] Building CXX object CMakeFiles/datapump.dir/src/compression_short.cpp.o
+[62/339] Building CXX object CMakeFiles/datapump.dir/src/compression_lzma.cpp.o
+[63/339] Building CXX object CMakeFiles/datapump.dir/src/modem.cpp.o
+[64/339] Building CXX object CMakeFiles/datapump.dir/src/pattern_code.cpp.o
+[65/339] Building CXX object CMakeFiles/datapump.dir/src/streaming_modem.cpp.o
+[66/339] Building CXX object CMakeFiles/datapump.dir/src/search_parallel.cpp.o
+[67/339] Building CXX object CMakeFiles/datapump.dir/src/channel.cpp.o
+[68/339] Building CXX object CMakeFiles/datapump.dir/src/pattern_correlator.cpp.o
+[69/339] Building CXX object CMakeFiles/datapump.dir/src/pattern_receiver.cpp.o
+[70/339] Building CXX object CMakeFiles/datapump.dir/src/runtime.cpp.o
+[71/339] Building CXX object CMakeFiles/datapump.dir/src/resampler.cpp.o
+[72/339] Building CXX object CMakeFiles/datapump.dir/src/qr.cpp.o
+[73/339] Building CXX object CMakeFiles/datapump.dir/src/tuning.cpp.o
+[74/339] Building CXX object CMakeFiles/datapump.dir/src/signal_view.cpp.o
+[75/339] Building CXX object CMakeFiles/datapump.dir/third_party/qrcodegen/qrcodegen.cpp.o
+[76/339] Building CXX object CMakeFiles/datapump.dir/src/transfer.cpp.o
+[77/339] Building CXX object CMakeFiles/datapump.dir/src/pattern_correlator_batch.cpp.o
+[78/339] Building CXX object CMakeFiles/datapump.dir/src/pattern_fft_batch.cpp.o
+[79/339] Building CXX object CMakeFiles/datapump.dir/src/simulation_estimate.cpp.o
+[80/339] Building CXX object CMakeFiles/datapump.dir/src/lpi_estimate.cpp.o
+[81/339] Building CXX object CMakeFiles/datapump.dir/src/correlation_experiment.cpp.o
+[82/339] Building CXX object CMakeFiles/datapump.dir/src/pattern_search.cpp.o
+[83/339] Building CXX object CMakeFiles/datapump.dir/src/live.cpp.o
+[84/339] Building CXX object CMakeFiles/datapump.dir/src/receiver_probability_differential.cpp.o
+[85/339] Checking Legacy modem isolation
+[86/339] Checking regular/fast DSP isolation
+-- Regular/fast DSP dependency boundary passed
+[87/339] Linking C static library third_party/xz/liblzma.a
+[88/339] Building CXX object CMakeFiles/datapump.dir/src/receiver_probability.cpp.o
+[89/339] Building CXX object CMakeFiles/datapump.dir/src/execution.cpp.o
+[90/339] Linking CXX static library libdatapump.a
+[91/339] Building CXX object CMakeFiles/datapump_legacy.dir/src/legacy/modem.cpp.o
+[92/339] Building CXX object CMakeFiles/datapump_legacy.dir/src/legacy/psk.cpp.o
+[93/339] Building CXX object CMakeFiles/datapump_legacy.dir/src/legacy/olivia.cpp.o
+[94/339] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/profile.cpp.o
+[95/339] Building CXX object CMakeFiles/datapump_legacy.dir/src/legacy/session.cpp.o
+[96/339] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/preset.cpp.o
+[97/339] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/compression.cpp.o
+[98/339] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/attachment.cpp.o
+[99/339] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/codec.cpp.o
+[100/339] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/modem.cpp.o
+[101/339] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/acoustic_ofdm.cpp.o
+/srv/recovery/source/src/fast/acoustic_ofdm.cpp: In member function ‘void datapump::fast::acoustic_ofdm::Receiver::Impl::search()’:
+/srv/recovery/source/src/fast/acoustic_ofdm.cpp:238:9: warning: this ‘for’ clause does not guard... [-Wmisleading-indentation]
+  238 |         for(std::size_t i=0;i<work.size();++i)work[i]*=std::conj(reference_fft[i]);fft(work,true);
+      |         ^~~
+/srv/recovery/source/src/fast/acoustic_ofdm.cpp:238:84: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘for’
+  238 |         for(std::size_t i=0;i<work.size();++i)work[i]*=std::conj(reference_fft[i]);fft(work,true);
+      |                                                                                    ^~~
+[102/339] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/session.cpp.o
+[103/339] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/telemetry.cpp.o
+[104/339] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/file_transfer.cpp.o
+[105/339] Linking CXX static library libdatapump_legacy.a
+[106/339] Checking the shared GUI/native adapter boundary
+[107/339] Building CXX object CMakeFiles/datapump_audio_native.dir/src/audio.cpp.o
+[108/339] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/ldpc.cpp.o
+[109/339] Linking CXX static library libdatapump_fast.a
+[110/339] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/application.cpp.o
+/srv/recovery/source/src/gui/application.cpp: In function ‘int datapump::gui::gui_main(int, char**, const char*, const std::function<int(Launch)>&, const char*)’:
+/srv/recovery/source/src/gui/application.cpp:585:96: warning: ‘std::filesystem::__cxx11::path std::filesystem::__cxx11::u8path(const _Source&) [with _Source = char*; _Require = path; _CharT = char]’ is deprecated: use 'path((const char8_t*)&*source)' instead [-Wdeprecated-declarations]
+  585 |             else if(arg=="--smoke-dir"&&i+1<argc)launch.smoke_directory=std::filesystem::u8path(argv[++i]);
+      |                                                                         ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~
+In file included from /srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/include/c++/15.3.0/filesystem:54,
+                 from /srv/recovery/source/src/gui/application.hpp:7,
+                 from /srv/recovery/source/src/gui/application.cpp:1:
+/srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/include/c++/15.3.0/bits/fs_path.h:843:5: note: declared here
+  843 |     u8path(const _Source& __source)
+      |     ^~~~~~
+[111/339] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/launch_command.cpp.o
+[112/339] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/gui_smoke.cpp.o
+[113/339] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/screen_console.cpp.o
+[114/339] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/controller.cpp.o
+[115/339] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/state.cpp.o
+[116/339] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/plot_render.cpp.o
+[117/339] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/fast/screen.cpp.o
+[118/339] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/fast/plots.cpp.o
+[119/339] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/legacy/screen.cpp.o
+[120/339] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/legacy/controller.cpp.o
+[121/339] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/legacy/plots.cpp.o
+[122/339] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/fast/controller.cpp.o
+[123/339] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/inspection_model.cpp.o
+[124/339] Building CXX object CMakeFiles/datapump_audio_native.dir/src/audio_policy.cpp.o
+[125/339] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/link_planner_model.cpp.o
+[126/339] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/link_planner_page.cpp.o
+[127/339] Linking CXX static library libdatapump_gui_application.a
+[128/339] Building CXX object CMakeFiles/datapump_framebuffer.dir/src/gui/framebuffer.cpp.o
+[129/339] Building CXX object CMakeFiles/datapump_terminal_ui.dir/src/gui/terminal_ui.cpp.o
+[130/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl.cxx.o
+[131/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Adjuster.cxx.o
+[132/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Bitmap.cxx.o
+[133/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Browser.cxx.o
+[134/339] Building CXX object CMakeFiles/datapump_web_bridge.dir/src/gui/web_bridge.cpp.o
+[135/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Browser_load.cxx.o
+[136/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Box.cxx.o
+[137/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Button.cxx.o
+[138/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Browser_.cxx.o
+[139/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Check_Browser.cxx.o
+[140/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Chart.cxx.o
+[141/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Check_Button.cxx.o
+[142/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Choice.cxx.o
+[143/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Clock.cxx.o
+[144/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Copy_Surface.cxx.o
+[145/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Counter.cxx.o
+[146/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Color_Chooser.cxx.o
+[147/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Device.cxx.o
+[148/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Double_Window.cxx.o
+[149/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_File_Browser.cxx.o
+[150/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Dial.cxx.o
+[151/339] Building CXX object CMakeFiles/datapump_framebuffer.dir/src/gui/framebuffer_ui.cpp.o
+[152/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_File_Chooser.cxx.o
+[153/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_File_Icon.cxx.o
+[154/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_File_Input.cxx.o
+[155/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_File_Chooser2.cxx.o
+[156/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Flex.cxx.o
+[157/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Grid.cxx.o
+[158/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Group.cxx.o
+[159/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Image.cxx.o
+[160/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Graphics_Driver.cxx.o
+[161/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Image_Surface.cxx.o
+[162/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Input.cxx.o
+[163/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Input_Choice.cxx.o
+[164/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Int_Vector.cxx.o
+[165/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Light_Button.cxx.o
+[166/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Input_.cxx.o
+[167/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Help_View.cxx.o
+[168/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Menu_.cxx.o
+[169/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Menu_Bar.cxx.o
+[170/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Menu_Window.cxx.o
+[171/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Menu_Button.cxx.o
+[172/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Menu.cxx.o
+[173/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Menu_global.cxx.o
+[174/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Multi_Label.cxx.o
+[175/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Menu_add.cxx.o
+[176/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Overlay_Window.cxx.o
+[177/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Message.cxx.o
+[178/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Native_File_Chooser.cxx.o
+[179/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Paged_Device.cxx.o
+[180/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Pack.cxx.o
+[181/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Positioner.cxx.o
+[182/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Pixmap.cxx.o
+[183/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Printer.cxx.o
+[184/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Progress.cxx.o
+[185/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Repeat_Button.cxx.o
+[186/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Return_Button.cxx.o
+[187/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Round_Button.cxx.o
+[188/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Scheme.cxx.o
+[189/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Scheme_Choice.cxx.o
+[190/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Roller.cxx.o
+[191/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Preferences.cxx.o
+[192/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Scroll.cxx.o
+[193/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Screen_Driver.cxx.o
+[194/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Shared_Image.cxx.o
+[195/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Scrollbar.cxx.o
+[196/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Single_Window.cxx.o
+[197/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Shortcut_Button.cxx.o
+[198/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Spinner.cxx.o
+[199/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Slider.cxx.o
+[200/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Sys_Menu_Bar.cxx.o
+[201/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_String.cxx.o
+[202/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_System_Driver.cxx.o
+[203/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Table_Row.cxx.o
+[204/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Table.cxx.o
+[205/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Tabs.cxx.o
+[206/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Text_Buffer.cxx.o
+[207/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Text_Editor.cxx.o
+[208/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Terminal.cxx.o
+[209/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Tiled_Image.cxx.o
+[210/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Tile.cxx.o
+[211/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Text_Display.cxx.o
+[212/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Timeout.cxx.o
+[213/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Tooltip.cxx.o
+[214/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Tree_Item_Array.cxx.o
+[215/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Tree_Prefs.cxx.o
+[216/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Valuator.cxx.o
+[217/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Tree_Item.cxx.o
+[218/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Value_Input.cxx.o
+[219/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Tree.cxx.o
+[220/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Value_Output.cxx.o
+[221/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Widget_Surface.cxx.o
+[222/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Widget.cxx.o
+[223/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Value_Slider.cxx.o
+[224/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Window_fullscreen.cxx.o
+[225/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Window_hotspot.cxx.o
+[226/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Window_Driver.cxx.o
+[227/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Window_iconize.cxx.o
+[228/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Window.cxx.o
+[229/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_XBM_Image.cxx.o
+[230/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Wizard.cxx.o
+[231/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_abort.cxx.o
+[232/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_add_idle.cxx.o
+[233/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_XPM_Image.cxx.o
+[234/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_compose.cxx.o
+[235/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_display.cxx.o
+[236/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_arg.cxx.o
+[237/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_grab.cxx.o
+[238/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_lock.cxx.o
+[239/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_own_colormap.cxx.o
+[240/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_visual.cxx.o
+[241/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/filename_expand.cxx.o
+[242/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/filename_absolute.cxx.o
+[243/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_get_system_colors.cxx.o
+[244/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/filename_ext.cxx.o
+[245/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/filename_isdir.cxx.o
+[246/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/filename_list.cxx.o
+[247/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/filename_match.cxx.o
+[248/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/filename_setext.cxx.o
+[249/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_ask.cxx.o
+[250/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_boxtype.cxx.o
+[251/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_color.cxx.o
+[252/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_arc.cxx.o
+[253/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_cursor.cxx.o
+[254/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_contrast.cxx.o
+[255/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_diamond_box.cxx.o
+[256/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_curve.cxx.o
+[257/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_draw_arrow.cxx.o
+[258/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_encoding_latin1.cxx.o
+[259/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_draw_pixmap.cxx.o
+[260/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_encoding_mac_roman.cxx.o
+[261/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_engraved_label.cxx.o
+[262/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_file_dir.cxx.o
+[263/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_font.cxx.o
+[264/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_draw.cxx.o
+[265/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_gleam.cxx.o
+[266/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_open_uri.cxx.o
+[267/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_gtk.cxx.o
+[268/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_labeltype.cxx.o
+[269/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_oval_box.cxx.o
+[270/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_overlay.cxx.o
+[271/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_oxy.cxx.o
+[272/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_read_image.cxx.o
+[273/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_plastic.cxx.o
+[274/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_rect.cxx.o
+[275/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_rounded_box.cxx.o
+[276/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_round_box.cxx.o
+[277/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_set_font.cxx.o
+[278/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_shadow_box.cxx.o
+[279/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_scroll_area.cxx.o
+[280/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_string_functions.cxx.o
+[281/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_shortcut.cxx.o
+[282/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_show_colormap.cxx.o
+[283/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_vertex.cxx.o
+[284/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/print_button.cxx.o
+[285/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/screen_xywh.cxx.o
+[286/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/drivers/Posix/Fl_Posix_Printer_Driver.cxx.o
+[287/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_utf8.cxx.o
+[288/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_symbols.cxx.o
+[289/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/drivers/Posix/Fl_Posix_System_Driver.cxx.o
+[290/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/drivers/X11/Fl_X11_Window_Driver.cxx.o
+[291/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/drivers/Unix/Fl_Unix_Screen_Driver.cxx.o
+[292/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/drivers/X11/Fl_X11_Screen_Driver.cxx.o
+[293/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/drivers/Unix/Fl_Unix_System_Driver.cxx.o
+[294/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/drivers/Xlib/Fl_Xlib_Copy_Surface_Driver.cxx.o
+[295/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/drivers/X11/fl_X11_platform_init.cxx.o
+[296/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/drivers/Xlib/Fl_Xlib_Image_Surface_Driver.cxx.o
+[297/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Native_File_Chooser_FLTK.cxx.o
+[298/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/fl_dnd_x.cxx.o
+[299/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_get_key.cxx.o
+[300/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Native_File_Chooser_GTK.cxx.o
+[301/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Native_File_Chooser_Kdialog.cxx.o
+[302/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_Native_File_Chooser_Zenity.cxx.o
+[303/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/drivers/Xlib/Fl_Xlib_Graphics_Driver.cxx.o
+[304/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/drivers/Xlib/Fl_Xlib_Graphics_Driver_arci.cxx.o
+[305/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/drivers/Xlib/Fl_Xlib_Graphics_Driver_font_xft.cxx.o
+[306/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/drivers/Xlib/Fl_Xlib_Graphics_Driver_color.cxx.o
+[307/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/Fl_x.cxx.o
+[308/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/drivers/Xlib/Fl_Xlib_Graphics_Driver_line_style.cxx.o
+[309/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/drivers/Xlib/Fl_Xlib_Graphics_Driver_rect.cxx.o
+[310/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/drivers/Xlib/Fl_Xlib_Graphics_Driver_vertex.cxx.o
+[311/339] Building C object third_party/fltk/src/CMakeFiles/fltk.dir/flstring.c.o
+[312/339] Building C object third_party/fltk/src/CMakeFiles/fltk.dir/vsnprintf.c.o
+[313/339] Building C object third_party/fltk/src/CMakeFiles/fltk.dir/numericsort.c.o
+[314/339] Building C object third_party/fltk/src/CMakeFiles/fltk.dir/xutf8/is_right2left.c.o
+[315/339] Building C object third_party/fltk/src/CMakeFiles/fltk.dir/xutf8/is_spacing.c.o
+[316/339] Building C object third_party/fltk/src/CMakeFiles/fltk.dir/xutf8/case.c.o
+[317/339] Building C object third_party/fltk/src/CMakeFiles/fltk.dir/scandir_posix.c.o
+[318/339] Building C object third_party/fltk/src/CMakeFiles/fltk.dir/xutf8/keysym2Ucs.c.o
+[319/339] Building CXX object third_party/fltk/src/CMakeFiles/fltk.dir/drivers/Xlib/Fl_Xlib_Graphics_Driver_image.cxx.o
+[320/339] Building CXX object CMakeFiles/pump.dir/src/fast/cli.cpp.o
+[321/339] Linking CXX static library libdatapump_terminal_ui.a
+[322/339] Linking CXX static library libdatapump_framebuffer.a
+[323/339] Building CXX object CMakeFiles/pump.dir/src/main.cpp.o
+[324/339] Building CXX object CMakeFiles/datapump-tui.dir/src/gui/backend_ncurses.cpp.o
+[325/339] Building CXX object CMakeFiles/datapump-gui.dir/src/gui/backend_fltk.cpp.o
+[326/339] Linking CXX static library libdatapump_web_bridge.a
+[327/339] Building CXX object CMakeFiles/datapump-fb.dir/src/gui/backend_sdl.cpp.o
+[328/339] Building CXX object CMakeFiles/datapump-worker.dir/src/host/worker.cpp.o
+[329/339] Building CXX object CMakeFiles/datapump_host_audio.dir/src/host/audio.cpp.o
+[330/339] Building CXX object CMakeFiles/datapump-worker.dir/src/host/protocol.cpp.o
+[331/339] Building CXX object CMakeFiles/datapump-worker.dir/src/host/sandbox.cpp.o
+[332/339] Linking CXX static library third_party/fltk/lib/libfltk.a
+[333/339] Linking CXX executable pump; Staging SDK runtime libraries for pump
+[334/339] Linking CXX executable datapump-tui; Staging SDK runtime libraries for datapump-tui
+[335/339] Linking CXX executable datapump-gui; Staging SDK runtime libraries for datapump-gui
+-- Removed runtime path from "/srv/recovery/build-fltk/sdk-runtime/libSM.so.6"
+-- Removed runtime path from "/srv/recovery/build-fltk/sdk-runtime/libSM.so.6.0.1"
+-- Removed runtime path from "/srv/recovery/build-fltk/sdk-runtime/libX11.so.6"
+-- Removed runtime path from "/srv/recovery/build-fltk/sdk-runtime/libX11.so.6.4.0"
+-- Removed runtime path from "/srv/recovery/build-fltk/sdk-runtime/libXext.so.6"
+-- Removed runtime path from "/srv/recovery/build-fltk/sdk-runtime/libXext.so.6.4.0"
+-- Removed runtime path from "/srv/recovery/build-fltk/sdk-runtime/libXinerama.so.1"
+-- Removed runtime path from "/srv/recovery/build-fltk/sdk-runtime/libXinerama.so.1.0.0"
+-- Removed runtime path from "/srv/recovery/build-fltk/sdk-runtime/libXfixes.so.3"
+-- Removed runtime path from "/srv/recovery/build-fltk/sdk-runtime/libXfixes.so.3.1.0"
+-- Removed runtime path from "/srv/recovery/build-fltk/sdk-runtime/libXcursor.so.1"
+-- Removed runtime path from "/srv/recovery/build-fltk/sdk-runtime/libXcursor.so.1.0.2"
+-- Removed runtime path from "/srv/recovery/build-fltk/sdk-runtime/libXrender.so.1"
+-- Removed runtime path from "/srv/recovery/build-fltk/sdk-runtime/libXrender.so.1.3.0"
+-- Removed runtime path from "/srv/recovery/build-fltk/sdk-runtime/libXft.so.2"
+-- Removed runtime path from "/srv/recovery/build-fltk/sdk-runtime/libXft.so.2.3.9"
+-- Removed runtime path from "/srv/recovery/build-fltk/sdk-runtime/libxcb.so.1"
+-- Removed runtime path from "/srv/recovery/build-fltk/sdk-runtime/libxcb.so.1.1.0"
+[336/339] Building CXX object CMakeFiles/datapump-worker.dir/src/host/runtime.cpp.o
+[337/339] Linking CXX executable datapump-fb; Staging SDK runtime libraries for datapump-fb
+-- Removed runtime path from "/srv/recovery/build-fltk/sdk-runtime/libSDL2-2.0.so.0"
+-- Removed runtime path from "/srv/recovery/build-fltk/sdk-runtime/libSDL2-2.0.so.0.3200.10"
+-- Removed runtime path from "/srv/recovery/build-fltk/sdk-runtime/libXi.so.6"
+-- Removed runtime path from "/srv/recovery/build-fltk/sdk-runtime/libXi.so.6.1.0"
+-- Removed runtime path from "/srv/recovery/build-fltk/sdk-runtime/libXrandr.so.2"
+-- Removed runtime path from "/srv/recovery/build-fltk/sdk-runtime/libXrandr.so.2.2.0"
+[338/339] Linking CXX executable datapump-worker; Staging SDK runtime libraries for datapump-worker
+[338/339] Run CPack packaging tool...
+CPack: Create package using TGZ
+CPack: Install projects
+CPack: - Install project: DataPump []
+CPack: Create package
+CPack: - package: /srv/recovery/build-fltk/releases/DataPump-1.0.0-Linux-x86_64-native-fltk.tar.gz generated.
+CPack: Create package using ZIP
+CPack: Install projects
+CPack: - Install project: DataPump []
+CPack: Create package
+CPack: - package: /srv/recovery/build-fltk/releases/DataPump-1.0.0-Linux-x86_64-native-fltk.zip generated.
+-- Native package inventory, dependency closure, and isolated commands verified
+-- 49 packaged ELF files: no GTK/GLib; highest numeric glibc requirement 2.36
+-- Native package inventory, dependency closure, and isolated commands verified
+-- 49 packaged ELF files: no GTK/GLib; highest numeric glibc requirement 2.36
+-- Both native archive formats verified in /srv/recovery/build-fltk/releases/verification-6798e2f4a68f
+Verified portable archives: /srv/recovery/build-fltk/releases

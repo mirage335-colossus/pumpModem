@@ -1,0 +1,6 @@
+COMMAND ["/srv/recovery/native-sdk/bin/cmake", "-DARCHIVE_DIR=/srv/recovery/complete-portable/fltk", "-DGUI_SMOKE=OFF", "-DMAX_GLIBC=2.36", "-DREQUIRE_MANUALS=ON", "-DREQUIRE_FRONTENDS=ON", "-P", "tools/verify-native-archives.cmake"]
+-- Native package inventory, dependency closure, and isolated commands verified
+-- 49 packaged ELF files: no GTK/GLib; highest numeric glibc requirement 2.36
+-- Native package inventory, dependency closure, and isolated commands verified
+-- 49 packaged ELF files: no GTK/GLib; highest numeric glibc requirement 2.36
+-- Both native archive formats verified in /srv/recovery/complete-portable/fltk/verification-e653e45734d5

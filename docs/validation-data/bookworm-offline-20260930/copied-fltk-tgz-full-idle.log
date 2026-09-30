@@ -1,0 +1,6 @@
+COMMAND ["xvfb-run", "-a", "-s", "-screen 0 2400x1800x24 -dpi 96", "/srv/recovery/native-sdk/bin/cmake", "-DPACKAGE_ROOT=/srv/recovery/build-fltk/releases/verification-83c064b972a1/DataPump-1.0.0-Linux-x86_64-native-fltk.tar.gz/offline destination with spaces/DataPump-1.0.0-Linux-x86_64-native-fltk", "-DGUI_SMOKE=ON", "-DGUI_SMOKE_TIMEOUT=600", "-DREQUIRE_MANUALS=ON", "-DREQUIRE_FRONTENDS=ON", "-P", "tools/verify-native-package.cmake"]
+procs -----------memory---------- ---swap-- -----io---- -system-- ------cpu-----
+ r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st
+ 1  0   1536 982508  80440 6920788    0    0    18   425  525  713 47  4 47  0  2
+ 1  0   1536 982508  80440 6920788    0    0     0     0  198  161  0  0 100  0  0
+-- Native package inventory, dependency closure, and isolated commands verified

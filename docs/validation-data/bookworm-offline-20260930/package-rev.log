@@ -1,0 +1,1478 @@
+COMMAND ["./build.sh", "package", "--sdk", "/srv/recovery/native-sdk", "--backend", "rev", "--tui", "--fb", "--web-worker", "--build-dir", "/srv/recovery/build-rev", "--jobs", "1", "--build-jobs", "3"]
+Configuring release in /srv/recovery/build-rev
+-- The C compiler identification is GNU 15.3.0
+-- The CXX compiler identification is GNU 15.3.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /srv/recovery/native-sdk/bin/x86_64-buildroot-linux-gnu-gcc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /srv/recovery/native-sdk/bin/x86_64-buildroot-linux-gnu-g++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- DataPump compiler cache: ccache unavailable (optional)
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+-- Found Threads: TRUE
+-- Found OpenSSL: /srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/sysroot/usr/lib64/libcrypto.a (found suitable version "3.6.4", minimum required is "3.0") found components: Crypto
+-- Looking for __i386__
+-- Looking for __i386__ - not found
+-- Performing Test TUKLIB_LARGE_FILE_SUPPORT_BY_DEFAULT
+-- Performing Test TUKLIB_LARGE_FILE_SUPPORT_BY_DEFAULT - Success
+-- Performing Test HAVE___BUILTIN_BSWAPXX
+-- Performing Test HAVE___BUILTIN_BSWAPXX - Success
+-- Check if unaligned memory access should be used
+-- Check if unaligned memory access should be used - yes
+-- Performing Test HAVE___BUILTIN_ASSUME_ALIGNED
+-- Performing Test HAVE___BUILTIN_ASSUME_ALIGNED - Success
+-- Looking for clock_gettime
+-- Looking for clock_gettime - found
+-- Looking for CLOCK_MONOTONIC
+-- Looking for CLOCK_MONOTONIC - found
+-- Found Intl: built in to C library
+-- Could NOT find Gettext (missing: GETTEXT_MSGMERGE_EXECUTABLE GETTEXT_MSGFMT_EXECUTABLE) 
+-- Performing Test HAVE_COMPILER_OPTION_-Wall
+-- Performing Test HAVE_COMPILER_OPTION_-Wall - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wextra
+-- Performing Test HAVE_COMPILER_OPTION_-Wextra - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wvla
+-- Performing Test HAVE_COMPILER_OPTION_-Wvla - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wformat_2
+-- Performing Test HAVE_COMPILER_OPTION_-Wformat_2 - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Winit-self
+-- Performing Test HAVE_COMPILER_OPTION_-Winit-self - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wmissing-include-dirs
+-- Performing Test HAVE_COMPILER_OPTION_-Wmissing-include-dirs - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wshift-overflow_2
+-- Performing Test HAVE_COMPILER_OPTION_-Wshift-overflow_2 - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wstrict-overflow_3
+-- Performing Test HAVE_COMPILER_OPTION_-Wstrict-overflow_3 - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Walloc-zero
+-- Performing Test HAVE_COMPILER_OPTION_-Walloc-zero - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wduplicated-cond
+-- Performing Test HAVE_COMPILER_OPTION_-Wduplicated-cond - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wfloat-equal
+-- Performing Test HAVE_COMPILER_OPTION_-Wfloat-equal - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wundef
+-- Performing Test HAVE_COMPILER_OPTION_-Wundef - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wshadow
+-- Performing Test HAVE_COMPILER_OPTION_-Wshadow - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wpointer-arith
+-- Performing Test HAVE_COMPILER_OPTION_-Wpointer-arith - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wbad-function-cast
+-- Performing Test HAVE_COMPILER_OPTION_-Wbad-function-cast - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wwrite-strings
+-- Performing Test HAVE_COMPILER_OPTION_-Wwrite-strings - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wdate-time
+-- Performing Test HAVE_COMPILER_OPTION_-Wdate-time - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wsign-conversion
+-- Performing Test HAVE_COMPILER_OPTION_-Wsign-conversion - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wfloat-conversion
+-- Performing Test HAVE_COMPILER_OPTION_-Wfloat-conversion - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wlogical-op
+-- Performing Test HAVE_COMPILER_OPTION_-Wlogical-op - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Waggregate-return
+-- Performing Test HAVE_COMPILER_OPTION_-Waggregate-return - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wstrict-prototypes
+-- Performing Test HAVE_COMPILER_OPTION_-Wstrict-prototypes - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wold-style-definition
+-- Performing Test HAVE_COMPILER_OPTION_-Wold-style-definition - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wmissing-prototypes
+-- Performing Test HAVE_COMPILER_OPTION_-Wmissing-prototypes - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wmissing-declarations
+-- Performing Test HAVE_COMPILER_OPTION_-Wmissing-declarations - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wredundant-decls
+-- Performing Test HAVE_COMPILER_OPTION_-Wredundant-decls - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wimplicit-fallthrough
+-- Performing Test HAVE_COMPILER_OPTION_-Wimplicit-fallthrough - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wimplicit-fallthrough_5
+-- Performing Test HAVE_COMPILER_OPTION_-Wimplicit-fallthrough_5 - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wc99-compat
+-- Performing Test HAVE_COMPILER_OPTION_-Wc99-compat - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wc11-extensions
+-- Performing Test HAVE_COMPILER_OPTION_-Wc11-extensions - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wc2x-compat
+-- Performing Test HAVE_COMPILER_OPTION_-Wc2x-compat - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wc2x-extensions
+-- Performing Test HAVE_COMPILER_OPTION_-Wc2x-extensions - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Warray-bounds-pointer-arithmetic
+-- Performing Test HAVE_COMPILER_OPTION_-Warray-bounds-pointer-arithmetic - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wassign-enum
+-- Performing Test HAVE_COMPILER_OPTION_-Wassign-enum - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wconditional-uninitialized
+-- Performing Test HAVE_COMPILER_OPTION_-Wconditional-uninitialized - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wdocumentation
+-- Performing Test HAVE_COMPILER_OPTION_-Wdocumentation - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wduplicate-enum
+-- Performing Test HAVE_COMPILER_OPTION_-Wduplicate-enum - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wempty-translation-unit
+-- Performing Test HAVE_COMPILER_OPTION_-Wempty-translation-unit - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wextra-semi-stmt
+-- Performing Test HAVE_COMPILER_OPTION_-Wextra-semi-stmt - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wflexible-array-extensions
+-- Performing Test HAVE_COMPILER_OPTION_-Wflexible-array-extensions - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wmissing-variable-declarations
+-- Performing Test HAVE_COMPILER_OPTION_-Wmissing-variable-declarations - Success
+-- Performing Test HAVE_COMPILER_OPTION_-Wnewline-eof
+-- Performing Test HAVE_COMPILER_OPTION_-Wnewline-eof - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wshift-sign-overflow
+-- Performing Test HAVE_COMPILER_OPTION_-Wshift-sign-overflow - Failed
+-- Performing Test HAVE_COMPILER_OPTION_-Wstring-conversion
+-- Performing Test HAVE_COMPILER_OPTION_-Wstring-conversion - Failed
+-- Performing Test IS_LINUX_WITH_GLIBC
+-- Performing Test IS_LINUX_WITH_GLIBC - Success
+-- Performing Test HAVE_LINKER_FLAG_UNDEFINED_VERSION
+-- Performing Test HAVE_LINKER_FLAG_UNDEFINED_VERSION - Success
+-- Checking how to detect the number of available CPU cores
+-- Performing Test TUKLIB_CPUCORES_SCHED_GETAFFINITY
+-- Performing Test TUKLIB_CPUCORES_SCHED_GETAFFINITY - Success
+-- Checking how to detect the amount of physical memory
+-- Performing Test TUKLIB_PHYSMEM_SPECIAL
+-- Performing Test TUKLIB_PHYSMEM_SPECIAL - Failed
+-- Performing Test TUKLIB_PHYSMEM_AIX
+-- Performing Test TUKLIB_PHYSMEM_AIX - Failed
+-- Performing Test TUKLIB_PHYSMEM_SYSCONF
+-- Performing Test TUKLIB_PHYSMEM_SYSCONF - Success
+-- Performing Test HAVE_FUNC_ATTRIBUTE_CONSTRUCTOR
+-- Performing Test HAVE_FUNC_ATTRIBUTE_CONSTRUCTOR - Success
+-- Looking for cpuid.h
+-- Looking for cpuid.h - found
+-- Looking for immintrin.h
+-- Looking for immintrin.h - found
+-- Performing Test HAVE__MM_MOVEMASK_EPI8
+-- Performing Test HAVE__MM_MOVEMASK_EPI8 - Success
+-- Performing Test HAVE_USABLE_CLMUL
+-- Performing Test HAVE_USABLE_CLMUL - Success
+-- Performing Test HAVE_ARM64_CRC32
+-- Performing Test HAVE_ARM64_CRC32 - Failed
+-- Performing Test HAVE_LOONGARCH_CRC32
+-- Performing Test HAVE_LOONGARCH_CRC32 - Failed
+-- Looking for getopt_long
+-- Looking for getopt_long - found
+-- Found Python3: /srv/recovery/native-sdk/bin/python3.14 (found version "3.14.7") found components: Interpreter
+-- Found OpenGL: /srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/sysroot/usr/lib/libOpenGL.so
+-- Found GLEW: /srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/sysroot/usr/include (found version "2.3.1")
+-- Found Freetype: /srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/sysroot/usr/lib/libfreetype.so (found version "2.14.3")
+-- Found X11: /srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/sysroot/usr/include  found components: Xrandr Xext
+-- Looking for XOpenDisplay in /srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/sysroot/usr/lib/libX11.so;/srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/sysroot/usr/lib/libXext.so
+-- Looking for XOpenDisplay in /srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/sysroot/usr/lib/libX11.so;/srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/sysroot/usr/lib/libXext.so - found
+-- Looking for gethostbyname
+-- Looking for gethostbyname - found
+-- Looking for connect
+-- Looking for connect - found
+-- Looking for remove
+-- Looking for remove - found
+-- Looking for shmat
+-- Looking for shmat - found
+-- Looking for IceConnectionNumber in ICE
+-- Looking for IceConnectionNumber in ICE - found
+Staged 46 Rev modules and embedded 18 resources
+-- DataPump GUI backend: rev
+-- Looking for wsyncup in /srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/sysroot/usr/lib/libcurses.so
+-- Looking for wsyncup in /srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/sysroot/usr/lib/libcurses.so - found
+-- Looking for cbreak in /srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/sysroot/usr/lib/libncursesw.so
+-- Looking for cbreak in /srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/sysroot/usr/lib/libncursesw.so - found
+-- Looking for nodelay in /srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/sysroot/usr/lib/libncursesw.so
+-- Looking for nodelay in /srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/sysroot/usr/lib/libncursesw.so - found
+-- Found Curses: /srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/sysroot/usr/lib/libncursesw.so
+-- DataPump build: /srv/recovery/build-rev (Release, rev, portable=ON)
+-- DataPump targeted receive mitigation: index=compiler target supported; barrier=compiler target supported
+-- Configuring done (8.7s)
+-- Generating done (0.1s)
+-- Build files have been written to: /srv/recovery/build-rev
+Building package with 3 compile jobs
+[0/2] Re-checking globbed directories...
+[1/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/common/tuklib_physmem.c.o
+[2/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/check/check.c.o
+[3/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/block_util.c.o
+[4/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/easy_preset.c.o
+[5/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/common.c.o
+[6/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/hardware_physmem.c.o
+[7/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/filter_common.c.o
+[8/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/stream_flags_common.c.o
+[9/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/vli_size.c.o
+[10/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/index.c.o
+[11/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/string_conversion.c.o
+[12/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/alone_encoder.c.o
+[13/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/block_buffer_encoder.c.o
+[14/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/block_encoder.c.o
+[15/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/easy_buffer_encoder.c.o
+[16/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/block_header_encoder.c.o
+[17/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/easy_encoder.c.o
+[18/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/easy_encoder_memusage.c.o
+[19/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/filter_buffer_encoder.c.o
+[20/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/filter_flags_encoder.c.o
+[21/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/filter_encoder.c.o
+[22/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/stream_buffer_encoder.c.o
+[23/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/check/crc32_fast.c.o
+[24/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/index_encoder.c.o
+[25/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/vli_encoder.c.o
+[26/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/stream_encoder.c.o
+[27/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/stream_flags_encoder.c.o
+[28/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/lzma_encoder.c.o
+[29/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/lzma_encoder_optimum_fast.c.o
+[30/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/lzma_encoder_optimum_normal.c.o
+[31/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/rangecoder/price_table.c.o
+[32/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lz/lz_encoder_mf.c.o
+[33/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/fastpos_table.c.o
+[34/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lz/lz_encoder.c.o
+[35/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/lzma2_encoder.c.o
+[36/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/auto_decoder.c.o
+[37/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/block_buffer_decoder.c.o
+[38/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/block_decoder.c.o
+[39/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/block_header_decoder.c.o
+[40/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/easy_decoder_memusage.c.o
+[41/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/filter_buffer_decoder.c.o
+[42/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/file_info.c.o
+[43/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/filter_decoder.c.o
+[44/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/filter_flags_decoder.c.o
+[45/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/index_decoder.c.o
+[46/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/index_hash.c.o
+[47/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/alone_decoder.c.o
+[48/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/stream_buffer_decoder.c.o
+[49/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/stream_flags_decoder.c.o
+[50/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/stream_decoder.c.o
+[51/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/common/vli_decoder.c.o
+[52/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lz/lz_decoder.c.o
+[53/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/lzma2_decoder.c.o
+[54/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/lzma_encoder_presets.c.o
+[55/251] Building C object third_party/xz/CMakeFiles/liblzma.dir/src/liblzma/lzma/lzma_decoder.c.o
+[56/251] Building CXX object CMakeFiles/datapump.dir/src/stream_codec.cpp.o
+[57/251] Building CXX object CMakeFiles/datapump.dir/src/attachment.cpp.o
+[58/251] Building CXX object CMakeFiles/datapump.dir/src/crypto.cpp.o
+[59/251] Building CXX object CMakeFiles/datapump.dir/src/compression_short.cpp.o
+[60/251] Building CXX object CMakeFiles/datapump.dir/src/compression_lzma.cpp.o
+[61/251] Building CXX object CMakeFiles/datapump.dir/src/boundary_sync.cpp.o
+[62/251] Building CXX object CMakeFiles/datapump.dir/src/recovery.cpp.o
+[63/251] Building CXX object CMakeFiles/datapump.dir/src/modem.cpp.o
+[64/251] Building CXX object CMakeFiles/datapump.dir/src/streaming_modem.cpp.o
+[65/251] Building CXX object CMakeFiles/datapump.dir/src/pattern_code.cpp.o
+[66/251] Building CXX object CMakeFiles/datapump.dir/src/search_parallel.cpp.o
+[67/251] Building CXX object CMakeFiles/datapump.dir/src/channel.cpp.o
+[68/251] Building CXX object CMakeFiles/datapump.dir/src/pattern_correlator.cpp.o
+[69/251] Building CXX object CMakeFiles/datapump.dir/src/resampler.cpp.o
+[70/251] Building CXX object CMakeFiles/datapump.dir/src/runtime.cpp.o
+[71/251] Building CXX object CMakeFiles/datapump.dir/src/pattern_receiver.cpp.o
+[72/251] Building CXX object CMakeFiles/datapump.dir/src/qr.cpp.o
+[73/251] Building CXX object CMakeFiles/datapump.dir/src/tuning.cpp.o
+[74/251] Building CXX object CMakeFiles/datapump.dir/src/signal_view.cpp.o
+[75/251] Building CXX object CMakeFiles/datapump.dir/third_party/qrcodegen/qrcodegen.cpp.o
+[76/251] Building CXX object CMakeFiles/datapump.dir/src/transfer.cpp.o
+[77/251] Building CXX object CMakeFiles/datapump.dir/src/pattern_correlator_batch.cpp.o
+[78/251] Building CXX object CMakeFiles/datapump.dir/src/pattern_fft_batch.cpp.o
+[79/251] Building CXX object CMakeFiles/datapump.dir/src/simulation_estimate.cpp.o
+[80/251] Building CXX object CMakeFiles/datapump.dir/src/lpi_estimate.cpp.o
+[81/251] Building CXX object CMakeFiles/datapump.dir/src/pattern_search.cpp.o
+[82/251] Building CXX object CMakeFiles/datapump.dir/src/correlation_experiment.cpp.o
+[83/251] Building CXX object CMakeFiles/datapump.dir/src/live.cpp.o
+[84/251] Building CXX object CMakeFiles/datapump.dir/src/receiver_probability_differential.cpp.o
+[85/251] Checking Legacy modem isolation
+[86/251] Checking regular/fast DSP isolation
+-- Regular/fast DSP dependency boundary passed
+[87/251] Linking C static library third_party/xz/liblzma.a
+[88/251] Building CXX object CMakeFiles/datapump.dir/src/receiver_probability.cpp.o
+[89/251] Building CXX object CMakeFiles/datapump_legacy.dir/src/legacy/modem.cpp.o
+[90/251] Building CXX object CMakeFiles/datapump.dir/src/execution.cpp.o
+[91/251] Linking CXX static library libdatapump.a
+[92/251] Building CXX object CMakeFiles/datapump_legacy.dir/src/legacy/psk.cpp.o
+[93/251] Building CXX object CMakeFiles/datapump_legacy.dir/src/legacy/olivia.cpp.o
+[94/251] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/profile.cpp.o
+[95/251] Building CXX object CMakeFiles/datapump_legacy.dir/src/legacy/session.cpp.o
+[96/251] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/preset.cpp.o
+[97/251] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/compression.cpp.o
+[98/251] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/attachment.cpp.o
+[99/251] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/codec.cpp.o
+[100/251] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/modem.cpp.o
+[101/251] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/acoustic_ofdm.cpp.o
+/srv/recovery/source/src/fast/acoustic_ofdm.cpp: In member function ‘void datapump::fast::acoustic_ofdm::Receiver::Impl::search()’:
+/srv/recovery/source/src/fast/acoustic_ofdm.cpp:238:9: warning: this ‘for’ clause does not guard... [-Wmisleading-indentation]
+  238 |         for(std::size_t i=0;i<work.size();++i)work[i]*=std::conj(reference_fft[i]);fft(work,true);
+      |         ^~~
+/srv/recovery/source/src/fast/acoustic_ofdm.cpp:238:84: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘for’
+  238 |         for(std::size_t i=0;i<work.size();++i)work[i]*=std::conj(reference_fft[i]);fft(work,true);
+      |                                                                                    ^~~
+[102/251] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/session.cpp.o
+[103/251] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/telemetry.cpp.o
+[104/251] Scanning /srv/recovery/build-rev/rev-generated/rev_embedded.cpp for CXX dependencies
+[105/251] Scanning /srv/recovery/build-rev/rev-generated/source/Core/Color.ixx for CXX dependencies
+[106/251] Scanning /srv/recovery/build-rev/rev-generated/source/Core/DirtyFlag.ixx for CXX dependencies
+[107/251] Scanning /srv/recovery/build-rev/rev-generated/source/Core/Dispatcher.ixx for CXX dependencies
+[108/251] Scanning /srv/recovery/build-rev/rev-generated/source/Core/Font.ixx for CXX dependencies
+[109/251] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/file_transfer.cpp.o
+[110/251] Scanning /srv/recovery/build-rev/rev-generated/source/Core/FontAtlas.ixx for CXX dependencies
+[111/251] Scanning /srv/recovery/build-rev/rev-generated/source/Core/Geometry/D3/Pos3.ixx for CXX dependencies
+[112/251] Scanning /srv/recovery/build-rev/rev-generated/source/Core/Geometry/Pos.ixx for CXX dependencies
+[113/251] Scanning /srv/recovery/build-rev/rev-generated/source/Core/Observable.ixx for CXX dependencies
+[114/251] Scanning /srv/recovery/build-rev/rev-generated/source/Core/Process.ixx for CXX dependencies
+[115/251] Scanning /srv/recovery/build-rev/rev-generated/source/Core/Rect.ixx for CXX dependencies
+[116/251] Scanning /srv/recovery/build-rev/rev-generated/source/Core/Resource.ixx for CXX dependencies
+[117/251] Scanning /srv/recovery/build-rev/rev-generated/source/Core/RevisionFlag.ixx for CXX dependencies
+[118/251] Scanning /srv/recovery/build-rev/rev-generated/source/Core/Shared.ixx for CXX dependencies
+[119/251] Scanning /srv/recovery/build-rev/rev-generated/source/Core/Vertex.ixx for CXX dependencies
+[120/251] Scanning /srv/recovery/build-rev/rev-generated/source/Core/Svg.ixx for CXX dependencies
+[121/251] Scanning /srv/recovery/build-rev/rev-generated/source/Core/Vertex3.ixx for CXX dependencies
+[122/251] Scanning /srv/recovery/build-rev/rev-generated/source/Element/Element.ixx for CXX dependencies
+[123/251] Scanning /srv/recovery/build-rev/rev-generated/source/Element/Event/Event.ixx for CXX dependencies
+[124/251] Scanning /srv/recovery/build-rev/rev-generated/source/Element/Resolved.ixx for CXX dependencies
+[125/251] Scanning /srv/recovery/build-rev/rev-generated/source/Element/Style/Style.ixx for CXX dependencies
+[126/251] Scanning /srv/recovery/build-rev/rev-generated/source/Elements/Box.ixx for CXX dependencies
+[127/251] Scanning /srv/recovery/build-rev/rev-generated/source/Elements/Controls/Button/Button.ixx for CXX dependencies
+[128/251] Scanning /srv/recovery/build-rev/rev-generated/source/Elements/Controls/ControlTheme.ixx for CXX dependencies
+[129/251] Scanning /srv/recovery/build-rev/rev-generated/source/Elements/Controls/Checkbox/Checkbox.ixx for CXX dependencies
+[130/251] Scanning /srv/recovery/build-rev/rev-generated/source/Elements/Controls/TextInput/TextInput.ixx for CXX dependencies
+[131/251] Scanning /srv/recovery/build-rev/rev-generated/source/Elements/Controls/Dropdown/Dropdown.ixx for CXX dependencies
+[132/251] Scanning /srv/recovery/build-rev/rev-generated/source/Elements/Svg.ixx for CXX dependencies
+[133/251] Scanning /srv/recovery/build-rev/rev-generated/source/Elements/Text.ixx for CXX dependencies
+[134/251] Scanning /srv/recovery/build-rev/rev-generated/source/GlobalTime.ixx for CXX dependencies
+[135/251] Scanning /srv/recovery/build-rev/rev-generated/source/Graphics/OpenGL/CommandBuffer.OpenGL.ixx for CXX dependencies
+[136/251] Scanning /srv/recovery/build-rev/rev-generated/source/Graphics/OpenGL/Canvas.OpenGL.ixx for CXX dependencies
+[137/251] Scanning /srv/recovery/build-rev/rev-generated/source/Graphics/OpenGL/FrameBuffer.OpenGL.ixx for CXX dependencies
+[138/251] Scanning /srv/recovery/build-rev/rev-generated/source/Graphics/OpenGL/Pipeline.OpenGL.ixx for CXX dependencies
+[139/251] Scanning /srv/recovery/build-rev/rev-generated/source/Graphics/OpenGL/Shader.OpenGL.ixx for CXX dependencies
+[140/251] Scanning /srv/recovery/build-rev/rev-generated/source/Graphics/OpenGL/Texture.OpenGL.ixx for CXX dependencies
+[141/251] Scanning /srv/recovery/build-rev/rev-generated/source/Graphics/OpenGL/UniformBuffer.OpenGL.ixx for CXX dependencies
+[142/251] Scanning /srv/recovery/build-rev/rev-generated/source/Graphics/OpenGL/VertexBuffer.OpenGL.ixx for CXX dependencies
+[143/251] Scanning /srv/recovery/build-rev/rev-generated/source/Graphics/Primitives/Lines/Lines.ixx for CXX dependencies
+[144/251] Scanning /srv/recovery/build-rev/rev-generated/source/Graphics/Primitives/Primitive.ixx for CXX dependencies
+[145/251] Scanning /srv/recovery/build-rev/rev-generated/source/Graphics/Primitives/Rectangle/Rectangle.ixx for CXX dependencies
+[146/251] Scanning /srv/recovery/build-rev/rev-generated/source/Graphics/Primitives/Svg/Svg.ixx for CXX dependencies
+[147/251] Scanning /srv/recovery/build-rev/rev-generated/source/Graphics/Primitives/Video/Video.ixx for CXX dependencies
+[148/251] Scanning /srv/recovery/build-rev/rev-generated/source/Graphics/Primitives/Text/Text.ixx for CXX dependencies
+[149/251] Scanning /srv/recovery/build-rev/rev-generated/source/OS/Application/Application.lnx.ixx for CXX dependencies
+[150/251] Scanning /srv/recovery/build-rev/rev-generated/source/OS/Window/NativeWindow.lnx.ixx for CXX dependencies
+[151/251] Scanning /srv/recovery/build-rev/rev-generated/source/Window.ixx for CXX dependencies
+[152/251] Linking CXX static library libdatapump_legacy.a
+[153/251] Generating CXX dyndep file CMakeFiles/datapump_rev.dir/CXX.dd
+[154/251] Checking the shared GUI/native adapter boundary
+[155/251] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/ldpc.cpp.o
+[156/251] Linking CXX static library libdatapump_fast.a
+[157/251] Building CXX object CMakeFiles/datapump_audio_native.dir/src/audio.cpp.o
+[158/251] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/gui_smoke.cpp.o
+[159/251] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/application.cpp.o
+/srv/recovery/source/src/gui/application.cpp: In function ‘int datapump::gui::gui_main(int, char**, const char*, const std::function<int(Launch)>&, const char*)’:
+/srv/recovery/source/src/gui/application.cpp:585:96: warning: ‘std::filesystem::__cxx11::path std::filesystem::__cxx11::u8path(const _Source&) [with _Source = char*; _Require = path; _CharT = char]’ is deprecated: use 'path((const char8_t*)&*source)' instead [-Wdeprecated-declarations]
+  585 |             else if(arg=="--smoke-dir"&&i+1<argc)launch.smoke_directory=std::filesystem::u8path(argv[++i]);
+      |                                                                         ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~
+In file included from /srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/include/c++/15.3.0/filesystem:54,
+                 from /srv/recovery/source/src/gui/application.hpp:7,
+                 from /srv/recovery/source/src/gui/application.cpp:1:
+/srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/include/c++/15.3.0/bits/fs_path.h:843:5: note: declared here
+  843 |     u8path(const _Source& __source)
+      |     ^~~~~~
+[160/251] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/launch_command.cpp.o
+[161/251] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/screen_console.cpp.o
+[162/251] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/controller.cpp.o
+[163/251] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/plot_render.cpp.o
+[164/251] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/fast/screen.cpp.o
+[165/251] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/state.cpp.o
+[166/251] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/fast/plots.cpp.o
+[167/251] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/legacy/screen.cpp.o
+[168/251] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/legacy/controller.cpp.o
+[169/251] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/legacy/plots.cpp.o
+[170/251] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/fast/controller.cpp.o
+[171/251] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/inspection_model.cpp.o
+[172/251] Scanning /srv/recovery/source/src/gui/backend_rev.cpp for CXX dependencies
+[173/251] Scanning /srv/recovery/source/src/gui/rev_platform.cpp for CXX dependencies
+[174/251] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/link_planner_model.cpp.o
+[175/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/rev_embedded.cpp.o
+[176/251] Building CXX object CMakeFiles/datapump_audio_native.dir/src/audio_policy.cpp.o
+[177/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Core/Color.ixx.o
+[178/251] Building CXX object CMakeFiles/datapump_gui_application.dir/src/gui/link_planner_page.cpp.o
+[179/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Core/Dispatcher.ixx.o
+[180/251] Linking CXX static library libdatapump_gui_application.a
+[181/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Core/DirtyFlag.ixx.o
+[182/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Core/Geometry/Pos.ixx.o
+[183/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Core/Geometry/D3/Pos3.ixx.o
+[184/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Core/Observable.ixx.o
+[185/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Core/Shared.ixx.o
+[186/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Core/RevisionFlag.ixx.o
+[187/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Core/Vertex.ixx.o
+[188/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Core/Vertex3.ixx.o
+[189/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Core/Rect.ixx.o
+[190/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Graphics/OpenGL/CommandBuffer.OpenGL.ixx.o
+[191/251] Generating CXX dyndep file CMakeFiles/datapump-gui.dir/CXX.dd
+[192/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/GlobalTime.ixx.o
+[193/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Core/Resource.ixx.o
+[194/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Core/Process.ixx.o
+[195/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Graphics/OpenGL/Shader.OpenGL.ixx.o
+[196/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Element/Style/Style.ixx.o
+/srv/recovery/build-rev/rev-generated/source/Element/Style/Style.ixx:66:29: warning: space between quotes and suffix is deprecated in C++23 [-Wdeprecated-literal-operator]
+   66 |     constexpr int operator"" _sec(long double value) { return static_cast<int>(value * 1000.0); }
+      |                             ^~
+      |                             --
+/srv/recovery/build-rev/rev-generated/source/Element/Style/Style.ixx:66:29: warning: space between quotes and suffix is deprecated in C++23 [-Wdeprecated-literal-operator]
+   66 |     constexpr int operator"" _sec(long double value) { return static_cast<int>(value * 1000.0); }
+      |                             ^~
+      |                             --
+/srv/recovery/build-rev/rev-generated/source/Element/Style/Style.ixx:67:29: warning: space between quotes and suffix is deprecated in C++23 [-Wdeprecated-literal-operator]
+   67 |     constexpr int operator"" _sec(unsigned long long value) { return static_cast<int>(value * 1000.0); }
+      |                             ^~
+      |                             --
+/srv/recovery/build-rev/rev-generated/source/Element/Style/Style.ixx:67:29: warning: space between quotes and suffix is deprecated in C++23 [-Wdeprecated-literal-operator]
+   67 |     constexpr int operator"" _sec(unsigned long long value) { return static_cast<int>(value * 1000.0); }
+      |                             ^~
+      |                             --
+/srv/recovery/build-rev/rev-generated/source/Element/Style/Style.ixx:68:29: warning: space between quotes and suffix is deprecated in C++23 [-Wdeprecated-literal-operator]
+   68 |     constexpr int operator"" _ms(unsigned long long value) { return static_cast<int>(value); }
+      |                             ^~
+      |                             --
+/srv/recovery/build-rev/rev-generated/source/Element/Style/Style.ixx:68:29: warning: space between quotes and suffix is deprecated in C++23 [-Wdeprecated-literal-operator]
+   68 |     constexpr int operator"" _ms(unsigned long long value) { return static_cast<int>(value); }
+      |                             ^~
+      |                             --
+/srv/recovery/build-rev/rev-generated/source/Element/Style/Style.ixx:153:30: warning: space between quotes and suffix is deprecated in C++23 [-Wdeprecated-literal-operator]
+  153 |     constexpr Dist operator"" _px(unsigned long long value) { return { Dist::Type::Abs, static_cast<float>(value) }; }
+      |                              ^~
+      |                              --
+/srv/recovery/build-rev/rev-generated/source/Element/Style/Style.ixx:153:30: warning: space between quotes and suffix is deprecated in C++23 [-Wdeprecated-literal-operator]
+  153 |     constexpr Dist operator"" _px(unsigned long long value) { return { Dist::Type::Abs, static_cast<float>(value) }; }
+      |                              ^~
+      |                              --
+/srv/recovery/build-rev/rev-generated/source/Element/Style/Style.ixx:154:30: warning: space between quotes and suffix is deprecated in C++23 [-Wdeprecated-literal-operator]
+  154 |     constexpr Dist operator"" _pct(unsigned long long value) { return { Dist::Type::Rel, static_cast<float>(value) / 100.0f }; }
+      |                              ^~
+      |                              --
+/srv/recovery/build-rev/rev-generated/source/Element/Style/Style.ixx:154:30: warning: space between quotes and suffix is deprecated in C++23 [-Wdeprecated-literal-operator]
+  154 |     constexpr Dist operator"" _pct(unsigned long long value) { return { Dist::Type::Rel, static_cast<float>(value) / 100.0f }; }
+      |                              ^~
+      |                              --
+/srv/recovery/build-rev/rev-generated/source/Element/Style/Style.ixx:155:30: warning: space between quotes and suffix is deprecated in C++23 [-Wdeprecated-literal-operator]
+  155 |     constexpr Dist operator"" _grow(unsigned long long value) { return { Dist::Type::Grow, static_cast<float>(value) / 100.0f }; }
+      |                              ^~
+      |                              --
+/srv/recovery/build-rev/rev-generated/source/Element/Style/Style.ixx:155:30: warning: space between quotes and suffix is deprecated in C++23 [-Wdeprecated-literal-operator]
+  155 |     constexpr Dist operator"" _grow(unsigned long long value) { return { Dist::Type::Grow, static_cast<float>(value) / 100.0f }; }
+      |                              ^~
+      |                              --
+/srv/recovery/build-rev/rev-generated/source/Element/Style/Style.ixx:156:30: warning: space between quotes and suffix is deprecated in C++23 [-Wdeprecated-literal-operator]
+  156 |     constexpr Dist operator"" _shrink(unsigned long long value) { return { Dist::Type::Shrink, static_cast<float>(value) / 100.0f }; }
+      |                              ^~
+      |                              --
+/srv/recovery/build-rev/rev-generated/source/Element/Style/Style.ixx:156:30: warning: space between quotes and suffix is deprecated in C++23 [-Wdeprecated-literal-operator]
+  156 |     constexpr Dist operator"" _shrink(unsigned long long value) { return { Dist::Type::Shrink, static_cast<float>(value) / 100.0f }; }
+      |                              ^~
+      |                              --
+[197/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Element/Resolved.ixx.o
+[198/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Elements/Controls/ControlTheme.ixx.o
+[199/251] Building CXX object CMakeFiles/datapump_framebuffer.dir/src/gui/framebuffer.cpp.o
+[200/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/OS/Window/NativeWindow.lnx.ixx.o
+[201/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Graphics/OpenGL/Pipeline.OpenGL.ixx.o
+[202/251] Building CXX object CMakeFiles/datapump_terminal_ui.dir/src/gui/terminal_ui.cpp.o
+[203/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Graphics/OpenGL/Texture.OpenGL.ixx.o
+[204/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Graphics/OpenGL/UniformBuffer.OpenGL.ixx.o
+[205/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Graphics/OpenGL/FrameBuffer.OpenGL.ixx.o
+[206/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Graphics/OpenGL/VertexBuffer.OpenGL.ixx.o
+[207/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Graphics/OpenGL/Canvas.OpenGL.ixx.o
+[208/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Core/Font.ixx.o
+[209/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Core/FontAtlas.ixx.o
+[210/251] Building CXX object CMakeFiles/datapump_framebuffer.dir/src/gui/framebuffer_ui.cpp.o
+[211/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Element/Event/Event.ixx.o
+[212/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Core/Svg.ixx.o
+[213/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Graphics/Primitives/Primitive.ixx.o
+[214/251] Building CXX object CMakeFiles/datapump_web_bridge.dir/src/gui/web_bridge.cpp.o
+[215/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Graphics/Primitives/Lines/Lines.ixx.o
+[216/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Element/Element.ixx.o
+[217/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Graphics/Primitives/Svg/Svg.ixx.o
+[218/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Graphics/Primitives/Rectangle/Rectangle.ixx.o
+[219/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Graphics/Primitives/Text/Text.ixx.o
+[220/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Elements/Box.ixx.o
+[221/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Graphics/Primitives/Video/Video.ixx.o
+[222/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Elements/Svg.ixx.o
+[223/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Elements/Text.ixx.o
+[224/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Elements/Controls/Button/Button.ixx.o
+[225/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Window.ixx.o
+/srv/recovery/build-rev/rev-generated/source/Window.ixx: In member function ‘void Rev::Window::onCharacter(char32_t)’:
+/srv/recovery/build-rev/rev-generated/source/Window.ixx:1158:18: warning: ‘template<class _Codecvt, class _Elem, class _Wide_alloc, class _Byte_alloc> class std::__cxx11::wstring_convert’ is deprecated [-Wdeprecated-declarations]
+ 1158 |             std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> conv;
+      |                  ^~~~~~~~~~~~~~~
+In file included from /srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/include/c++/15.3.0/locale:47,
+                 from /srv/recovery/build-rev/rev-generated/source/Window.ixx:9:
+/srv/recovery/native-sdk/x86_64-buildroot-linux-gnu/include/c++/15.3.0/bits/locale_conv.h:262:33: note: declared here
+  262 |     class _GLIBCXX17_DEPRECATED wstring_convert
+      |                                 ^~~~~~~~~~~~~~~
+[226/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Elements/Controls/Checkbox/Checkbox.ixx.o
+[227/251] Building CXX object CMakeFiles/pump.dir/src/main.cpp.o
+[228/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Elements/Controls/Dropdown/Dropdown.ixx.o
+[229/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/Elements/Controls/TextInput/TextInput.ixx.o
+[230/251] Building CXX object CMakeFiles/datapump_rev.dir/rev-generated/source/OS/Application/Application.lnx.ixx.o
+[231/251] Linking CXX static library libdatapump_rev.a
+[232/251] Building CXX object CMakeFiles/pump.dir/src/fast/cli.cpp.o
+[233/251] Linking CXX static library libdatapump_terminal_ui.a
+[234/251] Linking CXX static library libdatapump_framebuffer.a
+[235/251] Building CXX object CMakeFiles/datapump-gui.dir/src/gui/rev_platform.cpp.o
+[236/251] Building CXX object CMakeFiles/datapump-tui.dir/src/gui/backend_ncurses.cpp.o
+[237/251] Building CXX object CMakeFiles/datapump-fb.dir/src/gui/backend_sdl.cpp.o
+[238/251] Linking CXX static library libdatapump_web_bridge.a
+[239/251] Building CXX object CMakeFiles/datapump-worker.dir/src/host/worker.cpp.o
+[240/251] Building CXX object CMakeFiles/datapump_host_audio.dir/src/host/audio.cpp.o
+[241/251] Building CXX object CMakeFiles/datapump-worker.dir/src/host/protocol.cpp.o
+[242/251] Building CXX object CMakeFiles/datapump-worker.dir/src/host/runtime.cpp.o
+[243/251] Building CXX object CMakeFiles/datapump-worker.dir/src/host/sandbox.cpp.o
+[244/251] Linking CXX executable pump; Staging SDK runtime libraries for pump
+[245/251] Linking CXX executable datapump-tui; Staging SDK runtime libraries for datapump-tui
+[246/251] Linking CXX executable datapump-worker; Staging SDK runtime libraries for datapump-worker
+[247/251] Linking CXX executable datapump-fb; Staging SDK runtime libraries for datapump-fb
+-- Removed runtime path from "/srv/recovery/build-rev/sdk-runtime/libSDL2-2.0.so.0"
+-- Removed runtime path from "/srv/recovery/build-rev/sdk-runtime/libSDL2-2.0.so.0.3200.10"
+-- Removed runtime path from "/srv/recovery/build-rev/sdk-runtime/libXcursor.so.1"
+-- Removed runtime path from "/srv/recovery/build-rev/sdk-runtime/libXcursor.so.1.0.2"
+-- Removed runtime path from "/srv/recovery/build-rev/sdk-runtime/libXi.so.6"
+-- Removed runtime path from "/srv/recovery/build-rev/sdk-runtime/libXi.so.6.1.0"
+-- Removed runtime path from "/srv/recovery/build-rev/sdk-runtime/libXfixes.so.3"
+-- Removed runtime path from "/srv/recovery/build-rev/sdk-runtime/libXfixes.so.3.1.0"
+-- Removed runtime path from "/srv/recovery/build-rev/sdk-runtime/libXrandr.so.2"
+-- Removed runtime path from "/srv/recovery/build-rev/sdk-runtime/libXrandr.so.2.2.0"
+-- Removed runtime path from "/srv/recovery/build-rev/sdk-runtime/libXext.so.6"
+-- Removed runtime path from "/srv/recovery/build-rev/sdk-runtime/libXext.so.6.4.0"
+-- Removed runtime path from "/srv/recovery/build-rev/sdk-runtime/libXrender.so.1"
+-- Removed runtime path from "/srv/recovery/build-rev/sdk-runtime/libXrender.so.1.3.0"
+-- Removed runtime path from "/srv/recovery/build-rev/sdk-runtime/libX11.so.6"
+-- Removed runtime path from "/srv/recovery/build-rev/sdk-runtime/libX11.so.6.4.0"
+-- Removed runtime path from "/srv/recovery/build-rev/sdk-runtime/libxcb.so.1"
+-- Removed runtime path from "/srv/recovery/build-rev/sdk-runtime/libxcb.so.1.1.0"
+[248/251] Building CXX object CMakeFiles/datapump-gui.dir/src/gui/backend_rev.cpp.o
+In file included from /srv/recovery/source/src/gui/backend_rev.cpp:53:
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:19:127: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::visibility’ [-Wmissing-field-initializers]
+   19 | inline Rev::Appearance::Style rev_disabled_text={.applies={.disabled=true},.text={.color=rev_color(WidgetRole::disabled_text)}};
+      |                                                                                                                               ^
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:19:127: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::layout’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:19:127: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::position’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:19:127: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::size’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:19:127: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::margin’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:19:127: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::padding’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:19:127: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::background’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:19:127: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::border’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:19:127: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::shadow’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:19:127: warning: missing initializer for member ‘Rev::Appearance::TextStyle@Rev.Appearance::font’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:19:127: warning: missing initializer for member ‘Rev::Appearance::TextStyle@Rev.Appearance::size’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:19:127: warning: missing initializer for member ‘Rev::Appearance::TextStyle@Rev.Appearance::font’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:19:127: warning: missing initializer for member ‘Rev::Appearance::TextStyle@Rev.Appearance::size’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:19:127: warning: missing initializer for member ‘Rev::Appearance::TextStyle@Rev.Appearance::lineHeight’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:19:127: warning: missing initializer for member ‘Rev::Appearance::TextStyle@Rev.Appearance::spacing’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:19:127: warning: missing initializer for member ‘Rev::Appearance::TextStyle@Rev.Appearance::wrap’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:19:127: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::cursor’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:19:127: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::visibility’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:19:127: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::layout’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:19:127: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::position’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:19:127: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::size’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:19:127: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::margin’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:19:127: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::padding’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:19:127: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::background’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:19:127: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::border’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:19:127: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::shadow’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:19:127: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::cursor’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:19:127: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::opacity’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:19:127: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::dirty’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::visibility’ [-Wmissing-field-initializers]
+   21 |     .background={.color=rev_color(WidgetRole::disabled_background)},.border={.color=rev_color(WidgetRole::disabled_border)}};
+      |                                                                                                                            ^
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::layout’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::position’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::size’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::margin’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::padding’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::radius’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::width’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::tl’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::tr’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::bl’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::br’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::left’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::right’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::top’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::bottom’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::shadow’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::text’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::cursor’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::visibility’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::layout’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::position’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::size’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::margin’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::padding’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::shadow’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::text’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::cursor’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::opacity’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:21:124: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::dirty’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_theme.hpp: In constructor ‘datapump::gui::theme::RevButton::RevButton(Rev::Element::Element@Rev.Element*, Rev::Element::Button@Rev.Element.Button::Params, Rev::Appearance::StyleList@Rev.Appearance)’:
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:41:108: warning: declaration of ‘styles’ shadows a member of ‘datapump::gui::theme::RevButton’ [-Wshadow]
+   41 |     RevButton(Rev::Element::Element* parent,Rev::Element::Button::Params params,Rev::Appearance::StyleList styles={})
+      |                                                                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~
+In module Rev.Element, imported at /srv/recovery/source/src/gui/backend_rev.cpp:34:
+/srv/recovery/build-rev/rev-generated/source/Element/Element.ixx:95:19: note: shadowed declaration is here
+   95 |         StyleList styles;
+      |                   ^~~~~~
+/srv/recovery/source/src/gui/backend_rev_theme.hpp:41:38: warning: declaration of ‘parent’ shadows a member of ‘datapump::gui::theme::RevButton’ [-Wshadow]
+   41 |     RevButton(Rev::Element::Element* parent,Rev::Element::Button::Params params,Rev::Appearance::StyleList styles={})
+      |               ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~
+In module Rev.Element, imported at /srv/recovery/source/src/gui/backend_rev.cpp:34:
+/srv/recovery/build-rev/rev-generated/source/Element/Element.ixx:87:18: note: shadowed declaration is here
+   87 |         Element* parent = nullptr;
+      |                  ^~~~~~
+In file included from /srv/recovery/source/src/gui/backend_rev.cpp:54:
+/srv/recovery/source/src/gui/backend_rev_document.hpp: In constructor ‘datapump::gui::RevDocumentView::RevDocumentView(Rev::Element::Element@Rev.Element*, bool, BitmapFactory, Action, ControlFactory)’:
+/srv/recovery/source/src/gui/backend_rev_document.hpp:32:44: warning: declaration of ‘parent’ shadows a member of ‘datapump::gui::RevDocumentView’ [-Wshadow]
+   32 |     RevDocumentView(Rev::Element::Element* parent,bool color,BitmapFactory factory,Action action,ControlFactory controls={})
+      |                     ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~
+In module Rev.Element, imported at /srv/recovery/source/src/gui/backend_rev.cpp:34:
+/srv/recovery/build-rev/rev-generated/source/Element/Element.ixx:87:18: note: shadowed declaration is here
+   87 |         Element* parent = nullptr;
+      |                  ^~~~~~
+/srv/recovery/source/src/gui/backend_rev_document.hpp: In member function ‘void datapump::gui::RevDocumentView::update()’:
+/srv/recovery/source/src/gui/backend_rev_document.hpp:114:49: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  114 |         const auto height=Px(geometry.height+top+bottom);
+      |                              ~~~~~~~~~~~~~~~~~~~^~~~~~~
+/srv/recovery/source/src/gui/backend_rev_document.hpp: In static member function ‘static void datapump::gui::RevDocumentView::apply_geometry(Rev::Element::Element@Rev.Element&, const datapump::gui::ui::DocumentPresentation::Placement&)’:
+/srv/recovery/source/src/gui/backend_rev_document.hpp:165:48: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  165 |         element->style->position={.left=Px(box.x),.top=Px(box.y)};
+      |                                            ~~~~^
+/srv/recovery/source/src/gui/backend_rev_document.hpp:165:63: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  165 |         element->style->position={.left=Px(box.x),.top=Px(box.y)};
+      |                                                           ~~~~^
+/srv/recovery/source/src/gui/backend_rev_document.hpp:165:65: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::right’ [-Wmissing-field-initializers]
+  165 |         element->style->position={.left=Px(box.x),.top=Px(box.y)};
+      |                                                                 ^
+/srv/recovery/source/src/gui/backend_rev_document.hpp:165:65: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::bottom’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_document.hpp:165:65: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::min’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_document.hpp:165:65: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::max’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_document.hpp:167:38: warning: implicitly-declared ‘constexpr Rev::Appearance::Dist@Rev.Appearance::Dist(const Rev::Appearance::Dist@Rev.Appearance&)’ is deprecated [-Wdeprecated-copy]
+  167 |         element->style->size={.width=width,.height=height,.min={width,height},.max={width,height}};
+      |                                      ^~~~~
+In module Rev.Appearance, imported at /srv/recovery/source/src/gui/backend_rev.cpp:43:
+/srv/recovery/build-rev/rev-generated/source/Element/Style/Style.ixx:134:15: note: because ‘Rev::Appearance::Dist@Rev.Appearance’ has user-provided ‘Rev::Appearance::Dist@Rev.Appearance& Rev::Appearance::Dist@Rev.Appearance::operator=(const Rev::Appearance::Dist@Rev.Appearance&)’
+  134 |         Dist& operator=(const Dist& other) {
+      |               ^~~~~~~~
+/srv/recovery/source/src/gui/backend_rev_document.hpp:167:52: warning: implicitly-declared ‘constexpr Rev::Appearance::Dist@Rev.Appearance::Dist(const Rev::Appearance::Dist@Rev.Appearance&)’ is deprecated [-Wdeprecated-copy]
+  167 |         element->style->size={.width=width,.height=height,.min={width,height},.max={width,height}};
+      |                                                    ^~~~~~
+In module Rev.Appearance, imported at /srv/recovery/source/src/gui/backend_rev.cpp:43:
+/srv/recovery/build-rev/rev-generated/source/Element/Style/Style.ixx:134:15: note: because ‘Rev::Appearance::Dist@Rev.Appearance’ has user-provided ‘Rev::Appearance::Dist@Rev.Appearance& Rev::Appearance::Dist@Rev.Appearance::operator=(const Rev::Appearance::Dist@Rev.Appearance&)’
+  134 |         Dist& operator=(const Dist& other) {
+      |               ^~~~~~~~
+/srv/recovery/source/src/gui/backend_rev_document.hpp:167:65: warning: implicitly-declared ‘constexpr Rev::Appearance::Dist@Rev.Appearance::Dist(const Rev::Appearance::Dist@Rev.Appearance&)’ is deprecated [-Wdeprecated-copy]
+  167 |         element->style->size={.width=width,.height=height,.min={width,height},.max={width,height}};
+      |                                                                 ^~~~~
+In module Rev.Appearance, imported at /srv/recovery/source/src/gui/backend_rev.cpp:43:
+/srv/recovery/build-rev/rev-generated/source/Element/Style/Style.ixx:134:15: note: because ‘Rev::Appearance::Dist@Rev.Appearance’ has user-provided ‘Rev::Appearance::Dist@Rev.Appearance& Rev::Appearance::Dist@Rev.Appearance::operator=(const Rev::Appearance::Dist@Rev.Appearance&)’
+  134 |         Dist& operator=(const Dist& other) {
+      |               ^~~~~~~~
+/srv/recovery/source/src/gui/backend_rev_document.hpp:167:71: warning: implicitly-declared ‘constexpr Rev::Appearance::Dist@Rev.Appearance::Dist(const Rev::Appearance::Dist@Rev.Appearance&)’ is deprecated [-Wdeprecated-copy]
+  167 |         element->style->size={.width=width,.height=height,.min={width,height},.max={width,height}};
+      |                                                                       ^~~~~~
+In module Rev.Appearance, imported at /srv/recovery/source/src/gui/backend_rev.cpp:43:
+/srv/recovery/build-rev/rev-generated/source/Element/Style/Style.ixx:134:15: note: because ‘Rev::Appearance::Dist@Rev.Appearance’ has user-provided ‘Rev::Appearance::Dist@Rev.Appearance& Rev::Appearance::Dist@Rev.Appearance::operator=(const Rev::Appearance::Dist@Rev.Appearance&)’
+  134 |         Dist& operator=(const Dist& other) {
+      |               ^~~~~~~~
+/srv/recovery/source/src/gui/backend_rev_document.hpp:167:85: warning: implicitly-declared ‘constexpr Rev::Appearance::Dist@Rev.Appearance::Dist(const Rev::Appearance::Dist@Rev.Appearance&)’ is deprecated [-Wdeprecated-copy]
+  167 |         element->style->size={.width=width,.height=height,.min={width,height},.max={width,height}};
+      |                                                                                     ^~~~~
+In module Rev.Appearance, imported at /srv/recovery/source/src/gui/backend_rev.cpp:43:
+/srv/recovery/build-rev/rev-generated/source/Element/Style/Style.ixx:134:15: note: because ‘Rev::Appearance::Dist@Rev.Appearance’ has user-provided ‘Rev::Appearance::Dist@Rev.Appearance& Rev::Appearance::Dist@Rev.Appearance::operator=(const Rev::Appearance::Dist@Rev.Appearance&)’
+  134 |         Dist& operator=(const Dist& other) {
+      |               ^~~~~~~~
+/srv/recovery/source/src/gui/backend_rev_document.hpp:167:91: warning: implicitly-declared ‘constexpr Rev::Appearance::Dist@Rev.Appearance::Dist(const Rev::Appearance::Dist@Rev.Appearance&)’ is deprecated [-Wdeprecated-copy]
+  167 |         element->style->size={.width=width,.height=height,.min={width,height},.max={width,height}};
+      |                                                                                           ^~~~~~
+In module Rev.Appearance, imported at /srv/recovery/source/src/gui/backend_rev.cpp:43:
+/srv/recovery/build-rev/rev-generated/source/Element/Style/Style.ixx:134:15: note: because ‘Rev::Appearance::Dist@Rev.Appearance’ has user-provided ‘Rev::Appearance::Dist@Rev.Appearance& Rev::Appearance::Dist@Rev.Appearance::operator=(const Rev::Appearance::Dist@Rev.Appearance&)’
+  134 |         Dist& operator=(const Dist& other) {
+      |               ^~~~~~~~
+/srv/recovery/source/src/gui/backend_rev_document.hpp:174:51: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  174 |         element->style->padding={.left=Px(content.x),.right=Px(box.width-content.x-content.width),
+      |                                           ~~~~~~~~^
+/srv/recovery/source/src/gui/backend_rev_document.hpp:174:83: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  174 |         element->style->padding={.left=Px(content.x),.right=Px(box.width-content.x-content.width),
+      |                                                                ~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~
+/srv/recovery/source/src/gui/backend_rev_document.hpp:175:29: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  175 |             .top=Px(content.y),.bottom=Px(box.height-content.y-content.height)};
+      |                     ~~~~~~~~^
+/srv/recovery/source/src/gui/backend_rev_document.hpp:175:63: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  175 |             .top=Px(content.y),.bottom=Px(box.height-content.y-content.height)};
+      |                                           ~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~
+/srv/recovery/source/src/gui/backend_rev_document.hpp:175:79: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::min’ [-Wmissing-field-initializers]
+  175 |             .top=Px(content.y),.bottom=Px(box.height-content.y-content.height)};
+      |                                                                               ^
+/srv/recovery/source/src/gui/backend_rev_document.hpp:175:79: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::max’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_document.hpp: In member function ‘void datapump::gui::RevDocumentView::materialize(Rev::Element::Element@Rev.Element*, const datapump::gui::ui::DocumentPresentation::Node&)’:
+/srv/recovery/source/src/gui/backend_rev_document.hpp:177:45: warning: declaration of ‘parent’ shadows a member of ‘datapump::gui::RevDocumentView’ [-Wshadow]
+  177 |     void materialize(Rev::Element::Element* parent,const ui::DocumentPresentation::Node& presented) {
+      |                      ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~
+In module Rev.Element, imported at /srv/recovery/source/src/gui/backend_rev.cpp:34:
+/srv/recovery/build-rev/rev-generated/source/Element/Element.ixx:87:18: note: shadowed declaration is here
+   87 |         Element* parent = nullptr;
+      |                  ^~~~~~
+/srv/recovery/source/src/gui/backend_rev_document.hpp:233:53: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::min’ [-Wmissing-field-initializers]
+  233 |         element->style->padding={0_px,0_px,0_px,0_px};
+      |                                                     ^
+/srv/recovery/source/src/gui/backend_rev_document.hpp:233:53: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::max’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev_document.hpp:234:52: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::min’ [-Wmissing-field-initializers]
+  234 |         element->style->margin={0_px,0_px,0_px,0_px};
+      |                                                    ^
+/srv/recovery/source/src/gui/backend_rev_document.hpp:234:52: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::max’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp: At global scope:
+/srv/recovery/source/src/gui/backend_rev.cpp:64:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::applies’ [-Wmissing-field-initializers]
+   64 | Style column={.layout={Axis::Vertical,Align::Start,Align::Start,Wrap::False},.size={Grow()}};
+      |                                                                                            ^
+/srv/recovery/source/src/gui/backend_rev.cpp:64:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::visibility’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:64:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::position’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:64:92: warning: missing initializer for member ‘Rev::Appearance::Size@Rev.Appearance::height’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:64:92: warning: missing initializer for member ‘Rev::Appearance::Size@Rev.Appearance::min’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:64:92: warning: missing initializer for member ‘Rev::Appearance::Size@Rev.Appearance::max’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:64:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::margin’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:64:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::padding’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:64:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::background’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:64:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::border’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:64:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::shadow’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:64:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::text’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:64:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::cursor’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:64:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::applies’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:64:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::visibility’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:64:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::position’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:64:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::margin’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:64:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::padding’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:64:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::background’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:64:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::border’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:64:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::shadow’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:64:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::text’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:64:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::cursor’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:64:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::opacity’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:64:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::dirty’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:65:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::applies’ [-Wmissing-field-initializers]
+   65 | Style row={.layout={Axis::Horizontal,Align::Start,Align::Center,Wrap::False},.size={Grow()}};
+      |                                                                                            ^
+/srv/recovery/source/src/gui/backend_rev.cpp:65:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::visibility’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:65:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::position’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:65:92: warning: missing initializer for member ‘Rev::Appearance::Size@Rev.Appearance::height’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:65:92: warning: missing initializer for member ‘Rev::Appearance::Size@Rev.Appearance::min’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:65:92: warning: missing initializer for member ‘Rev::Appearance::Size@Rev.Appearance::max’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:65:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::margin’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:65:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::padding’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:65:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::background’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:65:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::border’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:65:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::shadow’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:65:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::text’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:65:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::cursor’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:65:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::applies’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:65:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::visibility’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:65:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::position’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:65:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::margin’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:65:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::padding’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:65:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::background’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:65:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::border’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:65:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::shadow’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:65:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::text’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:65:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::cursor’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:65:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::opacity’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:65:92: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::dirty’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:66:130: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::applies’ [-Wmissing-field-initializers]
+   66 | Style plainText={.size={100_pct},.text={.color=theme::rev_color(theme::WidgetRole::foreground),.size=13_px,.wrap=Wrap::BreakWord}};
+      |                                                                                                                                  ^
+/srv/recovery/source/src/gui/backend_rev.cpp:66:130: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::visibility’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:66:130: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::layout’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:66:130: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::position’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:66:130: warning: missing initializer for member ‘Rev::Appearance::Size@Rev.Appearance::height’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:66:130: warning: missing initializer for member ‘Rev::Appearance::Size@Rev.Appearance::min’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:66:130: warning: missing initializer for member ‘Rev::Appearance::Size@Rev.Appearance::max’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:66:130: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::margin’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:66:130: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::padding’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:66:130: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::background’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:66:130: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::border’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:66:130: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::shadow’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:66:130: warning: missing initializer for member ‘Rev::Appearance::TextStyle@Rev.Appearance::font’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:66:130: warning: missing initializer for member ‘Rev::Appearance::TextStyle@Rev.Appearance::font’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:66:130: warning: missing initializer for member ‘Rev::Appearance::TextStyle@Rev.Appearance::lineHeight’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:66:130: warning: missing initializer for member ‘Rev::Appearance::TextStyle@Rev.Appearance::spacing’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:66:130: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::cursor’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:66:130: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::applies’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:66:130: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::visibility’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:66:130: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::layout’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:66:130: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::position’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:66:130: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::margin’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:66:130: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::padding’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:66:130: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::background’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:66:130: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::border’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:66:130: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::shadow’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:66:130: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::cursor’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:66:130: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::opacity’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:66:130: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::dirty’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:67:161: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::applies’ [-Wmissing-field-initializers]
+   67 | Style smallText={.size={100_pct},.text={.color=theme::rev_color(theme::WidgetRole::secondary_text),.size=Px(ui::bitmap_caption_font_size),.wrap=Wrap::BreakWord}};
+      |                                                                                                                                                                 ^
+/srv/recovery/source/src/gui/backend_rev.cpp:67:161: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::visibility’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:67:161: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::layout’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:67:161: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::position’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:67:161: warning: missing initializer for member ‘Rev::Appearance::Size@Rev.Appearance::height’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:67:161: warning: missing initializer for member ‘Rev::Appearance::Size@Rev.Appearance::min’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:67:161: warning: missing initializer for member ‘Rev::Appearance::Size@Rev.Appearance::max’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:67:161: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::margin’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:67:161: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::padding’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:67:161: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::background’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:67:161: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::border’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:67:161: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::shadow’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:67:161: warning: missing initializer for member ‘Rev::Appearance::TextStyle@Rev.Appearance::font’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:67:161: warning: missing initializer for member ‘Rev::Appearance::TextStyle@Rev.Appearance::font’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:67:161: warning: missing initializer for member ‘Rev::Appearance::TextStyle@Rev.Appearance::lineHeight’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:67:161: warning: missing initializer for member ‘Rev::Appearance::TextStyle@Rev.Appearance::spacing’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:67:161: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::cursor’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:67:161: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::applies’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:67:161: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::visibility’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:67:161: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::layout’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:67:161: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::position’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:67:161: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::margin’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:67:161: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::padding’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:67:161: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::background’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:67:161: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::border’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:67:161: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::shadow’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:67:161: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::cursor’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:67:161: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::opacity’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:67:161: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::dirty’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::applies’ [-Wmissing-field-initializers]
+   71 |     .text={.color=theme::rev_color(theme::WidgetRole::data),.size=14_px,.wrap=Wrap::False}};
+      |                                                                                           ^
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::visibility’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::layout’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::position’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::Size@Rev.Appearance::min’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::Size@Rev.Appearance::max’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::margin’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::min’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::max’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::tl’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::tr’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::bl’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::br’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::left’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::right’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::top’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::bottom’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::shadow’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::TextStyle@Rev.Appearance::font’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::TextStyle@Rev.Appearance::font’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::TextStyle@Rev.Appearance::lineHeight’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::TextStyle@Rev.Appearance::spacing’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::cursor’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::applies’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::visibility’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::layout’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::position’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::margin’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::shadow’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::cursor’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::opacity’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:71:91: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::dirty’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::visibility’ [-Wmissing-field-initializers]
+   72 | Style editFocus={.applies={.focus=true},.border={.color=theme::rev_color(theme::WidgetRole::focus),.width=1_px}};
+      |                                                                                                                ^
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::layout’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::position’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::size’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::margin’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::padding’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::background’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::radius’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::tl’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::tr’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::bl’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::br’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::left’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::right’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::top’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::bottom’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::shadow’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::text’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::cursor’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::visibility’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::layout’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::position’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::size’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::margin’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::padding’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::background’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::shadow’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::text’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::cursor’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::opacity’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:72:112: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::dirty’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:73:89: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::applies’ [-Wmissing-field-initializers]
+   73 | Style selectedStyle={.background={.color=theme::rev_color(theme::WidgetRole::selection)}};
+      |                                                                                         ^
+/srv/recovery/source/src/gui/backend_rev.cpp:73:89: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::visibility’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:73:89: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::layout’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:73:89: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::position’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:73:89: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::size’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:73:89: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::margin’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:73:89: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::padding’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:73:89: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::border’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:73:89: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::shadow’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:73:89: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::text’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:73:89: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::cursor’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:73:89: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::applies’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:73:89: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::visibility’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:73:89: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::layout’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:73:89: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::position’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:73:89: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::size’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:73:89: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::margin’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:73:89: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::padding’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:73:89: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::border’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:73:89: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::shadow’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:73:89: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::text’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:73:89: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::cursor’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:73:89: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::opacity’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:73:89: warning: missing initializer for member ‘Rev::Appearance::Style@Rev.Appearance::dirty’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp: In function ‘void {anonymous}::configure_theme(bool)’:
+/srv/recovery/source/src/gui/backend_rev.cpp:83:51: warning: implicitly-declared ‘constexpr Rev::Appearance::sColor@Rev.Appearance::sColor(const Rev::Appearance::sColor@Rev.Appearance&)’ is deprecated [-Wdeprecated-copy]
+   83 |         .fieldBorder=rgb(Role::border),.fieldText=data,.labelText=text,.placeholderText=rgb(Role::secondary_text),
+      |                                                   ^~~~
+In module Rev.Appearance, imported at /srv/recovery/source/src/gui/backend_rev.cpp:43:
+/srv/recovery/build-rev/rev-generated/source/Element/Style/Style.ixx:216:17: note: because ‘Rev::Appearance::sColor@Rev.Appearance’ has user-provided ‘Rev::Appearance::sColor@Rev.Appearance& Rev::Appearance::sColor@Rev.Appearance::operator=(const Rev::Appearance::sColor@Rev.Appearance&)’
+  216 |         sColor& operator=(const sColor& other) {
+      |                 ^~~~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:83:67: warning: implicitly-declared ‘constexpr Rev::Appearance::sColor@Rev.Appearance::sColor(const Rev::Appearance::sColor@Rev.Appearance&)’ is deprecated [-Wdeprecated-copy]
+   83 |         .fieldBorder=rgb(Role::border),.fieldText=data,.labelText=text,.placeholderText=rgb(Role::secondary_text),
+      |                                                                   ^~~~
+In module Rev.Appearance, imported at /srv/recovery/source/src/gui/backend_rev.cpp:43:
+/srv/recovery/build-rev/rev-generated/source/Element/Style/Style.ixx:216:17: note: because ‘Rev::Appearance::sColor@Rev.Appearance’ has user-provided ‘Rev::Appearance::sColor@Rev.Appearance& Rev::Appearance::sColor@Rev.Appearance::operator=(const Rev::Appearance::sColor@Rev.Appearance&)’
+  216 |         sColor& operator=(const sColor& other) {
+      |                 ^~~~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:84:54: warning: implicitly-declared ‘constexpr Rev::Appearance::sColor@Rev.Appearance::sColor(const Rev::Appearance::sColor@Rev.Appearance&)’ is deprecated [-Wdeprecated-copy]
+   84 |         .focusBorder=rgb(Role::focus),.dropdownArrow=text,.optionHover=rgb(Role::hover),
+      |                                                      ^~~~
+In module Rev.Appearance, imported at /srv/recovery/source/src/gui/backend_rev.cpp:43:
+/srv/recovery/build-rev/rev-generated/source/Element/Style/Style.ixx:216:17: note: because ‘Rev::Appearance::sColor@Rev.Appearance’ has user-provided ‘Rev::Appearance::sColor@Rev.Appearance& Rev::Appearance::sColor@Rev.Appearance::operator=(const Rev::Appearance::sColor@Rev.Appearance&)’
+  216 |         sColor& operator=(const sColor& other) {
+      |                 ^~~~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:86:127: warning: implicitly-declared ‘constexpr Rev::Appearance::sColor@Rev.Appearance::sColor(const Rev::Appearance::sColor@Rev.Appearance&)’ is deprecated [-Wdeprecated-copy]
+   86 |         .sliderTrack=rgb(Role::border),.sliderThumb=rgb(Role::selection),.sliderHoverBorder=rgb(Role::focus),.sliderValueText=data,
+      |                                                                                                                               ^~~~
+In module Rev.Appearance, imported at /srv/recovery/source/src/gui/backend_rev.cpp:43:
+/srv/recovery/build-rev/rev-generated/source/Element/Style/Style.ixx:216:17: note: because ‘Rev::Appearance::sColor@Rev.Appearance’ has user-provided ‘Rev::Appearance::sColor@Rev.Appearance& Rev::Appearance::sColor@Rev.Appearance::operator=(const Rev::Appearance::sColor@Rev.Appearance&)’
+  216 |         sColor& operator=(const sColor& other) {
+      |                 ^~~~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:90:70: warning: implicitly-declared ‘constexpr Rev::Appearance::sColor@Rev.Appearance::sColor(const Rev::Appearance::sColor@Rev.Appearance&)’ is deprecated [-Wdeprecated-copy]
+   90 |         .buttonSecondaryHover=rgb(Role::hover),.buttonSecondaryLabel=text,
+      |                                                                      ^~~~
+In module Rev.Appearance, imported at /srv/recovery/source/src/gui/backend_rev.cpp:43:
+/srv/recovery/build-rev/rev-generated/source/Element/Style/Style.ixx:216:17: note: because ‘Rev::Appearance::sColor@Rev.Appearance’ has user-provided ‘Rev::Appearance::sColor@Rev.Appearance& Rev::Appearance::sColor@Rev.Appearance::operator=(const Rev::Appearance::sColor@Rev.Appearance&)’
+  216 |         sColor& operator=(const sColor& other) {
+      |                 ^~~~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:91:112: warning: implicitly-declared ‘constexpr Rev::Appearance::sColor@Rev.Appearance::sColor(const Rev::Appearance::sColor@Rev.Appearance&)’ is deprecated [-Wdeprecated-copy]
+   91 |         .buttonPrimarySurface=rgb(Role::surface_fill),.buttonPrimaryHover=rgb(Role::hover),.buttonPrimaryLabel=text,
+      |                                                                                                                ^~~~
+In module Rev.Appearance, imported at /srv/recovery/source/src/gui/backend_rev.cpp:43:
+/srv/recovery/build-rev/rev-generated/source/Element/Style/Style.ixx:216:17: note: because ‘Rev::Appearance::sColor@Rev.Appearance’ has user-provided ‘Rev::Appearance::sColor@Rev.Appearance& Rev::Appearance::sColor@Rev.Appearance::operator=(const Rev::Appearance::sColor@Rev.Appearance&)’
+  216 |         sColor& operator=(const sColor& other) {
+      |                 ^~~~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:115:43: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::min’ [-Wmissing-field-initializers]
+  115 |     t::Control.margin={0_px,0_px,0_px,0_px};
+      |                                           ^
+/srv/recovery/source/src/gui/backend_rev.cpp:115:43: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::max’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:116:41: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::min’ [-Wmissing-field-initializers]
+  116 |     t::Field.margin={0_px,0_px,0_px,0_px};
+      |                                         ^
+/srv/recovery/source/src/gui/backend_rev.cpp:116:41: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::max’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:117:68: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::min’ [-Wmissing-field-initializers]
+  117 |     t::Field.padding={.left=5_px,.right=5_px,.top=2_px,.bottom=2_px};
+      |                                                                    ^
+/srv/recovery/source/src/gui/backend_rev.cpp:117:68: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::max’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:118:78: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::min’ [-Wmissing-field-initializers]
+  118 |     t::ButtonSecondary.padding={.left=5_px,.right=5_px,.top=2_px,.bottom=2_px};
+      |                                                                              ^
+/srv/recovery/source/src/gui/backend_rev.cpp:118:78: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::max’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp: In function ‘void {anonymous}::place(Rev::Element::Element@Rev.Element*, datapump::gui::ui::Rect)’:
+/srv/recovery/source/src/gui/backend_rev.cpp:125:45: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  125 |     element->style->position={.left=Px(rect.x),.top=Px(rect.y)};
+      |                                        ~~~~~^
+/srv/recovery/source/src/gui/backend_rev.cpp:125:61: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  125 |     element->style->position={.left=Px(rect.x),.top=Px(rect.y)};
+      |                                                        ~~~~~^
+/srv/recovery/source/src/gui/backend_rev.cpp:125:63: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::right’ [-Wmissing-field-initializers]
+  125 |     element->style->position={.left=Px(rect.x),.top=Px(rect.y)};
+      |                                                               ^
+/srv/recovery/source/src/gui/backend_rev.cpp:125:63: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::bottom’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:125:63: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::min’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:125:63: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::max’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:126:42: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  126 |     element->style->size={.width=Px(rect.w),.height=Px(rect.h),.min={Px(rect.w),Px(rect.h)},.max={Px(rect.w),Px(rect.h)}};
+      |                                     ~~~~~^
+/srv/recovery/source/src/gui/backend_rev.cpp:126:61: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  126 |     element->style->size={.width=Px(rect.w),.height=Px(rect.h),.min={Px(rect.w),Px(rect.h)},.max={Px(rect.w),Px(rect.h)}};
+      |                                                        ~~~~~^
+/srv/recovery/source/src/gui/backend_rev.cpp:126:78: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  126 |     element->style->size={.width=Px(rect.w),.height=Px(rect.h),.min={Px(rect.w),Px(rect.h)},.max={Px(rect.w),Px(rect.h)}};
+      |                                                                         ~~~~~^
+/srv/recovery/source/src/gui/backend_rev.cpp:126:89: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  126 |     element->style->size={.width=Px(rect.w),.height=Px(rect.h),.min={Px(rect.w),Px(rect.h)},.max={Px(rect.w),Px(rect.h)}};
+      |                                                                                    ~~~~~^
+/srv/recovery/source/src/gui/backend_rev.cpp:126:107: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  126 |     element->style->size={.width=Px(rect.w),.height=Px(rect.h),.min={Px(rect.w),Px(rect.h)},.max={Px(rect.w),Px(rect.h)}};
+      |                                                                                                      ~~~~~^
+/srv/recovery/source/src/gui/backend_rev.cpp:126:118: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  126 |     element->style->size={.width=Px(rect.w),.height=Px(rect.h),.min={Px(rect.w),Px(rect.h)},.max={Px(rect.w),Px(rect.h)}};
+      |                                                                                                                 ~~~~~^
+/srv/recovery/source/src/gui/backend_rev.cpp:127:48: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::min’ [-Wmissing-field-initializers]
+  127 |     element->style->margin={0_px,0_px,0_px,0_px};
+      |                                                ^
+/srv/recovery/source/src/gui/backend_rev.cpp:127:48: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::max’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp: In function ‘void {anonymous}::compact_dropdown(Rev::Element::Dropdown@Rev.Element.Dropdown*)’:
+/srv/recovery/source/src/gui/backend_rev.cpp:132:47: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::min’ [-Wmissing-field-initializers]
+  132 |     choice->style->margin={0_px,0_px,0_px,0_px};
+      |                                               ^
+/srv/recovery/source/src/gui/backend_rev.cpp:132:47: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::max’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp: In constructor ‘{anonymous}::CheckboxView::CheckboxView(Rev::Element::Element@Rev.Element*, Rev::Element::Checkbox@Rev.Element.Checkbox::Params)’:
+/srv/recovery/source/src/gui/backend_rev.cpp:145:45: warning: declaration of ‘params’ shadows a member of ‘{anonymous}::CheckboxView’ [-Wshadow]
+  145 |     CheckboxView(re::Element* parent,Params params):re::Checkbox(parent,std::move(params)) {
+      |                                      ~~~~~~~^~~~~~
+In module Rev.Element.Checkbox, imported at /srv/recovery/source/src/gui/backend_rev.cpp:40:
+/srv/recovery/build-rev/rev-generated/source/Elements/Controls/Checkbox/Checkbox.ixx:53:16: note: shadowed declaration is here
+   53 |         Params params;
+      |                ^~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:145:31: warning: declaration of ‘parent’ shadows a member of ‘{anonymous}::CheckboxView’ [-Wshadow]
+  145 |     CheckboxView(re::Element* parent,Params params):re::Checkbox(parent,std::move(params)) {
+      |                  ~~~~~~~~~~~~~^~~~~~
+In module Rev.Element, imported at /srv/recovery/source/src/gui/backend_rev.cpp:34:
+/srv/recovery/build-rev/rev-generated/source/Element/Element.ixx:87:18: note: shadowed declaration is here
+   87 |         Element* parent = nullptr;
+      |                  ^~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp: In constructor ‘{anonymous}::Editor::Editor(Rev::Element::Element@Rev.Element*, bool, std::size_t, datapump::gui::RevPlatform&, bool)’:
+/srv/recovery/source/src/gui/backend_rev.cpp:173:25: warning: declaration of ‘parent’ shadows a member of ‘{anonymous}::Editor’ [-Wshadow]
+  173 |     Editor(re::Element* parent, bool multi, std::size_t bytes, RevPlatform& services,bool scrolling=false)
+      |            ~~~~~~~~~~~~~^~~~~~
+In module Rev.Element, imported at /srv/recovery/source/src/gui/backend_rev.cpp:34:
+/srv/recovery/build-rev/rev-generated/source/Element/Element.ixx:87:18: note: shadowed declaration is here
+   87 |         Element* parent = nullptr;
+      |                  ^~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp: In member function ‘virtual void {anonymous}::Editor::computePrimitives(Rev::Element::Event@Rev.Element.Event&)’:
+/srv/recovery/source/src/gui/backend_rev.cpp:192:29: warning: declaration of ‘row’ shadows a global declaration [-Wshadow]
+  192 |                 const auto& row=text->lines[cursorLineIndex()];
+      |                             ^~~
+/srv/recovery/source/src/gui/backend_rev.cpp:65:7: note: shadowed declaration is here
+   65 | Style row={.layout={Axis::Horizontal,Align::Start,Align::Center,Wrap::False},.size={Grow()}};
+      |       ^~~
+/srv/recovery/source/src/gui/backend_rev.cpp:208:23: warning: declaration of ‘row’ shadows a global declaration [-Wshadow]
+  208 |             for(auto& row:text->lines) {row.rect.x-=resolved.scroll.x;row.rect.y-=resolved.scroll.y;}
+      |                       ^~~
+/srv/recovery/source/src/gui/backend_rev.cpp:65:7: note: shadowed declaration is here
+   65 | Style row={.layout={Axis::Horizontal,Align::Start,Align::Center,Wrap::False},.size={Grow()}};
+      |       ^~~
+/srv/recovery/source/src/gui/backend_rev.cpp: In member function ‘virtual void {anonymous}::Editor::keyDown(Rev::Element::Event@Rev.Element.Event&)’:
+/srv/recovery/source/src/gui/backend_rev.cpp:307:53: warning: declaration of ‘next’ shadows a member of ‘{anonymous}::Editor’ [-Wshadow]
+  307 |                 const auto& value=content.get();int next=cursor;
+      |                                                     ^~~~
+In module Rev.Element, imported at /srv/recovery/source/src/gui/backend_rev.cpp:34:
+/srv/recovery/build-rev/rev-generated/source/Element/Element.ixx:88:18: note: shadowed declaration is here
+   88 |         Element* next = nullptr;
+      |                  ^~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:316:49: warning: declaration of ‘next’ shadows a member of ‘{anonymous}::Editor’ [-Wshadow]
+  316 |             const auto& value=content.get();int next=cursor;
+      |                                                 ^~~~
+In module Rev.Element, imported at /srv/recovery/source/src/gui/backend_rev.cpp:34:
+/srv/recovery/build-rev/rev-generated/source/Element/Element.ixx:88:18: note: shadowed declaration is here
+   88 |         Element* next = nullptr;
+      |                  ^~~~
+/srv/recovery/source/src/gui/backend_rev.cpp: In constructor ‘{anonymous}::BitmapView::BitmapView(Rev::Element::Element@Rev.Element*, bool, std::function<float()>)’:
+/srv/recovery/source/src/gui/backend_rev.cpp:337:29: warning: declaration of ‘parent’ shadows a member of ‘{anonymous}::BitmapView’ [-Wshadow]
+  337 |     BitmapView(re::Element* parent,bool colored,std::function<float()> dpi)
+      |                ~~~~~~~~~~~~~^~~~~~
+In module Rev.Element, imported at /srv/recovery/source/src/gui/backend_rev.cpp:34:
+/srv/recovery/build-rev/rev-generated/source/Element/Element.ixx:87:18: note: shadowed declaration is here
+   87 |         Element* parent = nullptr;
+      |                  ^~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp: In destructor ‘virtual {anonymous}::BitmapView::~BitmapView()’:
+/srv/recovery/source/src/gui/backend_rev.cpp:339:29: warning: deleting object of polymorphic class type ‘Rev::Primitives::Video@Rev.Primitive.Video’ which has non-virtual destructor might cause undefined behavior [-Wdelete-non-virtual-dtor]
+  339 |     ~BitmapView() override {delete video;}
+      |                             ^~~~~~~~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp: In lambda function:
+/srv/recovery/source/src/gui/backend_rev.cpp:353:73: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  353 |             if(extent>0 && logical==static_cast<float>(static_cast<int>(extent/dpi)))
+      |                                                                         ^~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp: In lambda function:
+/srv/recovery/source/src/gui/backend_rev.cpp:376:97: warning: declaration of ‘pixels’ shadows a previous local [-Wshadow]
+  376 |         snapshot.paint(full_bitmap_request(w,h,false,true),[&](unsigned x,unsigned y,PixelBlock pixels){image.blit(x,y,pixels);},color);
+      |                                                                                      ~~~~~~~~~~~^~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:368:20: note: shadowed declaration is here
+  368 |         const auto pixels=pixel_rect();
+      |                    ^~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp: In constructor ‘{anonymous}::ChoiceView::ChoiceView(Rev::Element::Element@Rev.Element*, Rev::Element::Dropdown@Rev.Element.Dropdown::Params, Rev::Appearance::StyleList@Rev.Appearance)’:
+/srv/recovery/source/src/gui/backend_rev.cpp:394:60: warning: declaration of ‘styles’ shadows a member of ‘{anonymous}::ChoiceView’ [-Wshadow]
+  394 |     ChoiceView(re::Element* parent,Params params,StyleList styles={})
+      |                                                  ~~~~~~~~~~^~~~~~~~~
+In module Rev.Element, imported at /srv/recovery/source/src/gui/backend_rev.cpp:34:
+/srv/recovery/build-rev/rev-generated/source/Element/Element.ixx:95:19: note: shadowed declaration is here
+   95 |         StyleList styles;
+      |                   ^~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:394:43: warning: declaration of ‘params’ shadows a member of ‘{anonymous}::ChoiceView’ [-Wshadow]
+  394 |     ChoiceView(re::Element* parent,Params params,StyleList styles={})
+      |                                    ~~~~~~~^~~~~~
+In module Rev.Element.Dropdown, imported at /srv/recovery/source/src/gui/backend_rev.cpp:41:
+/srv/recovery/build-rev/rev-generated/source/Elements/Controls/Dropdown/Dropdown.ixx:76:16: note: shadowed declaration is here
+   76 |         Params params;
+      |                ^~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:394:29: warning: declaration of ‘parent’ shadows a member of ‘{anonymous}::ChoiceView’ [-Wshadow]
+  394 |     ChoiceView(re::Element* parent,Params params,StyleList styles={})
+      |                ~~~~~~~~~~~~~^~~~~~
+In module Rev.Element, imported at /srv/recovery/source/src/gui/backend_rev.cpp:34:
+/srv/recovery/build-rev/rev-generated/source/Element/Element.ixx:87:18: note: shadowed declaration is here
+   87 |         Element* parent = nullptr;
+      |                  ^~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp: In member function ‘virtual void {anonymous}::ChoiceView::computeChildren(Rev::Element::Event@Rev.Element.Event&)’:
+/srv/recovery/source/src/gui/backend_rev.cpp:405:43: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  405 |         dropdownText->style->text.size=Px(font_size);
+      |                                           ^~~~~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:406:62: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  406 |         for(auto* option:options)option->style->text.size=Px(font_size);
+      |                                                              ^~~~~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp: In constructor ‘{anonymous}::ListView::ListView(Rev::Element::Element@Rev.Element*, const datapump::gui::ui::Control&, bool)’:
+/srv/recovery/source/src/gui/backend_rev.cpp:427:27: warning: declaration of ‘parent’ shadows a member of ‘{anonymous}::ListView’ [-Wshadow]
+  427 |     ListView(re::Element* parent,const ui::Control& control,bool colored)
+      |              ~~~~~~~~~~~~~^~~~~~
+In module Rev.Element, imported at /srv/recovery/source/src/gui/backend_rev.cpp:34:
+/srv/recovery/build-rev/rev-generated/source/Element/Element.ixx:87:18: note: shadowed declaration is here
+   87 |         Element* parent = nullptr;
+      |                  ^~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:430:99: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::tl’ [-Wmissing-field-initializers]
+  430 |         style->border={.color=theme::rev_color(theme::WidgetRole::border),.radius=0_px,.width=1_px};
+      |                                                                                                   ^
+/srv/recovery/source/src/gui/backend_rev.cpp:430:99: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::tr’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:430:99: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::bl’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:430:99: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::br’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:430:99: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::left’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:430:99: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::right’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:430:99: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::top’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:430:99: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::bottom’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:432:44: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  432 |         empty->style->text.size=Px(control.font_size);
+      |                                    ~~~~~~~~^~~~~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp: In member function ‘void {anonymous}::ListView::configure(const datapump::gui::ui::Control&)’:
+/srv/recovery/source/src/gui/backend_rev.cpp:439:78: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  439 |         empty->content=control.empty_text;empty->style->text.size=Px(control.font_size);
+      |                                                                      ~~~~~~~~^~~~~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:441:27: warning: declaration of ‘row’ shadows a global declaration [-Wshadow]
+  441 |             for(auto& [id,row]:rows)row.geometry_dirty=true;
+      |                           ^~~
+/srv/recovery/source/src/gui/backend_rev.cpp:65:7: note: shadowed declaration is here
+   65 | Style row={.layout={Axis::Horizontal,Align::Start,Align::Center,Wrap::False},.size={Grow()}};
+      |       ^~~
+/srv/recovery/source/src/gui/backend_rev.cpp: In member function ‘void {anonymous}::ListView::layout_cells(RecordRow&)’:
+/srv/recovery/source/src/gui/backend_rev.cpp:509:34: warning: declaration of ‘row’ shadows a global declaration [-Wshadow]
+  509 |     void layout_cells(RecordRow& row) {
+      |                       ~~~~~~~~~~~^~~
+/srv/recovery/source/src/gui/backend_rev.cpp:65:7: note: shadowed declaration is here
+   65 | Style row={.layout={Axis::Horizontal,Align::Start,Align::Center,Wrap::False},.size={Grow()}};
+      |       ^~~
+/srv/recovery/source/src/gui/backend_rev.cpp:510:37: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  510 |         row.button->style->size={Px(content_width),Px(row_height)};
+      |                                     ^~~~~~~~~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:510:55: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  510 |         row.button->style->size={Px(content_width),Px(row_height)};
+      |                                                       ^~~~~~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:510:66: warning: missing initializer for member ‘Rev::Appearance::Size@Rev.Appearance::min’ [-Wmissing-field-initializers]
+  510 |         row.button->style->size={Px(content_width),Px(row_height)};
+      |                                                                  ^
+/srv/recovery/source/src/gui/backend_rev.cpp:510:66: warning: missing initializer for member ‘Rev::Appearance::Size@Rev.Appearance::max’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp: In member function ‘void {anonymous}::ListView::layout_rows()’:
+/srv/recovery/source/src/gui/backend_rev.cpp:519:23: warning: declaration of ‘row’ shadows a global declaration [-Wshadow]
+  519 |         for(auto& [id,row]:rows) {
+      |                       ^~~
+/srv/recovery/source/src/gui/backend_rev.cpp:65:7: note: shadowed declaration is here
+   65 | Style row={.layout={Axis::Horizontal,Align::Start,Align::Center,Wrap::False},.size={Grow()}};
+      |       ^~~
+/srv/recovery/source/src/gui/backend_rev.cpp:539:23: warning: declaration of ‘row’ shadows a global declaration [-Wshadow]
+  539 |         for(auto& [id,row]:rows)if(resized||row.geometry_dirty) {layout_cells(row);row.geometry_dirty=false;}
+      |                       ^~~
+/srv/recovery/source/src/gui/backend_rev.cpp:65:7: note: shadowed declaration is here
+   65 | Style row={.layout={Axis::Horizontal,Align::Start,Align::Center,Wrap::False},.size={Grow()}};
+      |       ^~~
+/srv/recovery/source/src/gui/backend_rev.cpp: In member function ‘void {anonymous}::ListView::apply(const datapump::gui::ui::FieldState&)’:
+/srv/recovery/source/src/gui/backend_rev.cpp:547:19: warning: declaration of ‘row’ shadows a global declaration [-Wshadow]
+  547 |             auto& row=rows[id];row.record=&records.record(id);
+      |                   ^~~
+/srv/recovery/source/src/gui/backend_rev.cpp:65:7: note: shadowed declaration is here
+   65 | Style row={.layout={Axis::Horizontal,Align::Start,Align::Center,Wrap::False},.size={Grow()}};
+      |       ^~~
+/srv/recovery/source/src/gui/backend_rev.cpp:550:85: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::min’ [-Wmissing-field-initializers]
+  550 |             row.button->tabStop=true;row.button->style->padding={0_px,0_px,0_px,0_px};
+      |                                                                                     ^
+/srv/recovery/source/src/gui/backend_rev.cpp:550:85: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::max’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:551:59: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::min’ [-Wmissing-field-initializers]
+  551 |             row.button->style->margin={0_px,0_px,0_px,0_px};row.button->style->border.width=0_px;
+      |                                                           ^
+/srv/recovery/source/src/gui/backend_rev.cpp:551:59: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::max’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp: In lambda function:
+/srv/recovery/source/src/gui/backend_rev.cpp:560:19: warning: declaration of ‘row’ shadows a global declaration [-Wshadow]
+  560 |             auto& row=rows.at(id);const auto& record=records.record(id);
+      |                   ^~~
+/srv/recovery/source/src/gui/backend_rev.cpp:65:7: note: shadowed declaration is here
+   65 | Style row={.layout={Axis::Horizontal,Align::Start,Align::Center,Wrap::False},.size={Grow()}};
+      |       ^~~
+/srv/recovery/source/src/gui/backend_rev.cpp:570:48: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  570 |                 text->style->text.size=Px(cell.font_size);text->style->text.weight=cell.bold?700:400;
+      |                                           ~~~~~^~~~~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp: In member function ‘void {anonymous}::ListView::apply(const datapump::gui::ui::FieldState&)’:
+/srv/recovery/source/src/gui/backend_rev.cpp:579:19: warning: declaration of ‘row’ shadows a global declaration [-Wshadow]
+  579 |             auto& row=rows.at(id);row.button->setDisabled(!records.enabled(id));
+      |                   ^~~
+/srv/recovery/source/src/gui/backend_rev.cpp:65:7: note: shadowed declaration is here
+   65 | Style row={.layout={Axis::Horizontal,Align::Start,Align::Center,Wrap::False},.size={Grow()}};
+      |       ^~~
+/srv/recovery/source/src/gui/backend_rev.cpp: In constructor ‘{anonymous}::RevApp::RevApp(std::vector<void*>&, datapump::gui::Launch, std::span<const datapump::gui::ui::Control>)’:
+/srv/recovery/source/src/gui/backend_rev.cpp:769:88: warning: missing initializer for member ‘Rev::Appearance::Size@Rev.Appearance::min’ [-Wmissing-field-initializers]
+  769 |         surface=new theme::RevBox(this,{&column});surface->style->size={100_pct,100_pct};
+      |                                                                                        ^
+/srv/recovery/source/src/gui/backend_rev.cpp:769:88: warning: missing initializer for member ‘Rev::Appearance::Size@Rev.Appearance::max’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp: In lambda function:
+/srv/recovery/source/src/gui/backend_rev.cpp:778:37: warning: declaration of ‘parent’ shadows a member of ‘{anonymous}::RevApp’ [-Wshadow]
+  778 |                 [this](re::Element* parent,const BitmapSource& source)->re::Element* {
+      |                        ~~~~~~~~~~~~~^~~~~~
+In module Rev.Element, imported at /srv/recovery/source/src/gui/backend_rev.cpp:34:
+/srv/recovery/build-rev/rev-generated/source/Element/Element.ixx:87:18: note: shadowed declaration is here
+   87 |         Element* parent = nullptr;
+      |                  ^~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp: In lambda function:
+/srv/recovery/source/src/gui/backend_rev.cpp:781:37: warning: declaration of ‘parent’ shadows a member of ‘{anonymous}::RevApp’ [-Wshadow]
+  781 |                 [this](re::Element* parent,const ui::Control& control) {
+      |                        ~~~~~~~~~~~~~^~~~~~
+In module Rev.Element, imported at /srv/recovery/source/src/gui/backend_rev.cpp:34:
+/srv/recovery/build-rev/rev-generated/source/Element/Element.ixx:87:18: note: shadowed declaration is here
+   87 |         Element* parent = nullptr;
+      |                  ^~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp: In constructor ‘{anonymous}::RevApp::RevApp(std::vector<void*>&, datapump::gui::Launch, std::span<const datapump::gui::ui::Control>)’:
+/srv/recovery/source/src/gui/backend_rev.cpp:784:205: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::min’ [-Wmissing-field-initializers]
+  784 |                 documents[definition.id]->style->padding={.left=Px(ui::document_side_padding),.right=Px(ui::document_side_padding),.top=Px(ui::document_top_padding),.bottom=Px(ui::document_bottom_padding)};
+      |                                                                                                                                                                                                             ^
+/srv/recovery/source/src/gui/backend_rev.cpp:784:205: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::max’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:791:131: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::min’ [-Wmissing-field-initializers]
+  791 |         help_text->style->padding={Px(ui::tooltip_padding),Px(ui::tooltip_padding),Px(ui::tooltip_padding),Px(ui::tooltip_padding)};
+      |                                                                                                                                   ^
+/srv/recovery/source/src/gui/backend_rev.cpp:791:131: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::max’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:793:97: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::radius’ [-Wmissing-field-initializers]
+  793 |         help_text->style->border={.color=theme::rev_color(theme::WidgetRole::border),.width=1_px};
+      |                                                                                                 ^
+/srv/recovery/source/src/gui/backend_rev.cpp:793:97: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::tl’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:793:97: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::tr’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:793:97: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::bl’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:793:97: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::br’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:793:97: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::left’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:793:97: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::right’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:793:97: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::top’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:793:97: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::bottom’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp: In member function ‘void {anonymous}::RevApp::verify_layout() const’:
+/srv/recovery/source/src/gui/backend_rev.cpp:993:25: warning: declaration of ‘rect’ shadows a member of ‘{anonymous}::RevApp’ [-Wshadow]
+  993 |             const auto& rect=binding.element->rect;
+      |                         ^~~~
+In module Rev.Element, imported at /srv/recovery/source/src/gui/backend_rev.cpp:34:
+/srv/recovery/build-rev/rev-generated/source/Element/Element.ixx:99:14: note: shadowed declaration is here
+   99 |         Rect rect;
+      |              ^~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:995:59: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  995 |             if(rect.w<1||rect.h<=0||std::abs(rect.x-frame.x)>1||std::abs(rect.y-frame.y)>1||std::abs(rect.w-frame.w)>1||std::abs(rect.h-frame.h)>1)
+      |                                                     ~~~~~~^
+/srv/recovery/source/src/gui/backend_rev.cpp:995:87: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  995 |             if(rect.w<1||rect.h<=0||std::abs(rect.x-frame.x)>1||std::abs(rect.y-frame.y)>1||std::abs(rect.w-frame.w)>1||std::abs(rect.h-frame.h)>1)
+      |                                                                                 ~~~~~~^
+/srv/recovery/source/src/gui/backend_rev.cpp:995:115: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  995 |             if(rect.w<1||rect.h<=0||std::abs(rect.x-frame.x)>1||std::abs(rect.y-frame.y)>1||std::abs(rect.w-frame.w)>1||std::abs(rect.h-frame.h)>1)
+      |                                                                                                             ~~~~~~^
+/srv/recovery/source/src/gui/backend_rev.cpp:995:143: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  995 |             if(rect.w<1||rect.h<=0||std::abs(rect.x-frame.x)>1||std::abs(rect.y-frame.y)>1||std::abs(rect.w-frame.w)>1||std::abs(rect.h-frame.h)>1)
+      |                                                                                                                                         ~~~~~~^
+/srv/recovery/source/src/gui/backend_rev.cpp: In member function ‘void {anonymous}::RevApp::create_controls(std::span<const datapump::gui::ui::Control>, std::vector<{anonymous}::Binding>&, Rev::Element::Element@Rev.Element*, std::shared_ptr<const datapump::gui::ui::OverlayDefinition>, std::shared_ptr<bool>)’:
+/srv/recovery/source/src/gui/backend_rev.cpp:1030:26: warning: declaration of ‘parent’ shadows a member of ‘{anonymous}::RevApp’ [-Wshadow]
+ 1030 |             re::Element* parent=nullptr,std::shared_ptr<const ui::OverlayDefinition> lifetime={},std::shared_ptr<bool> alive={}) {
+      |             ~~~~~~~~~~~~~^~~~~~~~~~~~~~
+In module Rev.Element, imported at /srv/recovery/source/src/gui/backend_rev.cpp:34:
+/srv/recovery/build-rev/rev-generated/source/Element/Element.ixx:87:18: note: shadowed declaration is here
+   87 |         Element* parent = nullptr;
+      |                  ^~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:1034:24: warning: missing initializer for member ‘{anonymous}::Binding::menu_items’ [-Wmissing-field-initializers]
+ 1034 |             Binding b{c};
+      |                        ^
+/srv/recovery/source/src/gui/backend_rev.cpp:1034:24: warning: missing initializer for member ‘{anonymous}::Binding::presentation’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:1039:112: warning: missing initializer for member ‘Rev::Element::Dropdown@Rev.Element.Dropdown::Params::options’ [-Wmissing-field-initializers]
+ 1039 |                 b.menu=new ChoiceView(container,{.label="",.placeholder=c.menu_label,.openUpward=c.open_upward});
+      |                                                                                                                ^
+/srv/recovery/source/src/gui/backend_rev.cpp:1039:112: warning: missing initializer for member ‘Rev::Element::Dropdown@Rev.Element.Dropdown::Params::value’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp: In lambda function:
+/srv/recovery/source/src/gui/backend_rev.cpp:1055:97: warning: declaration of ‘event’ shadows a member of ‘{anonymous}::RevApp’ [-Wshadow]
+ 1055 |                     b.editor->submit_event=callback(lifetime,alive,[this,control=&c](re::Event& event){return application.submit(*control,event.keyboard.ctrl,event.keyboard.shift);});
+      |                                                                                      ~~~~~~~~~~~^~~~~
+In module Rev.Window, imported at /srv/recovery/source/src/gui/backend_rev.cpp:32:
+/srv/recovery/build-rev/rev-generated/source/Window.ixx:105:15: note: shadowed declaration is here
+  105 |         Event event;
+      |               ^~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp: In member function ‘void {anonymous}::RevApp::create_controls(std::span<const datapump::gui::ui::Control>, std::vector<{anonymous}::Binding>&, Rev::Element::Element@Rev.Element*, std::shared_ptr<const datapump::gui::ui::OverlayDefinition>, std::shared_ptr<bool>)’:
+/srv/recovery/source/src/gui/backend_rev.cpp:1057:117: warning: missing initializer for member ‘Rev::Element::Dropdown@Rev.Element.Dropdown::Params::options’ [-Wmissing-field-initializers]
+ 1057 |                         b.suggestions=new ChoiceView(container,{.label="",.placeholder="",.openUpward=c.open_upward});
+      |                                                                                                                     ^
+/srv/recovery/source/src/gui/backend_rev.cpp:1057:117: warning: missing initializer for member ‘Rev::Element::Dropdown@Rev.Element.Dropdown::Params::value’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:1064:128: warning: missing initializer for member ‘Rev::Element::Dropdown@Rev.Element.Dropdown::Params::options’ [-Wmissing-field-initializers]
+ 1064 |                     b.choice=new ChoiceView(container,{.label="",.placeholder=ui::choice_placeholder,.openUpward=c.open_upward});
+      |                                                                                                                                ^
+/srv/recovery/source/src/gui/backend_rev.cpp:1064:128: warning: missing initializer for member ‘Rev::Element::Dropdown@Rev.Element.Dropdown::Params::value’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:1081:21: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+ 1081 |                     if(geometry.has_caption)b.caption=new theme::RevText(container,"",{&smallText});break;
+      |                     ^~
+/srv/recovery/source/src/gui/backend_rev.cpp:1081:101: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+ 1081 |                     if(geometry.has_caption)b.caption=new theme::RevText(container,"",{&smallText});break;
+      |                                                                                                     ^~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp: In lambda function:
+/srv/recovery/source/src/gui/backend_rev.cpp:1086:116: warning: declaration of ‘event’ shadows a member of ‘{anonymous}::RevApp’ [-Wshadow]
+ 1086 |                 container->onMouseDown(callback(lifetime,alive,[this,control=&c,interactions,container](re::Event& event){
+      |                                                                                                         ~~~~~~~~~~~^~~~~
+In module Rev.Window, imported at /srv/recovery/source/src/gui/backend_rev.cpp:32:
+/srv/recovery/build-rev/rev-generated/source/Window.ixx:105:15: note: shadowed declaration is here
+  105 |         Event event;
+      |               ^~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp: In lambda function:
+/srv/recovery/source/src/gui/backend_rev.cpp:1096:100: warning: declaration of ‘event’ shadows a member of ‘{anonymous}::RevApp’ [-Wshadow]
+ 1096 |             container->onMouseWheel(callback(lifetime,alive,[this,control=&c,container](re::Event& event){
+      |                                                                                         ~~~~~~~~~~~^~~~~
+In module Rev.Window, imported at /srv/recovery/source/src/gui/backend_rev.cpp:32:
+/srv/recovery/build-rev/rev-generated/source/Window.ixx:105:15: note: shadowed declaration is here
+  105 |         Event event;
+      |               ^~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp: In lambda function:
+/srv/recovery/source/src/gui/backend_rev.cpp:1141:43: warning: declaration of ‘rect’ shadows a member of ‘{anonymous}::RevApp’ [-Wshadow]
+ 1141 |             const auto local=[&](ui::Rect rect){rect.x-=geometry.frame.x;rect.y-=geometry.frame.y;return rect;};
+      |                                  ~~~~~~~~~^~~~
+In module Rev.Element, imported at /srv/recovery/source/src/gui/backend_rev.cpp:34:
+/srv/recovery/build-rev/rev-generated/source/Element/Element.ixx:99:14: note: shadowed declaration is here
+   99 |         Rect rect;
+      |              ^~~~
+/srv/recovery/source/src/gui/backend_rev.cpp: In lambda function:
+/srv/recovery/source/src/gui/backend_rev.cpp:1145:28: warning: declaration of ‘layout’ shadows a member of ‘{anonymous}::RevApp’ [-Wshadow]
+ 1145 |                 const auto layout=ui::popup_layout(screen,details.size.width,geometry.popup_upward);
+      |                            ^~~~~~
+In module Rev.Element, imported at /srv/recovery/source/src/gui/backend_rev.cpp:34:
+/srv/recovery/build-rev/rev-generated/source/Element/Element.ixx:522:16: note: shadowed declaration is here
+  522 |         Layout layout;
+      |                ^~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:1151:75: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+ 1151 |                 choice->optionsContainer->style->size.min.width=Px(layout.width);choice->optionsContainer->style->size.max.width=Px(layout.width);
+      |                                                                    ~~~~~~~^~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:1151:140: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+ 1151 |                 choice->optionsContainer->style->size.min.width=Px(layout.width);choice->optionsContainer->style->size.max.width=Px(layout.width);
+      |                                                                                                                                     ~~~~~~~^~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:1152:74: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+ 1152 |                 choice->optionsContainer->style->position.left=Px(layout.left);choice->optionsContainer->style->position.right={};
+      |                                                                   ~~~~~~~^~~~
+/srv/recovery/source/src/gui/backend_rev.cpp: In member function ‘void {anonymous}::RevApp::layout_controls(std::vector<{anonymous}::Binding>&, std::span<const datapump::gui::ui::Control>, const datapump::gui::ui::ControlLayout*, datapump::gui::ui::Rect)’:
+/srv/recovery/source/src/gui/backend_rev.cpp:1157:100: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+ 1157 |                 binding.label->style->overflow=Overflow::Hide;binding.label->style->text.size=Px(c.font_size);
+      |                                                                                                  ~~^~~~~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:1159:42: warning: declaration of ‘rect’ shadows a member of ‘{anonymous}::RevApp’ [-Wshadow]
+ 1159 |             if(binding.menu) {const auto rect=local(geometry.widget);place(binding.menu,rect);place(binding.menu->dropdown,{0,0,rect.w,rect.h});popup(binding.menu,geometry.widget);}
+      |                                          ^~~~
+In module Rev.Element, imported at /srv/recovery/source/src/gui/backend_rev.cpp:34:
+/srv/recovery/build-rev/rev-generated/source/Element/Element.ixx:99:14: note: shadowed declaration is here
+   99 |         Rect rect;
+      |              ^~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:1160:116: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+ 1160 |             if(binding.editor) {place(binding.editor,local(geometry.widget));binding.editor->style->text.size=Px(c.font_size);}
+      |                                                                                                                  ~~^~~~~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:1161:75: warning: declaration of ‘rect’ shadows a member of ‘{anonymous}::RevApp’ [-Wshadow]
+ 1161 |             if(binding.suggestions&&geometry.has_suggestions) {const auto rect=local(geometry.suggestions);place(binding.suggestions,rect);place(binding.suggestions->dropdown,{0,0,rect.w,rect.h});popup(binding.suggestions,geometry.suggestions);}
+      |                                                                           ^~~~
+In module Rev.Element, imported at /srv/recovery/source/src/gui/backend_rev.cpp:34:
+/srv/recovery/build-rev/rev-generated/source/Element/Element.ixx:99:14: note: shadowed declaration is here
+   99 |         Rect rect;
+      |              ^~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:1162:44: warning: declaration of ‘rect’ shadows a member of ‘{anonymous}::RevApp’ [-Wshadow]
+ 1162 |             if(binding.choice) {const auto rect=local(geometry.widget);place(binding.choice,rect);place(binding.choice->dropdown,{0,0,rect.w,rect.h});popup(binding.choice,geometry.widget);}
+      |                                            ^~~~
+In module Rev.Element, imported at /srv/recovery/source/src/gui/backend_rev.cpp:34:
+/srv/recovery/build-rev/rev-generated/source/Element/Element.ixx:99:14: note: shadowed declaration is here
+   99 |         Rect rect;
+      |              ^~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:1163:44: warning: declaration of ‘rect’ shadows a member of ‘{anonymous}::RevApp’ [-Wshadow]
+ 1163 |             if(binding.toggle) {const auto rect=local(geometry.widget);const auto chrome=ui::checkbox_layout(rect.w,rect.h);place(binding.toggle,rect);place(binding.toggle->checkbox,chrome.box);place(binding.toggle->label,chrome.label);binding.toggle->label->style->text.size=Px(c.font_size);}
+      |                                            ^~~~
+In module Rev.Element, imported at /srv/recovery/source/src/gui/backend_rev.cpp:34:
+/srv/recovery/build-rev/rev-generated/source/Element/Element.ixx:99:14: note: shadowed declaration is here
+   99 |         Rect rect;
+      |              ^~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:1163:282: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+ 1163 |             if(binding.toggle) {const auto rect=local(geometry.widget);const auto chrome=ui::checkbox_layout(rect.w,rect.h);place(binding.toggle,rect);place(binding.toggle->checkbox,chrome.box);place(binding.toggle->label,chrome.label);binding.toggle->label->style->text.size=Px(c.font_size);}
+      |                                                                                                                                                                                                                                                                                        ~~^~~~~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:1164:127: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+ 1164 |             if(binding.button) {place(binding.button,local(geometry.widget));binding.button->labelText->style->text.size=Px(c.font_size);}
+      |                                                                                                                             ~~^~~~~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:1168:141: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::tl’ [-Wmissing-field-initializers]
+ 1168 |             binding.element->style->border={.color=theme::rev_color(theme::WidgetRole::border),.radius=0_px,.width=geometry.border?1_px:0_px};
+      |                                                                                                                                             ^
+/srv/recovery/source/src/gui/backend_rev.cpp:1168:141: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::tr’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:1168:141: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::bl’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:1168:141: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::br’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:1168:141: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::left’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:1168:141: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::right’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:1168:141: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::top’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:1168:141: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::bottom’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp: In member function ‘void {anonymous}::RevApp::process_services()’:
+/srv/recovery/source/src/gui/backend_rev.cpp:1321:13: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+ 1321 |             if(!service_probe)application.complete_service(std::move(result));service_probe=false;
+      |             ^~
+/srv/recovery/source/src/gui/backend_rev.cpp:1321:79: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+ 1321 |             if(!service_probe)application.complete_service(std::move(result));service_probe=false;
+      |                                                                               ^~~~~~~~~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:1326:21: warning: declaration of ‘next’ shadows a member of ‘{anonymous}::RevApp’ [-Wshadow]
+ 1326 |         const auto* next=services.next();if(!next)return;
+      |                     ^~~~
+In module Rev.Element, imported at /srv/recovery/source/src/gui/backend_rev.cpp:34:
+/srv/recovery/build-rev/rev-generated/source/Element/Element.ixx:88:18: note: shadowed declaration is here
+   88 |         Element* next = nullptr;
+      |                  ^~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:1329:48: warning: missing initializer for member ‘datapump::gui::ui::ServiceResult::value’ [-Wmissing-field-initializers]
+ 1329 |             ui::ServiceResult result{request.id};
+      |                                                ^
+/srv/recovery/source/src/gui/backend_rev.cpp:1329:48: warning: missing initializer for member ‘datapump::gui::ui::ServiceResult::error’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:1332:13: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+ 1332 |             if(services.complete(result))application.complete_service(std::move(result));return;
+      |             ^~
+/srv/recovery/source/src/gui/backend_rev.cpp:1332:90: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+ 1332 |             if(services.complete(result))application.complete_service(std::move(result));return;
+      |                                                                                          ^~~~~~
+/srv/recovery/source/src/gui/backend_rev.cpp:1337:53: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::right’ [-Wmissing-field-initializers]
+ 1337 |         modal->style->position={.left=0_px,.top=0_px};modal->style->size={100_pct,100_pct};
+      |                                                     ^
+/srv/recovery/source/src/gui/backend_rev.cpp:1337:53: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::bottom’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:1337:53: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::min’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:1337:53: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::max’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:1337:90: warning: missing initializer for member ‘Rev::Appearance::Size@Rev.Appearance::min’ [-Wmissing-field-initializers]
+ 1337 |         modal->style->position={.left=0_px,.top=0_px};modal->style->size={100_pct,100_pct};
+      |                                                                                          ^
+/srv/recovery/source/src/gui/backend_rev.cpp:1337:90: warning: missing initializer for member ‘Rev::Appearance::Size@Rev.Appearance::max’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:1340:52: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::min’ [-Wmissing-field-initializers]
+ 1340 |         dialog->style->padding={0_px,0_px,0_px,0_px};
+      |                                                    ^
+/srv/recovery/source/src/gui/backend_rev.cpp:1340:52: warning: missing initializer for member ‘Rev::Appearance::LrtbStyle@Rev.Appearance::max’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:1341:177: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::radius’ [-Wmissing-field-initializers]
+ 1341 |         dialog->style->background.color=theme::rev_color(theme::WidgetRole::dialog);dialog->style->border={.color=theme::rev_color(theme::WidgetRole::dialog_border),.width=1_px};
+      |                                                                                                                                                                                 ^
+/srv/recovery/source/src/gui/backend_rev.cpp:1341:177: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::tl’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:1341:177: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::tr’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:1341:177: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::bl’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:1341:177: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::br’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:1341:177: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::left’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:1341:177: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::right’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:1341:177: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::top’ [-Wmissing-field-initializers]
+/srv/recovery/source/src/gui/backend_rev.cpp:1341:177: warning: missing initializer for member ‘Rev::Appearance::Border@Rev.Appearance::bottom’ [-Wmissing-field-initializers]
+[249/251] Linking CXX executable datapump-gui; Staging SDK runtime libraries for datapump-gui
+[249/251] Run CPack packaging tool...
+CPack: Create package using TGZ
+CPack: Install projects
+CPack: - Install project: DataPump []
+CPack: Create package
+CPack: - package: /srv/recovery/build-rev/releases/DataPump-1.0.0-Linux-x86_64-native-rev.tar.gz generated.
+CPack: Create package using ZIP
+CPack: Install projects
+CPack: - Install project: DataPump []
+CPack: Create package
+CPack: - package: /srv/recovery/build-rev/releases/DataPump-1.0.0-Linux-x86_64-native-rev.zip generated.
+-- Native package inventory, dependency closure, and isolated commands verified
+-- 39 packaged ELF files: no GTK/GLib; highest numeric glibc requirement 2.36
+-- Native package inventory, dependency closure, and isolated commands verified
+-- 39 packaged ELF files: no GTK/GLib; highest numeric glibc requirement 2.36
+-- Both native archive formats verified in /srv/recovery/build-rev/releases/verification-311f613cfcda
+Verified portable archives: /srv/recovery/build-rev/releases
