@@ -20,6 +20,17 @@ page itself participates in shared desktop placement. Narrow document rows wrap
 when the next fixed width or minimum remaining width cannot fit. This adaptation
 is deterministic and contains no modem-specific layout rules.
 
+Record lists also project the shared cell rectangles and row height onto the
+terminal grid (8 logical pixels per column, 18 per line). Cells retain independent
+columns, multiline text, fixed or remaining width, tone and bold emphasis. Text
+wraps within each cell and clips to its declared height and list row; long
+remaining-width cells can be read with Left/Right. PageUp/PageDown and the wheel
+scroll a focused/pointed list in visual lines, including records taller than the
+viewport. Up/Down/Home/End select eligible records and reveal them. Tail-following
+lists preserve a manually scrolled historical position. Font sizes remain under
+the terminal host's control; sub-cell geometry is rounded to the cell grid.
+These adaptations require no application field or modem-specific rules.
+
 A new generic presentation primitive requires
 support in each relevant renderer, as it does for FLTK and Rev.
 

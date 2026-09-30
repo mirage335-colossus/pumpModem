@@ -1,6 +1,7 @@
 #include "terminal_ui.hpp"
 #include "control_binding.hpp"
 #include "cell_layout.hpp"
+#include "terminal_record_layout.hpp"
 #include "document_presentation.hpp"
 #include "service_queue.hpp"
 #include "text_policy.hpp"
@@ -82,8 +83,12 @@ struct Session::Impl {
     std::vector<Item> items;
     std::vector<Hit> hits;
     std::map<Identity,Editor> editors;
-    std::map<Identity,int> list_offsets;
-    std::map<Identity,int> list_horizontal;
+    struct ListPosition {
+        int offset=0,horizontal=0,chosen_top=-1,row_height=0,viewport_height=0;
+        bool tail=true,focused=false,reveal=false;
+        std::string selected;
+    };
+    std::map<Identity,ListPosition> list_positions;
     std::map<std::tuple<ui::Page,ui::Command,unsigned,std::size_t>,unsigned> document_instances;
     std::optional<Identity> focus,expanded;
     std::optional<Identity> saved_focus,popup_identity;
@@ -118,7 +123,7 @@ struct Session::Impl {
         return -1;
     }
     bool focusable(const Item& item) const {return item.enabled&&item.control.kind!=ui::Kind::label;}
-    void primitive(Primitive::Kind kind,ui::Rect r,std::string text={},Tone color=Tone::normal,bool focused=false,bool selected=false,bool enabled=true,bool border=false,BitmapSource bitmap={}) {
+    void primitive(Primitive::Kind kind,ui::Rect r,std::string text={},Tone color=Tone::normal,bool focused=false,bool selected=false,bool enabled=true,bool border=false,BitmapSource bitmap={},bool bold=false) {
         if(r.w<=0||r.h<=0||r.x>=columns()||r.y>=rows()||r.y+r.h<=0)return;
         auto clip=content_clip?std::optional<ui::Rect>({0,header_height,columns(),std::max(0,rows()-header_height-1)}):std::nullopt;
         if(document_clip) {
@@ -129,14 +134,15 @@ struct Session::Impl {
         }
         scene.primitives.push_back({kind,pixels(r),std::move(text),std::move(bitmap),color,focused,selected,enabled,border,
             clip?std::optional<ui::Rect>(pixels(*clip)):std::nullopt});
+        scene.primitives.back().bold=bold;
     }
     void fill(ui::Rect r,Tone color=Tone::normal,bool selected=false,bool focused=false,bool border=false) {
         primitive(Primitive::Kind::fill,r,{},color,focused,selected,true,border);
     }
-    void text(ui::Rect r,std::string_view value,Tone color=Tone::normal,bool focused=false,bool selected=false,bool enabled=true) {
+    void text(ui::Rect r,std::string_view value,Tone color=Tone::normal,bool focused=false,bool selected=false,bool enabled=true,bool bold=false) {
         auto wrapped=lines(value,r.w);
         for(int i=0;i<std::min(r.h,static_cast<int>(wrapped.size()));++i)
-            primitive(Primitive::Kind::text,{r.x,r.y+i,r.w,1},std::move(wrapped[i].text),color,focused,selected,enabled);
+            primitive(Primitive::Kind::text,{r.x,r.y+i,r.w,1},std::move(wrapped[i].text),color,focused,selected,enabled,false,{},bold);
     }
     Editor& editor(const Item& item) {
         auto& e=editors[ui::document_control_identity(item.control)];const auto& s=app.control(item.control).state;
@@ -310,16 +316,42 @@ struct Session::Impl {
         case ui::Kind::list: {
             fill(r,Tone::muted,false,selected);
             if(state.records.empty()&&c.empty_text[0])text(r,c.empty_text,Tone::muted,selected,false,item.enabled);
-            auto& offset=list_offsets[ui::document_control_identity(c)];
+            auto& position=list_positions[ui::document_control_identity(c)];
+            const int height=record_height(c.list_row_height);
+            const int maximum=std::max(0,static_cast<int>(state.records.size())*height-r.h);
+            const int width=record_columns(state.records,r.w);
+            position.horizontal=std::clamp(position.horizontal,0,std::max(0,width-r.w));
             int chosen=-1;for(int n=0;n<static_cast<int>(state.records.size());++n)if(state.records[n].id==state.selected)chosen=n;
-            if(c.follow_tail&&!selected)offset=std::max(0,static_cast<int>(state.records.size())-r.h);
-            if(selected&&chosen>=0) {if(chosen<offset)offset=chosen;if(chosen>=offset+r.h)offset=chosen-r.h+1;}
-            offset=std::clamp(offset,0,std::max(0,static_cast<int>(state.records.size())-r.h));
-            for(int n=offset;n<std::min(static_cast<int>(state.records.size()),offset+r.h);++n) {
-                std::string value;for(const auto& cell:state.records[n].cells) {if(!value.empty())value+=" | ";value+=cell.text;}
-                value.erase(0,static_cast<std::size_t>(glyph_offset(value,list_horizontal[ui::document_control_identity(c)])));
-                text({r.x,r.y+n-offset,r.w,1},value,n==chosen?Tone::inverse:Tone::normal,selected,n==chosen,item.enabled&&state.records[n].enabled);
+            if(c.follow_tail&&position.tail&&!selected)position.offset=maximum;
+            if(selected&&chosen>=0&&(!position.focused||position.selected!=state.selected||position.reveal||
+                position.chosen_top!=chosen*height||position.row_height!=height||position.viewport_height!=r.h)) {
+                const int top=chosen*height;
+                // Oversized records reveal their beginning once; subsequent
+                // page/wheel scrolling must be able to reach the rest.
+                if(top<position.offset||height>r.h)position.offset=top;
+                else if(top+height>position.offset+r.h)position.offset=top+height-r.h;
+                position.tail=position.offset>=maximum;
             }
+            position.offset=std::clamp(position.offset,0,maximum);
+            if(maximum==0)position.tail=true;
+            position.focused=selected;position.selected=state.selected;position.reveal=false;
+            position.chosen_top=chosen*height;position.row_height=height;position.viewport_height=r.h;
+            const auto previous_clip=document_clip;
+            const auto intersect=[](ui::Rect a,ui::Rect b) {
+                const int x=std::max(a.x,b.x),y=std::max(a.y,b.y);
+                return ui::Rect{x,y,std::max(0,std::min(a.x+a.w,b.x+b.w)-x),std::max(0,std::min(a.y+a.h,b.y+b.h)-y)};
+            };
+            const auto list_clip=previous_clip?intersect(r,*previous_clip):r;
+            for(int n=position.offset/height;n<static_cast<int>(state.records.size())&&n*height-position.offset<r.h;++n) {
+                const auto& record=state.records[n];const int y=r.y+n*height-position.offset;
+                document_clip=intersect(list_clip,{r.x,y,r.w,height});
+                if(n==chosen)fill({r.x,y,r.w,height},Tone::normal,true);
+                for(const auto& cell:record.cells) {
+                    auto box=record_cell_bounds(cell,width);box.x+=r.x-position.horizontal;box.y+=y;
+                    text(box,cell.text,tone(cell.tone),false,n==chosen,item.enabled&&record.enabled,cell.bold);
+                }
+            }
+            document_clip=previous_clip;
             break;
         }
         case ui::Kind::bitmap: {
@@ -328,6 +360,18 @@ struct Session::Impl {
             text({r.x,r.y+r.h-1,r.w,1},plot.caption,tone(plot.caption_tone),selected);break;
         }
         }
+    }
+    ui::Rect list_bounds(const Item& item) const {
+        auto r=item.bounds;r.y-=scroll;
+        if(!item.label.empty()) {const int label=std::min(std::max(0,r.h-1),static_cast<int>(lines(item.label,r.w).size()));r.y+=label;r.h-=label;}
+        return r;
+    }
+    void scroll_list(const Item& item,int amount) {
+        const auto& c=item.control;const auto& records=app.control(c).state.records;
+        auto& position=list_positions[ui::document_control_identity(c)];
+        const int maximum=std::max(0,static_cast<int>(records.size())*record_height(c.list_row_height)-list_bounds(item).h);
+        position.offset=std::clamp(position.offset+amount,0,maximum);
+        position.tail=position.offset==maximum;dirty=true;
     }
     void render_popup() {
         if(popup<0||popup>=static_cast<int>(items.size()))return;
@@ -642,6 +686,10 @@ struct Session::Impl {
         if(event.type==Event::Type::key) {
             if(event.key==Key::tab){move_focus(event.shift?-1:1);return;}
             if(event.key==Key::page_up||event.key==Key::page_down) {
+                const int active=focused();
+                if(active>=0&&items[active].control.kind==ui::Kind::list) {
+                    scroll_list(items[active],(event.key==Key::page_up?-1:1)*std::max(1,list_bounds(items[active]).h-1));return;
+                }
                 const int step=std::max(1,(rows()-header_height-1)/10);
                 scroll=std::max(0,scroll+(event.key==Key::page_up?-1:1)*step);dirty=true;return;
             }
@@ -664,6 +712,9 @@ struct Session::Impl {
                 if(hit->kind==Hit::Kind::item&&y>=header_height&&y<rows()-1){index=hit->index;break;}
             }
             if(event.type==Event::Type::wheel) {
+                if(index>=0&&items[index].control.kind==ui::Kind::list&&contains(list_bounds(items[index]),x,y)) {
+                    scroll_list(items[index],-event.wheel*3);return;
+                }
                 if(index>=0&&items[index].control.kind==ui::Kind::bitmap) {
                     const auto& c=items[index].control;const auto command=event.wheel>0?c.wheel_up:c.wheel_down;
                     if(command!=ui::Command::none){app.gesture(c,command);dirty=true;return;}
@@ -680,7 +731,8 @@ struct Session::Impl {
                 const int line=std::clamp(y-top+e.first_line,0,static_cast<int>(wrapped.size())-1);
                 const int at=wrapped[line].begin+glyph_offset(wrapped[line].text,std::max(0,x-item.bounds.x));e.selection={at,at,at};
             }else if(c.kind==ui::Kind::list) {
-                const int row=y-top+list_offsets[ui::document_control_identity(c)];
+                if(!contains(list_bounds(item),x,y)){dirty=true;return;}
+                const int row=(y-top+list_positions[ui::document_control_identity(c)].offset)/record_height(c.list_row_height);
                 if(row>=0&&row<static_cast<int>(state.records.size())&&state.records[row].enabled) {
                     const auto id=state.records[row].id;app.select(c,id);if(c.activate_on_select||event.double_click)app.activate_record(c,id);
                 }
@@ -694,10 +746,11 @@ struct Session::Impl {
         if(event.type==Event::Type::text&&!event.paste&&event.text==" "&&!event.ctrl&&!event.alt){activate(index);return;}
         if(event.type!=Event::Type::key)return;
         if(c.kind==ui::Kind::list&&(event.key==Key::left||event.key==Key::right)) {
-            auto& offset=list_horizontal[ui::document_control_identity(c)];offset=std::clamp(offset+(event.key==Key::left?-8:8),0,1024*1024);dirty=true;return;
+            auto& offset=list_positions[ui::document_control_identity(c)].horizontal;offset=std::clamp(offset+(event.key==Key::left?-8:8),0,std::max(0,record_columns(state.records,item.bounds.w)-item.bounds.w));dirty=true;return;
         }
         if(c.kind==ui::Kind::list&&(event.key==Key::up||event.key==Key::down||event.key==Key::home||event.key==Key::end)) {
             if(state.records.empty())return;
+            list_positions[ui::document_control_identity(c)].reveal=true;
             int n=-1;for(int i=0;i<static_cast<int>(state.records.size());++i)if(state.records[i].id==state.selected)n=i;
             const int direction=event.key==Key::up||event.key==Key::end?-1:1;
             if(event.key==Key::home)n=0;else if(event.key==Key::end)n=static_cast<int>(state.records.size())-1;else n=std::clamp(n+direction,0,static_cast<int>(state.records.size())-1);

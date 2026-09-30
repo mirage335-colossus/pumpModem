@@ -243,6 +243,7 @@ def run(binary):
     try:
         terminal.wait_for("Terminal contract ticks=")
         terminal.wait_for("literal:_]52;c;BAD_____")
+        terminal.wait_for("normal BOLD normal")
         assert b"\x1b]52" not in terminal.raw
         assert all(byte < 128 for byte in terminal.raw)
         plot = terminal.screen.text().splitlines()[5]

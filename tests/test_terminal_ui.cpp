@@ -1,5 +1,6 @@
 #include "terminal_ui.hpp"
 #include "cell_layout.hpp"
+#include "terminal_record_layout.hpp"
 #include <iostream>
 #include <stdexcept>
 
@@ -289,6 +290,104 @@ void empty_record_placeholder() {
     ui::OverlayDefinition overlay;overlay.controls={list};show_overlay(app,std::move(overlay));
     terminal::Session session(app);session.resize({80,24,{1,1}});find(session,list.empty_text);app.close();
 }
+void shared_record_layout() {
+    // Geometry comes from ordinary shared cells, including independent columns.
+    ui::Record record{"geometry",{{"freq",11,4,76,18,12,ui::TextTone::normal,true},
+        {"status",89,5,100,17},{"preamble",11,19,178,15},{"data",11,34,178,15},
+        {"message",194,14,-10,27}}};
+    const auto a=terminal::record_cell_bounds(record.cells[0],80);
+    const auto b=terminal::record_cell_bounds(record.cells[1],80);
+    const auto c=terminal::record_cell_bounds(record.cells[2],80);
+    const auto d=terminal::record_cell_bounds(record.cells[3],80);
+    const auto message=terminal::record_cell_bounds(record.cells[4],80);
+    check(a.x==1&&a.y==0&&a.w==10&&a.h==1&&b.x==11&&b.y==0,"record header geometry lost");
+    check(c.y==1&&d.y==2&&message.x==24&&message.y==1,"record columns were flattened or separated into artificial groups");
+    record.cells[4].x+=80;record.cells[4].y+=36;
+    const auto moved=terminal::record_cell_bounds(record.cells[4],80);
+    check(moved.x==message.x+10&&moved.y==message.y+2&&moved.w==message.w-10,"shared record edits did not change terminal geometry");
+    check(terminal::record_cell_bounds(record.cells[0],20)==a,"fixed record cell width changed with viewport");
+    check(terminal::record_cell_bounds(record.cells[4],100).w==moved.w+20,"remaining-width record cell failed to grow");
+    check(terminal::record_height(54)==3&&terminal::record_height(72)==4,"shared row height was ignored");
+    ui::Record utf8{"utf8",{{"\xc3\xa9\nABCDE",8,0,-8,36}}};
+    // Five glyphs on the longest line plus one column at each edge.
+    check(terminal::record_columns({utf8},1)==7,"record extent counted bytes or added separate lines");
+
+    Application app({});app.select(ui::Field::fast_mode,"robust");
+    auto list=declaration(ui::Field::signals);list.label="Shared records";
+    list.list_row_height=54;list.follow_tail=false;list.activate_on_select=false;list.activate_record=ui::Command::none;
+    list.placement={0,0,0,0,600,198};ui::OverlayDefinition overlay;overlay.controls={list};app.show_overlay(overlay);
+    auto& state=const_cast<ui::FieldState&>(app.field(list.field));
+    const auto row=[](const std::string& id,bool enabled=true) {
+        return ui::Record{id,{{id+"-head",8,0,80,18,13,ui::TextTone::negative,true},
+            {id+"-mid\n"+id+"-last",8,18,80,36,13,ui::TextTone::muted,false},
+            {id+"-right",104,18,-8,18,13,ui::TextTone::data,false}},enabled,false};
+    };
+    state.records={row("A"),row("B",false),row("C")};state.selected.clear();
+    terminal::Session session(app);session.resize({100,40,{1,1}});
+    const auto head=find(session,"A-head"),middle=find(session,"A-mid"),last=find(session,"A-last"),right=find(session,"A-right");
+    check(middle.bounds.y==head.bounds.y+1&&last.bounds.y==head.bounds.y+2&&right.bounds.y==middle.bounds.y&&right.bounds.x>middle.bounds.x,"shared multiline record geometry was flattened");
+    check(head.tone==terminal::Tone::negative&&head.bold&&!head.focused&&middle.tone==terminal::Tone::muted&&right.tone==terminal::Tone::data,"record presentation attributes lost");
+    check(!find(session,"B-head").enabled,"disabled record gained enabled appearance");
+    for(const auto text:{"A-head","A-mid","A-last","C-head","C-mid","C-last"}) {
+        const auto box=find(session,text).bounds;click(session,box.x,box.y);
+        check(state.selected==std::string(text).substr(0,1),"multiline row click selected the wrong record");
+    }
+    auto box=find(session,"B-mid").bounds;click(session,box.x,box.y);check(state.selected=="C","disabled row was selected");
+    box=find(session,"Shared records").bounds;click(session,box.x,box.y);check(state.selected=="C","list header selected a record");
+    session.input(key(terminal::Key::home));check(state.selected=="A","Home failed to select first record");
+    session.input(key(terminal::Key::down));check(state.selected=="C","Down failed to skip disabled record");
+    session.input(key(terminal::Key::up));check(state.selected=="A","Up failed to skip disabled record");
+    session.input(key(terminal::Key::end));check(state.selected=="C","End failed to select last record");
+    check(find(session,"C-last").selected&&find(session,"C-head").bold,"selection discarded shared emphasis");
+    session.resize({800,640,{8,16}});box=find(session,"A-last").bounds;click(session,box.x,box.y);
+    check(state.selected=="A","record pointer mapping ignored host metrics");
+
+    // Resize/reorder keeps identity; changed row geometry reaches this backend.
+    std::swap(state.records.front(),state.records.back());list.list_row_height=72;
+    overlay.controls={list};app.show_overlay(overlay);session.resize({100,40,{1,1}});
+    check(find(session,"A-head").bounds.y-find(session,"C-head").bounds.y==8&&state.selected=="A","record reorder/height edit lost shared geometry or selection");
+    state.records={row("wide")};state.records[0].cells[2].x=800;state.selected="wide";
+    overlay.controls[0].list_row_height=54;app.show_overlay(overlay);session.resize({100,40,{1,1}});
+    box=find(session,"wide-head").bounds;click(session,box.x,box.y);
+    for(int n=0;n<20;++n)session.input(key(terminal::Key::right));
+    const auto far=find(session,"wide-right");check(far.clip&&far.bounds.x<far.clip->x+far.clip->w,"horizontal scroll did not reveal distant shared cell");
+    for(int n=0;n<20;++n)session.input(key(terminal::Key::left));find(session,"wide-head");
+    app.close();
+}
+void record_scrolling() {
+    Application app({});app.select(ui::Field::fast_mode,"robust");
+    auto list=declaration(ui::Field::signals);list.label="History";list.list_row_height=108;
+    list.follow_tail=true;list.activate_on_select=false;list.activate_record=ui::Command::none;
+    list.placement={0,0,0,0,600,90};
+    auto toggle=declaration(ui::Field::developer_mode);toggle.placement={0,108,0,0,600,27};
+    ui::OverlayDefinition overlay;overlay.controls={list,toggle};app.show_overlay(overlay);
+    auto& state=const_cast<ui::FieldState&>(app.field(list.field));
+    const auto row=[](std::string id){return ui::Record{id,{{id+"0\n"+id+"1\n"+id+"2\n"+id+"3\n"+id+"4\n"+id+"5",0,0,160,108}}};};
+    state.records={row("A"),row("B")};state.selected.clear();terminal::Session session(app);session.resize({100,30,{1,1}});
+    const auto visible=[&](std::string_view value) {
+        for(const auto& p:session.scene().primitives)if(p.text==value&&(!p.clip||(p.bounds.y>=p.clip->y&&p.bounds.y<p.clip->y+p.clip->h)))return true;
+        return false;
+    };
+    check(visible("B5")&&!visible("A0"),"list failed to follow multiline tail");
+    state.records.push_back(row("C"));session.resize({100,30,{1,1}});check(visible("C5"),"appended record did not advance tail");
+    auto box=find(session,"C5").bounds;click(session,box.x,box.y);session.input(key(terminal::Key::home));
+    check(state.selected=="A"&&visible("A0"),"oversized keyboard selection did not reveal its beginning");
+    session.input(key(terminal::Key::page_down));check(visible("A5"),"oversized record could not scroll to its end");
+    session.input(key(terminal::Key::page_up));check(visible("A0"),"page scroll was snapped back to selection");
+    state.records.push_back(row("D"));session.resize({100,30,{1,1}});check(visible("A0")&&state.selected=="A","append displaced a selected historical record");
+    terminal::Event wheel;wheel.type=terminal::Event::Type::wheel;wheel.wheel=-1;box=find(session,"A0").bounds;wheel.x=box.x;wheel.y=box.y;session.input(wheel);
+    check(visible("A5")&&!visible("A0"),"list wheel moved page or snapped back to selection");
+    std::swap(state.records.front(),state.records.back());session.resize({100,30,{1,1}});
+    check(visible("A0")&&state.selected=="A","same selected ID disappeared after reorder");
+    // Leave a historical scroll position, then clear history and relinquish
+    // focus. New reception should follow the new tail without stale state.
+    session.input(key(terminal::Key::home));session.input(key(terminal::Key::page_up));
+    state.records.clear();state.selected.clear();session.resize({100,30,{1,1}});
+    session.input(key(terminal::Key::tab));
+    state.records={row("X"),row("Y")};session.resize({100,30,{1,1}});
+    check(visible("Y5"),"clearing history did not restore tail following");
+    app.close();
+}
 void path_dialog_policy() {
     Application app({});terminal::Session session(app);session.resize({80,24,{1,1}});
     const auto original=app.field(ui::Field::fast_file).text;
@@ -307,6 +406,6 @@ void path_dialog_policy() {
 }
 }
 int main() {
-    try {shared_layout_changes();editing_and_security();editable_presets();focus_choices_and_scroll();focus_boundaries();incremental_page_scroll();document_resize_scroll();draft_submit_shortcuts();path_dialog_policy();plot_expansion();overlay_focus_policy();popup_binding_identity();empty_record_placeholder();std::cout<<"Terminal UI interaction checks passed\n";return 0;}
+    try {shared_record_layout();record_scrolling();shared_layout_changes();editing_and_security();editable_presets();focus_choices_and_scroll();focus_boundaries();incremental_page_scroll();document_resize_scroll();draft_submit_shortcuts();path_dialog_policy();plot_expansion();overlay_focus_policy();popup_binding_identity();empty_record_placeholder();std::cout<<"Terminal UI interaction checks passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

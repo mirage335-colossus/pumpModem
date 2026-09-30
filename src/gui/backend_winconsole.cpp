@@ -259,7 +259,7 @@ private:
             if(primitive.tone==Tone::negative)color=9;
         }
         if(!primitive.enabled||primitive.tone==Tone::muted)color=8;
-        if(primitive.focused)color|=8;
+        if(primitive.focused||primitive.bold)color|=8;
         auto result=color_attribute(color);
         if(primitive.focused||primitive.selected||primitive.tone==Tone::inverse)result=reverse_attribute(result);
         return result;

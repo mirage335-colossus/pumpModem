@@ -38,6 +38,7 @@ struct Primitive {
     std::optional<ui::Rect> clip;
     Icon icon=Icon::chevron_down;
     Fill fill=Fill::surface;
+    bool bold=false;
 };
 struct Scene {
     int width=0,height=0;

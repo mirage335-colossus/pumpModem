@@ -32,6 +32,8 @@ void contracts() {
         terminal::Scene scene;scene.width=terminal.width();scene.height=terminal.height();
         terminal::Primitive text;text.bounds={0,0,scene.width,1};text.text="literal:\033]52;c;BAD\a\r\b\177\xc2\x9b";
         scene.primitives.push_back(text);
+        terminal::Primitive normal;normal.bounds={0,1,5,1};normal.text="N B N";scene.primitives.push_back(normal);
+        auto bold=normal;bold.bounds={2,1,1,1};bold.text="B";bold.bold=true;scene.primitives.push_back(bold);
         terminal::Primitive artwork;artwork.kind=terminal::Primitive::Kind::bitmap;artwork.bounds={0,2,12,4};
         artwork.bitmap=BitmapSource([](const BitmapRequest& request,const BitmapSink& sink,bool) {
             check(request.monochrome,"Binary console fixture was not monochrome");
@@ -46,6 +48,11 @@ void contracts() {
         std::vector<CHAR_INFO> cells(static_cast<std::size_t>(size.X)*static_cast<unsigned>(size.Y));
         auto region=info.srWindow;
         check(ReadConsoleOutputW(terminal.output(),cells.data(),size,{0,0},&region)!=0,"Cannot capture console fixture");
+        check((cells[size.X+2].Attributes&FOREGROUND_INTENSITY)!=0&&
+              (cells[size.X].Attributes&FOREGROUND_INTENSITY)==0&&
+              (cells[size.X+4].Attributes&FOREGROUND_INTENSITY)==0&&
+              (cells[size.X+2].Attributes&(BACKGROUND_RED|BACKGROUND_GREEN|BACKGROUND_BLUE|BACKGROUND_INTENSITY))==0,
+              "Console record emphasis leaked or reversed its background");
         check(cells[8].Char.UnicodeChar==L'_',"Console display interpreted received ESC");
         check(cells[static_cast<std::size_t>(size.X)*2].Char.UnicodeChar==L'\u2584'&&
             cells[static_cast<std::size_t>(size.X)*2+1].Char.UnicodeChar==L'\u2580',"Console binary half-block output collapsed");

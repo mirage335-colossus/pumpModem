@@ -411,7 +411,7 @@ private:
     int attributes(const Primitive& primitive) const {
         int result=primitive.focused||primitive.selected||primitive.tone==Tone::inverse?A_REVERSE:A_NORMAL;
         if(!primitive.enabled||primitive.tone==Tone::muted)result|=A_DIM;
-        if(primitive.focused)result|=A_BOLD;
+        if(primitive.focused||primitive.bold)result|=A_BOLD;
         if(colors_) {
             int pair=1;
             if(primitive.tone==Tone::accent||primitive.tone==Tone::data)pair=2;
@@ -570,6 +570,8 @@ int main(int argc,char** argv) {
                 if(text=="flood")for(int y=9;y<scene.height;++y)add(y,std::string(static_cast<std::size_t>(scene.width),static_cast<char>('a'+ticks%26)));
                 add(3,std::string("literal:")+"\033]52;c;BAD\a\r\b\177\xC2\x9B");
                 add(4,"..........");
+                add(8,"normal BOLD normal");
+                terminal::Primitive emphasis;emphasis.bounds={7,8,4,1};emphasis.text="BOLD";emphasis.bold=true;scene.primitives.push_back(emphasis);
                 terminal::Primitive clipped;clipped.bounds={0,4,10,1};clipped.text="outCLIPout";
                 clipped.clip=ui::Rect{3,4,4,1};scene.primitives.push_back(std::move(clipped));
                 terminal::Primitive plot;plot.kind=terminal::Primitive::Kind::bitmap;plot.bounds={0,5,20,3};
@@ -603,6 +605,11 @@ int main(int argc,char** argv) {
                     });scene.primitives.push_back(std::move(color));
                 }
                 terminal.paint(scene);dirty=false;
+                if(scene.width>=18&&scene.height>=9) {
+                    if((mvwinch(stdscr,8,7)&A_BOLD)==0||(mvwinch(stdscr,8,0)&A_BOLD)!=0||
+                       (mvwinch(stdscr,8,12)&A_BOLD)!=0||(mvwinch(stdscr,8,7)&A_REVERSE)!=0)
+                        throw std::runtime_error("Independent terminal record emphasis lost");
+                }
             }
             terminal.flush();pollfd input{STDIN_FILENO,POLLIN,0};poll(&input,1,4);
         }
