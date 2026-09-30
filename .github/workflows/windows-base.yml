@@ -83,7 +83,7 @@ jobs:
         if: inputs.source != 'rebuild'
         shell: pwsh
         run: |
-          python tools/windows-base.py fetch --repo "$env:GITHUB_REPOSITORY" --directory windows-base-assets --github-output "$env:GITHUB_OUTPUT"
+          python tools/windows-base.py fetch --with-sources --repo "$env:GITHUB_REPOSITORY" --directory windows-base-assets --github-output "$env:GITHUB_OUTPUT"
           if ($LASTEXITCODE -ne 0) { throw 'Base lookup or verification failed' }
       - name: Require explicit reuse when requested
         if: inputs.source == 'base' && steps.reuse.outputs.found != 'true'

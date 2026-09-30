@@ -135,6 +135,37 @@ jobs:
           test "$#" -eq 1
           python3 tools/build-sdk.py install --archive "$1" --destination "$GITHUB_WORKSPACE/build/sdk-qualified"
           python3 tools/build-sdk.py verify "$GITHUB_WORKSPACE/build/sdk-qualified" --max-host-glibc 2.36
+      - name: Install runtime prerequisites for fresh SDK backend checks
+        run: sh "$RUNNER_TEMP/ci-apt.sh" install make xvfb xauth fonts-dejavu-core fontconfig-config libgl1 libopengl0 libgl1-mesa-dri libxtst6
+      - name: Build and check every native backend with this relocated SDK
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          LP_NUM_THREADS: ${{ inputs.linux_runner == 'ubuntu-24.04' && '1' || '2' }}
+        run: |
+          set -eu
+          sdk="$GITHUB_WORKSPACE/build/sdk-qualified"
+          for backend in fltk rev; do
+            tree="build/sdk-base-$backend"
+            ./build.sh --sdk "$sdk" --backend "$backend" --tui --fb \
+              --build-dir "$tree" --jobs 1 --build-jobs "$(nproc)" -- \
+              -DDATAPUMP_PORTABLE=ON -DDATAPUMP_TEST_NATIVE_GUI=ON
+            "$sdk/bin/cmake" --build "$tree" --config Release \
+              --target datapump-tests-native --parallel "$(nproc)"
+            xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' \
+              "$sdk/bin/ctest" --test-dir "$tree" -C Release --output-on-failure \
+              --no-tests=error --parallel 1 -R '^gui_self_check$'
+            # Native conformance qualifies the rebuilt dependency consumers.
+            # Full GUI workflow, modem and calibration coverage remain in sdk.yml.
+            xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' \
+              "$sdk/bin/ctest" --test-dir "$tree" -C Release --output-on-failure \
+              --no-tests=error --parallel 1 -L '^native_gui$' -E '^gui_workflow$'
+          done
+          ./build.sh test frontends --sdk "$sdk" --backend fltk --tui --fb \
+            --build-dir build/sdk-base-fltk --jobs 1 --build-jobs "$(nproc)" -- \
+            -DDATAPUMP_PORTABLE=ON -DDATAPUMP_TEST_NATIVE_GUI=ON
+          SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy \
+            xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' \
+            timeout 30s build/sdk-base-fltk/datapump-fb --simulation --frames 3
       - name: Preserve SDK and complete sources in base (never Latest)
         if: inputs.publish_base
         env:
