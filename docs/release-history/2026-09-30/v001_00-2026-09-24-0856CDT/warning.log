@@ -1,0 +1,4 @@
+REV_REPLAY_CADENCE: Rev replay/waterfall may refresh below the display target.
+Display cadence deviations are warnings; data integrity and physical-completion
+checks remain mandatory. Actual observed warnings are recorded in later
+certification reports/logs.

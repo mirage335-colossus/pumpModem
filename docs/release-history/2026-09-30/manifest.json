@@ -1,0 +1,3209 @@
+{
+  "schema": 1,
+  "repository": "mirage335-colossus/pumpModem",
+  "prepared_at": "2026-09-30T16:46:41.959195+00:00",
+  "authorization": "User explicitly requested cleanup of old releases; prior instructions require all work committed and pushed to main.",
+  "status": "evidence_preserved_pending_cleanup",
+  "preserved_releases": [
+    {
+      "id": 399992872,
+      "tag_name": "v001_00-2026-09-30-0648CDT",
+      "name": "v001_00-2026-09-30-0648CDT",
+      "draft": false,
+      "prerelease": false,
+      "target_commitish": "dce9138d27a2e6941b4304af2cf035c4ac2a6c9b",
+      "created_at": "2026-09-30T10:43:21Z",
+      "published_at": "2026-09-30T12:01:12Z",
+      "html_url": "https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-30-0648CDT",
+      "body": "> **Certification passed with warnings.** See the certification reports below.\n\nBuild **v001_00-2026-09-30-0648CDT**\n\n- Source commit: `dce9138d27a2e6941b4304af2cf035c4ac2a6c9b`\n- Build date: `2026-09-30-0648CDT` (America/Chicago)\n- Workflow run: `36704181844`, attempt `1`\n- Package version: `1.0.0`\n- GUI downloads: fltk, rev\n- Linux ABI: x86-64: glibc 2.36 (Bookworm source SDK); AArch64: glibc 2.35\n\nDownload the archive matching your operating system, architecture and GUI backend (fltk or rev), or install the signed Debian packages from this release's flat APT repository. Each backend has a separate bundle and extraction directory. All bundles include the TUI, framebuffer and the same static HTML/Wasm page under share/datapump/web/wasm; Linux also includes the inherited-pipe worker and hosted browser assets. The static page runs in Windows and Linux browsers. Unpack the whole archive and keep bin/, lib/ and share/ together; required application libraries are bundled. Host audio/graphics services and drivers remain required. Debian installation instructions are in the release documentation linked below.\n\nThe attached warning.log describes known nonfatal Rev replay/waterfall display-cadence warnings. They do not fail builds or certification; data integrity, pending-message identity and physical-completion checks remain mandatory.\n\nPackaging checks have passed when this release is published. Extensive contract, GUI and copied-binary checks run separately through the Certify published release workflow; its hash-bound reports will be attached here later. Hosted checks do not qualify physical audio hardware.\n\nThe ARM64 bundle requires a compatible 64-bit Linux installation, including Raspberry Pi OS or Velvet OS. Windows requires Windows 10 1903+/11 x64. See [requirements and certification scope](https://github.com/mirage335-colossus/pumpModem/blob/dce9138d27a2e6941b4304af2cf035c4ac2a6c9b/docs/releases.md).\n\nThis release includes copies of the prepared developer SDKs and dependency bundles it used, their complete source archives, and recipe checksums. Copies reused from the [base release](https://github.com/mirage335-colossus/pumpModem/releases/tag/base) remain available here even if older releases are deleted. Application releases never rebuild an SDK automatically. The runner supplies MSVC and the Windows SDK separately; they are not redistributed.\n\n\nCertification [run 36704181844, attempt 1](https://github.com/mirage335-colossus/pumpModem/actions/runs/36704181844/attempts/1): **failed** ([report](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/certification-36704181844-attempt-1.md), [JSON](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/certification-36704181844-attempt-1.json)). This report applies only to the recorded source and asset hashes.\n**Windows Rev native graphics remain unqualified on this runner.** [Environment warning log](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/certification-36704181844-attempt-1-warning.log). Hosted certification failed. The recognized hosted graphics exclusion does not block certification or Latest eligibility. The listed graphics checks remain untested; all other required checks remain mandatory. Failed or incomplete required checks keep this release ineligible for Latest.\n\n\nCertification [run 36704181844, attempt 2](https://github.com/mirage335-colossus/pumpModem/actions/runs/36704181844/attempts/2): **passed with warnings** ([report](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/certification-36704181844-attempt-2.md), [JSON](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/certification-36704181844-attempt-2.json)). This report applies only to the recorded source and asset hashes.\n**Windows Rev native graphics remain unqualified on this runner.** [Environment warning log](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/certification-36704181844-attempt-2-warning.log). Hosted certification passed with documented exclusions. The recognized hosted graphics exclusion does not block certification or Latest eligibility. The listed graphics checks remain untested; all other required checks remain mandatory. This ordinary release remains eligible for Latest.\n",
+      "assets": [
+        {
+          "id": 600822443,
+          "name": "DataPump-v001_00-2026-09-30-0648CDT-linux-aarch64-fltk.tar.gz",
+          "size": 40261550,
+          "state": "uploaded",
+          "digest": "sha256:aac459e94ec28ebbee7018e83687c824171f823c47ef89a4c0016326e4ac93c2",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/DataPump-v001_00-2026-09-30-0648CDT-linux-aarch64-fltk.tar.gz"
+        },
+        {
+          "id": 600822440,
+          "name": "DataPump-v001_00-2026-09-30-0648CDT-linux-aarch64-rev.tar.gz",
+          "size": 36754276,
+          "state": "uploaded",
+          "digest": "sha256:3f6b5722e116c44417dd6f6464e1d4c0713928432435879bdab2ef3cbe015e3c",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/DataPump-v001_00-2026-09-30-0648CDT-linux-aarch64-rev.tar.gz"
+        },
+        {
+          "id": 600822439,
+          "name": "DataPump-v001_00-2026-09-30-0648CDT-linux-x86_64-fltk.tar.gz",
+          "size": 37076545,
+          "state": "uploaded",
+          "digest": "sha256:227c4eabea0d2290602bd3231907d678c61f8c7f0a59e679a80468d17cc3ea33",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/DataPump-v001_00-2026-09-30-0648CDT-linux-x86_64-fltk.tar.gz"
+        },
+        {
+          "id": 600822441,
+          "name": "DataPump-v001_00-2026-09-30-0648CDT-linux-x86_64-rev.tar.gz",
+          "size": 36905299,
+          "state": "uploaded",
+          "digest": "sha256:8c09dcbb378198bd1b7ff367139a8c93533de17bf8a0927e6a0c0be998c93d70",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/DataPump-v001_00-2026-09-30-0648CDT-linux-x86_64-rev.tar.gz"
+        },
+        {
+          "id": 600822442,
+          "name": "DataPump-v001_00-2026-09-30-0648CDT-windows-x86_64-fltk.zip",
+          "size": 17014679,
+          "state": "uploaded",
+          "digest": "sha256:a263641b0d95cd68935ce7aa4b5b34795fd1ebe0bd214fc0b78e2d6009369504",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/DataPump-v001_00-2026-09-30-0648CDT-windows-x86_64-fltk.zip"
+        },
+        {
+          "id": 600822507,
+          "name": "DataPump-v001_00-2026-09-30-0648CDT-windows-x86_64-rev.zip",
+          "size": 17584186,
+          "state": "uploaded",
+          "digest": "sha256:f53f00d11a5a47ccdbd8fa9d8e411d62be9e2d98743d695c8aacc52a26983cb0",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/DataPump-v001_00-2026-09-30-0648CDT-windows-x86_64-rev.zip"
+        },
+        {
+          "id": 600822537,
+          "name": "InRelease",
+          "size": 798,
+          "state": "uploaded",
+          "digest": "sha256:abf88e331c547a21cc8a2bfc86bd2b3a35b4ab41e56f046f9951d0fe418f24db",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/InRelease"
+        },
+        {
+          "id": 600822543,
+          "name": "Packages",
+          "size": 3218,
+          "state": "uploaded",
+          "digest": "sha256:e4fd955ba1f7f41e64e54c7130b04421964077e2d165902ca5736ee1bf26301a",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/Packages"
+        },
+        {
+          "id": 600822546,
+          "name": "Packages.gz",
+          "size": 761,
+          "state": "uploaded",
+          "digest": "sha256:04319bfcd4cfe54692f842a2aa625bef776fcfb99f7fa662a36c166f18603dc6",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/Packages.gz"
+        },
+        {
+          "id": 600822558,
+          "name": "Release",
+          "size": 521,
+          "state": "uploaded",
+          "digest": "sha256:76c4847e69b49d9534623d61f73d4fe6498e6dfd8701e0cdedc2c31d3a3e98fd",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/Release"
+        },
+        {
+          "id": 600822583,
+          "name": "Release.gpg",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:37f50d986d4d636570c695934e479089ae6be316b58f7b97ea24f5d6c548a71f",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/Release.gpg"
+        },
+        {
+          "id": 600823148,
+          "name": "SHA256SUMS.txt",
+          "size": 6192,
+          "state": "uploaded",
+          "digest": "sha256:bac799b36e8df8685b70ba2cdf53611fa249aa3b1a31e7ed20a976b9048cbadc",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/SHA256SUMS.txt"
+        },
+        {
+          "id": 600822592,
+          "name": "apt-repository.json",
+          "size": 5466,
+          "state": "uploaded",
+          "digest": "sha256:cc380270f78aa90c44c5c1eb5fd1c0e45266bf8bd095e4d44cef25516e2735f9",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/apt-repository.json"
+        },
+        {
+          "id": 600822595,
+          "name": "arch-repository.json",
+          "size": 5724,
+          "state": "uploaded",
+          "digest": "sha256:a054fc0f21a27c815454de88be37fc8c46fc14e3672c484c058e3eaa8e7b1c3d",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/arch-repository.json"
+        },
+        {
+          "id": 600822593,
+          "name": "arch-repository.json.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:759ff0d8aa52f8fcb43d52ddc1dffbc5d389e8a1061c5422eeb9f4ed8f4ad3f9",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/arch-repository.json.sig"
+        },
+        {
+          "id": 600900419,
+          "name": "certification-36704181844-attempt-1-warning.log",
+          "size": 572,
+          "state": "uploaded",
+          "digest": "sha256:76b42fdf5dfe69951449ff631dc76ac177480c91a0385158c88e351ed7281b79",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/certification-36704181844-attempt-1-warning.log"
+        },
+        {
+          "id": 600900420,
+          "name": "certification-36704181844-attempt-1.json",
+          "size": 18243,
+          "state": "uploaded",
+          "digest": "sha256:9630fd5678a4cc0356127321bc65222daa7c97583112584f403280e723967c64",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/certification-36704181844-attempt-1.json"
+        },
+        {
+          "id": 600900421,
+          "name": "certification-36704181844-attempt-1.md",
+          "size": 12699,
+          "state": "uploaded",
+          "digest": "sha256:7bb7fe0c19ff1dea43054bbd67f570117d42a29a48406c6965f8944832b2942f",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/certification-36704181844-attempt-1.md"
+        },
+        {
+          "id": 600910725,
+          "name": "certification-36704181844-attempt-2-warning.log",
+          "size": 572,
+          "state": "uploaded",
+          "digest": "sha256:76b42fdf5dfe69951449ff631dc76ac177480c91a0385158c88e351ed7281b79",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/certification-36704181844-attempt-2-warning.log"
+        },
+        {
+          "id": 600910722,
+          "name": "certification-36704181844-attempt-2.json",
+          "size": 18256,
+          "state": "uploaded",
+          "digest": "sha256:86f384fc07188f14058502fdee7eacd42df4c10e43358e13c45d913c7d38e76e",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/certification-36704181844-attempt-2.json"
+        },
+        {
+          "id": 600910721,
+          "name": "certification-36704181844-attempt-2.md",
+          "size": 12713,
+          "state": "uploaded",
+          "digest": "sha256:5d4ad41d213e73c23d7aaf8fd0bbd9c624f33f9d4891b4dcc34bd6f5ffdb8f8b",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/certification-36704181844-attempt-2.md"
+        },
+        {
+          "id": 600822590,
+          "name": "datapump-aarch64.db",
+          "size": 929,
+          "state": "uploaded",
+          "digest": "sha256:ff211d19144a837eedb9d80a6d2c26f70c3889bccdd28777fee8379294d3fadb",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-aarch64.db"
+        },
+        {
+          "id": 600822604,
+          "name": "datapump-aarch64.db.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:c696744bd748589c86e743a41c6d9f631913ce1207ba67c41622cb57aacf407f",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-aarch64.db.sig"
+        },
+        {
+          "id": 600822614,
+          "name": "datapump-aarch64.files",
+          "size": 4489,
+          "state": "uploaded",
+          "digest": "sha256:13c6e5b7b89bb5c65583492c6ec89c9fa251cd5d457993805110dcfc0a26b43e",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-aarch64.files"
+        },
+        {
+          "id": 600822609,
+          "name": "datapump-aarch64.files.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:983d409c60a26511f9cbcb7ece01b4c8438a502671e1b7fed3e1e564ea05d416",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-aarch64.files.sig"
+        },
+        {
+          "id": 600822612,
+          "name": "datapump-arch-recipes.tar.gz",
+          "size": 595280,
+          "state": "uploaded",
+          "digest": "sha256:cfed68efe857720d80182fe8b2c7ab9ad5f7f55cac17121dbe773a77e91ad831",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-arch-recipes.tar.gz"
+        },
+        {
+          "id": 600822617,
+          "name": "datapump-archive-keyring.gpg",
+          "size": 244,
+          "state": "uploaded",
+          "digest": "sha256:b240fb9919864dc242e37964ac6bc87c61751f08c179de3b54774e318cb111ee",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-archive-keyring.gpg"
+        },
+        {
+          "id": 600822618,
+          "name": "datapump-fltk-bin-1.0.0_p20260930114856_p36704181844_p1-1-aarch64.pkg.tar.gz",
+          "size": 40668881,
+          "state": "uploaded",
+          "digest": "sha256:3e4e4149d362b7e247b30d605c5f521c21f94d15e629f08a89c872fe24d7cd75",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-fltk-bin-1.0.0_p20260930114856_p36704181844_p1-1-aarch64.pkg.tar.gz"
+        },
+        {
+          "id": 600822624,
+          "name": "datapump-fltk-bin-1.0.0_p20260930114856_p36704181844_p1-1-aarch64.pkg.tar.gz.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:1c75c871209b407b31ba29421cafba984e2bd34f98bac4f17bbe7e3e1af71f2f",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-fltk-bin-1.0.0_p20260930114856_p36704181844_p1-1-aarch64.pkg.tar.gz.sig"
+        },
+        {
+          "id": 600822629,
+          "name": "datapump-fltk-bin-1.0.0_p20260930114856_p36704181844_p1-1-x86_64.pkg.tar.gz",
+          "size": 37570739,
+          "state": "uploaded",
+          "digest": "sha256:edf2a6d64e31c33cdb21ddb55735abdaaf155b75aa11af13cfc37deca69d1aab",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-fltk-bin-1.0.0_p20260930114856_p36704181844_p1-1-x86_64.pkg.tar.gz"
+        },
+        {
+          "id": 600822634,
+          "name": "datapump-fltk-bin-1.0.0_p20260930114856_p36704181844_p1-1-x86_64.pkg.tar.gz.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:44b7be36b4ae208032259b89184386019f44c295c50c59ed953ac031c20c6a42",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-fltk-bin-1.0.0_p20260930114856_p36704181844_p1-1-x86_64.pkg.tar.gz.sig"
+        },
+        {
+          "id": 600822637,
+          "name": "datapump-fltk_1.0.0+20260930114856.r36704181844.a1_amd64.deb",
+          "size": 37277176,
+          "state": "uploaded",
+          "digest": "sha256:cba267c2efbcdb6fb06e68627b42c0333a7e26c4a4be5b8c17b37690a5fc852d",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-fltk_1.0.0%2B20260930114856.r36704181844.a1_amd64.deb"
+        },
+        {
+          "id": 600822644,
+          "name": "datapump-fltk_1.0.0+20260930114856.r36704181844.a1_arm64.deb",
+          "size": 40390488,
+          "state": "uploaded",
+          "digest": "sha256:ef92700f38702085e3a6d6cd7ad41e071c2bbf406bbe8878c75cbaafb3054af5",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-fltk_1.0.0%2B20260930114856.r36704181844.a1_arm64.deb"
+        },
+        {
+          "id": 600822655,
+          "name": "datapump-gentoo-channel.json",
+          "size": 931,
+          "state": "uploaded",
+          "digest": "sha256:0c2addd773a499d8a113364a701d6f532f2293b6f105ecbb282fa89c078815e8",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-gentoo-channel.json"
+        },
+        {
+          "id": 600822674,
+          "name": "datapump-gentoo-channel.json.asc",
+          "size": 228,
+          "state": "uploaded",
+          "digest": "sha256:a1dbf0c09fe28f549ad6b103e12c41335a5133c5cea48234e4f66dddd87acf9d",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-gentoo-channel.json.asc"
+        },
+        {
+          "id": 600822673,
+          "name": "datapump-gentoo-overlay.tar.gz",
+          "size": 319946,
+          "state": "uploaded",
+          "digest": "sha256:fadcb407b56f2ae3e88ea7e35e8964439859377a5b04791dbb142dd97cc9fde3",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-gentoo-overlay.tar.gz"
+        },
+        {
+          "id": 600822686,
+          "name": "datapump-gentoo-portage-sync.py",
+          "size": 1680,
+          "state": "uploaded",
+          "digest": "sha256:bffd98ff28ddd75a483ded6ebac6c23db055f3e4419151d64e2b52e038c4922d",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-gentoo-portage-sync.py"
+        },
+        {
+          "id": 600822690,
+          "name": "datapump-gentoo-sync.py",
+          "size": 23040,
+          "state": "uploaded",
+          "digest": "sha256:1987b4b71ba133fec56f2b555c19cb44b4ec8165a6943fb2d5ebe71478390496",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-gentoo-sync.py"
+        },
+        {
+          "id": 600822699,
+          "name": "datapump-pacman-aarch64.conf",
+          "size": 371,
+          "state": "uploaded",
+          "digest": "sha256:c3cb0accf9caeb455d8a302956f3e4915908ee4251bca3c0911322086a433920",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-pacman-aarch64.conf"
+        },
+        {
+          "id": 600822701,
+          "name": "datapump-pacman-keyring.gpg",
+          "size": 244,
+          "state": "uploaded",
+          "digest": "sha256:b240fb9919864dc242e37964ac6bc87c61751f08c179de3b54774e318cb111ee",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-pacman-keyring.gpg"
+        },
+        {
+          "id": 600822700,
+          "name": "datapump-pacman-x86_64.conf",
+          "size": 370,
+          "state": "uploaded",
+          "digest": "sha256:5e90248dbfce1ac8a7f5f0047af1e3c8e6a027494f48e67fcdf90f6117b03778",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-pacman-x86_64.conf"
+        },
+        {
+          "id": 600822702,
+          "name": "datapump-rev-bin-1.0.0_p20260930114856_p36704181844_p1-1-aarch64.pkg.tar.gz",
+          "size": 37169521,
+          "state": "uploaded",
+          "digest": "sha256:338bc9c5570076a788e23975a157be1690d752c40253e5fe275389fe9da7c995",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-rev-bin-1.0.0_p20260930114856_p36704181844_p1-1-aarch64.pkg.tar.gz"
+        },
+        {
+          "id": 600822708,
+          "name": "datapump-rev-bin-1.0.0_p20260930114856_p36704181844_p1-1-aarch64.pkg.tar.gz.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:703e50fac5058f8e2b5e1c7710bd46537c400af291300378ff69905bef786301",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-rev-bin-1.0.0_p20260930114856_p36704181844_p1-1-aarch64.pkg.tar.gz.sig"
+        },
+        {
+          "id": 600822710,
+          "name": "datapump-rev-bin-1.0.0_p20260930114856_p36704181844_p1-1-x86_64.pkg.tar.gz",
+          "size": 37404757,
+          "state": "uploaded",
+          "digest": "sha256:6214336d2c7db65f191fe8a9579746c21809189d91ea2994eb2acf54b68810bb",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-rev-bin-1.0.0_p20260930114856_p36704181844_p1-1-x86_64.pkg.tar.gz"
+        },
+        {
+          "id": 600822713,
+          "name": "datapump-rev-bin-1.0.0_p20260930114856_p36704181844_p1-1-x86_64.pkg.tar.gz.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:c18b2b0178c64731ad9c59dee8b53c03334801eec7d1a8fc8cd6bfa2882815b3",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-rev-bin-1.0.0_p20260930114856_p36704181844_p1-1-x86_64.pkg.tar.gz.sig"
+        },
+        {
+          "id": 600822714,
+          "name": "datapump-rev_1.0.0+20260930114856.r36704181844.a1_amd64.deb",
+          "size": 37106688,
+          "state": "uploaded",
+          "digest": "sha256:bb5dfa86e8b6f08223f9c583700e745cacd3348f38c756748e40c18fb124b3e8",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-rev_1.0.0%2B20260930114856.r36704181844.a1_amd64.deb"
+        },
+        {
+          "id": 600822724,
+          "name": "datapump-rev_1.0.0+20260930114856.r36704181844.a1_arm64.deb",
+          "size": 36880888,
+          "state": "uploaded",
+          "digest": "sha256:808afe6a31645d5cdb4db2f21fccae8a1f665448771f64c9da4e60bbc0f0014c",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-rev_1.0.0%2B20260930114856.r36704181844.a1_arm64.deb"
+        },
+        {
+          "id": 600822733,
+          "name": "datapump-sdk-6c4884fdff9c745ab0a0-linux-x86_64.tar.gz",
+          "size": 250001680,
+          "state": "uploaded",
+          "digest": "sha256:a1050115f278d298947a6516a52ec5e848ffec370649cdb24985e2f16fde7985",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-sdk-6c4884fdff9c745ab0a0-linux-x86_64.tar.gz"
+        },
+        {
+          "id": 600822757,
+          "name": "datapump-sdk-sources-6c4884fdff9c745ab0a0.tar.gz",
+          "size": 467039330,
+          "state": "uploaded",
+          "digest": "sha256:26ef9fb79f5b0b7ebac17498dd9ec847dd488e796a5a8578e59477ecec26d5a5",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-sdk-sources-6c4884fdff9c745ab0a0.tar.gz"
+        },
+        {
+          "id": 600822766,
+          "name": "datapump-wasm-sdk-e66e98abb90b466cab32-linux-x86_64.tar.gz",
+          "size": 925304577,
+          "state": "uploaded",
+          "digest": "sha256:bae40c03d2aea930a9755a272c95bfc4bdcfa8c19dcc2b223c0b704c5afab224",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-wasm-sdk-e66e98abb90b466cab32-linux-x86_64.tar.gz"
+        },
+        {
+          "id": 600822771,
+          "name": "datapump-wasm-sdk-sources-e66e98abb90b466cab32.tar.gz",
+          "size": 384663084,
+          "state": "uploaded",
+          "digest": "sha256:4309fce79edc795a99d1bc6c1114071a679b172fcb2244a24ddf78a8155d9c07",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-wasm-sdk-sources-e66e98abb90b466cab32.tar.gz"
+        },
+        {
+          "id": 600822775,
+          "name": "datapump-x86_64.db",
+          "size": 926,
+          "state": "uploaded",
+          "digest": "sha256:a0d1a37b1e8f99478d12b75d2f83d5aa6b53807856f8c05736c18d00e0d4dcf0",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-x86_64.db"
+        },
+        {
+          "id": 600822809,
+          "name": "datapump-x86_64.db.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:2fc346fcb649fc42b3bb3aab8a15999902cfb624a13dc39d5981fff01e97c7f2",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-x86_64.db.sig"
+        },
+        {
+          "id": 600822835,
+          "name": "datapump-x86_64.files",
+          "size": 8342,
+          "state": "uploaded",
+          "digest": "sha256:338e64a17ff6250e1f9c0a12bd764c7e7215b9c5df2d0c493a50a1905830c27b",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-x86_64.files"
+        },
+        {
+          "id": 600822862,
+          "name": "datapump-x86_64.files.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:0baf2ddc1d6c951949f48285c81c6e9ca62f83b0e605187563b68fc4cd5781f7",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump-x86_64.files.sig"
+        },
+        {
+          "id": 600822881,
+          "name": "datapump.sources",
+          "size": 171,
+          "state": "uploaded",
+          "digest": "sha256:cf8786676c70a57bcb08a2781368647e8bffb916b8bdb6e98a76bfd6462f07bd",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/datapump.sources"
+        },
+        {
+          "id": 600822977,
+          "name": "distro-packages.json",
+          "size": 15819,
+          "state": "uploaded",
+          "digest": "sha256:341982bc97f86c903d88a704d0b5cfa3c3d734c16ff41e93ef9767c66f6565da",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/distro-packages.json"
+        },
+        {
+          "id": 600800226,
+          "name": "release-metadata.json",
+          "size": 1463,
+          "state": "uploaded",
+          "digest": "sha256:bc300b859113fb9db5aac8afb16a8c74ad37050a2681f5a7923a255e5410351a",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/release-metadata.json"
+        },
+        {
+          "id": 600800228,
+          "name": "release-notes.md",
+          "size": 2417,
+          "state": "uploaded",
+          "digest": "sha256:1ff39a6d28ae4a2715223ecc80715f6c0b28557d047921799a7cfc3643aeab92",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/release-notes.md"
+        },
+        {
+          "id": 600823024,
+          "name": "sdk-6c4884fdff9c745ab0a0-SHA256SUMS.txt",
+          "size": 235,
+          "state": "uploaded",
+          "digest": "sha256:63e2e4492870287a3799d571c9f670d92c9c08564906f7b1c32a695d73e0b127",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/sdk-6c4884fdff9c745ab0a0-SHA256SUMS.txt"
+        },
+        {
+          "id": 600800224,
+          "name": "warning.log",
+          "size": 259,
+          "state": "uploaded",
+          "digest": "sha256:cbb81d59759531e676a8c6a6387abcc70e6887b8225283ba5d87d600c5a3da02",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/warning.log"
+        },
+        {
+          "id": 600823038,
+          "name": "wasm-sdk-e66e98abb90b466cab32-SHA256SUMS.txt",
+          "size": 245,
+          "state": "uploaded",
+          "digest": "sha256:e42478883250ef4bacc942b39d7eb66d6f54f34a1b981663276a2b5d7964c48e",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/wasm-sdk-e66e98abb90b466cab32-SHA256SUMS.txt"
+        },
+        {
+          "id": 600823047,
+          "name": "windows-base-929016c86c9609704043-SHA256SUMS.txt",
+          "size": 237,
+          "state": "uploaded",
+          "digest": "sha256:0d5d6e993eef43ad3f7002ec0e9710097366bc98b21adc22637dfd78d48e0f1b",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/windows-base-929016c86c9609704043-SHA256SUMS.txt"
+        },
+        {
+          "id": 600823062,
+          "name": "windows-base-929016c86c9609704043-x64-windows-static.zip",
+          "size": 71239817,
+          "state": "uploaded",
+          "digest": "sha256:fbf4b93aeeec72b40a44a2c2c22a1732a7a160674621452e5fca5e7a793ada87",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/windows-base-929016c86c9609704043-x64-windows-static.zip"
+        },
+        {
+          "id": 600823066,
+          "name": "windows-base-sources-929016c86c9609704043.zip",
+          "size": 502263010,
+          "state": "uploaded",
+          "digest": "sha256:b40028617506d1db67bdf384bbc5d85466b9002a6bbbf8d8689f8af9040c887a",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/windows-base-sources-929016c86c9609704043.zip"
+        }
+      ]
+    },
+    {
+      "id": 394504384,
+      "tag_name": "base",
+      "name": "base",
+      "draft": false,
+      "prerelease": true,
+      "target_commitish": "0e98b72242c49793114cfb134d4930f955b374ca",
+      "created_at": "2026-09-23T03:35:42Z",
+      "published_at": "2026-09-23T09:44:07Z",
+      "html_url": "https://github.com/mirage335-colossus/pumpModem/releases/tag/base",
+      "body": "Reusable DataPump source SDKs and their preserved sources, indexed by exact recipe identity.",
+      "assets": [
+        {
+          "id": 595902624,
+          "name": "datapump-sdk-6c4884fdff9c745ab0a0-linux-x86_64.tar.gz",
+          "size": 250001680,
+          "state": "uploaded",
+          "digest": "sha256:a1050115f278d298947a6516a52ec5e848ffec370649cdb24985e2f16fde7985",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/base/datapump-sdk-6c4884fdff9c745ab0a0-linux-x86_64.tar.gz"
+        },
+        {
+          "id": 583455162,
+          "name": "datapump-sdk-b8685ab239d7ac8650e6-linux-x86_64.tar.gz",
+          "size": 244502346,
+          "state": "uploaded",
+          "digest": "sha256:e32ac3a85c1762f54be8aa4a73de692f4364247d2bb62338441636513b32e3ed",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/base/datapump-sdk-b8685ab239d7ac8650e6-linux-x86_64.tar.gz"
+        },
+        {
+          "id": 595762005,
+          "name": "datapump-sdk-e78f835cb96809868aef-linux-x86_64.tar.gz",
+          "size": 250003834,
+          "state": "uploaded",
+          "digest": "sha256:fdb8269902362f8fb0af03d401585264f541812da0b884affd5e17bdec827593",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/base/datapump-sdk-e78f835cb96809868aef-linux-x86_64.tar.gz"
+        },
+        {
+          "id": 595902626,
+          "name": "datapump-sdk-sources-6c4884fdff9c745ab0a0.tar.gz",
+          "size": 467039330,
+          "state": "uploaded",
+          "digest": "sha256:26ef9fb79f5b0b7ebac17498dd9ec847dd488e796a5a8578e59477ecec26d5a5",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/base/datapump-sdk-sources-6c4884fdff9c745ab0a0.tar.gz"
+        },
+        {
+          "id": 583455163,
+          "name": "datapump-sdk-sources-b8685ab239d7ac8650e6.tar.gz",
+          "size": 455866711,
+          "state": "uploaded",
+          "digest": "sha256:f7e4b0d858f6aeaa08d94120b0abde61d762b31dadd24e505b0ed11926f19680",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/base/datapump-sdk-sources-b8685ab239d7ac8650e6.tar.gz"
+        },
+        {
+          "id": 595762006,
+          "name": "datapump-sdk-sources-e78f835cb96809868aef.tar.gz",
+          "size": 467038885,
+          "state": "uploaded",
+          "digest": "sha256:21870676f26889444286f6e6345ffdfa9c0839a5ea032afb6c3d08725ac5b745",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/base/datapump-sdk-sources-e78f835cb96809868aef.tar.gz"
+        },
+        {
+          "id": 600049661,
+          "name": "datapump-wasm-sdk-e66e98abb90b466cab32-linux-x86_64.tar.gz",
+          "size": 925304577,
+          "state": "uploaded",
+          "digest": "sha256:bae40c03d2aea930a9755a272c95bfc4bdcfa8c19dcc2b223c0b704c5afab224",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/base/datapump-wasm-sdk-e66e98abb90b466cab32-linux-x86_64.tar.gz"
+        },
+        {
+          "id": 600049663,
+          "name": "datapump-wasm-sdk-sources-e66e98abb90b466cab32.tar.gz",
+          "size": 384663084,
+          "state": "uploaded",
+          "digest": "sha256:4309fce79edc795a99d1bc6c1114071a679b172fcb2244a24ddf78a8155d9c07",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/base/datapump-wasm-sdk-sources-e66e98abb90b466cab32.tar.gz"
+        },
+        {
+          "id": 595903078,
+          "name": "sdk-6c4884fdff9c745ab0a0-SHA256SUMS.txt",
+          "size": 235,
+          "state": "uploaded",
+          "digest": "sha256:63e2e4492870287a3799d571c9f670d92c9c08564906f7b1c32a695d73e0b127",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/base/sdk-6c4884fdff9c745ab0a0-SHA256SUMS.txt"
+        },
+        {
+          "id": 583462546,
+          "name": "sdk-b8685ab239d7ac8650e6-SHA256SUMS.txt",
+          "size": 235,
+          "state": "uploaded",
+          "digest": "sha256:97f38a934759c1841de72f4b6ba22b1eaebd1402006769094160a7a1b1898b04",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/base/sdk-b8685ab239d7ac8650e6-SHA256SUMS.txt"
+        },
+        {
+          "id": 595762853,
+          "name": "sdk-e78f835cb96809868aef-SHA256SUMS.txt",
+          "size": 235,
+          "state": "uploaded",
+          "digest": "sha256:7ecfb34fa75b877eda7cb6a5078f2286a603bd231403fc3016bbacce3b5eb96b",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/base/sdk-e78f835cb96809868aef-SHA256SUMS.txt"
+        },
+        {
+          "id": 600050508,
+          "name": "wasm-sdk-e66e98abb90b466cab32-SHA256SUMS.txt",
+          "size": 245,
+          "state": "uploaded",
+          "digest": "sha256:e42478883250ef4bacc942b39d7eb66d6f54f34a1b981663276a2b5d7964c48e",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/base/wasm-sdk-e66e98abb90b466cab32-SHA256SUMS.txt"
+        },
+        {
+          "id": 583860679,
+          "name": "windows-base-1be51afd94ed0cb4555a-SHA256SUMS.txt",
+          "size": 237,
+          "state": "uploaded",
+          "digest": "sha256:af5fd64a4087948ff9f52813ca56ddeee921ddf23221737a786761970027056b",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/base/windows-base-1be51afd94ed0cb4555a-SHA256SUMS.txt"
+        },
+        {
+          "id": 583860244,
+          "name": "windows-base-1be51afd94ed0cb4555a-x64-windows-static.zip",
+          "size": 57012854,
+          "state": "uploaded",
+          "digest": "sha256:931b8f3ec55648191bfc90d3361273709595b8726c81840f60d3409aa14ba8e6",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/base/windows-base-1be51afd94ed0cb4555a-x64-windows-static.zip"
+        },
+        {
+          "id": 595775443,
+          "name": "windows-base-929016c86c9609704043-SHA256SUMS.txt",
+          "size": 237,
+          "state": "uploaded",
+          "digest": "sha256:0d5d6e993eef43ad3f7002ec0e9710097366bc98b21adc22637dfd78d48e0f1b",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/base/windows-base-929016c86c9609704043-SHA256SUMS.txt"
+        },
+        {
+          "id": 595775134,
+          "name": "windows-base-929016c86c9609704043-x64-windows-static.zip",
+          "size": 71239817,
+          "state": "uploaded",
+          "digest": "sha256:fbf4b93aeeec72b40a44a2c2c22a1732a7a160674621452e5fca5e7a793ada87",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/base/windows-base-929016c86c9609704043-x64-windows-static.zip"
+        },
+        {
+          "id": 583860243,
+          "name": "windows-base-sources-1be51afd94ed0cb4555a.zip",
+          "size": 549046640,
+          "state": "uploaded",
+          "digest": "sha256:19d36b3c9ddae6a2b8db7c8266185c075bba8c067b366b3d5cbe0fef33ac6a2a",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/base/windows-base-sources-1be51afd94ed0cb4555a.zip"
+        },
+        {
+          "id": 595775138,
+          "name": "windows-base-sources-929016c86c9609704043.zip",
+          "size": 502263010,
+          "state": "uploaded",
+          "digest": "sha256:b40028617506d1db67bdf384bbc5d85466b9002a6bbbf8d8689f8af9040c887a",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/base/windows-base-sources-929016c86c9609704043.zip"
+        }
+      ]
+    }
+  ],
+  "retired_releases": [
+    {
+      "id": 399828596,
+      "tag_name": "v001_00-2026-09-30-0300CDT",
+      "name": "v001_00-2026-09-30-0300CDT",
+      "draft": true,
+      "prerelease": false,
+      "target_commitish": "ef70a2fd69d90d1d458eaa075c599a9aa80fcc7b",
+      "created_at": "2026-09-30T07:19:40Z",
+      "published_at": null,
+      "html_url": "https://github.com/mirage335-colossus/pumpModem/releases/tag/untagged-f46a1912cc658e689968",
+      "body": "> **Certification pending:** this release has not completed release certification and is not marked Latest.\n\nBuild **v001_00-2026-09-30-0300CDT**\n\n- Source commit: `ef70a2fd69d90d1d458eaa075c599a9aa80fcc7b`\n- Build date: `2026-09-30-0300CDT` (America/Chicago)\n- Workflow run: `36683147050`, attempt `1`\n- Package version: `1.0.0`\n- GUI downloads: fltk, rev\n- Linux ABI: x86-64: glibc 2.36 (Bookworm source SDK); AArch64: glibc 2.35\n\nDownload the archive matching your operating system, architecture and GUI backend (fltk or rev), or install the signed Debian packages from this release's flat APT repository. Each backend has a separate bundle and extraction directory. All bundles include the TUI, framebuffer and the same static HTML/Wasm page under share/datapump/web/wasm; Linux also includes the inherited-pipe worker and hosted browser assets. The static page runs in Windows and Linux browsers. Unpack the whole archive and keep bin/, lib/ and share/ together; required application libraries are bundled. Host audio/graphics services and drivers remain required. Debian installation instructions are in the release documentation linked below.\n\nThe attached warning.log describes known nonfatal Rev replay/waterfall display-cadence warnings. They do not fail builds or certification; data integrity, pending-message identity and physical-completion checks remain mandatory.\n\nPackaging checks have passed when this release is published. Extensive contract, GUI and copied-binary checks run separately through the Certify published release workflow; its hash-bound reports will be attached here later. Hosted checks do not qualify physical audio hardware.\n\nThe ARM64 bundle requires a compatible 64-bit Linux installation, including Raspberry Pi OS or Velvet OS. Windows requires Windows 10 1903+/11 x64. See [requirements and certification scope](https://github.com/mirage335-colossus/pumpModem/blob/ef70a2fd69d90d1d458eaa075c599a9aa80fcc7b/docs/releases.md).\n\nThis release includes copies of the prepared developer SDKs and dependency bundles it used, their complete source archives, and recipe checksums. Copies reused from the [base release](https://github.com/mirage335-colossus/pumpModem/releases/tag/base) remain available here even if older releases are deleted. Application releases never rebuild an SDK automatically. The runner supplies MSVC and the Windows SDK separately; they are not redistributed.\n",
+      "assets": [
+        {
+          "id": 600362859,
+          "name": "release-metadata.json",
+          "size": 1463,
+          "state": "uploaded",
+          "digest": "sha256:56ffe5ade1fe1cb20b2170e1ff13d550e6f5fca0466447c38b1586b4260713ab",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/untagged-f46a1912cc658e689968/release-metadata.json"
+        },
+        {
+          "id": 600362861,
+          "name": "release-notes.md",
+          "size": 2417,
+          "state": "uploaded",
+          "digest": "sha256:59038ae46b62dea4f0c2e0abe91ae054f24c2a6adca7fd8f65e4a8d1526f8f90",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/untagged-f46a1912cc658e689968/release-notes.md"
+        },
+        {
+          "id": 600362858,
+          "name": "warning.log",
+          "size": 259,
+          "state": "uploaded",
+          "digest": "sha256:cbb81d59759531e676a8c6a6387abcc70e6887b8225283ba5d87d600c5a3da02",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/untagged-f46a1912cc658e689968/warning.log"
+        }
+      ]
+    },
+    {
+      "id": 399921133,
+      "tag_name": "v001_00-2026-09-30-0505CDT",
+      "name": "v001_00-2026-09-30-0505CDT",
+      "draft": false,
+      "prerelease": false,
+      "target_commitish": "79bf20c840ce279af226a36bc698db3280664ea8",
+      "created_at": "2026-09-30T09:17:18Z",
+      "published_at": "2026-09-30T10:18:43Z",
+      "html_url": "https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-30-0505CDT",
+      "body": "> **Certification failed.** See the certification reports below.\n\nBuild **v001_00-2026-09-30-0505CDT**\n\n- Source commit: `79bf20c840ce279af226a36bc698db3280664ea8`\n- Build date: `2026-09-30-0505CDT` (America/Chicago)\n- Workflow run: `36695310257`, attempt `1`\n- Package version: `1.0.0`\n- GUI downloads: fltk, rev\n- Linux ABI: x86-64: glibc 2.36 (Bookworm source SDK); AArch64: glibc 2.35\n\nDownload the archive matching your operating system, architecture and GUI backend (fltk or rev), or install the signed Debian packages from this release's flat APT repository. Each backend has a separate bundle and extraction directory. All bundles include the TUI, framebuffer and the same static HTML/Wasm page under share/datapump/web/wasm; Linux also includes the inherited-pipe worker and hosted browser assets. The static page runs in Windows and Linux browsers. Unpack the whole archive and keep bin/, lib/ and share/ together; required application libraries are bundled. Host audio/graphics services and drivers remain required. Debian installation instructions are in the release documentation linked below.\n\nThe attached warning.log describes known nonfatal Rev replay/waterfall display-cadence warnings. They do not fail builds or certification; data integrity, pending-message identity and physical-completion checks remain mandatory.\n\nPackaging checks have passed when this release is published. Extensive contract, GUI and copied-binary checks run separately through the Certify published release workflow; its hash-bound reports will be attached here later. Hosted checks do not qualify physical audio hardware.\n\nThe ARM64 bundle requires a compatible 64-bit Linux installation, including Raspberry Pi OS or Velvet OS. Windows requires Windows 10 1903+/11 x64. See [requirements and certification scope](https://github.com/mirage335-colossus/pumpModem/blob/79bf20c840ce279af226a36bc698db3280664ea8/docs/releases.md).\n\nThis release includes copies of the prepared developer SDKs and dependency bundles it used, their complete source archives, and recipe checksums. Copies reused from the [base release](https://github.com/mirage335-colossus/pumpModem/releases/tag/base) remain available here even if older releases are deleted. Application releases never rebuild an SDK automatically. The runner supplies MSVC and the Windows SDK separately; they are not redistributed.\n\n\nCertification [run 36695310257, attempt 1](https://github.com/mirage335-colossus/pumpModem/actions/runs/36695310257/attempts/1): **failed** ([report](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/certification-36695310257-attempt-1.md), [JSON](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/certification-36695310257-attempt-1.json)). This report applies only to the recorded source and asset hashes.\n**Windows Rev native graphics remain unqualified on this runner.** [Environment warning log](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/certification-36695310257-attempt-1-warning.log). Hosted certification failed. The recognized hosted graphics exclusion does not block certification or Latest eligibility. The listed graphics checks remain untested; all other required checks remain mandatory. Failed or incomplete required checks keep this release ineligible for Latest.\n",
+      "assets": [
+        {
+          "id": 600621834,
+          "name": "DataPump-v001_00-2026-09-30-0505CDT-linux-aarch64-fltk.tar.gz",
+          "size": 40261557,
+          "state": "uploaded",
+          "digest": "sha256:4c3418346057bbd6d7e56ac826d371e84fd596f749d5ac0d3ba733227cdbe90e",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/DataPump-v001_00-2026-09-30-0505CDT-linux-aarch64-fltk.tar.gz"
+        },
+        {
+          "id": 600621840,
+          "name": "DataPump-v001_00-2026-09-30-0505CDT-linux-aarch64-rev.tar.gz",
+          "size": 36754276,
+          "state": "uploaded",
+          "digest": "sha256:690fa2ead560265551a243efac918d1d9d855092aa21e0311b99e33735e4bdda",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/DataPump-v001_00-2026-09-30-0505CDT-linux-aarch64-rev.tar.gz"
+        },
+        {
+          "id": 600621842,
+          "name": "DataPump-v001_00-2026-09-30-0505CDT-linux-x86_64-fltk.tar.gz",
+          "size": 37076529,
+          "state": "uploaded",
+          "digest": "sha256:14e4280c32dc10fed5f709ddd004dea70f96792944bbd6923a7061a05db948ba",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/DataPump-v001_00-2026-09-30-0505CDT-linux-x86_64-fltk.tar.gz"
+        },
+        {
+          "id": 600621839,
+          "name": "DataPump-v001_00-2026-09-30-0505CDT-linux-x86_64-rev.tar.gz",
+          "size": 36905301,
+          "state": "uploaded",
+          "digest": "sha256:6e8e5d9abbd131c97bb2273d24da01a516995d5f152a5cf8dfb94ae2c26fd398",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/DataPump-v001_00-2026-09-30-0505CDT-linux-x86_64-rev.tar.gz"
+        },
+        {
+          "id": 600621838,
+          "name": "DataPump-v001_00-2026-09-30-0505CDT-windows-x86_64-fltk.zip",
+          "size": 17014686,
+          "state": "uploaded",
+          "digest": "sha256:5c7c34eb5a28efe466c7d948814f7756823beb47adadc82e5ade7b160ec6202d",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/DataPump-v001_00-2026-09-30-0505CDT-windows-x86_64-fltk.zip"
+        },
+        {
+          "id": 600621899,
+          "name": "DataPump-v001_00-2026-09-30-0505CDT-windows-x86_64-rev.zip",
+          "size": 17584189,
+          "state": "uploaded",
+          "digest": "sha256:b2364b7259d3c2b2ad405532ba8d93a1452eea75d6547d4cdb22ebc4674cb60c",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/DataPump-v001_00-2026-09-30-0505CDT-windows-x86_64-rev.zip"
+        },
+        {
+          "id": 600621927,
+          "name": "InRelease",
+          "size": 798,
+          "state": "uploaded",
+          "digest": "sha256:e38fa2fb1bc001eaa0c8feac12d4c103f5dbcbdcdd8b01cff8167e7fed898482",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/InRelease"
+        },
+        {
+          "id": 600621946,
+          "name": "Packages",
+          "size": 3218,
+          "state": "uploaded",
+          "digest": "sha256:b524cc6f6a824802ff5471703c1c28ccf38e98a7a0678c0d3fa8c28409adeaea",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/Packages"
+        },
+        {
+          "id": 600621948,
+          "name": "Packages.gz",
+          "size": 759,
+          "state": "uploaded",
+          "digest": "sha256:fc09742bc12166827795daaa20975efae816737ef26dede939279f034ab42a39",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/Packages.gz"
+        },
+        {
+          "id": 600621947,
+          "name": "Release",
+          "size": 521,
+          "state": "uploaded",
+          "digest": "sha256:8a2a267a307a651c1f327b4c72ccc48c47ddec0f5cd1e4362e9a7e1df04ce9dc",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/Release"
+        },
+        {
+          "id": 600621949,
+          "name": "Release.gpg",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:6a4a5ab52ba866fed198abbb69527ceefda61a8d71dbc7ee1de74c664a383215",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/Release.gpg"
+        },
+        {
+          "id": 600622772,
+          "name": "SHA256SUMS.txt",
+          "size": 6192,
+          "state": "uploaded",
+          "digest": "sha256:d9d42df17b0a06557a32fa21567a72765653dcab43ab01d939a746b29856abe4",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/SHA256SUMS.txt"
+        },
+        {
+          "id": 600621959,
+          "name": "apt-repository.json",
+          "size": 5466,
+          "state": "uploaded",
+          "digest": "sha256:706f5f496eddcc191ed349040363db45440c094cb5c198572a9e1aa6034ee934",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/apt-repository.json"
+        },
+        {
+          "id": 600621973,
+          "name": "arch-repository.json",
+          "size": 5724,
+          "state": "uploaded",
+          "digest": "sha256:5c8acf15da2b0766f11ca3c4a4e1983e90be6f1ea0bbcdebe1509f5ca2e18cf0",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/arch-repository.json"
+        },
+        {
+          "id": 600621971,
+          "name": "arch-repository.json.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:a18c7641ea9c7e0a31b58baaffc825671ebe5535c9e81206fd4bdcdb3e1fb4c9",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/arch-repository.json.sig"
+        },
+        {
+          "id": 600708284,
+          "name": "certification-36695310257-attempt-1-warning.log",
+          "size": 572,
+          "state": "uploaded",
+          "digest": "sha256:76b42fdf5dfe69951449ff631dc76ac177480c91a0385158c88e351ed7281b79",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/certification-36695310257-attempt-1-warning.log"
+        },
+        {
+          "id": 600708285,
+          "name": "certification-36695310257-attempt-1.json",
+          "size": 18243,
+          "state": "uploaded",
+          "digest": "sha256:f55f521e47aafd8872e4eff23c8d634234fce6a83fcf2806c10b2c688f5d736f",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/certification-36695310257-attempt-1.json"
+        },
+        {
+          "id": 600708283,
+          "name": "certification-36695310257-attempt-1.md",
+          "size": 12699,
+          "state": "uploaded",
+          "digest": "sha256:1158c283c2b9e990fe35bdeebfe5e16d2e73dcc71cbcbdbd398ba07c41c89f6f",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/certification-36695310257-attempt-1.md"
+        },
+        {
+          "id": 600621974,
+          "name": "datapump-aarch64.db",
+          "size": 936,
+          "state": "uploaded",
+          "digest": "sha256:5e03b4e0a4950042c6142ad83aeb8af807ba32855cfaee4fdea1f3f7387b5673",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-aarch64.db"
+        },
+        {
+          "id": 600621975,
+          "name": "datapump-aarch64.db.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:0d564c11da02b4f6139040519794423803979fb266ac54122609d67057c41953",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-aarch64.db.sig"
+        },
+        {
+          "id": 600621997,
+          "name": "datapump-aarch64.files",
+          "size": 4493,
+          "state": "uploaded",
+          "digest": "sha256:0e05ab5017d2148aa22f2cf04390b5929f8d9b953283c03782b6cd7a1637e02d",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-aarch64.files"
+        },
+        {
+          "id": 600622011,
+          "name": "datapump-aarch64.files.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:c2e18a10774fb919e6f47eae9ace458c722596ad1f6e4e2b5df5d041edcf3d92",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-aarch64.files.sig"
+        },
+        {
+          "id": 600622019,
+          "name": "datapump-arch-recipes.tar.gz",
+          "size": 595282,
+          "state": "uploaded",
+          "digest": "sha256:b7d7df8253cc3a014b855da978727413cec2562ce80bdec20a70de9a51f0fa96",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-arch-recipes.tar.gz"
+        },
+        {
+          "id": 600622023,
+          "name": "datapump-archive-keyring.gpg",
+          "size": 244,
+          "state": "uploaded",
+          "digest": "sha256:b240fb9919864dc242e37964ac6bc87c61751f08c179de3b54774e318cb111ee",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-archive-keyring.gpg"
+        },
+        {
+          "id": 600622020,
+          "name": "datapump-fltk-bin-1.0.0_p20260930100523_p36695310257_p1-1-aarch64.pkg.tar.gz",
+          "size": 40669095,
+          "state": "uploaded",
+          "digest": "sha256:009b7304485af57d1680c9db31fd2bf2a5860988c18108a23841e8bd947be3ec",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-fltk-bin-1.0.0_p20260930100523_p36695310257_p1-1-aarch64.pkg.tar.gz"
+        },
+        {
+          "id": 600622034,
+          "name": "datapump-fltk-bin-1.0.0_p20260930100523_p36695310257_p1-1-aarch64.pkg.tar.gz.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:ed67adfd0f38c91a352059891555eaa1f785e2c448f7d196a478f761494a88e5",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-fltk-bin-1.0.0_p20260930100523_p36695310257_p1-1-aarch64.pkg.tar.gz.sig"
+        },
+        {
+          "id": 600622037,
+          "name": "datapump-fltk-bin-1.0.0_p20260930100523_p36695310257_p1-1-x86_64.pkg.tar.gz",
+          "size": 37570872,
+          "state": "uploaded",
+          "digest": "sha256:cf5a1343f3cc1f857397970a48dc0121458b9e3125391e9ceca79b154b4a1486",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-fltk-bin-1.0.0_p20260930100523_p36695310257_p1-1-x86_64.pkg.tar.gz"
+        },
+        {
+          "id": 600622041,
+          "name": "datapump-fltk-bin-1.0.0_p20260930100523_p36695310257_p1-1-x86_64.pkg.tar.gz.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:403090ffabe612718a8ee35e6439ed58abf6077df16460e2eef4bcc5995a2d98",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-fltk-bin-1.0.0_p20260930100523_p36695310257_p1-1-x86_64.pkg.tar.gz.sig"
+        },
+        {
+          "id": 600622046,
+          "name": "datapump-fltk_1.0.0+20260930100523.r36695310257.a1_amd64.deb",
+          "size": 37277246,
+          "state": "uploaded",
+          "digest": "sha256:5e4f41df8d812c09a89220a5a68b98ef0faa45a2dcd477731361ece149c0654a",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-fltk_1.0.0%2B20260930100523.r36695310257.a1_amd64.deb"
+        },
+        {
+          "id": 600622060,
+          "name": "datapump-fltk_1.0.0+20260930100523.r36695310257.a1_arm64.deb",
+          "size": 40390612,
+          "state": "uploaded",
+          "digest": "sha256:e252501e2b13e1e6ad3b02a2278e302012010c0452134f48c75ab71752fec828",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-fltk_1.0.0%2B20260930100523.r36695310257.a1_arm64.deb"
+        },
+        {
+          "id": 600622071,
+          "name": "datapump-gentoo-channel.json",
+          "size": 931,
+          "state": "uploaded",
+          "digest": "sha256:6a88e77be4471fe5d37d84b2bde0af0d869843efa6ad1e13527c3aab5de7cbf0",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-gentoo-channel.json"
+        },
+        {
+          "id": 600622100,
+          "name": "datapump-gentoo-channel.json.asc",
+          "size": 228,
+          "state": "uploaded",
+          "digest": "sha256:95fe5c16f06789c33bf46be3082b0c39cc589b9e29f1251b6225cd19c133964c",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-gentoo-channel.json.asc"
+        },
+        {
+          "id": 600622113,
+          "name": "datapump-gentoo-overlay.tar.gz",
+          "size": 319961,
+          "state": "uploaded",
+          "digest": "sha256:ea0cc2bba4471bd9ca2d49e4cf7802b13189767a94e6abfca4ac7800df243598",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-gentoo-overlay.tar.gz"
+        },
+        {
+          "id": 600622120,
+          "name": "datapump-gentoo-portage-sync.py",
+          "size": 1680,
+          "state": "uploaded",
+          "digest": "sha256:bffd98ff28ddd75a483ded6ebac6c23db055f3e4419151d64e2b52e038c4922d",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-gentoo-portage-sync.py"
+        },
+        {
+          "id": 600622128,
+          "name": "datapump-gentoo-sync.py",
+          "size": 23040,
+          "state": "uploaded",
+          "digest": "sha256:1987b4b71ba133fec56f2b555c19cb44b4ec8165a6943fb2d5ebe71478390496",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-gentoo-sync.py"
+        },
+        {
+          "id": 600622131,
+          "name": "datapump-pacman-aarch64.conf",
+          "size": 371,
+          "state": "uploaded",
+          "digest": "sha256:8e100a59380759ed36fb1b760f2cd5f507f94a7a3df320c611f6505a178b3804",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-pacman-aarch64.conf"
+        },
+        {
+          "id": 600622133,
+          "name": "datapump-pacman-keyring.gpg",
+          "size": 244,
+          "state": "uploaded",
+          "digest": "sha256:b240fb9919864dc242e37964ac6bc87c61751f08c179de3b54774e318cb111ee",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-pacman-keyring.gpg"
+        },
+        {
+          "id": 600622136,
+          "name": "datapump-pacman-x86_64.conf",
+          "size": 370,
+          "state": "uploaded",
+          "digest": "sha256:c300e44561484a5753d3340bb6583c90975bc65f5dcb7c05970b0e8d673bf2d5",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-pacman-x86_64.conf"
+        },
+        {
+          "id": 600622138,
+          "name": "datapump-rev-bin-1.0.0_p20260930100523_p36695310257_p1-1-aarch64.pkg.tar.gz",
+          "size": 37169561,
+          "state": "uploaded",
+          "digest": "sha256:821208134db0c71b9e8c49ab7db658dc7c972f5eaa437debcca4c252bff4c622",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-rev-bin-1.0.0_p20260930100523_p36695310257_p1-1-aarch64.pkg.tar.gz"
+        },
+        {
+          "id": 600622142,
+          "name": "datapump-rev-bin-1.0.0_p20260930100523_p36695310257_p1-1-aarch64.pkg.tar.gz.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:d835b36f7c605ebf77182e0ba6b7d4b090d0929ccc3104fe2fa6a3d87d506606",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-rev-bin-1.0.0_p20260930100523_p36695310257_p1-1-aarch64.pkg.tar.gz.sig"
+        },
+        {
+          "id": 600622145,
+          "name": "datapump-rev-bin-1.0.0_p20260930100523_p36695310257_p1-1-x86_64.pkg.tar.gz",
+          "size": 37404753,
+          "state": "uploaded",
+          "digest": "sha256:448a5c35fb1895d08904cad1cb4e73b3f23630567738776f676bd8b023505938",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-rev-bin-1.0.0_p20260930100523_p36695310257_p1-1-x86_64.pkg.tar.gz"
+        },
+        {
+          "id": 600622153,
+          "name": "datapump-rev-bin-1.0.0_p20260930100523_p36695310257_p1-1-x86_64.pkg.tar.gz.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:857cac8d73b18d4f1dab5aa73aa61eb3025dcac3e417622d0a98de137e84b6cd",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-rev-bin-1.0.0_p20260930100523_p36695310257_p1-1-x86_64.pkg.tar.gz.sig"
+        },
+        {
+          "id": 600622152,
+          "name": "datapump-rev_1.0.0+20260930100523.r36695310257.a1_amd64.deb",
+          "size": 37106772,
+          "state": "uploaded",
+          "digest": "sha256:2bd1cd19e471d9eebb4e75fbe82a12aa23ad32ed604b2b5c3e9a4f5e3a3c52e7",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-rev_1.0.0%2B20260930100523.r36695310257.a1_amd64.deb"
+        },
+        {
+          "id": 600622268,
+          "name": "datapump-rev_1.0.0+20260930100523.r36695310257.a1_arm64.deb",
+          "size": 36880876,
+          "state": "uploaded",
+          "digest": "sha256:51ed51f34539665a310dc3c412d0d0de3c14aea992e68e9affc990ce2b01e3d9",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-rev_1.0.0%2B20260930100523.r36695310257.a1_arm64.deb"
+        },
+        {
+          "id": 600622274,
+          "name": "datapump-sdk-6c4884fdff9c745ab0a0-linux-x86_64.tar.gz",
+          "size": 250001680,
+          "state": "uploaded",
+          "digest": "sha256:a1050115f278d298947a6516a52ec5e848ffec370649cdb24985e2f16fde7985",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-sdk-6c4884fdff9c745ab0a0-linux-x86_64.tar.gz"
+        },
+        {
+          "id": 600622320,
+          "name": "datapump-sdk-sources-6c4884fdff9c745ab0a0.tar.gz",
+          "size": 467039330,
+          "state": "uploaded",
+          "digest": "sha256:26ef9fb79f5b0b7ebac17498dd9ec847dd488e796a5a8578e59477ecec26d5a5",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-sdk-sources-6c4884fdff9c745ab0a0.tar.gz"
+        },
+        {
+          "id": 600622333,
+          "name": "datapump-wasm-sdk-e66e98abb90b466cab32-linux-x86_64.tar.gz",
+          "size": 925304577,
+          "state": "uploaded",
+          "digest": "sha256:bae40c03d2aea930a9755a272c95bfc4bdcfa8c19dcc2b223c0b704c5afab224",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-wasm-sdk-e66e98abb90b466cab32-linux-x86_64.tar.gz"
+        },
+        {
+          "id": 600622336,
+          "name": "datapump-wasm-sdk-sources-e66e98abb90b466cab32.tar.gz",
+          "size": 384663084,
+          "state": "uploaded",
+          "digest": "sha256:4309fce79edc795a99d1bc6c1114071a679b172fcb2244a24ddf78a8155d9c07",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-wasm-sdk-sources-e66e98abb90b466cab32.tar.gz"
+        },
+        {
+          "id": 600622359,
+          "name": "datapump-x86_64.db",
+          "size": 929,
+          "state": "uploaded",
+          "digest": "sha256:b699d8789b91d56eec2da6dbb29e10376c4c3d38920900896dc16904194e0e39",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-x86_64.db"
+        },
+        {
+          "id": 600622374,
+          "name": "datapump-x86_64.db.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:c97989ae78f7daae5a9a9eb62be5dfed5029c2631f7c16b1dbdde6af81c91df7",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-x86_64.db.sig"
+        },
+        {
+          "id": 600622384,
+          "name": "datapump-x86_64.files",
+          "size": 8346,
+          "state": "uploaded",
+          "digest": "sha256:3af48891dd1d6fe86b4ac9f047d030692bc85e21ad1a71d53e0b7b0249bb2f00",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-x86_64.files"
+        },
+        {
+          "id": 600622393,
+          "name": "datapump-x86_64.files.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:0e2d7c2ba68ced126e2cbcf1320b3e13c4ce8ddaf368552cbdbba2a5c4611297",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump-x86_64.files.sig"
+        },
+        {
+          "id": 600622408,
+          "name": "datapump.sources",
+          "size": 171,
+          "state": "uploaded",
+          "digest": "sha256:cf8786676c70a57bcb08a2781368647e8bffb916b8bdb6e98a76bfd6462f07bd",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/datapump.sources"
+        },
+        {
+          "id": 600622425,
+          "name": "distro-packages.json",
+          "size": 15819,
+          "state": "uploaded",
+          "digest": "sha256:d895974c56a852195871a3f632811fb2045d9d4c89fadcc705d8f791bea6664e",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/distro-packages.json"
+        },
+        {
+          "id": 600598938,
+          "name": "release-metadata.json",
+          "size": 1463,
+          "state": "uploaded",
+          "digest": "sha256:e199d7441f6a1e7cf86c1aa7900b3eb72a500a675e92db73b8da751aacdbed7d",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/release-metadata.json"
+        },
+        {
+          "id": 600598940,
+          "name": "release-notes.md",
+          "size": 2417,
+          "state": "uploaded",
+          "digest": "sha256:bb74d9d9b0eaed5e8950d5c3082e26fd3c271562a47d6c2b4bfffb5bfa339e94",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/release-notes.md"
+        },
+        {
+          "id": 600622430,
+          "name": "sdk-6c4884fdff9c745ab0a0-SHA256SUMS.txt",
+          "size": 235,
+          "state": "uploaded",
+          "digest": "sha256:63e2e4492870287a3799d571c9f670d92c9c08564906f7b1c32a695d73e0b127",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/sdk-6c4884fdff9c745ab0a0-SHA256SUMS.txt"
+        },
+        {
+          "id": 600598939,
+          "name": "warning.log",
+          "size": 259,
+          "state": "uploaded",
+          "digest": "sha256:cbb81d59759531e676a8c6a6387abcc70e6887b8225283ba5d87d600c5a3da02",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/warning.log"
+        },
+        {
+          "id": 600622444,
+          "name": "wasm-sdk-e66e98abb90b466cab32-SHA256SUMS.txt",
+          "size": 245,
+          "state": "uploaded",
+          "digest": "sha256:e42478883250ef4bacc942b39d7eb66d6f54f34a1b981663276a2b5d7964c48e",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/wasm-sdk-e66e98abb90b466cab32-SHA256SUMS.txt"
+        },
+        {
+          "id": 600622464,
+          "name": "windows-base-929016c86c9609704043-SHA256SUMS.txt",
+          "size": 237,
+          "state": "uploaded",
+          "digest": "sha256:0d5d6e993eef43ad3f7002ec0e9710097366bc98b21adc22637dfd78d48e0f1b",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/windows-base-929016c86c9609704043-SHA256SUMS.txt"
+        },
+        {
+          "id": 600622492,
+          "name": "windows-base-929016c86c9609704043-x64-windows-static.zip",
+          "size": 71239817,
+          "state": "uploaded",
+          "digest": "sha256:fbf4b93aeeec72b40a44a2c2c22a1732a7a160674621452e5fca5e7a793ada87",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/windows-base-929016c86c9609704043-x64-windows-static.zip"
+        },
+        {
+          "id": 600622683,
+          "name": "windows-base-sources-929016c86c9609704043.zip",
+          "size": 502263010,
+          "state": "uploaded",
+          "digest": "sha256:b40028617506d1db67bdf384bbc5d85466b9002a6bbbf8d8689f8af9040c887a",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0505CDT/windows-base-sources-929016c86c9609704043.zip"
+        }
+      ]
+    },
+    {
+      "id": 398483822,
+      "tag_name": "v001_00-2026-09-28-1246CDT",
+      "name": "v001_00-2026-09-28-1246CDT",
+      "draft": false,
+      "prerelease": false,
+      "target_commitish": "2382f4e68607c4b0616ae11dc24511985121418a",
+      "created_at": "2026-09-28T17:05:27Z",
+      "published_at": "2026-09-28T17:56:26Z",
+      "html_url": "https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-28-1246CDT",
+      "body": "> **Certification passed with warnings.** See the certification reports below.\n\nBuild **v001_00-2026-09-28-1246CDT**\n\n- Source commit: `2382f4e68607c4b0616ae11dc24511985121418a`\n- Build date: `2026-09-28-1246CDT` (America/Chicago)\n- Workflow run: `36455727999`, attempt `1`\n- Package version: `1.0.0`\n- GUI downloads: fltk, rev\n- Linux ABI: x86-64: glibc 2.36 (Bookworm source SDK); AArch64: glibc 2.35\n\nDownload the archive matching your operating system, architecture and GUI backend (fltk or rev), or install the signed Debian packages from this release's flat APT repository. Each backend has a separate bundle and extraction directory. Unpack the whole archive and keep bin/, lib/ and share/ together; required application libraries are bundled. Host audio/graphics services and drivers remain required. Debian installation instructions are in the release documentation linked below.\n\nThe attached warning.log describes known nonfatal Rev replay/waterfall display-cadence warnings. They do not fail builds or certification; data integrity, pending-message identity and physical-completion checks remain mandatory.\n\nPackaging checks have passed when this release is published. Extensive contract, GUI and copied-binary checks run separately through the Certify published release workflow; its hash-bound reports will be attached here later. Hosted checks do not qualify physical audio hardware.\n\nThe ARM64 bundle requires a compatible 64-bit Linux installation, including Raspberry Pi OS or Velvet OS. Windows requires Windows 10 1903+/11 x64. See [requirements and certification scope](https://github.com/mirage335-colossus/pumpModem/blob/2382f4e68607c4b0616ae11dc24511985121418a/docs/releases.md).\n\nThis release includes copies of the prepared developer SDKs and dependency bundles it used, their complete source archives, and recipe checksums. Copies reused from the [base release](https://github.com/mirage335-colossus/pumpModem/releases/tag/base) remain available here even if older releases are deleted. Application releases never rebuild an SDK automatically. The runner supplies MSVC and the Windows SDK separately; they are not redistributed.\n\n\nCertification [run 36455727999, attempt 1](https://github.com/mirage335-colossus/pumpModem/actions/runs/36455727999/attempts/1): **failed** ([report](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/certification-36455727999-attempt-1.md), [JSON](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/certification-36455727999-attempt-1.json)). This report applies only to the recorded source and asset hashes.\n**Windows Rev native graphics remain unqualified on this runner.** [Environment warning log](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/certification-36455727999-attempt-1-warning.log). Hosted certification failed. The recognized hosted graphics exclusion does not block certification or Latest eligibility. The listed graphics checks remain untested; all other required checks remain mandatory. Failed or incomplete required checks keep this release ineligible for Latest.\n\n\nCertification [run 36464360229, attempt 1](https://github.com/mirage335-colossus/pumpModem/actions/runs/36464360229/attempts/1): **failed** ([report](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/certification-36464360229-attempt-1.md), [JSON](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/certification-36464360229-attempt-1.json)). This report applies only to the recorded source and asset hashes.\n**Windows Rev native graphics remain unqualified on this runner.** [Environment warning log](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/certification-36464360229-attempt-1-warning.log). Hosted certification failed. The recognized hosted graphics exclusion does not block certification or Latest eligibility. The listed graphics checks remain untested; all other required checks remain mandatory. Failed or incomplete required checks keep this release ineligible for Latest.\n\n\nCertification [run 36466691708, attempt 1](https://github.com/mirage335-colossus/pumpModem/actions/runs/36466691708/attempts/1): **failed** ([report](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/certification-36466691708-attempt-1.md), [JSON](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/certification-36466691708-attempt-1.json)). This report applies only to the recorded source and asset hashes.\n**Windows Rev native graphics remain unqualified on this runner.** [Environment warning log](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/certification-36466691708-attempt-1-warning.log). Hosted certification failed. The recognized hosted graphics exclusion does not block certification or Latest eligibility. The listed graphics checks remain untested; all other required checks remain mandatory. Failed or incomplete required checks keep this release ineligible for Latest.\n\n\nCertification [run 36466691708, attempt 2](https://github.com/mirage335-colossus/pumpModem/actions/runs/36466691708/attempts/2): **passed with warnings** ([report](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/certification-36466691708-attempt-2.md), [JSON](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/certification-36466691708-attempt-2.json)). This report applies only to the recorded source and asset hashes.\n**Windows Rev native graphics remain unqualified on this runner.** [Environment warning log](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/certification-36466691708-attempt-2-warning.log). Hosted certification passed with documented exclusions. The recognized hosted graphics exclusion does not block certification or Latest eligibility. The listed graphics checks remain untested; all other required checks remain mandatory. This ordinary release remains eligible for Latest.\n",
+      "assets": [
+        {
+          "id": 596029962,
+          "name": "DataPump-v001_00-2026-09-28-1246CDT-linux-aarch64-fltk.tar.gz",
+          "size": 32292602,
+          "state": "uploaded",
+          "digest": "sha256:cef1baa4b010196aa6736064a0ff8cf580348728582b40310f21d4a3334eec97",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/DataPump-v001_00-2026-09-28-1246CDT-linux-aarch64-fltk.tar.gz"
+        },
+        {
+          "id": 596033337,
+          "name": "DataPump-v001_00-2026-09-28-1246CDT-linux-aarch64-rev.tar.gz",
+          "size": 29464715,
+          "state": "uploaded",
+          "digest": "sha256:dad2a8db288ab8776e5dd9fd229af81027a23d9665998e800cb1de8fef2326b3",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/DataPump-v001_00-2026-09-28-1246CDT-linux-aarch64-rev.tar.gz"
+        },
+        {
+          "id": 596026588,
+          "name": "DataPump-v001_00-2026-09-28-1246CDT-linux-x86_64-fltk.tar.gz",
+          "size": 28343766,
+          "state": "uploaded",
+          "digest": "sha256:61257988390873f8afe16ca67eca1499df04097f47bbd7e84936e3b4c2759561",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/DataPump-v001_00-2026-09-28-1246CDT-linux-x86_64-fltk.tar.gz"
+        },
+        {
+          "id": 596026778,
+          "name": "DataPump-v001_00-2026-09-28-1246CDT-linux-x86_64-rev.tar.gz",
+          "size": 28176542,
+          "state": "uploaded",
+          "digest": "sha256:8963e89cc154cacb5e7ffe93561794e009a635aab7a92e0f5cbbc664962bf94a",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/DataPump-v001_00-2026-09-28-1246CDT-linux-x86_64-rev.tar.gz"
+        },
+        {
+          "id": 596026968,
+          "name": "DataPump-v001_00-2026-09-28-1246CDT-windows-x86_64-fltk.zip",
+          "size": 13447196,
+          "state": "uploaded",
+          "digest": "sha256:e6141b834ad6461d1a6fb608dd74df89a2bd82006753794d23d51a49de14725d",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/DataPump-v001_00-2026-09-28-1246CDT-windows-x86_64-fltk.zip"
+        },
+        {
+          "id": 596033881,
+          "name": "DataPump-v001_00-2026-09-28-1246CDT-windows-x86_64-rev.zip",
+          "size": 14017158,
+          "state": "uploaded",
+          "digest": "sha256:e3312869cbb49e0afab60c00dfa379c3fffce23a202c654017a6d0efebf324b1",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/DataPump-v001_00-2026-09-28-1246CDT-windows-x86_64-rev.zip"
+        },
+        {
+          "id": 596037960,
+          "name": "InRelease",
+          "size": 798,
+          "state": "uploaded",
+          "digest": "sha256:df2b73baad7f658bf566f7c23e8546448321423d2f306bdee56fe5b01521daf1",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/InRelease"
+        },
+        {
+          "id": 596037963,
+          "name": "Packages",
+          "size": 3174,
+          "state": "uploaded",
+          "digest": "sha256:398fe7d730df32f23ab347e78bb3b2ab8b8927c82ca4385cc0bf4499d7f07f89",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/Packages"
+        },
+        {
+          "id": 596037954,
+          "name": "Packages.gz",
+          "size": 752,
+          "state": "uploaded",
+          "digest": "sha256:8d8d1a378504f1a7813197e9e664be628c90a50c2c30ba251571df9fedd75f8b",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/Packages.gz"
+        },
+        {
+          "id": 596037957,
+          "name": "Release",
+          "size": 521,
+          "state": "uploaded",
+          "digest": "sha256:0241b3d9350ef326934a0427e323ea6d08171bc1bd99fbf60fa0f9aa11daa9d5",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/Release"
+        },
+        {
+          "id": 596037961,
+          "name": "Release.gpg",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:ed653ee98bedf68c2a37857d450e7f65c4ea14510b8a557a1d73a90aa0ad2b69",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/Release.gpg"
+        },
+        {
+          "id": 596038224,
+          "name": "SHA256SUMS.txt",
+          "size": 5836,
+          "state": "uploaded",
+          "digest": "sha256:f44864272f1a9bae1f9192b8579dedb172318d17bad6277bb047879bc0470f00",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/SHA256SUMS.txt"
+        },
+        {
+          "id": 596037970,
+          "name": "apt-repository.json",
+          "size": 5466,
+          "state": "uploaded",
+          "digest": "sha256:f3e6e5cf2b94cf93ffb5f23a3f07bdb87c704bba85972f4c953f00c3611ab587",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/apt-repository.json"
+        },
+        {
+          "id": 596037974,
+          "name": "arch-repository.json",
+          "size": 5640,
+          "state": "uploaded",
+          "digest": "sha256:074c8ed033964adb850ab843165eec6dd615e50472a8ddcbfb813ab797f57668",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/arch-repository.json"
+        },
+        {
+          "id": 596037976,
+          "name": "arch-repository.json.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:ce756842c7e63cda70c090c9286b0ebd673844c21eb4cb2c73b7e43607ccfb4f",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/arch-repository.json.sig"
+        },
+        {
+          "id": 596074704,
+          "name": "certification-36455727999-attempt-1-warning.log",
+          "size": 572,
+          "state": "uploaded",
+          "digest": "sha256:76b42fdf5dfe69951449ff631dc76ac177480c91a0385158c88e351ed7281b79",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/certification-36455727999-attempt-1-warning.log"
+        },
+        {
+          "id": 596074703,
+          "name": "certification-36455727999-attempt-1.json",
+          "size": 16725,
+          "state": "uploaded",
+          "digest": "sha256:038408478eb96c60d1b25935ac550a2c49c0b839865336dc67da10b99c2d8697",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/certification-36455727999-attempt-1.json"
+        },
+        {
+          "id": 596074701,
+          "name": "certification-36455727999-attempt-1.md",
+          "size": 11458,
+          "state": "uploaded",
+          "digest": "sha256:4d639c4e7338d16ce372c906e7921064ae69c402cb9c8dad5f57560fceb2aff4",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/certification-36455727999-attempt-1.md"
+        },
+        {
+          "id": 596120768,
+          "name": "certification-36464360229-attempt-1-warning.log",
+          "size": 572,
+          "state": "uploaded",
+          "digest": "sha256:76b42fdf5dfe69951449ff631dc76ac177480c91a0385158c88e351ed7281b79",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/certification-36464360229-attempt-1-warning.log"
+        },
+        {
+          "id": 596120769,
+          "name": "certification-36464360229-attempt-1.json",
+          "size": 16727,
+          "state": "uploaded",
+          "digest": "sha256:3ebb2e3e7b3d55696bad485c6d18128b33fa5a35697300cbb84db48379aa2cc5",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/certification-36464360229-attempt-1.json"
+        },
+        {
+          "id": 596120766,
+          "name": "certification-36464360229-attempt-1.md",
+          "size": 11460,
+          "state": "uploaded",
+          "digest": "sha256:28cc22d24eb6ec13e6ab63d488780af613b213d4c77eb07aaf7cd3f0a86b3a46",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/certification-36464360229-attempt-1.md"
+        },
+        {
+          "id": 596201898,
+          "name": "certification-36466691708-attempt-1-warning.log",
+          "size": 572,
+          "state": "uploaded",
+          "digest": "sha256:76b42fdf5dfe69951449ff631dc76ac177480c91a0385158c88e351ed7281b79",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/certification-36466691708-attempt-1-warning.log"
+        },
+        {
+          "id": 596201897,
+          "name": "certification-36466691708-attempt-1.json",
+          "size": 16719,
+          "state": "uploaded",
+          "digest": "sha256:9f3493f7ef32b03541618e44ef18f1f896597138b83640264c0f1e01cabad350",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/certification-36466691708-attempt-1.json"
+        },
+        {
+          "id": 596201900,
+          "name": "certification-36466691708-attempt-1.md",
+          "size": 11452,
+          "state": "uploaded",
+          "digest": "sha256:f3cf43fab59a3d31a87c91e47ebc4fff3b583d18b09879dc8a54fa16a1aa8aae",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/certification-36466691708-attempt-1.md"
+        },
+        {
+          "id": 596250152,
+          "name": "certification-36466691708-attempt-2-warning.log",
+          "size": 572,
+          "state": "uploaded",
+          "digest": "sha256:76b42fdf5dfe69951449ff631dc76ac177480c91a0385158c88e351ed7281b79",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/certification-36466691708-attempt-2-warning.log"
+        },
+        {
+          "id": 596250154,
+          "name": "certification-36466691708-attempt-2.json",
+          "size": 16732,
+          "state": "uploaded",
+          "digest": "sha256:81fea231b14e425ebfdeed8412246d1ee3eeafee418b5f53ba1297fcafef532e",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/certification-36466691708-attempt-2.json"
+        },
+        {
+          "id": 596250153,
+          "name": "certification-36466691708-attempt-2.md",
+          "size": 11466,
+          "state": "uploaded",
+          "digest": "sha256:c97084a719e0b66d76adecbd1e31e0d9b4de5a9b39c2d95ba97bf22527f5dbbe",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/certification-36466691708-attempt-2.md"
+        },
+        {
+          "id": 596037975,
+          "name": "datapump-aarch64.db",
+          "size": 917,
+          "state": "uploaded",
+          "digest": "sha256:70319609817e22875866b79dd1f22e7b82c025dca3dd60ce9c1c56b5cc2e9d3b",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-aarch64.db"
+        },
+        {
+          "id": 596037978,
+          "name": "datapump-aarch64.db.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:dc29cbdbaa0c7aedf11ff43f9b939d2f747135edbbedda3a562984118810929c",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-aarch64.db.sig"
+        },
+        {
+          "id": 596037986,
+          "name": "datapump-aarch64.files",
+          "size": 4022,
+          "state": "uploaded",
+          "digest": "sha256:a6ff8fd5b063d1f83621b4f66d3bde74ffc0f6335cb8b9d4b0a9a1151e34826e",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-aarch64.files"
+        },
+        {
+          "id": 596037992,
+          "name": "datapump-aarch64.files.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:a5b2f367e202b4c1e0e6bbf2dc1de794986413b1bdf346175d8566b57ad96b23",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-aarch64.files.sig"
+        },
+        {
+          "id": 596037996,
+          "name": "datapump-arch-recipes.tar.gz",
+          "size": 552120,
+          "state": "uploaded",
+          "digest": "sha256:3067a283a7730ba6a3f1fd89615dd8099c0ff7aa11858c0ce050d89497f4bf0d",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-arch-recipes.tar.gz"
+        },
+        {
+          "id": 596037999,
+          "name": "datapump-archive-keyring.gpg",
+          "size": 244,
+          "state": "uploaded",
+          "digest": "sha256:b240fb9919864dc242e37964ac6bc87c61751f08c179de3b54774e318cb111ee",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-archive-keyring.gpg"
+        },
+        {
+          "id": 596038000,
+          "name": "datapump-fltk-bin-1.0.0_p20260928174606_p36455727999_p1-1-aarch64.pkg.tar.gz",
+          "size": 32523984,
+          "state": "uploaded",
+          "digest": "sha256:3a6bb6e67a20a8d56a25f5338e81acf15be9d07c3c680b63eed5aedb95183017",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-fltk-bin-1.0.0_p20260928174606_p36455727999_p1-1-aarch64.pkg.tar.gz"
+        },
+        {
+          "id": 596038011,
+          "name": "datapump-fltk-bin-1.0.0_p20260928174606_p36455727999_p1-1-aarch64.pkg.tar.gz.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:3b18536f30b751878f8a4158907f8a2d50b87360bd1c24e6eeb9dc5ee2bc9887",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-fltk-bin-1.0.0_p20260928174606_p36455727999_p1-1-aarch64.pkg.tar.gz.sig"
+        },
+        {
+          "id": 596038016,
+          "name": "datapump-fltk-bin-1.0.0_p20260928174606_p36455727999_p1-1-x86_64.pkg.tar.gz",
+          "size": 28642126,
+          "state": "uploaded",
+          "digest": "sha256:1575812ea2e66271681aa8d0b04289c3c0782cc622d3510acb6b8390b03e7d5b",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-fltk-bin-1.0.0_p20260928174606_p36455727999_p1-1-x86_64.pkg.tar.gz"
+        },
+        {
+          "id": 596038024,
+          "name": "datapump-fltk-bin-1.0.0_p20260928174606_p36455727999_p1-1-x86_64.pkg.tar.gz.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:bddb356c285bec020272d41737293992415c9b2be1ff3b44917bc02eb8394185",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-fltk-bin-1.0.0_p20260928174606_p36455727999_p1-1-x86_64.pkg.tar.gz.sig"
+        },
+        {
+          "id": 596038028,
+          "name": "datapump-fltk_1.0.0+20260928174606.r36455727999.a1_amd64.deb",
+          "size": 28369766,
+          "state": "uploaded",
+          "digest": "sha256:ee80660f53fea1631be31ecaf051047790273114ce33621231ecddafbf6e657b",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-fltk_1.0.0%2B20260928174606.r36455727999.a1_amd64.deb"
+        },
+        {
+          "id": 596038039,
+          "name": "datapump-fltk_1.0.0+20260928174606.r36455727999.a1_arm64.deb",
+          "size": 32262090,
+          "state": "uploaded",
+          "digest": "sha256:5844ab1857d7732566f86b446a90ccb26b81e24563e332a07de23fece06afcdd",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-fltk_1.0.0%2B20260928174606.r36455727999.a1_arm64.deb"
+        },
+        {
+          "id": 596038050,
+          "name": "datapump-gentoo-channel.json",
+          "size": 931,
+          "state": "uploaded",
+          "digest": "sha256:18494a56b4cc02e3578d70aae3b2bcba387ef47c331031950af20af0a16b1ffb",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-gentoo-channel.json"
+        },
+        {
+          "id": 596038064,
+          "name": "datapump-gentoo-channel.json.asc",
+          "size": 228,
+          "state": "uploaded",
+          "digest": "sha256:8e54f24b75bcb673e3d3050cb3b0b7578123cff1b3500ed9562143b7666b667d",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-gentoo-channel.json.asc"
+        },
+        {
+          "id": 596038069,
+          "name": "datapump-gentoo-overlay.tar.gz",
+          "size": 296420,
+          "state": "uploaded",
+          "digest": "sha256:411b981f279b72f769e4b11ef5cfa10d1751bb519f3bd5936a4cf6712f6a9076",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-gentoo-overlay.tar.gz"
+        },
+        {
+          "id": 596038079,
+          "name": "datapump-gentoo-portage-sync.py",
+          "size": 1680,
+          "state": "uploaded",
+          "digest": "sha256:bffd98ff28ddd75a483ded6ebac6c23db055f3e4419151d64e2b52e038c4922d",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-gentoo-portage-sync.py"
+        },
+        {
+          "id": 596038085,
+          "name": "datapump-gentoo-sync.py",
+          "size": 23040,
+          "state": "uploaded",
+          "digest": "sha256:1987b4b71ba133fec56f2b555c19cb44b4ec8165a6943fb2d5ebe71478390496",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-gentoo-sync.py"
+        },
+        {
+          "id": 596038099,
+          "name": "datapump-pacman-aarch64.conf",
+          "size": 371,
+          "state": "uploaded",
+          "digest": "sha256:38026d5bf0f20a59fcc2272e58805e7fd74a2a770c3e5c2c11a6b6be1654e6cb",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-pacman-aarch64.conf"
+        },
+        {
+          "id": 596038106,
+          "name": "datapump-pacman-keyring.gpg",
+          "size": 244,
+          "state": "uploaded",
+          "digest": "sha256:b240fb9919864dc242e37964ac6bc87c61751f08c179de3b54774e318cb111ee",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-pacman-keyring.gpg"
+        },
+        {
+          "id": 596038105,
+          "name": "datapump-pacman-x86_64.conf",
+          "size": 370,
+          "state": "uploaded",
+          "digest": "sha256:4c52d567c0a9042e3e7bf2f3ec4c5633f6852b1a0f669b9b601b8beb79170a58",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-pacman-x86_64.conf"
+        },
+        {
+          "id": 596038104,
+          "name": "datapump-rev-bin-1.0.0_p20260928174606_p36455727999_p1-1-aarch64.pkg.tar.gz",
+          "size": 29701970,
+          "state": "uploaded",
+          "digest": "sha256:c96d42f1e3bad4ecf1d7050d729b7c77649434ab82ca44c998f782e64f9fb878",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-rev-bin-1.0.0_p20260928174606_p36455727999_p1-1-aarch64.pkg.tar.gz"
+        },
+        {
+          "id": 596038108,
+          "name": "datapump-rev-bin-1.0.0_p20260928174606_p36455727999_p1-1-aarch64.pkg.tar.gz.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:bf3b47dab8cecc5c71e482628ca057872f3b8e1393781f47eb1d220bc4541ca8",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-rev-bin-1.0.0_p20260928174606_p36455727999_p1-1-aarch64.pkg.tar.gz.sig"
+        },
+        {
+          "id": 596038116,
+          "name": "datapump-rev-bin-1.0.0_p20260928174606_p36455727999_p1-1-x86_64.pkg.tar.gz",
+          "size": 28473581,
+          "state": "uploaded",
+          "digest": "sha256:69820894dd4f121e61eb3ca46be553bdab133262dad8f6f9bdf539a4c6c6fd55",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-rev-bin-1.0.0_p20260928174606_p36455727999_p1-1-x86_64.pkg.tar.gz"
+        },
+        {
+          "id": 596038126,
+          "name": "datapump-rev-bin-1.0.0_p20260928174606_p36455727999_p1-1-x86_64.pkg.tar.gz.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:29987530e0ca44a1bdbba0e02e098ad4a4006147a5f77fd6466f48745a2fa0a5",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-rev-bin-1.0.0_p20260928174606_p36455727999_p1-1-x86_64.pkg.tar.gz.sig"
+        },
+        {
+          "id": 596038136,
+          "name": "datapump-rev_1.0.0+20260928174606.r36455727999.a1_amd64.deb",
+          "size": 28201874,
+          "state": "uploaded",
+          "digest": "sha256:2d946cd3b0407b56658e23bbb64412dfb7b69e8a950b5849fb69b8f9e9e6b703",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-rev_1.0.0%2B20260928174606.r36455727999.a1_amd64.deb"
+        },
+        {
+          "id": 596038135,
+          "name": "datapump-rev_1.0.0+20260928174606.r36455727999.a1_arm64.deb",
+          "size": 29435818,
+          "state": "uploaded",
+          "digest": "sha256:3aab26e426b429cd4ba458fb774c159781187e275d350f3c70f151e53de53293",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-rev_1.0.0%2B20260928174606.r36455727999.a1_arm64.deb"
+        },
+        {
+          "id": 596038145,
+          "name": "datapump-sdk-6c4884fdff9c745ab0a0-linux-x86_64.tar.gz",
+          "size": 250001680,
+          "state": "uploaded",
+          "digest": "sha256:a1050115f278d298947a6516a52ec5e848ffec370649cdb24985e2f16fde7985",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-sdk-6c4884fdff9c745ab0a0-linux-x86_64.tar.gz"
+        },
+        {
+          "id": 596038155,
+          "name": "datapump-sdk-sources-6c4884fdff9c745ab0a0.tar.gz",
+          "size": 467039330,
+          "state": "uploaded",
+          "digest": "sha256:26ef9fb79f5b0b7ebac17498dd9ec847dd488e796a5a8578e59477ecec26d5a5",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-sdk-sources-6c4884fdff9c745ab0a0.tar.gz"
+        },
+        {
+          "id": 596038168,
+          "name": "datapump-x86_64.db",
+          "size": 914,
+          "state": "uploaded",
+          "digest": "sha256:ad5afb91222566c023e0989f174a67aaf0a10581e9a750047080663b39f4093b",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-x86_64.db"
+        },
+        {
+          "id": 596038169,
+          "name": "datapump-x86_64.db.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:f65d57debb664871bf647e328ed50286c7da360cdabb5882d0aeea8d9ae2f8c1",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-x86_64.db.sig"
+        },
+        {
+          "id": 596038170,
+          "name": "datapump-x86_64.files",
+          "size": 7705,
+          "state": "uploaded",
+          "digest": "sha256:8605688e93458f97b4bc616fa6b521c19bb8823ef83247bc452873c5ef9f1b82",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-x86_64.files"
+        },
+        {
+          "id": 596038194,
+          "name": "datapump-x86_64.files.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:e369fe8f94d3f69da443fa31574cfeaf8123701864773ffb7a065a48c470cd9b",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump-x86_64.files.sig"
+        },
+        {
+          "id": 596038196,
+          "name": "datapump.sources",
+          "size": 171,
+          "state": "uploaded",
+          "digest": "sha256:cf8786676c70a57bcb08a2781368647e8bffb916b8bdb6e98a76bfd6462f07bd",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/datapump.sources"
+        },
+        {
+          "id": 596038203,
+          "name": "distro-packages.json",
+          "size": 13055,
+          "state": "uploaded",
+          "digest": "sha256:5cc91992fa123997fd18c0d325e0802129fe5c0d7f934e039fdca65fb701003f",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/distro-packages.json"
+        },
+        {
+          "id": 596017368,
+          "name": "release-metadata.json",
+          "size": 1291,
+          "state": "uploaded",
+          "digest": "sha256:924e811f945c37b46e0868ed9b1320a1ad0bd4b39c52c913384ffc8d2d4fee6d",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/release-metadata.json"
+        },
+        {
+          "id": 596017367,
+          "name": "release-notes.md",
+          "size": 2185,
+          "state": "uploaded",
+          "digest": "sha256:0b19408091909f66a8ff812b4d103769f1b7f0d3bbc19e2ee3dd0da54950b222",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/release-notes.md"
+        },
+        {
+          "id": 596038207,
+          "name": "sdk-6c4884fdff9c745ab0a0-SHA256SUMS.txt",
+          "size": 235,
+          "state": "uploaded",
+          "digest": "sha256:63e2e4492870287a3799d571c9f670d92c9c08564906f7b1c32a695d73e0b127",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/sdk-6c4884fdff9c745ab0a0-SHA256SUMS.txt"
+        },
+        {
+          "id": 596017375,
+          "name": "warning.log",
+          "size": 259,
+          "state": "uploaded",
+          "digest": "sha256:cbb81d59759531e676a8c6a6387abcc70e6887b8225283ba5d87d600c5a3da02",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/warning.log"
+        },
+        {
+          "id": 596038213,
+          "name": "windows-base-929016c86c9609704043-SHA256SUMS.txt",
+          "size": 237,
+          "state": "uploaded",
+          "digest": "sha256:0d5d6e993eef43ad3f7002ec0e9710097366bc98b21adc22637dfd78d48e0f1b",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/windows-base-929016c86c9609704043-SHA256SUMS.txt"
+        },
+        {
+          "id": 596038215,
+          "name": "windows-base-929016c86c9609704043-x64-windows-static.zip",
+          "size": 71239817,
+          "state": "uploaded",
+          "digest": "sha256:fbf4b93aeeec72b40a44a2c2c22a1732a7a160674621452e5fca5e7a793ada87",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/windows-base-929016c86c9609704043-x64-windows-static.zip"
+        },
+        {
+          "id": 596038226,
+          "name": "windows-base-sources-929016c86c9609704043.zip",
+          "size": 502263010,
+          "state": "uploaded",
+          "digest": "sha256:b40028617506d1db67bdf384bbc5d85466b9002a6bbbf8d8689f8af9040c887a",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/windows-base-sources-929016c86c9609704043.zip"
+        }
+      ]
+    },
+    {
+      "id": 397435225,
+      "tag_name": "v001_00-2026-09-26-1847CDT",
+      "name": "experiment",
+      "draft": false,
+      "prerelease": true,
+      "target_commitish": "800da8c67611819c22236c7ef310cb518348ae2b",
+      "created_at": "2026-09-26T23:35:40Z",
+      "published_at": "2026-09-27T00:06:02Z",
+      "html_url": "https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-26-1847CDT",
+      "body": "> **Experimental build:** this prerelease is for evaluation. Users needing assurance should use a qualified regular release.\n\n> **Certification passed with warnings.** See the certification reports below.\n\nBuild **v001_00-2026-09-26-1847CDT**\n\n- Source commit: `800da8c67611819c22236c7ef310cb518348ae2b`\n- Build date: `2026-09-26-1847CDT` (America/Chicago)\n- Workflow run: `36280483610`, attempt `1`\n- Package version: `1.0.0`\n- GUI downloads: fltk, rev\n- Linux ABI: x86-64: glibc 2.36 (Bookworm source SDK); AArch64: glibc 2.35\n\nDownload the archive matching your operating system, architecture and GUI backend (fltk or rev), or install the signed Debian packages from this release's flat APT repository. Each backend has a separate bundle and extraction directory. Unpack the whole archive and keep bin/, lib/ and share/ together; required application libraries are bundled. Host audio/graphics services and drivers remain required. Debian installation instructions are in the release documentation linked below.\n\nThe attached warning.log describes known nonfatal Rev replay/waterfall display-cadence warnings. They do not fail builds or certification; data integrity, pending-message identity and physical-completion checks remain mandatory.\n\nPackaging checks have passed when this release is published. Extensive contract, GUI and copied-binary checks run separately through the Certify published release workflow; its hash-bound reports will be attached here later. Hosted checks do not qualify physical audio hardware.\n\nThe ARM64 bundle requires a compatible 64-bit Linux installation, including Raspberry Pi OS or Velvet OS. Windows requires Windows 10 1903+/11 x64. See [requirements and certification scope](https://github.com/mirage335-colossus/pumpModem/blob/800da8c67611819c22236c7ef310cb518348ae2b/docs/releases.md).\n\nThis release includes copies of the prepared developer SDKs and dependency bundles it used, their complete source archives, and recipe checksums. Copies reused from the [base release](https://github.com/mirage335-colossus/pumpModem/releases/tag/base) remain available here even if older releases are deleted. Application releases never rebuild an SDK automatically. The runner supplies MSVC and the Windows SDK separately; they are not redistributed.\n\n\nCertification [run 36281472303, attempt 1](https://github.com/mirage335-colossus/pumpModem/actions/runs/36281472303/attempts/1): **failed** ([report](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/certification-36281472303-attempt-1.md), [JSON](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/certification-36281472303-attempt-1.json)). This report applies only to the recorded source and asset hashes.\n**Windows Rev native graphics remain unqualified on this runner.** [Environment warning log](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/certification-36281472303-attempt-1-warning.log). Other required checks remain mandatory. This limited result does not promote Latest.\n\n\nCertification [run 36285388744, attempt 1](https://github.com/mirage335-colossus/pumpModem/actions/runs/36285388744/attempts/1): **failed** ([report](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/certification-36285388744-attempt-1.md), [JSON](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/certification-36285388744-attempt-1.json)). This report applies only to the recorded source and asset hashes.\n\n\nCertification [run 36283925159, attempt 1](https://github.com/mirage335-colossus/pumpModem/actions/runs/36283925159/attempts/1): **passed with warnings** ([report](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/certification-36283925159-attempt-1.md), [JSON](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/certification-36283925159-attempt-1.json)). This report applies only to the recorded source and asset hashes.\n**Windows Rev native graphics remain unqualified on this runner.** [Environment warning log](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/certification-36283925159-attempt-1-warning.log). Other required checks remain mandatory. This limited result does not promote Latest.\n\n\nCertification [run 36285582196, attempt 1](https://github.com/mirage335-colossus/pumpModem/actions/runs/36285582196/attempts/1): **passed with warnings** ([report](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/certification-36285582196-attempt-1.md), [JSON](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/certification-36285582196-attempt-1.json)). This report applies only to the recorded source and asset hashes.\n**Windows Rev native graphics remain unqualified on this runner.** [Environment warning log](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/certification-36285582196-attempt-1-warning.log). Hosted certification passed with documented exclusions. The recognized hosted graphics exclusion does not block certification or Latest eligibility. The listed graphics checks remain untested; all other required checks remain mandatory. This experiment remains a prerelease and is not eligible for Latest.\n\n\nCertification [run 36287962659, attempt 1](https://github.com/mirage335-colossus/pumpModem/actions/runs/36287962659/attempts/1): **passed with warnings** ([report](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/certification-36287962659-attempt-1.md), [JSON](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/certification-36287962659-attempt-1.json)). This report applies only to the recorded source and asset hashes.\n**Windows Rev native graphics remain unqualified on this runner.** [Environment warning log](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/certification-36287962659-attempt-1-warning.log). Hosted certification passed with documented exclusions. The recognized hosted graphics exclusion does not block certification or Latest eligibility. The listed graphics checks remain untested; all other required checks remain mandatory. This experiment remains a prerelease and is not eligible for Latest.\n",
+      "assets": [
+        {
+          "id": 591699691,
+          "name": "DataPump-v001_00-2026-09-26-1847CDT-linux-aarch64-fltk.tar.gz",
+          "size": 14588179,
+          "state": "uploaded",
+          "digest": "sha256:891e9a13ead6bf779d90ae4af77a5b183caf0fbb42074f363f392ae19adf5519",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/DataPump-v001_00-2026-09-26-1847CDT-linux-aarch64-fltk.tar.gz"
+        },
+        {
+          "id": 591703218,
+          "name": "DataPump-v001_00-2026-09-26-1847CDT-linux-aarch64-rev.tar.gz",
+          "size": 13000596,
+          "state": "uploaded",
+          "digest": "sha256:1079d2654109c8ae7506a420f04ffcfe277a5dd684aa13d2730360b166fa33b0",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/DataPump-v001_00-2026-09-26-1847CDT-linux-aarch64-rev.tar.gz"
+        },
+        {
+          "id": 591702041,
+          "name": "DataPump-v001_00-2026-09-26-1847CDT-linux-x86_64-fltk.tar.gz",
+          "size": 15822554,
+          "state": "uploaded",
+          "digest": "sha256:b0c6e4646b23a7318ce7657c8d7968adf570412633d80d0e22ca1dd4448c5a65",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/DataPump-v001_00-2026-09-26-1847CDT-linux-x86_64-fltk.tar.gz"
+        },
+        {
+          "id": 591701725,
+          "name": "DataPump-v001_00-2026-09-26-1847CDT-linux-x86_64-rev.tar.gz",
+          "size": 15629335,
+          "state": "uploaded",
+          "digest": "sha256:5a2beae8867b0894d2fa5d79151c73485c37c806db2951d3d282c4d70dcba479",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/DataPump-v001_00-2026-09-26-1847CDT-linux-x86_64-rev.tar.gz"
+        },
+        {
+          "id": 591701381,
+          "name": "DataPump-v001_00-2026-09-26-1847CDT-windows-x86_64-fltk.zip",
+          "size": 6576356,
+          "state": "uploaded",
+          "digest": "sha256:89b8de97f728c3ebe3a6fb42f48a11b489aaad1195464f6fcb809b8fd0ceb053",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/DataPump-v001_00-2026-09-26-1847CDT-windows-x86_64-fltk.zip"
+        },
+        {
+          "id": 591702139,
+          "name": "DataPump-v001_00-2026-09-26-1847CDT-windows-x86_64-rev.zip",
+          "size": 7145907,
+          "state": "uploaded",
+          "digest": "sha256:7413c16566b3234321bc1f820e7c2ab6544bc481c76315cdce307fb99e505c87",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/DataPump-v001_00-2026-09-26-1847CDT-windows-x86_64-rev.zip"
+        },
+        {
+          "id": 591705149,
+          "name": "InRelease",
+          "size": 798,
+          "state": "uploaded",
+          "digest": "sha256:14bb3e42970350c0ff4d7936c0e72a81cc3839aa17e5d93ab5e8300467418c48",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/InRelease"
+        },
+        {
+          "id": 591705146,
+          "name": "Packages",
+          "size": 3138,
+          "state": "uploaded",
+          "digest": "sha256:b66167159a97eebac6601f6dc32367a0be76bc1efa1ebaff7930aa6f3f2c9eba",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/Packages"
+        },
+        {
+          "id": 591705143,
+          "name": "Packages.gz",
+          "size": 751,
+          "state": "uploaded",
+          "digest": "sha256:232516cdcd5b7600446981087d352d8072160f7fe7ccb6e990f5e55b3d1b60a9",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/Packages.gz"
+        },
+        {
+          "id": 591705142,
+          "name": "Release",
+          "size": 521,
+          "state": "uploaded",
+          "digest": "sha256:671ecd88a1b7c3ec48368b70ced1366c15bbcacb92e584b848696bf13a889d2f",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/Release"
+        },
+        {
+          "id": 591705144,
+          "name": "Release.gpg",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:759973fd61d59ac11e349b50cec6d1d6f9a34340624161abcda47effdab54f93",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/Release.gpg"
+        },
+        {
+          "id": 591705320,
+          "name": "SHA256SUMS.txt",
+          "size": 5836,
+          "state": "uploaded",
+          "digest": "sha256:108919411c4c0c600d6c653f705b4b68cad7936457f645e06968378eed4fb6d5",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/SHA256SUMS.txt"
+        },
+        {
+          "id": 591705155,
+          "name": "apt-repository.json",
+          "size": 5466,
+          "state": "uploaded",
+          "digest": "sha256:722b68a1c11bf4deef5f40ac609e9cf8ac0fd836f69ab0da2789fc7092f4cdfc",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/apt-repository.json"
+        },
+        {
+          "id": 591705159,
+          "name": "arch-repository.json",
+          "size": 5643,
+          "state": "uploaded",
+          "digest": "sha256:7f0d524e17c7efbc5edf6c7ff0a1ba19bc0edff2a5aa3078273308a4559bf4d4",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/arch-repository.json"
+        },
+        {
+          "id": 591705156,
+          "name": "arch-repository.json.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:ab2879507a5cee023ad00c6d636f56ffcaa15d37df99f18f9f99ac49e5a5281f",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/arch-repository.json.sig"
+        },
+        {
+          "id": 591806854,
+          "name": "certification-36281472303-attempt-1-warning.log",
+          "size": 572,
+          "state": "uploaded",
+          "digest": "sha256:76b42fdf5dfe69951449ff631dc76ac177480c91a0385158c88e351ed7281b79",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/certification-36281472303-attempt-1-warning.log"
+        },
+        {
+          "id": 591806858,
+          "name": "certification-36281472303-attempt-1.json",
+          "size": 15667,
+          "state": "uploaded",
+          "digest": "sha256:5aee4f5126eaf19c88d833acf7c89a86f0660a76e24605e98c86c854526fd32d",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/certification-36281472303-attempt-1.json"
+        },
+        {
+          "id": 591806852,
+          "name": "certification-36281472303-attempt-1.md",
+          "size": 10418,
+          "state": "uploaded",
+          "digest": "sha256:6fcab59aa8fc5a6f1d0c46aa899173b6297a1832bcc66552d99c763073b69346",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/certification-36281472303-attempt-1.md"
+        },
+        {
+          "id": 591926020,
+          "name": "certification-36283925159-attempt-1-warning.log",
+          "size": 572,
+          "state": "uploaded",
+          "digest": "sha256:76b42fdf5dfe69951449ff631dc76ac177480c91a0385158c88e351ed7281b79",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/certification-36283925159-attempt-1-warning.log"
+        },
+        {
+          "id": 591926024,
+          "name": "certification-36283925159-attempt-1.json",
+          "size": 15681,
+          "state": "uploaded",
+          "digest": "sha256:3f2e77cd71eeebdf526bc96c44e364743224a0edbf298315f53ea08ef1f1aa32",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/certification-36283925159-attempt-1.json"
+        },
+        {
+          "id": 591926021,
+          "name": "certification-36283925159-attempt-1.md",
+          "size": 10432,
+          "state": "uploaded",
+          "digest": "sha256:1f1e75c9bb8c907ed413e4676922774ec1ead743b4aa90e4a8e9ed50355f1e00",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/certification-36283925159-attempt-1.md"
+        },
+        {
+          "id": 591859302,
+          "name": "certification-36285388744-attempt-1.json",
+          "size": 14386,
+          "state": "uploaded",
+          "digest": "sha256:bcb96f1cb442b11b107db133e5c2a9e4f0bcfedd3b8beb90b83a2b7b1b3d3109",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/certification-36285388744-attempt-1.json"
+        },
+        {
+          "id": 591859301,
+          "name": "certification-36285388744-attempt-1.md",
+          "size": 9795,
+          "state": "uploaded",
+          "digest": "sha256:ee017c92f4671bd68ca544e832514534eb0440a5e035eedc5dc0789162a18331",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/certification-36285388744-attempt-1.md"
+        },
+        {
+          "id": 591962437,
+          "name": "certification-36285582196-attempt-1-warning.log",
+          "size": 572,
+          "state": "uploaded",
+          "digest": "sha256:76b42fdf5dfe69951449ff631dc76ac177480c91a0385158c88e351ed7281b79",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/certification-36285582196-attempt-1-warning.log"
+        },
+        {
+          "id": 591962434,
+          "name": "certification-36285582196-attempt-1.json",
+          "size": 15811,
+          "state": "uploaded",
+          "digest": "sha256:9c6bc414da6923cbdf7b9bae99a0a2a905a9a7297f16a04a15bbebef98ff5248",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/certification-36285582196-attempt-1.json"
+        },
+        {
+          "id": 591962435,
+          "name": "certification-36285582196-attempt-1.md",
+          "size": 10730,
+          "state": "uploaded",
+          "digest": "sha256:fa4f076b1beaad9de18dafcdb0dafd873200058c50510dc3750c864c5fd4aa2d",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/certification-36285582196-attempt-1.md"
+        },
+        {
+          "id": 591995672,
+          "name": "certification-36287962659-attempt-1-warning.log",
+          "size": 572,
+          "state": "uploaded",
+          "digest": "sha256:76b42fdf5dfe69951449ff631dc76ac177480c91a0385158c88e351ed7281b79",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/certification-36287962659-attempt-1-warning.log"
+        },
+        {
+          "id": 591995673,
+          "name": "certification-36287962659-attempt-1.json",
+          "size": 15811,
+          "state": "uploaded",
+          "digest": "sha256:33635b0a608d29aac232a418d76774341487ee99b9a5aee066eab7f8ca15daad",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/certification-36287962659-attempt-1.json"
+        },
+        {
+          "id": 591995671,
+          "name": "certification-36287962659-attempt-1.md",
+          "size": 10730,
+          "state": "uploaded",
+          "digest": "sha256:e0c39b4b95767e41e3d604a67cb9cf52987150bda5659d8684834905f7f09507",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/certification-36287962659-attempt-1.md"
+        },
+        {
+          "id": 591705161,
+          "name": "datapump-aarch64.db",
+          "size": 917,
+          "state": "uploaded",
+          "digest": "sha256:b13bcd4e94bec17a042fef1861666b4327c656c2a135ba913fdc6a731b14bca2",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-aarch64.db"
+        },
+        {
+          "id": 591705163,
+          "name": "datapump-aarch64.db.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:aea0c45ad6cdc6245bc84ec02ce3e7d10a38efcb62dedc5605fdd0d36d807ac5",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-aarch64.db.sig"
+        },
+        {
+          "id": 591705171,
+          "name": "datapump-aarch64.files",
+          "size": 3125,
+          "state": "uploaded",
+          "digest": "sha256:15f46dcb71ca5e59d76f6713942c3887f690a876d5d88721023c28e62adc8563",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-aarch64.files"
+        },
+        {
+          "id": 591705172,
+          "name": "datapump-aarch64.files.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:f974e2a174f6b2cfac4b487faa24d97597b72c81e77a28a2d4e316e76f403ea9",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-aarch64.files.sig"
+        },
+        {
+          "id": 591705173,
+          "name": "datapump-arch-recipes.tar.gz",
+          "size": 506061,
+          "state": "uploaded",
+          "digest": "sha256:77a36ac16d9f3cff6cda35aeb064485e21cd2bd5e99ed9b0f932df14050cf4dd",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-arch-recipes.tar.gz"
+        },
+        {
+          "id": 591705174,
+          "name": "datapump-archive-keyring.gpg",
+          "size": 244,
+          "state": "uploaded",
+          "digest": "sha256:b240fb9919864dc242e37964ac6bc87c61751f08c179de3b54774e318cb111ee",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-archive-keyring.gpg"
+        },
+        {
+          "id": 591705175,
+          "name": "datapump-fltk-bin-1.0.0_p20260926234704_p36280483610_p1-1-aarch64.pkg.tar.gz",
+          "size": 14810664,
+          "state": "uploaded",
+          "digest": "sha256:51dc485a03aa0d2ec4de191465974cebbf55354f8761c4f4e258f889fba41923",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-fltk-bin-1.0.0_p20260926234704_p36280483610_p1-1-aarch64.pkg.tar.gz"
+        },
+        {
+          "id": 591705178,
+          "name": "datapump-fltk-bin-1.0.0_p20260926234704_p36280483610_p1-1-aarch64.pkg.tar.gz.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:4837120804d42122acd7d01be3f44218458953b3380e7b525d2d5f5f0e36a62a",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-fltk-bin-1.0.0_p20260926234704_p36280483610_p1-1-aarch64.pkg.tar.gz.sig"
+        },
+        {
+          "id": 591705180,
+          "name": "datapump-fltk-bin-1.0.0_p20260926234704_p36280483610_p1-1-x86_64.pkg.tar.gz",
+          "size": 16094466,
+          "state": "uploaded",
+          "digest": "sha256:52f81ea58f21b3fde5b8f7c1994592151046968bb1cdbcde5a46b75d59a95f4a",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-fltk-bin-1.0.0_p20260926234704_p36280483610_p1-1-x86_64.pkg.tar.gz"
+        },
+        {
+          "id": 591705192,
+          "name": "datapump-fltk-bin-1.0.0_p20260926234704_p36280483610_p1-1-x86_64.pkg.tar.gz.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:fa8f6d414993d2ad007b4a1a5caad493723a2912830a56790efb6bfbb6b44723",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-fltk-bin-1.0.0_p20260926234704_p36280483610_p1-1-x86_64.pkg.tar.gz.sig"
+        },
+        {
+          "id": 591705190,
+          "name": "datapump-fltk_1.0.0+20260926234704.r36280483610.a1_amd64.deb",
+          "size": 15832392,
+          "state": "uploaded",
+          "digest": "sha256:bf849057ebbe1ad82abbaabf7e5de317c011e59b8af806e0c657b28d6827cfe6",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-fltk_1.0.0%2B20260926234704.r36280483610.a1_amd64.deb"
+        },
+        {
+          "id": 591705186,
+          "name": "datapump-fltk_1.0.0+20260926234704.r36280483610.a1_arm64.deb",
+          "size": 14549390,
+          "state": "uploaded",
+          "digest": "sha256:f103cca63cf4dc189c51eab8eeac53f9e2294a7ff6e4f177e2f251a4c1b002e9",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-fltk_1.0.0%2B20260926234704.r36280483610.a1_arm64.deb"
+        },
+        {
+          "id": 591705204,
+          "name": "datapump-gentoo-channel.json",
+          "size": 930,
+          "state": "uploaded",
+          "digest": "sha256:777cca8d8b8a32125627fe18ed46596973e2b9b0a939a1792f99374c7e827a46",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-gentoo-channel.json"
+        },
+        {
+          "id": 591705205,
+          "name": "datapump-gentoo-channel.json.asc",
+          "size": 228,
+          "state": "uploaded",
+          "digest": "sha256:d4fa5455733aba9b36b9025660c7faa2b7a3250700ad9c1e57282c2db5d9ee5f",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-gentoo-channel.json.asc"
+        },
+        {
+          "id": 591705214,
+          "name": "datapump-gentoo-overlay.tar.gz",
+          "size": 254479,
+          "state": "uploaded",
+          "digest": "sha256:2d2a02c88c77cc43d3bcc8ee0e02e7b3dfc71598842edfec1654af3c1c6e70c6",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-gentoo-overlay.tar.gz"
+        },
+        {
+          "id": 591705216,
+          "name": "datapump-gentoo-portage-sync.py",
+          "size": 1680,
+          "state": "uploaded",
+          "digest": "sha256:bffd98ff28ddd75a483ded6ebac6c23db055f3e4419151d64e2b52e038c4922d",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-gentoo-portage-sync.py"
+        },
+        {
+          "id": 591705219,
+          "name": "datapump-gentoo-sync.py",
+          "size": 23040,
+          "state": "uploaded",
+          "digest": "sha256:1987b4b71ba133fec56f2b555c19cb44b4ec8165a6943fb2d5ebe71478390496",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-gentoo-sync.py"
+        },
+        {
+          "id": 591705224,
+          "name": "datapump-pacman-aarch64.conf",
+          "size": 394,
+          "state": "uploaded",
+          "digest": "sha256:db6fbab5c30144c6e35f6f0e15718489a60edf34330dd0fe7884c73b3c21bedc",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-pacman-aarch64.conf"
+        },
+        {
+          "id": 591705226,
+          "name": "datapump-pacman-keyring.gpg",
+          "size": 244,
+          "state": "uploaded",
+          "digest": "sha256:b240fb9919864dc242e37964ac6bc87c61751f08c179de3b54774e318cb111ee",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-pacman-keyring.gpg"
+        },
+        {
+          "id": 591705225,
+          "name": "datapump-pacman-x86_64.conf",
+          "size": 393,
+          "state": "uploaded",
+          "digest": "sha256:4707f52f5a80c687811467cb56f355cd9f2740d5e0b08b90f8127195734ba12f",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-pacman-x86_64.conf"
+        },
+        {
+          "id": 591705227,
+          "name": "datapump-rev-bin-1.0.0_p20260926234704_p36280483610_p1-1-aarch64.pkg.tar.gz",
+          "size": 13242461,
+          "state": "uploaded",
+          "digest": "sha256:3d4293ffe0dcf8c82a237a9fbe6a72930dc4aec74474ab72090eebdb5d37a23a",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-rev-bin-1.0.0_p20260926234704_p36280483610_p1-1-aarch64.pkg.tar.gz"
+        },
+        {
+          "id": 591705230,
+          "name": "datapump-rev-bin-1.0.0_p20260926234704_p36280483610_p1-1-aarch64.pkg.tar.gz.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:fe6084390db6c5f447a888614a6ce9407fe9df528b335b22a64d4c9ebeae54b7",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-rev-bin-1.0.0_p20260926234704_p36280483610_p1-1-aarch64.pkg.tar.gz.sig"
+        },
+        {
+          "id": 591705235,
+          "name": "datapump-rev-bin-1.0.0_p20260926234704_p36280483610_p1-1-x86_64.pkg.tar.gz",
+          "size": 15901850,
+          "state": "uploaded",
+          "digest": "sha256:610eb9055ece35987158fa9ffe447b4aace3c19459da6370d3a673b8a045364c",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-rev-bin-1.0.0_p20260926234704_p36280483610_p1-1-x86_64.pkg.tar.gz"
+        },
+        {
+          "id": 591705234,
+          "name": "datapump-rev-bin-1.0.0_p20260926234704_p36280483610_p1-1-x86_64.pkg.tar.gz.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:76f28c14702d19f9df01e9fa335464569f62c742b73f5b3f05ea8386b11e8bff",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-rev-bin-1.0.0_p20260926234704_p36280483610_p1-1-x86_64.pkg.tar.gz.sig"
+        },
+        {
+          "id": 591705241,
+          "name": "datapump-rev_1.0.0+20260926234704.r36280483610.a1_amd64.deb",
+          "size": 15638314,
+          "state": "uploaded",
+          "digest": "sha256:3f0b49329f3f5e6c95086f363e2f62e8b48cd01ea89dd803bdf54fbc99b4a3bf",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-rev_1.0.0%2B20260926234704.r36280483610.a1_amd64.deb"
+        },
+        {
+          "id": 591705245,
+          "name": "datapump-rev_1.0.0+20260926234704.r36280483610.a1_arm64.deb",
+          "size": 12980496,
+          "state": "uploaded",
+          "digest": "sha256:c695fc9fda7e86b74227102fed5453c77bceef1ceb66f15c01fdb1a329b401ac",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-rev_1.0.0%2B20260926234704.r36280483610.a1_arm64.deb"
+        },
+        {
+          "id": 591705248,
+          "name": "datapump-sdk-b8685ab239d7ac8650e6-linux-x86_64.tar.gz",
+          "size": 244502346,
+          "state": "uploaded",
+          "digest": "sha256:e32ac3a85c1762f54be8aa4a73de692f4364247d2bb62338441636513b32e3ed",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-sdk-b8685ab239d7ac8650e6-linux-x86_64.tar.gz"
+        },
+        {
+          "id": 591705253,
+          "name": "datapump-sdk-sources-b8685ab239d7ac8650e6.tar.gz",
+          "size": 455866711,
+          "state": "uploaded",
+          "digest": "sha256:f7e4b0d858f6aeaa08d94120b0abde61d762b31dadd24e505b0ed11926f19680",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-sdk-sources-b8685ab239d7ac8650e6.tar.gz"
+        },
+        {
+          "id": 591705265,
+          "name": "datapump-x86_64.db",
+          "size": 915,
+          "state": "uploaded",
+          "digest": "sha256:966142fafd0f61a41f45cf70966ed9f35a78692b2b27bdd9edcdac7f58f29325",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-x86_64.db"
+        },
+        {
+          "id": 591705272,
+          "name": "datapump-x86_64.db.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:3e5ecdd3adbfdb8a64865d2cddf85be886ebdba242ff37baec1824cb6ac6198b",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-x86_64.db.sig"
+        },
+        {
+          "id": 591705274,
+          "name": "datapump-x86_64.files",
+          "size": 6773,
+          "state": "uploaded",
+          "digest": "sha256:6a502367999c77459f54cb1f48ab0ecd74847d0704666274fe852e38c4b87c7c",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-x86_64.files"
+        },
+        {
+          "id": 591705275,
+          "name": "datapump-x86_64.files.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:4af80dd681a56c7e3803f00b1f58aa482d748265c4925758ee8d99d6526b4696",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump-x86_64.files.sig"
+        },
+        {
+          "id": 591705286,
+          "name": "datapump.sources",
+          "size": 191,
+          "state": "uploaded",
+          "digest": "sha256:3b727b4579b09166af3f475c96efc84e544bc63b25c71a55881729a1fd826ca2",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/datapump.sources"
+        },
+        {
+          "id": 591705288,
+          "name": "distro-packages.json",
+          "size": 8143,
+          "state": "uploaded",
+          "digest": "sha256:e1f1a151bab121ad1d0cb1fdc6a00a6cc767ec2ae426639861e009349309a3d2",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/distro-packages.json"
+        },
+        {
+          "id": 591695269,
+          "name": "release-metadata.json",
+          "size": 1223,
+          "state": "uploaded",
+          "digest": "sha256:4cdc84fe405870aa02d828f5330e9321ce6db608635e9362fa09e32f7b0d7164",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/release-metadata.json"
+        },
+        {
+          "id": 591695261,
+          "name": "release-notes.md",
+          "size": 2311,
+          "state": "uploaded",
+          "digest": "sha256:7b67625aa1ff63408a4c815c0f35ef20ec84db5f183efab11977d14219db79e9",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/release-notes.md"
+        },
+        {
+          "id": 591705289,
+          "name": "sdk-b8685ab239d7ac8650e6-SHA256SUMS.txt",
+          "size": 235,
+          "state": "uploaded",
+          "digest": "sha256:97f38a934759c1841de72f4b6ba22b1eaebd1402006769094160a7a1b1898b04",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/sdk-b8685ab239d7ac8650e6-SHA256SUMS.txt"
+        },
+        {
+          "id": 591695265,
+          "name": "warning.log",
+          "size": 259,
+          "state": "uploaded",
+          "digest": "sha256:cbb81d59759531e676a8c6a6387abcc70e6887b8225283ba5d87d600c5a3da02",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/warning.log"
+        },
+        {
+          "id": 591705300,
+          "name": "windows-base-1be51afd94ed0cb4555a-SHA256SUMS.txt",
+          "size": 237,
+          "state": "uploaded",
+          "digest": "sha256:af5fd64a4087948ff9f52813ca56ddeee921ddf23221737a786761970027056b",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/windows-base-1be51afd94ed0cb4555a-SHA256SUMS.txt"
+        },
+        {
+          "id": 591705301,
+          "name": "windows-base-1be51afd94ed0cb4555a-x64-windows-static.zip",
+          "size": 57012854,
+          "state": "uploaded",
+          "digest": "sha256:931b8f3ec55648191bfc90d3361273709595b8726c81840f60d3409aa14ba8e6",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/windows-base-1be51afd94ed0cb4555a-x64-windows-static.zip"
+        },
+        {
+          "id": 591705303,
+          "name": "windows-base-sources-1be51afd94ed0cb4555a.zip",
+          "size": 549046640,
+          "state": "uploaded",
+          "digest": "sha256:19d36b3c9ddae6a2b8db7c8266185c075bba8c067b366b3d5cbe0fef33ac6a2a",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-26-1847CDT/windows-base-sources-1be51afd94ed0cb4555a.zip"
+        }
+      ]
+    },
+    {
+      "id": 395745349,
+      "tag_name": "v001_00-2026-09-24-0856CDT",
+      "name": "v001_00-2026-09-24-0856CDT",
+      "draft": false,
+      "prerelease": false,
+      "target_commitish": "9c83f5ec4ec9671931ffeb8069c5502c004ab495",
+      "created_at": "2026-09-24T09:41:35Z",
+      "published_at": "2026-09-24T14:04:12Z",
+      "html_url": "https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-24-0856CDT",
+      "body": "> **Certification failed.** See the certification reports below.\n\nBuild **v001_00-2026-09-24-0856CDT**\n\n- Source commit: `9c83f5ec4ec9671931ffeb8069c5502c004ab495`\n- Build date: `2026-09-24-0856CDT` (America/Chicago)\n- Workflow run: `36009020695`, attempt `1`\n- Package version: `1.0.0`\n- GUI downloads: fltk, rev\n- Linux ABI: x86-64: glibc 2.36 (Bookworm source SDK); AArch64: glibc 2.35\n\nDownload the archive matching your operating system, architecture and GUI backend (fltk or rev), or install the signed Debian packages from this release's flat APT repository. Each backend has a separate bundle and extraction directory. Unpack the whole archive and keep bin/, lib/ and share/ together; required application libraries are bundled. Host audio/graphics services and drivers remain required. Debian installation instructions are in the release documentation linked below.\n\nThe attached warning.log describes known nonfatal Rev replay/waterfall display-cadence warnings. They do not fail builds or certification; data integrity, pending-message identity and physical-completion checks remain mandatory.\n\nPackaging checks have passed when this release is published. Extensive contract, GUI and copied-binary checks run separately through the Certify published release workflow; its hash-bound reports will be attached here later. Hosted checks do not qualify physical audio hardware.\n\nThe ARM64 bundle requires a compatible 64-bit Linux installation, including Raspberry Pi OS or Velvet OS. Windows requires Windows 10 1903+/11 x64. See [requirements and certification scope](https://github.com/mirage335-colossus/pumpModem/blob/9c83f5ec4ec9671931ffeb8069c5502c004ab495/docs/releases.md).\n\nReusable developer SDKs and their complete source archives are preserved separately in the [base release](https://github.com/mirage335-colossus/pumpModem/releases/tag/base). Application releases never rebuild an SDK automatically.\n\n\nCertification [run 36010161027, attempt 1](https://github.com/mirage335-colossus/pumpModem/actions/runs/36010161027/attempts/1): **failed** ([report](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/certification-36010161027-attempt-1.md), [JSON](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/certification-36010161027-attempt-1.json)). This report applies only to the recorded source and asset hashes.\n**Windows Rev native graphics remain unqualified on this runner.** [Environment warning log](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/certification-36010161027-attempt-1-warning.log). Other required checks remain mandatory. This limited result does not promote Latest.\n",
+      "assets": [
+        {
+          "id": 586079642,
+          "name": "DataPump-v001_00-2026-09-24-0856CDT-linux-aarch64-fltk.tar.gz",
+          "size": 14577702,
+          "state": "uploaded",
+          "digest": "sha256:02cdf112c9addb82d357ea02589e8f3c64e388722cbc15a76ff962d21f537967",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/DataPump-v001_00-2026-09-24-0856CDT-linux-aarch64-fltk.tar.gz"
+        },
+        {
+          "id": 586080785,
+          "name": "DataPump-v001_00-2026-09-24-0856CDT-linux-aarch64-rev.tar.gz",
+          "size": 12982000,
+          "state": "uploaded",
+          "digest": "sha256:fa46fd286a94854d5d34b2143729fc074ea8108ca0bb71ac5b5b38e10106823b",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/DataPump-v001_00-2026-09-24-0856CDT-linux-aarch64-rev.tar.gz"
+        },
+        {
+          "id": 586076145,
+          "name": "DataPump-v001_00-2026-09-24-0856CDT-linux-x86_64-fltk.tar.gz",
+          "size": 15804673,
+          "state": "uploaded",
+          "digest": "sha256:6d16ad53b59049fc3c3992111e657c0ada5140f694bdfead97a70d5a47e32959",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/DataPump-v001_00-2026-09-24-0856CDT-linux-x86_64-fltk.tar.gz"
+        },
+        {
+          "id": 586078198,
+          "name": "DataPump-v001_00-2026-09-24-0856CDT-linux-x86_64-rev.tar.gz",
+          "size": 15611185,
+          "state": "uploaded",
+          "digest": "sha256:4591a19c56e9d3e38a6408087a9588583ee1f989b89eac8d9e003416ab3f12e0",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/DataPump-v001_00-2026-09-24-0856CDT-linux-x86_64-rev.tar.gz"
+        },
+        {
+          "id": 586076588,
+          "name": "DataPump-v001_00-2026-09-24-0856CDT-windows-x86_64-fltk.zip",
+          "size": 6557925,
+          "state": "uploaded",
+          "digest": "sha256:e677117c4387daf26a17bae5f83a1897da978dfd00a34da7c98f964f822f7bb3",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/DataPump-v001_00-2026-09-24-0856CDT-windows-x86_64-fltk.zip"
+        },
+        {
+          "id": 586084236,
+          "name": "DataPump-v001_00-2026-09-24-0856CDT-windows-x86_64-rev.zip",
+          "size": 7127457,
+          "state": "uploaded",
+          "digest": "sha256:5504906a397308d424aff5e59e98a09bfc638d1d60de113b041bad87c8cfbdc3",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/DataPump-v001_00-2026-09-24-0856CDT-windows-x86_64-rev.zip"
+        },
+        {
+          "id": 586086008,
+          "name": "InRelease",
+          "size": 798,
+          "state": "uploaded",
+          "digest": "sha256:1fbbd62337541f2b412ed7601a746ca3b39e9a20a8a1984439441cb671c6b342",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/InRelease"
+        },
+        {
+          "id": 586086004,
+          "name": "Packages",
+          "size": 3174,
+          "state": "uploaded",
+          "digest": "sha256:8785842cc4f476dce35e6f4bac5458c9d81cfde8a8a14f54851ba09c2abc9334",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/Packages"
+        },
+        {
+          "id": 586086005,
+          "name": "Packages.gz",
+          "size": 754,
+          "state": "uploaded",
+          "digest": "sha256:139d0fb3244abeaadfdf258a62fc1d3e4d66b62aaf231069cc228b30bbb1119d",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/Packages.gz"
+        },
+        {
+          "id": 586086007,
+          "name": "Release",
+          "size": 521,
+          "state": "uploaded",
+          "digest": "sha256:bf98fe4668581429dea5eb4aac106887d5d4129779cbf239b9f3348359aa3a00",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/Release"
+        },
+        {
+          "id": 586086006,
+          "name": "Release.gpg",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:c830a92a115aa3ba74dd5e0df760f4a5b9eee3b0f16a7055089d0e001198bcfb",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/Release.gpg"
+        },
+        {
+          "id": 586086185,
+          "name": "SHA256SUMS.txt",
+          "size": 5145,
+          "state": "uploaded",
+          "digest": "sha256:54a2e4136aea86df1008b5e34516d6190f775a5e47da347a84a45120c6f30e9e",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/SHA256SUMS.txt"
+        },
+        {
+          "id": 586086024,
+          "name": "apt-repository.json",
+          "size": 5466,
+          "state": "uploaded",
+          "digest": "sha256:818e520d6b297139882515204d6ac6bd07d96ea1745bb6de1f9cc8340c8247aa",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/apt-repository.json"
+        },
+        {
+          "id": 586086028,
+          "name": "arch-repository.json",
+          "size": 5640,
+          "state": "uploaded",
+          "digest": "sha256:6cf1cf8261e12123a447253561e2f28fbc408595f4abe6a3e7115c936253fc37",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/arch-repository.json"
+        },
+        {
+          "id": 586086026,
+          "name": "arch-repository.json.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:d5a9e2af4983e34316e6546f9074cd0946b618a50f85251666e773e2f368bcc7",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/arch-repository.json.sig"
+        },
+        {
+          "id": 586159218,
+          "name": "certification-36010161027-attempt-1-warning.log",
+          "size": 572,
+          "state": "uploaded",
+          "digest": "sha256:76b42fdf5dfe69951449ff631dc76ac177480c91a0385158c88e351ed7281b79",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/certification-36010161027-attempt-1-warning.log"
+        },
+        {
+          "id": 586159224,
+          "name": "certification-36010161027-attempt-1.json",
+          "size": 14785,
+          "state": "uploaded",
+          "digest": "sha256:f5f132dff02aeb98b21c880d84b82b83a9bead4b01d1309ce3c2cc5588500cdc",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/certification-36010161027-attempt-1.json"
+        },
+        {
+          "id": 586159217,
+          "name": "certification-36010161027-attempt-1.md",
+          "size": 9648,
+          "state": "uploaded",
+          "digest": "sha256:efe2ffb940c351033e6e9934bf3a025e9a9563617e5a798838cfe9a5779fed00",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/certification-36010161027-attempt-1.md"
+        },
+        {
+          "id": 586086031,
+          "name": "datapump-aarch64.db",
+          "size": 915,
+          "state": "uploaded",
+          "digest": "sha256:a5fa1cd1f3954b28f54e5aafba7012f1ca2687a34807216af21048fc4c0e0779",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-aarch64.db"
+        },
+        {
+          "id": 586086029,
+          "name": "datapump-aarch64.db.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:794107852ae9809fe992a969f9cd3953b735a54203a5157bb0ea4583ab43ca23",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-aarch64.db.sig"
+        },
+        {
+          "id": 586086042,
+          "name": "datapump-aarch64.files",
+          "size": 3125,
+          "state": "uploaded",
+          "digest": "sha256:db7ffa9901873886fe1741f42e4d6601398bbc7ca026650a92f1b59e9f660121",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-aarch64.files"
+        },
+        {
+          "id": 586086046,
+          "name": "datapump-aarch64.files.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:35bd2232294cd9397f0c218381d27d16c1f97e664094535cdb93b19d9ed9046d",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-aarch64.files.sig"
+        },
+        {
+          "id": 586086053,
+          "name": "datapump-arch-recipes.tar.gz",
+          "size": 506078,
+          "state": "uploaded",
+          "digest": "sha256:bc59c96257c2ceb0e4595d9b3fee1b62bce43a3a1806f91dd64e9b11102bbf68",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-arch-recipes.tar.gz"
+        },
+        {
+          "id": 586086047,
+          "name": "datapump-archive-keyring.gpg",
+          "size": 244,
+          "state": "uploaded",
+          "digest": "sha256:b240fb9919864dc242e37964ac6bc87c61751f08c179de3b54774e318cb111ee",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-archive-keyring.gpg"
+        },
+        {
+          "id": 586086051,
+          "name": "datapump-fltk-bin-1.0.0_p20260924135629_p36009020695_p1-1-aarch64.pkg.tar.gz",
+          "size": 14792538,
+          "state": "uploaded",
+          "digest": "sha256:511fba7fe751cd882180a05b9ee1d75b989b4dba8fb97dba2dbac0ae884c0a2f",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-fltk-bin-1.0.0_p20260924135629_p36009020695_p1-1-aarch64.pkg.tar.gz"
+        },
+        {
+          "id": 586086056,
+          "name": "datapump-fltk-bin-1.0.0_p20260924135629_p36009020695_p1-1-aarch64.pkg.tar.gz.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:94f0cfcdea12a5e07a3e2bbea92991af5a3fd2cf5d3fe879caad240a1b25494d",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-fltk-bin-1.0.0_p20260924135629_p36009020695_p1-1-aarch64.pkg.tar.gz.sig"
+        },
+        {
+          "id": 586086063,
+          "name": "datapump-fltk-bin-1.0.0_p20260924135629_p36009020695_p1-1-x86_64.pkg.tar.gz",
+          "size": 16076222,
+          "state": "uploaded",
+          "digest": "sha256:e516a32f2c126a104c4cd4bfd271df4a8808edde9de03ca526426777932d1754",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-fltk-bin-1.0.0_p20260924135629_p36009020695_p1-1-x86_64.pkg.tar.gz"
+        },
+        {
+          "id": 586086069,
+          "name": "datapump-fltk-bin-1.0.0_p20260924135629_p36009020695_p1-1-x86_64.pkg.tar.gz.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:94ed3fe88b06dd9ca153d64116b7230f9b44055dd467d1230397d8131c686a07",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-fltk-bin-1.0.0_p20260924135629_p36009020695_p1-1-x86_64.pkg.tar.gz.sig"
+        },
+        {
+          "id": 586086068,
+          "name": "datapump-fltk_1.0.0+20260924135629.r36009020695.a1_amd64.deb",
+          "size": 15815228,
+          "state": "uploaded",
+          "digest": "sha256:a8546e59a9866a797534ebd3f0b9ac51e5e59b483a0ec6e7b300ffacbb3f7d87",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-fltk_1.0.0%2B20260924135629.r36009020695.a1_amd64.deb"
+        },
+        {
+          "id": 586086087,
+          "name": "datapump-fltk_1.0.0+20260924135629.r36009020695.a1_arm64.deb",
+          "size": 14528924,
+          "state": "uploaded",
+          "digest": "sha256:e829dcbeecd206e8903227cb04dadc3b5424133795bc51dee4b7eec4ccba4b5e",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-fltk_1.0.0%2B20260924135629.r36009020695.a1_arm64.deb"
+        },
+        {
+          "id": 586086092,
+          "name": "datapump-gentoo-channel.json",
+          "size": 931,
+          "state": "uploaded",
+          "digest": "sha256:23f3e80fe70d694324ed911bca68e07bbed018b1e5b2c1628666441510327cad",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-gentoo-channel.json"
+        },
+        {
+          "id": 586086095,
+          "name": "datapump-gentoo-channel.json.asc",
+          "size": 228,
+          "state": "uploaded",
+          "digest": "sha256:25deafd09f86ea1a3d4371724f9860ea3ccf8cd2e8d65695d892302685f5f781",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-gentoo-channel.json.asc"
+        },
+        {
+          "id": 586086104,
+          "name": "datapump-gentoo-overlay.tar.gz",
+          "size": 254485,
+          "state": "uploaded",
+          "digest": "sha256:5a5d83a17aa8236c327343f3b296a74876560747ea58af8c022024dfb96541f4",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-gentoo-overlay.tar.gz"
+        },
+        {
+          "id": 586086111,
+          "name": "datapump-gentoo-portage-sync.py",
+          "size": 1680,
+          "state": "uploaded",
+          "digest": "sha256:bffd98ff28ddd75a483ded6ebac6c23db055f3e4419151d64e2b52e038c4922d",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-gentoo-portage-sync.py"
+        },
+        {
+          "id": 586086112,
+          "name": "datapump-gentoo-sync.py",
+          "size": 23040,
+          "state": "uploaded",
+          "digest": "sha256:1987b4b71ba133fec56f2b555c19cb44b4ec8165a6943fb2d5ebe71478390496",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-gentoo-sync.py"
+        },
+        {
+          "id": 586086114,
+          "name": "datapump-pacman-aarch64.conf",
+          "size": 371,
+          "state": "uploaded",
+          "digest": "sha256:9363d1643c9e687f4526f5ec7d9ffbc226f25f2f61306efe8570a162bc4c0f6a",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-pacman-aarch64.conf"
+        },
+        {
+          "id": 586086122,
+          "name": "datapump-pacman-keyring.gpg",
+          "size": 244,
+          "state": "uploaded",
+          "digest": "sha256:b240fb9919864dc242e37964ac6bc87c61751f08c179de3b54774e318cb111ee",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-pacman-keyring.gpg"
+        },
+        {
+          "id": 586086126,
+          "name": "datapump-pacman-x86_64.conf",
+          "size": 370,
+          "state": "uploaded",
+          "digest": "sha256:f84f5f22cfb58f2d92ba7ea746ffe3b5fd4d892232c163d6c7fc7f72bee5f79d",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-pacman-x86_64.conf"
+        },
+        {
+          "id": 586086127,
+          "name": "datapump-rev-bin-1.0.0_p20260924135629_p36009020695_p1-1-aarch64.pkg.tar.gz",
+          "size": 13226760,
+          "state": "uploaded",
+          "digest": "sha256:5ce9c3407c03e331f5823945b7feeb93700e5f45c4054b07272804ebeffdc00b",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-rev-bin-1.0.0_p20260924135629_p36009020695_p1-1-aarch64.pkg.tar.gz"
+        },
+        {
+          "id": 586086134,
+          "name": "datapump-rev-bin-1.0.0_p20260924135629_p36009020695_p1-1-aarch64.pkg.tar.gz.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:6aecd29b0261e0c22f8dfb16b452092feebb065a621eb0d16cf59dff29f08d75",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-rev-bin-1.0.0_p20260924135629_p36009020695_p1-1-aarch64.pkg.tar.gz.sig"
+        },
+        {
+          "id": 586086135,
+          "name": "datapump-rev-bin-1.0.0_p20260924135629_p36009020695_p1-1-x86_64.pkg.tar.gz",
+          "size": 15882981,
+          "state": "uploaded",
+          "digest": "sha256:9aadf87706cc3d00e4879d8335b68b7a1ee56c5762c0fc2e4af1482d8d3c15fd",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-rev-bin-1.0.0_p20260924135629_p36009020695_p1-1-x86_64.pkg.tar.gz"
+        },
+        {
+          "id": 586086140,
+          "name": "datapump-rev-bin-1.0.0_p20260924135629_p36009020695_p1-1-x86_64.pkg.tar.gz.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:ed4db05362c383a358805f5e644b31cb3607190bcd2adac1e088bf33f1af4cb2",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-rev-bin-1.0.0_p20260924135629_p36009020695_p1-1-x86_64.pkg.tar.gz.sig"
+        },
+        {
+          "id": 586086147,
+          "name": "datapump-rev_1.0.0+20260924135629.r36009020695.a1_amd64.deb",
+          "size": 15621864,
+          "state": "uploaded",
+          "digest": "sha256:ae1a8709b5f9a9d88fca7d5bbee7f291a3d65fe66bb7f5e9f307d2296745e46e",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-rev_1.0.0%2B20260924135629.r36009020695.a1_amd64.deb"
+        },
+        {
+          "id": 586086156,
+          "name": "datapump-rev_1.0.0+20260924135629.r36009020695.a1_arm64.deb",
+          "size": 12961400,
+          "state": "uploaded",
+          "digest": "sha256:9fb15010fe18d66c323ebd23b080c7fb9f45788a74ac549e9df8e47fff037c36",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-rev_1.0.0%2B20260924135629.r36009020695.a1_arm64.deb"
+        },
+        {
+          "id": 586086159,
+          "name": "datapump-x86_64.db",
+          "size": 919,
+          "state": "uploaded",
+          "digest": "sha256:468e4f1b64b82233812d1b0e9138d2b94a1507f1b790194aa849ac5d5d6571c5",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-x86_64.db"
+        },
+        {
+          "id": 586086161,
+          "name": "datapump-x86_64.db.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:9410d68790f517ce4762e631b09dae22558f2c051e004d90e4eb1f033a121878",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-x86_64.db.sig"
+        },
+        {
+          "id": 586086171,
+          "name": "datapump-x86_64.files",
+          "size": 6774,
+          "state": "uploaded",
+          "digest": "sha256:4c375ef8a48e75c19a3a4f01a6301ffd1b2ad87ec05c8759be0a4525507ceb86",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-x86_64.files"
+        },
+        {
+          "id": 586086181,
+          "name": "datapump-x86_64.files.sig",
+          "size": 119,
+          "state": "uploaded",
+          "digest": "sha256:ea60ca7cc987c8c641198d614b52a806917b89bf2070d7f2b06733d53f8b9030",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump-x86_64.files.sig"
+        },
+        {
+          "id": 586086182,
+          "name": "datapump.sources",
+          "size": 171,
+          "state": "uploaded",
+          "digest": "sha256:cf8786676c70a57bcb08a2781368647e8bffb916b8bdb6e98a76bfd6462f07bd",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/datapump.sources"
+        },
+        {
+          "id": 586086183,
+          "name": "distro-packages.json",
+          "size": 8143,
+          "state": "uploaded",
+          "digest": "sha256:4d1c1c59399482e3daaa18d1f3946c25231246ecc8c1f16dccd5cfb01463e6a2",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/distro-packages.json"
+        },
+        {
+          "id": 586070621,
+          "name": "release-metadata.json",
+          "size": 1131,
+          "state": "uploaded",
+          "digest": "sha256:414447fb5fe4339e26d0b3b57e970e7df3bf920ba543c6733037df784e57af5f",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/release-metadata.json"
+        },
+        {
+          "id": 586070624,
+          "name": "release-notes.md",
+          "size": 1965,
+          "state": "uploaded",
+          "digest": "sha256:b8250342ac273c6652e47fbdcab2e9dc6306a4bb1b00fd1e5da96efc8aaee255",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/release-notes.md"
+        },
+        {
+          "id": 586070620,
+          "name": "warning.log",
+          "size": 259,
+          "state": "uploaded",
+          "digest": "sha256:cbb81d59759531e676a8c6a6387abcc70e6887b8225283ba5d87d600c5a3da02",
+          "browser_download_url": "https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-24-0856CDT/warning.log"
+        }
+      ]
+    }
+  ],
+  "preserved_evidence": [
+    {
+      "release_id": 395745349,
+      "asset_id": 586086185,
+      "path": "v001_00-2026-09-24-0856CDT/SHA256SUMS.txt",
+      "size": 5145,
+      "sha256": "54a2e4136aea86df1008b5e34516d6190f775a5e47da347a84a45120c6f30e9e"
+    },
+    {
+      "release_id": 395745349,
+      "asset_id": 586159218,
+      "path": "v001_00-2026-09-24-0856CDT/certification-36010161027-attempt-1-warning.log",
+      "size": 572,
+      "sha256": "76b42fdf5dfe69951449ff631dc76ac177480c91a0385158c88e351ed7281b79"
+    },
+    {
+      "release_id": 395745349,
+      "asset_id": 586159224,
+      "path": "v001_00-2026-09-24-0856CDT/certification-36010161027-attempt-1.json",
+      "size": 14785,
+      "sha256": "f5f132dff02aeb98b21c880d84b82b83a9bead4b01d1309ce3c2cc5588500cdc"
+    },
+    {
+      "release_id": 395745349,
+      "asset_id": 586159217,
+      "path": "v001_00-2026-09-24-0856CDT/certification-36010161027-attempt-1.md",
+      "size": 9648,
+      "sha256": "efe2ffb940c351033e6e9934bf3a025e9a9563617e5a798838cfe9a5779fed00"
+    },
+    {
+      "release_id": 395745349,
+      "asset_id": 586070621,
+      "path": "v001_00-2026-09-24-0856CDT/release-metadata.json",
+      "size": 1131,
+      "sha256": "414447fb5fe4339e26d0b3b57e970e7df3bf920ba543c6733037df784e57af5f"
+    },
+    {
+      "release_id": 395745349,
+      "asset_id": 586070624,
+      "path": "v001_00-2026-09-24-0856CDT/release-notes.md",
+      "size": 1965,
+      "sha256": "b8250342ac273c6652e47fbdcab2e9dc6306a4bb1b00fd1e5da96efc8aaee255"
+    },
+    {
+      "release_id": 395745349,
+      "asset_id": 586070620,
+      "path": "v001_00-2026-09-24-0856CDT/warning.log",
+      "size": 259,
+      "sha256": "cbb81d59759531e676a8c6a6387abcc70e6887b8225283ba5d87d600c5a3da02"
+    },
+    {
+      "release_id": 397435225,
+      "asset_id": 591705320,
+      "path": "v001_00-2026-09-26-1847CDT/SHA256SUMS.txt",
+      "size": 5836,
+      "sha256": "108919411c4c0c600d6c653f705b4b68cad7936457f645e06968378eed4fb6d5"
+    },
+    {
+      "release_id": 397435225,
+      "asset_id": 591806854,
+      "path": "v001_00-2026-09-26-1847CDT/certification-36281472303-attempt-1-warning.log",
+      "size": 572,
+      "sha256": "76b42fdf5dfe69951449ff631dc76ac177480c91a0385158c88e351ed7281b79"
+    },
+    {
+      "release_id": 397435225,
+      "asset_id": 591806858,
+      "path": "v001_00-2026-09-26-1847CDT/certification-36281472303-attempt-1.json",
+      "size": 15667,
+      "sha256": "5aee4f5126eaf19c88d833acf7c89a86f0660a76e24605e98c86c854526fd32d"
+    },
+    {
+      "release_id": 397435225,
+      "asset_id": 591806852,
+      "path": "v001_00-2026-09-26-1847CDT/certification-36281472303-attempt-1.md",
+      "size": 10418,
+      "sha256": "6fcab59aa8fc5a6f1d0c46aa899173b6297a1832bcc66552d99c763073b69346"
+    },
+    {
+      "release_id": 397435225,
+      "asset_id": 591926020,
+      "path": "v001_00-2026-09-26-1847CDT/certification-36283925159-attempt-1-warning.log",
+      "size": 572,
+      "sha256": "76b42fdf5dfe69951449ff631dc76ac177480c91a0385158c88e351ed7281b79"
+    },
+    {
+      "release_id": 397435225,
+      "asset_id": 591926024,
+      "path": "v001_00-2026-09-26-1847CDT/certification-36283925159-attempt-1.json",
+      "size": 15681,
+      "sha256": "3f2e77cd71eeebdf526bc96c44e364743224a0edbf298315f53ea08ef1f1aa32"
+    },
+    {
+      "release_id": 397435225,
+      "asset_id": 591926021,
+      "path": "v001_00-2026-09-26-1847CDT/certification-36283925159-attempt-1.md",
+      "size": 10432,
+      "sha256": "1f1e75c9bb8c907ed413e4676922774ec1ead743b4aa90e4a8e9ed50355f1e00"
+    },
+    {
+      "release_id": 397435225,
+      "asset_id": 591859302,
+      "path": "v001_00-2026-09-26-1847CDT/certification-36285388744-attempt-1.json",
+      "size": 14386,
+      "sha256": "bcb96f1cb442b11b107db133e5c2a9e4f0bcfedd3b8beb90b83a2b7b1b3d3109"
+    },
+    {
+      "release_id": 397435225,
+      "asset_id": 591859301,
+      "path": "v001_00-2026-09-26-1847CDT/certification-36285388744-attempt-1.md",
+      "size": 9795,
+      "sha256": "ee017c92f4671bd68ca544e832514534eb0440a5e035eedc5dc0789162a18331"
+    },
+    {
+      "release_id": 397435225,
+      "asset_id": 591962437,
+      "path": "v001_00-2026-09-26-1847CDT/certification-36285582196-attempt-1-warning.log",
+      "size": 572,
+      "sha256": "76b42fdf5dfe69951449ff631dc76ac177480c91a0385158c88e351ed7281b79"
+    },
+    {
+      "release_id": 397435225,
+      "asset_id": 591962434,
+      "path": "v001_00-2026-09-26-1847CDT/certification-36285582196-attempt-1.json",
+      "size": 15811,
+      "sha256": "9c6bc414da6923cbdf7b9bae99a0a2a905a9a7297f16a04a15bbebef98ff5248"
+    },
+    {
+      "release_id": 397435225,
+      "asset_id": 591962435,
+      "path": "v001_00-2026-09-26-1847CDT/certification-36285582196-attempt-1.md",
+      "size": 10730,
+      "sha256": "fa4f076b1beaad9de18dafcdb0dafd873200058c50510dc3750c864c5fd4aa2d"
+    },
+    {
+      "release_id": 397435225,
+      "asset_id": 591995672,
+      "path": "v001_00-2026-09-26-1847CDT/certification-36287962659-attempt-1-warning.log",
+      "size": 572,
+      "sha256": "76b42fdf5dfe69951449ff631dc76ac177480c91a0385158c88e351ed7281b79"
+    },
+    {
+      "release_id": 397435225,
+      "asset_id": 591995673,
+      "path": "v001_00-2026-09-26-1847CDT/certification-36287962659-attempt-1.json",
+      "size": 15811,
+      "sha256": "33635b0a608d29aac232a418d76774341487ee99b9a5aee066eab7f8ca15daad"
+    },
+    {
+      "release_id": 397435225,
+      "asset_id": 591995671,
+      "path": "v001_00-2026-09-26-1847CDT/certification-36287962659-attempt-1.md",
+      "size": 10730,
+      "sha256": "e0c39b4b95767e41e3d604a67cb9cf52987150bda5659d8684834905f7f09507"
+    },
+    {
+      "release_id": 397435225,
+      "asset_id": 591695269,
+      "path": "v001_00-2026-09-26-1847CDT/release-metadata.json",
+      "size": 1223,
+      "sha256": "4cdc84fe405870aa02d828f5330e9321ce6db608635e9362fa09e32f7b0d7164"
+    },
+    {
+      "release_id": 397435225,
+      "asset_id": 591695261,
+      "path": "v001_00-2026-09-26-1847CDT/release-notes.md",
+      "size": 2311,
+      "sha256": "7b67625aa1ff63408a4c815c0f35ef20ec84db5f183efab11977d14219db79e9"
+    },
+    {
+      "release_id": 397435225,
+      "asset_id": 591695265,
+      "path": "v001_00-2026-09-26-1847CDT/warning.log",
+      "size": 259,
+      "sha256": "cbb81d59759531e676a8c6a6387abcc70e6887b8225283ba5d87d600c5a3da02"
+    },
+    {
+      "release_id": 398483822,
+      "asset_id": 596038224,
+      "path": "v001_00-2026-09-28-1246CDT/SHA256SUMS.txt",
+      "size": 5836,
+      "sha256": "f44864272f1a9bae1f9192b8579dedb172318d17bad6277bb047879bc0470f00"
+    },
+    {
+      "release_id": 398483822,
+      "asset_id": 596074704,
+      "path": "v001_00-2026-09-28-1246CDT/certification-36455727999-attempt-1-warning.log",
+      "size": 572,
+      "sha256": "76b42fdf5dfe69951449ff631dc76ac177480c91a0385158c88e351ed7281b79"
+    },
+    {
+      "release_id": 398483822,
+      "asset_id": 596074703,
+      "path": "v001_00-2026-09-28-1246CDT/certification-36455727999-attempt-1.json",
+      "size": 16725,
+      "sha256": "038408478eb96c60d1b25935ac550a2c49c0b839865336dc67da10b99c2d8697"
+    },
+    {
+      "release_id": 398483822,
+      "asset_id": 596074701,
+      "path": "v001_00-2026-09-28-1246CDT/certification-36455727999-attempt-1.md",
+      "size": 11458,
+      "sha256": "4d639c4e7338d16ce372c906e7921064ae69c402cb9c8dad5f57560fceb2aff4"
+    },
+    {
+      "release_id": 398483822,
+      "asset_id": 596120768,
+      "path": "v001_00-2026-09-28-1246CDT/certification-36464360229-attempt-1-warning.log",
+      "size": 572,
+      "sha256": "76b42fdf5dfe69951449ff631dc76ac177480c91a0385158c88e351ed7281b79"
+    },
+    {
+      "release_id": 398483822,
+      "asset_id": 596120769,
+      "path": "v001_00-2026-09-28-1246CDT/certification-36464360229-attempt-1.json",
+      "size": 16727,
+      "sha256": "3ebb2e3e7b3d55696bad485c6d18128b33fa5a35697300cbb84db48379aa2cc5"
+    },
+    {
+      "release_id": 398483822,
+      "asset_id": 596120766,
+      "path": "v001_00-2026-09-28-1246CDT/certification-36464360229-attempt-1.md",
+      "size": 11460,
+      "sha256": "28cc22d24eb6ec13e6ab63d488780af613b213d4c77eb07aaf7cd3f0a86b3a46"
+    },
+    {
+      "release_id": 398483822,
+      "asset_id": 596201898,
+      "path": "v001_00-2026-09-28-1246CDT/certification-36466691708-attempt-1-warning.log",
+      "size": 572,
+      "sha256": "76b42fdf5dfe69951449ff631dc76ac177480c91a0385158c88e351ed7281b79"
+    },
+    {
+      "release_id": 398483822,
+      "asset_id": 596201897,
+      "path": "v001_00-2026-09-28-1246CDT/certification-36466691708-attempt-1.json",
+      "size": 16719,
+      "sha256": "9f3493f7ef32b03541618e44ef18f1f896597138b83640264c0f1e01cabad350"
+    },
+    {
+      "release_id": 398483822,
+      "asset_id": 596201900,
+      "path": "v001_00-2026-09-28-1246CDT/certification-36466691708-attempt-1.md",
+      "size": 11452,
+      "sha256": "f3cf43fab59a3d31a87c91e47ebc4fff3b583d18b09879dc8a54fa16a1aa8aae"
+    },
+    {
+      "release_id": 398483822,
+      "asset_id": 596250152,
+      "path": "v001_00-2026-09-28-1246CDT/certification-36466691708-attempt-2-warning.log",
+      "size": 572,
+      "sha256": "76b42fdf5dfe69951449ff631dc76ac177480c91a0385158c88e351ed7281b79"
+    },
+    {
+      "release_id": 398483822,
+      "asset_id": 596250154,
+      "path": "v001_00-2026-09-28-1246CDT/certification-36466691708-attempt-2.json",
+      "size": 16732,
+      "sha256": "81fea231b14e425ebfdeed8412246d1ee3eeafee418b5f53ba1297fcafef532e"
+    },
+    {
+      "release_id": 398483822,
+      "asset_id": 596250153,
+      "path": "v001_00-2026-09-28-1246CDT/certification-36466691708-attempt-2.md",
+      "size": 11466,
+      "sha256": "c97084a719e0b66d76adecbd1e31e0d9b4de5a9b39c2d95ba97bf22527f5dbbe"
+    },
+    {
+      "release_id": 398483822,
+      "asset_id": 596017368,
+      "path": "v001_00-2026-09-28-1246CDT/release-metadata.json",
+      "size": 1291,
+      "sha256": "924e811f945c37b46e0868ed9b1320a1ad0bd4b39c52c913384ffc8d2d4fee6d"
+    },
+    {
+      "release_id": 398483822,
+      "asset_id": 596017367,
+      "path": "v001_00-2026-09-28-1246CDT/release-notes.md",
+      "size": 2185,
+      "sha256": "0b19408091909f66a8ff812b4d103769f1b7f0d3bbc19e2ee3dd0da54950b222"
+    },
+    {
+      "release_id": 398483822,
+      "asset_id": 596017375,
+      "path": "v001_00-2026-09-28-1246CDT/warning.log",
+      "size": 259,
+      "sha256": "cbb81d59759531e676a8c6a6387abcc70e6887b8225283ba5d87d600c5a3da02"
+    },
+    {
+      "release_id": 399828596,
+      "asset_id": 600362859,
+      "path": "v001_00-2026-09-30-0300CDT/release-metadata.json",
+      "size": 1463,
+      "sha256": "56ffe5ade1fe1cb20b2170e1ff13d550e6f5fca0466447c38b1586b4260713ab"
+    },
+    {
+      "release_id": 399828596,
+      "asset_id": 600362861,
+      "path": "v001_00-2026-09-30-0300CDT/release-notes.md",
+      "size": 2417,
+      "sha256": "59038ae46b62dea4f0c2e0abe91ae054f24c2a6adca7fd8f65e4a8d1526f8f90"
+    },
+    {
+      "release_id": 399828596,
+      "asset_id": 600362858,
+      "path": "v001_00-2026-09-30-0300CDT/warning.log",
+      "size": 259,
+      "sha256": "cbb81d59759531e676a8c6a6387abcc70e6887b8225283ba5d87d600c5a3da02"
+    },
+    {
+      "release_id": 399921133,
+      "asset_id": 600622772,
+      "path": "v001_00-2026-09-30-0505CDT/SHA256SUMS.txt",
+      "size": 6192,
+      "sha256": "d9d42df17b0a06557a32fa21567a72765653dcab43ab01d939a746b29856abe4"
+    },
+    {
+      "release_id": 399921133,
+      "asset_id": 600708284,
+      "path": "v001_00-2026-09-30-0505CDT/certification-36695310257-attempt-1-warning.log",
+      "size": 572,
+      "sha256": "76b42fdf5dfe69951449ff631dc76ac177480c91a0385158c88e351ed7281b79"
+    },
+    {
+      "release_id": 399921133,
+      "asset_id": 600708285,
+      "path": "v001_00-2026-09-30-0505CDT/certification-36695310257-attempt-1.json",
+      "size": 18243,
+      "sha256": "f55f521e47aafd8872e4eff23c8d634234fce6a83fcf2806c10b2c688f5d736f"
+    },
+    {
+      "release_id": 399921133,
+      "asset_id": 600708283,
+      "path": "v001_00-2026-09-30-0505CDT/certification-36695310257-attempt-1.md",
+      "size": 12699,
+      "sha256": "1158c283c2b9e990fe35bdeebfe5e16d2e73dcc71cbcbdbd398ba07c41c89f6f"
+    },
+    {
+      "release_id": 399921133,
+      "asset_id": 600598938,
+      "path": "v001_00-2026-09-30-0505CDT/release-metadata.json",
+      "size": 1463,
+      "sha256": "e199d7441f6a1e7cf86c1aa7900b3eb72a500a675e92db73b8da751aacdbed7d"
+    },
+    {
+      "release_id": 399921133,
+      "asset_id": 600598940,
+      "path": "v001_00-2026-09-30-0505CDT/release-notes.md",
+      "size": 2417,
+      "sha256": "bb74d9d9b0eaed5e8950d5c3082e26fd3c271562a47d6c2b4bfffb5bfa339e94"
+    },
+    {
+      "release_id": 399921133,
+      "asset_id": 600598939,
+      "path": "v001_00-2026-09-30-0505CDT/warning.log",
+      "size": 259,
+      "sha256": "cbb81d59759531e676a8c6a6387abcc70e6887b8225283ba5d87d600c5a3da02"
+    }
+  ],
+  "git_tag_objects_before": {
+    "v001_00-2026-09-30-0300CDT": {
+      "sha": "ef70a2fd69d90d1d458eaa075c599a9aa80fcc7b",
+      "type": "commit",
+      "url": "https://api.github.com/repos/mirage335-colossus/pumpModem/git/commits/ef70a2fd69d90d1d458eaa075c599a9aa80fcc7b"
+    },
+    "v001_00-2026-09-30-0505CDT": {
+      "sha": "79bf20c840ce279af226a36bc698db3280664ea8",
+      "type": "commit",
+      "url": "https://api.github.com/repos/mirage335-colossus/pumpModem/git/commits/79bf20c840ce279af226a36bc698db3280664ea8"
+    },
+    "v001_00-2026-09-28-1246CDT": {
+      "sha": "2382f4e68607c4b0616ae11dc24511985121418a",
+      "type": "commit",
+      "url": "https://api.github.com/repos/mirage335-colossus/pumpModem/git/commits/2382f4e68607c4b0616ae11dc24511985121418a"
+    },
+    "v001_00-2026-09-26-1847CDT": {
+      "sha": "800da8c67611819c22236c7ef310cb518348ae2b",
+      "type": "commit",
+      "url": "https://api.github.com/repos/mirage335-colossus/pumpModem/git/commits/800da8c67611819c22236c7ef310cb518348ae2b"
+    },
+    "v001_00-2026-09-24-0856CDT": {
+      "sha": "9c83f5ec4ec9671931ffeb8069c5502c004ab495",
+      "type": "commit",
+      "url": "https://api.github.com/repos/mirage335-colossus/pumpModem/git/commits/9c83f5ec4ec9671931ffeb8069c5502c004ab495"
+    }
+  },
+  "deletion_policy": "Delete only the five listed GitHub release objects and their assets; preserve Latest, base, all Git tags and source commits.",
+  "results": []
+}

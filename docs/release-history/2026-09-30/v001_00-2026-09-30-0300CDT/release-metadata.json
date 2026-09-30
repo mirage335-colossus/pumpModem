@@ -1,0 +1,78 @@
+{
+  "apt_repository": {
+    "architectures": [
+      "amd64",
+      "arm64"
+    ],
+    "gui_backends": [
+      "fltk",
+      "rev"
+    ],
+    "schema": 1
+  },
+  "build_date": "2026-09-30-0300CDT",
+  "created_at": "2026-09-30T08:00:51Z",
+  "dependencies": {
+    "linux-sdk": "6c4884fdff9c745ab0a0",
+    "wasm-sdk": "e66e98abb90b466cab32",
+    "windows-base": "929016c86c9609704043"
+  },
+  "distro_channels": {
+    "architectures": [
+      "x86_64",
+      "aarch64"
+    ],
+    "formats": [
+      "pacman",
+      "gentoo-sync"
+    ],
+    "gui_backends": [
+      "fltk",
+      "rev"
+    ],
+    "schema": 1
+  },
+  "distro_recipes": {
+    "architectures": [
+      "x86_64",
+      "aarch64"
+    ],
+    "formats": [
+      "arch",
+      "gentoo"
+    ],
+    "gui_backends": [
+      "fltk",
+      "rev"
+    ],
+    "schema": 1
+  },
+  "experiment": false,
+  "frontends": [
+    "tui",
+    "framebuffer"
+  ],
+  "gui_backends": [
+    "fltk",
+    "rev"
+  ],
+  "linux_baseline": "bookworm-sdk",
+  "packager_sha": "ef70a2fd69d90d1d458eaa075c599a9aa80fcc7b",
+  "project_version": "1.0.0",
+  "run_attempt": "1",
+  "run_id": "36683147050",
+  "schema": 6,
+  "source_sha": "ef70a2fd69d90d1d458eaa075c599a9aa80fcc7b",
+  "tag": "v001_00-2026-09-30-0300CDT",
+  "timezone": "America/Chicago",
+  "title": "v001_00-2026-09-30-0300CDT",
+  "version": "v001_00",
+  "web": {
+    "browser": "wasm",
+    "schema": 1,
+    "worker_platforms": [
+      "linux-x86_64",
+      "linux-aarch64"
+    ]
+  }
+}

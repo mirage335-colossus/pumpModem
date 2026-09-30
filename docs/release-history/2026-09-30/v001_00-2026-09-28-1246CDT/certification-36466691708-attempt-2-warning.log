@@ -1,0 +1,3 @@
+WARNING windows-rev-wgl-unavailable: The runner cannot create the Rev OpenGL context. Native Windows Rev GUI tests and published GUI smoke are untested; compilation, headless GUI/CLI, modem, archive integrity and relocation checks remain mandatory. A Windows machine with the same graphics limitation cannot open the Rev GUI.
+Omitted checks for windows-x86_64-rev: source:gui_workflow, source:gui_adapter_conformance, source:gui_coordinates_1x, source:gui_coordinates_2x, published:gui_smoke
+Observed probe output: [NativeWindow] Required WGL ARB extensions not available
