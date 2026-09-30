@@ -17,6 +17,13 @@ import subprocess
 import tarfile
 import urllib.request
 
+try:
+    from build_capacity import default_jobs
+except ImportError:
+    # A copied standalone preparation script must still work.
+    def default_jobs():
+        return 1
+
 VERSION = "2.32.10"
 ARCHIVE = f"SDL2-{VERSION}.tar.gz"
 URL = f"https://www.libsdl.org/release/{ARCHIVE}"
@@ -66,7 +73,8 @@ def extract_source(archive, destination):
         source.extractall(destination, members=members)
 
 
-def prepare(destination, archive=None, jobs=2, cc="cc", cxx="c++"):
+def prepare(destination, archive=None, jobs=None, cc="cc", cxx="c++"):
+    jobs = default_jobs() if jobs is None else jobs
     if platform.system() != "Linux":
         raise ValueError("The native SDL preparation requires Linux")
     destination = Path(destination).absolute()
@@ -123,11 +131,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("destination", type=Path, help="new preparation directory")
     parser.add_argument("--archive", type=Path, help="existing pinned source archive (offline)")
-    parser.add_argument("--jobs", type=int, default=2)
+    parser.add_argument("--jobs", type=int, help="compile jobs (default: CPU/RAM capacity)")
     parser.add_argument("--cc", default=os.environ.get("CC", "cc"))
     parser.add_argument("--cxx", default=os.environ.get("CXX", "c++"))
     args = parser.parse_args()
-    if args.jobs < 1:
+    if args.jobs is not None and args.jobs < 1:
         parser.error("--jobs must be positive")
     prepare(args.destination, args.archive, args.jobs, args.cc, args.cxx)
 

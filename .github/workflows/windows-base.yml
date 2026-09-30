@@ -100,7 +100,8 @@ jobs:
         shell: pwsh
         run: |
           $recipe = Get-Content third_party/build-support/windows-base.json -Raw | ConvertFrom-Json
-          $env:VCPKG_MAX_CONCURRENCY = $env:NUMBER_OF_PROCESSORS
+          $env:VCPKG_MAX_CONCURRENCY = $(python -B tools/build_capacity.py)
+          if ($LASTEXITCODE -ne 0 -or $env:VCPKG_MAX_CONCURRENCY -notmatch '^[1-9][0-9]*$') { $env:VCPKG_MAX_CONCURRENCY = '1' }
           $toolchain = & ./tools/select-windows-toolchain.ps1
           $env:VCPKG_VISUAL_STUDIO_PATH = $toolchain.Instance
           # Toolset/version are triplet settings, not vcpkg environment options.
@@ -150,7 +151,9 @@ jobs:
         run: |
           cmake -S tests/windows-base-probe -B build/windows-base-probe -A x64 -DCMAKE_TOOLCHAIN_FILE="$env:BASE_TOOLCHAIN" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
           if ($LASTEXITCODE -ne 0) { throw 'Relocated dependency configure failed' }
-          cmake --build build/windows-base-probe --config Release --parallel $env:NUMBER_OF_PROCESSORS
+          $env:CL_MPCount = python -B tools/build_capacity.py
+          if ($LASTEXITCODE -ne 0 -or $env:CL_MPCount -notmatch '^[1-9][0-9]*$') { $env:CL_MPCount = '1' }
+          cmake --build build/windows-base-probe --config Release --parallel $env:CL_MPCount
           if ($LASTEXITCODE -ne 0) { throw 'Relocated dependency link failed' }
           & ./build/windows-base-probe/Release/windows-base-probe.exe
           if ($LASTEXITCODE -ne 0) { throw 'Relocated dependency runtime probe failed' }

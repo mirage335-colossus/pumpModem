@@ -241,11 +241,11 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release -DDATAPUMP_PORTABLE=OFF
           -DDATAPUMP_GUI_BACKEND=${{ matrix.backend }} -DDATAPUMP_TEST_NATIVE_GUI=ON
           -DGUI_SMOKE_TIMEOUT=${{ inputs.linux_runner == 'ubuntu-24.04' && '1200' || '600' }} -DDART_TESTING_TIMEOUT=3600
-      - run: cmake --build build-gui --target datapump-tests-gui --parallel "$(nproc)"
+      - run: cmake --build build-gui --target datapump-tests-gui --parallel "$(python3 -B tools/build_capacity.py)"
       - name: Check offline build and dependency tooling
         if: matrix.backend == 'fltk'
         run: |
-          cmake --build build-gui --target datapump-tests-build --parallel "$(nproc)"
+          cmake --build build-gui --target datapump-tests-build --parallel "$(python3 -B tools/build_capacity.py)"
           ctest --test-dir build-gui --output-on-failure -L '^build$'
       - name: Test shared behavior, native contract and simulated workflow
         run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' python3 tools/run-native-tests.py --allow-budget-exhaustion --build-dir build-gui --label gui --report-dir "$DATAPUMP_CI_SMOKE_WARNINGS_DIR"

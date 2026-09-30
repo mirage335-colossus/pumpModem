@@ -17,8 +17,9 @@ Usage: ./build.sh [build|test GROUP|sanitize [GROUP]|package] [OPTIONS] [-- CMAK
   --web-worker         Also build the socket-free inherited-pipe datapump-worker.
   --cli                Omit the native GUI (shared GUI tests remain available).
   --backend fltk|rev   Select a GUI backend; Rev needs its own suitable toolchain.
-  --jobs N, -j N       Parallel build/test limit (default: 2).
+  --jobs N, -j N       Explicit parallel build/test limit (tests default to 2).
   --build-jobs N       Override compilation concurrency; keep --jobs for tests.
+                       Default: available CPUs minus one, capped by available RAM.
   --stop-on-failure   Stop a test run after its first failed test (CI feedback).
   --build-dir PATH     Separate output tree, e.g. for another compiler/toolchain.
   --sdk PATH           Use a prepared source SDK; keep host dependencies separate.
@@ -47,7 +48,10 @@ cli=no
 tui=OFF
 framebuffer=OFF
 web_worker=OFF
-jobs=${DATAPUMP_JOBS:-${CMAKE_BUILD_PARALLEL_LEVEL:-2}}
+jobs=${DATAPUMP_JOBS:-${CMAKE_BUILD_PARALLEL_LEVEL:-}}
+jobs_explicit=no
+[ -z "$jobs" ] || jobs_explicit=yes
+jobs=${jobs:-2}
 build_jobs=
 build_jobs_explicit=no
 build_dir=
@@ -63,7 +67,7 @@ while [ "$#" -gt 0 ]; do
         --web-worker) web_worker=ON; shift ;;
         --stop-on-failure) stop_on_failure=yes; shift ;;
         --backend) need_value "$@"; backend=$2; backend_explicit=yes; shift 2 ;;
-        --jobs|-j) need_value "$@"; jobs=$2; shift 2 ;;
+        --jobs|-j) need_value "$@"; jobs=$2; jobs_explicit=yes; shift 2 ;;
         --build-jobs) need_value "$@"; build_jobs=$2; build_jobs_explicit=yes; shift 2 ;;
         --build-dir) need_value "$@"; build_dir=$2; shift 2 ;;
         --wasm-sdk) need_value "$@"; [ -n "$2" ] || die "--wasm-sdk needs a nonempty path"; wasm_sdk_root=$2; shift 2 ;;
@@ -87,7 +91,20 @@ done
 case "$backend" in fltk|rev) ;; *) die "backend must be fltk or rev" ;; esac
 case "$jobs" in ''|*[!0-9]*|0) die "jobs must be a positive integer" ;; esac
 [ "$jobs" -gt 0 ] || die "jobs must be a positive integer"
-if [ "$build_jobs_explicit" = no ]; then build_jobs=$jobs; fi
+if [ "$build_jobs_explicit" = no ]; then
+    if [ "$jobs_explicit" = yes ]; then
+        build_jobs=$jobs
+    else
+        source_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+        if ! command -v python3 >/dev/null 2>&1 ||
+           ! build_jobs=$(python3 -B "$source_dir/tools/build_capacity.py"); then
+            # Resource discovery is optional, including on CMake-only hosts.
+            build_jobs=1
+            printf '%s\n' 'build.sh: resource detection unavailable; compiling with one job (override with --build-jobs).' >&2
+        fi
+        case "$build_jobs" in ''|*[!0-9]*|0) build_jobs=1 ;; esac
+    fi
+fi
 case "$build_jobs" in ''|*[!0-9]*|0) die "build jobs must be a positive integer" ;; esac
 [ "$build_jobs" -gt 0 ] || die "build jobs must be a positive integer"
 if [ -n "${DATAPUMP_MAX_GLIBC:-}" ]; then
@@ -320,6 +337,7 @@ target=datapump-apps
 if [ -n "$group" ]; then target=datapump-tests-$group; fi
 if [ "$group" = all ]; then target=datapump-tests; fi
 if [ "$command_name" = package ]; then target=package; fi
+printf 'Building %s with %s compile jobs\n' "$target" "$build_jobs"
 cmake --build "$build_dir" --config "$build_config" --target "$target" --parallel "$build_jobs"
 
 if [ -n "$group" ]; then

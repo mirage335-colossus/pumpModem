@@ -12,7 +12,7 @@ on:
         type: string
         default: auto
       jobs:
-        description: 'SDK compilation jobs; 0 uses all CPUs available to the runner'
+        description: 'SDK compilation jobs; 0 selects CPU/RAM capacity, reserving one CPU'
         type: string
         default: '0'
       publish_base:
@@ -63,7 +63,7 @@ jobs:
           requested = os.environ['SDK_REQUESTED_JOBS']
           if not re.fullmatch(r'[0-9]+', requested):
               raise SystemExit('SDK jobs must be 0 (automatic) or a positive integer')
-          jobs = int(requested) or int(subprocess.check_output(['nproc'], text=True))
+          jobs = int(requested) or int(subprocess.check_output(['python3', '-B', 'tools/build_capacity.py'], text=True))
           identity = subprocess.check_output(['python3', 'tools/build-sdk.py', 'id'], text=True).strip()
           with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
               out.write(f'recipe_id={identity}\njobs={jobs}\n')
@@ -147,10 +147,10 @@ jobs:
           for backend in fltk rev; do
             tree="build/sdk-base-$backend"
             ./build.sh --sdk "$sdk" --backend "$backend" --tui --fb \
-              --build-dir "$tree" --jobs 1 --build-jobs "$(nproc)" -- \
+              --build-dir "$tree" --jobs 1 --build-jobs "$(python3 -B tools/build_capacity.py)" -- \
               -DDATAPUMP_PORTABLE=ON -DDATAPUMP_TEST_NATIVE_GUI=ON
             "$sdk/bin/cmake" --build "$tree" --config Release \
-              --target datapump-tests-native --parallel "$(nproc)"
+              --target datapump-tests-native --parallel "$(python3 -B tools/build_capacity.py)"
             xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' \
               "$sdk/bin/ctest" --test-dir "$tree" -C Release --output-on-failure \
               --no-tests=error --parallel 1 -R '^gui_self_check$'
@@ -161,7 +161,7 @@ jobs:
               --no-tests=error --parallel 1 -L '^native_gui$' -E '^gui_workflow$'
           done
           ./build.sh test frontends --sdk "$sdk" --backend fltk --tui --fb \
-            --build-dir build/sdk-base-fltk --jobs 1 --build-jobs "$(nproc)" -- \
+            --build-dir build/sdk-base-fltk --jobs 1 --build-jobs "$(python3 -B tools/build_capacity.py)" -- \
             -DDATAPUMP_PORTABLE=ON -DDATAPUMP_TEST_NATIVE_GUI=ON
           SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy \
             xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' \

@@ -37,7 +37,7 @@ jobs:
         run: |
           case "$SDK_SOURCE" in auto|base|rebuild) ;; *) exit 2 ;; esac
           case "$SDK_JOBS" in ''|*[!0-9]*) exit 2 ;; esac
-          if [ "$SDK_JOBS" = 0 ]; then SDK_JOBS=$(nproc); fi
+          if [ "$SDK_JOBS" = 0 ]; then SDK_JOBS=$(python3 -B tools/build_capacity.py); fi
           echo "jobs=$SDK_JOBS" >> "$GITHUB_OUTPUT"
           found=false
           if [ "$SDK_SOURCE" != rebuild ]; then
@@ -60,7 +60,7 @@ jobs:
       - name: Qualify relocation and actual browser application tests
         run: |
           python3 -B tools/wasm-sdk-release.py install --directory wasm-sdk-archives --destination "$GITHUB_WORKSPACE/build/wasm-qualified"
-          ./build.sh test web --wasm-sdk "$GITHUB_WORKSPACE/build/wasm-qualified" --build-dir build/wasm-qualification --jobs 1 --build-jobs "$(nproc)"
+          ./build.sh test web --wasm-sdk "$GITHUB_WORKSPACE/build/wasm-qualified" --build-dir build/wasm-qualification --jobs 1 --build-jobs "$(python3 -B tools/build_capacity.py)"
       - name: Preserve immutable recipe assets in base
         if: inputs.publish
         run: python3 -B tools/wasm-sdk-release.py publish --repo "$GITHUB_REPOSITORY" --directory wasm-sdk-archives --source-sha "$GITHUB_SHA"

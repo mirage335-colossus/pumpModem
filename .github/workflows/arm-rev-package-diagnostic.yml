@@ -32,7 +32,7 @@ jobs:
             sh tools/install-release-cmake.sh /workspace/build/ci-cmake
             python3 tools/install-release-rev.py /workspace/build/ci-rev-tools
             export PATH=/workspace/build/ci-cmake/bin:/workspace/build/ci-rev-tools/bin:$PATH
-            CC=clang-19 CXX=clang++-19 DATAPUMP_MAX_GLIBC=2.35 ./build.sh package --backend rev --build-dir build/arm-rev-package --jobs "$(nproc)"
+            CC=clang-19 CXX=clang++-19 DATAPUMP_MAX_GLIBC=2.35 ./build.sh package --backend rev --build-dir build/arm-rev-package --jobs "$(python3 -B tools/build_capacity.py)"
           '
       - name: Verify the unchanged archive and visible GUI with the newer host driver
         if: ${{ !inputs.smoke }}

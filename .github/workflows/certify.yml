@@ -252,7 +252,7 @@ jobs:
       - name: Prepare the released source's pinned CPU framebuffer host
         if: ${{ !matrix.sdk && needs.prepare.outputs.frontends == 'true' && (matrix.scope == 'main' || matrix.scope == 'frontends') }}
         run: |
-          python3 -B tools/prepare-native-sdl.py "$GITHUB_WORKSPACE/build/native-sdl" --cc gcc-11 --cxx g++-11 --jobs "$(nproc)"
+          python3 -B tools/prepare-native-sdl.py "$GITHUB_WORKSPACE/build/native-sdl" --cc gcc-11 --cxx g++-11 --jobs "$(python3 -B .certification-tools/tools/build_capacity.py)"
           echo "DATAPUMP_NATIVE_SDL_ROOT=$GITHUB_WORKSPACE/build/native-sdl/install" >> "$GITHUB_ENV"
       - name: Run source GUI, packaging and non-calibration contract suites
         if: matrix.scope == 'main'
@@ -278,7 +278,7 @@ jobs:
             set -- --backend "$GUI_BACKEND" --build-dir build/certify --jobs 2
             if [ "$BUILD_FRONTENDS" = true ]; then set -- "$@" --tui --fb; fi
             if [ "$BUILD_WEB" = true ]; then set -- "$@" --web-worker; fi
-            if [ "$separate_build_jobs" = true ]; then set -- "$@" --build-jobs "$(nproc)"; fi
+            if [ "$separate_build_jobs" = true ]; then set -- "$@" --build-jobs "$(python3 -B .certification-tools/tools/build_capacity.py)"; fi
             if [ "$USE_SDK" = true ]; then set -- "$@" --sdk "$GITHUB_WORKSPACE/build/sdk"; fi
             ./build.sh test "$group" --stop-on-failure "$@" -- -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600
             if [ "$group" = gui ]; then
@@ -289,7 +289,7 @@ jobs:
                 native_cmake="$GITHUB_WORKSPACE/build/sdk/bin/cmake"
                 native_ctest="$GITHUB_WORKSPACE/build/sdk/bin/ctest"
               fi
-              "$native_cmake" --build build/certify --target datapump-tests-native --parallel "$(nproc)"
+              "$native_cmake" --build build/certify --target datapump-tests-native --parallel "$(python3 -B .certification-tools/tools/build_capacity.py)"
               set -- --build-dir build/certify --config Release --ctest "$native_ctest" --report-dir "$DATAPUMP_CI_SMOKE_WARNINGS_DIR"
               if [ "$STANDARD_ARM_REV_ADAPTER" = true ]; then set -- "$@" --adapter-timeout 900 --adapter-warn-after 330; fi
               xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' python3 .certification-tools/tools/run-native-tests.py --allow-budget-exhaustion "$@"
@@ -301,7 +301,7 @@ jobs:
             contract_cmake="$GITHUB_WORKSPACE/build/sdk/bin/cmake"
             contract_ctest="$GITHUB_WORKSPACE/build/sdk/bin/ctest"
           fi
-          "$contract_cmake" --build build/certify --target datapump-tests-contract --parallel "$(nproc)"
+          "$contract_cmake" --build build/certify --target datapump-tests-contract --parallel "$(python3 -B .certification-tools/tools/build_capacity.py)"
           # Disjoint selections retain the complete immutable source contract.
           # Live simulation gets the CPU alone; full calibration runs in its
           # required sibling scope and remaining tests keep concurrency.
@@ -319,7 +319,7 @@ jobs:
           DATAPUMP_MAX_GLIBC: ${{ matrix.glibc }}
         run: |
           if [ "$USE_SDK" != true ]; then export CC=gcc-11 CXX=g++-11; fi
-          set -- --cli --web-worker --build-dir build/certify-web --jobs 1 --build-jobs "$(nproc)"
+          set -- --cli --web-worker --build-dir build/certify-web --jobs 1 --build-jobs "$(python3 -B .certification-tools/tools/build_capacity.py)"
           if [ "$USE_SDK" = true ]; then set -- "$@" --sdk "$GITHUB_WORKSPACE/build/sdk"; fi
           ./build.sh test web --stop-on-failure "$@" -- -DDATAPUMP_PORTABLE=ON
       - name: Retain independent native web evidence
@@ -342,7 +342,7 @@ jobs:
             if [ "$GUI_BACKEND" = rev ]; then export CC=clang-19 CXX=clang++-19;
             else export CC=gcc-11 CXX=g++-11; fi
           fi
-          set -- --cli --tui --fb --backend "$GUI_BACKEND" --build-dir build/certify-frontends --jobs 1 --build-jobs "$(nproc)"
+          set -- --cli --tui --fb --backend "$GUI_BACKEND" --build-dir build/certify-frontends --jobs 1 --build-jobs "$(python3 -B .certification-tools/tools/build_capacity.py)"
           if [ "$USE_SDK" = true ]; then set -- "$@" --sdk "$GITHUB_WORKSPACE/build/sdk"; fi
           ./build.sh test frontends --stop-on-failure "$@" -- -DDATAPUMP_PORTABLE=ON
       - name: Retain independent frontend evidence
@@ -380,7 +380,7 @@ jobs:
           fi
           set -- --backend "$GUI_BACKEND" --build-dir build/certify --jobs 2
           if ./build.sh --help | grep -q -- '--build-jobs'; then
-            set -- "$@" --build-jobs "$(nproc)"
+            set -- "$@" --build-jobs "$(python3 -B .certification-tools/tools/build_capacity.py)"
           fi
           calibration_cmake=cmake
           calibration_ctest=ctest
@@ -393,7 +393,7 @@ jobs:
           # Static OpenSSL matches main's contract configuration after packaging.
           # Do not override registered calibration workers, sections or seeds.
           ./build.sh test build --stop-on-failure "$@" -- -DDATAPUMP_PORTABLE=ON -DOPENSSL_USE_STATIC_LIBS=ON -DDART_TESTING_TIMEOUT=3600
-          "$calibration_cmake" --build build/certify --config Release --target test_differential_receiver_probability --parallel "$(nproc)"
+          "$calibration_cmake" --build build/certify --config Release --target test_differential_receiver_probability --parallel "$(python3 -B .certification-tools/tools/build_capacity.py)"
           "$calibration_ctest" --test-dir build/certify -C Release --show-only=json-v1 -L '^contract$' -LE native_gui -R '^differential_receiver_probability$' > build/certify/calibration-registration.json
           "$calibration_ctest" --test-dir build/certify -C Release --output-on-failure --stop-on-failure --no-tests=error -L '^contract$' -LE native_gui -R '^differential_receiver_probability$' --parallel 1 --output-log "$GITHUB_WORKSPACE/build/certify/calibration.log" --output-junit "$GITHUB_WORKSPACE/build/certify/calibration.xml"
           echo 'The complete registered differential receiver calibration passed independently; source and published-package checks remain required.' >> "$GITHUB_STEP_SUMMARY"
@@ -422,7 +422,7 @@ jobs:
             audio_cmake="$GITHUB_WORKSPACE/build/sdk/bin/cmake"
             audio_ctest="$GITHUB_WORKSPACE/build/sdk/bin/ctest"
           fi
-          "$audio_cmake" --build build/certify --target test_alsa_audio test_windows_audio test_audio_rates test_resampler --parallel "$(nproc)"
+          "$audio_cmake" --build build/certify --target test_alsa_audio test_windows_audio test_audio_rates test_resampler --parallel "$(python3 -B .certification-tools/tools/build_capacity.py)"
           "$audio_ctest" --test-dir build/certify --output-on-failure -R '^(alsa_audio_contract|windows_audio_contract|audio_rates|resampler)$' --parallel 1 --stop-on-failure --no-tests=error
       - name: Download and verify the exact published archive
         if: matrix.scope == 'main'

@@ -33,7 +33,7 @@ jobs:
           test "$(uname -m)" = aarch64
           {
             echo "Selected runner: $SELECTED_RUNNER; actual: $RUNNER_NAME"
-            echo "Build baseline: Ubuntu 22.04; architecture: $(uname -m); compile jobs: $(nproc)"
+            echo "Build baseline: Ubuntu 22.04; architecture: $(uname -m); usable CPUs: $(nproc)"
             awk '/MemTotal/ {print "Host memory: " $2 " KiB"}' /proc/meminfo
             echo 'Focused compiler/routing check only; no SDK build, packages or certification.'
           } | tee -a "$GITHUB_STEP_SUMMARY"
@@ -45,6 +45,6 @@ jobs:
       - name: Compile the small production Legacy fixture using available cores
         run: |
           cmake -S tests/devfast -B build/runner-capacity -G Ninja -DCMAKE_BUILD_TYPE=Release
-          cmake --build build/runner-capacity --target test_gui_legacy_poll --parallel "$(nproc)"
+          cmake --build build/runner-capacity --target test_gui_legacy_poll --parallel "$(python3 -B tools/build_capacity.py 2>/dev/null || echo 1)"
           ctest --test-dir build/runner-capacity --output-on-failure -R '^gui_legacy_poll$' --parallel 1 --no-tests=error
 

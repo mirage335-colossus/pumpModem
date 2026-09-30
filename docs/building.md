@@ -236,17 +236,47 @@ browser; those require the actual browser/device matrix.
 | `./build.sh test packaging` | `build/package-tests`, portable Release | Packaging fixtures and application relocation |
 | `CC=clang-19 CXX=clang++-19 ./build.sh --backend rev` | `build/rev` | Optional C++23/Rev build with its extra dependencies |
 
-Native sanitizer/CLI/Rev combinations use distinct directories. `--jobs N`
-controls build and test concurrency (default 2); `DATAPUMP_JOBS` or
-`CMAKE_BUILD_PARALLEL_LEVEL` can set that default. `--build-jobs N` overrides
-compilation concurrency independently, so a large CI runner can compile with all
-available cores while tests retain their established concurrency:
+Native sanitizer/CLI/Rev combinations use distinct directories. By default,
+compilation uses **one fewer than the available logical CPUs**, at least one job,
+subject to a RAM budget. Tests still default to two jobs. Explicit `--jobs N`,
+`DATAPUMP_JOBS`, or `CMAKE_BUILD_PARALLEL_LEVEL` keep their existing meaning: they
+set both build and test concurrency. `--build-jobs N` overrides compilation only,
+regardless of option order. Explicit limits take precedence over automatic detection.
 
 ```sh
-./build.sh test gui --build-jobs "$(nproc)" --jobs 2
+./build.sh test gui
+./build.sh test gui --build-jobs 8 --jobs 2
 ```
 
-Prefer a modest limit on memory-constrained hosts. Use `--stop-on-failure` with `test` or `sanitize` for early CI feedback after a
+The optional [capacity selector](../tools/build_capacity.py) uses only Python's
+standard library. It accounts for Linux CPU affinity and visible cgroup quotas,
+and uses available physical memory (including remaining cgroup headroom), not
+total installed RAM. It budgets 768 MiB per simultaneous job after reserving the
+larger of 256 MiB or 10% of available memory. Thus 2 GiB available permits up to
+two jobs; a two-CPU machine uses one. This is a conservative scheduling estimate,
+not an enforced memory ceiling: large compiler/linker tasks or concurrent builds
+may need an explicit lower limit. No compiler flags or optimization levels change.
+
+Detection is best-effort: no downloads, third-party Python packages, or new
+required system utilities. Unknown memory caps the automatic count at two;
+unsupported or failed probes fall back conservatively, and the wrapper uses one
+job if Python is unavailable. macOS memory availability is an estimate from
+`vm_stat`; Windows uses the built-in system memory API. No oversubscription is
+assumed from idle time or compiler-cache hits.
+
+For direct CMake or maintenance recipe invocations, pass the selector explicitly:
+
+```sh
+cmake --build build/dev --parallel "$(python3 -B tools/build_capacity.py)"
+python3 tools/build-sdk.py build --jobs "$(python3 -B tools/build_capacity.py)"
+```
+
+The immutable Linux/Wasm SDK recipe builders retain their historical standalone
+defaults to preserve existing recipe identities; base-maintenance workflows pass
+the automatic count explicitly. Normal application builds continue reusing the
+prepared SDK. No base rebuild is required for this scheduling change.
+
+Use `--stop-on-failure` with `test` or `sanitize` for early CI feedback after a
 failure; successful runs still execute the entire selected group.
 Native GUI tests must have a display, preferably an
 isolated Xvfb session; `./build.sh test native` builds and runs them explicitly.

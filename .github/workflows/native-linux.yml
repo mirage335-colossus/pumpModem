@@ -75,7 +75,7 @@ jobs:
       - name: Prepare the pinned CPU framebuffer host
         if: inputs.scope == 'package' || inputs.scope == 'frontends'
         run: |
-          python3 -B tools/prepare-native-sdl.py "$GITHUB_WORKSPACE/build/native-sdl" --cc gcc-11 --cxx g++-11 --jobs "$(nproc)"
+          python3 -B tools/prepare-native-sdl.py "$GITHUB_WORKSPACE/build/native-sdl" --cc gcc-11 --cxx g++-11 --jobs "$(python3 -B tools/build_capacity.py)"
           echo "DATAPUMP_NATIVE_SDL_ROOT=$GITHUB_WORKSPACE/build/native-sdl/install" >> "$GITHUB_ENV"
       - name: Prepare the JavaScript test host
         if: inputs.scope == 'web'
@@ -109,7 +109,7 @@ jobs:
             live) targets=(datapump-tests-ci-live) ;;
             *) echo "Unknown native scope: $CI_SCOPE" >&2; exit 2 ;;
           esac
-          cmake --build build --target "${targets[@]}" --parallel "$(nproc)"
+          cmake --build build --target "${targets[@]}" --parallel "$(python3 -B tools/build_capacity.py)"
       - name: Run the selected native tests
         if: inputs.scope == 'core' || inputs.scope == 'fast' || inputs.scope == 'live' || inputs.scope == 'calibration' || inputs.scope == 'frontends' || inputs.scope == 'web'
         run: |
@@ -185,7 +185,7 @@ jobs:
         env:
           DATAPUMP_SMOKE_SCOPE: published/native-archives
         run: |
-          cmake --build build --target package --parallel "$(nproc)"
+          cmake --build build --target package --parallel "$(python3 -B tools/build_capacity.py)"
           xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/build/releases" -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.35 -DREQUIRE_MANUALS=ON -DREQUIRE_FRONTENDS=ON -P tools/verify-native-archives.cmake 2>&1 | tee build/package-archives.log
           echo 'Portable Release desktop, relocation, corruption, both archive formats and ABI checks completed; any incomplete smoke coverage is listed in the retained reports. Independent regression/calibration jobs still determine the overall workflow result.' >> "$GITHUB_STEP_SUMMARY"
       - name: Upload Linux offline bundles

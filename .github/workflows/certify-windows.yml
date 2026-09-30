@@ -103,7 +103,9 @@ jobs:
           cmake -S . -B build/release-windows -A x64 -DCMAKE_SUPPRESS_REGENERATION=ON -DCMAKE_TOOLCHAIN_FILE="$env:DATAPUMP_WINDOWS_TOOLCHAIN" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DDATAPUMP_GUI_BACKEND="$env:GUI_BACKEND" -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600 -DDATAPUMP_TEST_NATIVE_GUI=ON -DGUI_SMOKE_TIMEOUT=600 -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded @frontendOptions
           if ($LASTEXITCODE -ne 0) { throw 'Configure failed' }
           if ($env:CERTIFICATION_SCOPE -eq 'main' -and $env:GUI_BACKEND -eq 'rev') {
-            cmake --build build/release-windows --config Release --target test_rev_coordinates --parallel $env:NUMBER_OF_PROCESSORS
+            $env:CL_MPCount = python -B .certification-tools/tools/build_capacity.py
+            if ($LASTEXITCODE -ne 0 -or $env:CL_MPCount -notmatch '^[1-9][0-9]*$') { $env:CL_MPCount = '1' }
+            cmake --build build/release-windows --config Release --target test_rev_coordinates --parallel $env:CL_MPCount
             if ($LASTEXITCODE -ne 0) { throw 'Rev native context probe build failed' }
           }
       - name: Classify only the known hosted WGL limitation
@@ -119,7 +121,9 @@ jobs:
         env:
           GUI_SMOKE: ${{ steps.graphics.outputs.gui_smoke || 'ON' }}
         run: |
-          cmake --build build/release-windows --config Release --target datapump-apps datapump-tests-contract datapump-tests-gui datapump-tests-packaging --parallel $env:NUMBER_OF_PROCESSORS
+          $env:CL_MPCount = python -B .certification-tools/tools/build_capacity.py
+          if ($LASTEXITCODE -ne 0 -or $env:CL_MPCount -notmatch '^[1-9][0-9]*$') { $env:CL_MPCount = '1' }
+          cmake --build build/release-windows --config Release --target datapump-apps datapump-tests-contract datapump-tests-gui datapump-tests-packaging --parallel $env:CL_MPCount
           if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
           # Only native graphics are unavailable after the exact WGL warning.
           # Headless GUI, CLI, modem, package and calibration checks stay required.
@@ -149,7 +153,9 @@ jobs:
         shell: pwsh
         run: |
           if ('${{ inputs.frontends }}' -ne 'true') { throw 'Frontend scope requires declared release inventory' }
-          cmake --build build/release-windows --config Release --target datapump-tests-frontends --parallel $env:NUMBER_OF_PROCESSORS
+          $env:CL_MPCount = python -B .certification-tools/tools/build_capacity.py
+          if ($LASTEXITCODE -ne 0 -or $env:CL_MPCount -notmatch '^[1-9][0-9]*$') { $env:CL_MPCount = '1' }
+          cmake --build build/release-windows --config Release --target datapump-tests-frontends --parallel $env:CL_MPCount
           if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed' }
           ctest --test-dir build/release-windows -C Release --output-on-failure -L '^frontends$' --parallel 1 --stop-on-failure --no-tests=error
           if ($LASTEXITCODE -ne 0) { throw 'Frontend tests failed' }
@@ -161,7 +167,9 @@ jobs:
         if: inputs.scope == 'calibration'
         shell: pwsh
         run: |
-          cmake --build build/release-windows --config Release --target test_differential_receiver_probability --parallel $env:NUMBER_OF_PROCESSORS
+          $env:CL_MPCount = python -B .certification-tools/tools/build_capacity.py
+          if ($LASTEXITCODE -ne 0 -or $env:CL_MPCount -notmatch '^[1-9][0-9]*$') { $env:CL_MPCount = '1' }
+          cmake --build build/release-windows --config Release --target test_differential_receiver_probability --parallel $env:CL_MPCount
           if ($LASTEXITCODE -ne 0) { throw 'Calibration build failed' }
           $registration = ctest --test-dir build/release-windows -C Release --show-only=json-v1 -L '^(contract|gui|packaging)$' -L '^calibration$' -R '^differential_receiver_probability$'
           if ($LASTEXITCODE -ne 0) { throw 'Calibration inventory failed' }

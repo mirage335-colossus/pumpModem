@@ -32,7 +32,7 @@ class ReleaseRevTools(unittest.TestCase):
             patch.object(tools, 'download', side_effect=self.download),
             patch.object(tools, 'NINJA_SHA256', hashlib.sha256(self.payload).hexdigest()),
             patch.object(tools.os, 'geteuid', return_value=0),
-            patch.object(tools.os, 'cpu_count', return_value=3),
+            patch.object(tools, 'default_jobs', return_value=3),
             patch.object(tools.platform, 'system', return_value='Linux'),
             patch.object(tools.platform, 'machine', return_value='x86_64'),
         ]

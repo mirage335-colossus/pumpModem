@@ -85,7 +85,9 @@ jobs:
             'live' { $targets = @('datapump-tests-ci-live') }
             default { throw "Unknown native scope: $env:CI_SCOPE" }
           }
-          cmake --build build --config Release --target @targets --parallel $env:NUMBER_OF_PROCESSORS
+          $env:CL_MPCount = python -B tools/build_capacity.py
+          if ($LASTEXITCODE -ne 0 -or $env:CL_MPCount -notmatch '^[1-9][0-9]*$') { $env:CL_MPCount = '1' }
+          cmake --build build --config Release --target @targets --parallel $env:CL_MPCount
           if ($LASTEXITCODE -ne 0) { throw "Native shard build failed" }
       - name: Run the selected native tests
         if: inputs.scope != 'package'
@@ -103,7 +105,9 @@ jobs:
         env:
           DATAPUMP_SMOKE_SCOPE: published/native-archives
         run: |
-          cmake --build build --config Release --target package --parallel $env:NUMBER_OF_PROCESSORS
+          $env:CL_MPCount = python -B tools/build_capacity.py
+          if ($LASTEXITCODE -ne 0 -or $env:CL_MPCount -notmatch '^[1-9][0-9]*$') { $env:CL_MPCount = '1' }
+          cmake --build build --config Release --target package --parallel $env:CL_MPCount
           if ($LASTEXITCODE -ne 0) { throw "Native packaging failed" }
           cmake -DARCHIVE_DIR="$PWD/build/releases" -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DREQUIRE_MANUALS=ON -DREQUIRE_FRONTENDS=ON -P tools/verify-native-archives.cmake 2>&1 | Tee-Object -FilePath build/package-archives.log
           if ($LASTEXITCODE -ne 0) { throw "Archive verification failed" }

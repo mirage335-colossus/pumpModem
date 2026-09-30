@@ -76,12 +76,12 @@ jobs:
         if: inputs.scope == 'packages'
         run: |
           set -o pipefail
-          ./build.sh package --wasm-sdk "$GITHUB_WORKSPACE/build/wasm-sdk" --build-dir build/wasm-package --jobs 2 --build-jobs "$(nproc)" 2>&1 | tee wasm-package.log
+          ./build.sh package --wasm-sdk "$GITHUB_WORKSPACE/build/wasm-sdk" --build-dir build/wasm-package --jobs 2 --build-jobs "$(python3 -B tools/build_capacity.py)" 2>&1 | tee wasm-package.log
       - name: Run every Wasm web case independently of native regressions
         if: inputs.scope == 'tests'
         run: |
           set -o pipefail
-          ./build.sh test web --wasm-sdk "$GITHUB_WORKSPACE/build/wasm-sdk" --build-dir build/wasm-tests --jobs 1 --build-jobs "$(nproc)" 2>&1 | tee wasm-tests.log
+          ./build.sh test web --wasm-sdk "$GITHUB_WORKSPACE/build/wasm-sdk" --build-dir build/wasm-tests --jobs 1 --build-jobs "$(python3 -B tools/build_capacity.py)" 2>&1 | tee wasm-tests.log
       - name: Preserve the platform-independent browser product
         if: inputs.scope == 'packages'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -36,7 +36,7 @@ jobs:
           test "$(uname -m)" = x86_64
           {
             echo "Selected runner: $SELECTED_RUNNER; actual: $RUNNER_NAME"
-            echo "Build baseline: Ubuntu 22.04; architecture: $(uname -m); compile jobs: $(nproc)"
+            echo "Build baseline: Ubuntu 22.04; architecture: $(uname -m); usable CPUs: $(nproc)"
             awk '/MemTotal/ {print "Host memory: " $2 " KiB"}' /proc/meminfo
             echo 'Focused compiler/routing check only; no SDK build, packages or certification.'
           } | tee -a "$GITHUB_STEP_SUMMARY"
@@ -48,7 +48,7 @@ jobs:
       - name: Compile the small production Legacy fixture using available cores
         run: |
           cmake -S tests/devfast -B build/runner-capacity -G Ninja -DCMAKE_BUILD_TYPE=Release
-          cmake --build build/runner-capacity --target test_gui_legacy_poll --parallel "$(nproc)"
+          cmake --build build/runner-capacity --target test_gui_legacy_poll --parallel "$(python3 -B tools/build_capacity.py 2>/dev/null || echo 1)"
           ctest --test-dir build/runner-capacity --output-on-failure -R '^gui_legacy_poll$' --parallel 1 --no-tests=error
 
   windows:
@@ -70,7 +70,7 @@ jobs:
         run: |
           if ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64') { throw 'An x64 Windows runner is required' }
           $memoryGiB = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 1)
-          $details = "Selected runner: $env:SELECTED_RUNNER; actual: $env:RUNNER_NAME`nImage: $env:ImageOS/$env:ImageVersion; compile jobs: $env:NUMBER_OF_PROCESSORS; memory: $memoryGiB GiB`nMultiToolTask and shared process cap enabled. Focused compiler/routing check only; no dependency build, packages or certification."
+          $details = "Selected runner: $env:SELECTED_RUNNER; actual: $env:RUNNER_NAME`nImage: $env:ImageOS/$env:ImageVersion; compile jobs: $(python -B tools/build_capacity.py); memory: $memoryGiB GiB`nMultiToolTask and shared process cap enabled. Focused compiler/routing check only; no dependency build, packages or certification."
           $details
           $details >> $env:GITHUB_STEP_SUMMARY
       - name: Verify toolchain selection and select the installed v143 compiler
@@ -81,7 +81,9 @@ jobs:
         run: |
           cmake -S tests/rev-style-probe -B build/runner-capacity -A x64
           if ($LASTEXITCODE -ne 0) { throw 'Module probe configuration failed' }
-          cmake --build build/runner-capacity --config Release --parallel $env:NUMBER_OF_PROCESSORS
+          $env:CL_MPCount = python -B tools/build_capacity.py
+          if ($LASTEXITCODE -ne 0 -or $env:CL_MPCount -notmatch '^[1-9][0-9]*$') { $env:CL_MPCount = '1' }
+          cmake --build build/runner-capacity --config Release --parallel $env:CL_MPCount
           if ($LASTEXITCODE -ne 0) { throw 'Module probe compilation failed' }
           ctest --test-dir build/runner-capacity -C Release --output-on-failure --parallel 1 --no-tests=error
           if ($LASTEXITCODE -ne 0) { throw 'Module probe regression failed' }

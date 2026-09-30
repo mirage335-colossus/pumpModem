@@ -20,7 +20,7 @@ on:
         type: string
         default: auto
       jobs:
-        description: 'Cold SDK compilation jobs; 0 uses all available runner CPUs'
+        description: 'Cold SDK compilation jobs; 0 selects CPU/RAM capacity, reserving one CPU'
         type: string
         default: '0'
       publish:
@@ -50,7 +50,7 @@ on:
         options: [auto, base, rebuild]
         default: auto
       jobs:
-        description: 'Cold SDK compilation jobs; 0 uses all available runner CPUs'
+        description: 'Cold SDK compilation jobs; 0 selects CPU/RAM capacity, reserving one CPU'
         type: string
         default: '0'
       publish:

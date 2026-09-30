@@ -9,6 +9,12 @@ import shutil
 import subprocess
 import tempfile
 
+try:
+    from build_capacity import default_jobs
+except ImportError:
+    def default_jobs():
+        return 1
+
 
 LLVM_VERSION = '1:19.1.7~++20250114103320+cd708029e0b2-1~exp1~20250114103432.75'
 # Primary fingerprint published at https://apt.llvm.org/.
@@ -98,7 +104,7 @@ def install(destination, system_root=Path('/')):
         run(['cmake', '-S', ninja_source, '-B', build, '-G', 'Unix Makefiles',
              '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_CXX_COMPILER=g++-11',
              '-DBUILD_TESTING=OFF', f'-DCMAKE_INSTALL_PREFIX={staged}'])
-        run(['cmake', '--build', build, '--parallel', str(os.cpu_count() or 1)])
+        run(['cmake', '--build', build, '--parallel', str(default_jobs())])
         run(['cmake', '--install', build])
         version = run([staged / 'bin/ninja', '--version'], capture_output=True, text=True).stdout.strip()
         if version != NINJA_VERSION:

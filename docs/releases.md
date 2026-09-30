@@ -1080,14 +1080,18 @@ or Windows jobs. Validate the new L and H pools directly; do not repeat the
 smaller standard-runner checks merely to compare capacity. Reuse existing
 evidence and proceed to the applicable full checks on the selected larger hosts.
 
-Compilation uses `nproc` on Linux and `NUMBER_OF_PROCESSORS` on Windows. The
-build wrapper's `--build-jobs` lets SDK and certification builds use those cores
+Compilation uses the shared [CPU/RAM capacity selector](building.md#commands-and-profiles).
+It reserves one usable logical CPU, with at least one job, and caps concurrency
+using currently available memory. Detection uses the Python standard library and
+optional OS probes with conservative fallbacks; no resource-monitor dependency
+or download is required. The build wrapper's `--build-jobs` lets SDK and certification builds use that capacity
 while test `--jobs` stays at two, or one for existing serial checks. Certifying
 older immutable releases whose wrapper lacks this option retains their original
 two-job behavior. Windows jobs enable
 [MSBuild MultiToolTask with a process limit shared across projects](https://devblogs.microsoft.com/cppblog/cpp-build-throughput-investigation-and-tune-up/)
 so source files within a project can compile concurrently without multiplying
-the CPU limit for every project. Module dependencies and link steps still impose
+the CPU limit for every project. CI sets `CL_MPCount` to the selected count as
+well as CMake's project parallelism. Module dependencies and link steps still impose
 serial work; larger runners do not guarantee a particular elapsed time.
 
 The [six-package H-runner verification](https://github.com/mirage335-colossus/pumpModem/actions/runs/35882420441)
@@ -1098,7 +1102,7 @@ took **3m30s/5m03s**. These are observed results, not a speed guarantee or full
 certification. See the [validation record](validation.md#larger-runners-and-independent-compilation-concurrency--23-september-2026)
 for source/run identities and the separate certification limitations.
 
-Base reuse remains the first optimization. Cold SDK builds use available cores
+Base reuse remains the first optimization. Cold SDK builds use the CPU/RAM budget
 when base maintenance's `jobs=0`; normal application builds continue retrieving
 the exact existing base instead of rebuilding it. Larger runners do not change
 `devfast=false` defaults, test assertions or release certification requirements.

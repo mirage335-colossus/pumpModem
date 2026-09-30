@@ -61,7 +61,9 @@ jobs:
       - name: Build only the diagnostic with available cores
         shell: pwsh
         run: |
-          $buildJobs = if ($IsWindows) { $env:NUMBER_OF_PROCESSORS } else { & nproc }
+          $buildJobs = python -B tools/build_capacity.py
+          if ($LASTEXITCODE -ne 0 -or $buildJobs -notmatch '^[1-9][0-9]*$') { $buildJobs = '1' }
+          $env:CL_MPCount = $buildJobs
           cmake --build build/devfast --config Release --parallel $buildJobs
           if ($LASTEXITCODE -ne 0) { throw 'Focused build failed' }
       - name: Repeat the focused test serially; stop on first failure

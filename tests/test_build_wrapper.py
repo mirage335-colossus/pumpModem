@@ -20,6 +20,9 @@ class BuildWrapperTests(unittest.TestCase):
         self.source = self.root / "source with spaces"
         self.source.mkdir()
         shutil.copy2(Path(__file__).resolve().parents[1] / "build.sh", self.source)
+        (self.source / 'tools').mkdir()
+        # Deterministic selector output; OS probes have independent fixtures.
+        (self.source / 'tools/build_capacity.py').write_text('print(7)\n')
         self.bin = self.root / "bin"
         self.bin.mkdir()
         self.log = self.root / "calls.jsonl"
@@ -61,6 +64,29 @@ if os.environ.get("FAIL_STEP") == ("build" if "--build" in sys.argv else "config
         self.assertIn("Ninja", calls[0])
         self.assertIn("datapump-apps", calls[1])
         self.assertNotIn("ctest", [call[0] for call in calls])
+        self.assertEqual(calls[1][calls[1].index('--parallel') + 1], '7')
+
+    def test_automatic_compilation_keeps_tests_at_two(self):
+        _, calls = self.run_wrapper('test', 'build')
+        self.assertEqual(calls[1][calls[1].index('--parallel') + 1], '7')
+        self.assertEqual(calls[2][calls[2].index('--parallel') + 1], '2')
+
+    def test_failed_optional_detection_still_builds(self):
+        (self.source / 'tools/build_capacity.py').write_text('raise OSError("probe failed")\n')
+        _, calls = self.run_wrapper()
+        self.assertEqual(calls[1][calls[1].index('--parallel') + 1], '1')
+
+    def test_missing_python_still_builds(self):
+        # The other mock tools use an absolute Python shebang.
+        (self.bin / 'dirname').symlink_to(shutil.which('dirname'))
+        _, calls = self.run_wrapper(PATH=str(self.bin))
+        self.assertEqual(calls[1][calls[1].index('--parallel') + 1], '1')
+
+    def test_explicit_limits_do_not_require_detection(self):
+        (self.source / 'tools/build_capacity.py').unlink()
+        _, calls = self.run_wrapper('test', 'build', '--jobs', '3')
+        for call in calls[1:]:
+            self.assertEqual(call[call.index('--parallel') + 1], '3')
 
     def test_independent_interactive_frontends(self):
         result, calls = self.run_wrapper('--cli', '--tui', '--fb')
