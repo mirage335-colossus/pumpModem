@@ -7,7 +7,8 @@ The [manifest](manifest.json) records the complete original asset inventories,
 Git tag objects, the two releases to keep, and the exact five deletion candidates.
 Original report bytes remain unchanged, including failed attempts and warnings.
 
-Cleanup state: evidence preserved and verified; release deletion pending.
+Cleanup state: complete. All five superseded GitHub release objects were removed;
+Latest and base metadata/assets and all five Git tag objects were verified unchanged.
 
 The current [Latest release](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-30-0648CDT)
 (release ID `399992872`) and the durable [base SDK release](https://github.com/mirage335-colossus/pumpModem/releases/tag/base)

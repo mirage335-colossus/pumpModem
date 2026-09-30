@@ -4,6 +4,16 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Superseded release cleanup — 30 September 2026
+
+At the maintainer's request, four superseded published releases and one failed
+draft were removed. Current Latest `v001_00-2026-09-30-0648CDT` and the durable
+`base` SDK release remain unchanged. All five old Git tags and their source
+commits are retained. The [cleanup record and original evidence](release-history/2026-09-30/README.md)
+retain 51 hash-verified metadata, checksum, warning and certification assets.
+Historic results below remain historical evidence; retired binary downloads
+are no longer available. All earlier SDK recipes survive in `base`.
+
 ## Base rebuild/reuse and certified binaries — 30 September 2026
 
 [Release `v001_00-2026-09-30-0648CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-30-0648CDT)
@@ -147,13 +157,15 @@ published. None of these runs is counted as release certification. Heavy run
 Run `36695310257` at `79bf20c840ce279af226a36bc698db3280664ea8`
 passed all 50 prepublication source jobs and all six native plus one browser
 producer, then published ordinary release
-[`v001_00-2026-09-30-0505CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-30-0505CDT),
+[`v001_00-2026-09-30-0505CDT`](https://github.com/mirage335-colossus/pumpModem/tree/v001_00-2026-09-30-0505CDT),
 release ID `399921133`. Exact source provenance passed the publication gate.
 Four ARM64 FLTK/Rev main and calibration certification jobs failed in the
 synthetic Wasm SDK installation test before application assertions: the fake
 archive declares Linux x86_64 but consulted the real ARM host. Publication
-alone does not qualify those bytes; preserve the failed report and assets,
-and make no certification or Latest claim for this candidate. Its immutable
+alone did not qualify those bytes. The failed report is retained in the
+[cleanup evidence](release-history/2026-09-30/README.md); its superseded binary
+assets were removed at the maintainer's request. No certification or Latest
+claim is made for this candidate. Its immutable
 `certification-36695310257-attempt-1.json` has SHA-256
 `f55f521e47aafd8872e4eff23c8d634234fce6a83fcf2806c10b2c688f5d736f`,
 status `failed`, and `latest_eligible=false`, bound to inventory
@@ -179,7 +191,7 @@ actual ARM64 qualification.
 ## Portable terminal and framebuffer release — 28 September 2026
 
 [Release
-`v001_00-2026-09-28-1246CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-28-1246CDT)
+`v001_00-2026-09-28-1246CDT`](https://github.com/mirage335-colossus/pumpModem/tree/v001_00-2026-09-28-1246CDT)
 was the verified official Latest release at that checkpoint, with six Linux/Windows archives,
 TUI/framebuffer binaries, signed Debian/Arch packages and Gentoo package-manager
 support. New Linux and Windows dependency recipes are published in
@@ -252,7 +264,7 @@ compatibility, signed APT, and Arch/Gentoo installation. All six independent fro
 jobs and every calibration job passed. It binds the original source and all six
 application hashes through inventory SHA-256
 `f44864272f1a9bae1f9192b8579dedb172318d17bad6277bb047879bc0470f00`. The [final
-report](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-28-1246CDT/certification-36466691708-attempt-2.md)
+report](release-history/2026-09-30/v001_00-2026-09-28-1246CDT/certification-36466691708-attempt-2.md)
 records `passed_with_warnings`. Independent `verify-latest-release.py` verification
 confirmed Latest release ID `398483822`, the exact published source and six application
 hashes, publication run `36455727999`, and certification run `36466691708` attempt `2`.
@@ -508,7 +520,7 @@ passed nine required jobs in 8m44s, building all six application targets from
 the same source with the verified base recipes. It initially created a draft
 with `publish=false`. After explicit user approval, those exact assets were
 published as the experiment prerelease
-[v001_00-2026-09-26-1847CDT](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-26-1847CDT),
+[v001_00-2026-09-26-1847CDT](https://github.com/mirage335-colossus/pumpModem/tree/v001_00-2026-09-26-1847CDT),
 without promoting Latest. Its inventory SHA256 is
 `108919411c4c0c600d6c653f705b4b68cad7936457f645e06968378eed4fb6d5`.
 Publication establishes available checked packages, not completed certification.
@@ -8270,7 +8282,7 @@ Instrumented native CI retains its default exclusions of `fast_session` and `gui
 
 STOPPED: Required workflow did not pass: certify
 
-Published release: [v001_00-2026-09-24-0856CDT](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-24-0856CDT).
+Published release: [v001_00-2026-09-24-0856CDT](https://github.com/mirage335-colossus/pumpModem/tree/v001_00-2026-09-24-0856CDT).
 
 This record does not claim completed release certification. Undispatched, pending or failed stages are not passes.
 

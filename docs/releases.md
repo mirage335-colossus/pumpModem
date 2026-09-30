@@ -330,16 +330,15 @@ configured on 23 September 2026, has primary fingerprint
 file from that exact tag, replacing `RELEASE_TAG` below. Check this fingerprint
 against a trusted copy of the maintainer's documentation before initial setup.
 
-The current package experiment is
-[`v001_00-2026-09-26-1847CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-26-1847CDT),
+The current ordinary Latest release is
+[`v001_00-2026-09-30-0648CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-30-0648CDT),
 including signed Debian/Ubuntu, Arch and Gentoo update channels. Its six bundles
-were built from application commit `800da8c` on standard GitHub runners.
-All nine Debian/Ubuntu and both Arch/Gentoo install/update checks passed in
-[certification run 36281472303](https://github.com/mirage335-colossus/pumpModem/actions/runs/36281472303).
-That run also exposed source-test timeouts; successful package installation is
-separate from full application certification. See the [validation record](validation.md)
-for the current qualification outcome and coverage limits. This is a prerelease
-and has not replaced Latest; use its explicit tag when opting into the experiment.
+were built from application commit `dce9138` and passed full hosted certification
+on standard GitHub runners. See the [validation record](validation.md) for its
+exact binary hashes and documented Windows Rev graphics/physical-device limits.
+The superseded 26 September package experiment and other old releases were
+removed at the maintainer's request; their original reports and source tags are
+retained in the [cleanup evidence](release-history/2026-09-30/README.md).
 
 ```sh
 tag=RELEASE_TAG
