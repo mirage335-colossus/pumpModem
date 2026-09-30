@@ -1,6 +1,23 @@
 name: Native Windows validation shard
 
 on:
+  workflow_dispatch:
+    inputs:
+      windows_runner:
+        description: 'Windows x64 runner for this validation shard'
+        type: choice
+        options: [windows-2022, windows-latest-l, windows-latest-h]
+        default: windows-2022
+      scope:
+        description: 'Run the selected unchanged native scope'
+        type: choice
+        options: [core, fast, live, calibration, frontends, web, package]
+        default: live
+      calibration_section:
+        description: 'Calibration section; used only by the calibration scope'
+        type: choice
+        options: [all, shaped, matrix, null, default-window]
+        default: all
   workflow_call:
     inputs:
       windows_runner:

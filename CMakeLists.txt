@@ -281,6 +281,10 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
       add_test(NAME ${component} COMMAND test_${component})
     endif()
   endforeach()
+  if(WIN32)
+    # The mock Live fixture uses timer APIs without the native audio provider.
+    target_link_libraries(test_live_profiles PRIVATE winmm)
+  endif()
   if(DATAPUMP_SANITIZERS AND NOT MSVC)
     # Sampled-media functional fixtures need bounded CPU-work allowances under
     # ASan/UBSan. Their physical/cancellation clocks and assertions are unchanged.
