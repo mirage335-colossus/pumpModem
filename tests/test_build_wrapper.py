@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise build orchestration without compiling or downloading dependencies."""
+"""Exercise build orchestration and source provenance without dependency downloads."""
 import json
 import os
 from pathlib import Path
@@ -514,6 +514,89 @@ endif()
         self.assertIn('does not support the rev GUI backend', result.stderr)
         self.run_cmake('', '-DDATAPUMP_BUILD_GUI=ON', '-DDATAPUMP_GUI_BACKEND=fltk')
         self.run_cmake('', '-DDATAPUMP_BUILD_GUI=OFF', '-DDATAPUMP_GUI_BACKEND=rev')
+
+
+@unittest.skipUnless(os.name != "nt" and all(shutil.which(tool) for tool in ("git", "cmake", "cc")),
+                     "Provenance fixture requires POSIX Git, CMake and a C compiler")
+class BuildInfoTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="datapump provenance ")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.source = self.root / "source with spaces"
+        self.source.mkdir()
+        repository = Path(__file__).resolve().parents[1]
+        (self.source / "include/datapump").mkdir(parents=True)
+        shutil.copy2(repository / "include/datapump/speculation.h",
+                     self.source / "include/datapump/speculation.h")
+        shutil.copy2(repository / "cmake/BuildInfo.cmake", self.source / "BuildInfo.cmake")
+        (self.source / "CMakeLists.txt").write_text(
+            "cmake_minimum_required(VERSION 3.24)\n"
+            "project(Provenance VERSION 1.0.0 LANGUAGES C)\n"
+            "set(DATAPUMP_VERSION 001_00)\ninclude(BuildInfo.cmake)\n")
+        self.global_config = self.root / "gitconfig"
+        self.global_config.write_text("[safe]\n\tdirectory =\n")
+        self.original_config = self.global_config.read_bytes()
+        self.env = os.environ.copy()
+        for name in tuple(self.env):
+            if name.startswith("GIT_CONFIG_") or name in (
+                    "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_TEST_ASSUME_DIFFERENT_OWNER"):
+                self.env.pop(name)
+        self.env.update(GIT_CONFIG_GLOBAL=str(self.global_config), GIT_CONFIG_NOSYSTEM="1")
+        for args in (("init", "--quiet"), ("add", "."),
+                     ("-c", "user.name=Provenance fixture", "-c", "user.email=fixture@example.invalid",
+                      "commit", "--quiet", "-m", "Provenance fixture")):
+            self.git(*args)
+        self.commit = self.git("rev-parse", "HEAD").stdout.strip()
+
+    def git(self, *args, env=None, success=True):
+        result = subprocess.run(["git", "-C", str(self.source), *args],
+                                env=env or self.env, text=True, capture_output=True)
+        if success:
+            self.assertEqual(result.returncode, 0, result.stderr)
+        return result
+
+    def configure(self, name, env=None):
+        build = self.root / name
+        result = subprocess.run(["cmake", "-S", str(self.source), "-B", str(build)],
+                                env=env or self.env, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.global_config.read_bytes(), self.original_config)
+        return (build / "build-info.txt").read_text(), result.stderr
+
+    def test_owned_checkout_records_commit_and_dirty_state(self):
+        info, _ = self.configure("clean")
+        self.assertIn("Source commit: " + self.commit, info.splitlines())
+        self.assertIn("Revision at configuration: " + self.commit[:12], info.splitlines())
+        with (self.source / "CMakeLists.txt").open("a") as out:
+            out.write("\n# Dirty fixture\n")
+        info, _ = self.configure("dirty")
+        self.assertIn("Source commit: " + self.commit, info.splitlines())
+        self.assertIn(" (working tree modified)", info)
+
+    def test_container_ownership_lookup_is_scoped_and_records_exact_commit(self):
+        env = dict(self.env, GIT_TEST_ASSUME_DIFFERENT_OWNER="1")
+        rejected = self.git("rev-parse", "HEAD", env=env, success=False)
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn("dubious ownership", rejected.stderr)
+        info, warnings = self.configure("container", env=env)
+        self.assertIn("Source commit: " + self.commit, info.splitlines())
+        self.assertIn("Revision at configuration: " + self.commit[:12], info.splitlines())
+        self.assertNotIn("Git source commit unavailable", warnings)
+        self.assertNotIn("working tree modified", info)
+
+    def test_failed_git_lookup_is_explicit_and_never_blank(self):
+        (self.source / ".git/HEAD").write_text("ref: refs/heads/nonexistent\n")
+        info, warnings = self.configure("failed")
+        self.assertIn("Source commit: unavailable", info.splitlines())
+        self.assertIn("Revision at configuration: Git lookup failed", info.splitlines())
+        self.assertIn("Git source commit unavailable", warnings)
+
+    def test_source_archive_retains_unavailable_provenance(self):
+        shutil.rmtree(self.source / ".git")
+        info, _ = self.configure("archive")
+        self.assertIn("Source commit: unavailable", info.splitlines())
+        self.assertIn("Revision at configuration: source archive (Git unavailable)", info.splitlines())
 
 
 if __name__ == "__main__":

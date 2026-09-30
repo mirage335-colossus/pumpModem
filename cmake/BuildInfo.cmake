@@ -49,17 +49,45 @@ find_package(Git QUIET)
 set(_revision "source archive (Git unavailable)")
 set(_source_commit "unavailable")
 if(GIT_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
-  execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+  # Container checkouts can have a different owner. Trust only the source root
+  # explicitly selected for this build, without changing any Git configuration.
+  set(_git_query "${GIT_EXECUTABLE}" -c "safe.directory=${CMAKE_CURRENT_SOURCE_DIR}")
+  execute_process(COMMAND ${_git_query} rev-parse HEAD
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    OUTPUT_VARIABLE _source_commit OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-  execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse --short=12 HEAD
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    OUTPUT_VARIABLE _revision OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-  execute_process(COMMAND "${GIT_EXECUTABLE}" status --porcelain --untracked-files=normal
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    OUTPUT_VARIABLE _changes ERROR_QUIET)
-  if(_changes)
-    string(APPEND _revision " (working tree modified)")
+    OUTPUT_VARIABLE _git_commit OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE _git_result ERROR_VARIABLE _git_error)
+  string(LENGTH "${_git_commit}" _git_commit_length)
+  if(_git_result EQUAL 0 AND _git_commit MATCHES "^[0-9a-f]+$" AND
+      (_git_commit_length EQUAL 40 OR _git_commit_length EQUAL 64))
+    set(_source_commit "${_git_commit}")
+    set(_revision "${_source_commit}")
+    execute_process(COMMAND ${_git_query} rev-parse --short=12 HEAD
+      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+      OUTPUT_VARIABLE _git_revision OUTPUT_STRIP_TRAILING_WHITESPACE
+      RESULT_VARIABLE _git_result ERROR_VARIABLE _git_error)
+    if(_git_result EQUAL 0 AND _git_revision MATCHES "^[0-9a-f]+$")
+      set(_revision "${_git_revision}")
+    else()
+      string(SUBSTRING "${_git_error}" 0 512 _git_error)
+      message(WARNING "Git short revision unavailable: ${_git_error}")
+    endif()
+    execute_process(COMMAND ${_git_query} status --porcelain --untracked-files=normal
+      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+      OUTPUT_VARIABLE _changes
+      RESULT_VARIABLE _git_result ERROR_VARIABLE _git_error)
+    if(_git_result EQUAL 0)
+      if(_changes)
+        string(APPEND _revision " (working tree modified)")
+      endif()
+    else()
+      string(APPEND _revision " (working tree status unavailable)")
+      string(SUBSTRING "${_git_error}" 0 512 _git_error)
+      message(WARNING "Git working tree status unavailable: ${_git_error}")
+    endif()
+  else()
+    set(_revision "Git lookup failed")
+    string(SUBSTRING "${_git_error}" 0 512 _git_error)
+    message(WARNING "Git source commit unavailable: ${_git_error}")
   endif()
 endif()
 set(_build_info "DataPump ${DATAPUMP_VERSION}\nPackage version: ${PROJECT_VERSION}\nRevision at configuration: ${_revision}\nSource commit: ${_source_commit}\nSystem: ${CMAKE_SYSTEM_NAME} ${CMAKE_SYSTEM_PROCESSOR}\nCompiler: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}\nGenerator: ${CMAKE_GENERATOR}\nBuild type: ${CMAKE_BUILD_TYPE}\nGUI: ${DATAPUMP_BUILD_GUI} (${DATAPUMP_GUI_BACKEND})\nTUI: ${DATAPUMP_BUILD_TUI} (${DATAPUMP_TUI_BACKEND})\nFramebuffer: ${DATAPUMP_BUILD_FB} (${DATAPUMP_FB_HOST})\nFramebuffer library: ${DATAPUMP_BUILD_FRAMEBUFFER_LIBRARY}\nWeb worker: ${DATAPUMP_BUILD_WEB_WORKER} (inherited-pipes; no sockets)\nWebAssembly: ${DATAPUMP_BUILD_WASM} (local messages; no sockets)\nPortable: ${DATAPUMP_PORTABLE}\nSanitizers: ${DATAPUMP_SANITIZERS}\nTests configured: ${BUILD_TESTING}\nDependency prefix: ${DATAPUMP_DEPENDENCY_PREFIX}\nC++ launcher: ${CMAKE_CXX_COMPILER_LAUNCHER}\n")
