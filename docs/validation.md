@@ -4,11 +4,183 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Base rebuild/reuse and certified binaries — 30 September 2026
+
+[Release `v001_00-2026-09-30-0648CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-30-0648CDT)
+is the independently verified official Latest release, ID `399992872`.
+The [complete release workflow](https://github.com/mirage335-colossus/pumpModem/actions/runs/36704181844)
+finished green on free `ubuntu-24.04`, `ubuntu-24.04-arm` and `windows-2022`
+runners with `devfast=false`: 120 successful required jobs and 16 conditional
+maintenance, diagnostic or alternative-path skips. Skips are not passes.
+Both existing-base reuse and new cold-base creation were also qualified below.
+
+Publication run `36704181844` attempt `1` binds source, packager and tag to
+`dce9138d27a2e6941b4304af2cf035c4ac2a6c9b`, with inventory SHA-256
+`bac799b36e8df8685b70ba2cdf53611fa249aa3b1a31e7ed20a976b9048cbadc`.
+All 50 prepublication qualification jobs and six native plus one automated
+Wasm producer passed. Instrumented Debug passed all 13 web cases in 157.45
+seconds, including mandatory `web_live` in 136.88 seconds; Windows core
+passed all 86 cases in 666.52 seconds. Every independent calibration section
+and its complete aggregate statistical gates passed. Both GUI/SDK contracts,
+terminal/framebuffer jobs and copied-package checks completed.
+
+Certification attempt `1` retained 117 successful jobs, 16 policy skips and
+three failures: ARM64 Debian trixie APT metadata download reported GitHub CLI
+`unexpected end of JSON input` before installation; certificate and Latest
+were dependent failures. Its immutable failed report
+`certification-36704181844-attempt-1.json`, SHA-256
+`9630fd5678a4cc0356127321bc65222daa7c97583112584f403280e723967c64`,
+and complete job history were preserved. A failed-only retry reused the exact
+published source and inventory. The APT installation/assertions, certificate
+and Latest gates then passed; no binaries or base recipes were republished.
+GitHub's attempt-2 API assigns new IDs to all results, but the 117 retained
+passing executions preserve their original start/end times and complete step
+results. They are counted once, as attempt-1 evidence; only those three failed
+jobs executed again.
+
+The [successful exact-hash report](https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/certification-36704181844-attempt-2.json)
+is `certification-36704181844-attempt-2.json`, SHA-256
+`86f384fc07188f14058502fdee7eacd42df4c10e43358e13c45d913c7d38e76e`,
+with `passed_with_warnings` and `latest_eligible=true`. All six aggregate scopes
+passed: Linux, Windows, copied-package compatibility, signed APT, Arch/Gentoo
+installation and native-worker/browser tests. Published metadata records
+publication attempt `1`. Independent `verify-latest-release.py` verification
+confirmed release ID `399992872`, publication run `36704181844`, certification
+attempt `2`, the exact source/inventory, all six application hashes and GitHub's
+final Latest pointer.
+
+The six durable application archives embed the identical standalone HTML/Wasm
+product from this source and Wasm SDK recipe `e66e98abb90b466cab32`; native
+Linux pipe workers and all five automated headless Wasm browser cases passed.
+Temporary Wasm producer archives are not additional durable application assets.
+Application SHA-256 digests are:
+
+| Target | SHA-256 |
+| --- | --- |
+| `linux-aarch64-fltk` | `aac459e94ec28ebbee7018e83687c824171f823c47ef89a4c0016326e4ac93c2` |
+| `linux-aarch64-rev` | `3f6b5722e116c44417dd6f6464e1d4c0713928432435879bdab2ef3cbe015e3c` |
+| `linux-x86_64-fltk` | `227c4eabea0d2290602bd3231907d678c61f8c7f0a59e679a80468d17cc3ea33` |
+| `linux-x86_64-rev` | `8c09dcbb378198bd1b7ff367139a8c93533de17bf8a0927e6a0c0be998c93d70` |
+| `windows-x86_64-fltk` | `a263641b0d95cd68935ce7aa4b5b34795fd1ebe0bd214fc0b78e2d6009369504` |
+| `windows-x86_64-rev` | `f53f00d11a5a47ccdbd8fa9d8e411d62be9e2d98743d695c8aacc52a26983cb0` |
+
+The exact nine dependency binary/source/checksum assets are retained with the
+release and match their durable base recipes:
+
+| Asset | SHA-256 |
+| --- | --- |
+| `datapump-sdk-6c4884fdff9c745ab0a0-linux-x86_64.tar.gz` | `a1050115f278d298947a6516a52ec5e848ffec370649cdb24985e2f16fde7985` |
+| `datapump-sdk-sources-6c4884fdff9c745ab0a0.tar.gz` | `26ef9fb79f5b0b7ebac17498dd9ec847dd488e796a5a8578e59477ecec26d5a5` |
+| `datapump-wasm-sdk-e66e98abb90b466cab32-linux-x86_64.tar.gz` | `bae40c03d2aea930a9755a272c95bfc4bdcfa8c19dcc2b223c0b704c5afab224` |
+| `datapump-wasm-sdk-sources-e66e98abb90b466cab32.tar.gz` | `4309fce79edc795a99d1bc6c1114071a679b172fcb2244a24ddf78a8155d9c07` |
+| `sdk-6c4884fdff9c745ab0a0-SHA256SUMS.txt` | `63e2e4492870287a3799d571c9f670d92c9c08564906f7b1c32a695d73e0b127` |
+| `wasm-sdk-e66e98abb90b466cab32-SHA256SUMS.txt` | `e42478883250ef4bacc942b39d7eb66d6f54f34a1b981663276a2b5d7964c48e` |
+| `windows-base-929016c86c9609704043-SHA256SUMS.txt` | `0d5d6e993eef43ad3f7002ec0e9710097366bc98b21adc22637dfd78d48e0f1b` |
+| `windows-base-929016c86c9609704043-x64-windows-static.zip` | `fbf4b93aeeec72b40a44a2c2c22a1732a7a160674621452e5fca5e7a793ada87` |
+| `windows-base-sources-929016c86c9609704043.zip` | `b40028617506d1db67bdf384bbc5d85466b9002a6bbbf8d8689f8af9040c887a` |
+
+The sole certification exclusion is the recognized Windows Rev probe
+`Required WGL ARB extensions not available`. It omits source `gui_workflow`,
+`gui_adapter_conformance`, `gui_coordinates_1x`, `gui_coordinates_2x` and
+published GUI smoke; compilation, clipboard, headless GUI/CLI, modem,
+calibration, packaging, integrity and relocation passed. This is not full
+Windows Rev graphics qualification. No typed smoke-budget incomplete coverage
+was reported. The advisory Rev display warning remains in publication
+`warning.log`, SHA-256
+`cbb81d59759531e676a8c6a6387abcc70e6887b8225283ba5d87d600c5a3da02`.
+The per-attempt certification warning log has SHA-256
+`76b42fdf5dfe69951449ff631dc76ac177480c91a0385158c88e351ed7281b79`.
+
+Coverage limits: hosted checks do not qualify physical audio, VT/GPM or VR
+hardware, Raspberry Pi/Chromebook devices, real Windows 10/11 client machines,
+or real browser microphone, playback and download behavior. Native Arch/Gentoo
+installation is x86-64; ARM package bytes are built and hash-verified. Optional
+instrumented GUI smoke and default Debug `fast_session`/`gui_fast_live` remain
+omitted; both real-time cases remain mandatory and passed in Release. Actual
+physical absence, cancellation and data-integrity assertions remain unchanged.
+
+Application candidate `dce9138d27a2e6941b4304af2cf035c4ac2a6c9b` includes
+the Windows Live fixture's WinMM link dependency, the exact-operation-order
+Fast DSP throughput repair, and command-local Git provenance lookup for
+container builds. The packaging fixture correction is confined to tests:
+Windows accepts the absent `PATH` representation of an empty CRT assignment;
+POSIX continues to require a present, empty value. Seven direct environment
+cases supplement the existing strict, typed incomplete, fatal and per-archive
+evidence checks. The production package verifier and smoke runner are unchanged.
+Focused local O1 ASan/UBSan validation passed all 13 web cases at 44.1 and
+48 kHz physical clocks and four modem, weak-signal, low-rate and convolutional
+checks. The provenance repair passed 52 build-wrapper and 10 browser assembly
+cases and all 34 build-group tests. The final packaging group passed 4/4 in
+40.21 seconds. Three ELF helper fixtures lacked `patchelf` and two Arch helpers
+required root/pacman; those internal omissions provide no platform qualification.
+Physical absence, wire vectors, pending-row identity, capture bounds and existing
+assertions/deadlines remain intact; no sanitizer or capture exception was added.
+
+The [cold base rebuild, run 36669864026](https://github.com/mirage335-colossus/pumpModem/actions/runs/36669864026)
+at `a0b4a10b9f6522f837965d54b66a71a68863860a` and
+[standard-runner base reuse, run 36673982525](https://github.com/mirage335-colossus/pumpModem/actions/runs/36673982525)
+at `cebffadcf1fd8795fc353e091d1893bfca7bd2fc` each passed all five jobs.
+Cold preparation rebuilt retained sources without the Windows vcpkg binary
+cache and verified offline Linux source replay. Both paths tested actual
+relocated Linux SDK archives with focused FLTK/Rev self-check/conformance, all nine terminal and
+framebuffer cases and a real X11 software window; Windows dependency probes,
+retained-source verification and five automated headless Wasm browser cases also passed.
+Dependency builders, recipes and base workflows are unchanged in the final
+candidate. The evidence therefore remains applicable to Linux SDK recipe
+`6c4884fdff9c745ab0a0`, Windows recipe `929016c86c9609704043` and Wasm SDK
+recipe `e66e98abb90b466cab32`. Existing recipe assets were preserved. The missing
+Wasm recipe was explicitly rebuilt, browser-qualified and published by run
+`36668812295` before that enclosing run encountered the Windows Live link fault
+and was cancelled; the enclosing run does not qualify an application release.
+
+Earlier full run `36672707169` failed mandatory instrumented Linux `web_live`
+after 49 other jobs passed. Run `36683147050` passed native/SDK qualification
+and all six native application producers before publication rejected a blank
+source commit in native build provenance. Git ownership rejection was reproduced
+locally, but suppressed cloud stderr prevents definitive attribution of the
+production failure. Standard-runner run `36691500969` was retired after 45
+successful jobs, the Windows core packaging-fixture failure and a dependent
+Latest failure; three jobs were cancelled and no application release was
+published. None of these runs is counted as release certification. Heavy run
+`36691025815` was cancelled early when the user selected free runners.
+
+Run `36695310257` at `79bf20c840ce279af226a36bc698db3280664ea8`
+passed all 50 prepublication source jobs and all six native plus one browser
+producer, then published ordinary release
+[`v001_00-2026-09-30-0505CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-30-0505CDT),
+release ID `399921133`. Exact source provenance passed the publication gate.
+Four ARM64 FLTK/Rev main and calibration certification jobs failed in the
+synthetic Wasm SDK installation test before application assertions: the fake
+archive declares Linux x86_64 but consulted the real ARM host. Publication
+alone does not qualify those bytes; preserve the failed report and assets,
+and make no certification or Latest claim for this candidate. Its immutable
+`certification-36695310257-attempt-1.json` has SHA-256
+`f55f521e47aafd8872e4eff23c8d634234fce6a83fcf2806c10b2c688f5d736f`,
+status `failed`, and `latest_eligible=false`, bound to inventory
+`d9d42df17b0a06557a32fa21567a72765653dcab43ab01d939a746b29856abe4`.
+The final run had 113 successful jobs, 16 skipped jobs and seven failures:
+four ARM fixture jobs plus three dependent aggregate/report/Latest gates.
+APT, copied-package compatibility, distro recipes and Windows aggregates
+passed; Linux and worker/browser aggregate assurance failed. The accepted
+Windows Rev WGL warning still records five untested graphics scopes;
+it does not change the failed result.
+
+The final `dce9138d27a2e6941b4304af2cf035c4ac2a6c9b` correction changes
+only that fixture to model its declared host, with explicit Linux ARM64,
+Darwin and Windows rejection checks before destination creation, extraction,
+compiler invocation or entropy qualification. Production SDK host restrictions,
+application runtime and recipe identities remain unchanged. All 15 fixture
+cases passed locally under both outer x86_64 and ARM identities, and the
+affected build group passed 34/34 in 12.40 seconds. Initial sandboxed local
+HTTP fixture failures were rerun with server permissions; none was accepted
+as a pass. Ordinary push CI `36704147360` passed. Local emulation is not
+actual ARM64 qualification.
+
 ## Portable terminal and framebuffer release — 28 September 2026
 
 [Release
 `v001_00-2026-09-28-1246CDT`](https://github.com/mirage335-colossus/pumpModem/releases/tag/v001_00-2026-09-28-1246CDT)
-is the verified official Latest release, with six Linux/Windows archives,
+was the verified official Latest release at that checkpoint, with six Linux/Windows archives,
 TUI/framebuffer binaries, signed Debian/Arch packages and Gentoo package-manager
 support. New Linux and Windows dependency recipes are published in
 [base](https://github.com/mirage335-colossus/pumpModem/releases/tag/base) and retained
@@ -119,10 +291,10 @@ incorrect binary hashes and corrupt report bytes. The final workflow gate was
 also exercised with 37 success, failure, cancellation, skip and missing-output
 scenarios. All workflow files pass actionlint 1.7.12; whitespace checks pass.
 
-This is local tooling validation. The new orchestration has not been dispatched
-on GitHub, no new binaries have been published or certified by this change,
-and Latest has not been changed. A completed hosted run remains necessary to
-establish release qualification and the final API verification in production.
+At the 26 September checkpoint this was local tooling validation: the new
+orchestration had not been dispatched on GitHub, no binaries had been published
+or certified by that change, and Latest had not changed. The 30 September record
+above supplies the completed hosted qualification and final API verification.
 
 ## Parallel CI qualification — 26 September 2026
 
