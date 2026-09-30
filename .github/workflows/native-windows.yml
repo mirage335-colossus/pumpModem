@@ -16,7 +16,7 @@ on:
       calibration_section:
         description: 'Calibration section; used only by the calibration scope'
         type: choice
-        options: [all, shaped, matrix, null, default-window]
+        options: [all, shaped, matrix, 'null', default-window]
         default: all
   workflow_call:
     inputs:
