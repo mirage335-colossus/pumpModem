@@ -33,6 +33,12 @@ class WasmSdkReleaseTests(unittest.TestCase):
         patched = patch.object(release.sdk, 'recipe', return_value=self.recipe)
         patched.start(); self.addCleanup(patched.stop)
         self.directory = self.root / 'archives'
+        # prepared() declares a synthetic Linux x86_64 SDK; compiler and entropy
+        # execution are mocked, so installation must use that fixture host too.
+        for attribute, value in (('system', 'Linux'), ('machine', 'x86_64')):
+            host = patch.object(release.sdk.platform, attribute, return_value=value)
+            host.start()
+            self.addCleanup(host.stop)
 
     def write(self, name, data):
         target = self.sdk / name
@@ -111,6 +117,23 @@ class WasmSdkReleaseTests(unittest.TestCase):
         release.validate(self.directory, binary_only=True)
         with patch.object(release.sdk, 'run'), patch.object(release.sdk, 'qualify_entropy'):
             release.install(self.directory, self.root / 'binary installed')
+
+    def test_unsupported_host_is_rejected_before_installation_side_effects(self):
+        self.prepared(); release.package(self.sdk, self.directory)
+        for system, machine in (('Linux', 'aarch64'), ('Darwin', 'x86_64'), ('Windows', 'AMD64')):
+            with self.subTest(system=system, machine=machine):
+                parent = self.root / (system + '-' + machine)
+                destination = parent / 'installed sdk'
+                with patch.object(release.sdk.platform, 'system', return_value=system), \
+                        patch.object(release.sdk.platform, 'machine', return_value=machine), \
+                        patch.object(release.sdk, 'extract') as extract, \
+                        patch.object(release.sdk, 'run') as run, \
+                        patch.object(release.sdk, 'qualify_entropy') as probe:
+                    with self.assertRaisesRegex(ValueError, '^This pinned SDK host supports Linux x86_64 only$'):
+                        release.install(self.directory, destination)
+                self.assertFalse(destination.exists())
+                self.assertFalse(parent.exists())
+                extract.assert_not_called(); run.assert_not_called(); probe.assert_not_called()
 
     def test_refuses_changed_source_or_builder_provenance(self):
         self.prepared()
