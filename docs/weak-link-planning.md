@@ -14,6 +14,12 @@ The [1.2 kHz case study](1200hz-weak-link-planning.md) compares the requested
 3 dBm/-170 dB mode with -200 dB and -230 dB, including a conditional day-long
 -200 dB detector candidate and the current receiver's compute/workspace limits.
 
+The [alternate Robust receiver study](robust-alternate-receiver.md) documents
+an independent processing-chain opportunity for these extreme links, including
+unmeasured CPU-efficiency targets, segment-search tradeoffs and the limits on
+converting computational savings into additional dB. It is a design proposal,
+not an implemented receiver or a qualification of reception above 200 dB loss.
+
 For the requested **3 dBm / -200 dB** case, received power is -197 dBm. With
 the preset noise density of -164 dBm/Hz, actual C/N0 is **-33 dB-Hz** and SNR
 in 100 Hz is -53 dB. This is 30 dB weaker than +3 dBm / -170 dB.

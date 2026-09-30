@@ -4,6 +4,12 @@ The iterative pattern receiver executes numerical batches on the CPU. This
 supports large logical work grids without creating one operating-system thread,
 template cache or transform buffer per hypothesis.
 
+For a proposed independent chain that preserves this receiver and all transmitter
+implementations, see [alternate Robust receiver opportunity and limitations](robust-alternate-receiver.md).
+That study distinguishes further computational savings from sensitivity gains,
+especially for symbols lasting days at path losses above 200 dB. Its numerical
+targets are unmeasured; the CPU implementation described here remains unchanged.
+
 ## Compute boundaries
 
 | Path | Input and output | Host responsibilities |
