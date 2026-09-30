@@ -10,7 +10,7 @@ datapump-fb \- software framebuffer audio modem interface
 The framebuffer interface shares Data Pump's application controls, message
 policies, modem workers and plots. A CPU renderer draws the entire interface
 into an owned RGBA framebuffer. The SDL2 host displays that buffer through a
-software window surface and translates keyboard and mouse events.
+software window surface and translates keyboard, mouse and touchscreen events.
 It does not use FLTK, Rev, OpenGL or an SDL 3D renderer.
 .PP
 The framebuffer uses independent pixel widgets and the shared desktop/document
@@ -33,6 +33,15 @@ bezel controls. TUNE and ACTIONS are the two banks. Button 1 changes bank;
 2/3 select a setting or action; 4/5 (DEC/INC) choose the displayed previous/next
 preset in TUNE. Button 5 (EXEC) executes an action; 4 is inactive in ACTIONS.
 Only numbered buttons are clickable. F5 through F9 press keys 1 through 5.
+The default targets are 48 pixels square and also accept touchscreen taps.
+Touch does not require mouse emulation. Only the first finger controls a gesture;
+releasing it or losing window focus ends the gesture.
+.PP
+At the default font size, the window opens at 1424x1048, preserving a 1200-pixel
+GUI canvas beside the 224-pixel bezel. Without MFD it opens at 1200x1048.
+The default bezel allowance follows the font size; an explicit
+.B \-\-size
+always sets the complete outer framebuffer size.
 .PP
 The three-key variant also uses the right edge. Button 1 cycles individual
 functions through TUNE and ACTIONS; 2/3 adjust settings, and 3 executes actions.

@@ -32,8 +32,15 @@ void copy_frame(const Frame&,Surface destination,PixelRect rectangle);
 inline void copy_frame(const Frame& frame,Surface destination) {
     copy_frame(frame,destination,{0,0,frame.width,frame.height});
 }
+// The bezel is additional display area, not part of the ordinary GUI canvas.
+constexpr int mfd_bezel_width(surface::Metrics metrics) {
+    return metrics.cell_width*28>192?metrics.cell_width*28:192;
+}
+constexpr unsigned default_window_width(surface::Metrics metrics,bool mfd=true) {
+    return 1200U+(mfd?static_cast<unsigned>(mfd_bezel_width(metrics)):0U);
+}
 struct Config {
-    unsigned width=1200,height=1048;
+    unsigned width=default_window_width({8,18}),height=1048;
     unsigned font_scale=2;
     bool color=true;
     bool mfd=true;

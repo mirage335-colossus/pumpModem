@@ -1,6 +1,7 @@
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
 #include "framebuffer.hpp"
+#include "backend_sdl_input.hpp"
 #include <charconv>
 #include <chrono>
 #include <cstring>
@@ -17,6 +18,7 @@ namespace {
 struct HostOptions {
     framebuffer::Config config;
     bool headless=false;
+    bool size_set=false;
     unsigned frames=0;
     std::filesystem::path capture;
 };
@@ -92,6 +94,7 @@ void present(SDL_Window* window,const framebuffer::Frame& frame) {
 }
 int run(Launch launch,const HostOptions& options) {
     auto config=options.config;config.color=launch.color;
+    if(!options.size_set)config.width=framebuffer::default_window_width(framebuffer::Renderer(config).metrics(),config.mfd);
     framebuffer::Runtime runtime(launch,config);
     const unsigned limit=options.frames?options.frames:(options.headless&&!launch.smoke?1U:0U);
     struct SdlLifetime {bool initialized=false;~SdlLifetime(){if(initialized){SDL_StopTextInput();SDL_Quit();}}} sdl;
@@ -101,13 +104,17 @@ int run(Launch launch,const HostOptions& options) {
         // Override environmental hints too: this host promises CPU presentation.
         if(!SDL_SetHintWithPriority(SDL_HINT_FRAMEBUFFER_ACCELERATION,"0",SDL_HINT_OVERRIDE))
             throw std::runtime_error("Cannot disable SDL framebuffer acceleration");
+        // Raw finger events are translated here, independently of environment
+        // mouse-emulation hints. Also filter emulated IDs in the input adapter.
+        SDL_SetHintWithPriority("SDL_TOUCH_MOUSE_EVENTS","0",SDL_HINT_OVERRIDE);
+        SDL_SetHintWithPriority("SDL_MOUSE_TOUCH_EVENTS","0",SDL_HINT_OVERRIDE);
         check_sdl(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_EVENTS),"Initializing SDL");sdl.initialized=true;
         window.reset(SDL_CreateWindow("Data Pump framebuffer",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,
             static_cast<int>(config.width),static_cast<int>(config.height),SDL_WINDOW_RESIZABLE));
         if(!window)throw std::runtime_error(SDL_GetError());
         SDL_SetWindowMinimumSize(window.get(),240,180);SDL_StartTextInput();
     }
-    bool closing=false,exposed=true;unsigned iterations=0;
+    bool closing=false,exposed=true;unsigned iterations=0;sdl_input::Pointer pointer;
     do {
         if(window) {
             SDL_Event event;
@@ -119,7 +126,8 @@ int run(Launch launch,const HostOptions& options) {
                         runtime.resize(static_cast<unsigned>(event.window.data1),static_cast<unsigned>(event.window.data2));exposed=true;
                     } else if(event.window.event==SDL_WINDOWEVENT_EXPOSED)exposed=true;
                     else if(event.window.event==SDL_WINDOWEVENT_FOCUS_LOST) {
-                        SDL_CaptureMouse(SDL_FALSE);surface::Event input;input.type=surface::Event::Type::pointer_up;runtime.input(input);
+                        SDL_CaptureMouse(SDL_FALSE);
+                        if(auto input=pointer.translate(event,SDL_GetWindowID(window.get()),0,0))runtime.input(*input);
                     }
                 } else if(!closing&&event.type==SDL_KEYDOWN) {
                     const auto modifiers=event.key.keysym.mod;
@@ -148,15 +156,14 @@ int run(Launch launch,const HostOptions& options) {
                     }
                 } else if(!closing&&event.type==SDL_TEXTINPUT) {
                     surface::Event input;input.type=surface::Event::Type::text;input.text=event.text.text;runtime.input(input);
-                } else if(!closing&&event.type==SDL_MOUSEBUTTONDOWN&&event.button.button==SDL_BUTTON_LEFT) {
-                    SDL_CaptureMouse(SDL_TRUE);surface::Event input;input.type=surface::Event::Type::pointer;input.x=event.button.x;input.y=event.button.y;input.double_click=event.button.clicks>=2;input.shift=(SDL_GetModState()&KMOD_SHIFT)!=0;runtime.input(input);
-                } else if(!closing&&event.type==SDL_MOUSEMOTION) {
-                    surface::Event input;input.type=surface::Event::Type::pointer_move;input.x=event.motion.x;input.y=event.motion.y;runtime.input(input);
-                } else if(event.type==SDL_MOUSEBUTTONUP&&event.button.button==SDL_BUTTON_LEFT) {
-                    SDL_CaptureMouse(SDL_FALSE);surface::Event input;input.type=surface::Event::Type::pointer_up;input.x=event.button.x;input.y=event.button.y;runtime.input(input);
-                } else if(!closing&&event.type==SDL_MOUSEWHEEL) {
-                    surface::Event input;input.type=surface::Event::Type::wheel;SDL_GetMouseState(&input.x,&input.y);
-                    input.wheel=event.wheel.direction==SDL_MOUSEWHEEL_FLIPPED?-event.wheel.y:event.wheel.y;input.shift=(SDL_GetModState()&KMOD_SHIFT)!=0;runtime.input(input);
+                } else if(!closing) {
+                    int width=0,height=0;SDL_GetWindowSize(window.get(),&width,&height);
+                    if(auto input=pointer.translate(event,SDL_GetWindowID(window.get()),width,height,SDL_GetModState())) {
+                        if(event.type==SDL_MOUSEBUTTONDOWN)SDL_CaptureMouse(SDL_TRUE);
+                        else if(event.type==SDL_MOUSEBUTTONUP)SDL_CaptureMouse(SDL_FALSE);
+                        else if(event.type==SDL_MOUSEWHEEL)SDL_GetMouseState(&input->x,&input->y);
+                        runtime.input(*input);
+                    }
                 }
             }
         }
@@ -198,6 +205,7 @@ int main(int argc,char** argv) {
                 const auto value=next();const auto split=value.find('x');
                 if(split==std::string_view::npos)throw std::invalid_argument("Framebuffer size must be WIDTHxHEIGHT");
                 options.config.width=number(value.substr(0,split),8192);options.config.height=number(value.substr(split+1),8192);
+                options.size_set=true;
             } else {arguments.push_back(argv[i]);if(arg=="--help")help=true;}
         }
         if(help)std::cout<<"Framebuffer host options: --headless --capture FILE.ppm --frames N\n  --size WIDTHxHEIGHT --font-scale 1..4 --no-mfd --mfd-buttons 3|5\nColor MFD rings default on; --monochrome selects monochrome.\nKeyboard: Tab / Shift+Tab, arrows, Enter, Escape, F1 help, Ctrl+Q quit.\nSDL2 software surface; no OpenGL renderer. Headless defaults to one frame,\nexcept --smoke-test, which runs the complete shared smoke workload.\n";

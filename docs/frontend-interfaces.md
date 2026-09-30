@@ -122,6 +122,14 @@ no bezel controls. Color is the default (AMPCD, Advanced Color Multi Purpose
 Display); `--monochrome` selects grayscale, and `--no-mfd` removes the bezel.
 `--mfd-buttons 3` selects three keys; the default is five keys total. Click a
 numbered key or press F5 through F9 (F5 through F7 in three-key mode).
+At the default font size the window opens at 1424 by 1048 pixels: the 224-pixel
+bezel is added beside the ordinary 1200-pixel GUI canvas. `--no-mfd` opens at
+1200 by 1048. Font-size changes adjust the default bezel allowance; an explicit
+`--size WIDTHxHEIGHT` always specifies the complete outer framebuffer.
+The default numbered targets are 48 pixels square and accept mouse clicks or
+touchscreen taps. The SDL host handles touch directly, so it does not depend on
+touch-to-mouse emulation. One finger owns a gesture until release or focus loss;
+additional fingers and emulated duplicates cannot trigger a second action.
 
 The fixed keys and changing, abbreviated labels follow the simulated-aircraft
 MFD convention. The backend offers two banks of Console operating functions:

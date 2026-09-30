@@ -1,4 +1,5 @@
 #include "framebuffer_ui.hpp"
+#include "framebuffer.hpp"
 #include "binding_state.hpp"
 #include "control_binding.hpp"
 #include "chrome_layout.hpp"
@@ -146,7 +147,7 @@ struct Session::Impl {
     }
     void resize(Viewport value) {
         outer_viewport=value;
-        const int bezel=mfd?std::min(std::max(192,value.metrics.cell_width*28),value.width/2):0;
+        const int bezel=mfd?std::min(mfd_bezel_width(value.metrics),value.width/2):0;
         interior={0,0,value.width-bezel,value.height};
         viewport={interior.w,interior.h,value.metrics};dirty=true;
     }
@@ -603,7 +604,7 @@ struct Session::Impl {
         collect_mfd();const bool enabled=mfd_available(),back=mfd_back();const auto* entry=mfd_entry();
         const char* banks[]={"TUNE","ACTIONS"};
         const int header=4*lh()+2*pad,pitch=(h-header)/static_cast<int>(mfd_buttons);
-        const int button=std::min(std::max(32,lh()+8),pitch-8),button_x=w-pad-button;
+        const int button=std::min(std::max(48,lh()+8),pitch-8),button_x=w-pad-button;
         const int label_x=left+pad,label_w=std::max(1,button_x-pad-label_x);
         line_text({label_x,pad,w-left-2*pad,lh()},std::string(banks[mfd_bank])+" "+
             std::to_string(mfd_selected[mfd_bank]+(entry?1:0))+"/"+std::to_string(mfd_entries[mfd_bank].size()),Tone::accent);

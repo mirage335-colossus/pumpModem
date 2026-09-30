@@ -207,6 +207,13 @@ if(BUILD_TESTING)
     endif()
   endif()
   if(DATAPUMP_BUILD_FB)
+    add_executable(test_fb_input tests/test_fb_input.cpp)
+    target_link_libraries(test_fb_input PRIVATE datapump_framebuffer ${DATAPUMP_SDL2_TARGET})
+    # Reuse the host's distribution-specific SDL header search path.
+    target_include_directories(test_fb_input PRIVATE "$<TARGET_PROPERTY:datapump-fb,INCLUDE_DIRECTORIES>")
+    add_test(NAME fb_input COMMAND test_fb_input)
+    set_tests_properties(fb_input PROPERTIES LABELS "frontends" TIMEOUT 30
+      ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
     add_test(NAME fb_self_check COMMAND datapump-fb --self-check)
     add_test(NAME fb_headless COMMAND datapump-fb --simulation --headless --frames 3)
     add_test(NAME fb_sdl COMMAND datapump-fb --simulation --frames 3)

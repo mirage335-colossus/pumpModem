@@ -11,7 +11,7 @@ set(contract_headers
   text_policy.hpp utf8_policy.hpp control_interactions.hpp record_scroll.hpp service_queue.hpp chrome_layout.hpp theme.hpp
   binding_state.hpp record_reconciliation.hpp document_presentation.hpp overlay.hpp)
 set(native_headers backend_fltk_document.hpp backend_rev_document.hpp
-  bitmap_fltk.hpp theme_fltk.hpp backend_rev_theme.hpp rev_platform.hpp backend_ncurses.hpp backend_winconsole.hpp)
+  bitmap_fltk.hpp theme_fltk.hpp backend_rev_theme.hpp rev_platform.hpp backend_ncurses.hpp backend_winconsole.hpp backend_sdl_input.hpp)
 
 # Public headers may depend only on each other and the standard library. An
 # unknown angle include is not automatically a system header: that used to let

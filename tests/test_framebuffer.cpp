@@ -337,6 +337,31 @@ void mfd_tuning_and_pages() {
     const auto selected=app.page();bezel(plain,1);require(app.page()==selected,"disabled MFD accepted hardware input");
     rejects([&]{framebuffer::Session invalid(app,true,4);},"invalid bezel count accepted");app.close();
 }
+
+void mfd_default_size() {
+    Launch launch;launch.smoke=true;Application app(launch);app.select(ui::Field::fast_mode,"fast");
+    for(unsigned scale=1;scale<=4;++scale) {
+        framebuffer::Config config;config.font_scale=scale;
+        const auto metrics=framebuffer::Renderer(config).metrics();
+        config.width=framebuffer::default_window_width(metrics,true);
+        if(scale==2)require(config.width==framebuffer::Config{}.width,"default Config and host width disagree");
+        require(framebuffer::default_window_width(metrics,false)==1200,"plain default lost its canvas width");
+        framebuffer::Session session(app);session.resize({static_cast<int>(config.width),static_cast<int>(config.height),metrics});session.tick();
+        const int canvas=static_cast<int>(config.width)-framebuffer::mfd_bezel_width(metrics);
+        require(canvas==1200&&canvas>=ui::min_width,"default bezel shrank GUI below its required width");
+        const auto targets=std::count_if(session.scene().primitives.begin(),session.scene().primitives.end(),[&](const auto& p){
+            return !p.clip&&p.kind==surface::Primitive::Kind::fill&&p.border&&p.bounds.x>=canvas&&p.bounds.w>=48&&p.bounds.h>=48;
+        });
+        require(targets==5,"default MFD touch target too small");
+        bool right_control=false;
+        for(const auto& p:session.scene().primitives)if(p.kind==surface::Primitive::Kind::fill&&p.border&&p.clip&&p.bounds.w>0) {
+            require(p.bounds.x>=0&&p.bounds.x+p.bounds.w<=canvas,"default Fast widget hidden behind bezel");
+            right_control|=p.bounds.x+p.bounds.w>canvas-40;
+        }
+        require(right_control,"default Fast layout check did not reach rightmost controls");
+    }
+    app.close();
+}
 void mfd_input_and_modality() {
     Launch launch;launch.smoke=true;Application app(launch);app.select(ui::Field::fast_mode,"fast");
     framebuffer::Session session(app);session.resize({1480,1220,{8,18}});session.tick();
@@ -426,6 +451,6 @@ void mfd_operating_subset() {
 
 }
 int main() {
-    try{render_and_lifetime();clipping_and_mono();growing_waterfall();copy_formats();glyphs();widget_raster();pixel_interaction();pixel_presets();minimal_embedding();overlay_focus_policy();popup_live_options();overlay_keyboard_scope();dropdown_chrome();mfd_tuning_and_pages();mfd_input_and_modality();mfd_three_buttons();mfd_operating_subset();std::cout<<"Framebuffer pixel, damage, ownership, clipping, format, interaction and MFD checks passed\n";return 0;}
+    try{render_and_lifetime();clipping_and_mono();growing_waterfall();copy_formats();glyphs();widget_raster();pixel_interaction();pixel_presets();minimal_embedding();overlay_focus_policy();popup_live_options();overlay_keyboard_scope();dropdown_chrome();mfd_tuning_and_pages();mfd_default_size();mfd_input_and_modality();mfd_three_buttons();mfd_operating_subset();std::cout<<"Framebuffer pixel, damage, ownership, clipping, format, interaction and MFD checks passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }
