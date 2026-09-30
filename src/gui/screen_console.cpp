@@ -5,6 +5,27 @@ namespace datapump::gui::ui {
 namespace {
 Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     control.slot=slot; control.menu=menu;
+    switch(slot) {
+    case Slot::fast_mode:case Slot::bandwidth:case Slot::carrier:case Slot::snr:
+    case Slot::long_snr:case Slot::volume:
+        control.purpose=ControlPurpose::operating_parameter;break;
+    case Slot::clear:case Slot::transmit:case Slot::transmit_noise:case Slot::cancel:
+        control.purpose=ControlPurpose::operation;break;
+    case Slot::simulation:case Slot::link_power:case Slot::link_loss:case Slot::link_noise:
+    case Slot::simulation_oscillator:
+        control.purpose=ControlPurpose::planning;break;
+    case Slot::device:case Slot::mono:case Slot::exclusive:case Slot::key:case Slot::key_actions:
+    case Slot::pattern:case Slot::fec:case Slot::dsp_workspace:case Slot::receive_snr:
+    case Slot::developer_mode:case Slot::shellcode_mode:case Slot::send_key:
+        control.purpose=ControlPurpose::setup;break;
+    case Slot::message:case Slot::binary:case Slot::paste_previous:case Slot::attach_file:
+    case Slot::use_text:case Slot::copy_signal:case Slot::paste_signal:case Slot::save_file:
+        control.purpose=ControlPurpose::content;break;
+    case Slot::qr_brightness:case Slot::clear_waterfall:case Slot::zoom_in:case Slot::zoom_out:
+    case Slot::reset_zoom:case Slot::transmit_scope_format:
+        control.purpose=ControlPurpose::presentation;break;
+    default:break;
+    }
     control.persistent=persistent_slot(slot);
     control.developer_only=slot==Slot::pattern||slot==Slot::fec||slot==Slot::dsp_workspace||
         slot==Slot::receive_snr||slot==Slot::profile_reference||slot==Slot::callsign||

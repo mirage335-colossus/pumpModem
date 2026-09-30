@@ -27,21 +27,30 @@ Unsupported local Unicode glyphs
 appear as question marks while the original editor bytes remain intact.
 Received text retains Data Pump's stricter shared received-byte policy.
 .SH MFD / AMPCD BEZEL
-The default color display has rectangular inner label and outer button rings.
-Five reusable keys total provide TUNE, ACTIONS and VIEWS banks. Button 1 changes
-bank; 2/3 select a setting, action or view; 4/5 choose the displayed previous/next
-preset in TUNE. Button 5 executes the selected action or opens the selected view.
-Only numbered outer buttons are clickable. F5 through F9 also press keys 1
-through 5. Unused key positions are empty.
+The default color display places all five numbered buttons on the right edge,
+with changing abbreviated labels immediately inward. The other edges have no
+bezel controls. TUNE and ACTIONS are the two banks. Button 1 changes bank;
+2/3 select a setting or action; 4/5 (DEC/INC) choose the displayed previous/next
+preset in TUNE. Button 5 (EXEC) executes an action; 4 is inactive in ACTIONS.
+Only numbered buttons are clickable. F5 through F9 press keys 1 through 5.
 .PP
-The three-key variant uses button 1 to cycle individual functions; 2/3 adjust
-settings, and 3 executes an action. In VIEWS, 2 advances the tab and 3 opens it.
-Button 1 becomes Back/Cancel for help, popups and services, or Escape for an
-overlay that declares an Escape binding. Other bezel actions remain inactive
-while modal input is owned. Changing bezel banks does not change the usual GUI tab. Labels, choices and
-action availability come from the active modem declarations. No setting value
-is invented by the backend. Below 480x320 the bezel asks for enlargement and
-does not accept keys. The full GUI is not a watch-size interface.
+The three-key variant also uses the right edge. Button 1 cycles individual
+functions through TUNE and ACTIONS; 2/3 adjust settings, and 3 executes actions.
+Button 1 becomes BACK for help, popups and services, or ESC for an overlay
+that declares Escape. Background bezel operations are inactive during modal input.
+A refresh that changes a displayed operation's binding or target cancels that
+key press. Below 480x320, or with insufficient space for a large font, the bezel
+requests enlargement and disables its keys. The GUI is not a watch-size layout.
+.PP
+The operating subset includes modem, rate/profile, carrier, SNR/squelch and
+actual TX audio volume where supported, plus Transmit, Transmit noise, Cancel TX
+and Clear received. No VIEWS bank or application-tab navigation is offered.
+Previous-message paste, attachments, text/file/clipboard tools, waterfall/zoom,
+simulation, estimated transmit power/path loss/noise floor, oscillator models,
+audio-device routing, QR brightness and key setup are left to preconfiguration
+or ordinary GUI use. The selected function/value appears above the keys;
+labels use abbreviations such as TX, RX and Exp SNR. Available options come from
+the active declarations; the backend does not invent setting values.
 .PP
 This is a prototype for constrained embedded display ports and simulated VR,
 and an example of consistent application functionality through few physical
@@ -58,7 +67,7 @@ application abstraction.
 .SH OPTIONS
 .TP
 .B \-\-no-mfd
-Disable both bezel rings and restore the ordinary framebuffer layout.
+Disable the right-edge labels and buttons and restore the ordinary framebuffer layout.
 .TP
 .BI \-\-mfd-buttons " 3|5"
 Select three or five physical-style keys total; default 5.

@@ -102,13 +102,16 @@ struct Session::Impl {
     ui::Rect interior{};
     struct MfdEntry {
         ui::Control control{};
-        std::optional<ui::Page> page;
         std::string label;
         bool enabled=false;
     };
-    struct MfdKey {ui::Rect bounds;unsigned number;bool enabled;};
-    std::array<std::vector<MfdEntry>,3> mfd_entries;
-    std::array<std::size_t,3> mfd_selected{};
+    struct MfdKey {
+        ui::Rect bounds;unsigned number;bool enabled;unsigned bank;bool back;
+        std::optional<ControlIdentity> control;
+        std::pair<std::string,std::string> target;
+    };
+    std::array<std::vector<MfdEntry>,2> mfd_entries;
+    std::array<std::size_t,2> mfd_selected{};
     std::map<ControlIdentity,std::pair<std::string,std::string>> mfd_presets;
     std::vector<MfdKey> mfd_keys;
     unsigned mfd_bank=0;
@@ -143,9 +146,8 @@ struct Session::Impl {
     }
     void resize(Viewport value) {
         outer_viewport=value;
-        const int x=mfd?std::min(std::max(104,value.metrics.cell_width*17),value.width/4):0;
-        const int y=mfd?std::min(2*value.metrics.line_height+46,value.height/4):0;
-        interior={x,y,value.width-2*x,value.height-2*y};
+        const int bezel=mfd?std::min(std::max(192,value.metrics.cell_width*28),value.width/2):0;
+        interior={0,0,value.width-bezel,value.height};
         viewport={interior.w,interior.h,value.metrics};dirty=true;
     }
     int width() const {return std::max(ui::min_width,viewport.width);}
@@ -428,7 +430,7 @@ struct Session::Impl {
         text({x+12,y+h-lh()-4,w-24,lh()},notice.empty()?"Enter accepts; Escape cancels":notice,notice.empty()?Tone::muted:Tone::negative);
     }
     // Bezel pages project the same opaque declarations as ordinary widgets.
-    // No field/command IDs, label matching or modem-setting calculations live here.
+    // Selection uses purpose metadata, never field/command IDs or label matching.
     static std::optional<double> numeric(std::string_view value) {
         double number=0;
         const auto parsed=std::from_chars(value.data(),value.data()+value.size(),number);
@@ -438,18 +440,21 @@ struct Session::Impl {
     void collect_mfd() {
         auto previous=std::move(mfd_entries);mfd_entries={};
         for(const auto& c:ui::console_screen()) {
-            if(c.document_only||(!c.persistent&&c.page!=app.page())||c.menu!=ui::Menu::none)continue;
+            if(c.document_only||c.developer_only||(!c.persistent&&c.page!=app.page())||c.menu!=ui::Menu::none)continue;
+            const bool parameter=c.purpose==ui::ControlPurpose::operating_parameter;
+            const bool operation=c.purpose==ui::ControlPurpose::operation;
+            if(!parameter&&!operation)continue;
             const auto view=app.control(c);if(!view.visible)continue;
-            const bool tune=c.kind==ui::Kind::choice||
-                (c.kind==ui::Kind::text&&!c.multiline&&!c.read_only&&view.state.options.size()>1);
-            if(!tune&&c.kind!=ui::Kind::action)continue;
+            const bool tune=parameter&&(c.kind==ui::Kind::choice||
+                (c.kind==ui::Kind::text&&!c.multiline&&!c.read_only&&view.state.options.size()>1));
+            if(!tune&&!(operation&&c.kind==ui::Kind::action))continue;
             std::string label=view.label;
             if(label.empty()) {
                 for(const auto& option:view.state.options)if(option.id==view.state.selected){label=option.label;break;}
                 if(label.empty())label=view.state.text;
             }
             if(label.empty())continue;
-            mfd_entries[tune?0:1].push_back({c,{},std::move(label),view.enabled});
+            mfd_entries[tune?0:1].push_back({c,std::move(label),view.enabled});
         }
         // Persistent controls and the action row containing an editor's submit
         // command come first. This is declaration structure, not radio policy.
@@ -467,16 +472,12 @@ struct Session::Impl {
         for(const auto& entry:actions)ranked.emplace_back(rank(entry),entry);
         std::stable_sort(ranked.begin(),ranked.end(),[](const auto& a,const auto& b){return a.first<b.first;});
         actions.clear();for(auto& entry:ranked)actions.push_back(std::move(entry.second));
-        for(const auto& tab:app.tab_layout(width(),height()))if(tab.visible) {
-            const auto found=std::find_if(ui::pages().begin(),ui::pages().end(),[&](const auto& page){return page.id==tab.page;});
-            if(found!=ui::pages().end())mfd_entries[2].push_back({{},tab.page,found->title,true});
-        }
-        for(unsigned bank=0;bank<3;++bank) {
+        for(unsigned bank=0;bank<mfd_entries.size();++bank) {
             auto& selected=mfd_selected[bank];const auto& entries=mfd_entries[bank];
             if(selected<previous[bank].size()) {
                 const auto& old=previous[bank][selected];
                 const auto found=std::find_if(entries.begin(),entries.end(),[&](const auto& entry) {
-                    return bank==2?entry.page==old.page:ui::document_control_identity(entry.control)==ui::document_control_identity(old.control);
+                    return ui::document_control_identity(entry.control)==ui::document_control_identity(old.control);
                 });
                 selected=found==entries.end()?0:static_cast<std::size_t>(found-entries.begin());
             } else selected=0;
@@ -518,8 +519,11 @@ struct Session::Impl {
         }
         return direction>0?values.front():values.back();
     }
+    bool mfd_fits() const {
+        return outer_viewport.width>=480&&outer_viewport.height>=std::max(320,(2*static_cast<int>(mfd_buttons)+4)*lh()+32);
+    }
     bool mfd_available() const {
-        return mfd&&outer_viewport.width>=480&&outer_viewport.height>=320&&
+        return mfd&&mfd_fits()&&
             !dialog&&!host_wait&&!help&&!popup&&app.overlay_layers().enable_background;
     }
     bool mfd_back() const {
@@ -533,7 +537,7 @@ struct Session::Impl {
         index=static_cast<std::size_t>((static_cast<int>(index)+direction+static_cast<int>(count))%static_cast<int>(count));
     }
     void mfd_press(unsigned number) {
-        if(mfd&&outer_viewport.width>=480&&outer_viewport.height>=320&&number==1&&mfd_back()) {
+        if(mfd&&mfd_fits()&&number==1&&mfd_back()) {
             if(dialog)finish_dialog(true);
             else if(host_wait) {
                 app.complete_service({host_wait->id,true,{},{}});host_wait.reset();host_services.clear();app.set_service_active(false);
@@ -545,7 +549,7 @@ struct Session::Impl {
         if(!mfd_available()||number<1||number>mfd_buttons)return;
         if(number==1) {
             if(mfd_buttons==3&&mfd_selected[mfd_bank]+1<mfd_entries[mfd_bank].size())++mfd_selected[mfd_bank];
-            else {mfd_bank=(mfd_bank+1)%3;if(mfd_buttons==3)mfd_selected[mfd_bank]=0;}
+            else {mfd_bank=static_cast<unsigned>((mfd_bank+1)%mfd_entries.size());if(mfd_buttons==3)mfd_selected[mfd_bank]=0;}
         } else if(mfd_buttons==5&&(number==2||number==3))mfd_move(number==2?-1:1);
         else if(const auto* entry=mfd_entry();entry&&entry->enabled) {
             const bool next=number==mfd_buttons;
@@ -555,17 +559,37 @@ struct Session::Impl {
                     if(control.kind==ui::Kind::choice)app.select(control,option->id);
                     else {app.preset(control,option->id);mfd_presets[ui::document_control_identity(control)]={option->id,app.control(control).state.text};}
                 }
-            } else if(mfd_bank==2) {
-                if(next) {app.navigate(*entry->page);document_scroll=0;}
-                else if(mfd_buttons==3)mfd_move(1);
             } else if(next)app.activate(entry->control);
         }
         dirty=true;
     }
+    void mfd_dispatch(unsigned number) {
+        const auto shown=std::find_if(mfd_keys.begin(),mfd_keys.end(),[&](const auto& key){return key.number==number;});
+        const std::optional<MfdKey> intended=shown==mfd_keys.end()?std::nullopt:std::optional<MfdKey>(*shown);
+        app.tick();services();rebuild();
+        const auto current=std::find_if(mfd_keys.begin(),mfd_keys.end(),[&](const auto& key){return key.number==number;});
+        // An old EXEC or adjustment must never operate a replacement binding or
+        // a changed target value after a refresh, modem switch or modal change.
+        if(!intended||!intended->enabled||current==mfd_keys.end()||!current->enabled||
+            intended->bank!=current->bank||intended->back!=current->back||
+            intended->control!=current->control||intended->target!=current->target)return;
+        mfd_press(number);
+    }
+    static std::string mfd_label(std::string text) {
+        // Display-only abbreviations: these never select or dispatch a binding.
+        for(const auto& [word,shortened]:std::initializer_list<std::pair<std::string_view,std::string_view>>{
+            {"Expected","Exp"},{"Transmit","TX"},{"transmit","TX"},{"received","RX"},
+            {"Channel","Chan"},{"Modem","Mdm"},{"target ",""},{"volume","vol"},
+            {"≤16 B","<=16B"},{" (dB-Hz)",""},{" (Hz)",""}}) {
+            std::size_t at=0;
+            while((at=text.find(word,at))!=std::string::npos){text.replace(at,word.size(),shortened);at+=shortened.size();}
+        }
+        return text;
+    }
     void compose_mfd() {
         mfd_keys.clear();if(!mfd)return;
-        // Ordinary widgets retain local coordinates, including popup placement,
-        // pan, modal dialogs and caret. Only composition sees the outer display.
+        // Ordinary widgets keep local coordinates. Only composition clips them
+        // to the area beside the right-edge hardware keys and their labels.
         for(auto& p:scene.primitives) {
             p.bounds.x+=interior.x;p.bounds.y+=interior.y;
             if(p.clip){p.clip->x+=interior.x;p.clip->y+=interior.y;p.clip=intersection(*p.clip,interior);}
@@ -573,48 +597,42 @@ struct Session::Impl {
         }
         if(scene.caret){scene.caret->x+=interior.x;scene.caret->y+=interior.y;scene.caret=intersection(*scene.caret,interior);}
         scene.width=outer_viewport.width;scene.height=outer_viewport.height;paint_clip.reset();
-        const int w=scene.width,h=scene.height,x=interior.x,y=interior.y;
-        fill({0,0,w,y});fill({0,h-y,w,y});fill({0,y,x,h-2*y});fill({w-x,y,x,h-2*y});
-        if(w<480||h<320) {line_text({0,0,w,std::min(y,lh()+4)},"Enlarge MFD (480 x 320)",Tone::caution,true,true);return;}
+        const int w=scene.width,h=scene.height,left=interior.x+interior.w,pad=8;
+        fill({left,0,w-left,h});fill({left,0,1,h},true);
+        if(!mfd_fits()) {text({left+2,2,w-left-4,h-4},"Enlarge MFD",Tone::caution);return;}
         collect_mfd();const bool enabled=mfd_available(),back=mfd_back();const auto* entry=mfd_entry();
-        const char* banks[]={"TUNE","ACTIONS","VIEWS"};
-        const int button=32,pad=8,label_w=std::max(1,x-button-3*pad);
-        const auto key=[&](unsigned number,ui::Rect box,ui::Rect label,std::string caption,bool active,bool centered=false) {
-            const bool available=active&&(enabled||(number==1&&back));
-            fill(box,false,false,true,available,Fill::canvas);
-            line_text(box,std::to_string(number),Tone::normal,available,true);
-            if(centered)line_text(label,caption,Tone::accent,available,true);
-            else text(label,caption,Tone::accent,available);
-            mfd_keys.push_back({box,number,available});
-        };
-        key(1,{w/2-button/2,pad,button,button},{w/2-140,pad+button+4,280,2*lh()},
-            back?(dialog||host_wait||help||popup?"BACK / CANCEL":"ESCAPE"):
-                std::string(mfd_buttons==3?"NEXT FUNCTION | ":"PAGE | ")+banks[mfd_bank],true,true);
-        if(mfd_buttons==5) {
-            key(2,{pad,h/2-button/2,button,button},{pad*2+button,h/2-lh(),label_w,2*lh()},"PREV\nITEM",entry);
-            key(3,{w-pad-button,h/2-button/2,button,button},{w-x+pad,h/2-lh(),label_w,2*lh()},"NEXT\nITEM",entry);
-        }
-        const int bottom=h-y;
-        std::string title=entry?entry->label:"No controls on this page";
+        const char* banks[]={"TUNE","ACTIONS"};
+        const int header=4*lh()+2*pad,pitch=(h-header)/static_cast<int>(mfd_buttons);
+        const int button=std::min(std::max(32,lh()+8),pitch-8),button_x=w-pad-button;
+        const int label_x=left+pad,label_w=std::max(1,button_x-pad-label_x);
+        line_text({label_x,pad,w-left-2*pad,lh()},std::string(banks[mfd_bank])+" "+
+            std::to_string(mfd_selected[mfd_bank]+(entry?1:0))+"/"+std::to_string(mfd_entries[mfd_bank].size()),Tone::accent);
+        line_text({label_x,pad+lh(),w-left-2*pad,lh()},entry?mfd_label(entry->label):"No operating controls",Tone::data);
         if(entry&&mfd_bank==0) {
             const auto& state=app.control(entry->control).state;std::string value=state.text;
             if(entry->control.kind==ui::Kind::choice)for(const auto& option:state.options)if(option.id==state.selected){value=option.label;break;}
-            if(value!=title&&!value.empty())title+=" | "+value;
+            if(value!=entry->label)line_text({label_x,pad+2*lh(),w-left-2*pad,lh()},mfd_label(value),Tone::data);
         }
-        line_text({x,bottom+2,w-2*x,lh()},std::string(banks[mfd_bank])+" "+
-            std::to_string(mfd_selected[mfd_bank]+(entry?1:0))+"/"+std::to_string(mfd_entries[mfd_bank].size())+" | "+title,Tone::data,true,true);
-        const int left=w/3,right=w*2/3;const int label_width=std::max(1,w/3-12);
-        const auto down=[&](unsigned number,int center,std::string caption,bool active) {
-            key(number,{center-button/2,h-pad-button,button,button},
-                {center-label_width/2,bottom+lh()+4,label_width,lh()},std::move(caption),active,true);
+        const auto key=[&](unsigned number,std::string caption,bool active,std::optional<ControlIdentity> control={},std::pair<std::string,std::string> target={}) {
+            const int center=header+(static_cast<int>(number)-1)*pitch+pitch/2;
+            const ui::Rect box{button_x,center-button/2,button,button};
+            const bool available=active&&(enabled||(number==1&&back));
+            fill(box,false,false,true,available,Fill::canvas);line_text(box,std::to_string(number),Tone::normal,available,true);
+            text({label_x,center-lh(),label_w,2*lh()},caption,Tone::accent,available);
+            mfd_keys.push_back({box,number,available,mfd_bank,number==1&&back,control,std::move(target)});
         };
+        key(1,back?(dialog||host_wait||help||popup?"BACK":"ESC"):(mfd_buttons==3?"NEXT FN":"PAGE"),true);
+        if(mfd_buttons==5) {key(2,"PREV ITEM",entry);key(3,"NEXT ITEM",entry);}
+        const auto binding=entry?std::optional<ControlIdentity>(ui::document_control_identity(entry->control)):std::nullopt;
         if(mfd_bank==0) {
             const auto previous=mfd_target(-1),next=mfd_target(1);
-            down(mfd_buttons-1,left,previous?"< "+previous->label:"< LIMIT",previous.has_value());
-            down(mfd_buttons,right,next?next->label+" >":"LIMIT >",next.has_value());
+            key(mfd_buttons-1,previous?"DEC\n"+mfd_label(previous->label):"DEC\nLIMIT",previous.has_value(),binding,
+                previous?std::pair{previous->id,previous->label}:std::pair<std::string,std::string>{});
+            key(mfd_buttons,next?"INC\n"+mfd_label(next->label):"INC\nLIMIT",next.has_value(),binding,
+                next?std::pair{next->id,next->label}:std::pair<std::string,std::string>{});
         } else {
-            if(mfd_bank==2&&mfd_buttons==3)down(2,left,"NEXT VIEW",entry);
-            down(mfd_buttons,right,mfd_bank==2?"OPEN":"EXECUTE",entry&&entry->enabled);
+            key(mfd_buttons-1,"--",false);
+            key(mfd_buttons,"EXEC",entry&&entry->enabled,binding,{"",entry?entry->label:""});
         }
     }
     void rebuild() {
@@ -848,13 +866,13 @@ struct Session::Impl {
         }
     }
     void input(Event event) {
+        if(mfd&&event.type==Event::Type::pointer&&!contains(interior,event.x,event.y))
+            for(const auto& key:mfd_keys)if(contains(key.bounds,event.x,event.y)){mfd_dispatch(key.number);return;}
         app.tick();services();rebuild();
         if(event.type==Event::Type::input_rejected){notice=event.text;dirty=true;return;}
         if(event.type==Event::Type::pointer_up){drag.reset();return;}
         if(mfd&&(event.type==Event::Type::pointer||event.type==Event::Type::pointer_move||event.type==Event::Type::wheel)) {
             if(!contains(interior,event.x,event.y)) {
-                if(event.type==Event::Type::pointer)for(const auto& key:mfd_keys)
-                    if(key.enabled&&contains(key.bounds,event.x,event.y)){mfd_press(key.number);break;}
                 return; // Inactive bezel/labels never fall through to the GUI.
             }
             event.x-=interior.x;event.y-=interior.y;
@@ -960,7 +978,7 @@ void Session::resize(Viewport viewport) {
 bool Session::tick(){const bool changed=impl_->app.tick();impl_->services();if(changed||impl_->dirty||impl_->app.revision()!=impl_->presented_revision){impl_->rebuild();return true;}return false;}
 void Session::input(const Event& event){impl_->input(event);}
 void Session::press_mfd_button(unsigned number) {
-    impl_->app.tick();impl_->services();impl_->rebuild();impl_->mfd_press(number);
+    impl_->mfd_dispatch(number);
 }
 const Scene& Session::scene() const{return impl_->scene;}
 std::vector<ui::ServiceRequest> Session::take_host_services(){auto result=std::move(impl_->host_services);impl_->host_services.clear();return result;}

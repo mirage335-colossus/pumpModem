@@ -116,59 +116,64 @@ plots use shared opaque bitmap producers and respect sample aspect ratio.
 
 ## Framebuffer MFD / AMPCD prototype
 
-`datapump-fb` opens with a rectangular MFD bezel: an inner ring of changing
-labels aligned with an outer ring of clickable, numbered buttons. Color is the
-default (AMPCD, Advanced Color Multi Purpose Display); `--monochrome` selects
-grayscale, and `--no-mfd` removes both rings and restores the ordinary framebuffer
-layout. `--mfd-buttons 3` selects the constrained three-button variant; the default
-is five buttons **total**, never more than five labels/buttons on any edge. Unused
-positions stay empty. Click the outer numbered buttons, or use F5 through F9
-for buttons 1 through 5 (F5 through F7 in three-button mode).
+`datapump-fb` opens with MFD labels and clickable numbered keys along the
+**right edge only**. Labels sit inward of their keys; the other three edges have
+no bezel controls. Color is the default (AMPCD, Advanced Color Multi Purpose
+Display); `--monochrome` selects grayscale, and `--no-mfd` removes the bezel.
+`--mfd-buttons 3` selects three keys; the default is five keys total. Click a
+numbered key or press F5 through F9 (F5 through F7 in three-key mode).
 
-The design borrows the simulated-aircraft convention of fixed bezel keys with
-adjacent context-dependent labels. It groups common operations into MFD pages,
-called banks here to distinguish them from the application's tabs:
+The fixed keys and changing, abbreviated labels follow the simulated-aircraft
+MFD convention. The backend offers two banks of Console operating functions:
 
 | Bank | Five-button behavior |
 | --- | --- |
-| TUNE | Button 1 changes bank; 2/3 choose a setting; 4/5 select the previous/next offered value. The label previews the exact target value. |
-| ACTIONS | 2/3 choose an action; 5 executes it. Changing the selection never executes it. Persistent controls and the editor's transmit-action row come first. |
-| VIEWS | 2/3 choose an application tab; 5 opens it. Selecting or browsing a tab does not open it until OPEN is pressed. |
+| TUNE | 1 changes bank; 2/3 choose a setting; 4/5 select the previous/next offered value, previewed by DEC/INC labels. |
+| ACTIONS | 2/3 choose an action; 5 (EXEC) executes it. Button 4 is inactive. Browsing never executes an action. |
 
-TUNE includes the modem selector and available settings such as Expected SNR
-and Rate (initially 3.6 kHz for Robust Modem). ACTIONS exposes the current modem's
-declared actions, including Transmit, Transmit noise where supported, Cancel TX,
-and Clear received. Modem changes regenerate the banks from the active
-application declarations. Labels and enabled states follow the application;
-an unavailable action stays disabled. Plain numeric presets are traversed in
-numeric order; other options retain their declared order. Endpoints stop, and
-labels show the offered destination rather than promising a fixed numeric step.
-The accepted value is displayed even when the application normalizes a preset.
+TUNE contains the modem selector, the selected modem's rate/profile, carrier,
+SNR targets or squelch where available, and actual TX audio volume. Robust Rate
+starts at 3.6 kHz. ACTIONS contains Transmit, Transmit noise where supported,
+Cancel TX and Clear received where available. Abbreviations include TX, RX,
+Exp SNR, Chan profile and Mdm. The header identifies the selected function and
+its accepted value. Numeric presets are ordered numerically; other options keep
+their declared order. Endpoints stop; the backend never invents a setting value.
 
-With three buttons, button 1 cycles individual functions through TUNE, ACTIONS,
-and VIEWS. Buttons 2/3 adjust the displayed setting; actions need only button 3
-(EXECUTE). In VIEWS, button 2 advances the candidate tab and button 3 opens it.
-This trades more navigation presses for fewer physical switches. Changing the
-MFD bank/function changes only bezel labels, leaving the usual GUI and its tab
-in place. Text editing and occasional setup remain available through ordinary
-widgets. Background MFD operations are inactive while help, a popup, a modal application
-overlay, or a host-service dialog owns input. Button 1 becomes BACK / CANCEL
-for help, popups and services, or ESCAPE when the overlay declares that key;
-it follows the shared overlay binding without bypassing its policy. Bezel labels and unused areas do
-not activate anything. Below 480 by 320 pixels the bezel requests enlargement
-and its keys are inactive; the full GUI is **not** a watch-size layout. Larger
-windows give the inset GUI more room; its normal panning/focus behavior remains
-available when the interior is smaller than the desktop layout.
+The bezel does not offer application-tab navigation or inspection views. It also
+omits previous-message paste, attachments, Use text, clipboard/file operations,
+waterfall clearing and zoom, simulation, link-budget power/loss/noise assumptions,
+oscillator models, audio routing, QR brightness and key-management setup. These
+remain available through the ordinary GUI or preconfiguration. Noise-floor
+planning is separate from the retained Transmit noise operation. Changing banks
+only changes bezel functions; it does not switch the application's tab.
+
+With three keys, 1 cycles individual functions through TUNE and ACTIONS; 2/3
+adjust a setting, and 3 executes an action. All three keys stay on the right.
+This trades more navigation presses for fewer physical switches. Ordinary text
+editing and occasional setup remain available. During help, a popup, a modal
+application overlay or a host-service dialog, background operations are inactive.
+Key 1 becomes BACK for help/popups/services or ESC for an overlay that declares
+an Escape binding. It follows shared modal policy. A stale adjustment or action
+is discarded if a refresh replaces its displayed binding or target value.
+Labels and unused bezel areas never activate anything.
+
+Below 480 by 320 pixels, or when a large selected font cannot fit the keys, the
+bezel requests enlargement and disables its keys. The full GUI is **not** a
+watch-size layout. Its normal panning/focus behavior remains available when the
+area to the left of the bezel is smaller than the desktop layout.
 
 This is a prototype for future display-hardware ports or simulated VR use,
 not an Arduino modem implementation. Its other purpose is to demonstrate the
 application's functionality through a consistent, reusable interface that other
 applications can follow. All MFD configuration, rings, hit testing, page/function
-selection and preset navigation belong to the framebuffer backend. The backend
-projects opaque shared declarations and invokes their existing scoped callbacks;
-it contains no modem field/command lookup, radio calculations or application-side
-MFD menu. Ordinary application maintenance does not require MFD-specific code.
-Grouped setup menus and arbitrary text entry need not be reachable from the bezel.
+selection, abbreviations and preset navigation belong to the framebuffer backend.
+Shared declarations describe backend-neutral control purposes (operating
+parameter, operation, setup, content, planning or presentation); they contain no
+MFD flags, button positions, banks or abbreviated labels. The framebuffer chooses
+which purposes to expose and invokes existing opaque, scoped callbacks, without
+modem-field lookup, label-based routing or radio calculations. Ordinary application
+maintenance requires no MFD-specific code. Setup menus and arbitrary text entry
+remain outside the bezel's operating subset.
 
 The intended derivatives are inexpensive embedded radios that seldom have a
 touchscreen or keyboard/mouse: a watch-like news receiver, a configurable radio

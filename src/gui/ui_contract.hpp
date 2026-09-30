@@ -45,6 +45,9 @@ enum class Bitmap {
 };
 enum class ScreenScope { regular, fast, legacy, shared };
 enum class Kind { label, action, toggle, choice, text, list, bitmap };
+// Device-independent semantics, separate from placement and binding identity.
+// Renderers may offer subsets without recognizing application fields or labels.
+enum class ControlPurpose { auxiliary, operating_parameter, operation, setup, content, planning, presentation };
 enum class Menu { none, keyfile, recovery };
 enum class TextTone { normal, muted, data, inverse, negative };
 enum class BitmapCaption { footer, overlay_error };
@@ -120,6 +123,7 @@ struct Control {
     bool developer_only = false; // Hide in place without changing the bound value.
     ScreenScope scope = ScreenScope::regular;
     bool read_only = false; // Selectable/scrollable native text without editing.
+    ControlPurpose purpose = ControlPurpose::auxiliary;
 };
 const std::vector<Control>& console_screen();
 struct PageDefinition {

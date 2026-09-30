@@ -7,6 +7,19 @@ Control placed(Kind kind,Field field,Command command,const char* label,Slot slot
     c.slot=slot;c.scope=ScreenScope::fast;c.help=help;
     c.byte_limit=32768;
     switch(slot) {
+    case Slot::fast_profile:case Slot::fast_expected_snr:case Slot::fast_volume:
+        c.purpose=ControlPurpose::operating_parameter;break;
+    case Slot::clear:case Slot::fast_transmit:case Slot::fast_cancel:
+        c.purpose=ControlPurpose::operation;break;
+    case Slot::fast_device:case Slot::fast_mono:case Slot::fast_exclusive:
+    case Slot::fast_encryption:case Slot::fast_key:case Slot::fast_open_key:case Slot::fast_generate_key:
+        c.purpose=ControlPurpose::setup;break;
+    case Slot::fast_text:case Slot::fast_file:case Slot::fast_choose_file:case Slot::fast_use_text:
+    case Slot::fast_save:case Slot::fast_copy_signal:case Slot::fast_paste_signal:
+        c.purpose=ControlPurpose::content;break;
+    default:break;
+    }
+    switch(slot) {
     case Slot::fast_symbol_rate:case Slot::fast_constellation:case Slot::fast_coding:
     case Slot::fast_depth:case Slot::fast_fec:case Slot::fast_progress:case Slot::fast_rate:
     case Slot::fast_tracking:case Slot::fast_correction:case Slot::fast_auth:case Slot::fast_detail:

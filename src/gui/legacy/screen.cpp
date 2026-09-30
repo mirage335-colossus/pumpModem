@@ -5,6 +5,15 @@ namespace {
 Control placed(Kind kind,Field field,const char* label,Slot slot) {
     Control c{kind,field,Command::none,Bitmap::none,Page::console,0,label};
     c.slot=slot;c.persistent=true;c.scope=ScreenScope::legacy;
+    switch(slot) {
+    case Slot::legacy_profile:case Slot::legacy_carrier:case Slot::legacy_squelch:case Slot::legacy_volume:
+        c.purpose=ControlPurpose::operating_parameter;break;
+    case Slot::legacy_transmit:c.purpose=ControlPurpose::operation;break;
+    case Slot::legacy_device:case Slot::legacy_mono:case Slot::legacy_exclusive:
+        c.purpose=ControlPurpose::setup;break;
+    case Slot::legacy_text:case Slot::legacy_transcript:c.purpose=ControlPurpose::content;break;
+    default:break;
+    }
     c.open_upward=slot==Slot::legacy_device||slot==Slot::legacy_squelch||slot==Slot::legacy_volume;return c;
 }
 }
