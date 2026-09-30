@@ -1,5 +1,8 @@
 # Build and maintenance guide
 
+The [documentation topic index](README.md) also covers modem internals,
+computational performance, weak-signal research, interfaces, security and evidence.
+
 From a checkout with its native development dependencies installed:
 
 ```sh
@@ -947,14 +950,15 @@ all required notices and ordinary documentation remain installed. See
 | Concern | Start here | First focused group |
 | --- | --- | --- |
 | Wire format, short bits, physical completion, pending rows | [development contract](development.md), `src/transfer.cpp`, `src/stream_codec.cpp`, `src/live.cpp` | `contract` |
-| Regular detector/search | `src/pattern_*`, `src/receiver_probability*` | `regular`, then `contract` |
-| Independent Fast/Legacy modem | `src/fast/`, `src/legacy/` and matching public headers | `fast` / `legacy` |
+| Regular detector/search | [Robust topics](indexes/robust.md), `src/pattern_*`, `src/receiver_probability*` | `regular`, then `contract` |
+| Independent Fast/Legacy modem | [Fast topics](indexes/fast.md), [Legacy reference](legacy-modem.md), `src/fast/`, `src/legacy/` and matching public headers | `fast` / `legacy` |
 | Shared GUI behavior | [GUI architecture](gui-architecture.md), `src/gui/application.cpp`, `src/gui/controller.cpp` | `gui`, then affected native backends |
 | Native widgets/platform services | `src/gui/backend_fltk*`, `src/gui/backend_rev*` | `gui`, `native` |
 | Build/dependencies/packaging | `CMakeLists.txt`, `cmake/`, `build.sh`, `third_party/README.md` | `build`, `packaging` |
 | Simultaneous agents, reservations, guarded edits and messages | [coordination workflow](agent-coordination.md), [recipes](agent-coordination-recipes.md), `tools/check-agent-record.py`, `tools/agent-board.py`, `tools/agent-session.py`, `tools/agent-edit.py` | `python3 -B tests/test_agent_record.py`, `test_agent_board.py`, `test_agent_session.py`, `test_agent_edit.py` and `test_agent_stress.py` under `tests/`, then `build` |
 
-Search maintained `src/`, `include/`, `tests/` and `cmake/` first. Vendored trees
-and `docs/validation-data` are reference material; old plans and recorded build
-commands are history, not current instructions. Keep independent reference
-fixtures even if they resemble production algorithms.
+When locating implementation, search maintained `src/`, `include/`, `tests/`
+and `cmake/` first. Vendored trees and `docs/validation-data` are reference
+material; old plans and recorded build commands are history, not current
+instructions. Keep independent reference fixtures even if they resemble
+production algorithms.

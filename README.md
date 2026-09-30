@@ -5,6 +5,10 @@
 for dependencies, stable profiles, focused tests and portable release limits.
 **Release with GitHub Actions:** follow [RELEASE](RELEASE), in order.
 
+**Documentation:** explore the [topic index](docs/README.md) for modem internals,
+performance studies, interfaces, security, build/release procedures and supporting
+evidence. Existing investigations include both measured results and open proposals.
+
 **AI contributors:** read [AGENTS.md](AGENTS.md) and the
 [shared agent coordination workflow](docs/agent-coordination.md) before editing
 or shared build/Git operations. Temporary ownership and findings live in the

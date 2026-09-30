@@ -1,11 +1,18 @@
 # Development requirements
 
-Build/navigation entry point: [docs/building.md](docs/building.md).
+Documentation topics: [docs/README.md](docs/README.md). Explore relevant branches
+for implementation explanations, prior investigations, measurements and proposals
+as useful to the task. Evaluate their applicability and evidence against current
+source; continue independent research and experiments where needed. The index
+provides navigation, not a required reading sequence.
+
+Build entry point: [docs/building.md](docs/building.md).
 Use `./build.sh` for the application and `./build.sh test GROUP` to build and
 run the appropriate tests. Stable profiles live under `build/`; older top-level
-`build-*` trees are historical and may contain stale binaries. Search `src/`,
-`include/`, `tests/` and `cmake/` first; vendored code and historical validation
-captures have their own documented provenance. Keep all checks below intact.
+`build-*` trees are historical and may contain stale binaries. When locating
+implementation, search `src/`, `include/`, `tests/` and `cmake/` first; vendored
+code and historical validation captures have their own documented provenance.
+Keep all checks below intact.
 
 ## Concurrent agents and temporary knowledge
 
