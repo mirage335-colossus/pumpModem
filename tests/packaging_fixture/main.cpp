@@ -20,7 +20,14 @@ int main(int argc, char** argv) {
             const auto path=std::getenv("PATH");
             const auto home=std::getenv("PYTHONHOME");
             const auto python=std::getenv("PYTHONPATH");
-            if(!path||*path||!home||std::strcmp(home,"/nonexistent")||
+#ifdef _WIN32
+            // Windows removes PATH for an empty assignment.
+            const bool isolated_path=!path||!*path;
+#else
+            // An absent POSIX PATH may enable default tool search directories.
+            const bool isolated_path=path&&!*path;
+#endif
+            if(!isolated_path||!home||std::strcmp(home,"/nonexistent")||
                 !python||std::strcmp(python,"/nonexistent")) {
                 std::fputs("GUI runtime environment was not isolated\n",stderr);return 1;
             }
