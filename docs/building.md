@@ -12,8 +12,10 @@ From a checkout with its native development dependencies installed:
 ./build.sh test contract
 ```
 
-`build.sh` is a POSIX shell wrapper around CMake, not another build system or a
-package manager. It selects an explicit preset, reuses its output directory and
+`build.sh` supports Dash and traditional SVR4 Bourne shell. See the
+[shell script inventory](shell-scripts.md) for maintained/generated entry points,
+interpreter requirements and compatibility checks. It selects an explicit CMake
+preset, reuses its output directory and
 prints the application paths. CMake 3.21+, a C++20 compiler and OpenSSL 3
 development files are required. The normal FLTK GUI also needs X11/Xft and font
 development packages on Linux. FLTK, XZ/liblzma, QR and LDPC sources are vendored.

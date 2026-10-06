@@ -1,5 +1,7 @@
 #!/bin/sh
 # A small, offline entry point; CMake remains the build system.
+# Compatible with Dash and traditional SVR4 Bourne shell; modern build tools are required.
+# shellcheck disable=SC2006,SC2015
 set -eu
 
 usage() {
@@ -39,6 +41,37 @@ HELP
 die() { printf '%s\n' "build.sh: $*" >&2; exit 2; }
 need_value() { [ "$#" -ge 2 ] || die "$1 needs a value"; }
 
+# `type` exists in traditional Bourne; the later `command` builtin does not.
+has_executable() { type "$1" >/dev/null 2>&1; }
+
+# Return an executable path without parsing shell-specific `type` output or
+# evaluating compiler arguments. Normalize empty PATH entries to the current
+# directory before splitting, and disable pathname expansion during that split.
+find_executable() {
+    case "$1" in
+        */*) [ -f "$1" ] && [ -x "$1" ] && printf '%s\n' "$1"; return ;;
+    esac
+    executable_name=$1
+    search_path=`printf '%s' "$PATH" | sed 's/^:/.:/; :empty; s/::/:.:/g; t empty; s/:$/:./; s/^$/./'`
+    saved_ifs=$IFS
+    saved_flags=$-
+    IFS=:
+    set -f
+    # Intentional PATH field splitting; globbing is disabled above.
+    # shellcheck disable=SC2086
+    set -- $search_path
+    IFS=$saved_ifs
+    case "$saved_flags" in *f*) ;; *) set +f ;; esac
+    for executable_directory do
+        if [ -f "$executable_directory/$executable_name" ] &&
+           [ -x "$executable_directory/$executable_name" ]; then
+            printf '%s\n' "$executable_directory/$executable_name"
+            return 0
+        fi
+    done
+    return 1
+}
+
 command_name=build
 command_seen=no
 group=
@@ -66,12 +99,12 @@ while [ "$#" -gt 0 ]; do
         --fb) framebuffer=ON; shift ;;
         --web-worker) web_worker=ON; shift ;;
         --stop-on-failure) stop_on_failure=yes; shift ;;
-        --backend) need_value "$@"; backend=$2; backend_explicit=yes; shift 2 ;;
-        --jobs|-j) need_value "$@"; jobs=$2; jobs_explicit=yes; shift 2 ;;
-        --build-jobs) need_value "$@"; build_jobs=$2; build_jobs_explicit=yes; shift 2 ;;
-        --build-dir) need_value "$@"; build_dir=$2; shift 2 ;;
-        --wasm-sdk) need_value "$@"; [ -n "$2" ] || die "--wasm-sdk needs a nonempty path"; wasm_sdk_root=$2; shift 2 ;;
-        --sdk) need_value "$@"; [ -n "$2" ] || die "--sdk needs a nonempty path"; sdk_root=$2; shift 2 ;;
+        --backend) need_value ${1+"$@"}; backend=$2; backend_explicit=yes; shift 2 ;;
+        --jobs|-j) need_value ${1+"$@"}; jobs=$2; jobs_explicit=yes; shift 2 ;;
+        --build-jobs) need_value ${1+"$@"}; build_jobs=$2; build_jobs_explicit=yes; shift 2 ;;
+        --build-dir) need_value ${1+"$@"}; build_dir=$2; shift 2 ;;
+        --wasm-sdk) need_value ${1+"$@"}; [ -n "$2" ] || die "--wasm-sdk needs a nonempty path"; wasm_sdk_root=$2; shift 2 ;;
+        --sdk) need_value ${1+"$@"}; [ -n "$2" ] || die "--sdk needs a nonempty path"; sdk_root=$2; shift 2 ;;
         --) shift; break ;;
         build|test|sanitize|package)
             if [ "$command_seen" = no ]; then
@@ -95,9 +128,18 @@ if [ "$build_jobs_explicit" = no ]; then
     if [ "$jobs_explicit" = yes ]; then
         build_jobs=$jobs
     else
-        source_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
-        if ! command -v python3 >/dev/null 2>&1 ||
-           ! build_jobs=$(python3 -B "$source_dir/tools/build_capacity.py"); then
+        script_directory=`dirname -- "$0"`
+        case "$script_directory" in /*) ;; *) script_directory=./$script_directory ;; esac
+        source_dir=`CDPATH=; export CDPATH; cd "$script_directory" && pwd -P`
+        capacity_available=no
+        if has_executable python3; then
+            # Heirloom applies errexit to a failed substitution even when the
+            # assignment is an if condition. A marker makes the failure explicit
+            # while keeping the substitution itself successful.
+            build_jobs=`python3 -B "$source_dir/tools/build_capacity.py" || printf '%s' unavailable`
+            case "$build_jobs" in ''|*[!0-9]*|0) ;; *) capacity_available=yes ;; esac
+        fi
+        if [ "$capacity_available" = no ]; then
             # Resource discovery is optional, including on CMake-only hosts.
             build_jobs=1
             printf '%s\n' 'build.sh: resource detection unavailable; compiling with one job (override with --build-jobs).' >&2
@@ -125,18 +167,22 @@ fi
 [ "$group" != native ] || [ "$cli" != yes ] || die "native tests require the GUI; omit --cli"
 
 # Resolve paths before changing directory so invocation from elsewhere works.
-source_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+script_directory=`dirname -- "$0"`
+case "$script_directory" in /*) ;; *) script_directory=./$script_directory ;; esac
+source_dir=`CDPATH=; export CDPATH; cd "$script_directory" && pwd -P`
 if [ -n "$build_dir" ]; then
-    case "$build_dir" in /*) ;; *) build_dir=$PWD/$build_dir ;; esac
+    invocation_directory=`pwd`
+    case "$build_dir" in /*) ;; *) build_dir=$invocation_directory/$build_dir ;; esac
 fi
 if [ -n "$sdk_root" ]; then
     [ -d "$sdk_root" ] || die "SDK directory is missing: $sdk_root"
-    sdk_root=$(CDPATH= cd -- "$sdk_root" && pwd -P)
+    case "$sdk_root" in /*) ;; *) sdk_root=./$sdk_root ;; esac
+    sdk_root=`CDPATH=; export CDPATH; cd "$sdk_root" && pwd -P`
     [ -f "$sdk_root/share/datapump-sdk/manifest.json" ] ||
         die "SDK manifest is missing; prepare the SDK explicitly before building"
     relocated_root=
     if [ -f "$sdk_root/share/datapump-sdk/relocated-root.txt" ]; then
-        IFS= read -r relocated_root < "$sdk_root/share/datapump-sdk/relocated-root.txt" || :
+        relocated_root=`sed -n '1p' "$sdk_root/share/datapump-sdk/relocated-root.txt"`
     fi
     [ "$relocated_root" = "$sdk_root" ] ||
         die "SDK needs explicit installation/relocation; use tools/build-sdk.py install before building"
@@ -157,11 +203,12 @@ if [ -n "$wasm_sdk_root" ]; then
     [ -z "${CPATH:-}${C_INCLUDE_PATH:-}${CPLUS_INCLUDE_PATH:-}${OBJC_INCLUDE_PATH:-}${LIBRARY_PATH:-}" ] ||
         die "--wasm-sdk requires compiler search-path environment overrides to be unset"
     [ -d "$wasm_sdk_root" ] || die "Wasm SDK directory is missing"
-    wasm_sdk_root=$(CDPATH= cd -- "$wasm_sdk_root" && pwd -P)
+    case "$wasm_sdk_root" in /*) ;; *) wasm_sdk_root=./$wasm_sdk_root ;; esac
+    wasm_sdk_root=`CDPATH=; export CDPATH; cd "$wasm_sdk_root" && pwd -P`
     [ -f "$wasm_sdk_root/share/datapump-wasm-sdk/manifest.json" ] || die "Prepare the Wasm SDK explicitly with tools/build-wasm-sdk.py"
     relocated_root=
     if [ -f "$wasm_sdk_root/share/datapump-wasm-sdk/relocated-root.txt" ]; then
-        IFS= read -r relocated_root < "$wasm_sdk_root/share/datapump-wasm-sdk/relocated-root.txt" || :
+        relocated_root=`sed -n '1p' "$wasm_sdk_root/share/datapump-wasm-sdk/relocated-root.txt"`
     fi
     [ "$relocated_root" = "$wasm_sdk_root" ] || die "Wasm SDK moved or preparation is incomplete"
     EM_CONFIG=$wasm_sdk_root/.emscripten
@@ -212,16 +259,16 @@ fi
 # Never reuse cached native paths with an SDK, or vice versa. CMake also checks
 # the SDK manifest fingerprint so upgrading it in place needs a fresh tree.
 if [ -f "$build_dir/CMakeCache.txt" ]; then
-    cached_sdk=$(sed -n 's/^DATAPUMP_CONFIGURED_SDK_ROOT:[^=]*=//p' "$build_dir/CMakeCache.txt")
-    cached_wasm_sdk=$(sed -n 's/^DATAPUMP_CONFIGURED_WASM_SDK_ROOT:[^=]*=//p' "$build_dir/CMakeCache.txt")
+    cached_sdk=`sed -n 's/^DATAPUMP_CONFIGURED_SDK_ROOT:[^=]*=//p' "$build_dir/CMakeCache.txt"`
+    cached_wasm_sdk=`sed -n 's/^DATAPUMP_CONFIGURED_WASM_SDK_ROOT:[^=]*=//p' "$build_dir/CMakeCache.txt"`
     [ "$cached_wasm_sdk" = "$wasm_sdk_root" ] || die "Wasm SDK differs from the configured tree; use a new --build-dir"
     [ "$cached_sdk" = "$sdk_root" ] ||
         die "SDK differs from the configured tree; use --build-dir with a new directory"
 fi
 
-command -v cmake >/dev/null 2>&1 || die "CMake 3.21 or newer is required"
+has_executable cmake || die "CMake 3.21 or newer is required"
 case "$command_name" in test|sanitize)
-    command -v ctest >/dev/null 2>&1 || die "CTest is required" ;;
+    has_executable ctest || die "CTest is required" ;;
 esac
 
 # Honor a cached generator; selecting Ninja again would reject an existing Make tree.
@@ -248,51 +295,56 @@ for arg do
     fi
 done
 if [ -z "$generator" ] && [ ! -f "$build_dir/CMakeCache.txt" ]; then
-    if command -v ninja >/dev/null 2>&1; then generator=Ninja; else generator='Unix Makefiles'; fi
+    if has_executable ninja; then generator=Ninja; else generator='Unix Makefiles'; fi
 fi
-if [ -n "$generator" ] && [ "$generator" != explicit ]; then set -- -G "$generator" "$@"; fi
+if [ -n "$generator" ] && [ "$generator" != explicit ]; then set -- -G "$generator" ${1+"$@"}; fi
 if [ -n "$sdk_root" ]; then
     set -- "-DCMAKE_TOOLCHAIN_FILE=$source_dir/cmake/toolchains/source-sdk.cmake" \
-        "-DDATAPUMP_SDK_ROOT=$sdk_root" "$@"
+        "-DDATAPUMP_SDK_ROOT=$sdk_root" ${1+"$@"}
 fi
 
 if [ -n "$wasm_sdk_root" ]; then
-    if [ "$group" = web ]; then set -- -DBUILD_TESTING=ON "$@"; fi
+    if [ "$group" = web ]; then set -- -DBUILD_TESTING=ON ${1+"$@"}; fi
     set -- "-DCMAKE_TOOLCHAIN_FILE=$source_dir/cmake/toolchains/wasm-sdk.cmake" \
-        "-DDATAPUMP_WASM_SDK_ROOT=$wasm_sdk_root" "$@"
+        "-DDATAPUMP_WASM_SDK_ROOT=$wasm_sdk_root" ${1+"$@"}
 fi
 
 # Match CMake's simple compiler-name + raw PROGRAM_ARGS form without evaluating
 # shell text. Compiler arguments can contain quotes; they are compared verbatim.
 compiler_environment() {
-    requested_compiler=$(printf '%s' "$1" | sed 's/^[[:space:]]*//')
+    requested_compiler=`printf '%s' "$1" | sed 's/^[[:space:]]*//'`
     requested_arguments=
     case "$requested_compiler" in
         \"*|\'*)
-            quote=${requested_compiler%"${requested_compiler#?}"}
-            remainder=${requested_compiler#?}
+            quote=`printf '%s' "$requested_compiler" | cut -c 1`
+            remainder=`printf '%s' "$requested_compiler" | cut -c 2-`
             case "$remainder" in
                 *"$quote"*)
-                    requested_compiler=${remainder%%"$quote"*}
-                    requested_arguments=${remainder#*"$quote"} ;;
+                    requested_compiler=`printf '%s' "$remainder" | sed "s/$quote.*//"`
+                    requested_arguments=`printf '%s' "$remainder" | sed "s/^[^$quote]*$quote//"` ;;
                 *) die "unclosed compiler-name quote in CC/CXX" ;;
             esac ;;
         *)
             # An existing executable path may itself contain unquoted spaces.
-            resolved=$(command -v "$requested_compiler" 2>/dev/null || :)
+            resolved=`find_executable "$requested_compiler" || :`
             if [ -z "$resolved" ]; then
                 remainder=$requested_compiler
-                requested_compiler=${remainder%%[[:space:]]*}
-                requested_arguments=${remainder#"$requested_compiler"}
+                requested_compiler=`printf '%s' "$remainder" | sed 's/[[:space:]].*//'`
+                requested_arguments=`printf '%s' "$remainder" | sed 's/^[^[:space:]]*//'`
             fi ;;
     esac
     case "$requested_compiler" in
         ''|*\"*|*\'*|*\\*) die "unsupported compiler-name quoting in CC/CXX; use a plain executable path or quote the whole path" ;;
     esac
-    case "$requested_arguments" in
-        ''|[[:space:]]*) ;;
-        *) die "unsupported compiler-name quoting in CC/CXX; put whitespace between the executable and arguments" ;;
-    esac
+    # Keep the full CMake whitespace class; character classes in shell case
+    # patterns are not available in traditional Bourne.
+    if [ -n "$requested_arguments" ]; then
+        if expr "x$requested_arguments" : 'x[[:space:]]' >/dev/null; then
+            :
+        else
+            die "unsupported compiler-name quoting in CC/CXX; put whitespace between the executable and arguments"
+        fi
+    fi
 }
 
 # CMake otherwise silently ignores a changed CC/CXX environment in a cached tree.
@@ -303,13 +355,13 @@ check_compiler() {
     [ -n "$requested_compiler" ] || return 0
     if [ "$kind" = environment ]; then compiler_environment "$requested_compiler"; fi
     [ -f "$build_dir/CMakeCache.txt" ] || return 0
-    cached=$(sed -n "s/^CMAKE_${language}_COMPILER:[^=]*=//p" "$build_dir/CMakeCache.txt")
+    cached=`sed -n "s/^CMAKE_${language}_COMPILER:[^=]*=//p" "$build_dir/CMakeCache.txt"`
     [ -n "$cached" ] || return 0
-    resolved=$(command -v "$requested_compiler" 2>/dev/null || :)
+    resolved=`find_executable "$requested_compiler" || :`
     [ "$requested_compiler" = "$cached" ] || [ "$resolved" = "$cached" ] ||
         die "${language} compiler differs from $cached; use --build-dir with a new directory when changing CC/CXX"
     if [ "$kind" = environment ]; then
-        cached_arguments=$(sed -n "s/^CMAKE_${language}_COMPILER_ARG1:[^=]*=//p" "$build_dir/CMakeCache.txt")
+        cached_arguments=`sed -n "s/^CMAKE_${language}_COMPILER_ARG1:[^=]*=//p" "$build_dir/CMakeCache.txt"`
         [ "$requested_arguments" = "$cached_arguments" ] ||
             die "${language} compiler arguments differ from the configured tree; use --build-dir with a new directory when changing CC/CXX"
     fi
@@ -318,18 +370,20 @@ check_compiler "${CC:-}" C environment
 check_compiler "${CXX:-}" CXX environment
 for arg do
     case "$arg" in
-        -DCMAKE_C_COMPILER=*|-DCMAKE_C_COMPILER:*=*) check_compiler "${arg#*=}" C path ;;
-        -DCMAKE_CXX_COMPILER=*|-DCMAKE_CXX_COMPILER:*=*) check_compiler "${arg#*=}" CXX path ;;
+        -DCMAKE_C_COMPILER=*|-DCMAKE_C_COMPILER:*=*) compiler_option=`printf '%s' "$arg" | sed 's/^[^=]*=//'`; check_compiler "$compiler_option" C path ;;
+        -DCMAKE_CXX_COMPILER=*|-DCMAKE_CXX_COMPILER:*=*) compiler_option=`printf '%s' "$arg" | sed 's/^[^=]*=//'`; check_compiler "$compiler_option" CXX path ;;
     esac
 done
 
 printf 'Configuring %s in %s\n' "$preset" "$build_dir"
-if ! cmake --preset "$preset" -S "$source_dir" -B "$build_dir" \
+if cmake --preset "$preset" -S "$source_dir" -B "$build_dir" \
     "-DDATAPUMP_BUILD_GUI=$gui" "-DDATAPUMP_GUI_BACKEND=$backend" \
     "-DDATAPUMP_BUILD_TUI=$tui" "-DDATAPUMP_BUILD_FB=$framebuffer" \
     "-DDATAPUMP_BUILD_WEB_WORKER=$web_worker" \
     "-DDATAPUMP_PORTABLE=$portable" "-DOPENSSL_USE_STATIC_LIBS=$portable" \
-    "-DDATAPUMP_TEST_NATIVE_GUI=$native" "$@"; then
+    "-DDATAPUMP_TEST_NATIVE_GUI=$native" ${1+"$@"}; then
+    :
+else
     die "configuration failed; check dependencies and use a new --build-dir for a different compiler/generator"
 fi
 
@@ -341,18 +395,20 @@ printf 'Building %s with %s compile jobs\n' "$target" "$build_jobs"
 cmake --build "$build_dir" --config "$build_config" --target "$target" --parallel "$build_jobs"
 
 if [ -n "$group" ]; then
-    set --
+    # A bare set -- does not clear arguments in traditional Bourne.
+    set -- clear
+    shift
     if [ "$stop_on_failure" = yes ]; then set -- --stop-on-failure; fi
     label=$group
     if [ "$group" = native ]; then label=native_gui; fi
     if [ "$group" = all ]; then
-        ctest "$@" --test-dir "$build_dir" -C "$build_config" --output-on-failure \
+        ctest ${1+"$@"} --test-dir "$build_dir" -C "$build_config" --output-on-failure \
             --no-tests=error --parallel "$jobs" -LE native_gui
     elif [ "$group" = native ]; then
-        ctest "$@" --test-dir "$build_dir" -C "$build_config" --output-on-failure \
+        ctest ${1+"$@"} --test-dir "$build_dir" -C "$build_config" --output-on-failure \
             --no-tests=error --parallel "$jobs" -L "^$label$"
     else
-        ctest "$@" --test-dir "$build_dir" -C "$build_config" --output-on-failure \
+        ctest ${1+"$@"} --test-dir "$build_dir" -C "$build_config" --output-on-failure \
             --no-tests=error --parallel "$jobs" -L "^$label$" -LE native_gui
     fi
 elif [ "$command_name" = package ]; then
@@ -363,21 +419,21 @@ elif [ "$command_name" = package ]; then
     fi
     set -- "-DARCHIVE_DIR=$build_dir/releases" "-DBUILD_DIR=$build_dir" -DGUI_SMOKE=OFF -DREQUIRE_MANUALS=ON
     if [ -n "${DATAPUMP_MAX_GLIBC:-}" ]; then
-        set -- "$@" "-DMAX_GLIBC=$DATAPUMP_MAX_GLIBC"
+        set -- ${1+"$@"} "-DMAX_GLIBC=$DATAPUMP_MAX_GLIBC"
     elif [ -n "$sdk_root" ]; then
         [ -f "$build_dir/CMakeCache.txt" ] || die "SDK configuration cache is missing"
-        sdk_glibc=$(sed -n 's/^DATAPUMP_SDK_GLIBC_MAX:[^=]*=//p' "$build_dir/CMakeCache.txt")
+        sdk_glibc=`sed -n 's/^DATAPUMP_SDK_GLIBC_MAX:[^=]*=//p' "$build_dir/CMakeCache.txt"`
         [ -n "$sdk_glibc" ] || die "SDK configuration did not provide its glibc baseline"
-        set -- "$@" "-DMAX_GLIBC=$sdk_glibc"
+        set -- ${1+"$@"} "-DMAX_GLIBC=$sdk_glibc"
     fi
     # These are newly generated local archives, not downloaded release artifacts.
     rm -f "$build_dir/releases/SHA256SUMS.txt"
-    cmake "$@" -P "$source_dir/tools/verify-native-archives.cmake"
+    cmake ${1+"$@"} -P "$source_dir/tools/verify-native-archives.cmake"
     printf 'Verified portable archives: %s/releases\n' "$build_dir"
 else
     executable_dir=$build_dir
     if [ -f "$build_dir/CMakeCache.txt" ]; then
-        configurations=$(sed -n 's/^CMAKE_CONFIGURATION_TYPES:[^=]*=//p' "$build_dir/CMakeCache.txt")
+        configurations=`sed -n 's/^CMAKE_CONFIGURATION_TYPES:[^=]*=//p' "$build_dir/CMakeCache.txt"`
         if [ -n "$configurations" ]; then executable_dir=$build_dir/$build_config; fi
     fi
     if [ -n "$wasm_sdk_root" ]; then
