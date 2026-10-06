@@ -1,0 +1,73 @@
+Further improvements to pumpModem
+================================
+
+Keep actionable improvements that justify their complexity, maintenance and
+qualification cost. Entries are future-work prompts, not authorization to launch
+builds, change releases or claim pending checks have passed. Follow AGENTS.md and
+the maintained build, coordination and release requirements when taking one up.
+
+Keep additions from each AI session together under a dated session heading.
+Separate batches from different sessions with at least eight completely blank
+lines. Preserve that spacing when appending; do not merge unrelated sessions.
+
+
+
+
+
+
+
+
+2026-10-06 / Codex: complete the Bookworm offline build path
+=========================================================
+
+Make the complete Linux application rebuildable on Debian Bookworm with only
+the matching project source, retained SDK/dependency archives and explicitly
+documented distro packages already available locally. Require no internet,
+third-party Git checkout, undeclared cache or supplier download during SDK
+restoration, application compilation or packaging. Keep build-host compatibility
+separate from the portable binaries' runtime compatibility.
+
+At this review, the default bookworm-sdk release path uses a retained native
+SDK only for x86_64. ARM64 builds instead use Ubuntu 22.04 and online preparation
+of CMake, Clang from apt.llvm.org, Ninja and SDL. ARM64 portable binaries pass
+Bookworm runtime checks, but that does not qualify an ARM64 offline source build.
+The independent September 30 Bookworm recovery record covers x86_64, not ARM64.
+Recheck current code and evidence before implementing; distro compiler and
+backports availability may change and is not itself proof of a working build.
+
+Provide and qualify a retained native ARM64 SDK, or an equally complete local
+toolchain route using supported distro packages, including any explicitly
+documented backports. Retain exact binary/source/checksum inventories, provenance,
+licenses, build tools and dependency inputs. Remove ordinary consumers' reliance
+on network bootstrap helpers; missing inputs must fail clearly. Keep dependency
+acquisition and SDK maintenance explicit, and preserve the working x86_64 route.
+
+Cover FLTK and Rev, terminal and framebuffer frontends, and the native web worker.
+Account for the retained Wasm SDK and browser payload when rebuilding the complete
+published bundle; document any required native-SDK Python bootstrap. Distinguish
+restoring compiler binaries from rebuilding the SDK/compiler from source: measure
+cold reconstruction separately rather than inferring it from an application build.
+
+Add disconnected acceptance to the Latest release qualification path after input
+staging: use clean native Bookworm environments on both Linux architectures,
+disable networking at the OS/container boundary, and use fresh build, HOME and
+cache directories. Configure, compile and package from the declared local inputs.
+Bind evidence to the exact application source, SDK recipes, dependency hashes and
+release inventory. Do not substitute an older revision's offline result or an
+ordinary network-enabled green workflow for this check.
+
+Separately exercise the exact copied portable TGZ/ZIP payloads without source or
+SDK access on Bookworm and the supported newer glibc-based distro matrix. Preserve
+dependency closure, relocation, ELF/CPU baseline, GUI/CLI and certification gates,
+including the existing x86_64 glibc 2.36 and ARM64 glibc 2.35 compatibility promises.
+Any intentional support-floor change needs an explicit support decision. Document
+required distro display/audio facilities and graphics drivers; do not imply every
+later distro, libc, kernel or physical device is qualified. Retain failures and
+incomplete GUI coverage accurately under the existing release policy.
+
+Start with .github/workflows/_release-latest.yml, release.yml, certify.yml and
+sdk-base.yml; tools/release.py, build-sdk.py, install-release-cmake.sh,
+install-release-rev.py and prepare-native-sdl.py; cmake/GuiRev.cmake; and
+docs/building.md, docs/releases.md and docs/validation.md. The sibling
+software-foundation project's retained ARM64 SDK and disconnected acceptance
+implementation are useful references, subject to this project's requirements.
