@@ -1,0 +1,175 @@
+{
+  "recorded_utc_date": "2026-10-06",
+  "application_head": "ba25a1d61f6c35b617f17019d3047527162e5524",
+  "gui_sha256": "a0af24469be9afa055834c581b10b8cb97422ff6e012cc96927a9764e119b0d2",
+  "application_source_changed": false,
+  "fast": {
+    "profile": "Speakers / mic \u00b7 short",
+    "encrypted": true,
+    "text_received": "Hello from Data Pump",
+    "text_bytes": 20,
+    "text_authenticated": true,
+    "file_bytes": 30000,
+    "file_authenticated": true,
+    "saved_file_matches_source": true,
+    "fixture": "repeated text; deliberately compressible",
+    "file_sha256": "e44a0966272ac33350be7c565c1249230b1f7b7e9eaba26c8244f78ebbb1d3b2"
+  },
+  "robust": {
+    "simulation": true,
+    "pattern": "auto-keystream",
+    "rate_hz": 3600,
+    "carrier_hz": 1500,
+    "tx_dbm": 3,
+    "tx_mw": 1.9952623149688795,
+    "path_loss_db": 150,
+    "noise_dbm_hz": -164,
+    "target_db_hz": 6.326999095983183,
+    "oscillator": "gpsdo-xo",
+    "encryption": true,
+    "keyed_private_waveform": true,
+    "authentication_tag": false,
+    "modeled_tx_seconds": 17.71,
+    "modeled_content_seconds": 14.7,
+    "modeled_reference_cpu_seconds": 7.6,
+    "modeled_rx_probability": ">99%",
+    "modeled_observer_receiver_ratio_approx": 108,
+    "actual_fresh_simulation_received_bit": "1",
+    "received_pattern_score": 380.2,
+    "result_file": "robust-result.mp4",
+    "result_cut_seconds": [
+      0,
+      1
+    ],
+    "result_presentation": "Held actual received snapshot; pending phase excluded",
+    "separate_audio_waveform": {
+      "seconds": 17.70833333333333,
+      "sample_rate": 14400,
+      "timestamp": 1800000000,
+      "excerpt_source_seconds": [
+        2,
+        8
+      ],
+      "excerpt_voice_free": true,
+      "energy_fraction_375_to_2625_hz": 0.9996110200881958,
+      "note": "Same modem configuration and disposable key; separately generated waveform, explicitly labelled."
+    },
+    "planner_edit": "none; captured speed"
+  },
+  "legacy": {
+    "modulation": "BPSK31",
+    "carrier_hz": 1500,
+    "text": "the quick brown fox jumps over the lazy dog",
+    "native_tx_audio_captured": true,
+    "phone": "labelled illustration",
+    "android_decode_tested": false,
+    "sms_sent": false
+  },
+  "other": {
+    "tui": "Actual official portable terminal UI captured under PTY",
+    "qr": "Actual generated uname -a QR; illustrated scanner submits with automatic Enter",
+    "hardware_illustrations": "Original editable code drawings",
+    "host_audio_settings_preserved": true,
+    "gps_clock_explanation": "Simulation modem carrier and sample clocks; no claim of equivalence to updating wall RTC alone",
+    "windows": "Rev portable",
+    "debian": "FLTK with Latest and direct setup-guide URLs shown",
+    "security": "Network/device path isolation and file trust distinguished together; small authenticator memory noted; arcane serial jargon removed",
+    "hardware_audio_in_this_revision": "Not used; reused existing Fast/Legacy live recordings without change"
+  },
+  "native_assets": {
+    "fast-text.mp4": {
+      "bytes": 2195629,
+      "sha256": "942d4651b7b03ae0525038062fb94420c96d127337165632fcd6b90aae4a8795"
+    },
+    "fast-file.mp4": {
+      "bytes": 2674542,
+      "sha256": "21f5f312a88d2e7222867075b4091aa7f13b5facdc074a36823bc1237c55f1b2"
+    },
+    "legacy.mp4": {
+      "bytes": 2526885,
+      "sha256": "b2cc32bef832b494e83c3ce86baa4e1dbf078159d642f07ea0cb7cc2c25da08d"
+    },
+    "command-qr.pbm": {
+      "bytes": 1691,
+      "sha256": "87d5d97799a7db2649f2307ea9dea71946b12d6d9c1c25839b1ce06f58271a4b"
+    },
+    "tui-screen.txt": {
+      "bytes": 2886,
+      "sha256": "a226f613099c87a6f06db8c95bc10df68d61f2889f86a8c37b9e723f070c69db"
+    },
+    "robust-planner.mp4": {
+      "bytes": 1917014,
+      "sha256": "df0e50d114cd01d82451c78dfa11690854f9ccb3e926b586dae1b732be9e0e93"
+    },
+    "robust-tx.wav": {
+      "bytes": 510044,
+      "sha256": "23a666027c105c39022e1969dc4342b0b5076dc747e4392a9c836c3cd025dcb2"
+    },
+    "robust-planner.actions.json": {
+      "bytes": 2400,
+      "sha256": "4e7676207bcae3df05004e9a77043a2b824f48e6b6212cdd539895166a146280"
+    },
+    "robust-bit.mp4": {
+      "bytes": 1655770,
+      "sha256": "c2786d80d14d5a51e58a5bdb4d92a9f872d4ad8b4d7a1e1528136024eba4a9e6"
+    },
+    "robust-bit.actions.json": {
+      "bytes": 427,
+      "sha256": "deaba4b5de7507f47bfc7ca4f255d1bbdc2c63256b9caeb2f5c3c7fc5a95778f"
+    },
+    "robust-result.mp4": {
+      "bytes": 1130405,
+      "sha256": "f2e5613177f1009af351d9c57b25ce9e1ffedcb4ee5519427a93a2a9359cc275"
+    },
+    "robust-result.actions.json": {
+      "bytes": 166,
+      "sha256": "f4dfc44a8c09d2d0f1ccf5737202ae823e80fa9a669d82303e9373b2aaacd377"
+    }
+  },
+  "final_delivery": {
+    "duration_seconds": 457.66666666666663,
+    "bytes": 10371277,
+    "sha256": "6dd9a656a5b5cefb652826825c227c709020d2a5931d9a0ddcf8b395e64e168f",
+    "voice_model_sha256": "6f52a751e2349abe7a76735eb09dc1875298c77ea2342ffd2fef79ff81b87f22",
+    "captions": 41,
+    "chapters": 18,
+    "external_delivery": "/home/user/___quick/p/_cur/dataPump/_lessonsLearned/data-pump-tutorial-media/clarity/delivery",
+    "complete_audio_video_decode": "passed; ffmpeg -xerror exit0",
+    "encoded_visual_review": "passed: security, workstation, Rev, Debian links, actual Robust result and automatic QR Enter",
+    "audio": {
+      "integrated_lufs": -19.14,
+      "true_peak_dbtp": -2.4,
+      "loudness_range_lu": 5.5,
+      "robust_excerpt": {
+        "rms_dbfs": -28.318897247314453,
+        "peak_dbfs": -19.580623626708984,
+        "energy_375_to_2625_hz": 0.9994347095489502
+      }
+    },
+    "caption_timing": "passed",
+    "application_source_changed": false
+  },
+  "toolchain": {
+    "ffmpeg": "7.1.5",
+    "piper-tts": "1.8.0",
+    "onnxruntime": "1.30.0",
+    "numpy": "2.5.3",
+    "pillow": "12.3.0"
+  },
+  "native_audio_onsets_seconds": {
+    "fast-text": 17.4,
+    "fast-file": 9.4,
+    "legacy": 10.3
+  },
+  "native_audio_onsets_match_transmit_actions": true,
+  "revision": "clarity corrections and audible Robust profile",
+  "retained_footage": "Fast and Legacy source videos unchanged, copied from verified prior tutorial take",
+  "validation": {
+    "source_syntax": "passed",
+    "script_storyboard_equality": "passed",
+    "read_only_content_review": "passed",
+    "correction_copy_checks": "passed",
+    "robust_audio_narration_gap_seconds": 6,
+    "final_encoded": "passed"
+  }
+}

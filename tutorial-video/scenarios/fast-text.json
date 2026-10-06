@@ -1,0 +1,72 @@
+{
+  "actions": [
+    {
+      "wait": 1,
+      "window": "sender"
+    },
+    {
+      "wait": 2,
+      "move": [
+        610,
+        933
+      ],
+      "note": "Default Speakers / mic profile"
+    },
+    {
+      "wait": 2,
+      "move": [
+        26,
+        328
+      ],
+      "click": 1,
+      "note": "Enable encryption"
+    },
+    {
+      "wait": 1,
+      "move": [
+        1044,
+        328
+      ],
+      "click": 1
+    },
+    {
+      "wait": 1,
+      "key": "ctrl+a"
+    },
+    {
+      "text": "/tmp/datapump-tutorial-newcomer/demo.key",
+      "key": "Return"
+    },
+    {
+      "wait": 3,
+      "move": [
+        260,
+        145
+      ],
+      "click": 1,
+      "text": "Hello from Data Pump"
+    },
+    {
+      "wait": 2,
+      "move": [
+        333,
+        273
+      ],
+      "click": 1,
+      "note": "Transmit text"
+    },
+    {
+      "wait": 6,
+      "window": "receiver"
+    },
+    {
+      "wait": 9,
+      "move": [
+        290,
+        415
+      ],
+      "note": "Wait for Received authenticated"
+    }
+  ],
+  "hold": 7
+}

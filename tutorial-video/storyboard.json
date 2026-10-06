@@ -1,0 +1,240 @@
+{
+  "title": "Data Pump \u2014 a practical introduction",
+  "fps": 15,
+  "scenes": [
+    {
+      "id": "purpose",
+      "kind": "purpose",
+      "title": "Move data. Keep control.",
+      "label": "DATA PUMP \u00b7 GETTING STARTED",
+      "sentences": [
+        "Data Pump moves text and files between computers using sound. Its priority is safe data transfer: blocking direct network and device bus paths for automatic infection.",
+        "Use speakers and a microphone for convenience, or a suitable audio cable for a faster direct audio link."
+      ]
+    },
+    {
+      "id": "isolation",
+      "kind": "isolation",
+      "title": "Why use an audio link?",
+      "label": "AUDIO IN \u00b7 DATA RECONSTRUCTED IN SOFTWARE",
+      "sentences": [
+        "The operating system receives audio samples. Data Pump reconstructs the data in its application, without letting the other computer appear as a keyboard or network adapter.",
+        "Received files never open or run automatically. You decide what to copy, save, and use."
+      ]
+    },
+    {
+      "id": "firewalls",
+      "kind": "firewalls",
+      "title": "Firewalls and file safety",
+      "label": "CRITICAL SYSTEMS \u00b7 CONNECTIONS AND CONTENT",
+      "sentences": [
+        "Firewalls are convenient, but forwarded traffic still reaches network software. Legitimate-looking or malformed input can exploit implementation flaws.",
+        "That remaining exposure can be unacceptable for critical workstations used to build bootstrap operating systems. Neither a firewall nor Data Pump makes files safe to open."
+      ]
+    },
+    {
+      "id": "layers",
+      "kind": "layers",
+      "title": "Build an isolating workstation",
+      "label": "COMPLEMENTARY PROTECTIONS \u00b7 ILLUSTRATION",
+      "sentences": [
+        "An isolating workstation uses three complementary tools. An optical data diode secure K V M separates computers sharing a keyboard, mouse, and display.",
+        "A small memory hardware authenticator, such as a FIPS YubiKey, protects private keys. Its tightly limited storage holds credentials and small security objects, instead of acting as a general purpose file drive.",
+        "Data Pump supplies the controlled path for text and files. Together, these tools provide the isolation."
+      ]
+    },
+    {
+      "id": "windows",
+      "kind": "windows",
+      "title": "Install on Windows",
+      "label": "PORTABLE \u00b7 NO INSTALLER REQUIRED",
+      "sentences": [
+        "Open the project website, then Releases and Latest. On Windows, download the Windows x sixty four Rev zip.",
+        "Choose Extract All, open the bin folder, and run data pump dash G U I. Keep the complete extracted folder together."
+      ]
+    },
+    {
+      "id": "linux",
+      "kind": "linux",
+      "title": "Install on Debian or Ubuntu",
+      "label": "SIGNED PACKAGE REPOSITORY",
+      "sentences": [
+        "On Debian or Ubuntu, open the setup guide shown here and complete its one time repository setup. Then update, install data pump dash F L T K, and launch it.",
+        "F L T K suits embedded computers and systems without useful graphics acceleration. Your package manager keeps it updated."
+      ]
+    },
+    {
+      "id": "setup",
+      "kind": "setup",
+      "title": "Set up both computers",
+      "label": "START WITH A SHORT MESSAGE",
+      "sentences": [
+        "Open Data Pump on both computers and choose Fast Modem. Select the sound devices you want to use, and keep the matching speakers and microphone short profile.",
+        "Place the receiving microphone near the transmitting speaker. Start at a moderate volume and try a short message first.",
+        "For encryption, use Generate keyfile once, then securely place the same key file on both computers."
+      ]
+    },
+    {
+      "id": "fast-text",
+      "kind": "native",
+      "title": "Fast Modem \u00b7 send a message",
+      "label": "SENDER \u2192 RECEIVER",
+      "sentences": [
+        "Turn on encryption. Load the same key file on both computers; keep that key private.",
+        "Write your message and choose Transmit text.",
+        "Leave the other computer listening. Wait for Received, authenticated. Your text is ready to copy."
+      ],
+      "file": "fast-text.mp4",
+      "cue_times": [
+        5,
+        16,
+        28
+      ],
+      "receiver_at": 23.584
+    },
+    {
+      "id": "fast-file",
+      "kind": "native",
+      "title": "Fast Modem \u00b7 send a file",
+      "label": "30 kB TEXT EXAMPLE \u00b7 COMPRESSED FOR TRANSFER",
+      "sentences": [
+        "Choose Attach file, select your file, then Transmit file.",
+        "This example contains thirty thousand bytes of repeated text. Compression makes it quick; other files can take longer.",
+        "On the receiving computer, wait for the authenticated attachment. Select it, choose Save selected, and pick where to save it."
+      ],
+      "file": "fast-file.mp4",
+      "cue_times": [
+        0.3,
+        10,
+        24
+      ],
+      "receiver_at": 16.552
+    },
+    {
+      "id": "robust-planner",
+      "kind": "native",
+      "title": "Robust Modem \u00b7 plan a difficult link",
+      "label": "3600 Hz RATE \u00b7 1500 Hz CARRIER \u00b7 2 mW \u00b7 150 dB LOSS",
+      "sentences": [
+        "Try Robust Modem in simulation first. Choose Simulation Yes, load your key, and select the hobbyist G P S clock model.",
+        "In Link planner, use the settings shown. This low probability of intercept example uses a private waveform and only two milliwatts. Compare Stronger and Weaker.",
+        "This target gives a high reception estimate and about eighteen seconds of transmit time. Apply it and return to Console."
+      ],
+      "file": "robust-planner.mp4",
+      "cue_times": [
+        0.3,
+        16,
+        30
+      ]
+    },
+    {
+      "id": "robust-bit",
+      "kind": "native",
+      "title": "Robust Modem \u00b7 send one bit",
+      "label": "SIMULATION \u00b7 ENCRYPTED PRIVATE WAVEFORM",
+      "sentences": [
+        "Type one in Binary, then choose Transmit.",
+        "Listen to this short sample of the transmitted signal."
+      ],
+      "file": "robust-bit.mp4",
+      "trim_end": 18,
+      "minimum": 20,
+      "cue_times": [
+        0.3,
+        8.5
+      ],
+      "audio_excerpt": {
+        "file": "robust-tx.wav",
+        "source_start": 2,
+        "at": 14,
+        "duration": 6,
+        "label": "Separate waveform sample \u00b7 same settings"
+      }
+    },
+    {
+      "id": "robust-result",
+      "kind": "native",
+      "title": "Robust Modem \u00b7 received 1",
+      "label": "SIMULATION RESULT \u00b7 RECEIVED SNAPSHOT",
+      "sentences": [
+        "Wait for Binary received. The receiver shows one. Use this simulation workflow to explore a difficult link before connecting real hardware.",
+        "The very short, one bit format is encrypted but has no authentication tag."
+      ],
+      "file": "robust-result.mp4",
+      "minimum": 16,
+      "cue_times": [
+        0.3,
+        9
+      ],
+      "trim_start": 0,
+      "trim_end": 1
+    },
+    {
+      "id": "legacy",
+      "kind": "phone",
+      "title": "Legacy Modem \u00b7 PSK31 text",
+      "label": "ILLUSTRATED PHONE \u00b7 SMS DRAFT",
+      "sentences": [
+        "Legacy Modem works with established radio text formats. Choose B P S K thirty one, enter your message, and transmit.",
+        "The illustrated phone shows And Fl message receiving the text. Pause its modem, select the message, and copy it.",
+        "Open a text message draft and paste. Review the text before sending. This phone sequence is an illustration; no S M S is sent."
+      ],
+      "file": "legacy.mp4",
+      "minimum": 40,
+      "cue_times": [
+        0.3,
+        13,
+        28
+      ]
+    },
+    {
+      "id": "terminal",
+      "kind": "terminal",
+      "title": "No graphical desktop? Use the TUI.",
+      "label": "TERMINAL INTERFACE",
+      "sentences": [
+        "Data Pump also has a text based user interface. It is useful for recovery, older systems, or bootstrapping before graphics are available, with the required audio and runtime support.",
+        "Launch the terminal application. Use Tab to move, arrows to select, Enter to activate, and F one for help."
+      ]
+    },
+    {
+      "id": "qr",
+      "kind": "qr",
+      "title": "Short text can travel by QR code",
+      "label": "ONE-WAY OPTICAL TRANSFER \u00b7 AUTOMATIC ENTER",
+      "sentences": [
+        "For short text or bootstrap commands, use Normal QR brightness, enlarge the preview, and focus the intended field on the receiving computer.",
+        "A USB QR scanner types the text. Enable automatic Enter for convenient command submission.",
+        "The optical scan provides no return connection for the receiving computer to infect the sending computer. The command itself still comes from the sender."
+      ]
+    },
+    {
+      "id": "radio",
+      "kind": "radio",
+      "title": "Audio first. Radio experiments too.",
+      "label": "FIXED LOCATIONS \u00b7 LOW POWER",
+      "sentences": [
+        "Data Pump also supports fixed location radio experiments, including sub nine kilohertz, with suitable hardware. Robust can spread the signal energy and use very low power, helping limit interference with appropriate settings.",
+        "Our encrypted example is a simulation. Choose frequencies and modes permitted for your radio service. Amateur Radio compatible modes are included, while safe data transfer remains the development priority."
+      ]
+    },
+    {
+      "id": "optical",
+      "kind": "optical",
+      "title": "An optional one-way optical path",
+      "label": "COMPATIBLE AUDIO HARDWARE",
+      "sentences": [
+        "For additional physical isolation, compatible optical audio interfaces, such as S P D I F, or custom data diode hardware can carry the waveform over a one way fiber link. The hardware provides the isolation."
+      ]
+    },
+    {
+      "id": "end",
+      "kind": "end",
+      "title": "Start with one short message",
+      "label": "DOWNLOAD \u00b7 CONNECT \u00b7 TRANSMIT \u00b7 CHECK",
+      "sentences": [
+        "Install Data Pump, match the settings on both computers, and try a short message. Check the received result, then move on to files. The project links and full setup instructions accompany this video."
+      ]
+    }
+  ]
+}

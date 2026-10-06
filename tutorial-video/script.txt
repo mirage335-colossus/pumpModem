@@ -1,0 +1,121 @@
+DATA PUMP — A PRACTICAL INTRODUCTION
+Narration and visible scene notes. Edit storyboard.json first, then refresh this file.
+
+Move data. Keep control.
+[DATA PUMP · GETTING STARTED]
+Data Pump moves text and files between computers using sound. Its priority is safe data transfer: blocking direct network and device bus paths for automatic infection.
+
+Use speakers and a microphone for convenience, or a suitable audio cable for a faster direct audio link.
+
+Why use an audio link?
+[AUDIO IN · DATA RECONSTRUCTED IN SOFTWARE]
+The operating system receives audio samples. Data Pump reconstructs the data in its application, without letting the other computer appear as a keyboard or network adapter.
+
+Received files never open or run automatically. You decide what to copy, save, and use.
+
+Firewalls and file safety
+[CRITICAL SYSTEMS · CONNECTIONS AND CONTENT]
+Firewalls are convenient, but forwarded traffic still reaches network software. Legitimate-looking or malformed input can exploit implementation flaws.
+
+That remaining exposure can be unacceptable for critical workstations used to build bootstrap operating systems. Neither a firewall nor Data Pump makes files safe to open.
+
+Build an isolating workstation
+[COMPLEMENTARY PROTECTIONS · ILLUSTRATION]
+An isolating workstation uses three complementary tools. An optical data diode secure K V M separates computers sharing a keyboard, mouse, and display.
+
+A small memory hardware authenticator, such as a FIPS YubiKey, protects private keys. Its tightly limited storage holds credentials and small security objects, instead of acting as a general purpose file drive.
+
+Data Pump supplies the controlled path for text and files. Together, these tools provide the isolation.
+
+Install on Windows
+[PORTABLE · NO INSTALLER REQUIRED]
+Open the project website, then Releases and Latest. On Windows, download the Windows x sixty four Rev zip.
+
+Choose Extract All, open the bin folder, and run data pump dash G U I. Keep the complete extracted folder together.
+
+Install on Debian or Ubuntu
+[SIGNED PACKAGE REPOSITORY]
+On Debian or Ubuntu, open the setup guide shown here and complete its one time repository setup. Then update, install data pump dash F L T K, and launch it.
+
+F L T K suits embedded computers and systems without useful graphics acceleration. Your package manager keeps it updated.
+
+Set up both computers
+[START WITH A SHORT MESSAGE]
+Open Data Pump on both computers and choose Fast Modem. Select the sound devices you want to use, and keep the matching speakers and microphone short profile.
+
+Place the receiving microphone near the transmitting speaker. Start at a moderate volume and try a short message first.
+
+For encryption, use Generate keyfile once, then securely place the same key file on both computers.
+
+Fast Modem · send a message
+[SENDER → RECEIVER]
+Turn on encryption. Load the same key file on both computers; keep that key private.
+
+Write your message and choose Transmit text.
+
+Leave the other computer listening. Wait for Received, authenticated. Your text is ready to copy.
+
+Fast Modem · send a file
+[30 kB TEXT EXAMPLE · COMPRESSED FOR TRANSFER]
+Choose Attach file, select your file, then Transmit file.
+
+This example contains thirty thousand bytes of repeated text. Compression makes it quick; other files can take longer.
+
+On the receiving computer, wait for the authenticated attachment. Select it, choose Save selected, and pick where to save it.
+
+Robust Modem · plan a difficult link
+[3600 Hz RATE · 1500 Hz CARRIER · 2 mW · 150 dB LOSS]
+Try Robust Modem in simulation first. Choose Simulation Yes, load your key, and select the hobbyist G P S clock model.
+
+In Link planner, use the settings shown. This low probability of intercept example uses a private waveform and only two milliwatts. Compare Stronger and Weaker.
+
+This target gives a high reception estimate and about eighteen seconds of transmit time. Apply it and return to Console.
+
+Robust Modem · send one bit
+[SIMULATION · ENCRYPTED PRIVATE WAVEFORM]
+Type one in Binary, then choose Transmit.
+
+Listen to this short sample of the transmitted signal.
+
+Robust Modem · received 1
+[SIMULATION RESULT · RECEIVED SNAPSHOT]
+Wait for Binary received. The receiver shows one. Use this simulation workflow to explore a difficult link before connecting real hardware.
+
+The very short, one bit format is encrypted but has no authentication tag.
+
+Legacy Modem · PSK31 text
+[ILLUSTRATED PHONE · SMS DRAFT]
+Legacy Modem works with established radio text formats. Choose B P S K thirty one, enter your message, and transmit.
+
+The illustrated phone shows And Fl message receiving the text. Pause its modem, select the message, and copy it.
+
+Open a text message draft and paste. Review the text before sending. This phone sequence is an illustration; no S M S is sent.
+
+No graphical desktop? Use the TUI.
+[TERMINAL INTERFACE]
+Data Pump also has a text based user interface. It is useful for recovery, older systems, or bootstrapping before graphics are available, with the required audio and runtime support.
+
+Launch the terminal application. Use Tab to move, arrows to select, Enter to activate, and F one for help.
+
+Short text can travel by QR code
+[ONE-WAY OPTICAL TRANSFER · AUTOMATIC ENTER]
+For short text or bootstrap commands, use Normal QR brightness, enlarge the preview, and focus the intended field on the receiving computer.
+
+A USB QR scanner types the text. Enable automatic Enter for convenient command submission.
+
+The optical scan provides no return connection for the receiving computer to infect the sending computer. The command itself still comes from the sender.
+
+Audio first. Radio experiments too.
+[FIXED LOCATIONS · LOW POWER]
+Data Pump also supports fixed location radio experiments, including sub nine kilohertz, with suitable hardware. Robust can spread the signal energy and use very low power, helping limit interference with appropriate settings.
+
+Our encrypted example is a simulation. Choose frequencies and modes permitted for your radio service. Amateur Radio compatible modes are included, while safe data transfer remains the development priority.
+
+An optional one-way optical path
+[COMPATIBLE AUDIO HARDWARE]
+For additional physical isolation, compatible optical audio interfaces, such as S P D I F, or custom data diode hardware can carry the waveform over a one way fiber link. The hardware provides the isolation.
+
+Start with one short message
+[DOWNLOAD · CONNECT · TRANSMIT · CHECK]
+Install Data Pump, match the settings on both computers, and try a short message. Check the received result, then move on to files. The project links and full setup instructions accompany this video.
+

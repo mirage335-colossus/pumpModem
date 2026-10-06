@@ -1,0 +1,81 @@
+DATA PUMP — LINKS AND BEGINNER SETUP
+Verified 2026-10-06. Use the current official guide when installing later.
+
+Project website:
+https://github.com/mirage335-colossus/pumpModem
+
+Latest release (consistent landing page):
+https://github.com/mirage335-colossus/pumpModem/releases/latest
+Portable filenames include the release version; choose the current asset there.
+
+WINDOWS
+Windows 10 version 1903 or later / Windows 11, x64.
+1. Open Latest. Expand Assets if needed.
+2. Download the Windows x86_64 Rev .zip.
+3. Right-click the ZIP and choose Extract All.
+4. Open the extracted folder, then bin, then datapump-gui.exe.
+5. Keep the complete bin/lib/share folder structure together.
+This is a portable application. No installer is needed.
+
+Verified Windows Rev download for the current release:
+https://github.com/mirage335-colossus/pumpModem/releases/download/v001_00-2026-09-30-0648CDT/DataPump-v001_00-2026-09-30-0648CDT-windows-x86_64-rev.zip
+Use the Latest page above for future versions.
+
+DEBIAN / UBUNTU
+For the current x64 package, use Debian 12+ or Ubuntu 24.04+.
+FLTK is suitable for embedded or marginally supported computers without useful
+graphics acceleration. The guide covers other architectures and dependencies.
+
+One-time authenticated repository setup:
+https://github.com/mirage335-colossus/pumpModem/blob/main/docs/releases.md#debian-installation-from-github-releases
+
+Follow the complete bootstrap block there, replacing RELEASE_TAG with the tag
+from the official release you selected. It verifies the signing key, signed
+manifest and source configuration before adding the source. Do this setup before
+the three short commands shown in the video. It requires curl, gpg, gpgv and
+Python 3; the guide also covers audio/runtime dependencies.
+
+Expected signing-key fingerprint:
+8C3D D4A7 27C8 3B93 374C 993B 1F94 BC4C EC2D F307
+
+After repository setup:
+    sudo apt update
+    sudo apt install datapump-fltk
+    datapump-fltk
+
+The normal release repository follows Latest; ordinary package updates keep it
+current. Experimental repositories remain pinned as described in the guide.
+
+Arch and Gentoo channels:
+https://github.com/mirage335-colossus/pumpModem/blob/main/docs/releases.md#arch-and-gentoo-update-channels
+
+FIRST MESSAGE
+1. Open Data Pump on both computers. Choose Fast Modem.
+2. Select the intended audio devices and match Speakers / mic · short.
+3. Place the receiving microphone near the transmitting speaker. Start with
+   moderate volume and a short message.
+4. For encryption, generate a key file once, securely copy it to both computers,
+   enable encryption and select the same key entry. Keep the key private.
+5. Type a message, choose Transmit text, and wait for Received · authenticated
+   on the listening computer. Then try Attach file / Transmit file.
+6. Select a received attachment and choose Save selected. Review received
+   material before opening it.
+
+TERMINAL AND QR
+The packaged TUI is datapump-tui-ncurses; the portable bundle has bin/datapump-tui.
+It still needs a working terminal and the appropriate runtime/audio support.
+QR guide:
+https://github.com/mirage335-colossus/pumpModem/blob/main/docs/qr.md
+Use Normal brightness, enlarge the preview, focus the intended receiving field,
+and scan with a trusted scanner in keyboard mode. Enable its automatic Enter
+suffix for convenient command submission when desired. The displayed command
+comes from the sending computer. The optical scan has no return data path from
+the receiving computer to the sender; the scanner's USB cable connects only
+to the receiving computer.
+
+ROBUST SIMULATION SHOWN IN THE VIDEO
+Select your key after launch:
+
+./datapump-gui --simulation --pattern auto-keystream --tx-dbm 3 --path-loss-db 150 --noise-dbm-hz -164 --oscillator gpsdo-xo --target-snr 6.326999095983183 --rate 3600 --carrier 1500 --dsp-workspace 50%
+
+The GPSDO selection is a simulation clock model; it does not synchronize hardware.

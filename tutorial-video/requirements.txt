@@ -1,0 +1,5 @@
+# Render runtime used for the reviewed video. Install outside this repository.
+piper-tts==1.8.0
+onnxruntime==1.30.0
+numpy==2.5.3
+Pillow==12.3.0

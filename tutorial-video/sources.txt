@@ -1,0 +1,85 @@
+CLAIM AND PRODUCTION NOTES — 2026-10-06
+
+Application reviewed at ba25a1d61f6c35b617f17019d3047527162e5524.
+Latest verified release: v001_00-2026-09-30-0648CDT, published 2026-09-30.
+Project installation, QR and security documentation are the primary sources:
+https://github.com/mirage335-colossus/pumpModem/blob/main/docs/releases.md
+https://github.com/mirage335-colossus/pumpModem/blob/main/docs/qr.md
+https://github.com/mirage335-colossus/pumpModem/blob/main/docs/security.md
+
+The audio path carries a waveform instead of exposing the peer as a bus device.
+Application parsing and explicit saving still matter. Received content is not
+automatically trustworthy. The narration does not promise immunity to malware,
+all parser flaws or arbitrary buffer overflows.
+The revision omits the arcane serial term. The current wire documentation does
+not support a general claim that filler bits prevent every fake embedded header;
+the relevant boundary is audio samples reconstructed as data in the application.
+
+Firewall filtering leaves allowed traffic exposed to destination software:
+https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-41r1.pdf
+The introduction keeps the two statements together: residual connection risk can
+be unacceptable for critical build systems, and neither a firewall nor Data Pump
+makes a file safe to open. Critical-workstation risk tolerance is the requested
+deployment context, not a guarantee of a perfectly safe alternative.
+
+Original BadUSB research:
+https://srlabs.de/blog/usb-peripherals-turn
+
+An example secure KVM with optical data-diode isolation:
+https://www.belkin.com/p/universal-2nd-gen-secure-kvm-switch-8-port-single-head-w%2F-cac/F1DN108KVM-UN-4.html
+The video uses an original generic illustration, not a photograph of this model.
+
+Yubico on hardware-backed authentication and device capabilities:
+https://developers.yubico.com/SSH/Securing_SSH_with_FIDO2.html
+https://docs.yubico.com/hardware/yubikey/yk-tech-manual/yk5-firmware-overview.html
+https://docs.yubico.com/yesdk/users-manual/yubikey-reference/transports/overview.html
+https://developers.yubico.com/Developer_Program/Guides/User_Loaded_Data.html
+https://docs.yubico.com/yesdk/users-manual/application-piv/piv-objects.html
+Limited memory is included as an important feature of the dedicated security
+device. It stores credentials and small security objects rather than serving as
+a general-purpose file drive. Small memory alone is not proof of impossibility
+of malware; PIV objects can contain small arbitrary data, and some interfaces
+include OTP keyboard functionality.
+
+USB scanner keyboard mode and automatic Enter suffix:
+https://docs.zebra.com/us/en/scanners/general/sm72-ig/usb-interface/usb-parameter-defaults/usb-device-type-.html
+https://docs.zebra.com/us/en/scanners/general/sp72-prg/user-preferences-and-miscellaneous-options/miscellaneous-scanner-parameters/enter-key.html
+The revision shows automatic Enter submitting an illustrated command. Optical
+scanning has no return data path through that link. The scanner's USB connection
+is to the receiving computer, not the sender. Error correction recovers damaged
+symbols; it does not establish that command content from the sender is trusted.
+
+GPSDO model and the supplied audible Robust profile:
+https://github.com/mirage335-colossus/pumpModem/blob/main/docs/oscillator-models.md
+https://tf.nist.gov/general/pdf/2871.pdf
+gpsdo-xo is an illustrative hobbyist GPS disciplined crystal model, without an
+oven. It assumes the modem carrier and sampling clocks have that reference.
+Disciplining only the wall RTC does not discipline an independent audio clock.
+The user-selected profile spans about 375–2625 Hz, permitting an audible example.
+Selecting the profile itself does not synchronize hardware.
+
+A Linux tg3 driver overflow did exist, but this primary fix concerns malicious
+firmware/VPD input; it does not establish a remote Ethernet-packet attack:
+https://github.com/torvalds/linux/commit/715230a44310a8cf66fbfb5a46f9a62a9b2de424
+https://nvd.nist.gov/vuln/detail/CVE-2013-1929
+This example is omitted from the beginner narration to avoid implying otherwise.
+
+The encrypted Robust demonstration is explicitly a simulation. Permitted
+frequencies, power and modes depend on the radio service and jurisdiction.
+For example, US amateur rules restrict messages encoded to obscure meaning:
+https://www.ecfr.gov/current/title-47/chapter-I/subchapter-D/part-97/subpart-B/section-97.113
+https://www.ecfr.gov/current/title-47/chapter-I/subchapter-D/part-97/subpart-D/section-97.309
+Noise-like signalling is not a guarantee of undetectability or no interference.
+
+The S/PDIF/fiber illustration assumes compatible audio interfaces and suitable
+one-way physical hardware. Data Pump itself does not certify optical isolation.
+
+Narration: locally synthesized using Piper en_US-ljspeech-medium. The voice model
+and its license/model card are distributed by the Piper voices project:
+https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_US/ljspeech/medium
+The LJ Speech source recordings are public domain. Keep the voice model outside
+Git; its SHA-256 is recorded in the final delivery report.
+
+All diagrams, the scanner and the phone sequence are editable original drawings
+in scripts/illustrations.py. Real native application footage is preserved in the
+external media directory. Audio waveforms and application UIs are not AI images.

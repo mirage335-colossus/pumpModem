@@ -1,0 +1,48 @@
+{
+  "actions": [
+    {
+      "wait": 2,
+      "move": [
+        244,
+        88
+      ],
+      "click": 1
+    },
+    {
+      "wait": 1,
+      "key": "Escape"
+    },
+    {
+      "wait": 1,
+      "move": [
+        341,
+        88
+      ]
+    },
+    {
+      "wait": 1,
+      "move": [
+        261,
+        521
+      ],
+      "click": 1,
+      "text": "the quick brown fox jumps over the lazy dog"
+    },
+    {
+      "wait": 1,
+      "move": [
+        1186,
+        90
+      ],
+      "click": 1
+    },
+    {
+      "wait": 2,
+      "move": [
+        632,
+        760
+      ]
+    }
+  ],
+  "hold": 25
+}

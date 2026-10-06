@@ -10,3 +10,4 @@ __pycache__/
 *.key
 *.pad
 *.pump
+/:memory:.ses

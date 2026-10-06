@@ -1,0 +1,148 @@
+{
+  "actions": [
+    {
+      "wait": 2,
+      "move": [
+        45,
+        119
+      ],
+      "click": 1
+    },
+    {
+      "wait": 1,
+      "key": "Escape"
+    },
+    {
+      "wait": 1,
+      "move": [
+        176,
+        119
+      ]
+    },
+    {
+      "wait": 1,
+      "move": [
+        457,
+        119
+      ]
+    },
+    {
+      "wait": 1,
+      "move": [
+        448,
+        76
+      ],
+      "click": 1
+    },
+    {
+      "wait": 1,
+      "move": [
+        431,
+        99
+      ],
+      "click": 1
+    },
+    {
+      "wait": 1,
+      "key": "ctrl+a"
+    },
+    {
+      "text": "/tmp/datapump-tutorial-clarity/demo.key",
+      "key": "Return"
+    },
+    {
+      "wait": 2,
+      "move": [
+        167,
+        246
+      ],
+      "click": 1
+    },
+    {
+      "wait": 2,
+      "move": [
+        310,
+        878
+      ],
+      "click": 1,
+      "key": "ctrl+a"
+    },
+    {
+      "text": "3600",
+      "key": "Tab"
+    },
+    {
+      "wait": 2,
+      "move": [
+        466,
+        878
+      ],
+      "click": 1,
+      "key": "ctrl+a"
+    },
+    {
+      "text": "1500",
+      "key": "Tab"
+    },
+    {
+      "wait": 2,
+      "move": [
+        328,
+        486
+      ],
+      "click": 1
+    },
+    {
+      "wait": 2,
+      "move": [
+        417,
+        486
+      ],
+      "click": 1
+    },
+    {
+      "wait": 1,
+      "move": [
+        130,
+        484
+      ],
+      "click": 1,
+      "key": "ctrl+a"
+    },
+    {
+      "text": "6.326999095983183",
+      "key": "Tab"
+    },
+    {
+      "wait": 2,
+      "move": [
+        830,
+        679
+      ]
+    },
+    {
+      "wait": 2,
+      "move": [
+        149,
+        571
+      ],
+      "click": 1
+    },
+    {
+      "wait": 2,
+      "move": [
+        56,
+        245
+      ],
+      "click": 1
+    },
+    {
+      "wait": 1,
+      "move": [
+        1000,
+        240
+      ]
+    }
+  ],
+  "hold": 4
+}

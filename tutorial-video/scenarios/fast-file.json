@@ -1,0 +1,70 @@
+{
+  "actions": [
+    {
+      "wait": 1,
+      "window": "sender"
+    },
+    {
+      "wait": 2,
+      "move": [
+        77,
+        273
+      ],
+      "click": 1
+    },
+    {
+      "wait": 1,
+      "key": "ctrl+a"
+    },
+    {
+      "text": "/tmp/datapump-tutorial-newcomer/tutorial-30000.txt",
+      "key": "Return"
+    },
+    {
+      "wait": 2,
+      "move": [
+        336,
+        273
+      ],
+      "click": 1,
+      "note": "Transmit file"
+    },
+    {
+      "wait": 7,
+      "window": "receiver"
+    },
+    {
+      "wait": 10,
+      "move": [
+        968,
+        415
+      ],
+      "click": 1
+    },
+    {
+      "wait": 3,
+      "move": [
+        922,
+        611
+      ],
+      "click": 1,
+      "note": "Save selected"
+    },
+    {
+      "wait": 1,
+      "key": "ctrl+a"
+    },
+    {
+      "text": "/tmp/datapump-tutorial-newcomer/received-30000.txt",
+      "key": "Return"
+    },
+    {
+      "wait": 3,
+      "move": [
+        1080,
+        850
+      ]
+    }
+  ],
+  "hold": 5
+}

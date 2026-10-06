@@ -1,0 +1,14 @@
+*.mp4
+*.wav
+*.png
+*.jpg
+*.key
+*.onnx*
+*.zip
+*.tar*
+*.deb
+*.so*
+*.a
+*.o
+__pycache__/
+output/
