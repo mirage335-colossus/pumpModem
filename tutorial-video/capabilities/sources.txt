@@ -1,0 +1,137 @@
+EVIDENCE AND EDITORIAL NOTES — verified 2026-10-06
+
+Data Pump source snapshot: 5cec4ad673b79af1679302f09f86f823abf887f5
+Software Foundation snapshot: d987ff218bcf6832138c36f2a0d9878efbb85702
+Native tutorial footage originally recorded with application snapshot ba25a1d.
+
+1. Existing audio hardware and security boundary
+https://github.com/mirage335-colossus/pumpModem/blob/5cec4ad673b79af1679302f09f86f823abf887f5/docs/security.md
+Audio removes the direct inter-computer network/peripheral-bus connection.
+Receive processing is bounded; received files are not automatically opened.
+This is a specific separation property, not a guarantee of malware-free files.
+The isolating workstation combines distinct equipment for distinct paths.
+
+2. Current Fast short acoustic profile
+https://github.com/mirage335-colossus/pumpModem/blob/5cec4ad673b79af1679302f09f86f823abf887f5/docs/fast-acoustic-short.md
+Published expected steady rates: 794 bit/s at -6 dB, 3141 at 0 dB, 7956 at 3 dB.
+The video rounds this to ~0.8–8 kbit/s and labels it a channel model, excluding
+startup and ending. Sampled noise/echo/clock tests do not qualify every room.
+
+3. Recorded physical higher-throughput trial
+https://github.com/mirage335-colossus/pumpModem/blob/5cec4ad673b79af1679302f09f86f823abf887f5/docs/fast-acoustic-routing-diagnosis.md
+The 500000-byte speaker/microphone result completed in 140.497 seconds with exact
+source/received equality. 500000*8/140.497 = 28470.3588 bit/s wall goodput.
+This earlier higher-throughput profile is distinct from the default short preset.
+The film's actual 30000-byte repeated-text clip is a separately labelled example,
+not footage of the 500000-byte trial or an incompressible throughput benchmark.
+
+4. Robust encryption, private waveform and detection model
+https://github.com/mirage335-colossus/pumpModem/blob/5cec4ad673b79af1679302f09f86f823abf887f5/docs/crypto.md
+https://github.com/mirage335-colossus/pumpModem/blob/5cec4ad673b79af1679302f09f86f823abf887f5/docs/lpi-estimates.md
+Private keyed amplitude/phase templates and protected settling/suppression avoid
+a public acquisition marker. The planner compares an unkeyed energy detector with
+a keyed receiver. Energy remains observable. This does not establish invisibility,
+zero interference or a universal comparison against all modern communications.
+Recorded simulation: 3 dBm (~2 mW), 150 dB loss, -164 dBm/Hz noise, 3600 Hz rate,
+1500 Hz carrier, gpsdo-xo oscillator, auto-keystream, target6.326999095983183,
+50% DSP workspace, disposable tutorial key. Actual received bit1; score380.2.
+Native generated sound is a separate four-second excerpt at source2–6 seconds,
+with the same settings/key. The film labels it as a separate waveform sample.
+See ../evidence.json for original footage and simulation provenance.
+
+5. Reusable development practices
+https://github.com/mirage335-colossus/pumpModem/blob/5cec4ad673b79af1679302f09f86f823abf887f5/docs/gui-architecture.md
+https://github.com/mirage335-colossus/pumpModem/blob/5cec4ad673b79af1679302f09f86f823abf887f5/docs/development.md
+https://github.com/mirage335-colossus/pumpModem/blob/5cec4ad673b79af1679302f09f86f823abf887f5/docs/validation.md
+https://github.com/mirage335-colossus/pumpModem/blob/5cec4ad673b79af1679302f09f86f823abf887f5/docs/agent-coordination-decentralized-validation.md
+Shared behavior and frontend conformance, independent compatibility vectors,
+seeded calibration, exact-source/binary release qualification and checked
+parallel editing/handoffs provide concrete practices. No productivity multiplier
+or universal prevention of editing conflicts is claimed.
+
+6. Existing public reference project
+https://github.com/mirage335-colossus/software-foundation
+https://github.com/mirage335-colossus/software-foundation/blob/d987ff218bcf6832138c36f2a0d9878efbb85702/README.md
+The project exposes seven frontends for shared application behavior. Actual FLTK,
+Wasm and terminal gallery screenshots are selected for this film; their gallery
+provenance identifies the October5 source snapshot. The October6 validation
+record identifies subsequent release certification. Public visibility independently
+confirmed with the GitHub repository API on2026-10-06.
+Future time savings remain an expressed ambition, not measured comparative data.
+
+7. Comparative claims considered but not asserted
+https://github.com/kamalmostafa/minimodem
+Public audio data transfer predates this project, so a blanket first-public claim
+would be unsupported. Data Pump's combined functionality is the focus.
+https://www.w1hkj.org/FldigiHelp/olivia_page.html
+https://raw.githubusercontent.com/w1hkj/fldigi/master/src/include/jalocha/pj_mfsk.h
+Olivia4/2000 has about109.375 source bits/s for its fixed7-bit characters. Comparing
+this 2 kHz mode with wider-band Fast acoustic profiles does not establish equal-
+bandwidth/noise/echo superiority. No matched test supports the decades-ahead or
+most-significant-since-PGP ranking. The video uses concrete rates and results. Revision2 includes the supported
+Olivia4/2000 comparison:28470.3588/109.375=260.30, above two orders of magnitude
+in rate. An explicit on-screen qualifier says bandwidths and channels differ.
+The user’s later2/4k notation is transposed relative to this supported mode.
+
+8. Purpose, team scope and ambition — project owner’s supplied context
+Data Pump’s main product purpose is safe data transfer. Weak-link/radio capability
+is a useful extension. The broader impetus was a demanding example to exercise
+development practices, as a starting point for Software Foundation. The film says
+“developers from the team” and “one example of the team’s capabilities”; it makes
+no claim that this project represents their full abilities.
+The owner estimates the starting project at approximately two weeks. The few-hour,
+potentially one-hour outcome is narrated and labelled as an ambition for comparable
+development breadth. No universal completeness or measured speedup is asserted.
+
+9. Specific Software Foundation pain points, grounded in history
+https://github.com/mirage335-colossus/software-foundation/commit/bb1e775
+Shared GUI behavior across seven hosts; gui/shared/application.cpp/view_definition.hpp.
+https://github.com/mirage335-colossus/software-foundation/commit/d8e712c
+Bounded background tasks, transactional file services and cancellation.
+https://github.com/mirage335-colossus/software-foundation/commit/e498acb
+Ordered browser/Wasm queues, responsiveness, late-result handling and shutdown.
+https://github.com/mirage335-colossus/software-foundation/commit/73f364f
+Windows process lifecycle and descendant cleanup.
+https://github.com/mirage335-colossus/software-foundation/commit/3df3296
+Portable builds, retained inputs, package qualification and signed distribution.
+https://github.com/mirage335-colossus/software-foundation/commit/baca94f
+Guarded edits, ownership tests and source-bound regression/certification practices.
+https://github.com/mirage335-colossus/software-foundation/blob/d987ff218bcf6832138c36f2a0d9878efbb85702/docs/development-speed.md
+Build/test iteration measurements explicitly do not establish developer-time or
+AI productivity savings. The video lists portable interfaces, regression tests,
+data flow/cancellation, reproducible builds, verified releases and parallel work.
+Continuous data flow describes bounded tasks/queues/I/O, not transferable DSP speed.
+
+10. Below-noise illustration for the supplied Robust simulation
+Received signal:3dBm−150dB=−147dBm. Ideal shaped observation band0.625×3600=2250Hz.
+Integrated noise:−164dBm/Hz+10log10(2250)=−130.478dBm. Thus signal/noise across
+that band is−16.522dB;10log10(1+10^(−16.522/10))=0.096dB average noise increase.
+The video rounds these modeled figures to16.5dB below in-band noise and~0.1dB rise.
+This is not a one-hertz signal/noise claim. No literal physical indistinguishability,
+universal minimum interference, or impossible interception is asserted. Finite
+bandwidth, clock structure, bounded amplitudes and burst edges remain relevant.
+The planner’s108× observer ratio is a normalized reference, not the actual link’s
+interception time, and is not used in this video’s copy or graphics.
+
+11. Historical context, revision3
+https://raw.githubusercontent.com/w1hkj/fldigi/master/src/include/jalocha/pj_mfsk.h
+The creator’s Olivia modem source dates the design to December2004.
+https://www.w1hkj.org/FldigiHelp/olivia_page.html
+Selected common Olivia configurations in the official manual deliver approximately
+15–29 words/minute. This supports Morse-like text speed for these configurations.
+https://www.arrl.org/code-transmissions
+ARRL fast Morse practice uses10–35 words/minute. This is a concrete pace comparison,
+not a claim that all operators or all Olivia modes run at those speeds.
+The video first presents these common configurations, then explicitly changes to
+the faster4/2000~109bit/s variant for the260x rate comparison. They are not conflated.
+A blanket claim that no comparable radio-modem leap occurred for decades is not
+established: other high-rate PSK/MFSK and PACTOR modes exist with differing channel
+assumptions. The film states Olivia’s age and the measured comparison precisely.
+https://www.w1hkj.org/FldigiHelp/mode_table_page.html
+https://www.scs-pactor.com/pactor-4
+
+12. Spoken-detail simplification, revision4
+The narration now says “The illustrated Olivia mode carries about a hundred bits
+per second.” The four-tone/2kHz label and approximate109bit/s value remain on the
+slide, so the260x comparison continues to use its exact documented109.375bit/s
+reference. No other narration or visual-design content changed.

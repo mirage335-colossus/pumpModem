@@ -1,0 +1,135 @@
+{
+  "title": "Data Pump · Safe transfer. A demanding proving ground.",
+  "fps": 15,
+  "width": 1600,
+  "height": 900,
+  "scenes": [
+    {
+      "id": "opening",
+      "title": "Safely move data.",
+      "subtitle": "Across security boundaries.",
+      "eyebrow": "DATA PUMP",
+      "kind": "opening",
+      "sentences": [
+        "Data Pump was built to safely move data across security boundaries, using hardware computers already have.",
+        "Developers from the team turned that practical need into a demanding proving ground for reusable development practices."
+      ]
+    },
+    {
+      "id": "isolation",
+      "title": "Preserve the boundary.",
+      "subtitle": "Keep useful work moving.",
+      "eyebrow": "01 / SAFE DATA TRANSFER",
+      "kind": "isolation",
+      "sentences": [
+        "Critical development and bootstrapping systems need useful data transfer without a direct network or peripheral-bus infection path.",
+        "Data Pump helps complete an isolating workstation. It does not make received files safe to open."
+      ]
+    },
+    {
+      "id": "fast",
+      "title": "Working software.",
+      "subtitle": "Encrypted text and files.",
+      "eyebrow": "RECORDED APPLICATION",
+      "kind": "native",
+      "file": "fast-file.mp4",
+      "trim_start": 6,
+      "trim_end": 25,
+      "note": "30 kB repeated-text example · compressed for transfer",
+      "sentences": [
+        "This is the working application: an encrypted file is transmitted, received, and authenticated.",
+        "Ordinary speakers and microphones can carry the data. An audio cable is another convenient option."
+      ]
+    },
+    {
+      "id": "rates",
+      "title": "From bits to kilobits.",
+      "subtitle": "Olivia’s origins: December 2004.",
+      "eyebrow": "02 / FAST MODEM",
+      "kind": "rates",
+      "sentences": [
+        "Olivia dates back more than twenty years; its common text modes run at roughly Morse-code speeds.",
+        "The illustrated Olivia mode carries about a hundred bits per second.",
+        "Data Pump’s documented speaker-and-microphone trial exceeded twenty-eight thousand bits per second: roughly two hundred and sixty times that rate."
+      ]
+    },
+    {
+      "id": "private",
+      "title": "Minimize apparent interference.",
+      "subtitle": "Low received power. A private waveform.",
+      "eyebrow": "03 / ROBUST MODEM",
+      "kind": "private",
+      "sentences": [
+        "Robust Modem adds fixed-location radio capability as a useful extension.",
+        "Its encrypted private waveform combines received energy below the background noise with a noise-like appearance and no public acquisition marker.",
+        "The intended receiver knows what to collect."
+      ],
+      "audio_excerpt": {
+        "file": "robust-tx.wav",
+        "source_start": 2,
+        "at": 17.5,
+        "duration": 4
+      },
+      "minimum": 22
+    },
+    {
+      "id": "robust",
+      "title": "Plan. Transmit. Recover.",
+      "subtitle": "A received bit at 150 dB loss.",
+      "eyebrow": "RECORDED SIMULATION",
+      "kind": "native",
+      "file": "robust-result.mp4",
+      "trim_start": 0,
+      "trim_end": 1,
+      "note": "2 mW · 1.5 kHz carrier · keyed waveform · simulation",
+      "sentences": [
+        "Here, the recorded simulation recovers a bit with two milliwatts of transmit power and one hundred and fifty decibels of path loss.",
+        "That makes demanding link assumptions concrete and testable."
+      ]
+    },
+    {
+      "id": "development",
+      "title": "A demanding proving ground.",
+      "subtitle": "Recurring problems, tested together.",
+      "eyebrow": "THE DEVELOPMENT PRACTICES",
+      "kind": "development",
+      "sentences": [
+        "The difficult example was the broader impetus for the project.",
+        "Portable interfaces. Regression tests. Continuous data flow and cancellation. Reproducible builds. Verified releases. And parallel development that preserves each contribution."
+      ]
+    },
+    {
+      "id": "team",
+      "title": "Solve the recurring problems.",
+      "subtitle": "Carry the practices forward.",
+      "eyebrow": "A REUSABLE WAY OF WORKING",
+      "kind": "team",
+      "sentences": [
+        "The value reaches beyond reusable code.",
+        "Exercising these problems together exposes the boundaries, failure cases, and development practices that future projects would otherwise have to discover again."
+      ]
+    },
+    {
+      "id": "foundation",
+      "title": "From weeks of lessons",
+      "subtitle": "to a faster starting point.",
+      "eyebrow": "SOFTWARE FOUNDATION",
+      "kind": "foundation",
+      "sentences": [
+        "Software Foundation carries those practices forward, with shared application behavior across seven interfaces.",
+        "The ambition: take work of comparable breadth from roughly two weeks to a few hours, potentially just one."
+      ]
+    },
+    {
+      "id": "closing",
+      "title": "A starting point for much more.",
+      "subtitle": "Safe data transfer remains the priority.",
+      "eyebrow": "DATA PUMP → SOFTWARE FOUNDATION",
+      "kind": "closing",
+      "sentences": [
+        "Safe data transfer remains Data Pump’s development priority.",
+        "This is one example of the team’s capabilities, and a starting point for applying tested practices to many more ambitious projects."
+      ]
+    }
+  ]
+}

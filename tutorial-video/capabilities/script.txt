@@ -1,0 +1,31 @@
+Data Pump · Safe transfer. A demanding proving ground.
+
+DATA PUMP
+Data Pump was built to safely move data across security boundaries, using hardware computers already have. Developers from the team turned that practical need into a demanding proving ground for reusable development practices.
+
+01 / SAFE DATA TRANSFER
+Critical development and bootstrapping systems need useful data transfer without a direct network or peripheral-bus infection path. Data Pump helps complete an isolating workstation. It does not make received files safe to open.
+
+RECORDED APPLICATION
+This is the working application: an encrypted file is transmitted, received, and authenticated. Ordinary speakers and microphones can carry the data. An audio cable is another convenient option.
+
+02 / FAST MODEM
+Olivia dates back more than twenty years; its common text modes run at roughly Morse-code speeds. The illustrated Olivia mode carries about a hundred bits per second. Data Pump’s documented speaker-and-microphone trial exceeded twenty-eight thousand bits per second: roughly two hundred and sixty times that rate.
+
+03 / ROBUST MODEM
+Robust Modem adds fixed-location radio capability as a useful extension. Its encrypted private waveform combines received energy below the background noise with a noise-like appearance and no public acquisition marker. The intended receiver knows what to collect.
+
+RECORDED SIMULATION
+Here, the recorded simulation recovers a bit with two milliwatts of transmit power and one hundred and fifty decibels of path loss. That makes demanding link assumptions concrete and testable.
+
+THE DEVELOPMENT PRACTICES
+The difficult example was the broader impetus for the project. Portable interfaces. Regression tests. Continuous data flow and cancellation. Reproducible builds. Verified releases. And parallel development that preserves each contribution.
+
+A REUSABLE WAY OF WORKING
+The value reaches beyond reusable code. Exercising these problems together exposes the boundaries, failure cases, and development practices that future projects would otherwise have to discover again.
+
+SOFTWARE FOUNDATION
+Software Foundation carries those practices forward, with shared application behavior across seven interfaces. The ambition: take work of comparable breadth from roughly two weeks to a few hours, potentially just one.
+
+DATA PUMP → SOFTWARE FOUNDATION
+Safe data transfer remains Data Pump’s development priority. This is one example of the team’s capabilities, and a starting point for applying tested practices to many more ambitious projects.
