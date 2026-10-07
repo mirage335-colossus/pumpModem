@@ -71,3 +71,201 @@ install-release-rev.py and prepare-native-sdl.py; cmake/GuiRev.cmake; and
 docs/building.md, docs/releases.md and docs/validation.md. The sibling
 software-foundation project's retained ARM64 SDK and disconnected acceptance
 implementation are useful references, subject to this project's requirements.
+
+
+
+
+
+
+
+
+2026-10-07 / Codex: oscillator-aware Robust search and long-symbol efficiency
+==========================================================================
+
+Improve the Robust Modem receiver so its actual bounded iterative search uses
+the selected LF/audio and RF oscillator models and a conservative uncertainty
+margin. Remove unnecessary dependence of the expensive encrypted pattern search
+on the audio carrier frequency. This is a future implementation prompt, not a
+claim that the changes below are implemented, measured or qualified. Recheck the current source
+and preserve the development contract before beginning implementation.
+
+Scope and exclusions
+--------------------
+Target stationary links with sufficiently stable oscillators and bounded residual
+frequency/timing uncertainty over the complete symbol. Do not add Doppler drift
+following, adaptive real-time synchronization loops, drift-rate/acceleration
+hypotheses, or a broad iterative search over Doppler trajectories. Real-time
+following can diverge, and comprehensive trajectory searches can be prohibitively
+expensive; neither is an acceptable solution for this work. Do not disguise such
+a search expansion as oscillator margin. Preserve existing pattern-evidence
+acquisition/refinement and detector behavior; report unsupported stability or
+coverage honestly rather than chasing a changing signal or claiming useful
+dynamic-Doppler coverage.
+
+Controls and physical meaning
+-----------------------------
+Add an "RF frequency shift" dropdown, default 0 Hz, with suitable frequency
+choices and validated custom entry. It describes external frequency translation,
+not residual tuning error, signal bandwidth or an instruction to retune hardware.
+Zero covers direct audio, VLF/sub-9 kHz and other untranslated operation. An HF
+converter can supply a shift in megahertz while the modem still generates and
+receives its existing audio waveform. Define the sign/sideband convention and
+show the resulting RF frequency. Never substitute that RF frequency for the
+audio carrier in the PCM sample-rate planner.
+
+Add an "Oscillator search margin" dropdown, default 3x, including 2x and 3x
+choices. Validate finite multipliers of at least 1x. Show the assumed accuracy,
+requested frequency half-width in Hz, sample-clock allowance in ppm, and actual
+covered region. Persist these controls and both oscillator selections through
+the existing configuration and CLI/GUI command import/export paths. Apply them
+to real reception as well as simulation and planning; they must not be
+simulation-only presentation settings.
+
+Provide separate "LF / audio oscillator model" and "RF conversion oscillator
+model" selections. Each describes its own frequency accuracy and phase stability
+over the intended observation interval; do not use one oscillator-quality choice
+to silently improve both stages. The LF model represents the actual audio
+carrier/timebase and ADC/DAC sampling behavior, while the RF model represents the
+external conversion references and synthesizers at the translated frequency.
+With RF shift 0 Hz and no conversion stage, the RF contribution is inactive.
+Support an explicitly declared shared reference without assuming it by default
+or double-counting its correlated errors. Retain effective relative TX/RX model
+semantics, or explicitly combine separately specified endpoint models.
+
+Ideal upconversion followed by downconversion removes the nominal RF carrier,
+but independent TX/RX oscillator phase variations do not cancel by symmetry.
+The remaining RF phase is their difference (at the appropriate delayed times),
+apart from constant propagation phase. Unknown constant phase is already fitted;
+a constant frequency difference belongs in the bounded frequency search. Model
+residual phase variation after those fits separately from the search half-width.
+Do not reduce RF phase fluctuations by the audio/RF frequency ratio on
+downconversion. Combine independent phase-error variances consistently and retain
+shared-reference correlations. A sufficiently stable RF stage may contribute
+negligible error compared with audio, but establish that over the actual symbol
+duration rather than assuming GPS lock provides unlimited phase coherence.
+
+Distinguish GPS time tagging of the computer, GPS-based audio-rate calibration,
+and hardware disciplining of the sound card's sample clock. A GPS receiver/PPS
+can support a hobbyist clock reference or calibration system; GPS synchronization
+of system time alone does not discipline an independent ADC/DAC oscillator.
+Hardware clock discipline requires a compatible clock input/control path. Where
+that is impractical, investigate measured sample-rate calibration and resampling
+against an independently observed local GPS reference, with trustworthy mapping
+from reference events to audio sample positions. State the remaining accuracy,
+phase noise and jitter; software correction cannot remove unobserved jitter or
+restore missing samples. Keep this local-reference calibration distinct from
+the excluded weak-signal/Doppler tracking. GPS PPS quantization/jitter and the
+disciplining loop must not be mistaken for the oscillator's phase stability.
+
+Derive the search from justified oscillator accuracy bounds for the intended
+integration duration. Distinguish static accuracy, stability and phase noise;
+do not treat a phase-noise or Allan-deviation value as a frequency-error bound.
+The present GPSDO residual presets are illustrative effective-link assumptions,
+not measured device guarantees. A 3x multiplier does not turn an unjustified
+nominal value into a conservative specification. State whether accuracy values
+already represent relative TX/RX error; combine per-end bounds conservatively
+before applying the margin, without counting an effective-link allowance twice.
+
+For a common reference controlling conversion and sampling, the starting model is
+  RF frequency = abs(audio carrier + signed RF shift)
+  frequency half-width = margin * RF frequency * relative_accuracy_ppm * 1e-6
+with the documented sideband convention. For independent audio and RF references,
+use separate bounds, for example
+  frequency half-width = margin * 1e-6 *
+      (abs(audio carrier) * audio_accuracy_ppm + abs(RF shift) * RF_accuracy_ppm)
+  sample-clock half-width in ppm = margin * audio_accuracy_ppm
+Do not assume an OCXO/GPSDO controlling the radio also disciplines an independent
+sound card. RF translation error contributes an additive frequency offset in Hz;
+sample-clock error changes chip/symbol timing. Never infer timing error by
+dividing the total RF-derived offset by the audio carrier. Allow coupling only
+when the declared reference relationship justifies it.
+
+One search policy throughout the application
+-------------------------------------------
+Resolve both oscillator models, RF shift and margin into one bounded policy used
+by live and offline receivers, receiver resets, simulation, probability/CPU estimates
+and planner target fitting. At fixed waveform settings, a better declared
+oscillator must reduce unnecessary hypotheses in the real receiver, not merely
+move the modeled signal inside an unchanged broad bank or change a graph label.
+Keep a finite frequency lattice with suitable integration-dependent spacing;
+round coverage outward without retaining an arbitrary broad minimum region that
+negates the improvement. Keep explicit residual offset distinct from RF shift.
+
+Represent frequency and sample-rate hypotheses correctly in every backend.
+At the inspected source, the FFT receiver validates clock_errors_ppm but its rate
+comes from carrier coupling, whereas the compact correlator actually enumerates
+the independent rates. Audit and fix this discrepancy before advertising separate
+RF/audio clock coverage; merely passing another configuration field is insufficient.
+Preserve compatible behavior for low-level callers without the new policy.
+
+Retain finite passband, hypothesis, memory and numeric limits. Report requested
+versus covered ranges, including any narrower fallback; never silently clamp and
+advertise complete margin coverage. The current GPSDO-XO/TCXO/OCXO presets share
+a frequency residual and differ in phase diffusion: equal accuracy assumptions
+should produce equal search geometry at otherwise identical settings. Do not
+invent wider frequency bounds merely from the oscillator class name.
+
+Long-symbol computational efficiency
+-----------------------------------
+Make the expensive pattern correlation primarily depend on bandwidth, complete
+symbol duration and actual hypothesis count, rather than audio carrier cycles.
+Use a suitable common complex-baseband representation and reusable pulse/template
+work where equivalence can be established. Encryption/keystream generation scales
+with chips, positions and key hypotheses; RF translation adds no cipher work by
+itself. A wider justified uncertainty in Hz can legitimately add hypotheses.
+
+The existing FFT path already mixes and bins the input: at 100 Hz nominal Rate,
+aligned half-chip bins can give 100 complex observations/s for both a 50 Hz
+carrier with 400 PCM samples/s and a 1.5 kHz carrier with 6,000 PCM samples/s.
+The compact shaped correlator still evaluates both bit templates at every raw
+sample per hypothesis. Investigate shared pulse/chip calculations and a validated
+baseband projection for that long-symbol path. Simply discarding samples or
+changing the CPU estimate is not an optimization with equivalent reception.
+
+Any filtering/decimation must retain the occupied signal and the entire intended
+offset range, account for image/quadrature and noise covariance, and preserve
+correct energy, Gram matrices, trial penalties and confidence thresholds. Preserve
+exact symbol/epoch/chip addresses, sample-coordinate rounding, bounded memory,
+cancellation, next-poll bit progress and physical absence detection. Do not add
+transmitted synchronization markers, change the encrypted waveform or wire format,
+or end a stream using EOF, successful decoding or partial-symbol silence.
+
+Validation and delivery for the future implementation
+----------------------------------------------------
+Test default 0 Hz/3x controls and command round trips, translated HF cases, separate
+LF/RF model selections, shared and independent reference assumptions, both signs
+of residual error, uncertainty edges, invalid values, numeric limits, and explicit
+incomplete-coverage reporting.
+Changing the RF model must not silently change an independent audio-clock bound;
+GPS computer timestamps alone must not select a disciplined audio-clock model.
+Test inactive RF error at zero shift, GPS-calibrated versus free-running audio,
+constant unknown phase, and residual phase noise in each stage separately.
+Verify actual evaluated frequency/rate hypotheses against the planner, including
+FFT, compact and fallback paths. Narrower searches must not conceal loss of the
+declared coverage or use simulated ground truth unavailable to a real receiver.
+
+Benchmark encrypted 100 Hz Rate reception at 50 Hz and 1.5 kHz audio carriers with
+identical symbol duration, keys/epochs, timing/frequency coverage and acceptance
+rules. Include very long symbols, matched signal and noise-only cases, memory
+limits, cancellation and incremental progress. Report front-end conversion/mixing
+separately from correlation, actual CPU time, wall time and memory. Compare against
+the current batched implementation; do not claim speedup from fewer required
+observations, weakened detection gates or omitted hypotheses. Distinguish savings
+from a legitimately narrower oscillator search from DSP savings at equal coverage.
+Target comparable dominant search cost, not an unsupported promise of identical
+whole-application CPU use. Qualify detection/false-accept behavior and normal
+regressions before claiming measured efficiency or improved usable sensitivity.
+
+Start with src/pattern_search.cpp, src/pattern_receiver.cpp,
+src/pattern_correlator.cpp, src/pattern_correlator_batch.cpp, src/pattern_code.cpp,
+src/pattern_fft_batch.cpp, src/live.cpp, src/transfer.cpp, src/channel.cpp,
+src/simulation_estimate.cpp, src/tuning.cpp, src/main.cpp and the GUI controller,
+link planner and launch-command paths. Consult docs/oscillator-models.md,
+docs/search-compute.md, docs/simulation-estimates.md,
+docs/robust-alternate-receiver.md and the existing search/correlator/GUI tests.
+For reference-clock distinctions, consult the NIST GPSDO uncertainty paper
+(https://tf.nist.gov/general/pdf/2871.pdf), the u-blox GPS-based timing note
+(https://content.u-blox.com/sites/default/files/products/documents/Timing_AppNote_%28GPS.G6-X-11007%29.pdf)
+and Ettus device synchronization documentation
+(https://files.ettus.com/manual/page_sync.html). These explain reference behavior;
+they do not qualify an unspecified radio or sound card.
