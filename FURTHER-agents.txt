@@ -85,8 +85,9 @@ implementation are useful references, subject to this project's requirements.
 Improve the Robust Modem receiver so its actual bounded iterative search uses
 the selected LF/audio and RF oscillator models and a conservative uncertainty
 margin. Remove unnecessary dependence of the expensive encrypted pattern search
-on the audio carrier frequency. This is a future implementation prompt, not a
-claim that the changes below are implemented, measured or qualified. Recheck the current source
+on the audio carrier frequency or the way an equivalent hardware-radio carrier
+is specified. This is a future implementation prompt, not a claim that the
+changes below are implemented, measured or qualified. Recheck the current source
 and preserve the development contract before beginning implementation.
 
 Scope and exclusions
@@ -105,13 +106,15 @@ dynamic-Doppler coverage.
 Controls and physical meaning
 -----------------------------
 Add an "RF frequency shift" dropdown, default 0 Hz, with suitable frequency
-choices and validated custom entry. It describes external frequency translation,
-not residual tuning error, signal bandwidth or an instruction to retune hardware.
-Zero covers direct audio, VLF/sub-9 kHz and other untranslated operation. An HF
-converter can supply a shift in megahertz while the modem still generates and
-receives its existing audio waveform. Define the sign/sideband convention and
-show the resulting RF frequency. Never substitute that RF frequency for the
-audio carrier in the PCM sample-rate planner.
+choices and validated custom entry. It describes the known frequency translation
+between the delivered real-sample passband and the on-air spectrum, whether in
+an external converter or the radio itself. It is not residual tuning error,
+signal bandwidth or an instruction to retune hardware. Zero covers direct audio,
+VLF/sub-9 kHz and untranslated operation. An HF radio/converter can supply a shift
+in megahertz while the modem still generates and receives a real waveform.
+Define the sign/sideband convention and distinguish the radio's LO/tuning
+frequency from the actual on-air modem carrier. Never substitute either RF
+quantity for the delivered modem carrier in the PCM sample-rate planner.
 
 Add an "Oscillator search margin" dropdown, default 3x, including 2x and 3x
 choices. Validate finite multipliers of at least 1x. Show the assumed accuracy,
@@ -126,8 +129,11 @@ model" selections. Each describes its own frequency accuracy and phase stability
 over the intended observation interval; do not use one oscillator-quality choice
 to silently improve both stages. The LF model represents the actual audio
 carrier/timebase and ADC/DAC sampling behavior, while the RF model represents the
-external conversion references and synthesizers at the translated frequency.
-With RF shift 0 Hz and no conversion stage, the RF contribution is inactive.
+radio/conversion references and synthesizers at the translated frequency.
+For untranslated audio with no hardware RF stage, the extra RF contribution is
+inactive. In shared radio-reference mode the RF model also accounts for that
+radio's ADC/DAC clock; an LF=0 indicator disables only an additional independent
+LF oscillator contribution, not the sample-clock uncertainty or actual tone.
 Support an explicitly declared shared reference without assuming it by default
 or double-counting its correlated errors. Retain effective relative TX/RX model
 semantics, or explicitly combine separately specified endpoint models.
@@ -167,10 +173,13 @@ already represent relative TX/RX error; combine per-end bounds conservatively
 before applying the margin, without counting an effective-link allowance twice.
 
 For a common reference controlling conversion and sampling, the starting model is
-  RF frequency = abs(audio carrier + signed RF shift)
+  RF frequency = physical on-air center from the declared conversion chain
   frequency half-width = margin * RF frequency * relative_accuracy_ppm * 1e-6
-with the documented sideband convention. For independent audio and RF references,
-use separate bounds, for example
+For an upper-sideband chain, RF frequency is RF LO/shift plus the actual modem
+carrier in the real stream. Use the corresponding signed mapping for other
+conversion orientations. The actual modem carrier is never replaced by an LF=0
+reference-topology indicator in this calculation.
+For independent audio and external RF references, use separate bounds, for example
   frequency half-width = margin * 1e-6 *
       (abs(audio carrier) * audio_accuracy_ppm + abs(RF shift) * RF_accuracy_ppm)
   sample-clock half-width in ppm = margin * audio_accuracy_ppm
@@ -179,6 +188,78 @@ sound card. RF translation error contributes an additive frequency offset in Hz;
 sample-clock error changes chip/symbol timing. Never infer timing error by
 dividing the total RF-derived offset by the audio carrier. Allow coupling only
 when the declared reference relationship justifies it.
+
+Native radios, shared clocks and equivalent carrier settings
+----------------------------------------------------------
+Data Pump accepts and produces ordinary real ADC/DAC sample streams. Do not add
+a complex I/Q input/output format or require the user to supply quadrature data.
+The delivered receiver modem carrier is not literally at DC. A radio can deliver
+a real stream spanning, for example, 0-20 kHz or 0-1 MHz above its RF tuning/LO
+frequency in upper-sideband operation. These ranges describe usable passband,
+not sample rate; use the actual supplied sample rate and passband limits.
+
+Represent the RF LO/tuning frequency, actual modem carrier and occupied band in
+the delivered real stream, real sample rate, and reference topology separately.
+Interpret the proposed LF=0 / RF=10 MHz setting as metadata for a radio whose
+ADC/DAC and synchronous mixer LOs share the radio reference, with no independent
+PC sound-card oscillator. It does not place the modem tone at zero or remove
+timing uncertainty. Resolve this shorthand to an explicit shared-reference mode
+in configuration and display its meaning clearly. Keep the actual modem carrier
+available separately for templates, filtering and physical RF calculations.
+
+For example, if RF=10 MHz identifies the LO, a 1.5 kHz modem carrier in the
+delivered upper-sideband stream corresponds to an on-air carrier of 10.0015 MHz.
+Label LO frequency versus total on-air carrier so the offset is added exactly
+once. Independent sound-card operation retains its separate LF oscillator model.
+In shared-reference mode, do not force two independent oscillator models onto
+the same clock. Separate reference sharing within each endpoint from any sharing
+between TX and RX; two GPSDO radios need not have identical residual phase noise.
+
+Normalize equivalent user descriptions of the same physical waveform, input
+interface and reference chain into one configuration before planning the search.
+An explicitly declared total RF carrier and an equivalent LO-plus-modem-offset
+description must give the same physical carrier and uncertainty. Record sideband
+orientation at the real-stream interface. Direct conversion with subsequent
+processing and superheterodyne conversion with synchronous LOs require no separate
+decoder configuration when they present the same stream and reference behavior.
+Model their effective frequency/phase performance, not the internal mixer chain.
+Neither LF=0 metadata nor an RF carrier value may overwrite the actual PCM tone
+or make the software sample-rate planner scale with RF frequency.
+
+For static fractional reference errors e_TX and e_RX, with each endpoint's RF
+synthesis and sampling sharing its own reference, use the normalized model
+  r = (1 + e_TX) / (1 + e_RX)
+  residual frequency offset = physical_RF_frequency * (r - 1)
+  symbol duration in receiver nominal time = nominal_symbol_duration / r
+For upper-sideband reception this makes the delivered modem carrier
+  received_modem_carrier = nominal_modem_carrier + residual_frequency_offset
+Use the corresponding mapping for other conversion orientations. Search paired
+frequency/rate hypotheses on this relation, not every independent combination.
+Use the actual physical RF frequency for the coupling, never divide by the LF=0
+metadata indicator. Combine endpoint bounds or use the effective relative-link
+bound, then apply the margin once. Do not count the common reference again as an
+independent LF error plus an independent RF error. Add independent dimensions
+only for justified residual errors, such as a separately referenced converter.
+Shared references can still feed different PLLs with additional phase noise;
+retain those residual impairments and correlations without double-counting them.
+
+Fit unknown constant phase using the existing internal phase treatment, preserving
+encrypted stream/epoch and symbol-timing searches. A high RF center does not require a new
+grid over carrier phase. Assess residual time-varying phase after constant-phase
+and fixed-frequency fits over the full symbol. If that coherence is inadequate,
+report the limitation or use a justified shorter integration; do not pretend a
+wider static-frequency bank restores coherence or add the excluded tracking.
+
+Downconvert, filter and decimate once before the repeated pattern search, using
+the radio's hardware facilities where available. At equal waveform bandwidth,
+symbol duration and actual uncertainty, equivalent carrier representations must
+produce the same hypotheses and comparable dominant decoder cost and memory.
+A wider or higher-rate delivered real stream can incur greater front-end cost;
+select the modem's occupied band plus justified uncertainty before repeating
+expensive correlations. Preserve valid sampling and noise statistics.
+A physically higher RF frequency at the same fractional accuracy may legitimately
+require more frequency hypotheses. A different way of entering the same RF
+frequency must not. Keep encryption work independent of nominal RF cycles.
 
 One search policy throughout the application
 -------------------------------------------
@@ -209,9 +290,11 @@ Long-symbol computational efficiency
 -----------------------------------
 Make the expensive pattern correlation primarily depend on bandwidth, complete
 symbol duration and actual hypothesis count, rather than audio carrier cycles.
-Use a suitable common complex-baseband representation and reusable pulse/template
-work where equivalence can be established. Encryption/keystream generation scales
-with chips, positions and key hypotheses; RF translation adds no cipher work by
+Use a suitable common internal representation and reusable pulse/template work
+where equivalence can be established. Internal complex arithmetic is an
+implementation choice and must not introduce an I/Q stream interface.
+Encryption/keystream generation scales with chips, positions and key hypotheses;
+RF translation adds no cipher work by
 itself. A wider justified uncertainty in Hz can legitimately add hypotheses.
 
 The existing FFT path already mixes and bins the input: at 100 Hz nominal Rate,
@@ -238,11 +321,23 @@ of residual error, uncertainty edges, invalid values, numeric limits, and explic
 incomplete-coverage reporting.
 Changing the RF model must not silently change an independent audio-clock bound;
 GPS computer timestamps alone must not select a disciplined audio-clock model.
-Test inactive RF error at zero shift, GPS-calibrated versus free-running audio,
+Test inactive extra RF error for untranslated audio, active RF and sample-clock
+error for radio-reference LF=0, GPS-calibrated versus free-running audio,
 constant unknown phase, and residual phase noise in each stage separately.
 Verify actual evaluated frequency/rate hypotheses against the planner, including
 FFT, compact and fallback paths. Narrower searches must not conceal loss of the
 declared coverage or use simulated ground truth unavailable to a real receiver.
+
+Test real-stream radio cases at 10 MHz and up to 30 MHz, the LF=0 shared-reference
+indicator with a nonzero actual modem carrier, LO versus total RF carrier entry,
+upper-sideband offset mapping, and equivalent direct-conversion/superheterodyne
+interfaces. Include real 0-20 kHz and 0-1 MHz input passbands with appropriate
+sample rates; no complex I/Q interface is in scope.
+Hold the physical waveform, delivered interface, clocks,
+uncertainty and symbol settings fixed; require identical canonical search bounds,
+paired hypotheses, phase assumptions and comparable core search cost. Cover
+shared-clock timing ratios on both sides of unity and genuine independent-clock
+cases. Separately measure wide-stream front-end work and narrowband search work.
 
 Benchmark encrypted 100 Hz Rate reception at 50 Hz and 1.5 kHz audio carriers with
 identical symbol duration, keys/epochs, timing/frequency coverage and acceptance
@@ -267,5 +362,10 @@ For reference-clock distinctions, consult the NIST GPSDO uncertainty paper
 (https://tf.nist.gov/general/pdf/2871.pdf), the u-blox GPS-based timing note
 (https://content.u-blox.com/sites/default/files/products/documents/Timing_AppNote_%28GPS.G6-X-11007%29.pdf)
 and Ettus device synchronization documentation
-(https://files.ettus.com/manual/page_sync.html). These explain reference behavior;
+(https://files.ettus.com/manual/page_sync.html). For native RF/IF/baseband tuning
+and hardware sample-rate conversion, consult the Ettus general application notes
+(https://files.ettus.com/manual/page_general.html); for common references feeding
+distinct RF and baseband PLLs, consult the Analog Devices AD9361 guide
+(https://wiki.analog.com/resources/eval/user-guides/ad9361).
+These explain reference behavior;
 they do not qualify an unspecified radio or sound card.
