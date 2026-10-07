@@ -70,7 +70,7 @@ At the 1.46-day point, the ideal coherent reference succeeds in 99.73% of
 trials; the default uninterrupted phase model succeeds in 2.45%. Reducing phase
 diffusion tenfold to 0.05 degrees/sqrt(second) raises that uninterrupted model
 to 99.65% (99.51–99.75%). This comparison shows why oscillator stability and
-tracking matter at least as much as making the configured bandwidth smaller.
+coherence matter at least as much as making the configured bandwidth smaller.
 
 ## Relative phase across shorter sections
 
@@ -165,16 +165,21 @@ custom link inputs cannot be mixed. The GUI offers
 `3dBm -200dB` and `3dBm -230dB` for the existing sampled simulation; adding a
 preset does not establish that the receiver can decode it.
 
-The GUI's **Oscillator model** dropdown and CLI `--oscillator` option select
-free-running crystal, hobbyist GPSDO/XO without an oven, GPSDO/TCXO without an
-oven, or GPSDO/OCXO impairments. They change both the sampled channel and the
-estimates. All three GPSDO choices share the 0.0001 ppm locked-link frequency
-assumption; their phase-diffusion scenarios differ. The channel does not model
-GPS phase corrections. See [oscillator models](oscillator-models.md) for the illustrative
-values and the distinction between GPS frequency accuracy and phase stability.
-An individual `--clock-error-ppm` or `--phase-noise` value overrides that part
-of the selected model. The examples and table above use the unchanged
-free-running-crystal default.
+The **LF / audio oscillator** and **RF oscillator** controls select free-running
+crystal, hobbyist GPSDO/XO without an oven, GPSDO/TCXO without an oven, or
+GPSDO/OCXO assumptions. RF shift defaults to 0 Hz, search margin to 3×, and
+the reference to independent audio. The shared-radio/LF=0 setting uses the RF
+model once for the real ADC/DAC stream and synchronous conversion references;
+the modem tone stays nonzero. All three GPSDO choices share the 0.0001 ppm
+locked-link frequency assumption; their phase-diffusion scenarios differ.
+The same declared policy bounds current receiver acquisition, planner support
+and compute counts. Simulated impairments omit the margin. The low-level
+estimator preserves an explicitly supplied channel independently of the
+receiver's declared bounds; it can report that channel outside coverage. See
+[oscillator models](oscillator-models.md) for the topology, values and distinction
+between GPS frequency accuracy and phase stability. The channel does not model
+GPS servo corrections or Doppler trajectories. The reference experiment and
+table above retain their stated free-running-crystal phase assumption.
 
 Useful comparison controls are `--phase-noise` (degrees/sqrt(second)),
 `--coherent-seconds`, `--noise-figure-db`, `--hypotheses`,
@@ -193,7 +198,8 @@ produce identical draws across compiler libraries.
   `simulated_seconds` includes the existing completion tail.
 - `current_receiver` describes the existing receiver's requested search,
   coverage limits and reference CPU/GPU compute estimates. When the carrier
-  is outside its search or the modeled memory does not fit, its probability
+  or sample-clock error is outside its search, the full requested oscillator
+  margin is not covered, or the modeled memory does not fit, its probability
   remains unavailable. Compute time in this case describes requested work,
   not a simulation that is guaranteed to run or decode successfully. The GPU
   estimate remains hypothetical; the production receiver runs on the CPU.
@@ -256,10 +262,12 @@ Within-observation phase fluctuations matter; see the filtered Wiener phase
 model in [Ghozlan and Kramer](https://arxiv.org/pdf/1503.03130).
 
 The current carrier search is another constraint. At 125,893 seconds per bit,
-its 4097-frequency cap covers approximately +/-4.07 mHz, while the default
-100 ppm shift at a 1500 Hz carrier is 0.15 Hz. A complete +/-200 ppm search
-would need about 302,145 frequencies before timing/clock alternatives.
-Longer integration alone does not supply that coverage.
+its 4,097-frequency cap covers approximately ±4.07 mHz, while the default
+100 ppm simulated shift at a 1,500 Hz carrier is 0.15 Hz. The default 3× crystal
+policy requests ±300 ppm, or ±0.45 Hz, which would need about 453,215
+frequencies before any independent rate alternatives. A GPSDO assumption can
+narrow that declared static region; it does not remove phase-coherence or
+workspace limits. Longer integration alone does not supply missing coverage.
 
 ## The reduced statistical experiment
 
@@ -287,11 +295,12 @@ time, carrier, clock, bit, epoch and key trials. This is not the production
 receiver's adaptive evidence threshold, and the complete search is not run.
 `--hypotheses` is prescribed independently of `current_receiver` geometry;
 it is not an automatic count of that receiver's search. For example, the
--36 target above needs about 602,855 frequencies for full +/-200 ppm
+-36 target above needs about 904,281 frequencies for full default ±300 ppm
 coverage, before other alternatives, while the reference default is one
 million cells. After counting both bit labels and the other alternatives,
-that complete production search exceeds the reference default. Increase M
-when examining a larger search.
+that hypothetical complete search exceeds the reference default. The actual
+production bank caps its work and reports the smaller covered region. Increase
+M when examining a larger reference search.
 
 Nonzero phase diffusion replaces random path energy with its exact mean eta.
 The resulting detection distribution is therefore an approximation that omits
@@ -303,8 +312,8 @@ waveform-dependent Gram matrices and the modem's adaptive decisions.
 describes the coherent/noncoherent integration tradeoff and squaring loss.
 
 The implemented four-section and local differential fits have distinct
-bounded scores and resource requirements. Adaptive sections and explicit
-clock/drift trajectories need their own scoring, resource limits and sampled
-signal/noise validation. This planning command
+bounded scores and resource requirements. Static oscillator-derived paired
+search adds no Doppler following, arbitrary clock/drift trajectories or
+real-time phase synchronization loop. This planning command
 does not change transmission, symbol admission, pending-bit progress or
 physical completion.

@@ -2,6 +2,7 @@
 #include "datapump/streaming_modem.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
+#include "datapump/pattern_search.hpp"
 #include "datapump/crypto.hpp"
 #include <algorithm>
 #include <bit>
@@ -100,6 +101,7 @@ void discard(std::istream& in, std::size_t count) {
 }
 }
 void validate(const Config& c) {
+    if(c.oscillator_search)validate_oscillator_search(*c.oscillator_search);
     check(c.pattern_symbols && c.constellation_bits==1,
           "APSK transport has been removed; use one-bit pattern transport");
     check(c.sample_rate >= 64 && c.sample_rate <= 120000000, "internal sample rate must be 64..120000000 Hz");
@@ -123,6 +125,25 @@ void validate(const Config& c) {
     check(std::isfinite(c.carrier_hz) && c.carrier_hz>=half_band &&
           c.carrier_hz+half_band<=c.sample_rate/2.,
           "carrier and waveform must fit above DC and below internal Nyquist; raise the carrier for short unshaped patterns or tone modes");
+    if(c.oscillator_search) {
+        const auto& policy=*c.oscillator_search;
+        const auto rf=policy.rf_shift_hz==0?static_cast<long double>(c.carrier_hz):
+            static_cast<long double>(policy.rf_shift_hz)+
+                (policy.sideband==OscillatorSideband::upper?1.L:-1.L)*c.carrier_hz;
+        check(std::isfinite(rf) && rf>0 && rf<=std::numeric_limits<double>::max(),
+            "RF LO and sideband must describe a finite positive on-air carrier");
+        const bool shared=policy.reference==OscillatorReference::shared_radio;
+        const auto accuracy=shared?rf*policy.rf.accuracy_ppm:
+            static_cast<long double>(c.carrier_hz)*policy.lf.accuracy_ppm+
+                static_cast<long double>(policy.rf_shift_hz)*policy.rf.accuracy_ppm;
+        const auto bound=accuracy*policy.margin*1e-6L;
+        check(std::isfinite(bound) && bound<=std::numeric_limits<double>::max(),
+            "oscillator frequency search allowance exceeds numeric range");
+        const auto phase=shared?policy.rf.phase_noise_degrees_per_sqrt_second:
+            policy.rf_shift_hz==0?policy.lf.phase_noise_degrees_per_sqrt_second:
+                std::hypot(policy.lf.phase_noise_degrees_per_sqrt_second,policy.rf.phase_noise_degrees_per_sqrt_second);
+        check(phase<=180,"combined oscillator phase diffusion exceeds simulation range");
+    }
     check(c.spreading_mode != SpreadingMode::tone || (!c.scramble && !c.dsss && !c.data_key),
           "tone mode is unencrypted and cannot enable Data, Scrambler or DSSS keystreams");
     check(c.memory_limit >= 1024, "modem memory limit must be at least 1024 bytes");

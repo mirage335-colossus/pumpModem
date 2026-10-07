@@ -4,6 +4,7 @@
 #include <FL/Fl_Double_Window.H>
 #include <FL/Fl_Scroll.H>
 #include <FL/Fl_Input.H>
+#include <FL/Fl_Image_Surface.H>
 #include <iostream>
 #include <stdexcept>
 
@@ -80,11 +81,47 @@ void retained_controls() {
     window.hide();
 }
 
+unsigned clipping_warnings=0;
+void clipping_warning(const char*,...) {++clipping_warnings;}
+void deeply_nested_clipping() {
+    struct WarningCapture {
+        decltype(Fl::warning) previous=Fl::warning;
+        WarningCapture(){clipping_warnings=0;Fl::warning=clipping_warning;}
+        ~WarningCapture(){Fl::warning=previous;}
+    } capture;
+    ui::DocumentNode nested;nested.width=100;nested.height=100;nested.fill=ui::DocumentFill::parity;
+    // Exceed both supported FLTK fixed clip-stack sizes. The explicit outer
+    // height must still crop every descendant, without hiding the next sibling.
+    for(unsigned depth=0;depth<80;++depth) {
+        ui::DocumentNode parent;parent.width=100;parent.height=100;
+        parent.children.push_back(std::move(nested));nested=std::move(parent);
+    }
+    nested.height=30;
+    ui::DocumentNode sibling;sibling.width=100;sibling.height=20;sibling.top=10;sibling.fill=ui::DocumentFill::surface;
+    ui::DocumentNode document;document.width=100;document.height=100;
+    document.children.push_back(std::move(nested));document.children.push_back(std::move(sibling));
+    FltkDocumentView view(0,0,100,1);view.update(document);
+    Fl_Image_Surface surface(120,100);Fl_Surface_Device::push_current(&surface);
+    fl_color(FL_WHITE);fl_rectf(0,0,120,100);surface.draw(&view);
+    Fl_Surface_Device::pop_current();std::unique_ptr<Fl_RGB_Image> image(surface.image());
+    const auto pixel=[&](int x,int y) {
+        const auto* data=image->array+(y*image->data_w()+x)*image->d();
+        return datapump::gui::theme::Rgb{data[0],data[1],data[2]};
+    };
+    require(clipping_warnings==0,"Nested document drawing overflowed the native clip stack");
+    require(pixel(5,5)==*datapump::gui::theme::document_fill_rgb(ui::DocumentFill::parity),
+        "Deeply nested document lost its visible descendant fill");
+    require(pixel(5,35)==datapump::gui::theme::Rgb{255,255,255}&&pixel(110,15)==datapump::gui::theme::Rgb{255,255,255},
+        "Deeply nested document painted outside an ancestor's clip");
+    require(pixel(5,45)==*datapump::gui::theme::document_fill_rgb(ui::DocumentFill::surface),
+        "Nested document clipping hid a later sibling");
+}
+
 }
 
 int main() {
     try {
-        datapump::gui::theme::apply_palette();retained_controls();
+        datapump::gui::theme::apply_palette();retained_controls();deeply_nested_clipping();
         Fl_Double_Window window(450,250,"FLTK generic document regression");
         Fl_Scroll scroll(10,10,430,230);scroll.type(Fl_Scroll::VERTICAL);
         unsigned actions=0;

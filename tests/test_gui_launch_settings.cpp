@@ -26,7 +26,8 @@ void generated_and_pasted_settings() {
     const auto initial=launch_command::parse(original);
     check(initial.pattern=="auto-pattern"&&initial.target_db_hz&&
         initial.tx_dbm&&initial.path_loss_db&&initial.noise_dbm_hz&&
-        initial.oscillator&&initial.rate_hz&&initial.carrier_hz&&initial.workspace_percent,
+        initial.oscillator&&initial.rf_oscillator&&initial.rf_shift_hz==0&&initial.search_margin==3&&initial.reference=="independent"&&
+        initial.sideband=="upper"&&initial.rate_hz&&initial.carrier_hz&&initial.workspace_percent,
         "Launch command must contain every shareable planner setting");
     near(*initial.target_db_hz,controller.link_plan()->inputs.target_db_hz,"Command did not use planner preview target");
     check(original.find("--simulation")==std::string::npos,"Shareable command must launch with Simulation No");
@@ -141,8 +142,32 @@ void live_validation_is_atomic() {
     controller.close();
 }
 }
+void real_radio_configuration() {
+    Controller controller;
+    const auto tone=controller.settings().transfer.modem.carrier_hz;
+    load(controller,"--rf-oscillator gpsdo-ocxo --rf-shift 10MHz --reference shared-radio --search-margin 3x --sideband upper");
+    const auto policy=*controller.settings().transfer.modem.oscillator_search;
+    check(policy.reference==modem::OscillatorReference::shared_radio&&policy.rf_shift_hz==10000000&&policy.margin==3,
+        "Radio controls did not reach the actual receiver policy");
+    near(controller.settings().transfer.modem.carrier_hz,tone,"RF configuration changed the nonzero PCM carrier");
+    near(controller.settings().simulation_clock_error_ppm,.0001,"Shared radio incorrectly retained the independent sound-card clock");
+    near(controller.settings().simulation_frequency_offset_hz,.001,"Shared radio applied the RF conversion error more than once");
+    const auto canonical=controller.field(F::planner_command).text;
+    check(launch_command::parse(canonical).rf_shift_hz==10000000,"Canonical command lost RF LO");
+    load(controller,"--lf-reference 0 --rf-carrier 10.0015MHz --carrier 1500");
+    check(*controller.settings().transfer.modem.oscillator_search==policy,
+        "Equivalent total RF and LO-plus-tone descriptions changed receiver policy");
+    controller.select(F::oscillator_reference,"independent");
+    near(controller.settings().simulation_clock_error_ppm,100,"Independent audio clock silently inherited RF GPS discipline");
+    controller.select(F::rf_oscillator,"gpsdo-tcxo");
+    near(controller.settings().simulation_clock_error_ppm,100,"Changing RF oscillator changed independent ADC/DAC uncertainty");
+    controller.edit(F::rf_shift,"0 Hz");
+    near(controller.settings().simulation_frequency_offset_hz,0,"Untranslated audio retained inactive RF conversion error");
+    near(controller.settings().simulation_phase_noise_degrees_per_sqrt_second,.5,"Untranslated audio retained inactive RF phase diffusion");
+    controller.close();
+}
 int main() {
-    try {generated_and_pasted_settings();rejected_settings_remain_atomic();startup_and_submit_behavior();live_validation_is_atomic();
+    try {generated_and_pasted_settings();rejected_settings_remain_atomic();startup_and_submit_behavior();live_validation_is_atomic();real_radio_configuration();
         std::cout<<"Planner launch setting round trips passed.\n";return 0;
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

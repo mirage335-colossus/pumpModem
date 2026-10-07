@@ -181,6 +181,29 @@ struct PatternCode::Impl {
         if (config.dsss) result *= static_cast<double>(dsss.sign(position));
         return result;
     }
+    std::array<std::complex<double>,2> values(std::uint64_t absolute,double fraction) {
+        if(config.spreading_mode!=SpreadingMode::pattern)return {value(absolute,0,fraction),value(absolute,1,fraction)};
+        require(std::isfinite(fraction) && fraction>=0 && fraction<1,
+                "pattern chip fraction must be within [0,1)");
+        auto& entry=shaped_chips[absolute%shaped_chips.size()];
+        if(!entry.valid || entry.address!=absolute) {
+            entry.value=value(absolute,0,0);entry.address=absolute;entry.valid=true;
+        }
+        auto alternative=entry.value;
+        alternative*=bit_mask[static_cast<std::size_t>((absolute%chips)%bit_mask.size())];
+        return {entry.value,alternative};
+    }
+    std::array<std::complex<double>,2> shaped_values(std::uint64_t first_chip,double within) {
+        require(std::isfinite(within),"pattern sample coordinate must be finite");
+        if(!shaped)return {shaped_value(first_chip,0,within),shaped_value(first_chip,1,within)};
+        std::array<std::complex<double>,2> result{};
+        pattern_pulse_each(within,symbol,chip,[&](std::uint64_t local,double coefficient) {
+            require(local<=std::numeric_limits<std::uint64_t>::max()-first_chip,"pattern chip address would overflow");
+            const auto chip_values=values(first_chip+local,0);
+            result[0]+=coefficient*chip_values[0];result[1]+=coefficient*chip_values[1];
+        });
+        return result;
+    }
     std::complex<double> shaped_value(std::uint64_t first_chip,unsigned bit,double within) {
         require(bit<=1,"pattern symbol must be a zero or one bit");
         require(std::isfinite(within),"pattern sample coordinate must be finite");
@@ -211,8 +234,14 @@ PatternCode& PatternCode::operator=(PatternCode&&) noexcept = default;
 std::complex<double> PatternCode::value(std::uint64_t chip, unsigned bit, double fraction) {
     return impl_->value(chip, bit, fraction);
 }
+std::array<std::complex<double>,2> PatternCode::values(std::uint64_t chip,double fraction) {
+    return impl_->values(chip,fraction);
+}
 std::complex<double> PatternCode::shaped_value(std::uint64_t first_chip,unsigned bit,double within) {
     return impl_->shaped_value(first_chip,bit,within);
+}
+std::array<std::complex<double>,2> PatternCode::shaped_values(std::uint64_t first_chip,double within) {
+    return impl_->shaped_values(first_chip,within);
 }
 void PatternCode::set_stream_phase_samples(std::uint64_t phase_samples) {
     require(phase_samples < impl_->config.sample_rate,

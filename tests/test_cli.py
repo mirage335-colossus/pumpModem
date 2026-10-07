@@ -223,6 +223,14 @@ class StreamCLI(unittest.TestCase):
                                         4*10**(-3.3)/math.radians(0.5)**2,rel_tol=1e-12))
             self.assertIsNone(value['current_receiver']['success_probability'])
             self.assertFalse(value['current_receiver']['carrier_in_search'])
+            self.assertFalse(value['current_receiver']['clock_in_search'])
+            self.assertTrue(value['current_receiver']['oscillator_search_limited'])
+            self.assertGreater(value['current_receiver']['requested_search_half_width_hz'],
+                               value['current_receiver']['covered_search_half_width_hz'])
+            self.assertEqual(value['current_receiver']['requested_search_half_width_hz'],
+                             value['oscillator_search']['requested_frequency_half_width_hz'])
+            self.assertEqual(value['current_receiver']['covered_search_half_width_hz'],
+                             value['oscillator_search']['covered_frequency_half_width_hz'])
             self.assertEqual(value['current_receiver']['clock_error_ppm'],100)
             self.assertEqual(value['current_receiver']['frequency_offset_hz'],0)
             self.assertTrue(value['current_receiver']['gpu_hypothetical'])
@@ -237,7 +245,7 @@ class StreamCLI(unittest.TestCase):
             self.assertGreaterEqual(value['current_receiver']['gpu_seconds'],value['current_receiver']['tracking_seconds'])
             self.assertEqual(value['current_receiver']['tracking_symbol_windows'],count)
             self.assertLessEqual(value['current_receiver']['frequency_hypotheses'],4097)
-            self.assertGreater(value['current_receiver']['full_200ppm_frequency_hypotheses'],4097)
+            self.assertGreater(value['current_receiver']['full_oscillator_frequency_hypotheses'],4097)
             for experiment in value['experiments'].values():
                 self.assertEqual(experiment['trials'],2000)
                 self.assertGreater(experiment['chips_per_segment'],0)
@@ -286,7 +294,7 @@ class StreamCLI(unittest.TestCase):
         self.assertGreater(receiver['probability_carrier_candidates'],0)
         self.assertLess(receiver['success_probability_sampling_low'],receiver['success_probability'])
         self.assertGreaterEqual(receiver['success_probability_sampling_high'],receiver['success_probability'])
-        self.assertEqual(receiver['probability_model_limit'],'')
+        self.assertIn('joint timing-path covariance',receiver['probability_model_limit'])
         self.assertFalse(value['pcm_generated'])
         self.assertFalse(value['production_decoder_run'])
     def test_link_analysis_bounded_extreme_duration(self):
@@ -365,7 +373,10 @@ class StreamCLI(unittest.TestCase):
             self.assertEqual(value['current_receiver']['clock_error_ppm'],clock)
             self.assertEqual(value['reference_assumptions']['phase_noise_degrees_per_sqrt_second'],phase)
             explicit=json.loads(self.run_pump(*args,'--clock-error-ppm',clock,'--phase-noise',phase).stdout)
-            self.assertEqual(value['current_receiver'],explicit['current_receiver'])
+            # Explicit sampled impairments do not replace the declared search
+            # model: geometry may differ while channel truth stays identical.
+            self.assertEqual(value['current_receiver']['clock_error_ppm'],explicit['current_receiver']['clock_error_ppm'])
+            self.assertEqual(value['current_receiver']['actual_carrier_offset_hz'],explicit['current_receiver']['actual_carrier_offset_hz'])
             self.assertEqual(value['experiments'],explicit['experiments'])
         override=json.loads(self.run_pump(*args,'--oscillator','gpsdo-ocxo','--phase-noise','2').stdout)
         self.assertTrue(override['oscillator_model']['overridden'])
@@ -383,7 +394,38 @@ class StreamCLI(unittest.TestCase):
         for command in ('simulate','listen','analyze-link'):
             self.run_pump(command,'--text','a','--simulation','3dBm -120dB',
                           '--oscillator','missing',ok=False)
-        self.run_pump('estimate','--text','a','--oscillator','gpsdo-xo',ok=False)
+        self.run_pump('estimate','--text','a','--oscillator','gpsdo-xo')
+    def test_real_radio_oscillator_search(self):
+        args=('analyze-link','--bits','0','--bw','100','--tx-dbm','3','--attenuation-db','-200','--trials','10')
+        radio=json.loads(self.run_pump(*args,'--rf-shift','10MHz','--rf-oscillator','gpsdo-ocxo',
+            '--reference','shared-radio').stdout)
+        policy=radio['oscillator_search']
+        self.assertEqual(policy['margin'],3)
+        self.assertEqual(policy['rf_shift_hz'],10000000)
+        self.assertEqual(policy['physical_rf_hz'],10001500)
+        self.assertEqual(radio['transmission']['carrier_hz'],1500)
+        self.assertEqual(radio['current_receiver']['clock_error_ppm'],.0001)
+        self.assertAlmostEqual(radio['current_receiver']['frequency_offset_hz'],.001)
+        total=json.loads(self.run_pump(*args,'--rf-carrier','10.0015MHz','--rf-oscillator','gpsdo-ocxo',
+            '--lf-reference','0').stdout)
+        self.assertEqual(policy,total['oscillator_search'])
+        self.assertEqual(radio['current_receiver'],total['current_receiver'])
+        for ppm in ('-.0001','.0001'):
+            override=json.loads(self.run_pump(*args,'--rf-shift','10MHz','--rf-oscillator','gpsdo-ocxo',
+                '--reference','shared-radio','--clock-error-ppm',ppm).stdout)
+            self.assertEqual(override['oscillator_search'],policy)
+            self.assertAlmostEqual(override['current_receiver']['frequency_offset_hz'],float(ppm)*10)
+            self.assertEqual(override['current_receiver']['clock_error_ppm'],float(ppm))
+        independent=json.loads(self.run_pump(*args,'--rf-shift','10MHz','--rf-oscillator','gpsdo-ocxo').stdout)
+        self.assertEqual(independent['current_receiver']['clock_error_ppm'],100)
+        self.assertEqual(independent['oscillator_search']['requested_clock_half_width_ppm'],300)
+        untranslated=json.loads(self.run_pump(*args,'--rf-oscillator','gpsdo-ocxo').stdout)
+        self.assertEqual(untranslated['oscillator_search']['rf_shift_hz'],0)
+        self.assertEqual(untranslated['current_receiver']['frequency_offset_hz'],0)
+        for flags in (('--rf-shift','-1'),('--search-margin','.5'),('--reference','wrong'),
+                      ('--sideband','wrong'),('--lf-reference','1500'),('--rf-shift','1','--rf-carrier','1'),
+                      ('--reference','independent','--lf-reference','0')):
+            self.run_pump(*args,*flags,ok=False)
     def test_oscillator_preset_applies_to_sampled_waveform(self):
         with tempfile.TemporaryDirectory() as directory:
             args=('simulate','--text','a',*AUDIO,'--snr','30','--seed','713')

@@ -2,6 +2,7 @@
 
 #include "datapump/modem.hpp"
 #include "datapump/transmit_trace.hpp"
+#include <array>
 #include <functional>
 #include <memory>
 
@@ -32,11 +33,19 @@ public:
     // fraction is the position within a chip in [0,1).
     std::complex<double> value(std::uint64_t absolute_chip, unsigned bit,
                                double fraction = 0);
+    // Shared bounded chip mapping for both bit alternatives. Pattern chips
+    // are cached independently of sample position; tones retain their phase.
+    std::array<std::complex<double>,2> values(std::uint64_t absolute_chip,
+                                             double fraction = 0);
     // Linear contribution from one symbol, including its filter tails. The
     // coordinate is a sample offset from that symbol's unpadded start. Other
     // symbols contribute zero; receivers use this without any guessed bits.
     std::complex<double> shaped_value(std::uint64_t first_chip, unsigned bit,
                                       double within_symbol);
+    // Both alternatives share pulse coefficients and private chip mapping;
+    // each output keeps shaped_value's within-bit accumulation order.
+    std::array<std::complex<double>,2> shaped_values(std::uint64_t first_chip,
+                                                   double within_symbol);
     // Reuse one bounded template for a different subsecond start hypothesis.
     // This changes only stream addressing and invalidates mapped chip caches.
     void set_stream_phase_samples(std::uint64_t phase_samples);

@@ -4,6 +4,7 @@
 #include <charconv>
 #include <cctype>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -65,7 +66,8 @@ unsigned workspace(std::string_view text) {
     if(text=="75")return 75;
     invalid("--dsp-workspace must be 25%, 50%, or 75%.");
 }
-double frequency(std::string_view text,std::string_view flag,double low) {
+double frequency(std::string_view text,std::string_view flag,double low,bool allow_zero=false,
+                 double high=30000000) {
     while(!text.empty()&&space(text.front()))text.remove_prefix(1);
     while(!text.empty()&&space(text.back()))text.remove_suffix(1);
     const auto original=text;
@@ -80,7 +82,7 @@ double frequency(std::string_view text,std::string_view flag,double low) {
     if(suffix=="khz"||suffix=="k")value*=1000;
     else if(suffix=="mhz"||suffix=="m")value*=1000000;
     else if(!suffix.empty()&&suffix!="hz")invalid(std::string(flag)+" requires Hz, kHz, or MHz units.");
-    if(!std::isfinite(value)||value<low||value<=0||value>30000000)
+    if(!std::isfinite(value)||value<low||(!allow_zero&&value<=0)||value>high)
         invalid(std::string(flag)+" is outside its supported frequency range.");
     return value;
 }
@@ -104,6 +106,8 @@ Patch parse_arguments(std::span<const std::string> arguments) {
         if(argument.find('\0')!=std::string::npos)invalid("Launch command contains a null character.");
     }
     Patch result;
+    bool lf_zero_reference=false;
+    std::optional<std::string> explicit_reference;
     for(std::size_t i=0;i<arguments.size();++i) {
         const std::string_view argument=arguments[i];
         const auto equal=argument.find('=');
@@ -114,7 +118,9 @@ Patch parse_arguments(std::span<const std::string> arguments) {
         }
         const bool known=flag=="--tx-dbm"||flag=="--path-loss-db"||flag=="--noise-dbm-hz"||
             flag=="--oscillator"||flag=="--target-snr"||flag=="--short-target-snr"||flag=="--long-target-snr"||
-            flag=="--rate"||flag=="--bw"||flag=="--carrier"||flag=="--dsp-workspace"||flag=="--pattern";
+            flag=="--rate"||flag=="--bw"||flag=="--carrier"||flag=="--dsp-workspace"||flag=="--pattern"||
+            flag=="--rf-oscillator"||flag=="--rf-shift"||flag=="--rf-carrier"||flag=="--search-margin"||
+            flag=="--reference"||flag=="--sideband"||flag=="--lf-reference";
         if(!known)invalid("Unknown launch option: "+std::string(flag));
         std::string_view value;
         if(equal!=std::string_view::npos)value=argument.substr(equal+1);
@@ -134,8 +140,29 @@ Patch parse_arguments(std::span<const std::string> arguments) {
         else if(flag=="--carrier")result.carrier_hz=frequency(value,flag,0);
         else if(flag=="--dsp-workspace")result.workspace_percent=workspace(value);
         else if(flag=="--oscillator")result.oscillator=std::string(tuning::parse_oscillator_preset(value).id);
+        else if(flag=="--rf-oscillator")result.rf_oscillator=std::string(tuning::parse_oscillator_preset(value).id);
+        else if(flag=="--rf-shift")result.rf_shift_hz=frequency(value,flag,0,true,std::numeric_limits<double>::max());
+        else if(flag=="--rf-carrier")result.rf_carrier_hz=frequency(value,flag,0,false,std::numeric_limits<double>::max());
+        else if(flag=="--search-margin") {
+            if(value.ends_with("x"))value.remove_suffix(1);
+            result.search_margin=number(value,flag,1,std::numeric_limits<double>::max());
+        }
+        else if(flag=="--reference") {
+            if(value!="independent"&&value!="shared-radio")invalid("--reference must be independent or shared-radio.");
+            result.reference=value;explicit_reference=std::string(value);
+        }
+        else if(flag=="--lf-reference") {
+            if(frequency(value,flag,0,true)!=0)invalid("--lf-reference only accepts 0 Hz, indicating shared-radio clocks.");
+            result.reference="shared-radio";lf_zero_reference=true;
+        }
+        else if(flag=="--sideband") {
+            if(value!="upper"&&value!="lower")invalid("--sideband must be upper or lower.");
+            result.sideband=value;
+        }
         else if(flag=="--pattern")result.pattern=std::string(tuning::pattern_mode_name(tuning::parse_pattern_mode(value)));
     }
+    if(result.rf_shift_hz&&result.rf_carrier_hz)invalid("Choose --rf-shift or --rf-carrier, not both.");
+    if(lf_zero_reference&&explicit_reference=="independent")invalid("--lf-reference 0 conflicts with independent reference.");
     return result;
 }
 Patch parse(std::string_view command) {
@@ -159,6 +186,12 @@ std::string format(const Patch& settings) {
     if(settings.path_loss_db)add("--path-loss-db",numeric(*settings.path_loss_db));
     if(settings.noise_dbm_hz)add("--noise-dbm-hz",numeric(*settings.noise_dbm_hz));
     if(settings.oscillator)add("--oscillator",std::string(tuning::parse_oscillator_preset(*settings.oscillator).id));
+    if(settings.rf_oscillator)add("--rf-oscillator",std::string(tuning::parse_oscillator_preset(*settings.rf_oscillator).id));
+    if(settings.rf_shift_hz)add("--rf-shift",numeric(*settings.rf_shift_hz));
+    if(settings.rf_carrier_hz)add("--rf-carrier",numeric(*settings.rf_carrier_hz));
+    if(settings.search_margin)add("--search-margin",numeric(*settings.search_margin));
+    if(settings.reference)add("--reference",*settings.reference);
+    if(settings.sideband)add("--sideband",*settings.sideband);
     if(settings.target_db_hz)add("--target-snr",numeric(*settings.target_db_hz));
     if(settings.short_target_db_hz)add("--short-target-snr",numeric(*settings.short_target_db_hz));
     if(settings.long_target_db_hz)add("--long-target-snr",numeric(*settings.long_target_db_hz));

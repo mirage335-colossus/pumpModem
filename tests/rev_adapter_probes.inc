@@ -404,7 +404,11 @@
             throw std::runtime_error("Rev launch command has no retained native editor");
         };
         auto* host=find_host();auto* editor=host->bindings.front().editor;
-        if(!editor||!editor->multiline||!editor->scroll_content||editor->limit!=8192||
+        if(!editor)throw std::runtime_error("Rev launch command has no editor");
+        auto* page=pages.at(ui::Page::planner);
+        page->resolved.scroll.y=std::max(0.f,page->resolved.scroll.y+editor->rect.y-page->rect.y-20.f);
+        shared->layoutDirty=true;settle();
+        if(!editor->multiline||!editor->scroll_content||editor->limit!=8192||
            !host->control.tab_navigation||!allows_input(editor))
             throw std::runtime_error("Rev launch command lacks native multiline scrolling or focus navigation");
         application.edit(ui::Field::message,"e");settle();
@@ -453,14 +457,21 @@
         };
         auto* host=find_host();auto* editor=host->bindings.front().editor;
         auto* presets=host->bindings.front().suggestions;auto* document=documents.at(ui::Page::planner);
-        if(!editor||!presets||presets->params.options.size()<3||!allows_input(editor)||
+        if(!editor)throw std::runtime_error("Rev inline document has no editor");
+        auto* page=pages.at(ui::Page::planner);
+        page->resolved.scroll.y=std::max(0.f,page->resolved.scroll.y+editor->rect.y-page->rect.y-20.f);
+        shared->layoutDirty=true;settle();
+        const auto tab_contains_target=[&] {
+            const auto& order=document->tab_elements();return std::find(order.begin(),order.end(),host->element())!=order.end();
+        };
+        if(!presets||presets->params.options.size()<3||!allows_input(editor)||
            editor->rect.y<application.page_bounds(details.size.width,details.size.height).y||
-           document->tab_elements().empty()||document->tab_elements().front()!=host->element())
-            throw std::runtime_error("Rev inline editor/presets did not use the first document control position: editor="+
+           !tab_contains_target())
+            throw std::runtime_error("Rev inline editor/presets did not retain a document control position: editor="+
                 std::to_string(editor!=nullptr)+" presets="+std::to_string(presets?presets->params.options.size():0)+
                 " input="+std::to_string(editor&&allows_input(editor))+" y="+std::to_string(editor?editor->rect.y:0)+
                 " page_y="+std::to_string(application.page_bounds(details.size.width,details.size.height).y)+
-                " tab_first="+std::to_string(!document->tab_elements().empty()&&document->tab_elements().front()==host->element()));
+                " tab_present="+std::to_string(tab_contains_target()));
         if(std::any_of(bindings.begin(),bindings.end(),[](const auto& binding){return binding.control.field==ui::Field::planner_target;}))
             throw std::runtime_error("Rev document-only editor was duplicated in the persistent desktop");
         show_help(host->control.help,host->bindings.front().element);help_timing.enter(help_now()-2);update_help();native_frame();
@@ -491,24 +502,43 @@
             throw std::runtime_error("Rev inline preset did not edit and commit through its normal binding");
         focus_control(editor);re::Event tab;tab.keyboard.tab.id=1;keyDown(tab);
         if(!presets->dropdown->targetFlags.focus)throw std::runtime_error("Rev inline editor Tab order skipped its preset control");
-        if(document->tab_elements().size()<3)throw std::runtime_error("Rev inline document lacks the adjacent target actions");
+        const auto& order=document->tab_elements();
+        const auto position=std::find(order.begin(),order.end(),host->element());
+        if(position==order.end()||std::distance(position,order.end())<3)
+            throw std::runtime_error("Rev inline document lacks the adjacent target actions");
+        const auto target_index=static_cast<std::size_t>(std::distance(order.begin(),position));
         tab.propagate=true;keyDown(tab);
-        if(!document->tab_elements()[1]->targetFlags.focus)throw std::runtime_error("Rev inline preset Tab order skipped the next document action");
+        if(!document->tab_elements()[target_index+1]->targetFlags.focus)throw std::runtime_error("Rev inline preset Tab order skipped the next document action");
         tab.propagate=true;keyDown(tab);
-        if(!document->tab_elements()[2]->targetFlags.focus)throw std::runtime_error("Rev document actions did not retain their visual Tab order");
+        if(!document->tab_elements()[target_index+2]->targetFlags.focus)throw std::runtime_error("Rev document actions did not retain their visual Tab order");
         tab.keyboard.shift.id=1;tab.propagate=true;keyDown(tab);tab.propagate=true;keyDown(tab);
         if(!presets->dropdown->targetFlags.focus)throw std::runtime_error("Rev reverse Tab order skipped the inline preset control");
         focus_control(editor);application.dispatch(ui::Command::planner_toggle_details);settle();
         if(find_host()!=host||!editor->targetFlags.focus)
             throw std::runtime_error("Rev document details replaced the inline editor or stole focus");
-        const auto old_y=editor->rect.y;auto* page=pages.at(ui::Page::planner);
-        page->resolved.scroll.y=230;shared->layoutDirty=true;settle();
-        if(editor->rect.y>=old_y||allows_input(editor)||editor->targetFlags.focus)
-            throw std::runtime_error("Rev scrolled-out inline editor remained interactive or focused");
-        page->resolved.scroll.y=0;shared->layoutDirty=true;settle();focus_control(editor);
+        const auto old_y=editor->rect.y,old_document_y=document->rect.y,target_scroll=page->resolved.scroll.y;
+        page->resolved.scroll.y+=editor->rect.y+editor->rect.h-page->rect.y+1;
+        shared->layoutDirty=true;settle();
+        // Rev skips layout of hidden children, so a correctly cropped editor
+        // can retain its old rectangle. Verify movement on its visible parent.
+        if(document->rect.y>=old_document_y||page->resolved.scroll.y<=target_scroll||allows_input(editor)||editor->targetFlags.focus)
+            throw std::runtime_error("Rev scrolled-out inline editor remained interactive or focused: old_y="+
+                std::to_string(old_y)+" y="+std::to_string(editor->rect.y)+" h="+std::to_string(editor->rect.h)+
+                " previous_scroll="+std::to_string(target_scroll)+" scroll="+std::to_string(page->resolved.scroll.y)+
+                " page_y="+std::to_string(page->rect.y)+" page_h="+std::to_string(page->rect.h)+
+                " document_h="+std::to_string(document->rect.h)+" input="+std::to_string(allows_input(editor))+
+                " focus="+std::to_string(editor->targetFlags.focus));
+        page->resolved.scroll.y=target_scroll;shared->layoutDirty=true;settle();focus_control(editor);
         if(!allows_input(editor)||!editor->targetFlags.focus)
             throw std::runtime_error("Rev scrolling back did not restore the retained inline editor");
+        page->resolved.scroll.y=0;shared->layoutDirty=true;settle();focus_control(editor);
+        if(!allows_input(editor)||!editor->targetFlags.focus)
+            throw std::runtime_error("Rev scroll-boundary fixture has no visible focused editor");
+        page->resolved.scroll.y=-10000;shared->layoutDirty=true;settle();
+        if(page->resolved.scroll.y!=0||!allows_input(editor)||!editor->targetFlags.focus)
+            throw std::runtime_error("Rev overscroll blurred an editor visible at the clamped boundary");
         // A visible label must not leave its completely clipped editor active.
+        page->resolved.scroll.y=0;shared->layoutDirty=true;
         ui::DocumentNode clipped;clipped.height=ui::label_height;
         ui::DocumentNode input;input.kind=ui::DocumentKind::control;input.height=45;input.control=host->control;
         clipped.children.push_back(input);document->apply(std::make_shared<const ui::DocumentNode>(clipped));

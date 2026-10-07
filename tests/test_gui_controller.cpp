@@ -2135,25 +2135,29 @@ void receive_target_controls() {
     controller.edit(F::receive_snr," 40, +6, -6, 40 ");
     std::this_thread::sleep_for(std::chrono::milliseconds(775));controller.poll();
     const auto accepted_targets=controller.settings().transfer.receive_targets_db_hz;
-    const bool adjusted_list=accepted_targets.size()==3&&accepted_targets.front()==40&&
-          accepted_targets[1]!=6&&
+    const std::vector<double> requested_targets{40,6,-6};
+    const bool adjusted_list=accepted_targets!=requested_targets;
+    check(accepted_targets.size()==3&&accepted_targets.front()==40&&
           controller.field(F::receive_snr).text==" 40, +6, -6, 40 "&&
-          !controller.field(F::receive_snr).display_text.empty();
-    if(!adjusted_list)throw Error("The short-profile clock gap near 6 dB must snap without overwriting the typed RX list: "+
-        controller.field(F::receive_snr).text+" / "+controller.field(F::receive_snr).display_text+" / "+
-        controller.field(F::status).text);
+          controller.field(F::receive_snr).display_text.empty()!=adjusted_list,
+          "Checked RX target fitting must preserve the typed list and label only actual value adjustments");
     auto options=controller.settings().transfer;
     auto input=controller.link_plan()->inputs;input.options=options;input.target_db_hz=-6;
     const std::array companions{accepted_targets[0],accepted_targets[1]};
     const auto expected_last=planner::nearest_fit_target(input,companions,planner::ReceiveBanks{true,0});
     check(expected_last&&*expected_last==accepted_targets.back(),
           "The RX list must use the nearest checked target under its actual RAM allowance and companion bank");
+    input.target_db_hz=6;
+    const std::array middle_companions{accepted_targets.front(),accepted_targets.back()};
+    const auto expected_middle=planner::nearest_fit_target(input,middle_companions,planner::ReceiveBanks{true,0});
+    check(expected_middle&&*expected_middle==accepted_targets[1],
+          "The former fixed-search clock gap must follow the declared oscillator policy and actual companion bank");
     const auto profiles=tuning::receive_profiles(options.modem,accepted_targets,options.receive_pattern_mode,false);
     modem::ChannelConfig channel;channel.clock_error_ppm=controller.settings().simulation_clock_error_ppm;
     for(const auto& profile:profiles) {
         options.modem=profile;
         const auto receiver=simulation::estimate(transfer::estimate_binary(Bytes{0},options),options,true,channel,profiles,1,false);
-        check(receiver.carrier_in_search&&receiver.receiver_workspace_supported,
+        check(receiver.carrier_in_search&&receiver.clock_in_search&&!receiver.oscillator_search_limited&&receiver.receiver_workspace_supported,
               "Every advertised RX target must independently fit clock search and the shared receiver workspace");
     }
     controller.commit_target(F::receive_snr);

@@ -10,7 +10,8 @@ namespace datapump::gui::launch_command {
 struct Patch {
     std::optional<double> tx_dbm,path_loss_db,noise_dbm_hz,target_db_hz;
     std::optional<double> short_target_db_hz,long_target_db_hz,rate_hz,carrier_hz;
-    std::optional<std::string> oscillator,pattern;
+    std::optional<double> rf_shift_hz,rf_carrier_hz,search_margin;
+    std::optional<std::string> oscillator,rf_oscillator,reference,sideband,pattern;
     std::optional<unsigned> workspace_percent;
     bool operator==(const Patch&) const=default;
 };

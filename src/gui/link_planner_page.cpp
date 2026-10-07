@@ -1,5 +1,6 @@
 #include "link_planner_page.hpp"
 #include "theme.hpp"
+#include "datapump/pattern_search.hpp"
 #include <algorithm>
 #include <array>
 #include <climits>
@@ -401,6 +402,41 @@ void planner_controls(Node& root,const planner::Model& model,bool show_details,b
             [&](const auto& control){return control.field==field;});
         auto node=column(width);node.kind=Kind::control;node.control=*declaration;node.height=height;return node;
     };
+    auto clocks=card(root.width);clocks.bottom=8;
+    paragraph(clocks,"Oscillator search and RF conversion",14,Tone::text,true,6);
+    const auto inner=clocks.width-2*clocks.padding;
+    const std::size_t columns=inner>=760?3:inner>=440?2:1;
+    const float field_width=(inner-12*static_cast<float>(columns-1))/static_cast<float>(columns);
+    constexpr std::array fields{ui::Field::rf_oscillator,ui::Field::rf_shift,ui::Field::search_margin,
+        ui::Field::oscillator_reference,ui::Field::oscillator_sideband};
+    for(std::size_t first=0;first<fields.size();first+=columns) {
+        auto line=row(inner);line.bottom=8;
+        for(std::size_t i=first;i<std::min(first+columns,fields.size());++i) {
+            auto field=native(fields[i],field_width,ui::label_height+28);
+            if(i+1<std::min(first+columns,fields.size()))field.right=12;
+            line.children.push_back(std::move(field));
+        }
+        clocks.children.push_back(std::move(line));
+    }
+    paragraph(clocks,"RF shift is the radio LO. The actual modem carrier stays in the real ADC/DAC stream. Radio clock (LF=0) uses one shared reference for sampling and synchronous mixer LOs; independent audio keeps a separate LF clock.",11);
+    const auto& config=model.inputs.options.modem;
+    if(config.oscillator_search) {
+        try {
+            const auto search=modem::oscillator_pattern_search(config);
+            const auto effects=modem::oscillator_effects(config);
+            const auto& policy=*config.oscillator_search;
+            const bool shared=policy.reference==modem::OscillatorReference::shared_radio;
+            paragraph(clocks,"On-air carrier "+frequency(effects.physical_rf_hz)+" · LF accuracy "+number(config.oscillator_search->lf.accuracy_ppm)+
+                " ppm"+(shared?" (inactive)":"")+" · RF accuracy "+number(config.oscillator_search->rf.accuracy_ppm)+
+                " ppm"+(!shared&&policy.rf_shift_hz==0?" (inactive)":"")+" · "+number(config.oscillator_search->margin)+"× margin",11);
+            paragraph(clocks,"Frequency half-width: requested "+frequency(search.frequency.requested_half_width_hz)+", covered "+frequency(search.frequency.half_width_hz)+
+                ". Sample-clock half-width: requested "+number(search.requested_clock_half_width_ppm)+" ppm, covered "+number(search.clock_half_width_ppm)+
+                " ppm. "+std::to_string(search.hypotheses.size())+" paired hypotheses."+(search.limited?" LIMITED COVERAGE.":""),11,
+                search.limited?Tone::accent:Tone::muted);
+        } catch(const std::exception& error) {paragraph(clocks,error.what(),11,Tone::accent);}
+    }
+    if(!model.probability_model_limit.empty())paragraph(clocks,"Estimate coverage: "+model.probability_model_limit,11,Tone::muted);
+    root.children.push_back(std::move(clocks));
     const bool compact=model.available&&root.width>=900;
     const bool paired=model.available&&root.width>=560;
     const float chart_width=compact?std::min(300.f,root.width*.28f):std::min(340.f,root.width*.44f);
@@ -566,6 +602,8 @@ void details(Node& root,const planner::Model& model) {
         paragraph(n,"CPU. Reference: Intel Core i9-13900H. A one-bit simulation takes about "+
             planner::duration(model.one_bit_cpu_seconds)+" of processing for "+planner::duration(model.bit_seconds)+
             " per bit. The CPU indicator counts receiver work and ordinary payload processing, including CPU-mitigation overhead, averaged over incoming audio including the final silence check. Additional recovery searches are excluded. Green: below 0.5× real time; yellow: 0.5–1×; red: 1× or more. Search bursts, extra receive targets and slower computers can need more headroom. This is an estimate, not a measurement of this computer.");
+    if(model.kernel_rebuild_upper_bound)
+        paragraph(n,"CPU cost includes a conservative full kernel rebuild for each fractional-clock cell. The receiver reuses incremental kernels, so actual work can be lower.");
     paragraph(n,"Graph. Solid line: time per bit on the left logarithmic axis. Dashed line: one-bit reception probability on the right percentage axis, using the selected power, path and noise. Both use the same target scale; their visual crossing is not a detection threshold. Gaps have no supported estimate.");
     paragraph(n, "Reception. The estimate includes signal strength, phase drift, clock and timing mismatch, acquisition and RAM. It assumes one matching receive target and every wire bit correct, before any error correction. The top-bar RX estimate uses the actual configured draft and receive bank. Oscillator values are illustrative; GPS phase corrections are not modeled.");
     paragraph(n, "Pattern transitions. Long patterns fit four sections with separate gain and phase. Eligible longer patterns also compare nearby local windows, allowing phase to change throughout a bit. One isolated strong quarter cannot carry that detector's match. The local window defaults to 100 seconds, rounded up to whole chips and at least sixteen chips; at least 256 windows are required. Supported estimates include all eligible detector scores, their shared noise and detector-choice penalties. Curves use 512 draws per sampled location; the selected estimate uses 4096. Unsupported geometries show a gap. Small RAM budgets may retain fewer detector branches.");

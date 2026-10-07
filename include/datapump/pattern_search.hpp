@@ -8,6 +8,9 @@ namespace datapump::modem {
 
 inline constexpr std::size_t maximum_pattern_frequency_hypotheses = 4097;
 inline constexpr double default_clock_uncertainty_ppm = 200;
+inline constexpr std::size_t maximum_pattern_rate_hypotheses = 65;
+inline constexpr std::size_t maximum_pattern_frequency_rate_hypotheses =
+    2 * maximum_pattern_frequency_hypotheses;
 
 // The application clock-search bank retains a contiguous, symmetric lattice. A finite
 // cap reduces its covered span rather than making long-integration bins wider.
@@ -19,6 +22,35 @@ struct PatternFrequencySearch {
     double requested_half_width_hz = 0;
     bool limited = false;
 };
+
+struct PatternFrequencyRateHypothesis {
+    double frequency_offset_hz = 0;
+    double clock_error_ppm = 0;
+    bool operator==(const PatternFrequencyRateHypothesis&) const = default;
+};
+struct OscillatorPatternSearch {
+    PatternFrequencySearch frequency;
+    // Center first; correlated references have one rate per frequency.
+    // Independent sampling/conversion clocks have explicitly paired lanes.
+    std::vector<PatternFrequencyRateHypothesis> hypotheses;
+    double requested_clock_half_width_ppm = 0;
+    double clock_half_width_ppm = 0;
+    double clock_step_ppm = 0;
+    bool limited = false;
+};
+struct OscillatorEffects {
+    double physical_rf_hz = 0;
+    double clock_error_ppm = 0;
+    // Additive RF contribution; existing simulation already scales the PCM
+    // carrier by clock_error_ppm. This never includes the search margin.
+    double frequency_offset_hz = 0;
+    double phase_noise_degrees_per_sqrt_second = 0;
+};
+void validate_oscillator_search(const OscillatorSearchConfig&);
+OscillatorEffects oscillator_effects(const Config&);
+// Finite static search from the declared effective-link oscillator bounds.
+// Requires Config::oscillator_search; no simulated truth is used by this bank.
+OscillatorPatternSearch oscillator_pattern_search(const Config&);
 
 // Pattern offsets may use the available real-PCM passband, reserving the same
 // intended waveform support as modem::validate (including RRC rolloff when

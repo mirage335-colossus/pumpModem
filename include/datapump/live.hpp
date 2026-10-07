@@ -27,6 +27,8 @@ struct Settings {
     // receiver remain unchanged; an absent value retains the raw dBFS view.
     std::optional<double> simulation_spectrum_gain_db;
     double simulation_clock_error_ppm = 100;
+    // Additive conversion/tuning error, separate from sample-clock scaling.
+    double simulation_frequency_offset_hz = 0;
     double simulation_phase_noise_degrees_per_sqrt_second = .5;
     // Received content and pending event storage are independent of DSP work.
     std::size_t content_limit = default_memory_limit;

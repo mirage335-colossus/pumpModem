@@ -684,7 +684,7 @@ public:
             control=declaration;control.label=text[0].c_str();control.menu_label=text[1].c_str();
             control.help=text[2].c_str();control.empty_text=text[3].c_str();
         }
-        void apply(const ui::Control& declaration,const ui::DocumentPresentation::Placement& placement) override {
+        void apply(const ui::Control& declaration,const ui::DocumentPresentation::Placement& placement,float document_y) override {
             retain(declaration);
             const auto& clip=placement.clip;const auto& absolute=placement.absolute;
             place(root.get(),{clip.x,clip.y,clip.width,clip.height});
@@ -696,7 +696,7 @@ public:
             app.apply_controls(bindings,std::span(&control,1),&geometry);
             app.layout_controls(bindings,std::span(&control,1),&geometry,
                 {static_cast<int>(std::round(root->parent->rect.x))+clip.x,
-                 static_cast<int>(std::round(root->parent->rect.y))+clip.y,0,0});
+                 static_cast<int>(std::round(document_y))+clip.y,0,0});
             const auto visible=[&](ui::Rect box) {
                 return box.w>0&&box.h>0&&box.x<clip.width&&box.y<clip.height&&
                     static_cast<long long>(box.x)+box.w>0&&static_cast<long long>(box.y)+box.h>0;
@@ -1170,7 +1170,17 @@ public:
     }
     void update_documents() {
         const auto viewport=application.page_bounds(details.size.width,details.size.height);
-        for(const auto& [page,view]:documents)view->apply(application.document(page,ui::document_content_width(viewport.w)));
+        for(const auto& [page,view]:documents) {
+            auto* pane=pages.at(page);
+            RevDocumentView::ScrollAnchor anchor;
+            if(page==application.page()&&view->anchor_scroll_current())
+                anchor=[&](int displacement,int height) {
+                    const float maximum=std::max(0.0f,static_cast<float>(height)-pane->resolved.getInner(Axis::Vertical));
+                    pane->resolved.scroll.y=std::clamp(pane->resolved.scroll.y+static_cast<float>(displacement),0.0f,maximum);
+                    shared->layoutDirty=true;
+                };
+            view->apply(application.document(page,ui::document_content_width(viewport.w)),std::move(anchor));
+        }
     }
     void sync_overlay() {
         const auto definition=application.overlay();

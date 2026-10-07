@@ -2,6 +2,7 @@
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/symbol_schedule.hpp"
+#include "datapump/tuning.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -227,6 +228,33 @@ void overlapping_carrier_hypotheses_emit_one_stream() {
     check(std::abs(result[0].frequency_hz-c.carrier_hz)==half_width,
           "an unresolved carrier bank must report measured grid evidence without inventing the center");
 }
+void wide_paired_carriers_publish_one_prefix_and_terminal() {
+    auto c=config();c.scramble=c.dsss=false;c.pulse_shaping=false;c.integration_seconds=1;
+    constexpr std::size_t start=375;
+    const Bytes bits{1,0,1,1,0};
+    const auto spacing=1.5*c.sample_rate/static_cast<double>(modem::symbol_sample_count(c));
+    modem::PatternSearch search;search.start_offset_seconds=.0625;search.start_uncertainty_seconds=0;
+    search.hypotheses={{-spacing,0},{spacing,0},{0,0}};search.compact_clock_search=true;
+    search.chunk_bits=1;search.track_limit=8;
+    auto samples=waveform(bits,c,start);samples.resize(start+(bits.size()+7)*modem::symbol_sample_count(c));
+    modem::PatternCorrelator receiver(c,search,4*1024*1024);
+    Bytes observed;unsigned terminals=0;std::uint64_t first=0,next=0;
+    for(std::size_t offset=0;offset<samples.size();) {
+        const auto n=std::min<std::size_t>(113,samples.size()-offset);
+        receiver.push(std::span(samples).subspan(offset,n));offset+=n;
+        for(const auto& event:receiver.take_bursts()) {
+            if(!observed.empty())check(event.stream_first_sample==first && event.first_stream_symbol==next,
+                "wide paired carrier sidelobes republished an immutable prefix");
+            else first=event.stream_first_sample;
+            observed.insert(observed.end(),event.bits.begin(),event.bits.end());next+=event.bits.size();
+            if(event.complete)++terminals;
+        }
+    }
+    receiver.finish();
+    for(const auto& event:receiver.take_bursts()) {observed.insert(observed.end(),event.bits.begin(),event.bits.end());if(event.complete)++terminals;}
+    check(observed==bits && terminals==1 && !receiver.synchronized(),
+          "wide paired frequency competition must publish one bit stream and one observed-absence terminal");
+}
 void shaped_raw_sample_evidence() {
     const auto c=config();const Bytes bits{0,1,0};
     const auto padding=modem::pattern_pulse_padding_samples(c);
@@ -260,6 +288,179 @@ void shaped_raw_sample_evidence() {
               "shaped pattern confidence must equal a direct two-basis fit on independent raw samples");
     }
     check(best(receiver.take_bursts()).bits==bits,"raw-sample shaped confidence must recover private symbols in noise");
+}
+
+void long_pulse_projection_matches_raw_reference() {
+    for(const auto carrier:{50.,1500.})for(const auto ppm:{-200.,200.}) {
+        auto c=tuning::resolve(100,0,tuning::PatternMode::auto_pattern,true,carrier).config;
+        c.integration_seconds=82;c.stream_epoch=1730000111;c.stream_phase_samples=7;
+        std::array<std::uint8_t,32> key{};key.fill(0xA9);c.data_key.emplace(key);
+        const auto symbol=modem::symbol_sample_count(c),chip=modem::pattern_chip_samples(c);
+        check(symbol/chip==4100 && symbol%(4*chip)==0,"projection fixture needs full-chip quarter and differential boundaries");
+        const auto rate=1+static_cast<long double>(ppm)*1e-6L;
+        const auto origin=-.137L;
+        const auto count=static_cast<std::size_t>(std::ceil(origin+symbol/rate));
+        std::vector<float> samples(count);
+        modem::PatternCode pattern(c,c.stream_epoch);
+        std::mt19937 random(831);std::normal_distribution<float> noise(0,.3F);
+        for(std::size_t n=0;n<count;++n) {
+            const auto within=static_cast<double>((static_cast<long double>(n)-origin)*rate);
+            const auto phase=std::polar(1.,2*std::numbers::pi*(carrier+.03125)*n/c.sample_rate+.71);
+            samples[n]=static_cast<float>((phase*pattern.shaped_value(0,1,within)).real())+noise(random);
+        }
+        modem::PatternSearch search;search.start_offset_seconds=static_cast<double>(origin/c.sample_rate);
+        search.start_uncertainty_seconds=0;search.search_stream_phases=false;search.compact_clock_search=true;
+        search.hypotheses={{.03125,ppm}};search.retain_score=0;search.candidate_limit=4;
+        search.track_limit=1;search.bit_limit=2;search.differential_window_seconds=.32;
+        modem::PatternCorrelator projected(c,search,4*1024*1024),raw(c,search,64*1024);
+        check(projected.working_bytes()>raw.working_bytes()+16384,
+              "bounded-workspace reference must select raw scoring rather than pulse projection");
+        const auto compare=[&](const auto& a,const auto& b) {
+            check(a.size()==b.size(),"pulse projection changed completed evidence count");
+            for(std::size_t i=0;i<a.size();++i) {
+                check(a[i].first_sample==b[i].first_sample && a[i].end_sample==b[i].end_sample &&
+                      a[i].stream_symbol==b[i].stream_symbol && a[i].bit==b[i].bit &&
+                      a[i].stream_phase_samples==b[i].stream_phase_samples &&
+                      a[i].admission_threshold==b[i].admission_threshold,
+                      "pulse projection changed sampled boundary, trial, epoch or bit identity");
+                check(std::abs(a[i].score-b[i].score)<2e-7*std::max(1.,b[i].score) &&
+                      std::abs(a[i].alternative_score-b[i].alternative_score)<2e-7*std::max(1.,b[i].alternative_score),
+                      "pulse projection changed whole, quarter or differential raw evidence");
+            }
+        };
+        const auto half=count/2;
+        projected.push(std::span(samples).first(half));raw.push(std::span(samples).first(half));
+        check(projected.candidates().empty() && raw.candidates().empty() && !projected.initial_search_complete(),
+              "partial pulse cell or symbol supplied unobserved detection evidence");
+        for(std::size_t offset=half;offset<count;) {
+            const auto n=std::min<std::size_t>(137,count-offset);
+            projected.push(std::span(samples).subspan(offset,n));raw.push(std::span(samples).subspan(offset,n));offset+=n;
+        }
+        compare(projected.candidates(),raw.candidates());
+        check(projected.candidates().size()==1 && projected.candidates()[0].bit==1,
+              "fractional paired projection did not finish the captured truncated symbol at its sampled endpoint");
+        modem::PatternCorrelator whole(c,search,4*1024*1024);whole.push(samples);
+        compare(whole.candidates(),projected.candidates());
+        const auto events=projected.take_bursts(),references=raw.take_bursts();
+        check(events.size()==1 && references.size()==1 && events[0].bits==Bytes({1}) &&
+              references[0].bits==events[0].bits && events[0].end_sample==references[0].end_sample,
+              "pulse projection changed independently admitted stream decisions");
+    }
+}
+
+void explicit_pairs_do_not_add_cartesian_lanes() {
+    for(const bool tone:{false,true}) {
+        auto c=config();c.integration_seconds=.2;c.pulse_shaping=false;
+        c.spreading_mode=tone?modem::SpreadingMode::tone:modem::SpreadingMode::pattern;
+        if(tone)c.scramble=c.dsss=false;
+        modem::PatternSearch search;search.start_offset_seconds=0;
+        search.start_uncertainty_seconds=0;search.retain_score=0;
+        search.frequency_offsets_hz={12345};search.clock_errors_ppm={-1,0,1};
+        search.hypotheses={{-.03125,-8000},{.03125,8000}};
+        const auto symbol=modem::symbol_sample_count(c);
+        const auto slow_end=static_cast<std::size_t>(std::ceil(symbol/.992L));
+        std::vector<float> silence(slow_end);
+        modem::PatternCorrelator receiver(c,search,4*1024*1024);
+        receiver.push(std::span(silence).first(slow_end-1));
+        check(!receiver.initial_search_complete(),"paired fast clock hid unfinished slower coverage");
+        receiver.push(std::span(silence).last(1));
+        check(receiver.initial_search_complete(),"paired slow clock did not complete full coverage");
+        const auto evidence=receiver.candidates();
+        check(evidence.size()==2,"authoritative pairs expanded into a Cartesian search");
+        for(const auto& pair:search.hypotheses) {
+            const auto end=static_cast<std::uint64_t>(std::ceil(static_cast<long double>(symbol)/
+                (1+static_cast<long double>(pair.clock_error_ppm)*1e-6L)));
+            check(std::any_of(evidence.begin(),evidence.end(),[&](const auto& observed) {
+                return observed.first_sample==0 && observed.end_sample==end &&
+                    observed.frequency_hz==c.carrier_hz+pair.frequency_offset_hz;
+            }),"paired frequency and rate were detached during compact scoring");
+        }
+        auto invalid=search;invalid.hypotheses[0].clock_error_ppm=10001;
+        rejects([&]{modem::PatternCorrelator rejected(c,invalid,4*1024*1024);},"invalid paired rate accepted");
+        invalid=search;invalid.hypotheses[0].frequency_offset_hz=std::numeric_limits<double>::quiet_NaN();
+        rejects([&]{modem::PatternCorrelator rejected(c,invalid,4*1024*1024);},"nonfinite paired frequency accepted");
+    }
+}
+void compact_constructor_uses_attached_oscillator_policy() {
+    auto c=tuning::resolve(100,0,tuning::PatternMode::auto_pattern,true,50).config;
+    c.integration_seconds=32;
+    modem::OscillatorSearchConfig policy;policy.lf={.0001,.005};policy.margin=3;
+    c.oscillator_search=policy;
+    const auto expected=modem::oscillator_pattern_search(c).hypotheses;
+    check(expected.size()==3,"tiny attached oscillator model should retain center and both conservative endpoints");
+    const auto slow=std::min_element(expected.begin(),expected.end(),[](const auto& a,const auto& b) {
+        return a.clock_error_ppm<b.clock_error_ppm;
+    });
+    const auto count=static_cast<std::size_t>(std::ceil(modem::symbol_sample_count(c)/
+        (1+static_cast<long double>(slow->clock_error_ppm)*1e-6L)));
+    modem::PatternSearch search;search.start_offset_seconds=0;search.start_uncertainty_seconds=0;
+    search.retain_score=0;search.compact_clock_search=true;
+    std::vector<float> silence(count);
+    modem::PatternCorrelator receiver(c,search,4*1024*1024);receiver.push(silence);
+    const auto evidence=receiver.candidates();check(evidence.size()==expected.size(),
+        "direct compact API ignored attached oscillator frequency/rate policy");
+    for(const auto& pair:expected)check(std::any_of(evidence.begin(),evidence.end(),[&](const auto& e) {
+        return e.frequency_hz==c.carrier_hz+pair.frequency_offset_hz && e.end_sample==
+            static_cast<std::uint64_t>(std::ceil(modem::symbol_sample_count(c)/
+                (1+static_cast<long double>(pair.clock_error_ppm)*1e-6L)));
+    }),"attached oscillator carrier and clock errors became independent compact dimensions");
+    search.frequency_offsets_hz={0};
+    modem::PatternCorrelator explicit_receiver(c,search,4*1024*1024);explicit_receiver.push(silence);
+    check(explicit_receiver.candidates().size()==1,"attached policy overrode explicit compact frequency coverage");
+}
+void paired_pulse_origin_parities_and_canonical_quarters() {
+    auto c=tuning::resolve(100,0,tuning::PatternMode::auto_pattern,true,1500).config;
+    c.integration_seconds=16;c.stream_epoch=1730000221;c.stream_phase_samples=11;
+    const auto chip=modem::pattern_chip_samples(c),symbol=modem::symbol_sample_count(c);
+    check(chip==120 && symbol/chip==800,"canonical quarter fixture geometry changed");
+    constexpr long double rate=1.0002L;
+    const auto origin=static_cast<long double>(chip)/rate;
+    modem::PatternSearch search;search.start_offset_seconds=static_cast<double>(1.125L*chip/rate/c.sample_rate);
+    search.start_uncertainty_seconds=*search.start_offset_seconds;search.search_stream_phases=false;
+    search.hypotheses={{0,200}};search.compact_clock_search=true;search.retain_score=0;
+    search.candidate_limit=64;search.track_limit=1;search.bit_limit=16;
+    const auto upper=2*static_cast<long double>(*search.start_offset_seconds)*c.sample_rate;
+    const auto count=static_cast<std::size_t>(std::ceil(upper+8*symbol/rate));
+    std::vector<float> samples(count);modem::PatternCode pattern(c,c.stream_epoch);
+    std::mt19937 random(971);std::normal_distribution<float> noise(0,.3F);
+    for(std::size_t n=0;n<count;++n) {
+        const auto nominal=(static_cast<long double>(n)-origin)*rate;
+        samples[n]=noise(random);if(nominal<0 || nominal>=8*symbol)continue;
+        const auto index=static_cast<std::uint64_t>(std::floor(nominal/symbol));
+        const auto within=nominal-index*symbol;
+        const auto quarter=static_cast<unsigned>(std::min(3.L,std::floor(within/(symbol/4))));
+        const auto phase=std::polar(1.,2*std::numbers::pi*c.carrier_hz*n/c.sample_rate+.4+1.2*quarter);
+        samples[n]+=static_cast<float>((phase*pattern.shaped_value(index*pattern.chips_per_symbol(),index%2,
+            static_cast<double>(within))).real());
+    }
+    modem::PatternCorrelator projected(c,search,4*1024*1024),raw(c,search,64*1024);
+    check(projected.working_bytes()>raw.working_bytes()+16384,"parity reference did not exercise raw fallback");
+    std::vector<modem::PatternEvidence> a,b;
+    const auto retain_new=[](auto& rows,const auto& recent) {
+        for(const auto& row:recent)if(std::none_of(rows.begin(),rows.end(),[&](const auto& previous) {
+            return previous.first_sample==row.first_sample && previous.end_sample==row.end_sample &&
+                previous.stream_symbol==row.stream_symbol;
+        }))rows.push_back(row);
+    };
+    for(std::size_t offset=0;offset<count;) {
+        const auto n=std::min<std::size_t>(137,count-offset);
+        projected.push(std::span(samples).subspan(offset,n));raw.push(std::span(samples).subspan(offset,n));offset+=n;
+        retain_new(a,projected.candidates());retain_new(b,raw.candidates());
+        projected.take_bursts();raw.take_bursts();
+    }
+    check(a.size()==48 && a.size()==b.size() && projected.initial_search_complete() && raw.initial_search_complete(),
+          "paired half-chip parity or clipped endpoint lost complete eight-symbol coverage");
+    for(std::size_t i=0;i<a.size();++i) {
+        check(a[i].first_sample==b[i].first_sample && a[i].end_sample==b[i].end_sample &&
+              a[i].stream_symbol==b[i].stream_symbol && a[i].bit==b[i].bit &&
+              a[i].admission_threshold==b[i].admission_threshold,
+              "shared parity cells changed canonical sampled boundaries or trial ordering");
+        check(std::abs(a[i].score-b[i].score)<2e-6*std::max(1.,b[i].score) &&
+              std::abs(a[i].alternative_score-b[i].alternative_score)<2e-6*std::max(1.,b[i].alternative_score),
+              "canonical fractional quarters changed pulse raw evidence across epochs");
+    }
+    check(std::count_if(a.begin(),a.end(),[](const auto& e){return e.stream_symbol==6;})==6,
+          "exact paired origin grid failed to retain every seventh-symbol quarter boundary");
 }
 void shaped_partial_chips() {
     auto c=config();c.integration_seconds=172.25/c.sample_rate;
@@ -927,7 +1128,12 @@ int main(int argc,char** argv) {
     run("per_symbol_support",per_symbol_support_does_not_borrow_strong_prefix_evidence);
     run("stronger_significance_rejects_marginal_symbol",stronger_significance_rejects_marginal_symbol);
     run("overlapping_carrier_hypotheses_emit_one_stream",overlapping_carrier_hypotheses_emit_one_stream);
+    run("wide_paired_carriers_publish_one_prefix_and_terminal",wide_paired_carriers_publish_one_prefix_and_terminal);
     run("shaped_raw_sample_evidence",shaped_raw_sample_evidence);
+    run("long_pulse_projection_matches_raw_reference",long_pulse_projection_matches_raw_reference);
+    run("explicit_pairs_do_not_add_cartesian_lanes",explicit_pairs_do_not_add_cartesian_lanes);
+    run("compact_constructor_uses_attached_oscillator_policy",compact_constructor_uses_attached_oscillator_policy);
+    run("paired_pulse_origin_parities_and_canonical_quarters",paired_pulse_origin_parities_and_canonical_quarters);
     run("shaped_partial_chips",shaped_partial_chips);
     run("majority_obscured_symbol_is_independent",majority_obscured_symbol_is_independent);
     run("completely_obscured_symbols_do_not_block_later_symbols",completely_obscured_symbols_do_not_block_later_symbols);

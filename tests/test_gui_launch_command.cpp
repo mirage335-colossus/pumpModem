@@ -28,6 +28,14 @@ void parsing_and_formatting() {
     check(launch_command::parse(command)==settings,"canonical command must round-trip every setting exactly");
     check(command.find("--auto-pattern")!=std::string::npos&&command.find("--target-snr -8")!=std::string::npos&&
           command.find("--rate 3600")!=std::string::npos,"canonical command must use concise readable flags and numbers");
+    const auto radio=launch_command::parse("--oscillator crystal --rf-oscillator gpsdo-ocxo --rf-shift 10MHz --search-margin 3x --reference shared-radio --sideband upper");
+    check(radio.rf_shift_hz==10000000&&radio.search_margin==3&&radio.reference=="shared-radio"&&radio.rf_oscillator=="gpsdo-ocxo"&&radio.sideband=="upper",
+          "Radio settings did not retain separate LF/RF models and shared clocks");
+    check(launch_command::parse(launch_command::format(radio))==radio,"Radio configuration did not round-trip exactly");
+    const auto shorthand=launch_command::parse("--lf-reference 0Hz --rf-carrier 10.0015MHz --carrier 1500 --search-margin 2");
+    check(shorthand.reference=="shared-radio"&&shorthand.rf_carrier_hz==10001500&&shorthand.carrier_hz==1500,
+          "LF=0 shorthand changed or erased the real modem tone");
+    check(launch_command::parse("--rf-shift 0 --search-margin 1").rf_shift_hz==0,"Untranslated zero-Hz RF shift was rejected");
     auto precise=settings;precise.target_db_hz=std::nextafter(-47.,-48.);
     precise.short_target_db_hz=-20.1234567890123;precise.long_target_db_hz=23;
     check(launch_command::parse(launch_command::format(precise))==precise,
@@ -61,6 +69,9 @@ void invalid_commands() {
             "--tx-dbm -201", "--tx-dbm 101", "--path-loss-db -1", "--path-loss-db 501",
             "--noise-dbm-hz -251", "--noise-dbm-hz 1", "--rate 0", "--rate .001", "--rate 31MHz",
             "--rate 3.6watts", "--carrier 0", "--carrier 30000001", "--dsp-workspace 90%",
+            "--rf-shift -1", "--rf-shift NaN", "--rf-shift 1e308MHz", "--rf-carrier 0", "--rf-shift 1 --rf-carrier 1",
+            "--search-margin .99", "--search-margin inf", "--reference imaginary", "--sideband imaginary", "--lf-reference 1500",
+            "--reference independent --lf-reference 0", "--lf-reference 0 --reference independent", "--rf-oscillator imaginary",
             "--oscillator imaginary", "--pattern imaginary", "--rate $(touch /tmp/never)",
             "--rate 3600;echo", "--tx-dbm `whoami`"})
         rejects([&]{(void)launch_command::parse(command);},std::string("invalid command was accepted: ")+command);

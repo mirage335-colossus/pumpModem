@@ -14,6 +14,7 @@
 #include "datapump/runtime.hpp"
 #include "datapump/simulation_estimate.hpp"
 #include "datapump/tuning.hpp"
+#include "datapump/pattern_search.hpp"
 #include <array>
 #include <cctype>
 #include <cmath>
@@ -192,7 +193,7 @@ struct Controller::Impl {
     double short_target=32,long_target=55;
     struct TargetEdit {std::string requested;double effective;};
     std::array<std::optional<TargetEdit>,2> target_edits;
-    struct ReceiveTargetEdit {std::string requested,canonical;};
+    struct ReceiveTargetEdit {std::string requested,canonical;bool adjusted=true;};
     std::optional<ReceiveTargetEdit> receive_target_edit;
     bool planner_target_valid=true;
     bool planner_input_notice=false;
@@ -276,9 +277,21 @@ struct Controller::Impl {
         for(const auto* value:{"-174 dBm/Hz","-170 dBm/Hz","-164 dBm/Hz","-150 dBm/Hz","-130 dBm/Hz"})
             f(UiField::link_noise).options.push_back({value,value});
         sync_link_fields();
-        for(const auto& preset:tuning::oscillator_presets())
+        for(const auto& preset:tuning::oscillator_presets()) {
             f(UiField::simulation_oscillator).options.push_back({std::string(preset.id),std::string(preset.name)});
+            f(UiField::rf_oscillator).options.push_back({std::string(preset.id),std::string(preset.name)});
+        }
         f(UiField::simulation_oscillator).selected="crystal";
+        f(UiField::rf_oscillator).selected="crystal";
+        f(UiField::rf_shift).text="0 Hz";
+        for(const auto hz:{0.,1000000.,3500000.,7000000.,10000000.,14000000.,30000000.})
+            f(UiField::rf_shift).options.push_back({frequency_text(hz),frequency_text(hz)});
+        f(UiField::search_margin).text="3x";
+        f(UiField::search_margin).options={{"1x","1x"},{"2x","2x"},{"3x","3x"}};
+        f(UiField::oscillator_reference).options={{"independent","Independent audio + RF"},{"shared-radio","Radio clock (LF=0)"}};
+        f(UiField::oscillator_reference).selected="independent";
+        f(UiField::oscillator_sideband).options={{"upper","Upper"},{"lower","Lower"}};
+        f(UiField::oscillator_sideband).selected="upper";
         f(UiField::key).options={{"none","None"}}; f(UiField::key).selected="none"; f(UiField::key_path).text="None";
         f(UiField::qr_brightness).options={{"normal","Normal"},{"dim","Dim"},{"dark","Dark"},{"off","Off"}}; f(UiField::qr_brightness).selected="dark";
         f(UiField::send_key).options={{"enter","on Enter"},{"ctrl-enter","on Ctrl+Enter"}}; f(UiField::send_key).selected="enter";
@@ -477,7 +490,7 @@ struct Controller::Impl {
             }
         }
         auto& receive_display=f(UiField::receive_snr).display_text;receive_display.clear();
-        if(settings_valid&&receive_target_edit&&receive_target_edit->requested==f(UiField::receive_snr).text)
+        if(settings_valid&&receive_target_edit&&receive_target_edit->adjusted&&receive_target_edit->requested==f(UiField::receive_snr).text)
             receive_display=receive_target_edit->canonical;
     }
     void configure(bool match_receive_target=false,bool match_carrier=false,
@@ -528,8 +541,18 @@ struct Controller::Impl {
             next.simulation=!(load&&simulation_off)&&f(UiField::simulation).selected=="yes";
             const auto oscillator_id=load&&load->oscillator?*load->oscillator:f(UiField::simulation_oscillator).selected;
             const auto oscillator=tuning::parse_oscillator_preset(oscillator_id);
-            next.simulation_clock_error_ppm=oscillator.clock_error_ppm;
-            next.simulation_phase_noise_degrees_per_sqrt_second=oscillator.phase_noise_degrees_per_sqrt_second;
+            const auto rf_oscillator_id=load&&load->rf_oscillator?*load->rf_oscillator:f(UiField::rf_oscillator).selected;
+            const auto rf_oscillator=tuning::parse_oscillator_preset(rf_oscillator_id);
+            const auto reference=load&&load->reference?*load->reference:f(UiField::oscillator_reference).selected;
+            const auto sideband=load&&load->sideband?*load->sideband:f(UiField::oscillator_sideband).selected;
+            modem::OscillatorSearchConfig oscillator_policy;
+            oscillator_policy.lf=tuning::oscillator_model(oscillator);oscillator_policy.rf=tuning::oscillator_model(rf_oscillator);
+            oscillator_policy.rf_shift_hz=load&&load->rf_carrier_hz?*load->rf_carrier_hz-(sideband=="upper"?carrier:-carrier):
+                load&&load->rf_shift_hz?*load->rf_shift_hz:frequency(f(UiField::rf_shift).text,"RF shift / LO");
+            oscillator_policy.margin=load&&load->search_margin?*load->search_margin:level(f(UiField::search_margin).text,"x","Oscillator search margin");
+            oscillator_policy.reference=reference=="shared-radio"?modem::OscillatorReference::shared_radio:modem::OscillatorReference::independent_audio;
+            oscillator_policy.sideband=sideband=="lower"?modem::OscillatorSideband::lower:modem::OscillatorSideband::upper;
+            modem::validate_oscillator_search(oscillator_policy);
             std::ostringstream oscillator_detail;
             oscillator_detail<<std::setprecision(6)<<"Clock mismatch "<<oscillator.clock_error_ppm<<" ppm | Phase diffusion "
                 <<oscillator.phase_noise_degrees_per_sqrt_second<<" deg / sqrt(s)";
@@ -549,8 +572,11 @@ struct Controller::Impl {
                 if(!automatic)return target;
                 auto input=next_planner;input.options=next.transfer;input.mode=mode;input.target_db_hz=target;
                 input.options.modem=tuning::resolve(rate,-20,mode,next_encrypted,carrier).config;
-                input.channel.clock_error_ppm=oscillator.clock_error_ppm;
-                input.channel.phase_noise_degrees_per_sqrt_second=oscillator.phase_noise_degrees_per_sqrt_second;
+                input.options.modem.oscillator_search=oscillator_policy;
+                const auto effects=modem::oscillator_effects(input.options.modem);
+                input.channel.clock_error_ppm=effects.clock_error_ppm;
+                input.channel.frequency_offset_hz=effects.frequency_offset_hz;
+                input.channel.phase_noise_degrees_per_sqrt_second=effects.phase_noise_degrees_per_sqrt_second;
                 const auto fitted=planner::nearest_fit_target(input,companions,receive_banks(next));
                 if(!fitted)throw Error("No clock/RAM fit found for this target.");
                 return *fitted;
@@ -579,8 +605,9 @@ struct Controller::Impl {
                 if(fitted!=target)adjustment=TargetEdit{f(*align_target).text,fitted};
                 target=fitted;
             }
-            const auto plan=tuning::resolve(rate,short_snr,mode,next_encrypted,carrier);
-            const auto longer_plan=tuning::resolve(rate,long_snr,mode,next_encrypted,carrier);
+            auto plan=tuning::resolve(rate,short_snr,mode,next_encrypted,carrier);
+            auto longer_plan=tuning::resolve(rate,long_snr,mode,next_encrypted,carrier);
+            plan.config.oscillator_search=oscillator_policy;longer_plan.config.oscillator_search=oscillator_policy;
             const auto receive_text=!align_receive&&receive_target_edit&&receive_target_edit->requested==f(UiField::receive_snr).text?
                 receive_target_edit->canonical:f(UiField::receive_snr).text;
             auto targets=tuning::parse_receive_targets((match_receive_target||load)?
@@ -604,9 +631,24 @@ struct Controller::Impl {
                 std::string canonical;
                 for(const auto target:targets.values) {if(!canonical.empty())canonical+=", ";canonical+=planner_number(target);}
                 targets=tuning::parse_receive_targets(canonical);
-                if(targets.values!=requested)receive_adjustment=ReceiveTargetEdit{f(UiField::receive_snr).text,targets.canonical};
+                receive_adjustment=ReceiveTargetEdit{f(UiField::receive_snr).text,targets.canonical,targets.values!=requested};
             }
+            if(align_receive&&!match_receive_target&&!load&&!targets.reset&&!receive_adjustment)
+                receive_adjustment=ReceiveTargetEdit{f(UiField::receive_snr).text,targets.canonical,false};
             next.transfer.modem=plan.config;next.long_message_modem=longer_plan.config;
+            const auto effects=modem::oscillator_effects(next.transfer.modem);
+            next.simulation_clock_error_ppm=effects.clock_error_ppm;
+            next.simulation_frequency_offset_hz=effects.frequency_offset_hz;
+            next.simulation_phase_noise_degrees_per_sqrt_second=effects.phase_noise_degrees_per_sqrt_second;
+            oscillator_detail.str({});oscillator_detail.clear();
+            oscillator_detail<<std::setprecision(6)<<"Clock mismatch "<<effects.clock_error_ppm<<" ppm | Phase diffusion "
+                <<effects.phase_noise_degrees_per_sqrt_second<<" deg / sqrt(s)";
+            const auto search=modem::oscillator_pattern_search(next.transfer.modem);
+            std::ostringstream search_detail;
+            search_detail<<std::setprecision(6)<<"On-air carrier "<<effects.physical_rf_hz<<" Hz | Frequency +/-"<<search.frequency.half_width_hz
+                <<" Hz (requested "<<search.frequency.requested_half_width_hz<<") | Clock +/-"<<search.clock_half_width_ppm
+                <<" ppm (requested "<<search.requested_clock_half_width_ppm<<") | "<<search.hypotheses.size()<<" paired hypotheses";
+            if(search.limited)search_detail<<" | LIMITED COVERAGE";
             next.transfer.receive_targets_db_hz=targets.values;
             if(load) {
                 (void)link_channel(next,next_planner);
@@ -625,6 +667,11 @@ struct Controller::Impl {
                 f(UiField::snr).text=planner_number(short_snr);f(UiField::long_snr).text=planner_number(long_snr);
                 target_edits={};receive_target_edit.reset();
                 f(UiField::simulation_oscillator).selected=oscillator_id;
+                f(UiField::rf_oscillator).selected=rf_oscillator_id;
+                f(UiField::rf_shift).text=exact_frequency(oscillator_policy.rf_shift_hz);
+                f(UiField::search_margin).text=planner_number(oscillator_policy.margin)+"x";
+                f(UiField::oscillator_reference).selected=reference;
+                f(UiField::oscillator_sideband).selected=sideband;
                 f(UiField::dsp_workspace).selected="ram-"+std::to_string(workspace_percent);
                 f(UiField::simulation).selected=next.simulation?"yes":"no";
                 f(UiField::pattern).selected=pattern;
@@ -634,6 +681,7 @@ struct Controller::Impl {
             dsp_workspace_percent=workspace_percent;dsp_workspace_bytes=workspace_bytes;
             f(UiField::dsp_workspace).display_text=workspace_text(workspace_percent,next.dsp_workspace_bytes);
             f(UiField::simulation_oscillator_detail).text=oscillator_detail.str();
+            f(UiField::oscillator_search_detail).text=search_detail.str();
             update_link_channel(next);
             if(match_receive_target||align_receive)receive_target_edit=std::move(receive_adjustment);
             if(!receive_target_edit)f(UiField::receive_snr).text=targets.canonical;
@@ -662,6 +710,7 @@ struct Controller::Impl {
         input.dsp_workspace_percent=dsp_workspace_percent;
         input.mode=settings.transfer.receive_pattern_mode;
         input.channel.clock_error_ppm=settings.simulation_clock_error_ppm;
+        input.channel.frequency_offset_hz=settings.simulation_frequency_offset_hz;
         input.channel.phase_noise_degrees_per_sqrt_second=settings.simulation_phase_noise_degrees_per_sqrt_second;
         input.wire_bits=planner_draft&&estimate?estimate->wire_bits:1;
         input.empty_draft=empty_draft();
@@ -680,6 +729,7 @@ struct Controller::Impl {
             if(!settings_valid)throw Error("Fix the modem settings to continue planning.");
             auto input=planner_inputs;input.options=settings.transfer;input.mode=settings.transfer.receive_pattern_mode;
             input.target_db_hz=value;input.channel.clock_error_ppm=settings.simulation_clock_error_ppm;
+            input.channel.frequency_offset_hz=settings.simulation_frequency_offset_hz;
             input.channel.phase_noise_degrees_per_sqrt_second=settings.simulation_phase_noise_degrees_per_sqrt_second;
             if(input.mode==tuning::PatternMode::auto_pattern||input.mode==tuning::PatternMode::auto_keystream||
                input.mode==tuning::PatternMode::auto_tone) {
@@ -706,6 +756,11 @@ struct Controller::Impl {
         values.tx_dbm=planner_inputs.tx_dbm;values.path_loss_db=planner_inputs.path_loss_db;
         values.noise_dbm_hz=planner_inputs.noise_density_dbm_hz;
         values.oscillator=f(UiField::simulation_oscillator).selected;
+        values.rf_oscillator=f(UiField::rf_oscillator).selected;
+        values.rf_shift_hz=settings.transfer.modem.oscillator_search->rf_shift_hz;
+        values.search_margin=settings.transfer.modem.oscillator_search->margin;
+        values.reference=f(UiField::oscillator_reference).selected;
+        values.sideband=f(UiField::oscillator_sideband).selected;
         values.target_db_hz=planner_inputs.target_db_hz;
         values.pattern=f(UiField::pattern).selected;
         values.rate_hz=settings.transfer.modem.bandwidth_hz;
@@ -1004,7 +1059,8 @@ struct Controller::Impl {
         f(UiField::planner_target).enabled=!closing;
         f(UiField::planner_command).enabled=!closing;
         sync_launch_command();
-        for(auto id:{UiField::simulation,UiField::simulation_oscillator,UiField::link_power,UiField::link_loss,UiField::link_noise,UiField::key,UiField::device,UiField::mono,UiField::volume,UiField::exclusive,UiField::bandwidth,UiField::carrier,UiField::snr,UiField::long_snr,UiField::receive_snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
+        for(auto id:{UiField::simulation,UiField::simulation_oscillator,UiField::rf_oscillator,UiField::rf_shift,UiField::search_margin,
+            UiField::oscillator_reference,UiField::oscillator_sideband,UiField::link_power,UiField::link_loss,UiField::link_noise,UiField::key,UiField::device,UiField::mono,UiField::volume,UiField::exclusive,UiField::bandwidth,UiField::carrier,UiField::snr,UiField::long_snr,UiField::receive_snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
         f(UiField::exclusive).enabled=!busy&&audio_controls::exclusive_supported();
         const bool simulation=f(UiField::simulation).selected=="yes";
         for(auto id:{UiField::link_power,UiField::link_loss,UiField::link_noise})f(id).visible=true;
@@ -1080,6 +1136,7 @@ struct Controller::Impl {
                     modem::ChannelConfig channel;
                     channel.snr_db=simulation_settings.simulation_snr_db;
                     channel.clock_error_ppm=simulation_settings.simulation_clock_error_ppm;
+                    channel.frequency_offset_hz=simulation_settings.simulation_frequency_offset_hz;
                     channel.phase_noise_degrees_per_sqrt_second=simulation_settings.simulation_phase_noise_degrees_per_sqrt_second;
                     channel.seed=simulation_settings.simulation_seed;
                     const auto& base=simulation_settings.transfer;
@@ -1143,6 +1200,8 @@ struct Controller::Impl {
                 const auto& model=*result.simulation_estimate;
                 const auto confidence=!model.profile_matches?"No matching RX profile":
                     !model.carrier_in_search?"Carrier outside RX search":
+                    !model.clock_in_search?"Clock outside RX search":
+                    model.oscillator_search_limited?"Oscillator margin coverage incomplete":
                     !model.receiver_workspace_supported?"Wide RX search exceeds RAM":
                     !model.confidence_available?"Unavailable":probability_text(model.success_probability);
                 simulation_estimate_text(confidence,
@@ -1487,7 +1546,7 @@ void Controller::edit(UiField field,std::string text) {
         }
         else if(field==UiField::snr||field==UiField::long_snr) p.configure(true,false,field);
         else if(field==UiField::bandwidth) p.configure(false,true);
-        else if(field==UiField::device||field==UiField::carrier) p.configure();
+        else if(field==UiField::device||field==UiField::carrier||field==UiField::rf_shift||field==UiField::search_margin) p.configure();
         else if(field==UiField::callsign||field==UiField::grid) { if(untouched&&!p.attachment&&!p.file_loading)p.seed_composer(); }
         else p.dirty();
     } catch(const std::exception& e) {
@@ -1557,7 +1616,8 @@ void Controller::select(UiField field,std::string id) {
             p.encryption_changed(); p.configure();
             if(field==UiField::pattern && p.tone())p.notice("Tone modes are unencrypted and do not provide Low-Probability-of-Intercept protection.");
         }
-        else if(field==UiField::simulation||field==UiField::simulation_oscillator||field==UiField::fec||field==UiField::dsp_workspace) p.configure();
+        else if(field==UiField::simulation||field==UiField::simulation_oscillator||field==UiField::rf_oscillator||
+            field==UiField::oscillator_reference||field==UiField::oscillator_sideband||field==UiField::fec||field==UiField::dsp_workspace) p.configure();
         else if(field==UiField::transmit_scope_format)
             p.f(UiField::transmit_scope).records=transmit_scope_records(p.snapshot.transmit_trace,state.selected=="bits");
     } catch(const std::exception& e) { p.notice(e.what(),10); }

@@ -18,17 +18,19 @@ class RevDocumentControl {
 public:
     virtual ~RevDocumentControl()=default;
     virtual Rev::Element::Element* element() const=0;
-    virtual void apply(const ui::Control&,const ui::DocumentPresentation::Placement&)=0;
+    virtual void apply(const ui::Control&,const ui::DocumentPresentation::Placement&,float document_y)=0;
     virtual void hide()=0;
     virtual bool busy() const {return false;}
 };
 // A toolkit adapter for ordinary document nodes. Application state, model
 // mapping, document invalidation and navigation remain outside this renderer.
 class RevDocumentView : public theme::RevBox {
+    using ControlIdentity=decltype(ui::document_control_identity(std::declval<const ui::Control&>()));
 public:
     using BitmapFactory=std::function<Rev::Element::Element*(Rev::Element::Element*,const BitmapSource&)>;
     using ControlFactory=std::function<std::unique_ptr<RevDocumentControl>(Rev::Element::Element*,const ui::Control&)>;
     using Action=std::function<void(ui::Command)>;
+    using ScrollAnchor=std::function<void(int displacement,int content_height)>;
     RevDocumentView(Rev::Element::Element* parent,bool color,BitmapFactory factory,Action action,ControlFactory controls={})
         :theme::RevBox(parent,{},"Document"),color_(color),bitmap_factory_(std::move(factory)),
          control_factory_(std::move(controls)),action_(std::move(action)) {
@@ -41,11 +43,18 @@ public:
         controls_.clear();
         while(!children.empty())delete children.back();
     }
-    void apply(std::shared_ptr<const ui::DocumentNode> document) {
+    void apply(std::shared_ptr<const ui::DocumentNode> document,ScrollAnchor anchor={}) {
         // Read native focus before replacing the shared node/action snapshot.
         std::optional<ui::DocumentActionIdentity> focus;
         for(const auto& [button,identity]:buttons_)if(button->targetFlags.focus)focus=identity;
-        if(presentation_.reset(std::move(document))) {
+        std::optional<std::pair<ControlIdentity,int>> editor;
+        if(anchor)for(const auto& [identity,control]:controls_) {
+            auto* focused=focused_descendant(control.host->element());
+            if(control.used&&focused&&accepts_input(focused)&&visible_focus(focused))
+                editor={{identity,control.bounds.y}};
+        }
+        const bool replaced=presentation_.reset(std::move(document));
+        if(replaced) {
             // Preserve native action focus when a new immutable description
             // retains the same shared action identity (for example after resize).
             labels_.clear();buttons_.clear();native_.clear();native_controls_.clear();tab_order_.clear();
@@ -76,10 +85,17 @@ public:
             if(at->second.host->busy()){++at;continue;}
             at=controls_.erase(at);
         }
-        update();
+        update(replaced?std::move(anchor):ScrollAnchor{},editor);
     }
     const std::vector<Rev::Element::Element*>& tab_elements() const {return tab_order_;}
-    void update() {
+    bool anchor_scroll_current() const {return focus_scroll_&&*focus_scroll_==parent->resolved.scroll.y;}
+    void computePrimitives(Rev::Element::Event& event) override {
+        // This hook follows native layout, even when pane movement and scroll
+        // happen to leave the document at the same screen coordinate.
+        native_scroll_=focus_scroll_=parent->resolved.scroll.y;
+        theme::RevBox::computePrimitives(event);
+    }
+    void update(ScrollAnchor anchor={},std::optional<std::pair<ControlIdentity,int>> editor={}) {
         using namespace Rev::Appearance;
         for(auto* ancestor=static_cast<Rev::Element::Element*>(this);ancestor;ancestor=ancestor->parent) {
             if(ancestor->resolved.hidden||ancestor->style->visibility==Visibility::Hidden)return;
@@ -90,6 +106,26 @@ public:
         const int top=ui::document_extent(resolved.pad.t.val),bottom=ui::document_extent(resolved.pad.b.val);
         const auto geometry=presentation_.layout(std::max(0,ui::document_extent(rect.w)-left-right),
             [this](const ui::DocumentNode& node,int width) {return measure_text(node,width);},left,top);
+        if(anchor&&editor)for(const auto& placement:geometry.nodes) {
+            const auto& node=*placement.node->source;
+            if(node.control&&ui::document_control_identity(*node.control)==editor->first&&placement.enabled&&placement.allocated) {
+                // Rev resolves native rectangles on the queued layout frame.
+                // Clip against the new scroll origin even during this pass.
+                if(!native_scroll_)native_scroll_=parent->resolved.scroll.y;
+                anchor(placement.absolute.y-editor->second,geometry.height+top+bottom);
+                focus_scroll_=parent->resolved.scroll.y;
+                break;
+            }
+        }
+        // Native layout clamps wheel/explicit scroll before positioning the
+        // document. Use that same bounded offset during pre-layout clipping,
+        // so overscroll cannot blur an editor visible at the actual boundary.
+        const float maximum_scroll=std::max(0.0f,static_cast<float>(geometry.height+top+bottom)-parent->resolved.getInner(Axis::Vertical));
+        const float bounded_scroll=std::clamp(parent->resolved.scroll.y,0.0f,maximum_scroll);
+        if(parent->resolved.scroll.y!=bounded_scroll) {
+            parent->resolved.scroll.y=bounded_scroll;shared->layoutDirty=true;
+        }
+        const float document_y=rect.y-(parent->resolved.scroll.y-native_scroll_.value_or(parent->resolved.scroll.y));
         for(const auto& placement:geometry.nodes) {
             const auto control=native_controls_.find(placement.node);
             if(control!=native_controls_.end()) {
@@ -100,14 +136,15 @@ public:
                     if(ancestor->resolved.style.overflow==Overflow::Hide) {
                         const auto& bounds=ancestor->rect;
                         visible.clip=intersect(visible.clip,{
-                            static_cast<int>(std::ceil(bounds.x-rect.x)),static_cast<int>(std::ceil(bounds.y-rect.y)),
+                            static_cast<int>(std::ceil(bounds.x-rect.x)),static_cast<int>(std::ceil(bounds.y-document_y)),
                             ui::document_extent(bounds.w),ui::document_extent(bounds.h)});
                     }
                     if(ancestor==ancestor->parent)break;
                 }
                 visible.allocated=visible.clip.width>0&&visible.clip.height>0;
                 visible.enabled=visible.enabled&&visible.allocated;
-                control->second->apply(*placement.node->source->control,visible);
+                controls_.at(ui::document_control_identity(*placement.node->source->control)).bounds=placement.absolute;
+                control->second->apply(*placement.node->source->control,visible,document_y);
             }
             else apply_geometry(*native_.at(placement.node),placement);
         }
@@ -125,11 +162,11 @@ private:
     std::unordered_map<const ui::DocumentNode*,Rev::Element::Text*> labels_;
     std::vector<std::pair<Rev::Element::Button*,ui::DocumentActionIdentity>> buttons_;
     std::vector<std::unique_ptr<Rev::Appearance::Style>> action_fills_;
-    using ControlIdentity=decltype(ui::document_control_identity(std::declval<const ui::Control&>()));
-    struct RetainedControl {std::unique_ptr<RevDocumentControl> host;bool used=false;};
+    struct RetainedControl {std::unique_ptr<RevDocumentControl> host;bool used=false;ui::DocumentRect bounds;};
     std::map<ControlIdentity,RetainedControl> controls_;
     std::unordered_map<const ui::DocumentPresentation::Node*,RevDocumentControl*> native_controls_;
     std::vector<Rev::Element::Element*> tab_order_;
+    std::optional<float> native_scroll_,focus_scroll_;
 
     static ui::DocumentRect intersect(ui::DocumentRect first,ui::DocumentRect second) {
         const auto x=std::max(first.x,second.x),y=std::max(first.y,second.y);
@@ -144,6 +181,24 @@ private:
             if(ancestor==ancestor->parent)break;
         }
         return true;
+    }
+    static Rev::Element::Element* focused_descendant(Rev::Element::Element* element) {
+        if(element->targetFlags.focus&&element->tabStop)return element;
+        for(auto* child:element->children)if(auto* focused=focused_descendant(child))return focused;
+        return nullptr;
+    }
+    static bool visible_focus(Rev::Element::Element* focused) {
+        float left=focused->rect.x,top=focused->rect.y;
+        float right=left+focused->rect.w,bottom=top+focused->rect.h;
+        for(auto* ancestor=focused->parent;ancestor;ancestor=ancestor->parent) {
+            if(ancestor->resolved.style.overflow==Rev::Appearance::Overflow::Hide) {
+                left=std::max(left,ancestor->rect.x);top=std::max(top,ancestor->rect.y);
+                right=std::min(right,ancestor->rect.x+ancestor->rect.w);
+                bottom=std::min(bottom,ancestor->rect.y+ancestor->rect.h);
+            }
+            if(ancestor==ancestor->parent)break;
+        }
+        return right>left&&bottom>top;
     }
 
     float measure_text(const ui::DocumentNode& node,int width) {

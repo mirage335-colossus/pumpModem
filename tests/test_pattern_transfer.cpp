@@ -2,6 +2,7 @@
 #include "datapump/boundary_sync.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
+#include "datapump/pattern_search.hpp"
 #include <algorithm>
 #include <array>
 #include <iostream>
@@ -178,5 +179,25 @@ void data_symbol_schedule_rebase() {
                       "rebased pattern and Data streams must describe the same surviving symbols");
     }
 }
+void oscillator_policy_transfer() {
+    auto value=options();
+    value.modem.sample_rate=400;value.modem.bandwidth_hz=100;value.modem.carrier_hz=50;
+    value.modem.spreading_factor=16;value.modem.pulse_shaping=true;
+    modem::OscillatorSearchConfig oscillator;
+    oscillator.reference=modem::OscillatorReference::shared_radio;
+    oscillator.rf_shift_hz=10000000;oscillator.lf={100,.5};oscillator.rf={0,0};
+    value.modem.oscillator_search=oscillator;
+    Message sent;sent.data={'a'};
+    modem::ChannelConfig channel;channel.snr_db=30;channel.clock_error_ppm=0;
+    channel.phase_noise_degrees_per_sqrt_second=0;
+    const auto received=transfer::simulate(sent,value,channel);
+    check(received.stream_complete&&received.short_text_decoded&&received.raw_bits==Bytes({0,1,1})&&
+          received.content.message.data==sent.data,
+          "offline real-stream receiver must use the radio oscillator policy and preserve exact short bits");
+    value.modem.oscillator_search->margin=.5;
+    bool rejected=false;
+    try {(void)transfer::estimate(sent,value);}catch(const Error&){rejected=true;}
+    check(rejected,"transfer entry points must validate attached oscillator policy");
 }
-int main(){try{data_symbol_schedule_seeks();data_symbol_schedule_rebase();six_second_end_and_eof();pcm_symbol_loss();sub_six_second_gap_is_one_stream();std::cout<<"pattern stream transfer passed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+}
+int main(){try{data_symbol_schedule_seeks();data_symbol_schedule_rebase();six_second_end_and_eof();pcm_symbol_loss();sub_six_second_gap_is_one_stream();oscillator_policy_transfer();std::cout<<"pattern stream transfer passed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

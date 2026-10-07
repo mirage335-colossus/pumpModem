@@ -18,6 +18,7 @@ namespace datapump::gui {
 // A document renderer owns native widgets, text measurement and geometry only.
 // The containing backend owns its scrollbar and supplies document revisions.
 class FltkDocumentView : public Fl_Group {
+    using ControlIdentity=decltype(ui::document_control_identity(ui::Control{}));
 public:
     using Action=std::function<void(ui::Command)>;
     struct ControlHost {
@@ -28,18 +29,25 @@ public:
         virtual bool busy() const {return false;}
     };
     using ControlFactory=std::function<std::unique_ptr<ControlHost>(Fl_Group&,const ui::Control&)>;
+    using ScrollAnchor=std::function<void(int displacement,int content_height)>;
     FltkDocumentView(int x,int y,int width,int height,Action action={},ControlFactory controls={})
         :Fl_Group(x,y,width,height),action_(std::move(action)),control_factory_(std::move(controls)) {box(FL_NO_BOX);end();}
 
-    void update(const ui::DocumentNode& document) {
+    void update(const ui::DocumentNode& document,ScrollAnchor anchor={}) {
         const auto focus=focused_action();
+        std::optional<std::pair<ControlIdentity,int>> editor;
+        if(anchor)for(const auto& control:controls_) {
+            auto* focused=Fl::focus();
+            if(focused&&control.used&&control.host->widget().contains(focused)&&focused->visible_r()&&focused->active_r())
+                editor={{control.identity,control.bounds.y}};
+        }
         // Keep native editors alive while their surrounding immutable tree is
         // replaced. Reattachment below restores ordinary native Tab order.
         for(auto& control:controls_)add(control.host->widget());
         presentation_.reset(std::make_shared<const ui::DocumentNode>(document));
         native_.clear();reconcile(root_,this,*presentation_.root());
         insert(*root_->widget,0);
-        layout(w());
+        layout(w(),anchor,editor);
         if(focus) {
             const auto restored=presentation_.actions().restore_focus(focus);
             auto* target=restored?find_action(root_.get(),*restored):nullptr;
@@ -56,7 +64,7 @@ public:
 
     // Explicit dimensions in a document are logical widget units. The caller
     // supplies a new width-dependent document when its grouping must change.
-    int layout(int width) {
+    int layout(int width,ScrollAnchor anchor={},std::optional<std::pair<ControlIdentity,int>> editor={}) {
         width=std::max(1,width);
         content_height_=1;
         ui::DocumentPresentation::Layout geometry;
@@ -65,6 +73,16 @@ public:
             content_height_=geometry.height;
         }
         content_height_=std::max(1,content_height_);
+        // Reconcile the retained editor before a changed tree can crop it and
+        // clear native focus. Ordinary scrolling has no anchor callback.
+        if(anchor&&editor)for(const auto& placement:geometry.nodes) {
+            const auto& node=*placement.node->source;
+            if(node.control&&ui::document_control_identity(*node.control)==editor->first&&placement.enabled&&placement.allocated) {
+                anchor(placement.absolute.y-editor->second,content_height_);
+                geometry=presentation_.layout(width,measure_text,x(),y());
+                break;
+            }
+        }
         Fl_Widget::resize(x(),y(),width,content_height_);
         for(auto& control:controls_)control.used=false;
         for(const auto& placement:geometry.nodes) {
@@ -74,9 +92,10 @@ public:
                 const auto id=ui::document_control_identity(*node.control);
                 auto found=std::find_if(controls_.begin(),controls_.end(),[&](const auto& entry){return entry.identity==id;});
                 if(found==controls_.end()) {
-                    controls_.push_back({id,control_factory_(*this,*node.control),false});found=std::prev(controls_.end());
+                    controls_.push_back({id,control_factory_(*this,*node.control),false,{}});found=std::prev(controls_.end());
                 }
                 found->used=true;
+                found->bounds=placement.absolute;
                 auto* parent=static_cast<Fl_Group*>(native_.at(placement.node));
                 if(found->host->widget().parent()!=parent)parent->add(found->host->widget());
                 const auto clip=viewport_?ui::document_intersection(placement.clip,*viewport_):placement.clip;
@@ -116,19 +135,24 @@ private:
     };
     struct Group : Fl_Group {
         Decoration decoration;
+        ui::DocumentRect clip;
         Group():Fl_Group(0,0,1,1) {box(FL_NO_BOX);end();}
         void draw() override {
-            decoration.draw(x(),y(),w(),h(),active_r());
-            fl_push_clip(x(),y(),w(),h());draw_children();fl_pop_clip();
+            fl_push_clip(clip.x,clip.y,clip.width,clip.height);
+            decoration.draw(x(),y(),w(),h(),active_r());fl_pop_clip();
+            // Each child already has the cumulative document clip. Keeping a
+            // clip open across descendants would exhaust FLTK's finite stack.
+            draw_children();
         }
     };
     struct Text : Fl_Box {
         Decoration decoration;
         ui::DocumentRect content;
+        ui::DocumentRect clip;
         Text():Fl_Box(0,0,1,1) {box(FL_NO_BOX);}
         void draw() override {
+            fl_push_clip(clip.x,clip.y,clip.width,clip.height);
             decoration.draw(x(),y(),w(),h(),active_r());
-            fl_push_clip(x(),y(),w(),h());
             fl_font(labelfont(),labelsize());fl_color(active_r()?labelcolor():theme::fltk_color(theme::WidgetRole::disabled_text));
             // Use FLTK's glyph measurement/wrapping, with literal text rather
             // than interpreting an application's '@' characters as symbols.
@@ -140,12 +164,13 @@ private:
     };
     struct Button : theme::Widget<Fl_Button> {
         ui::DocumentRect content;
+        ui::DocumentRect clip;
         bool border=false;
         Button():theme::Widget<Fl_Button>(0,0,1,1) {}
         void draw() override {
             theme::DrawStyle style(*this);
+            fl_push_clip(clip.x,clip.y,clip.width,clip.height);
             draw_box(value()?(down_box()?down_box():fl_down(box())):box(),value()?selection_color():color());
-            fl_push_clip(x(),y(),w(),h());
             fl_font(labelfont(),labelsize());fl_color(active_r()?labelcolor():theme::fltk_color(theme::WidgetRole::disabled_text));
             if(content.width>0 && content.height>0)
                 fl_draw(label()?label():"",x()+content.x,y()+content.y,content.width,content.height,
@@ -159,10 +184,11 @@ private:
         BitmapSource source;
         Decoration decoration;
         ui::DocumentRect content;
+        ui::DocumentRect clip;
         Bitmap():Fl_Widget(0,0,1,1) {}
         void draw() override {
+            fl_push_clip(clip.x,clip.y,clip.width,clip.height);
             decoration.draw(x(),y(),w(),h(),active_r());
-            fl_push_clip(x(),y(),w(),h());
             widgets::draw_bitmap(source,x()+content.x,y()+content.y,content.width,content.height);
             fl_pop_clip();
         }
@@ -181,9 +207,10 @@ private:
     std::unique_ptr<Item> root_;
     std::unordered_map<const ui::DocumentPresentation::Node*,Fl_Widget*> native_;
     struct RetainedControl {
-        decltype(ui::document_control_identity(ui::Control{})) identity;
+        ControlIdentity identity;
         std::unique_ptr<ControlHost> host;
         bool used=false;
+        ui::DocumentRect bounds;
     };
     ControlFactory control_factory_;
     std::optional<ui::DocumentRect> viewport_;
@@ -251,9 +278,10 @@ private:
         widget.resize(box.x,box.y,box.width,box.height);
         if(placement.allocated)widget.show();else widget.hide();
         if(placement.enabled)widget.activate();else widget.deactivate();
-        if(auto* text=dynamic_cast<Text*>(&widget))text->content=placement.content;
-        if(auto* bitmap=dynamic_cast<Bitmap*>(&widget))bitmap->content=placement.content;
-        if(auto* button=dynamic_cast<Button*>(&widget))button->content=placement.content;
+        if(auto* group=dynamic_cast<Group*>(&widget))group->clip=placement.clip;
+        if(auto* text=dynamic_cast<Text*>(&widget)){text->content=placement.content;text->clip=placement.clip;}
+        if(auto* bitmap=dynamic_cast<Bitmap*>(&widget)){bitmap->content=placement.content;bitmap->clip=placement.clip;}
+        if(auto* button=dynamic_cast<Button*>(&widget)){button->content=placement.content;button->clip=placement.clip;}
     }
     std::optional<ui::DocumentActionIdentity> focused_action() const {
         std::optional<ui::DocumentActionIdentity> result;

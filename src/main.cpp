@@ -119,9 +119,17 @@ Audio/simulation:
   --simulation PRESET   e.g. "3dBm -120dB": TX power and channel attenuation
   --seed N --delay-samples N --frequency-offset HZ
   --oscillator MODEL    crystal (default), gpsdo-xo, gpsdo-tcxo, gpsdo-ocxo
-                        Illustrative residual clock/phase models; no hardware control
-  --clock-error-ppm N   Override model's relative clock error; crystal default100
-  --phase-noise N       Override diffusion, degrees/sqrt(second); crystal default0.5
+                        LF/audio residual model; controls real RX search too
+  --rf-oscillator MODEL Independent RF reference model; same choices, default crystal
+  --rf-shift HZ         Radio LO/translation frequency, default 0; does not set PCM tone
+  --rf-carrier HZ       Alternative total on-air carrier; normalized to LO +/- tone
+  --reference MODE      independent (default) or shared-radio (ADC/DAC and LO clock)
+  --lf-reference 0      Shorthand for shared-radio; actual modem carrier stays nonzero
+  --sideband MODE       upper (default) or lower frequency orientation
+  --search-margin N     Static oscillator search bound multiplier, default 3; >=1
+                        All oscillator presets are illustrative, with no hardware control
+  --clock-error-ppm N   Override simulated signed clock error; search model stays fixed
+  --phase-noise N       Override simulated diffusion, degrees/sqrt(second)
   --receiver-time N     Independent receive epoch for simulate (default --time)
 
 Statistical link analysis (analyze-link only):
@@ -162,7 +170,7 @@ public:
         const std::set<std::string> valued={"text","input","output","save","kind","filename","callsign","grid",
             "bw","sample-rate","carrier","spreading","fec","memory-mb","keyfile","pad","time","search-seconds",
             "device","device-type","seconds","tx-delay","snr","seed","delay-samples","frequency-offset","bits","format",
-            "target-snr","receive-targets","pattern","simulation","oscillator","key-name","key-names","cache-mb","dsp-mb","clock-error-ppm","phase-noise","receiver-time",
+            "target-snr","receive-targets","pattern","simulation","oscillator","rf-oscillator","rf-shift","rf-carrier","search-margin","reference","sideband","lf-reference","key-name","key-names","cache-mb","dsp-mb","clock-error-ppm","phase-noise","receiver-time",
             "recovery-seconds","recovery-threads","recovery-bits","recovery-errors",
             "tx-dbm","attenuation-db","noise-figure-db","symbol-seconds","coherent-seconds",
             "trials","hypotheses","false-alarm","residual-frequency-hz","template-correlation"};
@@ -194,9 +202,10 @@ public:
         try {result=std::stod(value,&end);} catch(...) {throw Error("invalid number for --"+name);}
         double scale=1;
         auto suffix=value.substr(end);
-        if(name=="bw" && (suffix=="kHz" || suffix=="k")) scale=1000;
-        else if(name=="bw" && suffix=="MHz") scale=1000000;
-        else if(!suffix.empty() && !(name=="bw" && suffix=="Hz")) throw Error("invalid number for --"+name);
+        const bool frequency=name=="bw"||name=="rf-shift"||name=="rf-carrier"||name=="lf-reference";
+        if(frequency && (suffix=="kHz" || suffix=="k")) scale=1000;
+        else if(frequency && suffix=="MHz") scale=1000000;
+        else if(!suffix.empty() && !(frequency && suffix=="Hz") && !(name=="search-margin" && suffix=="x")) throw Error("invalid number for --"+name);
         if(!std::isfinite(result*scale)) throw Error("nonfinite number for --"+name);
         return result*scale;
     }
@@ -220,7 +229,9 @@ public:
         if(command!="tx" && command!="rx" && command!="status-tx" && command!="listen") reject({"device"},"is only valid for live audio commands");
         if(command!="keygen") reject({"key-names"},"is only valid for keygen");
         if(command!="simulate" && command!="listen" && command!="analyze-link") reject({"simulation"},"is only valid for simulate/listen/analyze-link");
-        if(command!="simulate" && command!="listen" && command!="analyze-link") reject({"oscillator","clock-error-ppm","phase-noise"},"is only valid for simulate/listen/analyze-link");
+        if(command!="simulate" && command!="listen" && command!="analyze-link") reject({"clock-error-ppm","phase-noise"},"is only valid for simulate/listen/analyze-link");
+        if(command=="qr"||command=="keygen"||command=="devices")
+            reject({"oscillator","rf-oscillator","rf-shift","rf-carrier","search-margin","reference","sideband","lf-reference"},"requires a Robust modem command");
         if(command!="analyze-link")
             reject({"tx-dbm","attenuation-db","noise-figure-db","symbol-seconds","coherent-seconds","trials",
                 "hypotheses","false-alarm","residual-frequency-hz","template-correlation"},"is only valid for analyze-link");
@@ -245,6 +256,41 @@ tuning::OscillatorPreset oscillator_config(const Args& a) {
     result.clock_error_ppm=a.number("clock-error-ppm",result.clock_error_ppm);
     result.phase_noise_degrees_per_sqrt_second=a.number("phase-noise",result.phase_noise_degrees_per_sqrt_second);
     return result;
+}
+modem::OscillatorSearchConfig oscillator_search_config(const Args& a,double carrier) {
+    modem::OscillatorSearchConfig result;
+    result.lf=tuning::oscillator_model(tuning::parse_oscillator_preset(a.get("oscillator","crystal")));
+    result.rf=tuning::oscillator_model(tuning::parse_oscillator_preset(a.get("rf-oscillator","crystal")));
+    result.margin=a.number("search-margin",3);
+    const auto reference=a.get("reference","independent");
+    if(reference!="independent"&&reference!="shared-radio")throw Error("reference must be independent or shared-radio");
+    result.reference=reference=="shared-radio"?modem::OscillatorReference::shared_radio:modem::OscillatorReference::independent_audio;
+    if(a.has("lf-reference")) {
+        if(a.number("lf-reference",0)!=0)throw Error("lf-reference only accepts 0 Hz, indicating shared-radio clocks");
+        if(a.has("reference")&&reference!="shared-radio")throw Error("lf-reference 0 conflicts with independent reference");
+        result.reference=modem::OscillatorReference::shared_radio;
+    }
+    const auto sideband=a.get("sideband","upper");
+    if(sideband!="upper"&&sideband!="lower")throw Error("sideband must be upper or lower");
+    result.sideband=sideband=="upper"?modem::OscillatorSideband::upper:modem::OscillatorSideband::lower;
+    if(a.has("rf-shift")&&a.has("rf-carrier"))throw Error("choose rf-shift or rf-carrier, not both");
+    result.rf_shift_hz=a.has("rf-carrier")?a.number("rf-carrier",0)-(sideband=="upper"?carrier:-carrier):a.number("rf-shift",0);
+    modem::validate_oscillator_search(result);
+    return result;
+}
+void apply_oscillator_effects(const Args& args,const modem::Config& config,modem::ChannelConfig& channel) {
+    const auto effects=modem::oscillator_effects(config);
+    channel.clock_error_ppm=effects.clock_error_ppm;
+    channel.frequency_offset_hz+=effects.frequency_offset_hz;
+    channel.phase_noise_degrees_per_sqrt_second=effects.phase_noise_degrees_per_sqrt_second;
+    if(args.has("clock-error-ppm")) {
+        const auto actual=args.number("clock-error-ppm",effects.clock_error_ppm);
+        if(config.oscillator_search->reference==modem::OscillatorReference::shared_radio)
+            channel.frequency_offset_hz+=(config.oscillator_search->sideband==modem::OscillatorSideband::upper?1.:-1.)*
+                config.oscillator_search->rf_shift_hz*(actual-effects.clock_error_ppm)*1e-6;
+        channel.clock_error_ppm=actual;
+    }
+    channel.phase_noise_degrees_per_sqrt_second=args.number("phase-noise",channel.phase_noise_degrees_per_sqrt_second);
 }
 std::size_t budget(const Args& a) {
     auto mb=a.integer("memory-mb",256);
@@ -282,6 +328,7 @@ modem::Config config(const Args& a) {
     if(rate>120000000) throw Error("internal sample rate exceeds120000000");
     c.sample_rate=static_cast<std::uint32_t>(rate);
     c.carrier_hz=a.number("carrier",automatic?c.carrier_hz:tuning::recommended_carrier_hz(c.bandwidth_hz));
+    c.oscillator_search=oscillator_search_config(a,c.carrier_hz);
     auto spreading=a.integer("spreading",c.spreading_factor);
     if(spreading==0 || spreading>16384) throw Error("spreading must be1..16384");
     c.spreading_factor=static_cast<unsigned>(spreading);
@@ -611,8 +658,7 @@ void analyze_link(const Args& a,transfer::Options options) {
     channel.delay_samples=a.integer("delay-samples",137);
     channel.frequency_offset_hz=a.number("frequency-offset",0);
     const auto oscillator=oscillator_config(a);
-    channel.clock_error_ppm=oscillator.clock_error_ppm;
-    channel.phase_noise_degrees_per_sqrt_second=oscillator.phase_noise_degrees_per_sqrt_second;
+    apply_oscillator_effects(a,c,channel);
     modem::validate_channel(c,channel);
     const auto trials=a.integer("trials",10000);
     if(!trials || trials>1000000)throw Error("trials must be 1..1000000");
@@ -643,10 +689,11 @@ void analyze_link(const Args& a,transfer::Options options) {
     const auto profiles=options.automatic_receive_profiles?tuning::receive_profiles(c,
         options.receive_targets_db_hz,options.receive_pattern_mode,options.key.has_value()):std::vector<modem::Config>{c};
     const auto current=simulation::estimate(transmission,options,raw,channel,profiles);
-    const auto geometry=modem::default_pattern_frequency_search(c);
+    const auto oscillator_search=modem::oscillator_pattern_search(c);
+    const auto& geometry=oscillator_search.frequency;
     const auto phase=static_cast<long double>(channel.phase_noise_degrees_per_sqrt_second)*std::numbers::pi_v<long double>/180;
     const auto rho=std::pow(10.L,static_cast<long double>(link.snr_db_hz)/10);
-    const auto full_half_width=static_cast<long double>(c.carrier_hz)*modem::default_clock_uncertainty_ppm/1e6L;
+    const auto full_half_width=static_cast<long double>(geometry.requested_half_width_hz);
     const auto full_frequency_count=1+2*std::ceil(full_half_width*experiment.symbol_seconds/.25L);
     std::cout<<std::setprecision(std::numeric_limits<double>::max_digits10)
         <<"{\"analysis\":\"matched_correlation_reference\",\"production_decoder_run\":false,\"pcm_generated\":false"
@@ -655,6 +702,17 @@ void analyze_link(const Args& a,transfer::Options options) {
         <<",\"monte_carlo_intervals\":\"model_only_95_percent_Wilson\""
         <<",\"oscillator_model\":{\"preset\":\""<<oscillator.id<<"\",\"illustrative\":true,\"overridden\":"
         <<((a.has("clock-error-ppm")||a.has("phase-noise"))?"true":"false")<<'}'
+        <<",\"oscillator_search\":{\"rf_preset\":\""<<tuning::parse_oscillator_preset(a.get("rf-oscillator","crystal")).id
+        <<"\",\"reference\":\""<<(c.oscillator_search->reference==modem::OscillatorReference::shared_radio?"shared-radio":"independent")
+        <<"\",\"sideband\":\""<<(c.oscillator_search->sideband==modem::OscillatorSideband::upper?"upper":"lower")
+        <<"\",\"rf_shift_hz\":";json_number(c.oscillator_search->rf_shift_hz);
+    std::cout<<",\"physical_rf_hz\":";json_number(modem::oscillator_effects(c).physical_rf_hz);
+    std::cout<<",\"margin\":";json_number(c.oscillator_search->margin);
+    std::cout<<",\"requested_frequency_half_width_hz\":";json_number(geometry.requested_half_width_hz);
+    std::cout<<",\"covered_frequency_half_width_hz\":";json_number(geometry.half_width_hz);
+    std::cout<<",\"requested_clock_half_width_ppm\":";json_number(oscillator_search.requested_clock_half_width_ppm);
+    std::cout<<",\"covered_clock_half_width_ppm\":";json_number(oscillator_search.clock_half_width_ppm);
+    std::cout<<",\"paired_hypotheses\":"<<oscillator_search.hypotheses.size()<<",\"limited\":"<<(oscillator_search.limited?"true":"false")<<'}'
         <<",\"receive_profile_assumption\":\""<<(matching_profile?"matching_transmit_profile":"explicit_receive_targets")<<'"'
         <<",\"link\":{\"transmit_dbm\":";json_number(preset.transmit_dbm);
     std::cout<<",\"attenuation_db\":";json_number(preset.attenuation_db);
@@ -684,6 +742,8 @@ void analyze_link(const Args& a,transfer::Options options) {
     std::cout<<"},\"current_receiver\":{\"profile_matches\":"<<(current.profile_matches?"true":"false")
         <<",\"receiver_profiles\":"<<current.receiver_profiles
         <<",\"carrier_in_search\":"<<(current.carrier_in_search?"true":"false")
+        <<",\"clock_in_search\":"<<(current.clock_in_search?"true":"false")
+        <<",\"oscillator_search_limited\":"<<(current.oscillator_search_limited?"true":"false")
         <<",\"workspace_supported\":"<<(current.receiver_workspace_supported?"true":"false")
         <<",\"confidence_available\":"<<(current.confidence_available?"true":"false")
         <<",\"success_probability\":";
@@ -691,13 +751,17 @@ void analyze_link(const Args& a,transfer::Options options) {
     std::cout<<",\"clock_error_ppm\":";json_number(channel.clock_error_ppm);
     std::cout<<",\"frequency_offset_hz\":";json_number(channel.frequency_offset_hz);
     std::cout<<",\"actual_carrier_offset_hz\":";json_number(current.carrier_offset_hz);
-    std::cout<<",\"requested_search_half_width_hz\":";json_number(current.carrier_search_half_width_hz);
+    std::cout<<",\"requested_search_half_width_hz\":";json_number(current.requested_carrier_search_half_width_hz);
+    std::cout<<",\"covered_search_half_width_hz\":";json_number(current.carrier_search_half_width_hz);
+    std::cout<<",\"requested_clock_half_width_ppm\":";json_number(current.requested_clock_search_half_width_ppm);
+    std::cout<<",\"covered_clock_half_width_ppm\":";json_number(current.clock_search_half_width_ppm);
+    std::cout<<",\"frequency_rate_hypotheses\":"<<current.frequency_rate_hypotheses;
     std::cout<<",\"frequency_step_hz\":";json_number(geometry.step_hz);
     std::cout<<",\"clock_error_for_quarter_chip_ppm\":";
     json_number(1e6L*.25L*modem::pattern_chip_samples(c)/c.sample_rate/experiment.symbol_seconds);
     std::cout<<",\"frequency_hypotheses\":"<<geometry.count
         <<",\"frequency_hypotheses_cap\":"<<modem::maximum_pattern_frequency_hypotheses
-        <<",\"full_200ppm_frequency_hypotheses\":";json_number(full_frequency_count);
+        <<",\"full_oscillator_frequency_hypotheses\":";json_number(full_frequency_count);
     std::cout<<",\"modeled_symbol_snr_db\":";json_number(current.modeled_symbol_snr_db);
     std::cout<<",\"coherent_reference_only\":"<<(current.coherent_reference_only?"true":"false")
         <<",\"drift_model_available\":"<<(current.drift_model_available?"true":"false")
@@ -733,6 +797,11 @@ void analyze_link(const Args& a,transfer::Options options) {
         <<"\",\"gpu_hypothetical\":"<<(current.gpu_hypothetical?"true":"false")<<",\"cpu_seconds\":";
     json_number(current.cpu_seconds);std::cout<<",\"gpu_seconds\":";json_number(current.gpu_seconds);
     std::cout<<",\"receiver_cpu_seconds\":";json_number(current.receiver_cpu_seconds);
+    std::cout<<",\"receiver_frontend_seconds\":";json_number(current.receiver_frontend_seconds);
+    std::cout<<",\"receiver_search_seconds\":";json_number(current.receiver_search_seconds);
+    std::cout<<",\"receiver_kernel_rebuild_seconds\":";json_number(current.receiver_kernel_rebuild_seconds);
+    std::cout<<",\"pulse_projection_modeled\":"<<(current.pulse_projection_modeled?"true":"false")
+        <<",\"kernel_rebuild_upper_bound\":"<<(current.kernel_rebuild_upper_bound?"true":"false");
     std::cout<<",\"payload_processing_seconds\":";json_number(current.payload_processing_seconds);
     std::cout<<",\"mitigation_seconds\":";json_number(current.mitigation_seconds);
     std::cout<<",\"tracking_seconds\":";json_number(current.tracking_seconds);
@@ -770,8 +839,11 @@ void listen(const Args& a,const transfer::Options& options) {
             options.modem.bandwidth_hz,options.modem.sample_rate).sample_snr_db;
     }
     settings.simulation_seed=a.integer("seed",1);
-    const auto oscillator=oscillator_config(a);
+    modem::ChannelConfig oscillator;
+    oscillator.frequency_offset_hz=a.number("frequency-offset",0);
+    apply_oscillator_effects(a,options.modem,oscillator);
     settings.simulation_clock_error_ppm=oscillator.clock_error_ppm;
+    settings.simulation_frequency_offset_hz=oscillator.frequency_offset_hz;
     settings.simulation_phase_noise_degrees_per_sqrt_second=oscillator.phase_noise_degrees_per_sqrt_second;
     if(options.modem.spreading_mode!=modem::SpreadingMode::tone && a.has("keyfile") && !a.has("key-name")) {
         for(const auto& entry:load_keyring(a.get("keyfile"),a.has("pad")?
@@ -997,9 +1069,7 @@ int main(int argc,char** argv) {
         }
         channel.delay_samples=a.integer("delay-samples",137);
         channel.frequency_offset_hz=a.number("frequency-offset",0);
-        const auto oscillator=oscillator_config(a);
-        channel.clock_error_ppm=oscillator.clock_error_ppm;
-        channel.phase_noise_degrees_per_sqrt_second=oscillator.phase_noise_degrees_per_sqrt_second;
+        apply_oscillator_effects(a,c,channel);
         if(a.has("receiver-time")) channel.receiver_timestamp=a.integer("receiver-time",timestamp);
         const auto outgoing=message(a);
         transfer::Received result;

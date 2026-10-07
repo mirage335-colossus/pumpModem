@@ -1,4 +1,5 @@
 #include "../src/pattern_correlator_batch.hpp"
+#include "datapump/pattern_pulse.hpp"
 
 #include <array>
 #include <iostream>
@@ -255,6 +256,81 @@ void invalid_batches_and_cancellation() {
     accumulate_correlator_cpu(fixture.batch(),lanes,workers,{});
     check(lanes[0].fits[0][0].count==9,"cancellation must leave CPU workspace reusable");
 }
+
+void pulse_projection_preserves_real_sample_fit() {
+    for(const auto chip:{8ULL,120ULL})for(const auto ppm:{0.,-.001,.001,-200.,200.,-8000.,8000.}) {
+        const auto rate=1+static_cast<long double>(ppm)*1e-6L;
+        const auto sample_rate=static_cast<std::uint32_t>(chip==8?400:6000);
+        const auto frequency=chip==8?50.03125:1500.03125;
+        CorrelationPulseKernel kernel(chip,rate,frequency,sample_rate);
+        for(unsigned cell_index=0;cell_index<24;++cell_index) {
+            const auto start=static_cast<long double>(cell_index)*chip/rate+.137L;
+            const auto first=static_cast<std::uint64_t>(std::ceil(start));
+            const auto end=static_cast<std::uint64_t>(std::ceil(start+chip/rate));
+            CorrelationPulseCell cell;cell.first=first;cell.end=end;cell.count=end-first;
+            std::array<std::complex<double>,correlation_pulse_atoms> coefficients;
+            for(std::size_t j=0;j<coefficients.size();++j)
+                coefficients[j]=std::polar(.3+.017*j,.43*j+.03*cell_index);
+            CorrelationFit direct;
+            for(auto sample=first;sample<end;++sample) {
+                const auto oscillator=std::polar(1.,2*std::numbers::pi*frequency*sample/sample_rate);
+                const auto x=std::sin(.71*sample)+.3*std::cos(.13*sample);
+                const auto c=oscillator.real(),s=oscillator.imag();
+                CorrelationProjection projection{x*c,x*s,c*c,s*s,c*s,x*x};
+                const auto position=(static_cast<long double>(sample)-start)*rate/chip-.5L;
+                std::complex<double> pattern{};
+                for(std::size_t j=0;j<coefficients.size();++j) {
+                    const auto pulse=pattern_pulse(static_cast<double>(position-j+8));
+                    cell.dot[j]+=pulse*x*oscillator;pattern+=pulse*coefficients[j];
+                }
+                direct.add(projection,pattern,1);cell.energy+=x*x;
+            }
+            const auto carrier_square=std::polar(1.,4*std::numbers::pi*frequency*first/sample_rate);
+            cell.gram=kernel.evaluate(static_cast<long double>(first)-start,cell.count,carrier_square,1);
+            const auto actual=cell.fit(coefficients);
+            check(actual.count==direct.count,"pulse projection changed independent observation count");
+            const std::array<double,6> a{actual.xc,actual.xs,actual.cc,actual.ss,actual.cs,actual.energy},
+                b{direct.xc,direct.xs,direct.cc,direct.ss,direct.cs,direct.energy};
+            for(std::size_t i=0;i<a.size();++i)
+                check(std::abs(a[i]-b[i])<1e-9*std::max(1.,std::abs(b[i])),
+                      "pulse projection changed raw dots or carrier Gram");
+            check(std::abs(actual.score()-direct.score())<1e-8*std::max(1.,direct.score()),
+                  "pulse projection changed two-real-basis evidence");
+        }
+        // Exact support endpoints require the singleton cache; adjacent points
+        // must rebuild rather than interpolate across the finite-pulse jump.
+        for(const auto offset:{0.L,1e-13L,0.L,.25L,.250000000001L}) {
+            const auto count=static_cast<std::uint64_t>(std::ceil(chip/rate-offset));
+            const auto gram=kernel.evaluate(offset,count,{1,0},1);
+            double expected=0;
+            for(std::uint64_t n=0;n<count;++n) {
+                const auto pulse=pattern_pulse(static_cast<double>((offset+n)*rate/chip+7.5L));
+                expected+=pulse*pulse;
+            }
+            check(std::abs(gram.energy.front()-expected)<1e-10*std::max(1.,expected),
+                  "pulse cache crossed a closed support endpoint");
+        }
+        // Repeated fractional cells exercise incremental polynomial changes,
+        // sample-count transitions and phase wraps over many cache intervals.
+        for(unsigned index=0;index<512;++index) {
+            const auto start=static_cast<long double>(index)*chip/rate+.137L;
+            const auto offset=std::ceil(start)-start;
+            const auto count=static_cast<std::uint64_t>(std::ceil(chip/rate-offset));
+            const auto gram=kernel.evaluate(offset,count,{1,0},1);
+            if(index%31)continue;
+            double energy=0;std::complex<double> square{};
+            for(std::uint64_t n=0;n<count;++n) {
+                const auto pulse=pattern_pulse(static_cast<double>((offset+n)*rate/chip-.5L));
+                energy+=pulse*pulse;square+=pulse*pulse*std::polar(1.,4*std::numbers::pi*frequency*n/sample_rate);
+            }
+            // Packed upper-triangle diagonal for the central (j=8) atom.
+            constexpr std::size_t center=8*correlation_pulse_atoms-8*7/2;
+            check(std::abs(gram.energy[center]-energy)<1e-9*std::max(1.,energy) &&
+                  std::abs(gram.square[center]-square)<1e-9*std::max(1.,std::abs(square)),
+                  "incremental pulse Gram drifted across fractional cells or count transitions");
+        }
+    }
+}
 } // namespace
 
 int main() {
@@ -266,6 +342,7 @@ int main() {
         phase_groups_and_observed_start();
         narrow_bank_with_future_origins();
         invalid_batches_and_cancellation();
+        pulse_projection_preserves_real_sample_fit();
         std::cout<<"pattern_correlator_batch ok\n";
         return 0;
     } catch(const std::exception& error) {

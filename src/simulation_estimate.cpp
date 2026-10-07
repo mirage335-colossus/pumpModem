@@ -31,6 +31,13 @@ constexpr long double tracking_pair_operations_per_bin = 32;
 constexpr long double tracking_real_pair_operations_per_bin = 64;
 constexpr long double tracking_evidence_operations_per_fit = 64;
 constexpr long double differential_operations_per_window = 128;
+// Pulse-cell fitting separates sample ingestion from private-chip work. The
+// cache allowance deliberately charges a full rebuild on every fractional-rate
+// cell; the runtime often reuses or incrementally updates its quadratic table.
+constexpr long double pulse_frontend_operations_per_sample = 220;
+constexpr long double pulse_pair_operations_per_chip = 6000;
+constexpr long double pulse_gram_operations_per_cell = 4000;
+constexpr long double pulse_kernel_operations_per_sample = 16000;
 constexpr long double model_implementation_loss_db = 3;
 
 struct PayloadWork { long double baseline=0,mitigation=0; };
@@ -118,22 +125,67 @@ double interval_probability(double admitted,double bit_error,FecMode fec) {
 bool same_profile(const modem::Config& a,const modem::Config& b) {
     return a.sample_rate==b.sample_rate && a.carrier_hz==b.carrier_hz && a.bandwidth_hz==b.bandwidth_hz &&
         a.spreading_mode==b.spreading_mode && a.scramble==b.scramble && a.dsss==b.dsss &&
-        a.pulse_shaping==b.pulse_shaping && modem::symbol_sample_count(a)==modem::symbol_sample_count(b) &&
+        a.pulse_shaping==b.pulse_shaping &&
+        modem::symbol_sample_count(a)==modem::symbol_sample_count(b) &&
         modem::pattern_chip_samples(a)==modem::pattern_chip_samples(b);
+}
+struct SearchBank {
+    modem::PatternFrequencySearch frequency;
+    std::vector<modem::PatternFrequencyRateHypothesis> hypotheses;
+    double requested_clock_ppm=0,clock_ppm=0,clock_step_ppm=0;
+    double minimum_rate=1,maximum_rate=1;
+    bool legacy_coupled=false,limited=false;
+};
+SearchBank search_bank(const modem::Config& config) {
+    SearchBank result;
+    if(config.oscillator_search) {
+        const auto plan=modem::oscillator_pattern_search(config);
+        result.frequency=plan.frequency;result.hypotheses=plan.hypotheses;
+        result.requested_clock_ppm=plan.requested_clock_half_width_ppm;
+        result.clock_ppm=plan.clock_half_width_ppm;result.clock_step_ppm=plan.clock_step_ppm;
+        result.limited=plan.limited;
+    } else {
+        result.frequency=modem::default_pattern_frequency_search(config);
+        result.legacy_coupled=result.frequency.count>5&&config.spreading_mode==modem::SpreadingMode::pattern;
+        const auto offsets=modem::default_pattern_frequency_offsets(config);
+        for(const auto offset:offsets)result.hypotheses.push_back({offset,0});
+        if(result.legacy_coupled)for(const auto offset:offsets)
+            result.hypotheses.push_back({offset,offset/config.carrier_hz*1e6});
+        result.clock_ppm=result.legacy_coupled?result.frequency.half_width_hz/config.carrier_hz*1e6:0;
+    }
+    for(const auto& hypothesis:result.hypotheses) {
+        const auto rate=1+hypothesis.clock_error_ppm*1e-6;
+        result.minimum_rate=std::min(result.minimum_rate,rate);
+        result.maximum_rate=std::max(result.maximum_rate,rate);
+    }
+    return result;
+}
+bool within_representation_bound(long double value,long double bound) {
+    // Policy endpoints and public channel values are doubles. Round the
+    // intermediate product back to that representation before comparing;
+    // the next representable double outside the endpoint stays outside.
+    return static_cast<double>(std::abs(value))<=static_cast<double>(bound);
+}
+bool paired_clock_coverage(const SearchBank& bank,long double frequency,double clock) {
+    if(!within_representation_bound(clock,bank.clock_ppm))return false;
+    return std::any_of(bank.hypotheses.begin(),bank.hypotheses.end(),[&](const auto& hypothesis) {
+        return within_representation_bound(frequency-hypothesis.frequency_offset_hz,bank.frequency.step_hz/2)&&
+            within_representation_bound(static_cast<long double>(clock)-hypothesis.clock_error_ppm,bank.clock_step_ppm/2);
+    });
 }
 long double phase_coherence(long double x) {
     if(x<1e-4L)return 1-x/3+x*x/12;
     return 2*(1+(std::expm1(-x)/x))/x;
 }
 struct Work {
-    long double serial=0,parallel=0,tracking_serial=0,tracking_windows=0,search_trials=1;
+    long double serial=0,parallel=0,tracking_serial=0,tracking_windows=0,search_trials=1,kernel_serial=0,search_serial=0;
     double noise_dimensions=0,coherent_dimensions=0,section_dimensions=0,noise_condition=1;
     double timing_uncertainty_chips=0,acquisition_threshold=0;
     double projection_bin_chips=0;
     double following_search_ratio=0;
     bool drift_supported=false;
     bool differential_supported=false;
-    bool compact=false;
+    bool compact=false,pulse_projected=false,kernel_upper_bound=false;
     std::uint64_t bin_samples=1;
     bool workspace_supported=true;
 };
@@ -151,10 +203,12 @@ Work receiver_work(const modem::Config& config,long double samples,
         (options.timestamp?0:std::ceil((static_cast<long double>(modem::training_sample_count(config))+
             modem::pattern_pulse_padding_samples(config))/config.sample_rate)):1.L;
     const auto banks=epochs*keys;
-    const auto geometry=modem::default_pattern_frequency_search(config);
-    const bool coupled=geometry.count>5 && config.spreading_mode==modem::SpreadingMode::pattern;
-    const auto frequencies=static_cast<long double>(geometry.count)*(coupled?2:1);
-    const auto maximum_clock_ratio=coupled?geometry.half_width_hz/config.carrier_hz:0.;
+    const auto bank=search_bank(config);
+    const auto& geometry=bank.frequency;
+    const bool coupled=bank.legacy_coupled;
+    const bool scaled=bank.minimum_rate!=1||bank.maximum_rate!=1;
+    const auto frequencies=static_cast<long double>(bank.hypotheses.size());
+    const auto maximum_clock_ratio=std::max(1-bank.minimum_rate,bank.maximum_rate-1);
     auto bin=modem::pattern_projection_bin_samples(config,geometry.half_width_hz);
     const auto omega=2*std::numbers::pi*config.carrier_hz/config.sample_rate;
     const auto sine=std::sin(omega);
@@ -162,7 +216,7 @@ Work receiver_work(const modem::Config& config,long double samples,
     if(symbol<=256 && (!private_pattern || image>1e-10*static_cast<double>(bin)))bin=1;
     image=std::abs(sine)>1e-12?std::abs(std::sin(static_cast<double>(bin)*omega)/sine):static_cast<double>(bin);
     const bool sample_fit=bin==1 && (symbol<=256 || !private_pattern);
-    const auto observation_samples=static_cast<long double>(symbol)/(1-maximum_clock_ratio);
+    const auto observation_samples=static_cast<long double>(symbol)/bank.minimum_rate;
     const auto length=std::max(4.L,std::ceil(observation_samples/bin));
     const auto nominal_length=std::ceil(static_cast<long double>(symbol)/bin);
     auto fft_log=std::max(std::ceil(std::log2(2*std::max(4.L,nominal_length))),std::ceil(std::log2(length)));
@@ -176,7 +230,7 @@ Work receiver_work(const modem::Config& config,long double samples,
         hop=std::min(transform-length+1,std::max(1.L,std::floor(nominal_length/2)));
         initial_batch=std::min(hop,std::max(1.L,std::floor(static_cast<long double>(config.sample_rate)/bin)));
     }
-    const bool separate_tracking_reference=coupled || transform<2*length;
+    const bool separate_tracking_reference=scaled || transform<2*length;
     // Retaining transformed template rows is optional. The streamed path
     // keeps FFT/ring/tracking scratch and empty row metadata, then generates
     // each template in existing per-job scratch without reducing coverage.
@@ -196,13 +250,36 @@ Work receiver_work(const modem::Config& config,long double samples,
     // Live banks stream expanded template rows when several profiles, keys or
     // epochs share the budget, so early banks cannot consume it with caches.
     const bool streamed_templates=!correlator &&
-        (drift_sections>1 || differential_window || fft_bytes>allowance || (coupled && banks*profiles>1));
-    const auto starts=std::ceil(2.L*(options.search_seconds+1.L)*config.sample_rate/
-                               std::max(1.L,std::floor(chip/(2.L*(1+maximum_clock_ratio)))))+1;
+        (drift_sections>1 || differential_window || fft_bytes>allowance || (scaled && banks*profiles>1));
+    auto starts=std::ceil(2.L*(options.search_seconds+1.L)*config.sample_rate/
+                          std::max(1.L,std::floor(chip/(2.L*(1+maximum_clock_ratio)))))+1;
+    if(config.oscillator_search) {
+        long double lanes=0;
+        for(const auto& hypothesis:bank.hypotheses) {
+            const auto rate=1+static_cast<long double>(hypothesis.clock_error_ppm)*1e-6L;
+            lanes+=std::ceil(4.L*(options.search_seconds+1.L)*config.sample_rate*rate/chip)+1;
+        }
+        starts=lanes/frequencies;
+    }
     const auto phase_groups=private_pattern&&symbol%config.sample_rate!=0?(symbol>=config.sample_rate?2.L:3.L):1.L;
     Work result;
     result.compact=correlator;result.bin_samples=bin;
-    result.workspace_supported=!coupled || fft_core_bytes<=allowance;
+    const bool compact_hint=private_pattern&&symbol>=60.L*config.sample_rate;
+    const auto block_samples=compact_hint?32.L:128.L;
+    const auto candidate_count=compact_hint?32.L:2048.L;
+    const auto points=compact_hint?64.L:2048.L;
+    const auto lanes=starts*frequencies;
+    const auto projection_banks=config.spreading_mode==modem::SpreadingMode::tone?2*frequencies:
+        static_cast<long double>(geometry.count);
+    // Rounded upper allowances cover private control/PatternCode state and
+    // lane metadata without constructing any receiver or payload in a planner.
+    const auto compact_required=256*1024.L+
+        lanes*(512+(phase_groups-1)*sizeof(std::array<modem::detail::CorrelationFit,2>)+2)+
+        projection_banks*(32+(block_samples+1)*sizeof(modem::detail::CorrelationProjection))+
+        candidate_count*sizeof(modem::PatternEvidence)+points*sizeof(std::complex<double>)+
+        frequencies*sizeof(modem::PatternFrequencyRateHypothesis);
+    result.workspace_supported=correlator?
+        (!config.oscillator_search||compact_required<=allowance):fft_core_bytes<=allowance;
     const auto real_rank=static_cast<long double>(bin)-image<=1e-10L*bin;
     const auto count=static_cast<double>(length);
     result.noise_dimensions=correlator?static_cast<double>(symbol)/2:count*(real_rank?.5:1.);
@@ -227,23 +304,66 @@ Work receiver_work(const modem::Config& config,long double samples,
     // state; tighter compact budgets retain the coherent reference.
     const auto compact_bound=starts*frequencies*phase_groups*(4096+
         (differential_window?sizeof(std::array<modem::detail::CorrelationDifferentialFit,2>):0))+2*1024*1024;
+    auto compact_allocated=compact_required;
+    const auto drift_extra=lanes*phase_groups*sizeof(std::array<modem::detail::CorrelationDriftFit,2>);
     result.drift_supported=drift_sections>1&&result.workspace_supported&&
-        (!correlator||compact_bound<=allowance)&&result.noise_dimensions>=16;
-    result.differential_supported=differential_window&&result.drift_supported;
+        (!correlator||(config.oscillator_search?compact_allocated+drift_extra<=allowance:compact_bound<=allowance))&&
+        result.noise_dimensions>=16;
+    if(correlator&&result.drift_supported)compact_allocated+=drift_extra;
+    const auto differential_extra=lanes*phase_groups*sizeof(std::array<modem::detail::CorrelationDifferentialFit,2>);
+    result.differential_supported=differential_window&&result.drift_supported&&
+        (!correlator||!config.oscillator_search||compact_allocated+differential_extra<=allowance);
+    if(correlator&&result.differential_supported)compact_allocated+=differential_extra;
+    const bool pulse_geometry=modem::pattern_pulse_enabled(config)&&symbol>=16.L*config.sample_rate&&
+        chip<=4096&&symbol%(4*chip)==0&&
+        (config.oscillator_search||(chip%2==0&&!scaled));
+    const auto cell_capacity=std::ceil(block_samples*bank.maximum_rate/chip)+2;
+    const auto pulse_extra=3*frequencies*(192+sizeof(modem::detail::CorrelationPulseKernel)+
+        (1+cell_capacity)*sizeof(modem::detail::CorrelationPulseCell))+lanes*16+32768;
+    result.pulse_projected=correlator&&pulse_geometry&&result.workspace_supported&&
+        compact_allocated+pulse_extra<=allowance;
     result.serial=samples*projection_operations_per_sample*banks;
     // Admission thresholds belong to one receiver; unrelated keys and
     // waveform profiles add compute work, not evidence against this signal.
     result.search_trials=std::max(1.L,starts*frequencies*phase_groups);
+    if(established_stream_bits)
+        result.tracking_windows=static_cast<long double>(established_stream_bits-1)+
+            static_cast<long double>(modem::pattern_absence_samples(config))/symbol;
     if(correlator) {
-        // Bounded streaming projections are reused by half-chip start lanes;
-        // each lane still evaluates two candidate bit fits per observation.
-        const auto observations=std::ceil(samples/std::min(32.L,static_cast<long double>(chip)));
-        // Eligible lanes retain the coherent fit and one active section fit;
-        // completed sections contribute only fixed-size summary statistics.
-        result.parallel=(observations*starts*frequencies*phase_groups*64*
-            (1+(drift_sections>1?1:0)+(differential_window?1:0))+
-            (differential_window?samples/symbol*differential_windows*starts*frequencies*phase_groups*
-                differential_operations_per_window:0))*banks;
+        if(result.pulse_projected) {
+            long double lattice_cells=0,kernel_samples=0;
+            for(const auto& hypothesis:bank.hypotheses) {
+                const auto rate=1+static_cast<long double>(hypothesis.clock_error_ppm)*1e-6L;
+                lattice_cells+=3*std::ceil(samples*rate/chip);
+                if(hypothesis.clock_error_ppm==0)kernel_samples+=9.L*chip;
+                else {kernel_samples+=3*samples;result.kernel_upper_bound=true;}
+            }
+            // Two parity lattices plus a clipped endpoint is a conservative
+            // frontend allowance. Private fitting contracts the same 17 pulse
+            // atoms and 153 Gram pairs once per chip and candidate bit pair.
+            result.serial+=(3*samples*frequencies*pulse_frontend_operations_per_sample+
+                lattice_cells*pulse_gram_operations_per_cell)*banks;
+            result.kernel_serial=kernel_samples*pulse_kernel_operations_per_sample*banks;
+            result.serial+=result.kernel_serial;
+            // The projected backend consumes shared cells and commits lane
+            // work in order on the caller; it does not use search workers.
+            result.search_serial=std::ceil(samples*bank.maximum_rate/chip)*lanes*phase_groups*
+                (pulse_pair_operations_per_chip+128*(result.drift_supported+result.differential_supported))*banks;
+            result.serial+=result.search_serial;
+        } else {
+            // Shaped fallback retains every original sample. Rectangular
+            // prefix projections can still share each bounded chip interval.
+            const bool shaped_policy=config.oscillator_search&&modem::pattern_pulse_enabled(config);
+            const auto observations=shaped_policy?samples:
+                std::ceil(samples/std::min(32.L,static_cast<long double>(chip)));
+            // Full shaped evaluation includes the 17-atom private waveform
+            // pair as well as its two real fits; prefix-only work is cheaper.
+            const auto operations_per_pair=shaped_policy?512.L:64.L;
+            result.parallel=(observations*lanes*phase_groups*operations_per_pair*
+                (1+(result.drift_supported?1:0)+(result.differential_supported?1:0))+
+                (result.differential_supported?samples/symbol*differential_windows*lanes*phase_groups*
+                    differential_operations_per_window:0))*banks;
+        }
     } else {
         auto blocks=std::ceil(samples/(bin*hop));
         auto scored_starts=blocks*hop;
@@ -305,8 +425,6 @@ Work receiver_work(const modem::Config& config,long double samples,
             // six seconds. This desired-stream allowance is independent of
             // unrelated key/epoch banks; extra competing/noise tracks and
             // reacquisition can add work, so it is not a runtime upper bound.
-            result.tracking_windows=static_cast<long double>(established_stream_bits-1)+
-                static_cast<long double>(modem::pattern_absence_samples(config))/symbol;
             // continue_tracks() refines five starts for each possible private
             // phase group, then compares the chosen start against every other
             // carrier/clock hypothesis. measure() reuses a template pair for
@@ -471,7 +589,12 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     result.simulated_seconds=finite_seconds(media);
     const auto samples=media*config.sample_rate;
     long double serial=samples*channel_operations_per_sample,parallel=0,tracking_serial=0,tracking_windows=0,trials=1;
+    long double receiver_frontend=0,kernel_serial=0,search_serial=0;
+    bool any_pulse_projected=false,any_kernel_upper_bound=false;
     Work matching_work;
+    const modem::Config* matching_profile=nullptr;
+    bool matching_supported=false;
+    const auto frequency=channel.frequency_offset_hz+static_cast<long double>(config.carrier_hz)*channel.clock_error_ppm*1e-6L;
     for(const auto& profile:profiles) {
         modem::validate(profile);
         const auto matches=same_profile(config,profile);
@@ -479,13 +602,27 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
         const auto work=receiver_work(profile,media*profile.sample_rate,options,profiles.size(),keys,
                                       matches?transmission.wire_bits:0,local_window_seconds);
         serial+=work.serial;parallel+=work.parallel;
+        receiver_frontend+=work.serial-work.kernel_serial-work.search_serial;kernel_serial+=work.kernel_serial;
+        search_serial+=work.search_serial;
+        any_pulse_projected|=work.pulse_projected;any_kernel_upper_bound|=work.kernel_upper_bound;
         tracking_serial+=work.tracking_serial;tracking_windows+=work.tracking_windows;
         if(matches) {
-            matching_work=work;
-            trials=std::max(trials,work.search_trials);
-            result.receiver_workspace_supported|=work.workspace_supported;
+            const auto candidate_bank=search_bank(profile);
+            const bool covered=within_representation_bound(frequency,candidate_bank.frequency.half_width_hz)&&
+                (!profile.oscillator_search||paired_clock_coverage(candidate_bank,frequency,channel.clock_error_ppm));
+            const bool supported=covered&&!candidate_bank.limited&&work.workspace_supported;
+            if(!matching_profile||(supported&&(!matching_supported||work.acquisition_threshold<matching_work.acquisition_threshold))) {
+                matching_work=work;matching_profile=&profile;matching_supported=supported;
+                trials=work.search_trials;
+            }
         }
     }
+    result.receiver_workspace_supported=matching_profile&&matching_work.workspace_supported;
+    result.receiver_frontend_seconds=finite_seconds(receiver_frontend/serial_operations_per_second);
+    result.receiver_search_seconds=finite_seconds(search_serial/serial_operations_per_second+parallel/cpu_scoring_operations_per_second);
+    result.receiver_kernel_rebuild_seconds=finite_seconds(kernel_serial/serial_operations_per_second);
+    result.pulse_projection_modeled=any_pulse_projected;
+    result.kernel_rebuild_upper_bound=any_kernel_upper_bound;
     result.tracking_seconds=finite_seconds(tracking_serial/serial_operations_per_second);
     result.tracking_symbol_windows=finite_seconds(tracking_windows);
     const auto payload=result.profile_matches?payload_work(transmission,options,raw_bits):PayloadWork{};
@@ -506,29 +643,59 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
 
     // The simulator's SNR is per Fs/2 noise bandwidth, so Es/N0=snr*Fs*T/2.
     const auto symbol_db=channel.snr_db+10*std::log10(static_cast<long double>(samples_per_symbol)/2);
-    const auto frequency=channel.frequency_offset_hz+config.carrier_hz*channel.clock_error_ppm*1e-6L;
-    const auto geometry=modem::default_pattern_frequency_search(config);
-    const bool coupled=geometry.count>5 && config.spreading_mode==modem::SpreadingMode::pattern;
-    const auto frequencies=static_cast<long double>(geometry.count)*(coupled?2:1);
+    const auto& receiver_config=matching_profile?*matching_profile:config;
+    const bool oscillator_policy=receiver_config.oscillator_search.has_value();
+    const auto bank=search_bank(receiver_config);
+    const auto& geometry=bank.frequency;
+    const bool coupled=bank.legacy_coupled;
+    const auto frequencies=static_cast<long double>(bank.hypotheses.size());
     const auto spacing=static_cast<long double>(geometry.step_hz);
     const auto outer_bin=static_cast<long double>(geometry.count/2);
     result.carrier_offset_hz=static_cast<double>(frequency);
     result.carrier_search_half_width_hz=geometry.half_width_hz;
-    result.carrier_in_search=std::abs(frequency)<=geometry.half_width_hz;
-    const auto nearest_bin=std::clamp(std::round(frequency/spacing),-outer_bin,outer_bin);
+    result.requested_carrier_search_half_width_hz=geometry.requested_half_width_hz;
+    result.clock_search_half_width_ppm=bank.clock_ppm;
+    result.requested_clock_search_half_width_ppm=bank.requested_clock_ppm;
+    result.frequency_rate_hypotheses=bank.hypotheses.size();
+    result.oscillator_search_limited=bank.limited;
+    if(oscillator_policy&&bank.minimum_rate!=bank.maximum_rate) {
+        result.probability_search_approximation=true;
+        result.probability_model_limit="Paired clock candidates use the selected timing coherence and full bank trial penalty; joint timing-path covariance is not simulated";
+    }
+    result.carrier_in_search=within_representation_bound(frequency,geometry.half_width_hz);
+    result.clock_in_search=!oscillator_policy||paired_clock_coverage(bank,frequency,channel.clock_error_ppm);
+    auto nearest_bin=std::clamp(std::round(frequency/spacing),-outer_bin,outer_bin);
     // Generate the same double-valued offset as the receiver's bank before
     // evaluating the residual; endpoints cannot drift beyond modeled coverage.
-    const auto nearest=static_cast<long double>(static_cast<double>(nearest_bin)*geometry.step_hz);
-    const auto angle=std::numbers::pi_v<long double>*(frequency-nearest)*seconds;
-    const auto carrier_loss=std::abs(angle)<1e-10L?1.L:std::pow(std::sin(angle)/angle,2);
+    auto nearest=static_cast<long double>(static_cast<double>(nearest_bin)*geometry.step_hz);
+    auto carrier_loss=1.L;
+    auto residual_clock_ppm=std::abs(static_cast<long double>(channel.clock_error_ppm));
+    if(oscillator_policy) {
+        long double best=-1;
+        for(const auto& hypothesis:bank.hypotheses) {
+            const auto angle=std::numbers::pi_v<long double>*(frequency-hypothesis.frequency_offset_hz)*seconds;
+            const auto loss=std::abs(angle)<1e-10L?1.L:std::pow(std::sin(angle)/angle,2);
+            const auto clock=std::abs(static_cast<long double>(channel.clock_error_ppm)-hypothesis.clock_error_ppm);
+            const auto smear=clock*1e-6L*seconds/chip_seconds;
+            const auto timing=config.spreading_mode==modem::SpreadingMode::tone?1.L:
+                std::pow(std::max(0.L,1-smear/2),2);
+            if(loss*timing>best) {
+                best=loss*timing;nearest=hypothesis.frequency_offset_hz;
+                carrier_loss=loss;residual_clock_ppm=clock;
+            }
+        }
+        nearest_bin=std::round(nearest/spacing);
+    } else {
+        const auto angle=std::numbers::pi_v<long double>*(frequency-nearest)*seconds;
+        carrier_loss=std::abs(angle)<1e-10L?1.L:std::pow(std::sin(angle)/angle,2);
+        if(coupled)residual_clock_ppm=std::min(residual_clock_ppm,
+            std::abs(channel.clock_error_ppm-nearest/config.carrier_hz*1e6L));
+    }
     const auto diffusion=channel.phase_noise_degrees_per_sqrt_second*std::numbers::pi_v<long double>/180;
     const auto phase_loss=phase_coherence(.5L*diffusion*diffusion*seconds);
     result.phase_coherence_loss_db=static_cast<double>(std::max(0.L,-10*std::log10(phase_loss)));
     const auto section_phase_loss=phase_coherence(.5L*diffusion*diffusion*result.drift_section_seconds);
     result.section_phase_coherence_loss_db=static_cast<double>(std::max(0.L,-10*std::log10(section_phase_loss)));
-    auto residual_clock_ppm=std::abs(static_cast<long double>(channel.clock_error_ppm));
-    if(coupled)residual_clock_ppm=std::min(residual_clock_ppm,
-        std::abs(channel.clock_error_ppm-nearest/config.carrier_hz*1e6L));
     // Expanded default banks retain both nominal symbol timing and timing
     // scaled by each carrier hypothesis. Independent carrier error can favor
     // the nominal-clock alternative; shared sample-clock error favors coupling.
@@ -543,7 +710,8 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     // fit ceiling even at high SNR. Attenuating Es/N0 alone cannot predict that
     // regime. Do not extrapolate a numeric probability beyond the bank, nor
     // claim zero: some out-of-bank signals can still produce admitted fits.
-    if(!result.profile_matches || !result.carrier_in_search || !result.receiver_workspace_supported)return result;
+    if(!result.profile_matches || !result.carrier_in_search || !result.clock_in_search ||
+       !result.receiver_workspace_supported || result.oscillator_search_limited)return result;
     if(!compute_probability)return result;
     if(differential_window&&!matching_work.differential_supported) {
         result.probability_model_limit="Local detector allocation is outside the modeled workspace allowance";
@@ -615,7 +783,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
         }
         result.probability_trials=probability.trials;
         result.one_bit_confidence_available=true;
-        result.probability_search_approximation=probability.frequency_search_approximation;
+        result.probability_search_approximation|=probability.frequency_search_approximation;
         result.probability_carrier_candidates=probability.frequency_candidates;
         result.differential_model_available=probability.differential_model;
         result.differential_added_detection_probability=probability.differential_acquired_correct;

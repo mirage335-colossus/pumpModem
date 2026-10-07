@@ -92,6 +92,7 @@ struct Model {
     bool one_bit_cpu_available=false;
     double one_bit_cpu_seconds=0;
     double receiver_cpu_seconds=0;
+    bool kernel_rebuild_upper_bound=false;
     double cpu_realtime_ratio=0;
     double cpu_per_bit_ratio=0;
     double occupied_bandwidth_hz=0;

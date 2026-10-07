@@ -705,6 +705,7 @@ private:
         Fl_Group* document_frame=nullptr;
         FltkDocumentView* document=nullptr;
         std::shared_ptr<const ui::DocumentNode> source;
+        int document_scroll=0;
     };
     std::unique_ptr<NativeWindow> window;
     Fl_Group* background=nullptr;
@@ -958,7 +959,16 @@ private:
             const int width=ui::document_content_width(bounds.w,Fl::scrollbar_size());
             page.document->viewport({bounds.x,bounds.y,bounds.w,bounds.h});
             const auto source=application.document(id,width);
-            if(source!=page.source) {page.source=source;page.document->update(*source);}
+            if(source!=page.source) {
+                page.source=source;
+                FltkDocumentView::ScrollAnchor anchor;
+                if(id==application.page()&&page.scroll->yposition()==page.document_scroll)
+                    anchor=[&](int displacement,int height) {
+                        const int maximum=std::max(0,height+ui::document_top_padding+ui::document_bottom_padding-bounds.h);
+                        page.scroll->scroll_to(0,std::clamp(page.scroll->yposition()+displacement,0,maximum));
+                    };
+                page.document->update(*source,std::move(anchor));
+            }
             const auto scroll=std::max(0,page.scroll->yposition());
             page.document->resize(bounds.x+ui::document_side_padding,bounds.y+ui::document_top_padding-scroll,width,page.document->content_height());
             const int height=page.document->layout(width);
@@ -968,6 +978,7 @@ private:
                 height+ui::document_top_padding+ui::document_bottom_padding);
             page.document_frame->init_sizes();
             page.scroll->scroll_to(0,std::min(scroll,std::max(0,height+ui::document_top_padding+ui::document_bottom_padding-bounds.h)));
+            page.document_scroll=page.scroll->yposition();
         }
     }
     void show_page() {

@@ -948,6 +948,136 @@ void coupled_clock_progress_and_absence() {
     }
     if(!failures.empty())throw Error(failures);
 }
+void independent_fft_frequency_and_rate() {
+    // RF conversion error is independent of PCM timing. Two equal-frequency
+    // candidates with opposite rates must remain distinct through FFT scoring
+    // and tracking; deriving rate from the final PCM carrier cannot recover
+    // this capture. A shared-radio-reference policy uses the same pair API.
+    auto c=config(128);c.sample_rate=64;c.carrier_hz=16;c.bandwidth_hz=4;c.pulse_shaping=false;
+    const Bytes expected{0,0,1,0,1,1,0,1,0};
+    constexpr std::size_t workspace=2*1024*1024;
+    for(const auto ppm:{-8000.,8000.}) {
+        modem::StreamingTransmitter transmitter(modem::RawBits{expected},c);
+        modem::ChannelConfig impairment;impairment.clock_error_ppm=ppm;
+        impairment.frequency_offset_hz=.03125;impairment.phase_noise_degrees_per_sqrt_second=0;
+        impairment.snr_db=30;impairment.seed=731;
+        modem::SampledSimulationChannel channel(c,impairment);
+        std::array<float,173> block{};std::vector<float> samples;
+        while(const auto count=channel.read(transmitter,block))
+            samples.insert(samples.end(),block.begin(),block.begin()+static_cast<std::ptrdiff_t>(count));
+        const auto capture_end=samples.size(),symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+        samples.resize(capture_end+3*symbol);channel.read_noise(std::span(samples).subspan(capture_end));
+        const auto offset=c.carrier_hz*ppm*1e-6+impairment.frequency_offset_hz;
+        for(const bool legacy_rates:{false,true}) {
+            modem::PatternSearch search;search.start_offset_seconds=0;search.start_uncertainty_seconds=.5;
+            search.worker_threads=1;search.drift_tolerant=false;search.chunk_bits=64;search.bit_limit=64;
+            search.track_limit=8;search.candidate_limit=128;
+            if(legacy_rates) {
+                search.frequency_offsets_hz={offset};search.clock_errors_ppm={-8000,8000};
+            } else {
+                search.hypotheses={{offset,-8000},{offset,8000}};
+                // Authoritative pairs must ignore unrelated legacy fields,
+                // including values which are invalid as a standalone bank.
+                search.frequency_offsets_hz={std::numeric_limits<double>::infinity()};
+                search.clock_errors_ppm.clear();search.couple_clock_to_carrier=true;
+                search.uncoupled_frequency_count=999;
+            }
+            modem::PatternReceiver receiver(c,workspace,search);
+            check(!receiver.clock_windowed(),"frequency/rate FFT fixture unexpectedly selected a compact backend");
+            Bytes observed;std::size_t completions=0,bit_polls=0,position=0;
+            std::optional<std::pair<std::uint64_t,std::uint64_t>> identity;
+            std::uint64_t accepted_end=0;
+            const auto poll=[&] {
+                check(receiver.working_bytes()<=workspace,"frequency/rate FFT bank exceeded its workspace");
+                const auto pending=receiver.provisional();bool found=false;
+                for(const auto& event:receiver.take_bursts()) {
+                    const auto current=std::pair{event.stream_first_sample,event.stream_first_symbol};
+                    if(!identity)identity=current;
+                    check(current==*identity,"equal-frequency rate alternatives duplicated one physical stream");
+                    check(event.missing_slots==0,"independent frequency/rate correction lost a symbol");
+                    found|=!event.bits.empty();observed.insert(observed.end(),event.bits.begin(),event.bits.end());
+                    if(!event.bits.empty())accepted_end=event.end_sample;
+                    check(observed.size()<=expected.size() && std::equal(observed.begin(),observed.end(),expected.begin()),
+                          "independent frequency/rate FFT correction changed the exact raw prefix");
+                    if(event.complete) {
+                        ++completions;
+                        check(position>=accepted_end+static_cast<std::uint64_t>(std::floor(symbol/1.008)),
+                              "frequency/rate FFT search completed before a whole absent symbol");
+                    }
+                }
+                if(found) {
+                    if(!bit_polls)check(observed.size()<8,"frequency/rate FFT publication waited for a byte");
+                    ++bit_polls;
+                }
+                if(!pending.bits.empty())check(observed.size()>=pending.first_stream_symbol+pending.bits.size(),
+                    "frequency/rate FFT search hid an accepted bit until another poll");
+                check(receiver.take_bursts().empty(),"frequency/rate FFT drain repeated a decision");
+            };
+            while(position<samples.size()) {
+                const auto count=std::min<std::size_t>(17,samples.size()-position);
+                receiver.push(std::span(samples).subspan(position,count));position+=count;poll();
+                if(position<capture_end+symbol/2)check(!completions,"partial silence completed a frequency/rate stream");
+            }
+            receiver.finish();poll();
+            check(observed==expected && bit_polls>=2 && completions==1,
+                  "independent frequency/rate FFT search did not preserve exact progress and observed absence");
+        }
+    }
+}
+void paired_carrier_alternatives_share_one_stream() {
+    auto c=config(128);c.sample_rate=64;c.carrier_hz=16;c.bandwidth_hz=4;c.pulse_shaping=false;
+    const Bytes expected{0,0,1,0,1,1,0,1,0,1,0,0,1,1,0,1,1,1,0,0,1,0,1,0,0,0,1,1,1,0,0,1};
+    const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+    const auto duration=modem::symbol_seconds(c);
+    const auto samples=waveform(c,expected,0,3*symbol,.37,.001);
+    modem::PatternSearch search;search.worker_threads=1;
+    search.start_offset_seconds=0;search.start_uncertainty_seconds=.5;
+    search.chunk_bits=64;search.bit_limit=128;
+    for(const auto offset:{0.,-1.5/duration,1.5/duration,-1.25/duration,1.25/duration})
+        search.hypotheses.push_back({offset,offset/10000000.*1e6});
+    const std::array<std::size_t,4> chunks{17,113,509,41};
+    const auto result=receive(samples,c,chunks,search,4*1024*1024);
+    const auto& burst=exact(result,expected);
+    check(burst.complete,"paired carrier alternatives did not complete after physical absence");
+}
+void frequency_rate_bank_limits() {
+    auto c=config();modem::PatternSearch search;search.hypotheses={{0,0}};
+    search.hypotheses.front().clock_error_ppm=std::numeric_limits<double>::infinity();
+    rejects([&]{modem::PatternReceiver receiver(c,8*1024*1024,search);},"FFT accepted a nonfinite pair rate");
+    search.hypotheses.front()={0,10001};
+    rejects([&]{modem::PatternReceiver receiver(c,8*1024*1024,search);},"FFT accepted a pair rate outside its finite bound");
+    search.hypotheses.front()={std::numeric_limits<double>::infinity(),0};
+    rejects([&]{modem::PatternReceiver receiver(c,8*1024*1024,search);},"FFT accepted a nonfinite pair carrier");
+    search.hypotheses.assign(modem::maximum_pattern_frequency_rate_hypotheses+1,{0,0});
+    rejects([&]{modem::PatternReceiver receiver(c,8*1024*1024,search);},"FFT accepted an unbounded pair bank");
+    search.hypotheses.clear();search.frequency_offsets_hz.assign(129,0);
+    search.clock_errors_ppm.assign(modem::maximum_pattern_rate_hypotheses,0);
+    rejects([&]{modem::PatternReceiver receiver(c,8*1024*1024,search);},"FFT expanded a legacy Cartesian bank past its finite pair limit");
+    search.frequency_offsets_hz={c.carrier_hz*.01};search.clock_errors_ppm={0,0};
+    search.couple_clock_to_carrier=true;
+    modem::PatternReceiver boundary(c,8*1024*1024,search);
+    check(boundary.working_bytes()<=8*1024*1024,"exact combined +10000-ppm boundary exceeded its workspace");
+}
+void attached_oscillator_policy_supplies_default_pairs() {
+    auto c=config(128);c.sample_rate=64;c.carrier_hz=16;c.bandwidth_hz=4;c.pulse_shaping=false;
+    c.oscillator_search.emplace();auto& policy=*c.oscillator_search;
+    policy.reference=modem::OscillatorReference::shared_radio;
+    policy.rf_shift_hz=10000000;policy.rf.accuracy_ppm=.0001;
+    const Bytes bits{0,0,1,0};
+    const auto samples=waveform(c,bits,0,3*modem::symbol_sample_count(c),.31,.001);
+    modem::PatternSearch implicit;implicit.worker_threads=1;implicit.start_offset_seconds=0;
+    implicit.start_uncertainty_seconds=.5;implicit.retain_score=0;
+    auto explicit_pairs=implicit;explicit_pairs.hypotheses=modem::oscillator_pattern_search(c).hypotheses;
+    const std::array<std::size_t,2> chunks{137,61};
+    const auto a=receive(samples,c,chunks,implicit),b=receive(samples,c,chunks,explicit_pairs);
+    check(a.bursts.size()==b.bursts.size() && a.candidates.size()==b.candidates.size(),
+          "attached oscillator policy did not supply the same default search as explicit pairs");
+    for(std::size_t i=0;i<a.bursts.size();++i)
+        check(same_burst(a.bursts[i],b.bursts[i]),"implicit oscillator policy changed stream publication");
+    for(std::size_t i=0;i<a.candidates.size();++i)
+        check(same_evidence(a.candidates[i],b.candidates[i]),"implicit oscillator policy changed paired evidence");
+    check(exact(a,bits).complete,"implicit shared-radio policy did not decode and observe absence");
+}
 void high_snr_sampled_channel() {
     // At 12 kHz bandwidth these sample SNRs correspond to 30 and 24 dB
     // in-band SNR. Seed 13 previously exposed lost first/final bits at eight
@@ -1247,8 +1377,10 @@ void application_local_fallback_preserves_original_search() {
     rejects([&]{modem::PatternReceiver strict(c,limit,no_window);},
             "application fallback must not invent a system-clock search window");
     auto nondefault_clock=automatic;nondefault_clock.clock_errors_ppm={100};
-    rejects([&]{modem::PatternReceiver strict(c,limit,nondefault_clock);},
-            "application fallback must not discard explicit clock-rate hypotheses");
+    modem::PatternReceiver complete_clock_bank(c,limit,nondefault_clock);
+    check(complete_clock_bank.clock_windowed() && !complete_clock_bank.local_clock_fallback() &&
+          complete_clock_bank.working_bytes()<=limit,
+          "an affordable compact fallback must retain the complete explicit clock-rate bank");
 
     auto local=automatic;local.expand_clock_search=false;local.allow_local_clock_fallback=false;
     local.compact_clock_search=automatic.compact_clock_search;
@@ -1374,6 +1506,10 @@ int main(int argc,char** argv) {
     run("independent epoch phase acquisition",independently_started_epoch_recovers_phase);
     run("independent sampled crystal and phase",independent_sampled_channel);
     run("coupled clock progress and absence",coupled_clock_progress_and_absence);
+    run("independent FFT frequency and rate",independent_fft_frequency_and_rate);
+    run("paired carrier alternatives share one stream",paired_carrier_alternatives_share_one_stream);
+    run("frequency rate bank limits",frequency_rate_bank_limits);
+    run("attached oscillator policy supplies default pairs",attached_oscillator_policy_supplies_default_pairs);
     run("high-SNR sampled private and public patterns",high_snr_sampled_channel);
     run("orthogonal private pattern bins",orthogonal_private_pattern_bins);
     run("shared projection and workspace updates",shared_projection_and_workspace_update);

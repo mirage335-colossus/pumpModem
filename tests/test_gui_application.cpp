@@ -874,6 +874,12 @@ void oscillator_declaration() {
           "Oscillator scenarios need a persistent shared choice with explicit residual-model limitations");
     for(const auto& page:ui::pages()) {
         app.select_page(page.id);
+        for(const auto field:{F::rf_oscillator,F::rf_shift,F::search_margin,F::oscillator_reference,F::oscillator_sideband}) {
+            const auto& reference=control(field);
+            check(reference.document_only&&reference.page==ui::Page::planner&&
+                  app.control(reference).visible==(page.id==ui::Page::planner),
+                  "RF and oscillator search controls must remain reachable in the scrollable planner");
+        }
         check(app.control(oscillator).visible&&app.control(oscillator).enabled&&
               app.control(detail).visible==(page.id!=ui::Page::planner),
               "Oscillator detail must yield its planner space only to the native preview-target editor");

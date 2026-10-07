@@ -6,6 +6,7 @@
 #include "datapump/streaming_modem.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/pattern_code.hpp"
+#include "datapump/pattern_search.hpp"
 #include "datapump/symbol_schedule.hpp"
 #include "signal_view.hpp"
 #include "live_pattern_scores.hpp"
@@ -24,6 +25,7 @@
 #include <numbers>
 #include <optional>
 #include <random>
+#include <sstream>
 #include <thread>
 #include <utility>
 #include <variant>
@@ -120,6 +122,7 @@ modem::ChannelConfig channel_config(const Settings& settings) {
     modem::ChannelConfig channel;
     channel.snr_db = settings.simulation_snr_db;
     channel.clock_error_ppm = settings.simulation_clock_error_ppm;
+    channel.frequency_offset_hz = settings.simulation_frequency_offset_hz;
     channel.phase_noise_degrees_per_sqrt_second = settings.simulation_phase_noise_degrees_per_sqrt_second;
     channel.seed = settings.simulation_seed;
     return channel;
@@ -140,6 +143,8 @@ Settings normalized(Settings value) {
             value.transfer.receive_pattern_mode = tuning::PatternMode::auto_tone;
     } else if (value.transfer.key) value.transfer.modem.scramble = true;
     modem::validate(value.transfer.modem);
+    if(value.transfer.modem.oscillator_search)
+        modem::validate_oscillator_search(*value.transfer.modem.oscillator_search);
     if (value.long_message_modem) {
         auto& longer = *value.long_message_modem;
         const auto& base = value.transfer.modem;
@@ -259,8 +264,18 @@ struct Session::Impl {
         std::size_t working_bytes = sizeof(detail::ReceptionHistory);
         double created_at = 0;
         bool limited = false;
+        std::string oscillator_limit;
         std::complex<double> mixer{1,0};
     };
+    static void note_oscillator_coverage(Bank& bank,const modem::OscillatorPatternSearch& search) {
+        if(!search.limited)return;
+        bank.limited=true;
+        std::ostringstream detail;
+        detail<<"RX oscillator coverage incomplete: frequency +/-"<<search.frequency.half_width_hz
+            <<" Hz (requested "<<search.frequency.requested_half_width_hz<<"), clock +/-"
+            <<search.clock_half_width_ppm<<" ppm (requested "<<search.requested_clock_half_width_ppm<<")";
+        bank.oscillator_limit=detail.str();
+    }
     static std::size_t receiver_workspace(const Receiver& receiver) {
         // Reserve bounded diagnostic growth and control storage before
         // admitting a receiver, rather than reporting only its idle allocation.
@@ -656,7 +671,7 @@ struct Session::Impl {
     }
     Bank make_bank(const Settings& value) { return make_bank(value, Bank{}); }
     Bank make_bank(const Settings& value, Bank bank) {
-        bank.limited=false;
+        bank.limited=!bank.oscillator_limit.empty();
         if(!bank.source_quota)bank.source_quota=std::make_shared<transfer::ReceiveStorageQuota>(
             transfer::ReceiveStorageQuota{transfer::source_storage_limit(value.content_limit),0});
         std::vector<std::optional<Crypto>> keys;
@@ -696,7 +711,7 @@ struct Session::Impl {
                     return receiver.key_tag == tag && (tag.empty() || receiver.epoch == epoch) &&
                         c.spreading_factor==profile.spreading_factor && c.integration_seconds==profile.integration_seconds &&
                         c.scramble==profile.scramble && c.spreading_mode==profile.spreading_mode &&
-                        c.pulse_shaping==profile.pulse_shaping;
+                        c.pulse_shaping==profile.pulse_shaping && c.oscillator_search==profile.oscillator_search;
                 });
                 if (existing != bank.receivers.end()) continue;
                 const auto capacity = bank_capacity(value);
@@ -714,7 +729,12 @@ struct Session::Impl {
                 const auto config = transfer::seeded_config(receiver.options, epoch);
                 try {
                     modem::PatternSearch search;
-                    search.expand_clock_search=true;
+                    if(config.oscillator_search) {
+                        auto oscillator_search=modem::oscillator_pattern_search(config);
+                        note_oscillator_coverage(bank,oscillator_search);
+                        search.hypotheses=std::move(oscillator_search.hypotheses);
+                    }
+                    else search.expand_clock_search=true;
                     search.prefer_streamed_templates=receiver.prefer_streamed_templates;
                     search.allow_local_clock_fallback=true;
                     search.compact_clock_search=compact;
@@ -1127,7 +1147,13 @@ struct Session::Impl {
                             if(current.running && generation==version)current.error=error.what();
                         }
                         bank.limited=true;
-                        modem::PatternSearch search;search.expand_clock_search=true;
+                        modem::PatternSearch search;
+                        if(receiver.options.modem.oscillator_search) {
+                            auto oscillator_search=modem::oscillator_pattern_search(receiver.options.modem);
+                            note_oscillator_coverage(bank,oscillator_search);
+                            search.hypotheses=std::move(oscillator_search.hypotheses);
+                        }
+                        else search.expand_clock_search=true;
                         search.prefer_streamed_templates=receiver.prefer_streamed_templates;
                         search.allow_local_clock_fallback=true;
                         search.bit_limit=transfer::pattern_bit_limit(value.content_limit);
@@ -1222,11 +1248,13 @@ struct Session::Impl {
                 current.pattern_score_observation_id = observation_id;
             }
             receiver_bytes = bank.working_bytes;
-            if(bank.limited)current.status="Pattern search is limited by the configured DSP workspace";
+            if(bank.limited)current.status=bank.oscillator_limit.empty()?
+                "Pattern search is limited by the configured DSP workspace":bank.oscillator_limit;
             else if(std::any_of(bank.receivers.begin(),bank.receivers.end(),[](const auto& receiver) {
                 return receiver.modem->local_clock_fallback();
             }))current.status="Using local carrier search; increase DSP memory for wider clock coverage";
             else if(current.status=="Pattern search is limited by the configured DSP workspace" ||
+                    current.status.starts_with("RX oscillator coverage incomplete:") ||
                     current.status=="Using local carrier search; increase DSP memory for wider clock coverage")current.status=idle_status();
             current.dsp_buffered_bytes = receiver_bytes + input_bytes + decoding_bytes + audio_bytes + plot_workspace(value) + (tx_busy ? value.dsp_workspace_bytes / 4 : 0);
         }

@@ -776,10 +776,137 @@ void target_and_channel_are_independent() {
           received->raw_bits==Bytes({0,1,1}) && received->content.message.data==message.data,
           "strong sampled 100 Hz channel must receive a even below the numerical design target");
 }
+void oscillator_policy_geometry() {
+    transfer::Options options;
+    options.modem=tuning::resolve(100,-3,tuning::PatternMode::auto_pattern,false).config;
+    options.timestamp=1800000000;options.dsp_workspace_bytes=128*1024*1024;
+    auto channel=clean_channel();
+    const auto legacy=simulation::estimate(wire(1,options.modem),options,true,channel,{},1,false);
+    modem::OscillatorSearchConfig oscillator;
+    oscillator.lf={.0001,.05};oscillator.rf={.0001,.005};
+    options.modem.oscillator_search=oscillator;
+    const auto narrow=simulation::estimate(wire(1,options.modem),options,true,channel,{},1,false);
+    const auto plan=modem::oscillator_pattern_search(options.modem);
+    check(narrow.frequency_rate_hypotheses==plan.hypotheses.size()&&
+          narrow.frequency_rate_hypotheses<legacy.frequency_rate_hypotheses,
+          "oscillator accuracy must reduce the bank used for real receiver workload estimates");
+    near(narrow.carrier_search_half_width_hz,plan.frequency.half_width_hz,
+         "estimated coverage must use the actual oscillator bank");
+    check(narrow.receiver_cpu_seconds<legacy.receiver_cpu_seconds,
+          "a smaller declared search must remove repeated receiver work");
+    auto receive_profile=options.modem;
+    receive_profile.oscillator_search->margin=2;
+    receive_profile.oscillator_search->lf.accuracy_ppm=.0002;
+    const auto receive_plan=modem::oscillator_pattern_search(receive_profile);
+    const auto different_policy=simulation::estimate(wire(1,options.modem),options,true,channel,
+        std::span(&receive_profile,1),1,false);
+    check(different_policy.profile_matches&&different_policy.carrier_in_search&&different_policy.clock_in_search&&
+          different_policy.frequency_rate_hypotheses==receive_plan.hypotheses.size(),
+          "receiver oscillator assumptions must not change the matching PCM waveform identity");
+    near(different_policy.requested_carrier_search_half_width_hz,receive_plan.frequency.requested_half_width_hz,
+         "coverage estimates must use the actual matching receive policy rather than the transmit policy");
+    const auto statistical=simulation::estimate(wire(1,options.modem),options,true,channel);
+    check(statistical.confidence_available&&statistical.probability_search_approximation&&
+          statistical.probability_model_limit.find("joint timing-path covariance")!=std::string::npos,
+          "paired timing estimates must disclose their conditional statistical approximation");
+    channel.clock_error_ppm=2*plan.clock_half_width_ppm+1;
+    const auto uncovered=simulation::estimate(wire(1,options.modem),options,true,channel,{},1,false);
+    check(!uncovered.clock_in_search&&!uncovered.confidence_available,
+          "an independent sample clock outside the declared region cannot show confidence");
+    oscillator.reference=modem::OscillatorReference::shared_radio;oscillator.rf_shift_hz=10000000;
+    oscillator.lf={100,.5};options.modem.oscillator_search=oscillator;
+    const auto effects=modem::oscillator_effects(options.modem);
+    channel.clock_error_ppm=effects.clock_error_ppm;
+    channel.frequency_offset_hz=effects.frequency_offset_hz;
+    channel.phase_noise_degrees_per_sqrt_second=effects.phase_noise_degrees_per_sqrt_second;
+    const auto shared=simulation::estimate(wire(1,options.modem),options,true,channel,{},1,false);
+    const auto shared_plan=modem::oscillator_pattern_search(options.modem);
+    check(shared.clock_in_search&&shared.carrier_in_search&&!shared.oscillator_search_limited&&
+          shared.frequency_rate_hypotheses==shared_plan.hypotheses.size(),
+          "radio reference must supply paired RF and ADC clock coverage despite an unused inaccurate LF model");
+    near(shared.carrier_offset_hz,effects.frequency_offset_hz+
+         options.modem.carrier_hz*effects.clock_error_ppm*1e-6,
+         "radio simulation truth must retain additive RF and sample-clock contributions exactly once");
+    channel.clock_error_ppm=0;channel.frequency_offset_hz=shared_plan.frequency.half_width_hz;
+    const auto off_relation=simulation::estimate(wire(1,options.modem),options,true,channel,{},1,false);
+    check(off_relation.carrier_in_search&&!off_relation.clock_in_search&&!off_relation.confidence_available,
+          "independent carrier and timing errors cannot claim coverage of a shared-reference diagonal bank");
+    // The declared model at a 1x edge can differ from its stored double
+    // endpoint by one rounding unit after the channel's long-double product.
+    auto boundary_options=options;
+    auto& boundary=*boundary_options.modem.oscillator_search;
+    boundary.reference=modem::OscillatorReference::independent_audio;
+    boundary.rf_shift_hz=0;boundary.margin=1;boundary.lf.accuracy_ppm=100;
+    auto boundary_channel=clean_channel();boundary_channel.clock_error_ppm=100;
+    const auto edge=simulation::estimate(wire(1,boundary_options.modem),boundary_options,true,boundary_channel,{},1,false);
+    check(edge.carrier_in_search&&edge.clock_in_search,
+          "the declared crystal 1x endpoint must remain covered despite arithmetic representation error");
+    boundary_channel.clock_error_ppm=100.001;
+    const auto beyond=simulation::estimate(wire(1,boundary_options.modem),boundary_options,true,boundary_channel,{},1,false);
+    check(!beyond.clock_in_search&&!beyond.carrier_in_search,
+          "representation rounding must not expand the physical oscillator bound");
+    boundary_channel.clock_error_ppm=0;
+    boundary_channel.frequency_offset_hz=std::nextafter(edge.carrier_search_half_width_hz,
+        std::numeric_limits<double>::infinity());
+    const auto next_outside=simulation::estimate(wire(1,boundary_options.modem),boundary_options,true,boundary_channel,{},1,false);
+    check(!next_outside.carrier_in_search,
+          "the next representable frequency outside a policy endpoint must remain outside");
+    oscillator.rf.accuracy_ppm=100;options.modem.oscillator_search=oscillator;
+    const auto limited=simulation::estimate(wire(1,options.modem),options,true,clean_channel(),{},1,false);
+    check(limited.oscillator_search_limited&&!limited.confidence_available&&
+          limited.requested_carrier_search_half_width_hz>limited.carrier_search_half_width_hz,
+          "finite radio frequency coverage must expose incomplete oscillator margin even for a central signal");
+}
+void projected_pattern_workload() {
+    transfer::Options options;
+    options.timestamp=1800000000;options.search_seconds=0;
+    options.dsp_workspace_bytes=64*1024*1024;
+    options.modem.sample_rate=400;options.modem.carrier_hz=50;
+    options.modem.bandwidth_hz=100;options.modem.integration_seconds=64;
+    options.modem.scramble=true;
+    modem::OscillatorSearchConfig oscillator;oscillator.lf={0,0};oscillator.rf={0,0};
+    options.modem.oscillator_search=oscillator;
+    const auto low=simulation::estimate(wire(3,options.modem),options,true,clean_channel(),{},1,false);
+    check(low.receiver_workspace_supported&&low.pulse_projection_modeled&&!low.kernel_rebuild_upper_bound&&
+          low.receiver_frontend_seconds>0&&low.receiver_search_seconds>0&&low.receiver_kernel_rebuild_seconds>0,
+          "eligible long shaped symbols must model sample frontend, chip search and cached Gram work separately");
+    check(low.receiver_frontend_seconds+low.receiver_search_seconds+low.receiver_kernel_rebuild_seconds+
+          low.tracking_seconds+low.payload_processing_seconds<=low.receiver_cpu_seconds,
+          "receive components must be included once within the total CPU allowance");
+    const auto synthetic_serial=(low.cpu_seconds-low.receiver_cpu_seconds);
+    // Both models leave projected core on the caller; the GPU adds setup and
+    // transfer allowances, rather than accelerating this serial search work.
+    check(low.gpu_seconds>=low.receiver_frontend_seconds+low.receiver_search_seconds+
+          low.receiver_kernel_rebuild_seconds+synthetic_serial,
+          "the hypothetical GPU total must retain all serial projected search work");
+    near(low.tracking_symbol_windows,3,"compact planning must retain logical desired-stream continuation and absence count");
+    near(low.tracking_seconds,0,"compact continuation scoring must not acquire duplicate serial tracking work");
+    options.modem.sample_rate=6000;options.modem.carrier_hz=1500;
+    const auto high=simulation::estimate(wire(3,options.modem),options,true,clean_channel(),{},1,false);
+    check(high.pulse_projection_modeled&&high.receiver_frontend_seconds>low.receiver_frontend_seconds&&
+          high.receiver_kernel_rebuild_seconds>low.receiver_kernel_rebuild_seconds,
+          "higher real sample rates must retain their frontend and kernel setup allowance");
+    near(high.receiver_search_seconds,low.receiver_search_seconds,
+         "private chip search with equal bandwidth, duration and bank must not grow with carrier or sample rate");
+    options.modem.oscillator_search->lf.accuracy_ppm=.001;
+    const auto fractional=simulation::estimate(wire(3,options.modem),options,true,clean_channel(),{},1,false);
+    check(fractional.pulse_projection_modeled&&fractional.kernel_rebuild_upper_bound&&
+          fractional.receiver_kernel_rebuild_seconds>high.receiver_kernel_rebuild_seconds,
+          "fractional-rate projection must disclose its conservative kernel rebuild allowance");
+    options.modem.oscillator_search=oscillator;
+    options.modem.integration_seconds=64+1./options.modem.sample_rate;
+    const auto partial=simulation::estimate(wire(3,options.modem),options,true,clean_channel(),{},1,false);
+    check(partial.receiver_workspace_supported&&!partial.pulse_projection_modeled&&partial.receiver_kernel_rebuild_seconds==0,
+          "partial chip/quarter geometry must model the full raw shaped fallback");
+    options.modem.integration_seconds=64;options.dsp_workspace_bytes=64*1024;
+    const auto unaffordable=simulation::estimate(wire(3,options.modem),options,true,clean_channel(),{},1,false);
+    check(!unaffordable.receiver_workspace_supported&&!unaffordable.pulse_projection_modeled&&!unaffordable.confidence_available,
+          "a compact bank whose mandatory state cannot fit must not claim supported receiver coverage");
+}
 }
 int main() {
     try {probability_and_framing();workload_and_impairments();receiver_cpu_budget();received_processing_budget();whole_symbol_phase_coherence();differential_model_limits();drift_receiver_estimate();receiver_statistic_controls();raw_sample_probability_geometry();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
-        coupled_and_independent_clock_estimates();streamed_template_workload();target_and_channel_are_independent();
+        coupled_and_independent_clock_estimates();streamed_template_workload();target_and_channel_are_independent();oscillator_policy_geometry();projected_pattern_workload();
         std::cout<<"simulation estimate tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"simulation estimate tests failed: "<<error.what()<<'\n';return 1;}
 }

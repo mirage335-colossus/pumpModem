@@ -37,12 +37,15 @@ and weak channels, and a nearly complete audio percentage is not a nearly
 complete computation. The noise-model percentage is not a measured reliability
 claim for the full receiver or its long, wide carrier search.
 
-The adjacent **Oscillator model** selector provides the original free-running
-crystal and three GPSDO cases: hobbyist XO without an oven, TCXO without an
-oven, and OCXO. It sets the same relative clock offset and phase diffusion
-for the sampled simulation and this estimate. The selected numeric values
-appear alongside the dropdown. These are illustrative sensitivity models,
-not measured GPSDO specifications; see [oscillator models](oscillator-models.md).
+The **LF / audio oscillator** and **RF oscillator** selectors provide
+free-running crystal and three GPSDO cases: hobbyist XO without an oven, TCXO
+without an oven, and OCXO. RF shift defaults to 0 Hz and the search margin to
+3×. The reference and sideband settings determine how their effective relative
+frequency, sample-clock and phase errors combine. The selected numeric values
+and requested/covered search bounds appear in the controls. These are
+illustrative sensitivity models, not measured GPSDO specifications; see
+[oscillator models](oscillator-models.md). The margin affects acquisition
+coverage, without multiplying the simulated impairment.
 
 The fixed reference machine is an **Intel Core i9-13900H** with an
 **NVIDIA GeForce RTX 4090 Laptop GPU**. The estimator never benchmarks the
@@ -80,7 +83,8 @@ receive it despite being below the design target. Target -61 requests
 79,432,823 seconds (about 919 days) per bit. The default 100 ppm clock shift is
 0.15 Hz, while the capped long-profile search covers only approximately
 ±6.45 microhertz. More nominal integration cannot compensate for drift outside
-that finite search. The
+that finite search. The default 3× crystal allowance requests ±0.45 Hz, so the
+full requested region also cannot fit. The
 current UI reports **Carrier outside RX search** for this long-symbol case,
 with no numeric probability. A sampled regression receives exact `011` / `a`
 for the strong 100 Hz case; it does not establish a calibrated 99.9% success
@@ -106,57 +110,92 @@ duration are different quantities. UI replay pacing is excluded.
 ## Probability model
 
 Numeric probability is available only when a matching receive profile covers
-the simulated carrier shift, the expanded FFT core fits its modeled
-workspace allowance, and every eligible detector lies within model coverage.
-The application enables an expanded carrier/clock
-search for pattern symbols lasting at least 16 sample-quantized seconds. Its
-frequency lattice has spacing `0.25/T`, where `T` is the actual sampled symbol
-duration. It retains the original local offsets when those suffice; otherwise
-it adds symmetric pairs toward ±200 ppm of the configured carrier.
-The search reserves the same intended waveform support above DC and below
-Nyquist as modem validation, including RRC rolloff for shaped patterns, and
-is capped at 4,097 distinct frequencies. Hitting a limit reduces the actual
-covered span; it never makes the lattice coarser to claim complete coverage.
+the simulated frequency and sample-clock error, the complete declared
+oscillator margin fits the finite bank, the requested receiver core fits its
+modeled workspace allowance, and every eligible detector lies within model
+coverage. Application search comes from `Config::oscillator_search`; the
+estimator consumes the same explicit frequency/rate pairs as live and transfer
+reception. It never replaces an explicitly supplied channel with the selected
+oscillator model.
 
-Each expanded frequency has two timing alternatives: the nominal sample clock
-and a clock scaled by `1 + frequency_offset/carrier_hz`. This retains coverage
-for both independent oscillator error and shared sample-clock error. The
-maximum expanded bank therefore contains 8,194 frequency/timing hypotheses.
-Projection bins shrink when necessary so averaging does not discard the
-carrier offsets the bank is intended to score. All tone profiles and pattern
-symbols shorter than 16 seconds retain the local bank of up to five frequencies.
-Implicit pattern offsets outside valid waveform headroom are omitted at any
-symbol duration, retaining the center even at a passband edge. The low-level
-`PatternSearch` API also preserves its local-bank default; live and
-transfer reception explicitly enable the application policy with
-`expand_clock_search`.
+Oscillator assumptions describe receiver acquisition rather than waveform
+identity. A transmit profile and a receive profile can match PCM geometry
+while declaring different margins or oscillator models. Search diagnostics
+then use the matching receive profile's bank; if several compatible banks are
+available, a supported bank is preferred. Every configured bank still adds
+compute work, and receiver/cache identity retains the policy.
 
-Expanded coupled banks use the FFT receiver for public and private patterns.
-The compact-private hint does not replace that comparison. If its core cannot
-fit, application callers may retain the original local, nominal-clock
-correlator search if it fits; live status identifies that narrower coverage. They never
-substitute independent per-lane admission over the expanded clock bank.
-Low-level automatic expanded requests require an explicit opt-in for this
-fallback. Explicitly supplied frequency banks remain strict.
+Its frequency lattice has spacing at most `0.25/T`, where `T` is the actual
+sampled symbol duration, refined to the declared endpoints. Requested frequency
+and sample-clock half-widths come from
+the effective-link LF/RF accuracy, RF shift, reference topology and margin.
+A shared radio has one linked rate per frequency candidate. Independent audio
+and active RF references use a bounded rate lattice, removing impossible
+combinations rather than treating every offset as an audio-clock error.
+The limits are 4,097 distinct frequencies, 65 independent rate candidates and
+8,194 paired lanes. Clock-scaled waveform support above DC and below Nyquist,
+including RRC rolloff and tone alias boundaries, imposes another bound. Hitting a limit reduces covered
+span; it never makes long-symbol frequency bins coarser to claim full coverage.
+
+`requested_carrier_search_half_width_hz` and
+`requested_clock_search_half_width_ppm` describe the requested allowances;
+`carrier_search_half_width_hz`, `clock_search_half_width_ppm` and
+`frequency_rate_hypotheses` describe the finite bank. `oscillator_search_limited`
+identifies incomplete joint margin coverage, and `clock_in_search` independently
+checks actual channel timing. Projection bins shrink when needed to retain
+the covered carrier offsets. Omitting the optional policy preserves historical
+low-level behavior, including its local bank unless `expand_clock_search`
+enables the old long-symbol ±200 ppm policy.
+
+The UI distinguishes **Clock outside RX search** from **Oscillator margin
+coverage incomplete** and from a workspace limit. Live status also reports
+covered/requested frequency and clock half-widths for an actual receive bank
+whose policy is limited, both on initial setup and after reset. This matters
+when selected receive targets produce a different symbol duration from TX;
+the transmit-setting detail alone does not describe every receiver bank.
+
+The CLI's `current_receiver` JSON uses `requested_search_half_width_hz` and
+`covered_search_half_width_hz` for these frequency bounds, plus
+`requested_clock_half_width_ppm` and `covered_clock_half_width_ppm` for rate
+coverage. It also reports `frequency_rate_hypotheses`, `clock_in_search` and
+`oscillator_search_limited`. The top-level `oscillator_search` describes the
+selected configuration; `current_receiver` describes the matching RX bank.
+
+Explicit policy banks retain the same paired hypotheses in FFT and compact
+correlation. Private long symbols can use compact correlation, and an
+unaffordable FFT core can use it when the declared bank fits that backend.
+Failure to fit the configured bank does not silently replace oscillator
+coverage with a local nominal-clock search.
+
+The historical `expand_clock_search` policy still requires the FFT comparison
+for its expanded coupled bank. Its optional local fallback is narrower;
+application status identifies that coverage. Low-level callers must opt into
+the fallback explicitly. Explicit frequency and paired hypothesis lists are
+strict.
 
 The model withholds its percentage and the UI shows **Wide RX search exceeds
 RAM** when its approximate per-bank allowance predicts this case. A missing
 profile or a carrier outside the requested wide bank takes precedence in that
-label. The displayed coverage and compute times then describe the requested
-FFT search, not the narrower fallback. No probability is inferred for that
-fallback. The direct correlator API retains its existing local frequency banks.
+label. For a legacy fallback, displayed coverage and compute times describe
+the requested FFT search, not the narrower fallback. No probability is inferred
+for that fallback. A direct correlator with no explicit policy retains its
+existing local frequency bank.
 
 The simulated shift includes both the explicit frequency offset and
 `carrier_hz * clock_error_ppm / 1e6`. Outside that span, the UI shows **Carrier
 outside RX search** and retains the CPU/GPU estimates. This is a model-coverage
-limit, not a claim that reception has exactly zero probability.
+limit, not a claim that reception has exactly zero probability. The RF model
+supplies an additive conversion offset, while the shared-radio model supplies
+the radio sample-clock error without another LF contribution.
 
 For example, public auto-pattern at 1 Hz and a 32 dB-Hz target uses 128-second
-symbols at the default 1,500 Hz carrier. The expanded application search uses
-309 distinct frequencies spanning ±0.30078125 Hz, with both clock alternatives,
-and includes the default 100 ppm simulation shift of 0.15 Hz. The sampled
-regression requires exact `011` / `a` reception with that default clock error
-and a completely observed absent symbol.
+symbols at the default 1,500 Hz carrier. The default crystal/3× application
+policy requests ±0.45 Hz and uses 463 paired frequencies/rates spanning
+±0.45 Hz. It includes the default 100 ppm simulation shift of 0.15 Hz.
+Historical sampled regressions used the previous ±200 ppm application bank,
+with 309 frequencies and two rate alternatives; those results are evidence
+for that earlier configuration. Current candidate validation is recorded in
+[oscillator search validation](oscillator-search-validation.md).
 
 The former five-frequency search spanned only ±0.00390625 Hz. An explicit
 five-frequency negative control retains the original reception failure. The
@@ -173,14 +212,21 @@ the integrated symbol energy is
 
 `Es/N0 (dB) = channel.snr_db + 10 log10(symbol_samples / 2)`.
 
-The original coherent approximation applies a fixed 3 dB implementation margin, squared-sinc loss for
-residual carrier frequency after selecting the closest actual frequency
-hypothesis using sample-quantized symbol durations, expected
+The original coherent approximation applies a fixed 3 dB implementation margin,
+squared-sinc loss for residual carrier frequency after selecting from the actual
+bank using sample-quantized symbol durations, expected
 coherent-energy loss from Wiener phase diffusion,
 and a triangular correlation loss for pattern timing smear within a symbol.
-For expanded banks the timing loss uses the smaller residual of the nominal
-clock and carrier-coupled alternatives. The nominal alternative prevents an
-independent oscillator offset from being mistaken for sample-clock drift.
+For policy banks it selects the pair with the best modeled combined
+carrier/timing coherence, which can trade carrier closeness for timing closeness.
+Independent converter error therefore cannot silently become sample-clock
+drift. Legacy banks retain their nominal and carrier-coupled alternatives.
+The statistical estimate models the selected pair's timing coherence and
+charges the complete paired-bank trial count; it does not jointly sample the
+covariance between different timing hypotheses. `probability_search_approximation`
+and the coverage diagnostic disclose this engineering approximation even when
+a conditional numeric estimate is available. Actual bank coverage remains a
+separate calculation.
 Tone profiles omit the pattern smear term. These are analytical approximations
 to the sampled channel; they do not reproduce adaptive tracking or the exact
 public/private codeword correlations.
@@ -355,7 +401,7 @@ remaining linear energy `g`, the assumed bit error rate is
 uses a Gaussian energy-statistic approximation with mean `g` and variance
 `1 + 2g`, threshold 5 for continuation, and a larger acquisition threshold
 `-ln(1e-10) + 2 ln(trials + 1) + ln(2 * hypotheses)`. Here `hypotheses` includes
-both timing alternatives when the frequency bank expands. Trials reflect the
+the actual frequency/rate pairs. Trials reflect the
 half-chip start window, that actual hypothesis count and private phase groups
 of a matching receiver.
 For the four-section receiver's coherent reference, both thresholds additionally
@@ -429,10 +475,40 @@ rounding gaps just as on the RX curve.
 The model counts full-rate waveform/channel samples, receiver projection work,
 FFT acquisition, established-stream tracking or bounded streaming correlation lanes. It reflects half-chip
 start searches, the actual bounded frequency/timing bank, private phase/initial-symbol
-searches and key/epoch/profile multiplicity. Expanded coupled banks use the FFT
-cost model, including when their requested core exceeds the allowance. For
-unexpanded banks, large private symbols or an unaffordable FFT core retain the
-existing correlation cost model.
+searches and key/epoch/profile multiplicity. Policy banks use their actual paired
+count and minimum/maximum rates. Large private symbols or an unaffordable FFT
+core use the correlation cost model when that path retains the bank. Historical
+expanded coupled requests use the FFT cost model, including when their requested
+core exceeds the allowance.
+
+For eligible compact shaped banks, the model separates full-rate pulse
+ingestion from chip-rate private fitting. It checks the actual pulse-projection
+geometry, including the 4,096-sample chip limit, and a conservative complete
+state/workspace allowance before crediting that path. Otherwise a policy bank's
+shaped raw fallback is charged per original sample. `pulse_projection_modeled`
+states whether any configured bank received this modeled path; it is not a
+runtime allocation guarantee.
+
+`receiver_frontend_seconds`, `receiver_search_seconds` and
+`receiver_kernel_rebuild_seconds` report separate components already included
+in `receiver_cpu_seconds`. Front-end work retains the supplied real sample rate,
+while projected private fitting follows chip cadence. Kernel preparation is
+charged separately. The current projected frontend and private fitting execute
+serially; both CPU and hypothetical GPU totals retain that serial cost.
+Nominal-rate banks allow bounded initial/clipped-cell
+preparation; fractional-rate banks pessimistically charge a full rebuild every
+cell. `kernel_rebuild_upper_bound` identifies that cache allowance. Actual reuse
+can make it much smaller, especially for narrow static clock regions. This
+component is not measured throughput, and does not imply that every cell
+actually rebuilt its kernel.
+
+The pulse allowances are 220 equivalent operations per input sample/lattice,
+4,000 per cell for Gram evaluation, 6,000 per candidate bit pair/chip/origin/phase
+for private fitting, and 16,000 per kernel sample for preparation. Up to three
+lattices per pair are budgeted. These rounded engineering coefficients are
+separate from [measured receiver workloads](oscillator-search-validation.md) and do not promise
+equal total cost for different input sample rates.
+
 The modeled per-bank allowance is the total divided by the modeled bank count,
 capped at half the total to match the live receiver's initial per-bank ceiling.
 The exact receiver's memory arbitration, reuse, bootstrap paths and template
@@ -465,10 +541,11 @@ transform for each job, using bounded scratch. Expanded live searches sharing
 memory with other keys, epochs or profiles also stream their rows, preserving
 room for the other banks. A single bank without section fitting can retain its
 public transformed templates when they fit. Four-section jobs always generate
-partial templates in shared scratch. An unaffordable expanded core
+partial templates in shared scratch. An unaffordable legacy expanded core
 leaves confidence unavailable; the model keeps the requested FFT cost rather
 than estimating the runtime's narrower correlator fallback.
-The existing compact-private/correlator choices apply only to unexpanded banks.
+The compact-private/correlator choices apply to explicit policy banks and
+historical unexpanded banks.
 These choices do not reduce the requested hypotheses. The
 streamed-template estimate includes extra forward transforms and template
 generation for public as well as private profiles, without benchmarking the
@@ -513,6 +590,10 @@ not a runtime upper bound or a probability-weighted expected runtime. Competing
 or noise tracks, late acquisition, replacements and reacquisition can change
 the work. The workload correction does not change the RX probability model.
 
+Compact continuation is already included in its continuous search allowance,
+so it adds no separate `tracking_seconds` charge. Its logical continuation and
+absence windows remain in `tracking_symbol_windows`.
+
 For streamed long public patterns, the CPU receiver can optionally cache the
 unmodulated nominal-clock waveform before applying each carrier offset. This
 cache is released after the input push and is used only when it fits without
@@ -551,8 +632,11 @@ The fixed engineering budgets are:
 | GPU path startup allowance, including CPU startup | 110 ms |
 
 FFT work uses a conventional five-operation complex FFT element/stage estimate
-plus template multiplication and scoring; correlation uses 64 equivalent
-operations per two-bit lane observation. These are deliberately rounded
+plus template multiplication and scoring. Legacy/prefix correlation uses 64
+equivalent operations per two-bit lane observation; an oscillator-policy bank's
+shaped raw fallback uses 512 per original sample, bit pair, origin and phase.
+Projected fitting uses the separate 6,000-per-chip allowance described above.
+These are deliberately rounded
 **assumed effective budgets**, not vendor benchmark results or measured
 application throughput. The CPU aggregate budget allows parallel scoring on
 the reference laptop while keeping channel and tracking allowances separate.

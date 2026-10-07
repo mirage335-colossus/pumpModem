@@ -34,6 +34,17 @@ struct Estimate {
     // Divide by simulated_seconds for a rough real-time workload,
     // not a measured CPU utilization or a guarantee about per-bit latency.
     double receiver_cpu_seconds = 0;
+    // Components included in receiver_cpu_seconds. Frontend work follows the
+    // original real sample rate; projected private search follows chip cadence
+    // and runs serially in the current backend (also in the GPU projection).
+    // Kernel rebuild work is a separate conservative cache allowance. With
+    // fractional rates it charges rebuilding every cell, although runtime cache
+    // reuse/incremental updates may make the actual work much smaller.
+    double receiver_frontend_seconds = 0;
+    double receiver_search_seconds = 0;
+    double receiver_kernel_rebuild_seconds = 0;
+    bool pulse_projection_modeled = false;
+    bool kernel_rebuild_upper_bound = false;
     // Ordinary receive bookkeeping, payload codecs and permitted text view.
     // Included once in CPU, receiver-only and hypothetical GPU totals. This
     // rounded reference allowance includes the mitigation subset below.
@@ -42,11 +53,13 @@ struct Estimate {
     // not an additional charge or a multiplier on unchanged modem DSP.
     double mitigation_seconds = 0;
     double gpu_seconds = 0;
-    // Included in both totals: serial whole-symbol continuation for one
-    // established signal stream per matching FFT profile, through observed
+    // Included in both totals: incremental serial whole-symbol continuation for
+    // one established signal stream per matching FFT profile, through observed
     // absence. Competing/noise tracks and reacquisition are not upper-bounded.
     // Unrelated key/epoch banks add acquisition work, not established streams.
     double tracking_seconds = 0;
+    // Logical continuation/absence windows also count compact profiles, whose
+    // continuation CPU is already included in receiver_search_seconds.
     double tracking_symbol_windows = 0;
     double simulated_seconds = 0;
     double modeled_symbol_snr_db = 0;
@@ -81,13 +94,21 @@ struct Estimate {
     bool differential_model_available = false;
     double differential_added_detection_probability = 0;
     double carrier_offset_hz = 0;
-    // Requested search span. If receiver_workspace_supported is false, live
-    // reception may use a narrower local fallback; no probability models it.
+    // Finite coverage of the configured bank; oscillator_search_limited distinguishes
+    // it from the full model/margin request below. An unaffordable legacy bank
+    // may fall back locally at runtime; no probability models that fallback.
     double carrier_search_half_width_hz = 0;
+    double requested_carrier_search_half_width_hz = 0;
+    double clock_search_half_width_ppm = 0;
+    double requested_clock_search_half_width_ppm = 0;
+    std::size_t frequency_rate_hypotheses = 0;
+    bool oscillator_search_limited = false;
+    // Includes membership in the paired region, not just independent extents.
+    bool clock_in_search = true;
     std::size_t receiver_profiles = 0;
     bool profile_matches = false;
     // A matching profile must have enough modeled workspace for the expanded
-    // FFT search. This is an approximate per-bank allowance, not an allocation
+    // FFT or compact search. This is a conservative per-bank allowance, not an allocation
     // guarantee; reference compute times still describe the requested work.
     bool receiver_workspace_supported = false;
     bool confidence_available = false;

@@ -1,5 +1,6 @@
 #pragma once
 #include "datapump/modem.hpp"
+#include "datapump/pattern_search.hpp"
 #include <algorithm>
 #include <memory>
 
@@ -68,6 +69,16 @@ struct PatternSearch {
     // A finite, explicit frequency bank. Empty preserves the five-bin local
     // search unless expand_clock_search is enabled by the application.
     std::vector<double> frequency_offsets_hz;
+    // Authoritative finite frequency/rate pairs. A nonempty bank replaces
+    // frequency_offsets_hz, clock_errors_ppm and carrier-coupling expansion;
+    // no Cartesian alternatives are added. An attached Config oscillator
+    // policy supplies this bank when no explicit frequency/rate override is
+    // given. Without a policy, empty retains the legacy API.
+    std::vector<PatternFrequencyRateHypothesis> hypotheses;
+    // Authoritative pairs describe alternatives for one uncertain carrier.
+    // Compare overlapping fits across the whole bank before publishing bits.
+    // False preserves independent-carrier arbitration for legacy rate banks.
+    bool frequency_rate_competition = true;
     // Search long pattern symbols across bounded +/-200 ppm carrier error,
     // with nominal and coupled sample-clock alternatives. See pattern_search.hpp.
     // The low-level local-search default remains usable in tiny DSP budgets.
@@ -116,6 +127,8 @@ struct PatternSearch {
     // at half-chip resolution; it rejects unaffordable coverage explicitly.
     std::optional<double> start_offset_seconds;
     double start_uncertainty_seconds = 0;
+    // Independent timing alternatives for each legacy frequency hypothesis.
+    // Rate is 1 + ppm*1e-6; observed symbol duration is nominal/rate.
     std::vector<double> clock_errors_ppm{0};
     // Scoring workers: zero uses all but one CPU available to this process
     // (at least one). One selects serial scoring. Search coverage and ordered

@@ -81,7 +81,7 @@ struct PatternReceiver::Impl {
     bool tracking_reference_valid=false;
     std::uint64_t prepared_template_index=0;
     bool templates_valid=false,streamed_templates=false,local_search_fallback=false;
-    bool long_symbol=false,required_tracking_reference=false;
+    bool long_symbol=false,required_tracking_reference=false,variable_clock=false;
     std::uint64_t active_stream_phase=0,phase_step=1,phase_upper=0;
     std::uint64_t sample=0,bins=0,next_start=0;
     Complex sum{},oscillator{1,0},rotation{},previous_chip{};
@@ -131,13 +131,31 @@ struct PatternReceiver::Impl {
         if((search.start_offset_seconds&&!std::isfinite(*search.start_offset_seconds)) ||
            !std::isfinite(search.start_uncertainty_seconds) || search.start_uncertainty_seconds<0)
             throw Error("invalid pattern system-clock window");
-        if(search.clock_errors_ppm.empty() || search.clock_errors_ppm.size()>65)
-            throw Error("clock-rate bank must contain 1..65 hypotheses");
-        for(auto ppm:search.clock_errors_ppm)
-            if(!std::isfinite(ppm)||std::abs(ppm)>10000)throw Error("clock-rate hypotheses must fit +/-10000 ppm");
+        if(c.oscillator_search && search.hypotheses.empty() && search.frequency_offsets_hz.empty() &&
+           search.clock_errors_ppm==std::vector<double>{0} && !search.couple_clock_to_carrier)
+            search.hypotheses=oscillator_pattern_search(c).hypotheses;
         const bool permit_local_fallback=search.allow_local_clock_fallback && search.expand_clock_search &&
-            search.frequency_offsets_hz.empty() && !search.couple_clock_to_carrier &&
+            search.hypotheses.empty() && search.frequency_offsets_hz.empty() && !search.couple_clock_to_carrier &&
             search.clock_errors_ppm==std::vector<double>{0};
+        if(!search.hypotheses.empty()) {
+            if(search.hypotheses.size()>maximum_pattern_frequency_rate_hypotheses)
+                throw Error("pattern frequency/rate bank exceeds finite hypothesis limit");
+            search.frequency_offsets_hz.clear();
+            search.frequency_offsets_hz.reserve(search.hypotheses.size());
+            for(const auto& hypothesis:search.hypotheses) {
+                if(!std::isfinite(hypothesis.clock_error_ppm) || std::abs(hypothesis.clock_error_ppm)>10000)
+                    throw Error("clock-rate hypotheses must fit +/-10000 ppm");
+                search.frequency_offsets_hz.push_back(hypothesis.frequency_offset_hz);
+            }
+            search.couple_clock_to_carrier=false;
+            search.uncoupled_frequency_count=0;
+            search.clock_errors_ppm={0};
+        } else {
+            if(search.clock_errors_ppm.empty() || search.clock_errors_ppm.size()>maximum_pattern_rate_hypotheses)
+                throw Error("clock-rate bank must contain 1..65 hypotheses");
+            for(auto ppm:search.clock_errors_ppm)
+                if(!std::isfinite(ppm)||std::abs(ppm)>10000)throw Error("clock-rate hypotheses must fit +/-10000 ppm");
+        }
         if(search.frequency_offsets_hz.empty()) {
             search.frequency_offsets_hz=search.expand_clock_search?default_pattern_frequency_offsets(c):
                 local_frequency_offsets(c);
@@ -160,6 +178,26 @@ struct PatternReceiver::Impl {
                 throw Error("coupled clock hypotheses must fit +/-10000 ppm");
             maximum_offset=std::max(maximum_offset,std::abs(offset));
         }
+        // The former FFT path validated independent rates but silently used
+        // nominal time. Flatten them once, in the compact receiver's rate-first
+        // order, so all backends score the same finite alternatives.
+        if(search.hypotheses.empty() && search.clock_errors_ppm!=std::vector<double>{0}) {
+            search.frequency_rate_competition=search.couple_clock_to_carrier;
+            if(search.frequency_offsets_hz.size()>maximum_pattern_frequency_rate_hypotheses/search.clock_errors_ppm.size())
+                throw Error("pattern frequency/rate bank exceeds finite hypothesis limit");
+            for(auto ppm:search.clock_errors_ppm)for(std::size_t f=0;f<search.frequency_offsets_hz.size();++f) {
+                const auto coupled=search.couple_clock_to_carrier && f>=search.uncoupled_frequency_count?
+                    1+search.frequency_offsets_hz[f]/c.carrier_hz:1.;
+                const auto combined_ppm=coupled==1?ppm:(coupled*(1+ppm*1e-6)-1)*1e6;
+                if(std::abs(combined_ppm)>10000+1e-8)throw Error("combined clock-rate hypotheses must fit +/-10000 ppm");
+                search.hypotheses.push_back({search.frequency_offsets_hz[f],std::clamp(combined_ppm,-10000.,10000.)});
+            }
+            search.frequency_offsets_hz.clear();search.frequency_offsets_hz.reserve(search.hypotheses.size());
+            for(const auto& hypothesis:search.hypotheses)search.frequency_offsets_hz.push_back(hypothesis.frequency_offset_hz);
+            search.couple_clock_to_carrier=false;search.uncoupled_frequency_count=0;search.clock_errors_ppm={0};
+        }
+        variable_clock=search.couple_clock_to_carrier || std::any_of(search.hypotheses.begin(),search.hypotheses.end(),
+            [](const auto& hypothesis){return hypothesis.clock_error_ppm!=0;});
         configured_bit_limit=search.bit_limit;
         if(!c.scramble&&!c.dsss)search.initial_stream_symbols=1;
         if(search.compact_clock_search && !search.couple_clock_to_carrier) {
@@ -197,8 +235,12 @@ struct PatternReceiver::Impl {
         real_rank=small<=1e-10*static_cast<double>(bin_samples);
         if(!real_rank)noise_condition=(static_cast<double>(bin_samples)+image)/small;
         if(symbols/bin_samples>std::numeric_limits<std::size_t>::max()-2)throw Error("pattern integration exceeds address space");
-        const auto observation_samples=static_cast<long double>(symbols)/
-            (search.couple_clock_to_carrier?1-maximum_offset/c.carrier_hz:1.);
+        double minimum_rate=search.couple_clock_to_carrier?1-maximum_offset/c.carrier_hz:1.;
+        if(!search.hypotheses.empty()) {
+            minimum_rate=clock_ratio(0);
+            for(std::size_t f=1;f<search.hypotheses.size();++f)minimum_rate=std::min(minimum_rate,clock_ratio(f));
+        }
+        const auto observation_samples=static_cast<long double>(symbols)/minimum_rate;
         if(observation_samples/bin_samples>std::numeric_limits<std::size_t>::max()-2)
             throw Error("pattern clock integration exceeds address space");
         length=static_cast<std::size_t>(std::ceil(observation_samples/bin_samples));
@@ -222,7 +264,7 @@ struct PatternReceiver::Impl {
         }
         hop=transform-length+1;
         if(long_symbol)hop=std::min(hop,std::max<std::size_t>(1,nominal_length/2));
-        required_tracking_reference=search.couple_clock_to_carrier || transform<2*length;
+        required_tracking_reference=variable_clock || transform<2*length;
         // Transform and baseband history allocations are checked before any
         // allocation. The RAM dropdown is a ceiling, not an allocation target.
         const auto arrays=5+2*search.frequency_offsets_hz.size();
@@ -237,11 +279,12 @@ struct PatternReceiver::Impl {
             static_cast<long double>(search.frequency_offsets_hz.size())*sizeof(decltype(template_energy)::value_type)+
             static_cast<long double>(search.frequency_offsets_hz.size())*sizeof(decltype(template_square)::value_type)+
             static_cast<long double>(search.frequency_offsets_hz.capacity()+search.clock_errors_ppm.capacity())*sizeof(double)+
+            static_cast<long double>(search.hypotheses.capacity())*sizeof(PatternFrequencyRateHypothesis)+
             4096*sizeof(Complex)+code.working_bytes()+sizeof(PatternReceiver);
         if(drift_sections>1)required+=static_cast<long double>(hop)*
             (sizeof(detail::FftDriftAccumulator)+sizeof(detail::FftSearchScore));
         if(differential_window)required+=static_cast<long double>(hop)*sizeof(detail::DifferentialAccumulator);
-        if(required>bytes || drift_sections>1 || (search.prefer_streamed_templates && search.couple_clock_to_carrier)) {
+        if(required>bytes || drift_sections>1 || (search.prefer_streamed_templates && variable_clock)) {
             const auto without_rows=required-2.L*search.frequency_offsets_hz.size()*transform*sizeof(Complex);
             // A wide bank needs every hypothesis, but not every transformed
             // template at once. Generate rows in bounded worker scratch (or
@@ -380,7 +423,7 @@ struct PatternReceiver::Impl {
         geometry.bins_per_symbol=length;geometry.bin_samples=bin_samples;
         geometry.carrier_hz=config.carrier_hz;geometry.evidence_count=evidence_count(length);
         geometry.noise_condition=noise_condition;geometry.real_rank=real_rank;geometry.sample_fit=sample_fit;
-        geometry.extended_clock_window=search.couple_clock_to_carrier;
+        geometry.extended_clock_window=variable_clock;
         geometry.drift_sections=drift_sections;
         geometry.differential_window_samples=differential_window;
         return geometry;
@@ -514,7 +557,7 @@ struct PatternReceiver::Impl {
     Complex template_value(PatternCode& pattern,std::size_t bin,std::uint64_t index,unsigned bit,std::size_t f) const {
         const auto sample_position=static_cast<long double>(bin)*bin_samples+static_cast<long double>(bin_samples-1)/2;
         const auto source_position=sample_position*clock_ratio(f);
-        if(search.couple_clock_to_carrier && source_position>=code.symbol_samples())return {};
+        if(variable_clock && source_position>=code.symbol_samples())return {};
         const auto chip_position=source_position/code.chip_samples();
         const auto local=static_cast<std::uint64_t>(chip_position);
         if(index>(std::numeric_limits<std::uint64_t>::max()-local)/code.chips_per_symbol())throw Error("pattern stream coordinate overflow");
@@ -551,12 +594,17 @@ struct PatternReceiver::Impl {
         // the waveform against every available sample.
         return sample_fit?std::min(count,4*count/static_cast<double>(code.chip_samples())):count;
     }
+    bool competing_frequencies()const {
+        return search.couple_clock_to_carrier ||
+            (!search.hypotheses.empty() && search.frequency_rate_competition);
+    }
     double clock_ratio(std::size_t frequency)const {
+        if(!search.hypotheses.empty())return 1+search.hypotheses[frequency].clock_error_ppm*1e-6;
         return search.couple_clock_to_carrier && frequency>=search.uncoupled_frequency_count?
             1+search.frequency_offsets_hz[frequency]/config.carrier_hz:1.;
     }
     std::uint64_t symbol_bins(std::size_t frequency)const {
-        if(!search.couple_clock_to_carrier)return length;
+        if(!variable_clock)return length;
         return std::max<std::uint64_t>(1,static_cast<std::uint64_t>(std::llround(
             static_cast<long double>(code.symbol_samples())/bin_samples/
             clock_ratio(frequency))));
@@ -572,7 +620,7 @@ struct PatternReceiver::Impl {
     double continuation_penalty()const {
         // Expanded banks compare both bits, five timing refinements and all
         // carrier/clock alternatives. Do not inherit the old five-bin bound.
-        return std::log(search.expand_clock_search && templates.size()>5?
+        return std::log(((search.expand_clock_search && templates.size()>5) || !search.hypotheses.empty())?
             10.*static_cast<double>(templates.size()):10.);
     }
     void remember(PatternEvidence item) {
@@ -687,6 +735,9 @@ struct PatternReceiver::Impl {
             one=detail::combine_drift_evidence(one,detail::drift_evidence(sections.explained(1,noise_condition,sample_fit),energy,count,drift_sections,real_rank),drift_sections);
         }
         zero=differential.combine(zero,0);one=differential.combine(one,1);
+        // Every candidate was scored through the common padded observation
+        // end. Keep that end in evidence so continuation excludes all reused
+        // bins, including the noise-only tail of a faster rate alternative.
         PatternEvidence result{start*bin_samples,(start+length)*bin_samples,index,
             config.carrier_hz+search.frequency_offsets_hz[f],std::max(zero,one),std::min(zero,one),one>zero?1U:0U,active_stream_phase};
         result.frequency_hypothesis=f;return result;
@@ -742,7 +793,7 @@ struct PatternReceiver::Impl {
             event.bits.assign(track.burst.bits.begin(),track.burst.bits.begin()+static_cast<std::ptrdiff_t>(count));
             event.complete=complete && count==track.confirmed;
             event.end_sample=count==track.confirmed?track.confirmed_end:
-                event.first_sample+count*code.symbol_samples();
+                event.first_sample+count*(search.hypotheses.empty()?code.symbol_samples():symbol_bins(track.frequency)*bin_samples);
             event.score=track.confirmed_score;
             event.support_samples=track.confirmed_support;
             room_for_bits(3*event.bits.capacity());latest=event;
@@ -816,7 +867,7 @@ struct PatternReceiver::Impl {
                 const auto timing_fit=best;
                 auto selected_frequency=track.frequency;
                 const auto eligible=[&](std::size_t f) {
-                    return track.established || std::abs(search.frequency_offsets_hz[f]-search.frequency_offsets_hz[track.frequency])<=
+                    return competing_frequencies() || track.established || std::abs(search.frequency_offsets_hz[f]-search.frequency_offsets_hz[track.frequency])<=
                         static_cast<double>(config.sample_rate)/static_cast<double>(code.symbol_samples());
                 };
                 std::size_t jobs=0;
@@ -860,7 +911,7 @@ struct PatternReceiver::Impl {
                 // suffix of the same physical stream.
                 if(!track.established) {
                     const auto same_frequency=[&](double frequency) {
-                        return search.couple_clock_to_carrier || std::abs(best.frequency_hz-frequency)<=
+                        return competing_frequencies() || std::abs(best.frequency_hz-frequency)<=
                             static_cast<double>(config.sample_rate)/static_cast<double>(code.symbol_samples());
                     };
                     const auto duplicate=std::any_of(tracks.begin(),tracks.end(),[&](const Track& other) {
@@ -884,7 +935,7 @@ struct PatternReceiver::Impl {
                 if(!track.unconfirmed_symbols)track.absent_samples=0;
                 track.absent_samples+=static_cast<long double>(code.symbol_samples())/clock_ratio(track.frequency);
                 ++track.unconfirmed_symbols;
-                const auto gap_expired=search.couple_clock_to_carrier?
+                const auto gap_expired=variable_clock?
                     track.absent_samples>=pattern_absence_seconds*config.sample_rate:
                     static_cast<long double>(track.unconfirmed_symbols)*code.symbol_samples()>=
                         static_cast<long double>(pattern_absence_seconds)*config.sample_rate;
@@ -1002,7 +1053,7 @@ struct PatternReceiver::Impl {
             if(group_count>1)return;
         }
         const auto same_frequency=[&](double frequency) {
-            return search.couple_clock_to_carrier ||
+            return competing_frequencies() ||
                 std::abs(item.frequency_hz-frequency)<=static_cast<double>(config.sample_rate)/static_cast<double>(code.symbol_samples());
         };
         for(const auto& span:completed)
@@ -1026,7 +1077,8 @@ struct PatternReceiver::Impl {
                 // be allowed to replace an obscured old track.
                 bool follows_gap=false;
                 if(track.pending_gap) {
-                    const auto next=track.next*bin_samples,symbol=code.symbol_samples();
+                    const auto next=track.next*bin_samples,symbol=search.hypotheses.empty()?
+                        code.symbol_samples():symbol_bins(track.frequency)*bin_samples;
                     const auto distance=next>item.first_sample?next-item.first_sample:item.first_sample-next;
                     const auto slots=distance/symbol+(distance%symbol>symbol/2);
                     const auto residual=distance%symbol;
@@ -1088,7 +1140,7 @@ struct PatternReceiver::Impl {
         const auto existing=std::find_if(peaks.begin(),peaks.end(),[&](const auto& p){
             const auto distance=p.first_sample>item.first_sample?p.first_sample-item.first_sample:item.first_sample-p.first_sample;
             return distance<std::max<std::uint64_t>(1,code.symbol_samples()/2) &&
-                (search.couple_clock_to_carrier ||
+                (competing_frequencies() ||
                  std::abs(p.frequency_hz-item.frequency_hz)<=static_cast<double>(config.sample_rate)/static_cast<double>(code.symbol_samples()));
         });
         if(existing!=peaks.end()) { if(item.score>existing->score)*existing=item; }
@@ -1199,7 +1251,7 @@ struct PatternReceiver::Impl {
             const auto covered=long_symbol && stable_spans && std::any_of(completed.begin(),completed.end(),[&](const Completed& span) {
                 if((next_start+count-1)*bin_samples>=span.end ||
                    (next_start+length)*bin_samples<=span.first)return false;
-                return search.couple_clock_to_carrier ||
+                return competing_frequencies() ||
                     std::all_of(search.frequency_offsets_hz.begin(),search.frequency_offsets_hz.end(),[&](double offset) {
                         return std::abs(config.carrier_hz+offset-span.frequency)<=
                             static_cast<double>(config.sample_rate)/static_cast<double>(code.symbol_samples());
@@ -1318,7 +1370,8 @@ struct PatternReceiver::Impl {
             templates.capacity()*sizeof(decltype(templates)::value_type)+
             template_energy.capacity()*sizeof(decltype(template_energy)::value_type)+
             template_square.capacity()*sizeof(decltype(template_square)::value_type)+
-            (search.frequency_offsets_hz.capacity()+search.clock_errors_ppm.capacity())*sizeof(double);
+            (search.frequency_offsets_hz.capacity()+search.clock_errors_ppm.capacity())*sizeof(double)+
+            search.hypotheses.capacity()*sizeof(PatternFrequencyRateHypothesis);
         for(const auto& row:templates)for(const auto& v:row)total+=v.capacity()*sizeof(Complex);
         total+=cached_templates.capacity()*sizeof(CachedTemplates);
         total+=tracking_reference.capacity()*sizeof(decltype(tracking_reference)::value_type);
@@ -1334,7 +1387,8 @@ struct PatternReceiver::Impl {
     }
     std::size_t wrapper_bytes()const {
         return sizeof(Impl)+sizeof(PatternReceiver)+code.working_bytes()+
-            search.frequency_offsets_hz.capacity()*sizeof(double)+search.clock_errors_ppm.capacity()*sizeof(double);
+            search.frequency_offsets_hz.capacity()*sizeof(double)+search.clock_errors_ppm.capacity()*sizeof(double)+
+            search.hypotheses.capacity()*sizeof(PatternFrequencyRateHypothesis);
     }
     void set_workspace_bytes(std::size_t bytes) {
         if(fallback) {

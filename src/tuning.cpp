@@ -93,6 +93,9 @@ std::string normalized(std::string_view name) {
 }
 }
 std::span<const PatternMode> pattern_modes(){return modes;}
+modem::OscillatorModel oscillator_model(const OscillatorPreset& preset) {
+    return {preset.clock_error_ppm,preset.phase_noise_degrees_per_sqrt_second};
+}
 std::string_view pattern_mode_name(PatternMode mode){return names[index_of(mode)];}
 bool tone_mode(PatternMode mode){return mode==PatternMode::auto_tone || index_of(mode)>=9;}
 PatternMode parse_pattern_mode(std::string_view name) {

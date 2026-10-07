@@ -43,11 +43,12 @@ struct PatternCorrelator::Impl {
     std::size_t block_samples=block_size;
     unsigned drift_sections=1;
     std::uint64_t differential_window=0;
+    long double origin_lower=0;
     bool finished=false,shaped=false;
     struct Hypothesis {
         long double origin=0,rate=1;
         std::uint64_t index=0,observed_start=0,phase_lower=0,phase_upper=0;
-        std::size_t frequency=0,rate_index=0;
+        std::size_t frequency=0,rate_index=0,tone_bank_base=0;
         std::array<Fit,2> fits{};
         PatternBurst burst;
         // The burst stores committed score/support; only tentative totals need
@@ -74,6 +75,30 @@ struct PatternCorrelator::Impl {
     std::vector<std::array<DriftFit,2>> drift_fits;
     std::vector<std::array<DifferentialFit,2>> differential_fits;
     std::vector<Bank> banks;
+    struct PulseLattice {
+        long double anchor=0,rate=1,start=0,first_offset=0;
+        std::size_t frequency=0;
+        std::uint64_t next=0;
+        Complex carrier_square{};
+        double carrier_norm=1;
+        detail::CorrelationPulseKernel kernel;
+        detail::CorrelationPulseCell pending;
+        std::vector<detail::CorrelationPulseCell> cells;
+        PulseLattice(long double origin,long double ratio,std::size_t bank,
+                     std::uint64_t chip,double frequency_hz,std::uint32_t sample_rate)
+            :anchor(origin),rate(ratio),frequency(bank),kernel(chip,ratio,frequency_hz,sample_rate) {
+            const auto position=std::floor(-anchor*rate/chip);
+            require(position>=std::numeric_limits<std::int64_t>::min() &&
+                    position<std::numeric_limits<std::int64_t>::max(),"pulse cell coordinate overflow");
+            pending.chip=static_cast<std::int64_t>(position);
+            start=anchor+static_cast<long double>(pending.chip)*chip/rate;
+            next=static_cast<std::uint64_t>(std::max(0.L,std::ceil(anchor+
+                static_cast<long double>(pending.chip+1)*chip/rate)));
+        }
+    };
+    std::vector<PulseLattice> pulse_lattices;
+    struct PulseAddress {std::size_t lattice=0;std::int64_t shift=0;};
+    std::vector<PulseAddress> pulse_addresses;
     std::vector<PatternEvidence> history;
     std::vector<PatternBurst> bursts;
     std::vector<Complex> points;
@@ -107,40 +132,71 @@ struct PatternCorrelator::Impl {
                 std::isfinite(search.retain_score) && search.retain_score>=0 && search.bit_limit && search.chunk_bits &&
                 search.candidate_limit && search.candidate_limit<=65536 && search.track_limit && search.track_limit<=128,
                 "invalid long pattern search limits");
-        require(!search.clock_errors_ppm.empty() && search.clock_errors_ppm.size()<=65,"clock-rate bank must contain 1..65 hypotheses");
+        if(c.oscillator_search && search.hypotheses.empty() && search.frequency_offsets_hz.empty() &&
+           search.clock_errors_ppm==std::vector<double>{0} && !search.couple_clock_to_carrier)
+            search.hypotheses=oscillator_pattern_search(c).hypotheses;
+        const bool paired=!search.hypotheses.empty();
         long double highest_rate=1;
-        for(auto ppm:search.clock_errors_ppm) {
-            require(std::isfinite(ppm) && std::abs(ppm)<=10000,"clock-rate hypotheses must fit +/-10000 ppm");
-            highest_rate=std::max(highest_rate,1+static_cast<long double>(ppm)*1e-6L);
+        if(paired) {
+            require(search.hypotheses.size()<=maximum_pattern_frequency_rate_hypotheses,
+                    "frequency/rate bank exceeds finite hypothesis limit");
+            search.frequency_offsets_hz.clear();search.clock_errors_ppm={0};
+            search.couple_clock_to_carrier=false;
+            for(const auto& pair:search.hypotheses) {
+                require(std::isfinite(pair.frequency_offset_hz) && std::isfinite(pair.clock_error_ppm) &&
+                        std::abs(pair.clock_error_ppm)<=10000,"invalid paired frequency/rate hypothesis");
+                highest_rate=std::max(highest_rate,1+static_cast<long double>(pair.clock_error_ppm)*1e-6L);
+                if(std::find(search.frequency_offsets_hz.begin(),search.frequency_offsets_hz.end(),pair.frequency_offset_hz)==
+                   search.frequency_offsets_hz.end())search.frequency_offsets_hz.push_back(pair.frequency_offset_hz);
+            }
+            require(search.frequency_offsets_hz.size()<=maximum_pattern_frequency_hypotheses,
+                    "frequency bank exceeds finite hypothesis limit");
+        } else {
+            require(!search.clock_errors_ppm.empty() && search.clock_errors_ppm.size()<=65,"clock-rate bank must contain 1..65 hypotheses");
+            for(auto ppm:search.clock_errors_ppm) {
+                require(std::isfinite(ppm) && std::abs(ppm)<=10000,"clock-rate hypotheses must fit +/-10000 ppm");
+                highest_rate=std::max(highest_rate,1+static_cast<long double>(ppm)*1e-6L);
+            }
+            if(search.frequency_offsets_hz.empty()) {
+                const auto step=.25*c.sample_rate/static_cast<double>(code.symbol_samples());
+                require(!search.expand_clock_search || default_pattern_frequency_search(c).count<=5,
+                        "expanded carrier competition requires FFT workspace");
+                search.frequency_offsets_hz={0,-step,step,-2*step,2*step};
+            }
+            require(!search.couple_clock_to_carrier && (!search.expand_clock_search || search.frequency_offsets_hz.size()<=5),
+                    "coupled carrier competition requires FFT workspace");
+            require(search.frequency_offsets_hz.size()<=65,"frequency bank exceeds 65 hypotheses");
         }
-        if(search.frequency_offsets_hz.empty()) {
-            const auto step=.25*c.sample_rate/static_cast<double>(code.symbol_samples());
-            require(!search.expand_clock_search || default_pattern_frequency_search(c).count<=5,
-                    "expanded carrier competition requires FFT workspace");
-            search.frequency_offsets_hz={0,-step,step,-2*step,2*step};
-        }
-        require(!search.couple_clock_to_carrier && (!search.expand_clock_search || search.frequency_offsets_hz.size()<=5),
-                "coupled carrier competition requires FFT workspace");
-        require(search.frequency_offsets_hz.size()<=65,"frequency bank exceeds 65 hypotheses");
         const auto tone_limit=static_cast<double>(c.sample_rate)/(4*static_cast<double>(code.chip_samples()));
+        const auto offset_limit=paired?pattern_frequency_offset_limit(c):c.bandwidth_hz/8;
         for(auto frequency:search.frequency_offsets_hz) {
-            require(std::isfinite(frequency) && std::abs(frequency)<=c.bandwidth_hz/8,"frequency hypothesis exceeds occupied band");
+            require(std::isfinite(frequency) && std::abs(frequency)<=offset_limit,"frequency hypothesis exceeds occupied band");
             if(c.spreading_mode==SpreadingMode::tone)
                 require(std::abs(frequency)<tone_limit,"tone frequency uncertainty aliases binary labels");
         }
         const auto lower=(static_cast<long double>(*search.start_offset_seconds)-search.start_uncertainty_seconds)*c.sample_rate;
         const auto upper=(static_cast<long double>(*search.start_offset_seconds)+search.start_uncertainty_seconds)*c.sample_rate;
+        origin_lower=lower;
         require(std::isfinite(lower) && std::isfinite(upper) && std::abs(lower)<1e15L && std::abs(upper)<1e15L,
                 "clock start window exceeds precise sample-coordinate range");
         const auto step=std::max(1.L,std::floor(static_cast<long double>(code.chip_samples())/(2*highest_rate)));
-        const auto origins=std::ceil((upper-lower)/step)+1;
-        const auto total=origins*search.frequency_offsets_hz.size()*search.clock_errors_ppm.size();
-        const auto bank_count=search.frequency_offsets_hz.size()*(c.spreading_mode==SpreadingMode::tone?2*search.clock_errors_ppm.size():1);
+        const auto pair_count=paired?search.hypotheses.size():search.frequency_offsets_hz.size()*search.clock_errors_ppm.size();
+        const auto origin_step=[&](long double ratio) {
+            return paired?static_cast<long double>(code.chip_samples())/(2*ratio):step;
+        };
+        long double total=0;
+        for(std::size_t pair=0;pair<pair_count;++pair) {
+            const auto ppm=paired?search.hypotheses[pair].clock_error_ppm:
+                search.clock_errors_ppm[pair/search.frequency_offsets_hz.size()];
+            total+=std::ceil((upper-lower)/origin_step(1+static_cast<long double>(ppm)*1e-6L))+1;
+        }
+        const auto bank_count=c.spreading_mode==SpreadingMode::tone?2*pair_count:search.frequency_offsets_hz.size();
         long double fixed=sizeof(PatternCorrelator)+sizeof(Impl)+code.working_bytes()+
             total*(sizeof(Hypothesis)+alternate_groups*sizeof(std::array<Fit,2>))+
             bank_count*(sizeof(Bank)+(block_samples+1)*sizeof(Projection))+point_capacity*sizeof(Complex)+
             static_cast<long double>(search.candidate_limit)*sizeof(PatternEvidence)+search.track_limit*(sizeof(PatternBurst)+sizeof(Emission))+
-            (search.frequency_offsets_hz.capacity()+search.clock_errors_ppm.capacity())*sizeof(double);
+            (search.frequency_offsets_hz.capacity()+search.clock_errors_ppm.capacity())*sizeof(double)+
+            search.hypotheses.capacity()*sizeof(PatternFrequencyRateHypothesis);
         require(total>=1 && total<=std::numeric_limits<std::size_t>::max() && fixed<bytes,
                 "complete half-chip clock/frequency/rate coverage exceeds DSP workspace");
         const auto count=static_cast<std::size_t>(total);
@@ -159,6 +215,21 @@ struct PatternCorrelator::Impl {
             if(fixed+extra+denominator<=bytes)fixed+=extra;
             else differential_window=0;
         }
+        // Full chip cells are sufficient statistics for this exact finite
+        // pulse. Two half-chip origin parities share each projection. Partial
+        // chips and legacy fractional origin grids keep the raw reference path.
+        const bool pulse_geometry=shaped && code.symbol_samples()>=16ULL*c.sample_rate &&
+            code.chip_samples()<=4096 &&
+            code.symbol_samples()%(4*code.chip_samples())==0 &&
+            (paired || (code.chip_samples()%2==0 &&
+                std::all_of(search.clock_errors_ppm.begin(),search.clock_errors_ppm.end(),[](double ppm){return ppm==0;})));
+        const auto pulse_cell_capacity=static_cast<std::size_t>(std::ceil(block_samples*highest_rate/code.chip_samples()))+2;
+        const auto pulse_count=3*pair_count;
+        const auto pulse_extra=static_cast<long double>(pulse_count)*
+            (sizeof(PulseLattice)+pulse_cell_capacity*sizeof(detail::CorrelationPulseCell))+
+            total*sizeof(PulseAddress)+detail::correlation_pulse_scratch_bytes;
+        const bool pulse_enabled=pulse_geometry && fixed+pulse_extra+denominator<=bytes;
+        if(pulse_enabled) {fixed+=pulse_extra;pulse_lattices.reserve(pulse_count);pulse_addresses.reserve(count);}
         const auto remaining=bytes-static_cast<std::size_t>(std::ceil(fixed));
         bit_limit=std::min(search.bit_limit,remaining/denominator);
         require(bit_limit>0,"clock-search workspace cannot retain symbol evidence");
@@ -174,33 +245,91 @@ struct PatternCorrelator::Impl {
                     "pattern drift fits exceed address space");
         }
         history.reserve(search.candidate_limit);bursts.reserve(search.track_limit);
-        for(std::size_t rate=0;rate<search.clock_errors_ppm.size();++rate) {
-            const auto ratio=1+static_cast<long double>(search.clock_errors_ppm[rate])*1e-6L;
-            for(std::size_t f=0;f<search.frequency_offsets_hz.size();++f) {
-                if(c.spreading_mode==SpreadingMode::tone)for(unsigned bit=0;bit<2;++bit)
-                    banks[(rate*search.frequency_offsets_hz.size()+f)*2+bit].frequency=c.carrier_hz+search.frequency_offsets_hz[f]+
-                        (bit?1.:-1.)*tone_limit*static_cast<double>(ratio);
-                else banks[f].frequency=c.carrier_hz+search.frequency_offsets_hz[f];
-                for(std::size_t i=0;i<static_cast<std::size_t>(origins);++i) {
-                    Hypothesis h;h.origin=std::min(upper,lower+static_cast<long double>(i)*step);
-                    h.rate=ratio;h.frequency=f;h.rate_index=rate;
-                    h.phase_lower=phase_lower;h.phase_upper=phase_upper;
-                    const auto elapsed=std::max(0.L,-h.origin)*ratio;
-                    const auto index=std::floor(elapsed/code.symbol_samples());
-                    require(index<std::numeric_limits<std::uint64_t>::max(),"clock hint exceeds stream symbol counter");
-                    h.index=static_cast<std::uint64_t>(index);hypotheses.push_back(std::move(h));
+        for(std::size_t pair=0;pair<pair_count;++pair) {
+            const auto rate=paired?pair:pair/search.frequency_offsets_hz.size();
+            const auto f=paired?static_cast<std::size_t>(std::find(search.frequency_offsets_hz.begin(),search.frequency_offsets_hz.end(),
+                search.hypotheses[pair].frequency_offset_hz)-search.frequency_offsets_hz.begin()):pair%search.frequency_offsets_hz.size();
+            const auto ppm=paired?search.hypotheses[pair].clock_error_ppm:search.clock_errors_ppm[rate];
+            const auto ratio=1+static_cast<long double>(ppm)*1e-6L;
+            const auto pair_step=origin_step(ratio);
+            const auto origins=static_cast<std::size_t>(std::ceil((upper-lower)/pair_step)+1);
+            const auto lattice_base=pulse_lattices.size();
+            const auto make_lattice=[&](long double anchor) {
+                pulse_lattices.emplace_back(anchor,ratio,f,code.chip_samples(),
+                    c.carrier_hz+search.frequency_offsets_hz[f],c.sample_rate);
+                pulse_lattices.back().cells.reserve(pulse_cell_capacity);
+            };
+            if(pulse_enabled) {make_lattice(lower);if(origins>1)make_lattice(lower+pair_step);}
+            if(c.spreading_mode==SpreadingMode::tone)for(unsigned bit=0;bit<2;++bit)
+                banks[2*pair+bit].frequency=c.carrier_hz+search.frequency_offsets_hz[f]+
+                    (bit?1.:-1.)*tone_limit*static_cast<double>(ratio);
+            else banks[f].frequency=c.carrier_hz+search.frequency_offsets_hz[f];
+            for(std::size_t i=0;i<origins;++i) {
+                Hypothesis h;h.origin=std::min(upper,lower+static_cast<long double>(i)*pair_step);
+                h.rate=ratio;h.frequency=f;h.rate_index=rate;h.tone_bank_base=2*pair;
+                if(pulse_enabled) {
+                    PulseAddress address;
+                    if(h.origin==upper && h.origin!=lower+static_cast<long double>(i)*pair_step) {
+                        make_lattice(h.origin);address.lattice=pulse_lattices.size()-1;
+                    } else {address.lattice=lattice_base+i%2;address.shift=static_cast<std::int64_t>(i/2);}
+                    pulse_addresses.push_back(address);
                 }
+                h.phase_lower=phase_lower;h.phase_upper=phase_upper;
+                const auto elapsed=std::max(0.L,-h.origin)*ratio;
+                const auto index=std::floor(elapsed/code.symbol_samples());
+                require(index<std::numeric_limits<std::uint64_t>::max(),"clock hint exceeds stream symbol counter");
+                h.index=static_cast<std::uint64_t>(index);hypotheses.push_back(std::move(h));
             }
         }
         accounted_bytes=working_bytes()+drift_reserved;
         require(sizeof(PatternCorrelator)+accounted_bytes<=budget,"clock-search state exceeds DSP workspace");
     }
+    long double clock_boundary(const Hypothesis& h,std::uint64_t within=0) const {
+        if(pulse_lattices.empty() && search.hypotheses.empty()) {
+            if(within==code.symbol_samples())return h.origin+(static_cast<long double>(h.index)+1)*code.symbol_samples()/h.rate;
+            return h.origin+static_cast<long double>(h.index)*code.symbol_samples()/h.rate+within/h.rate;
+        }
+        long double anchor=h.origin,shift=0;
+        if(!pulse_lattices.empty()) {
+            const auto& address=pulse_addresses[static_cast<std::size_t>(&h-hypotheses.data())];
+            anchor=pulse_lattices[address.lattice].anchor;shift=address.shift;
+        } else if(!search.hypotheses.empty()) {
+            // Recover the exact half-chip origin address, including the final
+            // clipped endpoint, without enlarging every legacy raw lane.
+            const auto step=static_cast<long double>(code.chip_samples())/(2*h.rate);
+            const auto address=std::round((h.origin-origin_lower)/step);
+            if(h.origin==origin_lower+address*step) {
+                const auto parity=std::fmod(address,2.L);
+                anchor=origin_lower+parity*step;shift=std::floor(address/2);
+            }
+        }
+        return anchor+(shift*code.chip_samples()+static_cast<long double>(h.index)*code.symbol_samples()+within)/h.rate;
+    }
+    long double symbol_start(const Hypothesis& h) const {return clock_boundary(h);}
+    void advance_drift(DriftFit& fit,const Hypothesis& h,std::uint64_t observed) const {
+        while(fit.section+1<drift_sections && static_cast<long double>(observed)>=
+              std::ceil(clock_boundary(h,detail::drift_boundary(fit.section+1,code.symbol_samples(),drift_sections)))) {
+            const auto explained=fit.active.explained();fit.explained_sum+=explained;
+            fit.largest_explained=std::max(fit.largest_explained,explained);fit.active={};++fit.section;
+        }
+    }
+    void advance_differential(DifferentialFit& fit,const Hypothesis& h,std::uint64_t observed) const {
+        const auto total=code.symbol_samples(),width=differential_window;
+        const auto position=std::max(0.L,(static_cast<long double>(observed)-symbol_start(h))*h.rate);
+        auto next=static_cast<std::uint64_t>(std::min(std::floor(position/width),static_cast<long double>(total/width)));
+        while(next<total/width && static_cast<long double>(observed)>=std::ceil(clock_boundary(h,(next+1)*width)))++next;
+        while(next && static_cast<long double>(observed)<std::ceil(clock_boundary(h,next*width)))--next;
+        if(fit.initialized && next==fit.window_index)return;
+        if(fit.initialized)fit.finish(total,width);
+        fit.active={};fit.window_index=next;fit.initialized=true;fit.expected_count=0;
+        if(next<total/width)fit.expected_count=static_cast<std::uint64_t>(
+            std::ceil(clock_boundary(h,(next+1)*width))-std::ceil(clock_boundary(h,next*width)));
+    }
     void prepare_drift(std::uint64_t end) {
         if(!drift_reserved)return;
         const auto first_boundary=detail::drift_boundary(1,code.symbol_samples(),drift_sections);
         const auto needed=std::any_of(hypotheses.begin(),hypotheses.end(),[&](const auto& h) {
-            return static_cast<long double>(end)>std::ceil(h.origin+
-                (static_cast<long double>(h.index)*code.symbol_samples()+first_boundary)/h.rate);
+            return static_cast<long double>(end)>std::ceil(clock_boundary(h,first_boundary));
         });
         if(!needed)return;
         // Until the first boundary the ordinary whole-symbol fit is also the
@@ -215,6 +344,7 @@ struct PatternCorrelator::Impl {
         room_for(0);
     }
     void prepare_workers() {
+        if(!pulse_lattices.empty())return;
         if(!worker_codes.empty())return;
         const auto concurrency=std::min(hypotheses.size(),detail::search_concurrency(search.worker_threads));
         const auto workers=std::min(concurrency,(budget-sizeof(PatternCorrelator)-accounted_bytes)/code.working_bytes());
@@ -234,7 +364,14 @@ struct PatternCorrelator::Impl {
             differential_fits.capacity()*sizeof(decltype(differential_fits)::value_type)+
             points.capacity()*sizeof(Complex)+
             history.capacity()*sizeof(PatternEvidence)+bursts.capacity()*sizeof(PatternBurst)+
-            (search.frequency_offsets_hz.capacity()+search.clock_errors_ppm.capacity())*sizeof(double);
+            (search.frequency_offsets_hz.capacity()+search.clock_errors_ppm.capacity())*sizeof(double)+
+            search.hypotheses.capacity()*sizeof(PatternFrequencyRateHypothesis);
+        value+=pulse_lattices.capacity()*sizeof(PulseLattice);
+        value+=pulse_addresses.capacity()*sizeof(PulseAddress);
+        // Kernel preparation has bounded wide polynomial scratch. Retain its
+        // reservation across workspace changes and payload allocation too.
+        if(!pulse_lattices.empty())value+=detail::correlation_pulse_scratch_bytes;
+        for(const auto& lattice:pulse_lattices)value+=lattice.cells.capacity()*sizeof(detail::CorrelationPulseCell);
         for(const auto& h:hypotheses)value+=h.burst.bits.capacity();
         for(const auto& burst:bursts)value+=burst.bits.capacity();
         for(const auto& bank:banks)value+=bank.prefix.capacity()*sizeof(Projection);
@@ -302,7 +439,8 @@ struct PatternCorrelator::Impl {
     Emission& output_stream(Hypothesis& h) {
         const auto same_clock=[&](long double origin,double frequency) {
             return std::abs(origin-h.origin)<static_cast<long double>(code.symbol_samples())/3 &&
-                std::abs(frequency-h.burst.frequency_hz)<=config.sample_rate/static_cast<double>(code.symbol_samples());
+                ((!search.hypotheses.empty() && search.frequency_rate_competition) ||
+                 std::abs(frequency-h.burst.frequency_hz)<=config.sample_rate/static_cast<double>(code.symbol_samples()));
         };
         for(auto& emission:emissions)if(same_clock(emission.origin,emission.frequency) &&
             (!emission.ended || h.burst.stream_first_symbol<emission.last_symbol))return emission;
@@ -330,8 +468,9 @@ struct PatternCorrelator::Impl {
             const auto difference=candidate.committed_end>owner.committed_end?
                 candidate.committed_end-owner.committed_end:owner.committed_end-candidate.committed_end;
             if(difference>code.symbol_samples() || std::abs(candidate.origin-owner.origin)>=code.symbol_samples()/3.L ||
-               std::abs(candidate.burst.frequency_hz-owner.burst.frequency_hz)>
-                    config.sample_rate/static_cast<double>(code.symbol_samples()))continue;
+               ((!search.hypotheses.empty() && search.frequency_rate_competition)?false:
+                std::abs(candidate.burst.frequency_hz-owner.burst.frequency_hz)>
+                    config.sample_rate/static_cast<double>(code.symbol_samples())))continue;
             if(candidate.burst.score>best->burst.score)best=&candidate;
         }
         // Nearby clocks may retire in a different order at the terminal
@@ -371,7 +510,8 @@ struct PatternCorrelator::Impl {
             const auto duplicate=std::find_if(bursts.begin(),bursts.end(),[&](const auto& prior) {
                 const auto delta=prior.first_sample>result.first_sample?prior.first_sample-result.first_sample:result.first_sample-prior.first_sample;
                 return prior.first_stream_symbol==result.first_stream_symbol && prior.complete==result.complete &&
-                    delta<code.symbol_samples()/3 && std::abs(prior.frequency_hz-result.frequency_hz)<=config.sample_rate/static_cast<double>(code.symbol_samples());
+                    delta<code.symbol_samples()/3 && ((!search.hypotheses.empty() && search.frequency_rate_competition) ||
+                    std::abs(prior.frequency_hz-result.frequency_hz)<=config.sample_rate/static_cast<double>(code.symbol_samples()));
             });
             const auto emitted_end=result.end_sample;
             if(duplicate!=bursts.end()) {
@@ -542,8 +682,8 @@ struct PatternCorrelator::Impl {
     }
     std::uint64_t accumulate(Hypothesis& h,std::size_t hypothesis,std::uint64_t cursor,
                              std::uint64_t end,PatternCode& pattern) {
-        const auto symbol_start=h.origin+static_cast<long double>(h.index)*code.symbol_samples()/h.rate;
-        const auto symbol_end=h.origin+(static_cast<long double>(h.index)+1)*code.symbol_samples()/h.rate;
+        const auto symbol_start=this->symbol_start(h);
+        const auto symbol_end=clock_boundary(h,code.symbol_samples());
         const auto segment_end=static_cast<std::uint64_t>(std::min(static_cast<long double>(end),std::ceil(symbol_end)));
         std::size_t group_count=0;
         const auto groups=phase_groups(h,group_count);
@@ -558,13 +698,15 @@ struct PatternCorrelator::Impl {
                 const auto within=std::max(0.L,(static_cast<long double>(observed)-symbol_start)*h.rate);
                 auto section_end=symbol_end;
                 if(drift) {
-                    for(auto& item:*drift)item.advance(observed,symbol_start,h.rate,code.symbol_samples(),drift_sections);
-                    section_end=symbol_start+static_cast<long double>(detail::drift_boundary(
-                        (*drift)[0].section+1,code.symbol_samples(),drift_sections))/h.rate;
+                    for(auto& item:*drift)advance_drift(item,h,observed);
+                    section_end=clock_boundary(h,detail::drift_boundary(
+                        (*drift)[0].section+1,code.symbol_samples(),drift_sections));
                 }
                 if(differential) {
-                    for(auto& item:*differential)item.advance(observed,symbol_start,h.rate,code.symbol_samples(),differential_window);
-                    section_end=std::min(section_end,(*differential)[0].boundary(symbol_start,h.rate,code.symbol_samples(),differential_window));
+                    for(auto& item:*differential)advance_differential(item,h,observed);
+                    const auto boundary=(*differential)[0].window_index<code.symbol_samples()/differential_window?
+                        ((*differential)[0].window_index+1)*differential_window:code.symbol_samples();
+                    section_end=std::min(section_end,clock_boundary(h,boundary));
                 }
                 if(shaped) {
                     require(h.index<=std::numeric_limits<std::uint64_t>::max()/code.chips_per_symbol(),
@@ -576,8 +718,9 @@ struct PatternCorrelator::Impl {
                     // Each alternative schedule fits the same disjoint
                     // raw observations. Its score never borrows samples
                     // or evidence from another possible schedule.
+                    const auto phases=pattern.shaped_values(first_chip,static_cast<double>(within));
                     for(unsigned bit=0;bit<2;++bit) {
-                        const auto phase=pattern.shaped_value(first_chip,bit,static_cast<double>(within));
+                        const auto phase=phases[bit];
                         fit[bit].add(projection,phase,1);
                         if(drift)(*drift)[bit].active.add(projection,phase,1);
                         if(differential)(*differential)[bit].active.add(projection,phase,1);
@@ -588,12 +731,12 @@ struct PatternCorrelator::Impl {
                 require(h.index<=(std::numeric_limits<std::uint64_t>::max()-local)/code.chips_per_symbol(),"pattern chip coordinate overflow");
                 const auto chip=h.index*code.chips_per_symbol()+local;
                 const auto fraction=std::clamp(static_cast<double>(within/code.chip_samples()-local),0.,std::nextafter(1.,0.));
-                const auto chip_end=symbol_start+(static_cast<long double>(local)+1)*code.chip_samples()/h.rate;
+                const auto chip_end=clock_boundary(h,(local+1)*code.chip_samples());
                 const auto boundary=std::min(static_cast<long double>(segment_end),std::ceil(std::min(chip_end,section_end)));
                 const auto until=static_cast<std::uint64_t>(std::max(static_cast<long double>(observed+1),boundary));
                 const auto left=static_cast<std::size_t>(observed-sample),right=static_cast<std::size_t>(until-sample);
                 for(unsigned bit=0;bit<2;++bit) {
-                    const auto bank_index=config.spreading_mode==SpreadingMode::tone?(h.rate_index*search.frequency_offsets_hz.size()+h.frequency)*2+bit:h.frequency;
+                    const auto bank_index=config.spreading_mode==SpreadingMode::tone?h.tone_bank_base+bit:h.frequency;
                     const auto& bank=banks[bank_index];
                     auto phase=pattern.value(chip,bit,fraction);
                     if(config.spreading_mode==SpreadingMode::tone) {
@@ -616,11 +759,93 @@ struct PatternCorrelator::Impl {
         if(point_count==points.size()){point_begin=(point_begin+1)%points.size();--point_count;}
         points[(point_begin+point_count++)%points.size()]=delta;previous_point=point;
     }
+    void project_pulse_cells(std::size_t count,std::stop_token stop) {
+        const auto chip=code.chip_samples();
+        for(auto& lattice:pulse_lattices) {
+            cancelled(stop);lattice.cells.clear();
+            const auto& prefix=banks[lattice.frequency].prefix;
+            for(std::size_t i=0;i<count;++i) {
+                const auto observed=sample+i;
+                auto& cell=lattice.pending;
+                const auto projection=prefix[i+1]-prefix[i];
+                if(!cell.count) {
+                    cell.first=observed;lattice.first_offset=static_cast<long double>(observed)-lattice.start;
+                    lattice.carrier_square={projection.cc-projection.ss,2*projection.cs};
+                    lattice.carrier_norm=projection.cc+projection.ss;
+                }
+                const auto q=(static_cast<long double>(observed)-lattice.start)*lattice.rate/chip-.5L;
+                const Complex measured{projection.xc,projection.xs};
+                for(std::size_t j=0;j<detail::correlation_pulse_atoms;++j)
+                    cell.dot[j]+=pattern_pulse(static_cast<double>(q+8-static_cast<long double>(j)))*measured;
+                cell.energy+=projection.energy;++cell.count;
+                if(observed+1==lattice.next) {
+                    cell.end=lattice.next;
+                    cell.gram=lattice.kernel.evaluate(lattice.first_offset,cell.count,
+                        lattice.carrier_square,lattice.carrier_norm,stop);
+                    require(lattice.cells.size()<lattice.cells.capacity(),"pulse projection exceeds bounded cell tile");
+                    lattice.cells.push_back(cell);
+                    require(cell.chip<std::numeric_limits<std::int64_t>::max(),"pulse cell coordinate overflow");
+                    const auto next_chip=cell.chip+1;cell={};cell.chip=next_chip;
+                    require(next_chip<std::numeric_limits<std::int64_t>::max(),"pulse cell coordinate overflow");
+                    lattice.start=lattice.anchor+static_cast<long double>(next_chip)*chip/lattice.rate;
+                    lattice.next=static_cast<std::uint64_t>(std::ceil(lattice.anchor+
+                        static_cast<long double>(next_chip+1)*chip/lattice.rate));
+                }
+            }
+        }
+    }
+    static void add_fit(Fit& target,const Fit& value) {
+        target.xc+=value.xc;target.xs+=value.xs;target.cc+=value.cc;target.ss+=value.ss;
+        target.cs+=value.cs;target.energy+=value.energy;target.count+=value.count;
+    }
+    void accumulate_pulse_cells(std::stop_token stop) {
+        const auto chips=code.chips_per_symbol();
+        for(std::size_t hypothesis=0;hypothesis<hypotheses.size();++hypothesis) {
+            cancelled(stop);auto& h=hypotheses[hypothesis];
+            const auto& address=pulse_addresses[hypothesis];
+            const auto& lattice=pulse_lattices[address.lattice];
+            for(const auto& cell:lattice.cells) {
+                require(h.index<=(static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())-
+                    static_cast<std::uint64_t>(address.shift))/chips,"pattern chip coordinate overflow");
+                const auto first=address.shift+static_cast<std::int64_t>(h.index*chips);
+                if(cell.chip<first)continue;
+                require(cell.chip-first<static_cast<std::int64_t>(chips),"pulse projection skipped a symbol endpoint");
+                const auto local=cell.chip-first;
+                if(!h.fits[0].count)h.observed_start=cell.first;
+                std::size_t group_count=0;const auto groups=phase_groups(h,group_count);
+                for(std::size_t group=0;group<group_count;++group) {
+                    code.set_stream_phase_samples(groups[group].lower);
+                    std::array<std::array<Complex,detail::correlation_pulse_atoms>,2> coefficients{};
+                    for(std::size_t j=0;j<detail::correlation_pulse_atoms;++j) {
+                        const auto position=local+static_cast<std::int64_t>(j)-8;
+                        if(position<0 || position>=static_cast<std::int64_t>(chips))continue;
+                        const auto values=code.values(h.index*chips+static_cast<std::uint64_t>(position));
+                        for(unsigned bit=0;bit<2;++bit)coefficients[bit][j]=values[bit];
+                    }
+                    auto& fit=fits(h,hypothesis,group);
+                    auto* drift=!drift_fits.empty()?&section_fits(hypothesis,group):nullptr;
+                    auto* differential=differential_window?&local_fits(hypothesis,group):nullptr;
+                    for(unsigned bit=0;bit<2;++bit) {
+                        const auto contribution=cell.fit(coefficients[bit]);add_fit(fit[bit],contribution);
+                        if(drift) {
+                            advance_drift((*drift)[bit],h,cell.first);
+                            add_fit((*drift)[bit].active,contribution);
+                        }
+                        if(differential) {
+                            advance_differential((*differential)[bit],h,cell.first);
+                            add_fit((*differential)[bit].active,contribution);
+                        }
+                    }
+                }
+                if(local+1==static_cast<std::int64_t>(chips))complete(h,hypothesis,cell.end);
+            }
+        }
+    }
     std::size_t process_batch(std::span<const float> input,std::stop_token stop) {
         // Preserve the scalar path as a reference, and never collect samples
         // across a caller's progress poll. Small/tight-workspace pushes retain
         // the original one-block path. No completion is allowed in this batch.
-        if(worker_codes.size()<2 || input.size()<=block_samples)return 0;
+        if(!pulse_lattices.empty() || !search.hypotheses.empty() || worker_codes.size()<2 || input.size()<=block_samples)return 0;
         constexpr std::size_t max_blocks=64,max_lanes=65536;
         using Lane=detail::CorrelationLane;
         using Block=detail::CorrelationBlock;
@@ -692,7 +917,7 @@ struct PatternCorrelator::Impl {
                 const auto& h=hypotheses[first+i];auto& lane=lanes[i];
                 lane.origin=h.origin;lane.rate=h.rate;lane.index=h.index;lane.observed_start=h.observed_start;
                 lane.phase_lower=h.phase_lower;lane.phase_upper=h.phase_upper;
-                lane.frequency=h.frequency;lane.rate_index=h.rate_index;lane.fits[0]=h.fits;
+                lane.frequency=h.frequency;lane.rate_index=h.rate_index;lane.tone_bank_base=h.tone_bank_base;lane.fits[0]=h.fits;
                 for(std::size_t group=0;group<alternate_groups;++group)
                     lane.fits[group+1]=alternate_fits[(first+i)*alternate_groups+group];
                 if(!drift_fits.empty())for(std::size_t group=0;group<=alternate_groups;++group)
@@ -733,11 +958,15 @@ struct PatternCorrelator::Impl {
             }
         }
         const auto end=sample+input.size();
+        if(!pulse_lattices.empty()) {
+            project_pulse_cells(input.size(),stop);accumulate_pulse_cells(stop);
+            record_point(banks.front().prefix[input.size()]);sample=end;room_for(0);return;
+        }
         const auto parallel=worker_codes.size()>1;
         if(parallel)detail::parallel_search(hypotheses.size(),worker_codes.size(),[&](std::size_t worker,std::size_t hypothesis) {
             cancelled(stop);auto& h=hypotheses[hypothesis];
             const auto cursor=initial_cursor(h,end);
-            const auto symbol_end=h.origin+(static_cast<long double>(h.index)+1)*code.symbol_samples()/h.rate;
+            const auto symbol_end=clock_boundary(h,code.symbol_samples());
             if(cursor<end && static_cast<long double>(cursor)<symbol_end)
                 accumulate(h,hypothesis,cursor,end,worker_codes[worker]);
         });
@@ -748,14 +977,14 @@ struct PatternCorrelator::Impl {
             // phase selection, peer ownership and every publication retain the
             // original serial hypothesis/complete-symbol order.
             if(parallel && cursor<end) {
-                const auto symbol_end=h.origin+(static_cast<long double>(h.index)+1)*code.symbol_samples()/h.rate;
+                const auto symbol_end=clock_boundary(h,code.symbol_samples());
                 if(static_cast<long double>(cursor)<symbol_end) {
                     cursor=static_cast<std::uint64_t>(std::min(static_cast<long double>(end),std::ceil(symbol_end)));
                     if(static_cast<long double>(cursor)>=symbol_end)complete(h,hypothesis,cursor);
                 }
             }
             while(cursor<end) {
-                const auto symbol_end=h.origin+(static_cast<long double>(h.index)+1)*code.symbol_samples()/h.rate;
+                const auto symbol_end=clock_boundary(h,code.symbol_samples());
                 if(static_cast<long double>(cursor)>=symbol_end) { complete(h,hypothesis,cursor);continue; }
                 cursor=accumulate(h,hypothesis,cursor,end,code);
                 if(static_cast<long double>(cursor)>=symbol_end)complete(h,hypothesis,cursor);

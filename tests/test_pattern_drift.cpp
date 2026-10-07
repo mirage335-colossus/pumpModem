@@ -272,7 +272,10 @@ void isolated_sections_are_not_whole_bits() {
 
 void compact_budget_fallback_preserves_accumulation() {
     const auto c=config();const Bytes bits{0,0,0};const auto pcm=waveform(c,bits,Impairment::steady);
-    modem::PatternCorrelator reference(c,search(false),workspace);
+    // Measure the mandatory raw coherent state. A larger reference budget may
+    // also allocate optional pulse projections, whose space could instead fit
+    // drift state in the constrained receiver below.
+    modem::PatternCorrelator reference(c,search(false),64*1024);
     const auto budget=reference.working_bytes()+128;
     modem::PatternCorrelator limited(c,search(true),budget),coherent(c,search(false),budget);
     check(!limited.drift_tolerant(),"insufficient optional workspace must preserve the complete coherent search bank");

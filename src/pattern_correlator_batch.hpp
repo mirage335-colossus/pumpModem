@@ -8,6 +8,7 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <stop_token>
 #include <type_traits>
@@ -46,6 +47,44 @@ struct CorrelationFit {
         // The same two-real-basis evidence calculation as the scalar receiver.
         return -.5*static_cast<double>(count-2)*std::log1p(-fraction);
     }
+};
+
+// A chip cell keeps all original real observations. Pulse dots and the two
+// Gram matrices factor reusable pulse work from private chip coefficients.
+inline constexpr std::size_t correlation_pulse_atoms=17;
+inline constexpr std::size_t correlation_pulse_pairs=
+    correlation_pulse_atoms*(correlation_pulse_atoms+1)/2;
+struct CorrelationPulseGram {
+    std::array<double,correlation_pulse_pairs> energy{};
+    std::array<std::complex<double>,correlation_pulse_pairs> square{};
+};
+inline constexpr std::size_t correlation_pulse_scratch_bytes=32768;
+static_assert(3*correlation_pulse_pairs*(sizeof(long double)+sizeof(std::complex<long double>))+
+    4*correlation_pulse_atoms*sizeof(long double)+2*sizeof(CorrelationPulseGram)+1024<=correlation_pulse_scratch_bytes);
+struct CorrelationPulseCell {
+    std::int64_t chip=0;
+    std::uint64_t first=0,end=0,count=0;
+    std::array<std::complex<double>,correlation_pulse_atoms> dot{};
+    CorrelationPulseGram gram;
+    double energy=0;
+    CorrelationFit fit(std::span<const std::complex<double>,correlation_pulse_atoms>) const;
+};
+class CorrelationPulseKernel {
+public:
+    CorrelationPulseKernel(std::uint64_t chip_samples,long double rate,
+                           double frequency,std::uint32_t sample_rate);
+    CorrelationPulseGram evaluate(long double first_offset,std::uint64_t count,
+                                  std::complex<double> carrier_square,double carrier_norm,
+                                  std::stop_token stop={});
+private:
+    std::uint64_t chip_=0,count_=0;
+    long double rate_=1,offset_=0,lower_=0,upper_=0;
+    double frequency_=0;
+    std::uint32_t sample_rate_=0;
+    bool valid_=false,point_=false;
+    std::array<std::array<long double,correlation_pulse_pairs>,3> energy_{};
+    std::array<std::array<std::complex<long double>,correlation_pulse_pairs>,3> square_{};
+    void prepare(long double,std::uint64_t,std::stop_token);
 };
 // One section is active at a time; earlier sections retain only their fitted
 // energy. This state is separate so ordinary coherent fits keep their size.
@@ -119,6 +158,8 @@ struct CorrelationLane {
     long double origin=0,rate=1;
     std::uint64_t index=0,observed_start=0,phase_lower=0,phase_upper=0;
     std::size_t frequency=0,rate_index=0;
+    // Exact paired-tone bank, or the legacy rectangular bank when omitted.
+    std::size_t tone_bank_base=std::numeric_limits<std::size_t>::max();
     std::array<std::array<CorrelationFit,2>,3> fits{};
     std::array<std::array<CorrelationDriftFit,2>,3> drift_fits{};
     std::array<std::array<CorrelationDifferentialFit,2>,3> differential_fits{};

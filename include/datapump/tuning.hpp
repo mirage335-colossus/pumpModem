@@ -87,6 +87,7 @@ struct OscillatorPreset {
 };
 std::span<const OscillatorPreset> oscillator_presets();
 OscillatorPreset parse_oscillator_preset(std::string_view name);
+modem::OscillatorModel oscillator_model(const OscillatorPreset&);
 struct LinkBudget {
     double received_power_dbm = 0;
     double noise_power_dbm = 0; // In the configured channel bandwidth.

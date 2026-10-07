@@ -8,7 +8,52 @@ For a proposed independent chain that preserves this receiver and all transmitte
 implementations, see [alternate Robust receiver opportunity and limitations](robust-alternate-receiver.md).
 That study distinguishes further computational savings from sensitivity gains,
 especially for symbols lasting days at path losses above 200 dB. Its numerical
-targets are unmeasured; the CPU implementation described here remains unchanged.
+targets are unmeasured and separate from the implemented changes below.
+
+## Oscillator policy and bounded banks
+
+Application configurations attach `Config::oscillator_search`, containing the
+LF/audio and RF effective-link models, RF shift (default 0 Hz), conservative
+margin (default 3×), clock-reference topology and sideband orientation.
+`oscillator_pattern_search` produces one finite bank of explicit
+`{frequency_offset_hz, clock_error_ppm}` pairs. Live reception, transfer reception,
+simulation, link planning and compute estimates use that same policy. A
+low-level caller omitting the optional policy retains its historical search.
+Explicit receiver hypothesis lists remain an override.
+
+A radio supplying real ADC/DAC samples retains the actual nonzero modem tone
+in `Config::carrier_hz`. Shared-radio/LF=0 metadata declares that sampling and
+conversion use the radio reference, without another PC clock contribution.
+RF shift is the known LO/tuning frequency, not the DSP carrier or sample rate.
+Equivalent total-RF and LO-plus-tone settings normalize to the same physical
+carrier and bank. See [reference topology and bounds](oscillator-models.md).
+
+Shared radio references require one linked sample-rate hypothesis per frequency
+candidate. Independent audio and active RF conversion require independent
+rate uncertainty; their paired bank omits combinations inconsistent with the
+declared converter allowance. Both FFT and compact correlation consume the
+explicit pairs. The FFT path does not infer sample-clock error by dividing an
+RF-derived frequency offset by the modem tone.
+
+The frequency lattice uses spacing no larger than `0.25/T`, with `T` the sampled
+symbol duration, refined to the declared endpoints. Independent rate cells allow
+a quarter-chip accumulated mismatch over that symbol. The finite limits are
+4,097 distinct frequencies, 65 independent rates, 8,194 frequency/rate lanes,
+and an absolute clock-rate range of +/-10,000 ppm,
+with an additional limit from the real passband, including clock-scaled waveform
+support and tone alias boundaries. These limits reduce actual
+coverage rather than silently coarsening the lattice. Workspace determines
+backend support and affordability while preserving the declared pairs; it does
+not silently narrow the policy bank. Results expose requested and covered
+frequency/rate half-widths, paired lane count and limited joint coverage. Phase
+diffusion affects coherence; it does not become a Doppler or phase-trajectory
+search dimension.
+
+RF metadata alone creates no signal samples or cipher work. PCM sample rate
+still follows the delivered modem waveform. A genuinely wider ADC stream costs
+more front-end processing, while repeated searches operate on reusable projected
+observations. A higher physical RF frequency can require more hypotheses at the
+same fractional accuracy; representing the same radio setting another way cannot.
 
 ## Compute boundaries
 
@@ -22,14 +67,14 @@ Logical indices do not encode a CPU worker number. Range dispatch allocates no
 state proportional to the number of jobs; tests cover 100,003 jobs and sparse
 ranges spanning `SIZE_MAX`. CPU concurrency still defaults to all but one
 available logical CPU, with at least one. Available work and workspace can lower
-the actual concurrency.
+the actual concurrency of the numerical batch paths.
 
 CPU correlation chooses its range grain from both lane count and worker count,
 targeting at least 16 ranges per worker when enough lanes exist, capped at 16
 lanes per range. Small banks therefore retain enough independently schedulable
 work, including when only some start-time hypotheses have become active. The
-normal public 1 Hz bank has 75 lanes; its previous fixed grain of 16 exposed only
-five parallel jobs despite an 11-worker limit.
+historical five-frequency, nominal-rate 1 Hz bank has 75 lanes; its previous
+fixed grain of 16 exposed only five parallel jobs despite an 11-worker limit.
 
 FFT job capacity now depends on the search bank and spare workspace, rather
 than a small multiple of the CPU count. Each CPU worker retains only one
@@ -38,7 +83,7 @@ disjoint output slices. A backend can reorder or tile them while the host
 collects scores in the original symbol/phase/frequency/start order. Prepared
 template views stay valid until the synchronous backend call completes.
 
-The long-symbol coordinator groups up to 64 original processing blocks and
+The raw long-symbol coordinator groups up to 64 original processing blocks and
 tiles up to 65,536 numerical lanes at a time, reducing dispatch and host scans
 between blocks. Both bounds can be reduced by spare workspace. Each lane
 processes its blocks in the original order. The original oscillator restarts,
@@ -49,7 +94,7 @@ Batching ends **before any hypothesis can complete a symbol**. The original
 scalar coordinator handles that boundary in its original hypothesis order.
 This also prevents batching across a caller's progress poll. No bit waits for
 an arbitrary batch to fill, and partial silence cannot finish reception early.
-One-worker and tight-workspace operation retain the original scalar path.
+One-worker and tight-workspace operation retain the unbatched coordinator.
 
 All temporary arrays are bounded by spare DSP workspace. They are released
 before they can displace payload growth and at the end of a push, preserving
@@ -58,12 +103,64 @@ counters or publication callbacks. Copied pattern seeds are cleared when the
 batch view is destroyed. CPU pattern caches must be constructed from the same
 configuration as the supplied immutable pattern parameters.
 
+## Long-symbol pulse projection
+
+Eligible shaped correlation separates shared pulse projections from private
+template coefficients. Each chip cell retains 17 finite RRC pulse atoms, their
+sample/template dots, a pulse-energy Gram matrix and a carrier-square Gram
+matrix. Frequency/rate pairs share these observations across the two half-chip
+start parities, with a separate lattice when the upper start endpoint is
+clipped. Keyed bit/epoch coefficients are then contracted at chip-cell cadence,
+rather than rebuilding two shaped private templates for every raw sample and
+start hypothesis.
+
+The fit retains the original **real observation count and received energy**.
+Both Gram matrices are necessary: the carrier-square term preserves the image
+covariance that can matter at low modem frequencies. Cells are a numerical
+factorization of the raw two-real-basis fit, not newly independent observations
+or a change to the noise evidence. Aggregating products changes floating-point
+addition order; qualification compares numerical fits within stated tolerances,
+not bit-identical scores.
+
+The path requires shaped symbols lasting at least 16 sampled seconds and an
+integral number of chips divisible by four, with at most 4,096 nominal samples
+per chip. Explicit paired banks use their
+individual half-chip start spacing `C/(2*r)`, where `C` is nominal chip length
+and `r` the clock ratio, including noninteger received chip durations. The legacy
+path requires even chip lengths and nominal clock rates. Partial-chip symbols,
+longer chips, legacy nonnominal-rate or odd-chip grids, and an unaffordable projection
+workspace retain the full raw bank. The numerical pulse Gram cache reuses a
+quadratic expression within each piecewise-linear pulse-table region. It
+updates changed sample contributions incrementally across nearby regions,
+rebuilding when cell geometry or support endpoints require it.
+
+Cell storage is bounded by the processing block and bank size, independently of
+symbol duration, including 32 KiB of preparation scratch in the workspace
+allowance. Pending cells retain actual observations across caller pushes.
+Symbol, quarter and local differential boundaries use the same canonical sampled
+endpoints; input beyond a symbol is never needed to publish that completed
+symbol. The host keeps admission, private phase selection, trials, pending-bit
+publication and fully observed absence outside the projection layer.
+
+Front-end work still includes 17 pulse terms per raw sample and lattice.
+Fractional clock errors can also increase Gram-cache rebuilding. The dominant
+private fit now follows chip cadence, while actual input rate, bank size and
+workspace still affect cost. RF carrier metadata alone adds neither RF-rate
+samples nor cipher work. Measurements must compare equal search coverage and
+state the input rate; a smaller oscillator bank is a separate saving from a
+faster numerical kernel. See the [measured workloads and qualification](oscillator-search-validation.md).
+
 ## CPU validation and reproduction
 
 The CPU reference tests exercise 16,387 FFT jobs and 10,019 correlator lanes,
 worker-count and tile-size equivalence, reordered FFT jobs, malformed spans,
-cancellation and reuse. Receiver-level tests preserve exact scores, next-poll
-prefixes, physical absence, tight workspace and idle footprints.
+cancellation and reuse. Receiver-level tests cover next-poll prefixes, physical
+absence, tight workspace and idle footprints. Pulse regressions compare the
+factored real fit with raw fits, including low/high modem carriers, signed rate
+error, quarter/differential scores and 137-sample pushes. Numerical score
+tolerances and completed-bit/endpoint identity are separate checks. Current
+candidate qualification and measured workloads are recorded in
+[validation](validation.md).
 
 For a reproducible large-bank CPU workload, build and run:
 

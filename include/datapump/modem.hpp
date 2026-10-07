@@ -16,6 +16,25 @@ inline constexpr double nominal_signal_power = 0.153125;
 inline constexpr double minimum_bandwidth_hz = 0.01;
 inline constexpr double maximum_bandwidth_hz = 30000000;
 enum class SpreadingMode : std::uint8_t { pattern, tone };
+// Illustrative or measured effective relative TX/RX errors, not per-end values.
+// Accuracy is a static bound; phase diffusion is a separate coherence model.
+struct OscillatorModel {
+    double accuracy_ppm = 100;
+    double phase_noise_degrees_per_sqrt_second = .5;
+    bool operator==(const OscillatorModel&) const = default;
+};
+enum class OscillatorReference : std::uint8_t { independent_audio, shared_radio };
+enum class OscillatorSideband : std::uint8_t { upper, lower };
+struct OscillatorSearchConfig {
+    OscillatorModel lf, rf;
+    // Known nonnegative radio LO/translation frequency. Never a PCM tone or
+    // sample rate. The actual on-air carrier is LO +/- Config::carrier_hz.
+    double rf_shift_hz = 0;
+    double margin = 3;
+    OscillatorReference reference = OscillatorReference::independent_audio;
+    OscillatorSideband sideband = OscillatorSideband::upper;
+    bool operator==(const OscillatorSearchConfig&) const = default;
+};
 struct Config {
     // Pattern transport conveys one bit per independently detectable waveform.
     // Obsolete multi-bit APSK profiles are rejected explicitly.
@@ -28,6 +47,9 @@ struct Config {
     std::uint32_t sample_rate = 6000;
     unsigned constellation_bits = 1; // Exactly one meaningful bit per waveform.
     double carrier_hz = 1500;
+    // Absent preserves the historical low-level receiver search policy.
+    // All external samples remain ordinary real ADC/DAC samples.
+    std::optional<OscillatorSearchConfig> oscillator_search;
     double bandwidth_hz = 1200;
     double training_seconds = 2; // Hardware target; pattern mode rounds to whole symbols.
     unsigned spreading_factor = 64;

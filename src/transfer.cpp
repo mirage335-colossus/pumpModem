@@ -5,6 +5,7 @@
 #include "datapump/channel.hpp"
 #include "datapump/boundary_sync.hpp"
 #include "datapump/pattern_pulse.hpp"
+#include "datapump/pattern_search.hpp"
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -39,6 +40,7 @@ void check_cancelled(std::stop_token stop) {
 
 void validate(const Options& options) {
     modem::validate(options.modem);
+    if(options.modem.oscillator_search)modem::validate_oscillator_search(*options.modem.oscillator_search);
     if(options.capture_epoch && (!std::isfinite(*options.capture_epoch) || *options.capture_epoch<0 ||
        static_cast<long double>(*options.capture_epoch)>=static_cast<long double>(std::numeric_limits<std::uint64_t>::max())))
         throw Error("invalid capture epoch");
@@ -749,7 +751,9 @@ Received receive(std::span<const float> samples, const Options& input_options, P
         check_cancelled(stop);if(progress)progress(epoch);
         try {
         auto value=options;value.modem=profile;
-        modem::PatternSearch search;search.expand_clock_search=true;search.allow_local_clock_fallback=true;
+        modem::PatternSearch search;search.allow_local_clock_fallback=true;
+        if(profile.oscillator_search)search.hypotheses=modem::oscillator_pattern_search(profile).hypotheses;
+        else search.expand_clock_search=true;
         search.start_offset_seconds=static_cast<double>(epoch)-options.capture_epoch.value_or(static_cast<double>(options.timestamp));
         if(!options.capture_epoch)*search.start_offset_seconds+=(static_cast<double>(modem::training_sample_count(profile))+
             static_cast<double>(modem::pattern_pulse_padding_samples(profile)))/profile.sample_rate;
@@ -796,7 +800,9 @@ Received simulate(const Message& message, const Options& input_options, const mo
         check_cancelled(stop);if(progress)progress(epoch);
         try {
         auto source=message_transmitter(message,options);auto value=options;value.modem=profile;
-        modem::PatternSearch search;search.expand_clock_search=true;search.allow_local_clock_fallback=true;
+        modem::PatternSearch search;search.allow_local_clock_fallback=true;
+        if(profile.oscillator_search)search.hypotheses=modem::oscillator_pattern_search(profile).hypotheses;
+        else search.expand_clock_search=true;
         search.start_offset_seconds=static_cast<double>(epoch)-static_cast<double>(center)+
             (static_cast<double>(modem::training_sample_count(profile))+
              static_cast<double>(modem::pattern_pulse_padding_samples(profile)))/profile.sample_rate;

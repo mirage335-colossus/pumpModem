@@ -53,18 +53,17 @@ inline double pattern_pulse(double chip_offset) {
 
 // Sum one finite chip sequence. A final partial chip retains its old energy
 // and stream position rather than borrowing a chip from the next symbol.
-template<class ChipValue>
-std::complex<double> pattern_pulse_sum(double sample, std::uint64_t samples,
-                                       std::uint64_t chip_samples, ChipValue value) {
+template<class Consume>
+void pattern_pulse_each(double sample, std::uint64_t samples,
+                        std::uint64_t chip_samples, Consume consume) {
     if(!chip_samples || !std::isfinite(sample))throw Error("invalid pulse sample coordinate or chip duration");
     const auto length=static_cast<double>(chip_samples);
     const auto support=pattern_pulse_half_span*length;
-    if(!samples || sample < -support || sample > static_cast<double>(samples)+support)return {};
+    if(!samples || sample < -support || sample > static_cast<double>(samples)+support)return;
     const auto chips=samples/chip_samples+(samples%chip_samples!=0);
     const auto begin=std::max(0.,std::floor((sample-support)/length)-1);
     const auto end=std::min(static_cast<double>(chips),std::floor((sample+support)/length)+1);
-    if(static_cast<long double>(begin)>=static_cast<long double>(chips))return {};
-    std::complex<double> result{};
+    if(static_cast<long double>(begin)>=static_cast<long double>(chips))return;
     // The explicit integer bound also protects a rounded double end coordinate
     // when an exceptionally long sequence exceeds exact double integer range.
     for(auto local=static_cast<std::uint64_t>(begin);local<chips &&
@@ -74,8 +73,17 @@ std::complex<double> pattern_pulse_sum(double sample, std::uint64_t samples,
         const auto center=static_cast<double>(first)+.5*static_cast<double>(duration);
         const auto coefficient=pattern_pulse((sample-center)/length)*
             std::sqrt(static_cast<double>(duration)/length);
-        if(coefficient!=0)result+=coefficient*value(local);
+        if(coefficient!=0)consume(local,coefficient);
     }
+}
+
+template<class ChipValue>
+std::complex<double> pattern_pulse_sum(double sample, std::uint64_t samples,
+                                      std::uint64_t chip_samples, ChipValue value) {
+    std::complex<double> result{};
+    pattern_pulse_each(sample,samples,chip_samples,[&](std::uint64_t local,double coefficient) {
+        result+=coefficient*value(local);
+    });
     return result;
 }
 

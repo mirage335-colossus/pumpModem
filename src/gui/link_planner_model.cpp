@@ -41,6 +41,9 @@ struct ReceiverSupport {
     bool clock=false,workspace=false;
     bool fits() const {return clock&&workspace;}
 };
+bool search_supported(const simulation::Estimate& estimate) {
+    return estimate.carrier_in_search&&estimate.clock_in_search&&!estimate.oscillator_search_limited;
+}
 ReceiverSupport receiver_support(const Inputs& inputs,const modem::Config& config,
         std::span<const modem::Config> profiles={}) {
     auto options=inputs.options;options.modem=config;
@@ -52,7 +55,7 @@ ReceiverSupport receiver_support(const Inputs& inputs,const modem::Config& confi
     // neither a draft, a transfer probe, nor PCM inside the bounded search.
     transfer::Estimate one;one.wire_bits=1;one.total_seconds=seconds(config);
     const auto estimate=simulation::estimate(one,options,true,channel,profiles,1,false);
-    return {estimate.carrier_in_search,estimate.receiver_workspace_supported};
+    return {search_supported(estimate),estimate.receiver_workspace_supported};
 }
 
 // All searches have fixed iteration counts. Preserve discrete tuner steps:
@@ -260,7 +263,9 @@ public:
         if(!tuning::tone_mode(inputs.mode)) {
             const auto reference=clock_candidate(inputs,std::clamp(-40.,minimum,maximum));
             if(reference) {
-                const auto requested=base.carrier_hz*modem::default_clock_uncertainty_ppm*1e-6L;
+                const auto requested=base.oscillator_search?
+                    static_cast<long double>(modem::oscillator_pattern_search(reference->config).frequency.requested_half_width_hz):
+                    base.carrier_hz*modem::default_clock_uncertainty_ppm*1e-6L;
                 const auto headroom=static_cast<long double>(modem::pattern_frequency_offset_limit(reference->config));
                 const auto span=std::min(requested,headroom);
                 if(span>0) {
@@ -373,6 +378,7 @@ transfer::Estimate one_bit_estimate(const modem::Config& config) {
 }
 auto curve_key(const transfer::Options& options,const modem::ChannelConfig& channel) {
     const auto c=options.key?transfer::seeded_config(options,options.modem.stream_epoch):options.modem;
+    const auto oscillator=c.oscillator_search.value_or(modem::OscillatorSearchConfig{});
     // Only quantities read by the estimator enter this bounded cache. The
     // private key's derived pattern identity is retained; the sampled-channel
     // RNG seed does not choose probability draws.
@@ -381,7 +387,10 @@ auto curve_key(const transfer::Options& options,const modem::ChannelConfig& chan
         modem::symbol_sample_count(c),modem::pattern_chip_samples(c),c.spreading_mode,c.pulse_shaping,c.scramble,c.dsss,
         c.spreading_seed,c.dsss_seed,c.memory_limit,options.dsp_workspace_bytes,
         options.timestamp,options.search_seconds,channel.snr_db,channel.frequency_offset_hz,
-        channel.delay_samples,channel.clock_error_ppm,channel.phase_noise_degrees_per_sqrt_second};
+        channel.delay_samples,channel.clock_error_ppm,channel.phase_noise_degrees_per_sqrt_second,
+        c.oscillator_search.has_value(),oscillator.lf.accuracy_ppm,oscillator.lf.phase_noise_degrees_per_sqrt_second,
+        oscillator.rf.accuracy_ppm,oscillator.rf.phase_noise_degrees_per_sqrt_second,
+        oscillator.rf_shift_hz,oscillator.margin,oscillator.reference,oscillator.sideband};
 }
 using CurveKey=decltype(curve_key(transfer::Options{},modem::ChannelConfig{}));
 struct CurveEntry {
@@ -406,11 +415,11 @@ CurveEntry& curve_entry(const transfer::Options& options,const modem::ChannelCon
 }
 ReceivePoint receive_point(double target,const simulation::Estimate& estimate,bool numerical_range) {
     return {target,estimate.success_probability,estimate.confidence_available&&numerical_range,
-        estimate.carrier_in_search,estimate.receiver_workspace_supported,estimate.probability_trials};
+        search_supported(estimate),estimate.receiver_workspace_supported,estimate.probability_trials};
 }
 CpuPoint cpu_point(double target,const simulation::Estimate& estimate) {
     const auto ratio=estimate.simulated_seconds>0?estimate.receiver_cpu_seconds/estimate.simulated_seconds:0;
-    return {target,ratio,estimate.carrier_in_search&&estimate.receiver_workspace_supported&&
+    return {target,ratio,search_supported(estimate)&&estimate.receiver_workspace_supported&&
         std::isfinite(ratio)&&ratio>0};
 }
 void receive_curve(Model& model,const simulation::Estimate& selected_one) {
@@ -436,7 +445,7 @@ void receive_curve(Model& model,const simulation::Estimate& selected_one) {
         // Receiver work is already available from the cheap support check;
         // the denser CPU curve adds no statistical trials or sampled audio.
         cpu_output.emplace(target,cpu_point(target,entry.estimate));
-        if(!entry.estimate.carrier_in_search||!entry.estimate.receiver_workspace_supported||!numerical_range) {
+        if(!search_supported(entry.estimate)||!entry.estimate.receiver_workspace_supported||!numerical_range) {
             output.emplace(target,receive_point(target,entry.estimate,numerical_range));return true;
         }
         const bool costly=entry.estimate.drift_sections>1;
@@ -468,7 +477,7 @@ void receive_curve(Model& model,const simulation::Estimate& selected_one) {
                     const auto snr=model.actual_cn0_db_hz-10*std::log10(aligned->config.sample_rate/2.);
                     channel.snr_db=std::clamp(snr,-300.,300.);
                     const auto& support=curve_entry(options,channel).estimate;
-                    if(snr>=-300&&snr<=300&&support.carrier_in_search&&support.receiver_workspace_supported) {
+                    if(snr>=-300&&snr<=300&&search_supported(support)&&support.receiver_workspace_supported) {
                         output.erase(target);cpu_output.erase(target);
                     }
                 }
@@ -595,7 +604,7 @@ Model build(const Inputs& inputs) {
         // confidence unavailable outside the estimator's supported range.
         channel.snr_db=std::clamp(sample_snr,-300.,300.);
         const auto receiver=simulation::estimate(transmission,options,true,channel);
-        result.clock_search_supported=receiver.carrier_in_search;
+        result.clock_search_supported=search_supported(receiver);
         result.receiver_workspace_supported=receiver.receiver_workspace_supported;
         result.confidence_available=receiver.confidence_available&&sample_snr>=-300&&sample_snr<=300;
         result.one_bit_confidence_available=receiver.one_bit_confidence_available&&sample_snr>=-300&&sample_snr<=300;
@@ -630,6 +639,7 @@ Model build(const Inputs& inputs) {
         single_receiver.coherent_reference_only=receiver.coherent_reference_only;
         result.one_bit_cpu_seconds=single_receiver.cpu_seconds;
         result.receiver_cpu_seconds=single_receiver.receiver_cpu_seconds;
+        result.kernel_rebuild_upper_bound=single_receiver.kernel_rebuild_upper_bound;
         result.cpu_realtime_ratio=single_receiver.simulated_seconds>0?
             single_receiver.receiver_cpu_seconds/single_receiver.simulated_seconds:0;
         result.cpu_per_bit_ratio=single_receiver.cpu_seconds/result.bit_seconds;
@@ -639,7 +649,11 @@ Model build(const Inputs& inputs) {
         // The selected marker already receives single_receiver directly.
         // Keep its 4096-trial result out of the 512-trial curve cache so a
         // previously selected target cannot change a later curve's precision.
-        if(!receiver.carrier_in_search)result.receiver_status="Clock outside RX search";
+        if(!receiver.carrier_in_search||!receiver.clock_in_search)result.receiver_status="Clock outside RX search";
+        if(receiver.oscillator_search_limited) {
+            if(!result.receiver_status.empty())result.receiver_status+=" · ";
+            result.receiver_status+="Oscillator margin coverage incomplete";
+        }
         if(!receiver.receiver_workspace_supported) {
             if(!result.receiver_status.empty())result.receiver_status+=" · ";
             result.receiver_status+="Wide RX search exceeds RAM";

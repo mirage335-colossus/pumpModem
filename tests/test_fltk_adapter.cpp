@@ -835,6 +835,15 @@ void repeatable_clicks() {
     auto* window=application_window();require(window,"Repeatable fixture has no native window");
     auto* toggle=dynamic_cast<NativeCheckbox*>(find_button(*window,"Repeatable"));
     require(toggle,"Repeatable fixture has no native checkbox");
+    struct CallbackProbe {
+        Fl_Widget& widget;Fl_Callback* original;void* context;unsigned calls=0;
+        explicit CallbackProbe(Fl_Widget& value):widget(value),original(value.callback()),context(value.user_data()) {
+            widget.callback([](Fl_Widget* sender,void* data) {
+                auto& probe=*static_cast<CallbackProbe*>(data);++probe.calls;probe.original(sender,probe.context);
+            },this);
+        }
+        ~CallbackProbe(){widget.callback(original,context);}
+    } probe(*toggle);
     const auto key=Fl::e_keysym,x=Fl::e_x,y=Fl::e_y,state=Fl::e_state;
     const auto refresh=[] {
         const auto until=Clock::now()+std::chrono::milliseconds(130);
@@ -868,14 +877,18 @@ void repeatable_clicks() {
         // Dragging outside cancels; returning inside before release commits.
         for(bool return_inside:{false,true}) {
             const auto checked=app.application.field(ui::Field::repeatable).checked;
-            const auto revision=app.application.revision();
+            const auto calls=probe.calls;
+            const auto body=app.application.field(ui::Field::message).text;
             pointer(FL_PUSH,px,py);refresh();
             pointer(FL_DRAG,toggle->x()+toggle->w()+10,py);refresh();
             if(return_inside) {pointer(FL_DRAG,px,py);refresh();}
             pointer(FL_RELEASE,return_inside?px:toggle->x()+toggle->w()+10,py);
             require(app.application.field(ui::Field::repeatable).checked==(checked!=return_inside)&&
-                app.application.revision()==revision+(return_inside?1:0),
+                probe.calls==calls+(return_inside?1:0),
                 "Presentation changed native Repeatable drag cancellation or release semantics");
+            const auto released=app.application.field(ui::Field::message).text;
+            require(return_inside?(checked?released=="Click test body":released.starts_with("REPEATABLE-")&&released.substr(19)==" Click test body"):released==body,
+                "Repeatable drag cancellation or release changed the message body");
             refresh();
         }
     }
@@ -1044,6 +1057,9 @@ void expanded_bitmap_hover_repaint() {
         const auto until=Clock::now()+std::chrono::milliseconds(130);while(Clock::now()<until)Fl::wait(.002);
     };
     const auto pixels=[&] {
+        // Deliver only damage already queued by native events. A Configure
+        // event can discard the double buffer before the next normal flush.
+        Fl::flush();
         window->make_current();std::unique_ptr<unsigned char[]> data(fl_read_image(nullptr,0,0,window->w(),window->h()));
         require(data!=nullptr,"QR hover fixture could not capture the visible client area");
         return std::vector<unsigned char>(data.get(),data.get()+static_cast<std::size_t>(window->w())*window->h()*3);
@@ -1054,13 +1070,22 @@ void expanded_bitmap_hover_repaint() {
     };
     window->position(80,80);move(window->w()+30,window->h()+30);
     app.application.edit(ui::Field::message,"Keep the complete expanded QR visible while the pointer moves");
-    app.application.select(ui::Field::qr_brightness,"normal");app.application.activate(ui::Command::toggle_qr_expanded);settle();
+    app.application.select(ui::Field::qr_brightness,"normal");app.application.activate(ui::Command::toggle_qr_expanded);
+    const auto overlay_deadline=Clock::now()+std::chrono::seconds(2);
+    while((!surface()||!surface()->visible_r())&&Clock::now()<overlay_deadline)Fl::wait(.002);
+    require(surface()&&surface()->visible_r(),"Expanded QR was not presented before the hover baseline");
+    settle();
+    const int captured_width=window->w(),captured_height=window->h();
     const auto observe=[&](const std::vector<unsigned char>& expected,int milliseconds,bool* saw_tooltip=nullptr) {
         const auto until=Clock::now()+std::chrono::milliseconds(milliseconds);
         do {
             // Process genuine pointer, tooltip and expose events. Do not ask
-            // the app or root window for a full repaint to repair the image.
+            // the app or root window for a full repaint to repair the image;
+            // pixels() merely completes damage already queued by these events.
             Fl::wait(.002);
+            require(window->w()==captured_width&&window->h()==captured_height&&
+                expected.size()==static_cast<std::size_t>(captured_width)*captured_height*3,
+                "Hover capture dimensions changed after the baseline");
             require(surface()&&surface()->x()==0&&surface()->y()==0&&surface()->w()==window->w()&&surface()->h()==window->h(),
                 "Hovering changed the expanded QR surface geometry");
             ui::Rect tip{};
@@ -1073,10 +1098,16 @@ void expanded_bitmap_hover_repaint() {
                 if(x>=tip.x&&x<tip.x+tip.w&&y>=tip.y&&y<tip.y+tip.h)continue;
                 const auto offset=(static_cast<std::size_t>(y)*window->w()+x)*3;
                 if(!std::equal(actual.begin()+offset,actual.begin()+offset+3,expected.begin()+offset))
-                    throw std::runtime_error("Pointer/tooltip repaint lost expanded QR pixels outside the tooltip at "+std::to_string(x)+","+std::to_string(y));
+                    throw std::runtime_error("Pointer/tooltip repaint lost expanded QR pixels outside the tooltip at "+std::to_string(x)+","+std::to_string(y)+
+                        " expected "+std::to_string(expected[offset])+","+std::to_string(expected[offset+1])+","+std::to_string(expected[offset+2])+
+                        " actual "+std::to_string(actual[offset])+","+std::to_string(actual[offset+1])+","+std::to_string(actual[offset+2]));
             }
         } while(Clock::now()<until);
     };
+    // X11 maps asynchronously; a fixed event wait does not guarantee the first
+    // double-buffer allocation. Establish the initial frame before observing
+    // genuine pointer/tooltip damage without forced repaints below.
+    window->wait_for_expose();
     const auto initial=pixels();
     for(const auto& point:{std::pair{32,32},std::pair{window->w()/2,window->h()/2},std::pair{window->w()-32,window->h()-32}}) {
         move(point.first,point.second);observe(initial,70);
@@ -1267,23 +1298,35 @@ void inline_document_editor() {
         while(Clock::now()<until)Fl::wait(.005);
     };
     app.application.select_page(ui::Page::planner);refresh();
+    const auto help_for=[](ui::Field field) {
+        const auto& controls=ui::console_screen();
+        const auto found=std::find_if(controls.begin(),controls.end(),[&](const auto& control){return control.field==field;});
+        require(found!=controls.end(),"Inline fixture has no control declaration");return std::string(found->help);
+    };
+    const auto target_help=help_for(ui::Field::planner_target),command_help=help_for(ui::Field::planner_command);
     NativeInput* editor=nullptr;NativeEditor* command_editor=nullptr;NativeMenuButton* presets=nullptr;FltkDocumentView* document=nullptr;
     const std::function<void(Fl_Group&)> find=[&](Fl_Group& group) {
         if(auto* view=dynamic_cast<FltkDocumentView*>(&group);view&&view->visible_r())document=view;
         for(int i=0;i<group.children();++i) {
             auto* child=group.child(i);
             if(document&&document->contains(child)) {
-                if(auto* input=dynamic_cast<NativeInput*>(child))editor=input;
-                if(auto* menu=dynamic_cast<NativeMenuButton*>(child);menu&&menu->visible_r())presets=menu;
-                if(auto* command=dynamic_cast<NativeEditor*>(child))command_editor=command;
+                const auto help=child->tooltip()?std::string_view(child->tooltip()):std::string_view{};
+                if(auto* input=dynamic_cast<NativeInput*>(child);input&&help==target_help)editor=input;
+                if(auto* menu=dynamic_cast<NativeMenuButton*>(child);menu&&help==target_help)presets=menu;
+                if(auto* command=dynamic_cast<NativeEditor*>(child);command&&help==command_help)command_editor=command;
             }
             if(auto* nested=dynamic_cast<Fl_Group*>(child))find(*nested);
         }
     };
     find(*window);
-    require(document&&editor&&presets&&presets->size()>2&&editor->visible_r(),
+    require(document&&editor&&presets&&presets->size()>2&&editor->parent()==presets->parent(),
         "Scrollable planner did not construct its ordinary native editor and preset dropdown");
-    require(editor->y()>=app.application.page_bounds(window->w(),window->h()).y&&editor->take_focus(),
+    auto* scroll=dynamic_cast<Fl_Scroll*>(document->parent()->parent());require(scroll,"Inline editor has no native scroll host");
+    const auto show=[&](Fl_Widget& widget) {
+        scroll->scroll_to(0,std::max(0,scroll->yposition()+widget.y()-scroll->y()-20));refresh();
+    };
+    show(*editor);
+    require(editor->visible_r()&&editor->y()>=app.application.page_bounds(window->w(),window->h()).y&&editor->take_focus(),
         "Inline editor remained in the persistent header or could not take focus");
     const auto key=Fl::e_keysym,state=Fl::e_state,length=Fl::e_length;auto* event_text=Fl::e_text;
     char tab_text[]={'\t',0};
@@ -1299,7 +1342,10 @@ void inline_document_editor() {
     find(*window);
     require(editor==original&&Fl::focus()==editor&&std::string(editor->value())=="-"&&
         app.application.field(ui::Field::planner_target).text=="-",
-        "Invalid typed prefix was replaced or lost focus during a document rebuild");
+        ("Invalid typed prefix was replaced or lost focus during a document rebuild: same="+std::to_string(editor==original)+
+         " focus="+std::to_string(Fl::focus()==editor)+" visible="+std::to_string(editor->visible_r()!=0)+
+         " y="+std::to_string(editor->y())+" scroll="+std::to_string(scroll->yposition())+
+         " value="+editor->value()+" field="+app.application.field(ui::Field::planner_target).text).c_str());
     editor->value("-18");editor->insert_position(2,1);editor->do_callback();refresh();
     require(Fl::focus()==editor&&editor->insert_position()==2&&editor->mark()==1&&std::string(editor->value())=="-18",
         "Ordinary inline typing lost its cursor, selection or edit buffer");
@@ -1314,13 +1360,14 @@ void inline_document_editor() {
     editor->take_focus();const int old_y=editor->y();
     app.application.dispatch(ui::Command::planner_toggle_details);refresh();find(*window);
     require(editor==original&&Fl::focus()==editor,"Adding document details replaced the inline editor or stole focus");
-    auto* scroll=dynamic_cast<Fl_Scroll*>(document->parent()->parent());require(scroll,"Inline editor has no native scroll host");
-    scroll->scroll_to(0,230);refresh();
+    const auto target_scroll=scroll->yposition();
+    scroll->scroll_to(0,target_scroll+editor->y()+editor->h()-scroll->y()+1);refresh();
     require(editor->y()<old_y&&!editor->visible_r()&&Fl::focus()!=editor&&!editor->take_focus(),
         "Scrolling the inline editor out of the viewport retained visible input or keyboard focus");
-    scroll->scroll_to(0,0);refresh();
+    scroll->scroll_to(0,target_scroll);refresh();
     require(editor->visible_r()&&editor->take_focus(),"Scrolling the inline editor back did not restore input");
-    require(command_editor&&command_editor->visible_r()&&command_editor->byte_limit==8192&&command_editor->tab_nav(),
+    require(command_editor,"Planner has no retained launch command editor");show(*command_editor);
+    require(command_editor->visible_r()&&command_editor->byte_limit==8192&&command_editor->tab_nav(),
         "Launch command is not a native multiline editor with ordinary focus navigation");
     app.application.edit(ui::Field::message,"e");refresh();
     const auto original_rate=app.application.field(ui::Field::bandwidth).text;
@@ -1647,7 +1694,32 @@ int main(int argc,char** argv) {
         if(argc==2&&std::string_view(argv[1])=="--layout-lifecycle") {
             theme::apply_palette();layout_lifecycle();return 0;
         }
+        if(argc==2&&std::string_view(argv[1])=="--repeatable-clicks") {
+            theme::apply_palette();repeatable_clicks();return 0;
+        }
+        if(argc==2&&std::string_view(argv[1])=="--inline-document-editor") {
+            theme::apply_palette();inline_document_editor();return 0;
+        }
+        if(argc==2&&std::string_view(argv[1])=="--expanded-hover") {
+            theme::apply_palette();expanded_bitmap_hover_repaint();return 0;
+        }
         if(argc!=1)throw std::runtime_error("Unknown FLTK adapter probe");
-        theme::apply_palette();palette_roles();estimate_warning_colors();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editor_history_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();fast_mode_visibility();developer_mode_visibility();tab_clicks();repeatable_clicks();expanded_bitmap_clicks();expanded_bitmap_hover_repaint();shared_overlay_controls();extension_controls();inline_document_editor();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();compression_page_labels();std::cout<<"FLTK generic adapter checks passed: menus, tab clicks, repeatable clicks, expanded bitmaps, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins, compression labels and shared extensions.\n";return 0;}
+        theme::apply_palette();
+        using Probe=std::pair<const char*,void(*)()>;
+        const std::array probes{
+            Probe{"palette_roles",palette_roles},Probe{"estimate_warning_colors",estimate_warning_colors},
+            Probe{"menus",menus},Probe{"generic_gestures_and_bitmaps",generic_gestures_and_bitmaps},
+            Probe{"editor_cursor_requests",editor_cursor_requests},Probe{"editor_history_requests",editor_history_requests},
+            Probe{"editors_and_records",editors_and_records},Probe{"clipboard",clipboard},
+            Probe{"clipboard_shortcuts",clipboard_shortcuts},Probe{"prompts",prompts},
+            Probe{"fast_mode_visibility",fast_mode_visibility},Probe{"developer_mode_visibility",developer_mode_visibility},
+            Probe{"tab_clicks",tab_clicks},Probe{"repeatable_clicks",repeatable_clicks},
+            Probe{"expanded_bitmap_clicks",expanded_bitmap_clicks},Probe{"expanded_bitmap_hover_repaint",expanded_bitmap_hover_repaint},
+            Probe{"shared_overlay_controls",shared_overlay_controls},Probe{"extension_controls",extension_controls},
+            Probe{"inline_document_editor",inline_document_editor},Probe{"layout_lifecycle",layout_lifecycle},
+            Probe{"policy_lifecycle",policy_lifecycle},Probe{"popup_polling_and_document_layout",popup_polling_and_document_layout},
+            Probe{"compression_page_labels",compression_page_labels}};
+        for(const auto& [name,probe]:probes){std::cout<<"FLTK adapter: "<<name<<std::endl;probe();}
+        std::cout<<"FLTK generic adapter checks passed: menus, tab clicks, repeatable clicks, expanded bitmaps, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins, compression labels and shared extensions.\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }
