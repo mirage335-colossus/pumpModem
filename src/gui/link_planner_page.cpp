@@ -42,8 +42,8 @@ std::string decimal(double value) {
     return result == "-0" ? "0" : result;
 }
 std::string frequency(double value) {
-    if (value >= 1000000) return decimal(value / 1000000) + " MHz";
-    return value >= 1000 ? decimal(value / 1000) + " kHz" : decimal(value) + " Hz";
+    const double scale=value>=1e12?1e12:value>=1e9?1e9:value>=1e6?1e6:value>=1e3?1e3:1;
+    return number(value/scale,12)+(scale==1e12?" THz":scale==1e9?" GHz":scale==1e6?" MHz":scale==1e3?" kHz":" Hz");
 }
 std::string band_span(double low, double high) {
     const bool khz = std::max(std::abs(low), std::abs(high)) >= 10000;
@@ -395,6 +395,34 @@ Node cpu_graph(const planner::Model& model,float width) {
     return n;
 }
 
+void oscillator_details(Node& root,const planner::Model& model) {
+    auto clocks=card(root.width);clocks.bottom=8;
+    paragraph(clocks,"Oscillator search",14,Tone::text,true,6);
+    paragraph(clocks,"Fixed USB uses a real ADC/DAC stream at Carrier minus Shift. Baseband Osc models sample timing and phase. Shift Osc models frequency translation; Baseband clock uses the same reference for sampling and synchronous mixer LOs, counted once. At Shift 0 only Baseband Osc contributes.",11);
+    const auto& config=model.inputs.options.modem;
+    if(config.oscillator_search) {
+        try {
+            const auto search=modem::oscillator_pattern_search(config);
+            const auto effects=modem::oscillator_effects(config);
+            const auto& policy=*config.oscillator_search;
+            const bool active_shift=policy.rf_shift_hz!=0;
+            const bool shared=active_shift&&policy.reference==modem::OscillatorReference::shared_radio;
+            paragraph(clocks,"Carrier "+frequency(effects.physical_rf_hz)+" · Stream tone "+frequency(config.carrier_hz)+" · Baseband accuracy "+number((shared?policy.rf:policy.lf).accuracy_ppm)+
+                " ppm · Shift accuracy "+number(config.oscillator_search->rf.accuracy_ppm)+
+                " ppm"+(!active_shift?" (N/A)":shared?" (Baseband clock)":"")+" · "+number(config.oscillator_search->margin)+"× margin",11);
+            paragraph(clocks,"Phase diffusion: Baseband "+number((shared?policy.rf:policy.lf).phase_noise_degrees_per_sqrt_second)+
+                " · Shift "+number(policy.rf.phase_noise_degrees_per_sqrt_second)+
+                (!active_shift?" (N/A)":shared?" (Baseband clock)":"")+" deg / sqrt(s). Effective clock mismatch "+
+                number(effects.clock_error_ppm)+" ppm.",11);
+            paragraph(clocks,"Frequency half-width: requested "+frequency(search.frequency.requested_half_width_hz)+", covered "+frequency(search.frequency.half_width_hz)+
+                ". Sample-clock half-width: requested "+number(search.requested_clock_half_width_ppm)+" ppm, covered "+number(search.clock_half_width_ppm)+
+                " ppm. "+std::to_string(search.hypotheses.size())+" paired hypotheses."+(search.limited?" LIMITED COVERAGE.":""),11,
+                search.limited?Tone::accent:Tone::muted);
+        } catch(const std::exception& error) {paragraph(clocks,error.what(),11,Tone::accent);}
+    }
+    root.children.push_back(std::move(clocks));
+}
+
 void planner_controls(Node& root,const planner::Model& model,bool show_details,bool use_draft) {
     const auto& declarations=ui::console_screen();
     const auto native=[&](ui::Field field,float width,float height) {
@@ -402,41 +430,6 @@ void planner_controls(Node& root,const planner::Model& model,bool show_details,b
             [&](const auto& control){return control.field==field;});
         auto node=column(width);node.kind=Kind::control;node.control=*declaration;node.height=height;return node;
     };
-    auto clocks=card(root.width);clocks.bottom=8;
-    paragraph(clocks,"Oscillator search and RF conversion",14,Tone::text,true,6);
-    const auto inner=clocks.width-2*clocks.padding;
-    const std::size_t columns=inner>=760?3:inner>=440?2:1;
-    const float field_width=(inner-12*static_cast<float>(columns-1))/static_cast<float>(columns);
-    constexpr std::array fields{ui::Field::rf_oscillator,ui::Field::rf_shift,ui::Field::search_margin,
-        ui::Field::oscillator_reference,ui::Field::oscillator_sideband};
-    for(std::size_t first=0;first<fields.size();first+=columns) {
-        auto line=row(inner);line.bottom=8;
-        for(std::size_t i=first;i<std::min(first+columns,fields.size());++i) {
-            auto field=native(fields[i],field_width,ui::label_height+28);
-            if(i+1<std::min(first+columns,fields.size()))field.right=12;
-            line.children.push_back(std::move(field));
-        }
-        clocks.children.push_back(std::move(line));
-    }
-    paragraph(clocks,"RF shift is the radio LO. The actual modem carrier stays in the real ADC/DAC stream. Radio clock (LF=0) uses one shared reference for sampling and synchronous mixer LOs; independent audio keeps a separate LF clock.",11);
-    const auto& config=model.inputs.options.modem;
-    if(config.oscillator_search) {
-        try {
-            const auto search=modem::oscillator_pattern_search(config);
-            const auto effects=modem::oscillator_effects(config);
-            const auto& policy=*config.oscillator_search;
-            const bool shared=policy.reference==modem::OscillatorReference::shared_radio;
-            paragraph(clocks,"On-air carrier "+frequency(effects.physical_rf_hz)+" · LF accuracy "+number(config.oscillator_search->lf.accuracy_ppm)+
-                " ppm"+(shared?" (inactive)":"")+" · RF accuracy "+number(config.oscillator_search->rf.accuracy_ppm)+
-                " ppm"+(!shared&&policy.rf_shift_hz==0?" (inactive)":"")+" · "+number(config.oscillator_search->margin)+"× margin",11);
-            paragraph(clocks,"Frequency half-width: requested "+frequency(search.frequency.requested_half_width_hz)+", covered "+frequency(search.frequency.half_width_hz)+
-                ". Sample-clock half-width: requested "+number(search.requested_clock_half_width_ppm)+" ppm, covered "+number(search.clock_half_width_ppm)+
-                " ppm. "+std::to_string(search.hypotheses.size())+" paired hypotheses."+(search.limited?" LIMITED COVERAGE.":""),11,
-                search.limited?Tone::accent:Tone::muted);
-        } catch(const std::exception& error) {paragraph(clocks,error.what(),11,Tone::accent);}
-    }
-    if(!model.probability_model_limit.empty())paragraph(clocks,"Estimate coverage: "+model.probability_model_limit,11,Tone::muted);
-    root.children.push_back(std::move(clocks));
     const bool compact=model.available&&root.width>=900;
     const bool paired=model.available&&root.width>=560;
     const float chart_width=compact?std::min(300.f,root.width*.28f):std::min(340.f,root.width*.44f);
@@ -572,6 +565,7 @@ void link_budget(Node& root, const planner::Model& model) {
     root.children.push_back(std::move(n));
 }
 void details(Node& root,const planner::Model& model) {
+    oscillator_details(root,model);
     auto n = card(root.width);
     paragraph(n, "Model limits", 15, Tone::text, true, 8);
     if(!model.probability_model_limit.empty())paragraph(n,"Estimate coverage: "+model.probability_model_limit+".");
@@ -628,17 +622,18 @@ void details(Node& root,const planner::Model& model) {
 ui::DocumentNode build(const planner::Model& model, float width, bool show_details, bool use_draft, std::string error) {
     auto root = column(std::max(220.0f, width));
     paragraph(root, "Link planner", 22, Tone::text, true, 4);
+    if (error.empty()) error = model.error;
+    // Reserve a small status line so valid background updates retain every
+    // control, chart and scroll position while previous values are identified.
+    const bool compact_status=error.empty()||model.calculating||error=="Updating · previous plan";
+    paragraph(root,error.empty()?" ":std::move(error),11,Tone::accent,true,4);
+    if(compact_status)root.children.back().height=18;
     link_budget(root, model);
     const auto& config = model.inputs.options.modem;
-    const auto& channel = model.inputs.channel;
-    const bool crystal = channel.clock_error_ppm == 100 && channel.phase_noise_degrees_per_sqrt_second == .5;
-    paragraph(root, "Rate " + frequency(config.bandwidth_hz) + "  ·  Carrier " + frequency(config.carrier_hz) +
-        "  ·  " + (crystal ? "Free-running crystal" : "Clock mismatch " + number(channel.clock_error_ppm) + " ppm") +
+    paragraph(root, "Rate " + frequency(config.bandwidth_hz) + "  ·  Stream tone " + frequency(config.carrier_hz) +
         "  ·  DSP " + (model.inputs.dsp_workspace_percent ? std::to_string(model.inputs.dsp_workspace_percent) + "% RAM · " : "") +
         number(static_cast<double>(model.inputs.options.dsp_workspace_bytes) / (1024 * 1024 * 1024)) + " GiB", 11, Tone::muted, false, 6);
     planner_controls(root,model,show_details,use_draft);
-    if (error.empty()) error = model.error;
-    if (!error.empty()) paragraph(root, std::move(error), 12, Tone::accent, true);
     if (!model.available) {
         paragraph(root, "Adjust the target or modem settings to calculate this link.", 13, Tone::text);
         if (show_details) details(root,model);
@@ -648,7 +643,7 @@ ui::DocumentNode build(const planner::Model& model, float width, bool show_detai
     auto headline = wide ? row(root.width, true) : column(root.width);
     const float headline_width = wide ? (root.width - 12) / 2 : root.width;
     auto send = card(headline_width); send.padding = 10; send.right = wide ? 12 : 0; send.bottom = wide ? 0 : 8;
-    paragraph(send, model.inputs.empty_draft ? "1-bit preview" : use_draft ?
+    paragraph(send, model.inputs.empty_draft ? "1-bit preview" : model.inputs.wire_bits>1 ?
         "Send current draft · " + std::to_string(model.inputs.wire_bits) + " bits" : "Send 1 bit", 12, Tone::text, true, 4);
     paragraph(send, planner::duration(model.send_seconds), 23, Tone::accent, true, 0);
     auto finish = card(headline_width); finish.padding = 10;

@@ -830,10 +830,11 @@ struct PatternReceiver::Impl {
         }
         bits.push_back(bit);
     }
-    void continue_tracks(std::stop_token stop,bool final=false) {
+    void continue_tracks(std::stop_token stop,bool final=false,
+                         std::uint64_t latest_start=std::numeric_limits<std::uint64_t>::max()) {
         for(auto it=tracks.begin();it!=tracks.end();) {
             cancelled(stop);auto& track=*it;bool ended=false;
-            while(track.next+length+(final?0:2)<=bins) {
+            while(track.next<=latest_start && track.next+length+(final?0:2)<=bins) {
                 PatternEvidence best;best.score=-1;std::uint64_t chosen=track.next;
                 std::size_t group_count=0;
                 const auto groups=phase_groups(track.index,track.phase_lower,track.phase_upper,group_count);
@@ -1320,10 +1321,13 @@ struct PatternReceiver::Impl {
             }
             std::sort(peaks.begin(),peaks.end(),[](const auto& a,const auto& b){return a.first_sample<b.first_sample;});
             for(const auto& peak:peaks) {
-                // Existing tracks must consume available observations before
-                // overlap checks: an FFT hop can expose a later symbol while
-                // its established track still points to the preceding one.
-                continue_tracks(stop);
+                // Advance through this candidate's timing before overlap
+                // arbitration, including the two-bin refinement tolerance.
+                // Consuming later symbols first could promote a weak track
+                // onto a suffix before its stronger prefix is considered.
+                const auto start=peak.first_sample/bin_samples;
+                continue_tracks(stop,false,start>std::numeric_limits<std::uint64_t>::max()-2?
+                    std::numeric_limits<std::uint64_t>::max():start+2);
                 admit(peak,peak.frequency_hypothesis);
             }
             next_start+=count;continue_tracks(stop);

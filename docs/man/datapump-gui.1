@@ -21,6 +21,13 @@ BPSK125 and Olivia-4/2k text.
 The modes have separate settings.
 Peers must select matching waveform, source, coding and key settings.
 .PP
+Robust keeps Baseband Osc, Shift Osc and Margin beside its main Carrier and
+Shift frequency controls. Shift 0 disables Shift Osc as N/A and excludes all
+Shift-model frequency and phase error. For a positive Shift, the Baseband clock
+option shares the selected Baseband model between sampling and mixers, counted
+once. Numerical oscillator/search information is under the Link planner's
+hideable Model limits and references.
+.PP
 FLTK and Rev builds provide the same application controls.
 The backend is selected at build time and reported by
 .BR \-\-version ;
@@ -64,9 +71,24 @@ Receiver noise density, from \-250 to 0 dBm/Hz.
 Default: \-164.
 .TP
 .BI \-\-oscillator " ID"
-Oscillator model:
+Baseband oscillator model for bounded receiver search and simulated impairments:
 .BR crystal " (default), " gpsdo-xo ,
 .BR gpsdo-tcxo " or " gpsdo-ocxo .
+.TP
+.BI \-\-rf\-oscillator " ID"
+Shift oscillator model; the same choices, default crystal. Inactive at Shift 0.
+For a legacy positive-Shift shared reference, this flag selects the shared model.
+.TP
+.BI \-\-reference " independent|shared-radio"
+Independent Baseband and Shift references (default), or one shared sampling/mixer
+reference for a positive Shift. Shift 0 always uses only the Baseband model.
+.B \-\-lf\-reference 0
+is a legacy shared-reference shorthand, unrelated to Shift 0. GUI load maps an
+active shared model into Baseband Osc and selects Shift Osc's Baseband clock
+option; no separate Clock dropdown is shown.
+.TP
+.BI \-\-search\-margin " N"
+Multiply declared frequency and clock accuracy bounds; default 3, minimum 1.
 .TP
 .BI \-\-target\-snr " DB-HZ"
 Set the planner, short-message and long-message target carrier-to-noise-density
@@ -89,8 +111,22 @@ This is not the payload bit rate.
 is an alias.
 .TP
 .BI \-\-carrier " FREQUENCY"
-Set the carrier frequency, greater than zero and at most 30 MHz.
-Default: 1500 Hz.
+Set the absolute transmitted/received carrier; default 1500 Hz.
+Carrier minus Shift must be positive and at most 30 MHz for the real USB stream.
+Case-insensitive Hz, kHz, MHz, GHz and THz suffixes, k/m/g/t shorthand, optional
+spaces and scientific notation are accepted; a plain number is in Hz.
+.B \-\-rf\-carrier
+is an alias; matching carrier aliases may be combined.
+.TP
+.BI \-\-shift " FREQUENCY"
+Nonnegative RF translation or LO; default 0 Hz.
+Accepts the same frequency units as Carrier.
+For Carrier 1.0015 MHz and Shift 1 MHz, the real stream tone is 1500 Hz.
+At Shift 0 the same Carrier needs a direct MHz-capable real stream.
+.B \-\-rf\-shift
+is an alias; choose one shift spelling.
+USB is fixed; \-\-sideband upper is a compatibility no-op and lower is rejected.
+These settings do not retune hardware or add a complex I/Q interface.
 .TP
 .BI \-\-dsp\-workspace " PERCENT"
 Limit the Robust DSP workspace to 25%, 50% or 75% of available RAM.
@@ -111,7 +147,8 @@ with N equal to 3, 4, 6, 8, 12 or 16, or
 with N equal to 1, 2, 3, 4, 8, 32, 128, 1024, 4096 or 16384.
 Tone modes disable private spreading and encryption.
 .PP
-Frequencies accept Hz, kHz or MHz, case-insensitively; bare numbers mean Hz.
+Frequencies accept Hz, kHz, MHz, GHz or THz case-insensitively, with optional
+spaces, scientific notation or k/m/g/t shorthand; bare numbers mean Hz.
 Quote a value containing spaces.
 The complete combination must fit the local modem and workspace constraints.
 .SS Diagnostics

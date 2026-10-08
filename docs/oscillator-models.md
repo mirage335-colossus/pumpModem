@@ -1,6 +1,6 @@
 # Oscillator references and receiver search
 
-The LF/audio and RF oscillator selectors separate link power from clock quality.
+The **Baseband Osc** and **Shift Osc** selectors separate link power from clock quality.
 They include hobbyist GPS disciplined oscillators (GPSDOs) without an oven,
 temperature-compensated crystal oscillators (TCXOs) without an oven, and
 oven-controlled crystal oscillators (OCXOs). The declared models determine the
@@ -36,35 +36,48 @@ a selected model range, not a universal ranking of hardware.
 ## Real streams and clock references
 
 All external input and output remains an ordinary **real ADC/DAC sample stream**.
-The modem carrier is the nonzero tone within that stream, such as 1.5 kHz.
-An RF LO/translation frequency is separate metadata; it never replaces the
-modem tone or controls the DSP sample-rate planner. A radio can supply a real
-0–20 kHz or 0–1 MHz passband by its own conversion and filtering. Direct
-conversion and synchronous superheterodyne hardware need no separate decoder
-mode when the delivered passband and effective reference behavior are the same.
+The public **Carrier** is the absolute transmitted/received frequency; **Shift**
+is the nonnegative RF translation or LO frequency, default **0 Hz**. Fixed upper
+sideband (USB) gives the nonzero stream tone **Carrier − Shift**. Carrier must
+exceed Shift. Both fields accept Hz, kHz, MHz, GHz or THz suffixes, ignoring
+case and optional spaces; scientific notation and plain values in Hz also work.
 
-The **independent audio** reference uses the LF/audio model for ADC/DAC timing
-and the modem tone. When RF translation is active, the RF model adds the
-converter's independent frequency and phase error. RF shift **0 Hz**, the
-default, makes that extra conversion contribution inactive.
+| Carrier | Shift | Real stream tone |
+| --- | --- | --- |
+| 1.0015 MHz | 1 MHz | 1.5 kHz |
+| 1.0015 MHz | 0 Hz | 1.0015 MHz |
 
-The **shared radio** reference uses the RF model once for the radio's ADC/DAC
-and synchronous mixer references. The LF=0 indication means there is no
-additional independent PC sound-card oscillator; it does not put the modem
-tone at DC or remove sampling uncertainty. A shared reference within each radio
-does not imply identical clocks at the two ends of the link, or eliminate
-additional synthesizer phase noise. The RF model must describe the effective
-relative behavior of the whole radio reference chain.
+The direct MHz case requires a real stream and sample rate that support that
+MHz tone. A radio can instead supply a real 0–20 kHz or 0–1 MHz passband by its
+own conversion and filtering. Direct conversion and synchronous superheterodyne
+hardware need no separate decoder mode when the delivered passband and effective
+reference behavior are the same. No external complex I/Q format is introduced.
 
-RF shift denotes the LO/tuning frequency. With a 10 MHz LO and a 1.5 kHz
-modem tone, the physical carrier is 10.0015 MHz for the upper sideband, or
-9.9985 MHz for the lower sideband. Entering the equivalent physical RF carrier
-instead of its LO decomposes to the same policy and search. The frequency
-orientation is required because lower-sideband conversion reverses the
-RF offset's sign in the delivered real stream.
+**Baseband Osc** always models ADC/DAC timing and the real stream's carrier.
+For a positive Shift, an independently selected **Shift Osc** profile adds the
+converter's frequency and phase error. At Shift **0 Hz**, Shift Osc displays
+**N/A** and is disabled. All Shift-model frequency error, phase diffusion and
+linked drift are excluded, including when a legacy shared-reference setting was
+loaded. Only the Baseband model remains active. The GUI remembers the chosen
+Shift Osc option and restores it when Shift becomes positive.
+
+Choose **Baseband clock** in Shift Osc when the ADC/DAC and synchronous mixers
+really share one reference within each radio. This uses the selected Baseband
+profile once, with linked frequency and sample-rate hypotheses. It does not
+add a second independent oscillator or a second phase-diffusion contribution.
+No separate Clock dropdown is needed. Shared hardware within each radio does
+not imply identical clocks at the two ends of the link, or eliminate additional
+synthesizer phase noise. The Baseband profile must describe the effective
+relative behavior of the whole shared reference chain.
+
+With Carrier 10.0015 MHz and Shift 10 MHz, the delivered tone is 1.5 kHz.
+Changing Shift while holding Carrier fixed changes the stream tone and can
+change its required sample rate. Once that tone is determined, RF translation
+metadata adds no RF-rate samples or cipher work. Carrier and Shift describe
+frequencies; neither control retunes physical hardware.
 
 GPS/PPS may set computer time or calibrate a sound-card rate without actually
-driving its sample clock. Those cases retain the relevant measured LF/audio
+driving its sample clock. Those cases retain the relevant measured Baseband
 uncertainty. Hardware clock discipline and software timing calibration are
 different assumptions; choosing a profile provides neither service.
 
@@ -77,47 +90,74 @@ low-level real streams can use the same reference policy.
 
 | Option | Meaning and default |
 | --- | --- |
-| `--oscillator MODEL` | LF/audio profile; `crystal` |
-| `--rf-oscillator MODEL` | RF/shared-radio profile; `crystal` |
-| `--rf-shift HZ` | RF LO/translation frequency; `0` |
-| `--rf-carrier HZ` | Alternative physical RF carrier, normalized to an LO using the modem tone and sideband |
+| `--oscillator MODEL` | Baseband profile; `crystal` |
+| `--rf-oscillator MODEL` | Shift profile for an independent positive Shift; legacy shared-reference profile; `crystal` |
+| `--carrier FREQUENCY` | Absolute carrier; the real stream tone is Carrier minus Shift |
+| `--shift FREQUENCY` | LO/translation frequency; `0` |
+| `--rf-shift FREQUENCY` | Compatibility alias for `--shift` |
+| `--rf-carrier FREQUENCY` | Compatibility alias for absolute `--carrier` |
 | `--search-margin N` | Effective-link accuracy multiplier; `3` |
-| `--reference independent\|shared-radio` | Reference topology; `independent` |
-| `--lf-reference 0` | Shorthand for `shared-radio`, without changing the actual modem tone |
-| `--sideband upper\|lower` | Frequency orientation; `upper` |
+| `--reference independent\|shared-radio` | Legacy reference spelling; `independent`; positive shared Shift uses the `--rf-oscillator` profile once for sampling and conversion |
+| `--lf-reference 0` | Legacy shorthand for `shared-radio`; unrelated to setting Shift to zero |
+| `--sideband upper` | Accepted compatibility no-op; lower sideband is rejected |
 
-For a 10 MHz LO and a GPSDO/OCXO radio reference:
+For an absolute 10.0015 MHz carrier, 10 MHz translation and a GPSDO/OCXO radio
+reference:
 
 ```sh
 ./build/pump analyze-link --text a --bw 100 --symbol-seconds 128 \
-  --simulation '3dBm -120dB' --rf-shift 10000000 \
-  --rf-oscillator gpsdo-ocxo --reference shared-radio --search-margin 3
+  --simulation '3dBm -120dB' --carrier '10.0015 MHz' --shift '10 MHz' \
+  --oscillator gpsdo-ocxo --rf-oscillator gpsdo-ocxo \
+  --reference shared-radio --search-margin 3
 ```
 
-The GUI keeps the RF shift, margin, reference and sideband controls in the
-scrollable Link planner. Shift choices include 0 Hz, 1, 3.5, 7, 10, 14 and
-30 MHz, with custom values. Margin choices include 1×, 2× and 3×, with custom
-values. Launch import/export preserves these settings and exports the
-normalized LO representation. Both RF entry forms describe the same search;
-they cannot be supplied together.
+The Robust Modem main controls keep **Baseband Osc**, **Shift Osc** and
+**Margin** together, with **Carrier** and **Shift** adjacent in the modem row.
+They remain available with Developer mode off and with Simulation on or off.
+Numerical clock/phase assumptions and requested/covered search bounds appear
+under the Link planner's hideable **Model limits and references**. There is no
+Sideband selector; the application uses USB.
+Very small nonzero search widths retain sufficient precision or scientific
+notation rather than being rounded to zero.
+Fast and Legacy Modem retain their separate controls. Shift presets include
+0 Hz and 1, 3.5, 7, 10, 14 and 30 MHz, with manual entry; Margin offers
+1×, 2× and 3× or a custom finite value of at least 1×.
+
+Launch import/export preserves the absolute Carrier and Shift and exports
+canonical `--carrier` / `--shift` options. Frequency suffixes are case-insensitive;
+the CLI also accepts `k`, `m`, `g` and `t` shorthand. Matching `--carrier` and
+`--rf-carrier` aliases may be combined; conflicting values are rejected.
+Choose either `--shift` or `--rf-shift`, not both. With translation enabled,
+set the absolute carrier above Shift to retain the intended stream tone.
+Without an explicit Carrier, the CLI retains its bandwidth-derived absolute
+Carrier default; Shift must still leave a positive stream. GUI launch imports
+retain omitted destination settings. Loading a legacy positive-Shift shared
+reference moves its effective `--rf-oscillator` profile into Baseband Osc and
+selects Shift Osc **Baseband clock**. Shared exports include that same profile
+in both oscillator flags, preserving CLI behavior. At Shift zero, import keeps
+the Baseband profile and excludes the inactive Shift profile; export omits
+`--rf-oscillator` and uses `--reference independent`.
 
 ## Oscillator-derived static search
 
 The default search margin is **3×**, applied once to the effective relative
 accuracy bounds. It expands the acquisition allowance without increasing the
-simulated impairment. If `f_m` is the modem tone, `f_LO` the declared RF shift,
-`a_LF` and `a_RF` the accuracy bounds in ppm, and `M` the margin, the requested
+simulated impairment. If `f_m` is the stream tone (Carrier minus Shift),
+`f_LO` is Shift, `f_on_air` is the absolute Carrier,
+`a_B` and `a_S` the Baseband and Shift accuracy bounds in ppm, and `M` the margin, the requested
 half-widths are:
 
 | Reference | Frequency half-width | Sample-clock half-width |
 | --- | --- | --- |
-| Independent audio | `M * (f_m * a_LF + f_LO * a_RF) * 1e-6` Hz | `M * a_LF` ppm |
-| Shared radio | `M * f_on_air * a_RF * 1e-6` Hz | `M * a_RF` ppm |
+| Shift zero | `M * f_m * a_B * 1e-6` Hz | `M * a_B` ppm |
+| Independent positive Shift | `M * (f_m * a_B + f_LO * a_S) * 1e-6` Hz | `M * a_B` ppm |
+| Positive Shift using Baseband clock | `M * f_on_air * a_B * 1e-6` Hz | `M * a_B` ppm |
 
 Shared-reference errors produce linked frequency and symbol-rate changes. The
-bank searches paired hypotheses on that relationship, using the physical RF
-carrier and sideband orientation rather than dividing by an LF=0 indicator.
-Independent audio and RF references retain independent timing uncertainty,
+bank searches paired hypotheses on that relationship, using the absolute
+carrier. The application fixes USB;
+the low-level oscillator-policy API retains its explicit sideband orientation.
+Independent Baseband and Shift references retain independent timing uncertainty,
 with impossible frequency/rate combinations omitted. Thus changing a field's
 representation cannot introduce duplicate reference errors or a larger bank.
 
@@ -180,11 +220,12 @@ behavior when those measurements are available.
 
 `clock_error_ppm` is a **constant relative frequency and sample-rate offset**.
 Its sample-clock contribution raises the received tone and shortens received
-symbols for a positive offset. With RF shift = 0, a 1,500 Hz tone and the shared
+symbols for a positive offset. With Shift = 0, a 1,500 Hz tone and the shared
 0.0001 ppm GPS assumption, that contribution is 0.00000015 Hz before any
-separately configured frequency offset. Shared-radio RF translation adds a
-linked, sideband-dependent contribution; lower-sideband conversion can make
-the total PCM frequency offset negative. This parameter is not an Allan
+separately configured frequency offset. A positive Shift using Baseband clock
+adds a linked contribution based on Shift. Shift zero excludes that contribution
+and every Shift-model phase term. Lower-sideband reversal remains a low-level
+policy capability; the application uses USB. This parameter is not an Allan
 deviation, a drift rate or a manufacturer's long-term accuracy specification.
 
 `phase_noise_degrees_per_sqrt_second` controls a Wiener phase process. With
@@ -204,11 +245,12 @@ noise processes can agree at one averaging interval and diverge elsewhere.
 The profiles already describe the **relative link impairment**. They are not
 per-device values to which another factor of sqrt(2) should be applied. The
 GPS scenarios assume both ends are locked. The selected topology specifies
-which references drive the carrier and sampling clocks. Disciplining an RF local
+which references drive the carrier and sampling clocks. Disciplining a mixer local
 oscillator alone does not discipline a separate audio DAC/ADC clock. This
 assumption also does not eliminate unknown starting phase, propagation delay,
 or the receiver's bounded timing and frequency search. Independent phase
-diffusion amplitudes combine in quadrature; the shared radio reference is
+diffusion amplitudes combine in quadrature only for an active independent Shift;
+the shared Baseband reference is
 counted once. These effective phase inputs must already include the relevant
 frequency synthesis behavior; the software does not infer phase noise by
 scaling an RF output specification to the audio tone.
@@ -240,9 +282,10 @@ The CLI also accepts individual `--clock-error-ppm` and `--phase-noise`
 simulation overrides after deriving the selected reference's impairments.
 These describe channel truth, not a larger acquisition allowance: receiver
 bounds continue to come from the declared profiles and margin. Signed clock
-overrides in shared-radio mode change both sampling error and the linked RF
-offset; independent mode changes LF timing while retaining the RF model's
-conversion error. A phase override sets the final combined diffusion.
+overrides with a positive shared Shift change both sampling error and the linked
+conversion offset; independent mode changes Baseband timing while retaining an
+active Shift model's conversion error. Shift zero retains only Baseband timing.
+A phase override sets the final combined diffusion.
 Use these controls to examine residuals inside and outside declared coverage.
 In `analyze-link`, the experimental
 detectors remain conditional on matched timing and clock acquisition;

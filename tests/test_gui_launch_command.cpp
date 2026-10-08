@@ -28,14 +28,45 @@ void parsing_and_formatting() {
     check(launch_command::parse(command)==settings,"canonical command must round-trip every setting exactly");
     check(command.find("--auto-pattern")!=std::string::npos&&command.find("--target-snr -8")!=std::string::npos&&
           command.find("--rate 3600")!=std::string::npos,"canonical command must use concise readable flags and numbers");
-    const auto radio=launch_command::parse("--oscillator crystal --rf-oscillator gpsdo-ocxo --rf-shift 10MHz --search-margin 3x --reference shared-radio --sideband upper");
-    check(radio.rf_shift_hz==10000000&&radio.search_margin==3&&radio.reference=="shared-radio"&&radio.rf_oscillator=="gpsdo-ocxo"&&radio.sideband=="upper",
+    const auto radio=launch_command::parse("--oscillator crystal --rf-oscillator gpsdo-ocxo --carrier 10.0015MHz --shift 10MHz --search-margin 3x --reference shared-radio --sideband upper");
+    check(radio.rf_shift_hz==10000000&&radio.search_margin==3&&radio.reference=="shared-radio"&&radio.rf_oscillator=="gpsdo-ocxo"&&radio.carrier_hz==10001500,
           "Radio settings did not retain separate LF/RF models and shared clocks");
     check(launch_command::parse(launch_command::format(radio))==radio,"Radio configuration did not round-trip exactly");
-    const auto shorthand=launch_command::parse("--lf-reference 0Hz --rf-carrier 10.0015MHz --carrier 1500 --search-margin 2");
-    check(shorthand.reference=="shared-radio"&&shorthand.rf_carrier_hz==10001500&&shorthand.carrier_hz==1500,
-          "LF=0 shorthand changed or erased the real modem tone");
+    const auto shorthand=launch_command::parse("--lf-reference 0Hz --rf-carrier 10.0015MHz --rf-shift 10MHz --search-margin 2");
+    check(shorthand.reference=="shared-radio"&&shorthand.carrier_hz==10001500&&shorthand.rf_shift_hz==10000000,
+          "LF=0 shorthand or carrier/shift aliases changed their absolute frequency meaning");
     check(launch_command::parse("--rf-shift 0 --search-margin 1").rf_shift_hz==0,"Untranslated zero-Hz RF shift was rejected");
+    const auto translated=launch_command::parse("--carrier 1.0015MHz --shift 1MHz");
+    check(translated.carrier_hz==1001500&&translated.rf_shift_hz==1000000,
+          "absolute Carrier and Shift did not retain the translated 1.5kHz real stream");
+    const auto direct=launch_command::parse("--carrier 1.0015MHz --shift 0Hz");
+    check(direct.carrier_hz==1001500&&direct.rf_shift_hz==0,
+          "direct real MHz carrier was reinterpreted as an audio tone");
+    const auto exported=launch_command::format(translated);
+    check(exported.find("--carrier ")!=std::string::npos&&exported.find("--shift ")!=std::string::npos&&
+          exported.find("--rf-shift")==std::string::npos&&exported.find("--sideband")==std::string::npos&&
+          launch_command::parse(exported)==translated,
+          "canonical export must preserve absolute Carrier and Shift using only USB semantics");
+    check(launch_command::parse("--carrier 1001500 --rf-carrier 1.0015MHz --shift 1MHz")==translated,
+          "matching absolute Carrier aliases should normalize to the same patch");
+    for(const auto& units:std::vector<std::pair<std::string,double>>{
+        {"  1.5 KHZ  ",1500},{"\t1.0015 mHz",1001500},{"1.0000015 GhZ",1000001500},
+        {"1.0000000015 THZ",1000000001500},{"1.5e-9 GHz",1.5},{"+1.5E3 hZ",1500}}) {
+        const std::vector<std::string> frequency_args{"--carrier",units.first};
+        const auto unit_value=launch_command::parse_arguments(frequency_args);
+        check(unit_value.carrier_hz==units.second,"Frequency order units, spacing or scientific notation were rejected");
+        check(launch_command::parse(launch_command::format(unit_value))==unit_value,
+            "Frequency units lost precision when exported and pasted");
+    }
+    const auto microwave=launch_command::parse("--carrier '2.4000015 GHz' --shift '2.4 GHz'");
+    const auto terahertz=launch_command::parse("--carrier 1.0000000015THz --shift 1THz");
+    check(microwave.carrier_hz==2400001500&&microwave.rf_shift_hz==2400000000&&
+        terahertz.carrier_hz==1000000001500&&terahertz.rf_shift_hz==1000000000000,
+        "Carrier and Shift units were restricted by the real-stream rate cap");
+    auto precise_frequency=microwave;
+    precise_frequency.carrier_hz=std::nextafter(*microwave.carrier_hz,*microwave.carrier_hz+1);
+    check(launch_command::parse(launch_command::format(precise_frequency))==precise_frequency,
+        "Frequency export discarded a fractional Hz above GHz");
     auto precise=settings;precise.target_db_hz=std::nextafter(-47.,-48.);
     precise.short_target_db_hz=-20.1234567890123;precise.long_target_db_hz=23;
     check(launch_command::parse(launch_command::format(precise))==precise,
@@ -68,9 +99,9 @@ void invalid_commands() {
             "--target-snr nan", "--target-snr inf", "--target-snr +-1", "--target-snr 201",
             "--tx-dbm -201", "--tx-dbm 101", "--path-loss-db -1", "--path-loss-db 501",
             "--noise-dbm-hz -251", "--noise-dbm-hz 1", "--rate 0", "--rate .001", "--rate 31MHz",
-            "--rate 3.6watts", "--carrier 0", "--carrier 30000001", "--dsp-workspace 90%",
-            "--rf-shift -1", "--rf-shift NaN", "--rf-shift 1e308MHz", "--rf-carrier 0", "--rf-shift 1 --rf-carrier 1",
-            "--search-margin .99", "--search-margin inf", "--reference imaginary", "--sideband imaginary", "--lf-reference 1500",
+            "--rate 3.6watts", "--carrier 0", "--carrier 30000001 --shift 0", "--dsp-workspace 90%",
+            "--rf-shift -1", "--rf-shift NaN", "--rf-shift 1e308MHz", "--shift 1e308GHz", "--carrier 1e308THz", "--rate 1GHz", "--carrier '1 2 MHz'", "--carrier '1 GHz extra'", "--carrier '+-1GHz'", "--rf-carrier 0", "--rf-shift 1 --rf-carrier 1",
+            "--search-margin .99", "--search-margin inf", "--reference imaginary", "--sideband imaginary", "--sideband lower", "--carrier 1500 --shift 1MHz", "--carrier 1MHz --shift 1MHz", "--carrier 1500 --rf-carrier 10001500", "--lf-reference 1500",
             "--reference independent --lf-reference 0", "--lf-reference 0 --reference independent", "--rf-oscillator imaginary",
             "--oscillator imaginary", "--pattern imaginary", "--rate $(touch /tmp/never)",
             "--rate 3600;echo", "--tx-dbm `whoami`"})

@@ -225,9 +225,10 @@ For extreme links, `pump analyze-link` compares bounded statistical detector
 experiments and extrapolated processing costs without generating PCM. See
 [fast weak-link planning](docs/weak-link-planning.md) for the 3 dBm/-200 dB
 case, example commands and the distinction from actual receiver success.
-The **Oscillator model** selector includes free-running crystal, hobbyist
+The **Baseband Osc** and **Shift Osc** selectors include free-running crystal, hobbyist
 GPSDO/XO and GPSDO/TCXO without ovens, and GPSDO/OCXO models. The same profiles
-are available as `--oscillator` in CLI simulations and analysis; see
+are available as `--oscillator` and active `--rf-oscillator` in CLI simulations
+and analysis; see
 [their assumptions](docs/oscillator-models.md).
 The inspection views show the two pattern codewords, their modeled distances,
 and exact bit/symbol counts. Long patterns use a bounded illustrative prefix;
@@ -269,9 +270,22 @@ the draft's source bytes; crossing the boundary does not restart reception.
 Rate is the nominal chip-rate planning parameter, not a measured occupied
 bandwidth: the default produces 1,800 chips/s and an ideal shaped spectrum of
 375–2,625 Hz, including the 25% RRC rolloff. Rate presets still include `18 kHz`.
-Changing Rate selects its default carrier: `1.5 kHz` for `3.6 kHz`, otherwise
-`max(1500, 0.75 × rate)` Hz. The Carrier dropdown offers only the current rate's
-default carrier; manual frequency entry remains available.
+Carrier is the absolute transmitted/received frequency; Shift defaults to
+`0 Hz`. The positive real USB stream tone is **Carrier − Shift**. For example,
+Carrier `1.0015 MHz` with Shift `1 MHz` gives a `1.5 kHz` tone; Shift `0` instead
+requires a direct real stream supporting the `1.0015 MHz` tone. Changing Rate
+sets Carrier to Shift plus `1.5 kHz` for `3.6 kHz`, otherwise Shift plus
+`max(1500, 0.75 × rate)` Hz. Carrier presets add Shift to the rate's recommended
+stream tone or center frequency; manual absolute frequency entry remains available.
+Both Carrier and Shift accept Hz, kHz, MHz, GHz and THz units, ignoring case
+and optional spaces, as well as scientific notation.
+Compact **Baseband Osc**, **Shift Osc** and **Margin** controls remain visible
+with Developer mode off, alongside adjacent Carrier/Shift fields. Numerical
+oscillator assumptions and search bounds appear under the Link planner's
+hideable **Model limits and references**. At Shift zero, Shift Osc is disabled
+as **N/A** and contributes no frequency or phase error. For a positive Shift,
+choose **Baseband clock** when sampling and conversion share one hardware
+reference; the Baseband model is then counted once.
 The **RX targets (dB-Hz)** comma-list starts at `32, 55`. Changing either TX SNR to
 a valid value replaces the RX list with both effective targets (deduplicated); the RX
 list can then be edited independently. Search varies this list while holding
@@ -713,13 +727,16 @@ for its bounded statistic and compute limitations.
 
 Hardware sample rates do not set the modem's bandwidth or symbol rate. Audio
 endpoints negotiate a supported clock and use a bounded band-limited converter
-to/from the modem's internal clock. With rate parameter `B` and selected carrier
-`fc`, automatic planning uses `Fs = ceil(max(64, 4B, 4fc))` samples/second. The CLI
-retains its default `B=1200` and carrier rule `max(1500, 0.75B)` Hz; the GUI
-uses the carrier control described above. The usual 6 kHz floor represents the
+to/from the modem's internal clock. With rate parameter `B` and real stream tone
+`fc = Carrier - Shift`, automatic planning starts at
+`Fs = ceil(max(64, 4B, 4fc))` samples/second. It rounds upward to whole sampled
+half-chips when an exact decimal Rate permits at most 5% extra samples within
+the 120 MHz limit; explicit sample clocks stay unchanged. The CLI retains its default `B=1200`
+and, at Shift 0, absolute Carrier rule `max(1500, 0.75B)` Hz; the GUI uses the
+Carrier/Shift controls described above. The usual 6 kHz floor represents the
 1500 Hz carrier at narrow rates; symbol timing and integration remain based on
-`B`. Both transmit and receive planning use the selected carrier before choosing
-pattern lengths. Large downsampling
+`B`. Both transmit and receive planning use the derived stream tone before
+choosing pattern lengths. Large downsampling
 ratios use bounded filter stages. Different 44.1/48/96 kHz cards can share the
 same modem settings. Conversion cannot restore frequencies outside the physical
 card's passband. Live GUI audio rejects a selected band that exceeds the converter's

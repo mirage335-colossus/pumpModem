@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <complex>
 #include <vector>
+#include <optional>
 #include <string>
 
 namespace datapump::simulation::detail {
@@ -22,7 +23,10 @@ struct ReceiverProbabilityParameters {
     double noise_condition=1;
     double acquisition_threshold=30, continuation_threshold=5;
     std::array<double,4> weights{.25,.25,.25,.25};
-    std::array<double,4> correlations{};
+    // rho = sum(a * conj(b)) / sqrt(Ea * Eb). Private candidates may
+    // have different envelopes and a complex overlap in every section.
+    std::array<std::complex<double>,4> correlations{};
+    std::optional<std::array<double,4>> alternative_weights;
     bool sections=true;
     // Complete receiver-local windows. Correlations and weights describe the
     // actual two projected templates; weights sum to one over the symbol.
@@ -31,7 +35,7 @@ struct ReceiverProbabilityParameters {
     std::vector<std::complex<double>> differential_correlations;
     std::vector<double> differential_weights;
     // Optional normalized weights for the alternative template. Empty means
-    // equal envelopes, as in an unshaped pattern.
+    // equal envelopes.
     std::vector<double> differential_alternative_weights;
     // Optional means of the actual (limited/projected) transmitted waveform
     // against each normalized template, divided by sqrt(total signal energy).

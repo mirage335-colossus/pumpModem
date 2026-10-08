@@ -165,13 +165,32 @@ custom link inputs cannot be mixed. The GUI offers
 `3dBm -200dB` and `3dBm -230dB` for the existing sampled simulation; adding a
 preset does not establish that the receiver can decode it.
 
-The **LF / audio oscillator** and **RF oscillator** controls select free-running
+The **Baseband Osc** and **Shift Osc** controls select free-running
 crystal, hobbyist GPSDO/XO without an oven, GPSDO/TCXO without an oven, or
-GPSDO/OCXO assumptions. RF shift defaults to 0 Hz, search margin to 3×, and
-the reference to independent audio. The shared-radio/LF=0 setting uses the RF
-model once for the real ADC/DAC stream and synchronous conversion references;
-the modem tone stays nonzero. All three GPSDO choices share the 0.0001 ppm
+GPSDO/OCXO assumptions. The compact Robust main controls place Baseband Osc,
+Shift Osc and Margin together, with absolute Carrier and Shift adjacent. Both
+frequency fields accept case-insensitive Hz, kHz, MHz, GHz and THz suffixes,
+optional spaces and scientific notation. Shift defaults to 0 Hz and the search
+margin to 3×. At Shift zero, Shift Osc is disabled as **N/A** and contributes
+no frequency or phase error. Baseband Osc remains active.
+The real USB stream tone is Carrier minus Shift and must remain positive:
+1.0015 MHz / 1 MHz gives 1.5 kHz, while Shift 0 requires a direct 1.0015 MHz
+real stream. Numerical assumptions and search bounds appear under the Link
+planner's hideable **Model limits and references**. A positive Shift can select
+**Baseband clock** in Shift Osc for a shared ADC/DAC and synchronous mixer
+reference; this uses the Baseband model once with linked timing and frequency
+hypotheses. All three GPSDO choices share the 0.0001 ppm
 locked-link frequency assumption; their phase-diffusion scenarios differ.
+Stronger/Weaker calculations reuse bounded per-controller probability-curve and
+clock/workspace-support caches across background workers. Support entries are
+invalidated when modem, oscillator, receive mode or link assumptions change;
+changing only the selected target reuses checked sample geometries. During a valid update, the planner retains its
+previous completed layout and labels it **Updating · previous plan**. Apply and
+computed navigation stay disabled until the current result arrives. Invalid
+inputs withdraw previous numerical results immediately. Cached illustrative
+curves retain their own precision; the selected estimate still uses its full
+4096 trials.
+
 The same declared policy bounds current receiver acquisition, planner support
 and compute counts. Simulated impairments omit the margin. The low-level
 estimator preserves an explicitly supplied channel independently of the

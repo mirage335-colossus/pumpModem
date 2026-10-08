@@ -369,3 +369,34 @@ distinct RF and baseband PLLs, consult the Analog Devices AD9361 guide
 (https://wiki.analog.com/resources/eval/user-guides/ad9361).
 These explain reference behavior;
 they do not qualify an unspecified radio or sound card.
+
+
+
+
+
+
+
+
+2026-10-07 / Codex: superseding Carrier/Shift oscillator control contract
+
+The implemented controls are Baseband Osc, Shift Osc and Margin, beside Carrier
+and Shift on the main Robust screen. No separate Clock dropdown is needed.
+Carrier and Shift accept case-insensitive Hz, kHz, MHz, GHz and THz suffixes,
+optional spaces and scientific notation. Their positive difference is the real
+USB stream tone; USB remains fixed.
+
+At Shift 0 Hz, Shift Osc is disabled as N/A. Exclude every Shift-model frequency,
+phase and linked-drift contribution, including legacy shared-reference settings;
+only the Baseband model is active. Keep the chosen Shift option for reactivation.
+At a positive Shift, an independent Shift profile adds conversion uncertainty,
+or Baseband clock uses the selected Baseband profile once for shared ADC/DAC and
+synchronous mixers, with linked frequency/rate search and no duplicate drift.
+The old LF=0 setting was shared-reference metadata, not Shift=0. Preserve legacy
+CLI imports by mapping an active shared model to visible Baseband Osc and
+Shift Osc=Baseband clock; an inactive Shift must never replace Baseband's model.
+
+Put numerical oscillator assumptions and requested/covered search information
+under the Link planner's hideable Model limits and references. Preserve tiny
+nonzero search bounds in formatting. These control refinements supersede the
+LF/RF/Clock terminology above; remaining computational-efficiency and validation
+requirements still apply. See docs/oscillator-models.md for the current contract.

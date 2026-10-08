@@ -32,6 +32,13 @@ void prepare(Controller& controller) {
     }
     check(controller.estimate().has_value(),"Payload estimate was not prepared");
 }
+void prepare_plan(Controller& controller) {
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(30);
+    while(controller.link_plan()->error.starts_with("Calculating")&&std::chrono::steady_clock::now()<deadline) {
+        controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(controller.link_plan()->available,"Planner worker did not prepare the fixture");
+}
 void apply_exact_target(Controller& controller,const std::string& target) {
     // Deliberately unsupported geometry remains available through explicit
     // planner Apply; dropdown edits now select a nearby clock/RAM fit.
@@ -39,7 +46,7 @@ void apply_exact_target(Controller& controller,const std::string& target) {
     const auto requests=controller.take_services();
     check(requests.size()==1,"Exact target fixture needs the planner prompt");
     controller.complete_service({requests.front().id,false,target,{}});
-    controller.activate(ui::Command::planner_apply_short);
+    prepare_plan(controller);controller.activate(ui::Command::planner_apply_short);
     check(controller.field(ui::Field::snr).text==target,"Explicit target fixture changed its numerical anchor");
 }
 void simulation_estimate_controls() {
@@ -153,6 +160,7 @@ void empty_composer_preview() {
         controller.edit(field,"");check_empty();
     }
     controller.activate(C::planner_toggle_draft);
+    prepare_plan(controller);
     check(controller.link_plan()->available&&controller.link_plan()->inputs.wire_bits==1,
           "The planner's current-draft view must use the empty editor's one-bit preview");
     // An empty file still has attachment metadata and fixed coding intervals.
@@ -227,6 +235,63 @@ void oscillator_controls() {
     check(!controller.field(F::simulation_oscillator).enabled&&
           controller.field(F::simulation_oscillator).selected=="gpsdo-ocxo",
           "A stale oscillator callback reconfigured a closing application");
+}
+void shift_oscillator_controls() {
+    using F=ui::Field;
+    Controller controller({true,true});
+    const auto initial=controller.settings().transfer.modem;
+    check(controller.field(F::rf_oscillator).selected=="crystal"&&
+          controller.field(F::rf_oscillator).display_text=="N/A"&&!controller.field(F::rf_oscillator).enabled&&
+          !controller.field(F::oscillator_reference).enabled&&!controller.field(F::oscillator_reference).visible,
+          "Zero Shift must disable its model and retire the separate Clock selector");
+    const auto revision=controller.revision();
+    controller.select(F::rf_oscillator,"gpsdo-ocxo");controller.select(F::oscillator_reference,"shared-radio");
+    check(controller.revision()==revision&&controller.field(F::rf_oscillator).selected=="crystal"&&
+          controller.settings().transfer.modem.oscillator_search==initial.oscillator_search&&
+          controller.settings().transfer.modem.carrier_hz==initial.carrier_hz&&
+          controller.settings().transfer.modem.sample_rate==initial.sample_rate,"Disabled oscillator callbacks changed accepted settings");
+    controller.edit(F::rf_shift,"1 GHz");
+    check(controller.field(F::rf_oscillator).enabled&&controller.field(F::rf_oscillator).display_text.empty()&&
+          controller.settings().transfer.modem.oscillator_search==initial.oscillator_search&&
+          controller.settings().transfer.modem.carrier_hz==initial.carrier_hz&&
+          controller.settings().transfer.modem.sample_rate==initial.sample_rate,"Correctable positive Shift did not unlock its model");
+    controller.select(F::rf_oscillator,"baseband-clock");
+    controller.select(F::simulation_oscillator,"gpsdo-ocxo");
+    controller.edit(F::carrier,"1.0000015 ghz");
+    auto policy=*controller.settings().transfer.modem.oscillator_search;
+    check(controller.settings().transfer.modem.carrier_hz==1500&&policy.rf_shift_hz==1e9&&
+          policy.reference==modem::OscillatorReference::shared_radio&&policy.lf==policy.rf,
+          "Shared Baseband clock did not supply both positive-Shift oscillator models");
+    controller.select(F::simulation_oscillator,"gpsdo-tcxo");
+    policy=*controller.settings().transfer.modem.oscillator_search;
+    check(policy.lf==policy.rf&&policy.lf==tuning::oscillator_model(tuning::parse_oscillator_preset("gpsdo-tcxo")),
+          "Baseband model changes did not update the shared Shift oscillator");
+    controller.select(F::rf_oscillator,"crystal");
+    policy=*controller.settings().transfer.modem.oscillator_search;
+    check(policy.reference==modem::OscillatorReference::independent_audio&&policy.rf.accuracy_ppm==100,
+          "Selecting an independent Shift preset retained shared clock correlation");
+    controller.edit(F::carrier,"1.0015 MHz");controller.edit(F::rf_shift,"0 Hz");
+    check(controller.field(F::rf_oscillator).selected=="crystal"&&controller.field(F::rf_oscillator).display_text=="N/A"&&
+          !controller.field(F::rf_oscillator).enabled&&controller.settings().transfer.modem.oscillator_search->rf==modem::OscillatorModel{0,0}&&
+          controller.settings().simulation_phase_noise_degrees_per_sqrt_second==.05,
+          "Zero Shift kept conversion phase drift or forgot its independent preset");
+    controller.select(F::rf_oscillator,"gpsdo-xo");
+    check(controller.field(F::rf_oscillator).selected=="crystal","A stale disabled Shift model callback replaced the remembered preset");
+    controller.edit(F::rf_shift,"nonsense");
+    check(!controller.field(F::rf_oscillator).enabled&&controller.field(F::rf_oscillator).selected=="crystal",
+          "Invalid Shift enabled or discarded its remembered model");
+    controller.edit(F::rf_shift,"1 MHz");
+    check(controller.field(F::rf_oscillator).enabled&&controller.field(F::rf_oscillator).selected=="crystal"&&
+          controller.settings().transfer.modem.carrier_hz==1500,"Restoring Shift did not restore its independent model");
+    controller.select(F::rf_oscillator,"baseband-clock");
+    controller.edit(F::rf_shift,"0 Hz");controller.edit(F::rf_shift,"1 MHz");
+    check(controller.field(F::rf_oscillator).selected=="baseband-clock"&&
+          controller.settings().transfer.modem.oscillator_search->reference==modem::OscillatorReference::shared_radio,
+          "Zero Shift lost a remembered shared Baseband clock");
+    controller.close();
+    controller.select(F::rf_oscillator,"crystal");
+    check(!controller.field(F::rf_oscillator).enabled&&controller.field(F::rf_oscillator).selected=="baseband-clock",
+          "A closing application accepted a Shift oscillator callback");
 }
 void lpi_estimate_controls() {
     using F=ui::Field;using C=ui::Command;
@@ -2466,7 +2531,7 @@ int main(int argc,char** argv) {
         datapump::gui::controller_self_check();
         simulation_estimate_controls();
         empty_composer_preview();
-        oscillator_controls();
+        oscillator_controls();shift_oscillator_controls();
         lpi_estimate_controls();
         revised_reception_ingestion();
         pending_replay_batch();

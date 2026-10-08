@@ -1,3 +1,4 @@
+#include "datapump/pattern_code.hpp"
 #include "datapump/simulation_estimate.hpp"
 #include "datapump/boundary_sync.hpp"
 #include "datapump/channel.hpp"
@@ -361,8 +362,12 @@ void drift_receiver_estimate() {
           "an affordable sixteen-second pattern with sixteen complete chips per quarter models both receiver branches");
     near(value.drift_section_seconds,4,"four-section diagnostic must use the actual quarter duration");
     near(value.section_phase_coherence_loss_db,0,"stable phase must have no section phase loss");
-    near(value.modeled_symbol_snr_db,20,
-         "the joint statistic already models receiver noise and must not retain an arbitrary three-dB margin");
+    modem::PatternCode finite_code(options.modem,options.modem.stream_epoch);
+    double finite_power=0;
+    for(std::uint64_t i=0;i<finite_code.chips_per_symbol();++i)finite_power+=std::norm(finite_code.value(i,0));
+    finite_power/=finite_code.chips_per_symbol();
+    near(value.modeled_symbol_snr_db,20+10*std::log10(finite_power),
+         "the joint statistic must retain actual finite-template power without an arbitrary three-dB margin");
     const auto repeated=simulation::estimate(wire(1,options.modem),options,true,channel);
     near(value.success_probability,repeated.success_probability,"fixed statistical draws must make receive estimates repeatable");
     const auto support=simulation::estimate(wire(1,options.modem),options,true,channel,{},1,false);
@@ -462,6 +467,24 @@ void receiver_statistic_controls() {
     check(indistinguishable.acquired_correct+indistinguishable.acquired_wrong<.01,
           "nearly identical bit templates cannot acquire confidence from independently invented noise");
 
+    parameters.correlations.fill({0,.999999});
+    const auto quadrature_copy=receiver_probability(parameters);
+    check(quadrature_copy.acquired_correct+quadrature_copy.acquired_wrong<.01,
+          "templates differing only by unknown complex phase must remain indistinguishable");
+    auto unequal=parameters;unequal.sections=false;unequal.signal_energy=1000;
+    unequal.correlations.fill(.999999);
+    unequal.alternative_weights=std::array{.01,.01,.01,.97};
+    check(receiver_probability(unequal).acquired_correct>.99,
+          "coherent alternative fits must use their own section energy envelope");
+    for(unsigned invalid=0;invalid<4;++invalid) {
+        auto bad=unequal;
+        if(invalid==0)bad.correlations[0]={0,std::numeric_limits<double>::quiet_NaN()};
+        if(invalid==1)bad.correlations[0]={.8,.8};
+        if(invalid==2)(*bad.alternative_weights)[0]=0;
+        if(invalid==3)(*bad.alternative_weights)[0]=.5;
+        bool rejected=false;try {(void)receiver_probability(bad);}catch(const Error&){rejected=true;}
+        check(rejected,"invalid complex correlation or alternative weights accepted");
+    }
     parameters.correlations.fill(0);
     const auto full_rank=receiver_probability(parameters);
     parameters.coherent_dimensions=parameters.section_dimensions=32;
@@ -857,6 +880,108 @@ void oscillator_policy_geometry() {
           limited.requested_carrier_search_half_width_hz>limited.carrier_search_half_width_hz,
           "finite radio frequency coverage must expose incomplete oscillator margin even for a central signal");
 }
+void nearby_shift_workload() {
+    for(const auto target:{18.,-3.}) {
+        simulation::Estimate baseline;
+        for(const auto shift:{0.,.001,10.,20.,30.}) {
+            transfer::Options options;
+            options.modem=tuning::resolve(100,target,tuning::PatternMode::auto_keystream,true,1500-shift).config;
+            options.timestamp=1800000000;options.dsp_workspace_bytes=128*1024*1024;
+            modem::OscillatorSearchConfig policy;
+            policy.lf=policy.rf=modem::OscillatorModel{.0001,.005};policy.rf_shift_hz=shift;
+            options.modem.oscillator_search=policy;
+            const auto effects=modem::oscillator_effects(options.modem);
+            auto channel=clean_channel();channel.clock_error_ppm=effects.clock_error_ppm;
+            channel.frequency_offset_hz=effects.frequency_offset_hz;
+            channel.phase_noise_degrees_per_sqrt_second=effects.phase_noise_degrees_per_sqrt_second;
+            const auto estimate=simulation::estimate(wire(1,options.modem),options,true,channel,{},1,false);
+            check(estimate.receiver_workspace_supported&&!estimate.oscillator_search_limited&&
+                  estimate.carrier_in_search&&estimate.clock_in_search,
+                  "small independent shifts must retain the declared oscillator region and receiver workspace");
+            if(shift==0)baseline=estimate;
+            else {
+                check(estimate.frequency_rate_hypotheses==baseline.frequency_rate_hypotheses &&
+                      estimate.pulse_projection_modeled==baseline.pulse_projection_modeled,
+                      "a narrow independent shift must not inflate lanes or discard the projected backend");
+                check(estimate.receiver_cpu_seconds<=1.05*baseline.receiver_cpu_seconds &&
+                      estimate.receiver_cpu_seconds>=.95*baseline.receiver_cpu_seconds,
+                      "small shifts at Rate100 must not create an artificial receiver CPU cliff");
+            }
+        }
+        if(target<0)check(baseline.pulse_projection_modeled,
+                         "long private symbol regression must exercise real projected admission");
+    }
+}
+void equivalent_receive_profiles() {
+    transfer::Options options;options.modem.scramble=true;
+    options.modem.integration_seconds=.25;options.timestamp=1800000000;
+    options.dsp_workspace_bytes=128*1024*1024;
+    modem::OscillatorSearchConfig policy;policy.rf_shift_hz=1000000;
+    options.modem.oscillator_search=policy;
+    const auto channel=clean_channel();const auto draft=wire(3,options.modem);
+    auto other_key=options.modem;
+    other_key.spreading_seed.fill(0x35);other_key.dsss_seed.fill(0xa7);
+    other_key.stream_epoch+=9;other_key.stream_phase_samples=17;
+    const std::array identical{options.modem,options.modem};
+    const std::array different_keys{options.modem,other_key};
+    const auto reference=simulation::estimate(draft,options,true,channel,identical);
+    const auto equivalent=simulation::estimate(draft,options,true,channel,different_keys);
+    for(const auto member:{&simulation::Estimate::cpu_seconds,&simulation::Estimate::receiver_cpu_seconds,
+            &simulation::Estimate::receiver_frontend_seconds,&simulation::Estimate::receiver_search_seconds,
+            &simulation::Estimate::receiver_kernel_rebuild_seconds,&simulation::Estimate::gpu_seconds,
+            &simulation::Estimate::tracking_seconds,&simulation::Estimate::tracking_symbol_windows,
+            &simulation::Estimate::carrier_search_half_width_hz,&simulation::Estimate::clock_search_half_width_ppm,
+            &simulation::Estimate::modeled_symbol_snr_db,&simulation::Estimate::success_probability})
+        near(equivalent.*member,reference.*member,
+             "equivalent key/epoch profiles must preserve modeled work, coverage and probability");
+    check(equivalent.receiver_profiles==2&&equivalent.profile_matches&&
+          equivalent.frequency_rate_hypotheses==reference.frequency_rate_hypotheses&&
+          equivalent.receiver_workspace_supported==reference.receiver_workspace_supported&&
+          equivalent.confidence_available==reference.confidence_available,
+          "local geometry reuse must preserve receive profile count and support diagnostics");
+    const auto single=simulation::estimate(draft,options,true,channel);
+    check(equivalent.receiver_cpu_seconds>single.receiver_cpu_seconds,
+          "reusing the estimate calculation must still charge each equivalent receive bank");
+
+    // Same waveform identity does not imply the same receiver search policy.
+    // The first bank cannot cover the test offset; the second matching bank can.
+    auto narrow=options.modem;
+    narrow.oscillator_search->lf.accuracy_ppm=.0001;
+    narrow.oscillator_search->rf.accuracy_ppm=.0001;
+    auto offset_channel=channel;offset_channel.frequency_offset_hz=10;
+    const std::array narrow_first{narrow,options.modem};
+    const std::array wide_first{options.modem,narrow};
+    const auto selected=simulation::estimate(draft,options,true,offset_channel,narrow_first,1,false);
+    const auto reordered=simulation::estimate(draft,options,true,offset_channel,wide_first,1,false);
+    const auto wide_plan=modem::oscillator_pattern_search(options.modem);
+    check(selected.carrier_in_search&&selected.clock_in_search&&
+          selected.frequency_rate_hypotheses==wide_plan.hypotheses.size()&&
+          selected.frequency_rate_hypotheses==reordered.frequency_rate_hypotheses,
+          "matching waveforms with different oscillator policies must keep distinct coverage banks");
+    near(selected.requested_carrier_search_half_width_hz,wide_plan.frequency.requested_half_width_hz,
+         "selected diagnostic must retain the covering receiver policy");
+    near(selected.receiver_cpu_seconds,reordered.receiver_cpu_seconds,
+         "receive profile order must not change total modeled work");
+
+    options.timestamp=0;
+    const auto ordinary=simulation::estimate(draft,options,true,channel,identical,1,false);
+    const auto epochs=simulation::estimate(draft,options,true,channel,different_keys,1,false);
+    near(epochs.receiver_cpu_seconds,ordinary.receiver_cpu_seconds,
+         "equivalent private banks must retain the same unknown-epoch work");
+    auto invalid_training=options.modem;invalid_training.training_seconds+=3;
+    const std::array invalid_duplicate{options.modem,invalid_training};
+    bool rejected=false;
+    try {(void)simulation::estimate(draft,options,true,channel,invalid_duplicate,1,false);}
+    catch(const Error&) {rejected=true;}
+    check(rejected,"a cached geometry must not bypass validation of a later receive profile");
+    // A call with unrelated profiles still uses the transmit geometry for its
+    // diagnostic bank, without retaining any bank from preceding estimates.
+    auto unrelated=options.modem;unrelated.spreading_factor*=2;unrelated.integration_seconds=.5;
+    const auto unmatched=simulation::estimate(draft,options,true,channel,std::span(&unrelated,1),1,false);
+    check(!unmatched.profile_matches&&!unmatched.confidence_available&&
+          unmatched.frequency_rate_hypotheses==wide_plan.hypotheses.size(),
+          "unmatched receive profiles must retain independent transmit diagnostic geometry");
+}
 void projected_pattern_workload() {
     transfer::Options options;
     options.timestamp=1800000000;options.search_seconds=0;
@@ -906,7 +1031,7 @@ void projected_pattern_workload() {
 }
 int main() {
     try {probability_and_framing();workload_and_impairments();receiver_cpu_budget();received_processing_budget();whole_symbol_phase_coherence();differential_model_limits();drift_receiver_estimate();receiver_statistic_controls();raw_sample_probability_geometry();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
-        coupled_and_independent_clock_estimates();streamed_template_workload();target_and_channel_are_independent();oscillator_policy_geometry();projected_pattern_workload();
+        coupled_and_independent_clock_estimates();streamed_template_workload();target_and_channel_are_independent();oscillator_policy_geometry();nearby_shift_workload();equivalent_receive_profiles();projected_pattern_workload();
         std::cout<<"simulation estimate tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"simulation estimate tests failed: "<<error.what()<<'\n';return 1;}
 }

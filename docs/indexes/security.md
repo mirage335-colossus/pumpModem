@@ -10,7 +10,7 @@ selected mitigations do not establish universal security or link performance.
 | --- | --- |
 | [Development contract](../development.md) | Required short/raw bits, framing, reception progress, physical completion and regression preservation. |
 | [Protocol](../protocol.md) | Implemented wire and receive boundaries. |
-| [Cryptography](../crypto.md) | Primitives, keyfiles, stream derivation and mode-specific boundaries. |
+| [Cryptography](../crypto.md) | Primitives, keyfiles, stream derivation, independent private bit templates and mode-specific boundaries. |
 | [Security](../security.md) | Current receive/presentation, storage, execution and cryptographic boundaries. |
 | [Receive-processing hardening](../receive-processing-hardening.md) | Implemented receive-processing and selected speculative-execution mitigations, audit scope and remaining limits. |
 | [Robust CPU costs](../robust-cpu-costs.md) | Paired mitigation-overhead measurements and their limited role in compute estimates. |

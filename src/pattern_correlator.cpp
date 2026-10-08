@@ -70,6 +70,8 @@ struct PatternCorrelator::Impl {
     // Only unresolved subsecond schedules need extra fits. Ordinary explicit
     // schedules retain the original pair of per-hypothesis accumulators.
     std::vector<std::array<Fit,2>> alternate_fits;
+    std::vector<std::array<detail::CorrelationChipEvidence,2>> chip_evidence;
+    std::vector<double> pending_chip_scores;
     // Allocated only for eligible long patterns; one active section per bit
     // and schedule, independent of symbol duration and input chunk length.
     std::vector<std::array<DriftFit,2>> drift_fits;
@@ -197,9 +199,15 @@ struct PatternCorrelator::Impl {
             static_cast<long double>(search.candidate_limit)*sizeof(PatternEvidence)+search.track_limit*(sizeof(PatternBurst)+sizeof(Emission))+
             (search.frequency_offsets_hz.capacity()+search.clock_errors_ppm.capacity())*sizeof(double)+
             search.hypotheses.capacity()*sizeof(PatternFrequencyRateHypothesis);
+        // A symbol at least six seconds long cannot form an unconfirmed
+        // multi-symbol acquisition chain before physical absence expires it.
+        const bool guard_chains=config.spreading_mode==SpreadingMode::pattern && (c.scramble || c.dsss) &&
+            static_cast<long double>(code.symbol_samples())/highest_rate<pattern_absence_seconds*c.sample_rate;
+        if(guard_chains)fixed+=total*((alternate_groups+1)*sizeof(decltype(chip_evidence)::value_type)+sizeof(double));
         require(total>=1 && total<=std::numeric_limits<std::size_t>::max() && fixed<bytes,
                 "complete half-chip clock/frequency/rate coverage exceeds DSP workspace");
         const auto count=static_cast<std::size_t>(total);
+        if(guard_chains){chip_evidence.resize(count*(alternate_groups+1));pending_chip_scores.resize(count);}
         const auto denominator=2*count+2*search.track_limit+2;
         if(drift_sections>1) {
             const auto extra=total*(alternate_groups+1)*sizeof(std::array<DriftFit,2>);
@@ -360,6 +368,7 @@ struct PatternCorrelator::Impl {
         auto value=sizeof(Impl)+code.working_bytes()+hypotheses.capacity()*sizeof(Hypothesis)+banks.capacity()*sizeof(Bank)+
             emissions.capacity()*sizeof(Emission)+
             alternate_fits.capacity()*sizeof(decltype(alternate_fits)::value_type)+
+            chip_evidence.capacity()*sizeof(decltype(chip_evidence)::value_type)+pending_chip_scores.capacity()*sizeof(double)+
             drift_fits.capacity()*sizeof(decltype(drift_fits)::value_type)+
             differential_fits.capacity()*sizeof(decltype(differential_fits)::value_type)+
             points.capacity()*sizeof(Complex)+
@@ -534,7 +543,9 @@ struct PatternCorrelator::Impl {
         // payload allocation so later hypotheses can use the same workspace.
         accounted_bytes-=h.burst.bits.capacity();Bytes{}.swap(h.burst.bits);
         h.burst.complete=false;h.admitted=h.pending_gaps=false;
-        h.sum_score=h.pending_score=h.burst.score=0;h.committed=0;h.gap_slots=0;
+        h.sum_score=h.pending_score=h.burst.score=0;
+        if(!pending_chip_scores.empty())pending_chip_scores[static_cast<std::size_t>(&h-hypotheses.data())]=0;
+        h.committed=0;h.gap_slots=0;
         h.sum_support=h.burst.support_samples=0;
     }
     void append(Hypothesis& h,std::uint8_t bit) {
@@ -550,6 +561,7 @@ struct PatternCorrelator::Impl {
             h.gap_slots=h.burst.bits.size()-h.committed;h.burst.bits.resize(h.committed);
         }
         h.sum_score=h.burst.score;h.pending_score=0;h.pending_gaps=true;
+        if(!pending_chip_scores.empty())pending_chip_scores[static_cast<std::size_t>(&h-hypotheses.data())]=0;
         h.sum_support=h.burst.support_samples;
     }
     void emit_gap(Hypothesis& h,std::uint64_t resumed_sample) {
@@ -647,16 +659,21 @@ struct PatternCorrelator::Impl {
                     h.burst.stream_phase_samples=h.phase_lower;
                     h.burst.frequency_hz=e.frequency_hz;
                     if(!h.admitted){h.sum_score=h.pending_score=h.burst.score=0;h.committed=0;h.gap_slots=0;
+                        if(!pending_chip_scores.empty())pending_chip_scores[hypothesis]=0;
                         h.sum_support=h.burst.support_samples=0;}
                 }
                 append(h,static_cast<std::uint8_t>(e.bit));h.burst.end_sample=end;h.sum_score+=e.score;h.pending_score+=e.score;
+                if(!chip_evidence.empty())pending_chip_scores[hypothesis]+=
+                    chip_evidence[hypothesis*(alternate_groups+1)+selected][e.bit].score(fits(h,hypothesis,selected)[e.bit]);
                 h.sum_support+=symbol_support;
                 const auto pending=h.burst.bits.size()-h.committed;
                 const auto n=static_cast<double>(pending);
-                const auto chain=h.pending_score>n?h.pending_score-n-n*std::log(h.pending_score/n)-n*std::log(2.):0;
+                const auto pending_score=h.admitted || chip_evidence.empty()?h.pending_score:pending_chip_scores[hypothesis];
+                const auto chain=pending_score>n?pending_score-n-n*std::log(pending_score/n)-n*std::log(2.):0;
                 if((n==1 && standalone) || chain>=threshold()) {
                     h.admitted=true;h.committed=h.burst.bits.size();h.committed_end=end;
                     h.burst.score=h.sum_score;h.pending_score=0;
+                    if(!pending_chip_scores.empty())pending_chip_scores[hypothesis]=0;
                     h.burst.support_samples=h.sum_support;
                 }
                 if(!h.admitted && static_cast<long double>(pending)*code.symbol_samples()/h.rate>=
@@ -667,6 +684,8 @@ struct PatternCorrelator::Impl {
             static_cast<long double>(pattern_absence_seconds)*config.sample_rate) {publish(h,true);clear(h);}
         else publish(h,false,false);
         h.fits={};
+        if(!chip_evidence.empty())for(std::size_t group=0;group<=alternate_groups;++group)
+            chip_evidence[hypothesis*(alternate_groups+1)+group]={};
         for(std::size_t group=0;group<alternate_groups;++group)
             alternate_fits[hypothesis*alternate_groups+group]={};
         if(drift_sections>1)for(std::size_t group=0;group<=alternate_groups;++group)
@@ -722,6 +741,8 @@ struct PatternCorrelator::Impl {
                     for(unsigned bit=0;bit<2;++bit) {
                         const auto phase=phases[bit];
                         fit[bit].add(projection,phase,1);
+                        if(!chip_evidence.empty())chip_evidence[hypothesis*(alternate_groups+1)+group][bit].add(
+                            projection,phase,1,detail::CorrelationChipEvidence::index(observed,symbol_start,h.rate,code.chip_samples()));
                         if(drift)(*drift)[bit].active.add(projection,phase,1);
                         if(differential)(*differential)[bit].active.add(projection,phase,1);
                     }
@@ -745,6 +766,7 @@ struct PatternCorrelator::Impl {
                     }
                     const auto projection=bank.prefix[right]-bank.prefix[left];
                     fit[bit].add(projection,phase,right-left);
+                    if(!chip_evidence.empty())chip_evidence[hypothesis*(alternate_groups+1)+group][bit].add(projection,phase,right-left,local);
                     if(drift)(*drift)[bit].active.add(projection,phase,right-left);
                     if(differential)(*differential)[bit].active.add(projection,phase,right-left);
                 }
@@ -906,7 +928,7 @@ struct PatternCorrelator::Impl {
              config.sample_rate,search.frequency_offsets_hz.size(),config.carrier_hz,shaped,
              config.spreading_mode==SpreadingMode::tone,
              {static_cast<std::uint32_t>(config.spreading_mode),config.scramble,config.dsss,
-              config.spreading_seed,config.dsss_seed},drift_fits.empty()?1:drift_sections,differential_window},
+              config.spreading_seed,config.dsss_seed},drift_fits.empty()?1:drift_sections,differential_window,!chip_evidence.empty()},
             {blocks.get(),block_count},{projections.get(),row_offset},{frequencies.get(),banks.size()},search.frequency_offsets_hz};
         // Numeric tiles contain no PatternBurst, heap-owned input, or references
         // to peer admission state. Device implementations can operate on these
@@ -920,6 +942,8 @@ struct PatternCorrelator::Impl {
                 lane.frequency=h.frequency;lane.rate_index=h.rate_index;lane.tone_bank_base=h.tone_bank_base;lane.fits[0]=h.fits;
                 for(std::size_t group=0;group<alternate_groups;++group)
                     lane.fits[group+1]=alternate_fits[(first+i)*alternate_groups+group];
+                if(!chip_evidence.empty())for(std::size_t group=0;group<=alternate_groups;++group)
+                    lane.chip_evidence[group]=chip_evidence[(first+i)*(alternate_groups+1)+group];
                 if(!drift_fits.empty())for(std::size_t group=0;group<=alternate_groups;++group)
                     lane.drift_fits[group]=section_fits(first+i,group);
                 if(differential_window)for(std::size_t group=0;group<=alternate_groups;++group)
@@ -931,6 +955,8 @@ struct PatternCorrelator::Impl {
                 h.observed_start=lane.observed_start;h.fits=lane.fits[0];
                 for(std::size_t group=0;group<alternate_groups;++group)
                     alternate_fits[(first+i)*alternate_groups+group]=lane.fits[group+1];
+                if(!chip_evidence.empty())for(std::size_t group=0;group<=alternate_groups;++group)
+                    chip_evidence[(first+i)*(alternate_groups+1)+group]=lane.chip_evidence[group];
                 if(!drift_fits.empty())for(std::size_t group=0;group<=alternate_groups;++group)
                     section_fits(first+i,group)=lane.drift_fits[group];
                 if(differential_window)for(std::size_t group=0;group<=alternate_groups;++group)

@@ -42,8 +42,9 @@ For byte offset `o`, the AES-256-CTR initial 128-bit counter is
 argument selects `StreamDomain::Payload` by default, whose eight-byte pad is
 all zero, preserving existing payload output. `StreamDomain::Preamble` uses
 the eight ASCII bytes `preamble`; `StreamDomain::Suppression` uses `suppress`.
-All three domains use the same purpose and epoch
-key; the counter pad is not another key derivation. Discard the first `o % 16`
+Private pattern candidates use `StreamDomain::PatternZeroV2` and
+`StreamDomain::PatternOneV2`, with ASCII pads `pat-v2-0` and `pat-v2-1`.
+All domains use the same purpose and epoch key; the counter pad is not another key derivation. Discard the first `o % 16`
 keystream bytes and produce the requested count. OpenSSL increments the whole
 counter in big-endian order. The API rejects an offset/count combination whose
 final byte exceeds `2^64-1`, so no domain can carry into the high counter
@@ -90,10 +91,13 @@ that newer epoch and resets the local positions. Long symbols skip intervening
 seconds. Partial final chips consume a full position. The helpers avoid
 overflowing intermediate sample products and reject true epoch/address overflow.
 
-A private template consumes eight bytes at `8*chip_position`. If Scrambler is
-enabled its bytes supply the row; otherwise a public Scrambler stream supplies
-the base. Enabled DSSS bytes at the same position and symbol epoch XOR into
-that row. DSSS currently follows the same symbol-boundary schedule. Two
+Each private candidate consumes eight bytes at `8*chip_position`, in its own
+versioned domain: `PatternZeroV2` for bit 0, `PatternOneV2` for bit 1. Both
+Scrambler and DSSS use that candidate's domain. If Scrambler is enabled its
+bytes supply the row; otherwise a public Scrambler stream at epoch zero supplies
+the base in the same candidate domain. Enabled DSSS bytes at the same position
+and symbol epoch XOR into that row. This also separates candidates when only
+DSSS is private. DSSS follows the same symbol-boundary schedule. Two
 big-endian 32-bit words determine a circular
 I/Q sample: uniform words `u,v` in `(0,1)` produce phase `2*pi*v` and radius
 `min(1.75, sqrt(-log(u))) / sqrt(1-exp(-1.75^2))`. This caps input-chip peaks and
@@ -119,7 +123,7 @@ compact caches do not imply unlimited search or guaranteed real-time operation.
 Pulse shaping occurs after this mapping. Eligible profiles use finite 25% RRC
 pulses, followed by a circular radial PCM limiter for overlapping peaks. Neither
 operation changes plaintext-to-ciphertext encryption, AES/HKDF, purpose keys,
-CTR domains, byte XOR mixing, bit masks or absolute chip positions. The two
+CTR domains, byte XOR mixing or absolute chip positions. The two
 filter tails consume no new chips or stream bytes. Fixed-size mapped-chip caches
 avoid repeating the same seek/map work and are cleansed on release. The receiver
 uses linear shaped candidate templates and treats limiter/neighbor tails as
@@ -127,9 +131,11 @@ model mismatch, while retaining pattern evidence as its sole synchronization
 criterion. See [pulse shaping](modem.md#pulse-shaping) for bandwidth, power loss,
 short-pattern exceptions and peer compatibility.
 
-The two legal bit alternatives multiply that position's circular private row
-by different public internal-transition masks. Only the selected alternative
-is emitted at each position. The receiver regenerates both alternatives for
+The two legal private alternatives are independent secret rows, rather than
+one row multiplied by a public mask. Both rows change with every symbol's
+canonical epoch/ordinal and chip position. Learning one emitted row does not
+reveal its opposite or the next symbol's alternatives under the AES assumption.
+Only the selected alternative is emitted at each position. The receiver regenerates both alternatives for
 its candidate key, epoch and stream position, fitting unknown common gain and
 phase. FFT correlation divides by the actual template energy; the bounded
 clock-window correlator retains the full two-quadrature Gram matrix. Signal
@@ -142,10 +148,38 @@ completed failure. A partial long-symbol window cannot end reception.
 Unkeyed public patterns use the same circular I/Q mapping with the public
 Scrambler seed, epoch zero and symbol-local chip positions. Amplitude and phase
 both vary, but their rows restart each symbol and are intentionally recognizable.
-Two bit alternatives mean two complete pattern templates, not a two-point
-constellation. Short public templates legitimately yield sparse plots because
+Their bit-1 alternative retains the public balanced eight-chip mask
+`{1,-1,-1,1,1,1,-1,-1}` applied to bit 0. Two bit alternatives mean two complete
+pattern templates, not a two-point constellation. Short public templates legitimately yield sparse plots because
 later symbols reuse the same finite chip values. All templates use complex
 `value` samples; the former real `sign`/`fill` API has been removed.
+
+### Independent private alphabet compatibility and limits
+
+The v2 private alphabet is mandatory whenever pattern Scrambler or DSSS is
+active. Both peers must use it; there is no legacy toggle, on-air version bit,
+automatic fallback or additional receiver hypothesis. Existing parameter lists
+continue to select private operation through their key/Scrambler/DSSS settings.
+Public unkeyed patterns, Data masking, keyfiles, settling and suppression retain
+their existing formats. Raw and dictionary-short messages keep their exact bit
+counts; longer messages retain the fixed marker and interval format.
+
+This removes the former public chip-mask substitution, including reuse of that
+transform at the next symbol. It is not a MAC for short messages, proof of sender
+identity, replay prevention or protection against cancellation and jamming.
+Repeated key/epoch/ordinal/chip coordinates still reproduce both rows. The
+cross-transmission limits and in-memory TX lock described below still apply;
+independent templates do not make a reused address fresh. Very short templates
+can also have poor phase-invariant separation; a single complex chip cannot
+establish bit identity under unknown gain and phase.
+
+The receiver still fits two candidates using its existing search bank and
+admission thresholds. Generation uses two bounded stream/mapped-chip caches;
+no storage grows with symbol duration. Planner probabilities retain complex
+template correlations and separate energy envelopes, and average both private
+source-bit conditions when finite templates are evaluated. Dense templates
+retain their orthogonal ensemble approximation. These are model estimates,
+not measured sensitivity or a universal dB penalty.
 
 ### Protected hardware settling
 

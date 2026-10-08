@@ -150,20 +150,28 @@ Both graphs follow actual sampled automatic-profile steps.
 
 The native **Target SNR (dB-Hz)** editable dropdown sits in the page's **Stronger /
 Weaker** controls row and scrolls with the document. It offers the same target
-presets as the transmit controls and changes only the preview. The numeric
-oscillator notes remain hidden while this tab is selected.
+presets as the transmit controls and changes only the preview. Numerical
+oscillator assumptions and requested/covered search bounds appear under the
+document's hideable **Model limits and references**.
 At normal window widths, target controls, the compact native multiline
 **Launch command** editor and the CPU graph form three top-aligned columns.
 **Load** sits beneath the editor. Narrower pages move the command and graph
 below the target controls, then stack them when needed.
-The generated command exports the current link budget, oscillator,
-waveform, rate, carrier, DSP allowance and independent preview target. Its
+The generated command exports the current link budget, Baseband/Shift models, clock
+reference, margin, waveform, rate, absolute Carrier, Shift, DSP allowance and
+independent preview target. Its
 common `--target-snr` sets both short and long targets; the parser also accepts
 explicit `--short-target-snr` and `--long-target-snr` overrides without changing
 the common preview target.
 Editing or pasting does not apply settings. **Load** parses settings without
 executing a process or shell expression, validates the complete proposed state,
 then applies it with **Simulation: No**. Omitted options preserve current values.
+Legacy positive-Shift shared-reference commands normalize their effective
+oscillator into visible Baseband Osc and select Shift Osc **Baseband clock**.
+At Shift zero, the inactive Shift model cannot replace Baseband's model; a shared
+choice may remain remembered for a later positive Shift. A shared export uses
+the same profile for both legacy oscillator flags; a zero-Shift export omits
+the inactive Shift flag and uses the independent reference spelling.
 Malformed or incompatible settings leave the existing settings and pasted text
 unchanged. A successful load preserves the draft and starts no transmission.
 Routine polls and draft edits preserve the command buffer; relevant accepted
@@ -200,7 +208,11 @@ navigation actions preserve the draft and modem geometry; **Load** applies its
 validated settings while retaining the draft. Shared power/path/noise edits
 update estimates without restarting reception in live mode. Preview
 recalculation is bounded in sample count and independent of transmission time;
-it generates no waveform, runs no receiver and starts no worker or transmission.
+it generates no waveform and starts no reception or transmission. The existing
+preparation worker computes the target sweep in the background on native
+desktop builds. While it runs, the current inputs remain editable and the
+preview says **Calculating plan...**; Apply and computed navigation wait for
+the current result. Pending edits coalesce and obsolete results are discarded.
 Immutable documents and plots are cached across unchanged presentation polls.
 
 In automatic modes, edits to every target dropdown select an exact clock/RAM
@@ -261,7 +273,8 @@ noise, yielding −117 dBm received and +47 dB-Hz actual C/N0. These inputs affe
 the actual budget separately from the target-driven timing and the existing
 normalized observer comparison. Propagation names do not supply unverified
 path-loss presets. **Model limits and references** retains the SSB/FT8 and rough
-scenario references, oscillator caveats, and normalized LPI assumptions in
+scenario references, numerical oscillator assumptions, requested/covered search
+bounds, oscillator caveats, and normalized LPI assumptions in
 [link planning](link-planner.md).
 
 Empty text/raw drafts remain empty and cannot start normal transmission. Their
@@ -271,9 +284,9 @@ sources or attachment framing. Clearing a draft does not repopulate it with a
 default message. Nonempty short/raw input and pending reception are unchanged.
 
 The tab uses one general LPI warning: **LPI is not guaranteed. See model limits.**
-Its private-pattern hypothetical state is a short qualifier. While this tab is
-selected, the persistent current-draft LPI advisory is hidden so it cannot be
-confused with the preview; it remains unchanged on every other tab.
+Its private-pattern hypothetical state is a short qualifier. The current-draft
+LPI advisory remains in Flow and Transmission inspection, separate from this
+preview; no standalone header LPI row is retained.
 
 **Transmit noise** appears beside the transmit controls on Console and
 Compression. It starts the regular encrypted pattern modulation with fresh
@@ -361,12 +374,22 @@ as Robust; custom selections survive an inventory update.
 Legacy places its audio-device selector on the left and squelch on the right in
 one row below the waterfall, above the status and transmit-volume row.
 
-The persistent **Oscillator model** dropdown below the Simulation estimates
-offers **Free-running crystal** (the unchanged default), **GPSDO: hobbyist XO
-(no oven)**, **GPSDO: TCXO (no oven)** and **GPSDO: OCXO**. A neighboring label
-shows the selected effective TX/RX clock mismatch in ppm and phase diffusion
-in degrees per square-root second on other tabs; Link planner hides that detail
-and places its independent target editor inside the page. These are illustrative residual scenarios,
+The compact persistent **Baseband Osc**, **Shift Osc** and **Margin** controls
+sit together below the Simulation estimates; **Carrier** and **Shift** are
+adjacent in the modem row. Both oscillator dropdowns offer **Free-running
+crystal** (the unchanged default), **GPSDO: hobbyist XO (no oven)**,
+**GPSDO: TCXO (no oven)** and **GPSDO: OCXO**. Shift Osc additionally offers
+**Baseband clock**, for sampling and mixers that share one hardware reference;
+this uses the selected Baseband profile once with linked frequency/rate errors.
+There is no separate Clock dropdown. Shift defaults to 0 Hz and Margin to 3×.
+At Shift zero, Shift Osc is disabled and displays **N/A**; all of its frequency,
+phase and linked-drift contributions are excluded. Its chosen option is retained
+for a later positive Shift. Baseband Osc remains active for sampling and the
+real stream tone in every case. These controls remain available with Developer
+mode off and Simulation on or off. Numerical clock/phase assumptions and
+requested versus covered search bounds appear under the Link planner's hideable
+**Model limits and references**. There is no Sideband selector; USB is fixed.
+These are illustrative residual scenarios,
 not measured specifications for products: GPS lock does not establish phase
 coherence, and low-cost non-oven oscillators retain more short-term instability
 than the OCXO scenario. The settings do not control physical clock hardware.
@@ -376,7 +399,8 @@ the draft and exact wire format, and follows the Simulation dropdown's busy
 lock. Other modem edits retain the choice; invalid or stale choices do not
 reconfigure a running or closed session.
 
-The persistent **LPI relative observation** advisory below the oscillator shows
+Flow and Transmission inspection retain the **LPI relative observation** advisory,
+showing
 the unkeyed energy detector's total observation relative to the receiver's
 one-bit design reference, at **90% detection / 1% false alarm per known window**.
 Both listeners are normalized to **18 dB Es/N0 for one receiver symbol**,
@@ -386,8 +410,8 @@ are `max(0, N - 1)`. This does not mean one accepted bit out of N transmissions
 and does not establish a calibrated reception threshold. Keyed
 pattern transmission enables the private pattern. With encryption off, including
 tone experiments, the same advisory assumes encrypted private patterns at the
-current sample, chip and symbol timing at that normalized reference. Its second
-line starts with
+current sample, chip and symbol timing at that normalized reference. The advisory
+includes
 **Warning: encryption off; hypothetical only**, including when numerical results
 are unavailable. Actual public patterns and tones can be easier to detect and
 are not described by these figures. No key or waveform setting is changed.
@@ -399,7 +423,6 @@ attenuation, noise figure and oscillator presets do not enter the comparison.
 TX targets affect it only when they change chip or symbol geometry; local RX
 target choices do not change it.
 
-Flow and Transmission inspection share the advisory and its assumptions.
 Transmission fields show the receiver reference, observation bandwidth,
 reference in-band SNR and noise rise, total and additional observer bit durations,
 and full draft airtime relative to the normalized detection duration, including
@@ -422,12 +445,17 @@ and transfer estimates receive the same budget, independently of the 256 MiB
 received-message/file cache.
 
 The persistent **Rate** field defaults to `3.6 kHz`, with `18 kHz` also
-available as a preset. The adjacent editable **Carrier** dropdown defaults to
-`1.5 kHz`. Changing Rate resets Carrier to `1.5 kHz` for `3.6 kHz`, otherwise
-to the existing `max(1500, 0.75 × rate)` Hz recommendation. The dropdown offers
-the current rate's default carrier and its center frequency (half the rate),
-including `1.8 kHz` for `3.6 kHz`. A manually entered carrier override
-persists until the next rate change. Both fields configure transmit planning,
+available as a preset. **Carrier** is absolute and defaults to `1.5 kHz`;
+adjacent **Shift** defaults to `0 Hz`. Their positive difference is the real
+USB stream tone. Both accept case-insensitive Hz, kHz, MHz, GHz and THz suffixes,
+optional spaces and scientific notation. Carrier `1.0015 MHz` and Shift `1 MHz`
+give `1.5 kHz`;
+Shift 0 requires direct MHz samples for that Carrier. Changing Rate resets
+Carrier to Shift plus `1.5 kHz` for `3.6 kHz`, otherwise Shift plus the existing
+`max(1500, 0.75 × rate)` Hz recommendation. Carrier presets add Shift to the
+current rate's default stream tone or center frequency (half the rate),
+including `1.8 kHz` at Rate `3.6 kHz` and Shift 0. A manually entered absolute
+Carrier persists until Rate changes. These fields configure transmit planning,
 receive profiles, live audio, simulation and inspection together. Rate remains
 the nominal timing parameter; it does not claim a measured spectral width.
 Two editable **target SNR (dB-Hz)** dropdowns select transmit planning:
@@ -696,9 +724,12 @@ and transmitted constellation display the generated signal from those stages.
 `desktop_layout.hpp` defines the desktop arrangement at 1180 by 1048 logical
 pixels, with a 1030 by 968 minimum. A persistent simulation row holds the
 dropdown, modeled receive probability and reference CPU/GPU compute estimates.
-The following persistent row holds the oscillator dropdown and selected model
-values. A third persistent row gives the LPI advisory two full-width text lines.
-The added rows preserve the existing composition, reception and plot allocations.
+The following compact persistent row holds Baseband Osc, Shift Osc and Margin;
+Carrier and Shift share the existing modem row. Detailed oscillator/search
+values appear under the Link planner's hideable Model limits and references,
+and LPI assumptions remain in inspection.
+The default and minimum window sizes retain the existing composition,
+reception and plot allocations.
 `control_layout.hpp` computes frame, label,
 editor, preset, caption and footer rectangles once. Both adapters apply these
 rectangles and convert logical to physical coordinates using their display

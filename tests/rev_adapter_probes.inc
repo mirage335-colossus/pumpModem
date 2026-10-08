@@ -500,6 +500,15 @@
         presets->params.value=option->value;re::Event picked;presets->onChange(picked);settle();
         if(editor->content.get()==before||!application.field(ui::Field::planner_target).display_text.empty())
             throw std::runtime_error("Rev inline preset did not edit and commit through its normal binding");
+        const auto planner_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(30);
+        while((!application.enabled(ui::Command::planner_stronger)||
+               !application.enabled(ui::Command::planner_weaker))&&std::chrono::steady_clock::now()<planner_deadline) {
+            application.tick();apply();native_frame();
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        if(!application.enabled(ui::Command::planner_stronger)||!application.enabled(ui::Command::planner_weaker))
+            throw std::runtime_error("Rev planner worker did not prepare native navigation");
+        settle();
         focus_control(editor);re::Event tab;tab.keyboard.tab.id=1;keyDown(tab);
         if(!presets->dropdown->targetFlags.focus)throw std::runtime_error("Rev inline editor Tab order skipped its preset control");
         const auto& order=document->tab_elements();
@@ -590,6 +599,11 @@
             application.tick();apply();native_frame();std::this_thread::sleep_for(std::chrono::milliseconds(5));
         },[&](ui::Field field,ui::TextTone tone) {
             const auto binding=std::find_if(bindings.begin(),bindings.end(),[&](const auto& item){return item.control.field==field;});
+            if(field==ui::Field::lpi_estimate) {
+                if(application.field(field).text_tone!=tone||binding!=bindings.end())
+                    throw std::runtime_error("Rev LPI advisory must retain its model tone without recreating the retired header label");
+                return;
+            }
             if(application.field(field).text_tone!=tone||binding==bindings.end()||!binding->label)
                 throw std::runtime_error("Rev estimate warning fixture has no matching shared label");
             const auto color=theme::text_rgb(tone,launch.color);

@@ -218,12 +218,29 @@ Tone modes disable encryption and private spreading.
 .TP
 .BI \-\-sample\-rate " Hz"
 Manual internal DSP clock, 64\(en120000000 samples/second.
-Normally chosen from bandwidth and carrier, at least four times each.
-The usual 1200 Hz bandwidth and 1500 Hz carrier use 6000 samples/second.
+Normally chosen from bandwidth and the real stream tone (Carrier minus Shift),
+at least four times each.
+The usual 1200 Hz bandwidth, Carrier 1500 Hz and Shift 0 use 6000 samples/second.
 Audio hardware negotiates its own clock and resamples as needed.
 .TP
-.BI \-\-carrier " Hz"
-Manual carrier override. Default: the greater of 1500 Hz and 0.75 times bandwidth.
+.BI \-\-carrier " FREQUENCY"
+Absolute transmitted/received carrier. At Shift 0, the default is the greater
+of 1500 Hz and 0.75 times bandwidth. Works with automatic planning.
+Carrier minus Shift must be positive and at most 30 MHz for the real USB stream.
+Case-insensitive Hz, kHz, MHz, GHz and THz suffixes, k/m/g/t shorthand, optional
+spaces and scientific notation are accepted; a plain number is in Hz.
+.B \-\-rf\-carrier
+is an alias; matching carrier aliases may be combined.
+.TP
+.BI \-\-shift " FREQUENCY"
+Nonnegative RF translation or LO; default 0.
+Accepts the same frequency units as Carrier.
+Carrier 1001500 and Shift 1000000 give a real 1500 Hz tone; at Shift 0 the same
+Carrier requires direct MHz-capable real samples.
+.B \-\-rf\-shift
+is an alias; choose one shift spelling.
+USB is fixed; \-\-sideband upper is a compatibility no-op and lower is rejected.
+No hardware tuning or external complex I/Q interface is added.
 .TP
 .BI \-\-spreading " N"
 Manual chips per symbol, 1\(en16384.
@@ -234,7 +251,7 @@ Enable keyed pattern rotation. Requires a keyfile.
 .B \-\-dsss
 Enable independent keyed direct-sequence spreading. Requires a keyfile.
 .PP
-Any manual sample-rate, carrier, spreading, scramble or DSSS option disables
+Any manual sample-rate, spreading, scramble or DSSS option disables
 automatic tuning. These options cannot be combined with
 .B \-\-target\-snr
 or
@@ -390,7 +407,7 @@ Independent receive epoch for
 default the transmit epoch.
 .TP
 .BI \-\-oscillator " model"
-Impairment model for simulation and analysis:
+Baseband model for bounded receiver search and simulated impairments:
 .B crystal
 (default),
 .BR gpsdo-xo ,
@@ -399,8 +416,25 @@ or
 .BR gpsdo-ocxo .
 Does not control hardware.
 .TP
+.BI \-\-rf\-oscillator " model"
+Shift model; same choices, default crystal. At Shift 0 all of its frequency and
+phase contributions are excluded, regardless of the reference setting.
+For a legacy positive-Shift shared reference, this flag selects the shared model.
+.TP
+.BI \-\-reference " independent|shared-radio"
+Independent Baseband and Shift references (default), or one shared sampling/mixer
+reference for a positive Shift. A positive shared Shift uses the rf-oscillator
+profile once for both effects; Shift 0 uses only the oscillator/Baseband profile.
+.B \-\-lf\-reference 0
+is a legacy shared-reference shorthand, unrelated to setting Shift to 0 Hz.
+.TP
+.BI \-\-search\-margin " N"
+Multiply declared frequency and clock accuracy bounds; default 3, minimum 1.
+The margin does not multiply simulated impairments.
+.TP
 .BI \-\-clock\-error\-ppm " N"
-Override relative clock error; crystal default 100 ppm.
+Override signed simulated relative clock error; crystal default 100 ppm.
+This changes channel truth without widening the declared receiver bounds.
 .TP
 .BI \-\-phase\-noise " N"
 Override phase diffusion in degrees per square root second;

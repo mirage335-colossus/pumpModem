@@ -26,13 +26,23 @@ frequency, clock and memory limits below remain material.
 The default CLI/internal configuration is mono 6,000 Hz PCM, a 1500 Hz carrier and
 1,200 Hz nominal rate parameter (`Config::bandwidth_hz`). For this parameter `B`
 from 0.01 Hz through 30 MHz, the legacy carrier recommendation is
-`max(1500, 0.75B)`. With a selected carrier `fc`, automatic planning chooses
-`Fs = ceil(max(64, 4B, 4fc))`. The GUI defaults to `B=3600`, `fc=1500`, and
-14,400 internal samples/s, and exposes both Rate and Carrier controls.
+`max(1500, 0.75B)`. Public Carrier is the absolute transmitted/received
+frequency; Shift defaults to zero, and the positive real USB stream tone is
+`fc = Carrier - Shift`. Automatic planning chooses
+`Fs >= ceil(max(64, 4B, 4fc))` from that stream tone. An exactly represented
+decimal Rate can round this minimum upward to whole sampled half-chips, with at most
+5% extra samples and the same 120 MHz ceiling. Rate 100 Hz therefore uses
+6000 samples/s at both 1500 Hz and 1490 Hz stream tones. Explicit caller-supplied
+sample clocks remain unchanged. The GUI defaults to `B=3600`,
+Carrier 1500 Hz, Shift 0 and 14,400 internal samples/s, and exposes Rate,
+Carrier and Shift controls.
+Both frequency fields accept case-insensitive Hz, kHz, MHz, GHz and THz units,
+optional spaces and scientific notation. The CLI accepts the same suffixes and
+the existing `--rf-carrier` / `--rf-shift` aliases.
 Narrow audio remains around a usable carrier rather than falling below 300 Hz.
 The 6 kHz floor is needed for this real-PCM carrier representation; it does not
 raise the nominal chip or symbol rate. The 30 MHz plan still uses 120 million
-internal samples/second. Manual CLI carrier/sample-rate overrides remain available.
+internal samples/second. Explicit Carrier/Shift and manual sample-rate choices remain available.
 The range is a DSP configuration range; physical operation uses the selected
 audio device's available sample rate and passband.
 The modem's nominal chip rate is bandwidth / 2.
@@ -115,8 +125,9 @@ noise contributes to that absence only when those searches reject it.
 Private templates map eight mixed keystream bytes per chip to circular noise,
 with both amplitude and phase varying. The bounded Gaussian transform has unit
 expected complex power before the transmitter's amplitude scale. Its two bit
-alternatives retain a public internal-transition mask, so the same iterative
-pattern comparison works under unknown common gain and phase. FFT scoring uses
+alternatives use independent versioned cryptographic domains at every symbol
+address. No public sign mask converts one private alternative into the other.
+The same iterative comparison fits unknown common gain and phase. FFT scoring uses
 actual template energy; the clock-window path fits its full Gram matrix.
 See [exact stream mapping](crypto.md#binary-pattern-chip-addressing).
 
@@ -139,9 +150,9 @@ in one second consume successive counter positions; a symbol beginning in a
 later second selects that newer epoch. Long symbols skip intervening seconds,
 and crossing a second inside a pattern never changes that pattern's reference.
 Stable purpose roots let the receiver regenerate later symbols without the
-original message epoch. The second codeword mixes
-the first with a nonconstant balanced mask, preserving distinguishability under
-unknown carrier phase. A separate DSSS purpose remains independent. Pattern
+original message epoch. Private bit 0 and bit 1 use separate `pat-v2-0` and
+`pat-v2-1` counter domains in every enabled private layer. Public unkeyed bit 1
+retains its balanced mask. A separate DSSS purpose remains independent. Pattern
 and Data streams share the symbol-start epoch and subsecond position. Streams
 are generated on demand with fixed-size caches. See
 [the exact integer schedule](crypto.md#binary-pattern-chip-addressing).
@@ -289,9 +300,15 @@ at full precision. See [Link planner](link-planner.md).
 The receiver resolves only this list, using the selected rate, carrier, clock
 and mode before selecting the pattern length and checking its confidence floor;
 identical sample-quantized waveform profiles are searched once. Manual CLI
-`--spreading`, `--scramble`, `--dsss`, `--sample-rate` or `--carrier` selects
-explicit pattern configuration and cannot be combined with automatic planning
-or `--receive-targets`. Simulator `--snr` describes sample-power noise and does
+`--spreading`, `--scramble`, `--dsss` or `--sample-rate` selects explicit
+pattern configuration and cannot be combined with automatic planning or
+`--receive-targets`. Absolute `--carrier` and translation `--shift` work with
+automatic planning; `--rf-carrier` and `--rf-shift` are their compatibility aliases.
+Baseband Osc always supplies sampling/carrier uncertainty. Shift zero disables
+Shift Osc and excludes every conversion-error contribution. For a positive Shift,
+Shift Osc can select an independent profile or **Baseband clock** for a shared
+reference counted once; see [oscillator models](oscillator-models.md).
+Simulator `--snr` describes sample-power noise and does
 not choose the transmitted profile.
 
 `tuning::resolve` uses binary pattern symbols (`constellation_bits = 1`). It
@@ -368,6 +385,17 @@ symbols can contribute to a chain. The default nominal search significance is
 trials. This adds approximately 4.61 natural-log units to the admission gate
 at the same trial count. It reduces marginal false starts under the reference
 model without making a calibrated probability claim for correlated interference.
+Before a compact receiver admits a private multi-symbol weak chain, it also
+bounds each contribution using projections into disjoint chip subspaces.
+This prevents oversampled wrong-key patterns from accumulating inflated raw-PCM
+confidence across weak symbols. Both signal and noise are projected; simply
+reducing the sample count would discard integration gain. The extra bounded
+state is allocated only when a searched symbol can finish within six seconds.
+Standalone symbols, already admitted streams and long-symbol detector scores
+retain their existing evidence calculation. This is a false-start safeguard,
+not authentication; the planner's standalone probability model does not model
+weak-chain acquisition.
+
 Once admitted, a stream retains its symbol
 clock across missing slots. The only end rule is consecutive fully scored
 failed symbols whose received duration covers at least six seconds. One failed
@@ -524,6 +552,10 @@ clock_ratio       = 1 + clock_error_ppm * 1e-6
 carrier_error_Hz  = explicit_frequency_offset + carrier_Hz * (clock_ratio - 1)
 RMS_phase_change  = phase_noise_degrees_per_sqrt_second * sqrt(elapsed_seconds)
 ```
+
+Here `carrier_Hz` is the internal real stream tone **Carrier − Shift**. Any
+active conversion-error contribution enters the additive frequency offset;
+independent Baseband clock error is not applied to the absolute Carrier.
 
 Receiver samples include AWGN and the altered carrier, sample timing and phase
 trajectory. Sample-clock error can reduce the actual spreading correlation; no

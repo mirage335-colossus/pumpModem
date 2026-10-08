@@ -4,6 +4,7 @@
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/channel.hpp"
 #include "datapump/symbol_schedule.hpp"
+#include "../src/pattern_fft_batch.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -586,27 +587,60 @@ void weak_prefix_cannot_borrow_payload_confidence() {
     check(burst.first_sample>=delay+symbol-10,
           "a strong payload symbol must not retroactively confirm a weak candidate before its start");
 }
+// Set an evidence boundary with fixed noise draws, independently of the
+// secret template bytes. This fixture uses the ordinary complex-bin path.
+void set_tail_evidence(std::vector<float>& pcm,const modem::Config& c,
+                       std::uint64_t symbol,unsigned bit,double target,std::uint64_t seed) {
+    modem::PatternCode code(c,c.stream_epoch);
+    const auto length=code.symbol_samples(),bin=modem::pattern_projection_bin_samples(c,0);
+    const auto start=symbol*length;
+    std::vector<float> clean(pcm.begin()+static_cast<std::ptrdiff_t>(start),
+                             pcm.begin()+static_cast<std::ptrdiff_t>(start+length));
+    std::vector<double> noise(length);std::mt19937_64 random(seed);
+    std::normal_distribution<double> normal(0,1.);
+    for(auto& value:noise)value=normal(random);
+    const auto image=std::abs(modem::detail::pattern_projection_image_ratio(bin,c.carrier_hz,c.sample_rate));
+    const auto condition=(1+image)/(1-image);
+    const auto score=[&](double amplitude,unsigned candidate) {
+        std::complex<double> dot{};double energy=0,norm=0;
+        for(std::uint64_t first=0;first<length;first+=bin) {
+            std::complex<double> observed{};
+            for(std::uint64_t j=0;j<bin;++j) {
+                const auto i=first+j;
+                pcm[start+i]=static_cast<float>(amplitude*clean[i]+noise[i]);
+                observed+=static_cast<double>(pcm[start+i])*std::polar(1.,-2*std::numbers::pi*
+                    c.carrier_hz*static_cast<double>(start+i)/c.sample_rate);
+            }
+            const auto reference=code.value(symbol*code.chips_per_symbol()+first/code.chip_samples(),candidate);
+            dot+=observed*std::conj(reference);norm+=std::norm(reference);energy+=std::norm(observed);
+        }
+        const auto fraction=std::clamp(std::norm(dot)/(condition*norm*energy),0.,1.-1e-15);
+        return -(static_cast<double>(length/bin)-1)*std::log1p(-fraction);
+    };
+    double low=0,high=8;
+    check(score(low,bit)<target && score(high,bit)>target,"tail fixture must bracket target evidence");
+    for(unsigned iteration=0;iteration<32;++iteration) {
+        const auto middle=(low+high)/2;
+        if(score(middle,bit)<target)low=middle;else high=middle;
+    }
+    const auto amplitude=(low+high)/2,actual=score(amplitude,bit),other=score(amplitude,1-bit);
+    check(std::abs(actual-target)<.01 && actual-other>1,"tail fixture must retain its intended bit preference");
+}
 void pending_tail_requires_joint_confidence() {
     auto c=config(64,true);c.pulse_shaping=false;
     const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
     modem::PatternSearch search;search.frequency_offsets_hz={0};search.initial_stream_symbols=1;
-    search.false_alarm_probability=1e-8; // This fixture brackets the original 30.5/34 evidence boundary.
+    search.false_alarm_probability=1e-8;
     constexpr std::array<std::size_t,3> changing{137,503,17};
     for(const bool joint_confident:{false,true}) {
         auto samples=waveform(c,{0,1,0},0,3*symbol,.73);
-        std::mt19937_64 random(197);std::normal_distribution<double> noise(0,2.);
-        for(std::size_t i=symbol;i<2*symbol;++i)samples[i]+=static_cast<float>(noise(random));
-        if(!joint_confident) {
-            std::mt19937_64 last_random(821);std::normal_distribution<double> last_noise(0,1.);
-            for(std::size_t i=2*symbol;i<3*symbol;++i)samples[i]+=static_cast<float>(last_noise(last_random));
-        }
+        set_tail_evidence(samples,c,1,1,8.,197);
+        if(!joint_confident)set_tail_evidence(samples,c,2,0,34.,821);
         const std::array<std::size_t,1> whole{samples.size()};
         for(const auto chunks:{std::span<const std::size_t>(changing),std::span<const std::size_t>(whole)}) {
             const auto result=receive(samples,c,chunks,search);
-            // Middle evidence is about 9.3. A last-symbol score around 34 meets
-            // standalone confidence but leaves the joint tail bound around 30.5,
-            // below acceptance. A clean last symbol also establishes joint
-            // confidence, which must preserve the existing combined-chain behavior.
+            // The fixed middle/tail targets straddle standalone and joint
+            // admission. A clean last symbol must still confirm both symbols.
             check(std::any_of(result.candidates.begin(),result.candidates.end(),[&](const auto& e) {
                 return e.stream_symbol==1 && e.score>=search.retain_score && e.score<10 &&
                     e.score-e.alternative_score>=1;
@@ -616,6 +650,11 @@ void pending_tail_requires_joint_confidence() {
                       "valid combined confidence must preserve the pending tail and entire admitted span");
                 continue;
             }
+            check(std::any_of(result.candidates.begin(),result.candidates.end(),[](const auto& e) {
+                const auto combined=8.+e.score;
+                const auto joint=combined-2-2*std::log(combined/2)-2*std::log(10.);
+                return e.stream_symbol==2 && e.score>e.admission_threshold+1 && joint<e.admission_threshold-1;
+            }),"tail fixture must independently pass while its joint weak tail remains unsupported");
             auto preserve=search;
             const auto joined=receive(samples,c,chunks,preserve);
             check(joined.bursts.size()==1 && joined.bursts.front().bits==Bytes({0,modem::missing_pattern_bit,0}),

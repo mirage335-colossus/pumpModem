@@ -15,6 +15,7 @@ import tarfile
 import tempfile
 import threading
 import unittest
+import zlib
 from urllib.parse import unquote
 from web_delivery_fixture import WEB, payload as web_payload
 
@@ -334,7 +335,9 @@ class AptReleaseTests(unittest.TestCase):
                 data = bytearray(path.read_bytes())
                 data[len(data) // 2] ^= 0x7f
                 path.write_bytes(data)
-                with self.assertRaises((ValueError, OSError, EOFError, subprocess.CalledProcessError, tarfile.TarError)):
+                # Corrupt DEFLATE bytes may fail before gzip/tar can classify
+                # the archive; rejection is still mandatory in that case.
+                with self.assertRaises((ValueError, OSError, EOFError, subprocess.CalledProcessError, tarfile.TarError, zlib.error)):
                     apt.verify(directory, self.metadata, trusted_fingerprint=self.fingerprint)
 
     def test_links_traversal_duplicate_and_privileged_archive_entries_fail(self):

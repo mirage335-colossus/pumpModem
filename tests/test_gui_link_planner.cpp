@@ -4,6 +4,7 @@
 #include "link_planner_model.hpp"
 #include "link_planner_page.hpp"
 #include "datapump/correlation_experiment.hpp"
+#include "datapump/execution.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_search.hpp"
 #include "datapump/simulation_estimate.hpp"
@@ -11,8 +12,10 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <exception>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <set>
 #include <string_view>
 #include <thread>
@@ -579,12 +582,195 @@ void quantization_fixed_modes_and_limits() {
     inputs=example();inputs.wire_bits=std::numeric_limits<std::size_t>::max();
     check(!planner::build(inputs).available,"An overflowing draft duration must not wrap the sample counter");
 }
+std::shared_ptr<const planner::Model> prepared_plan(Controller& controller) {
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(30);
+    while(controller.link_plan()->error.starts_with("Calculating")&&std::chrono::steady_clock::now()<deadline) {
+        controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(!controller.link_plan()->error.starts_with("Calculating"),"Planner worker did not complete");
+    return controller.link_plan();
+}
+void persistent_worker_curve_cache() {
+    auto input=example();input.target_db_hz=0;
+    input.channel.clock_error_ppm=input.channel.phase_noise_degrees_per_sqrt_second=0;
+    planner::Cache cache;
+    const auto in_worker=[&](const planner::Inputs& request) {
+        planner::Model model;std::exception_ptr failure;
+        // GUI preparation tasks have distinct native thread lifetimes.
+        execution::Task worker([&] {
+            try {model=planner::build(request,cache);}
+            catch(...) {failure=std::current_exception();}
+        });
+        worker.join();if(failure)std::rethrow_exception(failure);return model;
+    };
+    const auto cold=in_worker(input);const auto before=cache.statistics();
+    check(cold.available&&before.probability_evaluations>0&&before.entries<=512,
+          "Cold planner must compute supported probabilities inside its bounded cache");
+    const auto repeated=in_worker(input);const auto after=cache.statistics();
+    check(repeated.available&&after.probability_evaluations==before.probability_evaluations&&
+          after.probability_reuses>before.probability_reuses&&after.entries<=512,
+          "A new planner worker must reuse the previous worker's probability curve");
+    check(before.support_evaluations>0&&after.support_evaluations==before.support_evaluations&&
+          after.support_reuses>before.support_reuses&&after.support_entries<=8192,
+          "A new planner worker must reuse checked clock/workspace geometry");
+    const auto same_choices=[](const planner::Model& a,const planner::Model& b) {
+        check(a.clock_target==b.clock_target&&a.clock_limit_reason==b.clock_limit_reason&&
+              a.stronger_fit_target==b.stronger_fit_target&&a.weaker_fit_target==b.weaker_fit_target,
+              "Persistent support cache changed receiver-fit navigation");
+    };
+    same_choices(repeated,cold);
+    check(repeated.probability_trials==4096&&repeated.probability_trials==cold.probability_trials&&
+          repeated.receive_points.size()==cold.receive_points.size(),
+          "Illustrative cached curves must not replace the selected 4096-trial estimate");
+    near(repeated.success_probability,cold.success_probability,"Cache reuse changed selected reception confidence");
+    for(std::size_t i=0;i<cold.receive_points.size();++i) {
+        const auto& a=cold.receive_points[i];const auto& b=repeated.receive_points[i];
+        near(a.target_db_hz,b.target_db_hz,"Cache reuse moved a curve location");
+        near(a.success_probability,b.success_probability,"Cache reuse changed a deterministic curve probability");
+        check(a.confidence_available==b.confidence_available&&a.probability_trials==b.probability_trials,
+              "Cache reuse changed probability coverage or precision");
+    }
+    input.target_db_hz=1;const auto stepped=in_worker(input);const auto navigation=cache.statistics();
+    check(stepped.available&&navigation.probability_reuses>after.probability_reuses,
+          "A neighboring selected target must reuse unchanged curve locations");
+    check(navigation.support_reuses>after.support_reuses&&
+          navigation.support_evaluations-after.support_evaluations<before.support_evaluations/2,
+          "A neighboring target must reuse most clock/workspace checks");
+    planner::Cache stepped_reference;same_choices(stepped,planner::build(input,stepped_reference));
+    input.noise_density_dbm_hz-=1;const auto changed=in_worker(input);const auto invalidated=cache.statistics();
+    check(changed.available&&invalidated.probability_evaluations>navigation.probability_evaluations&&
+          invalidated.entries<=512,
+          "A changed link strength must compute new probabilities instead of reusing stale cache entries");
+    planner::Cache independent;const auto reference=planner::build(input,independent);
+    same_choices(changed,reference);
+    check(invalidated.support_evaluations>navigation.support_evaluations,
+          "Changed link assumptions must invalidate support checks");
+    near(changed.success_probability,reference.success_probability,"A reused cache changed the new selected input");
+    check(changed.receive_points.size()==reference.receive_points.size(),
+          "A reused cache changed the new curve's supported locations");
+    for(std::size_t i=0;i<changed.receive_points.size();++i)
+        near(changed.receive_points[i].success_probability,reference.receive_points[i].success_probability,
+             "Persistent cache identity omitted a changed strength input");
+    const auto verify_support_change=[&](const char* changed_field) {
+        const auto prior=cache.statistics();const auto cached=in_worker(input);
+        planner::Cache fresh;const auto uncached=planner::build(input,fresh);
+        if(!cached.available||!uncached.available||cache.statistics().support_evaluations<=prior.support_evaluations)
+            throw Error(std::string("Support invalidation failed for ")+changed_field+": "+cached.error);
+        same_choices(cached,uncached);
+    };
+    input.options.dsp_workspace_bytes/=2;verify_support_change("workspace");
+    input.options.modem.oscillator_search=modem::OscillatorSearchConfig{};verify_support_change("oscillator");
+    input.options.key.emplace(std::array<std::uint8_t,32>{});verify_support_change("key");
+    input.mode=tuning::PatternMode::auto_keystream;verify_support_change("mode");
+}
+void prepare_plan(Application& app) {
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(30);
+    while(!app.enabled(ui::Command::planner_apply_short)&&std::chrono::steady_clock::now()<deadline) {
+        app.tick();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(app.enabled(ui::Command::planner_apply_short),"Application planner worker did not complete");
+}
+void stable_planner_navigation_document() {
+    using F=ui::Field;using C=ui::Command;using P=ui::Page;
+    Application app({.simulation=true});app.select_page(P::planner);
+    app.edit(F::bandwidth,"3600 Hz");app.edit(F::carrier,"1500 Hz");
+    app.select(F::simulation_oscillator,"gpsdo-ocxo");
+    app.activate(C::planner_example_lpi);prepare_plan(app);
+    const auto original=app.document(P::planner,900);
+    check(original&&app.enabled(C::planner_stronger),"Navigation fixture must have a completed stronger step");
+    const auto geometry=[](const ui::DocumentNode& document) {
+        const auto layout=ui::layout_document(document,900,[](const auto& node,int) {return node.font_size*1.25;});
+        std::map<std::string,ui::DocumentRect> rectangles;
+        const auto visit=[&](auto&& self,const ui::DocumentNode& node,const ui::DocumentBox& box,int x,int y)->void {
+            x+=box.bounds.x;y+=box.bounds.y;const ui::DocumentRect rect{x,y,box.bounds.width,box.bounds.height};
+            if(!node.plot_name.empty())rectangles.emplace(node.plot_name,rect);
+            if(node.control&&node.control->field==F::planner_target)rectangles.emplace("target",rect);
+            if(node.control&&node.control->field==F::planner_command)rectangles.emplace("command",rect);
+            for(std::size_t i=0;i<node.children.size();++i)self(self,node.children[i],box.children[i],x,y);
+        };
+        visit(visit,document,layout.root,0,0);rectangles.emplace("document",layout.root.bounds);return rectangles;
+    };
+    const auto baseline=geometry(*original);
+    check(baseline.size()==6,"Navigation fixture must contain both native editors and all three plots");
+    app.activate(C::planner_stronger);
+    const auto pending=app.document(P::planner,900);
+    check(pending!=original&&contains_text(*pending,"Updating · previous plan")&&
+          geometry(*pending)==baseline&&contains_text(*pending,"Received:")&&
+          !app.enabled(C::planner_apply_short)&&!app.enabled(C::planner_weaker),
+          "Pending navigation must retain explicitly previous results and geometry while disabling stale actions");
+    for(const auto* node:nodes(*pending))if(node->command==C::planner_apply_short||node->command==C::planner_apply_long||
+            node->command==C::planner_stronger||node->command==C::planner_weaker||node->command==C::planner_clock)
+        check(!node->enabled,"A displayed previous plan exposed a stale calculation action");
+    check(app.document(P::planner,900)==pending,"Repeated pending reads must keep the same presentation identity");
+    app.edit(F::planner_target,"-");const auto invalid=app.document(P::planner,900);
+    const auto invalid_nodes=nodes(*invalid);
+    check(contains_text(*invalid,"Check planner target")&&!contains_text(*invalid,"Updating · previous plan")&&
+          !contains_text(*invalid,"Received:")&&std::none_of(invalid_nodes.begin(),invalid_nodes.end(),
+              [](const auto* node){return !node->plot_name.empty();}),
+          "Invalid input must immediately suppress previous numerical results and graphs");
+    app.edit(F::planner_target,"23");prepare_plan(app);
+    check(!contains_text(*app.document(P::planner,900),"Updating · previous plan")&&app.enabled(C::planner_apply_short),
+          "Completed valid planning must replace its previous view and restore applicable actions");
+    const auto restored=app.document(P::planner,900);const auto restored_geometry=geometry(*restored);
+    check(app.enabled(C::planner_weaker),"Recovered navigation fixture must offer a weaker step");
+    app.activate(C::planner_weaker);const auto weaker=app.document(P::planner,900);
+    check(contains_text(*weaker,"Updating · previous plan")&&geometry(*weaker)==restored_geometry&&
+          !app.enabled(C::planner_apply_short),
+          "Weaker navigation must preserve the same completed layout while its new target is pending");
+    prepare_plan(app);
+    app.close();
+}
 void prepare(Controller& controller) {
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
     while(!controller.estimate()&&std::chrono::steady_clock::now()<deadline) {
         controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     check(controller.estimate().has_value(),"Current-draft estimate was not prepared");
+}
+void asynchronous_planner_edits() {
+    using F=ui::Field;using C=ui::Command;
+    Controller controller({true,true});
+    controller.edit(F::carrier,"1.0015 MHz");controller.edit(F::rf_shift,"1 MHz");
+    prepare(controller);
+    const auto pending=controller.link_plan();
+    check(!pending->available&&pending->error=="Calculating plan..."&&
+          !controller.enabled(C::planner_apply_short),
+          "A cold shifted plan must return a pending model without calculating on the event thread");
+    controller.poll(); // Dispatch the old request before replacing its inputs.
+    controller.edit(F::rf_shift,"999.5 kHz");
+    const auto middle=controller.link_plan();
+    check(middle!=pending&&!middle->available&&middle->inputs.options.modem.carrier_hz==2000,
+          "A shift edit must immediately replace the pending input snapshot");
+    controller.edit(F::rf_shift,"2 MHz");
+    const auto invalid=controller.link_plan();
+    check(!invalid->available&&invalid->error.find("Fix the modem settings")!=std::string::npos,
+          "Invalid edits must withdraw stale planner results immediately");
+    controller.edit(F::carrier,"2.0015 MHz");
+    const auto latest=controller.link_plan();
+    check(!latest->available&&latest!=middle&&latest->inputs.options.modem.carrier_hz==1500&&
+          latest->inputs.options.modem.oscillator_search->rf_shift_hz==2000000,
+          "Rapid edits must retain only the newest absolute Carrier and Shift");
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(30);
+    while(!controller.link_plan()->available&&std::chrono::steady_clock::now()<deadline) {
+        controller.poll();
+        const auto current=controller.link_plan();
+        check(current->inputs.options.modem.oscillator_search->rf_shift_hz==2000000&&
+              current->inputs.options.modem.carrier_hz==1500,
+              "An obsolete worker result replaced newer Carrier/Shift settings");
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    const auto accepted=controller.link_plan();
+    check(accepted->available&&accepted!=latest,"Latest shifted plan did not complete asynchronously");
+    for(unsigned read=0;read<256;++read)
+        check(controller.link_plan()==accepted,"Completed plan must retain its cached identity");
+    controller.activate(C::planner_example_lpi);
+    const auto closing=controller.link_plan();controller.poll();controller.close();
+    while(!controller.ready_to_close()&&std::chrono::steady_clock::now()<deadline) {
+        controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(controller.ready_to_close()&&controller.link_plan()==closing&&
+          !controller.enabled(C::planner_apply_short),
+          "Closing must drain the worker without publishing or enabling its pending result");
 }
 void controller_checked_navigation() {
     using F=ui::Field;using C=ui::Command;
@@ -594,10 +780,10 @@ void controller_checked_navigation() {
     const auto inspection=controller.inspection();
     const auto waveform=controller.estimate()->waveform_samples;
     const auto receive_targets=controller.settings().transfer.receive_targets_db_hz;
-    const auto initial=controller.link_plan();
+    const auto initial=prepared_plan(controller);
     check(initial->clock_target.has_value(),"Controller GPSDO fixture must have a usable clock/RAM edge");
     controller.activate(C::planner_clock);
-    const auto edge=controller.link_plan();
+    const auto edge=prepared_plan(controller);
     check(edge->available&&edge->clock_search_supported&&edge->receiver_workspace_supported&&
           !controller.enabled(C::planner_weaker)&&controller.enabled(C::planner_stronger),
           "Controller navigation enablement must reflect its checked edge and available direction");
@@ -605,7 +791,7 @@ void controller_checked_navigation() {
         check(controller.link_plan()==edge,"Repeated planner presentation reads must reuse the bounded search result");
     const auto next=edge->stronger_fit_target;
     controller.activate(C::planner_stronger);
-    const auto stepped=controller.link_plan();
+    const auto stepped=prepared_plan(controller);
     check(next&&stepped!=edge&&stepped->inputs.target_db_hz==*next,
           "Stronger action must use the exact checked target advertised by the cached model");
     auto receiver=independently_check_receiver(stepped->inputs,stepped->inputs.target_db_hz);
@@ -617,13 +803,13 @@ void controller_checked_navigation() {
           "A stronger usable point must offer its checked weaker return path");
     const auto weaker=*stepped->weaker_fit_target;
     controller.activate(C::planner_weaker);
-    const auto selected=controller.link_plan();
+    const auto selected=prepared_plan(controller);
     check(selected->inputs.target_db_hz==weaker&&selected->clock_search_supported&&selected->receiver_workspace_supported,
           "Weaker action must preserve the exact target used to check its clock/RAM fit");
     controller.activate(C::planner_target);const auto requests=controller.take_services();
     check(requests.size()==1,"Checked navigation target must remain editable through its native prompt");
     controller.complete_service({requests.front().id,false,requests.front().value,{}});
-    check(controller.link_plan()->inputs.target_db_hz==weaker,
+    check(prepared_plan(controller)->inputs.target_db_hz==weaker,
           "A displayed checked target lost its sample-sensitive precision during prompt round-trip");
     const auto samples=modem::symbol_sample_count(planned_config(selected->inputs,weaker));
     controller.activate(C::planner_apply_short);prepare(controller);
@@ -641,7 +827,7 @@ void controller_target_alignment() {
     controller.edit(F::bandwidth,"1 Hz");controller.edit(F::carrier,"1500 Hz");
     controller.select(F::simulation_oscillator,"gpsdo-xo");controller.edit(F::short_bits,"00101");
     const auto expected=[&](double requested,double companion) {
-        auto input=controller.link_plan()->inputs;input.options=controller.settings().transfer;
+        auto input=prepared_plan(controller)->inputs;input.options=controller.settings().transfer;
         input.target_db_hz=requested;
         const std::array companions{companion};
         const auto result=planner::nearest_fit_target(input,companions,planner::ReceiveBanks{true,0});
@@ -652,7 +838,7 @@ void controller_target_alignment() {
     check(controller.field(F::snr).text=="-47"&&controller.estimate()->wire_bits==5&&
           controller.field(F::short_bits).text=="00101"&&
           modem::symbol_sample_count(controller.settings().transfer.modem)==
-          modem::symbol_sample_count(planned_config(controller.link_plan()->inputs,short_target))&&
+          modem::symbol_sample_count(planned_config(prepared_plan(controller)->inputs,short_target))&&
           std::find(controller.settings().transfer.receive_targets_db_hz.begin(),
                     controller.settings().transfer.receive_targets_db_hz.end(),short_target)!=
                     controller.settings().transfer.receive_targets_db_hz.end(),
@@ -675,11 +861,11 @@ void controller_target_alignment() {
           modem::symbol_sample_count(*controller.settings().long_message_modem)==long_samples,
           "An unrelated configuration refresh must not replace accepted targets with their unrounded edit buffers");
     const auto inspection=controller.inspection();const auto revision=controller.revision();
-    const auto plan=controller.link_plan();
+    const auto plan=prepared_plan(controller);
     controller.commit_target(F::snr);
     check(std::stod(controller.field(F::snr).text)==short_target&&controller.field(F::snr).display_text.empty()&&
           controller.field(F::long_snr).text=="-46"&&controller.inspection()==inspection&&
-          controller.revision()==revision&&controller.link_plan()==plan&&
+          controller.revision()==revision&&prepared_plan(controller)==plan&&
           controller.settings().transfer.receive_targets_db_hz==targets,
           "Committing a target must canonicalize only its buffer without retuning or discarding prepared estimates");
     controller.commit_target(F::long_snr);
@@ -698,13 +884,13 @@ void controller_target_alignment() {
     controller.edit(F::snr,"-20");prepare(controller);
     check(controller.field(F::snr).text=="-20"&&
           modem::symbol_sample_count(controller.settings().transfer.modem)==
-          modem::symbol_sample_count(planned_config(controller.link_plan()->inputs,boundary_target)),
+          modem::symbol_sample_count(planned_config(prepared_plan(controller)->inputs,boundary_target)),
           "The former -20 dB boundary must use the same clock/RAM alignment as every other target");
     const auto fallback=expected(-200,long_target);
     controller.edit(F::snr,"-200");prepare(controller);
     check(controller.field(F::snr).text=="-200"&&!controller.field(F::snr).display_text.empty()&&
           modem::symbol_sample_count(controller.settings().transfer.modem)==
-          modem::symbol_sample_count(planned_config(controller.link_plan()->inputs,fallback))&&
+          modem::symbol_sample_count(planned_config(prepared_plan(controller)->inputs,fallback))&&
           controller.estimate()->wire_bits==5,
           "An unrepresentable weak request must preserve its edit buffer and use a checked fallback without adding bits");
     controller.select(F::pattern,"pattern-16");controller.edit(F::snr,"-47");prepare(controller);
@@ -728,14 +914,14 @@ void current_draft_and_modem_isolation() {
     const auto modem=controller.settings().transfer.modem;
     const auto estimate=controller.estimate();
     controller.activate(C::planner_example_lpi);
-    check(controller.link_plan()->inputs.target_db_hz==23&&controller.link_plan()->inputs.wire_bits==1,
+    check(prepared_plan(controller)->inputs.target_db_hz==23&&prepared_plan(controller)->inputs.wire_bits==1,
           "LPI example must begin with exactly one raw bit");
     controller.activate(C::planner_toggle_draft);
-    check(controller.planner_uses_draft()&&controller.link_plan()->available&&controller.link_plan()->inputs.wire_bits==3,
+    check(controller.planner_uses_draft()&&prepared_plan(controller)->available&&prepared_plan(controller)->inputs.wire_bits==3,
           "Current draft must use the fixed dictionary's three-bit e endpoint");
     controller.activate(C::planner_power_100w);controller.activate(C::planner_toggle_details);
     prepare(controller); // Shared link power also refreshes the RX probability.
-    check(controller.planner_details()&&controller.link_plan()->inputs.tx_dbm==50,
+    check(controller.planner_details()&&prepared_plan(controller)->inputs.tx_dbm==50,
           "Planner detail and power actions did not update their own preview state");
     check(controller.field(F::snr).text==short_target&&controller.field(F::long_snr).text==long_target&&
           controller.settings().transfer.receive_targets_db_hz==receive_targets&&
@@ -749,14 +935,14 @@ void current_draft_and_modem_isolation() {
     controller.edit(F::short_bits,"00101");
     check(!controller.link_plan()->available,"A draft edit must immediately withdraw its stale planner estimate");
     prepare(controller);
-    check(controller.link_plan()->available&&controller.link_plan()->inputs.wire_bits==5,
+    check(prepared_plan(controller)->available&&prepared_plan(controller)->inputs.wire_bits==5,
           "Accepted raw draft must retain leading zeros and its partial-byte endpoint");
     controller.edit(F::message,std::string(17,'e'));prepare(controller);
-    check(controller.link_plan()->available&&controller.link_plan()->inputs.wire_bits==controller.estimate()->wire_bits&&
-          controller.link_plan()->inputs.wire_bits%1216==0,
+    check(prepared_plan(controller)->available&&prepared_plan(controller)->inputs.wire_bits==controller.estimate()->wire_bits&&
+          prepared_plan(controller)->inputs.wire_bits%1216==0,
           "Long draft planning must use the accepted fixed-interval wire geometry");
     controller.activate(C::planner_toggle_draft);
-    check(!controller.planner_uses_draft()&&controller.link_plan()->inputs.wire_bits==1,
+    check(!controller.planner_uses_draft()&&prepared_plan(controller)->inputs.wire_bits==1,
           "One-bit selection must not retain the previous draft length");
     controller.close();
 }
@@ -768,6 +954,7 @@ void failed_draft_estimate_and_recovery() {
     controller.activate(C::planner_target);const auto requests=controller.take_services();
     check(requests.size()==1,"Failure fixture must edit its explicit planner target");
     controller.complete_service({requests.front().id,false,"-129",{}});
+    (void)prepared_plan(controller);
     check(controller.enabled(C::planner_apply_short),"The explicit one-bit failure fixture must be representable before applying it");
     controller.activate(C::planner_apply_short);controller.activate(C::planner_example_short);
     // Explicit Apply bypasses dropdown alignment. One bit and its absence fit
@@ -788,13 +975,13 @@ void failed_draft_estimate_and_recovery() {
           failed->error.find("sample counter")!=std::string::npos,
           "Failed preparation must replace the cached pending planner with its actual failure");
     controller.activate(C::planner_toggle_draft);
-    check(!controller.planner_uses_draft()&&controller.link_plan()->available&&controller.link_plan()->inputs.wire_bits==1,
+    check(!controller.planner_uses_draft()&&prepared_plan(controller)->available&&prepared_plan(controller)->inputs.wire_bits==1,
           "Failed draft preparation must still allow a one-bit preview");
     controller.activate(C::planner_toggle_draft);controller.edit(F::snr,"32");
     check(!controller.link_plan()->available&&controller.link_plan()->error.find("Calculating")!=std::string::npos,
           "A corrected draft must clear the prior preparation failure while recalculating");
     prepare(controller);
-    check(controller.link_plan()->available&&controller.link_plan()->inputs.wire_bits==3,
+    check(prepared_plan(controller)->available&&prepared_plan(controller)->inputs.wire_bits==3,
           "Successful corrected preparation must restore the exact current-draft plan");
     controller.close();
 }
@@ -802,12 +989,12 @@ void selected_workspace_reaches_planner() {
     using F=ui::Field;using C=ui::Command;
     Controller controller({true,true});
     controller.edit(F::bandwidth,"3600");controller.edit(F::carrier,"1500");
-    const auto initial=controller.link_plan();
+    const auto initial=prepared_plan(controller);
     check(initial->inputs.dsp_workspace_percent==50&&
           initial->inputs.options.dsp_workspace_bytes==controller.settings().transfer.dsp_workspace_bytes,
           "Planner must receive the initial selected workspace percentage and actual byte allowance");
     controller.select(F::dsp_workspace,"ram-75");
-    const auto selected=controller.link_plan();
+    const auto selected=prepared_plan(controller);
     const auto allowance=controller.settings().dsp_workspace_bytes;
     check(controller.field(F::dsp_workspace).selected=="ram-75"&&selected!=initial&&
           selected->inputs.dsp_workspace_percent==75&&
@@ -817,14 +1004,14 @@ void selected_workspace_reaches_planner() {
     near(selected->bit_seconds,initial->bit_seconds,"Changing DSP memory must not change the selected bit duration");
     if(selected->clock_target) {
         controller.activate(C::planner_clock);
-        const auto milestone=controller.link_plan();
+        const auto milestone=prepared_plan(controller);
         check(milestone->inputs.target_db_hz==*selected->clock_target&&milestone->available&&
               milestone->clock_search_supported&&milestone->receiver_workspace_supported,
               "A 75% workspace milestone must fit both the clock search and the selected memory allowance");
         controller.activate(C::planner_target);const auto requests=controller.take_services();
         check(requests.size()==1,"Clock/RAM target must remain editable through the normal prompt");
         controller.complete_service({requests.front().id,false,requests.front().value,{}});
-        check(controller.link_plan()->inputs.target_db_hz==milestone->inputs.target_db_hz,
+        check(prepared_plan(controller)->inputs.target_db_hz==milestone->inputs.target_db_hz,
               "A clock/RAM boundary must survive its displayed prompt value without changing a sampled endpoint");
         controller.activate(C::planner_apply_short);
         const auto& applied=controller.settings().transfer;
@@ -843,7 +1030,7 @@ void shared_link_budget_without_simulation() {
     check(controller.field(F::simulation).selected=="no"&&!controller.settings().simulation,
           "A normal GUI must begin with sampled simulation off");
     controller.edit(F::message,"e");controller.edit(F::snr,"0");prepare(controller);
-    const auto initial=controller.link_plan();
+    const auto initial=prepared_plan(controller);
     near(initial->inputs.tx_dbm,3,"Shared power default must be 3 dBm");
     near(initial->inputs.path_loss_db,120,"Shared path-loss default must be 120 dB");
     check(controller.field(F::link_loss).text=="120 dB","The initial path-loss field must show the accepted default");
@@ -860,7 +1047,7 @@ void shared_link_budget_without_simulation() {
     const auto geometry=controller.settings().transfer.modem;
     controller.edit(F::link_power,"100 mW");controller.edit(F::link_loss,"150 dB");
     controller.edit(F::link_noise,"-170 dBm/Hz");prepare(controller);
-    const auto edited=controller.link_plan();
+    const auto edited=prepared_plan(controller);
     near(edited->inputs.tx_dbm,20,"Editable power units did not reach the planner");
     near(edited->inputs.path_loss_db,150,"Editable path loss did not reach the planner");
     near(edited->inputs.noise_density_dbm_hz,-170,"Editable noise density did not reach the planner");
@@ -875,7 +1062,7 @@ void shared_link_budget_without_simulation() {
           controller.settings().transfer.modem.spreading_factor==geometry.spreading_factor,
           "Link-budget edits must update confidence while preserving the draft and modem profile");
     controller.activate(C::planner_power_1w);prepare(controller);
-    near(controller.link_plan()->inputs.tx_dbm,30,"Planner power preset must update the shared link budget");
+    near(prepared_plan(controller)->inputs.tx_dbm,30,"Planner power preset must update the shared link budget");
     near(controller.settings().simulation_snr_db,50-10*std::log10(geometry.sample_rate/2.),
          "Planner power preset did not update RX confidence's shared link strength");
     check(!controller.field(F::link_power).text.empty(),"Planner power edit must remain visible in the global editable field");
@@ -884,7 +1071,7 @@ void shared_link_budget_without_simulation() {
     check(controller.settings().simulation,"Simulation Yes did not enable sampled simulation");
     controller.select(F::simulation,"no");prepare(controller);
     check(!controller.settings().simulation&&controller.field(F::simulation_confidence).text==confidence&&
-          controller.link_plan()->inputs.tx_dbm==30,
+          prepared_plan(controller)->inputs.tx_dbm==30,
           "Simulation toggle must preserve the shared link and its modeled RX confidence");
     controller.close();
 }
@@ -947,7 +1134,7 @@ void link_budget_edit_buffers() {
     controller.edit(F::message,"e");prepare(controller);
     const auto targets=controller.settings().transfer.receive_targets_db_hz;
     const auto value=[&](F field) {
-        const auto& inputs=controller.link_plan()->inputs;
+        const auto& inputs=prepared_plan(controller)->inputs;
         return field==F::link_power?inputs.tx_dbm:
                field==F::link_loss?inputs.path_loss_db:inputs.noise_density_dbm_hz;
     };
@@ -971,7 +1158,7 @@ void link_budget_edit_buffers() {
     type(F::link_loss,{{"",120},{"2",2},{"22",22},{"220",220},{"220 ",220},
                        {"220 d",220},{"220 dB",220}});
     prepare(controller);
-    const auto accepted=controller.link_plan();
+    const auto accepted=prepared_plan(controller);
     const auto sampled_snr=controller.settings().simulation_snr_db;
     for(const auto field:{F::link_power,F::link_loss,F::link_noise}) {
         for(const auto* invalid:{"","-","1e","nonsense","nan","inf","1e300"}) {
@@ -989,14 +1176,14 @@ void link_budget_edit_buffers() {
         }
     }
     controller.edit(F::link_noise,"-174 dBm/Hz");
-    check(controller.link_plan()->available,"A valid link edit must restore planning and clear prior incomplete fields");
+    check(prepared_plan(controller)->available,"A valid link edit must restore planning and clear prior incomplete fields");
     controller.edit(F::link_noise,"-");prepare(controller);
     check(controller.estimate().has_value()&&!controller.link_plan()->available&&
           controller.field(F::simulation_confidence).text.find("Check link inputs")!=std::string::npos&&
           controller.field(F::simulation_confidence).text.find('%')==std::string::npos,
           "An asynchronously completed estimate must not restore stale confidence while a link input is incomplete");
     controller.edit(F::link_noise,"-174 dBm/Hz");prepare(controller);
-    check(controller.link_plan()->available&&controller.field(F::simulation_confidence).text.find('%')!=std::string::npos,
+    check(prepared_plan(controller)->available&&controller.field(F::simulation_confidence).text.find('%')!=std::string::npos,
           "Finishing a valid link input must restore the planner and RX confidence");
     check(controller.message_bytes()==Bytes{'e'}&&
           controller.settings().transfer.receive_targets_db_hz==targets&&!controller.settings().simulation,
@@ -1061,23 +1248,30 @@ void one_warning_on_planner_page() {
     const auto found=std::find_if(screen.begin(),screen.end(),[](const auto& control) {
         return control.field==ui::Field::lpi_estimate;
     });
-    check(found!=screen.end()&&found->persistent,"Current-draft LPI advisory must remain a persistent shared control");
+    check(found==screen.end(),"Compact oscillator controls must not retain a duplicate header advisory");
+    prepare_plan(app);
     const auto advisory=app.field(ui::Field::lpi_estimate).text;
     for(const auto& page:ui::pages()) {
         app.select_page(page.id);
-        check(app.control(*found).visible==(page.id!=ui::Page::planner),
-              "Current-draft advisory must hide only while the planner owns the LPI warning");
+        check(app.field(ui::Field::lpi_estimate).text==advisory,
+              "Page navigation must preserve the calculated current-draft advisory");
     }
+    app.select_page(ui::Page::planner);
+    const auto document=app.document(ui::Page::planner,900);
+    const auto flat=nodes(*document);
+    check(std::count_if(flat.begin(),flat.end(),[](const auto* node) {
+        return node->text.find("LPI is not guaranteed")!=std::string::npos;
+    })==1,"The planner must retain one concise LPI warning after the header is compacted");
     app.select_page(ui::Page::console);
-    check(app.control(*found).visible&&app.field(ui::Field::lpi_estimate).text==advisory,
-          "Returning to Console must restore the existing advisory without modifying its content");
+    check(app.field(ui::Field::lpi_estimate).text==advisory,
+          "Returning to Console must preserve the advisory calculation");
     app.close();
 }
 void all_target_dropdowns_and_native_planner_editor() {
     using F=ui::Field;using C=ui::Command;
     Controller controller;
     controller.edit(F::short_bits,"00101");
-    auto input=controller.link_plan()->inputs;input.options=controller.settings().transfer;input.target_db_hz=-18;
+    auto input=prepared_plan(controller)->inputs;input.options=controller.settings().transfer;input.target_db_hz=-18;
     const std::array companion{55.};
     const auto expected=planner::nearest_fit_target(input,companion,planner::ReceiveBanks{true,0});
     check(expected&&*expected!=-18,"Above -20 fixture must expose a real free-running clock gap");
@@ -1183,6 +1377,7 @@ void application_prompt_roundtrips() {
         const auto request=prompt(command);app.complete_service({request.id,false,entered,{}});
     };
     app.activate(C::planner_example_lpi);check(value(C::planner_target)=="23","Positive 23 dB LPI example did not reach the shared facade");
+    prepare_plan(app);
     const auto lpi_document=app.document(ui::Page::planner,900);
     check(lpi_document!=document&&contains_text(*lpi_document,"5.85 sec"),
           "Changing the target must replace the shared document with the positive LPI example's real duration");
@@ -1208,11 +1403,11 @@ void application_prompt_roundtrips() {
     check(app.field(F::snr).text==short_target&&app.field(F::long_snr).text==long_target&&
           app.field(F::receive_snr).text==receive_targets&&app.field(F::message).text=="e",
           "Preview prompt edits changed live targets or draft text");
-    app.activate(C::planner_apply_short);
+    prepare_plan(app);app.activate(C::planner_apply_short);
     check(app.field(F::snr).text=="-12.5"&&app.field(F::long_snr).text==long_target&&
           app.field(F::receive_snr).text.find("-12.5")!=std::string::npos,
           "Explicit short-target apply did not use the existing matching receive-target update");
-    edit(C::planner_target,"-18");app.activate(C::planner_apply_long);
+    edit(C::planner_target,"-18");prepare_plan(app);app.activate(C::planner_apply_long);
     check(app.field(F::snr).text=="-12.5"&&app.field(F::long_snr).text=="-18"&&
           app.field(F::receive_snr).text.find("-18")!=std::string::npos,
           "Explicit long-target apply changed the wrong transmit profile");
@@ -1377,7 +1572,8 @@ void document_semantics_layout_and_plots() {
             check(std::none_of(flat.begin(),flat.end(),[&](const auto* node){return node->command==command;}),
                   "Planner must not duplicate the shared top-bar budget controls");
         }
-        check(!contains_text(document,"Quick references"),"Rough propagation references must remain collapsed by default");
+        check(!contains_text(document,"Quick references")&&!contains_text(document,"Oscillator search"),
+              "References and oscillator search assumptions must remain collapsed by default");
         const auto layout=ui::layout_document(document,static_cast<int>(width),[](const auto& node,int available) {
             const auto lines=std::max(1.,std::ceil(node.text.size()*node.font_size*.55/std::max(1,available)));
             return lines*node.font_size*1.2;
@@ -1433,11 +1629,19 @@ void document_semantics_layout_and_plots() {
     }
     const auto detailed=planner_page::build(model,900,true,false);
     check(contains_text(detailed,"Model limits")&&contains_text(detailed,"Quick references")&&
+          contains_text(detailed,"Oscillator search")&&contains_text(detailed,"At Shift 0 only Baseband Osc contributes")&&
           contains_text(detailed,"90% detection")&&contains_text(detailed,"1% false alarm")&&
           contains_text(detailed,"FT8 reference"),"Expandable model details lost their assumptions and familiar reference");
     check(contains_text(detailed,"Groundwave · 1 MHz · 150 miles: 180 dB path loss.")&&
           contains_text(detailed,"Groundwave · 30 MHz · 150 miles: 210 dB path loss."),
           "Groundwave references must use path loss in dB, not received power in dBm");
+    auto precise=model;
+    precise.inputs.options.modem.oscillator_search=modem::OscillatorSearchConfig{};
+    precise.inputs.options.modem.oscillator_search->lf={.0001,.005};
+    const auto precision_details=planner_page::build(precise,900,true,false);
+    check(contains_text(precision_details,"requested 4.5e-07 Hz")&&
+          !contains_text(precision_details,"Frequency half-width: requested 0 Hz"),
+          "GPSDO search widths must remain visibly nonzero in model details");
     auto wide_band=example();
     wide_band.options.modem=tuning::resolve(10000,-8,tuning::PatternMode::auto_pattern,false).config;
     const auto wide_document=planner_page::build(planner::build(wide_band),900,false,false);
@@ -1482,6 +1686,18 @@ void document_semantics_layout_and_plots() {
     check(std::any_of(pending_nodes.begin(),pending_nodes.end(),[](const auto* node) {
               return node->kind==ui::DocumentKind::action&&node->command==ui::Command::planner_toggle_draft&&node->enabled;
           }),"Pending or invalid draft planning must leave an action to return to one bit");
+    invalid.error="Enter a finite signal target, power and noise level, nonnegative path loss, and at least one bit.";
+    const auto long_error=planner_page::build(invalid,220,false,false);
+    const auto measure=[](const ui::DocumentNode& node,int width) {
+        return std::ceil(node.text.size()*node.font_size*.5/std::max(1,width))*node.font_size*1.25;
+    };
+    const auto wrapped=ui::layout_document(long_error,220,measure);bool readable_error=false;
+    const auto inspect=[&](auto&& self,const ui::DocumentNode& node,const ui::DocumentBox& box)->void {
+        if(node.text==invalid.error)readable_error=box.bounds.height>=std::ceil(measure(node,box.content.width));
+        for(std::size_t i=0;i<node.children.size();++i)self(self,node.children[i],box.children[i]);
+    };
+    inspect(inspect,long_error,wrapped.root);
+    check(readable_error,"Long planner errors must wrap completely at narrow document widths");
 }
 }
 int main() {
@@ -1491,7 +1707,8 @@ int main() {
         nearest_usable_targets();nearest_target_shares_receiver_budget();
         narrow_band_differential_model();phase_loss_and_receiver_confidence();gpsdo_phase_does_not_change_clock_coverage();
         separate_link_budget_and_observer_model();quantization_fixed_modes_and_limits();
-        current_draft_and_modem_isolation();application_prompt_roundtrips();all_target_dropdowns_and_native_planner_editor();
+        persistent_worker_curve_cache();stable_planner_navigation_document();
+        asynchronous_planner_edits();current_draft_and_modem_isolation();application_prompt_roundtrips();all_target_dropdowns_and_native_planner_editor();
         controller_checked_navigation();
         controller_target_alignment();
         failed_draft_estimate_and_recovery();one_warning_on_planner_page();

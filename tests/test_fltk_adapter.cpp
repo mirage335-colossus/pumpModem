@@ -397,6 +397,11 @@ void estimate_warning_colors() {
         test::estimate_warning_fields(app.application,[] {Fl::wait(.01);},[&](ui::Field field,ui::TextTone tone) {
             const auto& state=app.application.field(field);
             auto* label=find_label(*window,state.text);
+            if(field==ui::Field::lpi_estimate) {
+                require(state.text_tone==tone&&!label,
+                    "LPI advisory must retain its model tone without recreating the retired header label");
+                return;
+            }
             const auto deadline=Clock::now()+std::chrono::seconds(2);
             while((!label||label->labelcolor()!=text_color(tone))&&Clock::now()<deadline) {
                 Fl::wait(.01);label=find_label(*window,state.text);
@@ -1298,6 +1303,12 @@ void inline_document_editor() {
         while(Clock::now()<until)Fl::wait(.005);
     };
     app.application.select_page(ui::Page::planner);refresh();
+    const auto planner_deadline=Clock::now()+std::chrono::seconds(30);
+    while((!app.application.enabled(ui::Command::planner_stronger)||
+           !app.application.enabled(ui::Command::planner_weaker))&&Clock::now()<planner_deadline)Fl::wait(.005);
+    require(app.application.enabled(ui::Command::planner_stronger)&&
+            app.application.enabled(ui::Command::planner_weaker),"Planner worker did not prepare native navigation");
+    refresh();
     const auto help_for=[](ui::Field field) {
         const auto& controls=ui::console_screen();
         const auto found=std::find_if(controls.begin(),controls.end(),[&](const auto& control){return control.field==field;});

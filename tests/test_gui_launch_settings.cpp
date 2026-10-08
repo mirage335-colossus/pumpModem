@@ -26,8 +26,8 @@ void generated_and_pasted_settings() {
     const auto initial=launch_command::parse(original);
     check(initial.pattern=="auto-pattern"&&initial.target_db_hz&&
         initial.tx_dbm&&initial.path_loss_db&&initial.noise_dbm_hz&&
-        initial.oscillator&&initial.rf_oscillator&&initial.rf_shift_hz==0&&initial.search_margin==3&&initial.reference=="independent"&&
-        initial.sideband=="upper"&&initial.rate_hz&&initial.carrier_hz&&initial.workspace_percent,
+        initial.oscillator&&!initial.rf_oscillator&&initial.rf_shift_hz==0&&initial.search_margin==3&&initial.reference=="independent"&&
+        initial.rate_hz&&initial.carrier_hz&&initial.workspace_percent,
         "Launch command must contain every shareable planner setting");
     near(*initial.target_db_hz,controller.link_plan()->inputs.target_db_hz,"Command did not use planner preview target");
     check(original.find("--simulation")==std::string::npos,"Shareable command must launch with Simulation No");
@@ -145,7 +145,7 @@ void live_validation_is_atomic() {
 void real_radio_configuration() {
     Controller controller;
     const auto tone=controller.settings().transfer.modem.carrier_hz;
-    load(controller,"--rf-oscillator gpsdo-ocxo --rf-shift 10MHz --reference shared-radio --search-margin 3x --sideband upper");
+    load(controller,"--carrier 10.0015MHz --shift 10MHz --rf-oscillator gpsdo-ocxo --reference shared-radio --search-margin 3x");
     const auto policy=*controller.settings().transfer.modem.oscillator_search;
     check(policy.reference==modem::OscillatorReference::shared_radio&&policy.rf_shift_hz==10000000&&policy.margin==3,
         "Radio controls did not reach the actual receiver policy");
@@ -154,20 +154,116 @@ void real_radio_configuration() {
     near(controller.settings().simulation_frequency_offset_hz,.001,"Shared radio applied the RF conversion error more than once");
     const auto canonical=controller.field(F::planner_command).text;
     check(launch_command::parse(canonical).rf_shift_hz==10000000,"Canonical command lost RF LO");
-    load(controller,"--lf-reference 0 --rf-carrier 10.0015MHz --carrier 1500");
+    load(controller,"--lf-reference 0 --rf-carrier 10.0015MHz");
     check(*controller.settings().transfer.modem.oscillator_search==policy,
-        "Equivalent total RF and LO-plus-tone descriptions changed receiver policy");
-    controller.select(F::oscillator_reference,"independent");
-    near(controller.settings().simulation_clock_error_ppm,100,"Independent audio clock silently inherited RF GPS discipline");
+        "Absolute carrier alias changed receiver policy");
+    check(controller.field(F::simulation_oscillator).selected=="gpsdo-ocxo"&&
+          controller.field(F::rf_oscillator).selected=="baseband-clock",
+          "Legacy shared-radio import did not expose its effective common model");
     controller.select(F::rf_oscillator,"gpsdo-tcxo");
+    controller.select(F::simulation_oscillator,"crystal");
+    near(controller.settings().simulation_clock_error_ppm,100,"Independent Baseband clock silently inherited Shift GPS discipline");
+    controller.select(F::rf_oscillator,"gpsdo-xo");
     near(controller.settings().simulation_clock_error_ppm,100,"Changing RF oscillator changed independent ADC/DAC uncertainty");
-    controller.edit(F::rf_shift,"0 Hz");
+    load(controller,"--carrier 1500 --shift 0");
     near(controller.settings().simulation_frequency_offset_hz,0,"Untranslated audio retained inactive RF conversion error");
     near(controller.settings().simulation_phase_noise_degrees_per_sqrt_second,.5,"Untranslated audio retained inactive RF phase diffusion");
     controller.close();
 }
+void invalid_shift_edit_recovers() {
+    Controller controller({true,true});
+    const auto accepted=controller.settings().transfer.modem;
+    controller.edit(F::rf_shift,"1 MHz");
+    check(controller.settings().transfer.modem.carrier_hz==accepted.carrier_hz&&
+          controller.settings().transfer.modem.oscillator_search==accepted.oscillator_search&&
+          controller.field(F::rf_shift).text=="1 MHz"&&
+          controller.field(F::status).text.find("Carrier must be greater than Shift")!=std::string::npos,
+          "An invalid Shift edit must preserve accepted geometry and expose a correctable error");
+    controller.edit(F::carrier,"1.0015 MHz");
+    check(controller.settings().transfer.modem.carrier_hz==1500&&
+          controller.settings().transfer.modem.oscillator_search->rf_shift_hz==1000000,
+          "Correcting Carrier must recover the originally rejected Shift edit");
+    controller.close();
+}
+void absolute_carrier_and_shift() {
+    Controller controller({true,true});
+    load(controller,"--carrier 1.0015MHz --shift 1MHz --oscillator gpsdo-ocxo --rf-oscillator gpsdo-ocxo --reference shared-radio");
+    const auto translated=controller.settings().transfer.modem;
+    near(translated.carrier_hz,1500,"Absolute Carrier minus Shift did not produce the stream tone");
+    check(translated.sample_rate==tuning::recommended_sample_rate(3600,1500),"Translated carrier incorrectly raised the stream sample rate");
+    near(translated.oscillator_search->rf_shift_hz,1000000,"Shift was not retained by oscillator search");
+    check(translated.oscillator_search->sideband==modem::OscillatorSideband::upper,"Receiver was not fixed to USB");
+    auto command=launch_command::parse(controller.field(F::planner_command).text);
+    near(*command.carrier_hz,1001500,"Export wrote the internal stream tone instead of Carrier");
+    near(*command.rf_shift_hz,1000000,"Export lost Shift");
+    check(controller.field(F::carrier).text=="1.0015 MHz","Carrier field did not retain absolute frequency");
+    check(controller.field(F::carrier).options.front().id=="1.0015 MHz","Carrier presets ignored Shift");
+    load(controller,controller.field(F::planner_command).text);
+    near(controller.settings().transfer.modem.carrier_hz,1500,"Round trip subtracted Shift twice");
+    controller.edit(F::rf_shift,"0 Hz");
+    near(controller.settings().transfer.modem.carrier_hz,1001500,"Direct real stream did not use absolute Carrier");
+    check(controller.settings().transfer.modem.sample_rate>=4006000,"Direct real stream sample rate aliases Carrier");
+    controller.edit(F::rf_shift,"1 MHz");
+    near(controller.settings().transfer.modem.carrier_hz,1500,"Shift edit did not restore audio stream");
+    controller.edit(F::bandwidth,"100 Hz");
+    near(controller.settings().transfer.modem.carrier_hz,tuning::recommended_carrier_hz(100),"Rate edit lost translated stream default");
+    check(controller.field(F::carrier).options.front().id==controller.field(F::carrier).text,"Rate edit did not select an absolute carrier preset");
+    const auto accepted=controller.settings().transfer.modem;
+    controller.edit(F::carrier,"1 MHz");
+    near(controller.settings().transfer.modem.carrier_hz,accepted.carrier_hz,"Invalid Carrier committed a zero stream tone");
+    check(controller.field(F::status).text.find("Carrier must be greater than Shift")!=std::string::npos,"Invalid difference did not give a useful error");
+    controller.edit(F::carrier,"1.00005 MHz");
+    near(controller.settings().transfer.modem.carrier_hz,50,"Corrected Carrier did not recover from invalid edit");
+    load(controller,"--carrier 1001500.0001234567 --shift 1000000.0001234567");
+    controller.edit(F::bandwidth,"120 Hz");
+    check(controller.settings().transfer.modem.carrier_hz==1500,"Rate preset rounded the fractional Shift and changed the stream tone");
+    controller.edit(F::carrier,controller.field(F::carrier).options.back().id);
+    check(controller.settings().transfer.modem.carrier_hz==60,"Center preset rounded a fractional Shift");
+    const auto fractional=controller.field(F::planner_command).text;
+    load(controller,fractional);
+    check(controller.settings().transfer.modem.carrier_hz==60,"Fractional Carrier/Shift export changed the stream tone");
+    controller.close();
+}
+void zero_shift_legacy_and_shared_round_trip() {
+    Controller controller({true,true});
+    load(controller,"--carrier 1.5kHz --shift 0Hz --oscillator crystal --rf-oscillator gpsdo-ocxo --reference shared-radio");
+    check(controller.field(F::simulation_oscillator).selected=="crystal"&&
+          controller.field(F::rf_oscillator).selected=="baseband-clock"&&
+          controller.field(F::rf_oscillator).display_text=="N/A"&&!controller.field(F::rf_oscillator).enabled,
+          "Zero-Shift legacy load replaced the Baseband model with an inactive Shift model");
+    const auto zero=*controller.settings().transfer.modem.oscillator_search;
+    check(zero.reference==modem::OscillatorReference::independent_audio&&zero.rf==modem::OscillatorModel{0,0}&&
+          controller.settings().simulation_clock_error_ppm==100&&
+          controller.settings().simulation_phase_noise_degrees_per_sqrt_second==.5&&
+          controller.settings().simulation_frequency_offset_hz==0,
+          "Zero Shift retained modeled conversion accuracy or phase drift");
+    auto command=launch_command::parse(controller.field(F::planner_command).text);
+    check(command.oscillator=="crystal"&&!command.rf_oscillator&&command.reference=="independent"&&command.rf_shift_hz==0,
+          "Zero-Shift export retained hidden effective RF settings");
+    load(controller,controller.field(F::planner_command).text);
+    check(controller.field(F::rf_oscillator).selected=="baseband-clock",
+          "A zero-Shift command round trip discarded the remembered shared clock choice");
+    load(controller,"--carrier 2.4000015GHz --shift 2.4GHz --oscillator crystal --rf-oscillator gpsdo-tcxo --lf-reference 0");
+    check(controller.field(F::carrier).text=="2.4000015 GHz"&&controller.field(F::rf_shift).text=="2.4 GHz"&&
+          controller.field(F::simulation_oscillator).selected=="gpsdo-tcxo"&&
+          controller.field(F::rf_oscillator).selected=="baseband-clock",
+          "GHz legacy shared clock load did not expose effective Carrier, Shift and Baseband model");
+    load(controller,"--oscillator gpsdo-ocxo --reference shared-radio");
+    check(controller.field(F::simulation_oscillator).selected=="gpsdo-ocxo",
+          "Partial shared-clock import discarded an explicit Baseband model");
+    const auto shared=*controller.settings().transfer.modem.oscillator_search;
+    check(shared.reference==modem::OscillatorReference::shared_radio&&shared.lf==shared.rf,
+          "Changing a shared Baseband oscillator left stale Shift parameters");
+    command=launch_command::parse(controller.field(F::planner_command).text);
+    check(command.oscillator=="gpsdo-ocxo"&&command.rf_oscillator=="gpsdo-ocxo"&&command.reference=="shared-radio",
+          "Shared clock export did not use the visible effective Baseband oscillator");
+    load(controller,controller.field(F::planner_command).text);
+    check(*controller.settings().transfer.modem.oscillator_search==shared,
+          "Shared clock export/import changed the modeled receiver search");
+    controller.close();
+}
 int main() {
-    try {generated_and_pasted_settings();rejected_settings_remain_atomic();startup_and_submit_behavior();live_validation_is_atomic();real_radio_configuration();
+    try {generated_and_pasted_settings();rejected_settings_remain_atomic();startup_and_submit_behavior();live_validation_is_atomic();real_radio_configuration();invalid_shift_edit_recovers();absolute_carrier_and_shift();zero_shift_legacy_and_shared_round_trip();
         std::cout<<"Planner launch setting round trips passed.\n";return 0;
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

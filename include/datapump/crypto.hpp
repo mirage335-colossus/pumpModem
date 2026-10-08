@@ -10,7 +10,7 @@
 namespace datapump {
 
 enum class StreamPurpose : std::uint8_t { Data, Dsss, Scrambler, Fhss };
-enum class StreamDomain : std::uint8_t { Payload, Preamble, Suppression };
+enum class StreamDomain : std::uint8_t { Payload, Preamble, Suppression, PatternZeroV2, PatternOneV2 };
 
 // A 256-bit shared secret with independently derived stream and MAC keys.
 // The timestamp is the same whole-second epoch for every modem layer;
@@ -25,7 +25,8 @@ public:
     static Crypto random();
     // Domains share the existing purpose/epoch key. The high counter bytes
     // are zero for Payload, ASCII "preamble" for Preamble, and ASCII
-    // "suppress" for Suppression; the low bytes
+    // "suppress" for Suppression, "pat-v2-0" / "pat-v2-1" for the two
+    // independent private pattern candidates. The low bytes
     // encode the block offset. Byte offsets cannot carry into the domain.
     Bytes stream(StreamPurpose purpose, std::uint64_t timestamp,
                  std::uint64_t offset, std::size_t count,

@@ -29,9 +29,10 @@ void established_default() {
     check(layout[Slot::signals] == Rect{16, 657, 882, 110}, "received signals size changed");
     check(layout[Slot::files] == Rect{912, 657, 252, 74}, "received files size changed");
     check(layout[Slot::waterfall] == Rect{16, 790, 205, 91}, "header must preserve usable plot height");
-    check(layout[Slot::device] == Rect{16, 913, 220, 27}, "persistent modem controls moved");
-    check(layout[Slot::bandwidth] == Rect{246, 913, 127, 27} &&
-          layout[Slot::carrier] == Rect{383, 913, 135, 27}, "Rate and Carrier editors lost their reserved widths");
+    check(layout[Slot::device] == Rect{16, 913, 200, 27}, "persistent modem controls moved");
+    check(layout[Slot::bandwidth] == Rect{226, 913, 127, 27} &&
+          layout[Slot::carrier] == Rect{363, 913, 150, 27} &&
+          layout[Slot::rf_shift] == Rect{523, 913, 135, 27}, "Rate, Carrier and Shift editors lost their reserved widths");
     check(layout[Slot::snr] == Rect{16, 956, 260, 27} &&
           layout[Slot::long_snr] == Rect{286, 956, 260, 27} &&
           layout[Slot::receive_snr] == Rect{556, 956, 608, 27}, "separate transmit targets lost their persistent row");
@@ -103,7 +104,7 @@ void supported_sizes() {
         auto previous_estimate=layout[Slot::simulation_cpu_time];
         for(const auto slot:{Slot::simulation_cpu_time,Slot::simulation_gpu_time}) {
             const auto estimate=layout[slot];
-            check(persistent_slot(slot)&&estimate.y>layout[Slot::lpi_estimate].y+layout[Slot::lpi_estimate].h&&
+            check(persistent_slot(slot)&&estimate.y>layout[Slot::simulation_oscillator].y+field_height&&
                   estimate.y+estimate.h<layout[Slot::tabs].y&&estimate.h>=2*16&&estimate.w>=320,
                   "Simulation computation estimates must have a readable row below the other persistent header controls");
             if(slot==Slot::simulation_cpu_time)check(estimate.x==margin,"CPU estimate must start at the shared left margin");
@@ -129,27 +130,32 @@ void supported_sizes() {
         check(previous_input.x+previous_input.w+10<=layout[Slot::simulation_confidence].x,
               "Shared link inputs must stop before the always-visible RX confidence");
         const auto oscillator=layout[Slot::simulation_oscillator];
-        const auto detail=layout[Slot::simulation_oscillator_detail];
-        check(persistent_slot(Slot::simulation_oscillator)&&persistent_slot(Slot::simulation_oscillator_detail)&&
-              oscillator.x==simulation.x&&oscillator.w>=320&&oscillator.h==field_height&&
-              oscillator.y-label_height>simulation.y+simulation.h&&
-              detail.x>=oscillator.x+oscillator.w+10&&detail.w>=668&&detail.h>=20&&
-              detail.y==oscillator.y-label_height&&
-              detail.x+detail.w==size.w-margin&&oscillator.y+oscillator.h<layout[Slot::tabs].y,
-              "Oscillator choice and numeric model detail must fit below estimates without crowding any page");
-        const auto lpi=layout[Slot::lpi_estimate];
-        check(persistent_slot(Slot::lpi_estimate)&&lpi.x==detail.x&&lpi.w==detail.w&&
-              lpi.h>=20&&lpi.y>detail.y+detail.h&&lpi.y+lpi.h<layout[Slot::tabs].y,
-              "Concise LPI reference must fit below clock values beside the oscillator without wasting a row");
+        check(oscillator.x==simulation.x&&oscillator.w>=300&&oscillator.h==field_height&&
+              oscillator.y-label_height>simulation.y+simulation.h,
+              "LF oscillator must remain below the link assumptions");
+        auto prior_clock=oscillator;
+        for(const auto slot:{Slot::simulation_oscillator,Slot::rf_oscillator,Slot::search_margin}) {
+            const auto current=layout[slot];
+            check(persistent_slot(slot)&&current.y==oscillator.y&&current.h==field_height&&
+                  current.y+current.h<layout[Slot::tabs].y,
+                  "All oscillator controls must share one persistent row clear of the page");
+            if(slot!=Slot::simulation_oscillator)
+                check(current.x==prior_clock.x+prior_clock.w+10,"Oscillator controls overlap or lose their spacing");
+            prior_clock=current;
+        }
+        check(layout[Slot::rf_oscillator].w>=300&&
+              layout[Slot::search_margin].w>=88&&prior_clock.x+prior_clock.w==size.w-margin,
+              "Oscillator models and Margin must fit at the existing minimum window width");
         // Every top-bar control may be visible together during simulation.
         // Include native labels above inputs so a new row cannot obscure them.
         std::vector<Rect> occupied_header;
         for(const auto slot:{Slot::simulation,Slot::link_power,Slot::link_loss,Slot::link_noise,
                              Slot::simulation_confidence,Slot::simulation_cpu_time,Slot::simulation_gpu_time,
-                             Slot::simulation_oscillator,Slot::simulation_oscillator_detail,Slot::lpi_estimate}) {
+                             Slot::simulation_oscillator,Slot::rf_oscillator,Slot::search_margin}) {
             auto rect=layout[slot];
             if(slot==Slot::simulation||slot==Slot::link_power||slot==Slot::link_loss||slot==Slot::link_noise||
-               slot==Slot::simulation_oscillator) {rect.y-=label_height;rect.h+=label_height;}
+               slot==Slot::simulation_oscillator||slot==Slot::rf_oscillator||
+               slot==Slot::search_margin) {rect.y-=label_height;rect.h+=label_height;}
             for(const auto prior:occupied_header)
                 check(rect.x+rect.w<=prior.x||prior.x+prior.w<=rect.x||rect.y+rect.h<=prior.y||prior.y+prior.h<=rect.y,
                       "Persistent link inputs, their labels and computation estimates must never overlap");
@@ -244,7 +250,7 @@ void supported_sizes() {
         auto previous = layout[Slot::device];
         const auto control_gap = layout[Slot::bandwidth].x - previous.x - previous.w;
         check(control_gap == 10, "Modem row lost its shared control spacing");
-        for (const auto slot : {Slot::bandwidth, Slot::carrier, Slot::pattern, Slot::fec, Slot::dsp_workspace}) {
+        for (const auto slot : {Slot::bandwidth, Slot::carrier, Slot::rf_shift, Slot::pattern, Slot::fec, Slot::dsp_workspace}) {
             const auto current = layout[slot];
             check(current.x == previous.x + previous.w + control_gap && current.y == previous.y &&
                   current.h == previous.h, "modem control row is misaligned");
@@ -263,8 +269,8 @@ void supported_sizes() {
         }
         check(previous.x + previous.w == size.w - margin && previous.y + previous.h < layout[Slot::mono].y,
               "Target controls overlap audio routing or escape the row");
-        check(layout[Slot::bandwidth].w>=82 && layout[Slot::carrier].w>=90 &&
-              persistent_slot(Slot::carrier), "Rate or Carrier is unusable at the minimum window size");
+        check(layout[Slot::bandwidth].w>=82 && layout[Slot::carrier].w>=135 && layout[Slot::rf_shift].w>=120 &&
+              persistent_slot(Slot::carrier) && persistent_slot(Slot::rf_shift), "Rate, Carrier or Shift is unusable at the minimum window size");
         check(layout[Slot::device].w>=112 && layout[Slot::snr].w>=260 && layout[Slot::long_snr].w>=260 &&
               layout[Slot::receive_snr].w>=166 && layout[Slot::pattern].w>=130 &&
               layout[Slot::fec].w>=148 && layout[Slot::dsp_workspace].w>=121,
@@ -354,16 +360,16 @@ void hidden_simulation_estimates_reclaim_space() {
         for(const auto slot:{Slot::simulation_cpu_time,Slot::simulation_gpu_time})
             check(compact[slot].h==0,"Hidden simulation estimates must reserve no native height");
         for(const auto slot:{Slot::simulation,Slot::link_power,Slot::link_loss,Slot::link_noise,Slot::simulation_confidence,
-                             Slot::simulation_oscillator,Slot::simulation_oscillator_detail,Slot::lpi_estimate,
-                             Slot::device,Slot::mono,Slot::volume,Slot::exclusive,Slot::bandwidth,Slot::carrier,Slot::snr,Slot::long_snr,
+                             Slot::simulation_oscillator,Slot::rf_oscillator,Slot::search_margin,
+                             Slot::device,Slot::mono,Slot::volume,Slot::exclusive,Slot::bandwidth,Slot::carrier,Slot::rf_shift,Slot::snr,Slot::long_snr,
                              Slot::receive_snr,Slot::pattern,Slot::fec,Slot::dsp_workspace,Slot::diagnostics,Slot::status})
             check(compact[slot]==expanded[slot],"Simulation visibility must not move persistent inputs or bottom settings");
         const auto page=compact[Slot::page],old_page=expanded[Slot::page];
         check(page.y+simulation_estimate_row_height==old_page.y&&page.h==old_page.h+simulation_estimate_row_height&&
               page.y+page.h==old_page.y+old_page.h&&compact[Slot::tabs].y+simulation_estimate_row_height==expanded[Slot::tabs].y,
               "Simulation No must return the entire computation row to the page viewport");
-        check(compact[Slot::lpi_estimate].y+compact[Slot::lpi_estimate].h<compact[Slot::tabs].y,
-              "Collapsing simulation estimates must preserve the clock and LPI reference");
+        check(compact[Slot::search_margin].y+compact[Slot::search_margin].h<compact[Slot::tabs].y,
+              "Collapsing simulation estimates must preserve all oscillator controls");
         for(const auto slot:{Slot::message,Slot::binary,Slot::qr,Slot::short_bits}) {
             const auto current=compact[slot],prior=expanded[slot];
             check(current.y+simulation_estimate_row_height==prior.y&&current.h==prior.h&&contains(page,current),

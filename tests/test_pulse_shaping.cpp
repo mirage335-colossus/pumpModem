@@ -41,22 +41,24 @@ void unchanged_crypto_and_chip_vectors() {
     constexpr std::array<std::uint64_t,7> positions{0,1,63,64,127,128,4096};
     // Independently calculated from Crypto streams: N=640, C=64, Fs=6000;
     // E=epoch+floor((k/64)*640/6000), q=floor((((k/64)*640)%6000)/640),
-    // byte offset=8*(q*64+k%64). Includes cache, symbol and epoch boundaries.
+    // byte offset=8*(q*64+k%64), separate pat-v2-0/pat-v2-1 domains.
+    // Python hashlib/hmac HKDF and openssl AES-CTR, independent of PatternCode.
+    // Includes cache, symbol and epoch boundaries.
     constexpr std::array<std::complex<double>,14> expected{{
-        {-0x1.f25a2d0de95ddp-4,0x1.fa7890129aaa1p-4},
-        {-0x1.f25a2d0de95ddp-4,0x1.fa7890129aaa1p-4},
-        {0x1.060f7b38f7bc9p-3,-0x1.3ddd41787f15ep-2},
-        {-0x1.060f7b38f7bc9p-3,0x1.3ddd41787f15ep-2},
-        {0x1.165869f9c1305p-1,-0x1.3d2e85b0f027ep+0},
-        {-0x1.165869f9c1305p-1,0x1.3d2e85b0f027ep+0},
-        {-0x1.a59a0158c8406p-1,0x1.163ea6061edfcp-1},
-        {-0x1.a59a0158c8406p-1,0x1.163ea6061edfcp-1},
-        {0x1.efe50976ee926p-2,0x1.aaab098f280cep-1},
-        {-0x1.efe50976ee926p-2,-0x1.aaab098f280cep-1},
-        {0x1.c8ff7f65d533cp+0,0x1.4a47038d0140fp-3},
-        {0x1.c8ff7f65d533cp+0,0x1.4a47038d0140fp-3},
-        {-0x1.366b99e7dd348p-1,-0x1.aca822034df6p-2},
-        {-0x1.366b99e7dd348p-1,-0x1.aca822034df6p-2}
+        {-0x1.60565e03bf36ep-1,0x1.203deee4f94c9p-1},
+        {-0x1.303048aa28a90p+0,-0x1.f0da9fa6f5e67p-4},
+        {0x1.398c13280865ap-3,-0x1.4b36bd33ae2cbp-1},
+        {-0x1.3a17e7d2eccdap-3,0x1.8f0e168cf0c7ep-1},
+        {0x1.12493287cc956p+0,0x1.6fdb6c3b684bap+0},
+        {-0x1.6903ec82a0576p+0,0x1.e0fb8b2b4aecap-2},
+        {-0x1.d46ff98ba7cecp-1,0x1.24f2d01d781ecp+0},
+        {-0x1.17abd2e4344bep+0,-0x1.6bc79956f9b3bp+0},
+        {-0x1.85a3aaf3a3303p-4,0x1.17fc00b26acbcp-2},
+        {-0x1.cfe8f2240da48p-1,-0x1.7e93d81d0e872p-1},
+        {0x1.1f6a3596f7d87p-3,-0x1.7f344c8736777p-5},
+        {0x1.22f7b2b0a74bfp-2,0x1.2986df413f746p+0},
+        {0x1.1c3f97feb1692p-1,0x1.d2c76d65e0cbap-2},
+        {0x1.18300c678c64ep+0,-0x1.2bddb3697f235p+0}
     }};
     for(std::size_t index=0;index<positions.size();++index)for(unsigned bit=0;bit<2;++bit) {
         const auto value=a.value(positions[index],bit);

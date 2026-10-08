@@ -1,5 +1,6 @@
 #pragma once
 #include "datapump/transfer.hpp"
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -49,6 +50,8 @@ struct Model {
     // checked target sweep; unsupported Clock/RAM geometry leaves graph gaps.
     std::vector<CpuPoint> cpu_points;
     bool available=false;
+    // A valid background request; a previous completed view may remain visible.
+    bool calculating=false;
     bool automatic_mode=true;
     bool observer_available=false;
     bool observer_hypothetical=true;
@@ -112,8 +115,27 @@ struct Model {
     std::optional<double> stronger_fit_target;
     std::optional<double> weaker_fit_target;
 };
+// Bounded estimator state survives short-lived GUI worker threads. Access is
+// serialized internally; separate controllers retain independent caches.
+class Cache {
+public:
+    struct Statistics {
+        std::size_t entries=0,probability_evaluations=0,probability_reuses=0;
+        std::size_t support_entries=0,support_evaluations=0,support_reuses=0;
+    };
+    Cache();
+    ~Cache();
+    Cache(const Cache&)=delete;
+    Cache& operator=(const Cache&)=delete;
+    Statistics statistics() const;
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+    friend Model build(const Inputs&,Cache&);
+};
 // Bounded analytical planning only; no sampled audio or transmission occurs.
 Model build(const Inputs& inputs);
+Model build(const Inputs& inputs,Cache& cache);
 struct ReceiveBanks {
     bool plaintext=false;
     // Distinct key material, including the selected transmit key if present.

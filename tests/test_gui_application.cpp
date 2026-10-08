@@ -859,87 +859,136 @@ void mono_declaration() {
           "A stale audio channel callback reconfigured a closing application");
 }
 void oscillator_declaration() {
-    using F=ui::Field;
+    using F=ui::Field;using P=ui::Page;
     Application app({.simulation=true});
-    app.toggle(ui::Field::developer_mode,true);
     const auto& oscillator=control(F::simulation_oscillator);
-    const auto& detail=control(F::simulation_oscillator_detail);
     const std::string_view help=oscillator.help;
     check(oscillator.kind==ui::Kind::choice&&oscillator.persistent&&
-          detail.kind==ui::Kind::label&&detail.persistent&&
           app.field(oscillator.field).selected=="crystal"&&
           help.find("effective TX/RX")!=help.npos&&help.find("no oven")!=help.npos&&
           help.find("GPS lock does not imply phase coherence")!=help.npos&&
           help.find("does not discipline audio hardware")!=help.npos,
-          "Oscillator scenarios need a persistent shared choice with explicit residual-model limitations");
+          "Baseband oscillator needs a persistent choice with explicit residual-model limitations");
+    constexpr std::array fields{F::simulation_oscillator,F::rf_oscillator,F::search_margin,F::rf_shift};
+    constexpr std::array labels{"Baseband Osc","Shift Osc","Margin","Shift"};
+    for(std::size_t index=0;index<fields.size();++index) {
+        const auto& declaration=control(fields[index]);
+        check(declaration.persistent&&!declaration.document_only&&!declaration.developer_only&&
+              std::string_view(declaration.label)==labels[index]&&app.control(declaration).visible&&
+              app.control(declaration).enabled==(fields[index]!=F::rf_oscillator),
+              "Clock and conversion controls must be compact, persistent and available without Developer mode");
+    }
+    check(app.field(F::rf_shift).text=="0 Hz"&&app.field(F::search_margin).text=="3x"&&
+          app.field(F::rf_shift).options.size()>=2&&app.field(F::search_margin).options.size()>=3,
+          "Shift and Margin must offer editable dropdown presets with zero and 3x defaults");
+    check(app.field(F::rf_oscillator).display_text=="N/A", "Zero Shift must display an inactive Shift oscillator");
+    const auto initial_shift_model=app.field(F::rf_oscillator).selected;
+    app.select(control(F::rf_oscillator),"gpsdo-ocxo");
+    check(app.field(F::rf_oscillator).selected==initial_shift_model,
+          "Disabled Shift oscillator must reject stale native callbacks");
+    app.edit(control(F::carrier),"1.0015 MHz");app.edit(control(F::rf_shift),"1 MHz");
+    check(app.control(control(F::rf_oscillator)).enabled&&app.field(F::rf_oscillator).display_text.empty(),
+          "Nonzero Shift must restore the selectable oscillator model");
+    app.preset(control(F::search_margin),"2x");
+    app.edit(control(F::search_margin),"2.5x");
+    app.select(control(F::rf_oscillator),"gpsdo-ocxo");
+    app.select(control(F::rf_oscillator),"baseband-clock");
+    app.toggle(F::developer_mode,true);
     for(const auto& page:ui::pages()) {
         app.select_page(page.id);
-        for(const auto field:{F::rf_oscillator,F::rf_shift,F::search_margin,F::oscillator_reference,F::oscillator_sideband}) {
-            const auto& reference=control(field);
-            check(reference.document_only&&reference.page==ui::Page::planner&&
-                  app.control(reference).visible==(page.id==ui::Page::planner),
-                  "RF and oscillator search controls must remain reachable in the scrollable planner");
-        }
-        check(app.control(oscillator).visible&&app.control(oscillator).enabled&&
-              app.control(detail).visible==(page.id!=ui::Page::planner),
-              "Oscillator detail must yield its planner space only to the native preview-target editor");
+        for(const auto field:fields)
+            check(app.control(control(field)).visible&&app.control(control(field)).enabled,
+                  "Clock and conversion controls disappeared on another Robust page");
+        check(app.field(F::search_margin).text=="2.5x"&&app.field(F::rf_oscillator).selected=="baseband-clock",
+              "Navigating Robust pages discarded custom margin or RF oscillator settings");
         app.select(oscillator,"gpsdo-xo");
         check(app.field(oscillator.field).selected=="gpsdo-xo"&&
-              app.field(detail.field).text.find("Clock mismatch 0.0001 ppm")!=std::string::npos&&
-              app.field(detail.field).text.find("Phase diffusion 0.5 deg / sqrt(s)")!=std::string::npos,
+              app.field(F::simulation_oscillator_detail).text.find("Clock mismatch 0.0001 ppm")!=std::string::npos&&
+              app.field(F::simulation_oscillator_detail).text.find("Phase diffusion 0.5 deg / sqrt(s)")!=std::string::npos,
               "Hobbyist GPSDO selection lost its non-oven clock and phase assumptions through the facade");
         app.select(oscillator,"gpsdo-ocxo");
         check(app.field(oscillator.field).selected=="gpsdo-ocxo"&&
-              app.field(detail.field).text.find("Clock mismatch 0.0001 ppm")!=std::string::npos&&
-              app.field(detail.field).text.find("Phase diffusion 0.005 deg / sqrt(s)")!=std::string::npos,
+              app.field(F::simulation_oscillator_detail).text.find("Phase diffusion 0.005 deg / sqrt(s)")!=std::string::npos,
               "OCXO model values did not update through shared native choice dispatch");
         for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
-            const auto choice_geometry=app.control_layout(oscillator,size.w,size.h);
-            const auto detail_geometry=app.control_layout(detail,size.w,size.h);
-            check(choice_geometry.has_label&&choice_geometry.widget.w>=320&&
-                  choice_geometry.frame.x+choice_geometry.frame.w<detail_geometry.frame.x&&
-                  detail_geometry.frame.w>=668&&detail_geometry.frame.h>=20&&
-                  app.field(detail.field).text.find("GPS lock")==std::string::npos&&
-                  app.field(detail.field).text.find('\n')==std::string::npos,
-                  "Oscillator choice and selected model values overlap or clip in native layout");
+            auto previous=app.control_layout(oscillator,size.w,size.h);
+            check(previous.has_label&&previous.widget.w>=300,"LF model choice clips at the minimum desktop width");
+            for(const auto field:{F::rf_oscillator,F::search_margin}) {
+                const auto current=app.control_layout(control(field),size.w,size.h);
+                check(current.has_label&&current.frame.y==previous.frame.y&&
+                      current.frame.x==previous.frame.x+previous.frame.w+10,
+                      "The three oscillator controls must share a compact row without overlapping labels");
+                previous=current;
+            }
+            const auto carrier=app.control_layout(control(F::carrier),size.w,size.h);
+            const auto shift=app.control_layout(control(F::rf_shift),size.w,size.h);
+            const auto margin=app.control_layout(control(F::search_margin),size.w,size.h);
+            check(shift.has_suggestions&&margin.has_suggestions&&shift.widget.w>=97&&margin.widget.w>=65&&
+                  shift.frame.y==carrier.frame.y&&shift.frame.x==carrier.frame.x+carrier.frame.w+10,
+                  "Shift must remain beside Carrier with usable editable dropdowns for Shift and Margin");
         }
     }
+    app.select_page(P::console);app.toggle(F::developer_mode,false);
+    app.edit(control(F::carrier),"10.0015 MHz");app.edit(control(F::rf_shift),"10 MHz");
+    app.select(control(F::rf_oscillator),"baseband-clock");
+    for(const auto* mode:{"no","yes"}) {
+        app.select(F::simulation,mode);app.select_page(P::planner);
+        for(const auto field:fields)check(app.control(control(field)).visible,
+            "Simulation toggle hid a clock or conversion control");
+        check(app.field(F::carrier).text=="10.0015 MHz"&&app.field(F::rf_shift).text=="10 MHz"&&
+              app.field(F::rf_oscillator).selected=="baseband-clock",
+              "Simulation or page changes discarded absolute Carrier, Shift or Radio clock settings");
+    }
+    for(const auto* modem:{"fast","legacy"}) {
+        app.select(F::fast_mode,modem);
+        for(const auto field:fields)check(!app.control(control(field)).visible,
+            "Robust oscillator controls leaked into another modem's console");
+    }
+    app.select(F::fast_mode,"robust");
+    check(app.field(F::rf_shift).text=="10 MHz"&&app.field(F::search_margin).text=="2.5x"&&
+          app.field(F::simulation_oscillator).selected=="gpsdo-ocxo"&&app.field(F::rf_oscillator).selected=="baseband-clock",
+          "Switching modem modes discarded the retained Robust clock and conversion settings");
+    app.edit(control(F::rf_shift),"0 Hz");
+    check(!app.control(control(F::rf_oscillator)).enabled&&app.field(F::rf_oscillator).display_text=="N/A"&&
+          app.field(F::rf_oscillator).selected=="baseband-clock"&&app.control(oscillator).enabled,
+          "Zero Shift must deactivate only the Shift model and remember its shared-clock selection");
+    app.edit(control(F::rf_shift),"10 MHz");
+    check(app.control(control(F::rf_oscillator)).enabled&&app.field(F::rf_oscillator).selected=="baseband-clock",
+          "Reenabling Shift must restore its shared-clock selection");
     app.close();app.select(oscillator,"crystal");
     check(!app.control(oscillator).enabled&&app.field(oscillator.field).selected=="gpsdo-ocxo",
           "A stale oscillator callback changed a closing facade");
 }
-void lpi_declaration() {
+void planner_clock_details() {
     using F=ui::Field;
-    Application app({.simulation=true});
-    app.toggle(ui::Field::developer_mode,true);
-    const auto& advisory=control(F::lpi_estimate);
-    const std::string_view help=advisory.help;
-    check(advisory.kind==ui::Kind::label&&advisory.persistent&&advisory.font_size==12&&
-          help.find("90% detection and 1% false alarm per known window")!=help.npos&&
-          help.find("not a measurement or calibrated reception threshold")!=help.npos&&
-          help.find("18 dB Es/N0 pattern design reference")!=help.npos&&
-          help.find("one accepted bit out of N")!=help.npos&&
-          help.find("Simulation on/off, power and oscillator presets do not affect this estimate")!=help.npos&&
-          help.find("hypothetical encrypted private pattern")!=help.npos&&
-          help.find("warning remains when a number is unavailable")!=help.npos&&
-          help.find("No key or waveform setting is changed")!=help.npos&&
-          help.find("does not reduce power or interference")!=help.npos,
-          "LPI advisory needs a persistent shared label with explicit relative reference and observer assumptions");
-    for(const auto& page:ui::pages()) {
-        app.select_page(page.id);
-        check(app.control(advisory).visible==(page.id!=ui::Page::planner),
-              "Current-draft LPI advisory must stay on existing pages and yield to the planner's own reference");
-        for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
-            const auto geometry=app.control_layout(advisory,size.w,size.h);
-            const auto oscillator=app.control_layout(control(F::simulation_oscillator_detail),size.w,size.h);
-            const ui::DesktopLayout layout(size.w,size.h);
-            check(geometry.has_label&&geometry.label==geometry.widget&&geometry.widget.w==oscillator.widget.w&&
-                  geometry.widget.x==oscillator.widget.x&&geometry.widget.h>=20&&
-                  geometry.frame.y>oscillator.frame.y+oscillator.frame.h&&
-                  geometry.frame.y+geometry.frame.h<layout[ui::Slot::tabs].y,
-                  "Compact LPI label must share the clock-detail column and remain clear of the tabs");
-        }
-    }
+    Application app({.simulation=true});app.select_page(ui::Page::planner);
+    for(const auto& declaration:ui::console_screen())
+        check(declaration.field!=F::oscillator_reference&&declaration.field!=F::oscillator_sideband&&declaration.field!=F::simulation_oscillator_detail&&
+              declaration.field!=F::lpi_estimate,
+              "Sideband and long advisory labels must not occupy the compact main controls");
+    const auto document=app.document(ui::Page::planner,900);
+    std::string text;
+    const auto visit=[&](const auto& self,const ui::DocumentNode& node)->void {
+        text+=node.text+"\n";
+        if(node.kind==ui::DocumentKind::control)
+            check(node.control&&node.control->field!=F::rf_oscillator&&node.control->field!=F::rf_shift&&
+                  node.control->field!=F::search_margin&&node.control->field!=F::oscillator_reference,
+                  "Link planner duplicated the main clock or conversion controls");
+        for(const auto& child:node.children)self(self,child);
+    };
+    check(static_cast<bool>(document),"Link planner document disappeared");visit(visit,*document);
+    check(text.find("Oscillator search")==std::string::npos&&text.find("Frequency half-width")==std::string::npos,
+          "Oscillator search assumptions must be collapsed by default");
+    app.activate(ui::Command::planner_toggle_details);text.clear();
+    visit(visit,*app.document(ui::Page::planner,900));
+    check(text.find("Oscillator search")!=std::string::npos&&text.find("Carrier minus Shift")!=std::string::npos&&
+          text.find("Baseband clock uses the same reference")!=std::string::npos&&
+          text.find("Frequency half-width")!=std::string::npos,
+          "Expanded model limits must show oscillator assumptions and requested/covered search bounds");
+    app.activate(ui::Command::planner_toggle_details);text.clear();
+    visit(visit,*app.document(ui::Page::planner,900));
+    check(text.find("Oscillator search")==std::string::npos,
+          "Collapsing model limits must hide oscillator search details again");
 }
 void declared_submission() {
     Application app({.simulation=true});
@@ -1329,6 +1378,6 @@ void smoke_shutdown_does_not_resume_workflow() {
 }
 }
 int main() {
-    try {fast_default_console();developer_mode_presentation();transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();fitted_target_editing();mono_declaration();oscillator_declaration();lpi_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();force_transmit_declaration();noise_declarations_and_dispatch();smoke_shutdown_does_not_resume_workflow();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {fast_default_console();developer_mode_presentation();transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();fitted_target_editing();mono_declaration();oscillator_declaration();planner_clock_details();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();force_transmit_declaration();noise_declarations_and_dispatch();smoke_shutdown_does_not_resume_workflow();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

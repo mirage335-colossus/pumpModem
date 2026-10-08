@@ -44,8 +44,9 @@ static_assert(ui::persistent_slot(ui::Slot::simulation_confidence));
 static_assert(ui::persistent_slot(ui::Slot::simulation_cpu_time));
 static_assert(ui::persistent_slot(ui::Slot::simulation_gpu_time));
 static_assert(ui::persistent_slot(ui::Slot::simulation_oscillator));
-static_assert(ui::persistent_slot(ui::Slot::simulation_oscillator_detail));
-static_assert(ui::persistent_slot(ui::Slot::lpi_estimate));
+static_assert(ui::persistent_slot(ui::Slot::rf_oscillator));
+static_assert(ui::persistent_slot(ui::Slot::search_margin));
+static_assert(ui::persistent_slot(ui::Slot::rf_shift));
 static_assert(ui::Field::simulation_confidence!=ui::Field::simulation_cpu_time&&
               ui::Field::simulation_cpu_time!=ui::Field::simulation_gpu_time);
 

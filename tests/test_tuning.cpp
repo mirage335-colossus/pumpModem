@@ -1,6 +1,7 @@
 #include "datapump/tuning.hpp"
 #include "datapump/transfer.hpp"
 #include "datapump/pattern_code.hpp"
+#include "datapump/pattern_search.hpp"
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -112,7 +113,8 @@ void bandwidth_derived_clocks() {
         const auto plan=tuning::resolve(bandwidth,150,tuning::PatternMode::auto_pattern,false);
         const auto carrier=std::max(1500.,.75*bandwidth);
         const auto expected=static_cast<std::uint32_t>(std::ceil(std::max(4*bandwidth,4*carrier)));
-        check(plan.config.sample_rate==expected,"internal sample clock must cover occupied bandwidth and the audio carrier");
+        check(plan.config.sample_rate>=expected && plan.config.sample_rate<=expected+expected/20,
+              "internal sample clock must cover the spectrum without excessive alignment overhead");
         near(plan.config.carrier_hz,carrier,"low-bandwidth audio must use a usable carrier");
         check(plan.config.carrier_hz-bandwidth/2>=300,"automatic audio band extends below the usable audio range");
         check(plan.config.carrier_hz+bandwidth/2<.42*plan.config.sample_rate,"internal spectrum must fit the conversion passband");
@@ -129,6 +131,52 @@ void bandwidth_derived_clocks() {
     const modem::Config defaults;
     near(defaults.carrier_hz,tuning::recommended_carrier_hz(defaults.bandwidth_hz),"raw default carrier differs from the automatic carrier");
     check(defaults.sample_rate==tuning::recommended_sample_rate(defaults.bandwidth_hz),"raw default clock differs from the automatic clock");
+}
+void nearby_carrier_clocks() {
+    // Carrier 1500 / Shift 10 gives a 1490 Hz stream. A small frequency edit
+    // must not turn a 120-sample chip into a partial 119.2-sample symbol grid.
+    for(const auto carrier:{1480.,1490.,1490.25,1499.999,1500.}) {
+        for(const bool keyed:{false,true}) {
+            auto config=tuning::resolve(100,-3,tuning::PatternMode::auto_pattern,keyed,carrier).config;
+            check(config.carrier_hz==carrier && config.sample_rate==6000 &&
+                  modem::pattern_chip_samples(config)==120,
+                  "nearby carriers must preserve the selected tone and efficient sampled chip geometry");
+            for(const auto factor:{3u,6u,16u,64u,2048u,16384u}) {
+                config.spreading_factor=factor;
+                check(modem::symbol_sample_count(config)==120ULL*factor,
+                      "aligned clock changed nominal symbol duration or left a partial chip");
+            }
+        }
+    }
+    // Odd sampled chips also collapse the half-chip projection to one sample.
+    // Sweep both sides of the usual tone rather than only its first clock bin.
+    for(double carrier=1400;carrier<=1600;carrier+=1.25) {
+        const auto config=tuning::resolve(100,18,tuning::PatternMode::auto_keystream,true,carrier).config;
+        const auto chip=modem::pattern_chip_samples(config);
+        check(chip%2==0&&modem::pattern_projection_bin_samples(config,0)==chip/2,
+              "nearby carriers must retain complete sampled half-chip projections");
+    }
+    for(const auto pair:{std::pair{97.,6014u},std::pair{100.25,6015u},std::pair{100.5,6030u}}) {
+        const auto config=tuning::resolve(pair.first,-3,tuning::PatternMode::auto_pattern,false,1490).config;
+        check(config.sample_rate==pair.second &&
+              modem::symbol_sample_count(config)%modem::pattern_chip_samples(config)==0,
+              "exact fractional and integer rates need a nearby whole-chip clock");
+    }
+    check(tuning::recommended_sample_rate(1499.25,1500)==6000,
+          "alignment must not almost double the input clock for an awkward fractional rate");
+    check(tuning::recommended_sample_rate(1000,2300)==9200,
+          "even-chip alignment must retain the five-percent sample-work limit");
+    auto explicit_clock=tuning::resolve(100,18,tuning::PatternMode::auto_pattern,false,1480).config;
+    explicit_clock.sample_rate=5950;
+    const auto explicit_profiles=tuning::receive_profiles(explicit_clock,std::array{18.},
+        tuning::PatternMode::auto_pattern,false);
+    check(explicit_profiles.front().sample_rate==5950&&modem::pattern_chip_samples(explicit_profiles.front())==119,
+          "automatic recommendations must not rewrite an explicit odd-chip receive clock");
+    check(tuning::recommended_sample_rate(97,30000000)==120000000,
+          "alignment must retain the sample-rate upper limit");
+    for(const auto bandwidth:{0.,std::numeric_limits<double>::quiet_NaN(),30000001.})
+        rejects([&]{tuning::recommended_sample_rate(bandwidth,1500);},
+                "explicit-carrier clocks must validate the rate before integer alignment");
 }
 void sub_hertz_patterns() {
     // Exercise the lower endpoint without allocating its eleven-hour audio
@@ -186,8 +234,10 @@ void explicit_carrier_planning() {
               "receive targets must replan the selected centered audio profile");
     }
     const auto high=tuning::resolve(3600,80,tuning::PatternMode::auto_pattern,false,20000);
-    check(high.config.carrier_hz==20000 && high.config.sample_rate==80000,
-          "an explicit high carrier must increase the internal real-PCM clock");
+    check(high.config.carrier_hz==20000 && high.config.sample_rate==82800 &&
+          modem::symbol_sample_count(high.config)%modem::pattern_chip_samples(high.config)==0&&
+          modem::pattern_chip_samples(high.config)==46&&modem::pattern_projection_bin_samples(high.config,0)==23,
+          "an explicit high carrier must increase the internal clock while preserving whole chips");
     const auto wide=tuning::resolve(30000000,80,tuning::PatternMode::auto_pattern,false,25000000);
     check(wide.config.carrier_hz==25000000 && wide.config.sample_rate==120000000,
           "explicit carriers must retain the general-purpose high-bandwidth range");
@@ -224,6 +274,18 @@ void audio_passband_pattern_roundtrips() {
         const auto decoded=transfer::receive(raw_capture(bits,options),options);
         check(decoded.stream_complete && decoded.raw_bits==bits && !decoded.content_validated,
               "audio passband corrupted exact pattern bits");
+    }
+    for(const bool keyed:{false,true}) {
+        transfer::Options options;
+        if(keyed)options.key.emplace(Bytes(32,0x57));
+        options.modem=tuning::resolve(100,18,tuning::PatternMode::auto_pattern,keyed,1490).config;
+        options.modem.oscillator_search=modem::OscillatorSearchConfig{};
+        auto& oscillator=*options.modem.oscillator_search;
+        oscillator.lf=oscillator.rf=modem::OscillatorModel{.0001,.005};oscillator.rf_shift_hz=10;
+        options.timestamp=1800000000;options.search_seconds=0;
+        const auto decoded=transfer::receive(raw_capture(bits,options),options);
+        check(decoded.stream_complete && decoded.raw_bits==bits,
+              "aligned shifted carrier must retain physical completion and exact public/private bits");
     }
 }
 void automatic_pattern_rates() {
@@ -443,6 +505,6 @@ void receive_target_lists() {
 }
 }
 int main() {
-    try {modes_and_patterns();snr_planning();shannon_capacity();receive_target_lists();automatic_pattern_rates();bandwidth_derived_clocks();sub_hertz_patterns();explicit_carrier_planning();audio_passband_pattern_roundtrips();physical_simulation_presets();oscillator_simulation_presets();sizing_and_validation();std::cout<<"tuning tests passed\n";return 0;}
+    try {modes_and_patterns();snr_planning();shannon_capacity();receive_target_lists();automatic_pattern_rates();bandwidth_derived_clocks();nearby_carrier_clocks();sub_hertz_patterns();explicit_carrier_planning();audio_passband_pattern_roundtrips();physical_simulation_presets();oscillator_simulation_presets();sizing_and_validation();std::cout<<"tuning tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"tuning tests failed: "<<error.what()<<'\n';return 1;}
 }

@@ -277,9 +277,10 @@ void transmission_generation_trace() {
               "waveform preview cannot alter the published actual trace");
         const auto config=transfer::seeded_config(value,value.timestamp);
         const auto seed=encrypted?config.spreading_seed:public_seed;
-        const auto expected_pattern=Crypto(seed).stream(StreamPurpose::Scrambler,encrypted?value.timestamp:0,0,8);
+        const auto first_domain=encrypted?(first.wire_bits[0]?StreamDomain::PatternOneV2:StreamDomain::PatternZeroV2):StreamDomain::Payload;
+        const auto expected_pattern=Crypto(seed).stream(StreamPurpose::Scrambler,encrypted?value.timestamp:0,0,8,first_domain);
         check(first.pattern_input==expected_pattern,"pattern bytes must come from the selected actual public/private generator");
-        const auto expected_dsss=encrypted?Crypto(config.dsss_seed).stream(StreamPurpose::Dsss,value.timestamp,0,8):Bytes{};
+        const auto expected_dsss=encrypted?Crypto(config.dsss_seed).stream(StreamPurpose::Dsss,value.timestamp,0,8,first_domain):Bytes{};
         check(first.dsss_key==expected_dsss && first.pattern_key==(encrypted?expected_pattern:Bytes{}),
               "private replacement and DSSS purposes must preserve their actual generation bytes");
         for(std::size_t i=0;i<8;++i)check(first.pattern_output[i]==
@@ -302,8 +303,9 @@ void transmission_generation_trace() {
             const auto address=modem::symbol_stream_address(value.timestamp,config.stream_phase_samples,
                 symbol,modem::symbol_sample_count(config),config.sample_rate);
             const auto position=encrypted?modem::symbol_stream_chip(address,chips,0):0;
-            const auto pattern=Crypto(seed).stream(StreamPurpose::Scrambler,encrypted?address.epoch:0,position*8,8);
-            const auto key=encrypted?Crypto(config.dsss_seed).stream(StreamPurpose::Dsss,address.epoch,position*8,8):Bytes(8,0);
+            const auto domain=encrypted?(done.wire_bits[symbol]?StreamDomain::PatternOneV2:StreamDomain::PatternZeroV2):StreamDomain::Payload;
+            const auto pattern=Crypto(seed).stream(StreamPurpose::Scrambler,encrypted?address.epoch:0,position*8,8,domain);
+            const auto key=encrypted?Crypto(config.dsss_seed).stream(StreamPurpose::Dsss,address.epoch,position*8,8,domain):Bytes(8,0);
             for(std::size_t byte=0;byte<8;++byte) {
                 const auto index=symbol*8+byte;
                 check(done.pattern_input[index]==pattern[byte] && done.pattern_output[index]==(pattern[byte]^key[byte]),

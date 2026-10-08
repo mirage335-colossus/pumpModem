@@ -35,6 +35,9 @@ struct OscillatorPatternSearch {
     std::vector<PatternFrequencyRateHypothesis> hypotheses;
     double requested_clock_half_width_ppm = 0;
     double clock_half_width_ppm = 0;
+    // Twice the represented timing radius around each paired lane. For a
+    // thin independent region this can exceed adjacent lane spacing while
+    // remaining within the independent quarter-chip resolution.
     double clock_step_ppm = 0;
     bool limited = false;
 };

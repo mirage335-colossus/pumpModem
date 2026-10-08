@@ -175,10 +175,10 @@ double gamma_remainder(double shape,double normal) {
     return shape*base*base*base;
 }
 std::array<double,2> scores(const std::array<Complex,4>& observations,double energy,
-                          const ReceiverProbabilityParameters& p) {
+                          const ReceiverProbabilityParameters& p,const std::array<double,4>& weights) {
     Complex coherent{};double section_sum=0,strongest=0;
     for(std::size_t j=0;j<4;++j) {
-        coherent+=std::sqrt(p.weights[j])*observations[j];
+        coherent+=std::sqrt(weights[j])*observations[j];
         const auto fitted=std::norm(observations[j])/p.noise_condition;
         section_sum+=fitted;strongest=std::max(strongest,fitted);
     }
@@ -205,13 +205,17 @@ ReceiverProbability calculate(const ReceiverProbabilityParameters& p) {
         throw Error("invalid receiver probability geometry");
     if(p.requested_trials<256 || p.requested_trials>trials)
         throw Error("receiver probability trial count must be within 256..4096");
-    double weight_sum=0;
+    double weight_sum=0,alternative_sum=0;
+    const auto& alternative_weights=p.alternative_weights.value_or(p.weights);
     for(std::size_t j=0;j<4;++j) {
-        if(!(p.weights[j]>0) || !std::isfinite(p.correlations[j]) || std::abs(p.correlations[j])>=1)
+        if(!(p.weights[j]>0) || !std::isfinite(p.weights[j]) ||
+           !(alternative_weights[j]>0) || !std::isfinite(alternative_weights[j]) ||
+           !std::isfinite(p.correlations[j].real()) || !std::isfinite(p.correlations[j].imag()) ||
+           std::norm(p.correlations[j])>=1)
             throw Error("invalid receiver probability section");
-        weight_sum+=p.weights[j];
+        weight_sum+=p.weights[j];alternative_sum+=alternative_weights[j];
     }
-    if(std::abs(weight_sum-1)>1e-8)throw Error("receiver probability weights must sum to one");
+    if(std::abs(weight_sum-1)>1e-8 || std::abs(alternative_sum-1)>1e-8)throw Error("receiver probability weights must sum to one");
     const PhaseModel phase(p);
     ReceiverProbability result;result.trials=p.requested_trials;
     // The legacy phase model chooses a small carrier neighborhood by signal
@@ -246,7 +250,7 @@ ReceiverProbability calculate(const ReceiverProbabilityParameters& p) {
             const Complex other{draw[phase_draws+4*j+2]/std::sqrt(2.),draw[phase_draws+4*j+3]/std::sqrt(2.)};
             correct[j]=signal+noise;
             const auto correlation=p.correlations[j];
-            wrong[j]=correlation*correct[j]+std::sqrt(1-correlation*correlation)*other;
+            wrong[j]=correlation*correct[j]+std::sqrt(1-std::norm(correlation))*other;
             represented+=std::norm(signal);
             energy+=std::norm(correct[j])+std::norm(other);
         }
@@ -256,7 +260,7 @@ ReceiverProbability calculate(const ReceiverProbabilityParameters& p) {
         const Complex residual{std::sqrt(remainder)+draw[phase_draws+16]/std::sqrt(2.),
             draw[phase_draws+17]/std::sqrt(2.)};
         energy+=std::norm(residual)+gamma_remainder(p.noise_dimensions-9,draw[phase_draws+18]);
-        const auto a=scores(correct,energy,p),b=scores(wrong,energy,p);
+        const auto a=scores(correct,energy,p,p.weights),b=scores(wrong,energy,p,alternative_weights);
         return std::array{a,b};
         };
         const auto combined=observe(phasors.combined);

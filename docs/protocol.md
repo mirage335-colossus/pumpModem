@@ -349,7 +349,11 @@ position. Missing slots still consume positions. Nothing resets the cipher,
 epoch or marker cadence merely because an interval is drained or a symbol lost.
 The selected non-tone key also enables private pattern templates; tone modes
 force private protections off. Purpose-separated keys retain the existing Data,
-MAC, Scrambler and optional DSSS roles.
+MAC, Scrambler and optional DSSS roles. Private pattern bit alternatives use the
+mandatory independent v2 domains described in [cryptography](crypto.md#independent-private-alphabet-compatibility-and-limits),
+with a fresh pair at each canonical symbol address. This changes private waveforms
+without adding a transmitted flag, nonce, MAC or any other bits. Both peers must
+use the same implementation; existing parameter lists need no new setting.
 
 Only keyed intervals carry HMAC-SHA256. The MAC covers a fixed versioned domain,
 the local FEC/source profile, the canonical `(epoch, ordinal)` address of the

@@ -397,35 +397,88 @@ class StreamCLI(unittest.TestCase):
         self.run_pump('estimate','--text','a','--oscillator','gpsdo-xo')
     def test_real_radio_oscillator_search(self):
         args=('analyze-link','--bits','0','--bw','100','--tx-dbm','3','--attenuation-db','-200','--trials','10')
-        radio=json.loads(self.run_pump(*args,'--rf-shift','10MHz','--rf-oscillator','gpsdo-ocxo',
+        radio=json.loads(self.run_pump(*args,'--carrier','10.0015MHz','--rf-shift','10MHz','--rf-oscillator','gpsdo-ocxo',
             '--reference','shared-radio').stdout)
         policy=radio['oscillator_search']
         self.assertEqual(policy['margin'],3)
         self.assertEqual(policy['rf_shift_hz'],10000000)
         self.assertEqual(policy['physical_rf_hz'],10001500)
-        self.assertEqual(radio['transmission']['carrier_hz'],1500)
+        self.assertEqual(radio['transmission']['carrier_hz'],10001500)
+        self.assertEqual(radio['transmission']['stream_carrier_hz'],1500)
+        self.assertEqual(radio['transmission']['shift_hz'],10000000)
         self.assertEqual(radio['current_receiver']['clock_error_ppm'],.0001)
         self.assertAlmostEqual(radio['current_receiver']['frequency_offset_hz'],.001)
-        total=json.loads(self.run_pump(*args,'--rf-carrier','10.0015MHz','--rf-oscillator','gpsdo-ocxo',
+        total=json.loads(self.run_pump(*args,'--rf-carrier','10.0015MHz','--shift','10MHz','--rf-oscillator','gpsdo-ocxo',
             '--lf-reference','0').stdout)
         self.assertEqual(policy,total['oscillator_search'])
         self.assertEqual(radio['current_receiver'],total['current_receiver'])
         for ppm in ('-.0001','.0001'):
-            override=json.loads(self.run_pump(*args,'--rf-shift','10MHz','--rf-oscillator','gpsdo-ocxo',
+            override=json.loads(self.run_pump(*args,'--carrier','10.0015MHz','--rf-shift','10MHz','--rf-oscillator','gpsdo-ocxo',
                 '--reference','shared-radio','--clock-error-ppm',ppm).stdout)
             self.assertEqual(override['oscillator_search'],policy)
             self.assertAlmostEqual(override['current_receiver']['frequency_offset_hz'],float(ppm)*10)
             self.assertEqual(override['current_receiver']['clock_error_ppm'],float(ppm))
-        independent=json.loads(self.run_pump(*args,'--rf-shift','10MHz','--rf-oscillator','gpsdo-ocxo').stdout)
+        independent=json.loads(self.run_pump(*args,'--carrier','10.0015MHz','--rf-shift','10MHz','--rf-oscillator','gpsdo-ocxo').stdout)
         self.assertEqual(independent['current_receiver']['clock_error_ppm'],100)
         self.assertEqual(independent['oscillator_search']['requested_clock_half_width_ppm'],300)
         untranslated=json.loads(self.run_pump(*args,'--rf-oscillator','gpsdo-ocxo').stdout)
         self.assertEqual(untranslated['oscillator_search']['rf_shift_hz'],0)
         self.assertEqual(untranslated['current_receiver']['frequency_offset_hz'],0)
         for flags in (('--rf-shift','-1'),('--search-margin','.5'),('--reference','wrong'),
-                      ('--sideband','wrong'),('--lf-reference','1500'),('--rf-shift','1','--rf-carrier','1'),
+                      ('--sideband','wrong'),('--sideband','lower'),('--lf-reference','1500'),('--rf-shift','1','--rf-carrier','1'),
                       ('--reference','independent','--lf-reference','0')):
             self.run_pump(*args,*flags,ok=False)
+    def test_absolute_carrier_shift_real_stream(self):
+        args=('estimate','--text','a','--bw','100','--target-snr','32','--time','1800000000')
+        default=json.loads(self.run_pump(*args).stdout)
+        self.assertEqual((default['carrier_hz'],default['shift_hz'],default['stream_carrier_hz']),
+                         (1500,0,1500))
+        translated=json.loads(self.run_pump(*args,'--carrier','1.0015MHz','--shift','1MHz').stdout)
+        self.assertEqual((translated['carrier_hz'],translated['shift_hz'],translated['stream_carrier_hz']),
+                         (1001500,1000000,1500))
+        self.assertEqual(translated['sample_rate'],default['sample_rate'])
+        self.assertEqual(translated['wire_bits'],default['wire_bits'])
+        direct=json.loads(self.run_pump(*args,'--carrier','1.0015MHz','--shift','0').stdout)
+        self.assertEqual((direct['carrier_hz'],direct['shift_hz'],direct['stream_carrier_hz']),
+                         (1001500,0,1001500))
+        self.assertEqual(direct['sample_rate'],4006000)
+        manual=json.loads(self.run_pump('estimate','--text','a','--bw','100','--spreading','16',
+            '--carrier','1.0015MHz','--shift','0').stdout)
+        self.assertEqual(manual['sample_rate'],4006000)
+        alias=json.loads(self.run_pump(*args,'--rf-carrier','1.0015MHz','--rf-shift','1MHz',
+            '--sideband','upper').stdout)
+        self.assertEqual(alias,translated)
+        matching=json.loads(self.run_pump(*args,'--carrier','1.0015MHz','--rf-carrier','1.0015MHz',
+            '--shift','1MHz').stdout)
+        self.assertEqual(matching,translated)
+        for flags in (('--carrier','1MHz','--shift','1MHz'),
+                      ('--carrier','1500','--shift','1MHz'),
+                      ('--carrier','1500','--rf-carrier','1.0015MHz'),
+                      ('--shift','nan'),('--shift','-1'),('--carrier','inf'),
+                      ('--sideband','lower'),('--shift','0','--rf-shift','0')):
+            self.run_pump(*args,*flags,ok=False)
+    def test_frequency_order_units_and_zero_shift(self):
+        args=('estimate','--text','a','--bw','100','--target-snr','32','--time','1800000000')
+        for carrier,shift,expected in (
+                ('  1.5 KHZ  ','0 hZ',1500),
+                ('1.0015 mHz','1 MHz',1001500),
+                ('2.4000015 GHz','2.4 ghz',2400001500),
+                ('1.0000000015 THZ','1 THz',1000000001500),
+                ('+1.5E3 Hz','0e1 GHz',1500)):
+            result=json.loads(self.run_pump(*args,'--carrier',carrier,'--shift',shift).stdout)
+            self.assertEqual(result['carrier_hz'],expected)
+            self.assertEqual(result['stream_carrier_hz'],1500)
+            self.assertEqual(result['sample_rate'],6000)
+        for flags in (('--shift','1e308GHz'),('--carrier','1e308THz'),('--bw','1GHz'),
+                      ('--carrier','1 2 MHz'),('--carrier','1 GHz extra')):
+            self.run_pump(*args,*flags,ok=False)
+        radio_args=('analyze-link','--bits','0','--bw','100','--tx-dbm','3','--attenuation-db','-200','--trials','10')
+        base=json.loads(self.run_pump(*radio_args,'--oscillator','crystal').stdout)
+        for flags in (('--reference','shared-radio'),('--lf-reference','0')):
+            zero=json.loads(self.run_pump(*radio_args,'--oscillator','crystal','--rf-oscillator','gpsdo-ocxo',
+                '--shift','0',*flags).stdout)
+            self.assertEqual(zero['current_receiver'],base['current_receiver'])
+            self.assertEqual(zero['oscillator_search']['requested_clock_half_width_ppm'],300)
     def test_oscillator_preset_applies_to_sampled_waveform(self):
         with tempfile.TemporaryDirectory() as directory:
             args=('simulate','--text','a',*AUDIO,'--snr','30','--seed','713')

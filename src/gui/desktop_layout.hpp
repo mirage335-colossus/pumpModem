@@ -7,8 +7,6 @@ namespace datapump::gui::ui {
 inline constexpr int default_width = 1180, default_height = 1048;
 inline constexpr int min_width = 1030, min_height = 968;
 inline constexpr int oscillator_row_height = 48;
-// The concise LPI reference shares the clock row instead of reserving a row.
-inline constexpr int lpi_row_height = 0;
 inline constexpr int simulation_estimate_row_height = 48;
 inline constexpr int margin = 16, field_height = 27, label_height = 16;
 inline constexpr int action_height = 29, compact_action_height = 20;
@@ -17,7 +15,7 @@ enum class Slot {
     none, header, fast_mode, mode, developer_mode, shellcode_mode, clear, callsign, grid, repeatable, simulation,
     link_power, link_loss, link_noise,
     simulation_confidence, simulation_cpu_time, simulation_gpu_time,
-    simulation_oscillator, simulation_oscillator_detail, lpi_estimate, key_actions,
+    simulation_oscillator, rf_oscillator, search_margin, key_actions,
     key_path, key, tabs, page, message_label, paste_previous, force_transmit, binary_label, message,
     binary, qr_brightness, qr, attach_file, use_text, send_key, transmit, transmit_noise,
     cancel, airtime, transmit_scope_caption, transmit_scope_format, transmit_scope, profile_reference, signal_label, signals, copy_signal, paste_signal, recovery_actions, file_label, files,
@@ -27,7 +25,7 @@ enum class Slot {
     compression_explanation, short_bits_label, short_bits, short_bits_detail, compression_codes,
     short_use_text, short_send_key, short_transmit, short_transmit_noise, short_cancel, short_airtime,
     compression_signals, copy_raw_signal, paste_raw_signal, raw_recovery_actions, received_raw_bits,
-    device, mono, volume, exclusive, bandwidth, carrier, snr, long_snr, receive_snr, pattern, fec, dsp_workspace, diagnostics, status,
+    device, mono, volume, exclusive, bandwidth, carrier, rf_shift, snr, long_snr, receive_snr, pattern, fec, dsp_workspace, diagnostics, status,
     fast_profile, fast_expected_snr, fast_symbol_rate, fast_constellation, fast_coding, fast_fec, fast_depth, fast_device, fast_mono, fast_encryption,
     fast_key, fast_key_path, fast_open_key, fast_generate_key, fast_text, fast_file, fast_choose_file,
     fast_transmit, fast_cancel, fast_save, fast_progress, fast_rate, fast_tracking,
@@ -42,10 +40,10 @@ inline constexpr bool persistent_slot(Slot slot) {
     case Slot::callsign: case Slot::grid: case Slot::repeatable: case Slot::simulation:
     case Slot::link_power: case Slot::link_loss: case Slot::link_noise:
     case Slot::simulation_confidence: case Slot::simulation_cpu_time: case Slot::simulation_gpu_time:
-    case Slot::simulation_oscillator: case Slot::simulation_oscillator_detail:
-    case Slot::lpi_estimate:
+    case Slot::simulation_oscillator: case Slot::rf_oscillator:
+    case Slot::search_margin:
     case Slot::key_actions: case Slot::key_path: case Slot::key:
-    case Slot::device: case Slot::mono: case Slot::volume: case Slot::exclusive: case Slot::bandwidth: case Slot::carrier: case Slot::snr: case Slot::long_snr: case Slot::receive_snr: case Slot::pattern:
+    case Slot::device: case Slot::mono: case Slot::volume: case Slot::exclusive: case Slot::bandwidth: case Slot::carrier: case Slot::rf_shift: case Slot::snr: case Slot::long_snr: case Slot::receive_snr: case Slot::pattern:
     case Slot::fec: case Slot::dsp_workspace: case Slot::diagnostics: case Slot::status: return true;
     default: return false;
     }
@@ -70,7 +68,7 @@ struct DesktopLayout {
                            bool transmit_scope_visible = true, bool simulation_estimates_visible = true,
                            bool force_transmit_visible = false) {
         auto& out = *this;
-        const int header_rows = oscillator_row_height + lpi_row_height +
+        const int header_rows = oscillator_row_height +
             (simulation_estimates_visible ? simulation_estimate_row_height : 0);
         const int content_height = height - header_rows;
         out[Slot::header] = {margin, 10, 145, 32};
@@ -169,11 +167,14 @@ struct DesktopLayout {
         out[Slot::link_loss] = {loss_x, 105, loss_width, field_height};
         out[Slot::link_noise] = {noise_x, 105, confidence_x - group_gap - noise_x, field_height};
         out[Slot::simulation_confidence] = {confidence_x, 89, confidence_width, 43};
-        out[Slot::simulation_oscillator] = {margin, 153, 320, field_height};
-        out[Slot::simulation_oscillator_detail] = {346, 137, width - margin - 346, 21};
-        out[Slot::lpi_estimate] = {346, 160, width - margin - 346, 21};
-        // The planner replaces the right-hand clock notes with its native
-        // preview target editor; ordinary pages retain those notes.
+        // Keep clock assumptions together without consuming another row.
+        const int oscillator_width = width - 2 * margin - 88 - 2 * group_gap;
+        const int baseband_width = oscillator_width / 2;
+        const int shift_x = margin + baseband_width + group_gap;
+        const int shift_oscillator_width = oscillator_width - baseband_width;
+        out[Slot::simulation_oscillator] = {margin, 153, baseband_width, field_height};
+        out[Slot::rf_oscillator] = {shift_x, 153, shift_oscillator_width, field_height};
+        out[Slot::search_margin] = {shift_x + shift_oscillator_width + group_gap, 153, 88, field_height};
         const int cpu_width = (width - 2 * margin - group_gap) * 42 / 100;
         out[Slot::simulation_cpu_time] = {margin, 185, cpu_width, simulation_estimates_visible ? 43 : 0};
         const int gpu_x = margin + cpu_width + group_gap;
@@ -295,13 +296,14 @@ struct DesktopLayout {
         // width without reducing the composition, reception or plot areas.
         const int controls_y = content_height - 135, extra = std::max(0, width - min_width);
         constexpr int control_gap = 10;
-        const int device_width = 190 + extra * 20 / 100, bandwidth_width = 112 + extra * 10 / 100;
-        const int carrier_width = 120 + extra * 10 / 100;
-        const int pattern_width = 180 + extra * 20 / 100, fec_width = 180 + extra * 20 / 100;
+        const int device_width = 170 + extra * 20 / 100, bandwidth_width = 112 + extra * 10 / 100;
+        const int carrier_width = 135 + extra * 10 / 100, shift_width = 120 + extra * 10 / 100;
+        const int pattern_width = 130 + extra * 10 / 100, fec_width = 148 + extra * 15 / 100;
         int x = margin;
         out[Slot::device] = {x, controls_y, device_width, field_height}; x += device_width + control_gap;
         out[Slot::bandwidth] = {x, controls_y, bandwidth_width, field_height}; x += bandwidth_width + control_gap;
         out[Slot::carrier] = {x, controls_y, carrier_width, field_height}; x += carrier_width + control_gap;
+        out[Slot::rf_shift] = {x, controls_y, shift_width, field_height}; x += shift_width + control_gap;
         out[Slot::pattern] = {x, controls_y, pattern_width, field_height}; x += pattern_width + control_gap;
         out[Slot::fec] = {x, controls_y, fec_width, field_height}; x += fec_width + control_gap;
         out[Slot::dsp_workspace] = {x, controls_y, width - margin - x, field_height};

@@ -185,8 +185,14 @@ fresh nonce. Reusing key/epoch/ordinal positions exposes XOR relationships betwe
 plaintexts and permits replay within accepted timing windows. Local cooldowns do
 not coordinate separate processes or hosts; there is no durable replay database.
 
-Every selected non-tone key enables private pattern templates. Private chips and
-protected settling use capped circular I/Q values with varying amplitude/phase.
+Every selected non-tone key enables private pattern templates. Each bit value
+uses a separate versioned cryptographic domain, and each successive symbol uses
+its own canonical address. The two secret candidates have independent amplitude
+and phase; the former public chip-mask transform no longer swaps them. Observing
+one candidate does not reveal the opposite under the AES assumption. Reusing an
+address still enables recognition/replay; this change supplies no authentication
+for exact short/raw messages and does not prevent jamming or cancellation.
+Private chips and protected settling use capped circular I/Q values with varying amplitude/phase.
 Settling uses separate preamble counter positions and supplies no acquisition
 condition. Tone modes clear private protections. Bandwidth, chip cadence, capped
 amplitudes and finite edges remain observable; no measured interception or

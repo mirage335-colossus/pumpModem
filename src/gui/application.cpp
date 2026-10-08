@@ -88,6 +88,7 @@ struct Application::Impl {
     std::map<ui::Page,Document> documents;
     struct PlannerDocument {
         std::shared_ptr<const planner::Model> model;
+        std::shared_ptr<const planner::Model> previous;
         std::shared_ptr<const ui::DocumentNode> root;
         int width=0;
         bool details=false,draft=false,closing=false,can_apply=false,can_load=false;
@@ -329,12 +330,7 @@ ControlPresentation Application::control(const ui::Control& declaration) const {
     ControlPresentation view{state,declaration.label,state.enabled,state.visible};
     if(declaration.developer_only&&!impl_->developer_mode.checked)view.visible=false;
     if(!declaration.surface&&!declaration.persistent&&!page_visible(declaration.page))view.visible=false;
-    // The planner owns its concise LPI reference and single model warning.
-    // The current-draft advisory remains unchanged on the other pages.
-    if(!declaration.surface&&declaration.field==ui::Field::lpi_estimate&&page()==ui::Page::planner)view.visible=false;
-    if(!declaration.surface&&declaration.field==ui::Field::simulation_oscillator_detail&&page()==ui::Page::planner)view.visible=false;
-    if(!declaration.surface&&(declaration.field==ui::Field::planner_target||declaration.field==ui::Field::planner_command||
-        (declaration.field>=ui::Field::rf_oscillator&&declaration.field<=ui::Field::oscillator_search_detail)))
+    if(!declaration.surface&&(declaration.field==ui::Field::planner_target||declaration.field==ui::Field::planner_command))
         view.visible=page()==ui::Page::planner;
     if(declaration.surface) {
         view.visible=view.visible&&impl_->overlay&&impl_->overlay->generation==declaration.surface;
@@ -526,18 +522,22 @@ std::shared_ptr<const ui::DocumentNode> Application::document(ui::Page page,int 
     if(page==ui::Page::planner) {
         auto& cached=impl_->planner_document;
         const auto model=impl_->controller.link_plan();
+        if(model->available)cached.previous=model;
+        const bool updating=model->calculating&&cached.previous;
+        const auto displayed=updating?cached.previous:model;
         const bool details=impl_->controller.planner_details(),draft=impl_->controller.planner_uses_draft();
         const bool closing=impl_->controller.closing(),can_apply=impl_->controller.enabled(ui::Command::planner_apply_short);
         const bool can_load=impl_->controller.enabled(ui::Command::planner_load_command);
         if(!cached.root||cached.model!=model||cached.width!=width||cached.details!=details||
             cached.draft!=draft||cached.closing!=closing||cached.can_apply!=can_apply||cached.can_load!=can_load) {
-            auto root=planner_page::build(*model,static_cast<float>(width),details,draft);
+            auto root=planner_page::build(*displayed,static_cast<float>(width),details,draft,
+                updating?"Updating · previous plan":std::string{});
             std::function<void(ui::DocumentNode&)> enable=[&](auto& node) {
                 if(node.kind==ui::DocumentKind::action)node.enabled=node.enabled&&impl_->controller.enabled(node.command);
                 for(auto& child:node.children)enable(child);
             };
             enable(root);
-            cached={model,std::make_shared<const ui::DocumentNode>(std::move(root)),width,details,draft,closing,can_apply,can_load};
+            cached={model,cached.previous,std::make_shared<const ui::DocumentNode>(std::move(root)),width,details,draft,closing,can_apply,can_load};
         }
         return cached.root;
     }
@@ -576,7 +576,7 @@ int gui_main(int argc,char** argv,const char* backend,const std::function<int(La
         std::vector<std::string> settings_arguments;
         for(int i=1;i<argc;++i) {
             const std::string arg=argv[i];
-            if(arg=="--help") {std::cout<<"Data Pump continuous console\n"<<frontend_label<<backend<<" (selected at build time)\nUsage: "<<program_name<<" [--color|--monochrome] [--simulation] [--self-check] [--smoke-test]\nLink settings: --tx-dbm DBM --path-loss-db DB --noise-dbm-hz DBM/Hz\n  --oscillator ID --rf-oscillator ID --rf-shift HZ (default 0) --search-margin N (default 3)\n  --reference independent|shared-radio --lf-reference 0 (shared-radio shorthand)\n  --sideband upper|lower --rf-carrier HZ (total RF alternative to --rf-shift)\n  --target-snr DB-Hz --rate HZ --carrier HZ --dsp-workspace 25%|50%|75%\n  --auto-pattern or --pattern MODE; --bw is an alias for --rate\n  --target-snr sets preview, short and long targets; --short-target-snr / --long-target-snr override them\nSmoke options: --smoke-dir PATH --smoke-hold SECONDS --smoke-timeout SECONDS --smoke-view NAME --smoke-scroll 0..1\n";return 0;}
+            if(arg=="--help") {std::cout<<"Data Pump continuous console\n"<<frontend_label<<backend<<" (selected at build time)\nUsage: "<<program_name<<" [--color|--monochrome] [--simulation] [--self-check] [--smoke-test]\nLink settings: --tx-dbm DBM --path-loss-db DB --noise-dbm-hz DBM/Hz\n  --oscillator ID --rf-oscillator ID --shift HZ (default 0) --search-margin N (default 3)\n  --reference independent|shared-radio --lf-reference 0 (shared-radio shorthand)\n  --carrier HZ is absolute; fixed USB stream is Carrier minus Shift (>0)\n  --target-snr DB-Hz --rate HZ --carrier HZ --dsp-workspace 25%|50%|75%\n  --auto-pattern or --pattern MODE; --bw is an alias for --rate\n  --target-snr sets preview, short and long targets; --short-target-snr / --long-target-snr override them\nSmoke options: --smoke-dir PATH --smoke-hold SECONDS --smoke-timeout SECONDS --smoke-view NAME --smoke-scroll 0..1\n";return 0;}
             if(arg=="--version") {std::cout<<"Data Pump "<<DATAPUMP_VERSION<<' '<<frontend_label<<backend<<'\n';return 0;}
             if(arg=="--self-check") {gui_self_check();return 0;}
             if(arg=="--color")launch.color=true;

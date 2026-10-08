@@ -13,8 +13,9 @@ targets are unmeasured and separate from the implemented changes below.
 ## Oscillator policy and bounded banks
 
 Application configurations attach `Config::oscillator_search`, containing the
-LF/audio and RF effective-link models, RF shift (default 0 Hz), conservative
-margin (default 3×), clock-reference topology and sideband orientation.
+Baseband and Shift effective-link models, Shift (default 0 Hz), conservative
+margin (default 3×) and clock-reference topology. Application settings fix USB;
+the low-level policy retains an explicit sideband orientation.
 `oscillator_pattern_search` produces one finite bank of explicit
 `{frequency_offset_hz, clock_error_ppm}` pairs. Live reception, transfer reception,
 simulation, link planning and compute estimates use that same policy. A
@@ -22,18 +23,35 @@ low-level caller omitting the optional policy retains its historical search.
 Explicit receiver hypothesis lists remain an override.
 
 A radio supplying real ADC/DAC samples retains the actual nonzero modem tone
-in `Config::carrier_hz`. Shared-radio/LF=0 metadata declares that sampling and
-conversion use the radio reference, without another PC clock contribution.
-RF shift is the known LO/tuning frequency, not the DSP carrier or sample rate.
-Equivalent total-RF and LO-plus-tone settings normalize to the same physical
-carrier and bank. See [reference topology and bounds](oscillator-models.md).
+in `Config::carrier_hz`. Choosing Shift Osc **Baseband clock** declares that
+sampling and conversion share the selected Baseband reference, counted once.
+At Shift zero, only the Baseband model contributes frequency, sample-clock or
+phase error; every Shift contribution is excluded regardless of legacy topology.
+Public Carrier is the absolute frequency and Shift is the known LO/translation
+frequency. The real USB stream tone is Carrier minus Shift, which must be
+positive; that tone, rather than the absolute frequency, drives DSP sample-rate
+planning. `--rf-carrier` and `--rf-shift` are compatibility aliases for Carrier
+and Shift. Equivalent alias entries normalize to the same policy and bank.
+See [reference topology and bounds](oscillator-models.md).
 
-Shared radio references require one linked sample-rate hypothesis per frequency
-candidate. Independent audio and active RF conversion require independent
+An active shared Baseband clock requires one linked sample-rate hypothesis per frequency
+candidate. Independent Baseband and active Shift conversion require independent
 rate uncertainty; their paired bank omits combinations inconsistent with the
-declared converter allowance. Both FFT and compact correlation consume the
+declared converter allowance. At Shift zero the bank uses only the Baseband
+clock relationship. Both FFT and compact correlation consume the
 explicit pairs. The FFT path does not infer sample-clock error by dividing an
-RF-derived frequency offset by the modem tone.
+conversion-derived frequency offset by the modem tone.
+
+A sufficiently narrow independent region can use one timing lane per frequency
+without assuming shared clocks. For stream tone `c`, Baseband uncertainty `A`
+ppm and Shift uncertainty `B` Hz, the domain is `f = c * e * 1e-6 + r`, with
+`|e| <= A` and `|r| <= B`. The nearest frequency lane, spaced by `df`, uses
+`clamp(f / c * 1e6, -A, A)` for its timing. Its worst-case timing residual is
+bounded by `(df/2 + B) / c * 1e6` ppm. This reduction is used only when that
+fits the existing independent timing tolerance; the implementation also checks
+the actual rounded lane coordinates. Wider regions retain a separate timing
+grid. Reported timing cell width includes the complete represented radius,
+while the requested physical bounds and coverage limits remain unchanged.
 
 The frequency lattice uses spacing no larger than `0.25/T`, with `T` the sampled
 symbol duration, refined to the declared endpoints. Independent rate cells allow
@@ -49,11 +67,25 @@ frequency/rate half-widths, paired lane count and limited joint coverage. Phase
 diffusion affects coherence; it does not become a Doppler or phase-trajectory
 search dimension.
 
-RF metadata alone creates no signal samples or cipher work. PCM sample rate
-still follows the delivered modem waveform. A genuinely wider ADC stream costs
+Shift metadata alone creates no signal samples or cipher work once
+the stream tone is fixed. At a fixed public Carrier, changing Shift changes that
+tone and can change the planned PCM sample rate. A wider ADC stream costs
 more front-end processing, while repeated searches operate on reusable projected
 observations. A higher physical RF frequency can require more hypotheses at the
 same fractional accuracy; representing the same radio setting another way cannot.
+The automatic sample clock rounds up to whole sampled half-chips when an exactly
+represented decimal Rate permits it with at most 5% extra samples. For example,
+Rate 100 Hz uses 6000 samples/s for both 1500 Hz and 1490 Hz stream tones, keeping
+120-sample chips instead of creating partial chips and much larger transforms.
+Even chip lengths also avoid one-sample projection bins at nearby tones such as
+1480 Hz; its half-chip lattice otherwise collapses with an odd 119-sample chip.
+This preserves the selected carrier and nominal symbol-duration formula. If an
+aligned clock exceeds the 5% overhead or 120 MHz limit, the minimum valid clock
+remains in use, including any inefficient geometry. Arbitrary long integration endpoints
+can still have clock/RAM gaps; their actual geometry remains part of the estimate.
+The main GUI controls are Baseband Osc, Shift Osc and Margin, with no separate
+Clock selector. Numerical assumptions and requested/covered bank information
+appear under the Link planner's hideable **Model limits and references**.
 
 ## Compute boundaries
 
@@ -145,8 +177,8 @@ publication and fully observed absence outside the projection layer.
 Front-end work still includes 17 pulse terms per raw sample and lattice.
 Fractional clock errors can also increase Gram-cache rebuilding. The dominant
 private fit now follows chip cadence, while actual input rate, bank size and
-workspace still affect cost. RF carrier metadata alone adds neither RF-rate
-samples nor cipher work. Measurements must compare equal search coverage and
+workspace still affect cost. Once the real stream tone is fixed, RF translation
+metadata adds neither RF-rate samples nor cipher work. Measurements must compare equal search coverage and
 state the input rate; a smaller oscillator bank is a separate saving from a
 faster numerical kernel. See the [measured workloads and qualification](oscillator-search-validation.md).
 

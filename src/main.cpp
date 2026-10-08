@@ -1,3 +1,4 @@
+#include "frequency_parse.hpp"
 #include "datapump/audio.hpp"
 #include "datapump/fast/cli.hpp"
 #include "datapump/channel.hpp"
@@ -19,6 +20,7 @@
 #include "transmit_timing.hpp"
 #include <algorithm>
 #include <charconv>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <csignal>
@@ -82,8 +84,9 @@ Every other received byte is displayed as _. Use --save for original source byte
 Modem:
   --bw HZ               Nominal bandwidth, 0.01..30000000 Hz; default1200
                         Decimal Hz and units such as 1.2kHz are accepted
-  --sample-rate HZ      Internal DSP clock, 64..120000000; default max(6000,4*bw)
-  --carrier HZ          Default max(1500,0.75*bw); explicit overrides stay available
+  --sample-rate HZ      Internal real-stream clock, 64..120000000; covers bandwidth and Carrier minus Shift
+  --carrier HZ          Absolute physical carrier; accepts Hz/kHz/MHz/GHz/THz; default max(1500,0.75*bw)
+  --shift HZ            Oscillator translation; same units; default0; real USB stream = Carrier minus Shift
   --spreading N         Manual 4-bit APSK chips/symbol, 1..16384 (disables auto)
   --target-snr DBHZ     Automatic target C/N0; default32, auto unless manual controls
   --receive-targets LIST Receive C/N0 search list, e.g. 40,6,-6; default32
@@ -121,11 +124,11 @@ Audio/simulation:
   --oscillator MODEL    crystal (default), gpsdo-xo, gpsdo-tcxo, gpsdo-ocxo
                         LF/audio residual model; controls real RX search too
   --rf-oscillator MODEL Independent RF reference model; same choices, default crystal
-  --rf-shift HZ         Radio LO/translation frequency, default 0; does not set PCM tone
-  --rf-carrier HZ       Alternative total on-air carrier; normalized to LO +/- tone
+  --rf-shift HZ         Alias for --shift
+  --rf-carrier HZ       Alias for absolute --carrier; matching aliases may be combined
   --reference MODE      independent (default) or shared-radio (ADC/DAC and LO clock)
   --lf-reference 0      Shorthand for shared-radio; actual modem carrier stays nonzero
-  --sideband MODE       upper (default) or lower frequency orientation
+  --sideband upper      Optional compatibility setting; only real USB streams are supported
   --search-margin N     Static oscillator search bound multiplier, default 3; >=1
                         All oscillator presets are illustrative, with no hardware control
   --clock-error-ppm N   Override simulated signed clock error; search model stays fixed
@@ -170,7 +173,7 @@ public:
         const std::set<std::string> valued={"text","input","output","save","kind","filename","callsign","grid",
             "bw","sample-rate","carrier","spreading","fec","memory-mb","keyfile","pad","time","search-seconds",
             "device","device-type","seconds","tx-delay","snr","seed","delay-samples","frequency-offset","bits","format",
-            "target-snr","receive-targets","pattern","simulation","oscillator","rf-oscillator","rf-shift","rf-carrier","search-margin","reference","sideband","lf-reference","key-name","key-names","cache-mb","dsp-mb","clock-error-ppm","phase-noise","receiver-time",
+            "target-snr","receive-targets","pattern","simulation","oscillator","rf-oscillator","shift","rf-shift","rf-carrier","search-margin","reference","sideband","lf-reference","key-name","key-names","cache-mb","dsp-mb","clock-error-ppm","phase-noise","receiver-time",
             "recovery-seconds","recovery-threads","recovery-bits","recovery-errors",
             "tx-dbm","attenuation-db","noise-figure-db","symbol-seconds","coherent-seconds",
             "trials","hypotheses","false-alarm","residual-frequency-hz","template-correlation"};
@@ -198,16 +201,19 @@ public:
     }
     double number(const std::string& name,double fallback) const {
         if(!has(name)) return fallback;
-        const auto value=get(name);std::size_t end=0;double result;
-        try {result=std::stod(value,&end);} catch(...) {throw Error("invalid number for --"+name);}
-        double scale=1;
-        auto suffix=value.substr(end);
-        const bool frequency=name=="bw"||name=="rf-shift"||name=="rf-carrier"||name=="lf-reference";
-        if(frequency && (suffix=="kHz" || suffix=="k")) scale=1000;
-        else if(frequency && suffix=="MHz") scale=1000000;
-        else if(!suffix.empty() && !(frequency && suffix=="Hz") && !(name=="search-margin" && suffix=="x")) throw Error("invalid number for --"+name);
-        if(!std::isfinite(result*scale)) throw Error("nonfinite number for --"+name);
-        return result*scale;
+        const auto value=get(name);
+        const bool frequency=name=="bw"||name=="carrier"||name=="shift"||name=="rf-shift"||name=="rf-carrier"||name=="lf-reference";
+        if(frequency) {
+            const auto parsed=frequency_input::parse(value);
+            if(!parsed)throw Error("invalid finite frequency for --"+name+" (Hz, kHz, MHz, GHz or THz)");
+            return *parsed;
+        }
+        std::size_t end=0;double result;
+        try {result=std::stod(value,&end);}catch(...) {throw Error("invalid number for --"+name);}
+        const auto suffix=value.substr(end);
+        if(!suffix.empty()&&!(name=="search-margin"&&suffix=="x"))throw Error("invalid number for --"+name);
+        if(!std::isfinite(result))throw Error("nonfinite number for --"+name);
+        return result;
     }
     std::uint64_t integer(const std::string& name,std::uint64_t fallback)const {
         if(!has(name)) return fallback;
@@ -231,7 +237,7 @@ public:
         if(command!="simulate" && command!="listen" && command!="analyze-link") reject({"simulation"},"is only valid for simulate/listen/analyze-link");
         if(command!="simulate" && command!="listen" && command!="analyze-link") reject({"clock-error-ppm","phase-noise"},"is only valid for simulate/listen/analyze-link");
         if(command=="qr"||command=="keygen"||command=="devices")
-            reject({"oscillator","rf-oscillator","rf-shift","rf-carrier","search-margin","reference","sideband","lf-reference"},"requires a Robust modem command");
+            reject({"oscillator","rf-oscillator","shift","rf-shift","rf-carrier","search-margin","reference","sideband","lf-reference"},"requires a Robust modem command");
         if(command!="analyze-link")
             reject({"tx-dbm","attenuation-db","noise-figure-db","symbol-seconds","coherent-seconds","trials",
                 "hypotheses","false-alarm","residual-frequency-hz","template-correlation"},"is only valid for analyze-link");
@@ -257,7 +263,7 @@ tuning::OscillatorPreset oscillator_config(const Args& a) {
     result.phase_noise_degrees_per_sqrt_second=a.number("phase-noise",result.phase_noise_degrees_per_sqrt_second);
     return result;
 }
-modem::OscillatorSearchConfig oscillator_search_config(const Args& a,double carrier) {
+modem::OscillatorSearchConfig oscillator_search_config(const Args& a) {
     modem::OscillatorSearchConfig result;
     result.lf=tuning::oscillator_model(tuning::parse_oscillator_preset(a.get("oscillator","crystal")));
     result.rf=tuning::oscillator_model(tuning::parse_oscillator_preset(a.get("rf-oscillator","crystal")));
@@ -270,11 +276,11 @@ modem::OscillatorSearchConfig oscillator_search_config(const Args& a,double carr
         if(a.has("reference")&&reference!="shared-radio")throw Error("lf-reference 0 conflicts with independent reference");
         result.reference=modem::OscillatorReference::shared_radio;
     }
-    const auto sideband=a.get("sideband","upper");
-    if(sideband!="upper"&&sideband!="lower")throw Error("sideband must be upper or lower");
-    result.sideband=sideband=="upper"?modem::OscillatorSideband::upper:modem::OscillatorSideband::lower;
-    if(a.has("rf-shift")&&a.has("rf-carrier"))throw Error("choose rf-shift or rf-carrier, not both");
-    result.rf_shift_hz=a.has("rf-carrier")?a.number("rf-carrier",0)-(sideband=="upper"?carrier:-carrier):a.number("rf-shift",0);
+    if(a.get("sideband","upper")!="upper")
+        throw Error("only upper sideband is supported; Carrier minus Shift is the real stream frequency");
+    result.sideband=modem::OscillatorSideband::upper;
+    if(a.has("shift")&&a.has("rf-shift"))throw Error("choose shift or its rf-shift alias, not both");
+    result.rf_shift_hz=a.number("shift",a.number("rf-shift",0));
     modem::validate_oscillator_search(result);
     return result;
 }
@@ -309,26 +315,33 @@ std::size_t dsp_budget(const Args& a) {
 }
 bool automatic_tuning(const Args& a) {
     const bool manual=a.has("spreading") || a.has("scramble") || a.has("dsss") ||
-                      a.has("sample-rate") || a.has("carrier");
+                      a.has("sample-rate");
     return a.has("target-snr") || a.has("pattern") || !manual;
 }
 modem::Config config(const Args& a) {
     modem::Config c;
     c.bandwidth_hz=a.number("bw",1200);
+    const auto oscillator=oscillator_search_config(a);
+    const auto carrier=a.number("carrier",a.number("rf-carrier",tuning::recommended_carrier_hz(c.bandwidth_hz)));
+    if(a.has("carrier")&&a.has("rf-carrier")&&carrier!=a.number("rf-carrier",0))
+        throw Error("carrier and rf-carrier must specify the same absolute frequency");
+    const auto stream=static_cast<long double>(carrier)-oscillator.rf_shift_hz;
+    if(!std::isfinite(carrier)||carrier<=0||!std::isfinite(stream)||stream<=0||stream>30000000)
+        throw Error("Carrier minus Shift must be positive and at most 30 MHz for the real USB stream");
+    c.carrier_hz=static_cast<double>(stream);
     const bool automatic=automatic_tuning(a);
     if(automatic) {
-        if(a.has("spreading") || a.has("scramble") || a.has("dsss") || a.has("sample-rate") || a.has("carrier"))
-            throw Error("automatic tuning cannot be combined with manual spreading/scramble/dsss/sample-rate/carrier");
+        if(a.has("spreading") || a.has("scramble") || a.has("dsss") || a.has("sample-rate"))
+            throw Error("automatic tuning cannot be combined with manual spreading/scramble/dsss/sample-rate");
         const auto plan=tuning::resolve(c.bandwidth_hz,a.number("target-snr",32),
-            tuning::parse_pattern_mode(a.get("pattern",a.has("keyfile")?"auto-keystream":"auto-pattern")),a.has("keyfile"));
+            tuning::parse_pattern_mode(a.get("pattern",a.has("keyfile")?"auto-keystream":"auto-pattern")),a.has("keyfile"),c.carrier_hz);
         c=plan.config;
         if(a.has("progress") || !plan.target_supported) std::cerr<<plan.explanation<<'\n';
     }
-    auto rate=a.integer("sample-rate",automatic?c.sample_rate:tuning::recommended_sample_rate(c.bandwidth_hz));
+    auto rate=a.integer("sample-rate",automatic?c.sample_rate:tuning::recommended_sample_rate(c.bandwidth_hz,c.carrier_hz));
     if(rate>120000000) throw Error("internal sample rate exceeds120000000");
     c.sample_rate=static_cast<std::uint32_t>(rate);
-    c.carrier_hz=a.number("carrier",automatic?c.carrier_hz:tuning::recommended_carrier_hz(c.bandwidth_hz));
-    c.oscillator_search=oscillator_search_config(a,c.carrier_hz);
+    c.oscillator_search=oscillator;
     auto spreading=a.integer("spreading",c.spreading_factor);
     if(spreading==0 || spreading>16384) throw Error("spreading must be1..16384");
     c.spreading_factor=static_cast<unsigned>(spreading);
@@ -731,7 +744,9 @@ void analyze_link(const Args& a,transfer::Options options) {
         <<",\"coded_bytes\":"<<transmission.coded_bytes<<",\"content_bytes\":"<<transmission.content_bytes
         <<",\"raw_wire_path\":"<<(raw?"true":"false")<<",\"waveform_samples\":"<<transmission.waveform_samples
         <<",\"sample_rate\":"<<c.sample_rate<<",\"bandwidth_hz\":";json_number(c.bandwidth_hz);
-    std::cout<<",\"carrier_hz\":";json_number(c.carrier_hz);
+    std::cout<<",\"carrier_hz\":";json_number(modem::oscillator_effects(c).physical_rf_hz);
+    std::cout<<",\"stream_carrier_hz\":";json_number(c.carrier_hz);
+    std::cout<<",\"shift_hz\":";json_number(c.oscillator_search->rf_shift_hz);
     std::cout<<",\"tx_target_cn0_db_hz\":";json_number(a.number("target-snr",32));
     std::cout<<",\"symbol_duration_source\":\""<<(a.has("symbol-seconds")?"explicit_override":"configured_tx_plan")<<'"';
     std::cout<<",\"symbol_seconds\":";json_number(experiment.symbol_seconds);
@@ -986,13 +1001,14 @@ int main(int argc,char** argv) {
             if(std::isfinite(capacity))std::cout<<capacity;else std::cout<<"null";
             std::cout<<",\"spreading\":"<<c.spreading_factor
                 <<",\"constellation_bits\":"<<c.constellation_bits
-                <<",\"sample_rate\":"<<c.sample_rate<<",\"carrier_hz\":"<<c.carrier_hz
+                <<",\"sample_rate\":"<<c.sample_rate<<",\"carrier_hz\":"<<modem::oscillator_effects(c).physical_rf_hz
+                <<",\"stream_carrier_hz\":"<<c.carrier_hz<<",\"shift_hz\":"<<c.oscillator_search->rf_shift_hz
                 <<",\"repeatable_allowed\":"<<(result.repeatable_allowed?"true":"false")
                 <<",\"memory_supported\":"<<(result.memory_supported?"true":"false")
                 <<",\"batch_memory_supported\":"<<(result.batch_memory_supported?"true":"false");
             if(automatic_tuning(a)) {
                 const auto plan=tuning::resolve(c.bandwidth_hz,a.number("target-snr",32),
-                    tuning::parse_pattern_mode(a.get("pattern",a.has("keyfile")?"auto-keystream":"auto-pattern")),a.has("keyfile"));
+                    tuning::parse_pattern_mode(a.get("pattern",a.has("keyfile")?"auto-keystream":"auto-pattern")),a.has("keyfile"),c.carrier_hz);
                 std::cout<<",\"estimated_symbol_snr_db\":"<<plan.estimated_symbol_snr_db
                     <<",\"symbol_seconds\":"<<modem::symbol_seconds(c)
                     <<",\"target_supported\":"<<(plan.target_supported?"true":"false");

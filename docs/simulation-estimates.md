@@ -37,12 +37,17 @@ and weak channels, and a nearly complete audio percentage is not a nearly
 complete computation. The noise-model percentage is not a measured reliability
 claim for the full receiver or its long, wide carrier search.
 
-The **LF / audio oscillator** and **RF oscillator** selectors provide
+The **Baseband Osc** and **Shift Osc** selectors provide
 free-running crystal and three GPSDO cases: hobbyist XO without an oven, TCXO
-without an oven, and OCXO. RF shift defaults to 0 Hz and the search margin to
-3×. The reference and sideband settings determine how their effective relative
-frequency, sample-clock and phase errors combine. The selected numeric values
-and requested/covered search bounds appear in the controls. These are
+without an oven, and OCXO. Shift defaults to 0 Hz and the search margin to
+3×. Absolute Carrier minus Shift is the positive real USB stream tone used for
+DSP planning. At Shift zero, Shift Osc is disabled as **N/A** and contributes
+no frequency or phase error; the Baseband model alone remains active. A positive
+Shift can select **Baseband clock** for a shared sampling/mixer reference,
+counting that profile once with linked errors. Compact main controls hold these
+settings without a separate Clock dropdown. Selected numeric assumptions and
+requested/covered bounds appear under the Link planner's hideable **Model limits
+and references**. These are
 illustrative sensitivity models, not measured GPSDO specifications; see
 [oscillator models](oscillator-models.md). The margin affects acquisition
 coverage, without multiplying the simulated impairment.
@@ -128,9 +133,9 @@ compute work, and receiver/cache identity retains the policy.
 Its frequency lattice has spacing at most `0.25/T`, where `T` is the actual
 sampled symbol duration, refined to the declared endpoints. Requested frequency
 and sample-clock half-widths come from
-the effective-link LF/RF accuracy, RF shift, reference topology and margin.
-A shared radio has one linked rate per frequency candidate. Independent audio
-and active RF references use a bounded rate lattice, removing impossible
+the effective-link Baseband/Shift accuracy, Shift, reference topology and margin.
+An active shared Baseband clock has one linked rate per frequency candidate.
+Independent Baseband and active Shift references use a bounded rate lattice, removing impossible
 combinations rather than treating every offset as an audio-clock error.
 The limits are 4,097 distinct frequencies, 65 independent rate candidates and
 8,194 paired lanes. Clock-scaled waveform support above DC and below Nyquist,
@@ -182,11 +187,14 @@ for that fallback. A direct correlator with no explicit policy retains its
 existing local frequency bank.
 
 The simulated shift includes both the explicit frequency offset and
-`carrier_hz * clock_error_ppm / 1e6`. Outside that span, the UI shows **Carrier
+`carrier_hz * clock_error_ppm / 1e6`, where `carrier_hz` is the internal real
+stream tone **Carrier − Shift**. Outside that span, the UI shows **Carrier
 outside RX search** and retains the CPU/GPU estimates. This is a model-coverage
-limit, not a claim that reception has exactly zero probability. The RF model
-supplies an additive conversion offset, while the shared-radio model supplies
-the radio sample-clock error without another LF contribution.
+limit, not a claim that reception has exactly zero probability. An active
+independent Shift model supplies an additive conversion offset. Shift Osc
+**Baseband clock** supplies a linked conversion contribution using the same
+profile as sampling, counted once. Shift zero excludes both forms of Shift
+contribution and retains the Baseband profile alone.
 
 For example, public auto-pattern at 1 Hz and a 32 dB-Hz target uses 128-second
 symbols at the default 1,500 Hz carrier. The default crystal/3× application

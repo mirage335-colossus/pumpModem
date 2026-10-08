@@ -48,8 +48,8 @@ void seek_and_domains() {
         const auto address=modem::symbol_stream_address(epoch,c.stream_phase_samples,
             chip/code.chips_per_symbol(),code.symbol_samples(),c.sample_rate);
         const auto local=modem::symbol_stream_chip(address,code.chips_per_symbol(),chip%code.chips_per_symbol());
-        const auto a=pattern.stream(StreamPurpose::Scrambler,address.epoch,8*local,8);
-        const auto b=dsss.stream(StreamPurpose::Dsss,address.epoch,8*local,8);
+        const auto a=pattern.stream(StreamPurpose::Scrambler,address.epoch,8*local,8,StreamDomain::PatternZeroV2);
+        const auto b=dsss.stream(StreamPurpose::Dsss,address.epoch,8*local,8,StreamDomain::PatternZeroV2);
         std::uint32_t expected=0;
         for(unsigned i=4;i<8;++i)expected=(expected<<8)|(a[i]^b[i]);
         check(phase_word(code.value(chip,0))==expected,
@@ -107,8 +107,8 @@ void symbol_epoch_schedule() {
           "hours-long symbols must skip intervening seconds without changing their own epoch");
     Crypto pattern(c.spreading_seed),dsss(c.dsss_seed);
     const auto verify=[&](std::uint64_t chip,std::uint64_t time,std::uint64_t position) {
-        const auto a=pattern.stream(StreamPurpose::Scrambler,time,position*8,8);
-        const auto b=dsss.stream(StreamPurpose::Dsss,time,position*8,8);
+        const auto a=pattern.stream(StreamPurpose::Scrambler,time,position*8,8,StreamDomain::PatternZeroV2);
+        const auto b=dsss.stream(StreamPurpose::Dsss,time,position*8,8,StreamDomain::PatternZeroV2);
         std::uint32_t expected=0;
         for(unsigned i=4;i<8;++i)expected=(expected<<8)|(a[i]^b[i]);
         check(phase_word(long_code.value(chip,0))==expected,
@@ -160,6 +160,7 @@ void alphabet_and_repetition() {
     }
     check(adjacent_changed && legacy_period_changed,
           "private noise must neither reset per symbol nor repeat a finite template");
+    c.scramble=false; // Public mask properties are not private alphabet constraints.
     for (unsigned chips : {2U,3U,4U,8U}) {
         c.spreading_factor = chips; modem::PatternCode short_code(c, 73);
         std::vector<int> relative(chips);
@@ -175,6 +176,68 @@ void alphabet_and_repetition() {
     c.spreading_factor = 1; modem::PatternCode degenerate(c);
     check(degenerate.value(0, 0) == degenerate.value(0, 1),
           "one-chip binary template must expose its unavoidable unknown-phase ambiguity");
+}
+void independent_private_candidates() {
+    constexpr std::array<int,8> old_mask{1,-1,-1,1,1,1,-1,-1};
+    constexpr std::uint64_t epoch=1800000000;
+    constexpr std::array<std::uint8_t,32> public_seed{
+        'D','a','t','a','P','u','m','p','/','p','a','t','t','e','r','n',
+        '/','b','i','n','a','r','y','/','v','1',0,0,0,0,0,0};
+    for(unsigned layers=1;layers<=3;++layers) {
+        auto c=config();c.scramble=layers&1;c.dsss=layers&2;c.integration_seconds=.3;
+        modem::PatternCode code(c,epoch);
+        Crypto pattern(c.scramble?c.spreading_seed:public_seed),dsss(c.dsss_seed);
+        const auto n=code.symbol_samples(),chips=code.chips_per_symbol();
+        // Multiple same-second ordinals and epoch crossings; seek each later
+        // symbol directly, without consuming any earlier symbol or bit.
+        for(std::uint64_t symbol=0;symbol<12;++symbol) {
+            const auto address=modem::symbol_stream_address(epoch,0,symbol,n,c.sample_rate);
+            auto later_config=c;later_config.stream_phase_samples=address.sample_in_second;
+            modem::PatternCode later(later_config,address.epoch);
+            std::complex<double> overlap{},old_flipped_overlap{};double e0=0,e1=0;
+            for(std::uint64_t i=0;i<chips;++i) {
+                const auto absolute=symbol*chips+i;
+                const auto pair=code.values(absolute);
+                for(unsigned bit=0;bit<2;++bit) {
+                    check(pair[bit]==code.value(absolute,bit) && pair[bit]==later.value(i,bit),
+                          "both private candidates must match cached, scalar and rebased generation");
+                    check(pair[bit]!=code.value(absolute+chips,bit),"private candidate reused at the next bit position");
+                    {
+                        const auto domain=bit?StreamDomain::PatternOneV2:StreamDomain::PatternZeroV2;
+                        const auto position=modem::symbol_stream_chip(address,chips,i);
+                        const auto a=pattern.stream(StreamPurpose::Scrambler,c.scramble?address.epoch:0,position*8,8,domain);
+                        const auto b=c.dsss?dsss.stream(StreamPurpose::Dsss,address.epoch,position*8,8,domain):Bytes(8);
+                        std::uint32_t expected=0;
+                        for(unsigned j=4;j<8;++j)expected=(expected<<8)|(a[j]^b[j]);
+                        check(phase_word(pair[bit])==expected,"private candidate mapped from the wrong domain/address");
+                    }
+                }
+                overlap+=pair[0]*std::conj(pair[1]);
+                old_flipped_overlap+=static_cast<double>(old_mask[i%8])*pair[0]*std::conj(pair[1]);
+                e0+=std::norm(pair[0]);e1+=std::norm(pair[1]);
+            }
+            // A deterministic regression for the former exact swap, not a
+            // cryptographic security proof or a physical interference test.
+            check(std::norm(overlap)/(e0*e1)<.5 && std::norm(old_flipped_overlap)/(e0*e1)<.5,
+                  "private alternatives must not be global-phase copies or related by the former public mask");
+        }
+        for(unsigned bit=0;bit<2;++bit) {
+            const auto before=code.shaped_value(chips,bit,code.chip_samples());
+            code.set_stream_phase_samples(c.sample_rate/2);
+            auto changed=c;changed.stream_phase_samples=c.sample_rate/2;modem::PatternCode shifted(changed,epoch);
+            check(code.shaped_value(chips,bit,code.chip_samples())==shifted.shaped_value(chips,bit,code.chip_samples()),
+                  "phase changes must invalidate both private shaped caches");
+            for(double at:{-2.*code.chip_samples(),0.,.5*code.chip_samples(),
+                           static_cast<double>(n)-1,static_cast<double>(n)+2*code.chip_samples()}) {
+                const auto pair=code.shaped_values(chips,at);
+                check(pair[0]==code.shaped_value(chips,0,at) && pair[1]==code.shaped_value(chips,1,at),
+                      "paired and scalar private pulse templates must match through tails and phase changes");
+            }
+            code.set_stream_phase_samples(0);
+            check(code.shaped_value(chips,bit,code.chip_samples())==before,"phase revisit changed a private candidate");
+        }
+        check(code.working_bytes()<8192,"independent candidates must keep bounded cache storage");
+    }
 }
 void public_waveform_uses_amplitude_and_phase() {
     auto c=config();c.spreading_factor=4096;
@@ -553,22 +616,26 @@ void short_private_patterns_preserve_noise_and_addressing() {
         const auto count=symbol_count*chips;
         std::vector<std::complex<double>> values(count),position_mean(chips),position_square(chips);
         std::complex<double> mean{},square{},repetition{};
-        double energy=0,power_square=0;
+        double energy=0,power_square=0,other_energy=0,other_power_square=0;
         for(std::size_t chip=0;chip<count;++chip) {
             const auto sample=modem::pattern_pulse_padding_samples(c)+chip*chip_samples;
             const auto value=logical[chip]/std::sqrt(2*modem::nominal_signal_power);
             values[chip]=value;mean+=value;square+=value*value;
             position_mean[chip%chips]+=value;position_square[chip%chips]+=value*value;
             const auto power=std::norm(value);energy+=power;power_square+=power*power;
-            check(std::norm(samples[sample])<1 &&
-                  std::abs(std::norm(logical[chip])-std::norm(other_logical[chip]))<1e-12,
-                  "short private patterns must retain PCM headroom and a payload-independent input chip envelope");
+            const auto other_power=std::norm(other_logical[chip])/(2*modem::nominal_signal_power);
+            other_energy+=other_power;other_power_square+=other_power*other_power;
+            check(std::norm(samples[sample])<1 && std::norm(other[sample])<1,
+                  "both independent private candidates must retain PCM headroom");
             if(chip>=chips)repetition+=value*std::conj(values[chip-chips]);
         }
         check(std::abs(mean)/count<.06 && std::abs(square)/energy<.06 && std::abs(repetition)/energy<.06,
               "short private transmissions must not restore a fixed carrier, squared carrier or repeated symbol row");
         check(std::abs(energy/count-1)<.08 && power_square/count-std::pow(energy/count,2)>.4,
               "short private transmissions must preserve variable amplitude and normalized mean power");
+        check(std::abs(other_energy/count-1)<.08 &&
+              other_power_square/count-std::pow(other_energy/count,2)>.4,
+              "complementary private bits must preserve the same ensemble power and amplitude variation");
         for(unsigned position=0;position<chips;++position)
             check(std::abs(position_mean[position])/symbol_count<.15 &&
                   std::abs(position_square[position])/symbol_count<.15,
@@ -678,7 +745,7 @@ void shaped_coordinate_and_duration_bounds() {
 int main() {
     try {
         seek_and_domains(); symbol_epoch_schedule(); symbol_schedule_integer_bounds();
-        alphabet_and_repetition(); public_waveform_uses_amplitude_and_phase();
+        alphabet_and_repetition();independent_private_candidates(); public_waveform_uses_amplitude_and_phase();
         carrier_phase_integer_positions();exact_pcm_and_chunks(); tones_and_bounded_state();
         streaming_and_modem_integration();complete_symbols_require_aligned_starts();
         rounded_hardware_duration();hardware_noise_keystreams();

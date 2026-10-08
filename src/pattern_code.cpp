@@ -17,6 +17,7 @@ constexpr double tau = 2 * std::numbers::pi;
 constexpr std::array<std::uint8_t, 32> public_seed{
     'D','a','t','a','P','u','m','p','/','p','a','t','t','e','r','n',
     '/','b','i','n','a','r','y','/','v','1',0,0,0,0,0,0};
+// Public unkeyed alphabet only. Private candidates use independent CTR domains.
 // Balanced, neither a global sign reversal nor an alternating carrier shift.
 // Every four consecutive positions include a nonconstant, nonalternating row.
 constexpr std::array<int, 8> bit_mask{1,-1,-1,1,1,1,-1,-1};
@@ -110,13 +111,14 @@ struct PatternCode::Impl {
     Config config;
     std::uint64_t chip = 0, symbol = 0, chips = 0, epoch = 0;
     bool shaped = false;
-    StreamCache pattern, dsss;
+    bool private_patterns = false;
+    StreamCache pattern, dsss, pattern_one, dsss_one;
     struct CachedChip {
         std::uint64_t address=0;
         std::complex<double> value{};
         bool valid=false;
     };
-    std::array<CachedChip,32> shaped_chips{};
+    std::array<CachedChip,32> shaped_chips{}, shaped_chips_one{};
     struct TraceStorage {
         std::array<NoiseTrace,TransmitTrace::byte_limit/8> symbol_starts{};
         std::uint64_t first_chip=0;
@@ -125,10 +127,15 @@ struct PatternCode::Impl {
     };
     std::unique_ptr<TraceStorage> trace;
     Impl(Config value, std::uint64_t start_epoch): config(value), epoch(start_epoch),
+        private_patterns(config.spreading_mode == SpreadingMode::pattern && (config.scramble || config.dsss)),
         pattern(config.scramble ? std::span<const std::uint8_t>(config.spreading_seed) :
                                  std::span<const std::uint8_t>(public_seed),
-                StreamPurpose::Scrambler, config.scramble ? start_epoch : 0),
-        dsss(config.dsss_seed, StreamPurpose::Dsss, start_epoch) {
+                StreamPurpose::Scrambler, config.scramble ? start_epoch : 0,
+                private_patterns ? StreamDomain::PatternZeroV2 : StreamDomain::Payload),
+        dsss(config.dsss_seed, StreamPurpose::Dsss, start_epoch,
+             private_patterns ? StreamDomain::PatternZeroV2 : StreamDomain::Payload),
+        pattern_one(pattern.key, StreamPurpose::Scrambler, pattern.epoch, StreamDomain::PatternOneV2),
+        dsss_one(dsss.key, StreamPurpose::Dsss, start_epoch, StreamDomain::PatternOneV2) {
         chip = pattern_chip_samples(config);
         symbol = symbol_sample_count(config);
         chips = symbol / chip + (symbol % chip != 0);
@@ -140,6 +147,7 @@ struct PatternCode::Impl {
     }
     ~Impl() {
         OPENSSL_cleanse(shaped_chips.data(),sizeof(shaped_chips));
+        OPENSSL_cleanse(shaped_chips_one.data(),sizeof(shaped_chips_one));
         OPENSSL_cleanse(config.spreading_seed.data(),config.spreading_seed.size());
         OPENSSL_cleanse(config.dsss_seed.data(),config.dsss_seed.size());
     }
@@ -152,14 +160,14 @@ struct PatternCode::Impl {
             const auto address = symbol_stream_address(epoch, config.stream_phase_samples,
                 absolute_chip / chips, symbol, config.sample_rate);
             position = symbol_stream_chip(address, chips, position);
-            if (config.scramble) pattern.select_epoch(address.epoch);
-            if (config.dsss) dsss.select_epoch(address.epoch);
+            if (config.scramble) { pattern.select_epoch(address.epoch); pattern_one.select_epoch(address.epoch); }
+            if (config.dsss) { dsss.select_epoch(address.epoch); dsss_one.select_epoch(address.epoch); }
         }
         if (config.spreading_mode == SpreadingMode::pattern) {
             // A secret +/- sign on a real carrier disappears on squaring.
-            // Mix every enabled private stream before mapping both amplitude
-            // and phase, retaining the public internal-transition distinction
-            // between the two candidate patterns used by blind acquisition.
+            // Each private candidate has its own versioned counter domain in
+            // every enabled layer. Canonical symbol/chip addresses change the
+            // entire pair at every symbol; no public mask maps one to the other.
             // Public rows use the same I/Q map and repeat at symbol boundaries
             // so acquisition needs no transmission-index hypothesis.
             NoiseTrace* captured=nullptr;
@@ -171,8 +179,10 @@ struct PatternCode::Impl {
                     if(!entry.valid)captured=&entry;
                 }
             }
-            auto result = pattern.noise(position, config.dsss ? &dsss : nullptr,nullptr,nullptr,captured);
-            if (bit) result *= bit_mask[static_cast<std::size_t>((absolute_chip % chips) % bit_mask.size())];
+            auto& row = private_patterns && bit ? pattern_one : pattern;
+            auto* layer = config.dsss ? (private_patterns && bit ? &dsss_one : &dsss) : nullptr;
+            auto result = row.noise(position,layer,nullptr,nullptr,captured);
+            if (bit && !private_patterns) result *= bit_mask[static_cast<std::size_t>((absolute_chip % chips) % bit_mask.size())];
             return result;
         }
         const auto angle = (bit ? 1. : -1.) * std::numbers::pi / 2 *
@@ -185,13 +195,18 @@ struct PatternCode::Impl {
         if(config.spreading_mode!=SpreadingMode::pattern)return {value(absolute,0,fraction),value(absolute,1,fraction)};
         require(std::isfinite(fraction) && fraction>=0 && fraction<1,
                 "pattern chip fraction must be within [0,1)");
-        auto& entry=shaped_chips[absolute%shaped_chips.size()];
+        return {cached_value(absolute,0),cached_value(absolute,1)};
+    }
+    std::complex<double> cached_value(std::uint64_t absolute,unsigned bit) {
+        auto& cache = private_patterns && bit ? shaped_chips_one : shaped_chips;
+        auto& entry=cache[absolute%cache.size()];
         if(!entry.valid || entry.address!=absolute) {
-            entry.value=value(absolute,0,0);entry.address=absolute;entry.valid=true;
+            entry.value=value(absolute,private_patterns ? bit : 0,0);
+            entry.address=absolute;entry.valid=true;
         }
-        auto alternative=entry.value;
-        alternative*=bit_mask[static_cast<std::size_t>((absolute%chips)%bit_mask.size())];
-        return {entry.value,alternative};
+        auto result=entry.value;
+        if(bit && !private_patterns)result*=bit_mask[static_cast<std::size_t>((absolute%chips)%bit_mask.size())];
+        return result;
     }
     std::array<std::complex<double>,2> shaped_values(std::uint64_t first_chip,double within) {
         require(std::isfinite(within),"pattern sample coordinate must be finite");
@@ -216,13 +231,7 @@ struct PatternCode::Impl {
         return pattern_pulse_sum(within,symbol,chip,[&](std::uint64_t local) {
             require(local<=std::numeric_limits<std::uint64_t>::max()-first_chip,"pattern chip address would overflow");
             const auto absolute=first_chip+local;
-            auto& entry=shaped_chips[absolute%shaped_chips.size()];
-            if(!entry.valid || entry.address!=absolute) {
-                entry.value=value(absolute,0,0);entry.address=absolute;entry.valid=true;
-            }
-            auto result=entry.value;
-            if(bit)result*=bit_mask[static_cast<std::size_t>((absolute%chips)%bit_mask.size())];
-            return result;
+            return cached_value(absolute,bit);
         });
     }
 };
@@ -249,6 +258,7 @@ void PatternCode::set_stream_phase_samples(std::uint64_t phase_samples) {
     if (phase_samples == impl_->config.stream_phase_samples) return;
     impl_->config.stream_phase_samples = phase_samples;
     for (auto& entry : impl_->shaped_chips) entry.valid = false;
+    for (auto& entry : impl_->shaped_chips_one) entry.valid = false;
 }
 std::uint64_t PatternCode::chip_samples() const { return impl_->chip; }
 std::uint64_t PatternCode::chips_per_symbol() const { return impl_->chips; }

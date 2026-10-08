@@ -49,6 +49,55 @@ struct CorrelationFit {
     }
 };
 
+// A common phase fit is a subspace of separate per-chip phase fits. Under
+// white Gaussian noise, projecting both signal and noise into this larger
+// subspace preserves integration gain. Its rank, rather than the PCM sample
+// count, bounds a weak acquisition chain supplied by a structured wrong-key
+// waveform. Standalone and established-stream scoring keep their existing fit.
+struct CorrelationChipEvidence {
+    CorrelationFit cell;
+    double projected_energy=0;
+    std::uint64_t projected_rank=0,cell_index=std::numeric_limits<std::uint64_t>::max();
+    static std::pair<double,unsigned> projection(const CorrelationFit& fit) {
+        const auto trace=fit.cc+fit.ss;
+        if(!fit.count || trace<=1e-30)return {0,0};
+        const auto determinant=fit.cc*fit.ss-fit.cs*fit.cs;
+        if(fit.count>1 && determinant>1e-12*trace*trace)
+            return {std::clamp((fit.ss*fit.xc*fit.xc+fit.cc*fit.xs*fit.xs-
+                2*fit.cs*fit.xc*fit.xs)/determinant,0.,fit.energy),2};
+        // The leading eigenspace handles a one-sample or singular edge cell.
+        const auto angle=.5*std::atan2(2*fit.cs,fit.cc-fit.ss);
+        const auto lambda=.5*(trace+std::hypot(fit.cc-fit.ss,2*fit.cs));
+        const auto dot=std::cos(angle)*fit.xc+std::sin(angle)*fit.xs;
+        return {std::clamp(dot*dot/lambda,0.,fit.energy),1};
+    }
+    void retain(const CorrelationFit& value) {
+        const auto [energy,rank]=projection(value);
+        projected_energy+=energy;projected_rank+=rank;
+    }
+    void add(const CorrelationProjection& p,std::complex<double> phase,std::size_t n,
+             std::uint64_t index=std::numeric_limits<std::uint64_t>::max()) {
+        if(index==std::numeric_limits<std::uint64_t>::max())return;
+        if(index!=cell_index){retain(cell);cell={};cell_index=index;}
+        cell.add(p,phase,n);
+    }
+    double score(const CorrelationFit& total) const {
+        const auto raw=total.score();
+        const auto [last_energy,last_rank]=projection(cell);
+        const auto rank=projected_rank+last_rank;const auto energy=projected_energy+last_energy;
+        if(rank<=2 || energy<=1e-30)return raw;
+        const auto fraction=std::clamp(total.explained()/energy,0.,1.-1e-15);
+        return std::min(raw,-.5*static_cast<double>(rank-2)*std::log1p(-fraction));
+    }
+    static std::uint64_t index(std::uint64_t sample,long double start,long double rate,
+                               std::uint64_t chip) {
+        auto result=static_cast<std::uint64_t>(std::max(0.L,std::floor((sample-start)*rate/chip)));
+        while(static_cast<long double>(sample)>=std::ceil(start+static_cast<long double>(result+1)*chip/rate))++result;
+        while(result && static_cast<long double>(sample)<std::ceil(start+static_cast<long double>(result)*chip/rate))--result;
+        return result;
+    }
+};
+
 // A chip cell keeps all original real observations. Pulse dots and the two
 // Gram matrices factor reusable pulse work from private chip coefficients.
 inline constexpr std::size_t correlation_pulse_atoms=17;
@@ -161,6 +210,7 @@ struct CorrelationLane {
     // Exact paired-tone bank, or the legacy rectangular bank when omitted.
     std::size_t tone_bank_base=std::numeric_limits<std::size_t>::max();
     std::array<std::array<CorrelationFit,2>,3> fits{};
+    std::array<std::array<CorrelationChipEvidence,2>,3> chip_evidence{};
     std::array<std::array<CorrelationDriftFit,2>,3> drift_fits{};
     std::array<std::array<CorrelationDifferentialFit,2>,3> differential_fits{};
 };
@@ -185,6 +235,7 @@ struct CorrelationGeometry {
     CorrelationPatternParameters pattern;
     unsigned drift_sections=1;
     std::uint64_t differential_window_samples=0;
+    bool guard_chains=false;
 };
 struct CorrelationBatch {
     ~CorrelationBatch();

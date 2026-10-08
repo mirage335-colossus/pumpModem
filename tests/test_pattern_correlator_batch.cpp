@@ -5,6 +5,7 @@
 #include <iostream>
 #include <limits>
 #include <numbers>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -43,6 +44,7 @@ struct Fixture {
                   config.carrier_hz,shaped,tone,
                   {static_cast<std::uint32_t>(config.spreading_mode),config.scramble,config.dsss,
                    config.spreading_seed,config.dsss_seed}};
+        geometry.guard_chains=keyed && !tone;
         if(tone) {
             const auto deviation=config.sample_rate/(4.*static_cast<double>(geometry.chip_samples));
             for(const auto rate:{1.,1.001})for(const auto offset:offsets)
@@ -102,7 +104,13 @@ void same_lanes(std::span<const CorrelationLane> a,std::span<const CorrelationLa
               x.phase_lower==y.phase_lower && x.phase_upper==y.phase_upper && x.frequency==y.frequency &&
               x.rate_index==y.rate_index,"correlation backend changed stable logical lane coordinates");
         for(std::size_t group=0;group<x.fits.size();++group)for(std::size_t bit=0;bit<2;++bit)
+        {
             check(same_fit(x.fits[group][bit],y.fits[group][bit]),"worker count or block tiling changed correlation arithmetic");
+            const auto& a=x.chip_evidence[group][bit];const auto& b=y.chip_evidence[group][bit];
+            check(same_fit(a.cell,b.cell) && a.cell_index==b.cell_index && a.projected_rank==b.projected_rank &&
+                  a.projected_energy==b.projected_energy,
+                  "worker count or block tiling changed private chain evidence");
+        }
     }
 }
 
@@ -257,6 +265,43 @@ void invalid_batches_and_cancellation() {
     check(lanes[0].fits[0][0].count==9,"cancellation must leave CPU workspace reusable");
 }
 
+void chip_chain_evidence_preserves_noise_integration() {
+    for(unsigned count:{1U,2U}) {
+        CorrelationFit fit;
+        for(unsigned j=0;j<count;++j) {
+            const double c=j?0:1,s=j?1:0,x=j?-.7:.3;
+            fit.add({x*c,x*s,c*c,s*s,c*s,x*x},{1,0},1);
+        }
+        const auto [energy,rank]=CorrelationChipEvidence::projection(fit);
+        check(rank==count && std::abs(energy-fit.energy)<1e-12,
+              "one- and two-sample edge cells must keep their actual rank and projected energy");
+    }
+    std::array<double,2> integrated{};
+    for(unsigned size=0;size<2;++size) {
+        const unsigned samples=size?32:4;
+        std::mt19937_64 random(892171);std::normal_distribution<double> noise(0,std::sqrt(samples/4.));
+        for(unsigned trial=0;trial<256;++trial) {
+            CorrelationFit whole;CorrelationChipEvidence cells;
+            for(unsigned chip=0;chip<128;++chip)for(unsigned i=0;i<samples;++i) {
+                const auto pattern=std::polar(1.,.713*chip);
+                const auto oscillator=std::polar(1.,std::numbers::pi*i/2);
+                const auto x=std::sqrt(.125)*(pattern*oscillator).real()+noise(random);
+                const auto c=oscillator.real(),s=oscillator.imag();
+                const CorrelationProjection observation{x*c,x*s,c*c,s*s,c*s,x*x};
+                whole.add(observation,pattern,1);cells.add(observation,pattern,1,chip);
+            }
+            const auto [tail,rank]=CorrelationChipEvidence::projection(cells.cell);
+            const auto projected=cells.projected_energy+tail;
+            check(cells.projected_rank+rank==256 && whole.explained()<=projected+1e-8 && projected<=whole.energy+1e-8,
+                  "whole template must remain nested inside disjoint chip spans and raw observations");
+            check(cells.score(whole)<=whole.score(),"chain guard must never increase confidence");
+            integrated[size]+=cells.score(whole)/256;
+        }
+    }
+    check(integrated[0]>12 && integrated[0]<22 && std::abs(integrated[1]/integrated[0]-1)<.12,
+          "increasing chip duration at equal integrated SNR must preserve weak-signal chain evidence");
+}
+
 void pulse_projection_preserves_real_sample_fit() {
     for(const auto chip:{8ULL,120ULL})for(const auto ppm:{0.,-.001,.001,-200.,200.,-8000.,8000.}) {
         const auto rate=1+static_cast<long double>(ppm)*1e-6L;
@@ -343,6 +388,7 @@ int main() {
         narrow_bank_with_future_origins();
         invalid_batches_and_cancellation();
         pulse_projection_preserves_real_sample_fit();
+        chip_chain_evidence_preserves_noise_integration();
         std::cout<<"pattern_correlator_batch ok\n";
         return 0;
     } catch(const std::exception& error) {

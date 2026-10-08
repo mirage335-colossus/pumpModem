@@ -85,6 +85,8 @@ void accumulate_lane(const CorrelationBatch& batch,CorrelationLane& lane,Pattern
                     for(unsigned bit=0;bit<2;++bit) {
                         const auto phase=phases[bit];
                         fit[bit].add(projection,phase,1);
+                        if(g.guard_chains)lane.chip_evidence[group][bit].add(projection,phase,1,
+                            CorrelationChipEvidence::index(observed,symbol_start,lane.rate,g.chip_samples));
                         if(drift)(*drift)[bit].active.add(projection,phase,1);
                         if(differential)(*differential)[bit].active.add(projection,phase,1);
                     }
@@ -114,6 +116,7 @@ void accumulate_lane(const CorrelationBatch& batch,CorrelationLane& lane,Pattern
                     const auto row=block.projection_offset+bank*(block.count+1);
                     const auto projection=batch.projections[row+right]-batch.projections[row+left];
                     fit[bit].add(projection,phase,right-left);
+                    if(g.guard_chains)lane.chip_evidence[group][bit].add(projection,phase,right-left,local);
                     if(drift)(*drift)[bit].active.add(projection,phase,right-left);
                     if(differential)(*differential)[bit].active.add(projection,phase,right-left);
                 }

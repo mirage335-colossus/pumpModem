@@ -188,6 +188,44 @@ void test_suppression_domain() {
     }
 }
 
+void test_private_pattern_domains() {
+    Bytes master(32);
+    for(std::size_t i=0;i<master.size();++i)master[i]=static_cast<std::uint8_t>(i);
+    const Crypto crypto(master);
+    constexpr std::uint64_t epoch=1720000000;
+    // Independent Python hashlib/hmac HKDF plus openssl AES-256-CTR;
+    // fixed high counter bytes are ASCII pat-v2-0 and pat-v2-1.
+    check(crypto.stream(StreamPurpose::Scrambler,epoch,0,64,StreamDomain::PatternZeroV2)==
+        from_hex("51fa6125c11f500aca0dd70b71ac682cee81002fcfc6f7603ea963b0296a97ea"
+                 "19ca8d3d301b735545fb6f749ace1d944746274b15f2fd6b5851fd893337e323"),"private candidate counter vector mismatch");
+    check(crypto.stream(StreamPurpose::Scrambler,epoch,0,64,StreamDomain::PatternOneV2)==
+        from_hex("496e78c43f012621dee29e57d81300b8acb974dc637b46b52ec152555e41d49e"
+                 "8d96ae9de3ba4ab33b14b38c20b31e9df93b7cbaeb06f6da9fc287f02157a162"),"private candidate counter vector mismatch");
+    check(crypto.stream(StreamPurpose::Dsss,epoch,0,64,StreamDomain::PatternZeroV2)==
+        from_hex("4d9d774023174363c104e0342b2ae9914f8e28047d10b6512e2a8a39fbe69b7d"
+                 "e0e55f019585913a8ac83f8af22d88d843fb3244392444c9e80c4104b864aeb6"),"private candidate counter vector mismatch");
+    check(crypto.stream(StreamPurpose::Dsss,epoch,0,64,StreamDomain::PatternOneV2)==
+        from_hex("6d8b2552e7e0cf0e4ea2b5ff704690d7d09fd5f2a436fcba9447874d48b5c4b6"
+                 "4f54cbdabd94421d689aba72020ab6f1e8def17e8a05efb975ef53f9e9ea8a99"),"private candidate counter vector mismatch");
+    for(auto purpose:{StreamPurpose::Scrambler,StreamPurpose::Dsss})
+    for(auto domain:{StreamDomain::PatternZeroV2,StreamDomain::PatternOneV2}) {
+        const auto all=crypto.stream(purpose,epoch,0,1024,domain);
+        for(auto other:{StreamDomain::Payload,StreamDomain::Preamble,StreamDomain::Suppression,
+                        StreamDomain::PatternZeroV2,StreamDomain::PatternOneV2})
+            if(other!=domain)check(all!=crypto.stream(purpose,epoch,0,1024,other),
+                                  "private candidate domain overlaps another stream");
+        check(all!=crypto.stream(purpose,epoch+1,0,1024,domain),"private candidate epoch reused");
+        for(auto offset:{0U,1U,15U,16U,17U,255U,511U}) {
+            const auto part=crypto.stream(purpose,epoch,offset,127,domain);
+            check(std::equal(part.begin(),part.end(),all.begin()+offset),"private candidate seek mismatch");
+        }
+        constexpr auto final=std::numeric_limits<std::uint64_t>::max();
+        const auto tail=crypto.stream(purpose,epoch,final-30,31,domain);
+        check(tail.back()==crypto.stream(purpose,epoch,final,1,domain).front(),"private candidate final seek mismatch");
+        rejects([&]{crypto.stream(purpose,epoch,final,2,domain);},"private candidate byte offset wrapped");
+    }
+}
+
 void test_keyfiles() {
     TempDir dir;
     const testing::KeyfilePolicy policy{4096, 8193};
@@ -273,6 +311,7 @@ int main() {
         test_streams();
         test_preamble_domain();
         test_suppression_domain();
+        test_private_pattern_domains();
         test_authentication();
         test_keyfiles();
         test_production_keyfile();

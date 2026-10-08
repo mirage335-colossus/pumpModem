@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <thread>
 
 using namespace datapump::gui;
 namespace {
@@ -117,6 +118,11 @@ void layers_and_services() {
 void document_withdrawal() {
     Launch launch;launch.page=ui::Page::planner;
     Application app(launch);web::Bridge bridge(app);
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(30);
+    while(!app.enabled(ui::Command::planner_apply_short)&&std::chrono::steady_clock::now()<deadline) {
+        app.tick();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(app.enabled(ui::Command::planner_apply_short),"Planner worker did not prepare the apply fixture");
     const auto snapshot=bridge.snapshot(1000,760);
     const auto text=snapshot.find("\"text\":\"Use target for short messages\"");
     check(text!=std::string::npos,"Planner fixture requires an available apply action");

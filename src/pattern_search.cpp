@@ -90,8 +90,11 @@ OscillatorEffects oscillator_effects(const Config& config) {
     const auto& policy=*config.oscillator_search;
     validate_oscillator_search(policy);
     OscillatorEffects result;result.physical_rf_hz=physical_carrier(config,policy);
-    const bool shared=policy.reference==OscillatorReference::shared_radio;
-    const bool rf_active=shared || policy.rf_shift_hz!=0;
+    // Without a translation stage, only the delivered stream's Baseband
+    // oscillator is active, including when legacy shared-reference metadata
+    // remains attached to the configuration.
+    const bool shared=policy.reference==OscillatorReference::shared_radio && policy.rf_shift_hz!=0;
+    const bool rf_active=policy.rf_shift_hz!=0;
     result.clock_error_ppm=shared?policy.rf.accuracy_ppm:policy.lf.accuracy_ppm;
     result.frequency_offset_hz=sideband_sign(policy)*bounded_value(static_cast<long double>(policy.rf_shift_hz)*
         policy.rf.accuracy_ppm*1e-6L,"RF oscillator offset exceeds numeric range");
@@ -109,7 +112,7 @@ OscillatorPatternSearch oscillator_pattern_search(const Config& config) {
     const auto& policy=*config.oscillator_search;
     validate_oscillator_search(policy);
     const auto physical=physical_carrier(config,policy);
-    const bool shared=policy.reference==OscillatorReference::shared_radio;
+    const bool shared=policy.reference==OscillatorReference::shared_radio && policy.rf_shift_hz!=0;
     const auto clock_bound=bounded_value(static_cast<long double>(policy.margin)*
         (shared?policy.rf.accuracy_ppm:policy.lf.accuracy_ppm),"oscillator clock allowance exceeds numeric range");
     const auto rf_bound=shared?0.:bounded_value(static_cast<long double>(policy.margin)*
@@ -175,7 +178,36 @@ OscillatorPatternSearch oscillator_pattern_search(const Config& config) {
         return std::copysign(magnitude,offset/coupling);
     };
     const bool correlated=shared || rf_bound==0 || clock_bound==0;
-    if(correlated) {
+    // An independent conversion error describes a strip around the sampling
+    // clock relation, not necessarily a separately resolved timing dimension.
+    // For f=c*epsilon*1e-6+r, choosing epsilon_i=clamp(f_i/c*1e6,-A,A)
+    // at the nearest frequency gives |epsilon-epsilon_i| <= (df/2+B)/c*1e6.
+    // Keep one lane per frequency only when that entire strip fits the same
+    // quarter-chip timing resolution as the independent rectangular grid.
+    const auto maximum_clock_step=.25*static_cast<double>(pattern_chip_samples(config))/
+        static_cast<double>(symbol_sample_count(config))*1e6;
+    auto thin_clock_step=std::numeric_limits<double>::infinity();
+    const auto strip_clock_step=(static_cast<long double>(frequency.step_hz)+2.L*rf_bound)/
+        config.carrier_hz*1e6L;
+    if(!correlated && clock_bound<=10000 && strip_clock_step<=maximum_clock_step) {
+        long double radius=0;
+        const auto clock_scale=1e6L/config.carrier_hz;
+        const auto frequency_radius=static_cast<long double>(frequency.step_hz)/2+rf_bound;
+        for(const auto offset:offsets_for(steps)) {
+            const auto rate=correlated_rate(offset);
+            const auto lower=std::max(-static_cast<long double>(clock_bound),
+                (static_cast<long double>(offset)-frequency_radius)*clock_scale);
+            const auto upper=std::min(static_cast<long double>(clock_bound),
+                (static_cast<long double>(offset)+frequency_radius)*clock_scale);
+            radius=std::max({radius,std::abs(lower-rate),std::abs(upper-rate)});
+        }
+        // Bound the actual rounded public lane coordinates, including the
+        // conversion to ppm, rather than assuming exact lattice arithmetic.
+        thin_clock_step=std::nextafter(static_cast<double>(2*radius),
+            std::numeric_limits<double>::infinity());
+    }
+    const bool thin_independent=thin_clock_step<=maximum_clock_step;
+    if(correlated || thin_independent) {
         if(clock_bound>10000)steps=std::min(steps,fitting_steps(std::abs(coupling)*.01,frequency.step_hz,maximum_steps));
         while(steps) {
             const auto offset=endpoint(steps);
@@ -190,12 +222,11 @@ OscillatorPatternSearch oscillator_pattern_search(const Config& config) {
             result.hypotheses.push_back({offset,ppm});
             result.clock_half_width_ppm=std::max(result.clock_half_width_ppm,std::abs(ppm));
         }
-        result.clock_step_ppm=clock_bound==0?0.:frequency.step_hz/std::abs(coupling)*1e6;
+        result.clock_step_ppm=thin_independent?thin_clock_step:
+            clock_bound==0?0.:frequency.step_hz/std::abs(coupling)*1e6;
     } else {
         // A quarter-chip accumulated timing error is the independent clock
         // grid's resolution. The carrier grid independently resolves phase.
-        const auto maximum_clock_step=.25*static_cast<double>(pattern_chip_samples(config))/
-            static_cast<double>(symbol_sample_count(config))*1e6;
         const auto requested_rate_steps=std::ceil(static_cast<long double>(clock_bound)/maximum_clock_step);
         result.clock_step_ppm=static_cast<double>(static_cast<long double>(clock_bound)/requested_rate_steps);
         constexpr auto maximum_rate_steps=(maximum_pattern_rate_hypotheses-1)/2;
@@ -208,10 +239,47 @@ OscillatorPatternSearch oscillator_pattern_search(const Config& config) {
         // Include half a rate cell and one frequency cell for conservative
         // outward rounding; neither allowance is a new physical uncertainty.
         const auto frequency_radius=rf_bound+config.carrier_hz*result.clock_step_ppm*.5e-6+frequency.step_hz;
+        // At a fixed rate both tests describe one interval in increasing
+        // frequency order. Find its exact integer boundaries once, instead
+        // of repeatedly scanning the whole rate/frequency rectangle while
+        // choosing the pair cap. The direct comparisons preserve floating
+        // point endpoint decisions made by the ordinary pair predicate.
+        struct RateInterval {double rate;int first,last;};
+        std::vector<RateInterval> intervals;intervals.reserve(rates.size());
+        const auto outer=static_cast<int>(steps);
+        const auto offset_at=[&](int index) {
+            const auto magnitude=endpoint(static_cast<std::size_t>(std::abs(index)));
+            return index<0?-magnitude:magnitude;
+        };
+        const auto first_true=[&](const auto& predicate) {
+            int lower=-outer,upper=outer+1;
+            while(lower<upper) {
+                const auto middle=lower+(upper-lower)/2;
+                if(predicate(offset_at(middle)))upper=middle;
+                else lower=middle+1;
+            }
+            return lower;
+        };
+        for(auto rate:rates) {
+            const auto center=config.carrier_hz*rate*1e-6;
+            const auto support=static_cast<long double>(half_band)*(1+static_cast<long double>(rate)*1e-6L);
+            const auto first=first_true([&](double offset) {
+                return offset-center>=-frequency_radius &&
+                    static_cast<long double>(config.carrier_hz)+offset-support>=-passband_tolerance;
+            });
+            const auto last=first_true([&](double offset) {
+                return !(offset-center<=frequency_radius &&
+                    static_cast<long double>(config.carrier_hz)+offset+support<=nyquist+passband_tolerance);
+            })-1;
+            intervals.push_back({rate,first,last});
+        }
         const auto pair_count=[&](std::size_t candidate_steps) {
             std::size_t count=0;
-            for(auto rate:rates)for(auto offset:offsets_for(candidate_steps))
-                if(std::abs(offset-config.carrier_hz*rate*1e-6)<=frequency_radius && valid_pair(offset,rate))++count;
+            const auto bound=static_cast<int>(candidate_steps);
+            for(const auto& interval:intervals) {
+                const auto first=std::max(interval.first,-bound),last=std::min(interval.last,bound);
+                if(first<=last)count+=static_cast<std::size_t>(last-first+1);
+            }
             return count;
         };
         if(pair_count(steps)>maximum_pattern_frequency_rate_hypotheses) {
@@ -223,13 +291,25 @@ OscillatorPatternSearch oscillator_pattern_search(const Config& config) {
             }
             steps=lower;
         }
-        const auto offsets=offsets_for(steps);
         result.hypotheses.reserve(pair_count(steps));
-        for(auto rate:rates)for(auto offset:offsets)
-            if(std::abs(offset-config.carrier_hz*rate*1e-6)<=frequency_radius && valid_pair(offset,rate)) {
-                result.hypotheses.push_back({offset,rate});
-                result.clock_half_width_ppm=std::max(result.clock_half_width_ppm,std::abs(rate));
+        const auto bound=static_cast<int>(steps);
+        for(const auto& interval:intervals) {
+            const auto first=std::max(interval.first,-bound),last=std::min(interval.last,bound);
+            if(first>last)continue;
+            const auto emit=[&](int index) {
+                result.hypotheses.push_back({offset_at(index),interval.rate});
+                result.clock_half_width_ppm=std::max(result.clock_half_width_ppm,std::abs(interval.rate));
+            };
+            if(first<=0 && last>=0)emit(0);
+            // Merge the negative and positive halves in the historical
+            // center,-1,+1,-2,+2 order, visiting only retained pairs.
+            auto negative=std::max(1,-last),positive=std::max(1,first);
+            const auto negative_end=-first,positive_end=last;
+            while(negative<=negative_end || positive<=positive_end) {
+                if(negative<=negative_end && (positive>positive_end || negative<=positive))emit(-negative++);
+                else emit(positive++);
             }
+        }
         // Keep the reported frequency lattice contiguous and symmetric even
         // when only one joint passband edge loses all timing alternatives.
         std::vector<bool> positive(steps+1),negative(steps+1);

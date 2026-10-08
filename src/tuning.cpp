@@ -139,10 +139,32 @@ ReceiveTargets parse_receive_targets(std::string_view text) {
     return result;
 }
 std::uint32_t recommended_sample_rate(double bandwidth_hz,std::optional<double> carrier_hz) {
-    const auto carrier=carrier_hz.value_or(recommended_carrier_hz(bandwidth_hz));
+    const auto automatic_carrier=recommended_carrier_hz(bandwidth_hz);
+    const auto carrier=carrier_hz.value_or(automatic_carrier);
     if(!std::isfinite(carrier) || carrier<=0 || carrier>30000000)
         throw Error("modem carrier must be finite, positive and at most 30000000 Hz");
-    return static_cast<std::uint32_t>(std::ceil(std::max({64.,4*bandwidth_hz,4*carrier})));
+    const auto minimum=static_cast<std::uint32_t>(std::ceil(std::max({64.,4*bandwidth_hz,4*carrier})));
+    // Whole sampled half-chips preserve compact receive projections as the carrier
+    // moves. For Rate 100, a 1490 Hz tone therefore uses 6000 Hz, not 5960 Hz:
+    // the latter introduces partial chips and can expand the FFT by 20 times.
+    // Recognize only exact decimal-rate inputs, and spend at most 5% extra PCM
+    // work. Unusual fractional rates retain the existing valid minimum clock.
+    for(std::uint64_t denominator=1;denominator<=1000000;denominator*=10) {
+        const auto numerator=static_cast<std::uint64_t>(std::round(bandwidth_hz*static_cast<double>(denominator)));
+        if(!numerator || static_cast<double>(numerator)/static_cast<double>(denominator)!=bandwidth_hz)continue;
+        const auto quantum=numerator/std::gcd(numerator,denominator);
+        const auto candidate=(minimum+quantum-1)/quantum*quantum;
+        if(candidate>120000000 || candidate>minimum+minimum/20)break;
+        const auto chip=std::ceil(2.*static_cast<double>(candidate)/bandwidth_hz);
+        bool aligned=std::fmod(chip,2.)==0;
+        // Use the actual symbol-rounding arithmetic, including decimal-input
+        // representation error. Never claim alignment from the rational alone.
+        for(const auto factor:{1u,64u,16384u})
+            aligned &= std::ceil(2.L*candidate*factor/bandwidth_hz)==chip*factor;
+        if(aligned)return static_cast<std::uint32_t>(candidate);
+        break;
+    }
+    return minimum;
 }
 double recommended_carrier_hz(double bandwidth_hz) {
     if(!std::isfinite(bandwidth_hz) || bandwidth_hz<minimum_bandwidth_hz || bandwidth_hz>maximum_bandwidth_hz)

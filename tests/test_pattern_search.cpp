@@ -1,6 +1,8 @@
 #include "datapump/pattern_search.hpp"
+#include "datapump/pattern_pulse.hpp"
 #include "datapump/tuning.hpp"
 #include <algorithm>
+#include <iterator>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -245,10 +247,44 @@ void shared_radio_frequency_mapping() {
     for(auto pair:lower.hypotheses)
         check(near(pair.frequency_offset_hz,-9998500*pair.clock_error_ppm*1e-6),
               "lower-sideband frequency and time hypotheses retain the signed relation");
-    policy.rf_shift_hz=0;
-    check(modem::oscillator_effects(config).clock_error_ppm==.0001 &&
-          near(modem::oscillator_pattern_search(config).clock_half_width_ppm,.0003),
-          "explicit shared-reference mode remains active when external shift is zero");
+}
+void zero_shift_uses_only_baseband() {
+    auto config=oscillator_config();auto& policy=*config.oscillator_search;
+    for(const auto carrier:{50.,1500.})for(const auto& baseband:tuning::oscillator_presets()) {
+        config.carrier_hz=carrier;
+        policy.lf=tuning::oscillator_model(baseband);policy.rf={0,0};
+        policy.reference=modem::OscillatorReference::independent_audio;
+        policy.sideband=modem::OscillatorSideband::upper;
+        const auto expected=modem::oscillator_pattern_search(config);
+        for(const auto reference:{modem::OscillatorReference::independent_audio,
+                                  modem::OscillatorReference::shared_radio})
+            for(const auto sideband:{modem::OscillatorSideband::upper,modem::OscillatorSideband::lower})
+                for(const auto& shift:tuning::oscillator_presets()) {
+                    policy.reference=reference;policy.sideband=sideband;
+                    policy.rf=tuning::oscillator_model(shift);
+                    const auto effects=modem::oscillator_effects(config);
+                    check(effects.physical_rf_hz==carrier && effects.frequency_offset_hz==0 &&
+                          effects.clock_error_ppm==policy.lf.accuracy_ppm &&
+                          effects.phase_noise_degrees_per_sqrt_second==policy.lf.phase_noise_degrees_per_sqrt_second,
+                          "zero Shift must use only Baseband frequency, clock and phase effects for every preset and topology");
+                    const auto actual=modem::oscillator_pattern_search(config);
+                    check(actual.hypotheses==expected.hypotheses && actual.limited==expected.limited &&
+                          actual.frequency.count==expected.frequency.count &&
+                          actual.frequency.step_hz==expected.frequency.step_hz &&
+                          actual.frequency.half_width_hz==expected.frequency.half_width_hz &&
+                          actual.frequency.requested_half_width_hz==expected.frequency.requested_half_width_hz &&
+                          actual.requested_clock_half_width_ppm==expected.requested_clock_half_width_ppm &&
+                          actual.clock_half_width_ppm==expected.clock_half_width_ppm &&
+                          actual.clock_step_ppm==expected.clock_step_ppm,
+                          "zero Shift must retain the exact Baseband-only search region despite the stored Shift model");
+                }
+    }
+    policy.reference=modem::OscillatorReference::shared_radio;
+    policy.lf={0,179};policy.rf={10000,180};
+    modem::validate(config);
+    check(modem::oscillator_effects(config).phase_noise_degrees_per_sqrt_second==179 &&
+          modem::oscillator_pattern_search(config).hypotheses.size()==1,
+          "inactive Shift phase must not cause a combined-phase validation failure or extra search lanes");
 }
 void independent_reference_geometry() {
     auto config=oscillator_config();auto& policy=*config.oscillator_search;
@@ -257,8 +293,9 @@ void independent_reference_geometry() {
     const auto bank=modem::oscillator_pattern_search(config);
     check(near(bank.frequency.requested_half_width_hz,.453) && near(bank.clock_half_width_ppm,300) && !bank.limited,
           "independent LF and RF errors have distinct conservative bounds");
-    check(bank.hypotheses.size()>bank.frequency.count && bank.hypotheses.size()<bank.frequency.count*17,
-          "independent bank retains genuine clock dimensions and trims impossible corners");
+    check(bank.hypotheses.size()==bank.frequency.count &&
+          bank.clock_step_ppm<=.25*modem::pattern_chip_samples(config)/modem::symbol_sample_count(config)*1e6,
+          "unresolved independent conversion error fits the existing timing resolution with one lane per frequency");
     for(auto clock:{-300.,-173.,0.,91.,300.})for(auto rf:{-.003,0.,.003}) {
         const auto frequency=1500*clock*1e-6+rf;
         const auto found=std::any_of(bank.hypotheses.begin(),bank.hypotheses.end(),[&](auto pair) {
@@ -272,6 +309,102 @@ void independent_reference_geometry() {
     check(near(wider.requested_clock_half_width_ppm,bank.requested_clock_half_width_ppm) && wider.limited &&
           wider.hypotheses.size()<=modem::maximum_pattern_frequency_rate_hypotheses,
           "RF quality never silently changes independent LF timing and excessive coverage is explicit");
+}
+void check_independent_cell_coverage(const modem::Config& config,const modem::OscillatorPatternSearch& bank) {
+    const auto& policy=*config.oscillator_search;
+    const auto clock=static_cast<double>(static_cast<long double>(policy.margin)*policy.lf.accuracy_ppm);
+    const auto shift=static_cast<double>(static_cast<long double>(policy.margin)*policy.rf_shift_hz*
+        policy.rf.accuracy_ppm*1e-6L);
+    const auto timing_step=.25*static_cast<double>(modem::pattern_chip_samples(config))/
+        static_cast<double>(modem::symbol_sample_count(config))*1e6;
+    check(bank.clock_step_ppm<=timing_step,"sparse bank retains the independent quarter-chip timing resolution");
+    auto sorted=bank.hypotheses;
+    std::sort(sorted.begin(),sorted.end(),[](auto a,auto b){return a.frequency_offset_hz<b.frequency_offset_hz;});
+    const auto phase_tolerance=16*std::numeric_limits<double>::epsilon()*bank.frequency.requested_half_width_hz;
+    const auto timing_tolerance=8*std::numeric_limits<double>::epsilon()*clock;
+    const auto covered=[&](double rate,double rf) {
+        if(std::abs(rate)>clock || std::abs(rf)>shift)return;
+        const auto frequency=static_cast<long double>(config.carrier_hz)*rate*1e-6L+rf;
+        const auto candidate=std::lower_bound(sorted.begin(),sorted.end(),frequency,
+            [](auto pair,long double f){return pair.frequency_offset_hz<f;});
+        const auto matches=[&](auto pair) {
+            // Rounded exact frequency endpoints can differ from a uniform
+            // spacing by a few public-coordinate ulps, including at a tie.
+            return std::abs(frequency-pair.frequency_offset_hz)<=bank.frequency.step_hz/2+phase_tolerance &&
+                std::abs(static_cast<long double>(rate)-pair.clock_error_ppm)<=bank.clock_step_ppm/2+timing_tolerance;
+        };
+        check((candidate!=sorted.end() && matches(*candidate)) ||
+              (candidate!=sorted.begin() && matches(*std::prev(candidate))),
+              "independent strip cell edges and their adjacent values retain joint frequency/timing coverage");
+    };
+    for(auto rate:{-clock,0.,clock})for(auto rf:{-shift,0.,shift})covered(rate,rf);
+    // Each frequency cell clips the independent rectangle by two linear
+    // boundaries. Its extrema lie at rectangle corners or at the following
+    // intersections; these check the continuous domain, not selected clocks.
+    for(std::size_t i=1;i<sorted.size();++i) {
+        const auto edge=(static_cast<long double>(sorted[i-1].frequency_offset_hz)+sorted[i].frequency_offset_hz)/2;
+        for(auto rf:{-shift,shift}) {
+            const auto rate=static_cast<double>((edge-rf)/config.carrier_hz*1e6L);
+            covered(rate,rf);
+            covered(std::nextafter(rate,-std::numeric_limits<double>::infinity()),rf);
+            covered(std::nextafter(rate,std::numeric_limits<double>::infinity()),rf);
+        }
+        for(auto rate:{-clock,clock}) {
+            const auto rf=static_cast<double>(edge-static_cast<long double>(config.carrier_hz)*rate*1e-6L);
+            covered(rate,rf);
+            covered(rate,std::nextafter(rf,-std::numeric_limits<double>::infinity()));
+            covered(rate,std::nextafter(rf,std::numeric_limits<double>::infinity()));
+        }
+    }
+}
+void thin_independent_regions() {
+    auto config=oscillator_config();config.sample_rate=6000;config.carrier_hz=1490;
+    auto& policy=*config.oscillator_search;policy.rf_shift_hz=10;
+    for(auto accuracy:{.0001,100.})for(auto duration:{1.28,128.,163.84,398.08,600.}) {
+        policy.lf.accuracy_ppm=policy.rf.accuracy_ppm=accuracy;config.integration_seconds=duration;
+        const auto bank=modem::oscillator_pattern_search(config);
+        check(!bank.limited && bank.hypotheses.size()==bank.frequency.count &&
+              bank.frequency.half_width_hz==bank.frequency.requested_half_width_hz &&
+              bank.clock_half_width_ppm==bank.requested_clock_half_width_ppm,
+              "small independent Shift retains complete declared endpoints without a separate rate-axis cap");
+        check_independent_cell_coverage(config,bank);
+        auto direct=config;direct.carrier_hz=1500;direct.oscillator_search->rf_shift_hz=0;
+        const auto zero=modem::oscillator_pattern_search(direct);
+        check(bank.frequency.count==zero.frequency.count && bank.hypotheses.size()==zero.hypotheses.size() &&
+              near(bank.frequency.requested_half_width_hz,zero.frequency.requested_half_width_hz),
+              "equal physical Carrier and equal oscillator accuracy retain comparable zero/small Shift work");
+        for(const auto pair:bank.hypotheses) {
+            const auto rf=static_cast<long double>(pair.frequency_offset_hz)-
+                static_cast<long double>(config.carrier_hz)*pair.clock_error_ppm*1e-6L;
+            check(std::abs(rf)<=3*10*accuracy*1e-6+8*std::numeric_limits<double>::epsilon()*bank.frequency.half_width_hz,
+                  "sparse lanes remain inside the independent physical strip");
+        }
+    }
+    policy.lf.accuracy_ppm=policy.rf.accuracy_ppm=100;config.integration_seconds=128;
+    policy.margin=1;policy.lf.accuracy_ppm=300;policy.rf.accuracy_ppm=1;
+    const auto timing_step=.25*static_cast<double>(modem::pattern_chip_samples(config))/
+        static_cast<double>(modem::symbol_sample_count(config))*1e6;
+    // In this neighborhood the frequency lattice has 244 steps. Solve the
+    // strip-width/timing-resolution crossing, then test both sides without
+    // weakening either declared resolution.
+    const auto boundary=(timing_step*244*1490*1e-6-1490*300*1e-6)/(2*244+1);
+    policy.rf_shift_hz=boundary*1e6*(1-1e-10);
+    const auto narrow=modem::oscillator_pattern_search(config);
+    check(narrow.hypotheses.size()==narrow.frequency.count && !narrow.limited,
+          "a strip inside timing resolution uses sparse lanes");
+    check_independent_cell_coverage(config,narrow);
+    policy.rf_shift_hz=boundary*1e6*(1+1e-10);
+    const auto wide=modem::oscillator_pattern_search(config);
+    check(wide.hypotheses.size()>wide.frequency.count && !wide.limited,
+          "a strip outside timing resolution retains independently resolved timing lanes");
+    config.integration_seconds=86400;policy.rf_shift_hz=10;policy.rf.accuracy_ppm=100;policy.lf.accuracy_ppm=100;
+    const auto capped=modem::oscillator_pattern_search(config);
+    check(capped.limited && capped.hypotheses.size()<=modem::maximum_pattern_frequency_rate_hypotheses,
+          "long independent regions retain explicit cap-limited coverage");
+    config.integration_seconds=128;config.carrier_hz=31.25;
+    const auto edge=modem::oscillator_pattern_search(config);
+    check(edge.limited && edge.hypotheses.front()==modem::PatternFrequencyRateHypothesis{0,0},
+          "passband-trimmed independent regions retain nominal reception and honest coverage limits");
 }
 void short_and_bounded_oscillator_searches() {
     auto config=oscillator_config();config.sample_rate=400;config.carrier_hz=50;
@@ -345,14 +478,138 @@ void joint_passband_and_quantized_tones() {
     check(!endpoint.hypotheses.empty() && endpoint.hypotheses.front()==modem::PatternFrequencyRateHypothesis{0,0} &&
           endpoint.limited,"validated floating-point endpoint always retains an authoritative nominal lane");
 }
+// Deliberately enumerate the former Cartesian construction as an independent
+// oracle for the bounded interval implementation, including its exact ordering
+// and direct floating-point boundary comparisons.
+void compare_enumerated_independent_bank(const modem::Config& config) {
+    const auto actual=modem::oscillator_pattern_search(config);
+    const auto& policy=*config.oscillator_search;
+    const auto clock_bound=static_cast<double>(static_cast<long double>(policy.margin)*policy.lf.accuracy_ppm);
+    const auto rf_bound=static_cast<double>(static_cast<long double>(policy.margin)*policy.rf_shift_hz*
+        policy.rf.accuracy_ppm*1e-6L);
+    check(clock_bound>0 && rf_bound>0,"oracle exercises independent frequency and clock dimensions");
+    const auto width=static_cast<double>(static_cast<long double>(config.carrier_hz)*clock_bound*1e-6L+rf_bound);
+    const auto requested_steps=std::ceil(static_cast<long double>(width)/
+        (.25*config.sample_rate/static_cast<double>(modem::symbol_sample_count(config))));
+    const auto step=static_cast<double>(static_cast<long double>(width)/requested_steps);
+    check(actual.frequency.step_hz==step && actual.frequency.requested_half_width_hz==width,
+          "independent frequency resolution and requested bounds are unchanged");
+    const auto fitting=[](double limit,double spacing,std::size_t cap) {
+        const auto possible=std::floor(static_cast<long double>(limit)/spacing);
+        auto count=possible>=cap?cap:static_cast<std::size_t>(possible);
+        while(count && static_cast<double>(count)*spacing>limit)--count;
+        return count;
+    };
+    const auto endpoint=[&](std::size_t count) {
+        return count==requested_steps?width:std::min(static_cast<double>(count)*step,width);
+    };
+    const auto offsets=[&](std::size_t count) {
+        std::vector<double> values{0};values.reserve(1+2*count);
+        for(std::size_t index=1;index<=count;++index) {
+            values.push_back(-endpoint(index));values.push_back(endpoint(index));
+        }
+        return values;
+    };
+    constexpr auto maximum_steps=(modem::maximum_pattern_frequency_hypotheses-1)/2;
+    auto steps=requested_steps>=maximum_steps?maximum_steps:static_cast<std::size_t>(requested_steps);
+    const auto limit=modem::pattern_frequency_offset_limit(config);
+    if(width>limit)steps=std::min(steps,fitting(limit,step,maximum_steps));
+    const auto requested_rates=std::ceil(static_cast<long double>(clock_bound)/
+        (.25*static_cast<double>(modem::pattern_chip_samples(config))/
+         static_cast<double>(modem::symbol_sample_count(config))*1e6));
+    const auto rate_step=static_cast<double>(static_cast<long double>(clock_bound)/requested_rates);
+    const auto timing_step=.25*static_cast<double>(modem::pattern_chip_samples(config))/
+        static_cast<double>(modem::symbol_sample_count(config))*1e6;
+    if(clock_bound<=10000 && (static_cast<long double>(step)+2.L*rf_bound)/config.carrier_hz*1e6L<timing_step) {
+        check(actual.hypotheses.size()==actual.frequency.count,"thin independent oracle cases use one timing lane per frequency");
+        if(!actual.limited)check_independent_cell_coverage(config,actual);
+        return;
+    }
+    check(actual.clock_step_ppm==rate_step,"independent timing resolution is unchanged");
+    constexpr auto maximum_rates=(modem::maximum_pattern_rate_hypotheses-1)/2;
+    auto rate_steps=requested_rates>=maximum_rates?maximum_rates:static_cast<std::size_t>(requested_rates);
+    if(clock_bound>10000)rate_steps=std::min(rate_steps,fitting(10000,rate_step,maximum_rates));
+    std::vector<double> rates{0};
+    for(std::size_t index=1;index<=rate_steps;++index) {
+        const auto rate=index==requested_rates?clock_bound:std::min(static_cast<double>(index)*rate_step,clock_bound);
+        rates.push_back(-rate);rates.push_back(rate);
+    }
+    const auto half_band=modem::pattern_pulse_enabled(config)?
+        (1+modem::pattern_pulse_rolloff)*config.sample_rate/(2.*static_cast<double>(modem::pattern_chip_samples(config))):
+        config.bandwidth_hz/2;
+    const auto nyquist=config.sample_rate/2.;
+    const auto tolerance=4*(std::nextafter(nyquist,std::numeric_limits<double>::infinity())-nyquist);
+    const auto radius=rf_bound+config.carrier_hz*rate_step*.5e-6+step;
+    const auto enumerate=[&](std::size_t count) {
+        std::vector<modem::PatternFrequencyRateHypothesis> pairs;
+        const auto frequencies=offsets(count);
+        for(auto rate:rates)for(auto offset:frequencies) {
+            const auto support=static_cast<long double>(half_band)*(1+static_cast<long double>(rate)*1e-6L);
+            const auto carrier=static_cast<long double>(config.carrier_hz)+offset;
+            if(std::abs(offset-config.carrier_hz*rate*1e-6)<=radius &&
+                carrier-support>=-tolerance && carrier+support<=nyquist+tolerance)pairs.push_back({offset,rate});
+        }
+        return pairs;
+    };
+    if(enumerate(steps).size()>modem::maximum_pattern_frequency_rate_hypotheses) {
+        std::size_t lower=0,upper=steps;
+        while(lower<upper) {
+            const auto middle=lower+(upper-lower+1)/2;
+            if(enumerate(middle).size()<=modem::maximum_pattern_frequency_rate_hypotheses)lower=middle;
+            else upper=middle-1;
+        }
+        steps=lower;
+    }
+    auto expected=enumerate(steps);
+    std::vector<bool> positive(steps+1),negative(steps+1);
+    for(auto pair:expected) {
+        const auto index=std::min(steps,static_cast<std::size_t>(std::llround(std::abs(pair.frequency_offset_hz)/step)));
+        (pair.frequency_offset_hz<0?negative:positive)[index]=true;
+    }
+    for(std::size_t index=1;index<=steps;++index)
+        if(!positive[index] || !negative[index]) {steps=index-1;break;}
+    std::erase_if(expected,[&](auto pair){return std::abs(pair.frequency_offset_hz)>endpoint(steps);});
+    if(expected.empty()) {expected.push_back({0,0});steps=0;}
+    double maximum_clock=0;
+    for(auto pair:expected)maximum_clock=std::max(maximum_clock,std::abs(pair.clock_error_ppm));
+    check(actual.hypotheses==expected,"bounded construction preserves every exact paired hypothesis and its order");
+    check(actual.frequency.count==1+2*steps && actual.frequency.half_width_hz==endpoint(steps) &&
+          actual.clock_half_width_ppm==maximum_clock,"bounded construction preserves pair-cap and boundary coverage");
+}
+void bounded_independent_construction() {
+    auto config=oscillator_config();auto& policy=*config.oscillator_search;
+    for(auto shift:{10000.,1000000.,30000000.})for(auto duration:{1.3,128.,86400.}) {
+        policy.rf_shift_hz=shift;config.integration_seconds=duration;
+        compare_enumerated_independent_bank(config);
+    }
+    policy.rf_shift_hz=1000000;config.integration_seconds=82;
+    for(auto accuracy:{.0001,100.,10000.})for(auto margin:{1.,3.}) {
+        policy.lf.accuracy_ppm=accuracy;policy.rf.accuracy_ppm=.0001;policy.margin=margin;
+        compare_enumerated_independent_bank(config);
+    }
+    policy.margin=1;policy.lf.accuracy_ppm=100;policy.rf.accuracy_ppm=.0001;
+    config.sample_rate=400;config.bandwidth_hz=100;
+    for(auto carrier:{31.25,31.251,168.749,168.75}) {
+        config.carrier_hz=carrier;compare_enumerated_independent_bank(config);
+    }
+    config.sample_rate=6000;config.bandwidth_hz=1300;config.carrier_hz=1500;
+    config.spreading_mode=modem::SpreadingMode::tone;config.integration_seconds=.25;
+    policy.rf_shift_hz=1600000;policy.rf.accuracy_ppm=100;
+    compare_enumerated_independent_bank(config);
+    config=oscillator_config();config.sample_rate=400;config.bandwidth_hz=140;
+    config.carrier_hz=200-41.666666666666664;
+    config.oscillator_search->margin=1;config.oscillator_search->lf.accuracy_ppm=1e-10;
+    config.oscillator_search->rf_shift_hz=1000000;config.oscillator_search->rf.accuracy_ppm=1e-15;
+    compare_enumerated_independent_bank(config);
+}
 }
 int main() {
     try {
         unchanged_short_searches();long_pattern_coverage();short_carrier_passband_boundaries();quantization_and_endpoints();
         tones_and_invalid_configurations();projected_bin_coverage();
-        oscillator_bounds_and_phase();exact_declared_lattice_endpoints();shared_radio_frequency_mapping();independent_reference_geometry();
+        oscillator_bounds_and_phase();exact_declared_lattice_endpoints();shared_radio_frequency_mapping();zero_shift_uses_only_baseband();independent_reference_geometry();
         short_and_bounded_oscillator_searches();invalid_oscillator_policies();
-        joint_passband_and_quantized_tones();
+        joint_passband_and_quantized_tones();thin_independent_regions();bounded_independent_construction();
     }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
     std::cout<<"pattern search tests passed\n";
 }

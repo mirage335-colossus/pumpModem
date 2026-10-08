@@ -52,8 +52,9 @@ double shannon_capacity_bps(double bandwidth_hz, double target_snr_db_hz);
 // retain the 0.75 * bandwidth carrier. The logical clock covers both the band
 // and carrier with four samples per hertz, keeping the nominal upper edge in
 // the resampler's flat passband. Hardware clocks are negotiated independently.
-// An explicit carrier changes the internal clock as needed; omitted carriers
-// preserve the existing automatic recommendation.
+// Round up to whole sampled half-chips when an exact decimal-rate clock fits within
+// 5% of the minimum. This keeps small carrier edits from creating large FFTs.
+// The physical carrier and nominal symbol-duration formula are unchanged.
 std::uint32_t recommended_sample_rate(double bandwidth_hz,
     std::optional<double> carrier_hz = std::nullopt);
 double recommended_carrier_hz(double bandwidth_hz);

@@ -132,7 +132,7 @@ void validate(const Config& c) {
                 (policy.sideband==OscillatorSideband::upper?1.L:-1.L)*c.carrier_hz;
         check(std::isfinite(rf) && rf>0 && rf<=std::numeric_limits<double>::max(),
             "RF LO and sideband must describe a finite positive on-air carrier");
-        const bool shared=policy.reference==OscillatorReference::shared_radio;
+        const bool shared=policy.reference==OscillatorReference::shared_radio && policy.rf_shift_hz!=0;
         const auto accuracy=shared?rf*policy.rf.accuracy_ppm:
             static_cast<long double>(c.carrier_hz)*policy.lf.accuracy_ppm+
                 static_cast<long double>(policy.rf_shift_hz)*policy.rf.accuracy_ppm;
