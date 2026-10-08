@@ -857,6 +857,37 @@ rows one per backing pixel; taller plots scale that bounded history to fill the
 available height. Startup history remains bottom-aligned with blank space for
 unobserved rows. Resizing does not clear or add measurements.
 
+The live oscilloscope uses a fixed environmental timebase, independently of
+the expected carrier. Its default spans up to 2,048 captured samples, capped
+at half a second for low-rate streams. Missing startup time remains blank;
+the trace does not stretch as samples arrive. Zoom can still inspect the
+retained tail.
+
+During hardware reception, the oscilloscope and waterfall observe the audio
+provider's input before modem resampling. Their rate and Nyquist range describe
+that captured stream, including surrounding interference. Device negotiation
+and receiver PCM/rate remain unchanged. A 48 kHz input has 23.4375 Hz FFT bins;
+this environmental display is not a narrowband detection statistic. Receiver
+I/Q and pattern evidence continue to use the modem stream. Logical receiver
+updates do not append duplicate environmental spectrum rows.
+
+The optional monitor uses a fixed 2,048-sample ring, with 96 KiB conservatively
+reserved inside the existing audio allowance for ring, copies, FFT scratch and
+callback state. It publishes at most 20 times per second, omits carrier/I/Q
+work, and replaces the logical display FFT rather than adding another one.
+If the provider lacks monitoring or that allowance cannot fit, the plots retain
+their ordinary modem-stream fallback. Captions distinguish `input monitor`,
+`modem stream` and `simulated stream`. No receiver hypotheses or workspace quota
+are reduced to enable monitoring.
+
+Simulation and replay show their actual generated PCM and retain its spectral
+resolution and noise calibration. They cannot display frequencies absent from
+that sampled model. An expensive offline simulation still advances its measured
+plots as computation produces samples; it does not invent fresh environmental
+frames. Hardware transmit continues its existing input-pause policy and shows
+the transmitted modem stream. These display changes add no reception samples,
+physical completion events or accepted-bit batching.
+
 The Console **Pattern evidence** plot places received P0 log scores on the
 horizontal axis and P1 log scores on the vertical axis. It preserves the spread
 of noise and signal candidates instead of converting their scores into a

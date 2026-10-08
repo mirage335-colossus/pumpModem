@@ -126,7 +126,7 @@ std::vector<AudioEndpoint::Event> AudioEndpoint::take_events() {
     p.event_frames=0;p.changed.notify_all();return result;
 }
 void AudioEndpoint::close(){auto& p=*impl_;std::lock_guard lock(p.mutex);p.closed=true;p.changed.notify_all();}
-void AudioEndpoint::capture(std::uint32_t logical,const audio::CaptureCallback& callback,std::stop_token stop,audio::StreamFormatCallback format) {
+void AudioEndpoint::capture(std::uint32_t logical,const audio::CaptureCallback& callback,std::stop_token stop,audio::StreamFormatCallback format,audio::CaptureMonitor monitor) {
     auto& p=*impl_;std::uint64_t generation,stream;std::uint32_t rate;
     {
         std::unique_lock lock(p.mutex);
@@ -153,6 +153,8 @@ void AudioEndpoint::capture(std::uint32_t logical,const audio::CaptureCallback& 
                 p.valid(generation,stop);if(!available)throw Error("host capture stopped delivering samples");
                 input=std::move(p.capture_queue.front());p.capture_queue.pop_front();p.capture_frames-=input.size();
             }
+            if(stop.stop_requested())throw Error("audio operation cancelled");
+            if(monitor)monitor(input,rate);
             std::size_t offset=0;
             while(offset<input.size() && more) {
                 if(stop.stop_requested())throw Error("audio operation cancelled");
@@ -250,7 +252,7 @@ void schedule_output(double epoch,std::stop_token stop){host::audio_endpoint().s
 std::vector<Device> devices(){return {{"default",default_device_description()}};}
 namespace {void device_check(const std::string& id){if(!id.empty()&&id!="default")throw Error("unavailable host audio device");}}
 void capture(std::uint32_t rate,const std::string& id,const CaptureCallback& cb,std::stop_token stop,StreamFormatCallback format){capture(rate,id,cb,stop,std::move(format),{});}
-void capture(std::uint32_t rate,const std::string& id,const CaptureCallback& cb,std::stop_token stop,StreamFormatCallback format,Options options){device_check(id);validate_options(options);host::audio_endpoint().capture(rate,cb,stop,std::move(format));}
+void capture(std::uint32_t rate,const std::string& id,const CaptureCallback& cb,std::stop_token stop,StreamFormatCallback format,Options options){device_check(id);validate_options(options);host::audio_endpoint().capture(rate,cb,stop,std::move(format),std::move(options.capture_monitor));}
 void playback(std::uint32_t rate,const std::string& id,const PlaybackCallback& cb,std::stop_token stop,StreamFormatCallback format,bool mono){playback(rate,id,cb,stop,std::move(format),output_channels(mono),{});}
 void playback(std::uint32_t rate,const std::string& id,const PlaybackCallback& cb,std::stop_token stop,StreamFormatCallback format,ChannelMode channels){playback(rate,id,cb,stop,std::move(format),channels,{});}
 void playback(std::uint32_t rate,const std::string& id,const PlaybackCallback& cb,std::stop_token stop,StreamFormatCallback format,ChannelMode channels,Options options){device_check(id);host::audio_endpoint().playback(rate,cb,stop,std::move(format),channels,options);}

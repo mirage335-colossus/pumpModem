@@ -11,6 +11,13 @@
 
 namespace datapump::gui::plots {
 inline constexpr std::size_t waveform_kernel_radius = 32;
+// The live oscilloscope follows an environmental timebase, independent of the
+// expected carrier. Low-rate inputs default to half a second; ordinary audio
+// uses the retained 2048-sample capture. Zoom can inspect the complete tail.
+inline std::size_t oscilloscope_extent(std::uint32_t sample_rate,double zoom=1) {
+    if(!sample_rate || !(zoom>0) || !std::isfinite(zoom))throw Error("invalid oscilloscope timebase");
+    return static_cast<std::size_t>(std::clamp(std::ceil(std::min(2047.,sample_rate*.5)*zoom)+1,2.,2048.));
+}
 // Keep the original samples. A useful timebase prevents hundreds of carrier
 // cycles being rasterized into a few hundred pixels as an apparent square wave.
 // Optional captured context on either side avoids extrapolating the displayed

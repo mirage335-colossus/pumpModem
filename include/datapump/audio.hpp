@@ -7,7 +7,7 @@
 namespace datapump::audio {
 struct Device {std::string id,description;};
 std::vector<Device> devices();
-// Callbacks and supplied/returned PCM always use logical_rate. The sound card
+// Modem callbacks and supplied/returned PCM use logical_rate. The sound card
 // may run at another supported rate; conversion is automatic and bounded.
 // usable_passband_hz describes the converter's flat passband, not a promise
 // about a particular microphone/speaker or recoverable energy above Nyquist.
@@ -22,7 +22,11 @@ using StreamFormatCallback = std::function<void(const StreamFormat&)>;
 enum class ChannelMode { left_mono, right_mono, stereo };
 // Applied only at the final hardware PCM boundary, after rate conversion.
 // Unity gain preserves the original conversion exactly; capture is not scaled.
-struct Options {double transmit_gain=1.0; bool exclusive=false;};
+// Optional read-only capture observation before resampling. The borrowed PCM
+// and rate describe the provider capture stream, independently of the modem clock.
+// Keep this callback bounded; it cannot consume samples or finish reception.
+using CaptureMonitor = std::function<void(std::span<const float>,std::uint32_t)>;
+struct Options {double transmit_gain=1.0; bool exclusive=false; CaptureMonitor capture_monitor={};};
 // Capabilities belong to the selected audio provider, not the UI or target OS.
 bool exclusive_supported();
 std::string default_device_description();

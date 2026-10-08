@@ -357,7 +357,7 @@ std::vector<float> record(double seconds,std::uint32_t rate,const std::string& d
     },stop,std::move(on_format));
     return samples;
 }
-static void capture_device(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop,StreamFormatCallback on_format) {
+static void capture_device(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop,StreamFormatCallback on_format,const CaptureMonitor& monitor={}) {
     check_cancelled(stop);
     if(!on_chunk) throw Error("capture callback is required");
     Alsa api; Stream stream(api,device,1,rate,stop,true);
@@ -383,6 +383,9 @@ static void capture_device(std::uint32_t rate,const std::string& device,const Ca
             if(static_cast<std::size_t>(n)>chunk_limit) throw Error("audio capture returned invalid sample count");
             for(std::size_t i=0;i<static_cast<std::size_t>(n);++i) converted[i]=block[i]/32768.0f;
             failures=0;
+            check_cancelled(stop);
+            if(monitor)monitor(std::span<const float>(converted.data(),static_cast<std::size_t>(n)),stream.hardware_rate);
+            check_cancelled(stop);
             if(!sink.write(std::span<const float>(converted.data(),static_cast<std::size_t>(n)))) break;
         }
     }
@@ -558,7 +561,7 @@ std::vector<float> record(double seconds,std::uint32_t rate,const std::string& d
     },stop,std::move(on_format));
     return result;
 }
-static void capture_device(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop,StreamFormatCallback on_format) {
+static void capture_device(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop,StreamFormatCallback on_format,const CaptureMonitor& monitor={}) {
     check_cancelled(stop);
     if(!on_chunk) throw Error("capture callback is required");
     WaveSession session(true,rate,device);
@@ -584,6 +587,9 @@ static void capture_device(std::uint32_t rate,const std::string& device,const Ca
         for(std::size_t i=0;i<count;++i) converted[i]=session.pcm[slot][i]/32768.0f;
         if(session.headers[1-slot].dwFlags&WHDR_DONE) throw Error("audio capture overrun");
         mm_check(waveInAddBuffer(session.input,&header,sizeof(WAVEHDR)),"waveIn requeue failed");
+        check_cancelled(stop);
+        if(monitor)monitor(std::span<const float>(converted.data(),count),session.hardware_rate);
+        check_cancelled(stop);
         if(!sink.write(std::span<const float>(converted.data(),count))) break;
         slot=1-slot;
     }
@@ -597,7 +603,7 @@ void capture(std::uint32_t rate,const std::string& device,const CaptureCallback&
 }
 void capture(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop,StreamFormatCallback on_format,Options options) {
     check_cancelled(stop);validate_options(options);
-    capture_device(rate,selected_endpoint(device,true,options.exclusive),on_chunk,stop,std::move(on_format));
+    capture_device(rate,selected_endpoint(device,true,options.exclusive),on_chunk,stop,std::move(on_format),options.capture_monitor);
 }
 void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop,StreamFormatCallback on_format,ChannelMode channels) {
     playback_device(rate,device,next_samples,stop,std::move(on_format),channels,1.0);

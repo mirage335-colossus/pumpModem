@@ -8,7 +8,7 @@
 
 namespace datapump::gui::plots {
 namespace {
-struct Waveform { std::vector<float> samples; modem::Config config; double zoom; };
+struct Waveform { std::vector<float> samples; modem::Config config; double zoom; bool environment=false; };
 struct Constellation { std::vector<std::complex<double>> points; bool symbols; };
 struct PatternScores { std::vector<PatternScore> scores; bool enabled; };
 struct Waterfall { SpectrumHistory history; bool overview; };
@@ -100,6 +100,11 @@ PlotSnapshot PlotSnapshot::waveform(std::vector<float> samples, modem::Config co
     if (!(zoom > 0) || !std::isfinite(zoom)) throw Error("invalid waveform zoom");
     return PlotSnapshot(std::make_shared<Data>(Waveform{std::move(samples), config, zoom}));
 }
+PlotSnapshot PlotSnapshot::oscilloscope(std::vector<float> samples,std::uint32_t rate,double zoom) {
+    (void)oscilloscope_extent(rate,zoom);
+    modem::Config config;config.sample_rate=rate;
+    return PlotSnapshot(std::make_shared<Data>(Waveform{std::move(samples),config,zoom,true}));
+}
 PlotSnapshot PlotSnapshot::constellation(std::vector<std::complex<double>> points, bool symbols) {
     return PlotSnapshot(std::make_shared<Data>(Constellation{std::move(points), symbols}));
 }
@@ -163,36 +168,43 @@ void PlotSnapshot::paint(const BitmapRequest& request, const BitmapSink& sink, b
                 }
             };
             if (!data.samples.empty()) {
-                const auto view = waveform_window(data.samples, data.config, data.zoom, waveform_kernel_radius);
+                const auto extent=data.environment?oscilloscope_extent(data.config.sample_rate,data.zoom):std::size_t{};
+                const auto view=data.environment?std::span<const float>(data.samples).last(std::min(extent,data.samples.size())):
+                    waveform_window(data.samples,data.config,data.zoom,waveform_kernel_radius);
+                // Missing capture time stays blank, with constant sample spacing.
+                const auto draw_width=data.environment?1+static_cast<unsigned>(
+                    static_cast<std::uint64_t>(request.width-1)*(view.size()-1)/(extent-1)):request.width;
+                const auto left=static_cast<int>(request.width-draw_width);
                 const auto first = static_cast<std::size_t>(view.data() - data.samples.data());
-                const auto trace = waveform_reconstruction(data.samples, first, view.size(), request.width);
+                const auto trace = waveform_reconstruction(data.samples, first, view.size(), draw_width);
                 double scale = 1e-12;
-                for (auto value : data.samples) if (std::isfinite(value)) scale = std::max(scale, std::abs(static_cast<double>(value)));
+                const auto levels=data.environment?view:std::span<const float>(data.samples);
+                for (auto value : levels) if (std::isfinite(value)) scale = std::max(scale, std::abs(static_cast<double>(value)));
                 for (auto value : trace) if (std::isfinite(value)) scale = std::max(scale, std::abs(value));
                 const auto screen_y = [&](double value) {
                     return static_cast<int>(std::lround(height * .5 - value / scale * height * .43));
                 };
-                if (view.size() <= request.width) {
+                if (view.size() <= draw_width) {
                     const auto vertices = trace.empty() ? view.size() : trace.size();
                     int previous_x = 0, previous_y = 0; bool previous_valid = false;
                     for (std::size_t i = 0; i < vertices; ++i) {
                         const auto value = trace.empty() ? view[i] : trace[i];
                         if (!std::isfinite(value)) { previous_valid = false; continue; }
-                        const auto px = static_cast<int>(static_cast<double>(i) * (width - 1) / static_cast<double>(std::max<std::size_t>(1, vertices - 1)));
+                        const auto px = left+static_cast<int>(static_cast<double>(i) * (draw_width - 1) / static_cast<double>(std::max<std::size_t>(1, vertices - 1)));
                         const auto py = screen_y(value);
                         if (previous_valid) line(previous_x, previous_y, px, py); else add(px, py);
                         previous_x = px; previous_y = py; previous_valid = true;
                     }
-                    if (view.size() * 4 < request.width) for (std::size_t i = 0; i < view.size(); ++i) {
+                    if (view.size() * 4 < draw_width) for (std::size_t i = 0; i < view.size(); ++i) {
                         if (!std::isfinite(view[i])) continue;
-                        const auto px = static_cast<int>(static_cast<double>(i) * (width - 1) / static_cast<double>(std::max<std::size_t>(1, view.size() - 1)));
+                        const auto px = left+static_cast<int>(static_cast<double>(i) * (draw_width - 1) / static_cast<double>(std::max<std::size_t>(1, view.size() - 1)));
                         const auto py = screen_y(view[i]);
                         add(px - 1, py - 1); add(px - 1, py); add(px, py - 1); add(px, py);
                     }
                 } else {
-                    const auto columns = waveform_columns(view, request.width);
+                    const auto columns = waveform_columns(view, draw_width);
                     for (std::size_t i = 0; i < columns.size(); ++i) {
-                        const auto px = static_cast<int>(i);
+                        const auto px = left+static_cast<int>(i);
                         if (std::isfinite(columns[i].low) && std::isfinite(columns[i].high))
                             line(px, screen_y(columns[i].low), px, screen_y(columns[i].high));
                         if (i && std::isfinite(columns[i-1].last) && std::isfinite(columns[i].first))
@@ -415,9 +427,13 @@ std::string PlotSnapshot::caption(unsigned width) const {
         std::ostringstream out;
         if constexpr (std::is_same_v<Type, Waveform>) {
             if (data.samples.empty()) return "No waveform samples";
-            const auto view = waveform_window(data.samples, data.config, data.zoom, waveform_kernel_radius);
-            const auto seconds = static_cast<double>(view.size() - 1) / data.config.sample_rate;
-            const bool reconstructed = view.size() >= 2 && view.size() <= width && view.size() <= 8193;
+            const auto extent=data.environment?oscilloscope_extent(data.config.sample_rate,data.zoom):std::size_t{};
+            const auto view=data.environment?std::span<const float>(data.samples).last(std::min(extent,data.samples.size())):
+                waveform_window(data.samples,data.config,data.zoom,waveform_kernel_radius);
+            const auto seconds=static_cast<double>((data.environment?extent:view.size())-1)/data.config.sample_rate;
+            const auto draw_width=data.environment && width?1+static_cast<unsigned>(
+                static_cast<std::uint64_t>(width-1)*(view.size()-1)/(extent-1)):width;
+            const bool reconstructed = view.size() >= 2 && view.size() <= draw_width && view.size() <= 8193;
             out << std::setprecision(3) << seconds * (seconds < .001 ? 1e6 : 1000) << (seconds < .001 ? " us" : " ms")
                 << " / " << view.size() << " samples" << (reconstructed ? " / reconstructed" : "");
         } else if constexpr (std::is_same_v<Type, Constellation>) {

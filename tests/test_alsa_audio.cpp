@@ -401,8 +401,26 @@ int main(){try{
         f::state.captured=0;f::state.read_limit=173;
         const auto other_chunks=a::record(4,logical,"default",1024*1024);
         check(received==other_chunks,"varying driver capture chunk sizes changes modem PCM");
+        f::state.captured=0;std::size_t monitored=0;bool format_seen=false;
+        a::Options monitor_options;
+        monitor_options.capture_monitor=[&](std::span<const float> raw,std::uint32_t clock) {
+            check(format_seen && clock==hardware,"monitor ran before format or used logical sample rate");
+            for(const auto sample:raw)check(sample==f::state.sample(monitored++,clock)/32768.f,"raw monitor reordered or resampled device PCM");
+        };
+        const auto with_monitor=a::record(4,logical,"default",1024*1024,{},[&](const auto&){format_seen=true;},monitor_options);
+        check(with_monitor==received && monitored==f::state.captured && monitored>with_monitor.size(),
+              "monitor changed receiver PCM or counted logical samples as physical input");
         check(f::state.live==0,"low-rate conversion leaked an audio stream");
     }
+    f::reset();f::state.available={"default"};f::state.supported_rates={48000};
+    f::state.sample=[](std::size_t i,unsigned rate){return static_cast<std::int16_t>(8000*std::sin(2*std::numbers::pi*8*i/rate)+8000*std::sin(2*std::numbers::pi*3000*i/rate));};
+    const auto composite=a::record(2,64,"default",1024*1024);
+    f::state.captured=0;std::size_t raw_count=0;
+    a::Options observer;observer.capture_monitor=[&](auto raw,auto rate){for(auto sample:raw)check(sample==f::state.sample(raw_count++,rate)/32768.f,"monitor lost an out-of-band interferer");};
+    check(a::record(2,64,"default",1024*1024,{},{},observer)==composite,"wideband monitor altered the filtered receiver stream");
+    observer.capture_monitor=[](auto,auto){throw datapump::Error("monitor failed");};
+    rejects([&]{a::record(2,64,"default",1024*1024,{},{},observer);});
+    check(f::state.live==0 && f::state.opens==f::state.closes,"monitor exception leaked an ALSA stream");
     f::reset();f::state.available={"default"};f::state.supported_rates={44100};
     std::stop_source cancelled;
     rejects([&]{a::playback(96000,"default",[&](std::span<float> values){cancelled.request_stop();std::fill(values.begin(),values.end(),.1f);return values.size();},cancelled.get_token());});

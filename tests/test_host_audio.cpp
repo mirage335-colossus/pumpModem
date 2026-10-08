@@ -1,5 +1,6 @@
 #include "datapump/host/audio.hpp"
 #include <atomic>
+#include <algorithm>
 #include <chrono>
 #include <future>
 #include <iostream>
@@ -44,6 +45,37 @@ void gap_and_close() {
     require(frames==128,"capture gap manufactured silence or accepted a broken timeline");
     endpoint.configure(2,44100);fails([&]{endpoint.capture_samples(1,stream,0,pcm);});pcm[0]=std::numeric_limits<float>::quiet_NaN();fails([&]{endpoint.capture_samples(2,stream,0,pcm);});
     AudioEndpoint waiting;auto blocked=std::async(std::launch::async,[&]{fails([&]{waiting.capture(8000,[](auto){return true;},{},{});});});waiting.close();require(blocked.wait_for(2s)==std::future_status::ready,"close failed to wake unconfigured capture");blocked.get();
+}
+void capture_monitor_pair() {
+    constexpr std::uint32_t hardware=8000,logical=1000;
+    std::vector<float> pcm(3200);
+    for(std::size_t i=0;i<pcm.size();++i)pcm[i]=i%4==1?.5f:i%4==3?-.5f:0.f;
+    struct Result {std::vector<float> logical,raw;std::vector<std::size_t> chunks;};
+    const auto run=[&](bool observed) {
+        AudioEndpoint endpoint;endpoint.configure(1,hardware);Result result;bool formatted=false;
+        audio::CaptureMonitor monitor;
+        if(observed)monitor=[&](std::span<const float> input,std::uint32_t rate) {
+            require(formatted && rate==hardware,"host monitor lost physical format ordering");
+            require(result.raw.size()+input.size()<=pcm.size(),"host monitor duplicated PCM");
+            result.raw.insert(result.raw.end(),input.begin(),input.end());
+        };
+        auto task=std::async(std::launch::async,[&] {
+            endpoint.capture(logical,[&](std::span<const float> input) {
+                result.chunks.push_back(input.size());result.logical.insert(result.logical.end(),input.begin(),input.end());
+                return result.logical.size()<256;
+            },{},[&](const auto&){formatted=true;},monitor);
+        });
+        std::uint64_t stream=0;
+        until(endpoint,[&](const auto& e){if(e.kind!=AudioEndpoint::Kind::capture_start)return false;stream=e.stream;return true;});
+        for(std::size_t offset=0;offset<pcm.size();offset+=400)
+            endpoint.capture_samples(1,stream,offset,std::span<const float>(pcm).subspan(offset,400));
+        if(task.wait_for(2s)!=std::future_status::ready) {endpoint.close();task.wait();throw std::runtime_error("host monitored capture stalled");}
+        task.get();return result;
+    };
+    const auto plain=run(false),observed=run(true);
+    require(plain.logical==observed.logical && plain.chunks==observed.chunks,"host monitor changed decoder PCM or chunk boundaries");
+    require(observed.raw.size()>=2048 && observed.raw.size()<=pcm.size() &&
+            std::equal(observed.raw.begin(),observed.raw.end(),pcm.begin()),"host monitor changed or repeated raw out-of-band input");
 }
 void capture_restart() {
     AudioEndpoint endpoint;endpoint.configure(1,48000);std::vector<float> pcm(128,.25f);
@@ -135,4 +167,4 @@ void paced_capture_stops() {
     }
 }
 }
-int main(){try{playback(8000);playback(44100);playback(48000);gap_and_close();capture_restart();stopped_capture();cancellation();failed_output_keeps_capture();paced_capture_stops();std::cout<<"Host audio bounds, continuity, resampling, readiness, drain, cancellation and output recovery passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{playback(8000);playback(44100);playback(48000);gap_and_close();capture_monitor_pair();capture_restart();stopped_capture();cancellation();failed_output_keeps_capture();paced_capture_stops();std::cout<<"Host audio bounds, continuity, resampling, readiness, drain, cancellation and output recovery passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

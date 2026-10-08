@@ -202,6 +202,42 @@ void measured_plots() {
     const auto compressed = render(retained, full_bitmap_request(1, 1));
     check(red(compressed, 0, 0) == 255, "narrow waterfall lost a peak between output columns");
 }
+void environmental_oscilloscope() {
+    for(const auto rate:{64U,400U,6000U,48000U}) {
+        const auto extent=plots::oscilloscope_extent(rate);
+        const auto request=full_bitmap_request(321,101);
+        const auto empty=render(PlotSnapshot::oscilloscope({},rate),request);
+        std::string timebase;
+        for(const std::size_t count:{1U,3U,static_cast<unsigned>(extent/2),static_cast<unsigned>(extent)}) {
+            const auto source=PlotSnapshot::oscilloscope(std::vector<float>(count,.5f),rate);
+            const auto bitmap=render(source,request);
+            const auto left=320-320*(count-1)/(extent-1);
+            for(unsigned x=0;x+1<left;++x)
+                check(red(bitmap,x,7)==red(empty,x,7),"oscilloscope stretched partial capture into unobserved time");
+            check(red(bitmap,320,7)==255,"oscilloscope lost its newest measured sample");
+            const auto caption=source.caption();const auto duration=caption.substr(0,caption.find(" / "));
+            if(timebase.empty())timebase=duration;
+            check(timebase==duration,"oscilloscope timebase changes while capture fills");
+        }
+    }
+    check(plots::oscilloscope_extent(64)==33 && plots::oscilloscope_extent(48000)==2048 &&
+          plots::oscilloscope_extent(64,128)==2048,"environmental timebase lost its low-rate cap or retained zoom");
+    check(PlotSnapshot::oscilloscope(std::vector<float>(2048,.5f),48000).caption().starts_with("42.6 ms"),
+          "hardware waveform caption used the narrowband receiver clock");
+    check(PlotSnapshot::oscilloscope(std::vector<float>(400,.5f),48000).caption(640).find("reconstructed")==std::string::npos,
+          "partial oscilloscope envelope was labeled as reconstruction");
+    modem::Config config;config.sample_rate=48000;config.carrier_hz=8;config.bandwidth_hz=16;
+    std::vector<float> samples(2048);
+    for(std::size_t i=0;i<samples.size();++i)samples[i]=static_cast<float>(.5*std::cos(2*std::numbers::pi*3000*i/48000));
+    const auto all=live::detail::signal_plots(samples,config);
+    const auto monitor=live::detail::signal_plots(samples,config,0,live::detail::SignalView::environment);
+    const auto iq=live::detail::signal_plots(samples,config,0,live::detail::SignalView::constellation);
+    check(monitor.waveform==all.waveform && monitor.spectrum==all.spectrum && monitor.constellation.empty() &&
+          iq.constellation==all.constellation && iq.waveform.empty() && iq.spectrum.empty(),
+          "separate environment/IQ views changed measured statistics or repeated unused work");
+    check(std::max_element(monitor.spectrum.begin(),monitor.spectrum.end())-monitor.spectrum.begin()==128,
+          "environmental spectrum omitted interference outside the receiver's 32 Hz Nyquist");
+}
 void simulation_waterfall_reference() {
     Controller controller({true, false});
     const auto noise_history = [&] {
@@ -809,7 +845,7 @@ void sampled_pattern_score_clouds() {
 }
 int main() {
     try {
-        transfer_contract(); producer_lifetime(); tiled_replay(); measured_plots(); simulation_waterfall_reference(); simulation_waterfall_calibration(); waterfall_resize(); fitted_history(); qr_and_patterns(); pattern_scores(); sampled_pattern_score_clouds();
+        transfer_contract(); producer_lifetime(); tiled_replay(); measured_plots(); environmental_oscilloscope(); simulation_waterfall_reference(); simulation_waterfall_calibration(); waterfall_resize(); fitted_history(); qr_and_patterns(); pattern_scores(); sampled_pattern_score_clouds();
         std::cout << "GUI bitmap contract and shared producer tests passed\n";
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

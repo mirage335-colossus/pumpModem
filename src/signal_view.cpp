@@ -45,23 +45,26 @@ std::optional<double> spectrum_display_gain(std::optional<double> reference_gain
         waveform_samples==3?1.:1.5/static_cast<double>(waveform_samples-1);
     return *reference_gain_db+10*std::log10(complete/partial);
 }
-SignalPlots signal_plots(std::span<const float> samples,const modem::Config& config,std::uint64_t first_sample) {
+SignalPlots signal_plots(std::span<const float> samples,const modem::Config& config,std::uint64_t first_sample,SignalView view) {
     if (samples.size()>SignalWindow::sample_capacity(config)) throw Error("signal preview exceeds its frame window");
     SignalPlots result;
-    const auto waveform=samples.last(std::min(samples.size(),signal_window_size));
-    result.waveform.assign(waveform.begin(),waveform.end());
-    std::vector<std::complex<double>> bins(signal_window_size);
-    double weight=0;
-    for (std::size_t i=0;i<waveform.size();++i) {
-        const auto window=waveform.size()<3?1.:.5-.5*std::cos(2*std::numbers::pi*static_cast<double>(i)/static_cast<double>(waveform.size()-1));
-        bins[i]=static_cast<double>(waveform[i])*window; weight+=window;
+    if(view!=SignalView::constellation) {
+        const auto waveform=samples.last(std::min(samples.size(),signal_window_size));
+        result.waveform.assign(waveform.begin(),waveform.end());
+        std::vector<std::complex<double>> bins(signal_window_size);
+        double weight=0;
+        for (std::size_t i=0;i<waveform.size();++i) {
+            const auto window=waveform.size()<3?1.:.5-.5*std::cos(2*std::numbers::pi*static_cast<double>(i)/static_cast<double>(waveform.size()-1));
+            bins[i]=static_cast<double>(waveform[i])*window; weight+=window;
+        }
+        fft(bins);
+        result.spectrum.reserve(signal_window_size/2+1);
+        for (std::size_t i=0;i<=signal_window_size/2;++i) {
+            const double factor=(i==0 || i==signal_window_size/2)?1.:2.;
+            result.spectrum.push_back(20*std::log10(std::max(1e-12,std::abs(bins[i])*factor/std::max(1.,weight))));
+        }
     }
-    fft(bins);
-    result.spectrum.reserve(signal_window_size/2+1);
-    for (std::size_t i=0;i<=signal_window_size/2;++i) {
-        const double factor=(i==0 || i==signal_window_size/2)?1.:2.;
-        result.spectrum.push_back(20*std::log10(std::max(1e-12,std::abs(bins[i])*factor/std::max(1.,weight))));
-    }
+    if(view==SignalView::environment)return result;
     const auto chip=integration_samples(samples.size(),config);
     result.constellation.reserve(samples.size()/chip);
     const auto skip=static_cast<std::size_t>((chip-first_sample%chip)%chip);
@@ -103,10 +106,10 @@ void SignalWindow::push(std::span<const float> samples) {
     for (const auto sample:samples) { samples_[next_]=sample; next_=(next_+1)%samples_.size(); }
     size_=std::min(samples_.size(),size_+samples.size());
 }
-SignalPlots SignalWindow::frame(const modem::Config& config) const {
+SignalPlots SignalWindow::frame(const modem::Config& config,SignalView view) const {
     std::vector<float> ordered(size_);
     const auto first=(next_+samples_.size()-size_)%samples_.size();
     for (std::size_t i=0;i<size_;++i) ordered[i]=samples_[(first+i)%samples_.size()];
-    return signal_plots(ordered,config,total_-size_);
+    return signal_plots(ordered,config,total_-size_,view);
 }
 }

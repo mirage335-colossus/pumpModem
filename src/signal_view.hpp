@@ -9,8 +9,9 @@ struct SignalPlots {
     std::vector<double> spectrum;
     std::vector<std::complex<double>> constellation;
 };
+enum class SignalView { all, environment, constellation };
 SignalPlots signal_plots(std::span<const float> samples,const modem::Config& config,
-                         std::uint64_t first_sample=0);
+                         std::uint64_t first_sample=0,SignalView view=SignalView::all);
 // Match partial startup FFT noise bandwidth to a complete Hann window, using
 // display metadata only. Full windows and unreferenced hardware stay unchanged.
 std::optional<double> spectrum_display_gain(std::optional<double> reference_gain_db,
@@ -26,7 +27,7 @@ public:
     void push(std::span<const float> samples);
     void reset(std::uint64_t first_sample=0) noexcept { next_=size_=0; total_=first_sample; }
     std::uint64_t samples_seen() const noexcept { return total_; }
-    SignalPlots frame(const modem::Config& config) const;
+    SignalPlots frame(const modem::Config& config,SignalView view=SignalView::all) const;
 private:
     std::vector<float> samples_;
     std::size_t next_=0,size_=0;

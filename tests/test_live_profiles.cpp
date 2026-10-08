@@ -1,4 +1,6 @@
 #include "datapump/audio.hpp"
+#include "../src/signal_view.hpp"
+#include <numbers>
 #include "cpu_work_budget.hpp"
 #include "datapump/live.hpp"
 #include "datapump/pattern_pulse.hpp"
@@ -53,6 +55,10 @@ struct CaptureScript {
     std::vector<float> samples;
     std::uint32_t rate = 0;
     std::atomic<std::size_t> released{0}, delivered{0};
+    std::vector<float> monitor_samples;
+    std::uint32_t monitor_rate=0;
+    std::size_t monitor_format_bytes=0;
+    std::atomic<std::size_t> monitor_released{0},monitor_delivered{0};
 };
 CaptureScript* capture_script = nullptr;
 constexpr std::uint64_t epoch = 1800000000;
@@ -551,6 +557,57 @@ void simulated_long_fft_single_bit(double duration = 40, double snr = 30, std::u
     session.stop();
 }
 
+void independent_environment_monitor() {
+    auto value=settings({55},Configuration{16.,8.});
+    value.transfer.automatic_receive_profiles=false;
+    const auto config=value.transfer.modem;
+    check(config.sample_rate==64,"monitor fixture did not select narrowband input clock");
+    for(const unsigned budget_case:{0U,1U,2U}) {
+        const bool fallback=budget_case==2;
+        CaptureScript script;script.rate=config.sample_rate;script.monitor_rate=48000;
+        script.monitor_format_bytes=budget_case?value.dsp_workspace_bytes/8-96*1024+(fallback?1:0):0;
+        script.monitor_samples.resize(4096);script.samples.resize(128);
+        for(std::size_t i=0;i<script.monitor_samples.size();++i)
+            script.monitor_samples[i]=static_cast<float>((i<2048?.5:.25)*std::cos(2*std::numbers::pi*3000*i/48000));
+        for(std::size_t i=0;i<script.samples.size();++i)
+            script.samples[i]=static_cast<float>(.2*std::cos(2*std::numbers::pi*config.carrier_hz*i/config.sample_rate));
+        capture_script=&script;live::Session session([]{return static_cast<double>(epoch);});session.start(value);
+        const auto await=[&](auto predicate) {
+            const auto deadline=std::chrono::steady_clock::now()+3s;
+            while(std::chrono::steady_clock::now()<deadline) {
+                const auto snapshot=session.snapshot();check(snapshot.error.empty(),"monitor fixture: "+snapshot.error);
+                if(predicate(snapshot))return snapshot;std::this_thread::sleep_for(2ms);
+            }
+            throw Error("monitor fixture deadline");
+        };
+        script.monitor_released=2048;
+        await([&](const auto&){return script.monitor_delivered==2048;});
+        if(!fallback) {
+            const auto before=await([](const auto& x){return x.environment_monitor;});
+            check(before.waveform_sample_rate==48000 && before.spectrum_bin_hz==48000./2048 &&
+                  before.samples_received==0 && before.virtual_seconds==0 && before.signals.empty() && before.received.empty() &&
+                  !before.simulation_spectrum_gain_db && before.waveform==std::vector<float>(script.monitor_samples.begin(),script.monitor_samples.begin()+2048),
+                  "hardware-only monitoring changed receiver time/progress or lost raw preview geometry");
+            check(before.dsp_buffered_bytes<=value.dsp_workspace_bytes,"monitor exceeded configured workspace");
+            std::this_thread::sleep_for(60ms);script.monitor_released=4096;
+            const auto next=await([&](const auto& x){return x.spectrum_revision>before.spectrum_revision;});
+            check(next.samples_received==0 && next.signals.empty(),"another environment frame manufactured reception progress");
+            script.released=script.samples.size();
+            const auto logical=await([&](const auto& x){return x.samples_received==script.samples.size() && !x.constellation.empty();});
+            const auto expected=live::detail::signal_plots(script.samples,config);
+            check(logical.constellation==expected.constellation && logical.environment_monitor &&
+                  logical.waveform_sample_rate==48000 && logical.spectrum_revision==next.spectrum_revision &&
+                  logical.waveform==next.waveform && logical.spectrum_db==next.spectrum_db,
+                  "logical IQ overwrote environment samples or duplicated a waterfall observation");
+        } else {
+            script.released=script.samples.size();
+            const auto logical=await([&](const auto& x){return x.samples_received==script.samples.size() && !x.waveform.empty();});
+            check(!logical.environment_monitor && logical.waveform_sample_rate==64 && logical.spectrum_bin_hz==64./2048,
+                  "insufficient monitor headroom lost logical-rate fallback");
+        }
+        session.stop();capture_script=nullptr;
+    }
+}
 void sampled_long_fft_seeds() {
     for (const auto seed : {1ULL, 7ULL, 19ULL, 73ULL}) for (const auto snr : {30., -25.}) {
         try { simulated_long_fft_single_bit(400, snr, seed); }
@@ -568,6 +625,22 @@ namespace datapump::audio {
 void capture(std::uint32_t rate,const std::string& device,const CaptureCallback& callback,
              std::stop_token stop,StreamFormatCallback format,Options options) {
     validate_options(options);
+    if(capture_script && capture_script->monitor_rate) {
+        auto& script=*capture_script;
+        check(rate==script.rate && device=="controlled profile capture","monitor fixture capture identity changed");
+        if(format)format({rate,script.monitor_rate,rate/2.,script.monitor_format_bytes});
+        while(!stop.stop_requested()) {
+            auto begin=script.monitor_delivered.load(),end=script.monitor_released.load();
+            if(end>begin) {
+                if(options.capture_monitor)options.capture_monitor(std::span(script.monitor_samples).subspan(begin,end-begin),script.monitor_rate);
+                script.monitor_delivered=end;
+            }
+            begin=script.delivered.load();end=script.released.load();
+            if(end>begin) {if(!callback(std::span(script.samples).subspan(begin,end-begin)))return;script.delivered=end;}
+            std::this_thread::sleep_for(1ms);
+        }
+        return;
+    }
     capture(rate,device,callback,stop,std::move(format));
 }
 void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& callback,
@@ -607,8 +680,9 @@ int main(int argc, char** argv) {
         const FixtureTimerResolution timer_resolution;
 #endif
         const std::string suite = argc > 1 ? argv[1] : "all";
-        check(suite == "all" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds" || suite == "interval_queue",
+        check(suite == "all" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds" || suite == "interval_queue" || suite == "monitor",
               "unknown profile test suite");
+        if(suite=="all" || suite=="monitor") {context="independent environment monitor";independent_environment_monitor();}
         if (suite == "interval_queue") {
             context = "RX 55,32 TX 32 fixed interval queue pacing";
             run_case({55, 32}, 32, "hello fixed intervals", false);

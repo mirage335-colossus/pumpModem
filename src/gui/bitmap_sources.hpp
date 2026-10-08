@@ -17,13 +17,19 @@ public:
         };
         const auto update = controller.plot_update();
         const auto& snapshot = controller.snapshot();
+        const auto leaving_replay=replaying_ && !snapshot.simulation_replay;
         replaying_ = snapshot.simulation_replay;
-        if (update.clear_waterfall) history_.clear();
-        if (update.append_waterfall) history_.push(snapshot.spectrum_db, snapshot.spectrum_bin_hz,
+        simulation_=snapshot.simulation;environment_monitor_=snapshot.environment_monitor;
+        if (update.clear_waterfall) {history_.clear();spectrum_revision_.reset();}
+        const bool append=update.append_waterfall && (leaving_replay || snapshot.simulation_replay || !snapshot.spectrum_revision ||
+            !spectrum_revision_ || *spectrum_revision_!=snapshot.spectrum_revision);
+        if (append) history_.push(snapshot.spectrum_db, snapshot.spectrum_bin_hz,
                                                  snapshot.simulation_spectrum_gain_db);
+        if(append)spectrum_revision_=snapshot.spectrum_revision;
         const auto zoom = controller.waveform_zoom();
         if (update.update_plots || zoom_ != zoom)
-            put(ui::Bitmap::waveform, plots::PlotSnapshot::waveform(snapshot.waveform, controller.settings().transfer.modem, zoom));
+            put(ui::Bitmap::waveform, plots::PlotSnapshot::oscilloscope(snapshot.waveform,
+                snapshot.waveform_sample_rate?snapshot.waveform_sample_rate:controller.settings().transfer.modem.sample_rate,zoom));
         zoom_ = zoom;
         if (update.update_plots) {
             put(ui::Bitmap::constellation, plots::PlotSnapshot::constellation(snapshot.constellation,
@@ -45,7 +51,7 @@ public:
         }
         pattern_enabled_ = pattern_enabled;
         pattern_rx_paused_ = pattern_rx_paused;
-        if (update.clear_waterfall || update.append_waterfall)
+        if (update.clear_waterfall || append)
             put(ui::Bitmap::waterfall, plots::PlotSnapshot::waterfall(history_));
         const auto& bytes = controller.message_bytes();
         const std::string text(bytes.begin(), bytes.end());
@@ -92,6 +98,8 @@ public:
                 "Horizontal P0 / vertical P1: waiting for retained evidence from complete pattern windows";
         }
         auto result = get(id).caption(width);
+        if(id==ui::Bitmap::waveform || id==ui::Bitmap::waterfall)
+            result+=environment_monitor_?" / input monitor":simulation_?" / simulated stream":" / modem stream";
         if (id == ui::Bitmap::constellation && constellation_dropped_)
             result += " / " + std::to_string(constellation_dropped_) + " omitted";
         return result;
@@ -113,6 +121,7 @@ private:
     std::map<ui::Bitmap, std::uint64_t> versions_;
     plots::PlotSnapshot empty_;
     plots::SpectrumHistory history_;
+    std::optional<std::uint64_t> spectrum_revision_;
     PatternScoreView pattern_view_;
     std::vector<plots::PatternScore> pattern_scores_;
     std::string qr_text_, brightness_, qr_error_;
@@ -122,6 +131,7 @@ private:
     std::uint64_t constellation_dropped_ = 0;
     double zoom_ = 0;
     bool replaying_ = false;
+    bool simulation_ = true, environment_monitor_ = false;
     bool pattern_enabled_ = false;
     bool pattern_rx_paused_ = false;
     bool pattern_waiting_ = true;

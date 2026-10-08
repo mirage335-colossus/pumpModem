@@ -167,8 +167,9 @@ struct Smoke::Impl {
             if(beginning||snapshot.replay_frame_index!=replay.frame) {
                 if(bitmaps)require(preview_pixels(bitmaps->get(B::constellation))==preview_pixels(plots::PlotSnapshot::constellation(
                         snapshot.constellation,source!=live::ConstellationSource::input))&&
-                        preview_pixels(bitmaps->get(B::waveform))==preview_pixels(plots::PlotSnapshot::waveform(
-                        snapshot.waveform,controller.settings().transfer.modem,controller.waveform_zoom())),
+                        preview_pixels(bitmaps->get(B::waveform))==preview_pixels(plots::PlotSnapshot::oscilloscope(
+                        snapshot.waveform,snapshot.waveform_sample_rate?snapshot.waveform_sample_rate:
+                            controller.settings().transfer.modem.sample_rate,controller.waveform_zoom())),
                         "Shared replay bitmaps retained measurements from a different frame");
                 if(!beginning) {
                     if(bitmaps)require(bitmaps->version(B::waterfall)>replay.waterfall_version&&

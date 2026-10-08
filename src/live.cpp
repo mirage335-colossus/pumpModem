@@ -35,6 +35,10 @@ namespace datapump::live {
 namespace {
 using Clock = std::chrono::steady_clock;
 constexpr std::size_t plot_size = 2048;
+// Optional monitor fits inside the existing audio reservation. This covers its
+// fixed ring, ordered copy, FFT/result scratch and callback state, including
+// simultaneous logical diagnostic storage. It never reduces the RX bank quota.
+constexpr std::size_t monitor_workspace = 96 * 1024;
 constexpr std::size_t maximum_events = 64;
 constexpr std::size_t maximum_recovery_jobs = 8;
 constexpr std::size_t recovery_workspace_limit = 16 * 1024 * 1024;
@@ -503,6 +507,8 @@ struct Session::Impl {
         result.simulation_replay = true; result.replay_frame_index = index; result.replay_frame_count = replay.size();
         result.simulation_sample_fraction = frame.fraction;
         result.waveform = frame.waveform; result.spectrum_db.assign(frame.spectrum.begin(), frame.spectrum.end());
+        result.waveform_sample_rate = static_cast<std::uint32_t>(replay_bin_hz * (plot_size / 4));
+        result.environment_monitor = false;
         result.simulation_spectrum_gain_db = frame.simulation_spectrum_gain_db;
         result.spectrum_bin_hz = replay_bin_hz; result.constellation_source = frame.source;
         modem::ConstellationBatch visible;
@@ -581,9 +587,9 @@ struct Session::Impl {
                  modem::StreamingTransmitter* transmitter = nullptr, std::uint64_t serial = 0,
                  const std::vector<std::complex<double>>* pattern_scores = nullptr,
                  const std::vector<PatternScoreObservation>* pattern_observations = nullptr,
-                 std::uint64_t observation_id = 0) {
+                 std::uint64_t observation_id = 0, bool preserve_monitor = false) {
         if (!force && Clock::now() - last_plot < std::chrono::milliseconds(50)) return;
-        auto measured = window.frame(config);
+        auto measured = window.frame(config,preserve_monitor?detail::SignalView::constellation:detail::SignalView::all);
         auto transmitted = transmitter ? transmitter->take_payload_constellation() : modem::ConstellationBatch{};
         auto transmitted_history = transmitter ? transmitter->payload_constellation() :
             std::vector<std::complex<double>>{};
@@ -591,9 +597,14 @@ struct Session::Impl {
         if (!current.running || generation != version) return;
         if (transmitter && tx_serial != serial) return;
         if (pattern_scores && tx_serial != serial) return;
-        current.waveform = std::move(measured.waveform); current.spectrum_db = std::move(measured.spectrum);
-        current.simulation_spectrum_gain_db = settings.simulation ?
-            detail::spectrum_display_gain(settings.simulation_spectrum_gain_db, current.waveform.size()) : std::nullopt;
+        if(!preserve_monitor) {
+            current.waveform = std::move(measured.waveform); current.spectrum_db = std::move(measured.spectrum);
+            current.waveform_sample_rate = config.sample_rate; current.environment_monitor = false;
+            current.simulation_spectrum_gain_db = settings.simulation ?
+                detail::spectrum_display_gain(settings.simulation_spectrum_gain_db, current.waveform.size()) : std::nullopt;
+            current.spectrum_bin_hz = static_cast<double>(config.sample_rate) / plot_size;
+            ++current.spectrum_revision;
+        }
         if (pattern_scores) {
             current.pattern_scores = *pattern_scores;
             current.pattern_score_observations = *pattern_observations;
@@ -613,8 +624,21 @@ struct Session::Impl {
             current.constellation_source = ConstellationSource::transmitted;
             queue_points(std::move(transmitted), ConstellationSource::transmitted);
         }
-        current.spectrum_bin_hz = static_cast<double>(config.sample_rate) / plot_size;
         ++current.sequence; last_plot = Clock::now();
+    }
+    void publish_monitor(const detail::SignalWindow& window, const modem::Config& config,
+                         std::uint64_t version, Clock::time_point& last_plot) {
+        if(Clock::now()-last_plot<std::chrono::milliseconds(50))return;
+        auto measured=window.frame(config,detail::SignalView::environment);
+        std::lock_guard lock(mutex);
+        if(!current.running || generation!=version)return;
+        current.waveform=std::move(measured.waveform);current.spectrum_db=std::move(measured.spectrum);
+        current.waveform_sample_rate=config.sample_rate;current.environment_monitor=true;
+        current.spectrum_bin_hz=static_cast<double>(config.sample_rate)/plot_size;
+        current.simulation_spectrum_gain_db.reset();
+        current.dsp_buffered_bytes=receiver_bytes+input_bytes+decoding_bytes+audio_bytes+plot_workspace(settings)+
+            (tx_busy?settings.dsp_workspace_bytes/4:0);
+        ++current.spectrum_revision;++current.sequence;last_plot=Clock::now();
     }
     static std::uint64_t replay_target(const Prepared& wave) {
         const auto samples = wave.transmitter->total_samples();
@@ -1581,13 +1605,34 @@ struct Session::Impl {
                     if (generation == version) { current.status = idle_status(); current.error.clear(); }
                 }
                 plot_window.reset();
+                std::optional<detail::SignalWindow> monitor_window;
+                bool monitor_seen=false;
+                auto last_monitor=Clock::time_point{};
+                audio::Options capture_options{1.0,value.exclusive};
+                capture_options.capture_monitor=[&](std::span<const float> raw,std::uint32_t rate) {
+                    if(!monitor_window || raw.empty())return;
+                    monitor_window->push(raw);
+                    auto config=value.transfer.modem;config.sample_rate=rate;
+                    publish_monitor(*monitor_window,config,version,last_monitor);
+                    monitor_seen=true;
+                };
                 audio::capture(value.transfer.modem.sample_rate, value.device, [&](std::span<const float> chunk) {
                     account(chunk.size(), version); plot_window.push(chunk);
-                    publish(plot_window, value.transfer.modem, version, last_plot);
+                    publish(plot_window, value.transfer.modem, version, last_plot,false,nullptr,0,nullptr,nullptr,0,monitor_seen);
                     enqueue_audio(chunk, version);
                     std::lock_guard lock(mutex);
                     return current.running && generation == version && !ready && !capture_suspended;
-                }, capture_token, [&](const auto& format) { audio_format(format, version); }, {1.0,value.exclusive});
+                }, capture_token, [&](const auto& format) {
+                    audio_format(format, version);
+                    const auto reserve=audio_reserve(value);
+                    if(format.workspace_bytes<=reserve && monitor_workspace<=reserve-format.workspace_bytes) {
+                        // Default capacity is exactly 2048, independent of the
+                        // input hardware rate and the narrowband symbol length.
+                        monitor_window.emplace();
+                        std::lock_guard lock(mutex);
+                        if(generation==version)audio_bytes=format.workspace_bytes+monitor_workspace;
+                    }
+                }, std::move(capture_options));
             } catch (const std::exception& exception) {
                 const auto cancelled_transmission = wave && wave->stop.stop_requested();
                 if (!cancelled_transmission) simulation_bank.reset();

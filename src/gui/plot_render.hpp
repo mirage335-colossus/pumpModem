@@ -25,6 +25,7 @@ class PlotSnapshot {
 public:
     PlotSnapshot();
     static PlotSnapshot waveform(std::vector<float> samples, modem::Config config, double zoom = 1);
+    static PlotSnapshot oscilloscope(std::vector<float> samples, std::uint32_t sample_rate, double zoom = 1);
     static PlotSnapshot constellation(std::vector<std::complex<double>> points, bool symbols = false);
     // Preserve native log-score variation below T and reserve a logarithmic
     // upper range for strong signals. T and 2T are fixed score references.

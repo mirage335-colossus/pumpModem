@@ -244,6 +244,19 @@ int main() {
             for(std::size_t i=logical;i<converted.size();++i)
                 error=std::max(error,std::abs(converted[i]-(15000./32768)*std::sin(2*std::numbers::pi*frequency*static_cast<double>(i)/logical)));
             require(error<.00015,"Windows multistage capture phase or amplitude changed");clean();
+            fake::state.captured=0;std::size_t monitored=0;bool format_seen=false;
+            audio::Options monitor;
+            monitor.capture_monitor=[&](std::span<const float> raw,std::uint32_t clock) {
+                require(format_seen && clock==hardware,"Windows monitor lost physical rate or format ordering");
+                for(auto sample:raw)require(sample==fake::state.sample(monitored++,clock)/32768.f,"Windows monitor lost raw PCM continuity");
+            };
+            const auto paired=audio::record(4,logical,"7",1024*1024,{},[&](const auto&){format_seen=true;},monitor);
+            require(paired==converted && monitored==fake::state.captured && monitored>paired.size(),
+                    "Windows monitor altered receiver PCM or lost physical input");clean();
+            monitor.capture_monitor=[](auto,auto){throw datapump::Error("monitor failed");};
+            rejects([&]{audio::record(1,logical,"7",1024*1024,{},{},monitor);});
+            clean();
+
         }
         std::cout<<"Windows audio lifecycle tests passed\n";return 0;
     }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}

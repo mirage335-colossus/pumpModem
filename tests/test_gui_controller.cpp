@@ -1806,6 +1806,11 @@ void delayed_replay_interruption() {
             check(snapshot.simulation_replay&&snapshot.transmission_id==transmission&&controller.inbox().items().empty(),
                   "Delayed native polling released a controlled interruption source");
             bitmaps.update(controller);
+            check(snapshot.waveform_sample_rate>0 &&
+                  render(bitmaps.get(ui::Bitmap::waveform)).pixels()==
+                  render(plots::PlotSnapshot::oscilloscope(snapshot.waveform,snapshot.waveform_sample_rate,
+                      controller.waveform_zoom())).pixels(),
+                  "Replay oscilloscope changed its captured rate or displayed a different frame");
             const auto evidence=PatternScoreView{}.scores(snapshot,clock->now());
             saw_pattern_evidence=saw_pattern_evidence||!evidence.empty();
             check(render(bitmaps.get(ui::Bitmap::pattern_scores)).pixels()==

@@ -100,7 +100,12 @@ struct Snapshot {
     static constexpr std::size_t pattern_score_limit = 128;
     static constexpr auto pattern_score_lifetime = std::chrono::seconds(6);
     std::vector<float> waveform;
+    // Geometry belongs to these captured samples, not the receiver's clock.
+    // Hardware monitoring observes input before receiver rate conversion.
+    std::uint32_t waveform_sample_rate = 0;
+    bool environment_monitor = false;
     std::vector<double> spectrum_db;
+    std::uint64_t spectrum_revision = 0;
     double spectrum_bin_hz = 0;
     // Captured with spectrum_db, including startup noise-bandwidth correction
     // and replay. Always absent for hardware.
