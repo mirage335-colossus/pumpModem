@@ -376,6 +376,90 @@ void pulse_projection_preserves_real_sample_fit() {
         }
     }
 }
+
+void long_pulse_segments_and_grams_match_sampled_reference() {
+    struct Case {std::uint64_t chip;double ppm,frequency;long double offset;std::uint64_t trim;};
+    const std::array cases{
+        Case{4097,-200,.005,0,0},Case{4097,200,.5,.137L,1},
+        Case{4097,8000,1500,.999L,17},Case{4097,0,2999.999999999,.25L,0},
+        Case{12800,-200,.005,.137L,3},Case{12800,200,1500,.5L,0},
+        Case{12800,-.001,2999.999999999,0,1},
+        Case{12800,0,0,3200.137L,9599},Case{12800,0,3000,6400.25L,6398},
+        Case{12800,0,3000.000000001,9600.9L,3183},
+        Case{12800,0,.000000001,3200.5L,17},
+        Case{1200000,200,.005,.137L,0},Case{1200000,-.001,1500,0,1}};
+    constexpr std::uint32_t sample_rate=6000;
+    for(const auto& item:cases) {
+        const auto rate=1+static_cast<long double>(item.ppm)*1e-6L;
+        const auto duration=item.chip/rate;
+        const auto count=static_cast<std::uint64_t>(std::ceil(duration-item.offset))-item.trim;
+        CorrelationPulseKernel kernel(item.chip,rate,item.frequency,sample_rate);
+        const auto carrier_squared=std::polar(.49,.74);
+        const auto actual=kernel.evaluate(item.offset,count,carrier_squared,.49);
+        std::array<double,correlation_pulse_pairs> energy{},real{},imaginary{};
+        const auto rotation=std::polar(1.L,2*static_cast<long double>(2*std::numbers::pi)*item.frequency/sample_rate);
+        std::complex<long double> carrier{1,0};
+        std::array<long double,correlation_pulse_atoms> values{};
+        for(std::uint64_t n=0;n<count;++n) {
+            const auto q=(item.offset+n)/duration-.5L;
+            for(std::size_t j=0;j<values.size();++j)
+                values[j]=pattern_pulse(static_cast<double>(q+8-static_cast<long double>(j)));
+            std::size_t pair=0;
+            for(std::size_t j=0;j<values.size();++j)for(std::size_t k=j;k<values.size();++k,++pair) {
+                const auto product=values[j]*values[k];
+                energy[pair]+=static_cast<double>(product);
+                real[pair]+=static_cast<double>(product*carrier.real());
+                imaginary[pair]+=static_cast<double>(product*carrier.imag());
+            }
+            carrier*=rotation;
+        }
+        for(std::size_t pair=0;pair<correlation_pulse_pairs;++pair) {
+            // Absolute error is normalized by the unmodulated pair's available
+            // energy; an image term close to zero must not conceal a bad fit.
+            const auto scale=std::max(1.,static_cast<double>(count));
+            check(std::abs(actual.energy[pair]-.49*energy[pair])<3e-11*scale &&
+                  std::abs(actual.square[pair]-carrier_squared*std::complex<double>{real[pair],imaginary[pair]})<3e-11*scale,
+                  "bounded long-chip Gram changed a sampled pulse pair or real carrier image");
+        }
+        std::uint64_t first=0,segments=0;
+        while(first<count) {
+            const auto span=correlation_pulse_segment(item.offset+first,count-first,duration);
+            check(span.count && span.count<=count-first && (!span.endpoint || span.count==1),
+                  "affine pulse span lost a sampled endpoint or exceeded its clipped extent");
+            for(const auto local:std::array<std::uint64_t,3>{0,span.count/2,span.count-1}) {
+                const auto q=(item.offset+first+local)/duration-.5L;
+                for(std::size_t j=0;j<span.value.size();++j) {
+                    const auto expected=pattern_pulse(static_cast<double>(q+8-static_cast<long double>(j)));
+                    check(std::abs(span.value[j]+local*span.slope[j]-expected)<3e-14,
+                          "affine moment pulse differs from the sampled finite table");
+                }
+            }
+            first+=span.count;++segments;
+        }
+        check(segments<=260,"long-chip preparation reverted to original sample cadence");
+        const auto clipped=correlation_pulse_segment(item.offset,std::min<std::uint64_t>(17,count),duration);
+        check(clipped.count<=17,"affine segment helper crossed a caller's clipped block");
+    }
+    // A midpoint landing exactly on the closed support is a singleton, even
+    // when rounding double pulse coordinates creates that endpoint nearby.
+    for(const auto offset:{600000.L,600000.L-1e-13L,600000.L+1e-13L}) {
+        const auto span=correlation_pulse_segment(offset,128,1200000);
+        check(span.endpoint && span.count==1 && span.value.front()==pattern_pulse(8) &&
+              span.value.back()==pattern_pulse(-8),"rounded support endpoint was spread over an affine span");
+    }
+    std::stop_source stop;stop.request_stop();
+    rejects([&]{CorrelationPulseKernel kernel(1200000,1,.005,6000);
+                kernel.evaluate(0,1200000,{1,0},1,stop.get_token());},
+            "bounded long-chip Gram ignored cancellation");
+    CorrelationPulseKernel reusable(12800,1,.005,6000);
+    const auto before=reusable.evaluate(0,12800,{1,0},1);
+    rejects([&]{reusable.evaluate(.137L,12800,{1,0},1,stop.get_token());},
+            "cached long-chip rebuild ignored cancellation");
+    const auto after=reusable.evaluate(0,12800,{1,0},1);
+    check(before.energy==after.energy && before.square==after.square,
+          "cancelled long-chip rebuild corrupted the previous cache geometry");
+    rejects([]{correlation_pulse_segment(0,0,1200000);},"empty affine pulse extent was accepted");
+}
 } // namespace
 
 int main() {
@@ -388,6 +472,7 @@ int main() {
         narrow_bank_with_future_origins();
         invalid_batches_and_cancellation();
         pulse_projection_preserves_real_sample_fit();
+        long_pulse_segments_and_grams_match_sampled_reference();
         chip_chain_evidence_preserves_noise_integration();
         std::cout<<"pattern_correlator_batch ok\n";
         return 0;

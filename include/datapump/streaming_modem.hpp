@@ -88,6 +88,8 @@ public:
     Bytes push(std::span<const float> samples, std::stop_token stop = {});
     Bytes push(std::span<const float> samples, std::span<const std::complex<double>> projected,
                std::stop_token stop = {});
+    Bytes push(std::span<const float> samples, std::span<const std::complex<double>> projected,
+               std::stop_token stop,detail::CorrelationProjectionCache*);
     // Removed integrated-symbol interface: throws; use physical samples.
     Bytes push_symbols(std::span<const SymbolObservation> observations, std::stop_token stop = {});
     // Finish a finite capture without inserting silence or extra symbols.
@@ -115,6 +117,7 @@ public:
     // Reset discards pending points and their overflow count.
     ConstellationBatch take_payload_constellation();
     std::size_t working_bytes() const;
+    std::size_t reserved_workspace_bytes() const;
     // Shared receiver banks can lend unused DSP space to an active recording.
     // The limit cannot be reduced below storage already in use.
     void set_workspace_bytes(std::size_t bytes);

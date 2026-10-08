@@ -38,6 +38,9 @@ constexpr long double pulse_frontend_operations_per_sample = 220;
 constexpr long double pulse_pair_operations_per_chip = 6000;
 constexpr long double pulse_gram_operations_per_cell = 4000;
 constexpr long double pulse_kernel_operations_per_sample = 16000;
+constexpr long double pulse_moment_operations_per_block = 48;
+constexpr long double pulse_moment_operations_per_segment = 256;
+constexpr long double pulse_moment_kernel_operations_per_segment = 22000;
 constexpr long double model_implementation_loss_db = 3;
 
 struct PayloadWork { long double baseline=0,mitigation=0; };
@@ -322,14 +325,22 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         (!correlator||!config.oscillator_search||compact_allocated+differential_extra<=allowance);
     if(correlator&&result.differential_supported)compact_allocated+=differential_extra;
     const bool pulse_geometry=modem::pattern_pulse_enabled(config)&&symbol>=16.L*config.sample_rate&&
-        chip<=4096&&symbol%(4*chip)==0&&
+        (chip<=4096||config.oscillator_search)&&
+        symbol%(4*chip)==0&&
         (config.oscillator_search||(chip%2==0&&!scaled));
+    const bool pulse_moments=chip>4096;
     const auto cell_capacity=std::ceil(block_samples*bank.maximum_rate/chip)+2;
     const auto pulse_extra=3*frequencies*(192+sizeof(modem::detail::CorrelationPulseKernel)+
-        (1+cell_capacity)*sizeof(modem::detail::CorrelationPulseCell))+lanes*16+32768;
+        sizeof(modem::detail::CorrelationPulseSegment)+2*sizeof(std::complex<long double>)+2*sizeof(std::uint64_t)+
+        (1+cell_capacity)*sizeof(modem::detail::CorrelationPulseCell))+lanes*16+32768+
+        (pulse_moments?frequencies*(block_samples+1)*sizeof(std::complex<double>):0);
     result.pulse_projected=correlator&&pulse_geometry&&result.workspace_supported&&
         compact_allocated+pulse_extra<=allowance;
-    result.serial=samples*projection_operations_per_sample*banks;
+    // The compact receiver mixes each unique real carrier bank. Clock lanes
+    // sharing that carrier reuse its prefix; FFT receives one baseband stream.
+    // Cross-key/epoch Live cache hits depend on per-push spare workspace and
+    // origin identity, so this work model conservatively charges cache misses.
+    result.serial=samples*projection_operations_per_sample*(correlator?projection_banks:1)*banks;
     // Admission thresholds belong to one receiver; unrelated keys and
     // waveform profiles add compute work, not evidence against this signal.
     result.search_trials=std::max(1.L,starts*frequencies*phase_groups);
@@ -342,15 +353,34 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
             for(const auto& hypothesis:bank.hypotheses) {
                 const auto rate=1+static_cast<long double>(hypothesis.clock_error_ppm)*1e-6L;
                 lattice_cells+=3*std::ceil(samples*rate/chip);
-                if(hypothesis.clock_error_ppm==0)kernel_samples+=9.L*chip;
+                if(pulse_moments) {
+                    // Each finite table cell has at most 256 affine pieces,
+                    // plus sampled endpoint singletons. Fractional clocks may
+                    // rebuild every cell, but no rebuild scans the PCM chip.
+                    const auto pieces=260.L;
+                    kernel_samples+=hypothesis.clock_error_ppm==0?9*pieces:
+                        3*std::ceil(samples*rate/chip)*pieces;
+                    if(hypothesis.clock_error_ppm!=0)result.kernel_upper_bound=true;
+                } else if(hypothesis.clock_error_ppm==0)kernel_samples+=9.L*chip;
                 else {kernel_samples+=3*samples;result.kernel_upper_bound=true;}
             }
             // Two parity lattices plus a clipped endpoint is a conservative
             // frontend allowance. Private fitting contracts the same 17 pulse
             // atoms and 153 Gram pairs once per chip and candidate bit pair.
-            result.serial+=(3*samples*frequencies*pulse_frontend_operations_per_sample+
-                lattice_cells*pulse_gram_operations_per_cell)*banks;
-            result.kernel_serial=kernel_samples*pulse_kernel_operations_per_sample*banks;
+            if(pulse_moments) {
+                result.serial+=(samples*8*projection_banks+
+                    3*std::ceil(samples/block_samples)*frequencies*pulse_moment_operations_per_block+
+                    lattice_cells*260*pulse_moment_operations_per_segment+
+                    lattice_cells*pulse_gram_operations_per_cell)*banks;
+                // Binary geometric-moment concatenation is logarithmic in
+                // samples per table piece, including a zero image frequency.
+                const auto moment_work=200*std::ceil(std::log2(std::max(1.L,static_cast<long double>(chip)/256)));
+                result.kernel_serial=kernel_samples*(pulse_moment_kernel_operations_per_segment+moment_work)*banks;
+            } else {
+                result.serial+=(3*samples*frequencies*pulse_frontend_operations_per_sample+
+                    lattice_cells*pulse_gram_operations_per_cell)*banks;
+                result.kernel_serial=kernel_samples*pulse_kernel_operations_per_sample*banks;
+            }
             result.serial+=result.kernel_serial;
             // The projected backend consumes shared cells and commits lane
             // work in order on the caller; it does not use search workers.

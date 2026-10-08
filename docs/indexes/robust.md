@@ -24,6 +24,7 @@ coverage and decoded-message reliability are related but distinct quantities.
 | Document | Context and contents |
 | --- | --- |
 | [Batched iterative search](../search-compute.md) | Implementation reference: FFT acquisition, long-symbol CPU batching, workers, memory boundaries and reproducible workloads. |
+| [Pulse-moment qualification](../pulse-moment-validation.md) | Paired raw-PCM performance, conditional sensitivity statistics, numerical equivalence and coverage limits for high-chip iterative search. |
 | [Robust CPU costs](../robust-cpu-costs.md) | Paired receive-hardening overhead measurements and estimate coefficients; not a whole-DSP bottleneck profile. |
 | [Alternate Robust receiver study](../robust-alternate-receiver.md) | Proposed independent chain: FIR/IIR/FFT tradeoffs, reference reuse, carrier/clock search, CPU efficiency at low expected SNR, GUI/TX isolation and experimental criteria. Source assessment dated 2026-09-30; speedup and sensitivity targets are unmeasured. |
 | [Simulation estimates](../simulation-estimates.md) | Reference and models: whole-draft receive probability, reference-machine compute estimates and unsupported coverage. |

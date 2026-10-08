@@ -152,6 +152,9 @@ public:
     // Sample-resolution and local differential Gram fits reconstruct the carrier from raw samples
     // to keep their real basis matrix independent of that arbitrary rotation.
     void push(std::span<const float>,std::span<const std::complex<double>> projected,std::stop_token = {});
+    // Internal bank-scoped reuse of exact carrier moments over immutable PCM.
+    void push(std::span<const float>,std::span<const std::complex<double>> projected,
+              std::stop_token,detail::CorrelationProjectionCache*);
     // Flush available decisions as incomplete; capture EOF is not stream end.
     void finish(std::stop_token = {});
     // Drain accepted decisions, including a final short chunk, as pending.
@@ -176,6 +179,8 @@ public:
     // Whether the additional section detector fits this profile and budget.
     bool drift_tolerant() const;
     std::size_t working_bytes() const;
+    // Includes admitted detector state whose allocation is deferred until PCM.
+    std::size_t reserved_workspace_bytes() const;
     // Reject a reduction that cannot retain current state. Future candidate
     // growth is capped within the new ceiling; excess payload throws Error.
     void set_workspace_bytes(std::size_t);

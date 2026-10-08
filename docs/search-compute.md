@@ -155,12 +155,13 @@ addition order; qualification compares numerical fits within stated tolerances,
 not bit-identical scores.
 
 The path requires shaped symbols lasting at least 16 sampled seconds and an
-integral number of chips divisible by four, with at most 4,096 nominal samples
-per chip. Explicit paired banks use their
+integral number of chips divisible by four. The former 4,096-sample chip limit
+is removed for explicit paired banks. Those banks use their
 individual half-chip start spacing `C/(2*r)`, where `C` is nominal chip length
 and `r` the clock ratio, including noninteger received chip durations. The legacy
-path requires even chip lengths and nominal clock rates. Partial-chip symbols,
-longer chips, legacy nonnominal-rate or odd-chip grids, and an unaffordable projection
+path requires even chip lengths, nominal clock rates and at most 4,096 samples
+per chip, preserving its historical small-workspace footprint. Partial-chip symbols,
+unsupported legacy grids, and an unaffordable projection
 workspace retain the full raw bank. The numerical pulse Gram cache reuses a
 quadratic expression within each piecewise-linear pulse-table region. It
 updates changed sample contributions incrementally across nearby regions,
@@ -174,13 +175,42 @@ endpoints; input beyond a symbol is never needed to publish that completed
 symbol. The host keeps admission, private phase selection, trials, pending-bit
 publication and fully observed absence outside the projection layer.
 
-Front-end work still includes 17 pulse terms per raw sample and lattice.
-Fractional clock errors can also increase Gram-cache rebuilding. The dominant
-private fit now follows chip cadence, while actual input rate, bank size and
-workspace still affect cost. Once the real stream tone is fixed, RF translation
-metadata adds neither RF-rate samples nor cipher work. Measurements must compare equal search coverage and
-state the input rate; a smaller oscillator bank is a separate saving from a
-faster numerical kernel. See the [measured workloads and qualification](oscillator-search-validation.md).
+For chips above 4,096 samples, the frontend exploits the actual finite pulse
+table's piecewise-linear interpolation. Within one table segment each atom is
+`a + b*n`. Shared complex zeroth and first sample moments therefore supply its
+I/Q dot product without evaluating all 17 atoms at every sample. At most 260
+segments, including literal closed-support endpoints, cover one chip cell.
+Unmodulated polynomial sums and binary concatenation of geometric moments give
+all 153 Gram entries without scanning the original chip. The latter remains
+well conditioned at DC and carrier-square aliases; it does not divide by a
+small `1-z`. Fractional clocks may rebuild the bounded segment sums, while
+private key, epoch and bit coefficients are contracted only when a cell completes.
+
+This is an algebraic factorization of every sampled finite pulse, with no
+decimation or bandwidth cutoff. It includes spectral tails and amplitude-limited
+input, introduces no filter state or delay, and keeps the original noise energy,
+sample count and admission thresholds. Floating-point differences still require
+paired sensitivity qualification. No samples or hypotheses are discarded.
+
+Live banks can also share the original carrier prefix and moment arrays across
+keys and epochs for one immutable PCM push. Cache keys include the exact input
+subspan, receiver sample coordinate, sample rate, carrier and oscillator block
+convention. Private patterns never enter this cache. Its 256 KiB ceiling,
+128-row bound, reserved detector storage and per-receiver recording headroom
+are checked before use. Exhaustion falls back to the receiver's own frontend;
+the cache is released before presentation/content growth. Different sample
+origins and mixed FFT banks can reduce or disable sharing. Sequential whole-file
+transfer banks currently use individual frontends.
+
+The planner charges unique carrier projections, bounded segment/Gram work and
+chip-cadence private fits separately. It conservatively assumes cross-receiver
+cache misses and up to three timing lattices per frequency/rate pair; actual
+clipped timing ranges can require fewer. Its operation coefficients are a work
+model, not a measured execution time. Input conversion still follows sample
+rate, and wider oscillator uncertainty can require more carrier banks. See
+[pulse-moment measurements and limits](pulse-moment-validation.md) for paired
+execution and sensitivity evidence, and the earlier
+[oscillator-search qualification](oscillator-search-validation.md).
 
 ## CPU validation and reproduction
 

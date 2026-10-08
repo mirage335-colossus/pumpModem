@@ -13,6 +13,7 @@
 #include "live_receptions.hpp"
 #include "transmit_timing.hpp"
 #include "transmit_epoch_guard.hpp"
+#include "pattern_projection_cache.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -1020,15 +1021,50 @@ struct Session::Impl {
         return candidate;
     }
     template<class Feed> void feed_bank(Bank& bank, const Settings& value, std::uint64_t version,
-                                        std::stop_token stop, std::size_t sample_count, Feed feed,
+                                        std::stop_token stop, std::span<const float> samples, Feed feed,
                                         Prepared* simulation_wave = nullptr) {
         // Admit the receiver's current clock epoch before consuming this PCM
         // block. A short burst can finish within one block after a second rolls
         // over; refreshing afterward can miss every chip of the new stream.
         refresh_bank(bank,value);
+        const auto sample_count=samples.size();
         if(sample_count>std::numeric_limits<std::uint64_t>::max()-bank.samples)
             throw Error("receive sample clock exceeds its platform range");
         const auto capacity = bank_capacity(value);
+        struct SharedProjection {
+            Bank& bank;
+            std::unique_ptr<modem::detail::CorrelationProjectionCache> cache;
+            std::size_t charged=0;
+            void release(){cache.reset();bank.working_bytes-=charged;charged=0;}
+            ~SharedProjection(){release();}
+        } projection{bank};
+        // This optional cache spends surplus only. Preserve every already
+        // admitted detector reservation, plus substantial recording headroom,
+        // before charging its bounded numeric storage to the shared bank.
+        const auto moment_receivers=std::count_if(bank.receivers.begin(),bank.receivers.end(),[](const auto& receiver){
+            const auto& config=receiver.options.modem;
+            return config.oscillator_search && modem::pattern_pulse_enabled(config) && modem::pattern_chip_samples(config)>4096;
+        });
+        if(moment_receivers>1 && bank.working_bytes<=capacity &&
+           std::all_of(bank.receivers.begin(),bank.receivers.end(),[](const auto& receiver){return receiver.modem->clock_windowed();})) {
+            auto reserved=bank.working_bytes;
+            bool fits=true;
+            for(const auto& receiver:bank.receivers) {
+                const auto actual=receiver.modem->working_bytes();
+                const auto deferred=receiver.modem->reserved_workspace_bytes();
+                const auto extra=deferred>actual?deferred-actual:0;
+                constexpr std::size_t headroom=2*1024*1024;
+                if(extra>capacity-reserved || headroom>capacity-reserved-extra){fits=false;break;}
+                reserved+=extra+headroom;
+            }
+            if(fits) {
+                const auto allowance=std::min<std::size_t>(256*1024,capacity-reserved);
+                projection.cache=std::make_unique<modem::detail::CorrelationProjectionCache>(samples,allowance);
+                if(projection.cache->enabled()) {
+                    projection.charged=projection.cache->working_bytes();bank.working_bytes+=projection.charged;
+                } else projection.cache.reset();
+            }
+        }
         std::vector<std::complex<double>> pattern_scores;
         std::vector<PatternScoreObservation> pattern_observations;
         // Observe every profile before publishing any completion. Otherwise a
@@ -1046,14 +1082,28 @@ struct Session::Impl {
                 try {
                     if(phase==0) {
                         const auto overhead = accounted - receiver.modem->working_bytes();
-                        const auto other = bank.working_bytes - accounted;
+                        auto other = bank.working_bytes - accounted;
+                        if(projection.cache)for(const auto& candidate:bank.receivers) {
+                            if(&candidate==&receiver)continue;
+                            const auto actual=candidate.modem->working_bytes();
+                            const auto deferred=candidate.modem->reserved_workspace_bytes();
+                            const auto extra=deferred>actual?deferred-actual:0;
+                            if(extra>capacity-std::min(capacity,other)){other=capacity;break;}
+                            other+=extra;
+                        }
+                        if(projection.cache && (other>capacity || overhead>capacity-other ||
+                           receiver.modem->reserved_workspace_bytes()>capacity-other-overhead)) {
+                            // If recording grew past the surplus, release the
+                            // optimization before restoring the original loan.
+                            projection.release();other=bank.working_bytes-accounted;
+                        }
                         if (other > capacity || overhead > capacity - other)
                             throw Error("key and epoch receiver bank exceeds the configured DSP workspace");
                         // Idle keys reserve their actual state. The receiver being
                         // fed can use all remaining shared space for recording and
                         // replay, while later keys see its measured growth.
                         receiver.modem->set_workspace_bytes(capacity - other - overhead);
-                        feed(*receiver.modem);
+                        feed(*receiver.modem,projection.cache.get());
                         update_workspace();
                         {
                             const auto candidates = receiver.modem->pattern_candidates(pattern_score_limit);
@@ -1141,6 +1191,7 @@ struct Session::Impl {
                 } catch (const Error& error) {
                     update_workspace();
                     if (stop.stop_requested()) return;
+                    projection.release();
                     {
                         {
                             std::lock_guard lock(mutex);
@@ -1183,6 +1234,7 @@ struct Session::Impl {
                 }
             }
             if(phase==0) {
+                projection.release();
                 std::lock_guard lock(mutex);
                 if(!current.running || generation!=version || stop.stop_requested())return;
                 for(auto& receiver:bank.receivers) {
@@ -1270,7 +1322,7 @@ struct Session::Impl {
             }
             bank.mixer/=std::abs(bank.mixer);
             const auto raw=samples.subspan(offset,count);const auto mixed=std::span(projected).first(count);
-            feed_bank(bank,value,version,stop,count,[&](auto& receiver){return receiver.push(raw,mixed,stop);},wave);
+            feed_bank(bank,value,version,stop,raw,[&](auto& receiver,auto* cache){return receiver.push(raw,mixed,stop,cache);},wave);
             offset+=count;
         }
     }

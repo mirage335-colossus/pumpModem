@@ -1027,6 +1027,18 @@ void projected_pattern_workload() {
     const auto unaffordable=simulation::estimate(wire(3,options.modem),options,true,clean_channel(),{},1,false);
     check(!unaffordable.receiver_workspace_supported&&!unaffordable.pulse_projection_modeled&&!unaffordable.confidence_available,
           "a compact bank whose mandatory state cannot fit must not claim supported receiver coverage");
+    options.dsp_workspace_bytes=64*1024*1024;
+    options.modem.bandwidth_hz=.01;options.modem.integration_seconds=6400;
+    options.modem.sample_rate=64;options.modem.carrier_hz=.005;
+    const auto narrow=simulation::estimate(wire(1,options.modem),options,true,clean_channel(),{},1,false);
+    options.modem.sample_rate=6000;options.modem.carrier_hz=1500;
+    const auto oversampled=simulation::estimate(wire(1,options.modem),options,true,clean_channel(),{},1,false);
+    check(narrow.pulse_projection_modeled && oversampled.pulse_projection_modeled,
+          "long-chip affine statistics must replace the former 4096-sample eligibility limit");
+    near(narrow.receiver_search_seconds,oversampled.receiver_search_seconds,
+         "private long-chip search must follow chip count rather than nominal carrier sample rate");
+    check(oversampled.receiver_kernel_rebuild_seconds<2*narrow.receiver_kernel_rebuild_seconds,
+          "long-chip Gram work must follow table pieces and logarithmic geometric moments, not PCM chip length");
 }
 }
 int main() {

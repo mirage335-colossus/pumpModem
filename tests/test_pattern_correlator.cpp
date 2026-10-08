@@ -347,6 +347,143 @@ void long_pulse_projection_matches_raw_reference() {
               "pulse projection changed independently admitted stream decisions");
     }
 }
+void high_chip_moments_preserve_evidence_and_progress() {
+    for(const auto carrier:{.005,.5,1500.}) {
+        auto c=tuning::resolve(.01,4.2185134083910505,tuning::PatternMode::auto_pattern,true,carrier).config;
+        c.stream_epoch=1730000123;c.stream_phase_samples=7;
+        c.spreading_seed[3]=91;c.dsss_seed[11]=217;
+        const auto chip=modem::pattern_chip_samples(c);
+        // Sixteen complete chips enable shaping and exercise quarter boundaries at the exact
+        // reproduction sample rates without making a regression depend on a
+        // planner prediction or transmitting a different reference waveform.
+        c.integration_seconds=16.*chip/c.sample_rate;
+        const auto symbol=modem::symbol_sample_count(c);
+        check(chip>4096 && symbol==16*chip,"high-chip regression did not reach the new backend");
+        const auto ppm=carrier==.5?-200.:200.;
+        const auto rate=1+static_cast<long double>(ppm)*1e-6L,origin=-.137L;
+        const auto count=static_cast<std::size_t>(std::ceil(origin+symbol/rate));
+        std::vector<float> samples(count);
+        modem::PatternCode pattern(c,c.stream_epoch);
+        std::mt19937 random(938);std::normal_distribution<float> noise(0,.1F);
+        double phase=.71;
+        for(std::size_t n=0;n<count;++n) {
+            const auto within=static_cast<double>((static_cast<long double>(n)-origin)*rate);
+            phase+=static_cast<double>(noise(random))*.00001;
+            const auto rotation=std::polar(1.,2*std::numbers::pi*carrier*n/c.sample_rate+phase);
+            const auto limited=modem::pattern_limit_pcm(pattern.shaped_value(0,1,within));
+            samples[n]=static_cast<float>((rotation*limited).real())+noise(random)+
+                static_cast<float>(.02*std::sin(2*std::numbers::pi*(carrier+.003)*n/c.sample_rate));
+        }
+        modem::PatternSearch search;search.start_offset_seconds=static_cast<double>(origin/c.sample_rate);
+        search.start_uncertainty_seconds=0;search.search_stream_phases=false;search.compact_clock_search=true;
+        search.hypotheses={{0,ppm}};search.retain_score=0;search.candidate_limit=8;
+        search.track_limit=1;search.bit_limit=4;search.worker_threads=1;
+        modem::PatternCorrelator automatic(c,search,4*1024*1024),reference(c,search,4*1024*1024,{true,false});
+        check(automatic.work().backend==modem::PatternCorrelationBackend::pulse_moments &&
+              reference.work().backend==modem::PatternCorrelationBackend::raw &&
+              automatic.work().hypotheses==reference.work().hypotheses &&
+              automatic.drift_tolerant()==reference.drift_tolerant(),"paired receivers changed search or detector coverage");
+        for(std::size_t offset=0;offset+1<count;) {
+            const auto n=std::min<std::size_t>(65521,count-1-offset);
+            automatic.push(std::span(samples).subspan(offset,n));reference.push(std::span(samples).subspan(offset,n));offset+=n;
+        }
+        check(automatic.candidates().empty() && reference.candidates().empty() && automatic.take_bursts().empty(),
+              "partial pulse moments manufactured a complete symbol");
+        automatic.push(std::span(samples).last(1));reference.push(std::span(samples).last(1));
+        const auto a=automatic.candidates(),b=reference.candidates();
+        check(a.size()==1 && b.size()==1 && a[0].bit==b[0].bit && a[0].bit==1 &&
+              a[0].first_sample==b[0].first_sample && a[0].end_sample==b[0].end_sample &&
+              a[0].admission_threshold==b[0].admission_threshold,"pulse moments changed completed candidate identity");
+        check(std::abs(a[0].score-b[0].score)<2e-7*std::max(1.,b[0].score) &&
+              std::abs(a[0].alternative_score-b[0].alternative_score)<2e-7*std::max(1.,b[0].alternative_score),
+              "pulse moments changed real-sample evidence or covariance");
+        const auto accepted=automatic.take_bursts(),raw_accepted=reference.take_bursts();
+        check(accepted.size()==1 && raw_accepted.size()==1 && accepted[0].bits==Bytes{1} &&
+              !accepted[0].complete,"a newly accepted high-chip bit missed its next progress poll");
+        check(automatic.work().segments<=16*260 && automatic.work().cells==16,
+              "pulse contractions followed PCM samples instead of table knots");
+        modem::PatternCorrelator whole(c,search,4*1024*1024);whole.push(samples);
+        check(std::abs(whole.candidates()[0].score-a[0].score)<2e-7*std::max(1.,a[0].score),
+              "caller block boundaries changed retained affine moments");
+        std::vector<float> silence(6*c.sample_rate);automatic.push(silence);
+        const auto pending=automatic.take_bursts();
+        check(std::none_of(pending.begin(),pending.end(),[](const auto& event){return event.complete;}),
+              "six seconds inside an unscored long symbol manufactured physical completion");
+        std::stop_source cancel;cancel.request_stop();
+        rejects([&]{automatic.push(silence,cancel.get_token());},"moment frontend ignored cancellation");
+        automatic.finish();
+        const auto stopped=automatic.take_bursts();
+        check(std::none_of(stopped.begin(),stopped.end(),[](const auto& event){return event.complete;}),
+              "capture EOF manufactured high-chip physical completion");
+    }
+}
+
+void high_chip_section_and_differential_evidence() {
+    for(const bool differential:{false,true}) {
+        auto c=config();c.sample_rate=64;c.carrier_hz=16;c.bandwidth_hz=128./4097;
+        for(unsigned i=0;i<8 && modem::pattern_chip_samples(c)>4097;++i)
+            c.bandwidth_hz=std::nextafter(c.bandwidth_hz,std::numeric_limits<double>::infinity());
+        const auto chip=modem::pattern_chip_samples(c);
+        const std::uint64_t chips=differential?4096:64;
+        c.integration_seconds=static_cast<double>(chip*chips)/c.sample_rate;
+        c.stream_epoch=1730000311;c.spreading_seed[7]=31;c.dsss_seed[4]=219;
+        const auto symbol=modem::symbol_sample_count(c);
+        check(chip==4097 && symbol==chip*chips,"long section fixture lost whole-chip geometry");
+        const Bytes bits=differential?Bytes{1}:Bytes{1,1,0};
+        constexpr long double origin=-.137L;
+        const double ppm=differential?200.:-200.;const auto rate=1+static_cast<long double>(ppm)*1e-6L;
+        modem::PatternSearch search;search.start_offset_seconds=static_cast<double>(origin/c.sample_rate);
+        search.start_uncertainty_seconds=0;search.search_stream_phases=false;search.compact_clock_search=true;
+        search.hypotheses={{0,ppm}};search.retain_score=0;search.candidate_limit=16;
+        search.track_limit=1;search.bit_limit=8;search.chunk_bits=1;search.worker_threads=1;
+        if(differential)search.differential_window_seconds=16.*chip/c.sample_rate;
+        modem::PatternCorrelator automatic(c,search,4*1024*1024),raw(c,search,4*1024*1024,{true,false});
+        check(automatic.work().backend==modem::PatternCorrelationBackend::pulse_moments &&
+              automatic.drift_tolerant() && raw.drift_tolerant(),"high-chip section detector was omitted");
+        if(differential)check(automatic.work().differential_window_samples==16*chip &&
+              raw.work().differential_window_samples==16*chip,"high-chip differential coverage was omitted");
+        const auto count=static_cast<std::uint64_t>(std::ceil(origin+(bits.size()+(differential?0:1))*symbol/rate));
+        modem::PatternCode pattern(c,c.stream_epoch);std::mt19937 random(731);
+        std::normal_distribution<float> noise(0,.2F);std::vector<float> block(65521);
+        Bytes accepted;unsigned completed=0;
+        for(std::uint64_t offset=0;offset<count;) {
+            const auto n=static_cast<std::size_t>(std::min<std::uint64_t>(block.size(),count-offset));
+            for(std::size_t i=0;i<n;++i) {
+                const auto position=(static_cast<long double>(offset+i)-origin)*rate;
+                const auto index=static_cast<std::uint64_t>(position/symbol);
+                if(index>=bits.size()){block[i]=0;continue;}
+                const auto within=static_cast<double>(position-index*symbol);
+                const auto phase=differential?.0007*std::floor(within/(16*chip)):
+                    .25*std::floor(4*within/symbol);
+                const auto rotation=std::polar(1.,2*std::numbers::pi*c.carrier_hz*(offset+i)/c.sample_rate+phase);
+                block[i]=static_cast<float>((rotation*modem::pattern_limit_pcm(pattern.shaped_value(index*chips,bits[index],within))).real())+noise(random);
+            }
+            automatic.push(std::span(block).first(n));raw.push(std::span(block).first(n));offset+=n;
+            const auto a=automatic.take_bursts(),b=raw.take_bursts();
+            check(a.size()==b.size(),"high-chip detector changed next-poll event count");
+            for(std::size_t i=0;i<a.size();++i) {
+                check(a[i].bits==b[i].bits && a[i].complete==b[i].complete && a[i].end_sample==b[i].end_sample,
+                      "high-chip detector changed private prefix or absence completion");
+                accepted.insert(accepted.end(),a[i].bits.begin(),a[i].bits.end());completed+=a[i].complete;
+            }
+        }
+        const auto a=automatic.candidates(),b=raw.candidates();
+        check(a.size()==b.size() && a.size()>=bits.size(),"high-chip detector lost complete observations");
+        for(std::size_t i=0;i<a.size();++i)check(a[i].bit==b[i].bit && a[i].stream_symbol==b[i].stream_symbol &&
+            a[i].admission_threshold==b[i].admission_threshold && a[i].end_sample==b[i].end_sample &&
+            std::abs(a[i].score-b[i].score)<2e-7*std::max(1.,b[i].score) &&
+            std::abs(a[i].alternative_score-b[i].alternative_score)<2e-7*std::max(1.,b[i].alternative_score),
+            "high-chip section/differential statistic changed relative to identical raw PCM");
+        if(accepted!=bits || completed!=unsigned(!differential)) {
+            std::cerr<<"high-chip detector diagnostic differential="<<differential<<" accepted=";
+            for(auto bit:accepted)std::cerr<<unsigned(bit);
+            std::cerr<<" completed="<<completed<<" evidence="<<a.size()<<'\n';
+            for(const auto& item:a)std::cerr<<item.stream_symbol<<' '<<item.score<<' '<<item.alternative_score<<' '<<item.admission_threshold<<'\n';
+        }
+        check(accepted==bits && completed==unsigned(!differential),
+              "successive private bits or fully observed high-chip absence were not preserved");
+    }
+}
 
 void explicit_pairs_do_not_add_cartesian_lanes() {
     for(const bool tone:{false,true}) {
@@ -1131,6 +1268,8 @@ int main(int argc,char** argv) {
     run("wide_paired_carriers_publish_one_prefix_and_terminal",wide_paired_carriers_publish_one_prefix_and_terminal);
     run("shaped_raw_sample_evidence",shaped_raw_sample_evidence);
     run("long_pulse_projection_matches_raw_reference",long_pulse_projection_matches_raw_reference);
+    run("high_chip_moments_preserve_evidence_and_progress",high_chip_moments_preserve_evidence_and_progress);
+    run("high_chip_section_and_differential_evidence",high_chip_section_and_differential_evidence);
     run("explicit_pairs_do_not_add_cartesian_lanes",explicit_pairs_do_not_add_cartesian_lanes);
     run("compact_constructor_uses_attached_oscillator_policy",compact_constructor_uses_attached_oscillator_policy);
     run("paired_pulse_origin_parities_and_canonical_quarters",paired_pulse_origin_parities_and_canonical_quarters);

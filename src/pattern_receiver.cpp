@@ -1444,9 +1444,13 @@ void PatternReceiver::push(std::span<const float> input,std::stop_token stop) {
     if(s.long_symbol)s.continue_tracks(stop);
 }
 void PatternReceiver::push(std::span<const float> input,std::span<const std::complex<double>> projected,std::stop_token stop) {
+    push(input,projected,stop,nullptr);
+}
+void PatternReceiver::push(std::span<const float> input,std::span<const std::complex<double>> projected,
+                           std::stop_token stop,detail::CorrelationProjectionCache* cache) {
     auto& s=*impl_;cancelled(stop);if(s.finished)throw Error("pattern capture already finished");
     if(input.size()!=projected.size())throw Error("shared pattern projection length mismatch");
-    if(s.fallback){s.fallback->push(input,stop);return;}
+    if(s.fallback){s.fallback->push(input,stop,cache);return;}
     if(s.sample_fit || s.differential_window) {
         // Exact Gram whitening needs a known carrier phase convention. Shared
         // projections may have an arbitrary fixed rotation, so reconstruct
@@ -1511,6 +1515,9 @@ bool PatternReceiver::local_clock_fallback()const{return impl_->local_search_fal
 bool PatternReceiver::drift_tolerant()const{return impl_->fallback?impl_->fallback->drift_tolerant():impl_->drift_sections>1;}
 std::size_t PatternReceiver::working_bytes()const {
     return impl_->working_bytes();
+}
+std::size_t PatternReceiver::reserved_workspace_bytes()const {
+    return impl_->fallback?impl_->wrapper_bytes()+impl_->fallback->reserved_workspace_bytes():impl_->working_bytes();
 }
 void PatternReceiver::set_workspace_bytes(std::size_t bytes){impl_->set_workspace_bytes(bytes);}
 Diagnostics PatternReceiver::diagnostics()const {

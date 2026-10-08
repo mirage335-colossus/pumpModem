@@ -103,6 +103,17 @@ struct CorrelationChipEvidence {
 inline constexpr std::size_t correlation_pulse_atoms=17;
 inline constexpr std::size_t correlation_pulse_pairs=
     correlation_pulse_atoms*(correlation_pulse_atoms+1)/2;
+// The finite pulse table is affine between its shared 1/256-chip knots.
+// Coordinates are relative to the first actual observation in this span:
+// pulse[j](n) = value[j] + n*slope[j], for 0 <= n < count. Closed support
+// endpoints are isolated singletons rather than interpolated through a jump.
+struct CorrelationPulseSegment {
+    std::uint64_t count=0;
+    std::array<long double,correlation_pulse_atoms> value{},slope{};
+    bool endpoint=false;
+};
+CorrelationPulseSegment correlation_pulse_segment(long double first_offset,
+        std::uint64_t max_count,long double chip_duration);
 struct CorrelationPulseGram {
     std::array<double,correlation_pulse_pairs> energy{};
     std::array<std::complex<double>,correlation_pulse_pairs> square{};
@@ -134,6 +145,7 @@ private:
     std::array<std::array<long double,correlation_pulse_pairs>,3> energy_{};
     std::array<std::array<std::complex<long double>,correlation_pulse_pairs>,3> square_{};
     void prepare(long double,std::uint64_t,std::stop_token);
+    void prepare_segments(long double,std::uint64_t,std::stop_token);
 };
 // One section is active at a time; earlier sections retain only their fitted
 // energy. This state is separate so ordinary coherent fits keep their size.

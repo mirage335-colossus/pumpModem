@@ -127,6 +127,75 @@ void accumulate_lane(const CorrelationBatch& batch,CorrelationLane& lane,Pattern
 }
 } // namespace
 
+CorrelationPulseSegment correlation_pulse_segment(long double offset,
+        std::uint64_t max_count,long double duration) {
+    require(std::isfinite(offset) && offset>=0 && max_count &&
+            std::isfinite(duration) && duration>0,
+            "invalid affine pulse segment geometry");
+    constexpr long double resolution=256;
+    const auto position=[&](std::uint64_t n) {return (offset+n)/duration-.5L;};
+    const auto endpoint=[&](long double q) {
+        for(std::size_t j=0;j<correlation_pulse_atoms;++j) {
+            const auto p=static_cast<double>(q+8-static_cast<long double>(j));
+            if(p==-8 || p==8)return true;
+        }
+        return false;
+    };
+    const auto q=position(0),knot=std::floor(resolution*q);
+    CorrelationPulseSegment result;
+    result.endpoint=endpoint(q);
+    if(result.endpoint)result.count=1;
+    else {
+        // The subtraction is in chip coordinates, avoiding cancellation of
+        // two large sample coordinates near a knot in an exceptionally long chip.
+        const auto distance=((knot+1)/resolution-q)*duration;
+        result.count=distance>=max_count?max_count:static_cast<std::uint64_t>(
+            std::max(1.L,std::ceil(distance)));
+        // Verify the actual sampled endpoint. Rounded knot coordinates can
+        // otherwise put one observation from the next segment in this span.
+        while(result.count>1 && (std::floor(resolution*position(result.count-1))!=knot ||
+              endpoint(position(result.count-1))))--result.count;
+    }
+    for(std::size_t j=0;j<correlation_pulse_atoms;++j) {
+        const auto p=static_cast<double>(q+8-static_cast<long double>(j));
+        result.value[j]=pattern_pulse(p);
+        if(!result.endpoint && p>-8 && p<8) {
+            const auto index=knot+(8-static_cast<long double>(j))*resolution;
+            result.slope[j]=(pattern_pulse(static_cast<double>((index+1)/resolution))-
+                pattern_pulse(static_cast<double>(index/resolution)))*resolution/duration;
+        }
+    }
+    return result;
+}
+
+namespace {
+using PulseWide=std::complex<long double>;
+struct PulseMoments {
+    std::uint64_t count=0;
+    PulseWide rotation{1,0};
+    std::array<PulseWide,3> sum{};
+};
+// Concatenation computes polynomial/geometric sums without division by
+// 1-rotation. It remains well conditioned at DC, both real carrier images,
+// and frequencies arbitrarily close to their aliases.
+PulseMoments concatenate(const PulseMoments& left,const PulseMoments& right) {
+    const auto n=static_cast<long double>(left.count);
+    return {left.count+right.count,left.rotation*right.rotation,{
+        left.sum[0]+left.rotation*right.sum[0],
+        left.sum[1]+left.rotation*(right.sum[1]+n*right.sum[0]),
+        left.sum[2]+left.rotation*(right.sum[2]+2*n*right.sum[1]+n*n*right.sum[0])}};
+}
+PulseMoments pulse_moments(PulseWide rotation,std::uint64_t count) {
+    PulseMoments result,power{1,rotation,{PulseWide{1,0},PulseWide{},PulseWide{}}};
+    while(count) {
+        if(count&1U)result=concatenate(result,power);
+        count>>=1U;
+        if(count)power=concatenate(power,power);
+    }
+    return result;
+}
+} // namespace
+
 CorrelationFit CorrelationPulseCell::fit(
         std::span<const std::complex<double>,correlation_pulse_atoms> coefficients) const {
     std::complex<double> dot_sum{},square_sum{};double energy_sum=0;
@@ -153,6 +222,7 @@ void CorrelationPulseKernel::prepare(long double offset,std::uint64_t count,std:
     require(std::isfinite(offset) && offset>=0 && count &&
             count<=std::ceil(static_cast<long double>(chip_)/rate_)+1,
             "invalid pulse projection extent");
+    if(chip_>4096) {prepare_segments(offset,count,stop);return;}
     using Wide=std::complex<long double>;
     std::array<std::array<long double,correlation_pulse_pairs>,3> energy{};
     std::array<std::array<Wide,correlation_pulse_pairs>,3> square{};
@@ -232,6 +302,39 @@ void CorrelationPulseKernel::prepare(long double offset,std::uint64_t count,std:
         energy_[degree][pair]=energy[degree][pair];square_[degree][pair]=square[degree][pair];
     }
     count_=count;offset_=offset;valid_=true;
+}
+
+void CorrelationPulseKernel::prepare_segments(long double offset,std::uint64_t count,
+                                              std::stop_token stop) {
+    // Cancellation may leave only part of a new Gram. Never let that partial
+    // state masquerade as the previously cached geometry on a later call.
+    valid_=false;
+    for(auto& row:energy_)row={};
+    for(auto& row:square_)row={};
+    const auto duration=static_cast<long double>(chip_)/rate_;
+    const auto rotation=std::polar(1.L,2*static_cast<long double>(tau)*frequency_/sample_rate_);
+    PulseWide carrier{1,0};
+    for(std::uint64_t first=0;first<count;) {
+        cancelled(stop);
+        const auto segment=correlation_pulse_segment(offset+first,count-first,duration);
+        const auto n=static_cast<long double>(segment.count);
+        const std::array<long double,3> moments{n,n*(n-1)/2,n*(n-1)*(2*n-1)/6};
+        const auto geometric=pulse_moments(rotation,segment.count);
+        std::size_t pair=0;
+        for(std::size_t j=0;j<correlation_pulse_atoms;++j)
+            for(std::size_t k=j;k<correlation_pulse_atoms;++k,++pair) {
+                const auto a=segment.value[j]*segment.value[k];
+                const auto b=segment.value[j]*segment.slope[k]+segment.slope[j]*segment.value[k];
+                const auto c=segment.slope[j]*segment.slope[k];
+                energy_[0][pair]+=a*moments[0]+b*moments[1]+c*moments[2];
+                square_[0][pair]+=carrier*(a*geometric.sum[0]+b*geometric.sum[1]+c*geometric.sum[2]);
+            }
+        carrier*=geometric.rotation;first+=segment.count;
+    }
+    // Reuse identical geometry, but rebuild differing fractional offsets.
+    // Each rebuild follows table knots rather than the original sample count;
+    // no interpolation is allowed across a rounded support endpoint.
+    point_=true;lower_=upper_=offset;count_=count;offset_=offset;valid_=true;
 }
 
 CorrelationPulseGram CorrelationPulseKernel::evaluate(long double offset,std::uint64_t count,

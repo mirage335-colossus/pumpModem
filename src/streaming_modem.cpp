@@ -183,6 +183,7 @@ bool StreamingReceiver::acquiring()const{return impl_->pattern.acquiring();}
 Diagnostics StreamingReceiver::diagnostics()const{return impl_->pattern.diagnostics();}
 ConstellationBatch StreamingReceiver::take_payload_constellation(){return {impl_->pattern.take_chip_constellation(),0};}
 std::size_t StreamingReceiver::working_bytes()const{return sizeof(StreamingReceiver)+sizeof(Impl)+impl_->pattern.working_bytes();}
+std::size_t StreamingReceiver::reserved_workspace_bytes()const{return sizeof(StreamingReceiver)+sizeof(Impl)+impl_->pattern.reserved_workspace_bytes();}
 void StreamingReceiver::set_workspace_bytes(std::size_t bytes) {
     if(bytes<working_bytes())throw Error("DSP workspace is smaller than retained receiver history");
     impl_->pattern.set_workspace_bytes(bytes-sizeof(Impl));impl_->workspace=bytes;
@@ -193,6 +194,8 @@ Bytes StreamingReceiver::push_symbols(std::span<const SymbolObservation>,std::st
 }
 Bytes StreamingReceiver::push(std::span<const float> samples,std::stop_token stop){impl_->pattern.push(samples,stop);return {};}
 Bytes StreamingReceiver::push(std::span<const float> samples,std::span<const Complex> projected,std::stop_token stop){impl_->pattern.push(samples,projected,stop);return {};}
+Bytes StreamingReceiver::push(std::span<const float> samples,std::span<const Complex> projected,std::stop_token stop,
+                              detail::CorrelationProjectionCache* cache){impl_->pattern.push(samples,projected,stop,cache);return {};}
 PatternBurst StreamingReceiver::provisional_pattern()const{return impl_->pattern.provisional();}
 std::vector<PatternBurst> StreamingReceiver::take_pattern_bursts(){return impl_->pattern.take_bursts();}
 std::vector<PatternEvidence> StreamingReceiver::pattern_candidates()const{return impl_->pattern.candidates();}
