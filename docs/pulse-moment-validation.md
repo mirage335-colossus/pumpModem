@@ -4,8 +4,9 @@ This change extends the iterative receiver beyond its former 4,096 nominal
 samples per chip limit. It was developed against `d4de80cf2a0247c03b41efc797a4250319cfb10b`.
 The [implementation reference](search-compute.md#long-symbol-pulse-projection)
 describes eligibility, workspace fallbacks and unchanged admission semantics.
-Qualification is in progress; the measurements below do not yet establish
-completion of the full regression or sensitivity requirements.
+Extended qualification is paused for manual GUI testing at the user's request.
+All changes remain local. The measurements below do not establish completion
+of the full regression or sensitivity requirements.
 
 ## Reproduction geometry
 
@@ -118,6 +119,36 @@ of arbitrary structured interference. Multi-hypothesis trial spending remains
 the original receiver's responsibility.
 
 ## Coverage and remaining qualification
+
+At the manual-testing checkpoint, local candidate `5a37b78` passed the complete
+focused correlator, pulse Gram, cache and planner set (4/4), followed by the
+added high-chip section/differential fixture and updated planner/cache checks.
+The FLTK GUI application built successfully. Full general/native, sanitizer,
+platform, SDK and packaging qualification has not run for this candidate.
+
+Five conditional cases each completed 20,000 paired Gaussian draws and sixteen
+paired actual-PCM replays. They covered both bits at 0.005 Hz/64 samples/s with
+12,800-sample chips, bit zero at 0.5 Hz with the same geometry, bit one at 0.5 Hz
+with a 0.503-Hz interferer, and bit zero at 1,500 Hz/6,000 samples/s with
+4,097-sample chips and a 200-ppm clock offset. All included 0.5-degree/sqrt(second)
+phase diffusion. Estimated additional C/N0 at both 90% and 99% detection was
+zero at the 1e-7-dB root resolution. Paired bootstrap intervals were zero at
+that resolution; adding both conservative numerical allowances gave upper
+limits from **0.000350 to 0.000746 dB**. These are conditional single-branch
+results, not complete acquisition-bank or full-reproduction qualification.
+The longer 1,500-Hz statistic experiment was interrupted at the user's request
+and is not counted as a pass.
+
+Five isolated 20-second, 1,500-Hz reproduction pairs (13 epochs, 78 hypotheses)
+measured median CPU/wall times of approximately **2.010/2.010 seconds raw** and
+**0.04566/0.04567 seconds optimized**, with paired speedups **42.4–45.6x**.
+This capture is a fraction of the 6,400-second symbol and establishes no
+acquisition latency. Three paired 6,408-second captures at each low carrier
+measured median wall times **11.814/4.371 seconds** at 0.005 Hz and
+**11.774/4.538 seconds** at 0.5 Hz (raw/optimized). They accepted the first bit;
+the complete initial bank coverage remained unfinished for negative origins.
+Full performance, near-threshold acquisition-bank PCM curves, ordinary FFT-path
+comparisons and final latency/memory reporting remain outstanding.
 
 Focused checks compare all 153 pulse Gram pairs, including long chips, partial
 cells, DC/carrier-square aliases, fractional clocks, nonunit carrier norms and

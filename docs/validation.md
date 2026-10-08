@@ -4,6 +4,22 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Pulse-moment candidate — manual-testing checkpoint, 8 October 2026
+
+Local candidate `5a37b78` extends exact finite-pulse projection above the former
+4,096-sample chip limit and shares public carrier moments across eligible Live
+key/epoch receivers. See the [measurement method and partial results](pulse-moment-validation.md).
+The focused receiver/kernel/cache/planner checks and added high-chip
+section/differential regression passed. The local FLTK GUI built for manual
+testing. Five conditional 20,000-draw sensitivity cases passed paired PCM
+checks, but the requested complete sensitivity/performance matrix is unfinished.
+
+The user requested keeping all changes local and testing manually before
+extended validation. No push or hosted CI occurred. Full general/native GUI,
+sanitizer, platform, SDK and packaging qualification remains pending; the
+interrupted longer statistic experiment is not a pass. This checkpoint is
+not a full validation or release-certification claim.
+
 ## Independent Bookworm offline recovery — 30 September 2026
 
 At source `db31ad1b3109c0d7c9a1b87c0db9ab4d3093ce02`, an independent Linode
