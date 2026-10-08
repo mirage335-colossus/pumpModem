@@ -168,12 +168,12 @@ std::uint32_t recommended_sample_rate(double bandwidth_hz,std::optional<double> 
 }
 double recommended_carrier_hz(double bandwidth_hz) {
     if(!std::isfinite(bandwidth_hz) || bandwidth_hz<minimum_bandwidth_hz || bandwidth_hz>maximum_bandwidth_hz)
-        throw Error("modem bandwidth must be 0.01..30000000 Hz");
+        throw Error("modem bandwidth must be 0.001..30000000 Hz");
     return std::max(1500.,.75*bandwidth_hz);
 }
 double shannon_capacity_bps(double bandwidth_hz,double target_snr_db_hz) {
     if(!std::isfinite(bandwidth_hz) || bandwidth_hz<minimum_bandwidth_hz || bandwidth_hz>maximum_bandwidth_hz)
-        throw Error("modem bandwidth must be 0.01..30000000 Hz");
+        throw Error("modem bandwidth must be 0.001..30000000 Hz");
     if(!std::isfinite(target_snr_db_hz))throw Error("target C/N0 must be finite dB-Hz");
     const auto log_snr=target_snr_db_hz*(std::numbers::ln10/10)-std::log(bandwidth_hz);
     // log1p preserves weak-signal capacity; the positive branch avoids

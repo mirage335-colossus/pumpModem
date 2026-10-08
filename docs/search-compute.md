@@ -168,15 +168,20 @@ sample contributions across nearby regions; the large-chip kernel recomputes
 bounded segment sums when the common valid interval or sample count changes.
 Closed-support endpoints remain literal samples.
 
-Paired shaped symbols that do not contain a multiple of four complete chips
-use an additional affine-span path when they last at least 16 seconds and have
-at least 1,024 samples per chip. This path shares complex sample moments, then
+Paired shaped symbols use an additional affine-span path when they do not
+contain a multiple of four complete chips, or when the larger whole-chip
+projection state cannot fit. They must last at least 16 seconds and have
+at least 1,024 samples per chip. Affordable whole-chip projection remains the
+first choice. This fallback shares complex sample moments, then
 combines the 17 pulse atoms into each fresh private 0/1 template before fitting.
 It needs no per-lane pulse Gram matrix or symbol-sized buffer. The last partial
 chip retains its original center and amplitude, including its shifted table
 knots. Every chip, quarter, complete local window, caller push and oscillator
-block boundary clips the span. Carrier moments are prepared once per frequency
-and possible span length, with explicit workspace accounting. Smaller chips and
+block boundary clips the span. Four immutable carrier-moment entries per
+frequency cover the full block and selected short lengths. Other lengths use
+the same exact bounded geometric sum on the caller's stack, shared by both bit
+fits. The palette and its tags have explicit workspace accounting; no mutable
+cache crosses parallel private searches. Smaller chips and
 tight budgets keep the raw path. The 1,024-sample gate avoids replacing cheap
 short spans with more setup work.
 
@@ -214,11 +219,19 @@ Live banks can also share the original carrier prefix and moment arrays across
 keys and epochs for one immutable PCM push. Cache keys include the exact input
 subspan, receiver sample coordinate, sample rate, carrier and oscillator block
 convention. Private patterns never enter this cache. Its 256 KiB ceiling,
-128-row bound, reserved detector storage and per-receiver recording headroom
-are checked before use. Exhaustion falls back to the receiver's own frontend;
+128-row bound, reserved detector storage and finite-push recording/drain
+allocation bounds are checked before use. The bounds include vector growth
+and transient copies; they replace the earlier blanket 2 MiB reservation per
+receiver. Admission sums them once and consumes them as each receiver runs,
+without repeatedly scanning every peer. Exhaustion falls back to the receiver's own frontend;
 the cache is released before presentation/content growth. Different sample
 origins and mixed FFT banks can reduce or disable sharing. Sequential whole-file
 transfer banks currently use individual frontends.
+
+Receiver-major pushes can exhaust this small cache quickly: 101 carriers and
+2,048 samples require 6,464 compact rows, while the arena holds about 118.
+A successful short-block sharing test is therefore not evidence of sustained
+frontend sharing for that larger push. The cache ceiling has not been raised.
 
 The planner charges unique carrier projections, bounded segment/Gram work and
 chip-cadence private fits separately. It conservatively assumes cross-receiver

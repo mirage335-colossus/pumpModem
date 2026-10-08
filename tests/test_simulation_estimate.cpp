@@ -962,7 +962,27 @@ void nearby_shift_workload() {
                          "long private symbol regression must exercise real projected admission");
     }
 }
+void bounded_affine_rf_workload() {
+    // A wide RF uncertainty bank can fit the exact affine path while the
+    // larger whole-chip Gram kernels cannot fit. Keep the full paired bank.
+    transfer::Options rf;
+    rf.modem=tuning::resolve(1,-24,tuning::PatternMode::auto_keystream,true,1500).config;
+    modem::OscillatorSearchConfig policy;
+    policy.lf=policy.rf={.0001,.005};policy.rf_shift_hz=30000000;
+    rf.modem.oscillator_search=policy;rf.timestamp=0;rf.dsp_workspace_bytes=1999661056;
+    std::array<std::uint8_t,32> key{};rf.key.emplace(key);
+    const auto affine=simulation::estimate(wire(1,rf.modem),rf,true,clean_channel(),{},1,false);
+    check(affine.frequency_rate_hypotheses==1181&&!affine.oscillator_search_limited&&
+          affine.receiver_workspace_supported&&affine.pulse_segment_projection_modeled,
+          "wide RF bank must model bounded affine fallback without dropping paired hypotheses");
+    rf.dsp_workspace_bytes=16ULL*1024*1024*1024;
+    const auto whole=simulation::estimate(wire(1,rf.modem),rf,true,clean_channel(),{},1,false);
+    check(whole.frequency_rate_hypotheses==affine.frequency_rate_hypotheses&&
+          whole.pulse_projection_modeled&&!whole.pulse_segment_projection_modeled,
+          "ample workspace must preserve the existing whole-chip first choice and bank coverage");
+}
 void equivalent_receive_profiles() {
+    bounded_affine_rf_workload();
     transfer::Options options;options.modem.scramble=true;
     options.modem.integration_seconds=.25;options.timestamp=1800000000;
     options.dsp_workspace_bytes=128*1024*1024;

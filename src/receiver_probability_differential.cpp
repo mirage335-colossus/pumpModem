@@ -12,6 +12,7 @@
 #include <numbers>
 #include <numeric>
 #include <random>
+#include <string>
 #include <vector>
 
 namespace datapump::simulation::detail {
@@ -19,7 +20,7 @@ namespace {
 using Complex=std::complex<double>;
 constexpr double tau=2*std::numbers::pi;
 
-ReceiverProbability unsupported(const char* why) {
+ReceiverProbability unsupported(const std::string& why) {
     ReceiverProbability result;result.available=false;result.differential_model=true;
     result.unsupported_reason=why;return result;
 }
@@ -204,26 +205,45 @@ bool atom_span(const ReceiverProbabilityAtom& atom,AtomSpan& span) {
 
 ReceiverProbability real_probability(const ReceiverProbabilityParameters& p) {
     const auto windows=p.differential_windows;
-    if(windows<256||windows>4096||!p.real_window_samples||!p.real_sample_rate||
-       p.real_samples/p.real_window_samples!=windows||p.real_atoms.size()>windows+4||
-       p.real_atoms.empty()||p.requested_trials<256||p.requested_trials>4096||
-       !(p.signal_energy>=0)||!std::isfinite(p.signal_energy)||
-       !(p.diffusion_degrees>=0)||!std::isfinite(p.diffusion_degrees)||
-       !std::isfinite(p.residual_frequency)||!(p.timing_coherence>=0&&p.timing_coherence<=1)||
-       !(p.timing_uncertainty_chips>=0&&p.timing_uncertainty_chips<=.5)||
-       p.frequency_bin_min>0||p.frequency_bin_max<0||p.frequency_bin_min < -8194||p.frequency_bin_max > 8194||
-       p.frequency_bin_max-p.frequency_bin_min+1>17||
-       !(p.frequency_step_hz>=0)||!std::isfinite(p.frequency_step_hz)||
-       !(p.coherent_dimensions>1)||!std::isfinite(p.coherent_dimensions)||
-       !(p.section_dimensions>4)||!std::isfinite(p.section_dimensions)||
-       !(p.acquisition_threshold>=0)||!std::isfinite(p.acquisition_threshold)||
+    if(windows<256||windows>4096)
+        return unsupported("The real-covariance probability model supports 256–4096 complete local windows.");
+    if(!p.real_window_samples||!p.real_sample_rate)
+        return unsupported("Real-covariance sample rate and local-window length must be nonzero.");
+    if(p.real_samples/p.real_window_samples!=windows||p.real_atoms.size()>windows+4||p.real_atoms.empty())
+        return unsupported("Real-covariance atoms do not match the complete local-window geometry.");
+    if(p.requested_trials<256||p.requested_trials>4096)
+        return unsupported("The probability trial count must be within 256–4096.");
+    if(!(p.signal_energy>=0)||!std::isfinite(p.signal_energy))
+        return unsupported("Real-covariance signal energy must be finite and nonnegative.");
+    if(!(p.diffusion_degrees>=0)||!std::isfinite(p.diffusion_degrees))
+        return unsupported("Real-covariance phase diffusion must be finite and nonnegative.");
+    if(!std::isfinite(p.residual_frequency))
+        return unsupported("Real-covariance residual carrier frequency must be finite.");
+    if(!(p.timing_coherence>=0&&p.timing_coherence<=1)||
+       !(p.timing_uncertainty_chips>=0&&p.timing_uncertainty_chips<=.5))
+        return unsupported("Real-covariance timing coherence must be within 0–1 and timing uncertainty within 0–0.5 chip.");
+    if(p.frequency_bin_min>0||p.frequency_bin_max<0||p.frequency_bin_min < -8194||p.frequency_bin_max > 8194)
+        return unsupported("Real-covariance carrier bins must contain zero and remain within −8194–8194.");
+    const auto candidates=p.frequency_bin_max-p.frequency_bin_min+1;
+    if(candidates>17)
+        return unsupported("The real-covariance probability model supports at most 17 carrier candidates; this search has "+
+            std::to_string(candidates)+". Receiver search coverage is unchanged.");
+    if(!(p.frequency_step_hz>=0)||!std::isfinite(p.frequency_step_hz))
+        return unsupported("Real-covariance carrier spacing must be finite and nonnegative.");
+    if(!(p.coherent_dimensions>1)||!std::isfinite(p.coherent_dimensions)||
+       !(p.section_dimensions>4)||!std::isfinite(p.section_dimensions))
+        return unsupported("Real-covariance detector dimensions must be finite, above 1 for coherent and above 4 for section fits.");
+    if(!(p.acquisition_threshold>=0)||!std::isfinite(p.acquisition_threshold)||
        !(p.continuation_threshold>=0)||!std::isfinite(p.continuation_threshold))
-        return unsupported("Partial real-covariance geometry is outside the bounded model range.");
+        return unsupported("Real-covariance detection thresholds must be finite and nonnegative.");
     const auto sigma=p.diffusion_degrees*std::numbers::pi/180;
     const auto duration=static_cast<double>(p.real_window_samples)/p.real_sample_rate;
-    if(sigma*sigma*duration>.5||std::abs(p.residual_frequency)*duration>.05||
-       std::max(std::abs(p.frequency_bin_min),std::abs(p.frequency_bin_max))*p.frequency_step_hz*duration>.05)
-        return unsupported("Unresolved local phase or carrier variation exceeds the partial model range.");
+    if(sigma*sigma*duration>.5)
+        return unsupported("Phase diffusion exceeds the real-covariance model limit of 0.5 radian² per local window.");
+    if(std::abs(p.residual_frequency)*duration>.05)
+        return unsupported("Residual carrier rotation exceeds the real-covariance model limit of 0.05 cycle per local window.");
+    if(std::max(std::abs(p.frequency_bin_min),std::abs(p.frequency_bin_max))*p.frequency_step_hz*duration>.05)
+        return unsupported("Carrier-search rotation exceeds the real-covariance model limit of 0.05 cycle per local window.");
     std::vector<AtomSpan> spans(p.real_atoms.size());std::uint64_t position=0;unsigned rank=0;
     for(std::size_t i=0;i<p.real_atoms.size();++i) {
         const auto& atom=p.real_atoms[i];
@@ -234,8 +254,11 @@ ReceiverProbability real_probability(const ReceiverProbabilityParameters& p) {
            !atom_span(atom,spans[i]))return unsupported("Partial template/source Gram geometry is inconsistent.");
         position+=atom.samples;rank+=spans[i].rank;
     }
-    if(position!=p.real_samples||p.noise_dimensions!=static_cast<double>(p.real_samples)/2||
-       p.real_samples<=rank+1)return unsupported("Partial atoms do not cover complete received energy.");
+    if(position!=p.real_samples)return unsupported("Partial atoms do not cover complete received energy.");
+    if(p.noise_dimensions!=static_cast<double>(p.real_samples)/2)
+        return unsupported("Real-covariance noise dimensions do not match complete received energy.");
+    if(p.real_samples<=rank+1)
+        return unsupported("Real-covariance geometry has no orthogonal received-noise remainder.");
     struct PhaseAtom {double interval,drift,sd,correction;};
     std::vector<PhaseAtom> phase_atoms;
     constexpr unsigned nodes=8;

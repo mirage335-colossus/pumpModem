@@ -126,7 +126,7 @@ Patch parse_arguments(std::span<const std::string> arguments) {
         else if(flag=="--target-snr")result.target_db_hz=number(value,flag,-200,200);
         else if(flag=="--short-target-snr")result.short_target_db_hz=number(value,flag,-200,200);
         else if(flag=="--long-target-snr")result.long_target_db_hz=number(value,flag,-200,200);
-        else if(flag=="--rate"||flag=="--bw")result.rate_hz=frequency(value,flag,.01);
+        else if(flag=="--rate"||flag=="--bw")result.rate_hz=frequency(value,flag,tuning::minimum_bandwidth_hz);
         else if(flag=="--carrier")result.carrier_hz=frequency(value,flag,0,false,std::numeric_limits<double>::max());
         else if(flag=="--dsp-workspace")result.workspace_percent=workspace(value);
         else if(flag=="--oscillator")result.oscillator=std::string(tuning::parse_oscillator_preset(value).id);

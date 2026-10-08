@@ -118,6 +118,9 @@ public:
     ConstellationBatch take_payload_constellation();
     std::size_t working_bytes() const;
     std::size_t reserved_workspace_bytes() const;
+    // Additional allocation bound for one finite PCM push and its next drain.
+    // SIZE_MAX disables optional shared preprocessing for unsupported geometry.
+    std::size_t projection_cache_headroom(std::size_t input_samples) const;
     // Shared receiver banks can lend unused DSP space to an active recording.
     // The limit cannot be reduced below storage already in use.
     void set_workspace_bytes(std::size_t bytes);

@@ -179,15 +179,16 @@ class StreamCLI(unittest.TestCase):
             self.assertEqual(strong['lpi']['status'],'outside_weak_signal_model')
             self.assertIsNone(strong['lpi']['detection_seconds'])
     def test_sub_hertz_estimate(self):
-        for bandwidth in ('0.01', '0.1Hz', '0.5'):
-            numeric=float(bandwidth.removesuffix('Hz'))
+        # At 10 Hz this target needs more chips than the narrow-rate floor.
+        for bandwidth,seconds in (('0.001',128000), ('0.01',12800), ('0.1Hz',1280),
+                                  ('0.5',256), ('10',204.8)):
             value=json.loads(self.run_pump('estimate','--text','a','--bw',bandwidth,
                                           '--target-snr','-3').stdout)
             self.assertEqual(value['wire_bits'],3)
             self.assertEqual(value['sample_rate'],6000)
             self.assertEqual(value['carrier_hz'],1500)
-            self.assertTrue(math.isclose(value['symbol_seconds'],128/numeric,rel_tol=1e-12))
-            self.assertTrue(math.isclose(value['bit_rate'],numeric/128,rel_tol=1e-12))
+            self.assertTrue(math.isclose(value['symbol_seconds'],seconds,rel_tol=1e-12))
+            self.assertTrue(math.isclose(value['bit_rate'],1/seconds,rel_tol=1e-12))
     def test_link_analysis_exact_draft_and_airtime(self):
         geometry=('--bw','100','--target-snr','-36','--time','1800000000')
         link=('--tx-dbm','3','--attenuation-db','-200','--trials','2000')
@@ -690,7 +691,7 @@ class StreamCLI(unittest.TestCase):
             self.assertFalse(incomplete['stream_complete'])
             self.assertFalse(incomplete['known_bits_match'])
     def test_invalid_input_is_bounded(self):
-        for extra in (('--fec','99'),('--cache-mb','0'),('--bw','0'),('--bw','0.009'),('--nonsense','x')):
+        for extra in (('--fec','99'),('--cache-mb','0'),('--bw','0'),('--bw','0.0009'),('--nonsense','x')):
             self.run_pump('estimate','--text','x',*extra,ok=False)
         self.run_pump('tx','--text','x',ok=False)
 

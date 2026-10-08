@@ -96,6 +96,46 @@ void bounded_storage_and_cancellation() {
     check(new_value && new_value.prefix[1].xc==-.75 && new_value.prefix[1].energy==.5625,
           "a later input push reused stale PCM statistics");
 }
+void many_epoch_affine_banks_share_preprocessing() {
+    Config base;base.sample_rate=64;base.carrier_hz=16;base.bandwidth_hz=.1;
+    base.pattern_symbols=true;base.constellation_bits=1;base.spreading_factor=128;
+    base.scramble=base.dsss=true;base.stream_epoch=9708;
+    base.spreading_seed[3]=51;base.dsss_seed[13]=171;
+    base.integration_seconds=(32.*1280+1-.25)/base.sample_rate;
+    PatternSearch search;search.start_offset_seconds=0;search.start_uncertainty_seconds=0;
+    search.search_stream_phases=false;search.compact_clock_search=true;search.drift_tolerant=false;
+    search.candidate_limit=4;search.track_limit=1;search.bit_limit=4;search.worker_threads=1;
+    for(int bin=-50;bin<=50;++bin)search.hypotheses.push_back({bin*1e-5,0});
+    PatternCorrelator raw(base,search,4*1024*1024,{true,false});
+    const auto allowance=raw.reserved_workspace_bytes()+128*1024;
+    constexpr std::size_t epochs=129;
+    std::vector<PatternCorrelator> shared,individual;shared.reserve(epochs);individual.reserve(epochs);
+    std::size_t finite_headroom=0;
+    for(std::size_t i=0;i<epochs;++i) {
+        auto config=base;config.stream_epoch+=i;
+        if(i&1)config.dsss_seed[13]^=static_cast<std::uint8_t>(i);
+        shared.emplace_back(config,search,allowance);individual.emplace_back(config,search,allowance);
+        check(shared.back().work().backend==PatternCorrelationBackend::pulse_segments &&
+              shared.back().work().hypotheses==101,"many-epoch fixture reduced carrier coverage or repeated raw search");
+        finite_headroom+=shared.back().projection_cache_headroom(32);
+    }
+    check(finite_headroom<128*1024,"finite many-epoch cache admission retained arbitrary megabyte margins");
+    std::vector<float> samples(32);std::mt19937 random(6511);std::normal_distribution<float> noise(0,.3F);
+    for(auto& x:samples)x=noise(random);
+    CorrelationProjectionCache cache(samples,256*1024);
+    for(std::size_t i=0;i<epochs;++i) {
+        shared[i].push(samples,{},&cache);individual[i].push(samples);
+        check(shared[i].work().samples==individual[i].work().samples &&
+              shared[i].work().segments==individual[i].work().segments &&
+              shared[i].candidates().size()==individual[i].candidates().size() &&
+              shared[i].take_bursts().empty() && individual[i].take_bursts().empty() &&
+              !shared[i].initial_search_complete(),
+              "many-epoch cache changed partial observation, fresh search or admission state");
+    }
+    check(cache.computed_samples()==101*samples.size() && cache.hits()==(epochs-1)*101 &&
+          cache.working_bytes()<=256*1024,
+          "many-epoch bank repeated public carrier preprocessing or exceeded its bounded cache");
+}
 void private_key_and_epoch_receivers_share_only_pcm() {
     Config base;base.sample_rate=8000;base.carrier_hz=1500;base.bandwidth_hz=1.6;
     base.pattern_symbols=true;base.constellation_bits=1;base.spreading_factor=128;
@@ -151,7 +191,7 @@ void private_key_and_epoch_receivers_share_only_pcm() {
 }
 int main() {
     try {
-        carrier_statistics_and_identity();bounded_storage_and_cancellation();private_key_and_epoch_receivers_share_only_pcm();
+        carrier_statistics_and_identity();bounded_storage_and_cancellation();private_key_and_epoch_receivers_share_only_pcm();many_epoch_affine_banks_share_preprocessing();
         std::cout<<"pattern projection cache tests passed\n";return 0;
     } catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

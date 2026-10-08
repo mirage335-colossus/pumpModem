@@ -703,7 +703,7 @@ pending; it completes only after that profile observes physical absence.
 `reception_id` matches the completed payload's `id`. These are local presentation
 identities, not transmitted framing or authentication.
 
-The reference modem accepts nominal bandwidths from 0.01 Hz through 30 MHz and
+The reference modem accepts nominal bandwidths from 0.001 Hz through 30 MHz and
 forced durations of 1..16,384 chips. `--target-snr` is the desired C/N0 in dB-Hz,
 defaulting to 32 (32 dB/1Hz). Large messages and attachments default to 60%
 Reed–Solomon parity overhead (`--fec 60`).

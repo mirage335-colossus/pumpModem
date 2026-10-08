@@ -861,8 +861,10 @@ void rate_carrier_controls() {
           "GUI defaults must use the 3.6 kHz rate, 1.5 kHz carrier, 32/55 dB-Hz targets and 60% FEC");
     struct CarrierPreset { const char* rate; const char* recommended; const char* center; double center_hz; };
     constexpr CarrierPreset presets[]={
+        {"0.001 Hz","1.5 kHz","0.0005 Hz",.0005},
         {"0.01 Hz","1.5 kHz","0.005 Hz",.005},{"0.1 Hz","1.5 kHz","0.05 Hz",.05},
-        {"1 Hz","1.5 kHz","0.5 Hz",.5},{"100 Hz","1.5 kHz","50 Hz",50},
+        {"1 Hz","1.5 kHz","0.5 Hz",.5},{"10 Hz","1.5 kHz","5 Hz",5},
+        {"100 Hz","1.5 kHz","50 Hz",50},
         {"1.2 kHz","1.5 kHz","600 Hz",600},{"2.4 kHz","1.8 kHz","1.2 kHz",1200},
         {"3.6 kHz","1.5 kHz","1.8 kHz",1800},{"12 kHz","9 kHz","6 kHz",6000},
         {"18 kHz","13.5 kHz","9 kHz",9000},{"24 kHz","18 kHz","12 kHz",12000},
@@ -924,7 +926,7 @@ void sub_hertz_controls() {
     using F=ui::Field;using C=ui::Command;
     Controller controller({true,true});
     const auto& rates=controller.field(F::bandwidth).options;
-    for(const auto* value:{"0.01 Hz","0.1 Hz"})
+    for(const auto* value:{"0.001 Hz","0.01 Hz","0.1 Hz","10 Hz"})
         check(std::any_of(rates.begin(),rates.end(),[&](const auto& option){return option.id==value;}),
               "sub-hertz rates must be discoverable in the Rate dropdown");
     controller.edit(F::message,"a");controller.edit(F::bandwidth,"0.01 Hz");prepare(controller);
@@ -932,9 +934,9 @@ void sub_hertz_controls() {
           controller.settings().transfer.modem.carrier_hz==1500 && controller.estimate()->wire_bits==3 &&
           controller.estimate()->coded_seconds==38400 && controller.enabled(C::transmit),
           "sub-hertz GUI preparation must keep the exact short message and permit bounded transmission");
-    controller.edit(F::bandwidth,"0.009 Hz");
+    controller.edit(F::bandwidth,"0.0009 Hz");
     check(!controller.enabled(C::transmit) && controller.settings().transfer.modem.bandwidth_hz==.01 &&
-          controller.field(F::status).text.find("0.01")!=std::string::npos,
+          controller.field(F::status).text.find("0.001")!=std::string::npos,
           "an out-of-range rate must preserve the previous configuration and explain the lower bound");
 }
 void shannon_capacity_display() {

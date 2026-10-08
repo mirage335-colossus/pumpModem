@@ -38,21 +38,27 @@ void check(bool condition,const char* message){if(!condition)throw Error(message
 template<class T>T number(std::string_view input){T out{};auto r=std::from_chars(input.data(),input.data()+input.size(),out);if(r.ec!=std::errc{}||r.ptr!=input.data()+input.size())throw Error("invalid argument");return out;}
 struct Args {
     std::string csv;std::uint32_t rate=64;std::uint64_t chip=4097,tail=0,seed=719;
+    std::size_t workspace_bytes=8*1024*1024;bool affine_statistics=false;
     double carrier=16,ppm=0,offset=0,diffusion=0,interference=0,interference_frequency=17;
     double minimum=-60,maximum=20,root_tolerance=1e-7;unsigned trials=20000,bit=0,verify=8;
 };
+bool affine_representation(const Args& a){return a.tail||a.affine_statistics;}
 Args arguments(int argc,char** argv){
     Args a;for(int i=1;i<argc;++i){const std::string flag=argv[i];
         if(flag=="--help") {std::cout<<"benchmark_pulse_statistics --csv PATH --trials 20000 --bit 0|1\n"
             " --sample-rate HZ --carrier HZ --chip-samples N --tail-samples N --clock-ppm N --frequency-offset HZ\n"
             " --phase-diffusion N --interference-amplitude N --interference-frequency HZ\n"
             " --minimum-cn0 DB-Hz --maximum-cn0 DB-Hz --root-tolerance-db N --seed N --verify-pcm-seeds N\n"
+            " --workspace-bytes N (receiver budget; default8388608) --affine-statistics (representation only)\n"
             "Conditional exact joint-noise statistic Monte Carlo, single paired coherent bank.\n"
-            "Whole symbols require chip>4096; a partial final chip permits chip>=1024, 0<tail<chip, and duration>=16s.\n";std::exit(0);}
+            "Pulse moments require chip>4096; affine statistics require chip>=1024 and duration>=16s.\n"
+            "A nonzero tail selects affine statistics; an aligned affine run must use a workspace that automatically selects pulse_segments.\n";std::exit(0);}
+        if(flag=="--affine-statistics"){a.affine_statistics=true;continue;}
         if(i+1==argc)throw Error("missing argument");const std::string v=argv[++i];
         if(flag=="--csv")a.csv=v;else if(flag=="--trials")a.trials=number<unsigned>(v);else if(flag=="--bit")a.bit=number<unsigned>(v);
         else if(flag=="--sample-rate")a.rate=number<std::uint32_t>(v);else if(flag=="--chip-samples")a.chip=number<std::uint64_t>(v);
         else if(flag=="--tail-samples")a.tail=number<std::uint64_t>(v);
+        else if(flag=="--workspace-bytes")a.workspace_bytes=number<std::size_t>(v);
         else if(flag=="--carrier")a.carrier=number<double>(v);else if(flag=="--clock-ppm")a.ppm=number<double>(v);
         else if(flag=="--frequency-offset")a.offset=number<double>(v);else if(flag=="--phase-diffusion")a.diffusion=number<double>(v);
         else if(flag=="--interference-amplitude")a.interference=number<double>(v);else if(flag=="--interference-frequency")a.interference_frequency=number<double>(v);
@@ -61,8 +67,10 @@ Args arguments(int argc,char** argv){
         else if(flag=="--verify-pcm-seeds")a.verify=number<unsigned>(v);else throw Error("unknown option: "+flag);
     }
     check(a.bit<2&&a.trials&&a.trials<=1000000&&a.chip<=250000&&a.tail<a.chip&&
-          (a.tail?a.chip>=1024:a.chip>4096),"invalid bit, trials, chip or partial-tail bound");
-    check(a.rate&&(!a.tail||32*a.chip+a.tail>=16ULL*a.rate),"partial statistic geometry requires at least16 seconds");
+          (affine_representation(a)?a.chip>=1024:a.chip>4096),"invalid bit, trials, chip or partial-tail bound");
+    check(a.rate&&(!affine_representation(a)||32*a.chip+a.tail>=16ULL*a.rate),"affine statistic geometry requires at least16 seconds");
+    check(a.workspace_bytes>0,"receiver workspace must be nonzero");
+    check(!a.affine_statistics||a.verify>0,"explicit affine statistics require actual PCM verification seeds");
     check(a.minimum<a.maximum&&a.maximum-a.minimum<=200&&a.root_tolerance>0&&a.root_tolerance<=.01,"invalid C/N0 root bracket");
     check(std::isfinite(a.ppm)&&std::abs(a.ppm)<=10000,"invalid clock scaling");
     return a;
@@ -92,7 +100,7 @@ PatternSearch paired_search(const Args& a,const Model& model) {
     return search;
 }
 PatternCorrelationBackend optimized_backend(const Args& a) {
-    return a.tail?PatternCorrelationBackend::pulse_segments:PatternCorrelationBackend::pulse_moments;
+    return affine_representation(a)?PatternCorrelationBackend::pulse_segments:PatternCorrelationBackend::pulse_moments;
 }
 void add_fit(CorrelationFit& a,const CorrelationFit& b){a.xc+=b.xc;a.xs+=b.xs;a.cc+=b.cc;a.ss+=b.ss;a.cs+=b.cs;a.energy+=b.energy;a.count+=b.count;}
 Model prepare(const Args& a){
@@ -116,7 +124,7 @@ Model prepare(const Args& a){
     m.origin=static_cast<long double>(static_cast<double>(m.origin/m.config.sample_rate))*m.config.sample_rate;
     m.first=static_cast<std::uint64_t>(std::ceil(m.origin));m.end=static_cast<std::uint64_t>(std::ceil(m.origin+symbol_sample_count(m.config)/m.rate));m.count=m.end-m.first;
     {
-        PatternCorrelator probe(m.config,paired_search(a,m),8*1024*1024);
+        PatternCorrelator probe(m.config,paired_search(a,m),a.workspace_bytes);
         m.work=probe.work();
         check(m.work.backend==optimized_backend(a),"automatic receiver did not select the represented statistic backend");
         check(m.work.drift_sections==1&&!m.work.differential_window_samples&&m.work.hypotheses==1&&m.work.phase_groups==1,
@@ -140,7 +148,7 @@ Model prepare(const Args& a){
             const double c=phase.real(),s=phase.imag();m.raw_gram[bit].add({0,0,c*c,s*s,c*s,0},values[bit],1);}
         m.vectors[5][n]=a.interference*std::cos(static_cast<double>(tau*a.interference_frequency*sample/a.rate+.47L));phase*=step;
     }
-    if(a.tail) {
+    if(affine_representation(a)) {
         // Match the bank's original32-sample oscillator blocks and covariance
         // prefixes, including observations preceding a fractional symbol start.
         // Prefix subtraction also matters for affine_fit's singleton shortcut.
@@ -167,7 +175,7 @@ Model prepare(const Args& a){
                 const auto duration=static_cast<long double>(a.chip)/m.rate;
                 auto piece=correlation_pulse_segment(offset,limit,duration);
                 CorrelationPulseSegment final_piece;
-                const bool has_final=local<=32&&32-local<=8;
+                const bool has_final=a.tail&&local<=32&&32-local<=8;
                 if(has_final) {
                     final_piece=correlation_pulse_segment(offset+static_cast<long double>(a.chip-a.tail)/(2*m.rate),limit,duration);
                     piece.count=std::min(piece.count,final_piece.count);
@@ -176,7 +184,7 @@ Model prepare(const Args& a){
                 std::array<long double,2> envelope_value{},envelope_slope{};
                 for(std::size_t j=0;j<correlation_pulse_atoms;++j) {
                     const auto position=static_cast<std::int64_t>(local)+static_cast<std::int64_t>(j)-8;
-                    if(position<0||position>32)continue;
+                    if(position<0||position>=static_cast<std::int64_t>(32+(a.tail!=0)))continue;
                     auto pulse_value=piece.value[j],pulse_slope=piece.slope[j];
                     if(has_final&&position==32) {
                         const auto scale=std::sqrt(static_cast<double>(a.tail)/static_cast<double>(a.chip));
@@ -431,7 +439,7 @@ double verify_pcm(const Args& a,const Model& model,const Noise& draw,double cn0,
     double error=0;
     std::array<PatternEvidence,2> paired_candidates{};
     for(bool optimized:{false,true}){
-        PatternCorrelator receiver(model.config,paired_search(a,model),8*1024*1024,PatternCorrelatorOptions{!optimized,false});
+        PatternCorrelator receiver(model.config,paired_search(a,model),a.workspace_bytes,PatternCorrelatorOptions{!optimized,false});
         for(std::size_t pos=0;pos<pcm.size();pos+=2048) {
             const auto count=std::min<std::size_t>(2048,pcm.size()-pos);
             receiver.push(std::span(pcm).subspan(pos,count));
@@ -463,9 +471,12 @@ double verify_pcm(const Args& a,const Model& model,const Noise& draw,double cn0,
         // Away from a crossing, quantized PCM must preserve the complete actual
         // receiver admission decision as well as its paired score.
         check(correct==accepted(model,draw,cn0,optimized,a.bit),"actual PCM and statistic reconstruction changed admission away from threshold");
-        check(receiver.work().drift_sections==1&&!receiver.work().differential_window_samples&&receiver.work().hypotheses==1,"statistic and actual PCM detector/search coverage differ");
+        check(receiver.work().drift_sections==1&&!receiver.work().differential_window_samples&&receiver.work().hypotheses==1&&
+              receiver.work().phase_groups==1&&receiver.work().lattices==(optimized?model.work.lattices:0),"statistic and actual PCM detector/search coverage differ");
         check(receiver.work().backend==(optimized?optimized_backend(a):PatternCorrelationBackend::raw),"actual PCM receiver selected an unexpected backend");
-        if(optimized&&a.tail)check(receiver.work().segments==model.segments,"actual PCM receiver and statistic representation split different affine spans");
+        check(receiver.work().samples==pcm.size(),"actual PCM receiver did not process the complete shared capture");
+        if(!optimized)check(receiver.work().cells==0&&receiver.work().segments==0,"raw reference unexpectedly performed pulse preprocessing");
+        if(optimized&&affine_representation(a))check(model.segments>0&&receiver.work().cells==0&&receiver.work().segments==model.segments,"actual PCM receiver and statistic representation split different affine spans");
         receiver.finish();for(const auto& event:receiver.take_bursts())check(!event.complete,"capture EOF substituted for physical absence");
     }
     check(paired_candidates[0].first_sample==paired_candidates[1].first_sample&&paired_candidates[0].end_sample==paired_candidates[1].end_sample,
@@ -477,7 +488,7 @@ void csv_value(std::ostream& out,const std::string& text){out<<'"';for(const aut
 int main(int argc,char** argv){try{
     const auto a=arguments(argc,argv);const auto model=prepare(a);std::ofstream file;std::ostream* out=&std::cout;
     if(!a.csv.empty()){file.open(a.csv);check(bool(file),"cannot open statistics CSV");out=&file;}*out<<std::setprecision(17);
-    *out<<"mode,case,variant,backend,carrier_hz,bandwidth_hz,sample_rate,chip_samples,symbol_samples,symbol_seconds,workspace_bytes,keys,epochs,frequency_offset_hz,clock_ppm,phase_diffusion,start_uncertainty_seconds,noise_only,seed,repeat,input_cn0_db_hz,instrumented,hypotheses,phase_groups,drift_sections,differential_window_samples,samples,capture_begin_sample,pcm_samples_identical,threshold_cn0_db_hz,root_error_db,bracketed,monotone,maximum_template_relative_error,maximum_gram_relative_error,joint_noise_covariance_error,awgn_false_accept_union_bound,actual_pcm_maximum_score_relative_error,noise_span_rank,interference_amplitude,interference_frequency,waveform_seed,actual_pcm_verified_pairs,actual_pcm_verified_seed,numerical_root_error_bound_db,numerical_enclosure_valid,numerical_enclosure_method,numerical_enclosure_scope,nonmonotone_curve,tail_samples,represented_affine_spans,automatic_constructor_workspace_bytes\n";
+    *out<<"mode,case,variant,backend,carrier_hz,bandwidth_hz,sample_rate,chip_samples,symbol_samples,symbol_seconds,workspace_bytes,keys,epochs,frequency_offset_hz,clock_ppm,phase_diffusion,start_uncertainty_seconds,noise_only,seed,repeat,input_cn0_db_hz,instrumented,hypotheses,phase_groups,drift_sections,differential_window_samples,samples,capture_begin_sample,pcm_samples_identical,threshold_cn0_db_hz,root_error_db,bracketed,monotone,maximum_template_relative_error,maximum_gram_relative_error,joint_noise_covariance_error,awgn_false_accept_union_bound,actual_pcm_maximum_score_relative_error,noise_span_rank,interference_amplitude,interference_frequency,waveform_seed,actual_pcm_verified_pairs,actual_pcm_verified_seed,numerical_root_error_bound_db,numerical_enclosure_valid,numerical_enclosure_method,numerical_enclosure_scope,nonmonotone_curve,tail_samples,represented_affine_spans,automatic_constructor_workspace_bytes,affine_statistics_requested\n";
     unsigned invalid=0,verified_pairs=0;double pcm_error=0;
     for(unsigned trial=0;trial<a.trials;++trial){const auto seed=a.seed+104729ULL*trial;const auto draw=noise(model,seed);
         auto raw=crossing(a,model,draw,false),optimized=crossing(a,model,draw,true);
@@ -489,9 +500,9 @@ int main(int argc,char** argv){try{
         const bool verified=trial<a.verify&&raw.bracketed&&optimized.bracketed&&numerical_valid[0]&&numerical_valid[1];
         if(verified){const auto center=.5*(raw.value+optimized.value);pcm_error=std::max({pcm_error,verify_pcm(a,model,draw,center-.05,seed),verify_pcm(a,model,draw,center+.05,seed)});verified_pairs+=2;}
         for(bool current:{false,true}){const auto& root=current?optimized:raw;
-            *out<<"statistics_crossing,statistics-bit"<<a.bit<<','<<(current?(a.tail?"automatic,pulse_segments":"automatic,pulse_moments"):"raw_reference,raw")<<','
+            *out<<"statistics_crossing,statistics-bit"<<a.bit<<','<<(current?(affine_representation(a)?"automatic,pulse_segments":"automatic,pulse_moments"):"raw_reference,raw")<<','
                 <<a.carrier<<','<<model.config.bandwidth_hz<<','<<a.rate<<','<<a.chip<<','<<symbol_sample_count(model.config)<<','
-                <<static_cast<double>(symbol_sample_count(model.config))/a.rate<<",8388608,1,1,"<<a.offset<<','<<a.ppm<<','<<a.diffusion
+                <<static_cast<double>(symbol_sample_count(model.config))/a.rate<<','<<a.workspace_bytes<<",1,1,"<<a.offset<<','<<a.ppm<<','<<a.diffusion
                 <<",0,0,"<<seed<<','<<trial<<",,0,"<<model.work.hypotheses<<','<<model.work.phase_groups<<','<<model.work.drift_sections<<','
                 <<model.work.differential_window_samples<<','<<model.count<<','<<model.first<<",1,";
             if(root.bracketed)*out<<root.value;
@@ -499,7 +510,7 @@ int main(int argc,char** argv){try{
                 <<model.covariance_error<<','<<model.false_accept_bound<<','<<pcm_error<<','<<model.orthonormal.size()<<','<<a.interference<<','<<a.interference_frequency<<','<<a.seed<<','<<verified_pairs<<','<<verified<<',';
             if(numerical_valid[current])*out<<numerical_bounds[current];
             *out<<','<<numerical_valid[current]<<",ieee_roundoff_estimate,entire_lower_bracket,";
-            csv_value(*out,root.curve);*out<<','<<a.tail<<','<<model.segments<<','<<model.work.peak_workspace_bytes<<'\n';}
+            csv_value(*out,root.curve);*out<<','<<a.tail<<','<<model.segments<<','<<model.work.peak_workspace_bytes<<','<<a.affine_statistics<<'\n';}
         if((trial+1)%1024==0){out->flush();std::cerr<<"joint-statistic paired seeds completed "<<trial+1<<'/'<<a.trials<<'\n';}
     }
     out->flush();check(bool(*out),"statistics CSV write failed");

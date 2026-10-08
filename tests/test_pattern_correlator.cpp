@@ -781,6 +781,120 @@ void partial_projection_affine_fallback() {
     check(rectangular.work().backend==modem::PatternCorrelationBackend::raw,
           "partial affine optimization changed rectangular templates");
 }
+void aligned_projection_affine_budget() {
+    auto c=config();c.sample_rate=64;c.carrier_hz=16;c.bandwidth_hz=.1;
+    constexpr std::uint64_t chip=1280,symbol=32*chip;
+    c.integration_seconds=static_cast<double>(symbol)/c.sample_rate;
+    c.stream_epoch=1730000931;c.stream_phase_samples=7;
+    check(modem::pattern_chip_samples(c)==chip && modem::symbol_sample_count(c)==symbol,
+          "aligned budget fixture lost whole pulse geometry");
+    constexpr std::size_t delay=137;
+    const auto padding=modem::pattern_pulse_padding_samples(c);
+    const Bytes bits{0,1};auto samples=waveform(bits,c,delay);
+    const auto origin=delay+padding;
+    // The slowest clock must observe its entire absent symbol before ending.
+    const auto count=static_cast<std::size_t>(std::ceil(origin+(bits.size()+1)*symbol/(1-200e-6)));
+    samples.resize(count);
+    std::mt19937 random(6155);std::normal_distribution<float> noise(0,.125F);
+    for(auto& x:samples)x+=noise(random);
+    modem::PatternSearch search;search.start_offset_seconds=static_cast<double>(origin)/c.sample_rate;
+    // Retain the known private stream address in this aligned fixture.
+    search.start_uncertainty_seconds=0;search.search_stream_phases=false;search.compact_clock_search=true;
+    search.drift_tolerant=false;search.retain_score=0;search.candidate_limit=128;
+    search.track_limit=1;search.bit_limit=8;search.chunk_bits=1;search.worker_threads=1;
+    const auto frequency_step=.25*c.sample_rate/symbol;
+    // Use the receiver policy's central-first ordering. Accepted output is
+    // immutable; deliberately prioritizing a far carrier tests a different
+    // acquisition policy, not the representation under the normal policy.
+    for(const auto bin:{0,-1,1,-2,2,-3,3,-4,4})for(const auto ppm:{0.,-200.,200.})
+        search.hypotheses.push_back({bin*frequency_step,ppm});
+    modem::PatternCorrelator raw(c,search,8*1024*1024,{true,false});
+    const auto tight_budget=raw.reserved_workspace_bytes()+24*1024;
+    modem::PatternCorrelator affine(c,search,tight_budget),whole(c,search,8*1024*1024);
+    check(affine.work().backend==modem::PatternCorrelationBackend::pulse_segments &&
+          whole.work().backend==modem::PatternCorrelationBackend::pulse &&
+          affine.work().hypotheses==raw.work().hypotheses &&
+          affine.work().phase_groups==raw.work().phase_groups && affine.drift_tolerant()==raw.drift_tolerant(),
+          "aligned workspace fallback changed complete search or detector coverage");
+    check(affine.reserved_workspace_bytes()<=raw.reserved_workspace_bytes()+12*1024,
+          "aligned affine fallback retained large kernel tables");
+    Bytes accepted;unsigned completed=0;
+    for(std::size_t offset=0;offset<samples.size();) {
+        const auto count=std::min<std::size_t>(2048,samples.size()-offset);
+        const auto input=std::span(samples).subspan(offset,count);offset+=count;
+        affine.push(input);raw.push(input);
+        const auto a=affine.candidates(),b=raw.candidates();
+        check(a.size()==b.size(),"aligned affine fallback omitted a completed hypothesis");
+        for(std::size_t i=0;i<a.size();++i)check(a[i].bit==b[i].bit &&
+            a[i].first_sample==b[i].first_sample && a[i].end_sample==b[i].end_sample &&
+            a[i].stream_symbol==b[i].stream_symbol && a[i].stream_phase_samples==b[i].stream_phase_samples &&
+            a[i].admission_threshold==b[i].admission_threshold &&
+            std::abs(a[i].score-b[i].score)<2e-7*std::max(1.,b[i].score) &&
+            std::abs(a[i].alternative_score-b[i].alternative_score)<2e-7*std::max(1.,b[i].alternative_score),
+            "aligned affine fallback changed I/Q, pulse energy, covariance or trial identity");
+        const auto x=affine.take_bursts(),y=raw.take_bursts();
+        check(x.size()==y.size(),"aligned affine fallback changed next-poll progress");
+        for(std::size_t i=0;i<x.size();++i) {
+            check(x[i].bits==y[i].bits && x[i].complete==y[i].complete && x[i].end_sample==y[i].end_sample &&
+                  x[i].first_stream_symbol==y[i].first_stream_symbol,
+                  "aligned affine fallback changed fresh private bits or physical absence");
+            accepted.insert(accepted.end(),x[i].bits.begin(),x[i].bits.end());completed+=x[i].complete;
+        }
+        check(affine.working_bytes()<=tight_budget,"aligned affine fallback exceeded its bounded workspace");
+    }
+    if(accepted!=bits || completed!=1) {
+        std::cerr<<"aligned affine decisions: ";for(auto bit:accepted)std::cerr<<unsigned(bit);
+        std::cerr<<", completions: "<<completed<<'\n';
+    }
+    check(accepted==bits && completed==1,"aligned affine budget fallback lost physical bit decisions");
+    affine.finish();check(affine.take_bursts().empty(),"aligned affine EOF supplied physical completion");
+    // The manual 30 MHz RF case keeps all 1,181 carrier hypotheses even when
+    // shared-cell kernels cannot fit. This is constructor coverage, not timing.
+    c.sample_rate=6000;c.carrier_hz=1500;c.bandwidth_hz=1;
+    c.integration_seconds=16384;
+    search.start_offset_seconds=0;search.hypotheses.clear();search.candidate_limit=4;
+    const auto rf_symbol=modem::symbol_sample_count(c);
+    for(int bin=-590;bin<=590;++bin)search.hypotheses.push_back({bin*.25*c.sample_rate/rf_symbol,0});
+    modem::PatternCorrelator rf_raw(c,search,16*1024*1024,{true,false});
+    modem::PatternCorrelator rf_affine(c,search,rf_raw.reserved_workspace_bytes()+2*1024*1024);
+    check(modem::pattern_chip_samples(c)==12000 && rf_symbol==98304000 &&
+          rf_affine.work().backend==modem::PatternCorrelationBackend::pulse_segments &&
+          rf_affine.work().hypotheses==1181 && rf_affine.work().hypotheses==rf_raw.work().hypotheses &&
+          rf_affine.reserved_workspace_bytes()<rf_raw.reserved_workspace_bytes()+1200*1024,
+          "high-frequency-count aligned search fell back to repeated raw templates or lost hypotheses");
+}
+void projection_cache_headroom_bound() {
+    auto c=config();c.sample_rate=64;c.carrier_hz=16;c.bandwidth_hz=.1;
+    constexpr std::uint64_t symbol=17*1280+27;
+    c.integration_seconds=(static_cast<double>(symbol)-.25)/c.sample_rate;
+    const Bytes bits{0,1,1,0,0,1};auto samples=waveform(bits,c,137);
+    modem::PatternSearch search;search.start_offset_seconds=(137.+modem::pattern_pulse_padding_samples(c))/c.sample_rate;
+    search.start_uncertainty_seconds=0;search.search_stream_phases=true;search.compact_clock_search=true;
+    search.hypotheses={{0,0}};search.drift_tolerant=false;search.worker_threads=1;
+    search.retain_score=0;search.candidate_limit=8;search.track_limit=8;search.bit_limit=32;search.chunk_bits=2;
+    modem::PatternCorrelator receiver(c,search,4*1024*1024);
+    check(receiver.projection_cache_headroom(2048)<4096,
+          "idle finite-push headroom retained the arbitrary per-epoch megabytes");
+    // One large push crosses several doublings/publications; intermediate
+    // pushes retain an ample buffer and exercise its later reset trajectory.
+    for(const auto count:{std::size_t{137},std::size_t{2*symbol},samples.size()}) {
+        if(samples.empty())break;
+        const auto n=std::min(count,samples.size());
+        const auto before=receiver.reserved_workspace_bytes(),old_peak=receiver.work().peak_workspace_bytes;
+        const auto extra=receiver.projection_cache_headroom(n);
+        receiver.set_workspace_bytes(before+extra);
+        receiver.push(std::span(samples).first(n));
+        check(receiver.projection_cache_headroom(std::numeric_limits<std::size_t>::max())==
+              std::numeric_limits<std::size_t>::max(),"overflowing sample count did not disable optional caching");
+        check(receiver.work().peak_workspace_bytes<=std::max(old_peak,before+extra),
+              "finite-push bound missed a transient reserve or publication allocation");
+        const auto events=receiver.take_bursts();
+        auto retained=receiver.reserved_workspace_bytes()+events.capacity()*sizeof(modem::PatternBurst);
+        for(const auto& event:events)retained+=event.bits.capacity();
+        check(retained<=before+extra,"finite-push headroom missed drained event storage");
+        samples.erase(samples.begin(),samples.begin()+static_cast<std::ptrdiff_t>(n));
+    }
+}
 void majority_obscured_symbol_is_independent() {
     auto c=config();c.integration_seconds=2;
     const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
@@ -1449,6 +1563,8 @@ int main(int argc,char** argv) {
     run("partial_projection_affine",partial_projection_affine);
     run("partial_projection_affine_differential",partial_projection_affine_differential);
     run("partial_projection_affine_fallback",partial_projection_affine_fallback);
+    run("aligned_projection_affine_budget",aligned_projection_affine_budget);
+    run("projection_cache_headroom_bound",projection_cache_headroom_bound);
     run("majority_obscured_symbol_is_independent",majority_obscured_symbol_is_independent);
     run("completely_obscured_symbols_do_not_block_later_symbols",completely_obscured_symbols_do_not_block_later_symbols);
     run("weak_tails_expire_without_blocking_independent_symbols",weak_tails_expire_without_blocking_independent_symbols);

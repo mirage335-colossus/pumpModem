@@ -524,12 +524,20 @@ std::shared_ptr<const ui::DocumentNode> Application::document(ui::Page page,int 
         const auto model=impl_->controller.link_plan();
         if(model->available)cached.previous=model;
         const bool updating=model->calculating&&cached.previous;
-        const auto displayed=updating?cached.previous:model;
+        auto displayed=updating?cached.previous:model;
         const bool details=impl_->controller.planner_details(),draft=impl_->controller.planner_uses_draft();
         const bool closing=impl_->controller.closing(),can_apply=impl_->controller.enabled(ui::Command::planner_apply_short);
         const bool can_load=impl_->controller.enabled(ui::Command::planner_load_command);
         if(!cached.root||cached.model!=model||cached.width!=width||cached.details!=details||
             cached.draft!=draft||cached.closing!=closing||cached.can_apply!=can_apply||cached.can_load!=can_load) {
+            if(updating) {
+                // Numerical results and plots remain explicitly previous,
+                // while navigation always belongs to the current inputs.
+                auto current_actions=std::make_shared<planner::Model>(*cached.previous);
+                current_actions->stronger_fit_target=model->stronger_fit_target;
+                current_actions->weaker_fit_target=model->weaker_fit_target;
+                displayed=std::move(current_actions);
+            }
             auto root=planner_page::build(*displayed,static_cast<float>(width),details,draft,
                 updating?"Updating · previous plan":std::string{});
             std::function<void(ui::DocumentNode&)> enable=[&](auto& node) {

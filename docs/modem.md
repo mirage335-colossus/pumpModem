@@ -25,7 +25,7 @@ frequency, clock and memory limits below remain material.
 
 The default CLI/internal configuration is mono 6,000 Hz PCM, a 1500 Hz carrier and
 1,200 Hz nominal rate parameter (`Config::bandwidth_hz`). For this parameter `B`
-from 0.01 Hz through 30 MHz, the legacy carrier recommendation is
+from 0.001 Hz through 30 MHz, the legacy carrier recommendation is
 `max(1500, 0.75B)`. Public Carrier is the absolute transmitted/received
 frequency; Shift defaults to zero, and the positive real USB stream tone is
 `fc = Carrier - Shift`. Automatic planning chooses

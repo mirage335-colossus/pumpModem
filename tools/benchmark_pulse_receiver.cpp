@@ -45,7 +45,7 @@ std::string text(double value) {std::ostringstream out;out<<std::setprecision(17
 template<class T> std::string text(T value) {return std::to_string(value);}
 using Row=std::map<std::string,std::string>;
 const std::vector<std::string> columns{
-    "mode","case","variant","backend","carrier_hz","bandwidth_hz","sample_rate","chip_samples","symbol_samples",
+    "mode","case","variant","backend","carrier_hz","rf_shift_hz","oscillator","rf_oscillator","bandwidth_hz","sample_rate","chip_samples","symbol_samples",
     "symbol_seconds","target_cn0_db_hz","input_cn0_db_hz","workspace_bytes","keys","epochs","epoch_before","hypotheses",
     "lattices","phase_groups","drift_sections","differential_window_samples","seed","repeat","instrumented",
     "samples","media_seconds","wall_seconds","cpu_seconds","construction_seconds","frontend_seconds",
@@ -74,9 +74,9 @@ struct Csv {
     void emit(const Row& row) {std::vector<std::string> values;for(const auto& key:columns){const auto it=row.find(key);values.push_back(it==row.end()?"":it->second);}write(values);}
 };
 struct Args {
-    std::string mode="performance",scenario="reproduction",csv,bits="001";
+    std::string mode="performance",scenario="reproduction",csv,bits="001",oscillator="gpsdo-xo",rf_oscillator="gpsdo-ocxo";
     double carrier=1500,bandwidth=0,target=4.2185134083910505,seconds=20,uncertainty=7;
-    double frequency=0,clock=.0001,diffusion=.5,cn0=-3;
+    double frequency=0,clock=.0001,diffusion=.5,cn0=-3,rf_shift=0;
     std::uint32_t sample_rate=0;std::uint64_t chip=0,symbol=0,seed=17;
     std::size_t workspace=0;unsigned workspace_percent=50,keys=1,epochs=1,repeats=5,trials=64;
     unsigned epoch_before=std::numeric_limits<unsigned>::max();
@@ -96,6 +96,7 @@ Args arguments(int argc,char** argv) {
         if(flag=="--help") {
             std::cout<<"benchmark_pulse_receiver --mode geometry|performance|curve --case reproduction|threshold|wide|weak|fast\n"
                 "  --carrier HZ --sample-rate HZ (0: selected) --bandwidth HZ --target-cn0 DB-Hz\n"
+                "  --rf-shift HZ --oscillator PROFILE --rf-oscillator PROFILE (carrier is the real stream tone)\n"
                 "  --chip-samples N (threshold fixture) --symbol-samples N (exact sampled fixture)\n"
                 "  --workspace-bytes N | --workspace-percent N\n"
                 "  --seconds N (0: complete capture) --bits 001 --epochs N --keys N --repeats N\n"
@@ -119,6 +120,8 @@ Args arguments(int argc,char** argv) {
         else if(flag=="--seconds")a.seconds=number<double>(value);else if(flag=="--uncertainty")a.uncertainty=number<double>(value);
         else if(flag=="--frequency-offset")a.frequency=number<double>(value);else if(flag=="--clock-ppm")a.clock=number<double>(value);
         else if(flag=="--phase-diffusion")a.diffusion=number<double>(value);
+        else if(flag=="--rf-shift")a.rf_shift=number<double>(value);
+        else if(flag=="--oscillator")a.oscillator=value;else if(flag=="--rf-oscillator")a.rf_oscillator=value;
         else if(flag=="--workspace-bytes")a.workspace=number<std::size_t>(value);
         else if(flag=="--workspace-percent")a.workspace_percent=number<unsigned>(value);
         else if(flag=="--keys")a.keys=number<unsigned>(value);else if(flag=="--epochs")a.epochs=number<unsigned>(value);
@@ -128,8 +131,9 @@ Args arguments(int argc,char** argv) {
         else if(flag=="--cn0-grid")a.cn0_grid=grid(value);else throw Error("unknown option: "+flag);
     }
     check(a.mode=="geometry"||a.mode=="performance"||a.mode=="curve","unknown measurement mode");
-    check(a.keys&&a.keys<=16&&a.epochs&&a.epochs<=257&&a.epochs%2&&a.chunk&&a.chunk<=65536,
-          "keys1..16, odd epochs1..257 and chunk1..65536 required");
+    check(a.keys&&a.keys<=16&&a.epochs&&a.epochs<=2049&&a.epochs%2&&a.chunk&&a.chunk<=65536,
+          "keys1..16, odd epochs1..2049 and chunk1..65536 required");
+    check(std::isfinite(a.rf_shift)&&a.rf_shift>=0,"RF shift must be finite and nonnegative");
     if(a.epoch_before==std::numeric_limits<unsigned>::max())a.epoch_before=a.epochs/2;
     check(a.epoch_before<a.epochs,"epoch-before must identify the source epoch within the complete bank");
     check(a.repeats&&a.trials&&a.trials<=1000000&&a.seconds>=0&&std::isfinite(a.seconds),"invalid repetition/capture bounds");
@@ -168,14 +172,17 @@ modem::Config configuration(const Args& a,unsigned key=0,std::int64_t epoch=0) {
                 modem::symbol_sample_count(c)>a.symbol?0.:std::numeric_limits<double>::infinity());
         check(modem::symbol_sample_count(c)==a.symbol,"fixture symbol duration cannot be represented exactly");
     }
-    modem::OscillatorSearchConfig policy;policy.lf={.0001,.5};policy.rf={0,0};policy.margin=3;
+    modem::OscillatorSearchConfig policy;policy.lf=tuning::oscillator_model(tuning::parse_oscillator_preset(a.oscillator));
+    policy.rf=tuning::oscillator_model(tuning::parse_oscillator_preset(a.rf_oscillator));
+    policy.rf_shift_hz=a.rf_shift;policy.margin=3;
     c.oscillator_search=policy;
     transfer::Options options;options.modem=c;options.timestamp=static_cast<std::uint64_t>(1800000000+epoch);
     options.key.emplace(synthetic_key(key));c=transfer::seeded_config(options,options.timestamp);
     modem::validate(c);return c;
 }
 Row geometry(const Args& a,const modem::Config& c,std::size_t workspace) {
-    Row row{{"mode",a.mode},{"case",a.scenario},{"carrier_hz",text(c.carrier_hz)},{"bandwidth_hz",text(c.bandwidth_hz)},
+    Row row{{"mode",a.mode},{"case",a.scenario},{"carrier_hz",text(c.carrier_hz)},
+        {"rf_shift_hz",text(a.rf_shift)},{"oscillator",a.oscillator},{"rf_oscillator",a.rf_oscillator},{"bandwidth_hz",text(c.bandwidth_hz)},
         {"sample_rate",text(c.sample_rate)},{"chip_samples",text(modem::pattern_chip_samples(c))},
         {"symbol_samples",text(modem::symbol_sample_count(c))},{"symbol_seconds",text(static_cast<double>(modem::symbol_sample_count(c))/c.sample_rate)},
         {"target_cn0_db_hz",text(a.target)},{"workspace_bytes",text(workspace)},{"keys",text(a.keys)},{"epochs",text(a.epochs)},{"epoch_before",text(a.epoch_before)},
@@ -330,6 +337,10 @@ int main(int argc,char** argv) {
         check(budget/(a.keys*a.epochs)>=1024*1024,"at least1MiB per receiver bank required for fair detector coverage");
         if(a.mode=="geometry") {
             auto shape=geometry(a,c,budget);modem::PatternSearch search;search.start_offset_seconds=0;search.start_uncertainty_seconds=a.uncertainty;search.search_stream_phases=true;
+            // Match the measured and Live compact bank; default constructor
+            // limits use a different oscillator block and payload reservation.
+            search.worker_threads=1;search.chunk_bits=1;search.compact_clock_search=true;
+            search.candidate_limit=4096;search.bit_limit=4096;search.track_limit=4;search.retain_score=0;
             modem::PatternCorrelator receiver(c,search,budget/(a.keys*a.epochs));const auto work=receiver.work();
             shape["backend"]=backend_name(work.backend);shape["hypotheses"]=text(work.hypotheses*a.keys*a.epochs);shape["lattices"]=text(work.lattices*a.keys*a.epochs);
             shape["phase_groups"]=text(work.phase_groups);shape["drift_sections"]=text(work.drift_sections);shape["differential_window_samples"]=text(work.differential_window_samples);

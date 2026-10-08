@@ -126,6 +126,28 @@ void startup_and_submit_behavior() {
     check(!app.submit(*found,false,false),"Command editor Enter must remain editable text");
     app.close();
 }
+void narrow_rate_round_trips() {
+    Controller controller({true,true});controller.edit(F::binary,"001");
+    for(const auto& command:{"--rate .001 --carrier .0005 --oscillator gpsdo-xo --target-snr 32",
+                            "--rate 10 --carrier 5 --oscillator gpsdo-xo --target-snr 32"}) {
+        const auto requested=launch_command::parse(command);
+        load(controller,command);
+        check(!controller.settings().simulation&&controller.field(F::short_bits).text=="001"&&
+              !controller.snapshot().transmitting,"New Rate preset loading must preserve exact bits and Simulation No");
+        near(controller.settings().transfer.modem.bandwidth_hz,*requested.rate_hz,"New Rate preset did not load");
+        near(controller.settings().transfer.modem.carrier_hz,*requested.carrier_hz,"New Rate center carrier did not load");
+        const auto exported=controller.field(F::planner_command).text;
+        const auto patch=launch_command::parse(exported);
+        check(patch.rate_hz==requested.rate_hz&&patch.carrier_hz==requested.carrier_hz,
+              "Generated launch command lost the new Rate or its fractional carrier");
+        const auto samples=modem::symbol_sample_count(controller.settings().transfer.modem);
+        load(controller,exported);
+        check(controller.field(F::planner_command).text==exported&&
+              modem::symbol_sample_count(controller.settings().transfer.modem)==samples&&
+              controller.field(F::short_bits).text=="001","New Rate launch/load roundtrip changed sampled geometry or wire bits");
+    }
+    controller.close();
+}
 void live_validation_is_atomic() {
     Controller controller({true,true});controller.start();controller.poll();
     const auto rate=controller.settings().transfer.modem.bandwidth_hz;
@@ -263,7 +285,7 @@ void zero_shift_legacy_and_shared_round_trip() {
     controller.close();
 }
 int main() {
-    try {generated_and_pasted_settings();rejected_settings_remain_atomic();startup_and_submit_behavior();live_validation_is_atomic();real_radio_configuration();invalid_shift_edit_recovers();absolute_carrier_and_shift();zero_shift_legacy_and_shared_round_trip();
+    try {generated_and_pasted_settings();rejected_settings_remain_atomic();startup_and_submit_behavior();narrow_rate_round_trips();live_validation_is_atomic();real_radio_configuration();invalid_shift_edit_recovers();absolute_carrier_and_shift();zero_shift_legacy_and_shared_round_trip();
         std::cout<<"Planner launch setting round trips passed.\n";return 0;
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

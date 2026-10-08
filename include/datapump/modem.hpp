@@ -14,7 +14,7 @@
 namespace datapump::modem {
 namespace detail { class CorrelationProjectionCache; }
 inline constexpr double nominal_signal_power = 0.153125;
-inline constexpr double minimum_bandwidth_hz = 0.01;
+inline constexpr double minimum_bandwidth_hz = 0.001;
 inline constexpr double maximum_bandwidth_hz = 30000000;
 enum class SpreadingMode : std::uint8_t { pattern, tone };
 // Illustrative or measured effective relative TX/RX errors, not per-end values.

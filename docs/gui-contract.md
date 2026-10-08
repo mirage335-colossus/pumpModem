@@ -211,8 +211,15 @@ recalculation is bounded in sample count and independent of transmission time;
 it generates no waveform and starts no reception or transmission. The existing
 preparation worker computes the target sweep in the background on native
 desktop builds. While it runs, the current inputs remain editable and the
-preview says **Calculating plan...**; Apply and computed navigation wait for
-the current result. Pending edits coalesce and obsolete results are discarded.
+preview says **Calculating plan...**. Two exact one-dB Stronger/Weaker candidates
+are checked once for the current inputs without probability calculations or
+the full target sweep. A fitting direction remains usable while the precise
+probability model runs; an unsupported direction waits for the background
+clock/RAM gap search. Apply and computed milestones wait for the current full
+result. A completed previous plan may remain visible as **Updating · previous
+plan**, with its numerical results and plots retained while Stronger/Weaker
+controls use only current checked targets. Pending edits coalesce and obsolete
+results are discarded.
 Immutable documents and plots are cached across unchanged presentation polls.
 
 In automatic modes, edits to every target dropdown select an exact clock/RAM

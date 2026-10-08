@@ -706,6 +706,9 @@ void rate_carrier_declarations() {
     Application app({.simulation=true});
     app.toggle(ui::Field::developer_mode,true);
     const auto& rate=control(F::bandwidth);const auto& carrier=control(F::carrier);
+    for(const auto* value:{"0.001 Hz","10 Hz"})
+        check(std::any_of(app.field(F::bandwidth).options.begin(),app.field(F::bandwidth).options.end(),
+              [&](const auto& option){return option.id==value;}),"New Rate presets must be visible on the shared control");
     check(std::string_view(rate.label)=="Rate" && std::string_view(carrier.label)=="Carrier" &&
           rate.kind==ui::Kind::text && carrier.kind==ui::Kind::text && rate.persistent && carrier.persistent &&
           carrier.open_upward && app.field(carrier.field).options.size()==2 &&

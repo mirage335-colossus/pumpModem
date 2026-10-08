@@ -137,6 +137,13 @@ private:
 // Bounded analytical planning only; no sampled audio or transmission occurs.
 Model build(const Inputs& inputs);
 Model build(const Inputs& inputs,Cache& cache);
+struct TargetSteps {
+    std::optional<double> stronger,weaker;
+};
+// Two exact +/-1 dB receiver-support checks, without probability calculations
+// or the full gap search. Missing directions remain for the background planner
+// to resolve. The caller retains this result for its immutable input snapshot.
+TargetSteps preview_steps(const Inputs& inputs);
 struct ReceiveBanks {
     bool plaintext=false;
     // Distinct key material, including the selected transmit key if present.

@@ -276,7 +276,7 @@ struct Controller::Impl {
         f(UiField::mono).options={{"left","Left mono"},{"right","Right mono"},{"stereo","Stereo"}};
         f(UiField::mono).selected="left";
         f(UiField::bandwidth).text="3.6 kHz";
-        for(const auto* s:{"0.01 Hz","0.1 Hz","1 Hz","100 Hz","1.2 kHz","2.4 kHz","3.6 kHz","12 kHz","18 kHz","24 kHz","1 MHz","30 MHz"}) f(UiField::bandwidth).options.push_back({s,s});
+        for(const auto* s:{"0.001 Hz","0.01 Hz","0.1 Hz","1 Hz","10 Hz","100 Hz","1.2 kHz","2.4 kHz","3.6 kHz","12 kHz","18 kHz","24 kHz","1 MHz","30 MHz"}) f(UiField::bandwidth).options.push_back({s,s});
         reset_carrier(3600);
         f(UiField::snr).text="32"; f(UiField::long_snr).text="55";
         f(UiField::planner_target).text="-8";
@@ -759,6 +759,11 @@ struct Controller::Impl {
             auto model=std::make_shared<planner::Model>();model->inputs=std::move(input);
             model->error="Calculating plan...";
             model->calculating=true;
+            // Keep navigation independent of the probability worker and its
+            // cache mutex. Check only the two current-input steps here; the
+            // background planner retains the complete clock/RAM gap search.
+            const auto steps=planner::preview_steps(model->inputs);
+            model->stronger_fit_target=steps.stronger;model->weaker_fit_target=steps.weaker;
             planner_model=std::move(model);
             pending_planner=PlannerRequest{planner_model->inputs,planner_model};
         }
@@ -1042,8 +1047,8 @@ struct Controller::Impl {
         case Command::planner_fast: return link_plan()->available&&link_plan()->fast_target.has_value();
         case Command::planner_day: return link_plan()->available&&link_plan()->day_target.has_value();
         case Command::planner_clock: return link_plan()->available&&link_plan()->clock_target.has_value();
-        case Command::planner_stronger: return link_plan()->available&&link_plan()->stronger_fit_target.has_value();
-        case Command::planner_weaker: return link_plan()->available&&link_plan()->weaker_fit_target.has_value();
+        case Command::planner_stronger: return (link_plan()->available||link_plan()->calculating)&&link_plan()->stronger_fit_target.has_value();
+        case Command::planner_weaker: return (link_plan()->available||link_plan()->calculating)&&link_plan()->weaker_fit_target.has_value();
         case Command::transmit_short_bits: return !attachment&&!file_loading&&draft_error.empty()&&
             !f(UiField::short_bits).text.empty()&&enabled(Command::transmit);
         case Command::transmit: return transmit_ready()&&key_lock_seconds()<=0&&separation_seconds()<=0;

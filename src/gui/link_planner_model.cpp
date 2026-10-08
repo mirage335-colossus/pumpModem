@@ -595,6 +595,44 @@ Model build(const Inputs& inputs) {
     thread_local Cache cache;
     return build(inputs,cache);
 }
+TargetSteps preview_steps(const Inputs& inputs) {
+    TargetSteps result;
+    try {
+        if(!automatic(inputs.mode)||!std::isfinite(inputs.target_db_hz)||
+           inputs.target_db_hz< -200||inputs.target_db_hz>200||!inputs.wire_bits||
+           !std::isfinite(inputs.tx_dbm)||!std::isfinite(inputs.path_loss_db)||inputs.path_loss_db<0||
+           !std::isfinite(inputs.noise_density_dbm_hz))return result;
+        const auto received=inputs.tx_dbm-inputs.path_loss_db;
+        const auto cn0=received-inputs.noise_density_dbm_hz;
+        if(!std::isfinite(received)||!std::isfinite(cn0)||!std::isfinite(cn0-inputs.target_db_hz))return result;
+        auto options=inputs.options;options.modem=resolve(inputs,inputs.target_db_hz);
+        options.automatic_receive_profiles=true;
+        options.receive_targets_db_hz={inputs.target_db_hz};options.receive_pattern_mode=inputs.mode;
+        // The support-only estimator omits transfer validation. Retain the
+        // full planner's options and sample-counter guards before advertising
+        // any action; one raw bit needs neither PCM nor a payload allocation.
+        constexpr std::array<std::uint8_t,1> one_bit{0};
+        const auto transmission=transfer::estimate_binary(one_bit,options);
+        const auto symbol=modem::symbol_sample_count(options.modem);
+        if(!transmission.waveform_samples||transmission.waveform_samples<symbol)return result;
+        const auto overhead=static_cast<std::uint64_t>(transmission.waveform_samples)-symbol;
+        if(inputs.wire_bits>(std::numeric_limits<std::uint64_t>::max()-overhead)/symbol)return result;
+        (void)add_samples(add_samples(static_cast<std::uint64_t>(inputs.wire_bits)*symbol,overhead),
+            modem::pattern_absence_samples(options.modem));
+        const auto maximum_seconds=static_cast<long double>(std::numeric_limits<std::uint64_t>::max())/
+            (4.L*options.modem.sample_rate);
+        const auto minimum=std::max(-200.,tuning::pattern_target_symbol_snr_db-
+            10*std::log10(static_cast<double>(maximum_seconds)));
+        for(const bool stronger:{true,false}) {
+            const auto target=std::clamp(inputs.target_db_hz+(stronger?1:-1),minimum,200.);
+            if(stronger?target<=inputs.target_db_hz+1e-8:target>=inputs.target_db_hz-1e-8)continue;
+            const auto config=try_resolve(inputs,target);
+            if(config&&receiver_support(inputs,*config).fits())
+                (stronger?result.stronger:result.weaker)=target;
+        }
+    } catch(const Error&) {return {};}
+    return result;
+}
 Model build(const Inputs& inputs,Cache& cache) {
     std::lock_guard lock(cache.impl_->mutex);
     Model result;result.inputs=inputs;result.automatic_mode=automatic(inputs.mode);

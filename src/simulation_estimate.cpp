@@ -287,7 +287,7 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         phase_groups*sizeof(std::array<modem::detail::CorrelationChipEvidence,2>)+sizeof(double):0.L;
     const auto compact_required=256*1024.L+
         lanes*(512+(phase_groups-1)*sizeof(std::array<modem::detail::CorrelationFit,2>)+2+chain_state)+
-        projection_banks*(32+(block_samples+1)*sizeof(modem::detail::CorrelationProjection))+
+        projection_banks*(64+(block_samples+1)*sizeof(modem::detail::CorrelationProjection))+
         candidate_count*sizeof(modem::PatternEvidence)+points*sizeof(std::complex<double>)+
         frequencies*sizeof(modem::PatternFrequencyRateHypothesis);
     result.workspace_supported=correlator?
@@ -338,12 +338,14 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         (pulse_moments?frequencies*(block_samples+1)*sizeof(std::complex<double>):0);
     result.pulse_projected=correlator&&pulse_geometry&&result.workspace_supported&&
         compact_allocated+pulse_extra<=allowance;
-    const auto affine_capacity=1+std::min(block_samples,
-        std::ceil(static_cast<long double>(chip)/(256*bank.minimum_rate))+1);
+    // Four immutable carrier-moment lengths per frequency; a missing count
+    // uses the exact bounded geometric helper on the caller's stack. Tags
+    // are included in the per-bank state allowance above.
+    constexpr auto affine_capacity=4.L;
     const auto segment_extra=projection_banks*((block_samples+1)*sizeof(std::complex<double>)+
         affine_capacity*sizeof(modem::detail::CorrelationCarrierMoments))+lanes*phase_groups*sizeof(std::uint64_t);
     result.pulse_segmented=correlator&&config.oscillator_search&&modem::pattern_pulse_enabled(config)&&
-        symbol>=16.L*config.sample_rate&&chip>=1024&&symbol%(4*chip)!=0&&result.workspace_supported&&
+        symbol>=16.L*config.sample_rate&&chip>=1024&&!result.pulse_projected&&result.workspace_supported&&
         compact_allocated+segment_extra<=allowance;
     // The compact receiver mixes each unique real carrier bank. Clock lanes
     // sharing that carrier reuse its prefix; FFT receives one baseband stream.
@@ -368,9 +370,15 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
             result.serial+=samples*8*projection_banks*banks;
             result.search_serial=spans*lanes*phase_groups*(pulse_affine_pair_operations_per_segment+
                 128*(result.drift_supported+result.differential_supported))*banks;
-            // Carrier moments for every possible span length are prepared once
-            // per public frequency bank, then reused for both private bits.
+            // The small immutable palette is prepared once per frequency.
+            // Unusual knot/quarter/window clips can miss it; conservatively
+            // charge one geometric helper per such boundary and lane. Full
+            // oscillator blocks use the pinned entry. Caller push sizes that
+            // are not multiples of the oscillator block add unmodeled misses.
+            const auto clipped_spans=std::min(spans,256*std::ceil(samples*bank.maximum_rate/chip)+boundaries);
             result.kernel_serial=projection_banks*affine_capacity*200*
+                std::ceil(std::log2(std::max(2.L,block_samples)))*banks+
+                clipped_spans*lanes*phase_groups*200*
                 std::ceil(std::log2(std::max(2.L,block_samples)))*banks;
             result.kernel_upper_serial=result.kernel_serial;
             result.serial+=result.search_serial+result.kernel_serial;

@@ -1519,6 +1519,9 @@ std::size_t PatternReceiver::working_bytes()const {
 std::size_t PatternReceiver::reserved_workspace_bytes()const {
     return impl_->fallback?impl_->wrapper_bytes()+impl_->fallback->reserved_workspace_bytes():impl_->working_bytes();
 }
+std::size_t PatternReceiver::projection_cache_headroom(std::size_t input_samples)const {
+    return impl_->fallback?impl_->fallback->projection_cache_headroom(input_samples):std::numeric_limits<std::size_t>::max();
+}
 void PatternReceiver::set_workspace_bytes(std::size_t bytes){impl_->set_workspace_bytes(bytes);}
 Diagnostics PatternReceiver::diagnostics()const {
     if(impl_->fallback)return impl_->fallback->diagnostics();

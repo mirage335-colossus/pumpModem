@@ -201,10 +201,39 @@ void real_atom_reduction() {
         const auto probability=receiver_probability(p);
         check(probability.available&&probability.differential_model&&probability.trials==256,
               "a singular short atom must not reject a nonsingular complete receiver fit");
+        const auto unavailable=[](const ReceiverProbabilityParameters& model,const char* reason) {
+            const auto result=receiver_probability(model);
+            check(!result.available&&result.trials==0&&result.acquired_correct==0&&
+                  result.unsupported_reason.find(reason)!=std::string::npos,
+                  "unsupported real geometry must name its limiting gate without inventing a probability");
+        };
+        auto carrier_bank=p;
+        carrier_bank.frequency_bin_min=-8;carrier_bank.frequency_bin_max=8;carrier_bank.frequency_step_hz=.0001;
+        const auto full_bank=receiver_probability(carrier_bank);
+        check(full_bank.available&&full_bank.frequency_candidates==17&&full_bank.trials==p.requested_trials&&
+              full_bank.frequency_search_approximation,
+              "the supported 17-candidate real model must retain every carrier candidate and trial");
+        // The 8.2 kHz / target −49 GUI geometry has 101 candidates relative
+        // to its selected lane. Keeping its small local rotation does not
+        // permit replacing the full bank with a selected-lane probability.
+        carrier_bank.frequency_bin_min=-67;carrier_bank.frequency_bin_max=33;
+        carrier_bank.frequency_step_hz=4.92e-8;
+        unavailable(carrier_bank,"at most 17 carrier candidates; this search has 101");
+        auto unresolved=p;unresolved.diffusion_degrees=60;
+        unavailable(unresolved,"0.5 radian² per local window");
+        unresolved=p;unresolved.residual_frequency=.051;
+        unavailable(unresolved,"Residual carrier rotation");
+        unresolved=p;unresolved.frequency_bin_min=-8;unresolved.frequency_bin_max=8;
+        unresolved.frequency_step_hz=.007;
+        unavailable(unresolved,"Carrier-search rotation");
+        unresolved=p;unresolved.requested_trials=255;
+        unavailable(unresolved,"trial count must be within 256–4096");
+        unresolved=p;unresolved.noise_dimensions+=1;
+        unavailable(unresolved,"noise dimensions do not match complete received energy");
         auto malformed=p;malformed.section_dimensions=std::numeric_limits<double>::infinity();
-        check(!receiver_probability(malformed).available,"infinite detector dimensions must be unsupported");
+        unavailable(malformed,"detector dimensions must be finite");
         malformed=p;malformed.differential_windows=0;
-        check(!receiver_probability(malformed).available,"real atoms without local windows must be unsupported");
+        unavailable(malformed,"256–4096 complete local windows");
         p.real_atoms.back().first_sample--;
         check(!receiver_probability(p).available,"overlapping atoms must not duplicate received energy");
     }

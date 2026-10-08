@@ -184,6 +184,7 @@ Diagnostics StreamingReceiver::diagnostics()const{return impl_->pattern.diagnost
 ConstellationBatch StreamingReceiver::take_payload_constellation(){return {impl_->pattern.take_chip_constellation(),0};}
 std::size_t StreamingReceiver::working_bytes()const{return sizeof(StreamingReceiver)+sizeof(Impl)+impl_->pattern.working_bytes();}
 std::size_t StreamingReceiver::reserved_workspace_bytes()const{return sizeof(StreamingReceiver)+sizeof(Impl)+impl_->pattern.reserved_workspace_bytes();}
+std::size_t StreamingReceiver::projection_cache_headroom(std::size_t input_samples)const{return impl_->pattern.projection_cache_headroom(input_samples);}
 void StreamingReceiver::set_workspace_bytes(std::size_t bytes) {
     if(bytes<working_bytes())throw Error("DSP workspace is smaller than retained receiver history");
     impl_->pattern.set_workspace_bytes(bytes-sizeof(Impl));impl_->workspace=bytes;

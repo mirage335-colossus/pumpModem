@@ -101,7 +101,7 @@ void shannon_capacity() {
          "weak-signal capacity must retain precision");
     near(tuning::shannon_capacity_bps(1000,4000)/1318805.4536702829,1,
          "strong finite targets must not overflow while converting dB");
-    for(const auto bandwidth:{0.,.009,30000001.,std::numeric_limits<double>::quiet_NaN(),
+    for(const auto bandwidth:{0.,.0009,30000001.,std::numeric_limits<double>::quiet_NaN(),
                               std::numeric_limits<double>::infinity()})
         rejects([&]{tuning::shannon_capacity_bps(bandwidth,60);},"invalid capacity bandwidth accepted");
     for(const auto target:{std::numeric_limits<double>::quiet_NaN(),
@@ -109,7 +109,7 @@ void shannon_capacity() {
         rejects([&]{tuning::shannon_capacity_bps(1000,target);},"nonfinite capacity target accepted");
 }
 void bandwidth_derived_clocks() {
-    for(const double bandwidth:{.01,.1,.5,1.,16.,100.,100.25,1200.,1499.,1499.25,1500.,1501.,1703.,1800.,2000.,2000.25,2400.,24000.,192000.,1000000.,30000000.}) {
+    for(const double bandwidth:{.001,.01,.1,.5,1.,10.,16.,100.,100.25,1200.,1499.,1499.25,1500.,1501.,1703.,1800.,2000.,2000.25,2400.,24000.,192000.,1000000.,30000000.}) {
         const auto plan=tuning::resolve(bandwidth,150,tuning::PatternMode::auto_pattern,false);
         const auto carrier=std::max(1500.,.75*bandwidth);
         const auto expected=static_cast<std::uint32_t>(std::ceil(std::max(4*bandwidth,4*carrier)));
@@ -179,7 +179,7 @@ void nearby_carrier_clocks() {
                 "explicit-carrier clocks must validate the rate before integer alignment");
 }
 void sub_hertz_patterns() {
-    // Exercise the lower endpoint without allocating its eleven-hour audio
+    // Exercise narrow rates without allocating their long audio
     // waveform. The exact short dictionary and raw endpoints are unchanged.
     transfer::Options options;
     options.modem=tuning::resolve(.01,-3,tuning::PatternMode::auto_pattern,false).config;
@@ -212,7 +212,22 @@ void sub_hertz_patterns() {
     check(profiles.size()==1 && profiles.front().bandwidth_hz==.01 &&
           modem::symbol_sample_count(profiles.front())==76800000,
           "receive planning must retain the sub-hertz profile and deduplicate identical geometry");
-    for(const auto bandwidth:{0.,.009,std::nextafter(tuning::minimum_bandwidth_hz,0.)}) {
+    auto minimum=options;
+    minimum.modem=tuning::resolve(.001,-3,tuning::PatternMode::auto_pattern,false).config;
+    check(minimum.modem.sample_rate==6000&&minimum.modem.carrier_hz==1500&&
+          modem::pattern_chip_samples(minimum.modem)==12000000&&
+          modem::symbol_sample_count(minimum.modem)==768000000&&
+          modem::pattern_absence_samples(minimum.modem)==768000000,
+          "minimum rate must retain exact chip, symbol and physical absence durations");
+    const auto minimum_estimate=transfer::estimate(message,minimum);
+    check(transfer::message_wire_bits(message,minimum)==bits&&minimum_estimate.wire_bits==3,
+          "minimum rate changed the short message endpoint");
+    near(minimum_estimate.coded_seconds,384000,"minimum rate lost exact three-bit airtime");
+    auto minimum_source=transfer::message_transmitter(message,minimum);
+    check(minimum_source->total_samples()==minimum_estimate.waveform_samples&&
+          minimum_source->working_bytes()<1024*1024&&minimum_source->read(samples)==samples.size(),
+          "minimum rate transmitter must remain incremental and bounded");
+    for(const auto bandwidth:{0.,.0009,std::nextafter(tuning::minimum_bandwidth_hz,0.)}) {
         rejects([&]{tuning::resolve(bandwidth,32,tuning::PatternMode::auto_pattern,false);},
                 "automatic planning accepted bandwidth below the documented lower bound");
         auto invalid=options.modem;invalid.bandwidth_hz=bandwidth;

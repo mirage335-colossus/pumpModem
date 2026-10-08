@@ -1034,18 +1034,18 @@ struct Session::Impl {
         struct SharedProjection {
             Bank& bank;
             std::unique_ptr<modem::detail::CorrelationProjectionCache> cache;
-            std::size_t charged=0;
-            void release(){cache.reset();bank.working_bytes-=charged;charged=0;}
+            std::size_t charged=0,remaining_headroom=0,deferred_detectors=0;
+            void release(){cache.reset();bank.working_bytes-=charged;charged=remaining_headroom=deferred_detectors=0;}
             ~SharedProjection(){release();}
         } projection{bank};
         // This optional cache spends surplus only. Preserve every already
-        // admitted detector reservation, plus substantial recording headroom,
+        // admitted detector reservation, plus the finite push/drain allocation bound,
         // before charging its bounded numeric storage to the shared bank.
         const auto moment_receivers=std::count_if(bank.receivers.begin(),bank.receivers.end(),[](const auto& receiver){
             const auto& config=receiver.options.modem;
             const auto chip=modem::pattern_chip_samples(config),symbol=modem::symbol_sample_count(config);
             return config.oscillator_search && modem::pattern_pulse_enabled(config) &&
-                (chip>4096 || (chip>=1024 && symbol>=16ULL*config.sample_rate && symbol%(4*chip)!=0));
+                (chip>4096 || (chip>=1024 && symbol>=16ULL*config.sample_rate));
         });
         if(moment_receivers>1 && bank.working_bytes<=capacity &&
            std::all_of(bank.receivers.begin(),bank.receivers.end(),[](const auto& receiver){return receiver.modem->clock_windowed();})) {
@@ -1055,9 +1055,9 @@ struct Session::Impl {
                 const auto actual=receiver.modem->working_bytes();
                 const auto deferred=receiver.modem->reserved_workspace_bytes();
                 const auto extra=deferred>actual?deferred-actual:0;
-                constexpr std::size_t headroom=2*1024*1024;
+                const auto headroom=receiver.modem->projection_cache_headroom(sample_count);
                 if(extra>capacity-reserved || headroom>capacity-reserved-extra){fits=false;break;}
-                reserved+=extra+headroom;
+                reserved+=extra+headroom;projection.remaining_headroom+=headroom;projection.deferred_detectors+=extra;
             }
             if(fits) {
                 const auto allowance=std::min<std::size_t>(256*1024,capacity-reserved);
@@ -1083,18 +1083,31 @@ struct Session::Impl {
                 };
                 try {
                     if(phase==0) {
-                        const auto overhead = accounted - receiver.modem->working_bytes();
+                        const auto actual=receiver.modem->working_bytes();
+                        const auto overhead = accounted - actual;
                         auto other = bank.working_bytes - accounted;
-                        if(projection.cache)for(const auto& candidate:bank.receivers) {
-                            if(&candidate==&receiver)continue;
-                            const auto actual=candidate.modem->working_bytes();
-                            const auto deferred=candidate.modem->reserved_workspace_bytes();
-                            const auto extra=deferred>actual?deferred-actual:0;
-                            if(extra>capacity-std::min(capacity,other)){other=capacity;break;}
-                            other+=extra;
+                        const auto growth=projection.cache?receiver.modem->projection_cache_headroom(sample_count):0;
+                        const auto deferred=projection.cache?receiver.modem->reserved_workspace_bytes():actual;
+                        const auto extra=deferred>actual?deferred-actual:0;
+                        if(projection.cache && (growth>projection.remaining_headroom || extra>projection.deferred_detectors)) {
+                            projection.release();other=bank.working_bytes-accounted;
+                        }
+                        if(projection.cache) {
+                            const auto peers=projection.deferred_detectors-extra;
+                            if(peers>capacity-std::min(capacity,other))other=capacity;
+                            else other+=peers;
+                        }
+                        if(projection.cache) {
+                            // Query each unprocessed profile once at admission.
+                            // Its state stays unchanged until this sequential
+                            // feed; consumed bounds become measured bank bytes.
+                            const auto pending=projection.remaining_headroom-growth;
+                            if(pending>capacity-std::min(capacity,other))other=capacity;
+                            else other+=pending;
                         }
                         if(projection.cache && (other>capacity || overhead>capacity-other ||
-                           receiver.modem->reserved_workspace_bytes()>capacity-other-overhead)) {
+                           deferred>capacity-other-overhead ||
+                           growth>capacity-other-overhead-deferred)) {
                             // If recording grew past the surplus, release the
                             // optimization before restoring the original loan.
                             projection.release();other=bank.working_bytes-accounted;
@@ -1116,6 +1129,15 @@ struct Session::Impl {
                         receiver.bursts=receiver.modem->take_pattern_bursts();
                         update_workspace();
                         if(bank.working_bytes>capacity)throw Error("receive event storage exceeds the configured DSP workspace");
+                        if(projection.cache) {
+                            projection.remaining_headroom-=growth;
+                            projection.deferred_detectors-=extra;
+                            const auto retained=receiver.modem->working_bytes();
+                            const auto promised=receiver.modem->reserved_workspace_bytes();
+                            const auto pending=promised>retained?promised-retained:0;
+                            if(pending>capacity-projection.deferred_detectors)projection.release();
+                            else projection.deferred_detectors+=pending;
+                        }
                         continue;
                     }
                     {

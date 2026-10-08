@@ -26,6 +26,11 @@ void parsing_and_formatting() {
           "complete command did not parse its concrete settings");
     const auto command=launch_command::format(settings);
     check(launch_command::parse(command)==settings,"canonical command must round-trip every setting exactly");
+    for(const auto rate:{.001,10.}) {
+        auto changed=settings;changed.rate_hz=rate;
+        check(launch_command::parse(launch_command::format(changed))==changed,
+              "new Rate presets must round-trip exact numeric launch settings");
+    }
     check(command.find("--auto-pattern")!=std::string::npos&&command.find("--target-snr -8")!=std::string::npos&&
           command.find("--rate 3600")!=std::string::npos,"canonical command must use concise readable flags and numbers");
     const auto radio=launch_command::parse("--oscillator crystal --rf-oscillator gpsdo-ocxo --carrier 10.0015MHz --shift 10MHz --search-margin 3x --reference shared-radio --sideband upper");
@@ -98,7 +103,7 @@ void invalid_commands() {
             "--tx-dbm --path-loss-db 170", "--rate 3600 trailing", "--rate '3600", "--auto-pattern=yes",
             "--target-snr nan", "--target-snr inf", "--target-snr +-1", "--target-snr 201",
             "--tx-dbm -201", "--tx-dbm 101", "--path-loss-db -1", "--path-loss-db 501",
-            "--noise-dbm-hz -251", "--noise-dbm-hz 1", "--rate 0", "--rate .001", "--rate 31MHz",
+            "--noise-dbm-hz -251", "--noise-dbm-hz 1", "--rate 0", "--rate .0009", "--rate 31MHz",
             "--rate 3.6watts", "--carrier 0", "--carrier 30000001 --shift 0", "--dsp-workspace 90%",
             "--rf-shift -1", "--rf-shift NaN", "--rf-shift 1e308MHz", "--shift 1e308GHz", "--carrier 1e308THz", "--rate 1GHz", "--carrier '1 2 MHz'", "--carrier '1 GHz extra'", "--carrier '+-1GHz'", "--rf-carrier 0", "--rf-shift 1 --rf-carrier 1",
             "--search-margin .99", "--search-margin inf", "--reference imaginary", "--sideband imaginary", "--sideband lower", "--carrier 1500 --shift 1MHz", "--carrier 1MHz --shift 1MHz", "--carrier 1500 --rf-carrier 10001500", "--lf-reference 1500",

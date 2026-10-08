@@ -320,3 +320,239 @@ native/general, sanitizer, SDK, platform and packaging qualification remains
 paused at the user's request; these focused results do not declare the original
 end-to-end qualification objective complete. No settings or transmitted bits
 were added or changed.
+
+
+## RF and Sub-9kHz manual-feedback follow-up
+
+This local follow-up starts from `f3cf818575fd34b6a047f445e265fbd288411854`.
+It keeps full qualification paused for manual testing. It adds no persisted
+setting. The rate dropdown now includes 0.001 Hz and 10 Hz; the shared lower
+bound, CLI, launch-command and parameter-list round trips accept 0.001 Hz.
+Rate remains nominal waveform bandwidth, not payload bits per second.
+
+### Resolved configurations and the missing estimate
+
+Both supplied commands were resolved with deterministic synthetic keys. The
+30 MHz command has an on-air carrier of 30,001,500 Hz and a 30,000,000 Hz Shift,
+so its real sampled carrier is 1,500 Hz. It is not a 5.8 GHz simulation. Both
+oscillator profiles are GPSDO-OCXO, independent references, search margin three.
+The Sub-9kHz case has no RF shift and therefore no RF-oscillator contribution.
+
+| Quantity | 30 MHz command | 8.2 kHz command |
+| --- | ---: | ---: |
+| Input C/N0 | −19.9794000867 dB-Hz | −36 dB-Hz |
+| Target C/N0; margin | −24; 4.0205999133 dB | −49; 13 dB |
+| Rate; selected sample rate | 1 Hz; 6,000 samples/s | 0.01 Hz; 32,800 samples/s |
+| Samples/chip | 12,000 | 6,560,000 |
+| Samples/symbol | 98,304,000 | 164,389,412,630 |
+| Seconds/symbol | 16,384 (4.55 hours) | 5,011,872.33628 (58.01 days) |
+| Frequency/clock pairs | 1,181 | 101 |
+| Carrier half-width | 0.00900045 Hz | 0.00000246 Hz |
+| Clock half-width | 0.0003 ppm | 0.0003 ppm |
+| GUI epoch range | 22 earlier + source + 6 later | 1,606 earlier + source + 6 later |
+| Complete timed-bank hypothesis count | 530,845 | 325,826 |
+| Private phase groups; coherent sections | 1; 4 | 2; 4 |
+| Local differential windows | none | 1,566 complete 3,200-second windows plus tail |
+| Selected optimized backend | `pulse_segments` | `pulse_segments` |
+
+The earlier 50% workspace snapshot resolved to **1,999,661,056 bytes**. Every
+raw/optimized timing pair below uses that exact common ceiling. Percentage
+resolution depends on available host memory; it is not a permanent 2 GB setting.
+Later 50% compact-constructor snapshots resolved to **2,235,377,664 bytes**
+(RF) and **2,234,329,088 bytes** (Sub-9kHz), selecting the same backends and
+hypothesis counts. Their aggregate constructor reservations were 376,289,384
+and 965,425,664 bytes, before the optional 262,104-byte allocated cache arena.
+The geometry-only tool was corrected to use the same compact flags as the
+timed path; earlier default-constructor snapshots are not those bank estimates.
+
+Sub-9kHz probability remains unavailable because the real-covariance probability
+model supports at most **17 carrier candidates**, whereas this search has 101.
+The UI now names that limit and explicitly says receiver coverage is unchanged.
+It does not substitute a selected-lane probability for full-bank correct-bit
+probability: a wrong-bit carrier can win the competition. The 13 dB arithmetic
+margin does not resolve that modeling gap. Whole-symbol phase loss in this
+configured stochastic model is only 0.0275827 dB; phase loss is not the failing
+eligibility gate here. These modeled assumptions are not hardware measurements.
+
+### Implementation and CPU cliffs
+
+Aligned shaped symbols that cannot afford whole-chip kernel state now use the
+same exact affine-span path as partial symbols, subject to its existing
+1,024-sample/chip and 16-second eligibility gates. Affordable whole-chip pulse
+projection still wins. No filtering, decimation, I/Q removal, narrower search,
+private-pattern reuse or changed threshold is involved. This preserves finite
+pulse tails, limited transmitted PCM and sample-domain completion endpoints.
+
+A four-entry immutable carrier-moment palette occupies **416 bytes/frequency**
+including tags, instead of 3,168 bytes for the previous compact 33-entry table.
+Nonresident lengths use the same bounded exact helper on the stack. Live cache
+admission uses finite-push/drain growth bounds and linear aggregate accounting,
+replacing a blanket 2 MiB reservation per receiver. The shared PCM cache remains
+256 KiB, and unsupported budgets retain the raw fallback.
+
+The planner now accounts for these actual paths and palette misses. At the
+fixed workspace above, the keyed RF central CPU/audio estimates change from
+413.17 to **267.15** at target −24, and 1,233.52 to **562.67** at −25.
+Sub-9kHz target −50 now fits affine storage, changing its model from 5,339.45 to
+**1,368.36**; targets −49 and −48 give **1,088.22** and **872.73**. These are
+reference-model estimates, not measurements or an encryption-only multiplier.
+No coefficient was fitted to the following timings. Remaining steps include
+real changes in chip count, carrier count and eligible detector branches;
+plots have not been cosmetically smoothed across them.
+
+### Actual paired execution
+
+Release/GCC on the same Ryzen 5 PRO 5650U host, pinned to CPU 2, no concurrent
+agent builds/tests. Each pair uses identical float PCM, key, seed and impairments;
+order alternates and all hypotheses remain present. Three pairs per case use
+application-selected sample rates, held fixed within each pair. Construction,
+receiver pushes and polling are timed; waveform generation is excluded.
+These very short captures exercise the complete bank without pretending to
+receive hours or days of waveform.
+
+| Case and observed PCM | Raw median CPU / wall | Affine median CPU / wall | Paired wall speedup median (range) |
+| --- | ---: | ---: | ---: |
+| RF, 96 samples / 0.016 s | 7.85082 / 7.85257 s | 4.15325 / 4.15391 s | **1.901×** (1.874–1.959×) |
+| Sub-9kHz, 66 samples / 0.00201220 s | 14.94131 / 14.94296 s | 2.87882 / 2.87916 s | **5.200×** (4.854–5.276×) |
+
+Median construction wall times are 0.06361/0.14120 seconds (RF raw/affine) and
+0.22797/0.54671 seconds (Sub-9kHz). Total throughput is 12.23/23.11 samples/s
+and 4.42/22.92 samples/s respectively. Accounted peak DSP workspace is
+**340,807,624 / 376,551,488 bytes** and **814,242,488 / 965,687,768 bytes**.
+The increases relative to raw are 35.7 MB and 151.4 MB; they are not free RAM.
+The reduced palette saves storage compared with the previous affine table,
+which is a different comparison from raw. Process lifetime peak RSS reached
+303,415,296 bytes and 879,857,664 bytes, including fixture/process allocations.
+
+Separate instrumented pairs give frontend/search wall times:
+RF **0.02159 / 8.46686 s raw**, **0.04263 / 3.87720 s affine**;
+Sub-9kHz **0.07231 / 15.03110 s raw**, **0.07855 / 2.25289 s affine**.
+Private fitting remains the dominant work in these captures. Construction and
+bookkeeping explain the remainder; instrumented totals do not replace the
+primary measurements. Median maximum push times fell from 7.78891 to 3.99005 s
+and 14.71497 to 2.33242 s. **No bit completed**, so acquisition and accepted-bit
+progress latency are unmeasured here, not zero. These banks remain far from
+real time on this host. Extrapolating these prefixes to full-symbol CPU or
+acquisition time is not a measured result.
+
+The cache still exhausts on long receiver-major pushes, and affine templates
+are still contracted at oscillator-block boundaries. This follow-up does not
+make all search cost independent of sample rate. Earlier fixed-6,000-Hz
+comparisons above remain separate from sampling-policy gains.
+
+### Ordinary-path regression timings
+
+A standalone application harness was compiled against the original `d4de80c`
+static library and the final library. It lets `StreamingReceiver` select its
+normal backend. Three alternating pairs per case replay the exact same saved
+120,000-sample PCM capture (20 seconds at 6,000 samples/s), with one warmup per
+process, one worker, a 64 MiB workspace and the original oscillator policy.
+All three cases selected FFT and retained three frequency/clock pairs.
+
+| Case (bandwidth; target C/N0) | C; N | Original / final median CPU | Original / final median wall | Retained workspace, both |
+| --- | ---: | ---: | ---: | ---: |
+| Ordinary fast (1,200 Hz; 60 dB-Hz) | 10; 640 | 0.184868 / 0.184835 s | 0.184890 / 0.184835 s | 434,536 bytes |
+| Wider band (100 Hz; 20 dB-Hz) | 120; 7,680 | 0.026028 / 0.026247 s | 0.026029 / 0.026269 s | 434,530 bytes |
+| Weaker signal (100 Hz; 10 dB-Hz) | 120; 61,440 | 0.014298 / 0.014420 s | 0.014362 / 0.014420 s | 850,248 bytes |
+
+Median wall changes are below 1%; the paired original/final ratios span
+0.995–1.413, 0.988–1.047 and 0.996–1.001 respectively. The first fast baseline
+pair was slower; all pairs remain included and this is not a speedup claim for
+FFT. Input hashes, complete event hashes, bit counts, hypothesis counts,
+coverage flags and retained memory match within every pair.
+
+The fast fixture accepts all 16 bits exactly once and physically completes;
+its final median acquisition is 1.99 ms of computation / 0.3413 s of sampled
+media. Maximum push is 4.57 ms, and measured next-poll progress delay is bounded
+between about 2 microseconds and 4.19 ms for the 2,048-sample polling blocks.
+The wider case accepts 15 bits without completion (the capture is short), and
+the weaker case accepts one bit without completion. They do not supply whole
+message latency results. These are bounded regression measurements, not full
+platform or performance qualification.
+
+### Aligned-affine sensitivity and uncertainty
+
+Two new cases each use **20,000 paired noise draws**, one for each private bit,
+at 6,000 samples/s, 1,500 Hz, C=12,000 and exactly 32 chips (64 seconds).
+They include +0.0003 ppm clock error, +0.003 Hz frequency offset, fractional
+sample start, 0.0070710678 degrees/sqrt(second) phase diffusion and the finite
+limited transmitted waveform. A 65,536-byte workspace automatically selects
+the actual `pulse_segments` backend; the tool asserts its backend, spans,
+sample counts, complete scores, thresholds, next-poll events and EOF behavior.
+Twelve PCM seeds per bit give **48 paired actual-PCM replays across 24 seeds**.
+Whole-chip moment and partial-tail control runs also pass.
+
+| Private bit | 90% required C/N0 (absolute interval) | 99% required C/N0 (absolute interval) | Upper additional C/N0 including numerical allowance |
+| --- | ---: | ---: | ---: |
+| 0 | −2.49642 [−2.53384, −2.46583] dB-Hz | −1.47185 [−1.51479, −1.41371] dB-Hz | **0.001072 dB** |
+| 1 | −2.05546 [−2.09079, −2.02399] dB-Hz | −1.03691 [−1.08417, −0.97673] dB-Hz | **0.001011 dB** |
+
+Both bits have zero estimated additional required C/N0 and [0,0] paired
+bootstrap intervals at the 1e-7-dB root resolution. Joint analysis uses 1,000
+paired bootstrap draws and 98.75% individual intervals for **95% family
+coverage over all four 90%/99% comparisons**. The upper column adds both root
+errors and conservative IEEE numerical allowances; it is not a claim of exact
+zero error or an arbitrary-libm interval proof. Maximum actual-PCM relative
+score discrepancy is 6.44e-8. There are no invalid/nonmonotone omitted draws.
+The analytical single-branch two-bit AWGN union bound is about 5.0e-11, based
+on implemented Gram/covariance eigenvalues, not a rate estimated from 24 seeds.
+
+This is conditional single-coherent-candidate sensitivity evidence. It does
+not qualify the 8,192-chip RF symbol, 58-day Sub-9kHz symbol, their competing
+carrier/timing/key/epoch banks, or hardware oscillator reliability. Existing
+paired interference, wider clocks, partial/tail, multi-key/cache and physical
+completion regressions remain intact. Full acquisition-bank sensitivity and
+rare-event qualification remain outstanding.
+
+### Navigation, validation and manual handoff
+
+Stronger/Weaker use two checked current-input support previews while the precise
+probability worker is pending; the worker retains its full calculation and gap
+search. Previous plots remain labeled previous, and Apply remains disabled.
+Twenty-four alternating shared-Application clicks with document generation in
+the default LPI fixture took a median **0.0726 ms**, maximum **0.1496 ms**;
+no worker was started in that timing probe. A separate keyed support probe
+across both expensive geometries measured at most **4.04 ms for two targets**.
+Neither is a measurement of rendering a previous completed plot on every native
+platform. The full GUI planner regression also exercises rapid steps while a
+probability job can be in flight and checks current target identity and layout.
+
+The application/GUI build succeeded through `./build.sh`. Complete affected
+suites pass: `pattern_correlator`, `pattern_correlator_batch`,
+`pattern_projection_cache`, `simulation_estimate`, `receiver_probability`,
+`tuning`, `gui_controller`, `gui_application`, `gui_link_planner`,
+`link_planner_curves`, `gui_launch_command`, `gui_launch_settings`,
+`gui_self_check` and `cli`. The keyed Live acquisition/epoch fixture passes.
+The initial CLI run failed outdated below-minimum and 10-Hz duration assumptions;
+focused repairs and the full CLI rerun passed. No test assertion or receiver
+coverage was dropped.
+
+An aligned test initially used an ascending carrier list, which let both raw
+and affine receivers publish a weaker unmatched hypothesis before the central
+candidate. All candidate scores agreed; immutable output cannot then change
+owners. Retaining every lane but using the normal central-first policy passed
+exact `01` and full absence completion. The existing order dependence is
+recorded as an acquisition-policy limitation, not hidden as evidence of
+full-bank sensitivity equivalence. The test also retains the slowest clock's
+complete absent-symbol endpoint.
+
+Local evidence is retained under
+`.agent-work/artifacts/receiver-opt-20261008/`: the `rf*-performance.csv` and
+`sub9-performance.csv` captures, component captures, joint aligned statistics,
+analysis JSON, resolved geometry/probes, test logs and source-release manifest.
+The `manual-rf30.sh` and `manual-sub9.sh` launchers use the rebuilt GUI and the
+supplied arguments; select a synthetic key in the GUI because the exported
+command does not contain it. All changes remain local. Full contract/general,
+sanitizer/native-platform, SDK, packaging and full-bank sensitivity work remains
+paused for the user's manual test; this is not a completion or release claim.
+
+A GPSDO label alone cannot promise useful coherence at 0.001 Hz or over days.
+The configured OCXO diffusion predicts only 0.224 degrees RMS over a 2,000-second
+chip; that is a model assumption, not a specification for a physical unit.
+[NIST's GPS-disciplined-clock study](https://www.nist.gov/publications/measurement-transient-environmental-effects-gps-disciplined-clocks)
+explains the role of the local oscillator, control loop and environmental
+transients. EME also requires a Doppler/libration channel, illustrated in this
+[ARRL microwave EME report](https://www.arrl.org/files/file/Technology/microwave/Small%20Dishes%20and%20Digital%20EME.pdf).
+Its 10 GHz example is not a measured 5.8 GHz channel for this application.
+The present AWGN/static-offset/Brownian-phase fixtures establish neither EME
+nor practical Sub-9kHz link feasibility.

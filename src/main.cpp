@@ -82,7 +82,7 @@ and newline (ASCII LF). JSON encodes newlines as \n.
 Every other received byte is displayed as _. Use --save for original source bytes.
 
 Modem:
-  --bw HZ               Nominal bandwidth, 0.01..30000000 Hz; default1200
+  --bw HZ               Nominal bandwidth, 0.001..30000000 Hz; default1200
                         Decimal Hz and units such as 1.2kHz are accepted
   --sample-rate HZ      Internal real-stream clock, 64..120000000; covers bandwidth and Carrier minus Shift
   --carrier HZ          Absolute physical carrier; accepts Hz/kHz/MHz/GHz/THz; default max(1500,0.75*bw)

@@ -31,10 +31,38 @@ struct Bank {
     std::vector<Projection> prefix;
     std::vector<Complex> first_moment;
     std::vector<detail::CorrelationCarrierMoments> affine_carrier;
+    std::array<std::uint64_t,4> affine_lengths{};
     std::span<const Projection> shared_prefix;
     std::span<const Complex> shared_moment;
     std::span<const Projection> observations() const {return shared_prefix.empty()?std::span<const Projection>(prefix):shared_prefix;}
     std::span<const Complex> moments() const {return shared_moment.empty()?std::span<const Complex>(first_moment):shared_moment;}
+    void prepare_carrier(std::size_t block_samples,long double knot_duration,std::uint32_t sample_rate) {
+        // Immutable during parallel lane scoring. A complete oscillator block
+        // is the dominant length at large chips; retain three common knot
+        // clips too, and compute any other length exactly in caller scratch.
+        affine_carrier.resize(affine_lengths.size());affine_lengths[0]=block_samples;
+        std::size_t used=1;
+        const auto remainder=std::fmod(knot_duration,static_cast<long double>(block_samples));
+        const auto lower=static_cast<std::uint64_t>(std::floor(remainder));
+        const auto upper=static_cast<std::uint64_t>(std::ceil(remainder));
+        const auto retain=[&](std::uint64_t count) {
+            if(!count || count>block_samples || used==affine_lengths.size() ||
+               std::find(affine_lengths.begin(),affine_lengths.begin()+static_cast<std::ptrdiff_t>(used),count)!=
+                   affine_lengths.begin()+static_cast<std::ptrdiff_t>(used))return;
+            affine_lengths[used++]=count;
+        };
+        retain(lower);retain(upper);
+        if(knot_duration<block_samples)retain(lower?lower-1:0);
+        else retain(block_samples-upper);
+        for(std::uint64_t count=1;used<affine_lengths.size();++count)retain(count);
+        for(std::size_t i=0;i<affine_lengths.size();++i)
+            affine_carrier[i]=detail::correlation_carrier_moments(affine_lengths[i],2*tau*frequency/sample_rate);
+    }
+    const detail::CorrelationCarrierMoments* carrier(std::uint64_t count) const {
+        for(std::size_t i=0;i<affine_carrier.size();++i)
+            if(affine_lengths[i]==count)return &affine_carrier[i];
+        return nullptr;
+    }
 };
 struct WorkTimer {
     bool enabled;
@@ -263,8 +291,9 @@ struct PatternCorrelator::Impl {
             else differential_window=0;
         }
         // Full chip cells are sufficient statistics for this exact finite
-        // pulse. Two half-chip origin parities share each projection. Partial
-        // chips and legacy fractional origin grids keep the raw reference path.
+        // pulse. Two half-chip origin parities share each projection. Affine
+        // spans below cover partial chips or unaffordable shared-cell kernels;
+        // unsupported legacy fractional grids retain the raw reference path.
         const bool pulse_geometry=!options.raw_reference && shaped && code.symbol_samples()>=16ULL*c.sample_rate &&
             // Historical low-level compact banks promise a sub-64-KiB idle
             // footprint. Application oscillator banks provide explicit pairs;
@@ -281,17 +310,16 @@ struct PatternCorrelator::Impl {
             (code.chip_samples()>4096?bank_count*(block_samples+1)*sizeof(Complex):0);
         const bool pulse_enabled=pulse_geometry && fixed+pulse_extra+denominator<=bytes;
         if(pulse_enabled) {fixed+=pulse_extra;pulse_lattices.reserve(pulse_count);pulse_addresses.reserve(count);}
-        // A partial chip or quarter cannot be consumed as a whole shared cell.
-        // Integrate its finite affine pulse pieces from the same public bank
-        // moments instead, without retaining a kernel or samples per lane.
-        const auto affine_capacity=1+static_cast<std::size_t>(std::min<long double>(block_samples,
-            std::ceil(code.chip_samples()/(256*lowest_rate))+1));
+        // Affine spans also retain a whole symbol when its shared-cell kernels
+        // cannot fit. They keep the same complete search and pulse geometry
+        // without retaining a kernel or observations per lane.
+        const auto affine_capacity=std::tuple_size_v<decltype(Bank::affine_lengths)>;
         const auto segment_extra=bank_count*((block_samples+1)*sizeof(Complex)+
             affine_capacity*sizeof(detail::CorrelationCarrierMoments))+total*sizeof(std::uint64_t);
         pulse_segmented=!options.raw_reference && shaped && paired &&
             code.symbol_samples()>=16ULL*c.sample_rate &&
             code.chip_samples()>=1024 &&
-            code.symbol_samples()%(4*code.chip_samples())!=0 &&
+            !pulse_enabled &&
             fixed+segment_extra+denominator<=bytes;
         if(pulse_segmented){fixed+=segment_extra;affine_counts.resize(count);}
         const auto remaining=bytes-static_cast<std::size_t>(std::ceil(fixed));
@@ -353,11 +381,8 @@ struct PatternCorrelator::Impl {
                 h.index=static_cast<std::uint64_t>(index);hypotheses.push_back(std::move(h));
             }
         }
-        if(pulse_segmented)for(auto& bank:banks) {
-            bank.affine_carrier.resize(affine_capacity);
-            for(std::size_t n=1;n<affine_capacity;++n)
-                bank.affine_carrier[n]=detail::correlation_carrier_moments(n,2*tau*bank.frequency/c.sample_rate);
-        }
+        if(pulse_segmented)for(auto& bank:banks)
+            bank.prepare_carrier(block_samples,code.chip_samples()/(256*lowest_rate),c.sample_rate);
         accounted_bytes=working_bytes()+drift_reserved;
         require(sizeof(PatternCorrelator)+accounted_bytes<=budget,"clock-search state exceeds DSP workspace");
         work.backend=pulse_segmented?PatternCorrelationBackend::pulse_segments:pulse_lattices.empty()?PatternCorrelationBackend::raw:
@@ -462,6 +487,49 @@ struct PatternCorrelator::Impl {
             bank.affine_carrier.capacity()*sizeof(detail::CorrelationCarrierMoments);
         value+=worker_bytes();
         return value;
+    }
+    std::size_t projection_cache_headroom(std::size_t input_samples) const {
+        // This is an allocation bound for one finite push and its next drain,
+        // not a signal-dependent prediction. Optional worker caches may be
+        // dropped by room_for(); promised detectors are reserved separately.
+        constexpr auto maximum=std::numeric_limits<std::size_t>::max();
+        if(input_samples>std::numeric_limits<std::uint64_t>::max()-sample)return maximum;
+        std::size_t total=0,transient=0,output=0;
+        const auto add=[&](std::size_t n){total=n>maximum-total?maximum:total+n;};
+        const auto product=[&](std::size_t a,std::size_t b){return a && b>maximum/a?maximum:a*b;};
+        for(const auto& h:hypotheses) {
+            // A partly accumulated symbol can finish immediately. Each later
+            // completion appends at most one bit; gap events carry no bits.
+            const auto slots=1+std::ceil(static_cast<long double>(input_samples)*h.rate/code.symbol_samples());
+            if(!std::isfinite(slots) || slots>=static_cast<long double>(maximum))return maximum;
+            const auto added=static_cast<std::size_t>(slots);
+            const auto required=std::min(bit_limit,added>maximum-h.burst.bits.size()?maximum:h.burst.bits.size()+added);
+            auto capacity=h.burst.bits.capacity();const auto initial=capacity;
+            while(capacity<required) {
+                transient=std::max(transient,capacity);
+                capacity=capacity? (capacity>bit_limit/2?bit_limit:capacity*2):1;
+            }
+            // A failed prefix can clear its buffer and regrow from zero in
+            // this same push. Include that doubling trajectory's old buffer
+            // in the transient bound even if the initial capacity was ample.
+            auto reset_capacity=std::size_t{0};
+            const auto reset_required=std::min(bit_limit,added);
+            while(reset_capacity<reset_required) {
+                transient=std::max(transient,reset_capacity);
+                reset_capacity=reset_capacity? (reset_capacity>bit_limit/2?bit_limit:reset_capacity*2):1;
+            }
+            capacity=std::max(capacity,reset_capacity);
+            add(capacity-initial);
+            output=std::max(output,std::min(required,std::min(search.chunk_bits,bit_limit)));
+        }
+        // reserve(wanted) checks the complete new allocation while the old
+        // payload remains charged. Publishing likewise creates one temporary
+        // copy before queue insertion/replacement, alongside retained events.
+        add(transient);add(product(search.track_limit,output));add(output);
+        // take_bursts() moves the existing event vector and reserves its next
+        // bounded queue before the caller replaces its previous drained vector.
+        add(product(search.track_limit,sizeof(PatternBurst)));
+        return total;
     }
     std::size_t worker_bytes() const {
         auto bytes=worker_codes.capacity()*sizeof(PatternCode);
@@ -860,11 +928,17 @@ struct PatternCorrelator::Impl {
                         const auto moment=moments[right]-moments[left]-static_cast<double>(left)*measured;
                         const auto first=prefix[left+1]-prefix[left];
                         const Complex square{first.cc-first.ss,2*first.cs};
-                        require(piece.count<bank.affine_carrier.size(),"affine pulse span exceeds reserved carrier moments");
+                        require(piece.count<=block_samples,"affine pulse span exceeds its oscillator block");
+                        detail::CorrelationCarrierMoments uncached;
+                        const auto* carrier=bank.carrier(piece.count);
+                        if(!carrier) {
+                            uncached=detail::correlation_carrier_moments(piece.count,2*tau*bank.frequency/config.sample_rate);
+                            carrier=&uncached;
+                        }
                         for(unsigned bit=0;bit<2;++bit) {
                             const auto contribution=detail::correlation_affine_fit(projection,moment,
                                 piece.count,value[bit],slope[bit],square,first.cc+first.ss,
-                                bank.affine_carrier[piece.count]);
+                                *carrier);
                             add_fit(fit[bit],contribution);
                             if(drift)add_fit((*drift)[bit].active,contribution);
                             if(differential)add_fit((*differential)[bit].active,contribution);
@@ -1312,6 +1386,7 @@ bool PatternCorrelator::initial_search_complete()const {
 }
 bool PatternCorrelator::drift_tolerant()const{return impl_->drift_sections>1;}
 std::size_t PatternCorrelator::working_bytes()const{return sizeof(PatternCorrelator)+impl_->working_bytes();}
+std::size_t PatternCorrelator::projection_cache_headroom(std::size_t input_samples)const{return impl_->projection_cache_headroom(input_samples);}
 std::size_t PatternCorrelator::reserved_workspace_bytes()const{return sizeof(PatternCorrelator)+impl_->accounted_bytes;}
 void PatternCorrelator::set_workspace_bytes(std::size_t bytes) {
     if(bytes<working_bytes())impl_->drop_workers();

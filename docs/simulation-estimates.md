@@ -308,10 +308,23 @@ whether its probability was included; `probability_model_limit` explains a
 coverage failure. `differential_windows` and `differential_window_seconds`
 describe eligible geometry, not a guaranteed live allocation.
 
+Coverage failures name the limiting geometry, including the actual carrier
+candidate count, local phase variance, residual carrier rotation or search-bank
+rotation. For example, independent GPSDO-OCXO at bandwidth 0.01 Hz, stream
+carrier 8200 Hz and target −49 dB-Hz resolves to a roughly 58-day symbol and
+101 carrier candidates. Its real-covariance probability remains unavailable
+because the model supports at most 17 candidates; the receiver retains all 101.
+A full-bank admission threshold applied to a selected-lane probability is not
+a lower bound on correct reception: an omitted wrong-bit candidate can win.
+Extending this model requires shared draws and competing correct/wrong fits
+across the full lattice, validation of the local-rotation approximation, and
+bounded planner latency. A small neighborhood cannot silently stand in for that
+coverage.
+
 Carrier candidates use the actual frequency lattice and shared noisy fits.
-Banks of at most 17 candidates are evaluated in full when their local rotation
-is resolved. Larger banks use a bounded neighborhood around nominal frequency
-and the phase-path slope; omitted candidates set
+In the circular local model, banks of at most 17 candidates are evaluated in
+full when their local rotation is resolved. Larger circular banks use a bounded
+neighborhood around nominal frequency and the phase-path slope; omitted candidates set
 `probability_search_approximation`. The actual search bank still determines the
 admission threshold. This improves on selecting a signal-only best frequency
 before adding noise, but does not reproduce full adaptive acquisition, clock

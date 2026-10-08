@@ -181,6 +181,9 @@ public:
     std::size_t working_bytes() const;
     // Includes admitted detector state whose allocation is deferred until PCM.
     std::size_t reserved_workspace_bytes() const;
+    // Additional allocation bound for one finite PCM push and its next drain.
+    // SIZE_MAX disables optional shared preprocessing for unsupported geometry.
+    std::size_t projection_cache_headroom(std::size_t input_samples) const;
     // Reject a reduction that cannot retain current state. Future candidate
     // growth is capped within the new ceiling; excess payload throws Error.
     void set_workspace_bytes(std::size_t);

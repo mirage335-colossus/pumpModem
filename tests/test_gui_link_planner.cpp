@@ -319,6 +319,35 @@ void nearest_usable_targets() {
     check(!planner::nearest_fit_target(inputs,invalid_companion),
           "An invalid companion receive target must not be omitted when choosing a fit");
 }
+void bounded_navigation_preview() {
+    auto inputs=example();inputs.target_db_hz=23;
+    const auto steps=planner::preview_steps(inputs);
+    check(steps.stronger==24&&steps.weaker==22,
+          "Current-input navigation must advertise fitting exact one-dB steps without a probability sweep");
+    for(const auto target:{*steps.stronger,*steps.weaker}) {
+        auto options=inputs.options;options.modem=planned_config(inputs,target);
+        transfer::Estimate one;one.wire_bits=1;
+        one.total_seconds=modem::symbol_seconds(options.modem);
+        const auto support=simulation::estimate(one,options,true,inputs.channel,{},1,false);
+        check(support.carrier_in_search&&support.clock_in_search&&!support.oscillator_search_limited&&
+              support.receiver_workspace_supported,"A preview step must fit the complete actual receiver bank");
+    }
+    inputs.target_db_hz=200;
+    check(!planner::preview_steps(inputs).stronger,"The upper target boundary must disable its outward step");
+    inputs.target_db_hz=-200;
+    const auto unrepresentable=planner::preview_steps(inputs);
+    check(!unrepresentable.stronger&&!unrepresentable.weaker,
+          "An unrepresentable current duration must advertise no preview navigation");
+    inputs.target_db_hz=23;inputs.mode=tuning::PatternMode::pattern_16;
+    const auto fixed=planner::preview_steps(inputs);
+    check(!fixed.stronger&&!fixed.weaker,"Fixed-duration profiles must have no preview timing navigation");
+    inputs=example();inputs.options.dsp_workspace_bytes=1;
+    const auto invalid=planner::preview_steps(inputs);
+    check(!invalid.stronger&&!invalid.weaker,"Preview navigation must retain transfer workspace validation");
+    inputs=gpsdo_islands();inputs.options.dsp_workspace_bytes=1024*1024;
+    const auto unaffordable=planner::preview_steps(inputs);
+    check(!unaffordable.stronger&&!unaffordable.weaker,"Preview navigation must reject unaffordable receiver geometry");
+}
 simulation::Estimate independently_check_banks(const planner::Inputs& inputs,double target,
         std::span<const double> companions,planner::ReceiveBanks banks) {
     auto options=inputs.options;options.modem=planned_config(inputs,target);
@@ -696,12 +725,24 @@ void stable_planner_navigation_document() {
     const auto pending=app.document(P::planner,900);
     check(pending!=original&&contains_text(*pending,"Updating · previous plan")&&
           geometry(*pending)==baseline&&contains_text(*pending,"Received:")&&
-          !app.enabled(C::planner_apply_short)&&!app.enabled(C::planner_weaker),
-          "Pending navigation must retain explicitly previous results and geometry while disabling stale actions");
+          !app.enabled(C::planner_apply_short)&&app.enabled(C::planner_weaker)&&app.enabled(C::planner_stronger),
+          "Pending navigation must retain previous results and current checked steps while disabling Apply");
     for(const auto* node:nodes(*pending))if(node->command==C::planner_apply_short||node->command==C::planner_apply_long||
-            node->command==C::planner_stronger||node->command==C::planner_weaker||node->command==C::planner_clock)
+            node->command==C::planner_clock)
         check(!node->enabled,"A displayed previous plan exposed a stale calculation action");
+    for(const auto* node:nodes(*pending))if(node->command==C::planner_stronger||node->command==C::planner_weaker)
+        check(node->enabled==app.enabled(node->command),"Previous-plan controls must use current-input navigation");
     check(app.document(P::planner,900)==pending,"Repeated pending reads must keep the same presentation identity");
+    app.tick(); // The precise probability calculation may now be in flight.
+    auto target=std::stod(app.field(F::planner_target).text);
+    for(const auto command:{C::planner_stronger,C::planner_stronger,C::planner_weaker}) {
+        check(app.enabled(command),"Current-input steps must not wait behind an obsolete probability calculation");
+        target+=command==C::planner_stronger?1:-1;app.activate(command);
+        const auto current=app.document(P::planner,900);
+        check(std::stod(app.field(F::planner_target).text)==target&&geometry(*current)==baseline&&
+              contains_text(*current,"Updating · previous plan")&&!app.enabled(C::planner_apply_short),
+              "Rapid steps must use the latest target without enabling stale Apply or moving the previous plots");
+    }
     app.edit(F::planner_target,"-");const auto invalid=app.document(P::planner,900);
     const auto invalid_nodes=nodes(*invalid);
     check(contains_text(*invalid,"Check planner target")&&!contains_text(*invalid,"Updating · previous plan")&&
@@ -1704,7 +1745,7 @@ int main() {
     try {
         independent_reference_values();exact_geometry_and_physical_finish();timing_milestones();
         clock_and_ram_milestones();sampled_clock_ram_islands();checked_clock_ram_navigation();
-        nearest_usable_targets();nearest_target_shares_receiver_budget();
+        nearest_usable_targets();bounded_navigation_preview();nearest_target_shares_receiver_budget();
         narrow_band_differential_model();phase_loss_and_receiver_confidence();gpsdo_phase_does_not_change_clock_coverage();
         separate_link_budget_and_observer_model();quantization_fixed_modes_and_limits();
         persistent_worker_curve_cache();stable_planner_navigation_document();
