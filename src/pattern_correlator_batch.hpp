@@ -49,6 +49,24 @@ struct CorrelationFit {
     }
 };
 
+// Fit a complex affine template value+n*slope to the original real samples.
+// signal_first_moment is sum(n*x[n]*oscillator[n]), relative to this span;
+// summed retains the ordinary oscillator projection and unmodified PCM energy.
+// square_phase_step is twice the carrier's radians/sample. The same bounded
+// oscillator-block convention as pulse cells supplies its first square/norm.
+CorrelationFit correlation_affine_fit(const CorrelationProjection& summed,
+    std::complex<double> signal_first_moment, std::uint64_t count,
+    std::complex<double> value, std::complex<double> slope,
+    std::complex<double> first_carrier_square, double first_carrier_norm,
+    double square_phase_step);
+using CorrelationCarrierMoments=std::array<std::complex<long double>,3>;
+CorrelationCarrierMoments correlation_carrier_moments(std::uint64_t count,double square_phase_step);
+CorrelationFit correlation_affine_fit(const CorrelationProjection& summed,
+    std::complex<double> signal_first_moment, std::uint64_t count,
+    std::complex<double> value, std::complex<double> slope,
+    std::complex<double> first_carrier_square, double first_carrier_norm,
+    const CorrelationCarrierMoments& carrier_moments);
+
 // A common phase fit is a subspace of separate per-chip phase fits. Under
 // white Gaussian noise, projecting both signal and noise into this larger
 // subspace preserves integration gain. Its rank, rather than the PCM sample
@@ -136,8 +154,9 @@ public:
     CorrelationPulseGram evaluate(long double first_offset,std::uint64_t count,
                                   std::complex<double> carrier_square,double carrier_norm,
                                   std::stop_token stop={});
+    std::uint64_t preparation_count() const {return preparations_;}
 private:
-    std::uint64_t chip_=0,count_=0;
+    std::uint64_t chip_=0,count_=0,preparations_=0;
     long double rate_=1,offset_=0,lower_=0,upper_=0;
     double frequency_=0;
     std::uint32_t sample_rate_=0;

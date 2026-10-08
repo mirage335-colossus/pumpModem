@@ -10,6 +10,19 @@
 
 namespace datapump::simulation::detail {
 
+// Disjoint intersections of receiver windows, drift sections and the physical
+// symbol endpoint. Gram uses the four real I/Q template vectors, including
+// their carrier image. Signal projections/energy are normalized by sqrt(2/N)
+// and 2/N respectively, where N is the whole symbol's real sample count.
+struct ReceiverProbabilityAtom {
+    std::uint64_t first_sample=0, samples=0;
+    unsigned section=0;
+    std::array<double,16> gram{};
+    std::array<double,4> signal_cos{},signal_sin{};
+    std::array<double,3> signal_energy{}; // cos*cos, sin*sin, cos*sin
+    bool operator==(const ReceiverProbabilityAtom&) const = default;
+};
+
 // Matched-statistic approximation; no PCM, adaptive search or receiver state.
 // Energies use one complex noise dimension (two real noise dimensions).
 struct ReceiverProbabilityParameters {
@@ -41,6 +54,11 @@ struct ReceiverProbabilityParameters {
     // against each normalized template, divided by sqrt(total signal energy).
     // Empty selects a signal exactly proportional to the first template.
     std::vector<std::array<std::complex<double>,2>> differential_signal_coefficients;
+    // Optional real covariance path for noncircular or nonaligned compact raw fits.
+    // A partial final window contributes to energy/whole/section fits only.
+    std::uint64_t real_samples=0, real_window_samples=0;
+    std::uint32_t real_sample_rate=0;
+    std::vector<ReceiverProbabilityAtom> real_atoms;
     std::size_t requested_trials=4096;
     bool operator==(const ReceiverProbabilityParameters&) const = default;
 };
@@ -68,5 +86,12 @@ ReceiverProbability receiver_probability(const ReceiverProbabilityParameters&);
 // Shared implementation entry point; unsupported geometry returns available
 // false rather than extrapolating a probability or silently dropping a detector.
 ReceiverProbability differential_receiver_probability(const ReceiverProbabilityParameters&);
+
+// Shared production-algebra evaluation, also used to check the atom reduction
+// against direct PCM fits. Each dot contains the unnormalized four raw sums.
+struct ReceiverProbabilityEvidence { double coherent=0,older=0,combined=0,differential=0; };
+std::array<ReceiverProbabilityEvidence,2> receiver_real_atom_evidence(
+    const ReceiverProbabilityParameters&,const std::vector<std::array<double,4>>& dots,
+    double energy,int frequency_bin=0);
 
 } // namespace datapump::simulation::detail

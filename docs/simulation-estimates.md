@@ -283,12 +283,26 @@ Within-window phase integration uses bounded quadrature, with its second moment
 corrected to the analytical coherent-energy mean. Template weighting within a
 wandering window remains an approximation.
 
-The supported local envelope is 256–4096 complete windows, with no partial tail
-and boundaries aligned to the four sections. Projected-template integration is
-capped at 524,288 observations; locally singular templates, appreciably
-noncircular projected noise, local phase variance above 0.5 radian², or unresolved
-local carrier rotation have no numeric probability. These are model limits,
-not new receiver restrictions. The same receiver-local window helper and
+The supported local envelope is 256–4096 complete windows. Aligned circular
+fits retain the existing complex model. Compact raw fits with partial tails,
+quarter-crossing windows, or a rejected circular approximation use a joint
+four-real-template covariance model. Disjoint atoms split at quarters, local
+windows and the physical symbol end. A tail contributes to whole/quarter fits
+and received energy; only complete windows enter local products. Singular
+short fragments retain their actual rank. Source energy, both private fits and
+orthogonal residual noise share the same draw. A failed circular calculation
+is retried from pristine parameters, so source power is never normalized twice.
+
+Template integration remains a length-weighted, 16-point-per-chip envelope
+quadrature, capped at 524,288 blocks; carrier covariance within each block is
+analytic, including DC and Nyquist images. It includes the finite shaped pulse
+and radial limiter, but is not exact sample-wise envelope integration. Local
+phase variance above 0.5 radian² or unresolved carrier rotation remains
+unsupported. The real model evaluates at most 17 carrier candidates using atom
+midpoint rotations, limited to 0.05 cycle per local window; nonzero banks are
+explicitly marked approximate. Compact multi-bit timing ownership remains
+unsupported even when the first-bit estimate is available. These are model
+limits, not new receiver restrictions. The same receiver-local window helper and
 workspace checks select the detector. `differential_model_available` states
 whether its probability was included; `probability_model_limit` explains a
 coverage failure. `differential_windows` and `differential_window_seconds`
@@ -490,32 +504,36 @@ expanded coupled requests use the FFT cost model, including when their requested
 core exceeds the allowance.
 
 For eligible compact shaped banks, the model separates full-rate pulse
-ingestion from chip-rate private fitting. It checks the actual pulse-projection
-geometry, including the 4,096-sample chip limit, and a conservative complete
-state/workspace allowance before crediting that path. Otherwise a policy bank's
-shaped raw fallback is charged per original sample. `pulse_projection_modeled`
-states whether any configured bank received this modeled path; it is not a
-runtime allocation guarantee.
+ingestion from chip-rate private fitting. Explicit paired banks have no
+4,096-sample chip ceiling; above that size they use bounded polynomial/geometric
+moments. Partial symbols with at least 1,024 samples per chip use affine spans.
+Eligibility and conservative complete workspace are checked before crediting
+either path; unsupported banks retain full-rate raw work.
+`pulse_projection_modeled` identifies either path, while
+`pulse_segment_projection_modeled` identifies the partial-symbol path. These
+are planning decisions, not guarantees of a live allocation.
 
 `receiver_frontend_seconds`, `receiver_search_seconds` and
-`receiver_kernel_rebuild_seconds` report separate components already included
-in `receiver_cpu_seconds`. Front-end work retains the supplied real sample rate,
-while projected private fitting follows chip cadence. Kernel preparation is
-charged separately. The current projected frontend and private fitting execute
-serially; both CPU and hypothetical GPU totals retain that serial cost.
-Nominal-rate banks allow bounded initial/clipped-cell
-preparation; fractional-rate banks pessimistically charge a full rebuild every
-cell. `kernel_rebuild_upper_bound` identifies that cache allowance. Actual reuse
-can make it much smaller, especially for narrow static clock regions. This
-component is not measured throughput, and does not imply that every cell
-actually rebuilt its kernel.
+`receiver_kernel_rebuild_seconds` are components of `receiver_cpu_seconds`.
+Projected work remains serial in both CPU and hypothetical GPU totals. The
+central kernel estimate counts initial variants plus 257 knot/count boundaries
+per sample of accumulated clock displacement, capped at one rebuild per cell.
+This is a geometric density heuristic, not a cache-hit guarantee. The separate
+`receiver_kernel_rebuild_upper_seconds` charges every fractional-clock cell;
+`kernel_rebuild_upper_bound` labels its availability. The upper allowance is
+excluded from the central total and shown separately in GUI model details.
+Exact endpoints and rounding can reduce reuse.
 
-The pulse allowances are 220 equivalent operations per input sample/lattice,
-4,000 per cell for Gram evaluation, 6,000 per candidate bit pair/chip/origin/phase
-for private fitting, and 16,000 per kernel sample for preparation. Up to three
-lattices per pair are budgeted. These rounded engineering coefficients are
-separate from [measured receiver workloads](oscillator-search-validation.md) and do not promise
-equal total cost for different input sample rates.
+Small-cell allowances remain 220 equivalent operations per sample/lattice,
+4,000 per cell Gram, 6,000 per private bit pair/chip/origin/phase, and 16,000 per
+kernel sample. Large cells use bounded table segments and logarithmic geometric
+moments. Partial affine search counts pulse knots, oscillator-block clips,
+quarters and complete local-window boundaries, capped at the observation count;
+it charges 1,800 operations per private bit-pair span plus detector bookkeeping.
+Carrier moments are prepared once per public frequency and span length.
+Up to three lattices per pair and cross-receiver cache misses are budgeted.
+These coefficients are rounded engineering assumptions, not host calibration.
+See [paired execution and sensitivity evidence](pulse-moment-validation.md).
 
 The modeled per-bank allowance is the total divided by the modeled bank count,
 capped at half the total to match the live receiver's initial per-bank ceiling.

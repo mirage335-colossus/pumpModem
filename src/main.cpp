@@ -815,7 +815,9 @@ void analyze_link(const Args& a,transfer::Options options) {
     std::cout<<",\"receiver_frontend_seconds\":";json_number(current.receiver_frontend_seconds);
     std::cout<<",\"receiver_search_seconds\":";json_number(current.receiver_search_seconds);
     std::cout<<",\"receiver_kernel_rebuild_seconds\":";json_number(current.receiver_kernel_rebuild_seconds);
+    std::cout<<",\"receiver_kernel_rebuild_upper_seconds\":";json_number(current.receiver_kernel_rebuild_upper_seconds);
     std::cout<<",\"pulse_projection_modeled\":"<<(current.pulse_projection_modeled?"true":"false")
+        <<",\"pulse_segment_projection_modeled\":"<<(current.pulse_segment_projection_modeled?"true":"false")
         <<",\"kernel_rebuild_upper_bound\":"<<(current.kernel_rebuild_upper_bound?"true":"false");
     std::cout<<",\"payload_processing_seconds\":";json_number(current.payload_processing_seconds);
     std::cout<<",\"mitigation_seconds\":";json_number(current.mitigation_seconds);

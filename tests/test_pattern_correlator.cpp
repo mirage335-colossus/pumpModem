@@ -609,6 +609,178 @@ void shaped_partial_chips() {
     check(best(capture(waveform(bits,c,delay),c,search,113)).bits==bits,
           "continuous shaped partial-chip symbols must preserve absolute stream addresses and bit labels");
 }
+void partial_projection_affine() {
+    struct Geometry {std::uint64_t chip,chips,tail;double ppm,carrier=16;};
+    for(const auto item:{Geometry{1280,64,1,-200},Geometry{1280,64,640,200},
+            Geometry{1280,64,1279,-200},Geometry{4097,64,27,200},Geometry{1280,17,0,200},
+            Geometry{1280,17,27,-10000,.05},Geometry{1280,17,459,10000,.05}}) {
+        auto c=config();c.sample_rate=64;c.carrier_hz=item.carrier;c.bandwidth_hz=128./item.chip;
+        for(unsigned i=0;i<8 && modem::pattern_chip_samples(c)>item.chip;++i)
+            c.bandwidth_hz=std::nextafter(c.bandwidth_hz,std::numeric_limits<double>::infinity());
+        const auto wanted=item.chip*item.chips+item.tail;
+        c.integration_seconds=(static_cast<double>(wanted)-.25)/c.sample_rate;
+        c.stream_epoch=1730000931;c.stream_phase_samples=7;
+        c.spreading_seed[9]=73;c.dsss_seed[6]=213;
+        const auto symbol=modem::symbol_sample_count(c),chip=modem::pattern_chip_samples(c);
+        check(symbol==wanted && chip==item.chip,"partial affine regression lost its exact sampled geometry");
+        const auto rate=1+static_cast<long double>(item.ppm)*1e-6L;
+        constexpr std::size_t delay=137;
+        const auto origin=delay+modem::pattern_pulse_padding_samples(c)/rate;
+        const Bytes bits=item.chips==17?Bytes{1,0}:Bytes{0,0,1,1,0};
+        // Actual transmitter PCM includes finite pulse tails, adjacent-symbol
+        // overlap and radial limiting before the identical paired reception.
+        auto samples=waveform(bits,c,delay,static_cast<double>(rate));
+        const auto count=static_cast<std::size_t>(std::ceil(origin+(bits.size()+1)*symbol/rate));
+        check(count<=samples.size(),"partial affine capture omitted the full physical absence interval");
+        samples.resize(count);
+        const auto payload_end=static_cast<std::size_t>(std::ceil(origin+bits.size()*symbol/rate));
+        // Keep the finite transmitted tail below the absent-symbol threshold;
+        // an almost noiseless tail can legitimately admit an extra raw bit.
+        std::mt19937 noise_random(4189);std::normal_distribution<double> added_noise(0,.125);
+        for(auto& sample:samples)sample+=static_cast<float>(added_noise(noise_random));
+        for(std::size_t n=0;n<std::min(count,payload_end);++n)samples[n]+=static_cast<float>(.012*
+            std::sin(2*std::numbers::pi*(c.carrier_hz+.03125)*n/c.sample_rate));
+        modem::PatternSearch search;search.start_offset_seconds=static_cast<double>(origin/c.sample_rate);
+        search.start_uncertainty_seconds=0;search.search_stream_phases=true;search.compact_clock_search=true;
+        search.hypotheses={{c.carrier_hz*static_cast<double>(rate-1),item.ppm}};
+        search.retain_score=0;search.candidate_limit=32;search.track_limit=1;
+        search.bit_limit=16;search.chunk_bits=1;search.worker_threads=1;
+        modem::PatternCorrelator affine(c,search,4*1024*1024),raw(c,search,4*1024*1024,{true,false});
+        check(affine.work().backend==modem::PatternCorrelationBackend::pulse_segments &&
+              raw.work().backend==modem::PatternCorrelationBackend::raw &&
+              affine.work().hypotheses==raw.work().hypotheses &&
+              affine.work().phase_groups==raw.work().phase_groups && affine.drift_tolerant()==raw.drift_tolerant(),
+              "partial affine optimization changed backend/reference or search and detector coverage");
+        check(affine.reserved_workspace_bytes()<raw.reserved_workspace_bytes()+4096,
+              "partial affine projections retained symbol-sized or per-lane kernel storage");
+        const auto compare=[](const auto& a,const auto& b) {
+            check(a.size()==b.size(),"partial affine projections changed completed evidence count");
+            for(std::size_t i=0;i<a.size();++i) {
+                check(a[i].first_sample==b[i].first_sample && a[i].end_sample==b[i].end_sample &&
+                      a[i].stream_symbol==b[i].stream_symbol && a[i].bit==b[i].bit &&
+                      a[i].stream_phase_samples==b[i].stream_phase_samples &&
+                      a[i].admission_threshold==b[i].admission_threshold,
+                      "partial affine projections changed clock, fresh pattern, endpoint or trial identity");
+                check(std::abs(a[i].score-b[i].score)<2e-7*std::max(1.,b[i].score) &&
+                      std::abs(a[i].alternative_score-b[i].alternative_score)<2e-7*std::max(1.,b[i].alternative_score),
+                      "partial affine projections changed raw sample noise, pulse energy or quarter evidence");
+            }
+        };
+        Bytes accepted;unsigned completed=0;std::uint64_t next_symbol=0;
+        auto endpoint=static_cast<std::size_t>(std::ceil(origin+symbol/rate));
+        for(std::size_t offset=0;offset<count;) {
+            auto until=std::min(offset+137,count);
+            if(offset<endpoint-1)until=std::min(until,endpoint-1);
+            else if(offset<endpoint)until=endpoint;
+            affine.push(std::span(samples).subspan(offset,until-offset));
+            raw.push(std::span(samples).subspan(offset,until-offset));offset=until;
+            compare(affine.candidates(),raw.candidates());
+            if(offset==endpoint-1) {
+                const auto rows=affine.candidates();
+                check(std::none_of(rows.begin(),rows.end(),[&](const auto& row){return row.stream_symbol==next_symbol;}),
+                      "an affine pulse piece published an unobserved final sample");
+            }
+            const auto a=affine.take_bursts(),b=raw.take_bursts();
+            check(a.size()==b.size(),"partial affine projection changed next-poll progress count");
+            for(std::size_t i=0;i<a.size();++i) {
+                check(a[i].bits==b[i].bits && a[i].complete==b[i].complete &&
+                      a[i].end_sample==b[i].end_sample && a[i].first_stream_symbol==b[i].first_stream_symbol,
+                      "partial affine projection changed accepted prefix or physical absence");
+                accepted.insert(accepted.end(),a[i].bits.begin(),a[i].bits.end());completed+=a[i].complete;
+            }
+            if(offset==endpoint){++next_symbol;endpoint=static_cast<std::size_t>(
+                std::ceil(origin+(next_symbol+1)*symbol/rate));}
+        }
+        if(accepted!=bits || completed!=1) {
+            std::cerr<<"partial geometry chip="<<chip<<" symbol="<<symbol<<" ppm="<<item.ppm
+                <<" accepted=";for(const auto bit:accepted)std::cerr<<unsigned(bit);
+            std::cerr<<" completions="<<completed<<'\n';
+            throw Error("partial-chip private patterns or fully scored absence changed");
+        }
+        check(affine.work().segments>0,"partial affine receiver did not record bounded numerical spans");
+        // This block-size comparison deliberately omits the intermediate polls;
+        // reserve enough output slots for the same per-bit events plus absence.
+        auto whole_search=search;whole_search.track_limit=bits.size()+1;
+        modem::PatternCorrelator whole(c,whole_search,4*1024*1024);whole.push(samples);
+        compare(whole.candidates(),affine.candidates());
+        affine.finish();const auto stopped=affine.take_bursts();
+        check(std::none_of(stopped.begin(),stopped.end(),[](const auto& event){return event.complete;}),
+              "EOF supplied a second affine physical completion");
+    }
+}
+void partial_projection_affine_differential() {
+    auto c=config();c.sample_rate=64;c.carrier_hz=16;c.bandwidth_hz=.1;
+    constexpr std::uint64_t chip=1280,symbol=4096*chip+27;
+    c.integration_seconds=(static_cast<double>(symbol)-.25)/c.sample_rate;
+    c.stream_epoch=1730000931;c.stream_phase_samples=7;
+    check(modem::pattern_chip_samples(c)==chip && modem::symbol_sample_count(c)==symbol,
+          "partial differential affine fixture lost exact geometry");
+    const auto padding=modem::pattern_pulse_padding_samples(c);
+    modem::PatternSearch search;search.start_offset_seconds=static_cast<double>(padding)/c.sample_rate;
+    search.start_uncertainty_seconds=0;search.search_stream_phases=true;search.compact_clock_search=true;
+    search.hypotheses={{0,0}};search.retain_score=0;search.candidate_limit=8;
+    search.track_limit=1;search.bit_limit=4;search.chunk_bits=1;search.worker_threads=1;
+    search.differential_window_seconds=16.*chip/c.sample_rate;
+    modem::PatternCorrelator affine(c,search,4*1024*1024),raw(c,search,4*1024*1024,{true,false});
+    check(affine.work().backend==modem::PatternCorrelationBackend::pulse_segments &&
+          affine.work().differential_window_samples==16*chip &&
+          raw.work().differential_window_samples==16*chip,"partial affine differential search was omitted");
+    modem::PatternTransmitter transmitter(Bytes{1},c,c.stream_epoch,0,false);
+    std::vector<float> block(65521);std::mt19937 random(923);std::normal_distribution<float> noise(0,.04F);
+    const auto endpoint=padding+symbol;
+    for(std::uint64_t offset=0;offset<endpoint;) {
+        const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(block.size(),endpoint-offset));
+        check(transmitter.read(std::span(block).first(count))==count,"partial differential PCM capture truncated");
+        for(std::size_t i=0;i<count;++i)block[i]+=noise(random);
+        const auto before_last=offset+count==endpoint?count-1:count;
+        affine.push(std::span(block).first(before_last));raw.push(std::span(block).first(before_last));
+        if(before_last!=count) {
+            check(affine.candidates().empty() && affine.take_bursts().empty(),
+                  "partial differential tail manufactured a complete affine symbol");
+            affine.push(std::span(block).subspan(before_last,1));raw.push(std::span(block).subspan(before_last,1));
+        }
+        offset+=count;
+    }
+    const auto a=affine.candidates(),b=raw.candidates();
+    check(a.size()==1 && b.size()==1 && a[0].bit==b[0].bit && a[0].bit==1 &&
+          a[0].end_sample==b[0].end_sample && a[0].admission_threshold==b[0].admission_threshold &&
+          std::abs(a[0].score-b[0].score)<2e-7*std::max(1.,b[0].score) &&
+          std::abs(a[0].alternative_score-b[0].alternative_score)<2e-7*std::max(1.,b[0].alternative_score),
+          "affine partial differential tail changed complete real-sample evidence");
+    const auto progress=affine.take_bursts(),reference=raw.take_bursts();
+    check(progress.size()==1 && reference.size()==1 && progress[0].bits==Bytes{1} &&
+          reference[0].bits==progress[0].bits && !progress[0].complete,
+          "partial differential affine bit was batched behind physical completion");
+    std::vector<float> silence(6*c.sample_rate);affine.push(silence);raw.push(silence);
+    check(affine.take_bursts().empty() && raw.take_bursts().empty(),
+          "six seconds inside a long affine symbol manufactured absence");
+    std::stop_source cancel;cancel.request_stop();
+    rejects([&]{affine.push(silence,cancel.get_token());},"partial affine input ignored cancellation");
+    affine.finish();check(affine.take_bursts().empty(),"cancel/EOF completed an unobserved affine absent symbol");
+}
+void partial_projection_affine_fallback() {
+    auto c=tuning::resolve(.1,-38,tuning::PatternMode::auto_keystream,true,.05).config;
+    modem::PatternSearch search;search.start_offset_seconds=0;search.start_uncertainty_seconds=0;
+    search.search_stream_phases=false;search.compact_clock_search=true;search.hypotheses={{0,.0003}};
+    search.candidate_limit=4;search.track_limit=1;search.bit_limit=8;search.worker_threads=1;
+    modem::PatternCorrelator affine(c,search,4*1024*1024),raw(c,search,4*1024*1024,{true,false});
+    check(modem::pattern_chip_samples(c)==1280 && modem::symbol_sample_count(c)==25478859 &&
+          affine.work().backend==modem::PatternCorrelationBackend::pulse_segments &&
+          affine.reserved_workspace_bytes()<raw.reserved_workspace_bytes()+4096,
+          "manual -38 target partial geometry lost its bounded affine backend");
+    search.drift_tolerant=false;
+    modem::PatternCorrelator coherent_raw(c,search,4*1024*1024,{true,false});
+    modem::PatternCorrelator tight(c,search,coherent_raw.reserved_workspace_bytes()+64);
+    check(tight.work().backend==modem::PatternCorrelationBackend::raw,
+          "unaffordable affine moment arrays did not retain the raw fallback");
+    c.bandwidth_hz=128./65;c.carrier_hz=16;c.integration_seconds=(65.*64+27-.25)/c.sample_rate;
+    modem::PatternCorrelator small(c,search,4*1024*1024);
+    check(small.work().backend==modem::PatternCorrelationBackend::raw,
+          "singleton pulse pieces regressed the ordinary small-chip raw path");
+    c.pulse_shaping=false;modem::PatternCorrelator rectangular(c,search,4*1024*1024);
+    check(rectangular.work().backend==modem::PatternCorrelationBackend::raw,
+          "partial affine optimization changed rectangular templates");
+}
 void majority_obscured_symbol_is_independent() {
     auto c=config();c.integration_seconds=2;
     const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
@@ -1274,6 +1446,9 @@ int main(int argc,char** argv) {
     run("compact_constructor_uses_attached_oscillator_policy",compact_constructor_uses_attached_oscillator_policy);
     run("paired_pulse_origin_parities_and_canonical_quarters",paired_pulse_origin_parities_and_canonical_quarters);
     run("shaped_partial_chips",shaped_partial_chips);
+    run("partial_projection_affine",partial_projection_affine);
+    run("partial_projection_affine_differential",partial_projection_affine_differential);
+    run("partial_projection_affine_fallback",partial_projection_affine_fallback);
     run("majority_obscured_symbol_is_independent",majority_obscured_symbol_is_independent);
     run("completely_obscured_symbols_do_not_block_later_symbols",completely_obscured_symbols_do_not_block_later_symbols);
     run("weak_tails_expire_without_blocking_independent_symbols",weak_tails_expire_without_blocking_independent_symbols);

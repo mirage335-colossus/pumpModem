@@ -37,13 +37,15 @@ struct Estimate {
     // Components included in receiver_cpu_seconds. Frontend work follows the
     // original real sample rate; projected private search follows chip cadence
     // and runs serially in the current backend (also in the GPU projection).
-    // Kernel rebuild work is a separate conservative cache allowance. With
-    // fractional rates it charges rebuilding every cell, although runtime cache
-    // reuse/incremental updates may make the actual work much smaller.
+    // Kernel work estimates reuse across nearby clock candidates. Its separate
+    // upper allowance charges rebuilding every fractional-clock cell and is
+    // excluded from the central totals. Neither is a host measurement.
     double receiver_frontend_seconds = 0;
     double receiver_search_seconds = 0;
     double receiver_kernel_rebuild_seconds = 0;
+    double receiver_kernel_rebuild_upper_seconds = 0;
     bool pulse_projection_modeled = false;
+    bool pulse_segment_projection_modeled = false;
     bool kernel_rebuild_upper_bound = false;
     // Ordinary receive bookkeeping, payload codecs and permitted text view.
     // Included once in CPU, receiver-only and hypothetical GPU totals. This

@@ -160,12 +160,30 @@ is removed for explicit paired banks. Those banks use their
 individual half-chip start spacing `C/(2*r)`, where `C` is nominal chip length
 and `r` the clock ratio, including noninteger received chip durations. The legacy
 path requires even chip lengths, nominal clock rates and at most 4,096 samples
-per chip, preserving its historical small-workspace footprint. Partial-chip symbols,
-unsupported legacy grids, and an unaffordable projection
-workspace retain the full raw bank. The numerical pulse Gram cache reuses a
-quadratic expression within each piecewise-linear pulse-table region. It
-updates changed sample contributions incrementally across nearby regions,
-rebuilding when cell geometry or support endpoints require it.
+per chip, preserving its historical small-workspace footprint. Unsupported legacy
+grids and unaffordable projection workspace retain the full raw bank. The
+numerical pulse Gram cache reuses a quadratic expression within each pulse-table
+region, for both small and large chips. The small-chip kernel updates changed
+sample contributions across nearby regions; the large-chip kernel recomputes
+bounded segment sums when the common valid interval or sample count changes.
+Closed-support endpoints remain literal samples.
+
+Paired shaped symbols that do not contain a multiple of four complete chips
+use an additional affine-span path when they last at least 16 seconds and have
+at least 1,024 samples per chip. This path shares complex sample moments, then
+combines the 17 pulse atoms into each fresh private 0/1 template before fitting.
+It needs no per-lane pulse Gram matrix or symbol-sized buffer. The last partial
+chip retains its original center and amplitude, including its shifted table
+knots. Every chip, quarter, complete local window, caller push and oscillator
+block boundary clips the span. Carrier moments are prepared once per frequency
+and possible span length, with explicit workspace accounting. Smaller chips and
+tight budgets keep the raw path. The 1,024-sample gate avoids replacing cheap
+short spans with more setup work.
+
+The affine path still contracts at oscillator-block boundaries. Its search
+cost therefore follows the sum of the pulse-knot and input-block rates; it is
+not independent of sample rate in arbitrarily oversampled partial geometries.
+No accepted bit waits for a later block or symbol.
 
 Cell storage is bounded by the processing block and bank size, independently of
 symbol duration, including 32 KiB of preparation scratch in the workspace
@@ -205,8 +223,12 @@ transfer banks currently use individual frontends.
 The planner charges unique carrier projections, bounded segment/Gram work and
 chip-cadence private fits separately. It conservatively assumes cross-receiver
 cache misses and up to three timing lattices per frequency/rate pair; actual
-clipped timing ranges can require fewer. Its operation coefficients are a work
-model, not a measured execution time. Input conversion still follows sample
+clipped timing ranges can require fewer. Expected kernel preparation follows
+initial setup and changed-knot/count density. A separate full-rebuild allowance
+is exposed for fractional clocks and excluded from the central total. This
+avoids presenting a cache-miss bound as ordinary CPU demand. The density and
+operation coefficients remain engineering estimates, not measured execution
+times. Partial affine spans are counted separately from complete chip cells. Input conversion still follows sample
 rate, and wider oscillator uncertainty can require more carrier banks. See
 [pulse-moment measurements and limits](pulse-moment-validation.md) for paired
 execution and sensitivity evidence, and the earlier

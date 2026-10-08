@@ -1043,7 +1043,9 @@ struct Session::Impl {
         // before charging its bounded numeric storage to the shared bank.
         const auto moment_receivers=std::count_if(bank.receivers.begin(),bank.receivers.end(),[](const auto& receiver){
             const auto& config=receiver.options.modem;
-            return config.oscillator_search && modem::pattern_pulse_enabled(config) && modem::pattern_chip_samples(config)>4096;
+            const auto chip=modem::pattern_chip_samples(config),symbol=modem::symbol_sample_count(config);
+            return config.oscillator_search && modem::pattern_pulse_enabled(config) &&
+                (chip>4096 || (chip>=1024 && symbol>=16ULL*config.sample_rate && symbol%(4*chip)!=0));
         });
         if(moment_receivers>1 && bank.working_bytes<=capacity &&
            std::all_of(bank.receivers.begin(),bank.receivers.end(),[](const auto& receiver){return receiver.modem->clock_windowed();})) {

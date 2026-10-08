@@ -9,7 +9,7 @@ struct PatternCorrelatorOptions {
     bool raw_reference=false;
     bool measure_work=false;
 };
-enum class PatternCorrelationBackend { raw, pulse, pulse_moments };
+enum class PatternCorrelationBackend { raw, pulse, pulse_moments, pulse_segments };
 struct PatternCorrelatorWork {
     PatternCorrelationBackend backend=PatternCorrelationBackend::raw;
     std::size_t hypotheses=0,lattices=0,phase_groups=0,peak_workspace_bytes=0;

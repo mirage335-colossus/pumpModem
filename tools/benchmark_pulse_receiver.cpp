@@ -46,7 +46,7 @@ template<class T> std::string text(T value) {return std::to_string(value);}
 using Row=std::map<std::string,std::string>;
 const std::vector<std::string> columns{
     "mode","case","variant","backend","carrier_hz","bandwidth_hz","sample_rate","chip_samples","symbol_samples",
-    "symbol_seconds","target_cn0_db_hz","input_cn0_db_hz","workspace_bytes","keys","epochs","hypotheses",
+    "symbol_seconds","target_cn0_db_hz","input_cn0_db_hz","workspace_bytes","keys","epochs","epoch_before","hypotheses",
     "lattices","phase_groups","drift_sections","differential_window_samples","seed","repeat","instrumented",
     "samples","media_seconds","wall_seconds","cpu_seconds","construction_seconds","frontend_seconds",
     "search_seconds","kernel_seconds","frontend_cpu_seconds","search_cpu_seconds","kernel_cpu_seconds",
@@ -77,8 +77,9 @@ struct Args {
     std::string mode="performance",scenario="reproduction",csv,bits="001";
     double carrier=1500,bandwidth=0,target=4.2185134083910505,seconds=20,uncertainty=7;
     double frequency=0,clock=.0001,diffusion=.5,cn0=-3;
-    std::uint32_t sample_rate=0;std::uint64_t chip=0,seed=17;
+    std::uint32_t sample_rate=0;std::uint64_t chip=0,symbol=0,seed=17;
     std::size_t workspace=0;unsigned workspace_percent=50,keys=1,epochs=1,repeats=5,trials=64;
+    unsigned epoch_before=std::numeric_limits<unsigned>::max();
     std::size_t chunk=2048;bool instrumented=false,noise=false,cancel=false;
     std::vector<double> cn0_grid{-22,-21,-20,-19,-18};
 };
@@ -95,8 +96,10 @@ Args arguments(int argc,char** argv) {
         if(flag=="--help") {
             std::cout<<"benchmark_pulse_receiver --mode geometry|performance|curve --case reproduction|threshold|wide|weak|fast\n"
                 "  --carrier HZ --sample-rate HZ (0: selected) --bandwidth HZ --target-cn0 DB-Hz\n"
-                "  --chip-samples N (threshold fixture) --workspace-bytes N | --workspace-percent N\n"
+                "  --chip-samples N (threshold fixture) --symbol-samples N (exact sampled fixture)\n"
+                "  --workspace-bytes N | --workspace-percent N\n"
                 "  --seconds N (0: complete capture) --bits 001 --epochs N --keys N --repeats N\n"
+                "  --epoch-before N (default: centered; GUI padding may require older epochs)\n"
                 "  --trials N --cn0-grid D1,D2,... --input-cn0 DB-Hz --seed N --chunk N --csv PATH\n"
                 "  --frequency-offset HZ --clock-ppm N --phase-diffusion N --uncertainty SECONDS\n"
                 "  --instrumented --noise-only --cancel\n"
@@ -111,6 +114,7 @@ Args arguments(int argc,char** argv) {
         else if(flag=="--bits")a.bits=value;else if(flag=="--carrier")a.carrier=number<double>(value);
         else if(flag=="--sample-rate")a.sample_rate=number<std::uint32_t>(value);
         else if(flag=="--bandwidth")a.bandwidth=number<double>(value);else if(flag=="--chip-samples")a.chip=number<std::uint64_t>(value);
+        else if(flag=="--symbol-samples")a.symbol=number<std::uint64_t>(value);
         else if(flag=="--target-cn0")a.target=number<double>(value);else if(flag=="--input-cn0")a.cn0=number<double>(value);
         else if(flag=="--seconds")a.seconds=number<double>(value);else if(flag=="--uncertainty")a.uncertainty=number<double>(value);
         else if(flag=="--frequency-offset")a.frequency=number<double>(value);else if(flag=="--clock-ppm")a.clock=number<double>(value);
@@ -118,13 +122,16 @@ Args arguments(int argc,char** argv) {
         else if(flag=="--workspace-bytes")a.workspace=number<std::size_t>(value);
         else if(flag=="--workspace-percent")a.workspace_percent=number<unsigned>(value);
         else if(flag=="--keys")a.keys=number<unsigned>(value);else if(flag=="--epochs")a.epochs=number<unsigned>(value);
+        else if(flag=="--epoch-before")a.epoch_before=number<unsigned>(value);
         else if(flag=="--repeats")a.repeats=number<unsigned>(value);else if(flag=="--trials")a.trials=number<unsigned>(value);
         else if(flag=="--seed")a.seed=number<std::uint64_t>(value);else if(flag=="--chunk")a.chunk=number<std::size_t>(value);
         else if(flag=="--cn0-grid")a.cn0_grid=grid(value);else throw Error("unknown option: "+flag);
     }
     check(a.mode=="geometry"||a.mode=="performance"||a.mode=="curve","unknown measurement mode");
-    check(a.keys&&a.keys<=16&&a.epochs&&a.epochs<=65&&a.epochs%2&&a.chunk&&a.chunk<=65536,
-          "keys1..16, odd epochs1..65 and chunk1..65536 required");
+    check(a.keys&&a.keys<=16&&a.epochs&&a.epochs<=257&&a.epochs%2&&a.chunk&&a.chunk<=65536,
+          "keys1..16, odd epochs1..257 and chunk1..65536 required");
+    if(a.epoch_before==std::numeric_limits<unsigned>::max())a.epoch_before=a.epochs/2;
+    check(a.epoch_before<a.epochs,"epoch-before must identify the source epoch within the complete bank");
     check(a.repeats&&a.trials&&a.trials<=1000000&&a.seconds>=0&&std::isfinite(a.seconds),"invalid repetition/capture bounds");
     check(!a.bits.empty()&&a.bits.size()<=4096&&a.bits.find_first_not_of("01")==std::string::npos,"bits must be1..4096 binary symbols");
     check(std::isfinite(a.uncertainty)&&a.uncertainty>=0&&a.uncertainty<=3600,"invalid timing uncertainty");
@@ -154,6 +161,13 @@ modem::Config configuration(const Args& a,unsigned key=0,std::int64_t epoch=0) {
         for(unsigned i=0;i<8&&modem::pattern_chip_samples(c)>chip;++i)c.bandwidth_hz=std::nextafter(c.bandwidth_hz,std::numeric_limits<double>::infinity());
         check(modem::pattern_chip_samples(c)==chip&&modem::symbol_sample_count(c)==32*chip,"threshold fixture needs whole32-chip symbols");
     }
+    if(a.symbol) {
+        c.integration_seconds=static_cast<double>(a.symbol)/c.sample_rate;
+        for(unsigned i=0;i<8 && modem::symbol_sample_count(c)!=a.symbol;++i)
+            c.integration_seconds=std::nextafter(c.integration_seconds,
+                modem::symbol_sample_count(c)>a.symbol?0.:std::numeric_limits<double>::infinity());
+        check(modem::symbol_sample_count(c)==a.symbol,"fixture symbol duration cannot be represented exactly");
+    }
     modem::OscillatorSearchConfig policy;policy.lf={.0001,.5};policy.rf={0,0};policy.margin=3;
     c.oscillator_search=policy;
     transfer::Options options;options.modem=c;options.timestamp=static_cast<std::uint64_t>(1800000000+epoch);
@@ -164,7 +178,7 @@ Row geometry(const Args& a,const modem::Config& c,std::size_t workspace) {
     Row row{{"mode",a.mode},{"case",a.scenario},{"carrier_hz",text(c.carrier_hz)},{"bandwidth_hz",text(c.bandwidth_hz)},
         {"sample_rate",text(c.sample_rate)},{"chip_samples",text(modem::pattern_chip_samples(c))},
         {"symbol_samples",text(modem::symbol_sample_count(c))},{"symbol_seconds",text(static_cast<double>(modem::symbol_sample_count(c))/c.sample_rate)},
-        {"target_cn0_db_hz",text(a.target)},{"workspace_bytes",text(workspace)},{"keys",text(a.keys)},{"epochs",text(a.epochs)},
+        {"target_cn0_db_hz",text(a.target)},{"workspace_bytes",text(workspace)},{"keys",text(a.keys)},{"epochs",text(a.epochs)},{"epoch_before",text(a.epoch_before)},
         {"phase_diffusion",text(a.diffusion)},{"clock_ppm",text(a.clock)},{"frequency_offset_hz",text(a.frequency)},
         {"start_uncertainty_seconds",text(a.uncertainty)},{"frequency_hypotheses",text(modem::oscillator_pattern_search(c).hypotheses.size())}};
     return row;
@@ -198,7 +212,8 @@ Capture capture(const Args& a,const modem::Config& c,double cn0,std::uint64_t se
 }
 const char* backend_name(modem::PatternCorrelationBackend backend) {
     switch(backend){case modem::PatternCorrelationBackend::raw:return "raw";case modem::PatternCorrelationBackend::pulse:return "pulse";
-    case modem::PatternCorrelationBackend::pulse_moments:return "pulse_moments";}return "unknown";
+    case modem::PatternCorrelationBackend::pulse_moments:return "pulse_moments";
+    case modem::PatternCorrelationBackend::pulse_segments:return "pulse_segments";}return "unknown";
 }
 std::uint64_t peak_rss() {
 #if defined(__unix__) || defined(__APPLE__)
@@ -219,7 +234,7 @@ Result receive(const Args& a,const modem::Config& source,const Capture& pcm,std:
     const auto begun=Clock::now();const auto cpu_begin=std::clock();
     std::vector<std::unique_ptr<modem::PatternCorrelator>> bank;
     for(unsigned key=0;key<a.keys;++key)for(unsigned epoch=0;epoch<a.epochs;++epoch) {
-        const auto offset=static_cast<std::int64_t>(epoch)-a.epochs/2;
+        const auto offset=static_cast<std::int64_t>(epoch)-a.epoch_before;
         auto c=configuration(a,key,offset);
         modem::PatternSearch search;search.start_offset_seconds=static_cast<double>(offset);
         search.start_uncertainty_seconds=a.uncertainty;search.search_stream_phases=true;
@@ -252,8 +267,8 @@ Result receive(const Args& a,const modem::Config& source,const Capture& pcm,std:
             try{bank[b]->push(input,stop.get_token(),cache.enabled()?&cache:nullptr);}
             catch(const Error&){if(!stop.stop_requested())throw;cancelled=true;break;}
             auto events=bank[b]->take_bursts();
-            if(b!=a.epochs/2)for(const auto& event:events)wrong_bank+=event.bits.size();
-            if(b==a.epochs/2)for(const auto& event:events) {
+            if(b!=a.epoch_before)for(const auto& event:events)wrong_bank+=event.bits.size();
+            if(b==a.epoch_before)for(const auto& event:events) {
                 check(position+count>=event.end_sample,"receiver published before physical symbol endpoint");
                 if(!event.bits.empty() && first_bit_wall<0){first_bit_wall=elapsed(begun);first_bit_media=static_cast<double>(position+count)/source.sample_rate;}
                 progress_samples=std::max(progress_samples,static_cast<std::uint64_t>(position+count)-event.end_sample);

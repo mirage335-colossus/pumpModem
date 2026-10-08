@@ -2,6 +2,7 @@
 #include "probability_random.hpp"
 #include "pattern_differential.hpp"
 #include "pattern_drift.hpp"
+#include "pattern_correlator_batch.hpp"
 #include "datapump/correlation_experiment.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include <algorithm>
@@ -75,9 +76,259 @@ double gamma_remainder(double shape,double draw) {
     const auto base=std::max(0.,1-1/(9*shape)+draw/(3*std::sqrt(shape)));
     return shape*base*base*base;
 }
+
+struct RealBank {
+    std::vector<std::array<double,2>> rotations;
+    std::array<std::array<modem::detail::CorrelationFit,5>,2> fits{};
+    std::array<std::vector<modem::detail::CorrelationFit>,2> windows;
+};
+RealBank real_bank(const ReceiverProbabilityParameters& p,int bin) {
+    RealBank bank;
+    for(auto& windows:bank.windows)windows.resize(p.differential_windows);
+    for(const auto& atom:p.real_atoms) {
+        const auto time=(atom.first_sample+(static_cast<double>(atom.samples)-1)/2)/p.real_sample_rate;
+        const auto angle=tau*bin*p.frequency_step_hz*time;
+        const auto c=std::cos(angle),s=std::sin(angle);
+        bank.rotations.push_back({c,s});
+        for(unsigned bit=0;bit<2;++bit) {
+            const auto k=2*bit;
+            modem::detail::CorrelationProjection projection{};
+            projection.cc=atom.gram[4*k+k];projection.ss=atom.gram[4*(k+1)+k+1];
+            projection.cs=atom.gram[4*k+k+1];
+            for(const auto section:{0u,atom.section+1})
+                bank.fits[bit][section].add(projection,{c,s},atom.samples);
+            const auto window=atom.first_sample/p.real_window_samples;
+            if(window<p.differential_windows)
+                bank.windows[bit][window].add(projection,{c,s},atom.samples);
+        }
+    }
+    return bank;
+}
+std::array<ReceiverProbabilityEvidence,2> real_evaluate(const ReceiverProbabilityParameters& p,
+    const RealBank& bank,const std::vector<std::array<double,4>>& dots,double energy) {
+    auto fits=bank.fits;auto windows=bank.windows;
+    for(std::size_t i=0;i<p.real_atoms.size();++i) {
+        const auto& atom=p.real_atoms[i];const auto c=bank.rotations[i][0],s=bank.rotations[i][1];
+        const auto window=atom.first_sample/p.real_window_samples;
+        for(unsigned bit=0;bit<2;++bit) {
+            const auto xc=c*dots[i][2*bit]-s*dots[i][2*bit+1];
+            const auto xs=s*dots[i][2*bit]+c*dots[i][2*bit+1];
+            for(const auto section:{0u,atom.section+1}) {
+                fits[bit][section].xc+=xc;fits[bit][section].xs+=xs;
+            }
+            if(window<p.differential_windows) {
+                windows[bit][window].xc+=xc;windows[bit][window].xs+=xs;
+            }
+        }
+    }
+    std::array<ReceiverProbabilityEvidence,2> result{};
+    for(unsigned bit=0;bit<2;++bit) {
+        for(auto& fit:fits[bit])fit.energy=energy;
+        auto& score=result[bit];
+        score.coherent=modem::detail::drift_evidence(fits[bit][0].explained(),energy,p.coherent_dimensions,1,false);
+        double fitted=0,strongest=0;
+        for(unsigned j=1;j<5;++j) {
+            const auto explained=fits[bit][j].explained();fitted+=explained;strongest=std::max(strongest,explained);
+        }
+        const auto quarters=modem::detail::drift_evidence(fitted-strongest,energy,p.section_dimensions,4,false);
+        score.older=modem::detail::combine_drift_evidence(score.coherent,quarters,p.sections?4:1);
+        modem::detail::DifferentialAccumulator differential;
+        for(std::size_t i=0;i<windows[bit].size();++i) {
+            const auto& fit=windows[bit][i];
+            differential.add(modem::detail::differential_whiten(fit.xc,fit.xs,fit.cc,fit.ss,fit.cs),
+                i,p.real_samples,p.real_window_samples);
+        }
+        score.differential=differential.score();
+        score.combined=modem::detail::combine_differential_evidence(score.older,score.differential,true);
+    }
+    return result;
+}
+
+// Rank-aware eigenspaces retain a short fragment even when both private
+// patterns share its two real carrier vectors. Reject material negative Gram
+// eigenvalues or source components outside that span; never manufacture rank.
+struct AtomSpan {
+    std::array<double,4> eigenvalues{};
+    std::array<double,16> vectors{};
+    std::array<double,4> signal_cos{},signal_sin{};
+    unsigned rank=0;
+};
+bool atom_span(const ReceiverProbabilityAtom& atom,AtomSpan& span) {
+    auto matrix=atom.gram;
+    for(unsigned i=0;i<4;++i)span.vectors[4*i+i]=1;
+    double scale=0;
+    for(unsigned i=0;i<4;++i) {
+        scale+=std::abs(matrix[4*i+i]);
+        for(unsigned j=0;j<4;++j)
+            if(!std::isfinite(matrix[4*i+j])||std::abs(matrix[4*i+j]-matrix[4*j+i])>1e-10*std::max(1.,scale))return false;
+    }
+    if(!(scale>0))return false;
+    for(unsigned iteration=0;iteration<80;++iteration) {
+        unsigned a=0,b=1;double largest=0;
+        for(unsigned i=0;i<4;++i)for(unsigned j=i+1;j<4;++j)
+            if(std::abs(matrix[4*i+j])>largest){largest=std::abs(matrix[4*i+j]);a=i;b=j;}
+        if(largest<=1e-14*scale)break;
+        const auto angle=.5*std::atan2(2*matrix[4*a+b],matrix[4*b+b]-matrix[4*a+a]);
+        const auto c=std::cos(angle),s=std::sin(angle);
+        for(unsigned i=0;i<4;++i) {
+            const auto x=matrix[4*i+a],y=matrix[4*i+b];matrix[4*i+a]=c*x-s*y;matrix[4*i+b]=s*x+c*y;
+            const auto u=span.vectors[4*i+a],v=span.vectors[4*i+b];
+            span.vectors[4*i+a]=c*u-s*v;span.vectors[4*i+b]=s*u+c*v;
+        }
+        for(unsigned j=0;j<4;++j) {
+            const auto x=matrix[4*a+j],y=matrix[4*b+j];matrix[4*a+j]=c*x-s*y;matrix[4*b+j]=s*x+c*y;
+        }
+    }
+    double cc=0,ss=0,cs=0;
+    for(unsigned j=0;j<4;++j) {
+        const auto eigen=matrix[4*j+j];if(eigen < -1e-10*scale)return false;
+        double c=0,s=0;
+        for(unsigned i=0;i<4;++i) {
+            if(!std::isfinite(atom.signal_cos[i])||!std::isfinite(atom.signal_sin[i]))return false;
+            c+=span.vectors[4*i+j]*atom.signal_cos[i];s+=span.vectors[4*i+j]*atom.signal_sin[i];
+        }
+        if(eigen<=1e-10*scale) {
+            if(c*c+s*s>1e-8*scale*std::max(1e-20,atom.signal_energy[0]+atom.signal_energy[1]))return false;
+            continue;
+        }
+        span.eigenvalues[j]=eigen;++span.rank;
+        span.signal_cos[j]=c/std::sqrt(eigen);span.signal_sin[j]=s/std::sqrt(eigen);
+        cc+=span.signal_cos[j]*span.signal_cos[j];ss+=span.signal_sin[j]*span.signal_sin[j];
+        cs+=span.signal_cos[j]*span.signal_sin[j];
+    }
+    const auto a=atom.signal_energy[0]-cc,b=atom.signal_energy[1]-ss,c=atom.signal_energy[2]-cs;
+    const auto tolerance=1e-8*std::max(1e-20,atom.signal_energy[0]+atom.signal_energy[1]);
+    return std::isfinite(a)&&std::isfinite(b)&&std::isfinite(c)&&a>=-tolerance&&b>=-tolerance&&
+        c*c<=std::max(0.,a)*std::max(0.,b)+tolerance*tolerance;
+}
+
+ReceiverProbability real_probability(const ReceiverProbabilityParameters& p) {
+    const auto windows=p.differential_windows;
+    if(windows<256||windows>4096||!p.real_window_samples||!p.real_sample_rate||
+       p.real_samples/p.real_window_samples!=windows||p.real_atoms.size()>windows+4||
+       p.real_atoms.empty()||p.requested_trials<256||p.requested_trials>4096||
+       !(p.signal_energy>=0)||!std::isfinite(p.signal_energy)||
+       !(p.diffusion_degrees>=0)||!std::isfinite(p.diffusion_degrees)||
+       !std::isfinite(p.residual_frequency)||!(p.timing_coherence>=0&&p.timing_coherence<=1)||
+       !(p.timing_uncertainty_chips>=0&&p.timing_uncertainty_chips<=.5)||
+       p.frequency_bin_min>0||p.frequency_bin_max<0||p.frequency_bin_min < -8194||p.frequency_bin_max > 8194||
+       p.frequency_bin_max-p.frequency_bin_min+1>17||
+       !(p.frequency_step_hz>=0)||!std::isfinite(p.frequency_step_hz)||
+       !(p.coherent_dimensions>1)||!std::isfinite(p.coherent_dimensions)||
+       !(p.section_dimensions>4)||!std::isfinite(p.section_dimensions)||
+       !(p.acquisition_threshold>=0)||!std::isfinite(p.acquisition_threshold)||
+       !(p.continuation_threshold>=0)||!std::isfinite(p.continuation_threshold))
+        return unsupported("Partial real-covariance geometry is outside the bounded model range.");
+    const auto sigma=p.diffusion_degrees*std::numbers::pi/180;
+    const auto duration=static_cast<double>(p.real_window_samples)/p.real_sample_rate;
+    if(sigma*sigma*duration>.5||std::abs(p.residual_frequency)*duration>.05||
+       std::max(std::abs(p.frequency_bin_min),std::abs(p.frequency_bin_max))*p.frequency_step_hz*duration>.05)
+        return unsupported("Unresolved local phase or carrier variation exceeds the partial model range.");
+    std::vector<AtomSpan> spans(p.real_atoms.size());std::uint64_t position=0;unsigned rank=0;
+    for(std::size_t i=0;i<p.real_atoms.size();++i) {
+        const auto& atom=p.real_atoms[i];
+        if(atom.first_sample!=position||!atom.samples||atom.samples>p.real_samples-position||atom.section>3||
+           atom.first_sample<modem::detail::drift_boundary(atom.section,p.real_samples,4)||
+           atom.first_sample+atom.samples>modem::detail::drift_boundary(atom.section+1,p.real_samples,4)||
+           atom.first_sample/p.real_window_samples!=(atom.first_sample+atom.samples-1)/p.real_window_samples||
+           !atom_span(atom,spans[i]))return unsupported("Partial template/source Gram geometry is inconsistent.");
+        position+=atom.samples;rank+=spans[i].rank;
+    }
+    if(position!=p.real_samples||p.noise_dimensions!=static_cast<double>(p.real_samples)/2||
+       p.real_samples<=rank+1)return unsupported("Partial atoms do not cover complete received energy.");
+    struct PhaseAtom {double interval,drift,sd,correction;};
+    std::vector<PhaseAtom> phase_atoms;
+    constexpr unsigned nodes=8;
+    for(const auto& atom:p.real_atoms) {
+        const auto seconds=static_cast<double>(atom.samples)/p.real_sample_rate;
+        const auto interval=seconds/nodes;
+        double discrete=nodes;
+        for(unsigned k=1;k<nodes;++k)discrete+=2*(nodes-k)*std::exp(-.5*sigma*sigma*seconds*k/nodes)*
+            std::cos(tau*p.residual_frequency*seconds*k/nodes);
+        discrete/=nodes*nodes;
+        const auto expected=expected_correlation_coherence(seconds,p.diffusion_degrees,p.residual_frequency);
+        phase_atoms.push_back({interval,tau*p.residual_frequency*interval,sigma*std::sqrt(interval),
+            std::sqrt(std::max(0.,expected)/std::max(expected,discrete))/nodes});
+    }
+    std::vector<RealBank> banks;
+    for(int bin=p.frequency_bin_min;bin<=p.frequency_bin_max;++bin)banks.push_back(real_bank(p,bin));
+    ReceiverProbability result;result.differential_model=true;result.trials=p.requested_trials;
+    result.frequency_search_approximation=p.frequency_step_hz>0&&
+        (p.frequency_bin_min!=0||p.frequency_bin_max!=0);
+    result.frequency_candidates=banks.size();
+    std::mt19937_64 generator(0xa653719de920b47cULL);ProbabilityNormal normal;
+    std::vector<std::array<double,4>> dots(p.real_atoms.size());
+    const auto accepted=[](double a,double b,double threshold){return a>=threshold&&a-b>=1;};
+    for(std::size_t trial=0;trial<p.requested_trials;++trial) {
+        const auto timing_offset=p.timing_uncertainty_chips*probability_uniform(generator);
+        auto timing=1-timing_offset;
+        if(p.pulse_shaping&&timing_offset>1e-9) {
+            const auto angle=std::numbers::pi*timing_offset,beta=modem::pattern_pulse_rolloff;
+            timing=std::sin(angle)/angle*std::cos(beta*angle)/(1-4*beta*beta*timing_offset*timing_offset);
+        }
+        timing*=std::sqrt(p.timing_coherence);
+        double phase=0,energy=0,represented=0,physical=0;
+        for(std::size_t i=0;i<p.real_atoms.size();++i) {
+            const auto& atom=p.real_atoms[i];const auto& span=spans[i];
+            const auto& local_phase=phase_atoms[i];const auto drift=local_phase.drift,sd=local_phase.sd;
+            Complex integrated{};double cc=0,ss=0,cs=0;
+            phase+=sd/std::sqrt(2.)*normal(generator)+drift/2;
+            for(unsigned node=0;node<nodes;++node) {
+                const auto c=std::cos(phase),s=std::sin(phase);integrated+=Complex{c,s};
+                cc+=c*c/nodes;ss+=s*s/nodes;cs+=c*s/nodes;
+                if(node+1<nodes)phase+=sd*normal(generator)+drift;
+            }
+            phase+=sd/std::sqrt(2.)*normal(generator)+drift/2;
+            integrated*=local_phase.correction;
+            physical+=p.signal_energy*(atom.signal_energy[0]*cc+atom.signal_energy[1]*ss-2*atom.signal_energy[2]*cs);
+            dots[i].fill(0);
+            for(unsigned j=0;j<4;++j)if(span.eigenvalues[j]>0) {
+                const auto mean=std::sqrt(p.signal_energy)*timing*(integrated.real()*span.signal_cos[j]-
+                    integrated.imag()*span.signal_sin[j]);
+                const auto observation=mean+normal(generator)/std::sqrt(2.);
+                energy+=observation*observation;represented+=mean*mean;
+                for(unsigned k=0;k<4;++k)dots[i][k]+=span.vectors[4*k+j]*std::sqrt(span.eigenvalues[j])*observation;
+            }
+        }
+        if(represented>physical+1e-8*std::max(1.,physical))
+            return unsupported("Phase-weighted projections exceed complete signal energy.");
+        const auto residual=std::sqrt(std::max(0.,physical-represented))+normal(generator)/std::sqrt(2.);
+        energy+=residual*residual+gamma_remainder((static_cast<double>(p.real_samples)-rank-1)/2,normal(generator));
+        std::array<ReceiverProbabilityEvidence,2> combined{},coherent{},older{};
+        double best=-1,coherent_best=-1,older_best=-1;
+        for(const auto& bank:banks) {
+            const auto scores=real_evaluate(p,bank,dots,energy);
+            const auto a=std::max(scores[0].combined,scores[1].combined),b=std::max(scores[0].coherent,scores[1].coherent);
+            const auto c=std::max(scores[0].older,scores[1].older);
+            if(a>best){best=a;combined=scores;}if(b>coherent_best){coherent_best=b;coherent=scores;}
+            if(c>older_best){older_best=c;older=scores;}
+        }
+        const auto acquired=accepted(combined[0].combined,combined[1].combined,p.acquisition_threshold);
+        result.acquired_correct+=acquired;
+        result.acquired_wrong+=accepted(combined[1].combined,combined[0].combined,p.acquisition_threshold);
+        result.retained_correct+=accepted(combined[0].combined,combined[1].combined,p.continuation_threshold);
+        result.retained_wrong+=accepted(combined[1].combined,combined[0].combined,p.continuation_threshold);
+        result.coherent_acquired_correct+=accepted(coherent[0].coherent,coherent[1].coherent,p.acquisition_threshold);
+        result.coherent_acquired_wrong+=accepted(coherent[1].coherent,coherent[0].coherent,p.acquisition_threshold);
+        result.coherent_retained_correct+=accepted(coherent[0].coherent,coherent[1].coherent,p.continuation_threshold);
+        result.coherent_retained_wrong+=accepted(coherent[1].coherent,coherent[0].coherent,p.continuation_threshold);
+        result.differential_acquired_correct+=acquired&&!accepted(older[0].older,older[1].older,p.acquisition_threshold);
+    }
+    for(auto* value:{&result.acquired_correct,&result.acquired_wrong,&result.retained_correct,&result.retained_wrong,
+        &result.coherent_acquired_correct,&result.coherent_acquired_wrong,&result.coherent_retained_correct,
+        &result.coherent_retained_wrong,&result.differential_acquired_correct})*value/=static_cast<double>(p.requested_trials);
+    return result;
+}
+}
+
+std::array<ReceiverProbabilityEvidence,2> receiver_real_atom_evidence(const ReceiverProbabilityParameters& p,
+    const std::vector<std::array<double,4>>& dots,double energy,int bin) {
+    if(dots.size()!=p.real_atoms.size()||!p.real_sample_rate||!p.real_window_samples)return {};
+    return real_evaluate(p,real_bank(p,bin),dots,energy);
 }
 
 ReceiverProbability differential_receiver_probability(const ReceiverProbabilityParameters& p) {
+    if(!p.real_atoms.empty())return real_probability(p);
     const auto windows=p.differential_windows;
     if(windows<256 || windows>4096 || windows%4 || p.differential_tail_seconds!=0 ||
        !(p.seconds>0) || !std::isfinite(p.seconds) ||

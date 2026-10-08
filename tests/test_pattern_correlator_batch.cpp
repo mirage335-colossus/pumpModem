@@ -460,6 +460,74 @@ void long_pulse_segments_and_grams_match_sampled_reference() {
           "cancelled long-chip rebuild corrupted the previous cache geometry");
     rejects([]{correlation_pulse_segment(0,0,1200000);},"empty affine pulse extent was accepted");
 }
+void affine_spans_preserve_real_sample_fit() {
+    constexpr double tau=2*std::numbers::pi;
+    for(const auto frequency:{0.,.005,.05,1500.,2999.999999,3000.})
+        for(const auto count:{1U,2U,5U,31U,32U,127U,128U})
+            for(const auto norm:{.998,1.,1.003}) {
+                const std::complex<double> value{.27,-.83},slope{.0031,.0017};
+                auto oscillator=std::polar(std::sqrt(norm),.371);
+                const auto first=oscillator,step=std::polar(1.,tau*frequency/6000);
+                CorrelationProjection summed;
+                std::complex<double> first_moment{};
+                CorrelationFit reference;
+                for(unsigned i=0;i<count;++i) {
+                    const auto x=std::sin(.31*i)+.2*std::cos(.017*i);
+                    const auto c=oscillator.real(),s=oscillator.imag();
+                    const CorrelationProjection p{x*c,x*s,c*c,s*s,c*s,x*x};
+                    summed.xc+=p.xc;summed.xs+=p.xs;summed.cc+=p.cc;
+                    summed.ss+=p.ss;summed.cs+=p.cs;summed.energy+=p.energy;
+                    first_moment+=static_cast<double>(i)*std::complex<double>{p.xc,p.xs};
+                    reference.add(p,value+static_cast<double>(i)*slope,1);
+                    oscillator*=step;
+                }
+                const auto actual=correlation_affine_fit(summed,first_moment,count,value,slope,
+                    first*first,std::norm(first),2*tau*frequency/6000);
+                const auto near=[](double a,double b) {
+                    return std::abs(a-b)<=2e-11*std::max({1.,std::abs(a),std::abs(b)});
+                };
+                check(actual.count==reference.count && actual.energy==reference.energy &&
+                    near(actual.xc,reference.xc) && near(actual.xs,reference.xs) &&
+                    near(actual.cc,reference.cc) && near(actual.ss,reference.ss) &&
+                    near(actual.cs,reference.cs),"affine span changed original I/Q fit or PCM energy");
+                if(frequency==1500 && count>=5)
+                    check(near(actual.score(),reference.score()),"affine span changed detection statistic");
+            }
+    rejects([] {correlation_affine_fit({}, {},0, {}, {}, {1,0},1,0);},
+            "empty affine fit accepted");
+    rejects([] {correlation_affine_fit({}, {},129, {}, {}, {1,0},1,0);},
+            "affine fit crossed original bounded oscillator block");
+}
+void fractional_pulse_kernels_reuse_exact_intervals() {
+    for(const auto chip:{1280ULL,4097ULL,12800ULL,1200000ULL}) {
+        const auto rate=1.L+3e-10L;
+        CorrelationPulseKernel cached(chip,rate,.05,6000);
+        for(unsigned i=0;i<12;++i) {
+            const auto offset=.137L+i*1e-5L;
+            const auto count=static_cast<std::uint64_t>(std::ceil(chip/rate-offset));
+            const auto a=cached.evaluate(offset,count,{.6,.8},1.);
+            CorrelationPulseKernel fresh(chip,rate,.05,6000);
+            const auto b=fresh.evaluate(offset,count,{.6,.8},1.);
+            for(std::size_t p=0;p<correlation_pulse_pairs;++p) {
+                const auto tolerance=2e-10*std::max(1.,std::abs(b.energy[p]));
+                check(std::abs(a.energy[p]-b.energy[p])<=tolerance &&
+                    std::abs(a.square[p]-b.square[p])<=tolerance,
+                    "fractional pulse reuse crossed a table or changed its Gram");
+            }
+        }
+        check(cached.preparation_count()==1,
+            "stable GPSDO kernel rebuilt instead of reusing its valid interval");
+        // Large displacements and support points must still use the proper
+        // new geometry, including an interrupted preparation on each backend.
+        const auto original=cached.evaluate(.137L,chip,{1,0},1.);
+        std::stop_source stop;stop.request_stop();
+        rejects([&]{cached.evaluate(.99L,chip-1,{1,0},1.,stop.get_token());},
+                "fractional kernel ignored cancelled geometry change");
+        const auto recovered=cached.evaluate(.137L,chip,{1,0},1.);
+        check(original.energy==recovered.energy && original.square==recovered.square,
+                "cancelled fractional preparation corrupted a cached Gram");
+    }
+}
 } // namespace
 
 int main() {
@@ -473,6 +541,8 @@ int main() {
         invalid_batches_and_cancellation();
         pulse_projection_preserves_real_sample_fit();
         long_pulse_segments_and_grams_match_sampled_reference();
+        affine_spans_preserve_real_sample_fit();
+        fractional_pulse_kernels_reuse_exact_intervals();
         chip_chain_evidence_preserves_noise_integration();
         std::cout<<"pattern_correlator_batch ok\n";
         return 0;

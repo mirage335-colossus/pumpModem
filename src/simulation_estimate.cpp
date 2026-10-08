@@ -32,8 +32,8 @@ constexpr long double tracking_real_pair_operations_per_bin = 64;
 constexpr long double tracking_evidence_operations_per_fit = 64;
 constexpr long double differential_operations_per_window = 128;
 // Pulse-cell fitting separates sample ingestion from private-chip work. The
-// cache allowance deliberately charges a full rebuild on every fractional-rate
-// cell; the runtime often reuses or incrementally updates its quadratic table.
+// Central work follows changed table knots/counts; a separate full-cell rebuild
+// allowance covers cache misses and closed endpoint/numerical edge geometries.
 constexpr long double pulse_frontend_operations_per_sample = 220;
 constexpr long double pulse_pair_operations_per_chip = 6000;
 constexpr long double pulse_gram_operations_per_cell = 4000;
@@ -41,6 +41,7 @@ constexpr long double pulse_kernel_operations_per_sample = 16000;
 constexpr long double pulse_moment_operations_per_block = 48;
 constexpr long double pulse_moment_operations_per_segment = 256;
 constexpr long double pulse_moment_kernel_operations_per_segment = 22000;
+constexpr long double pulse_affine_pair_operations_per_segment = 1800;
 constexpr long double model_implementation_loss_db = 3;
 
 struct PayloadWork { long double baseline=0,mitigation=0; };
@@ -181,14 +182,15 @@ long double phase_coherence(long double x) {
     return 2*(1+(std::expm1(-x)/x))/x;
 }
 struct Work {
-    long double serial=0,parallel=0,tracking_serial=0,tracking_windows=0,search_trials=1,kernel_serial=0,search_serial=0;
+    long double serial=0,parallel=0,tracking_serial=0,tracking_windows=0,search_trials=1,kernel_serial=0,
+        kernel_upper_serial=0,search_serial=0;
     double noise_dimensions=0,coherent_dimensions=0,section_dimensions=0,noise_condition=1;
     double timing_uncertainty_chips=0,acquisition_threshold=0;
     double projection_bin_chips=0;
     double following_search_ratio=0;
     bool drift_supported=false;
     bool differential_supported=false;
-    bool compact=false,pulse_projected=false,kernel_upper_bound=false;
+    bool compact=false,pulse_projected=false,pulse_segmented=false,kernel_upper_bound=false;
     std::uint64_t bin_samples=1;
     bool workspace_supported=true;
 };
@@ -336,6 +338,13 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         (pulse_moments?frequencies*(block_samples+1)*sizeof(std::complex<double>):0);
     result.pulse_projected=correlator&&pulse_geometry&&result.workspace_supported&&
         compact_allocated+pulse_extra<=allowance;
+    const auto affine_capacity=1+std::min(block_samples,
+        std::ceil(static_cast<long double>(chip)/(256*bank.minimum_rate))+1);
+    const auto segment_extra=projection_banks*((block_samples+1)*sizeof(std::complex<double>)+
+        affine_capacity*sizeof(modem::detail::CorrelationCarrierMoments))+lanes*phase_groups*sizeof(std::uint64_t);
+    result.pulse_segmented=correlator&&config.oscillator_search&&modem::pattern_pulse_enabled(config)&&
+        symbol>=16.L*config.sample_rate&&chip>=1024&&symbol%(4*chip)!=0&&result.workspace_supported&&
+        compact_allocated+segment_extra<=allowance;
     // The compact receiver mixes each unique real carrier bank. Clock lanes
     // sharing that carrier reuse its prefix; FFT receives one baseband stream.
     // Cross-key/epoch Live cache hits depend on per-push spare workspace and
@@ -348,21 +357,42 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         result.tracking_windows=static_cast<long double>(established_stream_bits-1)+
             static_cast<long double>(modem::pattern_absence_samples(config))/symbol;
     if(correlator) {
-        if(result.pulse_projected) {
-            long double lattice_cells=0,kernel_samples=0;
+        if(result.pulse_segmented) {
+            // A span ends at an oscillator block, pulse-table knot, chip,
+            // quarter or local-window boundary. Sum their rates, capped by
+            // actual observations. This counts the implemented block clips;
+            // it does not claim that partial search is independent of Fs.
+            const auto boundaries=samples/symbol*(4+(differential_window?differential_windows:0));
+            const auto spans=std::min(samples,std::ceil(samples/block_samples)+
+                256*std::ceil(samples*bank.maximum_rate/chip)+boundaries);
+            result.serial+=samples*8*projection_banks*banks;
+            result.search_serial=spans*lanes*phase_groups*(pulse_affine_pair_operations_per_segment+
+                128*(result.drift_supported+result.differential_supported))*banks;
+            // Carrier moments for every possible span length are prepared once
+            // per public frequency bank, then reused for both private bits.
+            result.kernel_serial=projection_banks*affine_capacity*200*
+                std::ceil(std::log2(std::max(2.L,block_samples)))*banks;
+            result.kernel_upper_serial=result.kernel_serial;
+            result.serial+=result.search_serial+result.kernel_serial;
+        } else if(result.pulse_projected) {
+            long double lattice_cells=0,kernel_samples=0,kernel_upper_samples=0;
             for(const auto& hypothesis:bank.hypotheses) {
                 const auto rate=1+static_cast<long double>(hypothesis.clock_error_ppm)*1e-6L;
-                lattice_cells+=3*std::ceil(samples*rate/chip);
+                const auto cells=3*std::ceil(samples*rate/chip);lattice_cells+=cells;
+                // Engineering estimate of changed-knot density: 256 finite
+                // table knots and one sample-count boundary per chip. Initial
+                // lattice/count variants retain the historical nine setups.
+                // It is not a cache-hit guarantee: exact closed endpoints or
+                // roundoff-sized motion can force the separate upper path.
+                const auto prepared=hypothesis.clock_error_ppm==0?9.L:
+                    std::min(cells,9+3*257*samples*std::abs(rate-1));
+                const auto upper=hypothesis.clock_error_ppm==0?9.L:std::max(9.L,cells);
+                if(hypothesis.clock_error_ppm!=0)result.kernel_upper_bound=true;
                 if(pulse_moments) {
-                    // Each finite table cell has at most 256 affine pieces,
-                    // plus sampled endpoint singletons. Fractional clocks may
-                    // rebuild every cell, but no rebuild scans the PCM chip.
+                    // No affine Gram preparation scans the original PCM chip.
                     const auto pieces=260.L;
-                    kernel_samples+=hypothesis.clock_error_ppm==0?9*pieces:
-                        3*std::ceil(samples*rate/chip)*pieces;
-                    if(hypothesis.clock_error_ppm!=0)result.kernel_upper_bound=true;
-                } else if(hypothesis.clock_error_ppm==0)kernel_samples+=9.L*chip;
-                else {kernel_samples+=3*samples;result.kernel_upper_bound=true;}
+                    kernel_samples+=prepared*pieces;kernel_upper_samples+=upper*pieces;
+                } else {kernel_samples+=prepared*chip;kernel_upper_samples+=upper*chip;}
             }
             // Two parity lattices plus a clipped endpoint is a conservative
             // frontend allowance. Private fitting contracts the same 17 pulse
@@ -376,10 +406,12 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
                 // samples per table piece, including a zero image frequency.
                 const auto moment_work=200*std::ceil(std::log2(std::max(1.L,static_cast<long double>(chip)/256)));
                 result.kernel_serial=kernel_samples*(pulse_moment_kernel_operations_per_segment+moment_work)*banks;
+                result.kernel_upper_serial=kernel_upper_samples*(pulse_moment_kernel_operations_per_segment+moment_work)*banks;
             } else {
                 result.serial+=(3*samples*frequencies*pulse_frontend_operations_per_sample+
                     lattice_cells*pulse_gram_operations_per_cell)*banks;
                 result.kernel_serial=kernel_samples*pulse_kernel_operations_per_sample*banks;
+                result.kernel_upper_serial=kernel_upper_samples*pulse_kernel_operations_per_sample*banks;
             }
             result.serial+=result.kernel_serial;
             // The projected backend consumes shared cells and commits lane
@@ -485,12 +517,87 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
 // Compact receivers use a bounded per-chip quadrature for shaped templates.
 // Unsupported cases keep their timing/resource diagnostics without inventing
 // a reception percentage from a different detector.
+bool real_differential_statistics(const transfer::Options& options,std::uint64_t window,
+                                 detail::ReceiverProbabilityParameters& p,unsigned source_bit) {
+    const auto& config=options.modem;
+    const auto total=modem::symbol_sample_count(config),chip=modem::pattern_chip_samples(config);
+    const auto step=modem::pattern_pulse_enabled(config)?std::max<std::uint64_t>(1,chip/16):chip;
+    // Same compact per-chip quadrature limit as the aligned approximation.
+    // Intersections and a short final block are length weighted, never padded.
+    if(!step || total/step>524288 || total/window>4096)return false;
+    auto configured=config;
+    if(options.timestamp)configured.stream_epoch=options.timestamp;
+    if(options.key)configured=transfer::seeded_config(options,configured.stream_epoch);
+    modem::PatternCode code(configured,configured.stream_epoch);
+    p.differential_windows=static_cast<std::uint32_t>(total/window);
+    p.differential_window_seconds=static_cast<double>(window)/config.sample_rate;
+    p.differential_tail_seconds=static_cast<double>(total%window)/config.sample_rate;
+    p.real_samples=total;p.real_window_samples=window;p.real_sample_rate=config.sample_rate;
+    // The carrier-square covariance is periodic in pi. Reduce before the
+    // geometric sum so both DC and Nyquist use the same stable sinc limit.
+    const auto omega=std::remainder(2*std::numbers::pi*config.carrier_hz/config.sample_rate,
+        std::numbers::pi);
+    const auto sinc=[](double x){return std::abs(x)<1e-4?1-x*x/6+x*x*x*x/120:std::sin(x)/x;};
+    const auto amplitude=std::sqrt(2*modem::nominal_signal_power);
+    for(std::uint64_t first=0;first<total;) {
+        unsigned section=0;
+        while(section<3&&first>=modem::detail::drift_boundary(section+1,total,4))++section;
+        const auto end=std::min({total,(first/window+1)*window,
+            modem::detail::drift_boundary(section+1,total,4)});
+        detail::ReceiverProbabilityAtom atom;atom.first_sample=first;atom.samples=end-first;atom.section=section;
+        for(auto at=first;at<end;) {
+            const auto until=std::min(end,(at/step+1)*step),count=until-at;
+            const auto position=static_cast<double>(at)+(static_cast<double>(count)-1)/2;
+            const auto index=static_cast<std::uint64_t>(position/chip);
+            const auto fraction=position/chip-static_cast<double>(index);
+            const auto a=modem::pattern_pulse_enabled(config)?code.shaped_value(0,source_bit,position):
+                code.value(index,source_bit,fraction);
+            const auto b=modem::pattern_pulse_enabled(config)?code.shaped_value(0,1-source_bit,position):
+                code.value(index,1-source_bit,fraction);
+            const auto source=modem::pattern_pulse_enabled(config)?
+                modem::pattern_limit_pcm(amplitude*a)/amplitude:a;
+            // Exact real carrier covariance inside this constant-envelope
+            // quadrature block, including DC/Nyquist and finite-pulse images.
+            const auto image=sinc(static_cast<double>(count)*omega)/sinc(omega);
+            const auto phase=2*omega*position;
+            const auto half_count=static_cast<double>(count)*.5;
+            const std::array<double,3> carrier{half_count*(1+image*std::cos(phase)),
+                half_count*(1-image*std::cos(phase)),half_count*image*std::sin(phase)};
+            const std::array<std::array<double,2>,6> vectors{{
+                {a.real(),-a.imag()},{a.imag(),a.real()},
+                {b.real(),-b.imag()},{b.imag(),b.real()},
+                {source.real(),-source.imag()},{source.imag(),source.real()}}};
+            const auto product=[&](unsigned i,unsigned j) {
+                return vectors[i][0]*vectors[j][0]*carrier[0]+vectors[i][1]*vectors[j][1]*carrier[1]+
+                    (vectors[i][0]*vectors[j][1]+vectors[i][1]*vectors[j][0])*carrier[2];
+            };
+            for(unsigned i=0;i<4;++i) {
+                for(unsigned j=0;j<4;++j)atom.gram[4*i+j]+=product(i,j);
+                atom.signal_cos[i]+=product(i,4);atom.signal_sin[i]+=product(i,5);
+            }
+            atom.signal_energy[0]+=product(4,4);atom.signal_energy[1]+=product(5,5);
+            atom.signal_energy[2]+=product(4,5);at=until;
+        }
+        for(auto& value:atom.signal_cos)value*=std::sqrt(2./static_cast<double>(total));
+        for(auto& value:atom.signal_sin)value*=std::sqrt(2./static_cast<double>(total));
+        for(auto& value:atom.signal_energy)value*=2./static_cast<double>(total);
+        p.real_atoms.push_back(atom);first=end;
+    }
+    return true;
+}
+
 bool differential_statistics(const transfer::Options& options,const Work& work,
                              std::uint64_t window,detail::ReceiverProbabilityParameters& p,unsigned source_bit=0) {
     const auto& config=options.modem;
     const auto total=modem::symbol_sample_count(config),chip=modem::pattern_chip_samples(config);
     const auto windows=total/window;
-    if(windows>4096 || total%window || windows%4)return false;
+    if(windows>4096)return false;
+    if(total%window || windows%4) {
+        // The old circular approximation has no representation of a tail or
+        // a window crossing a drift boundary. Preserve it for aligned cases;
+        // raw compact fits use the joint real-covariance atom model instead.
+        return work.compact&&real_differential_statistics(options,window,p,source_bit);
+    }
     // Private raw-bin FFT fits use a different trace-only legacy score scale;
     // the joint model currently supports compact raw fits or complex FFT bins.
     if(!work.compact&&work.bin_samples==1&&(config.scramble||config.dsss))return false;
@@ -629,8 +736,8 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     result.simulated_seconds=finite_seconds(media);
     const auto samples=media*config.sample_rate;
     long double serial=samples*channel_operations_per_sample,parallel=0,tracking_serial=0,tracking_windows=0,trials=1;
-    long double receiver_frontend=0,kernel_serial=0,search_serial=0;
-    bool any_pulse_projected=false,any_kernel_upper_bound=false;
+    long double receiver_frontend=0,kernel_serial=0,kernel_upper_serial=0,search_serial=0;
+    bool any_pulse_projected=false,any_pulse_segmented=false,any_kernel_upper_bound=false;
     Work matching_work;
     const modem::Config* matching_profile=nullptr;
     struct BankEntry {const modem::Config* profile;SearchBank bank;};
@@ -674,8 +781,10 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
         if(existing==work_entries.end())work_entries.push_back({index,training_samples,work});
         serial+=work.serial;parallel+=work.parallel;
         receiver_frontend+=work.serial-work.kernel_serial-work.search_serial;kernel_serial+=work.kernel_serial;
+        kernel_upper_serial+=work.kernel_upper_serial;
         search_serial+=work.search_serial;
-        any_pulse_projected|=work.pulse_projected;any_kernel_upper_bound|=work.kernel_upper_bound;
+        any_pulse_projected|=work.pulse_projected||work.pulse_segmented;
+        any_pulse_segmented|=work.pulse_segmented;any_kernel_upper_bound|=work.kernel_upper_bound;
         tracking_serial+=work.tracking_serial;tracking_windows+=work.tracking_windows;
         if(matches) {
             const bool covered=within_representation_bound(frequency,candidate_bank.frequency.half_width_hz)&&
@@ -692,7 +801,9 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     result.receiver_frontend_seconds=finite_seconds(receiver_frontend/serial_operations_per_second);
     result.receiver_search_seconds=finite_seconds(search_serial/serial_operations_per_second+parallel/cpu_scoring_operations_per_second);
     result.receiver_kernel_rebuild_seconds=finite_seconds(kernel_serial/serial_operations_per_second);
+    result.receiver_kernel_rebuild_upper_seconds=finite_seconds(kernel_upper_serial/serial_operations_per_second);
     result.pulse_projection_modeled=any_pulse_projected;
+    result.pulse_segment_projection_modeled=any_pulse_segmented;
     result.kernel_rebuild_upper_bound=any_kernel_upper_bound;
     result.tracking_seconds=finite_seconds(tracking_serial/serial_operations_per_second);
     result.tracking_symbol_windows=finite_seconds(tracking_windows);
@@ -849,7 +960,18 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
                 if(!differential_window && !modem::pattern_pulse_enabled(config))
                     p.signal_energy*=weight/static_cast<double>(samples_per_symbol);
             }
-            return !differential_window || differential_statistics(options,matching_work,differential_window,p,source_bit);
+            if(!differential_window)return true;
+            // A failed circular fit may have partially normalized its source
+            // power and covariance. Retry from pristine parameters so the
+            // real-covariance fallback applies that normalization exactly once.
+            auto candidate=p;
+            if(differential_statistics(options,matching_work,differential_window,candidate,source_bit)) {
+                p=std::move(candidate);return true;
+            }
+            if(!matching_work.compact)return false;
+            candidate=p;candidate.real_atoms.clear();
+            if(!real_differential_statistics(options,differential_window,candidate,source_bit))return false;
+            p=std::move(candidate);return true;
         };
         auto alternative_parameters=parameters;
         if(!configure_statistics(parameters,0)) {
@@ -937,6 +1059,19 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
                 for(std::size_t i=0;i<p.differential_windows;++i)
                     fitted+=std::sqrt(p.differential_weights[i])*p.differential_signal_coefficients[i][0];
                 fitted_fraction=std::norm(fitted);
+            }
+            if(!p.real_atoms.empty()) {
+                modem::detail::CorrelationFit fit;std::array<double,2> c{},s{};
+                for(const auto& atom:p.real_atoms) {
+                    fit.cc+=atom.gram[0];fit.ss+=atom.gram[5];fit.cs+=atom.gram[1];fit.count+=atom.samples;
+                    for(unsigned j=0;j<2;++j) {c[j]+=atom.signal_cos[j];s[j]+=atom.signal_sin[j];}
+                }
+                // Unknown initial carrier phase: average the two real source
+                // quadratures. The actual limited source is already normalized
+                // in the atoms, so nominal signal energy is applied only once.
+                fit.energy=std::numeric_limits<double>::max();fit.xc=c[0];fit.xs=c[1];
+                const auto cosine=fit.explained();fit.xc=s[0];fit.xs=s[1];
+                fitted_fraction=(cosine+fit.explained())/2;
             }
             return p.signal_energy*fitted_fraction;
         };

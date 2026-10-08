@@ -694,6 +694,9 @@ Model build(const Inputs& inputs,Cache& cache) {
         result.kernel_rebuild_upper_bound=single_receiver.kernel_rebuild_upper_bound;
         result.cpu_realtime_ratio=single_receiver.simulated_seconds>0?
             single_receiver.receiver_cpu_seconds/single_receiver.simulated_seconds:0;
+        result.cpu_realtime_upper_ratio=single_receiver.simulated_seconds>0?
+            (single_receiver.receiver_cpu_seconds+std::max(0.,single_receiver.receiver_kernel_rebuild_upper_seconds-
+                single_receiver.receiver_kernel_rebuild_seconds))/single_receiver.simulated_seconds:0;
         result.cpu_per_bit_ratio=single_receiver.cpu_seconds/result.bit_seconds;
         result.one_bit_cpu_available=single_receiver.receiver_workspace_supported&&
             std::isfinite(result.one_bit_cpu_seconds)&&std::isfinite(result.receiver_cpu_seconds)&&

@@ -276,6 +276,56 @@ void whole_symbol_phase_coherence() {
     check(!unsupported.confidence_available&&unsupported.phase_coherence_loss_db>17,
           "phase loss should remain visible when insufficient RAM prevents a numeric receive estimate");
 }
+
+void partial_compact_probability() {
+    transfer::Options options;
+    options.modem=tuning::resolve(.1,-38,tuning::PatternMode::auto_keystream,true,.05).config;
+    options.timestamp=1800000000;options.search_seconds=6;
+    options.dsp_workspace_bytes=std::size_t{512}*1024*1024;
+    options.modem.scramble=true;
+    for(std::size_t i=0;i<options.modem.spreading_seed.size();++i)
+        options.modem.spreading_seed[i]=static_cast<std::uint8_t>(37*i+11);
+    options.modem.stream_epoch=options.timestamp;
+    modem::OscillatorSearchConfig oscillator;
+    oscillator.lf=oscillator.rf=tuning::oscillator_model(tuning::parse_oscillator_preset("gpsdo-xo"));
+    options.modem.oscillator_search=oscillator;
+    auto channel=clean_channel();
+    channel.phase_noise_degrees_per_sqrt_second=oscillator.lf.phase_noise_degrees_per_sqrt_second;
+    channel.snr_db=36.020599913279625-200-(-164)-10*std::log10(options.modem.sample_rate/2.);
+    check(options.modem.sample_rate==64&&modem::pattern_chip_samples(options.modem)==1280&&
+          modem::symbol_sample_count(options.modem)==25478859,
+          "partial probability reproduction resolved a different physical waveform");
+    const auto value=simulation::estimate(wire(1,options.modem),options,true,channel,{},1,true,100,256);
+    check(value.differential_windows==1244&&value.differential_window_seconds==320&&
+          value.receiver_workspace_supported&&value.one_bit_confidence_available&&value.confidence_available&&
+          value.differential_model_available&&value.probability_trials==256&&value.probability_interval_available&&
+          value.pulse_segment_projection_modeled&&value.pulse_projection_modeled,
+          "bounded compact partial windows must retain the complete detector probability model");
+    check(std::isfinite(value.success_probability)&&value.success_probability>=0&&value.success_probability<=1&&
+          std::isfinite(value.modeled_symbol_snr_db),"partial model produced an invalid probability or energy diagnostic");
+    const auto draft=simulation::estimate(wire(3,options.modem),options,true,channel,{},1,true,100,256);
+    check(!draft.confidence_available&&draft.one_bit_confidence_available&&
+          draft.probability_model_limit.find("timing ownership")!=std::string::npos,
+          "partial covariance support must not invent compact continuation timing ownership");
+    std::cout<<"partial compact probability "<<value.success_probability<<", 256 trials, modeled SNR "
+             <<value.modeled_symbol_snr_db<<" dB\n";
+    auto boundary=options;
+    boundary.modem=tuning::resolve(.1,-37.1545,tuning::PatternMode::auto_keystream,true,.05).config;
+    boundary.modem.oscillator_search=oscillator;boundary.modem.stream_epoch=options.timestamp;
+    boundary.modem.spreading_seed=options.modem.spreading_seed;
+    const auto edge=simulation::estimate(wire(1,boundary.modem),boundary,true,channel,{},1,true,100,256);
+    check(modem::symbol_sample_count(boundary.modem)%(4*modem::pattern_chip_samples(boundary.modem))!=0&&
+          edge.confidence_available&&edge.one_bit_confidence_available&&edge.pulse_segment_projection_modeled,
+          "the automatic integration boundary must retain its short final atom and complete-symbol model");
+    boundary.modem=tuning::resolve(.1,-37,tuning::PatternMode::auto_keystream,true,.05).config;
+    boundary.modem.oscillator_search=oscillator;boundary.modem.stream_epoch=options.timestamp;
+    boundary.modem.spreading_seed=options.modem.spreading_seed;
+    const auto aligned=simulation::estimate(wire(1,boundary.modem),boundary,true,channel,{},1,true,100,256);
+    check(aligned.confidence_available&&aligned.one_bit_confidence_available&&aligned.differential_model_available&&
+          aligned.pulse_projection_modeled&&!aligned.pulse_segment_projection_modeled,
+          "aligned noncircular templates must retry a pristine real-covariance model");
+}
+
 void differential_model_limits() {
     transfer::Options options;
     options.modem.sample_rate=256;options.modem.carrier_hz=64;
@@ -1016,8 +1066,9 @@ void projected_pattern_workload() {
     options.modem.oscillator_search->lf.accuracy_ppm=.001;
     const auto fractional=simulation::estimate(wire(3,options.modem),options,true,clean_channel(),{},1,false);
     check(fractional.pulse_projection_modeled&&fractional.kernel_rebuild_upper_bound&&
-          fractional.receiver_kernel_rebuild_seconds>high.receiver_kernel_rebuild_seconds,
-          "fractional-rate projection must disclose its conservative kernel rebuild allowance");
+          fractional.receiver_kernel_rebuild_seconds>high.receiver_kernel_rebuild_seconds&&
+          fractional.receiver_kernel_rebuild_upper_seconds>fractional.receiver_kernel_rebuild_seconds,
+          "fractional-rate projection must separate central cache work from its conservative rebuild allowance");
     options.modem.oscillator_search=oscillator;
     options.modem.integration_seconds=64+1./options.modem.sample_rate;
     const auto partial=simulation::estimate(wire(3,options.modem),options,true,clean_channel(),{},1,false);
@@ -1041,8 +1092,12 @@ void projected_pattern_workload() {
           "long-chip Gram work must follow table pieces and logarithmic geometric moments, not PCM chip length");
 }
 }
-int main() {
-    try {probability_and_framing();workload_and_impairments();receiver_cpu_budget();received_processing_budget();whole_symbol_phase_coherence();differential_model_limits();drift_receiver_estimate();receiver_statistic_controls();raw_sample_probability_geometry();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
+int main(int argc,char** argv) {
+    try {
+        if(argc==2&&std::string(argv[1])=="--partial-only") {
+            partial_compact_probability();std::cout<<"partial simulation estimate tests passed\n";return 0;
+        }
+        probability_and_framing();workload_and_impairments();receiver_cpu_budget();received_processing_budget();whole_symbol_phase_coherence();partial_compact_probability();differential_model_limits();drift_receiver_estimate();receiver_statistic_controls();raw_sample_probability_geometry();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
         coupled_and_independent_clock_estimates();streamed_template_workload();target_and_channel_are_independent();oscillator_policy_geometry();nearby_shift_workload();equivalent_receive_profiles();projected_pattern_workload();
         std::cout<<"simulation estimate tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"simulation estimate tests failed: "<<error.what()<<'\n';return 1;}

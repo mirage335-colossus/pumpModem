@@ -196,6 +196,44 @@ PulseMoments pulse_moments(PulseWide rotation,std::uint64_t count) {
 }
 } // namespace
 
+CorrelationFit correlation_affine_fit(const CorrelationProjection& summed,
+        std::complex<double> signal_first_moment,std::uint64_t count,
+        std::complex<double> value,std::complex<double> slope,
+        std::complex<double> first_carrier_square,double first_carrier_norm,
+        double square_phase_step) {
+    return correlation_affine_fit(summed,signal_first_moment,count,value,slope,
+        first_carrier_square,first_carrier_norm,correlation_carrier_moments(count,square_phase_step));
+}
+
+CorrelationCarrierMoments correlation_carrier_moments(std::uint64_t count,double square_phase_step) {
+    require(count && count<=128 && std::isfinite(square_phase_step),"invalid carrier moment span");
+    return pulse_moments(std::polar(1.L,static_cast<long double>(square_phase_step)),count).sum;
+}
+
+CorrelationFit correlation_affine_fit(const CorrelationProjection& summed,
+        std::complex<double> signal_first_moment,std::uint64_t count,
+        std::complex<double> value,std::complex<double> slope,
+        std::complex<double> first_carrier_square,double first_carrier_norm,
+        const CorrelationCarrierMoments& geometric) {
+    require(count && count<=128 &&
+            std::isfinite(first_carrier_norm) && first_carrier_norm>=0,
+            "invalid affine correlation span");
+    if(count==1 || slope==std::complex<double>{}) {
+        CorrelationFit result;result.add(summed,value,count);return result;
+    }
+    const auto dot=value*std::complex<double>{summed.xc,summed.xs}+slope*signal_first_moment;
+    const auto n=static_cast<long double>(count);
+    const std::array<long double,3> moments{n,n*(n-1)/2,n*(n-1)*(2*n-1)/6};
+    const PulseWide a{value.real(),value.imag()},b{slope.real(),slope.imag()};
+    const auto energy=first_carrier_norm*(std::norm(a)*moments[0]+
+        2*(a*std::conj(b)).real()*moments[1]+std::norm(b)*moments[2]);
+    const auto square=PulseWide{first_carrier_square.real(),first_carrier_square.imag()}*
+        (a*a*geometric[0]+2.L*a*b*geometric[1]+b*b*geometric[2]);
+    return {dot.real(),dot.imag(),static_cast<double>((energy+square.real())/2),
+        static_cast<double>((energy-square.real())/2),static_cast<double>(square.imag()/2),
+        summed.energy,count};
+}
+
 CorrelationFit CorrelationPulseCell::fit(
         std::span<const std::complex<double>,correlation_pulse_atoms> coefficients) const {
     std::complex<double> dot_sum{},square_sum{};double energy_sum=0;
@@ -235,8 +273,8 @@ void CorrelationPulseKernel::prepare(long double offset,std::uint64_t count,std:
         square[0][pair]=square_[0][pair]+delta*(square_[1][pair]+delta*square_[2][pair]);
         square[1][pair]=square_[1][pair]+2*delta*square_[2][pair];square[2][pair]=square_[2][pair];
     }
-    lower_=std::max(0.L,duration-count);upper_=std::min(duration,duration-count+1);
-    point_=count!=static_cast<std::uint64_t>(std::ceil(std::max(0.L,duration-offset)));
+    auto lower=std::max(0.L,duration-count),upper=std::min(duration,duration-count+1);
+    auto point=count!=static_cast<std::uint64_t>(std::ceil(std::max(0.L,duration-offset)));
     constexpr long double resolution=256;
     const auto rotation=std::polar(1.L,2*static_cast<long double>(tau)*frequency_/sample_rate_);
     Wide carrier{1,0};
@@ -246,14 +284,14 @@ void CorrelationPulseKernel::prepare(long double offset,std::uint64_t count,std:
         const auto q=(offset+n)/duration-.5L;
         const auto knot=std::floor(resolution*q);
         if(n<count) {
-            lower_=std::max(lower_,duration*(knot/resolution+.5L)-n);
-            upper_=std::min(upper_,duration*((knot+1)/resolution+.5L)-n);
+            lower=std::max(lower,duration*(knot/resolution+.5L)-n);
+            upper=std::min(upper,duration*((knot+1)/resolution+.5L)-n);
         }
         const auto old_q=(offset_+n)/duration-.5L;
         const auto support_endpoint=[](long double position) {
             return static_cast<double>(position+8)==8 || static_cast<double>(position-8)==-8;
         };
-        if(n<count && support_endpoint(q))point_=true;
+        if(n<count && support_endpoint(q))point=true;
         // Most fractional cells move only a handful of table segments. Shift
         // the existing polynomial and replace those sample contributions,
         // including count changes and the closed support endpoint singleton.
@@ -267,7 +305,7 @@ void CorrelationPulseKernel::prepare(long double offset,std::uint64_t count,std:
             if(n<count)values[j]=pattern_pulse(position);
             // The existing finite pulse has nonzero closed endpoints. Their
             // discontinuity cannot be represented by a neighborhood polynomial.
-            if(n<count && (position==-8 || position==8))point_=true;
+            if(n<count && (position==-8 || position==8))point=true;
             if(n<count && position>-8 && position<8) {
                 const auto index=std::floor(position*static_cast<double>(resolution));
                 slopes[j]=(pattern_pulse((index+1)/static_cast<double>(resolution))-
@@ -301,6 +339,7 @@ void CorrelationPulseKernel::prepare(long double offset,std::uint64_t count,std:
     for(unsigned degree=0;degree<3;++degree)for(std::size_t pair=0;pair<correlation_pulse_pairs;++pair) {
         energy_[degree][pair]=energy[degree][pair];square_[degree][pair]=square[degree][pair];
     }
+    lower_=lower;upper_=upper;point_=point;
     count_=count;offset_=offset;valid_=true;
 }
 
@@ -312,11 +351,20 @@ void CorrelationPulseKernel::prepare_segments(long double offset,std::uint64_t c
     for(auto& row:energy_)row={};
     for(auto& row:square_)row={};
     const auto duration=static_cast<long double>(chip_)/rate_;
+    lower_=std::max(0.L,duration-count);upper_=std::min(duration,duration-count+1);
+    point_=count!=static_cast<std::uint64_t>(std::ceil(std::max(0.L,duration-offset)));
     const auto rotation=std::polar(1.L,2*static_cast<long double>(tau)*frequency_/sample_rate_);
     PulseWide carrier{1,0};
     for(std::uint64_t first=0;first<count;) {
         cancelled(stop);
         const auto segment=correlation_pulse_segment(offset+first,count-first,duration);
+        // A common displacement of this cell changes every atom by its
+        // affine slope. Cache the resulting quadratic Gram while all original
+        // sample coordinates remain in their current pulse-table segments.
+        const auto knot=std::floor(256*((offset+first)/duration-.5L));
+        lower_=std::max(lower_,duration*(knot/256+.5L)-first);
+        upper_=std::min(upper_,duration*((knot+1)/256+.5L)-(first+segment.count-1));
+        point_|=segment.endpoint;
         const auto n=static_cast<long double>(segment.count);
         const std::array<long double,3> moments{n,n*(n-1)/2,n*(n-1)*(2*n-1)/6};
         const auto geometric=pulse_moments(rotation,segment.count);
@@ -328,20 +376,25 @@ void CorrelationPulseKernel::prepare_segments(long double offset,std::uint64_t c
                 const auto c=segment.slope[j]*segment.slope[k];
                 energy_[0][pair]+=a*moments[0]+b*moments[1]+c*moments[2];
                 square_[0][pair]+=carrier*(a*geometric.sum[0]+b*geometric.sum[1]+c*geometric.sum[2]);
+                energy_[1][pair]+=b*moments[0]+2*c*moments[1];
+                energy_[2][pair]+=c*moments[0];
+                square_[1][pair]+=carrier*(b*geometric.sum[0]+2*c*geometric.sum[1]);
+                square_[2][pair]+=carrier*c*geometric.sum[0];
             }
         carrier*=geometric.rotation;first+=segment.count;
     }
-    // Reuse identical geometry, but rebuild differing fractional offsets.
-    // Each rebuild follows table knots rather than the original sample count;
-    // no interpolation is allowed across a rounded support endpoint.
-    point_=true;lower_=upper_=offset;count_=count;offset_=offset;valid_=true;
+    // No interpolation crosses a knot, count change or closed support point.
+    // Fractional-clock cells inside the interval reuse these same coefficients.
+    count_=count;offset_=offset;valid_=true;
 }
 
 CorrelationPulseGram CorrelationPulseKernel::evaluate(long double offset,std::uint64_t count,
         std::complex<double> carrier_square,double carrier_norm,std::stop_token stop) {
     const auto guard=1e-12L*std::max(1.L,std::abs(offset));
     if(!valid_ || count!=count_ || (offset!=offset_ &&
-       (point_ || offset<=lower_+guard || offset>=upper_-guard)))prepare(offset,count,stop);
+       (point_ || offset<=lower_+guard || offset>=upper_-guard))) {
+        prepare(offset,count,stop);++preparations_;
+    }
     const auto delta=offset-offset_;
     CorrelationPulseGram result;
     for(std::size_t pair=0;pair<correlation_pulse_pairs;++pair) {

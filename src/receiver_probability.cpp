@@ -290,7 +290,7 @@ ReceiverProbability receiver_probability(const ReceiverProbabilityParameters& p)
     struct Entry {ReceiverProbabilityParameters parameters;ReceiverProbability result;};
     thread_local std::vector<Entry> cache;
     for(const auto& entry:cache)if(entry.parameters==p)return entry.result;
-    auto result=p.differential_windows?differential_receiver_probability(p):calculate(p);
+    auto result=(p.differential_windows||!p.real_atoms.empty())?differential_receiver_probability(p):calculate(p);
     // Rejected geometry can contain arbitrarily sized caller-owned vectors.
     // Do not copy those into the bounded cache merely to remember a cheap
     // coverage failure; only supported geometries have bounded model storage.

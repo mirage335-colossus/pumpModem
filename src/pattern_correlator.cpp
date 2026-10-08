@@ -30,6 +30,7 @@ struct Bank {
     double frequency=0;
     std::vector<Projection> prefix;
     std::vector<Complex> first_moment;
+    std::vector<detail::CorrelationCarrierMoments> affine_carrier;
     std::span<const Projection> shared_prefix;
     std::span<const Complex> shared_moment;
     std::span<const Projection> observations() const {return shared_prefix.empty()?std::span<const Projection>(prefix):shared_prefix;}
@@ -68,7 +69,7 @@ struct PatternCorrelator::Impl {
     unsigned drift_sections=1;
     std::uint64_t differential_window=0;
     long double origin_lower=0;
-    bool finished=false,shaped=false;
+    bool finished=false,shaped=false,pulse_segmented=false;
     PatternCorrelatorOptions options;
     PatternCorrelatorWork work;
     struct Hypothesis {
@@ -103,6 +104,9 @@ struct PatternCorrelator::Impl {
     std::vector<std::array<DriftFit,2>> drift_fits;
     std::vector<std::array<DifferentialFit,2>> differential_fits;
     std::vector<Bank> banks;
+    // Only the partial-symbol affine path needs these per-lane diagnostics.
+    // Separate counters keep worker accumulation independent and bounded.
+    std::vector<std::uint64_t> affine_counts;
     struct PulseLattice {
         long double anchor=0,rate=1,start=0,first_offset=0;
         std::size_t frequency=0;
@@ -171,7 +175,7 @@ struct PatternCorrelator::Impl {
            search.clock_errors_ppm==std::vector<double>{0} && !search.couple_clock_to_carrier)
             search.hypotheses=oscillator_pattern_search(c).hypotheses;
         const bool paired=!search.hypotheses.empty();
-        long double highest_rate=1;
+        long double highest_rate=1,lowest_rate=1;
         if(paired) {
             require(search.hypotheses.size()<=maximum_pattern_frequency_rate_hypotheses,
                     "frequency/rate bank exceeds finite hypothesis limit");
@@ -181,6 +185,7 @@ struct PatternCorrelator::Impl {
                 require(std::isfinite(pair.frequency_offset_hz) && std::isfinite(pair.clock_error_ppm) &&
                         std::abs(pair.clock_error_ppm)<=10000,"invalid paired frequency/rate hypothesis");
                 highest_rate=std::max(highest_rate,1+static_cast<long double>(pair.clock_error_ppm)*1e-6L);
+                lowest_rate=std::min(lowest_rate,1+static_cast<long double>(pair.clock_error_ppm)*1e-6L);
                 if(std::find(search.frequency_offsets_hz.begin(),search.frequency_offsets_hz.end(),pair.frequency_offset_hz)==
                    search.frequency_offsets_hz.end())search.frequency_offsets_hz.push_back(pair.frequency_offset_hz);
             }
@@ -191,6 +196,7 @@ struct PatternCorrelator::Impl {
             for(auto ppm:search.clock_errors_ppm) {
                 require(std::isfinite(ppm) && std::abs(ppm)<=10000,"clock-rate hypotheses must fit +/-10000 ppm");
                 highest_rate=std::max(highest_rate,1+static_cast<long double>(ppm)*1e-6L);
+                lowest_rate=std::min(lowest_rate,1+static_cast<long double>(ppm)*1e-6L);
             }
             if(search.frequency_offsets_hz.empty()) {
                 const auto step=.25*c.sample_rate/static_cast<double>(code.symbol_samples());
@@ -275,13 +281,26 @@ struct PatternCorrelator::Impl {
             (code.chip_samples()>4096?bank_count*(block_samples+1)*sizeof(Complex):0);
         const bool pulse_enabled=pulse_geometry && fixed+pulse_extra+denominator<=bytes;
         if(pulse_enabled) {fixed+=pulse_extra;pulse_lattices.reserve(pulse_count);pulse_addresses.reserve(count);}
+        // A partial chip or quarter cannot be consumed as a whole shared cell.
+        // Integrate its finite affine pulse pieces from the same public bank
+        // moments instead, without retaining a kernel or samples per lane.
+        const auto affine_capacity=1+static_cast<std::size_t>(std::min<long double>(block_samples,
+            std::ceil(code.chip_samples()/(256*lowest_rate))+1));
+        const auto segment_extra=bank_count*((block_samples+1)*sizeof(Complex)+
+            affine_capacity*sizeof(detail::CorrelationCarrierMoments))+total*sizeof(std::uint64_t);
+        pulse_segmented=!options.raw_reference && shaped && paired &&
+            code.symbol_samples()>=16ULL*c.sample_rate &&
+            code.chip_samples()>=1024 &&
+            code.symbol_samples()%(4*code.chip_samples())!=0 &&
+            fixed+segment_extra+denominator<=bytes;
+        if(pulse_segmented){fixed+=segment_extra;affine_counts.resize(count);}
         const auto remaining=bytes-static_cast<std::size_t>(std::ceil(fixed));
         bit_limit=std::min(search.bit_limit,remaining/denominator);
         require(bit_limit>0,"clock-search workspace cannot retain symbol evidence");
         hypotheses.reserve(count);emissions.reserve(search.track_limit);banks.resize(bank_count);
         for(auto& bank:banks) {
             bank.prefix.resize(block_samples+1);
-            if(pulse_enabled && code.chip_samples()>4096)bank.first_moment.resize(block_samples+1);
+            if(pulse_segmented || (pulse_enabled && code.chip_samples()>4096))bank.first_moment.resize(block_samples+1);
         }
         points.resize(point_capacity);
         require(!alternate_groups || count<=std::numeric_limits<std::size_t>::max()/alternate_groups,
@@ -334,9 +353,14 @@ struct PatternCorrelator::Impl {
                 h.index=static_cast<std::uint64_t>(index);hypotheses.push_back(std::move(h));
             }
         }
+        if(pulse_segmented)for(auto& bank:banks) {
+            bank.affine_carrier.resize(affine_capacity);
+            for(std::size_t n=1;n<affine_capacity;++n)
+                bank.affine_carrier[n]=detail::correlation_carrier_moments(n,2*tau*bank.frequency/c.sample_rate);
+        }
         accounted_bytes=working_bytes()+drift_reserved;
         require(sizeof(PatternCorrelator)+accounted_bytes<=budget,"clock-search state exceeds DSP workspace");
-        work.backend=pulse_lattices.empty()?PatternCorrelationBackend::raw:
+        work.backend=pulse_segmented?PatternCorrelationBackend::pulse_segments:pulse_lattices.empty()?PatternCorrelationBackend::raw:
             code.chip_samples()>4096?PatternCorrelationBackend::pulse_moments:PatternCorrelationBackend::pulse;
         work.hypotheses=hypotheses.size();work.lattices=pulse_lattices.size();work.phase_groups=alternate_groups+1;
         work.peak_workspace_bytes=sizeof(PatternCorrelator)+accounted_bytes;
@@ -427,13 +451,15 @@ struct PatternCorrelator::Impl {
             search.hypotheses.capacity()*sizeof(PatternFrequencyRateHypothesis);
         value+=pulse_lattices.capacity()*sizeof(PulseLattice);
         value+=pulse_addresses.capacity()*sizeof(PulseAddress);
+        value+=affine_counts.capacity()*sizeof(std::uint64_t);
         // Kernel preparation has bounded wide polynomial scratch. Retain its
         // reservation across workspace changes and payload allocation too.
         if(!pulse_lattices.empty())value+=detail::correlation_pulse_scratch_bytes;
         for(const auto& lattice:pulse_lattices)value+=lattice.cells.capacity()*sizeof(detail::CorrelationPulseCell);
         for(const auto& h:hypotheses)value+=h.burst.bits.capacity();
         for(const auto& burst:bursts)value+=burst.bits.capacity();
-        for(const auto& bank:banks)value+=bank.prefix.capacity()*sizeof(Projection)+bank.first_moment.capacity()*sizeof(Complex);
+        for(const auto& bank:banks)value+=bank.prefix.capacity()*sizeof(Projection)+bank.first_moment.capacity()*sizeof(Complex)+
+            bank.affine_carrier.capacity()*sizeof(detail::CorrelationCarrierMoments);
         value+=worker_bytes();
         return value;
     }
@@ -784,6 +810,67 @@ struct PatternCorrelator::Impl {
                     const auto first_chip=h.index*code.chips_per_symbol();
                     const auto left=static_cast<std::size_t>(observed-sample);
                     const auto& bank=banks[h.frequency];
+                    if(pulse_segmented) {
+                        const auto chip=code.chip_samples(),symbol=code.symbol_samples();
+                        const auto local=static_cast<std::uint64_t>(std::floor(within/chip));
+                        const auto chip_end=clock_boundary(h,local<symbol/chip?(local+1)*chip:symbol);
+                        const auto boundary=std::min(static_cast<long double>(segment_end),
+                            std::ceil(std::min(chip_end,section_end)));
+                        const auto limit=static_cast<std::uint64_t>(
+                            std::max(static_cast<long double>(observed+1),boundary))-observed;
+                        const auto offset=(within-static_cast<long double>(local)*chip)/h.rate;
+                        const auto duration=static_cast<long double>(chip)/h.rate;
+                        auto piece=detail::correlation_pulse_segment(offset,limit,duration);
+                        const auto tail=symbol%chip;
+                        detail::CorrelationPulseSegment final_piece;
+                        const auto final_chip=code.chips_per_symbol()-1;
+                        const bool has_final=tail && final_chip>=local && final_chip-local<=8;
+                        if(has_final) {
+                            // pattern_pulse_each centers a partial final pulse
+                            // in its actual duration and scales its energy. Its
+                            // shifted table knots need their own span limit.
+                            final_piece=detail::correlation_pulse_segment(
+                                offset+static_cast<long double>(chip-tail)/(2*h.rate),limit,duration);
+                            piece.count=std::min(piece.count,final_piece.count);
+                        }
+                        std::array<Complex,2> value{},slope{};
+                        for(std::size_t j=0;j<detail::correlation_pulse_atoms;++j) {
+                            if(j<8 && local<8-j)continue;
+                            if(j>8 && local>std::numeric_limits<std::uint64_t>::max()-(j-8))continue;
+                            const auto position=j<8?local-(8-j):local+(j-8);
+                            if(position>=code.chips_per_symbol())continue;
+                            auto a=piece.value[j],b=piece.slope[j];
+                            if(has_final && position==final_chip) {
+                                const auto scale=std::sqrt(static_cast<double>(tail)/static_cast<double>(chip));
+                                a=final_piece.value[j]*scale;b=final_piece.slope[j]*scale;
+                            }
+                            if(a==0 && b==0)continue;
+                            require(position<=std::numeric_limits<std::uint64_t>::max()-first_chip,
+                                    "pattern chip address would overflow");
+                            const auto pair=pattern.values(first_chip+position);
+                            for(unsigned bit=0;bit<2;++bit) {
+                                value[bit]+=static_cast<double>(a)*pair[bit];
+                                slope[bit]+=static_cast<double>(b)*pair[bit];
+                            }
+                        }
+                        const auto right=left+static_cast<std::size_t>(piece.count);
+                        const auto prefix=bank.observations();const auto moments=bank.moments();
+                        const auto projection=prefix[right]-prefix[left];
+                        const Complex measured{projection.xc,projection.xs};
+                        const auto moment=moments[right]-moments[left]-static_cast<double>(left)*measured;
+                        const auto first=prefix[left+1]-prefix[left];
+                        const Complex square{first.cc-first.ss,2*first.cs};
+                        require(piece.count<bank.affine_carrier.size(),"affine pulse span exceeds reserved carrier moments");
+                        for(unsigned bit=0;bit<2;++bit) {
+                            const auto contribution=detail::correlation_affine_fit(projection,moment,
+                                piece.count,value[bit],slope[bit],square,first.cc+first.ss,
+                                bank.affine_carrier[piece.count]);
+                            add_fit(fit[bit],contribution);
+                            if(drift)add_fit((*drift)[bit].active,contribution);
+                            if(differential)add_fit((*differential)[bit].active,contribution);
+                        }
+                        ++affine_counts[hypothesis];observed+=piece.count;continue;
+                    }
                     const auto projection=bank.observations()[left+1]-bank.observations()[left];
                     // Each alternative schedule fits the same disjoint
                     // raw observations. Its score never borrows samples
@@ -1088,7 +1175,7 @@ struct PatternCorrelator::Impl {
         WorkTimer frontend_timer(options.measure_work,work.frontend_seconds,work.frontend_cpu_seconds);
         for(std::size_t b=0;b<banks.size();++b) {
             cancelled(stop);auto& bank=banks[b];bank.shared_prefix={};bank.shared_moment={};
-            if(cache && work.backend==PatternCorrelationBackend::pulse_moments) {
+            if(cache && (work.backend==PatternCorrelationBackend::pulse_moments || pulse_segmented)) {
                 const auto shared=cache->get(input,sample,config.sample_rate,bank.frequency,block_samples,true,stop);
                 if(shared){bank.shared_prefix=shared.prefix;bank.shared_moment=shared.first_moment;continue;}
             }
@@ -1145,6 +1232,7 @@ struct PatternCorrelator::Impl {
                 if(static_cast<long double>(cursor)>=symbol_end)complete(h,hypothesis,cursor);
             }
         }
+        if(pulse_segmented)work.segments=std::accumulate(affine_counts.begin(),affine_counts.end(),std::uint64_t{0});
         record_point(banks.front().observations()[input.size()]);
         sample=end;
         room_for(0);
