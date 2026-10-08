@@ -23,6 +23,11 @@ struct State {
     unsigned hint_calls=0,hints_freed=0;
     int direction=0,hint_error=0;
     std::size_t captured=0,write_limit=137,read_limit=4096;
+    std::vector<long> read_results;
+    std::vector<int> wait_results,recovered_errors;
+    std::size_t read_result=0,wait_result=0;
+    int recover_result=-1;
+    std::function<void()> after_recover;
 };
 extern State state;
 void reset();

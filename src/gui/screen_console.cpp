@@ -67,6 +67,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(control.field==Field::rf_shift)control.help="Absolute frequency translation or radio LO in Hz, kHz, MHz, GHz or THz; default 0 Hz. Fixed USB delivers a real ADC/DAC stream at Carrier minus Shift, which must stay positive. Set Carrier above Shift to keep the desired stream tone. This setting does not retune physical hardware.";
     if(control.field==Field::search_margin)control.help="Conservative multiplier on justified relative frequency and sample-clock accuracy; default 3x. At least 1x. Model limits and references shows requested and actually covered bounds. A margin cannot guarantee an unjustified oscillator specification.";
 
+    if(slot==Slot::mode)control.help="Receiver failures stay visible until restart or reconfiguration. Dropped input means the capture queue discarded audio; interrupted input means device continuity was lost or uncertain. Search limited means required coverage or candidates were omitted by a resource limit; restarted means an error reset acquisition. Normal weak-candidate rejection and slow lossless simulation are not failures. See Status for details.";
     if(slot==Slot::paste_previous) {control.font_size=11;control.help="Paste the previous transmitted message back into Message for editing or retransmission.";}
     if(slot==Slot::force_transmit) {
         control.font_size=11;

@@ -3,6 +3,7 @@
 #include "../src/gui/bitmap_sources.hpp"
 #include "../src/gui/binary_editor.hpp"
 #include "../src/gui/transmit_scope.hpp"
+#include "../src/gui/receiver_health.hpp"
 #include "datapump/compression.hpp"
 #include "datapump/runtime.hpp"
 #include "datapump/received_text.hpp"
@@ -24,6 +25,38 @@ std::string repeatable_marker(std::string_view text) {
     check(text.substr(11,8).find_first_not_of(alphabet)==std::string_view::npos,
           "Repeatable identifier contains a vowel or non-alphanumeric character");
     return std::string(text.substr(0,20));
+}
+void receiver_health_indicator() {
+    live::Snapshot snapshot;snapshot.running=true;ui::FieldState field;
+    const auto show=[&]{receiver_mode(field,snapshot,"Listening / default");};
+    show();check(field.text=="Listening / default" && field.text_tone==ui::TextTone::normal,"healthy mode changed");
+    snapshot.error="unrelated transmit error";snapshot.constellation_dropped=123;
+    snapshot.simulation=true;snapshot.simulation_compute_seconds=10000;
+    show();check(field.text_tone==ui::TextTone::normal,"TX error, display thinning or slow simulation claimed receiver loss");
+    snapshot.receiver_behind=true;snapshot.receiver_backlog_seconds=2.;snapshot.receiver_oldest_input_seconds=3.;
+    show();check(field.text_tone==ui::TextTone::normal,"lossless simulation reported hardware backlog");
+    snapshot.simulation=false;show();
+    check(field.text=="LATE: receiver backlog 3.0 s" && field.text_tone==ui::TextTone::negative,"backlog left a healthy listening label");
+    snapshot.receiver_behind=false;show();
+    check(field.text=="Listening / default" && field.text_tone==ui::TextTone::normal,"drained backlog warning did not clear");
+    snapshot.receiver_behind=true;
+    for(unsigned reason=0;reason<4;++reason) {
+        snapshot.receiver_health={};
+        if(reason==0)snapshot.receiver_health.input_overruns=1;
+        if(reason==1)snapshot.receiver_health.input_interrupted=true;
+        if(reason==2)snapshot.receiver_health.receiver_reset=true;
+        if(reason==3)snapshot.receiver_health.search_limited=true;
+        show();check(field.text.starts_with("FAIL: receiver ") && field.text_tone==ui::TextTone::negative,"receiver failure missing red mode label");
+        snapshot.status="temporary notice";snapshot.error.clear();show();
+        check(field.text.starts_with("FAIL:"),"ordinary status cleared receiver failure");
+        snapshot.transmitting=true;receiver_mode(field,snapshot,"Transmitting 42%");
+        check(field.text.find("Transmitting 42%")!=std::string::npos && field.text.starts_with("FAIL:"),"failure hid transmit progress");
+        snapshot.transmitting=false;snapshot.simulation_replay=true;receiver_mode(field,snapshot,"Simulation replay 75%");
+        check(field.text.find("Simulation replay 75%")!=std::string::npos && field.text_tone==ui::TextTone::negative,"replay hid failure or progress");
+        snapshot.simulation_replay=false;
+    }
+    snapshot.running=false;show();check(field.text=="Stopped" && field.text_tone==ui::TextTone::normal,"stopped receiver claimed active loss");
+    snapshot={};snapshot.running=true;show();check(field.text=="Listening / default" && field.text_tone==ui::TextTone::normal,"fresh receiver retained red mode");
 }
 void prepare(Controller& controller) {
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
@@ -2525,6 +2558,8 @@ void bitmap_source_checks() {
 
 int main(int argc,char** argv) {
     try {
+        receiver_health_indicator();
+        if(argc>1&&std::string_view(argv[1])=="--receiver-health") {std::cout<<"Receiver health indicator passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--pending-replay-batch") {
             revised_reception_ingestion();pending_replay_batch();
             std::cout<<"Pending replay batch checks passed\n";

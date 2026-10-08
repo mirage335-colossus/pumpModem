@@ -4,6 +4,7 @@
 #include <utility>
 #include "datapump/compression.hpp"
 #include "controller.hpp"
+#include "receiver_health.hpp"
 #include "audio_controls.hpp"
 #include "datapump/received_text.hpp"
 #include "record_presentations.hpp"
@@ -1349,13 +1350,17 @@ struct Controller::Impl {
             next.simulation?(next.simulation_receiving_tail?std::string("Checking reception after transmission"):
                 "Simulating / audio "+audio_percent+"%")+" / "+elapsed_text(next.simulation_compute_seconds)+" elapsed":
             "Transmitting "+audio_percent+"% / "+seconds_text(next.transmission_seconds)+" media";
-        f(UiField::mode).text=next.transmitting?tx_mode:next.simulation_replay?"Simulation replay "+std::to_string(static_cast<int>(std::clamp(next.simulation_sample_fraction,0.0,1.0)*100))+"%":mode;
+        receiver_mode(f(UiField::mode),next,next.transmitting?tx_mode:next.simulation_replay?"Simulation replay "+std::to_string(static_cast<int>(std::clamp(next.simulation_sample_fraction,0.0,1.0)*100))+"%":mode);
         if(next.simulation_replay||snapshot.simulation_replay||Clock::now()>=notice_until) f(UiField::status).text=next.error.empty()?next.status:next.error;
         if(Clock::now()-cpu_time>=std::chrono::seconds(1)) { const auto now=Clock::now(); cpu_percent=100*static_cast<double>(std::clock()-cpu_clock)/CLOCKS_PER_SEC/std::chrono::duration<double>(now-cpu_time).count(); cpu_clock=std::clock(); cpu_time=now; }
         std::ostringstream diagnostics;
         diagnostics<<format_bit_rate(modem::bit_rate(transmit_config()))
             <<" | Shannon-Hartley limit "<<format_bit_rate(shannon_capacity_bps)
             <<" | "<<next.samples_received<<" input samples | CPU "<<std::fixed<<std::setprecision(1)<<cpu_percent<<"%";
+        if(!next.simulation && (next.buffered_samples || next.decoding_samples))
+            diagnostics<<" | RX pending "<<next.receiver_backlog_seconds<<" s / oldest "<<next.receiver_oldest_input_seconds<<" s";
+        if(next.receiver_health.input_overruns) diagnostics<<" | RX overruns "<<next.receiver_health.input_overruns;
+        if(next.receiver_health.dropped_samples) diagnostics<<" | RX discarded samples "<<next.receiver_health.dropped_samples;
         if(next.simulation) diagnostics<<" | Channel SNR "<<channel_snr<<" dB / media "<<seconds_text(next.virtual_seconds);
         else if(next.hardware_sample_rate) diagnostics<<" | Hardware "<<next.hardware_sample_rate/1000.0<<" kHz";
         diagnostics<<" | DSP "<<settings.transfer.modem.sample_rate<<" Hz | Carrier "<<std::defaultfloat<<std::setprecision(6)<<settings.transfer.modem.carrier_hz+settings.transfer.modem.oscillator_search->rf_shift_hz<<" Hz";

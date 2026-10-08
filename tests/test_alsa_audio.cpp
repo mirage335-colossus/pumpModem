@@ -14,6 +14,61 @@ namespace a=datapump::audio;
 namespace f=alsa_test;
 void check(bool value,const char* reason){if(!value)throw std::runtime_error(reason);}
 template<class F> void rejects(F action){try{action();}catch(const datapump::Error&){check(f::state.live==0,"leaked failed stream");return;}throw std::runtime_error("invalid audio accepted");}
+void capture_discontinuities() {
+    const auto signal=[](std::size_t i,unsigned) {return static_cast<std::int16_t>(8000*std::sin(.001*i)+1000*std::cos(.217*i));};
+    for(const auto logical:{64U,4800U,48000U}) {
+        const auto setup=[&] {
+            f::reset();f::state.available={"default"};f::state.supported_rates={48000};
+            f::state.sample=signal;f::state.recover_result=0;
+        };
+        setup();const auto reference=a::record(1,logical,"default",1024*1024);
+        for(const bool wait_path:{false,true})for(const int error:{-EPIPE,-ESTRPIPE}) {
+            setup();bool after_gap=false;unsigned events=0;std::vector<float> post;
+            // A fractional converter phase and nonempty FIR tail before loss.
+            f::state.read_results.assign(20,2400);f::state.read_results.push_back(1);
+            f::state.read_results.push_back(wait_path?-EAGAIN:error);
+            if(wait_path)f::state.wait_results={error};
+            f::state.sample=[&](auto i,auto rate){return after_gap?signal(i,rate):std::int16_t{20000};};
+            f::state.after_recover=[&]{after_gap=true;f::state.captured=0;};
+            a::Options options;
+            options.capture_discontinuity=[&]{check(after_gap,"gap notified before recovery");++events;};
+            options.capture_monitor=[&](auto,auto){if(after_gap)check(events==1,"post-gap monitor preceded discontinuity");};
+            a::capture(logical,"default",[&](auto chunk) {
+                if(after_gap) {
+                    check(events==1,"post-gap PCM preceded discontinuity");
+                    const auto count=std::min(chunk.size(),reference.size()-post.size());
+                    post.insert(post.end(),chunk.begin(),chunk.begin()+count);
+                }
+                return post.size()<reference.size();
+            },{},{},options);
+            check(events==1 && f::state.recovered_errors==std::vector<int>{error},"capture recovery notification count/reason changed");
+            check(post==reference,"capture gap bridged old filter history or changed post-gap sample phase");
+            check(f::state.live==0 && f::state.opens==f::state.closes,"recovered capture leaked stream");
+        }
+        setup();f::state.read_results={173,-EAGAIN,-EAGAIN};f::state.wait_results={0,1};
+        f::state.read_results.insert(f::state.read_results.end(),12,-EINTR);
+        unsigned events=0;a::Options options;options.capture_discontinuity=[&]{++events;};
+        check(a::record(1,logical,"default",1024*1024,{},{},options)==reference && events==0,
+              "healthy wait/interrupted syscall changed PCM or reported loss");
+    }
+    for(const bool wait_path:{false,true})for(const int error:{-EPIPE,-ESTRPIPE}) {
+        f::reset();f::state.available={"default"};f::state.recover_result=0;
+        f::state.read_results={173,wait_path?-EAGAIN:error};if(wait_path)f::state.wait_results={error};
+        rejects([&]{a::record(1,48000,"default");});
+        check(f::state.captured==173,"flat recording silently concatenated PCM across a gap");
+        f::state.read_result=f::state.wait_result=f::state.captured=0;unsigned callbacks=0;
+        rejects([&]{a::capture(48000,"default",[&](auto){++callbacks;return true;});});
+        check(callbacks==1 && f::state.captured==173,"unobserved discontinuity delivered post-gap PCM");
+    }
+    for(const unsigned cancel:{0U,1U,2U}) {
+        f::reset();f::state.available={"default"};f::state.read_results={-EPIPE};f::state.recover_result=0;
+        std::stop_source stop;a::Options options;unsigned gaps=0,pcm=0;
+        if(cancel==2)f::state.after_recover=[&]{stop.request_stop();};
+        options.capture_discontinuity=[&]{++gaps;if(cancel)stop.request_stop();else throw datapump::Error("gap callback failed");};
+        rejects([&]{a::capture(48000,"default",[&](auto){++pcm;return false;},stop.get_token(),{},options);});
+        check(pcm==0 && gaps==(cancel==2?0:1),"cancellation delivered PCM or reported an intentional stop as loss");
+    }
+}
 void plugin_directories() {
     namespace fs=std::filesystem;
     const auto root=fs::temp_directory_path()/("datapump-alsa-plugins-"+
@@ -428,5 +483,6 @@ int main(){try{
     f::reset();f::state.available={"default"};f::state.supported_rates={44100};
     std::stop_source capture_cancel;
     rejects([&]{a::capture(96000,"default",[&](std::span<const float> values){check(values.size()<=4096,"capture resampling exceeded bounded callback size");capture_cancel.request_stop();return false;},capture_cancel.get_token());});
+    capture_discontinuities();
     std::cout<<"ALSA default resolution and streaming tests passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

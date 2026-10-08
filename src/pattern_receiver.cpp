@@ -88,7 +88,7 @@ struct PatternReceiver::Impl {
     double noise_condition=1;
     bool real_rank=false,sample_fit=false,shaped=false;
     std::size_t partial=0;
-    bool finished=false,oscillator_valid=true;
+    bool finished=false,oscillator_valid=true,candidate_limit_reached=false;
     std::uint64_t trials=0;
     std::vector<PatternEvidence> history,peaks;
     struct Completed {std::uint64_t first=0,end=0;double frequency=0;};
@@ -1102,6 +1102,7 @@ struct PatternReceiver::Impl {
             } else ++it;
         }
         if(tracks.size()==search.track_limit) {
+            candidate_limit_reached=true;
             const auto worst=std::min_element(tracks.begin(),tracks.end(),[](const auto& a,const auto& b){
                 if(a.established!=b.established)return !a.established;
                 return a.total_score<b.total_score;
@@ -1146,6 +1147,15 @@ struct PatternReceiver::Impl {
         });
         if(existing!=peaks.end()) { if(item.score>existing->score)*existing=item; }
         else if(peaks.size()<search.candidate_limit)peaks.push_back(item);
+        else if(item.score-item.alternative_score>=1) {
+            // These tests also reject a candidate unconditionally in admit().
+            // A full diagnostic peak list must not turn ordinary ambiguity
+            // rejection into a receiver failure.
+            std::size_t group_count=1;
+            if(search.search_stream_phases && item.score<threshold())
+                phase_groups(item.stream_symbol,0,phase_upper,group_count);
+            if(group_count==1)candidate_limit_reached=true;
+        }
     }
     void collect_scores(std::span<const Complex> scores,std::uint64_t index,std::uint64_t phase,std::size_t f) {
         for(std::size_t j=0;j<scores.size();++j)
@@ -1512,6 +1522,7 @@ bool PatternReceiver::initial_search_complete()const {
 }
 bool PatternReceiver::clock_windowed()const{return static_cast<bool>(impl_->fallback);}
 bool PatternReceiver::local_clock_fallback()const{return impl_->local_search_fallback;}
+bool PatternReceiver::candidate_limited()const{return impl_->candidate_limit_reached;}
 bool PatternReceiver::drift_tolerant()const{return impl_->fallback?impl_->fallback->drift_tolerant():impl_->drift_sections>1;}
 std::size_t PatternReceiver::working_bytes()const {
     return impl_->working_bytes();

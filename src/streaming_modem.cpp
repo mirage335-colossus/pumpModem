@@ -179,6 +179,7 @@ bool StreamingReceiver::synchronized()const{return impl_->pattern.synchronized()
 bool StreamingReceiver::initial_search_complete()const{return impl_->pattern.initial_search_complete();}
 bool StreamingReceiver::clock_windowed()const{return impl_->pattern.clock_windowed();}
 bool StreamingReceiver::local_clock_fallback()const{return impl_->pattern.local_clock_fallback();}
+bool StreamingReceiver::candidate_limited()const{return impl_->pattern.candidate_limited();}
 bool StreamingReceiver::acquiring()const{return impl_->pattern.acquiring();}
 Diagnostics StreamingReceiver::diagnostics()const{return impl_->pattern.diagnostics();}
 ConstellationBatch StreamingReceiver::take_payload_constellation(){return {impl_->pattern.take_chip_constellation(),0};}

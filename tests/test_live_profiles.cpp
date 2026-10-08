@@ -59,6 +59,8 @@ struct CaptureScript {
     std::uint32_t monitor_rate=0;
     std::size_t monitor_format_bytes=0;
     std::atomic<std::size_t> monitor_released{0},monitor_delivered{0};
+    std::atomic<unsigned> interruptions{0},interruptions_delivered{0};
+    std::function<void()> after_monitor;
 };
 CaptureScript* capture_script = nullptr;
 constexpr std::uint64_t epoch = 1800000000;
@@ -340,6 +342,69 @@ void run_case(const std::vector<double>& targets, double target, const std::stri
     session.stop();
 }
 
+// Queue processing time must not select the private epoch for already captured
+// PCM. Delay the logical callback after the raw monitor callback, avoiding any
+// dependency on CPU speed or scheduler sleeps in this timestamp regression.
+void receiver_backlog_before_overflow() {
+    CaptureScript capture;capture.rate=modem_config(55,{}).sample_rate;
+    capture.monitor_rate=capture.rate;capture.monitor_samples.resize(64);capture.monitor_released=64;
+    capture.samples.resize(3*capture.rate);capture.released=64;capture_script=&capture;
+    const auto main_thread=std::this_thread::get_id();std::thread::id capture_thread;
+    std::atomic<bool> armed{false},entered{false},released{false};
+    capture.after_monitor=[&]{capture_thread=std::this_thread::get_id();armed=true;};
+    live::Session session([]{return double(epoch);},[&]{
+        if(armed && std::this_thread::get_id()!=main_thread && std::this_thread::get_id()!=capture_thread && !entered.exchange(true))
+            while(!released.load())std::this_thread::sleep_for(1ms);
+        return std::chrono::steady_clock::now();
+    });
+    // Declared after Session so exceptions always release its decoder first.
+    struct Release {std::atomic<bool>& flag;~Release(){flag=true;}} release{released};
+    session.start(settings({55}));
+    const auto await=[&](auto predicate) {
+        const auto deadline=std::chrono::steady_clock::now()+10s;
+        do {auto snapshot=session.snapshot();if(predicate(snapshot))return snapshot;std::this_thread::sleep_for(1ms);}
+        while(std::chrono::steady_clock::now()<deadline);
+        throw Error("receiver backlog fixture did not reach checkpoint");
+    };
+    const auto active=await([&](const auto& x){return entered && x.decoding_samples==64 && !x.buffered_samples;});
+    check(!active.receiver_health.failed(),"stalled decoder falsely reported dropped samples");
+    const auto aged=await([](const auto& x){return x.receiver_behind;});
+    check(aged.buffered_samples==0 && aged.decoding_samples==64 && aged.receiver_oldest_input_seconds>=1. &&
+          aged.receiver_backlog_seconds<1. && !aged.receiver_health.failed(),
+          "popped in-flight work hid backlog until queue overflow");
+    capture.released=capture.samples.size();
+    const auto queued=await([&](const auto& x){return x.buffered_samples==capture.samples.size()-64;});
+    check(queued.receiver_backlog_seconds==3. && queued.receiver_behind && !queued.receiver_health.failed(),
+          "queued hardware backlog changed sample accounting or claimed input loss");
+    released=true;
+    const auto drained=await([](const auto& x){return !x.buffered_samples && !x.decoding_samples;});
+    check(!drained.receiver_behind && drained.receiver_backlog_seconds==0 && drained.receiver_oldest_input_seconds==0 &&
+          !drained.receiver_health.failed() && drained.signals.empty() && drained.received.empty(),
+          "drained backlog latched a failure or manufactured completion");
+    session.stop();
+}
+
+void captured_epoch_survives_delay() {
+    Configuration config;config.keyed=true;config.mode=tuning::PatternMode::auto_keystream;
+    const auto wave=waveform(55,"e",false,config);
+    for(const double delay:{0.,30.}) {
+        CaptureScript capture;capture.samples=wave.samples;capture.rate=wave.rate;
+        capture.monitor_rate=wave.rate;capture.monitor_samples.resize(64);
+        capture.monitor_released=64;
+        std::atomic<double> now{epoch+64./wave.rate};
+        capture.after_monitor=[&]{now=epoch+delay;};
+        capture_script=&capture;
+        auto value=settings({55},config);value.transfer.timestamp=0;value.receive_keys.clear();
+        value.transfer.search_seconds=static_cast<unsigned>(std::ceil((wave.payload_end-3*wave.symbol_samples)/double(wave.rate)))+1;
+        live::Session session([&]{return now.load();});session.start(value);
+        Observations observed;
+        std::cout<<"Capture delay "<<delay<<" s, prefix "<<(wave.payload_end-3*wave.symbol_samples)/double(wave.rate)<<" s\n"<<std::flush;
+        receive_wave(session,capture,wave,0,observed);
+        check(!session.snapshot().receiver_health.failed(),"delayed captured PCM lost receive coverage");
+        session.stop();
+    }
+}
+
 void sequential_profiles(const std::vector<double>& targets, double first_target, double second_target) {
     const auto first = waveform(first_target, "e"), second = waveform(second_target, "hello");
     CaptureScript capture;
@@ -557,6 +622,55 @@ void simulated_long_fft_single_bit(double duration = 40, double snr = 30, std::u
     session.stop();
 }
 
+void receiver_loss_health() {
+    const Configuration geometry{16.,8.};
+    auto value=settings({55},geometry);value.transfer.automatic_receive_profiles=false;
+    const auto wave=waveform(55,"001",true,geometry);
+    const auto prefix=wave.payload_end+value.transfer.modem.sample_rate;
+    const auto oversized=value.dsp_workspace_bytes/8/sizeof(float)+1;
+    for(const bool device_gap:{false,true}) {
+        CaptureScript script;script.rate=wave.rate;script.monitor_rate=48000;
+        script.samples.assign(wave.samples.begin(),wave.samples.begin()+prefix);
+        script.samples.resize(prefix+(device_gap?0:oversized)+10*wave.rate);
+        capture_script=&script;live::Session session([]{return static_cast<double>(epoch);});session.start(value);
+        std::uint64_t pending=0;bool complete=false;
+        const auto await=[&](auto condition) {
+            const auto deadline=std::chrono::steady_clock::now()+5s;
+            while(std::chrono::steady_clock::now()<deadline) {
+                const auto snapshot=session.snapshot();
+                for(const auto& signal:snapshot.signals) {
+                    complete|=signal.complete;
+                    if(!signal.complete && signal.received_bits) {
+                        check(signal.binary && signal.text==wave.bits.substr(0,signal.received_bits),
+                              "health fixture lost exact pending prefix");
+                        if(pending)check(pending==signal.id,"health fixture changed pending identity");
+                        pending=signal.id;
+                    }
+                }
+                check(snapshot.received.empty() && !complete,"lost input manufactured physical completion");
+                check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,"loss reporting exceeded workspace");
+                if(condition(snapshot))return snapshot;
+                std::this_thread::sleep_for(2ms);
+            }
+            throw Error("receiver health fixture did not reach checkpoint");
+        };
+        script.released=prefix;
+        const auto before=await([&](const auto& x){return pending && x.buffered_samples==0 && x.decoding_samples==0;});
+        check(!before.receiver_health.failed(),"healthy pending receiver reported loss");
+        if(device_gap)script.interruptions=1;else script.released=prefix+oversized;
+        const auto lost=await([&](const auto& x){return device_gap?x.receiver_health.input_interrupted:x.receiver_health.input_overruns!=0;});
+        check(lost.receiver_health.input_overruns==(device_gap?0:1) &&
+              lost.receiver_health.dropped_samples==(device_gap?0:oversized),"receiver loss counters misreported discarded PCM");
+        // Give the fresh acquisition complete observed absence. It must not
+        // complete the prefix retained before the missing segment.
+        script.released=script.samples.size();
+        const auto after=await([&](const auto& x){return script.delivered==script.samples.size() && x.buffered_samples==0 && x.decoding_samples==0;});
+        check(after.receiver_health.failed(),"healthy PCM cleared latched loss");
+        session.configure(value);
+        check(!session.snapshot().receiver_health.failed(),"reconfiguration retained obsolete receiver failure");
+        session.stop();capture_script=nullptr;
+    }
+}
 void independent_environment_monitor() {
     auto value=settings({55},Configuration{16.,8.});
     value.transfer.automatic_receive_profiles=false;
@@ -630,10 +744,16 @@ void capture(std::uint32_t rate,const std::string& device,const CaptureCallback&
         check(rate==script.rate && device=="controlled profile capture","monitor fixture capture identity changed");
         if(format)format({rate,script.monitor_rate,rate/2.,script.monitor_format_bytes});
         while(!stop.stop_requested()) {
+            const auto interrupts=script.interruptions.load();
+            if(interrupts>script.interruptions_delivered.load()) {
+                if(options.capture_discontinuity)options.capture_discontinuity();
+                script.interruptions_delivered=interrupts;
+            }
             auto begin=script.monitor_delivered.load(),end=script.monitor_released.load();
             if(end>begin) {
                 if(options.capture_monitor)options.capture_monitor(std::span(script.monitor_samples).subspan(begin,end-begin),script.monitor_rate);
                 script.monitor_delivered=end;
+                if(script.after_monitor)script.after_monitor();
             }
             begin=script.delivered.load();end=script.released.load();
             if(end>begin) {if(!callback(std::span(script.samples).subspan(begin,end-begin)))return;script.delivered=end;}
@@ -680,8 +800,11 @@ int main(int argc, char** argv) {
         const FixtureTimerResolution timer_resolution;
 #endif
         const std::string suite = argc > 1 ? argv[1] : "all";
-        check(suite == "all" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds" || suite == "interval_queue" || suite == "monitor",
+        check(suite == "all" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds" || suite == "interval_queue" || suite == "monitor" || suite == "health" || suite == "capture_time" || suite == "backlog",
               "unknown profile test suite");
+        if(suite=="all" || suite=="backlog") {context="receiver backlog before overflow";receiver_backlog_before_overflow();}
+        if(suite=="all" || suite=="capture_time") {context="captured private epoch survives decode delay";captured_epoch_survives_delay();}
+        if(suite=="all" || suite=="health") {context="receiver loss health";receiver_loss_health();}
         if(suite=="all" || suite=="monitor") {context="independent environment monitor";independent_environment_monitor();}
         if (suite == "interval_queue") {
             context = "RX 55,32 TX 32 fixed interval queue pacing";

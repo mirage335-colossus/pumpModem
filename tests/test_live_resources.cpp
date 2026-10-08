@@ -167,6 +167,7 @@ void default_workspace_admits_long_key_banks() {
     });
     check(result.dsp_buffered_bytes>0,"long keyed receiver banks did not report their search allocation");
     check(result.status.find("limited")==std::string::npos,"default workspace did not admit the requested long keyed search banks");
+    check(!result.receiver_health.failed(),"healthy long keyed search bank reported receiver failure");
 }
 void noise_epochs_retire_with_bounded_workspace() {
     constexpr std::uint64_t origin=1800000000;
@@ -185,6 +186,7 @@ void noise_epochs_retire_with_bounded_workspace() {
             // an unscored acquisition window cannot expire just because its
             // wall clock advanced faster than the simulated receiver media.
             bounded(snapshot,value);no_reception(snapshot);
+            check(!snapshot.receiver_health.failed(),"lossless simulated noise/epoch expiry reported receiver loss");
             return snapshot.samples_received>=old_samples+value.transfer.modem.sample_rate;
         });
         if(second==12)warm_bytes=previous.dsp_buffered_bytes;
@@ -290,6 +292,7 @@ void reconfiguration_discards_cancelled_work() {
     const auto started=std::chrono::steady_clock::now();session.cancel_transmit();
     check(std::chrono::steady_clock::now()-started<100ms,"cancel blocked on a complete recording");
     const auto cancelled=session.snapshot();
+    check(!cancelled.receiver_health.failed(),"intentional simulation cancellation reported receiver loss");
     check(!cancelled.transmitting && cancelled.transmission_finished && cancelled.transmission_cancelled,
           "local cancellation state was not immediately visible");
     replay_milliseconds=3000;
@@ -313,6 +316,7 @@ void reconfiguration_discards_cancelled_work() {
     replay_milliseconds=6000;
     const auto result=wait_for(session,[&](const auto& snapshot){bounded(snapshot,value);return !snapshot.received.empty();});
     spectrum_reference(result,value);
+    check(!result.receiver_health.failed(),"fresh successful receiver retained a failure");
     check(result.received.size()==1 && result.received.front().content.message.data==sent.data,
           "fresh configuration failed to receive after discarding cancelled work");
     session.stop();check(!session.snapshot().running,"stop did not leave the reconfigured session idle");

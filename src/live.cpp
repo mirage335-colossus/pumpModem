@@ -230,7 +230,12 @@ struct Session::Impl {
         std::uint64_t pattern_score_observation_id = 0;
         std::stop_token stop;
     };
-    struct AudioBlock { std::vector<float> samples; std::uint64_t revision; };
+    struct AudioBlock {
+        std::vector<float> samples;
+        std::uint64_t revision;
+        double observed_epoch;
+        Clock::time_point queued_at;
+    };
     struct RecoveryTask {
         transfer::Received result;
         std::shared_ptr<transfer::RecoveryJob> job;
@@ -268,13 +273,18 @@ struct Session::Impl {
         std::uint64_t samples = 0, next_candidate = 1;
         std::size_t working_bytes = sizeof(detail::ReceptionHistory);
         double created_at = 0;
+        // UTC for a captured block, independent of when its search runs. Sample
+        // coordinates remain continuous; fresh stamps only guide new admission.
+        std::optional<double> observed_epoch;
+        std::uint64_t observed_sample = 0;
         bool limited = false;
+        bool coverage_limited = false;
         std::string oscillator_limit;
         std::complex<double> mixer{1,0};
     };
     static void note_oscillator_coverage(Bank& bank,const modem::OscillatorPatternSearch& search) {
         if(!search.limited)return;
-        bank.limited=true;
+        bank.limited=bank.coverage_limited=true;
         std::ostringstream detail;
         detail<<"RX oscillator coverage incomplete: frequency +/-"<<search.frequency.half_width_hz
             <<" Hz (requested "<<search.frequency.requested_half_width_hz<<"), clock +/-"
@@ -318,6 +328,8 @@ struct Session::Impl {
     std::deque<AudioBlock> input;
     std::size_t input_bytes = 0, decoding_bytes = 0, received_bytes = 0, receiver_bytes = 0;
     std::size_t audio_bytes = 0;
+    std::optional<Clock::time_point> decoding_queued_at;
+    std::size_t decoding_remaining_samples=0;
     // At most one coordinator runs; each job owns its bounded parallel search.
     std::deque<std::shared_ptr<RecoveryTask>> recoveries;
     std::shared_ptr<RecoveryTask> active_recovery;
@@ -636,7 +648,7 @@ struct Session::Impl {
         current.waveform_sample_rate=config.sample_rate;current.environment_monitor=true;
         current.spectrum_bin_hz=static_cast<double>(config.sample_rate)/plot_size;
         current.simulation_spectrum_gain_db.reset();
-        current.dsp_buffered_bytes=receiver_bytes+input_bytes+decoding_bytes+audio_bytes+plot_workspace(settings)+
+        current.dsp_buffered_bytes=receiver_bytes+queue_storage_bytes()+decoding_bytes+audio_bytes+plot_workspace(settings)+
             (tx_busy?settings.dsp_workspace_bytes/4:0);
         ++current.spectrum_revision;++current.sequence;last_plot=Clock::now();
     }
@@ -673,26 +685,57 @@ struct Session::Impl {
         frame.transmit_trace = wave.transmitter->transmit_trace();
         wave.replay.push_back(std::move(frame));
     }
-    void enqueue_audio(std::span<const float> samples, std::uint64_t version) {
+    std::size_t queue_storage_bytes() const {
+        return input_bytes+input.size()*sizeof(AudioBlock);
+    }
+    void enqueue_audio(std::span<const float> samples, std::uint64_t version, double observed_epoch) {
         std::lock_guard lock(mutex);
         if (!current.running || generation != version || capture_suspended) return;
         const auto bytes = samples.size_bytes();
         const auto queue_limit = settings.dsp_workspace_bytes / 8;
-        if (bytes > queue_limit) { current.error = "audio callback exceeds streaming workspace"; return; }
-        if (input_bytes + decoding_bytes + bytes > queue_limit) {
-            input.clear(); input_bytes = 0; ++receive_revision;
+        const auto retained=queue_storage_bytes()+decoding_bytes+sizeof(AudioBlock);
+        const auto block_bytes=bytes+sizeof(AudioBlock);
+        if (block_bytes > queue_limit || retained > queue_limit-block_bytes) {
+            count_dropped(current.receiver_health.input_overruns,1);
+            count_dropped(current.receiver_health.dropped_samples,input_bytes/sizeof(float));
+            // Every gap, including an oversized callback, invalidates the old
+            // acquisition. Never concatenate later samples across missing PCM.
+            reset_input_locked();
             current.status = "Audio receiver overrun; restarting acquisition";
+            if (block_bytes > queue_limit || decoding_bytes+sizeof(AudioBlock) > queue_limit-block_bytes) {
+                count_dropped(current.receiver_health.dropped_samples,samples.size());
+                if(block_bytes>queue_limit)current.error="audio callback exceeds streaming workspace";
+                return;
+            }
         }
-        if (decoding_bytes + bytes > queue_limit) return;
-        input.push_back({std::vector<float>(samples.begin(), samples.end()), receive_revision});
+        input.push_back({std::vector<float>(samples.begin(), samples.end()), receive_revision, observed_epoch, Clock::now()});
         input_bytes += bytes; current.buffered_samples = input_bytes / sizeof(float);
-        current.dsp_buffered_bytes = input_bytes + decoding_bytes + receiver_bytes + audio_bytes + plot_workspace(settings);
+        current.dsp_buffered_bytes = queue_storage_bytes() + decoding_bytes + receiver_bytes + audio_bytes + plot_workspace(settings);
+        changed.notify_all();
+    }
+    // Caller holds mutex. Intentional half-duplex changes use this without
+    // marking a fault; overload/device failures additionally latch health.
+    void reset_input_locked() {
+        input.clear(); input_bytes = 0; ++receive_revision;
+        current.buffered_samples = 0;
+        current.dsp_buffered_bytes=decoding_bytes+receiver_bytes+audio_bytes+plot_workspace(settings);
         changed.notify_all();
     }
     void discontinuity() {
         std::lock_guard lock(mutex);
-        input.clear(); input_bytes = 0; ++receive_revision;
-        current.buffered_samples = 0; changed.notify_all();
+        reset_input_locked();
+    }
+    void input_interrupted(std::uint64_t version,std::stop_token stop) {
+        std::lock_guard lock(mutex);
+        if(!current.running || generation!=version || capture_suspended || stop.stop_requested())return;
+        current.receiver_health.input_interrupted=true;
+        count_dropped(current.receiver_health.dropped_samples,input_bytes/sizeof(float));
+        reset_input_locked();
+    }
+    double observation_epoch(const Bank& bank,const Settings& value,std::uint64_t sample) const {
+        if(!bank.observed_epoch)return current_epoch(); // simulation retains its own timeline
+        return *bank.observed_epoch+static_cast<double>((static_cast<long double>(sample)-
+            bank.observed_sample)/value.transfer.modem.sample_rate);
     }
     Bank make_bank(const Settings& value) { return make_bank(value, Bank{}); }
     Bank make_bank(const Settings& value, Bank bank) {
@@ -710,7 +753,7 @@ struct Session::Impl {
         };
         if (value.transfer.key) add(*value.transfer.key);
         for (const auto& key : value.receive_keys) add(key);
-        const auto now = current_epoch();
+        const auto now = observation_epoch(bank,value,bank.samples);
         const auto center = value.transfer.timestamp ? value.transfer.timestamp : static_cast<std::uint64_t>(now);
         for (std::size_t family=0;family<keys.size();++family) {
             const auto& key=keys[family];
@@ -743,7 +786,7 @@ struct Session::Impl {
                 const auto compact=key && modem::symbol_sample_count(profile)>=60ULL*profile.sample_rate;
                 const auto control_margin = (compact?8192:65536) + sizeof(Receiver);
                 if(bank.working_bytes>=capacity || capacity-bank.working_bytes<=control_margin) {
-                    bank.limited=true;continue;
+                    bank.limited=bank.coverage_limited=true;continue;
                 }
                 Receiver receiver;
                 receiver.sample_origin=bank.samples;receiver.family=family;
@@ -773,8 +816,9 @@ struct Session::Impl {
                     receiver.modem = std::make_unique<modem::StreamingReceiver>(config,
                         std::min(value.dsp_workspace_bytes / 2, capacity - bank.working_bytes - control_margin),search);
                 } catch(const Error&) {
-                    bank.limited=true;continue;
+                    bank.limited=bank.coverage_limited=true;continue;
                 }
+                bank.coverage_limited |= receiver.modem->local_clock_fallback();
                 receiver.content=std::make_unique<transfer::StreamReceiver>(receiver.options,receiver.epoch,bank.source_quota);
                 bank.working_bytes += receiver_workspace(receiver);
                 if (bank.working_bytes > bank_capacity(value))
@@ -793,7 +837,7 @@ struct Session::Impl {
         if(value.transfer.timestamp && std::none_of(bank.receivers.begin(),bank.receivers.end(),[](const auto& receiver){
             return receiver.key_tag.empty() && receiver.modem->clock_windowed();
         }))return;
-        const auto now = current_epoch();
+        const auto now = observation_epoch(bank,value,bank.samples);
         if (std::floor(now)==std::floor(bank.created_at)) return;
         std::erase_if(bank.receivers,[&](const auto& receiver){
             // Short streams can hold fewer than one output chunk throughout
@@ -1051,6 +1095,11 @@ struct Session::Impl {
         // block. A short burst can finish within one block after a second rolls
         // over; refreshing afterward can miss every chip of the new stream.
         refresh_bank(bank,value);
+        if(bank.coverage_limited) {
+            std::lock_guard lock(mutex);
+            if(current.running && generation==version && !stop.stop_requested())
+                current.receiver_health.search_limited=true;
+        }
         const auto sample_count=samples.size();
         if(sample_count>std::numeric_limits<std::uint64_t>::max()-bank.samples)
             throw Error("receive sample clock exceeds its platform range");
@@ -1170,7 +1219,8 @@ struct Session::Impl {
                             const auto score=burst.score,frequency=burst.frequency_hz;
                             const auto physical_id=std::pair{burst.stream_first_sample,burst.stream_first_symbol};
                             if(burst.end_sample>receiver.last_confident_end) {
-                                receiver.last_confident_end=burst.end_sample;receiver.last_confident_at=current_epoch();
+                                receiver.last_confident_end=burst.end_sample;
+                                receiver.last_confident_at=observation_epoch(bank,value,receiver.sample_origin+burst.end_sample);
                             }
                             auto presentation=receiver.presentations.find(physical_id);
                             if(presentation==receiver.presentations.end())continue;
@@ -1186,6 +1236,7 @@ struct Session::Impl {
                             const auto complete=result.stream_complete;
                             const auto decision=bank.receptions.observe(candidate,[&]{return next_signal++;});
                             bank.limited|=decision.limited;
+                            if(decision.limited && !decision.selected)bank.coverage_limited=true;
                             display.signal_id=decision.signal_id;
                             if(decision.selected) {
                                 SignalUpdate event;event.id=decision.signal_id;event.frequency_hz=frequency;
@@ -1243,7 +1294,10 @@ struct Session::Impl {
                     {
                         {
                             std::lock_guard lock(mutex);
-                            if(current.running && generation==version)current.error=error.what();
+                            if(current.running && generation==version) {
+                                current.error=error.what();
+                                current.receiver_health.receiver_reset=true;
+                            }
                         }
                         bank.limited=true;
                         modem::PatternSearch search;
@@ -1260,7 +1314,7 @@ struct Session::Impl {
                         search.compact_clock_search=receiver.options.key &&
                             modem::symbol_sample_count(receiver.options.modem)>=60ULL*receiver.options.modem.sample_rate;
                         search.search_stream_phases=receiver.options.key.has_value();
-                        search.start_offset_seconds=static_cast<double>(receiver.epoch)-current_epoch();
+                        search.start_offset_seconds=static_cast<double>(receiver.epoch)-observation_epoch(bank,value,bank.samples+sample_count);
                         if(value.simulation || value.transfer.timestamp)
                             *search.start_offset_seconds+=(static_cast<double>(modem::training_sample_count(receiver.options.modem))+
                                 static_cast<double>(modem::pattern_pulse_padding_samples(receiver.options.modem)))/receiver.options.modem.sample_rate;
@@ -1270,8 +1324,9 @@ struct Session::Impl {
                         const auto remaining=capacity-other-overhead;
                         receiver.modem.reset();
                         receiver.modem=std::make_unique<modem::StreamingReceiver>(transfer::seeded_config(receiver.options,receiver.epoch),remaining,search);
+                        bank.coverage_limited |= receiver.modem->local_clock_fallback();
                         receiver.content=std::make_unique<transfer::StreamReceiver>(receiver.options,receiver.epoch,bank.source_quota);
-                        receiver.admitted_at=current_epoch();
+                        receiver.admitted_at=observation_epoch(bank,value,bank.samples+sample_count);
                         receiver.sample_origin=bank.samples+sample_count;
                         receiver.last_confident_at=0;receiver.last_confident_end=0;
                         receiver.pattern_score_history = {};
@@ -1292,7 +1347,7 @@ struct Session::Impl {
                         const auto physical_id=std::pair{burst.stream_first_sample,burst.stream_first_symbol};
                         auto presentation=receiver.presentations.find(physical_id);
                         if(presentation==receiver.presentations.end()) {
-                            if(receiver.presentations.size()>=16){bank.limited=true;continue;}
+                            if(receiver.presentations.size()>=16){bank.limited=bank.coverage_limited=true;continue;}
                             presentation=receiver.presentations.emplace(physical_id,
                                 Receiver::Presentation{bank.next_candidate++}).first;
                         }
@@ -1300,6 +1355,7 @@ struct Session::Impl {
                         candidate.complete=false;
                         const auto decision=bank.receptions.observe(candidate,[&]{return next_signal++;});
                         bank.limited|=decision.limited;
+                        if(decision.limited && !decision.selected)bank.coverage_limited=true;
                         presentation->second.signal_id=decision.signal_id;
                     }
                     bank.working_bytes=bank.working_bytes-before+receiver_workspace(receiver);
@@ -1347,7 +1403,12 @@ struct Session::Impl {
                 }
                 current.pattern_score_observation_id = observation_id;
             }
+            if(!value.simulation)decoding_remaining_samples-=std::min(decoding_remaining_samples,samples.size());
             receiver_bytes = bank.working_bytes;
+            current.receiver_health.search_limited |= bank.coverage_limited ||
+                std::any_of(bank.receivers.begin(),bank.receivers.end(),[](const auto& receiver) {
+                    return receiver.modem->local_clock_fallback() || receiver.modem->candidate_limited();
+                });
             if(bank.limited)current.status=bank.oscillator_limit.empty()?
                 "Pattern search is limited by the configured DSP workspace":bank.oscillator_limit;
             else if(std::any_of(bank.receivers.begin(),bank.receivers.end(),[](const auto& receiver) {
@@ -1356,7 +1417,7 @@ struct Session::Impl {
             else if(current.status=="Pattern search is limited by the configured DSP workspace" ||
                     current.status.starts_with("RX oscillator coverage incomplete:") ||
                     current.status=="Using local carrier search; increase DSP memory for wider clock coverage")current.status=idle_status();
-            current.dsp_buffered_bytes = receiver_bytes + input_bytes + decoding_bytes + audio_bytes + plot_workspace(value) + (tx_busy ? value.dsp_workspace_bytes / 4 : 0);
+            current.dsp_buffered_bytes = receiver_bytes + queue_storage_bytes() + decoding_bytes + audio_bytes + plot_workspace(value) + (tx_busy ? value.dsp_workspace_bytes / 4 : 0);
         }
     }
     void feed_samples(Bank& bank,std::span<const float> samples,const Settings& value,std::uint64_t version,
@@ -1608,18 +1669,37 @@ struct Session::Impl {
                 std::optional<detail::SignalWindow> monitor_window;
                 bool monitor_seen=false;
                 auto last_monitor=Clock::time_point{};
+                // Raw monitor callbacks precede the resampler. Map each logical
+                // output timestamp through its unconsumed input/lookahead, using
+                // a fresh raw end time so hardware clock drift cannot accumulate
+                // for hours. No waveform sample, filter state or rate is changed.
+                long double raw_seconds=0,logical_seconds=0;
+                std::optional<double> raw_end_epoch,logical_origin;
                 audio::Options capture_options{1.0,value.exclusive};
+                capture_options.capture_discontinuity=[&]{
+                    input_interrupted(version,capture_token);
+                    raw_seconds=logical_seconds=0;raw_end_epoch.reset();logical_origin.reset();
+                };
                 capture_options.capture_monitor=[&](std::span<const float> raw,std::uint32_t rate) {
-                    if(!monitor_window || raw.empty())return;
+                    if(raw.empty())return;
+                    raw_end_epoch=current_epoch();
+                    raw_seconds+=static_cast<long double>(raw.size())/rate;
+                    if(!monitor_window)return;
                     monitor_window->push(raw);
                     auto config=value.transfer.modem;config.sample_rate=rate;
                     publish_monitor(*monitor_window,config,version,last_monitor);
                     monitor_seen=true;
                 };
                 audio::capture(value.transfer.modem.sample_rate, value.device, [&](std::span<const float> chunk) {
+                    const auto duration=static_cast<long double>(chunk.size())/value.transfer.modem.sample_rate;
+                    if(!raw_end_epoch && !logical_origin)logical_origin=current_epoch()-static_cast<double>(duration);
+                    const auto observed=raw_end_epoch?
+                        *raw_end_epoch-static_cast<double>(raw_seconds-logical_seconds):
+                        *logical_origin+static_cast<double>(logical_seconds);
+                    logical_seconds+=duration;
                     account(chunk.size(), version); plot_window.push(chunk);
                     publish(plot_window, value.transfer.modem, version, last_plot,false,nullptr,0,nullptr,nullptr,0,monitor_seen);
-                    enqueue_audio(chunk, version);
+                    enqueue_audio(chunk, version,std::max(0.,observed));
                     std::lock_guard lock(mutex);
                     return current.running && generation == version && !ready && !capture_suspended;
                 }, capture_token, [&](const auto& format) {
@@ -1634,11 +1714,17 @@ struct Session::Impl {
                     }
                 }, std::move(capture_options));
             } catch (const std::exception& exception) {
+                const auto failed_capture = !value.simulation && !wave;
                 const auto cancelled_transmission = wave && wave->stop.stop_requested();
                 if (!cancelled_transmission) simulation_bank.reset();
                 if (wave) { complete_tx(*wave, wave->stop.stop_requested() ? "" : exception.what()); wave.reset(); }
                 std::unique_lock lock(mutex);
                 if (current.running && generation == version && !capture_token.stop_requested() && !processing_token.stop_requested() && !cancelled_transmission) {
+                    if(failed_capture) {
+                        current.receiver_health.input_interrupted=true;
+                        count_dropped(current.receiver_health.dropped_samples,input_bytes/sizeof(float));
+                        reset_input_locked();
+                    }
                     current.error = exception.what(); current.status = value.simulation ? "Simulation paused after channel error" : "Audio input unavailable; retrying";
                     changed.wait_for(lock, stop, std::chrono::seconds(2), [this, version] {
                         return !current.running || generation != version || ready || capture_suspended;
@@ -1804,28 +1890,37 @@ struct Session::Impl {
                 if (stop.stop_requested()) break;
                 if (local_generation != generation) {
                     bank.reset(); local_generation = generation; local_revision = receive_revision;
-                    decoding_bytes = 0; decoder_generation = generation; changed.notify_all();
+                    decoding_bytes = decoding_remaining_samples = 0; decoding_queued_at.reset(); decoder_generation = generation; changed.notify_all();
                 }
                 if (!current.running || settings.simulation || input.empty()) continue;
                 value = settings; version = generation; token = decode_stop.get_token();
                 block = std::move(input.front()); input.pop_front(); input_bytes -= block.samples.size() * sizeof(float);
                 decoding_bytes = block.samples.size() * sizeof(float);
+                decoding_queued_at=block.queued_at;decoding_remaining_samples=block.samples.size();
                 current.buffered_samples = input_bytes / sizeof(float);
                 if (local_generation != version || local_revision != block.revision) {
                     local_generation = version; local_revision = block.revision; bank.reset();
                 }
             }
             try {
-                if (!bank) bank = make_bank(value);
+                if (!bank) {
+                    Bank initial;initial.observed_epoch=block.observed_epoch;
+                    bank=make_bank(value,std::move(initial));
+                } else {
+                    bank->observed_epoch=block.observed_epoch;bank->observed_sample=bank->samples;
+                }
                 feed_samples(*bank,block.samples,value,version,token);
             } catch (const std::exception& exception) {
                 std::lock_guard lock(mutex);
-                if (current.running && generation == version && !token.stop_requested()) current.error = exception.what();
+                if (current.running && generation == version && !token.stop_requested()) {
+                    current.error = exception.what();
+                    current.receiver_health.receiver_reset=true;
+                }
                 bank.reset();
             }
             {
                 std::lock_guard lock(mutex);
-                decoding_bytes = 0;
+                decoding_bytes = decoding_remaining_samples = 0;decoding_queued_at.reset();
             }
         }
     }
@@ -1976,7 +2071,23 @@ Snapshot Session::snapshot() {
             count_dropped(impl_->current.constellation_dropped, impl_->pending_points.points.size());
         impl_->pending_points = {}; ++impl_->current.sequence;
     }
+    // Include constructor/scoring work after it has left the queue. No loss is
+    // implied: a large configured buffer may retain minutes of delayed PCM.
+    double pending_seconds=0,oldest_seconds=0;
+    if(impl_->current.running && !impl_->settings.simulation && impl_->decoder_generation==impl_->generation) {
+        pending_seconds=(static_cast<double>(impl_->input_bytes)/sizeof(float)+impl_->decoding_remaining_samples)/
+            impl_->settings.transfer.modem.sample_rate;
+        auto oldest=impl_->decoding_remaining_samples?impl_->decoding_queued_at:std::nullopt;
+        if(!impl_->input.empty() && (!oldest || impl_->input.front().queued_at<*oldest))oldest=impl_->input.front().queued_at;
+        if(oldest)oldest_seconds=std::max(0.,std::chrono::duration<double>(Clock::now()-*oldest).count());
+    }
+    impl_->current.receiver_backlog_seconds=pending_seconds;
+    impl_->current.receiver_oldest_input_seconds=oldest_seconds;
+    const auto delay=std::max(pending_seconds,oldest_seconds);
+    // A transient warning, with hysteresis; only observed loss flags latch.
+    impl_->current.receiver_behind=delay>1. || (impl_->current.receiver_behind && delay>.25);
     auto result = impl_->current; result.signals = std::move(signals); result.received = std::move(received);
+    result.decoding_samples=impl_->decoder_generation==impl_->generation?impl_->decoding_remaining_samples:0;
     impl_->replay_snapshot(result, now);
     count_dropped(result.constellation_dropped, impl_->replay_omitted); impl_->replay_omitted = 0;
     return result;

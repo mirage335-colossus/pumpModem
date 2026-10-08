@@ -26,7 +26,17 @@ enum class ChannelMode { left_mono, right_mono, stereo };
 // and rate describe the provider capture stream, independently of the modem clock.
 // Keep this callback bounded; it cannot consume samples or finish reception.
 using CaptureMonitor = std::function<void(std::span<const float>,std::uint32_t)>;
-struct Options {double transmit_gain=1.0; bool exclusive=false; CaptureMonitor capture_monitor={};};
+// Report known or uncertain loss of capture continuity before any later PCM.
+// A recoverable device interruption is not observed silence. Never flush the
+// old resampler tail into the next continuous segment. Without an observer,
+// capture fails on such a gap: a flat recording cannot represent lost time.
+using CaptureDiscontinuity = std::function<void()>;
+struct Options {
+    double transmit_gain=1.0;
+    bool exclusive=false;
+    CaptureMonitor capture_monitor={};
+    CaptureDiscontinuity capture_discontinuity={};
+};
 // Capabilities belong to the selected audio provider, not the UI or target OS.
 bool exclusive_supported();
 std::string default_device_description();

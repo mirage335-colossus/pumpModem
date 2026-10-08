@@ -96,7 +96,22 @@ struct PatternScoreObservation {
     double admission_threshold = 0;
     bool operator==(const PatternScoreObservation&) const = default;
 };
+// Latched for one Session configuration. Healthy input and automatic retries
+// cannot erase evidence of lost reception. Normal score rejection, diagnostic
+// retention and lossless slow simulation do not set these flags.
+struct ReceiverHealth {
+    std::uint64_t input_overruns = 0;
+    std::uint64_t dropped_samples = 0; // Known discarded logical PCM only.
+    bool input_interrupted = false; // Device continuity lost or uncertain.
+    bool search_limited = false; // Required coverage/candidate omitted by quota.
+    bool receiver_reset = false; // Processing error discarded acquisition state.
+    bool failed() const noexcept {
+        return input_overruns || input_interrupted || search_limited || receiver_reset;
+    }
+};
 struct Snapshot {
+    ReceiverHealth receiver_health;
+
     static constexpr std::size_t pattern_score_limit = 128;
     static constexpr auto pattern_score_lifetime = std::chrono::seconds(6);
     std::vector<float> waveform;
@@ -140,6 +155,13 @@ struct Snapshot {
     std::uint64_t sequence = 0;
     std::uint64_t samples_received = 0;
     std::size_t buffered_samples = 0;
+    // PCM currently being scored outside the capture queue. Together with
+    // buffered_samples, distinguishes an idle decoder from a popped work block.
+    std::size_t decoding_samples = 0;
+    // Hardware queue + in-flight PCM only, not symbol/lookahead retention.
+    // Oldest age includes bank construction and a synchronous scoring call.
+    double receiver_backlog_seconds = 0, receiver_oldest_input_seconds = 0;
+    bool receiver_behind = false; // >1 s; clears below 0.25 s, independent of workspace
     double virtual_seconds = 0;
     double transmission_seconds = 0;
     // Fraction of transmitted audio generated/played, not receiver work.

@@ -1471,6 +1471,39 @@ void application_local_fallback_preserves_original_search() {
 }
 }
 namespace {
+void candidate_quota_health() {
+    auto c=config(128,true);c.sample_rate=6000;c.carrier_hz=1500;c.bandwidth_hz=1200;c.pulse_shaping=false;
+    auto shifted=c;shifted.carrier_hz+=75;
+    auto samples=waveform(c,Bytes{0},0,0,.21);
+    const auto other=waveform(shifted,Bytes{1},0,0,-.53);
+    for(std::size_t i=0;i<samples.size();++i)samples[i]+=other[i];
+    for(const unsigned limit:{0U,1U,2U}) {
+        modem::PatternSearch search;search.frequency_offsets_hz={0,75};search.drift_tolerant=false;
+        search.worker_threads=1;search.chunk_bits=16;search.candidate_limit=limit==1?1:16;search.track_limit=limit==2?1:4;
+        modem::PatternReceiver receiver(c,8*1024*1024,search);
+        check(!receiver.clock_windowed() && !receiver.candidate_limited(),"quota fixture did not start in healthy FFT backend");
+        receiver.push(samples);receiver.finish();
+        const auto bursts=receiver.take_bursts();
+        check(receiver.candidate_limited()==(limit!=0),"FFT candidate quota did not report omitted coverage");
+        check(bursts.size()==(limit?1:2),"quota fixture did not admit its independent control streams");
+        for(const auto& burst:bursts)check(!burst.complete && burst.bits.size()==1,"quota/EOF manufactured physical completion");
+        receiver.finish();check(receiver.candidate_limited()==(limit!=0),"draining or EOF cleared quota history");
+    }
+    // Noise and ordinary competition between overlapping starts are healthy.
+    modem::PatternSearch search;search.frequency_offsets_hz={0};search.candidate_limit=1;search.track_limit=1;
+    search.drift_tolerant=false;search.worker_threads=1;
+    for(const unsigned background:{0U,1U,2U}) {
+        modem::PatternReceiver receiver(c,8*1024*1024,search);
+        auto input=waveform(c,Bytes{0},0,0,.21);
+        if(background)std::fill(input.begin(),input.end(),0);
+        if(background==2) {
+            std::mt19937_64 random(481);std::normal_distribution<float> noise(0,.2f);
+            for(auto& sample:input)sample=noise(random);
+        }
+        receiver.push(input);receiver.finish();receiver.take_bursts();
+        check(!receiver.candidate_limited(),"noise or ordinary candidate rejection reported quota loss");
+    }
+}
 void initial_search_coverage() {
     auto c=config();c.sample_rate=8192;c.carrier_hz=2048;c.bandwidth_hz=1024;c.pulse_shaping=false;
     const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
@@ -1524,6 +1557,7 @@ int main(int argc,char** argv) {
         try { test();std::cout<<name<<": passed\n"; }
         catch(const std::exception& error){++failures;std::cerr<<name<<": "<<error.what()<<'\n';}
     };
+    run("candidate quota health",candidate_quota_health);
     run("initial search coverage",initial_search_coverage);
     run("exact blind bits",exact_blind_bits);run("chunk invariance and late start",changing_chunks_and_late_start);
     run("continuous long FFT progress",continuous_long_fft_progress);

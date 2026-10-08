@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <memory>
+#include <optional>
 #include <thread>
 #include <chrono>
 #include <cerrno>
@@ -86,17 +87,23 @@ public:
 class CaptureSink {
     const CaptureCallback& next_;
     std::stop_token stop_;
-    Resampler converter_;
+    std::uint32_t logical_,hardware_;
+    std::optional<Resampler> converter_;
     std::vector<float> output_;
 public:
     CaptureSink(std::uint32_t logical,std::uint32_t hardware,const CaptureCallback& next,std::stop_token stop)
-        :next_(next),stop_(stop),converter_(hardware,logical),output_(std::min<std::size_t>(4096,logical/20)){}
-    std::size_t workspace_bytes() const {return sizeof(*this)+converter_.workspace_bytes()+output_.capacity()*sizeof(float);}
+        :next_(next),stop_(stop),logical_(logical),hardware_(hardware),converter_(std::in_place,hardware,logical),output_(std::min<std::size_t>(4096,logical/20)){}
+    std::size_t workspace_bytes() const {return sizeof(*this)+converter_->workspace_bytes()+output_.capacity()*sizeof(float);}
+    void discontinuity() {
+        // emplace destroys the old filter before allocating its replacement;
+        // no doubled filter workspace and no fabricated EOF/absence samples.
+        converter_.emplace(hardware_,logical_);
+    }
     bool write(std::span<const float> input) {
         std::size_t consumed=0;
         while(true) {
             check_cancelled(stop_);
-            const auto progress=converter_.process(input.subspan(consumed),output_);
+            const auto progress=converter_->process(input.subspan(consumed),output_);
             consumed+=progress.consumed;
             if(progress.produced) {
                 const bool keep=next_(std::span<const float>(output_.data(),progress.produced));
@@ -357,7 +364,7 @@ std::vector<float> record(double seconds,std::uint32_t rate,const std::string& d
     },stop,std::move(on_format));
     return samples;
 }
-static void capture_device(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop,StreamFormatCallback on_format,const CaptureMonitor& monitor={}) {
+static void capture_device(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop,StreamFormatCallback on_format,const CaptureMonitor& monitor={},const CaptureDiscontinuity& discontinuity={}) {
     check_cancelled(stop);
     if(!on_chunk) throw Error("capture callback is required");
     Alsa api; Stream stream(api,device,1,rate,stop,true);
@@ -367,17 +374,30 @@ static void capture_device(std::uint32_t rate,const std::string& device,const Ca
     std::vector<float> converted(chunk_limit);
     report_format(rate,stream.hardware_rate,sink.workspace_bytes()+block.capacity()*sizeof(std::int16_t)+converted.capacity()*sizeof(float),on_format);
     unsigned failures=0;
+    const auto recover=[&](int error) {
+        check_cancelled(stop);
+        if(error==-EINTR)return; // Interrupted syscall does not lose the stream.
+        if(++failures>8 || api.recover(stream.pcm,error,1)<0)throw Error("audio capture recovery failed");
+        check_cancelled(stop);
+        if(error==-EPIPE || error==-ESTRPIPE) {
+            // EPIPE is an overrun. Suspend recovery may resume losslessly or
+            // prepare a fresh stream; its continuity is unknown to this API.
+            if(!discontinuity)throw Error("audio capture continuity lost; restart reception");
+            discontinuity();
+            check_cancelled(stop);
+            sink.discontinuity();
+        }
+    };
     while(true) {
         check_cancelled(stop);
         auto n=api.read(stream.pcm,block.data(),chunk_limit);
         check_cancelled(stop);
         if(n==-EAGAIN) {
             const auto waited=api.wait(stream.pcm,20);
-            if(waited<0 && (++failures>8 || api.recover(stream.pcm,waited,1)<0))
-                throw Error("audio capture wait failed");
+            if(waited<0)recover(waited);
             continue;
         }
-        if(n<0) {if(++failures>8 || api.recover(stream.pcm,static_cast<int>(n),1)<0) throw Error("audio capture failed");}
+        if(n<0)recover(static_cast<int>(n));
         else if(n==0) throw Error("audio capture stalled");
         else {
             if(static_cast<std::size_t>(n)>chunk_limit) throw Error("audio capture returned invalid sample count");
@@ -561,7 +581,7 @@ std::vector<float> record(double seconds,std::uint32_t rate,const std::string& d
     },stop,std::move(on_format));
     return result;
 }
-static void capture_device(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop,StreamFormatCallback on_format,const CaptureMonitor& monitor={}) {
+static void capture_device(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop,StreamFormatCallback on_format,const CaptureMonitor& monitor={},const CaptureDiscontinuity& ={}) {
     check_cancelled(stop);
     if(!on_chunk) throw Error("capture callback is required");
     WaveSession session(true,rate,device);
@@ -603,7 +623,7 @@ void capture(std::uint32_t rate,const std::string& device,const CaptureCallback&
 }
 void capture(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop,StreamFormatCallback on_format,Options options) {
     check_cancelled(stop);validate_options(options);
-    capture_device(rate,selected_endpoint(device,true,options.exclusive),on_chunk,stop,std::move(on_format),options.capture_monitor);
+    capture_device(rate,selected_endpoint(device,true,options.exclusive),on_chunk,stop,std::move(on_format),options.capture_monitor,options.capture_discontinuity);
 }
 void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop,StreamFormatCallback on_format,ChannelMode channels) {
     playback_device(rate,device,next_samples,stop,std::move(on_format),channels,1.0);

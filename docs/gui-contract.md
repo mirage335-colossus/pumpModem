@@ -381,6 +381,51 @@ as Robust; custom selections survive an inventory update.
 Legacy places its audio-device selector on the left and squelch on the right in
 one row below the waterfall, above the status and transmit-volume row.
 
+The Robust listening mode label becomes a red **FAIL: receiver dropped input**
+when its bounded capture queue discards PCM. Other explicit reasons are
+**receiver input interrupted** (device loss or uncertain continuity),
+**receiver search limited** (required coverage or candidates omitted by a resource
+limit), and **receiver restarted** (a processing error discarded acquisition).
+These flags remain visible until receiver restart/reconfiguration; ordinary status
+notices, later healthy samples, transmission and replay do not clear them.
+Transmission/replay progress remains beside the failure. Stopping shows **Stopped**.
+The literal FAIL text remains meaningful with custom colors disabled.
+
+Before any input is discarded, hardware reception shows a red
+**LATE: receiver backlog N.N s** when either queued/unprocessed audio duration or
+oldest unprocessed block age exceeds one second. This includes receiver setup and
+in-flight scoring, even when the capture queue is empty. The warning updates on
+each GUI poll, independently of plot updates and configured buffer capacity; it
+clears when both measures are at most 0.25 seconds. Diagnostics show pending media
+and oldest age separately. These thresholds govern presentation only. They do not
+shorten queues, omit searches or classify retained input as dropped. The queue
+reserves one eighth of the configured workspace: before per-block metadata, its
+float PCM capacity is `workspace_bytes / (32 * DSP_sample_rate)` seconds. A large
+workspace can therefore delay a true overflow by many minutes; backlog reporting
+does not wait for that event. Block metadata is charged against this same bound. Confirmed
+FAIL reasons take precedence and remain latched. Simulation and modem-internal
+symbol/lookahead retention do not count as hardware backlog.
+
+Queued hardware PCM carries observation UTC. Raw capture endpoint time and the
+resampler's unconsumed-input/lookahead duration locate each logical block, so key
+epoch admission follows captured audio rather than delayed decoding wall time.
+Each raw callback refreshes the time mapping to avoid accumulating hardware clock
+drift over long sessions. These are source-arrival timestamps, with device-buffer
+uncertainty, not exact ADC timestamps. Existing waveform/sample coordinates stay
+continuous; true device discontinuities reset the mapping and acquisition.
+
+This is observed runtime health, not a forecast from CPU usage or the planner.
+Normal weak-candidate rejection, competing timing hypotheses, diagnostic history
+rotation, display thinning and slow but lossless simulation do not trigger it.
+A limited search means omitted coverage, not proof that a message bit was lost.
+Diagnostics count queue overruns and known discarded logical samples; unknown
+hardware loss and partially scored in-flight work are not invented sample counts.
+Recovered ALSA overruns reset filter/acquisition continuity before subsequent
+PCM. Suspend recovery is conservatively classified as uncertain continuity.
+Capture callers without a discontinuity handler fail instead of concatenating
+samples across these gaps; a flat recording cannot describe missing time.
+No gap, receiver reset, EOF or quota event supplies physical absence/completion.
+
 The compact persistent **Baseband Osc**, **Shift Osc** and **Margin** controls
 sit together below the Simulation estimates; **Carrier** and **Shift** are
 adjacent in the modem row. Both oscillator dropdowns offer **Free-running

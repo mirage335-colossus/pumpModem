@@ -176,6 +176,10 @@ public:
     // The application requested expansion but only the original local
     // five-frequency search fitted its workspace. This is reduced coverage.
     bool local_clock_fallback() const;
+    // A peak/continuation was omitted at the configured candidate/track quota.
+    // Latched until reconstruction; normal competing-score rejection and
+    // diagnostic history eviction do not set this. Not proof of a lost bit.
+    bool candidate_limited() const;
     // Whether the additional section detector fits this profile and budget.
     bool drift_tolerant() const;
     std::size_t working_bytes() const;
