@@ -540,12 +540,24 @@ Exact endpoints and rounding can reduce reuse.
 Small-cell allowances remain 220 equivalent operations per sample/lattice,
 4,000 per cell Gram, 6,000 per private bit pair/chip/origin/phase, and 16,000 per
 kernel sample. Large cells use bounded table segments and logarithmic geometric
-moments. Partial affine search counts pulse knots, oscillator-block clips,
-quarters and complete local-window boundaries, capped at the observation count;
-it charges 1,800 operations per private bit-pair span plus detector bookkeeping.
+moments. Affine search counts pulse knots, shifted partial-final pulse knots,
+quarters, symbols and complete local-window boundaries, capped at the observation
+count. Oscillator-block clips still require a covariance fit. Where the optional
+80-byte per-lane/per-phase interval cache fits, the model charges 990 equivalent
+operations for preparation at natural boundaries and 810 for each clipped fit,
+plus detector bookkeeping. The cache gate follows the implementation's chip,
+clock-scaled knot width and workspace checks. Required payload retention can
+evict this cache, returning to the unchanged 1,800-operation fallback. Logical
+payload capacity and hypothesis coverage are unchanged.
 Carrier moments are prepared once per public frequency and span length.
 Up to three lattices per pair and cross-receiver cache misses are budgeted.
-These coefficients are rounded engineering assumptions, not host calibration.
+The 55:45 preparation/fitting split is a conservative engineering attribution
+informed by component profiles, whose fine-grained timers add substantial cost.
+It is not a throughput calibration; actual total speedup is measured separately
+without those timers. The interval fast path also avoids repeated geometry work;
+its benefit is not independently calibrated into the remaining fitting allowance.
+Short-prefix speedup factors are not multiplied into full-message predictions.
+These coefficients remain rounded engineering assumptions.
 See [paired execution and sensitivity evidence](pulse-moment-validation.md).
 
 The modeled per-bank allowance is the total divided by the modeled bank count,

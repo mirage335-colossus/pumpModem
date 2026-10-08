@@ -185,10 +185,38 @@ cache crosses parallel private searches. Smaller chips and
 tight budgets keep the raw path. The 1,024-sample gate avoids replacing cheap
 short spans with more setup work.
 
-The affine path still contracts at oscillator-block boundaries. Its search
-cost therefore follows the sum of the pulse-knot and input-block rates; it is
-not independent of sample rate in arbitrarily oversampled partial geometries.
-No accepted bit waits for a later block or symbol.
+The affine path fits observations at the same oscillator-block boundaries.
+For chips of at least 8,192 samples whose shortest table interval exceeds that
+block, it can retain the two private templates' complex values and slopes until
+the natural pulse interval ends. Each lane and phase group owns an 80-byte
+entry. Reuse translates the anchored value by the integer sample displacement;
+it does not accumulate a chain of incremental translations. The interval ends
+at a regular or shifted final-pulse knot, chip, quarter, local window or symbol
+boundary. Literal support endpoints remain singleton spans. Completing a symbol
+clears its entries before the next private stream address is selected.
+When every active group's interval covers the entire next oscillator block,
+the receiver also skips repeated phase, clock and boundary calculations. It
+still performs the original per-block fit in the same order. Materializing
+deferred quarter state invalidates the intervals so the next fit observes the
+newly active boundaries.
+
+This optional cache uses available workspace without lowering the preceding
+path's bit-retention limit or detector reservations. Payload allocation and
+workspace reduction can evict it and resume the preceding arithmetic. Eviction
+cleanses the retained private coefficients. The cache is never shared between
+keys, epochs, lanes or phase groups; only the existing public sample projections
+are shared. Smaller intervals and insufficient workspace use the preceding
+affine path automatically. There is no persisted setting.
+
+Private coefficient construction then follows natural pulse intervals, while
+I/Q projection, covariance fitting and ordered admission retain their original
+sample/block cadence. No filtering, decimation, oscillator-bank reduction or
+additional observation delay is introduced. Search is still not independent
+of input rate in arbitrarily oversampled geometries. Reassociation introduces
+floating-point differences, which require paired validation against both the
+preceding optimized receiver and the raw reference; see the
+[measurement record](pulse-moment-validation.md). No accepted bit waits for a
+later block or symbol.
 
 Cell storage is bounded by the processing block and bank size, independently of
 symbol duration, including 32 KiB of preparation scratch in the workspace

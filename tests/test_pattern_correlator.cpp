@@ -895,6 +895,145 @@ void projection_cache_headroom_bound() {
         samples.erase(samples.begin(),samples.begin()+static_cast<std::ptrdiff_t>(n));
     }
 }
+void affine_coefficient_reuse() {
+    struct Geometry {std::uint64_t tail,chips;double ppm,carrier;};
+    constexpr std::uint64_t chip=16384;
+    for(const auto item:{Geometry{0,17,0,16},Geometry{1,17,200,16},
+            Geometry{chip/2,17,-200,.05},Geometry{chip-1,64,10000,.05}}) {
+        auto c=config();c.sample_rate=64;c.carrier_hz=item.carrier;c.bandwidth_hz=128./chip;
+        const auto symbol=item.chips*chip+item.tail;
+        c.integration_seconds=(static_cast<double>(symbol)-.25)/c.sample_rate;
+        c.stream_epoch=1730000931;c.stream_phase_samples=7;
+        check(modem::pattern_chip_samples(c)==chip && modem::symbol_sample_count(c)==symbol,
+              "coefficient reuse fixture lost its exact finite pulse geometry");
+        const auto rate=1+static_cast<long double>(item.ppm)*1e-6L;
+        constexpr std::size_t delay=137;
+        const auto origin=delay+modem::pattern_pulse_padding_samples(c)/rate;
+        const Bytes bits{0,1,0};auto samples=waveform(bits,c,delay,static_cast<double>(rate));
+        samples.resize(static_cast<std::size_t>(std::ceil(origin+(bits.size()+1)*symbol/rate)));
+        // Preserve the finite transmitted tail. This long-chip fixture needs
+        // enough noise that a tail-only following interval is absent under
+        // the unchanged raw detector as well as both optimized paths.
+        std::mt19937 random(9147);std::normal_distribution<float> noise(0,2.F);
+        for(auto& x:samples)x+=noise(random);
+        modem::PatternSearch search;search.start_offset_seconds=static_cast<double>(origin/c.sample_rate);
+        search.start_uncertainty_seconds=0;search.search_stream_phases=true;search.compact_clock_search=true;
+        search.hypotheses={{c.carrier_hz*static_cast<double>(rate-1),item.ppm}};
+        search.retain_score=0;search.candidate_limit=32;search.track_limit=1;
+        search.bit_limit=16;search.chunk_bits=1;search.worker_threads=1;
+        modem::PatternCorrelator cached(c,search,4*1024*1024,{false,false,false,true});
+        modem::PatternCorrelator preceding(c,search,4*1024*1024,{false,false,true,true});
+        modem::PatternCorrelator raw(c,search,4*1024*1024,{true,false});
+        check(cached.work().backend==modem::PatternCorrelationBackend::pulse_segments &&
+              preceding.work().backend==cached.work().backend &&
+              cached.work().affine_coefficient_cache_entries==cached.work().hypotheses*cached.work().phase_groups &&
+              preceding.work().affine_coefficient_cache_entries==0 &&
+              raw.work().affine_coefficient_cache_entries==0 && cached.drift_tolerant()==preceding.drift_tolerant(),
+              "automatic coefficient reuse changed the backend, hypothesis or detector bank");
+        check(cached.reserved_workspace_bytes()==preceding.reserved_workspace_bytes()+
+              80*cached.work().affine_coefficient_cache_entries,
+              "private coefficient reuse exceeded its bounded lane/group allowance");
+        // Production bit quotas often exceed the workspace-derived limit.
+        // Optional initial coefficients must remain available in that case,
+        // while future payload growth can evict them without reducing the limit.
+        auto large_search=search;large_search.bit_limit=std::numeric_limits<std::size_t>::max();
+        const auto derived_budget=preceding.reserved_workspace_bytes()+4096;
+        modem::PatternCorrelator derived(c,large_search,derived_budget);
+        check(derived.work().affine_coefficient_cache_entries==cached.work().affine_coefficient_cache_entries &&
+              derived.work().hypotheses==cached.work().hypotheses && derived.drift_tolerant()==cached.drift_tolerant() &&
+              derived.reserved_workspace_bytes()<=derived_budget,
+              "workspace-derived bit retention incorrectly vetoed optional coefficient reuse");
+        const auto denominator=2*cached.work().hypotheses+2*search.track_limit+2;
+        modem::PatternCorrelator no_cache(c,search,preceding.reserved_workspace_bytes()+denominator);
+        check(no_cache.work().affine_coefficient_cache_entries==0 &&
+              no_cache.work().hypotheses==cached.work().hypotheses &&
+              no_cache.work().backend==modem::PatternCorrelationBackend::pulse_segments,
+              "unaffordable private coefficients changed the complete affine fallback");
+        const auto compare=[](const auto& a,const auto& b) {
+            check(a.size()==b.size(),"coefficient reuse omitted a completed hypothesis");
+            for(std::size_t i=0;i<a.size();++i)check(a[i].bit==b[i].bit &&
+                a[i].first_sample==b[i].first_sample && a[i].end_sample==b[i].end_sample &&
+                a[i].stream_symbol==b[i].stream_symbol && a[i].stream_phase_samples==b[i].stream_phase_samples &&
+                a[i].admission_threshold==b[i].admission_threshold &&
+                std::abs(a[i].score-b[i].score)<2e-7*std::max(1.,b[i].score) &&
+                std::abs(a[i].alternative_score-b[i].alternative_score)<2e-7*std::max(1.,b[i].alternative_score),
+                "coefficient reuse changed fresh private bits, covariance, section evidence or trial identity");
+        };
+        std::vector<std::size_t> boundaries;
+        const auto mark=[&](long double position) {
+            const auto at=static_cast<std::size_t>(std::ceil(position));
+            if(at)boundaries.push_back(at-1);
+            boundaries.push_back(at);boundaries.push_back(at+1);
+        };
+        mark(origin+chip/(2*rate));
+        if(item.tail)mark(origin+((modem::pattern_chips_per_symbol(c)-1-8)*chip+item.tail/2.L)/rate);
+        for(std::size_t n=1;n<=bits.size()+1;++n) {
+            mark(origin+n*symbol/rate);
+            if(item.chips>=64)for(unsigned section=1;section<4;++section)
+                mark(origin+((n-1)*symbol+section*(symbol/4))/rate);
+        }
+        std::sort(boundaries.begin(),boundaries.end());
+        boundaries.erase(std::unique(boundaries.begin(),boundaries.end()),boundaries.end());
+        Bytes accepted;unsigned completed=0;std::size_t push_index=0;
+        for(std::size_t offset=0;offset<samples.size();) {
+            constexpr std::array<std::size_t,4> chunks{17,137,2048,4097};
+            auto until=std::min(samples.size(),offset+chunks[push_index++%chunks.size()]);
+            const auto next=std::upper_bound(boundaries.begin(),boundaries.end(),offset);
+            if(next!=boundaries.end())until=std::min(until,*next);
+            const auto input=std::span(samples).subspan(offset,until-offset);offset=until;
+            cached.push(input);preceding.push(input);raw.push(input);
+            compare(cached.candidates(),preceding.candidates());compare(cached.candidates(),raw.candidates());
+            const auto a=cached.take_bursts(),b=preceding.take_bursts(),r=raw.take_bursts();
+            check(a.size()==b.size() && a.size()==r.size(),"coefficient reuse batched next-poll bit progress");
+            for(std::size_t i=0;i<a.size();++i) {
+                check(a[i].bits==b[i].bits && a[i].bits==r[i].bits &&
+                      a[i].complete==b[i].complete && a[i].complete==r[i].complete &&
+                      a[i].end_sample==b[i].end_sample && a[i].end_sample==r[i].end_sample,
+                      "coefficient reuse changed pending bits or physical absence");
+                accepted.insert(accepted.end(),a[i].bits.begin(),a[i].bits.end());completed+=a[i].complete;
+            }
+            check(cached.working_bytes()<=4*1024*1024,"coefficient reuse exceeded configured workspace");
+        }
+        if(accepted!=bits || completed!=1) {
+            std::cerr<<"affine fixture tail="<<item.tail<<" chips="<<item.chips
+                <<" ppm="<<item.ppm<<" carrier="<<item.carrier<<" accepted=";
+            for(const auto bit:accepted)std::cerr<<unsigned(bit);
+            std::cerr<<" completed="<<completed<<'\n';
+            for(const auto& e:cached.candidates())std::cerr<<"  symbol="<<e.stream_symbol
+                <<" score="<<e.score<<" alternative="<<e.alternative_score
+                <<" threshold="<<e.admission_threshold<<'\n';
+        }
+        check(accepted==bits && completed==1,"cached private affine patterns changed physical bit decisions");
+        const auto a=cached.work(),b=preceding.work();
+        check(a.affine_reuses>0 && a.affine_interval_fast_paths>0 && a.affine_preparations>0 && b.affine_reuses==0 &&
+              a.affine_preparations<b.affine_preparations &&
+              a.affine_preparations+a.affine_reuses==a.segments && b.affine_preparations==b.segments,
+              "coefficient reuse fixture did not exercise retained natural pulse intervals");
+        cached.finish();check(cached.take_bursts().empty(),"coefficient cache manufactured a second physical end");
+        // Eviction during a partially observed affine interval retains the
+        // preceding bit limit and accumulated observation/evidence state.
+        modem::PatternCorrelator evicted(c,search,4*1024*1024),reference(c,search,4*1024*1024,{false,false,true,false});
+        const auto start=static_cast<std::size_t>(std::ceil(origin))+17;
+        evicted.push(std::span(samples).first(start));reference.push(std::span(samples).first(start));
+        evicted.set_workspace_bytes(reference.reserved_workspace_bytes());
+        check(evicted.work().affine_coefficient_cache_entries==0 && evicted.drift_tolerant()==reference.drift_tolerant(),
+              "cache eviction reset private fitting or displaced a promised detector");
+        evicted.set_workspace_bytes(4*1024*1024);
+        std::stop_source cancel;cancel.request_stop();
+        rejects([&]{evicted.push(std::span(samples).subspan(start,1),cancel.get_token());},
+                "coefficient cache ignored cancellation");
+        const auto first_end=static_cast<std::size_t>(std::ceil(origin+symbol/rate));
+        const auto remaining=std::span(samples).subspan(start,first_end-start);
+        evicted.push(remaining);reference.push(remaining);compare(evicted.candidates(),reference.candidates());
+        const auto x=evicted.take_bursts(),y=reference.take_bursts();
+        check(x.size()==y.size() && x.size()==1 && x[0].bits==Bytes{0} && x[0].bits==y[0].bits &&
+              !x[0].complete && !y[0].complete,"mid-span cache eviction lost immediate first-bit progress");
+        evicted.finish();reference.finish();
+        const auto stopped=evicted.take_bursts();
+        check(std::none_of(stopped.begin(),stopped.end(),
+              [](const auto& event){return event.complete;}),"cache eviction or EOF manufactured absence");
+    }
+}
 void majority_obscured_symbol_is_independent() {
     auto c=config();c.integration_seconds=2;
     const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
@@ -1565,6 +1704,7 @@ int main(int argc,char** argv) {
     run("partial_projection_affine_fallback",partial_projection_affine_fallback);
     run("aligned_projection_affine_budget",aligned_projection_affine_budget);
     run("projection_cache_headroom_bound",projection_cache_headroom_bound);
+    run("affine_coefficient_reuse",affine_coefficient_reuse);
     run("majority_obscured_symbol_is_independent",majority_obscured_symbol_is_independent);
     run("completely_obscured_symbols_do_not_block_later_symbols",completely_obscured_symbols_do_not_block_later_symbols);
     run("weak_tails_expire_without_blocking_independent_symbols",weak_tails_expire_without_blocking_independent_symbols);

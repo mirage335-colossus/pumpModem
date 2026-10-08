@@ -14,6 +14,7 @@
 #include <numeric>
 #include <chrono>
 #include <ctime>
+#include <openssl/crypto.h>
 
 namespace datapump::modem {
 namespace {
@@ -112,6 +113,7 @@ struct PatternCorrelator::Impl {
         std::size_t committed=0,gap_slots=0;
         std::uint64_t committed_end=0;
         bool admitted=false,pending_gaps=false;
+        std::uint8_t affine_groups=0; // Uses the existing trailing alignment padding.
     };
     std::vector<Hypothesis> hypotheses;
     struct Emission {
@@ -135,6 +137,21 @@ struct PatternCorrelator::Impl {
     // Only the partial-symbol affine path needs these per-lane diagnostics.
     // Separate counters keep worker accumulation independent and bounded.
     std::vector<std::uint64_t> affine_counts;
+    struct AffineCoefficients {
+        std::array<Complex,2> value{},slope{};
+        std::uint64_t first=0,end=0;
+        void invalidate() {
+            OPENSSL_cleanse(value.data(),sizeof(value));
+            OPENSSL_cleanse(slope.data(),sizeof(slope));
+            first=end=0;
+        }
+        ~AffineCoefficients(){invalidate();}
+    };
+    static_assert(sizeof(AffineCoefficients)==80);
+    // Slots are permanently bound to a lane and phase group. Their absolute
+    // ranges never cross a chip, detector boundary or symbol; completion
+    // invalidates all slots before changing the private stream address.
+    std::vector<AffineCoefficients> affine_coefficients;
     struct PulseLattice {
         long double anchor=0,rate=1,start=0,first_offset=0;
         std::size_t frequency=0;
@@ -174,6 +191,8 @@ struct PatternCorrelator::Impl {
     Impl(Config c,PatternSearch search_options,std::size_t bytes,PatternCorrelatorOptions work_options)
         :config(c),search(std::move(search_options)),code(c,c.stream_epoch),budget(bytes),options(work_options) {
         validate(c);
+        require(!options.measure_affine_work || search.worker_threads==1,
+                "detailed affine work timing requires one scoring worker");
         drift_sections=detail::drift_section_count(c,search.drift_tolerant);
         require(std::isfinite(search.differential_window_seconds) && search.differential_window_seconds>=0,
                 "invalid differential window duration");
@@ -325,6 +344,19 @@ struct PatternCorrelator::Impl {
         const auto remaining=bytes-static_cast<std::size_t>(std::ceil(fixed));
         bit_limit=std::min(search.bit_limit,remaining/denominator);
         require(bit_limit>0,"clock-search workspace cannot retain symbol evidence");
+        // Coefficient reuse is optional and evictable. Preserve the preceding
+        // path's bit limit; room_for() releases these coefficients before a
+        // later payload allocation needs their space. Promised detector state
+        // is already charged in fixed, and minimum retention must still fit.
+        // At shorter chips natural table spans rarely outlive a 32-sample
+        // block; retain the preceding arithmetic there without a cache.
+        const auto coefficient_count=total*(alternate_groups+1);
+        const auto coefficient_extra=coefficient_count*sizeof(AffineCoefficients);
+        if(pulse_segmented && !options.affine_coefficient_reference && code.chip_samples()>=8192 &&
+                code.chip_samples()/(256*highest_rate)>block_samples &&
+                coefficient_count<=std::numeric_limits<std::size_t>::max() &&
+                fixed+coefficient_extra+denominator<=bytes)
+            affine_coefficients.resize(static_cast<std::size_t>(coefficient_count));
         hypotheses.reserve(count);emissions.reserve(search.track_limit);banks.resize(bank_count);
         for(auto& bank:banks) {
             bank.prefix.resize(block_samples+1);
@@ -388,6 +420,7 @@ struct PatternCorrelator::Impl {
         work.backend=pulse_segmented?PatternCorrelationBackend::pulse_segments:pulse_lattices.empty()?PatternCorrelationBackend::raw:
             code.chip_samples()>4096?PatternCorrelationBackend::pulse_moments:PatternCorrelationBackend::pulse;
         work.hypotheses=hypotheses.size();work.lattices=pulse_lattices.size();work.phase_groups=alternate_groups+1;
+        work.affine_coefficient_cache_entries=affine_coefficients.size();
         work.peak_workspace_bytes=sizeof(PatternCorrelator)+accounted_bytes;
     }
     long double clock_boundary(const Hypothesis& h,std::uint64_t within=0) const {
@@ -442,6 +475,11 @@ struct PatternCorrelator::Impl {
         // first section fit. Reserve its eventual state from construction, but
         // keep idle long-symbol searches at their historical physical size.
         drift_fits.resize(hypotheses.size()*(alternate_groups+1));
+        // Earlier cache ranges were prepared before section state existed.
+        // Rebuild them with the newly active quarter boundaries before any
+        // interval fast path can bypass section advancement.
+        for(auto& cached:affine_coefficients)cached.invalidate();
+        for(auto& h:hypotheses)h.affine_groups=0;
         for(std::size_t i=0;i<hypotheses.size();++i)for(std::size_t group=0;group<=alternate_groups;++group) {
             auto& drift=section_fits(i,group);const auto& whole=fits(hypotheses[i],i,group);
             for(unsigned bit=0;bit<2;++bit)drift[bit].active=whole[bit];
@@ -477,6 +515,7 @@ struct PatternCorrelator::Impl {
         value+=pulse_lattices.capacity()*sizeof(PulseLattice);
         value+=pulse_addresses.capacity()*sizeof(PulseAddress);
         value+=affine_counts.capacity()*sizeof(std::uint64_t);
+        value+=affine_coefficients.capacity()*sizeof(AffineCoefficients);
         // Kernel preparation has bounded wide polynomial scratch. Retain its
         // reservation across workspace changes and payload allocation too.
         if(!pulse_lattices.empty())value+=detail::correlation_pulse_scratch_bytes;
@@ -540,7 +579,16 @@ struct PatternCorrelator::Impl {
         accounted_bytes-=worker_bytes();
         std::vector<PatternCode>().swap(worker_codes);
     }
+    void drop_affine_coefficients() {
+        accounted_bytes-=affine_coefficients.capacity()*sizeof(AffineCoefficients);
+        decltype(affine_coefficients)().swap(affine_coefficients);
+        work.affine_coefficient_cache_entries=0;
+    }
     void room_for(std::size_t extra) {
+        // Called outside affine accumulation, before retained payload/event
+        // allocations. No private coefficient pointer survives this eviction.
+        if(!affine_coefficients.empty() && (sizeof(PatternCorrelator)+accounted_bytes>budget ||
+                extra>budget-sizeof(PatternCorrelator)-accounted_bytes))drop_affine_coefficients();
         if(!worker_codes.empty() && (sizeof(PatternCorrelator)+accounted_bytes>budget ||
                 extra>budget-sizeof(PatternCorrelator)-accounted_bytes))drop_workers();
         require(sizeof(PatternCorrelator)+accounted_bytes<=budget && extra<=budget-sizeof(PatternCorrelator)-accounted_bytes,
@@ -828,6 +876,9 @@ struct PatternCorrelator::Impl {
         if(h.admitted && static_cast<long double>(end-h.committed_end)>=
             static_cast<long double>(pattern_absence_seconds)*config.sample_rate) {publish(h,true);clear(h);}
         else publish(h,false,false);
+        if(!affine_coefficients.empty())for(std::size_t group=0;group<=alternate_groups;++group)
+            affine_coefficients[hypothesis*(alternate_groups+1)+group].invalidate();
+        h.affine_groups=0;
         h.fits={};
         if(!chip_evidence.empty())for(std::size_t group=0;group<=alternate_groups;++group)
             chip_evidence[hypothesis*(alternate_groups+1)+group]={};
@@ -844,16 +895,80 @@ struct PatternCorrelator::Impl {
             return static_cast<std::uint64_t>(std::min(static_cast<long double>(end),std::ceil(h.origin)));
         return sample;
     }
+    void fit_affine_piece(const Bank& bank,std::size_t left,std::uint64_t piece_count,
+                          const std::array<Complex,2>& value,const std::array<Complex,2>& slope,
+                          std::array<Fit,2>& fit,std::array<DriftFit,2>* drift,
+                          std::array<DifferentialFit,2>* differential) {
+        WorkTimer fit_timer(options.measure_affine_work,work.affine_fit_seconds,work.affine_fit_cpu_seconds);
+        const auto right=left+static_cast<std::size_t>(piece_count);
+        const auto prefix=bank.observations();const auto moments=bank.moments();
+        const auto projection=prefix[right]-prefix[left];
+        const Complex measured{projection.xc,projection.xs};
+        const auto moment=moments[right]-moments[left]-static_cast<double>(left)*measured;
+        const auto first=prefix[left+1]-prefix[left];
+        const Complex square{first.cc-first.ss,2*first.cs};
+        require(piece_count<=block_samples,"affine pulse span exceeds its oscillator block");
+        detail::CorrelationCarrierMoments uncached;
+        const auto* carrier=bank.carrier(piece_count);
+        if(!carrier) {
+            uncached=detail::correlation_carrier_moments(piece_count,2*tau*bank.frequency/config.sample_rate);
+            carrier=&uncached;
+        }
+        for(unsigned bit=0;bit<2;++bit) {
+            const auto contribution=detail::correlation_affine_fit(projection,moment,
+                piece_count,value[bit],slope[bit],square,first.cc+first.ss,
+                *carrier);
+            add_fit(fit[bit],contribution);
+            if(drift)add_fit((*drift)[bit].active,contribution);
+            if(differential)add_fit((*differential)[bit].active,contribution);
+        }
+    }
     std::uint64_t accumulate(Hypothesis& h,std::size_t hypothesis,std::uint64_t cursor,
                              std::uint64_t end,PatternCode& pattern) {
+        if(cursor<end && !affine_coefficients.empty() && h.affine_groups) {
+            const auto base=hypothesis*(alternate_groups+1);
+            bool covered=true;
+            for(std::size_t group=0;group<h.affine_groups;++group) {
+                const auto& cached=affine_coefficients[base+group];
+                covered&=cached.first<=cursor && end<=cached.end;
+            }
+            if(covered) {
+                // Every active group's retained range lies inside the same
+                // chip, pulse interval, detector section/window and symbol.
+                // The miss path already initialized their active fits. No
+                // clock/phase/boundary calculation or state advance is needed
+                // until an observation reaches the end of one of those ranges.
+                if(!h.fits[0].count)h.observed_start=cursor;
+                const auto& bank=banks[h.frequency];
+                for(std::size_t group=0;group<h.affine_groups;++group) {
+                    const auto& cached=affine_coefficients[base+group];
+                    std::array<Complex,2> value{};
+                    {
+                        WorkTimer timer(options.measure_affine_work,work.affine_prepare_seconds,
+                            work.affine_prepare_cpu_seconds);
+                        const auto distance=static_cast<double>(cursor-cached.first);
+                        for(unsigned bit=0;bit<2;++bit)value[bit]=cached.value[bit]+distance*cached.slope[bit];
+                        if(options.measure_affine_work)++work.affine_reuses;
+                    }
+                    fit_affine_piece(bank,static_cast<std::size_t>(cursor-sample),end-cursor,
+                        value,cached.slope,fits(h,hypothesis,group),
+                        drift_fits.empty()?nullptr:&section_fits(hypothesis,group),
+                        differential_window?&local_fits(hypothesis,group):nullptr);
+                    ++affine_counts[hypothesis];
+                }
+                if(options.measure_affine_work)++work.affine_interval_fast_paths;
+                return end;
+            }
+        }
         const auto symbol_start=this->symbol_start(h);
         const auto symbol_end=clock_boundary(h,code.symbol_samples());
         const auto segment_end=static_cast<std::uint64_t>(std::min(static_cast<long double>(end),std::ceil(symbol_end)));
         std::size_t group_count=0;
         const auto groups=phase_groups(h,group_count);
+        h.affine_groups=static_cast<std::uint8_t>(group_count);
         if(!h.fits[0].count)h.observed_start=cursor;
         for(std::size_t group=0;group<group_count;++group) {
-            pattern.set_stream_phase_samples(groups[group].lower);
+            if(affine_coefficients.empty())pattern.set_stream_phase_samples(groups[group].lower);
             auto& fit=fits(h,hypothesis,group);
             auto* drift=!drift_fits.empty()?&section_fits(hypothesis,group):nullptr;
             auto* differential=differential_window?&local_fits(hypothesis,group):nullptr;
@@ -888,62 +1003,73 @@ struct PatternCorrelator::Impl {
                             std::max(static_cast<long double>(observed+1),boundary))-observed;
                         const auto offset=(within-static_cast<long double>(local)*chip)/h.rate;
                         const auto duration=static_cast<long double>(chip)/h.rate;
-                        auto piece=detail::correlation_pulse_segment(offset,limit,duration);
-                        const auto tail=symbol%chip;
-                        detail::CorrelationPulseSegment final_piece;
-                        const auto final_chip=code.chips_per_symbol()-1;
-                        const bool has_final=tail && final_chip>=local && final_chip-local<=8;
-                        if(has_final) {
-                            // pattern_pulse_each centers a partial final pulse
-                            // in its actual duration and scales its energy. Its
-                            // shifted table knots need their own span limit.
-                            final_piece=detail::correlation_pulse_segment(
-                                offset+static_cast<long double>(chip-tail)/(2*h.rate),limit,duration);
-                            piece.count=std::min(piece.count,final_piece.count);
-                        }
                         std::array<Complex,2> value{},slope{};
-                        for(std::size_t j=0;j<detail::correlation_pulse_atoms;++j) {
-                            if(j<8 && local<8-j)continue;
-                            if(j>8 && local>std::numeric_limits<std::uint64_t>::max()-(j-8))continue;
-                            const auto position=j<8?local-(8-j):local+(j-8);
-                            if(position>=code.chips_per_symbol())continue;
-                            auto a=piece.value[j],b=piece.slope[j];
-                            if(has_final && position==final_chip) {
-                                const auto scale=std::sqrt(static_cast<double>(tail)/static_cast<double>(chip));
-                                a=final_piece.value[j]*scale;b=final_piece.slope[j]*scale;
+                        std::uint64_t piece_count=0;
+                        {
+                            WorkTimer timer(options.measure_affine_work,work.affine_prepare_seconds,
+                                work.affine_prepare_cpu_seconds);
+                            auto* cached=affine_coefficients.empty()?nullptr:
+                                &affine_coefficients[hypothesis*(alternate_groups+1)+group];
+                            if(cached && observed>=cached->first && observed<cached->end) {
+                                const auto distance=static_cast<double>(observed-cached->first);
+                                for(unsigned bit=0;bit<2;++bit) {
+                                    value[bit]=cached->value[bit]+distance*cached->slope[bit];
+                                    slope[bit]=cached->slope[bit];
+                                }
+                                piece_count=std::min(limit,cached->end-observed);
+                                if(options.measure_affine_work)++work.affine_reuses;
+                            } else {
+                                // Caller and oscillator block ends do not end a
+                                // waveform affine interval. The retained range
+                                // is bounded by the actual pulse and detector
+                                // geometry, including a shifted partial tail.
+                                const auto natural_end=std::min(
+                                    static_cast<long double>(std::numeric_limits<std::uint64_t>::max()),
+                                    std::ceil(std::min(chip_end,section_end)));
+                                const auto natural_limit=cached?static_cast<std::uint64_t>(
+                                    std::max(static_cast<long double>(observed+1),natural_end))-observed:limit;
+                                auto piece=detail::correlation_pulse_segment(offset,natural_limit,duration);
+                                const auto tail=symbol%chip;
+                                detail::CorrelationPulseSegment final_piece;
+                                const auto final_chip=code.chips_per_symbol()-1;
+                                const bool has_final=tail && final_chip>=local && final_chip-local<=8;
+                                if(has_final) {
+                                    // The final pulse center and amplitude use
+                                    // its actual partial-chip duration.
+                                    final_piece=detail::correlation_pulse_segment(
+                                        offset+static_cast<long double>(chip-tail)/(2*h.rate),natural_limit,duration);
+                                    piece.count=std::min(piece.count,final_piece.count);
+                                }
+                                if(cached)pattern.set_stream_phase_samples(groups[group].lower);
+                                for(std::size_t j=0;j<detail::correlation_pulse_atoms;++j) {
+                                    if(j<8 && local<8-j)continue;
+                                    if(j>8 && local>std::numeric_limits<std::uint64_t>::max()-(j-8))continue;
+                                    const auto position=j<8?local-(8-j):local+(j-8);
+                                    if(position>=code.chips_per_symbol())continue;
+                                    auto a=piece.value[j],b=piece.slope[j];
+                                    if(has_final && position==final_chip) {
+                                        const auto scale=std::sqrt(static_cast<double>(tail)/static_cast<double>(chip));
+                                        a=final_piece.value[j]*scale;b=final_piece.slope[j]*scale;
+                                    }
+                                    if(a==0 && b==0)continue;
+                                    require(position<=std::numeric_limits<std::uint64_t>::max()-first_chip,
+                                            "pattern chip address would overflow");
+                                    const auto pair=pattern.values(first_chip+position);
+                                    for(unsigned bit=0;bit<2;++bit) {
+                                        value[bit]+=static_cast<double>(a)*pair[bit];
+                                        slope[bit]+=static_cast<double>(b)*pair[bit];
+                                    }
+                                }
+                                piece_count=std::min(limit,piece.count);
+                                if(cached) {
+                                    cached->value=value;cached->slope=slope;
+                                    cached->first=observed;cached->end=observed+piece.count;
+                                }
+                                if(options.measure_affine_work)++work.affine_preparations;
                             }
-                            if(a==0 && b==0)continue;
-                            require(position<=std::numeric_limits<std::uint64_t>::max()-first_chip,
-                                    "pattern chip address would overflow");
-                            const auto pair=pattern.values(first_chip+position);
-                            for(unsigned bit=0;bit<2;++bit) {
-                                value[bit]+=static_cast<double>(a)*pair[bit];
-                                slope[bit]+=static_cast<double>(b)*pair[bit];
-                            }
                         }
-                        const auto right=left+static_cast<std::size_t>(piece.count);
-                        const auto prefix=bank.observations();const auto moments=bank.moments();
-                        const auto projection=prefix[right]-prefix[left];
-                        const Complex measured{projection.xc,projection.xs};
-                        const auto moment=moments[right]-moments[left]-static_cast<double>(left)*measured;
-                        const auto first=prefix[left+1]-prefix[left];
-                        const Complex square{first.cc-first.ss,2*first.cs};
-                        require(piece.count<=block_samples,"affine pulse span exceeds its oscillator block");
-                        detail::CorrelationCarrierMoments uncached;
-                        const auto* carrier=bank.carrier(piece.count);
-                        if(!carrier) {
-                            uncached=detail::correlation_carrier_moments(piece.count,2*tau*bank.frequency/config.sample_rate);
-                            carrier=&uncached;
-                        }
-                        for(unsigned bit=0;bit<2;++bit) {
-                            const auto contribution=detail::correlation_affine_fit(projection,moment,
-                                piece.count,value[bit],slope[bit],square,first.cc+first.ss,
-                                *carrier);
-                            add_fit(fit[bit],contribution);
-                            if(drift)add_fit((*drift)[bit].active,contribution);
-                            if(differential)add_fit((*differential)[bit].active,contribution);
-                        }
-                        ++affine_counts[hypothesis];observed+=piece.count;continue;
+                        fit_affine_piece(bank,left,piece_count,value,slope,fit,drift,differential);
+                        ++affine_counts[hypothesis];observed+=piece_count;continue;
                     }
                     const auto projection=bank.observations()[left+1]-bank.observations()[left];
                     // Each alternative schedule fits the same disjoint
@@ -1268,7 +1394,12 @@ struct PatternCorrelator::Impl {
         work.samples+=input.size();
         if(!pulse_lattices.empty()) {
             const auto cells_before=work.cells;
-            project_pulse_cells(input.size(),stop);frontend_timer.finish();
+            {
+                WorkTimer statistics_timer(options.measure_work,work.pulse_statistics_seconds,
+                    work.pulse_statistics_cpu_seconds);
+                project_pulse_cells(input.size(),stop);
+            }
+            frontend_timer.finish();
             WorkTimer search_timer(options.measure_work,work.search_seconds,work.search_cpu_seconds);
             // There is no hypothesis work before a shared chip cell is ready.
             // In particular a high PCM rate must not rescan the timing/key
@@ -1321,8 +1452,11 @@ PatternCorrelator& PatternCorrelator::operator=(PatternCorrelator&&) noexcept=de
 void PatternCorrelator::push(std::span<const float> samples,std::stop_token stop,detail::CorrelationProjectionCache* cache) {
     auto& s=*impl_;cancelled(stop);require(!s.finished,"pattern capture already finished");
     require(samples.size()<=std::numeric_limits<std::uint64_t>::max()-s.sample,"pattern sample counter overflow");
-    if(s.options.raw_reference || !cache || !cache->covers(samples))
-        for(auto value:samples)require(std::isfinite(value),"nonfinite pattern sample");
+    {
+        WorkTimer validation_timer(s.options.measure_work,s.work.validation_seconds,s.work.validation_cpu_seconds);
+        if(s.options.raw_reference || !cache || !cache->covers(samples))
+            for(auto value:samples)require(std::isfinite(value),"nonfinite pattern sample");
+    }
     // Idle epochs keep their original footprint so parallel scratch cannot
     // displace other clock/key hypotheses from a shared receiver bank.
     struct ReleaseWorkers {
@@ -1389,6 +1523,8 @@ std::size_t PatternCorrelator::working_bytes()const{return sizeof(PatternCorrela
 std::size_t PatternCorrelator::projection_cache_headroom(std::size_t input_samples)const{return impl_->projection_cache_headroom(input_samples);}
 std::size_t PatternCorrelator::reserved_workspace_bytes()const{return sizeof(PatternCorrelator)+impl_->accounted_bytes;}
 void PatternCorrelator::set_workspace_bytes(std::size_t bytes) {
+    if(!impl_->affine_coefficients.empty() && bytes<sizeof(PatternCorrelator)+impl_->accounted_bytes)
+        impl_->drop_affine_coefficients();
     if(bytes<working_bytes())impl_->drop_workers();
     if(impl_->differential_window && bytes<sizeof(PatternCorrelator)+impl_->accounted_bytes) {
         decltype(impl_->differential_fits)().swap(impl_->differential_fits);

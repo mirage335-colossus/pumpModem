@@ -6,6 +6,7 @@
 #include "datapump/pattern_receiver.hpp"
 #include "datapump/pattern_search.hpp"
 #include "../src/receiver_probability.hpp"
+#include "../src/pattern_correlator_batch.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -981,6 +982,187 @@ void bounded_affine_rf_workload() {
           whole.pulse_projection_modeled&&!whole.pulse_segment_projection_modeled,
           "ample workspace must preserve the existing whole-chip first choice and bank coverage");
 }
+transfer::Options affine_work_options(std::uint32_t fs,std::uint64_t chip,std::uint64_t chips) {
+    transfer::Options options;
+    options.modem.sample_rate=fs;options.modem.carrier_hz=fs==64?8:1500;
+    options.modem.bandwidth_hz=std::nextafter(2.*fs/chip,std::numeric_limits<double>::infinity());
+    options.modem.integration_seconds=static_cast<double>(chips*chip+1)/fs;
+    options.modem.scramble=true;
+    modem::OscillatorSearchConfig policy;policy.lf=policy.rf={0,0};
+    options.modem.oscillator_search=policy;
+    options.timestamp=1800000000;options.search_seconds=0;
+    options.dsp_workspace_bytes=128*1024*1024;
+    std::array<std::uint8_t,32> key{};key[0]=0x35;options.key.emplace(key);
+    check(modem::pattern_chip_samples(options.modem)==chip&&
+          modem::symbol_sample_count(options.modem)==chips*chip+1&&
+          modem::pattern_pulse_enabled(options.modem),
+          "affine work fixture must resolve the exact shaped partial geometry");
+    return options;
+}
+long double affine_fallback_search(const simulation::Estimate& estimate,const modem::Config& config,
+                                  long double block_samples,long double banks=1) {
+    // This reference charges the preceding 1800 allowance on every real fit,
+    // with the independently specified finite-pulse/partial-tail span bound.
+    const auto chip=modem::pattern_chip_samples(config),symbol=modem::symbol_sample_count(config);
+    const auto plan=modem::oscillator_pattern_search(config);
+    const auto samples=static_cast<long double>(estimate.simulated_seconds)*config.sample_rate;
+    long double maximum_rate=1,lanes=0;
+    for(const auto& h:plan.hypotheses) {
+        const auto rate=1+static_cast<long double>(h.clock_error_ppm)*1e-6L;
+        maximum_rate=std::max(maximum_rate,rate);
+        lanes+=std::ceil(4.L*config.sample_rate*rate/chip)+1;
+    }
+    const auto symbols=std::ceil(samples*maximum_rate/symbol);
+    const auto tail=symbol%chip?257*symbols*std::min(9.L,std::ceil(static_cast<long double>(symbol)/chip)):0.L;
+    const auto natural=std::min(samples,1+257*std::ceil(samples*maximum_rate/chip)+tail+
+        symbols*(4+estimate.differential_windows));
+    const auto fits=std::min(samples,std::ceil(samples/block_samples)+natural);
+    const auto groups=symbol%config.sample_rate?2.L:1.L;
+    const auto detector_work=128.L*((estimate.drift_sections>1)+bool(estimate.differential_windows));
+    return fits*lanes*groups*(1800+detector_work)*banks/1.5e9L;
+}
+void affine_coefficient_workload() {
+    // More than 16 chips keeps the shaped waveform. These exact partial
+    // symbols reject the whole-chip backend without dropping a hypothesis.
+    for(const auto chip:{8191ULL,8192ULL,8193ULL,16384ULL}) {
+        auto options=affine_work_options(64,chip,16);
+        const auto estimate=simulation::estimate(wire(1,options.modem),options,true,clean_channel(),{},1,false);
+        check(estimate.receiver_workspace_supported&&estimate.pulse_segment_projection_modeled&&
+              estimate.frequency_rate_hypotheses==1&&!estimate.oscillator_search_limited&&
+              estimate.drift_sections==1&&estimate.differential_windows==0,
+              "compact coefficient gate must retain shaped affine coverage and detector geometry");
+        const auto fallback=affine_fallback_search(estimate,options.modem,32);
+        if(chip<=8192)near(estimate.receiver_search_seconds,static_cast<double>(fallback),
+            "short or equal-width spans must preserve all 1800 uncached work");
+        else check(estimate.receiver_search_seconds<fallback,
+            "long natural private intervals must reduce repeated preparation while retaining block fits");
+    }
+    // The complete oscillator bank's fastest clock, rather than its nominal
+    // lane, determines whether a natural interval can outlive a block.
+    for(const auto chip:{8193ULL,8194ULL}) {
+        auto options=affine_work_options(64,chip,16);
+        options.modem.oscillator_search->lf.accuracy_ppm=41;
+        const auto plan=modem::oscillator_pattern_search(options.modem);
+        long double fastest=1;
+        for(const auto& h:plan.hypotheses)fastest=std::max(fastest,1+h.clock_error_ppm*1e-6L);
+        const auto estimate=simulation::estimate(wire(1,options.modem),options,true,clean_channel(),{},1,false);
+        check(estimate.receiver_workspace_supported&&estimate.pulse_segment_projection_modeled&&
+              !estimate.oscillator_search_limited&&estimate.frequency_rate_hypotheses==plan.hypotheses.size(),
+              "clock-width cache policy must retain the complete paired frequency/rate search");
+        const auto fallback=affine_fallback_search(estimate,options.modem,32);
+        if(chip==8193) {
+            check(chip/(256*fastest)<=32,"clock-boundary fixture must cross the nominal-only cache width");
+            near(estimate.receiver_search_seconds,static_cast<double>(fallback),
+                 "fastest clock boundary must retain uncached work even when nominal intervals exceed32");
+        } else {
+            check(chip/(256*fastest)>32&&estimate.receiver_search_seconds<fallback,
+                  "complete clock region strictly above the width gate must permit coefficient reuse");
+        }
+    }
+    for(const auto extra:{0ULL,1ULL}) {
+        auto options=affine_work_options(4096,8192,32);
+        options.modem.integration_seconds=static_cast<double>(32*8192ULL+4096+extra)/4096;
+        const auto estimate=simulation::estimate(wire(1,options.modem),options,true,clean_channel(),{},1,false);
+        check(modem::symbol_sample_count(options.modem)==32*8192ULL+4096+extra&&
+              estimate.pulse_segment_projection_modeled&&estimate.drift_sections==1&&estimate.differential_windows==0,
+              "phase-group work fixture must retain exact partial-symbol geometry");
+        near(estimate.receiver_search_seconds,static_cast<double>(affine_fallback_search(estimate,options.modem,32)),
+             "each possible stream-phase group must retain its independent private preparation and fits");
+    }
+    // Non-hint compact receivers use 128-sample blocks. C8192 is insufficient
+    // here; the strict width boundary is C32768 at the zero-clock hypothesis.
+    for(const auto chip:{16384ULL,32768ULL,32769ULL}) {
+        auto options=affine_work_options(32768,chip,32);options.dsp_workspace_bytes=8*1024*1024;
+        const auto estimate=simulation::estimate(wire(1,options.modem),options,true,clean_channel(),{},1,false);
+        check(modem::symbol_sample_count(options.modem)<60ULL*options.modem.sample_rate&&
+              estimate.receiver_workspace_supported&&estimate.pulse_segment_projection_modeled&&
+              estimate.frequency_rate_hypotheses==1&&estimate.drift_sections==1&&estimate.differential_windows==0,
+              "non-hint affine work fixture must use its actual 128-sample block policy");
+        const auto fallback=affine_fallback_search(estimate,options.modem,128);
+        if(chip<=32768)near(estimate.receiver_search_seconds,static_cast<double>(fallback),
+            "128-sample equality must not receive 32-sample cache credit");
+        else check(estimate.receiver_search_seconds<fallback,
+            "strictly longer natural intervals must admit non-hint coefficient reuse");
+    }
+    auto options=affine_work_options(4096,16384,16);
+    const auto draft=wire(1,options.modem);
+    const auto ample=simulation::estimate(draft,options,true,clean_channel(),{},1,false);
+    // This is the planner's deliberately conservative fixed allowance, not an
+    // assertion about exact heap bytes. No optional detector is eligible here.
+    constexpr long double lanes=2,groups=2,block=32;
+    const auto fixed=256*1024.L+lanes*(512+(groups-1)*sizeof(std::array<modem::detail::CorrelationFit,2>)+2)+
+        64+(block+1)*sizeof(modem::detail::CorrelationProjection)+32*sizeof(modem::PatternEvidence)+
+        64*sizeof(std::complex<double>)+sizeof(modem::PatternFrequencyRateHypothesis)+
+        (block+1)*sizeof(std::complex<double>)+4*sizeof(modem::detail::CorrelationCarrierMoments)+
+        lanes*groups*sizeof(std::uint64_t);
+    const auto admitted=2*static_cast<std::size_t>(std::ceil(fixed+80*lanes*groups+2*lanes+34));
+    options.dsp_workspace_bytes=admitted-1;
+    const auto low=simulation::estimate(draft,options,true,clean_channel(),{},1,false);
+    options.dsp_workspace_bytes=admitted;
+    const auto high=simulation::estimate(draft,options,true,clean_channel(),{},1,false);
+    for(const auto* value:{&low,&high})check(value->receiver_workspace_supported&&
+        value->pulse_segment_projection_modeled&&value->frequency_rate_hypotheses==ample.frequency_rate_hypotheses&&
+        value->oscillator_search_limited==ample.oscillator_search_limited&&
+        value->drift_sections==ample.drift_sections&&value->differential_windows==ample.differential_windows,
+        "optional cache memory gate must preserve mandatory geometry and detector coverage");
+    near(low.receiver_search_seconds,static_cast<double>(affine_fallback_search(low,options.modem,32)),
+         "insufficient optional cache workspace must retain the complete uncached work");
+    near(high.receiver_search_seconds,ample.receiver_search_seconds,
+         "admitting the optional cache must not depend on reserving every configured retained bit");
+    check(high.receiver_search_seconds<low.receiver_search_seconds,
+          "workspace admission must reduce actual private preparation modeled work");
+    near(high.receiver_frontend_seconds,low.receiver_frontend_seconds,
+         "coefficient reuse must not erase original-sample frontend work");
+    near(high.receiver_kernel_rebuild_seconds,low.receiver_kernel_rebuild_seconds,
+         "coefficient reuse must not erase carrier covariance/kernel work");
+    near(high.tracking_symbol_windows,low.tracking_symbol_windows,
+         "optional memory admission must preserve physical continuation/absence windows");
+
+    // Same transmitted geometry at twice Fs preserves preparation cadence,
+    // but still doubles original-sample ingestion and increases per-block fits.
+    options.dsp_workspace_bytes=128*1024*1024;
+    const auto base=simulation::estimate(draft,options,true,clean_channel(),{},1,false);
+    auto scaled=options;scaled.modem.sample_rate*=2;scaled.modem.integration_seconds=options.modem.integration_seconds;
+    check(modem::pattern_chip_samples(scaled.modem)==2*modem::pattern_chip_samples(options.modem)&&
+          modem::symbol_sample_count(scaled.modem)==2*modem::symbol_sample_count(options.modem),
+          "fixed waveform scaling fixture must preserve chip and symbol time");
+    const auto larger=simulation::estimate(wire(1,scaled.modem),scaled,true,clean_channel(),{},1,false);
+    near(larger.simulated_seconds,base.simulated_seconds,"paired work-model sample rates must preserve physical duration");
+    check(larger.pulse_segment_projection_modeled&&larger.frequency_rate_hypotheses==base.frequency_rate_hypotheses&&
+          larger.receiver_frontend_seconds>base.receiver_frontend_seconds&&
+          larger.receiver_search_seconds>base.receiver_search_seconds&&
+          larger.receiver_search_seconds<2*base.receiver_search_seconds,
+          "private preparation must follow natural intervals while block fits and frontend still follow Fs");
+    near(larger.receiver_kernel_rebuild_seconds,base.receiver_kernel_rebuild_seconds,
+         "unchanged natural pulse geometry must retain the same carrier moment allowance");
+
+    // Geometry reuse never reuses a private candidate across keys or epochs.
+    for(const auto keys:{2U,3U}) {
+        const auto multiple=simulation::estimate(draft,options,true,clean_channel(),{},keys,false);
+        near(multiple.receiver_search_seconds,keys*base.receiver_search_seconds,"each key must retain private preparation and fitting work");
+        near(multiple.receiver_frontend_seconds,keys*base.receiver_frontend_seconds,"central estimate must charge each key frontend conservatively");
+        near(multiple.receiver_kernel_rebuild_seconds,keys*base.receiver_kernel_rebuild_seconds,"each key bank must retain covariance preparation work");
+        check(multiple.frequency_rate_hypotheses==base.frequency_rate_hypotheses&&multiple.receiver_workspace_supported,
+              "additional keys must not reduce one bank's complete hypothesis coverage");
+    }
+    auto unknown=options;unknown.timestamp=0;
+    const auto epochs=1+std::ceil((static_cast<long double>(modem::training_sample_count(options.modem))+
+        modem::pattern_pulse_padding_samples(options.modem))/options.modem.sample_rate);
+    const auto unanchored=simulation::estimate(draft,unknown,true,clean_channel(),{},1,false);
+    check(unanchored.receiver_workspace_supported&&unanchored.pulse_segment_projection_modeled,
+          "unknown epoch work fixture must retain complete affordable private banks");
+    near(unanchored.receiver_search_seconds,static_cast<double>(epochs*base.receiver_search_seconds),
+         "every possible epoch must retain fresh private coefficient preparation");
+    auto other=options.modem;other.spreading_seed.fill(0xa7);other.stream_epoch+=9;other.stream_phase_samples=17;
+    const std::array identical{options.modem,options.modem};
+    const std::array independent{options.modem,other};
+    const auto repeated=simulation::estimate(draft,options,true,clean_channel(),identical,1,false);
+    const auto fresh=simulation::estimate(draft,options,true,clean_channel(),independent,1,false);
+    near(fresh.receiver_search_seconds,repeated.receiver_search_seconds,
+         "private identities can share geometry calculation without sharing secret coefficients");
+    near(fresh.receiver_search_seconds,2*base.receiver_search_seconds,
+         "each profile must retain its own complete private search cost");
+}
 void equivalent_receive_profiles() {
     bounded_affine_rf_workload();
     transfer::Options options;options.modem.scramble=true;
@@ -1114,11 +1296,15 @@ void projected_pattern_workload() {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc==2&&std::string(argv[1])=="--affine-work-only") {
+            bounded_affine_rf_workload();affine_coefficient_workload();projected_pattern_workload();
+            std::cout<<"affine work model tests passed\n";return 0;
+        }
         if(argc==2&&std::string(argv[1])=="--partial-only") {
             partial_compact_probability();std::cout<<"partial simulation estimate tests passed\n";return 0;
         }
         probability_and_framing();workload_and_impairments();receiver_cpu_budget();received_processing_budget();whole_symbol_phase_coherence();partial_compact_probability();differential_model_limits();drift_receiver_estimate();receiver_statistic_controls();raw_sample_probability_geometry();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
-        coupled_and_independent_clock_estimates();streamed_template_workload();target_and_channel_are_independent();oscillator_policy_geometry();nearby_shift_workload();equivalent_receive_profiles();projected_pattern_workload();
+        coupled_and_independent_clock_estimates();streamed_template_workload();target_and_channel_are_independent();oscillator_policy_geometry();nearby_shift_workload();equivalent_receive_profiles();affine_coefficient_workload();projected_pattern_workload();
         std::cout<<"simulation estimate tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"simulation estimate tests failed: "<<error.what()<<'\n';return 1;}
 }

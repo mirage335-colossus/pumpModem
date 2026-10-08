@@ -8,6 +8,12 @@ namespace detail {class CorrelationProjectionCache;}
 struct PatternCorrelatorOptions {
     bool raw_reference=false;
     bool measure_work=false;
+    // Preserve the preceding affine-span arithmetic, independently of the
+    // original raw-sample reference. Neither diagnostic is a saved setting.
+    bool affine_coefficient_reference=false;
+    // Fine timers perturb short spans and require worker_threads=1. Use
+    // uninstrumented paired runs to measure an execution speedup.
+    bool measure_affine_work=false;
 };
 enum class PatternCorrelationBackend { raw, pulse, pulse_moments, pulse_segments };
 struct PatternCorrelatorWork {
@@ -19,6 +25,14 @@ struct PatternCorrelatorWork {
     // Opt-in timers affect execution cost; use uninstrumented runs for speedup.
     double frontend_seconds=0,search_seconds=0,kernel_seconds=0;
     double frontend_cpu_seconds=0,search_cpu_seconds=0,kernel_cpu_seconds=0;
+    // Validation is outside frontend. Pulse statistics are a frontend subset
+    // which includes kernel time; the remainder is downconversion/prefix work.
+    double validation_seconds=0,validation_cpu_seconds=0;
+    double pulse_statistics_seconds=0,pulse_statistics_cpu_seconds=0;
+    std::size_t affine_coefficient_cache_entries=0;
+    std::uint64_t affine_preparations=0,affine_reuses=0,affine_interval_fast_paths=0;
+    double affine_prepare_seconds=0,affine_fit_seconds=0;
+    double affine_prepare_cpu_seconds=0,affine_fit_cpu_seconds=0;
 };
 // Finite clock/frequency/start-time hypotheses with streaming sufficient
 // statistics. Storage depends on requested coverage and retained bits, never

@@ -42,6 +42,17 @@ constexpr long double pulse_moment_operations_per_block = 48;
 constexpr long double pulse_moment_operations_per_segment = 256;
 constexpr long double pulse_moment_kernel_operations_per_segment = 22000;
 constexpr long double pulse_affine_pair_operations_per_segment = 1800;
+// Fine paired RF/Sub9 diagnostics attributed 57--60% of uncached component
+// time to private 17-atom preparation. Conservatively assign 55% of the old
+// aggregate allowance to preparation, with hit-offset adjustment covered by
+// fitting. Their sum remains 1800; this rounded attribution is not calibrated
+// throughput or a measured duration on the user's computer. See the measured
+// cases and instrumentation limitations in docs/pulse-moment-validation.md.
+constexpr long double pulse_affine_prepare_operations_per_segment = 990;
+constexpr long double pulse_affine_fit_operations_per_segment =
+    pulse_affine_pair_operations_per_segment-pulse_affine_prepare_operations_per_segment;
+static_assert(pulse_affine_prepare_operations_per_segment>0&&
+    pulse_affine_fit_operations_per_segment>0);
 constexpr long double model_implementation_loss_db = 3;
 
 struct PayloadWork { long double baseline=0,mitigation=0; };
@@ -347,6 +358,20 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     result.pulse_segmented=correlator&&config.oscillator_search&&modem::pattern_pulse_enabled(config)&&
         symbol>=16.L*config.sample_rate&&chip>=1024&&!result.pulse_projected&&result.workspace_supported&&
         compact_allocated+segment_extra<=allowance;
+    // Match the optional runtime cache: 80 bytes per lane/phase group, with
+    // the original logical bit limit retained. The runtime evicts this cache
+    // before required payload growth, so this central estimate credits reuse
+    // while admitted; memory pressure can return future spans to the fallback
+    // allowance. Do not reserve every possible retained bit and thereby veto
+    // the production banks whose bit limit already consumes the spare budget.
+    constexpr auto affine_coefficient_bytes=80.L;
+    const auto coefficient_count=lanes*phase_groups;
+    const auto minimum_retention=2*lanes+2*modem::PatternSearch{}.track_limit+2;
+    const bool affine_coefficient_reuse=result.pulse_segmented&&chip>=8192&&
+        chip/(256*bank.maximum_rate)>block_samples&&
+        coefficient_count<=std::numeric_limits<std::size_t>::max()&&
+        compact_allocated+segment_extra+coefficient_count*affine_coefficient_bytes+
+            minimum_retention<=allowance;
     // The compact receiver mixes each unique real carrier bank. Clock lanes
     // sharing that carrier reuse its prefix; FFT receives one baseband stream.
     // Cross-key/epoch Live cache hits depend on per-push spare workspace and
@@ -360,22 +385,32 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
             static_cast<long double>(modem::pattern_absence_samples(config))/symbol;
     if(correlator) {
         if(result.pulse_segmented) {
-            // A span ends at an oscillator block, pulse-table knot, chip,
-            // quarter or local-window boundary. Sum their rates, capped by
-            // actual observations. This counts the implemented block clips;
-            // it does not claim that partial search is independent of Fs.
-            const auto boundaries=samples/symbol*(4+(differential_window?differential_windows:0));
-            const auto spans=std::min(samples,std::ceil(samples/block_samples)+
-                256*std::ceil(samples*bank.maximum_rate/chip)+boundaries);
+            // Natural private preparations end at table knots, finite pulse
+            // endpoints, chips, symbol invalidation and detector boundaries.
+            // A partial final chip intersects a second shifted knot train in
+            // at most its last nine chip positions. Rounded upper allowances
+            // count those cuts independently and cap them at observations.
+            // This corrects the preceding 256-knot-only span allowance even
+            // when reuse cannot fit; the fallback still charges 1800 per fit.
+            const auto symbols=std::ceil(samples*bank.maximum_rate/symbol);
+            const auto boundaries=symbols*(4+(differential_window?differential_windows:0));
+            const auto partial_tail=symbol%chip?257*symbols*
+                std::min(9.L,std::ceil(static_cast<long double>(symbol)/chip)):0.L;
+            const auto natural_spans=std::min(samples,1+257*
+                std::ceil(samples*bank.maximum_rate/chip)+partial_tail+boundaries);
+            const auto spans=std::min(samples,std::ceil(samples/block_samples)+natural_spans);
+            const auto preparations=affine_coefficient_reuse?natural_spans:spans;
             result.serial+=samples*8*projection_banks*banks;
-            result.search_serial=spans*lanes*phase_groups*(pulse_affine_pair_operations_per_segment+
-                128*(result.drift_supported+result.differential_supported))*banks;
+            result.search_serial=(preparations*pulse_affine_prepare_operations_per_segment+
+                spans*(pulse_affine_fit_operations_per_segment+
+                    128*(result.drift_supported+result.differential_supported)))*
+                lanes*phase_groups*banks;
             // The small immutable palette is prepared once per frequency.
             // Unusual knot/quarter/window clips can miss it; conservatively
             // charge one geometric helper per such boundary and lane. Full
             // oscillator blocks use the pinned entry. Caller push sizes that
             // are not multiples of the oscillator block add unmodeled misses.
-            const auto clipped_spans=std::min(spans,256*std::ceil(samples*bank.maximum_rate/chip)+boundaries);
+            const auto clipped_spans=std::min(spans,natural_spans);
             result.kernel_serial=projection_banks*affine_capacity*200*
                 std::ceil(std::log2(std::max(2.L,block_samples)))*banks+
                 clipped_spans*lanes*phase_groups*200*
