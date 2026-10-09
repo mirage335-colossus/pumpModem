@@ -38,8 +38,62 @@ std::vector<float> sine(std::uint32_t rate,double frequency,std::size_t count) {
     return result;
 }
 double rms(std::span<const float> values) {double sum=0;for(const auto x:values)sum+=x*x;return std::sqrt(sum/static_cast<double>(values.size()));}
+std::vector<float> adjusted(std::span<const float> input,std::uint32_t from,std::uint32_t to,
+                            std::size_t in_chunk,std::size_t out_chunk) {
+    Resampler converter(from,to,true);
+    converter.initialize_timing(.375,-.0001);
+    converter.set_rate_correction(.00015,.00001);
+    const auto workspace=converter.workspace_bytes();
+    std::vector<float> result,output(out_chunk);
+    std::size_t offset=0;
+    long double previous=-1;
+    while(!converter.finished()) {
+        const auto count=std::min(in_chunk,input.size()-offset);
+        const auto progress=converter.process(input.subspan(offset,count),output,offset+count==input.size());
+        require(progress.consumed || progress.produced || converter.finished(),"adjustable converter stalled");
+        offset+=progress.consumed;
+        result.insert(result.end(),output.begin(),output.begin()+static_cast<std::ptrdiff_t>(progress.produced));
+        require(converter.source_seconds()>=previous,"UTC correction rewound logical PCM");
+        previous=converter.source_seconds();
+        require(converter.workspace_bytes()==workspace,"UTC correction grew the converter workspace");
+    }
+    require(offset==input.size(),"UTC correction discarded the input tail");
+    const auto elapsed=static_cast<double>(result.size())/to;
+    require(std::abs(converter.rate_correction()-(-.0001+.00001*elapsed))<1e-10,"UTC rate slew depends on callback duration");
+    require(std::abs(static_cast<double>(converter.source_seconds())-static_cast<double>(input.size())/from)<2./to,
+        "UTC correction manufactured an extended EOF");
+    return result;
+}
 }
 int main(){try {
+    {
+        Resampler slow(48000,48000,true);
+        slow.initialize_timing(0,.001);slow.set_rate_correction(0,1e-16);
+        const std::vector<float> input(48100,0);std::vector<float> output(48000);
+        const auto progress=slow.process(input,output);
+        require(progress.produced==48000,"tiny-slew fixture produced an incomplete second");
+        require(std::abs(slow.rate_correction()-(.001-1e-16))<3e-19,
+            "sub-ULP timing slew was discarded on every sample");
+    }
+    for(const auto pair:{std::pair{48000u,48000u},std::pair{44100u,48000u},std::pair{48000u,8000u}}) {
+        const auto input=sine(pair.first,701,pair.first*2+19);
+        const auto large=adjusted(input,pair.first,pair.second,input.size(),4096);
+        const auto small=adjusted(input,pair.first,pair.second,31,17);
+        require(large==small,"continuous UTC correction depends on input/output block boundaries");
+        double error=0,energy=0;
+        for(std::size_t i=200;i+200<large.size();++i) {
+            const double t=static_cast<double>(i)/pair.second;
+            const double source=.375/pair.first+t*(1-.0001)+.5*.00001*t*t;
+            const double ideal=.6*std::sin(2*std::numbers::pi*701*source+.37);
+            error+=(large[i]-ideal)*(large[i]-ideal);energy+=ideal*ideal;
+        }
+        require(error/energy<1e-7,"smooth correction adds excessive passband interpolation error");
+    }
+    rejects([]{Resampler fixed(48000,48000);fixed.set_rate_correction(.0001,.00001);});
+    rejects([]{Resampler variable(48000,48000,true);variable.initialize_timing(1);});
+    rejects([]{Resampler variable(48000,48000,true);variable.set_rate_correction(.1,.00001);});
+    rejects([]{Resampler variable(48000,48000,true);variable.set_rate_correction(0,0);});
+    rejects([]{Resampler variable(48000,48000,true);std::array<float,1> out{};variable.process({},out);variable.initialize_timing(0);});
     for(const auto from:{44100u,48000u,96000u})for(const auto to:{44100u,48000u,96000u}) {
         const auto input=sine(from,3173,from/3+13);
         const auto large=convert(input,from,to,input.size(),4096);

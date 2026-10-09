@@ -26,6 +26,7 @@ struct TransmitTrace {
     bool source_available=false, compressed_available=false;
     bool data_masked=false, pattern_private=false, pattern_available=false;
     bool dsss=false, tone=false;
+    unsigned outer_dsss_factor=1;
     std::size_t total_wire_bits=0, generated_bits=0;
     std::uint64_t generated_chips=0, revision=0;
     std::size_t working_bytes() const {

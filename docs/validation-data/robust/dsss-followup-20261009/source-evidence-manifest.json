@@ -1,0 +1,654 @@
+{
+  "created_utc": "2026-10-09T08:26:19.452627+00:00",
+  "head": "ac63e3ab18850daf4f093c9dfeb1bcb6541abf27",
+  "scope": "local manual-test evidence; qualification incomplete",
+  "final_source": [
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/include/datapump/clock_sync.hpp",
+      "sha256": "62f325193f8b285291b99b8606a50f13266b20d07184e246298e1f7fef2b0ff6",
+      "bytes": 6909
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/include/datapump/transfer.hpp",
+      "sha256": "1d6e52a51f2697090cfd14a3f16e27f633ce0f221d1cd7f912deaa3344fce95e",
+      "bytes": 8323
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/include/datapump/pattern_receiver.hpp",
+      "sha256": "67f4d078266e18c64d3c0a99284ab1fff0e2c7d42e3d4ec836c23732baeb5dd7",
+      "bytes": 13411
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/transfer.cpp",
+      "sha256": "ff9082b7faaed272f026bdabb099c709c13a5e83891025f180c543f1918947be",
+      "bytes": 51590
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/main.cpp",
+      "sha256": "8247af326849dad176d865e55d85415d9071d8430a674077cb0ade680c2dfe8c",
+      "bytes": 77497
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_gui_application.cpp",
+      "sha256": "e4699002c691bd8b45de0e8df1b3d5b8326d8bb9006b54a872b88946b4167a1a",
+      "bytes": 99839
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_cli.py",
+      "sha256": "dd09fa9d01177980fc46f7c501c406e0571d06b3b3940ebe027062e6b7157a43",
+      "bytes": 50292
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/include/datapump/modem.hpp",
+      "sha256": "55cbdda735afe724677da1a7ee6cb8db6e4923a238800e388f5aff4190cfbd4d",
+      "bytes": 7911
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/include/datapump/crypto.hpp",
+      "sha256": "028b5ca803252ca8b05d60ad9bd69805a4bf27ce0c84e1b92a97841d008dcbe0",
+      "bytes": 4003
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/include/datapump/pattern_code.hpp",
+      "sha256": "e43f28f67a9a34497685c22cd5cad5851b2c8ee626d03b14eb29439f12b9b780",
+      "bytes": 7159
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/include/datapump/pattern_pulse.hpp",
+      "sha256": "21f2e598edafc01871409655c96941bb3e0df7cbfffb4c62c0361b5fa1683a14",
+      "bytes": 4768
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/crypto.cpp",
+      "sha256": "254c147203aaf703b7ed12265a3b5856eea5994325f60351f934e9c65d7a332a",
+      "bytes": 33053
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/pattern_code.cpp",
+      "sha256": "0aa354b4f5b05e717e33871bb99cb05df658df853f1df23dc8f1285bf9ce6053",
+      "bytes": 36778
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/modem.cpp",
+      "sha256": "17b8bc58a946f15882f419e7badcc5c9544b79885cfcadfec9f1c2056e024be6",
+      "bytes": 22918
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/streaming_modem.cpp",
+      "sha256": "2d1d2a2852a104219067638fa4a672fb376264c7592a3cef1a9b3911376d5ff9",
+      "bytes": 14030
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/pattern_fft_batch.hpp",
+      "sha256": "199875a3c72346b835b5a523f46c2fdeb51b20113ba65f5c3be59fd02e0fd0a9",
+      "bytes": 6245
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/lpi_estimate.cpp",
+      "sha256": "bb1d4c39364003412e8056d7aa35a8a8c92cd0a45c7215080a35cc9efde1e972",
+      "bytes": 4618
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_crypto.cpp",
+      "sha256": "b65bc74d45d15ede272b3b9b04ed2879c330f509eec035536e80fe0c764afedd",
+      "bytes": 19260
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_pattern_code.cpp",
+      "sha256": "b5bde0661ae3dbdb65200d3704624243711f81cd95b8e7a56285eafbaac7ce48",
+      "bytes": 55303
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_modem.cpp",
+      "sha256": "9e2e523ecad779207303bc78ecb3e92e73ee899978af9fc7276819956c0e652b",
+      "bytes": 6660
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_pattern_space.cpp",
+      "sha256": "3ee1a9f4c18f925865007dedf1e34d06003cba94b2804c6470e223bee183bcf4",
+      "bytes": 9555
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_transfer.cpp",
+      "sha256": "f7924d8725e976a73f5a9ec5d1f9f0683a8d1a66582d5593cd56899bf6ec587f",
+      "bytes": 31574
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_lpi_estimate.cpp",
+      "sha256": "f012271f8101f851bf2a661b00ddd4838a6435800f2d05fab7e26e1eeced4e66",
+      "bytes": 12382
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_pattern_correlator.cpp",
+      "sha256": "02c5efee52a1749807ec90f6943246c74e82ef371498d9d353ef32549ffadef5",
+      "bytes": 124725
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/pattern_search.cpp",
+      "sha256": "53e1dbc22266da40530bb06d7112eaa0396be9ff3b0e3315f644e342d7612ec0",
+      "bytes": 27439
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/include/datapump/resampler.hpp",
+      "sha256": "afa52b280ddba647a49165565691c86ad9b7ccf1cf8c8388ddb374abae473a03",
+      "bytes": 2974
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/resampler.cpp",
+      "sha256": "d99ca29cf142a380e206867b6b0eb975e249d378f0e2c34c65bc14bf4bc4cda6",
+      "bytes": 10562
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/include/datapump/host/audio.hpp",
+      "sha256": "a3dbfa5fa33cc26a94c2c63ff24864d756aaf4274bff05f1d55381be3c402155",
+      "bytes": 2690
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/host/audio.cpp",
+      "sha256": "be934a6210aab85f91f53ea4cf374ba928c2d545123faca9d7a47d13fc82d4a0",
+      "bytes": 19396
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/include/datapump/streaming_modem.hpp",
+      "sha256": "f5413d8527a0be9aacf6b3b943085e660e06f47b52069b5134357fe26bd00307",
+      "bytes": 7215
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_resampler.cpp",
+      "sha256": "3add3cc8a087fd6d3077c4ea3f7605551d82ccf70004b155677c8e9a2673772c",
+      "bytes": 9792
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_windows_audio.cpp",
+      "sha256": "84e29482ca89a7524500bb9984f6a57f01553c0d83d38a7dbac6dfd0561fa75c",
+      "bytes": 20267
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_host_audio.cpp",
+      "sha256": "7e073dc2fdbda646fd77578d31f16c4d2c14bfbbec7aad96704c44dc470b0584",
+      "bytes": 13591
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_live_resources.cpp",
+      "sha256": "8cd140dc101a3488a17e2580cf24dc5d3495c5dc345d5c9cd3f7348ec8515719",
+      "bytes": 21649
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_streaming_modem.cpp",
+      "sha256": "a6b16a7146a55b7493e68da573ffaa1f184914822efa4227a59654417dd77fa0",
+      "bytes": 30780
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_clock_sync.cpp",
+      "sha256": "a6744da7b3630b0a64bde83a1ff77c4dbbf563cc0995799c2e0f96679f5d37be",
+      "bytes": 14196
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/CMakeLists.txt",
+      "sha256": "5686cab926b10b2683b877d17bce3b171cdb99d4e8f6305da7d0bf3af5f40fe7",
+      "bytes": 42435
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/gui/transmit_scope.hpp",
+      "sha256": "0fe29f95324760af2ecb6af27b924702245532c6b2391fb4d8286030327522ce",
+      "bytes": 7727
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/include/datapump/transmit_trace.hpp",
+      "sha256": "1cdd9b2db2bae5b7d4f98f4eb880d5f3a21c1aff833b7bf436b329d653b7e0d0",
+      "bytes": 1987
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/transmit_timing.hpp",
+      "sha256": "8d2228165bbc63c1ad64639f57c1e7e1e32ad8a032d92aa9f173bc64083c30dd",
+      "bytes": 3187
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_audio_rates.cpp",
+      "sha256": "f9c4d704a2e0f4f79d93988b1f5cd031b4816eb9ef582795ac5ac026b3d726de",
+      "bytes": 7627
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/include/datapump/pattern_search.hpp",
+      "sha256": "16ca00f10a261d19368bae747e393de8fa2914bbef08742be68251efdd5dab52",
+      "bytes": 4206
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_pattern_search.cpp",
+      "sha256": "a83bb711d44626770673eeae70163f5ee491c08bf0f0813fc8fd5f4ba5527f89",
+      "bytes": 43974
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/audio.cpp",
+      "sha256": "57a2145baa035cc89b9aa11a0959575242a4532ba66db5d287e461d280f6a06d",
+      "bytes": 62552
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/audio_policy.cpp",
+      "sha256": "a7941a061845c7a9608fe5722de68f228739b4ee5a73a4bb9304bbc704127cc5",
+      "bytes": 1528
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/include/datapump/audio.hpp",
+      "sha256": "ab75fcd1254c57f4ffc609ac0db145da6565c0ace8982e8c127fc4402eb28cb3",
+      "bytes": 10476
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/include/datapump/utc_timing.hpp",
+      "sha256": "5062e61de74bafcf7b947055c9f1f61376d7b9be09e6dacf0fe33b81ed2a24a6",
+      "bytes": 17705
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_alsa_audio.cpp",
+      "sha256": "1ff509f83307a0d8f029028ec22257520ec21ea388a8a64a013a243fd29028f3",
+      "bytes": 71000
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/alsa_stub.cpp",
+      "sha256": "cfebdd85f75bdb38189050e8c2b59637c7faf3ec48f4fb7ed1139502a4db2bf2",
+      "bytes": 5033
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/alsa_stub.hpp",
+      "sha256": "60c52a15edead5388a867c74807fec075c93692e8d0550c66448dfb229d3c99c",
+      "bytes": 1580
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/live.cpp",
+      "sha256": "a27e6f0aa40716f86521463cf091b3f26a7798b2a9cec28d5aa7074cb9dca22b",
+      "bytes": 153587
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/include/datapump/live.hpp",
+      "sha256": "27995c4161e45fac4ba2f83e8014d4d38977972bbe8a2a7245e95d1229c1438a",
+      "bytes": 13933
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_live_profiles.cpp",
+      "sha256": "33299b13fbfd37fc7e82859ef110607f74d3f732818fff6c524a1bb9046fbc49",
+      "bytes": 64922
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/pattern_start_geometry.hpp",
+      "sha256": "e58beb958fcf8703b0695ee10aab7b1554f64ff017f6841dd9b3784102ea5f57",
+      "bytes": 7485
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_pattern_start_geometry.cpp",
+      "sha256": "ed39bfb2512fa0582826a7e2181b3300c044af967b829661e28d67c9e8ae43d0",
+      "bytes": 8169
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/tuning.cpp",
+      "sha256": "b058fcf10ea65d633d7f57145a03c422a10571757c8923a7ba76bc077768f884",
+      "bytes": 20671
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/include/datapump/tuning.hpp",
+      "sha256": "b01033f3865d99230f6b1cacf8ee0ae72e41e5175acf9c8c49df46d3832f0663",
+      "bytes": 5141
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/simulation_estimate.cpp",
+      "sha256": "3507bcf3df63eab621cefc04e676bf342728810357cbd0a80456af578af19cf5",
+      "bytes": 89215
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/gui/link_planner_model.cpp",
+      "sha256": "f731c15094719f3f8c057b7c42f5de6513d460d1090508fdd692de9de71e1184",
+      "bytes": 52217
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_tuning.cpp",
+      "sha256": "5f8b1289a83b0703b99f33290bdfa108b14b9791e2f198e32a02e06ad1a9ac5a",
+      "bytes": 40411
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_simulation_estimate.cpp",
+      "sha256": "22af4b88818a32c04383a2dc99862d61a64402e7bb79ad136341f78e582e121b",
+      "bytes": 106079
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/include/datapump/simulation_estimate.hpp",
+      "sha256": "4518f82c5d755b3dda62d58a6be830b25d4e333b13514723e51ca1fcd860fd45",
+      "bytes": 10984
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/gui/link_planner_model.hpp",
+      "sha256": "a50d014444992b716df91285b6173ca41250c4bc93d337e78516aaf4aeab3dab",
+      "bytes": 7308
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/gui/controller.cpp",
+      "sha256": "a315f055c7fd82a7ed37bb65aa1d735763bcddc74581d7c43ba13e179747e63e",
+      "bytes": 136813
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/gui/desktop_layout.hpp",
+      "sha256": "9d1ace694c4a1a7b30157fe78d323dcbbea369b3d41cd99104211aeaf3514025",
+      "bytes": 25887
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/gui/ui_contract.hpp",
+      "sha256": "f19da5baf2bd8d1077c8ea87daf653730488c28eae0f4f390807bab5e59ed5e5",
+      "bytes": 10170
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/gui/screen_console.cpp",
+      "sha256": "286e0725c1a6582b3c554a9273b2839b9e5f7577475f80b9ae799730a947a2b4",
+      "bytes": 41273
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/gui/launch_command.cpp",
+      "sha256": "1a97f31f8f333b24c04068b4fa41a83016b539af3a46ccc09b893f3b56f8c651",
+      "bytes": 13474
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/gui/launch_command.hpp",
+      "sha256": "f9dcbd5d70c650af38597c5b6b193c7819277433760a260155c7b308f56cb3e4",
+      "bytes": 1547
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/gui/application.cpp",
+      "sha256": "17f62accdec5faf93d443a74b7459820a60227ab810a26a2a0253f22a3b9c89d",
+      "bytes": 38422
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_gui_controller.cpp",
+      "sha256": "40e2cbc39dbf1ba6b1c7a12adde4c2a28fe1a2f3e6db44293f7791878e5a00d9",
+      "bytes": 189831
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_gui_launch_command.cpp",
+      "sha256": "931e68b86ad3e2332e952149f9559461a24c558146ffb30512cddc0d411a30f5",
+      "bytes": 15989
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_gui_launch_settings.cpp",
+      "sha256": "c08eac538170b043c2bbb7790208749b5930fd2a2af31cb7cacc4e2552cb0664",
+      "bytes": 28819
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_gui_layout.cpp",
+      "sha256": "8128e8a082abe6584394bc0de0093ec1e9226efcbe015b11e2db9480faf134a0",
+      "bytes": 39242
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/gui/link_planner_page.cpp",
+      "sha256": "fdd3fafed610e5d6924700910694217fe4dbed494ffed6247993b748d8c2ca72",
+      "bytes": 48433
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_gui_link_planner.cpp",
+      "sha256": "20c85bc0ee9e2fdb760cc24af4b42bf6c4a65ce4d8f15de6fe13565d31758791",
+      "bytes": 131420
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/pattern_correlator.cpp",
+      "sha256": "0e68454f76d1a3ef43b98c352bfb8db97710ba87209cf5032cd174bdeee6caa5",
+      "bytes": 120253
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/pattern_correlator_batch.cpp",
+      "sha256": "c3f6a8ed53741e8de873bce98367d13abfef91dd30c36707e528fd9e9bb8731a",
+      "bytes": 28583
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/pattern_correlator_batch.hpp",
+      "sha256": "5aeab04badad3f34db308a29bb02e13d49cafaaf9a0bf3b94be42a4c3f743af3",
+      "bytes": 20880
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/pattern_receiver.cpp",
+      "sha256": "110f09980b022d27ff8829d5ad4911cd601a9485dad3200a279d8d565ae73b36",
+      "bytes": 106601
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_pattern_receiver.cpp",
+      "sha256": "0fa14084b1a89d3cc8a49cf3b25dd5fbbb7a7edebf5c591b02772d55a0faa558",
+      "bytes": 122717
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_pattern_correlator_batch.cpp",
+      "sha256": "3e24fc32714b30d4b3098913b691d33e53a8f6290cdae86d849b88b020c20251",
+      "bytes": 38524
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/cmake/TestGroups.cmake",
+      "sha256": "8ed1de7ee0cb90b599d4f54a19a4c08931d9d24a72d67999badfd3dd4147aa5d",
+      "bytes": 6441
+    }
+  ],
+  "source_release": {
+    "path": ".agent-work/artifacts/receiver-opt-20261008/dsss-followup-source-release.json",
+    "sha256": "044e8109d8afcd61e9adf2356bbba3b0e4817ac44335134498c605092894c61f",
+    "bytes": 29883
+  },
+  "final_binaries": [
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/agents/receiver-opt-20261008/native/datapump-gui",
+      "sha256": "7a88d9496158fcb626abf8973bd40e6c603a992bd81d027de11a8f5efc2115e7",
+      "bytes": 6389008
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/agents/receiver-opt-20261008/native/pump",
+      "sha256": "fff4d76b098033b7a6a2b784e147d79a4fcc61a6bdc75005e9a909c9619e53b3",
+      "bytes": 3617968
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/agents/receiver-opt-20261008/native/libdatapump.a",
+      "sha256": "2bc0dbc37e94f728a512690c4b15c5ae06e6dfcacd40816b1d7ab6f9a92fd68a",
+      "bytes": 3194442
+    }
+  ],
+  "baseline_manifest": {
+    "path": ".agent-work/artifacts/receiver-opt-20261008/clock-spread-manual-manifest.json",
+    "sha256": "d8a70cd34978517844a1245462484e93c1bd9161ed89cf4b31e234f6b7cb6fda",
+    "bytes": 46097
+  },
+  "baseline_library": {
+    "path": ".agent-work/artifacts/receiver-opt-20261008/dsss-before-libdatapump.a",
+    "sha256": "13cc4ae7428e1a5afa6813445b79b5cf1c8f130cdee63e8fc0903851bee54995",
+    "bytes": 3030998
+  },
+  "baseline_gui": {
+    "path": ".agent-work/artifacts/receiver-opt-20261008/clock-spread-manual-gui",
+    "sha256": "24ec8757fc613c62b821db08660af9effa67bb0965a4487ef7e95b03397d89f4",
+    "bytes": 6279240
+  },
+  "files": [
+    {
+      "path": "docs/validation-data/robust/dsss-followup-20261009/README.md",
+      "sha256": "3a1d3072008165474b6c8c5e5a8b2873b9105a29ea60c59fb9550c39d1b046b7",
+      "bytes": 1911
+    },
+    {
+      "path": "docs/validation-data/robust/dsss-followup-20261009/analyze_outer_guard.py",
+      "sha256": "46f6657abc2d92132c4935fd45a9dece01a6287e3d20933f9661affe843bdce4",
+      "bytes": 7931
+    },
+    {
+      "path": "docs/validation-data/robust/dsss-followup-20261009/artifact-manifest.json",
+      "sha256": "f4f0d99434eb707ac415668f21fea3d723251bb18415a2d137de247e150db428",
+      "bytes": 1626
+    },
+    {
+      "path": "docs/validation-data/robust/dsss-followup-20261009/benchmark_dsss_followup.cpp",
+      "sha256": "ae9fb1481ed78293ccc57012ea3ffa299c06a7b91375d3e99499edbc7bf8540a",
+      "bytes": 17158
+    },
+    {
+      "path": "docs/validation-data/robust/dsss-followup-20261009/benchmark_dsss_inclusive.cpp",
+      "sha256": "edc0c5cc9521b6ec9f477c175b5a926c751c403e45cd6a33dbe089c4cd14472b",
+      "bytes": 17545
+    },
+    {
+      "path": "docs/validation-data/robust/dsss-followup-20261009/benchmark_pulse_receiver.cpp",
+      "sha256": "cf2f9da31a898af2a46604c83e4b34edbf75e63576a7290e7e2dc3f275636189",
+      "bytes": 51704
+    },
+    {
+      "path": "docs/validation-data/robust/dsss-followup-20261009/checks.json",
+      "sha256": "9a1cc3e8b1ab6ad65b81c52e59bb47e9120a958b5c0a1830aa813a33026ecebc",
+      "bytes": 1944
+    },
+    {
+      "path": "docs/validation-data/robust/dsss-followup-20261009/dsss-before-binaries.json",
+      "sha256": "d8f5cd4e2ca20539238e1fc7e3556cc9a4b652261fff88b77efe67beab3c3623",
+      "bytes": 1857
+    },
+    {
+      "path": "docs/validation-data/robust/dsss-followup-20261009/dsss-config-report.cpp",
+      "sha256": "975cfaa053bbca79ef586ce70d9fc21bb57460495d940a9b659d5762cce106bf",
+      "bytes": 3845
+    },
+    {
+      "path": "docs/validation-data/robust/dsss-followup-20261009/dsss-paired-driver-headers.json",
+      "sha256": "489d94c5f0dca15e50eea347c2e3da36044f61dc4d960cc86fbdd68ab2a0657e",
+      "bytes": 1389
+    },
+    {
+      "path": "docs/validation-data/robust/dsss-followup-20261009/dsss-spectrum-before.csv",
+      "sha256": "77da5dad2b0de3528db9fb140b53daa250455146a2b7450ac6adb366c92a5385",
+      "bytes": 937
+    },
+    {
+      "path": "docs/validation-data/robust/dsss-followup-20261009/dsss-spectrum.cpp",
+      "sha256": "681dd461b60fa79636770d986f261507cc694aa857126ff7872e3a5379781056",
+      "bytes": 2536
+    },
+    {
+      "path": "docs/validation-data/robust/dsss-followup-20261009/final-replay-summary.json",
+      "sha256": "530c62221c28dcd9e2eb62871bcd8562f6a9f76beaef8b2d593605b924bf3a6b",
+      "bytes": 7518
+    },
+    {
+      "path": "docs/validation-data/robust/dsss-followup-20261009/holdout-family-coarse.json",
+      "sha256": "e36dae06868cc4f48321e28b7cf74197c3b65d25cc36c60e733950d00c5a7b48",
+      "bytes": 13225
+    },
+    {
+      "path": "docs/validation-data/robust/dsss-followup-20261009/holdout-family-fine.json",
+      "sha256": "355f201ea4f241aea0a680c1f65e379aa3342fe259c0ec3ac0973b900b3cb571",
+      "bytes": 13274
+    },
+    {
+      "path": "docs/validation-data/robust/dsss-followup-20261009/holdout-plan.json",
+      "sha256": "950caddef28004a793e8ea58e6b35515568e22d4ea9bcc60f53fc30df964b257",
+      "bytes": 1176
+    },
+    {
+      "path": "docs/validation-data/robust/dsss-followup-20261009/native-CMakeCache.txt",
+      "sha256": "8f60ac4e46f7ae03f08a6c4c0bc8c0023c16e9ed5bcd3b0b4c633b5fce367bd2",
+      "bytes": 76643
+    },
+    {
+      "path": "docs/validation-data/robust/dsss-followup-20261009/outer_guard_statistics.cpp",
+      "sha256": "ef40681032de34473dfe391aac6ed1facdc470d3e988e764a91e30491fbd71ee",
+      "bytes": 25159
+    },
+    {
+      "path": "docs/validation-data/robust/dsss-followup-20261009/performance-environment.json",
+      "sha256": "4f07d6dfad8168855aa419c93b6e8bb3e5df17e43207da9f72bc7c71d9ee753e",
+      "bytes": 422
+    },
+    {
+      "path": "docs/validation-data/robust/dsss-followup-20261009/performance-inclusive-normalized.json",
+      "sha256": "51719cfc728fd771a681f720a3c863397400a1bae5efbc6806ff3230a7026770",
+      "bytes": 34410
+    },
+    {
+      "path": "docs/validation-data/robust/dsss-followup-20261009/performance-inclusive-short-results.json",
+      "sha256": "2e720ea3986203cb0326d82af5d98be4be3adf754b718fcf7cc71f10a05a9527",
+      "bytes": 57364
+    },
+    {
+      "path": "docs/validation-data/robust/dsss-followup-20261009/performance-long-results.json",
+      "sha256": "ffbf736bb8b72a21ca766787be827f1d6a00ddcf071f3579b918462dbd460584",
+      "bytes": 367240
+    },
+    {
+      "path": "docs/validation-data/robust/dsss-followup-20261009/performance-short-results.json",
+      "sha256": "87b0cffa71ab7001f47fd12c0ac3a11cdc5cbad0e683faaee62db43b08f9fc30",
+      "bytes": 179723
+    },
+    {
+      "path": "docs/validation-data/robust/dsss-followup-20261009/performance-summary.json",
+      "sha256": "431a7122c562f9a8c44a4d81dbce460520599ae12f8d36bdc266f7ed72cf80ef",
+      "bytes": 96078
+    },
+    {
+      "path": "docs/validation-data/robust/dsss-followup-20261009/resolved-configurations.csv",
+      "sha256": "43c179f36635b2eafff610cd41d197aaa91f166a0c58bd66ab61918048520f5e",
+      "bytes": 2530
+    },
+    {
+      "path": "docs/validation-data/robust/dsss-followup-20261009/run-dsss-final-performance.py",
+      "sha256": "abbc76a1157f216933711f10655593c0e63cfe460422fc1cd276497bb4f37183",
+      "bytes": 4979
+    },
+    {
+      "path": "docs/validation-data/robust/dsss-followup-20261009/run-dsss-inclusive.py",
+      "sha256": "5c38f142ae6cf3b0acd92c42b766c948f84db7d243dd89b7e3c9321931eb9a4a",
+      "bytes": 943
+    },
+    {
+      "path": "docs/validation-data/robust/dsss-followup-20261009/waveform-provenance.json",
+      "sha256": "ad4d65359d42106bd2da4c163565a1a2163cb0c881f2bfc1ced6b33a480eb921",
+      "bytes": 691
+    }
+  ],
+  "logs": [
+    {
+      "path": ".agent-work/artifacts/receiver-opt-20261008/dsss-final-application.log",
+      "sha256": "d4a5bd0c8cc05be40b60c202107dee67a35dea4665e8ec851371e23ab81b1ebd",
+      "bytes": 3116
+    },
+    {
+      "path": ".agent-work/artifacts/receiver-opt-20261008/dsss-final-gui-group-2.log",
+      "sha256": "bc4947d07a3aae59c859018f36e07eef04d2e502921a7d346adc8bc8e240d0db",
+      "bytes": 9011
+    },
+    {
+      "path": ".agent-work/artifacts/receiver-opt-20261008/dsss-correlator-final-complete.log",
+      "sha256": "eec2d89ac3b076b3bc2c0d4397fac722eac45811333adbc621cf779a308aa908",
+      "bytes": 512
+    },
+    {
+      "path": ".agent-work/artifacts/receiver-opt-20261008/dsss-final-fallback-fixture.log",
+      "sha256": "74d5aca3659a5d354c3745b0f986399f671cc284b7d2c4e2346b8fb209250622",
+      "bytes": 48
+    },
+    {
+      "path": ".agent-work/artifacts/receiver-opt-20261008/dsss-followup-affected-tests.log",
+      "sha256": "bb087c5b150d7e627094850d2f191e527e2ead23efe1f2c6e6740495a1c404fa",
+      "bytes": 4241
+    },
+    {
+      "path": ".agent-work/artifacts/receiver-opt-20261008/dsss-followup-live-focused.json",
+      "sha256": "b04eb2666e5e1af0d4856df8f91195322003777cb4f9f2579f7611ff72fffba1",
+      "bytes": 1342
+    },
+    {
+      "path": ".agent-work/artifacts/receiver-opt-20261008/dsss-sparse-final-focused.json",
+      "sha256": "8a687b043efffbdb282d3b992585f8f3d438ad6122348f8d4b4dfd8288e5858a",
+      "bytes": 641
+    },
+    {
+      "path": ".agent-work/artifacts/receiver-opt-20261008/dsss-final-performance.log",
+      "sha256": "182a094dae4d34fcfc33a9ea3aca164df3043392559e8093aa14dd9341469a5b",
+      "bytes": 2713
+    },
+    {
+      "path": ".agent-work/artifacts/receiver-opt-20261008/dsss-inclusive-performance.log",
+      "sha256": "43366dfe905361c2c9cb5aa1b717dc41f7fc2b8e8415812ea09377f56c597337",
+      "bytes": 273
+    },
+    {
+      "path": ".agent-work/artifacts/receiver-opt-20261008/dsss-final-self-check.log",
+      "sha256": "2cd7ce2258fb065e3b686fbd09892e9c9d537c07f51808e7059182ad867dad76",
+      "bytes": 105
+    }
+  ],
+  "omitted": "Full general/contract/calibration/native graphical/platform/SDK/packaging and hardware/full-bank/cumulative sensitivity qualification; user manual checkpoint. No publication."
+}

@@ -2,6 +2,7 @@
 #include "launch_command.hpp"
 #include "gui_smoke_budget.hpp"
 #include "datapump/tuning.hpp"
+#include "datapump/clock_sync.hpp"
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -17,6 +18,23 @@ template<class Function> void rejects(Function function,const std::string& messa
     throw std::runtime_error(message);
 }
 void parsing_and_formatting() {
+    const auto clock=launch_command::parse("--clock-sync GPS_0.1ms-400ms_region-2564ms_offset --audio-error 30ms --dsss-factor 1000 --fhss fake-0.4s-200 --live-duplex yes");
+    check(clock.audio_timing_error_seconds==.03,"audio allowance lost duration units");
+    check(clock.full_duplex==true,"duplex selection was omitted from the saved settings");
+    const auto half_duplex=launch_command::parse("--live-duplex no");
+    check(half_duplex.full_duplex==false && launch_command::parse(launch_command::format(half_duplex))==half_duplex,
+        "explicit half duplex was confused with an omitted option");
+    check(!launch_command::parse("--rate 1200").full_duplex.has_value(),"older commands must leave duplex unchanged");
+    check(launch_command::parse(launch_command::format(clock))==clock,"clock and spreading settings must round trip");
+    const auto policy=datapump::clock_sync::parse(*clock.clock_sync);
+    check(policy && std::abs(policy->half_window_seconds()-.2002)<1e-12 && policy->offset_seconds==2.564,
+          "region must be total width with BOTH stations GPS bounds outside it");
+    check(datapump::clock_sync::parse("GPS_1e-3ms-1us_region-0ms_offset")->accuracy_seconds==1e-6,
+          "sub-millisecond scientific clock input lost precision");
+    check(!datapump::clock_sync::parse("Default"),"Default clock policy must remain absent");
+    for(const auto* command:{"--fhss genuine","--fhss ic-7100","--dsss-factor 2","--clock-sync GPS_nanms-1ms_region-0ms_offset",
+        "--clock-sync GPS_1ms--1ms_region-0ms_offset","--audio-error 0ms","--audio-error -1ms",
+        "--audio-error NaNms","--audio-error 61s","--audio-error 30","--live-duplex maybe","--live-duplex 1"})rejects([&]{launch_command::parse(command);},"invalid clock/spreading setting accepted");
     const auto settings=launch_command::parse(
         "./datapump-gui --auto-pattern --tx-dbm 3 --path-loss-db=170 --noise-dbm-hz -164 "
         "--oscillator gpsdo-ocxo --target-snr -8 --rate 3600 --carrier 1500 --dsp-workspace 50%");
@@ -81,7 +99,8 @@ void parsing_and_formatting() {
         check(launch_command::parse(launch_command::format(pattern))==pattern,"every actual pattern mode must retain its identity");
     }
     for(const auto& oscillator:datapump::tuning::oscillator_presets()) {
-        auto model=settings;model.oscillator=oscillator.id;
+        auto model=settings;
+        if(oscillator.id=="ic-7100")model.rf_oscillator=oscillator.id;else model.oscillator=oscillator.id;
         check(launch_command::parse(launch_command::format(model))==model,"every oscillator preset must round-trip");
     }
     const auto windows=launch_command::parse(R"("C:\Program Files\Data Pump\datapump-gui.exe" --rate "3.6 kHz"

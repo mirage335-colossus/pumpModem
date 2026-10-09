@@ -1,0 +1,22 @@
+{
+  "created_utc": "2026-10-09T07:37:52.888844+00:00",
+  "scope": "conditional single coherent hypothesis real-AWGN statistic; actual PCM replay selected seeds only",
+  "qualification_inputs": "fresh holdout only; exploratory files excluded",
+  "production_sources_edited": false,
+  "jobs_running": false,
+  "hashes": {
+    "outer_guard_statistics.cpp": "ef40681032de34473dfe391aac6ed1facdc470d3e988e764a91e30491fbd71ee",
+    "outer_guard_statistics": "adf487bbd72367db2323aab3b7df7fb54d3d161de452b28eb6520897b282eba6",
+    "analyze_outer_guard.py": "46f6657abc2d92132c4935fd45a9dece01a6287e3d20933f9661affe843bdce4",
+    "README.md": "633a8125bcf5536e9e4cf0a376a90c117cec93351d61e42cdc9b007266f8ceb5",
+    "holdout-plan.json": "950caddef28004a793e8ea58e6b35515568e22d4ea9bcc60f53fc30df964b257",
+    "holdout-pool-manifest.json": "3da26ecdb5d8793e3314789a4231abfd3854e027d17ba29a13b095a859f932cd",
+    "holdout-family-fine.json": "355f201ea4f241aea0a680c1f65e379aa3342fe259c0ec3ac0973b900b3cb571",
+    "holdout-family-coarse.json": "e36dae06868cc4f48321e28b7cf74197c3b65d25cc36c60e733950d00c5a7b48",
+    "source-baseline.json": "1c964d21bb04c32a0b3a2cee803ed49b623212496c18a1fde37d58ad1b109bd8",
+    "final-core-comparison.json": "7849cd4fb81947a65099e8fcd8cda2a62779f037f5f229eb690bba1ff04e4d60",
+    "analyzer-numeric-check.json": "609bdb32c14efe8cfad666635e30869d095053c25bf9a5e6eb80bce3f9880791",
+    "pool-manifest.json": "2115979f28eded0552e6874a9613abcc557c82de999ef57a4e2cf8f93b158fd9"
+  },
+  "pool_lineage": "holdout-pool-manifest.json contains all16 original qualification input SHA256 and four pooled CSV SHA256"
+}

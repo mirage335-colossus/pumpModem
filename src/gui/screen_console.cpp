@@ -13,9 +13,10 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.purpose=ControlPurpose::operation;break;
     case Slot::simulation:case Slot::link_power:case Slot::link_loss:case Slot::link_noise:
     case Slot::simulation_oscillator:case Slot::rf_oscillator:
-    case Slot::search_margin:
+    case Slot::search_margin: case Slot::clock_accuracy: case Slot::clock_region: case Slot::clock_offset: case Slot::audio_error:
         control.purpose=ControlPurpose::planning;break;
-    case Slot::device:case Slot::mono:case Slot::exclusive:case Slot::key:case Slot::key_actions:
+    case Slot::device:case Slot::mono:case Slot::live_duplex:case Slot::exclusive:case Slot::key:case Slot::key_actions:
+    case Slot::dsss_factor:case Slot::fhss:
     case Slot::pattern:case Slot::fec:case Slot::dsp_workspace:case Slot::receive_snr:
     case Slot::developer_mode:case Slot::shellcode_mode:case Slot::send_key:
         control.purpose=ControlPurpose::setup;break;
@@ -49,6 +50,10 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::simulation_confidence||slot==Slot::simulation_cpu_time||slot==Slot::simulation_gpu_time)control.font_size=12;
     if(slot==Slot::simulation)
         control.help="Yes runs the modem through a simulated radio link. No uses audio hardware. Power, path loss and noise remain editable in either mode. RX estimate models reception; link assumptions do not set hardware output power.";
+    if(slot==Slot::live_duplex) {
+        control.font_size=12;
+        control.help="Keep hardware audio input and the receiver running during transmission, for an audio loopback cable or speakers/microphone in one instance. Default off pauses capture during hardware output. Does not synthesize an internal loopback or control radio PTT; the selected audio route must permit simultaneous input/output. Simulation already has an independent receiver.";
+    }
     if(slot==Slot::link_power)
         control.help="Average transmit power for the shared link budget and RX estimate. Choose a preset or enter power in W, mW, uW, µW or dBm. This is a planning assumption; adjust the radio's output power separately.";
     if(slot==Slot::link_loss)
@@ -66,6 +71,13 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(control.field==Field::rf_oscillator)control.help="Effective relative TX/RX frequency-shift oscillator accuracy and phase diffusion. Select Baseband clock when the mixer and ADC/DAC share a reference; its errors are counted once with linked drift. At Shift 0 this choice is disabled as N/A and contributes no frequency or phase drift; the selection is remembered. Illustrative models are not measured hardware guarantees and selecting one does not control hardware.";
     if(control.field==Field::rf_shift)control.help="Absolute frequency translation or radio LO in Hz, kHz, MHz, GHz or THz; default 0 Hz. Fixed USB delivers a real ADC/DAC stream at Carrier minus Shift, which must stay positive. Set Carrier above Shift to keep the desired stream tone. This setting does not retune physical hardware.";
     if(control.field==Field::search_margin)control.help="Conservative multiplier on justified relative frequency and sample-clock accuracy; default 3x. At least 1x. Model limits and references shows requested and actually covered bounds. A margin cannot guarantee an unjustified oscillator specification.";
+
+    if(slot==Slot::clock_accuracy)control.help="GPS PC-clock error bound at each station, independent of oscillator accuracy or GPSDO. The arrival search adds both station bounds. Editable ns/us/ms/s; Default restores all three clock controls and the existing six-second epoch search.";
+    if(slot==Slot::clock_region)control.help="Total remaining propagation-delay search width centered on Offset. For example 400 ms means +/-200 ms. Both GPS error bounds are added outside this region. Editable ns/us/ms/s; Default resets all clock controls.";
+    if(slot==Slot::clock_offset)control.help="Approximate fixed one-way path delay, or total Earth-Moon-Earth path delay (2564 ms example). Region extends nearer and farther around it. This does not set the PC clock. Default resets all clock controls.";
+    if(slot==Slot::audio_error)control.help="Assumed maximum residual audio timing error at each station after compensating reported queued audio; default 30 ms. Separate from GPS accuracy, propagation and the underrun-prevention buffer. Both peers must fit this allowance. Editable ns/us/ms/s, greater than zero and at most 60 s. A smaller setting cannot reduce measured provider uncertainty; unsupported timing stops before transmission. Retained when Clock sync returns to Default.";
+    if(slot==Slot::dsss_factor)control.help="Additional private outer DSSS spreading factor, using separate DSSS key/counter domains while retaining independent inner private patterns. Selecting 10x, 100x or 1000x starts at Rate 360, 36 or 3.6 Hz and a 1.5 kHz stream carrier, preserving the usual voice-passband width. Rate remains editable; occupied bandwidth grows with Rate times factor. Experimental waveform; both peers must match. Requires a selected key; spreading adds no energy per bit.";
+    if(slot==Slot::fhss)control.help="Fake animates Carrier and Shift during transmission and plans oscillator uncertainty at the highest illustrated frequency. It does not retune hardware or hop the audio signal, and adds no observer-time gain. The illustrative 0.4 s / 200-channel schedule is not a US/EU compliance profile. Genuine and IC-7100 hardware hopping are not implemented.";
 
     if(slot==Slot::mode)control.help="Receiver failures stay visible until restart or reconfiguration. Dropped input means the capture queue discarded audio; interrupted input means device continuity was lost or uncertain. Search limited means required coverage or candidates were omitted by a resource limit; restarted means an error reset acquisition. Normal weak-candidate rejection and slow lossless simulation are not failures. See Status for details.";
     if(slot==Slot::paste_previous) {control.font_size=11;control.help="Paste the previous transmitted message back into Message for editing or retransmission.";}
@@ -181,6 +193,10 @@ const std::vector<Control>& console_screen() {
         placed({Kind::label,Field::simulation_confidence,Command::none,Bitmap::none,Page::console,2,"RX estimate"}, Slot::simulation_confidence),
         placed({Kind::label,Field::simulation_cpu_time,Command::none,Bitmap::none,Page::console,2,"CPU / i9-13900H"}, Slot::simulation_cpu_time),
         placed({Kind::label,Field::simulation_gpu_time,Command::none,Bitmap::none,Page::console,2,"GPU / RTX 4090 Laptop (projected)"}, Slot::simulation_gpu_time),
+        placed({Kind::text,Field::clock_accuracy,Command::none,Bitmap::none,Page::console,3,"Clock sync",1,false,128}, Slot::clock_accuracy),
+        placed({Kind::text,Field::clock_region,Command::none,Bitmap::none,Page::console,3,"Region",1,false,128}, Slot::clock_region),
+        placed({Kind::text,Field::clock_offset,Command::none,Bitmap::none,Page::console,3,"Offset",1,false,128}, Slot::clock_offset),
+        placed({Kind::text,Field::audio_error,Command::none,Bitmap::none,Page::console,3,"Audio error",1,false,128}, Slot::audio_error),
         placed({Kind::choice,Field::simulation_oscillator,Command::none,Bitmap::none,Page::console,3,"Baseband Osc"}, Slot::simulation_oscillator),
         placed({Kind::choice,Field::rf_oscillator,Command::none,Bitmap::none,Page::console,3,"Shift Osc"}, Slot::rf_oscillator),
         placed({Kind::text,Field::search_margin,Command::none,Bitmap::none,Page::console,3,"Margin",1,false,64}, Slot::search_margin),
@@ -190,6 +206,8 @@ const std::vector<Control>& console_screen() {
         placed({Kind::action,Field::count,Command::generate_keyfile,Bitmap::none,Page::console,2,"Generate keyfile"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::action,Field::count,Command::show_key_folder,Bitmap::none,Page::console,2,"Show key folder"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::action,Field::count,Command::acknowledge_key_failure,Bitmap::none,Page::console,2,"Keep current keys"}, Slot::key_actions, Menu::keyfile),
+        placed({Kind::choice,Field::dsss_factor,Command::none,Bitmap::none,Page::console,3,"DSSS"}, Slot::dsss_factor),
+        placed({Kind::choice,Field::fhss,Command::none,Bitmap::none,Page::console,3,"FHSS"}, Slot::fhss),
         placed({Kind::choice,Field::key,Command::none,Bitmap::none,Page::console,3,"Encryption key entry"}, Slot::key),
         placed({Kind::label,Field::key_path,Command::none,Bitmap::none,Page::console,3,""}, Slot::key_path),
         placed({Kind::text,Field::device,Command::none,Bitmap::none,Page::console,4,"Audio device"}, Slot::device),
@@ -237,6 +255,7 @@ const std::vector<Control>& console_screen() {
         placed({Kind::action,Field::count,Command::zoom_out,Bitmap::none,Page::console,13,"Zoom out"}, Slot::zoom_out),
         placed({Kind::action,Field::count,Command::reset_zoom,Bitmap::none,Page::console,13,"Reset zoom"}, Slot::reset_zoom),
         placed({Kind::choice,Field::mono,Command::none,Bitmap::none,Page::console,14,""}, Slot::mono),
+        placed({Kind::toggle,Field::live_duplex,Command::none,Bitmap::none,Page::console,14,"Live/Duplex"}, Slot::live_duplex),
         placed({Kind::choice,Field::volume,Command::none,Bitmap::none,Page::console,14,"TX volume"}, Slot::volume),
         placed({Kind::toggle,Field::exclusive,Command::none,Bitmap::none,Page::console,14,"Exclusive"}, Slot::exclusive),
         placed({Kind::label,Field::diagnostics,Command::none,Bitmap::none,Page::console,14,""}, Slot::diagnostics),

@@ -275,6 +275,26 @@ transmit/capture start.
 Search epochs within N seconds on either side, nearest first;
 0\(en32768, default 6.
 .TP
+.BI \-\-clock\-sync " SPEC"
+Default preserves the existing search policy. An explicit value such as
+GPS_1ms-400ms_region-2564ms_offset describes per-station system-clock accuracy,
+total propagation region width centered on a fixed offset. Durations accept
+ns/us/ms/s units. This does not select an oscillator or establish audio latency.
+Unsupported timing paths keep the full search.
+.TP
+.BI \-\-audio\-error " TIME"
+Per-station residual audio timing allowance after reported queue compensation;
+default 30ms. Accepts positive ns/us/ms/s durations up to 60s. Separate from GPS
+accuracy, propagation and oscillator models; does not change the audio buffer.
+Insufficient timing allowance visibly falls back to ordinary playback before
+private output, without clipping provider uncertainty or enlarging the setting.
+Failures after private output begins stop transmission; they do not restart it.
+.TP
+.BI \-\-dsss\-factor " 1|10|100|1000"
+Additional independent private outer spreading, with 1 preserving the existing
+waveform. Factors above one require a keyfile and retain the inner private bit
+patterns. Receiver sensitivity and interference qualification remain incomplete.
+.TP
 .BI \-\-progress
 Report timing search to standard error. With
 .B listen \-\-json

@@ -1,6 +1,7 @@
 #include "../frequency_parse.hpp"
 #include "launch_command.hpp"
 #include "datapump/tuning.hpp"
+#include "datapump/clock_sync.hpp"
 #include <array>
 #include <charconv>
 #include <cctype>
@@ -110,7 +111,8 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             flag=="--oscillator"||flag=="--target-snr"||flag=="--short-target-snr"||flag=="--long-target-snr"||
             flag=="--rate"||flag=="--bw"||flag=="--carrier"||flag=="--dsp-workspace"||flag=="--pattern"||
             flag=="--rf-oscillator"||flag=="--shift"||flag=="--rf-shift"||flag=="--rf-carrier"||flag=="--search-margin"||
-            flag=="--reference"||flag=="--sideband"||flag=="--lf-reference";
+            flag=="--reference"||flag=="--sideband"||flag=="--lf-reference"||
+            flag=="--clock-sync"||flag=="--audio-error"||flag=="--dsss-factor"||flag=="--fhss"||flag=="--live-duplex";
         if(!known)invalid("Unknown launch option: "+std::string(flag));
         std::string_view value;
         if(equal!=std::string_view::npos)value=argument.substr(equal+1);
@@ -129,7 +131,30 @@ Patch parse_arguments(std::span<const std::string> arguments) {
         else if(flag=="--rate"||flag=="--bw")result.rate_hz=frequency(value,flag,tuning::minimum_bandwidth_hz);
         else if(flag=="--carrier")result.carrier_hz=frequency(value,flag,0,false,std::numeric_limits<double>::max());
         else if(flag=="--dsp-workspace")result.workspace_percent=workspace(value);
-        else if(flag=="--oscillator")result.oscillator=std::string(tuning::parse_oscillator_preset(value).id);
+        else if(flag=="--clock-sync")result.clock_sync=clock_sync::format(clock_sync::parse(value));
+        else if(flag=="--audio-error") {
+            result.audio_timing_error_seconds=clock_sync::duration(value);
+            clock_sync::validate_audio_error(*result.audio_timing_error_seconds);
+        }
+        else if(flag=="--dsss-factor") {
+            const auto factor=number(value,flag,1,1000);
+            if(factor!=1&&factor!=10&&factor!=100&&factor!=1000)
+                invalid("--dsss-factor must be 1 (off), 10, 100, or 1000.");
+            result.dsss_factor=static_cast<unsigned>(factor);
+        }
+        else if(flag=="--live-duplex") {
+            if(value!="yes"&&value!="no")invalid("--live-duplex must be yes or no.");
+            result.full_duplex=value=="yes";
+        }
+        else if(flag=="--fhss") {
+            if(value!="off"&&value!="fake-0.4s-200")invalid("Only off or fake-0.4s-200 FHSS is implemented.");
+            result.fhss=std::string(value);
+        }
+        else if(flag=="--oscillator") {
+            const auto preset=tuning::parse_oscillator_preset(value);
+            if(preset.id=="ic-7100")invalid("IC-7100 is an RF Shift oscillator example; its audio-clock accuracy is not specified.");
+            result.oscillator=std::string(preset.id);
+        }
         else if(flag=="--rf-oscillator")result.rf_oscillator=std::string(tuning::parse_oscillator_preset(value).id);
         else if(flag=="--shift"||flag=="--rf-shift")result.rf_shift_hz=frequency(value,flag,0,true,std::numeric_limits<double>::max());
         else if(flag=="--rf-carrier")carrier_alias=frequency(value,flag,0,false,std::numeric_limits<double>::max());
@@ -194,6 +219,11 @@ std::string format(const Patch& settings) {
     if(settings.rate_hz)add("--rate",numeric(*settings.rate_hz));
     if(settings.carrier_hz)add("--carrier",numeric(*settings.carrier_hz));
     if(settings.workspace_percent)add("--dsp-workspace",std::to_string(*settings.workspace_percent)+"%");
+    if(settings.clock_sync)add("--clock-sync",clock_sync::format(clock_sync::parse(*settings.clock_sync)));
+    if(settings.audio_timing_error_seconds)add("--audio-error",clock_sync::duration_text(*settings.audio_timing_error_seconds));
+    if(settings.dsss_factor)add("--dsss-factor",std::to_string(*settings.dsss_factor));
+    if(settings.full_duplex)add("--live-duplex",*settings.full_duplex?"yes":"no");
+    if(settings.fhss)add("--fhss",*settings.fhss);
     // Validate programmatic exports as strictly as pasted text before returning
     // any command. Canonical enum values contain no shell metacharacters.
     (void)parse_arguments(arguments);

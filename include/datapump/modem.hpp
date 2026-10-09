@@ -63,6 +63,9 @@ struct Config {
     bool pulse_shaping = true;
     bool scramble = false;
     bool dsss = false;
+    // Additional outer QPSK spreading. bandwidth_hz remains the inner rate;
+    // symbol duration and framing do not change. 1 preserves legacy PCM.
+    unsigned dsss_factor = 1;
     std::array<std::uint8_t, 32> spreading_seed{};
     std::array<std::uint8_t, 32> dsss_seed{};
     // Same selected key used to encrypt payload data. Preamble bytes use its
@@ -70,6 +73,9 @@ struct Config {
     std::optional<Crypto> data_key;
     std::size_t memory_limit = default_memory_limit;
 };
+inline double waveform_bandwidth_hz(const Config& config) {
+    return config.bandwidth_hz * config.dsss_factor;
+}
 // Duration of independently recognized training evidence. This is evidence
 // coverage, not a correlation percentage or a content-codec admission gate.
 struct PreambleReception {

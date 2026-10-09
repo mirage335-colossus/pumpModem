@@ -39,7 +39,7 @@ void budget(std::size_t limit, std::initializer_list<std::pair<std::size_t,std::
     }
 }
 std::size_t chip_samples(const Config& c) {
-    return static_cast<std::size_t>(std::ceil(2.*c.sample_rate/c.bandwidth_hz));
+    return static_cast<std::size_t>(std::ceil(2.*c.sample_rate/waveform_bandwidth_hz(c)));
 }
 void finite_samples(std::span<const float> samples, std::size_t limit, std::stop_token stop = {}) {
     product(samples.size(), sizeof(float), limit);
@@ -106,13 +106,17 @@ void validate(const Config& c) {
           "APSK transport has been removed; use one-bit pattern transport");
     check(c.sample_rate >= 64 && c.sample_rate <= 120000000, "internal sample rate must be 64..120000000 Hz");
     check(c.stream_phase_samples < c.sample_rate, "symbol stream phase must be within its whole second");
-    check(std::isfinite(c.bandwidth_hz) && c.bandwidth_hz >= minimum_bandwidth_hz && c.bandwidth_hz <= maximum_bandwidth_hz && c.bandwidth_hz <= c.sample_rate / 2.0,
+    check(std::isfinite(c.bandwidth_hz) && c.bandwidth_hz >= minimum_bandwidth_hz && waveform_bandwidth_hz(c) <= maximum_bandwidth_hz && waveform_bandwidth_hz(c) <= c.sample_rate / 2.0,
           "bandwidth must be finite and within 0.001 Hz..30 MHz and internal Nyquist");
     check(std::isfinite(c.training_seconds) && c.training_seconds == 2,
           "normal training duration is fixed at 2 seconds");
     check(std::isfinite(c.integration_seconds) && c.integration_seconds>=0,"invalid integration duration");
     check(c.spreading_factor >= 1 && c.spreading_factor <= 16384, "spreading factor must be 1..16384");
     check(c.spreading_mode == SpreadingMode::pattern || c.spreading_mode == SpreadingMode::tone,"unknown spreading mode");
+    check(c.dsss_factor==1||c.dsss_factor==10||c.dsss_factor==100||c.dsss_factor==1000,
+          "outer DSSS factor must be 1, 10, 100, or 1000");
+    check(c.dsss_factor==1 || (c.scramble && c.spreading_mode==SpreadingMode::pattern),
+          "outer DSSS requires independent private inner patterns");
     const auto samples=symbol_sample_count(c);
     const auto chip=chip_samples(c);
     // Do not call pattern_pulse_enabled here: its chip helper validates this
@@ -121,7 +125,7 @@ void validate(const Config& c) {
         samples/chip>=2*pattern_pulse_half_span;
     // This is the intended RRC support including rolloff, not a certified
     // emission mask. Finite pulse truncation and limiting still leave tails.
-    const auto half_band=shaped ? (1+pattern_pulse_rolloff)*c.sample_rate/(2.*static_cast<double>(chip)) : c.bandwidth_hz/2;
+    const auto half_band=shaped ? (1+pattern_pulse_rolloff)*c.sample_rate/(2.*static_cast<double>(chip)) : waveform_bandwidth_hz(c)/2;
     check(std::isfinite(c.carrier_hz) && c.carrier_hz>=half_band &&
           c.carrier_hz+half_band<=c.sample_rate/2.,
           "carrier and waveform must fit above DC and below internal Nyquist; raise the carrier for short unshaped patterns or tone modes");

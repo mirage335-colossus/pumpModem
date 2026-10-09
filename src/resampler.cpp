@@ -5,16 +5,16 @@
 #include <numbers>
 
 namespace datapump::audio {
-Resampler::Resampler(std::uint32_t input_rate,std::uint32_t output_rate)
-    :input_rate_(input_rate),output_rate_(output_rate) {
+Resampler::Resampler(std::uint32_t input_rate,std::uint32_t output_rate,bool adjustable)
+    :input_rate_(input_rate),output_rate_(output_rate),adjustable_(adjustable) {
     if(input_rate<64 || input_rate>120000000 || output_rate<64 || output_rate>120000000)
         throw Error("resampler rate must be 64..120000000 Hz");
-    if(input_rate==output_rate)return;
+    if(input_rate==output_rate && !adjustable_)return;
     if(static_cast<std::uint64_t>(input_rate)>static_cast<std::uint64_t>(output_rate)*4) {
         auto intermediate_rate=output_rate;
         while(static_cast<std::uint64_t>(intermediate_rate)*4<input_rate)intermediate_rate*=4;
         first_stage_=std::make_unique<Resampler>(input_rate,intermediate_rate);
-        last_stage_=std::make_unique<Resampler>(intermediate_rate,output_rate);
+        last_stage_=std::make_unique<Resampler>(intermediate_rate,output_rate,adjustable_);
         intermediate_.resize(256);
         return;
     }
@@ -39,6 +39,33 @@ Resampler::Resampler(std::uint32_t input_rate,std::uint32_t output_rate)
         for(std::size_t tap=0;tap<taps_;++tap)
             coefficients_[phase*taps_+tap]=static_cast<float>(coefficients_[phase*taps_+tap]/sum);
     }
+}
+void Resampler::set_rate_correction(double correction,double slew) {
+    if(!adjustable_ || !std::isfinite(correction) || std::abs(correction)>.001 ||
+       !std::isfinite(slew) || slew<=0 || slew>.001)
+        throw Error("invalid continuous resampler rate correction");
+    if(last_stage_) {last_stage_->set_rate_correction(correction,slew);return;}
+    target_correction_=correction;correction_step_=slew/output_rate_;
+}
+void Resampler::initialize_timing(double fraction,double correction) {
+    if(!adjustable_ || started_ || !std::isfinite(fraction) || fraction<0 || fraction>=1 ||
+       !std::isfinite(correction) || std::abs(correction)>.001)
+        throw Error("invalid initial resampler timing");
+    if(last_stage_) {
+        // Both stages preserve time zero. Express the original fractional
+        // sample in the final stage's input clock without moving either history.
+        last_stage_->initialize_timing(fraction*last_stage_->input_rate_/input_rate_,correction);
+        return;
+    }
+    fraction_=fraction;correction_=target_correction_=correction;correction_roundoff_=0;
+}
+long double Resampler::source_seconds() const noexcept {
+    if(last_stage_)return last_stage_->source_seconds();
+    return (static_cast<long double>(source_)+(adjustable_?fraction_:
+        static_cast<long double>(remainder_)/output_rate_))/input_rate_;
+}
+double Resampler::rate_correction() const noexcept {
+    return last_stage_?last_stage_->rate_correction():correction_;
 }
 std::uint64_t Resampler::final_count() const {
     // Quotient/remainder avoids multiplying a long-running input counter.
@@ -80,10 +107,10 @@ Resampler::Progress Resampler::process_stages(std::span<const float> input,std::
     return progress;
 }
 double Resampler::passband_hz() const noexcept {
-    return (input_rate_==output_rate_?.5:.42)*std::min(input_rate_,output_rate_);
+    return (input_rate_==output_rate_ && !adjustable_?.5:.42)*std::min(input_rate_,output_rate_);
 }
 float Resampler::interpolate() const {
-    const double phase_position=static_cast<double>(remainder_)*phases/output_rate_;
+    const double phase_position=(adjustable_?fraction_:static_cast<double>(remainder_)/output_rate_)*phases;
     const auto phase=static_cast<unsigned>(phase_position);
     const double blend=phase_position-phase;
     double value=0;
@@ -108,9 +135,10 @@ void Resampler::discard_history() {
 }
 Resampler::Progress Resampler::process(std::span<const float> input,std::span<float> output,bool end) {
     if(ending_ && !input.empty())throw Error("cannot append to a finished resampler");
+    started_=true;
     if(first_stage_)return process_stages(input,output,end);
     Progress progress;
-    if(input_rate_==output_rate_) {
+    if(input_rate_==output_rate_ && !adjustable_) {
         const auto count=std::min(input.size(),output.size());
         for(std::size_t i=0;i<count;++i) {
             if(!std::isfinite(input[i]))throw Error("nonfinite resampler input");
@@ -123,16 +151,29 @@ Resampler::Progress Resampler::process(std::span<const float> input,std::span<fl
     }
     while(progress.produced<output.size()) {
         if(end && progress.consumed==input.size())ending_=true;
-        if(ending_ && produced_>=final_count())break;
+        if(ending_ && (adjustable_?source_>=received_:produced_>=final_count()))break;
         if((source_<=std::numeric_limits<std::uint64_t>::max()-radius_ && received_>source_+radius_) || ending_) {
             const auto sample=interpolate();
             if(!std::isfinite(sample))throw Error("resampler output overflow");
             output[progress.produced++]=sample;
             ++produced_;
-            const auto advance=static_cast<std::uint64_t>(remainder_)+input_rate_;
-            if(source_>std::numeric_limits<std::uint64_t>::max()-advance/output_rate_)
-                throw Error("resampler duration exceeds counter range");
-            source_+=advance/output_rate_;remainder_=static_cast<std::uint32_t>(advance%output_rate_);
+            if(adjustable_) {
+                // Slew the derivative only. No sample insertion/deletion, phase
+                // jump, periodic reset, or dependence on callback boundaries.
+                const auto delta=std::clamp(target_correction_-correction_,-correction_step_,correction_step_)-correction_roundoff_;
+                const auto next=correction_+delta;
+                correction_roundoff_=(next-correction_)-delta;
+                const auto phase=fraction_+static_cast<double>(input_rate_)/output_rate_*(1+(correction_+next)*.5);
+                const auto advance=static_cast<std::uint64_t>(phase);
+                if(source_>std::numeric_limits<std::uint64_t>::max()-advance)
+                    throw Error("resampler duration exceeds counter range");
+                source_+=advance;fraction_=phase-static_cast<double>(advance);correction_=next;
+            } else {
+                const auto advance=static_cast<std::uint64_t>(remainder_)+input_rate_;
+                if(source_>std::numeric_limits<std::uint64_t>::max()-advance/output_rate_)
+                    throw Error("resampler duration exceeds counter range");
+                source_+=advance/output_rate_;remainder_=static_cast<std::uint32_t>(advance%output_rate_);
+            }
             discard_history();
         } else if(progress.consumed<input.size()) {
             if(size_==ring_.size())throw Error("resampler buffer invariant failed");

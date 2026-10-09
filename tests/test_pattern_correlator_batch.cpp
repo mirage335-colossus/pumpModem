@@ -377,6 +377,47 @@ void pulse_projection_preserves_real_sample_fit() {
     }
 }
 
+void translated_small_pulse_knots() {
+    // Signed original search anchors produce exact ordinary table knots that
+    // the .137-offset cases avoid. Check every matrix pair across repeated
+    // knot crossings, count changes and more than two fractional-phase wraps.
+    for(const auto ppm:{-200.,200.})for(const auto parity:{0,1}) {
+        const auto rate=1+static_cast<long double>(ppm)*1e-6L;
+        const auto anchor=-768.L+parity*4.L/rate;
+        auto index=static_cast<std::int64_t>(std::floor(-anchor*rate/8));
+        CorrelationPulseKernel cached(8,rate,64.03125,256);
+        for(std::uint64_t observed=0;observed<9000;++index) {
+            const auto start=anchor+index*8/rate;
+            const auto end=static_cast<std::uint64_t>(std::ceil(anchor+(index+1)*8/rate));
+            const auto count=end-observed,offset_count=count;
+            const auto offset=static_cast<long double>(observed)-start;
+            const auto a=cached.evaluate(offset,offset_count,{1,0},1);
+            CorrelationPulseKernel fresh(8,rate,64.03125,256);
+            const auto b=fresh.evaluate(offset,offset_count,{1,0},1);
+            std::size_t pair=0;
+            for(std::size_t j=0;j<correlation_pulse_atoms;++j)
+                for(std::size_t k=j;k<correlation_pulse_atoms;++k,++pair) {
+                    const auto tolerance=1e-10*std::max(1.,std::abs(b.energy[pair]));
+                    check(std::abs(a.energy[pair]-b.energy[pair])<tolerance &&
+                          std::abs(a.square[pair]-b.square[pair])<tolerance,
+                          "translated table knot corrupted a reused pulse Gram");
+                    if(index%31)continue;
+                    long double energy=0;std::complex<long double> square{};
+                    for(std::uint64_t n=0;n<count;++n) {
+                        const auto q=(offset+n)*rate/8-.5L;
+                        const auto product=static_cast<long double>(pattern_pulse(static_cast<double>(q+8-j)))*
+                            pattern_pulse(static_cast<double>(q+8-k));
+                        energy+=product;
+                        square+=product*std::polar(1.L,4*std::numbers::pi_v<long double>*64.03125L*n/256);
+                    }
+                    check(std::abs(a.energy[pair]-energy)<tolerance &&
+                          std::abs(std::complex<long double>{a.square[pair].real(),a.square[pair].imag()}-square)<tolerance,
+                          "translated table knot changed the literal sampled pulse Gram");
+                }
+            observed=end;
+        }
+    }
+}
 void long_pulse_segments_and_grams_match_sampled_reference() {
     struct Case {std::uint64_t chip;double ppm,frequency;long double offset;std::uint64_t trim;};
     const std::array cases{
@@ -528,6 +569,67 @@ void fractional_pulse_kernels_reuse_exact_intervals() {
                 "cancelled fractional preparation corrupted a cached Gram");
     }
 }
+void outer_pulse_evidence_retains_complete_pulses() {
+    constexpr std::uint64_t chip=12;
+    const auto coefficients=[](std::uint64_t local) {
+        return std::array<std::complex<double>,2>{
+            std::polar(.2+.03*(local%11),.37*static_cast<double>(local)),
+            std::polar(.3+.02*(local%7),-.29*static_cast<double>(local+1))};
+    };
+    for(const auto tail:{1ULL,5ULL,11ULL})for(const auto begin:{0U,75U}) {
+        const auto samples=35*chip+tail,chips=samples/chip+1;
+        CorrelationOuterEvidence ring;
+        std::vector<std::complex<double>> direct(chips);
+        for(std::uint64_t n=begin;n<samples;++n) {
+            const auto position=.137+static_cast<double>(n)*.9998;
+            const auto measured=std::polar(std::sin(.17*n),.41*n);
+            pattern_pulse_each(position,samples,chip,[&](std::uint64_t local,double pulse) {
+                const auto value=pulse*measured;direct[local]+=value;
+                ring.add(local,value,coefficients);
+            });
+        }
+        ring.finish(coefficients);
+        for(unsigned bit=0;bit<2;++bit) {
+            std::complex<long double> dot{};long double variance=0;
+            for(std::size_t i=0;i<direct.size();++i) {
+                const auto pair=coefficients(i);
+                const std::complex<long double> c{pair[bit].real(),pair[bit].imag()},u{direct[i].real(),direct[i].imag()};
+                dot+=c*u;variance+=std::norm(c)*std::norm(u);
+            }
+            check(std::abs(dot-ring.dot[bit])<=1e-13L*std::max(1.L,std::abs(dot)) &&
+                  std::abs(variance-ring.variance[bit])<=1e-13L*std::max(1.L,variance),
+                  "outer evidence squared pulse fragments or changed clipped finite tails");
+        }
+    }
+    // Exhaustive small independent-QPSK null: no Monte Carlo rare-event claim.
+    constexpr std::array<std::complex<double>,4> weights{{{1,.2},{-.3,.7},{.5,-.4},{.1,.9}}};
+    constexpr std::array<std::complex<double>,4> q{{{1,0},{0,1},{-1,0},{0,-1}}};
+    double variance=0;for(const auto z:weights)variance+=std::norm(z);
+    for(const auto threshold:{0.,.5,1.,2.,3.,4.,5.,6.}) {
+        unsigned accepted=0;
+        for(unsigned address=0;address<256;++address) {
+            auto v=address;std::complex<double> dot{};
+            for(const auto weight:weights){dot+=weight*q[v%4];v/=4;}
+            if(std::norm(dot)/variance>=threshold)++accepted;
+        }
+        check(accepted/256.<=std::min(1.,2*std::exp(3.)/9*std::exp(-threshold))+1e-15,
+            "independent-QPSK radial evidence violated its comparison bound");
+    }
+    CorrelationFit total;total.count=7680;total.energy=1;
+    CorrelationChipEvidence projection;projection.projected_rank=1280;
+    projection.projected_energy=.2;
+    check(!projection.colored_excess(total,32),"ordinary chip-subspace noise activated outer guard");
+    projection.projected_energy=.8;
+    check(projection.colored_excess(total,32),"strong colored chip-subspace excess did not activate outer guard");
+    total.cc=1;total.xc=std::sqrt(.8);
+    check(!projection.colored_excess(total,32),"perfect coherent signal activated lack-of-fit guard");
+    total.xc=0;projection.nested=false;
+    check(!projection.colored_excess(total,32),"truncated non-nested subspace claimed colored evidence");
+    projection.nested=true;projection.projected_rank=total.count;
+    check(!projection.colored_excess(total,32),"zero residual degrees of freedom claimed colored evidence");
+    CorrelationOuterEvidence small;small.contributing_terms={20,100};
+    check(!small.can_admit(0,32) && small.can_admit(1,32),"partial pulse count allowed impossible outer admission");
+}
 } // namespace
 
 int main() {
@@ -540,10 +642,12 @@ int main() {
         narrow_bank_with_future_origins();
         invalid_batches_and_cancellation();
         pulse_projection_preserves_real_sample_fit();
+        translated_small_pulse_knots();
         long_pulse_segments_and_grams_match_sampled_reference();
         affine_spans_preserve_real_sample_fit();
         fractional_pulse_kernels_reuse_exact_intervals();
         chip_chain_evidence_preserves_noise_integration();
+        outer_pulse_evidence_retains_complete_pulses();
         std::cout<<"pattern_correlator_batch ok\n";
         return 0;
     } catch(const std::exception& error) {

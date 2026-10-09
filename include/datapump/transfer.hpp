@@ -1,5 +1,6 @@
 #pragma once
 #include "datapump/crypto.hpp"
+#include "datapump/clock_sync.hpp"
 #include "datapump/modem.hpp"
 #include "datapump/stream_codec.hpp"
 #include "datapump/runtime.hpp"
@@ -30,6 +31,10 @@ struct Options {
     // Without it, offline buffers retain their deterministic prefix origin.
     std::optional<double> capture_epoch;
     unsigned search_seconds = 6;
+    std::optional<clock_sync::Policy> clock_sync;
+    // Per-station residual audio presentation-error allowance after known
+    // queue delay compensation. Independent of GPS and propagation settings.
+    double audio_timing_error_seconds=clock_sync::default_audio_error_seconds;
     // Manual callers retain their explicit modem profile. Automatic GUI/CLI
     // receive searches resolve only these targets at the selected band/mode.
     bool automatic_receive_profiles = false;

@@ -24,7 +24,7 @@ Options effective_options(const Options& input) {
     auto result=input;
     if(result.modem.spreading_mode==modem::SpreadingMode::tone) {
         result.key.reset();result.modem.data_key.reset();
-        result.modem.scramble=false;result.modem.dsss=false;
+        result.modem.scramble=false;result.modem.dsss=false;result.modem.dsss_factor=1;
         result.modem.spreading_seed.fill(0);result.modem.dsss_seed.fill(0);
         if(result.automatic_receive_profiles && !tuning::tone_mode(result.receive_pattern_mode))
             result.receive_pattern_mode=tuning::PatternMode::auto_tone;
@@ -40,6 +40,8 @@ void check_cancelled(std::stop_token stop) {
 
 void validate(const Options& options) {
     modem::validate(options.modem);
+    if(options.clock_sync)clock_sync::validate(*options.clock_sync);
+    clock_sync::validate_audio_error(options.audio_timing_error_seconds);
     if(options.modem.oscillator_search)modem::validate_oscillator_search(*options.modem.oscillator_search);
     if(options.capture_epoch && (!std::isfinite(*options.capture_epoch) || *options.capture_epoch<0 ||
        static_cast<long double>(*options.capture_epoch)>=static_cast<long double>(std::numeric_limits<std::uint64_t>::max())))
@@ -232,7 +234,7 @@ modem::Config seeded_config(const Options& input_options, std::uint64_t timestam
         const auto seed = options.key->stream(StreamPurpose::Scrambler, 0, 0, result.spreading_seed.size());
         std::copy(seed.begin(), seed.end(), result.spreading_seed.begin());
     }
-    if (options.key && result.dsss) {
+    if (options.key && (result.dsss || result.dsss_factor>1)) {
         const auto seed = options.key->stream(StreamPurpose::Dsss, 0, 0, result.dsss_seed.size());
         std::copy(seed.begin(), seed.end(), result.dsss_seed.begin());
     }
@@ -752,7 +754,7 @@ Received receive(std::span<const float> samples, const Options& input_options, P
         try {
         auto value=options;value.modem=profile;
         modem::PatternSearch search;search.allow_local_clock_fallback=true;
-        if(profile.oscillator_search)search.hypotheses=modem::oscillator_pattern_search(profile).hypotheses;
+        if(profile.oscillator_search)search.hypotheses=modem::oscillator_pattern_search(profile,options.clock_sync?modem::utc_transmit_rate_limit(profile):0).hypotheses;
         else search.expand_clock_search=true;
         search.start_offset_seconds=static_cast<double>(epoch)-options.capture_epoch.value_or(static_cast<double>(options.timestamp));
         if(!options.capture_epoch)*search.start_offset_seconds+=(static_cast<double>(modem::training_sample_count(profile))+
@@ -801,6 +803,9 @@ Received simulate(const Message& message, const Options& input_options, const mo
         try {
         auto source=message_transmitter(message,options);auto value=options;value.modem=profile;
         modem::PatternSearch search;search.allow_local_clock_fallback=true;
+        // This source supplies fixed-rate simulated PCM, without the hardware
+        // UTC resampler. Retain its complete oscillator bank without charging
+        // or searching an additional correction that cannot occur here.
         if(profile.oscillator_search)search.hypotheses=modem::oscillator_pattern_search(profile).hypotheses;
         else search.expand_clock_search=true;
         search.start_offset_seconds=static_cast<double>(epoch)-static_cast<double>(center)+

@@ -20,6 +20,7 @@ residual, while phase diffusion is spread out to examine coherence sensitivity.
 | `gpsdo-xo` | Hobbyist GPSDO, basic crystal, no oven | 0.0001 ppm | 0.5 degrees/sqrt(second) |
 | `gpsdo-tcxo` | GPSDO with temperature compensation, no oven | 0.0001 ppm | 0.05 degrees/sqrt(second) |
 | `gpsdo-ocxo` | GPSDO with an oven-controlled crystal | 0.0001 ppm | 0.005 degrees/sqrt(second) |
+| `ic-7100` | IC-7100 RF reference example (Shift Osc only) | 1 ppm | 0.05 degrees/sqrt(second), assumed |
 
 The default for each model remains `crystal`.
 The common GPS residual, 0.0001 ppm (a fractional offset of 10^-10), is an
@@ -32,6 +33,38 @@ The hobbyist profile improves average frequency offset without assuming an
 improvement in phase diffusion. Across the GPS profiles, the phase-diffusion
 amplitude differs by 100 times, so its variance differs by 10,000 times. This is
 a selected model range, not a universal ranking of hardware.
+
+### IC-7100 assumptions
+
+The IC-7100 option uses Icom's published ±0.5 ppm per-radio RF stability
+(0–50°C at 430 MHz), conservatively combined as 1 ppm between two radios before
+the selected search margin. Its phase diffusion is an engineering assumption,
+not a published Icom measurement. The official first IF is 124.487 MHz for
+SSB/CW/AM/FM/RTTY/DV; a nominal 170 MHz conversion frequency is not used to
+invent an additional independent error. The RF stability specification describes
+the radio's resulting RF frequency. [Icom specifications](https://www.icomjapan.com/lineup/products/IC-7100USA/)
+
+Icom's July 2013 service manual (S-15008XZ-C1, printed3-9) identifies the
+41.344 MHz X2001 reference as a **TCXO**, not an oven-controlled oscillator.
+The parts and circuit sections separately identify a PCM2901 USB codec
+(IC602) with a 12 MHz crystal (X601), and an internal DSP codec with a
+24.576 MHz crystal (X5051). These do not justify treating USB sample timing
+as shared with the RF reference or permanently GPS disciplined.
+The manual specifies a five-minute warm-up for RF stability; it does not
+establish a permanently powered oven or an audio timing guarantee.
+[Manufacturer service manual, public mirror](https://ok2haz.ok2kld.cz/ok2haz/wp-content/uploads/2017/01/IC-7100_service_manual.pdf)
+
+TI describes the PCM2901 as adaptive for USB playback and asynchronous for
+recording, using a 12 MHz source and packet-derived audio timing. Its permitted
+crystal tolerance is not a measurement of the IC-7100's effective sample rate.
+Use an independent Baseband model for the USB path unless separate evidence
+supports a different model. [TI PCM2901 datasheet](https://www.ti.com/lit/ds/symlink/pcm2901.pdf)
+
+No loopback measurement is required to use these explicitly modeled assumptions.
+They do not establish USB/driver/DSP latency or a millisecond end-to-end arrival
+bound; those remain distinct from RF stability and PC synchronization. See
+[clock synchronization](clock-sync.md) for the current timing fallback and
+qualification limits.
 
 ## Real streams and clock references
 
@@ -65,7 +98,7 @@ Choose **Baseband clock** in Shift Osc when the ADC/DAC and synchronous mixers
 really share one reference within each radio. This uses the selected Baseband
 profile once, with linked frequency and sample-rate hypotheses. It does not
 add a second independent oscillator or a second phase-diffusion contribution.
-No separate Clock dropdown is needed. Shared hardware within each radio does
+This reference topology is separate from the UTC clock controls. Shared hardware within each radio does
 not imply identical clocks at the two ends of the link, or eliminate additional
 synthesizer phase noise. The Baseband profile must describe the effective
 relative behavior of the whole shared reference chain.
@@ -113,6 +146,8 @@ reference:
 
 The Robust Modem main controls keep **Baseband Osc**, **Shift Osc** and
 **Margin** together, with **Carrier** and **Shift** adjacent in the modem row.
+The editable **Clock accuracy**, **Clock region** and **Clock offset** fields
+are independent UTC-arrival controls; see [clock synchronization](clock-sync.md).
 They remain available with Developer mode off and with Simulation on or off.
 Numerical clock/phase assumptions and requested/covered search bounds appear
 under the Link planner's hideable **Model limits and references**. There is no

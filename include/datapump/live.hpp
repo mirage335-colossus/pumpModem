@@ -22,6 +22,9 @@ struct Settings {
     bool mono = true;
     audio::ChannelMode channel_mode = audio::ChannelMode::left_mono;
     bool simulation = false;
+    // Keep independent hardware capture and reception active during playback.
+    // A physical cable or acoustic path supplies any local loopback.
+    bool full_duplex = false;
     double simulation_snr_db = 18;
     // Display-only offset for simulated spectra. The raw PCM, FFT values and
     // receiver remain unchanged; an absent value retains the raw dBFS view.
@@ -111,6 +114,16 @@ struct ReceiverHealth {
 };
 struct Snapshot {
     ReceiverHealth receiver_health;
+    audio::TimingQuality clock_timing_quality=audio::TimingQuality::unavailable;
+    double clock_backend_uncertainty_seconds=0;
+    bool clock_window_modeled=false;
+    bool clock_timing_fallback=false;
+    bool transmit_clock_following=false;
+    std::string clock_timing_status;
+    // Actual timestamp model for the qualified PCM currently scored by RX.
+    // Engineering work estimates may consume its bounds, not its moving UTC
+    // anchor. Absence retains ordinary full-search estimation.
+    std::optional<audio::TimePrediction> receiver_timing;
 
     static constexpr std::size_t pattern_score_limit = 128;
     static constexpr auto pattern_score_lifetime = std::chrono::seconds(6);
@@ -223,6 +236,9 @@ public:
     // not cancel recovery, complete a reception, or change saved settings.
     bool try_suspend_capture();
     void resume_capture();
+    // Discard receive history and queued/in-flight acquisition work without
+    // stopping transmission, forgetting key-use epochs, or completing a burst.
+    void clear_received();
     // Force applies only to this request, bypassing local key/quiet waits.
     // It never clears previously recorded key use or changes the waveform.
     void transmit(const Message& message, bool force = false);

@@ -6,6 +6,7 @@
 #include "datapump/symbol_schedule.hpp"
 #include "search_parallel.hpp"
 #include "pattern_fft_batch.hpp"
+#include "pattern_correlator_batch.hpp"
 #include "pattern_drift.hpp"
 #include <algorithm>
 #include <array>
@@ -200,6 +201,10 @@ struct PatternReceiver::Impl {
             [](const auto& hypothesis){return hypothesis.clock_error_ppm!=0;});
         configured_bit_limit=search.bit_limit;
         if(!c.scramble&&!c.dsss)search.initial_stream_symbols=1;
+        // The FFT scanner does not yet enforce phase-dependent UTC windows.
+        // It must keep its complete original search and retirement geometry.
+        if(!search.compact_clock_search || search.couple_clock_to_carrier)
+            search.qualified_start_window.reset();
         if(search.compact_clock_search && !search.couple_clock_to_carrier) {
             const auto wrapper=wrapper_bytes();
             if(wrapper>=bytes)throw Error("pattern workspace cannot retain correlator control state");
@@ -419,7 +424,7 @@ struct PatternReceiver::Impl {
         geometry.pattern={config.stream_epoch,code.chip_samples(),code.chips_per_symbol(),code.symbol_samples(),
             config.sample_rate,static_cast<std::uint32_t>(config.spreading_mode),
             shaped?1U:0U,config.scramble?1U:0U,config.dsss?1U:0U,
-            config.spreading_seed,config.dsss_seed};
+            config.spreading_seed,config.dsss_seed,config.dsss_factor};
         geometry.bins_per_symbol=length;geometry.bin_samples=bin_samples;
         geometry.carrier_hz=config.carrier_hz;geometry.evidence_count=evidence_count(length);
         geometry.noise_condition=noise_condition;geometry.real_rank=real_rank;geometry.sample_fit=sample_fit;
@@ -740,7 +745,7 @@ struct PatternReceiver::Impl {
         // bins, including the noise-only tail of a faster rate alternative.
         PatternEvidence result{start*bin_samples,(start+length)*bin_samples,index,
             config.carrier_hz+search.frequency_offsets_hz[f],std::max(zero,one),std::min(zero,one),one>zero?1U:0U,active_stream_phase};
-        result.frequency_hypothesis=f;return result;
+        result.frequency_hypothesis=static_cast<std::uint32_t>(f);return result;
     }
     std::array<double,2> measure_streamed(PatternCode& pattern,std::uint64_t start,std::uint64_t index,
                                         std::size_t f,std::uint64_t observed_before,
@@ -774,6 +779,82 @@ struct PatternReceiver::Impl {
                 sections.explained(bit,noise_condition,sample_fit),energy,count,drift_sections,real_rank),drift_sections);
         for(unsigned bit=0;bit<2;++bit)result[bit]=differential.combine(result[bit],bit);
         return result;
+    }
+    bool outer_presence_check(PatternEvidence& evidence,std::uint64_t observed_before,std::stop_token stop) {
+        if(!search.outer_presence_guard || config.dsss_factor<=1 || drift_sections>1 || differential_window ||
+            evidence.score<search.retain_score)return true;
+        const auto start=evidence.first_sample/bin_samples,index=evidence.stream_symbol;
+        const auto f=evidence.frequency_hypothesis;
+        const auto skip=static_cast<std::size_t>(observed_before>start?std::min<std::uint64_t>(length,observed_before-start):0);
+        stream_phase(evidence.stream_phase_samples);
+        detail::CorrelationOuterEvidence outer;
+        std::array<detail::CorrelationFit,2> full{};
+        std::array<detail::CorrelationChipEvidence,2> chips{};
+        if(index>std::numeric_limits<std::uint64_t>::max()/code.chips_per_symbol())throw Error("outer chip coordinate overflow");
+        const auto first_chip=index*code.chips_per_symbol();
+        const auto coefficients=[&](std::uint64_t local) {
+            auto values=code.values(first_chip+local);
+            for(auto& value:values)value=std::conj(value);
+            return values;
+        };
+        const auto omega=tau*config.carrier_hz/config.sample_rate;
+        const auto sine=std::sin(omega);
+        const auto image=std::abs(sine)>1e-12?std::sin(bin_samples*omega)/(bin_samples*sine):1.;
+        for(std::size_t i=skip;i<length;++i) {
+            if((i&4095U)==0)cancelled(stop);
+            const auto sample_position=static_cast<long double>(i)*bin_samples+(bin_samples-1)/2.L;
+            const auto source=sample_position*clock_ratio(f);
+            const auto observation=at(start+i);
+            const auto rotation=std::polar(1.,tau*search.frequency_offsets_hz[f]*static_cast<double>(sample_position)/config.sample_rate);
+            if(source<code.symbol_samples()) {
+                const auto measured=observation*std::conj(rotation);
+                if(shaped)pattern_pulse_each(static_cast<double>(source),code.symbol_samples(),code.chip_samples(),
+                    [&](std::uint64_t local,double pulse){outer.add(local,pulse*measured,coefficients);});
+                else outer.add(static_cast<std::uint64_t>(source/code.chip_samples()),measured,coefficients);
+            }
+            const auto local=static_cast<std::uint64_t>(std::max(0.L,source/code.chip_samples()));
+            const auto gamma=image*std::conj(carrier_square(start+i));
+            const auto determinant=1-std::norm(gamma);
+            double a=0,b=0,c=0;std::uint64_t rank=2;
+            if(!sample_fit) {
+                if(determinant>1e-12) {
+                    a=(1-gamma.real())/determinant;b=-gamma.imag()/determinant;c=(1+gamma.real())/determinant;
+                } else {
+                    const auto angle=.5*std::arg(gamma),x=std::cos(angle),y=std::sin(angle);
+                    const auto lambda=1+std::abs(gamma);a=x*x/lambda;b=x*y/lambda;c=y*y/lambda;rank=1;
+                }
+            }
+            for(unsigned bit=0;bit<2;++bit) {
+                const auto p=template_value(i,index,bit,f);
+                detail::CorrelationFit fit;
+                if(sample_fit) {
+                    const auto dot=observation*std::conj(p),square=p*p*carrier_square(start+i);
+                    const auto norm=std::norm(p);
+                    fit={dot.real(),-dot.imag(),.5*(norm+square.real()),.5*(norm-square.real()),
+                        .5*square.imag(),std::norm(observation),1};
+                } else {
+                    const auto x=observation.real(),y=observation.imag(),u=p.real(),v=p.imag();
+                    const auto wx=a*x+b*y,wy=b*x+c*y;
+                    fit={u*wx+v*wy,-v*wx+u*wy,a*u*u+2*b*u*v+c*v*v,
+                        a*v*v-2*b*u*v+c*u*u,b*(u*u-v*v)+(c-a)*u*v,x*wx+y*wy,rank};
+                }
+                auto& total=full[bit];total.xc+=fit.xc;total.xs+=fit.xs;total.cc+=fit.cc;
+                total.ss+=fit.ss;total.cs+=fit.cs;total.energy+=fit.energy;total.count+=fit.count;
+                chips[bit].add_fit(fit,local);
+            }
+        }
+        outer.finish(coefficients);
+        evidence.outer_presence_score=outer.score(evidence.bit);
+        // Section/differential phase evidence needs its own independent-code
+        // statistic; do not silently substitute a canceled coherent dot.
+        // Enhanced branches are conservatively left unqualified until their
+        // corresponding section-wise independent-code statistic is implemented.
+        evidence.outer_presence_active=outer.can_admit(evidence.bit,threshold()) && drift_sections==1 && !differential_window &&
+            chips[evidence.bit].colored_excess(full[evidence.bit],threshold(),
+                static_cast<double>(full[evidence.bit].count)/std::max(1.,
+                    evidence_count(length-skip)*(real_rank?1.:2.))*
+                (sample_fit?1.:noise_condition/std::max(1e-12,1-std::abs(image))));
+        return !evidence.outer_presence_active || evidence.outer_presence_score>=threshold();
     }
     void publish(Track& track,bool complete,bool flush=false,bool draining=false) {
         track.burst.score=track.confirmed_score;
@@ -898,7 +979,7 @@ struct PatternReceiver::Impl {
                             fit={chosen*bin_samples,(chosen+length)*bin_samples,track.index,
                                 config.carrier_hz+search.frequency_offsets_hz[f],std::max(zero,one),std::min(zero,one),
                                 one>zero?1U:0U,active_stream_phase};
-                            fit.frequency_hypothesis=f;
+                            fit.frequency_hypothesis=static_cast<std::uint32_t>(f);
                         } else fit=measure(chosen,track.index,f,track.burst.end_sample/bin_samples,carrier_phases(chosen));
                     }
                     if(f!=track.frequency)++trials;
@@ -927,12 +1008,13 @@ struct PatternReceiver::Impl {
                     });
                     if(duplicate){ended=true;break;}
                 }
+                const auto presence=outer_presence_check(best,track.burst.end_sample/bin_samples,stop);
                 remember(best);
                 const auto observed_begin=std::max(best.first_sample,track.burst.end_sample);
                 const auto symbol_support=pattern_symbol_support(
                     static_cast<double>(best.end_sample>observed_begin?best.end_sample-observed_begin:0),
                     best.score,code.chip_samples());
-                const auto standalone=best.score>=threshold();
+                const auto standalone=best.score>=threshold() && presence;
                 if(!track.unconfirmed_symbols)track.absent_samples=0;
                 track.absent_samples+=static_cast<long double>(code.symbol_samples())/clock_ratio(track.frequency);
                 ++track.unconfirmed_symbols;
@@ -940,7 +1022,7 @@ struct PatternReceiver::Impl {
                     track.absent_samples>=pattern_absence_seconds*config.sample_rate:
                     static_cast<long double>(track.unconfirmed_symbols)*code.symbol_samples()>=
                         static_cast<long double>(pattern_absence_seconds)*config.sample_rate;
-                if(best.score<search.retain_score || best.score-best.alternative_score<1 || (group_count>1 && !standalone) ||
+                if(!presence || best.score<search.retain_score || best.score-best.alternative_score<1 || (group_count>1 && !standalone) ||
                    (track.pending_gap && !standalone)) {
                     if(track.admitted && !gap_expired) {
                         if(!track.pending_gap) {
@@ -1138,7 +1220,7 @@ struct PatternReceiver::Impl {
         if(std::max(a,b)<search.retain_score)return;
         PatternEvidence item{(next_start+j)*bin_samples,(next_start+j+length)*bin_samples,index,
             config.carrier_hz+search.frequency_offsets_hz[f],std::max(a,b),std::min(a,b),b>a?1U:0U,phase};
-        item.frequency_hypothesis=f;
+        item.frequency_hypothesis=static_cast<std::uint32_t>(f);
         const auto existing=std::find_if(peaks.begin(),peaks.end(),[&](const auto& p){
             const auto distance=p.first_sample>item.first_sample?p.first_sample-item.first_sample:item.first_sample-p.first_sample;
             return distance<std::max<std::uint64_t>(1,code.symbol_samples()/2) &&
@@ -1338,7 +1420,9 @@ struct PatternReceiver::Impl {
                 const auto start=peak.first_sample/bin_samples;
                 continue_tracks(stop,false,start>std::numeric_limits<std::uint64_t>::max()-2?
                     std::numeric_limits<std::uint64_t>::max():start+2);
-                admit(peak,peak.frequency_hypothesis);
+                auto checked=peak;
+                if(outer_presence_check(checked,0,stop))admit(checked,checked.frequency_hypothesis);
+                else remember(checked);
             }
             next_start+=count;continue_tracks(stop);
         }
@@ -1461,7 +1545,7 @@ void PatternReceiver::push(std::span<const float> input,std::span<const std::com
     auto& s=*impl_;cancelled(stop);if(s.finished)throw Error("pattern capture already finished");
     if(input.size()!=projected.size())throw Error("shared pattern projection length mismatch");
     if(s.fallback){s.fallback->push(input,stop,cache);return;}
-    if(s.sample_fit || s.differential_window) {
+    if(s.sample_fit || s.differential_window || (s.search.outer_presence_guard && s.config.dsss_factor>1 && s.drift_sections==1)) {
         // Exact Gram whitening needs a known carrier phase convention. Shared
         // projections may have an arbitrary fixed rotation, so reconstruct
         // the observations from their raw samples.

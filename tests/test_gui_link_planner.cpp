@@ -1487,7 +1487,8 @@ void receiver_overlay_and_cpu_status() {
     };
     for(const auto format:{PixelFormat::mono1,PixelFormat::gray8,PixelFormat::rgb24}) {
         model.receive_points.clear();const auto empty=render(model,format);
-        model.receive_points={{25,.1,true,true,true},{0,0,false,false,false},{-35,.9,true,true,true}};
+        model.receive_points={{25,.1,true,false,false,true,true},{0,0,false,false,false,false,false},
+            {-35,.9,true,false,false,true,true}};
         const auto gap=render(model,format);
         check(gap.pixels()!=empty.pixels(),"Supported RX islands must remain visible as points beside gaps");
         const auto stride=pixel_row_bytes(319,format);
@@ -1498,7 +1499,7 @@ void receiver_overlay_and_cpu_status() {
                 check(gap.pixels()[begin+component]==empty.pixels()[begin+component],
                       "RX overlay must not bridge an unavailable Clock/RAM region");
         }
-        model.receive_points[1]={0,.5,true,true,true};
+        model.receive_points[1]={0,.5,true,false,false,true,true};
         const auto connected=render(model,format);
         check(connected.pixels()!=empty.pixels(),"The RX curve must remain visible in color, grayscale and monochrome");
 
@@ -1577,6 +1578,53 @@ void estimate_warning_thresholds() {
           contains_text(detailed,"does not measure randomness")&&
           contains_text(detailed,"Tone modes still transmit tones"),
           "Hidden details must explain both thresholds and the limits of the listening guideline");
+}
+void conditional_reference_and_timing_work_document() {
+    planner::Model model;model.inputs=example();model.available=true;
+    model.clock_search_supported=model.receiver_workspace_supported=true;
+    model.bit_seconds=model.send_seconds=60;model.finish_seconds=120;
+    model.probability_reference_only=model.reference_probability_available=model.one_bit_reference_available=true;
+    model.success_probability=model.one_bit_success_probability=.79;
+    model.probability_model_limit="Conditional matched-template reference; full acquisition is unqualified";
+    model.probability_trials=4096;model.probability_interval_available=true;
+    model.success_probability_low=.77;model.success_probability_high=.81;
+    model.one_bit_cpu_available=true;model.one_bit_cpu_seconds=12;model.cpu_realtime_ratio=.1;
+    model.frequency_rate_hypotheses=3;model.epoch_hypotheses=4;model.timing_hypotheses=123;
+    model.timing_phase_groups=2;model.timing_window_modeled=true;
+    model.fallback_cpu_realtime_ratio=.8;model.fallback_timing_hypotheses=999;
+    model.receiver_work_assumptions="Compact bank under admitted capture bounds";
+    model.receive_points={{25,.1,false,true,true,true,true},{-35,.9,false,true,true,true,true}};
+    const auto bit_plot=[&](const ui::DocumentNode& page) {
+        const auto flat=nodes(page);
+        const auto found=std::find_if(flat.begin(),flat.end(),[](const auto* node){return node->plot_name=="planner/bit-time";});
+        check(found!=flat.end(),"Reference document lost its bit-time plot");
+        BitmapImage image(319,167,PixelFormat::rgb24);
+        (*found)->plot.paint(full_bitmap_request(319,167,false,true),
+            [&](unsigned x,unsigned y,PixelBlock pixels){image.blit(x,y,pixels);});
+        return image.pixels();
+    };
+    for(const auto width:{220.f,900.f}) {
+        const auto page=planner_page::build(model,width,true,false);
+        check(!model.confidence_available&&!model.one_bit_confidence_available&&
+            contains_text(page,"RX reference: ≈ 79%")&&contains_text(page,"1-bit RX reference · right axis")&&
+            contains_text(page,"Conditional reference. Monte Carlo:")&&contains_text(page,"full acquisition is unqualified"),
+            "Conditional percentages must stay visibly distinct from qualified receiver estimates");
+        check(contains_text(page,"Receiver work: Compact bank")&&contains_text(page,"3 frequency/clock pairs × 4 epochs")&&
+            contains_text(page,"123 timing origins")&&contains_text(page,"2 timing phase groups")&&
+            contains_text(page,"Full-window fallback: 0.8 s processing per 1 s audio")&&contains_text(page,"999 timing origins"),
+            "Planner must expose actual modeled bank and timing fallback assumptions");
+        const auto reference_plot=bit_plot(page);
+        auto unsupported=model;unsupported.reference_probability_available=unsupported.one_bit_reference_available=false;
+        for(auto& point:unsupported.receive_points)point.reference_available=false;
+        const auto gap=planner_page::build(unsupported,width,true,false);
+        check(contains_text(gap,"RX estimate unavailable")&&bit_plot(gap)!=reference_plot,
+            "Unqualified references require an explicit availability flag and must otherwise leave a graph gap");
+        auto fallback=model;fallback.timing_window_modeled=false;
+        fallback.receiver_work_assumptions="Full arrival-window bank; extra UTC correction lanes retained";
+        const auto full_page=planner_page::build(fallback,width,false,false);
+        check(contains_text(full_page,"extra UTC correction lanes retained")&&!contains_text(full_page,"Full-window fallback:"),
+            "Unsupported timing backends must explain their full bank rather than imply a compact speedup");
+    }
 }
 void document_semantics_layout_and_plots() {
     const auto model=planner::build(example());
@@ -1741,8 +1789,12 @@ void document_semantics_layout_and_plots() {
     check(readable_error,"Long planner errors must wrap completely at narrow document widths");
 }
 }
-int main() {
+int main(int argc,char** argv) {
     try {
+        if(argc==2&&std::string_view(argv[1])=="--reference-document") {
+            conditional_reference_and_timing_work_document();
+            std::cout<<"Conditional RX reference and timing work document passed\n";return 0;
+        }
         independent_reference_values();exact_geometry_and_physical_finish();timing_milestones();
         clock_and_ram_milestones();sampled_clock_ram_islands();checked_clock_ram_navigation();
         nearest_usable_targets();bounded_navigation_preview();nearest_target_shares_receiver_budget();
@@ -1756,7 +1808,7 @@ int main() {
         selected_workspace_reaches_planner();
         shared_link_budget_without_simulation();shared_link_controls_visibility();
         link_budget_edit_buffers();link_budget_preset_and_dialog_sync();
-        receiver_overlay_and_cpu_status();estimate_warning_thresholds();document_semantics_layout_and_plots();
+        receiver_overlay_and_cpu_status();estimate_warning_thresholds();conditional_reference_and_timing_work_document();document_semantics_layout_and_plots();
         std::cout<<"Shared Link planner tests passed\n";
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

@@ -48,13 +48,13 @@ Selecting encryption later may change the automatic profile and fixed-interval
 source capacity, so the result is a controlled comparison at the current
 timing, not a preview of all settings that a real key selection would produce.
 
-The ordinary encrypted automatic profile enables the private Scrambler. Its
-many noise-like chips already spread one transmitted bit across a pattern.
-The separate DSSS mixing switch defaults to off; enabling encryption does not
-also turn on that independent switch. Either private stream changes the
-unkeyed observer's knowledge, but neither adds a separate processing-gain
-multiplier to this calculation. Bandwidth and actual symbol duration account
-for spreading once.
+The ordinary encrypted automatic profile already spreads each bit across private
+Scrambler chips. The additional outer-DSSS factor changes the fine-chip bandwidth
+and, depending on the inner Rate, its symbol duration. The calculation uses the
+resulting bandwidth and actual duration once; it adds no separate DSSS or
+encryption multiplier. At fixed outer bandwidth, decreasing inner Rate as the
+factor increases lengthens symbols. Normalized received power then decreases to
+preserve the same 18 dB one-symbol energy reference.
 
 Numerical detection times are restricted to a normalized observation-band SNR of
 at most **-10 dB**. Stronger signals are reported as outside this weak-signal
@@ -76,11 +76,12 @@ both give N; `additional_wire_symbols` gives `max(0, N - 1)`.
 
 ## Observation bandwidth and receiver reference
 
-Let `F` be the internal sample rate and `R` the nominal Rate setting, in hertz.
-The actual chip duration is sample-quantized:
+Let `F` be the internal sample rate, `R_inner` the Rate setting and `D` the
+outer-DSSS factor (Off is 1). Fine-chip geometry is sample-quantized:
 
 ```text
-chip_samples = ceil(2 F / R)
+R_outer = R_inner * D
+chip_samples = ceil(2 F / R_outer)
 chip_rate = F / chip_samples
 T_s = symbol_sample_count / F
 ```
@@ -88,8 +89,8 @@ T_s = symbol_sample_count / F
 For a shaped pattern (including the private pattern assumed in a hypothetical
 tone experiment), the assumed observer bandwidth is
 `B = (1 + 0.25) * chip_rate`, the ideal full passband support of the
-root-raised-cosine pulse. It is approximately `0.625 R`, rather than `R`.
-For rectangular patterns the model uses `B = R`. These are assumed ideal
+root-raised-cosine pulse. It is approximately `0.625 R_outer`.
+For rectangular patterns the model uses `B = R_outer`. These are assumed ideal
 observation filters, not measured occupied bandwidths: finite pulse truncation,
 limiting, sidelobes and spectral weighting can change a real detector's result.
 The model treats all nominal signal power as lying within the chosen band.
@@ -123,6 +124,13 @@ observation duration `T`, the ideal real bandpass radiometer has approximately
 statistic has mean 1 and standard deviation `1/sqrt(BT)` without a signal,
 and mean `1 + rho` and standard deviation `(1 + rho)/sqrt(BT)` with one.
 
+Outer DSSS retains each inner complex coefficient across several fine chips with
+independent secret QPSK phase changes. The wider spectrum retains correlated
+power envelopes. Bandwidth alone does not establish independent power samples
+or signal-present variance. The model omits these correlations and envelope or
+higher-order detectors. Its ratio remains an uncalibrated analytical comparison;
+that correlation alone does not establish a large error when noise dominates.
+
 The normal approximation therefore gives
 
 ```text
@@ -148,6 +156,17 @@ or the symbol duration approximately doubles the observation ratio. Increasing
 symbol duration also lowers the normalized received power to keep the same
 one-symbol energy reference. These relationships do not credit encryption with
 a reduction in actual transmitted power.
+
+## Frequency hopping
+
+Secret genuine hopping can reduce a narrowband observer's opportunities to capture
+the signal. An observer covering the whole hop set still receives its energy.
+Detection time depends on capture bandwidth, channelization, dwell, tuning gaps,
+noise and search thresholds; channel count alone is not a time multiplier. The
+current known-band radiometer does not model these effects. Fake FHSS changes
+frequency displays and conservative oscillator planning while actual audio and
+hardware remain fixed, so its observer estimate is unchanged. Genuine hardware
+hopping remains unavailable.
 
 ## Symbols, whole bursts and examples
 

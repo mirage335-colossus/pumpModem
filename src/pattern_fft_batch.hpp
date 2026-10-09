@@ -30,6 +30,7 @@ struct FftPatternParameters {
     std::uint32_t sample_rate = 0, spreading_mode = 0;
     std::uint32_t shaped = 0, scramble = 0, dsss = 0;
     std::array<std::uint8_t,32> spreading_seed{}, dsss_seed{};
+    unsigned dsss_factor=1;
 };
 struct FftSearchGeometry {
     FftPatternParameters pattern;

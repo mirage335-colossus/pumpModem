@@ -17,6 +17,8 @@ coverage and decoded-message reliability are related but distinct quantities.
 | [Pattern constellation](../pattern-constellation.md) | Reference: binary pattern construction, settling waveform and constellation interpretation. |
 | [Development contract](../development.md) | Requirements: short messages, pending progress, physical end and regression preservation. |
 | [Modem inspection](../inspection.md) | Reference: flow views, plots and interpretation boundaries. |
+| [Clock synchronization](../clock-sync.md) | Local candidate: independent GPS arrival controls, timing evidence, narrow-search prerequisites and hardware limitations. |
+| [Spread controls](../spread-spectrum-controls.md) | Local candidate: separate outer DSSS factors, Fake FHSS illustration and unqualified acquisition/regulatory scope. |
 | [Packetless stream plan](../packetless-stream-plan.md) | Historical code audit and migration plan for the now-implemented fixed-interval transport. |
 
 ## Computation, iterative search and receiver alternatives
@@ -25,6 +27,7 @@ coverage and decoded-message reliability are related but distinct quantities.
 | --- | --- |
 | [Batched iterative search](../search-compute.md) | Implementation reference: FFT acquisition, long-symbol CPU batching, workers, memory boundaries and reproducible workloads. |
 | [Pulse-moment qualification](../pulse-moment-validation.md) | Paired raw-PCM performance, conditional sensitivity statistics, numerical equivalence and coverage limits for high-chip iterative search. |
+| [DSSS follow-up evidence](../dsss-followup-validation.md) | Local manual checkpoint: coherent outer-code guard, timing-neighbor completion, duplex, paired regressions and conditional sensitivity limits. |
 | [Robust CPU costs](../robust-cpu-costs.md) | Paired receive-hardening overhead measurements and estimate coefficients; not a whole-DSP bottleneck profile. |
 | [Alternate Robust receiver study](../robust-alternate-receiver.md) | Proposed independent chain: FIR/IIR/FFT tradeoffs, reference reuse, carrier/clock search, CPU efficiency at low expected SNR, GUI/TX isolation and experimental criteria. Source assessment dated 2026-09-30; speedup and sensitivity targets are unmeasured. |
 | [Simulation estimates](../simulation-estimates.md) | Reference and models: whole-draft receive probability, reference-machine compute estimates and unsupported coverage. |

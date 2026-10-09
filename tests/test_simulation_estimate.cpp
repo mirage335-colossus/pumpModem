@@ -931,6 +931,126 @@ void oscillator_policy_geometry() {
           limited.requested_carrier_search_half_width_hz>limited.carrier_search_half_width_hz,
           "finite radio frequency coverage must expose incomplete oscillator margin even for a central signal");
 }
+void utc_bank_estimate() {
+    transfer::Options options;options.modem=tuning::resolve(100,16,tuning::PatternMode::auto_keystream,true).config;
+    options.key.emplace(Bytes(32,0x39));options.timestamp=1800000000;options.dsp_workspace_bytes=128*1024*1024;
+    modem::OscillatorSearchConfig policy;policy.lf={10,.05};policy.rf={.01,.005};policy.margin=3;
+    options.modem.oscillator_search=policy;
+    const auto baseline=simulation::estimate(wire(3,options.modem),options,true,clean_channel(),{},1,false);
+    options.clock_sync=clock_sync::Policy{.001,.4,2.564};
+    const auto actual=modem::oscillator_pattern_search(options.modem,modem::utc_transmit_rate_limit(options.modem));
+    const auto estimate=simulation::estimate(wire(3,options.modem),options,true,clean_channel(),{},1,true,100,4096,
+        simulation::ReceiverWorkMode::hardware_fallback);
+    check(actual.transmit_rate_correction>0 && estimate.frequency_rate_hypotheses==actual.hypotheses.size() &&
+        estimate.frequency_rate_hypotheses>=baseline.frequency_rate_hypotheses,
+        "UTC estimator omitted actual expanded-bank hypotheses");
+    check(estimate.receiver_cpu_seconds>=baseline.receiver_cpu_seconds,
+        "UTC estimate discounted work without implemented arrival-window evidence");
+    check(!estimate.confidence_available && !estimate.one_bit_confidence_available &&
+        estimate.probability_reference_only && estimate.reference_probability_available &&
+        estimate.one_bit_reference_available && !estimate.probability_interval_available &&
+        estimate.probability_model_limit.find("UTC")!=std::string::npos,
+        "UTC reference must remain distinct from a supported receiver probability");
+    const auto simulated=simulation::estimate(wire(3,options.modem),options,true,clean_channel(),{},1,false);
+    check(simulated.frequency_rate_hypotheses==baseline.frequency_rate_hypotheses,
+        "known unsteered sampled simulation must not acquire hardware steering lanes");
+    near(simulated.receiver_cpu_seconds,baseline.receiver_cpu_seconds,
+        "clock controls alone must not increase known unsteered simulation work");
+}
+void clock_dsss_reference() {
+    transfer::Options options;options.modem=tuning::resolve(1200,70,tuning::PatternMode::auto_keystream,true,9000,10).config;
+    options.key.emplace(Bytes(32,0x63));options.search_seconds=6;options.dsp_workspace_bytes=128*1024*1024;
+    modem::OscillatorSearchConfig policy;policy.lf={.0001,.5};policy.rf={.0001,.005};
+    policy.rf_shift_hz=1000000;policy.margin=3;options.modem.oscillator_search=policy;
+    const auto original=modem::oscillator_pattern_search(options.modem);
+    const auto expanded=modem::oscillator_pattern_search(options.modem,modem::utc_transmit_rate_limit(options.modem));
+    options.clock_sync=clock_sync::Policy{.0001,.001,0};options.audio_timing_error_seconds=.001;
+    const auto draft=wire(3,options.modem);
+    const auto sampled=simulation::estimate(draft,options,true,clean_channel());
+    const auto hardware=simulation::estimate(draft,options,true,clean_channel(),{},1,true,100,4096,
+        simulation::ReceiverWorkMode::hardware_fallback);
+    const auto short_timed=simulation::estimate(draft,options,true,clean_channel(),{},1,false,100,4096,
+        simulation::ReceiverWorkMode::hardware_timing_model);
+    check(options.modem.sample_rate==48000&&modem::pattern_chip_samples(options.modem)==8&&
+        modem::symbol_sample_count(options.modem)==5120,
+        "imported DSSS configuration no longer has its resolved waveform geometry");
+    check(sampled.frequency_rate_hypotheses==original.hypotheses.size()&&
+        hardware.frequency_rate_hypotheses==expanded.hypotheses.size(),
+        "work contexts must retain their actual oscillator banks");
+    check(sampled.epoch_hypotheses==16&&hardware.epoch_hypotheses==13,
+        "sampled startup and hardware initial epoch coverage must remain distinct");
+    check(!short_timed.timing_window_modeled&&short_timed.timing_hypotheses==hardware.timing_hypotheses,
+        "FFT work must not claim a timing-prior reduction the scanner does not implement");
+    near(short_timed.receiver_cpu_seconds,hardware.receiver_cpu_seconds,
+        "unsupported short timing geometry must retain its full receiver cost");
+    for(const auto* estimate:{&sampled,&hardware}) {
+        check(estimate->probability_reference_only&&estimate->reference_probability_available&&
+            estimate->one_bit_reference_available&&!estimate->confidence_available&&
+            !estimate->one_bit_confidence_available&&!estimate->probability_interval_available,
+            "outer DSSS reference falsely qualified the new receiver behavior");
+        check(estimate->success_probability>=0&&estimate->success_probability<=1&&
+            estimate->probability_model_limit.find("outer DSSS")!=std::string::npos,
+            "outer DSSS conditional reference or scope is missing");
+    }
+    check(sampled.receiver_work_assumptions.find("outer-code candidate-check")!=std::string::npos,
+        "DSSS estimate hid its added coherent guard workload allowance");
+    options.clock_sync.reset();
+    const auto without_clock=simulation::estimate(draft,options,true,clean_channel(),{},1,false);
+    near(sampled.receiver_cpu_seconds,without_clock.receiver_cpu_seconds,
+        "tight clock fields must not invent simulated timing-bank work");
+}
+void compact_clock_prior_workload() {
+    transfer::Options options;options.key.emplace(Bytes(32,0x24));
+    options.modem.sample_rate=6000;options.modem.carrier_hz=1500;options.modem.bandwidth_hz=100;
+    options.modem.integration_seconds=64;options.modem.scramble=true;
+    options.search_seconds=6;options.dsp_workspace_bytes=128*1024*1024;
+    modem::OscillatorSearchConfig policy;policy.lf={.0001,.05};policy.rf={0,0};policy.margin=3;
+    options.modem.oscillator_search=policy;
+    options.clock_sync=clock_sync::Policy{.0001,.001,0};options.audio_timing_error_seconds=.001;
+    const auto draft=wire(3,options.modem);
+    const auto full=simulation::estimate(draft,options,true,clean_channel(),{},1,false,100,4096,
+        simulation::ReceiverWorkMode::hardware_fallback);
+    const auto tight=simulation::estimate(draft,options,true,clean_channel(),{},1,false,100,4096,
+        simulation::ReceiverWorkMode::hardware_timing_model);
+    simulation::ReceiverTimingModel late_capture;
+    late_capture.capture_error_seconds=.03;
+    late_capture.capture_rate_uncertainty_fraction=0;
+    late_capture.capture_seconds_per_frame=1./options.modem.sample_rate;
+    const auto timing_fallback=simulation::estimate(draft,options,true,clean_channel(),{},1,false,100,4096,
+        simulation::ReceiverWorkMode::hardware_timing_model,late_capture);
+    check(!timing_fallback.timing_window_modeled,
+        "capture uncertainty exceeding selected Audio error must retain Live's full-window fallback");
+    near(timing_fallback.receiver_cpu_seconds,full.receiver_cpu_seconds,
+        "unqualified capture timing must not discount full-window CPU work");
+    near(timing_fallback.timing_hypotheses,full.timing_hypotheses,
+        "unqualified capture timing must retain every arrival origin");
+    options.clock_sync=clock_sync::Policy{.001,.4,0};options.audio_timing_error_seconds=.03;
+    const auto wide=simulation::estimate(draft,options,true,clean_channel(),{},1,false,100,4096,
+        simulation::ReceiverWorkMode::hardware_timing_model);
+    check(full.receiver_workspace_supported&&tight.receiver_workspace_supported&&wide.receiver_workspace_supported&&
+        tight.timing_window_modeled&&wide.timing_window_modeled,
+        "eligible compact hardware timing model must retain its workspace and count the admitted prior");
+    check(tight.frequency_rate_hypotheses==full.frequency_rate_hypotheses&&
+        wide.frequency_rate_hypotheses==full.frequency_rate_hypotheses&&
+        tight.epoch_hypotheses==full.epoch_hypotheses,
+        "a timing prior must not omit oscillator, key or epoch coverage");
+    check(tight.timing_hypotheses<=wide.timing_hypotheses&&wide.timing_hypotheses<full.timing_hypotheses&&
+        tight.receiver_search_seconds<=wide.receiver_search_seconds&&wide.receiver_cpu_seconds<full.receiver_cpu_seconds,
+        "narrowing an implemented compact prior must reduce actual modeled search work monotonically");
+    near(tight.receiver_frontend_seconds,full.receiver_frontend_seconds,
+        "timing pruning must not erase ingestion or shared pulse-statistic costs");
+    near(tight.fallback_receiver_cpu_seconds,full.receiver_cpu_seconds,
+        "compact timing estimate must retain a separate complete-window fallback");
+    near(tight.fallback_timing_hypotheses,full.timing_hypotheses,
+        "fallback must retain every original timing origin");
+    auto invalid=late_capture;invalid.capture_seconds_per_frame=0;
+    bool rejected=false;
+    try {
+        (void)simulation::estimate(draft,options,true,clean_channel(),{},1,false,100,4096,
+            simulation::ReceiverWorkMode::hardware_timing_model,invalid);
+    } catch(const Error&) {rejected=true;}
+    check(rejected,"invalid supplied capture metadata must not produce a timing estimate");
+}
 void nearby_shift_workload() {
     for(const auto target:{18.,-3.}) {
         simulation::Estimate baseline;
@@ -1296,6 +1416,9 @@ void projected_pattern_workload() {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc==2&&std::string(argv[1])=="--utc-only") {
+            utc_bank_estimate();clock_dsss_reference();compact_clock_prior_workload();std::cout<<"UTC bank estimate tests passed\n";return 0;
+        }
         if(argc==2&&std::string(argv[1])=="--affine-work-only") {
             bounded_affine_rf_workload();affine_coefficient_workload();projected_pattern_workload();
             std::cout<<"affine work model tests passed\n";return 0;
@@ -1303,7 +1426,7 @@ int main(int argc,char** argv) {
         if(argc==2&&std::string(argv[1])=="--partial-only") {
             partial_compact_probability();std::cout<<"partial simulation estimate tests passed\n";return 0;
         }
-        probability_and_framing();workload_and_impairments();receiver_cpu_budget();received_processing_budget();whole_symbol_phase_coherence();partial_compact_probability();differential_model_limits();drift_receiver_estimate();receiver_statistic_controls();raw_sample_probability_geometry();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
+        utc_bank_estimate();clock_dsss_reference();compact_clock_prior_workload();probability_and_framing();workload_and_impairments();receiver_cpu_budget();received_processing_budget();whole_symbol_phase_coherence();partial_compact_probability();differential_model_limits();drift_receiver_estimate();receiver_statistic_controls();raw_sample_probability_geometry();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
         coupled_and_independent_clock_estimates();streamed_template_workload();target_and_channel_are_independent();oscillator_policy_geometry();nearby_shift_workload();equivalent_receive_profiles();affine_coefficient_workload();projected_pattern_workload();
         std::cout<<"simulation estimate tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"simulation estimate tests failed: "<<error.what()<<'\n';return 1;}

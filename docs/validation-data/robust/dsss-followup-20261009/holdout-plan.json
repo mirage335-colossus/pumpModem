@@ -1,0 +1,37 @@
+{
+  "created_utc": "2026-10-09T07:35:18.630141+00:00",
+  "status": "fixed before fresh holdout launch",
+  "scope": "conditional coherent raw real-AWGN statistic plus selected production raw/auto float replay, not fullbank/universalfloat",
+  "trials_per_case": 80000,
+  "batch_size": 20000,
+  "cases": [
+    "bit0",
+    "bit1",
+    "adverse-bit0",
+    "adverse-bit1"
+  ],
+  "noise_seed_starts": [
+    8378320719,
+    10472900719,
+    12567480719,
+    14662060719
+  ],
+  "noise_seed_increment": 104729,
+  "analysis_grid_low": -5,
+  "analysis_grid_high": 10,
+  "cell_widths_db": [
+    0.025,
+    0.04
+  ],
+  "family_alpha_per_grid": 0.025,
+  "total_family_alpha": 0.05,
+  "qualified_energy_bracket": [
+    -10,
+    20
+  ],
+  "exception_correction": "CP upper includes nonmonotone/unbracketed/nonnested; cell lower must exceed2*exception_upper+activation_bound",
+  "harness_sha256": "ef40681032de34473dfe391aac6ed1facdc470d3e988e764a91e30491fbd71ee",
+  "binary_sha256": "adf487bbd72367db2323aab3b7df7fb54d3d161de452b28eb6520897b282eba6",
+  "analyzer_sha256": "46f6657abc2d92132c4935fd45a9dece01a6287e3d20933f9661affe843bdce4",
+  "postlaunch_grid_or_case_tuning_forbidden": true
+}

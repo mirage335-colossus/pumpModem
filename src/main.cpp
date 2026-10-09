@@ -93,7 +93,10 @@ Modem:
                         Invalid lists reset to32; selected bandwidth/pattern stay fixed
   --pattern MODE        auto-keystream, auto-pattern, auto-tone, pattern-N, tone-N
   --scramble            Cryptographic pattern rotation (requires keyfile)
-  --dsss                Independent encrypted direct-sequence spreading
+  --dsss                Legacy independent private mapper layer
+  --dsss-factor N       Outer private spreading: 1 (off), 10, 100, 1000; requires keyfile
+  --clock-sync SPEC     default or GPS_1ms-400ms_region-2564ms_offset
+  --audio-error TIME    Per-station residual audio timing allowance; default30ms
   --fec 20|60|off        Reed-Solomon parity overhead, default60
   --no-compression      Diagnostic override; both peers must select the same source codec
   --memory-mb N         Legacy batch PCM workspace budget, default256 MiB
@@ -171,7 +174,7 @@ public:
     Args(int argc,char** argv) {
         const std::set<std::string> booleans={"json","repeatable","no-compression","no-mono","right-mono","scramble","dsss","progress","help","version"};
         const std::set<std::string> valued={"text","input","output","save","kind","filename","callsign","grid",
-            "bw","sample-rate","carrier","spreading","fec","memory-mb","keyfile","pad","time","search-seconds",
+            "bw","sample-rate","carrier","spreading","dsss-factor","clock-sync","audio-error","fec","memory-mb","keyfile","pad","time","search-seconds",
             "device","device-type","seconds","tx-delay","snr","seed","delay-samples","frequency-offset","bits","format",
             "target-snr","receive-targets","pattern","simulation","oscillator","rf-oscillator","shift","rf-shift","rf-carrier","search-margin","reference","sideband","lf-reference","key-name","key-names","cache-mb","dsp-mb","clock-error-ppm","phase-noise","receiver-time",
             "recovery-seconds","recovery-threads","recovery-bits","recovery-errors",
@@ -264,6 +267,7 @@ tuning::OscillatorPreset oscillator_config(const Args& a) {
     return result;
 }
 modem::OscillatorSearchConfig oscillator_search_config(const Args& a) {
+    if(tuning::parse_oscillator_preset(a.get("oscillator","crystal")).id=="ic-7100")throw Error("IC-7100 model is available for --rf-oscillator, not the unspecified audio clock");
     modem::OscillatorSearchConfig result;
     result.lf=tuning::oscillator_model(tuning::parse_oscillator_preset(a.get("oscillator","crystal")));
     result.rf=tuning::oscillator_model(tuning::parse_oscillator_preset(a.get("rf-oscillator","crystal")));
@@ -321,8 +325,10 @@ bool automatic_tuning(const Args& a) {
 modem::Config config(const Args& a) {
     modem::Config c;
     c.bandwidth_hz=a.number("bw",1200);
+    c.dsss_factor=static_cast<unsigned>(a.integer("dsss-factor",1));
+    if(c.dsss_factor!=1&&c.dsss_factor!=10&&c.dsss_factor!=100&&c.dsss_factor!=1000)throw Error("dsss-factor must be 1, 10, 100, or 1000");
     const auto oscillator=oscillator_search_config(a);
-    const auto carrier=a.number("carrier",a.number("rf-carrier",tuning::recommended_carrier_hz(c.bandwidth_hz)));
+    const auto carrier=a.number("carrier",a.number("rf-carrier",tuning::recommended_carrier_hz(modem::waveform_bandwidth_hz(c))));
     if(a.has("carrier")&&a.has("rf-carrier")&&carrier!=a.number("rf-carrier",0))
         throw Error("carrier and rf-carrier must specify the same absolute frequency");
     const auto stream=static_cast<long double>(carrier)-oscillator.rf_shift_hz;
@@ -334,11 +340,11 @@ modem::Config config(const Args& a) {
         if(a.has("spreading") || a.has("scramble") || a.has("dsss") || a.has("sample-rate"))
             throw Error("automatic tuning cannot be combined with manual spreading/scramble/dsss/sample-rate");
         const auto plan=tuning::resolve(c.bandwidth_hz,a.number("target-snr",32),
-            tuning::parse_pattern_mode(a.get("pattern",a.has("keyfile")?"auto-keystream":"auto-pattern")),a.has("keyfile"),c.carrier_hz);
+            tuning::parse_pattern_mode(a.get("pattern",a.has("keyfile")?"auto-keystream":"auto-pattern")),a.has("keyfile"),c.carrier_hz,c.dsss_factor);
         c=plan.config;
         if(a.has("progress") || !plan.target_supported) std::cerr<<plan.explanation<<'\n';
     }
-    auto rate=a.integer("sample-rate",automatic?c.sample_rate:tuning::recommended_sample_rate(c.bandwidth_hz,c.carrier_hz));
+    auto rate=a.integer("sample-rate",automatic?c.sample_rate:tuning::recommended_sample_rate(modem::waveform_bandwidth_hz(c),c.carrier_hz));
     if(rate>120000000) throw Error("internal sample rate exceeds120000000");
     c.sample_rate=static_cast<std::uint32_t>(rate);
     c.oscillator_search=oscillator;
@@ -346,15 +352,15 @@ modem::Config config(const Args& a) {
     if(spreading==0 || spreading>16384) throw Error("spreading must be1..16384");
     c.spreading_factor=static_cast<unsigned>(spreading);
     c.memory_limit=budget(a);
-    if(!automatic) {c.scramble=a.has("scramble");c.dsss=a.has("dsss");}
-    if((a.has("scramble") || a.has("dsss")) && !a.has("keyfile")) throw Error("encrypted spreading requires --keyfile");
+    if(!automatic) {c.scramble=a.has("scramble")||c.dsss_factor>1;c.dsss=a.has("dsss");}
+    if((a.has("scramble") || a.has("dsss") || c.dsss_factor>1) && !a.has("keyfile")) throw Error("encrypted spreading requires --keyfile");
     if(a.get("device-type","audio")!="audio") throw Error("this build supports analog audio only; SDR and IC-7100 frontends are not implemented");
-    if(a.has("device") && c.bandwidth_hz>192000)
+    if(a.has("device") && modem::waveform_bandwidth_hz(c)>192000)
         throw Error("this bandwidth requires an SDR frontend; use simulation in this audio-only build");
     modem::validate(c);return c;
 }
 audio::StreamFormatCallback audio_passband_guard(const modem::Config& config) {
-    const auto upper_edge=config.carrier_hz+config.bandwidth_hz/2;
+    const auto upper_edge=config.carrier_hz+modem::waveform_bandwidth_hz(config)/2;
     return [upper_edge](const audio::StreamFormat& format) {
         if(upper_edge>format.usable_passband_hz)
             throw Error("Selected upper band edge ("+std::to_string(upper_edge)+
@@ -366,6 +372,29 @@ audio::StreamFormatCallback audio_passband_guard(const modem::Config& config) {
 template<class Factory>
 void play_transmission(const Args& a, transfer::Options& options, Factory make) {
     std::unique_ptr<modem::StreamingTransmitter> source;
+    audio::Options output;
+    output.maximum_utc_error_seconds=options.audio_timing_error_seconds;
+    output.follow_system_clock=options.clock_sync && audio::utc_follow_supported() &&
+        (!options.modem.oscillator_search || options.modem.oscillator_search->reference==modem::OscillatorReference::independent_audio);
+    output.allow_timing_fallback=options.clock_sync.has_value();
+    output.timing_status=[](const audio::TimingStatus& status) {
+        if(!status.following_system_clock)
+            std::cerr<<"UTC timing fallback: "<<status.reason<<"\n";
+    };
+    if(options.clock_sync && a.has("time"))throw Error("UTC hardware transmission requires a freshly scheduled epoch");
+    if(output.follow_system_clock && options.modem.oscillator_search) {
+        const auto bank=modem::oscillator_pattern_search(options.modem,modem::utc_transmit_rate_limit(options.modem));
+        output.maximum_timing_rate_correction=bank.transmit_rate_correction;
+        if(output.maximum_timing_rate_correction>0) {
+            options.modem.stream_phase_samples=0;
+            const auto sized=make(options); // no source samples are requested
+            output.timing_source_duration_seconds=static_cast<double>(sized->total_samples())/options.modem.sample_rate;
+            output.estimated_timing=audio::EstimatedDeviceTiming{};
+            output.estimated_timing->maximum_utc_error_seconds=options.audio_timing_error_seconds;
+            output.maximum_timing_slew_per_second=audio::conservative_timing_slew(options.modem.sample_rate,
+                static_cast<double>(modem::symbol_sample_count(options.modem))/options.modem.sample_rate);
+        }
+    }
     if(a.has("time"))source=make(options);
     audio::playback(options.modem.sample_rate,a.get("device"),[&](std::span<float> chunk) {
         return source->read(chunk);
@@ -376,10 +405,10 @@ void play_transmission(const Args& a, transfer::Options& options, Factory make) 
         options.modem.stream_phase_samples=0;
         auto scheduled=detail::schedule_transmission(options.modem,[&](std::uint64_t epoch) {
             options.timestamp=epoch;return make(options);
-        },clock);
+        },clock,{},0,audio::minimum_lead_seconds());
         source=std::move(scheduled.transmitter);
-        detail::wait_for_playback(scheduled.playback_epoch,clock);
-    },a.has("no-mono")?audio::ChannelMode::stereo:a.has("right-mono")?audio::ChannelMode::right_mono:audio::ChannelMode::left_mono);
+        audio::schedule_output(scheduled.playback_epoch);
+    },a.has("no-mono")?audio::ChannelMode::stereo:a.has("right-mono")?audio::ChannelMode::right_mono:audio::ChannelMode::left_mono,output);
 }
 std::uint64_t epoch(const Args& a) {
     return a.integer("time",static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
@@ -402,6 +431,9 @@ transfer::Options transfer_options(const Args& a,const modem::Config& c,const st
     const auto window=a.integer("search-seconds",6);
     if(window>32768) throw Error("clock drift search exceeds32768 seconds");
     options.search_seconds=static_cast<unsigned>(window);
+    if(a.has("clock-sync"))options.clock_sync=clock_sync::parse(a.get("clock-sync"));
+    if(a.has("audio-error"))options.audio_timing_error_seconds=clock_sync::duration(a.get("audio-error"));
+    clock_sync::validate_audio_error(options.audio_timing_error_seconds);
     const auto recovery_seconds=a.integer("recovery-seconds",300);
     const auto recovery_threads=a.integer("recovery-threads",0);
     const auto recovery_bits=a.integer("recovery-bits",65536);
@@ -702,7 +734,7 @@ void analyze_link(const Args& a,transfer::Options options) {
     const auto profiles=options.automatic_receive_profiles?tuning::receive_profiles(c,
         options.receive_targets_db_hz,options.receive_pattern_mode,options.key.has_value()):std::vector<modem::Config>{c};
     const auto current=simulation::estimate(transmission,options,raw,channel,profiles);
-    const auto oscillator_search=modem::oscillator_pattern_search(c);
+    const auto oscillator_search=modem::oscillator_pattern_search(c,options.clock_sync?modem::utc_transmit_rate_limit(c):0);
     const auto& geometry=oscillator_search.frequency;
     const auto phase=static_cast<long double>(channel.phase_noise_degrees_per_sqrt_second)*std::numbers::pi_v<long double>/180;
     const auto rho=std::pow(10.L,static_cast<long double>(link.snr_db_hz)/10);
@@ -1010,7 +1042,7 @@ int main(int argc,char** argv) {
                 <<",\"batch_memory_supported\":"<<(result.batch_memory_supported?"true":"false");
             if(automatic_tuning(a)) {
                 const auto plan=tuning::resolve(c.bandwidth_hz,a.number("target-snr",32),
-                    tuning::parse_pattern_mode(a.get("pattern",a.has("keyfile")?"auto-keystream":"auto-pattern")),a.has("keyfile"),c.carrier_hz);
+                    tuning::parse_pattern_mode(a.get("pattern",a.has("keyfile")?"auto-keystream":"auto-pattern")),a.has("keyfile"),c.carrier_hz,c.dsss_factor);
                 std::cout<<",\"estimated_symbol_snr_db\":"<<plan.estimated_symbol_snr_db
                     <<",\"symbol_seconds\":"<<modem::symbol_seconds(c)
                     <<",\"target_supported\":"<<(plan.target_supported?"true":"false");

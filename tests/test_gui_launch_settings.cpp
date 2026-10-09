@@ -284,8 +284,110 @@ void zero_shift_legacy_and_shared_round_trip() {
           "Shared clock export/import changed the modeled receiver search");
     controller.close();
 }
+void clock_and_spread_controls() {
+    Controller controller({true,true});
+    check(std::none_of(controller.field(F::clock_accuracy).options.begin(),controller.field(F::clock_accuracy).options.end(),
+        [](const auto& option){return option.id.starts_with("GPS_")||option.label.starts_with("GPS_");}),
+        "Clock sync menu must offer accuracy durations instead of composite serialized policies");
+    check(!controller.settings().transfer.clock_sync && controller.field(F::clock_accuracy).text=="Default" &&
+          controller.field(F::clock_region).text=="Default" && controller.field(F::clock_offset).text=="Default",
+          "UTC controls must preserve the existing default search");
+    const auto oscillator=controller.settings().transfer.modem.oscillator_search;
+    check(controller.field(F::audio_error).text=="30ms" && controller.settings().transfer.audio_timing_error_seconds==.03,
+        "audio timing needs its independent 30 ms default");
+    controller.edit(F::audio_error,"12345us");
+    check(controller.settings().transfer.audio_timing_error_seconds==.012345 &&
+        !controller.settings().transfer.clock_sync && controller.settings().transfer.modem.oscillator_search==oscillator,
+        "editing audio error changed GPS/oscillator mode or lost precision");
+    for(const auto reset:{F::clock_accuracy,F::clock_region,F::clock_offset}) {
+        controller.edit(F::clock_accuracy,"GPS_0.1ms-400ms_region-2564ms_offset");
+        const auto policy=controller.settings().transfer.clock_sync;
+        check(policy && policy->accuracy_seconds==.0001 && policy->region_seconds==.4 && policy->offset_seconds==2.564,
+              "clock preset did not atomically set all three independent controls");
+        check(controller.field(F::clock_accuracy).text=="0.1ms"&&controller.field(F::clock_region).text=="400ms"&&
+            controller.field(F::clock_offset).text=="2564ms","serialized policy leaked into an individual duration editor");
+        check(controller.settings().transfer.modem.oscillator_search==oscillator,
+              "GPS PC timing changed oscillator assumptions");
+        controller.edit(reset,"Default");
+        check(!controller.settings().transfer.clock_sync && controller.field(F::clock_accuracy).text=="Default" &&
+              controller.field(F::clock_region).text=="Default" && controller.field(F::clock_offset).text=="Default",
+              "Default in any editor must reset the complete clock triplet");
+        check(controller.settings().transfer.audio_timing_error_seconds==.012345,
+            "Default clock reset erased independent audio allowance");
+    }
+    controller.edit(F::clock_accuracy,"100ns");controller.edit(F::clock_region,"1us");controller.edit(F::clock_offset,"0ms");
+    const auto accepted=controller.settings().transfer.clock_sync;
+    const auto command=controller.field(F::planner_command).text;
+    for(const auto* invalid:{"0ms","NaNms","-1ms","61s"}) {
+        controller.edit(F::audio_error,invalid);
+        check(controller.settings().transfer.audio_timing_error_seconds==.012345 &&
+            controller.field(F::planner_command).text==command,
+            "invalid audio edit changed live settings or exported command");
+    }
+    controller.edit(F::clock_region,"NaNms");
+    check(controller.settings().transfer.clock_sync==accepted && controller.field(F::planner_command).text==command,
+          "invalid clock edit partially changed live timing or export");
+    controller.select(F::dsss_factor,"100");
+    check(controller.field(F::dsss_factor).selected=="100" && controller.settings().transfer.modem.dsss_factor==1 &&
+          controller.field(F::dsss_factor).display_text.find("key needed")!=std::string::npos,
+          "outer DSSS must remain inactive and labeled when no private key is selected");
+    near(controller.settings().transfer.modem.bandwidth_hz,36,"DSSS 100x did not install its voice-passband Rate");
+    near(controller.settings().transfer.modem.carrier_hz,1500,"DSSS default did not retain a 1.5 kHz stream carrier");
+    controller.select(F::fhss,"fake-0.4s-200");
+    const auto model=controller.link_plan();
+    check(controller.settings().transfer.modem.oscillator_search->rf_shift_hz==0 &&
+          model->inputs.options.modem.oscillator_search->rf_shift_hz==19900000 &&
+          model->inputs.options.modem.oscillator_search->rf.accuracy_ppm==100,
+          "fake hopping must plan the highest shift with the RF model without tuning the actual stream");
+    for(const auto* unsupported:{"genuine","ic-7100"}) {
+        controller.select(F::fhss,unsupported);
+        check(controller.field(F::fhss).selected=="fake-0.4s-200","disabled hardware hopping became selectable");
+    }
+    const auto exported=controller.field(F::planner_command).text;
+    load(controller,exported);
+    check(controller.settings().transfer.audio_timing_error_seconds==.012345,
+        "audio allowance lost its saved parameter-list value");
+    check(controller.settings().transfer.clock_sync==accepted && controller.field(F::dsss_factor).selected=="100" &&
+          controller.field(F::fhss).selected=="fake-0.4s-200","clock/spread settings lost their loaded values");
+    load(controller,"--clock-sync default");
+    check(controller.settings().transfer.audio_timing_error_seconds==.012345,
+        "loading an older command without audio error changed its retained value");
+    controller.close();
+}
+void duplex_settings() {
+    Controller controller({false,false});
+    const auto& screen=ui::console_screen();
+    const auto declaration=std::find_if(screen.begin(),screen.end(),[](const auto& control){return control.field==F::live_duplex;});
+    check(declaration!=screen.end()&&declaration->kind==ui::Kind::toggle&&declaration->persistent&&
+        !declaration->developer_only&&std::string_view(declaration->help).find("loopback")!=std::string_view::npos,
+        "Live/Duplex requires an ordinary persistent checkbox with physical loopback help");
+    check(!controller.settings().full_duplex&&!controller.field(F::live_duplex).checked&&controller.field(F::live_duplex).enabled,
+        "hardware audio must preserve default half duplex");
+    controller.toggle(F::live_duplex,true);
+    check(controller.settings().full_duplex&&controller.field(F::live_duplex).checked&&
+        launch_command::parse(controller.field(F::planner_command).text).full_duplex==true,
+        "Live/Duplex toggle did not reach runtime and exported settings");
+    load(controller,"--rate 1200");
+    check(controller.settings().full_duplex&&controller.field(F::live_duplex).checked,
+        "loading an older command reset an omitted duplex setting");
+    load(controller,"--live-duplex no");
+    check(!controller.settings().full_duplex&&!controller.field(F::live_duplex).checked,
+        "explicit half duplex failed to restore default capture behavior");
+    load(controller,"--live-duplex yes");
+    controller.select(F::simulation,"yes");
+    check(!controller.field(F::live_duplex).enabled&&controller.field(F::live_duplex).checked,
+        "Simulation must disable the hardware-only toggle while remembering its selection");
+    controller.toggle(F::live_duplex,false);
+    check(controller.settings().full_duplex,"disabled Simulation control accepted a duplex callback");
+    controller.select(F::simulation,"no");
+    check(controller.field(F::live_duplex).enabled&&controller.settings().full_duplex,
+        "returning to hardware lost its remembered duplex setting");
+    controller.close();controller.toggle(F::live_duplex,false);
+    check(!controller.field(F::live_duplex).enabled&&controller.settings().full_duplex,
+        "closing controller accepted a duplex callback");
+}
 int main() {
-    try {generated_and_pasted_settings();rejected_settings_remain_atomic();startup_and_submit_behavior();narrow_rate_round_trips();live_validation_is_atomic();real_radio_configuration();invalid_shift_edit_recovers();absolute_carrier_and_shift();zero_shift_legacy_and_shared_round_trip();
+    try {duplex_settings();clock_and_spread_controls();generated_and_pasted_settings();rejected_settings_remain_atomic();startup_and_submit_behavior();narrow_rate_round_trips();live_validation_is_atomic();real_radio_configuration();invalid_shift_edit_recovers();absolute_carrier_and_shift();zero_shift_legacy_and_shared_round_trip();
         std::cout<<"Planner launch setting round trips passed.\n";return 0;
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

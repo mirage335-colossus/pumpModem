@@ -602,6 +602,47 @@ void bounded_independent_construction() {
     config.oscillator_search->rf_shift_hz=1000000;config.oscillator_search->rf.accuracy_ppm=1e-15;
     compare_enumerated_independent_bank(config);
 }
+void utc_correction_coverage() {
+    for(const auto rf:{0.,10000.})for(const auto duration:{.5,16.}) {
+        auto config=oscillator_config();config.integration_seconds=duration;
+        auto& policy=*config.oscillator_search;policy.rf_shift_hz=rf;
+        policy.lf.accuracy_ppm=10;policy.rf.accuracy_ppm=.01;policy.margin=3;
+        const auto original=modem::oscillator_pattern_search(config);
+        const auto effects=modem::oscillator_effects(config);
+        const auto correction=modem::utc_transmit_rate_limit(config);
+        const auto adjusted=modem::oscillator_pattern_search(config,correction);
+        check(correction>0 && !adjusted.limited && !adjusted.timing_correction_unavailable &&
+            adjusted.transmit_rate_correction==correction,"UTC correction unexpectedly lost complete coverage");
+        check(std::equal(original.hypotheses.begin(),original.hypotheses.end(),adjusted.hypotheses.begin()),
+            "UTC search removed or reordered an original required hypothesis");
+        const long double a=policy.margin*policy.lf.accuracy_ppm*1e-6L;
+        for(const auto sa:{-1,1})for(const auto sc:{-1,1}) {
+            const auto rate=(1+sa*a)*(1+sc*static_cast<long double>(correction))-1;
+            check(std::abs(rate)*1e6<=adjusted.requested_clock_half_width_ppm+1e-9,
+                "UTC steering product omitted a clock-domain corner");
+            const auto frequency=std::abs(config.carrier_hz*rate)+policy.margin*rf*policy.rf.accuracy_ppm*1e-6L;
+            check(frequency<=adjusted.frequency.requested_half_width_hz+1e-12,
+                "UTC steering omitted carrier/translation uncertainty");
+        }
+        check(adjusted.hypotheses.size()<=modem::maximum_pattern_frequency_rate_hypotheses &&
+            adjusted.frequency.count<=modem::maximum_pattern_frequency_hypotheses,
+            "UTC union escaped the existing bounded bank");
+        check(modem::oscillator_effects(config).clock_error_ppm==effects.clock_error_ppm,
+            "UTC correction changed the physical oscillator model");
+    }
+    auto config=oscillator_config();config.integration_seconds=86400;
+    const auto original=modem::oscillator_pattern_search(config);
+    const auto fallback=modem::oscillator_pattern_search(config,.001);
+    check(fallback.transmit_rate_correction==0 && fallback.timing_correction_unavailable &&
+        fallback.hypotheses==original.hypotheses && fallback.limited==original.limited,
+        "unsupported UTC geometry changed the original fallback bank");
+    config.integration_seconds=1;config.oscillator_search->reference=modem::OscillatorReference::shared_radio;
+    config.oscillator_search->rf_shift_hz=1000000;
+    check(modem::utc_transmit_rate_limit(config)==0 &&
+        modem::oscillator_pattern_search(config,.0001).timing_correction_unavailable,
+        "independent UTC correction was applied to a coupled RF clock");
+    rejects([&]{modem::oscillator_pattern_search(config,-1);},"negative timing allowance accepted");
+}
 }
 int main() {
     try {
@@ -610,6 +651,7 @@ int main() {
         oscillator_bounds_and_phase();exact_declared_lattice_endpoints();shared_radio_frequency_mapping();zero_shift_uses_only_baseband();independent_reference_geometry();
         short_and_bounded_oscillator_searches();invalid_oscillator_policies();
         joint_passband_and_quantized_tones();thin_independent_regions();bounded_independent_construction();
+        utc_correction_coverage();
     }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
     std::cout<<"pattern search tests passed\n";
 }

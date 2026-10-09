@@ -67,6 +67,17 @@ void modes_and_patterns() {
     }
 }
 void snr_planning() {
+    for(const auto factor:{10U,100U,1000U})for(const auto bandwidth:{.01,.1,1.,10.}) {
+        const auto outer=tuning::resolve(bandwidth,100,tuning::PatternMode::auto_keystream,true,std::nullopt,factor);
+        const auto& c=outer.config;
+        check(modem::symbol_sample_count(c)/modem::pattern_chip_samples(c)/factor>=64,
+            "outer DSSS planner counted fine chips as independent inner chips");
+        if(c.spreading_factor>64) {
+            auto smaller=c;smaller.spreading_factor=c.spreading_factor/2;
+            check(modem::symbol_sample_count(smaller)/modem::pattern_chip_samples(smaller)/factor<64,
+                "outer DSSS planner rounded a full-chip geometry into an unnecessary longer symbol");
+        }
+    }
     auto plan=tuning::resolve(1200,6,tuning::PatternMode::auto_pattern,false);
     check(plan.config.pattern_symbols && plan.config.constellation_bits==1,"automatic planning carries one meaningful bit per rare pattern");
     near(plan.required_spreading,std::pow(10.,(plan.target_symbol_snr_db-6)/10)*600.,"required spreading from selected symbol energy");
@@ -387,7 +398,7 @@ void physical_simulation_presets() {
 }
 void oscillator_simulation_presets() {
     const auto presets=tuning::oscillator_presets();
-    check(presets.size()==4,"oscillator simulation must include crystal and three GPSDO tiers");
+    check(presets.size()==5,"oscillator simulation must include crystal, three GPSDO tiers and an IC-7100 RF example");
     const modem::ChannelConfig defaults;
     check(presets.front().id=="crystal" &&
           presets.front().clock_error_ppm==defaults.clock_error_ppm &&

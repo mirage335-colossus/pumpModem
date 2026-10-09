@@ -1,4 +1,5 @@
 #include "datapump/audio.hpp"
+#include "datapump/resampler.hpp"
 #include "alsa_stub.hpp"
 #include "../src/alsa_plugin_path.hpp"
 #include <algorithm>
@@ -14,6 +15,495 @@ namespace a=datapump::audio;
 namespace f=alsa_test;
 void check(bool value,const char* reason){if(!value)throw std::runtime_error(reason);}
 template<class F> void rejects(F action){try{action();}catch(const datapump::Error&){check(f::state.live==0,"leaked failed stream");return;}throw std::runtime_error("invalid audio accepted");}
+void native_audio_error_model() {
+    // A one-second reported capture queue changes the time origin, not the
+    // residual uncertainty. Buffer capacity likewise is not timestamp jitter.
+    for(const auto rate:{8000u,48000u})for(const auto period_ms:{10u,40u}) {
+        f::reset();f::state.available={"default"};f::state.supported_rates={rate};
+        f::state.buffer_frames=2*rate;f::state.period_frames=rate*period_ms/1000;
+        f::state.delay_frames=rate;
+        a::Options options;options.follow_system_clock=true;
+        const auto expected=period_ms/1000.+.001+std::max(.002,.001+18./rate);
+        const auto before=std::chrono::duration<long double>(std::chrono::system_clock::now().time_since_epoch()).count();
+        bool format_seen=false,timestamp_seen=false;
+        options.capture_timing=[&](const auto& timing) {
+            timestamp_seen=true;
+            check(timing.quality==a::TimingQuality::estimated && timing.uncertainty_seconds>=expected &&
+                  timing.uncertainty_seconds<expected+.01,"native model truncated provider error or counted buffer duration");
+            check(timing.utc_seconds<before-.99L && timing.utc_seconds>before-1.1L,
+                "reported capture queue was not compensated in the sample time origin");
+        };
+        a::capture(rate,"default",[](auto){return false;},{},[&](const auto& format) {
+            format_seen=true;
+            check(std::abs(format.timing_uncertainty_seconds-expected)<1e-12,
+                "native timing model lost period/codec rate dependence");
+        },options);
+        check(format_seen && timestamp_seen && !f::state.live,"native capture model was not exercised");
+    }
+}
+void stricter_caller_timing_allowance() {
+    for(const auto limit:{.005,.02}) {
+        f::reset();f::state.available={"default"};f::state.supported_rates={48000};
+        a::Options options;options.follow_system_clock=true;options.maximum_utc_error_seconds=limit;
+        options.maximum_timing_rate_correction=.0003;options.timing_source_duration_seconds=.2;
+        options.estimated_timing=a::EstimatedDeviceTiming{}; // its 30 ms cannot override the caller
+        const auto epoch=std::ceil(std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count())+5;
+        options.frame_timestamp=[&](std::uint64_t frames,bool) {
+            const auto elapsed=static_cast<long double>(frames)/48000;
+            return a::FrameTimestamp{static_cast<long double>(frames),epoch-.125L+elapsed,elapsed,
+                .01,2e-9,a::TimingQuality::estimated,91};
+        };
+        std::size_t generated=0;std::string error;
+        try {a::playback(48000,"default",[&](std::span<float> output) {
+            const auto count=std::min<std::size_t>(output.size(),7003-generated);
+            std::fill_n(output.begin(),count,.125f);generated+=count;return count;
+        },{},[&](const auto&){a::schedule_output(epoch);},a::ChannelMode::left_mono,options);}
+        catch(const datapump::Error& e){error=e.what();}
+        if(limit<.01)check(generated==0 && !error.empty() &&
+            std::all_of(f::state.played.begin(),f::state.played.end(),[](auto s){return s==0;}),
+            "estimated model enlarged the caller's audio error and generated private PCM");
+        else check(generated==7003 && error.empty(),"valid caller timing allowance was ignored");
+        check(!f::state.live,"caller timing allowance leaked its stream");
+    }
+}
+void visible_timing_fallback() {
+    constexpr unsigned rate=48000;
+    std::vector<float> input(7003);
+    for(std::size_t i=0;i<input.size();++i)input[i]=static_cast<float>(.15*std::sin(.017*i));
+    f::reset();f::state.available={"default"};f::state.supported_rates={rate};
+    a::play(input,rate);const auto ordinary=f::state.played;
+    // The exact user 1 ms selection is valid configuration, but the generic
+    // driver model cannot satisfy it. Do not start 120 s of futile calibration.
+    for(const bool estimated:{false,true}) {
+        f::reset();f::state.available={"default"};f::state.supported_rates={rate};
+        a::Options options;options.follow_system_clock=true;options.maximum_utc_error_seconds=.001;
+        if(estimated) {
+            options.maximum_timing_rate_correction=.0003;options.timing_source_duration_seconds=1;
+            options.estimated_timing=a::EstimatedDeviceTiming{};
+            options.estimated_timing->maximum_utc_error_seconds=.001;
+        }
+        options.allow_timing_fallback=true;
+        bool fallback=false,formatted=false;std::size_t generated=0;unsigned statuses=0;
+        options.timing_status=[&](const a::TimingStatus& status) {
+            ++statuses;
+            check(!formatted && !generated,"fallback occurred after source scheduling/generation");
+            check(!status.following_system_clock && status.requested_error_seconds==.001 &&
+                status.modeled_uncertainty_seconds>.001 && !status.reason.empty(),
+                "fallback concealed insufficient provider uncertainty or changed the requested limit");
+            fallback=true;
+        };
+        a::playback(rate,"default",[&](std::span<float> output) {
+            check(fallback && formatted,"ordinary source ran before visible fallback/format");
+            const auto n=std::min(output.size(),input.size()-generated);
+            std::copy_n(input.begin()+static_cast<std::ptrdiff_t>(generated),n,output.begin());generated+=n;return n;
+        },{},[&](const auto& format) {
+            check(fallback && !formatted && !generated && format.timing_quality==a::TimingQuality::unavailable,
+                "fallback claimed timed format or scheduled the source twice");formatted=true;
+        },a::ChannelMode::left_mono,options);
+        check(statuses==1 && generated==input.size() && f::state.played==ordinary,
+            "tight-clock fallback changed, omitted or replayed ordinary PCM");
+        check(!f::state.live && f::state.drops==0 && f::state.prepares==0,
+            "known-impossible timing geometry entered rate preparation or leaked a stream");
+        check(options.maximum_utc_error_seconds==.001 && options.follow_system_clock,
+            "fallback silently edited the caller's clock configuration");
+    }
+    // A provider may reveal excessive uncertainty only after silence has
+    // started. Fallback still precedes source scheduling and all private PCM.
+    f::reset();f::state.available={"default"};f::state.supported_rates={rate};
+    a::Options delayed;delayed.follow_system_clock=true;delayed.maximum_utc_error_seconds=.005;
+    delayed.maximum_timing_rate_correction=.0003;delayed.timing_source_duration_seconds=1;
+    delayed.estimated_timing=a::EstimatedDeviceTiming{};delayed.allow_timing_fallback=true;
+    bool delayed_fallback=false,delayed_format=false;std::size_t delayed_generated=0;
+    delayed.frame_timestamp=[](std::uint64_t frames,bool) {
+        const auto elapsed=static_cast<long double>(frames)/rate;
+        return a::FrameTimestamp{static_cast<long double>(frames),1800000000.L+elapsed,elapsed,
+            .01,2e-9,a::TimingQuality::estimated,118};
+    };
+    delayed.timing_status=[&](const auto& status) {
+        check(!status.following_system_clock && !delayed_generated && !delayed_format &&
+            status.modeled_uncertainty_seconds>=.01,"preparation failure escaped before-source fallback");
+        check(!f::state.played.empty() && std::all_of(f::state.played.begin(),f::state.played.end(),[](auto x){return x==0;}),
+            "UTC preparation contained private PCM");delayed_fallback=true;
+    };
+    a::playback(rate,"default",[&](std::span<float> output) {
+        check(delayed_fallback && delayed_format,"preparation fallback generated early private PCM");
+        const auto n=std::min(output.size(),input.size()-delayed_generated);
+        std::copy_n(input.begin()+static_cast<std::ptrdiff_t>(delayed_generated),n,output.begin());delayed_generated+=n;return n;
+    },{},[&](const auto&){check(delayed_fallback && !delayed_format,"preparation scheduled a source before fallback");delayed_format=true;},
+        a::ChannelMode::left_mono,delayed);
+    check(delayed_generated==input.size() && f::state.played.size()==2400+ordinary.size() &&
+        std::equal(ordinary.begin(),ordinary.end(),f::state.played.begin()+2400) && !f::state.live,
+        "preparation fallback changed or replayed the private PCM suffix");
+    f::reset();f::state.available={"default"};f::state.supported_rates={rate};
+    a::Options strict;strict.follow_system_clock=true;strict.maximum_utc_error_seconds=.001;
+    std::size_t generated=0;
+    rejects([&]{a::playback(rate,"default",[&](auto output){generated+=output.size();return output.size();},
+        {},{},a::ChannelMode::left_mono,strict);});
+    check(!generated && f::state.played.empty(),"strict timing failure generated private PCM");
+    f::reset();strict.allow_timing_fallback=true;
+    rejects([&]{a::playback(rate,"default",[](auto){return 0;},{},{},a::ChannelMode::left_mono,strict);});
+    check(!f::state.opens,"unobserved fallback opened a device");
+}
+void bounded_timing_preflight_and_post_start_failure() {
+    constexpr unsigned rate=48000;
+    for(const bool step:{false,true}) {
+        f::reset();f::state.available={"default"};f::state.supported_rates={rate};
+        const auto epoch=std::ceil(std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count())+5;
+        a::Options options;options.follow_system_clock=true;options.maximum_utc_error_seconds=.001;
+        options.allow_timing_fallback=true;
+        bool qualified=false,formatted=false;unsigned statuses=0;std::size_t generated=0;
+        options.timing_status=[&](const a::TimingStatus& status) {
+            ++statuses;
+            check(!formatted && !generated && status.following_system_clock &&
+                status.requested_error_seconds==.001 && status.modeled_uncertainty_seconds<=.001,
+                "accurate provider was downgraded or qualification followed private generation");
+            qualified=true;
+        };
+        options.frame_timestamp=[&](std::uint64_t frames,bool capture) {
+            check(!capture,"playback preflight queried capture");
+            const auto elapsed=static_cast<long double>(frames)/rate;
+            return a::FrameTimestamp{static_cast<long double>(frames),epoch-.125L+elapsed+
+                (step && frames>=8400?.01L:0.L),elapsed,2e-9,2e-9,a::TimingQuality::bounded,102};
+        };
+        std::string error;
+        try {a::playback(rate,"default",[&](std::span<float> output) {
+            check(qualified && formatted,"bounded provider source preceded qualification");
+            const auto n=std::min<std::size_t>(output.size(),20003-generated);
+            std::fill_n(output.begin(),n,.125f);generated+=n;return n;
+        },{},[&](const auto& format) {
+            check(format.timing_quality==a::TimingQuality::bounded && format.timing_uncertainty_seconds<=.001,
+                "bounded preflight format concealed accepted provider quality");
+            check(qualified && !formatted && !generated && f::state.stopped && f::state.drops==1,
+                "bounded source construction ran against an active device");
+            formatted=true;a::schedule_output(epoch);
+        },a::ChannelMode::left_mono,options);}
+        catch(const datapump::Error& e){error=e.what();}
+        check(statuses==1 && qualified && formatted && !f::state.live,
+            "bounded preflight lost its sole status or leaked a device");
+        if(step)check(generated>0 && generated<20003 && !error.empty() && f::state.configured_streams==1,
+            "post-start clock failure restarted, fell back or replayed private output");
+        else check(generated==20003 && error.empty(),"accurate bounded 1 ms provider failed strict playback");
+    }
+}
+void capture_timing_fallback_preserves_pcm() {
+    constexpr unsigned rate=48000;
+    const auto run=[&](bool timed) {
+        f::reset();f::state.available={"default"};f::state.supported_rates={rate};f::state.read_limit=511;
+        f::state.sample=[](std::size_t n,unsigned){return static_cast<std::int16_t>((n*37)%19001-9500);};
+        a::Options options;options.follow_system_clock=timed;options.maximum_utc_error_seconds=.001;
+        options.allow_timing_fallback=timed;
+        bool fallback=false,formatted=false;unsigned timestamps=0,statuses=0;
+        options.timing_status=[&](const a::TimingStatus& status) {
+            ++statuses;check(!formatted && !status.following_system_clock &&
+                status.requested_error_seconds==.001 && status.modeled_uncertainty_seconds>.001,
+                "capture fallback concealed provider uncertainty or arrived after format");fallback=true;
+        };
+        options.capture_timing=[&](const auto&){++timestamps;};
+        std::vector<float> output;
+        a::capture(16000,"default",[&](auto samples) {
+            check(formatted && (!timed || fallback),"capture PCM preceded full-search fallback");
+            output.insert(output.end(),samples.begin(),samples.end());return output.size()<10000;
+        },{},[&](const auto& format) {
+            formatted=true;check(format.timing_quality==a::TimingQuality::unavailable,
+                "ordinary capture fallback claimed qualified timestamps");
+        },options);
+        check(!f::state.live && timestamps==0 && statuses==(timed?1u:0u),
+            "capture fallback emitted timing metadata, repeated status or leaked a stream");
+        return output;
+    };
+    const auto ordinary=run(false),fallback=run(true);
+    check(ordinary==fallback,"capture timing fallback reset/filter-shifted or lost PCM");
+}
+void capture_uncertainty_downgrade_preserves_filter() {
+    constexpr unsigned hardware=48000,logical=16000;
+    const auto run=[&](bool timed) {
+        f::reset();f::state.available={"default"};f::state.supported_rates={hardware};f::state.read_limit=511;
+        f::state.sample=[](std::size_t n,unsigned){return static_cast<std::int16_t>((n*43)%17011-8500);};
+        a::Options options;options.follow_system_clock=timed;options.maximum_utc_error_seconds=.001;
+        options.allow_timing_fallback=timed;
+        unsigned clock_queries=0,statuses=0,timestamps=0;bool qualified=false,fallback=false;
+        options.frame_timestamp=[&](std::uint64_t frames,bool capture) {
+            check(capture,"capture downgrade queried playback timing");++clock_queries;
+            const auto elapsed=static_cast<long double>(frames)/hardware;
+            // A query after downgrade would see a wall-clock step. Ordinary
+            // capture must continue without validating a discarded UTC model.
+            return a::FrameTimestamp{static_cast<long double>(frames),1800000000.L+elapsed+
+                (clock_queries>2?.01L:0.L),elapsed,clock_queries==1?2e-9:.01,2e-9,
+                a::TimingQuality::bounded,217};
+        };
+        options.timing_status=[&](const a::TimingStatus& status) {
+            ++statuses;
+            if(status.following_system_clock) {
+                check(!qualified && !fallback && status.modeled_uncertainty_seconds<=.001,
+                    "capture qualified the wrong source-coordinate bound");qualified=true;
+            } else {
+                check(qualified && !fallback && status.modeled_uncertainty_seconds>.001,
+                    "capture uncertainty downgrade was hidden or duplicated");fallback=true;
+            }
+        };
+        options.capture_timing=[&](const auto& timing) {
+            ++timestamps;check(qualified && !fallback && timing.uncertainty_seconds<=.001,
+                "capture sent unqualified timing after fallback");
+        };
+        std::vector<float> output;
+        a::capture(logical,"default",[&](auto samples) {
+            output.insert(output.end(),samples.begin(),samples.end());return output.size()<5000;
+        },{},{},options);
+        check(!f::state.live,"capture downgrade leaked its device");
+        if(timed)check(qualified && fallback && statuses==2 && clock_queries==2 && timestamps>0,
+            "capture downgrade kept UTC observations/recovery active or lost its accepted prefix");
+        return output;
+    };
+    const auto ordinary=run(false),downgraded=run(true);
+    check(ordinary==downgraded,"capture qualification loss reset FIR state or changed logical PCM");
+}
+void timed_drain() {
+    for(const auto scenario:{0,1,2,3}) {
+        f::reset();f::state.available={"default"};f::state.supported_rates={48000};
+        f::state.drain_results={-EAGAIN,-EINTR,-EAGAIN,0};
+        f::state.wait_results={0,-EINTR,1};
+        std::stop_source cancellation;
+        if(scenario==1)f::state.after_drain=[&]{cancellation.request_stop();};
+        if(scenario==2)f::state.drain_results={-EIO};
+        if(scenario==3)f::state.wait_results={-EIO};
+        const auto epoch=std::ceil(std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count())+5;
+        a::Options options;options.follow_system_clock=true;
+        options.frame_timestamp=[&](std::uint64_t frames,bool capture) {
+            check(!capture,"drain test queried capture timing");
+            const auto elapsed=static_cast<long double>(frames)/48000;
+            return a::FrameTimestamp{static_cast<long double>(frames),epoch-.125L+elapsed,elapsed,
+                2e-9,2e-9,a::TimingQuality::bounded,71};
+        };
+        std::vector<float> input(7003,.125f);std::size_t cursor=0;std::string error;
+        try {a::playback(48000,"default",[&](std::span<float> output) {
+            const auto n=std::min(output.size(),input.size()-cursor);
+            std::copy_n(input.begin()+static_cast<std::ptrdiff_t>(cursor),n,output.begin());cursor+=n;return n;
+        },cancellation.get_token(),[&](const auto&){a::schedule_output(epoch);},a::ChannelMode::left_mono,options);}
+        catch(const datapump::Error& e){error=e.what();}
+        a::Resampler reference(48000,48000,true);reference.initialize_timing(0,0);
+        std::vector<float> expected(input.size()+1);const auto converted=reference.process(input,expected,true);
+        if(cursor!=input.size() || !reference.finished() || f::state.played.size()!=6000+converted.produced)
+            throw std::runtime_error("timed drain changed submitted finite PCM: cursor="+std::to_string(cursor)+
+                " played="+std::to_string(f::state.played.size())+" final="+
+                std::to_string(f::state.played.empty()?0:f::state.played.back())+" error="+error);
+        for(std::size_t i=0;i<converted.produced;++i)
+            check(std::abs(f::state.played[6000+i]-expected[i]*32767)<2,
+                "timed drain changed or replayed the resampled finite pulse tail");
+        if(scenario==0)check(error.empty() && f::state.drain_calls==4,"nonblocking drain closed before its buffered tail completed");
+        if(scenario==1)check(error=="audio operation cancelled" && f::state.drain_calls==1,"drain ignored cancellation or retried after it");
+        if(scenario>=2)check(!error.empty() && f::state.drain_calls==1,"drain ignored a fatal device error");
+        check(!f::state.live && f::state.recovered_errors.empty(),"drain leaked or recovered/replayed a stream");
+    }
+}
+void bounded_clock_provider() {
+    // Independently supplied device timestamps exercise native scheduling and
+    // partial writes without wall-clock sleeps or relying on ALSA delay jitter.
+    // They qualify this adapter contract, not any physical sound card.
+    constexpr unsigned rate=48000;
+    // Measure the interpolation table through unit impulses, independently of
+    // its coefficient builder. Summation by parts bounds the derivative for
+    // any zero-extended input with |x[n+1]-x[n]|<=.065 and |x[n]|<=.6.
+    // The 129-sample window contains the complete identical-rate FIR support.
+    std::vector<std::vector<float>> impulse_rows;
+    for(unsigned phase=0;phase<256;++phase) {
+        std::vector<float> impulse(129),output(129);impulse[64]=1;
+        a::Resampler probe(rate,rate,true);probe.initialize_timing(phase/256.,0);
+        const auto result=probe.process(impulse,output,true);
+        check(result.produced==129 && probe.finished(),"FIR derivative probe lost support");
+        impulse_rows.push_back(std::move(output));
+    }
+    double waveform_lipschitz=0;
+    for(unsigned phase=0;phase<256;++phase) {
+        double cumulative=0,variation=0;
+        for(std::size_t n=0;n<129;++n) {
+            const auto next=phase<255?impulse_rows[phase+1][n]:(n+1<129?impulse_rows[0][n+1]:0);
+            cumulative+=256.*(next-impulse_rows[phase][n]);
+            if(n+1<129)variation+=std::abs(cumulative);
+        }
+        waveform_lipschitz=std::max(waveform_lipschitz,.065*variation+.6*std::abs(cumulative));
+    }
+    check(waveform_lipschitz<.26,"FIR interpolation exceeded the default-slew waveform derivative bound");
+    for(const auto error:{-.0001,0.,.0001})for(const bool modeled:{false,true})for(const bool slewing:{false,true}) {
+        if(slewing && (!modeled || error==0))continue;
+        f::reset();f::state.available={"default"};f::state.supported_rates={rate};
+        f::state.write_limit=137;
+        f::state.write_results={-EAGAIN,-EINTR,37,-EAGAIN,71};f::state.wait_results={0,1};
+        auto epoch=std::ceil(std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count())+5;
+        long double origin=static_cast<long double>(epoch)-.125L;
+        const auto initial_origin=origin;
+        long double latest_utc=origin;
+        std::size_t calibration_frames=0;
+        std::optional<std::pair<long double,long double>> first_stamp,last_stamp;
+        double reference_rate=error;
+        const auto jitter=slewing?2e-6:0.;
+        const auto variable_error=slewing?jitter:2e-9;
+        a::Options options;options.follow_system_clock=true;options.maximum_timing_rate_correction=.0003;
+        options.timing_source_duration_seconds=modeled?1:.1;
+        if(modeled) {
+            options.estimated_timing=a::EstimatedDeviceTiming{variable_error,.00025,120};
+            // Isolate the selected initial affine map in this exact-PCM test.
+            // Continuous corrections have separate whole-message guard tests.
+            if(!slewing)options.maximum_timing_slew_per_second=1e-14;
+            f::state.after_drop=[&] {
+                calibration_frames=f::state.played.size();
+                // Model a slow source-construction callback while the device
+                // is stopped. A running device would have underrun by now.
+                origin=latest_utc+.5L;latest_utc=origin;
+            };
+        }
+        options.frame_timestamp=[&](std::uint64_t frames,bool capture) {
+            check(!capture,"playback queried a capture clock");
+            const auto elapsed=static_cast<long double>(frames)/rate;
+            const auto timing_jitter=first_stamp?jitter:-jitter;
+            latest_utc=origin+elapsed*(1+error)+timing_jitter;
+            if(!first_stamp)first_stamp=std::pair{elapsed,latest_utc};
+            last_stamp=std::pair{elapsed,latest_utc};
+            return a::FrameTimestamp{static_cast<long double>(frames),latest_utc,elapsed+timing_jitter,
+                slewing?jitter:2e-9,2e-9,modeled?a::TimingQuality::estimated:a::TimingQuality::bounded,31};
+        };
+        std::vector<float> input(modeled?48000:4800);
+        for(std::size_t i=0;i<input.size();++i) {
+            if(!slewing)input[i]=static_cast<float>(.2+.05*std::sin(.08*i));
+            else {
+                const auto edge=std::min({i,input.size()-1-i,std::size_t{96}});
+                const auto taper=.5-.5*std::cos(std::numbers::pi*edge/96);
+                input[i]=static_cast<float>(taper*(.4*std::sin(.08*i+.31)+.2*std::sin(std::sqrt(2.)*.08*i+.73)));
+            }
+        }
+        std::size_t cursor=0;
+        a::playback(rate,"default",[&](std::span<float> output) {
+            const auto count=std::min(output.size(),input.size()-cursor);
+            std::copy_n(input.begin()+static_cast<std::ptrdiff_t>(cursor),count,output.begin());
+            cursor+=count;return count;
+        },{},[&](const auto& format){
+            check(format.timing_quality==(modeled?a::TimingQuality::estimated:a::TimingQuality::unavailable),
+                "provider advertised incorrect timing quality");
+            if(modeled) {
+                check(cursor==0 && latest_utc>initial_origin+.125L && f::state.stopped && f::state.drops==1,
+                    "timing preparation generated private samples or left playback running during source construction");
+                // The interval midpoint is deliberately not assumed equal to
+                // the true hardware rate. Verify the adapter's selected affine
+                // waveform separately from the model's timestamp uncertainty.
+                const auto span=last_stamp->first-first_stamp->first;
+                const auto wall=last_stamp->second-first_stamp->second;
+                const auto pair_error=2*(variable_error+2e-9L);
+                const auto low=std::nextafter(static_cast<double>((wall-pair_error)/(span+2.L/rate)-1),
+                    -std::numeric_limits<double>::infinity());
+                const auto high=std::nextafter(static_cast<double>((wall+pair_error)/(span-2.L/rate)-1),
+                    std::numeric_limits<double>::infinity());
+                check(low<=error && error<=high,"estimated timestamp interval omitted the actual device clock");
+                reference_rate=error==0?0:low+(high-low)/2;
+                epoch=static_cast<double>(std::ceil(latest_utc+.125L));
+            }
+            a::schedule_output(epoch);
+        },a::ChannelMode::left_mono,options);
+        const auto first=static_cast<std::size_t>(std::find_if(f::state.played.begin(),f::state.played.end(),
+            [](auto sample){return sample!=0;})-f::state.played.begin());
+        const auto expected_start=calibration_frames+static_cast<std::size_t>(std::ceil((epoch-origin-jitter)*rate/(1+error)));
+        if((!slewing && first!=expected_start) || cursor!=input.size())throw std::runtime_error(
+            "bounded UTC scheduling skipped or repeated logical source samples: ppm="+std::to_string(error*1e6)+
+            " first="+std::to_string(first)+" expected="+std::to_string(expected_start)+" cursor="+std::to_string(cursor));
+        const auto source_start=slewing?expected_start:first;
+        const auto fraction=static_cast<double>((origin+jitter+(source_start-calibration_frames)*(1+error)/rate-epoch)*rate);
+        a::Resampler reference(rate,rate,true);reference.initialize_timing(fraction,reference_rate);
+        std::vector<float> expected(input.size()+100);
+        const auto converted=reference.process(input,expected,true);
+        check(converted.consumed==input.size() && reference.finished(),"UTC reference fixture did not finish");
+        const auto produced=f::state.played.size()-source_start;
+        if((!slewing && produced!=converted.produced) || (slewing && std::abs(static_cast<double>(produced)-converted.produced)>1))throw std::runtime_error(
+            "UTC adapter changed finite stream duration: ppm="+std::to_string(error*1e6)+
+            " actual="+std::to_string(f::state.played.size()-first)+" expected="+std::to_string(converted.produced));
+        double maximum_difference=0;
+        for(std::size_t i=0;i<std::min(produced,converted.produced);++i) {
+            const auto difference=std::abs(f::state.played[source_start+i]-expected[i]*32767);
+            maximum_difference=std::max(maximum_difference,static_cast<double>(difference));
+            // The separate exact-affine cases retain their two-count gate.
+            // Here feedback is active. Use the independently probed FIR
+            // derivative bound and .01-sample warp, including finite ends.
+            // This PCM envelope is not an independent timing measurement.
+            if(difference>=(slewing?32767*waveform_lipschitz*.01+2:2))
+                throw std::runtime_error("UTC adapter changed monotonic waveform phase across partial writes: modeled="+
+                    std::to_string(modeled)+" ppm="+std::to_string(error*1e6)+" sample="+std::to_string(i)+
+                    " actual="+std::to_string(f::state.played[source_start+i])+" expected="+std::to_string(expected[i]*32767));
+        }
+        if(slewing) {
+            check(maximum_difference>2,"default-slew fixture did not exercise feedback beyond exact-affine quantization");
+            for(const auto n:{std::size_t{0},produced}) {
+                const auto actual=origin+(source_start-calibration_frames+n)*(1+error)/rate;
+                const auto nominal=epoch+(fraction+n*(1+reference_rate))/rate;
+                check(std::abs(actual-nominal)+.01/rate<options.estimated_timing->maximum_utc_error_seconds,
+                    "default-slew adapter exceeded the synthetic device UTC allowance");
+            }
+        }
+        check(f::state.live==0 && f::state.recovered_errors.empty(),"UTC playback leaked or replayed an audio stream");
+        check(f::state.drops==(modeled?1U:0U) && f::state.prepares==f::state.drops,
+            "UTC playback reset the device after private samples started");
+    }
+    for(const auto quality:{a::TimingQuality::estimated,a::TimingQuality::bounded}) {
+        f::reset();f::state.available={"default"};f::state.supported_rates={rate};
+        const auto epoch=std::ceil(std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count())+5;
+        a::Options options;options.follow_system_clock=true;options.maximum_timing_rate_correction=.0003;
+        options.timing_source_duration_seconds=.1;
+        options.frame_timestamp=[&](std::uint64_t frames,bool) {
+            const auto t=static_cast<long double>(frames)/rate;
+            return a::FrameTimestamp{static_cast<long double>(frames),epoch-.125L+t,t,
+                quality==a::TimingQuality::bounded?.1:2e-9,2e-9,quality,31};
+        };
+        unsigned source_calls=0;
+        rejects([&]{a::playback(rate,"default",[&](auto values){++source_calls;return values.size();},
+            {},[&](const auto&){a::schedule_output(epoch);},a::ChannelMode::left_mono,options);});
+        check(!source_calls && std::all_of(f::state.played.begin(),f::state.played.end(),[](auto value){return value==0;}),
+            "unqualified rate generated or emitted private source PCM before rejecting timing");
+    }
+    f::reset();f::state.available={"default"};f::state.supported_rates={rate};
+    f::state.read_limit=173;
+    const auto original=a::record(.4,4800,"default",1024*1024);
+    f::state.captured=0;
+    a::Options capture;capture.follow_system_clock=true;
+    capture.frame_timestamp=[](std::uint64_t frames,bool recording) {
+        check(recording,"capture queried a playback clock");
+        const auto elapsed=static_cast<long double>(frames)/rate;
+        return a::FrameTimestamp{static_cast<long double>(frames),1800000000.L+elapsed*1.0001L,elapsed,
+            2e-9,2e-9,a::TimingQuality::bounded,51};
+    };
+    long double previous=0;unsigned stamps=0;
+    capture.capture_timing=[&](const a::TimePrediction& timing) {
+        check(timing.quality==a::TimingQuality::bounded && timing.utc_seconds>previous,
+            "capture discarded timestamp quality or repeated a chunk timestamp");
+        if(++stamps>3)check(std::abs(timing.seconds_per_frame-1.0001/4800)<1e-9,
+            "capture timestamp slope retained hardware-frame units");
+        previous=timing.utc_seconds;
+    };
+    check(a::record(.4,4800,"default",1024*1024,{},{},capture)==original && stamps>3,
+        "UTC capture metadata changed original PCM/noise processing");
+    for(const bool failed_timestamp:{false,true}) {
+        f::reset();f::state.available={"default"};f::state.supported_rates={rate};f::state.write_limit=137;
+        const auto epoch=std::ceil(std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count())+5;
+        std::stop_source stop;
+        std::size_t cursor=0,saved_cursor=0,saved_output=0;
+        a::Options options;options.follow_system_clock=true;
+        options.frame_timestamp=[&](std::uint64_t frames,bool) {
+            if(cursor && !saved_cursor) {
+                saved_cursor=cursor;saved_output=f::state.played.size();
+                if(failed_timestamp)throw datapump::Error("synthetic UTC timestamp failure");
+                stop.request_stop();
+            }
+            const auto elapsed=static_cast<long double>(frames)/rate;
+            return a::FrameTimestamp{static_cast<long double>(frames),epoch-.125L+elapsed,elapsed,
+                2e-9,2e-9,a::TimingQuality::bounded,81};
+        };
+        std::string error;
+        try {a::playback(rate,"default",[&](std::span<float> values) {
+            for(auto& sample:values)sample=static_cast<float>(.2*std::sin(.073*cursor++));
+            return values.size();
+        },stop.get_token(),[&](const auto&){a::schedule_output(epoch);},a::ChannelMode::left_mono,options);}
+        catch(const datapump::Error& e){error=e.what();}
+        check(error==(failed_timestamp?"synthetic UTC timestamp failure":"audio operation cancelled") &&
+              saved_cursor && cursor==saved_cursor && f::state.played.size()==saved_output &&
+              !f::state.live && f::state.recovered_errors.empty() && !f::state.drops && !f::state.prepares,
+            "timed cancellation/timestamp failure consumed or replayed later private PCM");
+    }
+}
 void capture_discontinuities() {
     const auto signal=[](std::size_t i,unsigned) {return static_cast<std::int16_t>(8000*std::sin(.001*i)+1000*std::cos(.217*i));};
     for(const auto logical:{64U,4800U,48000U}) {
@@ -484,5 +974,13 @@ int main(){try{
     std::stop_source capture_cancel;
     rejects([&]{a::capture(96000,"default",[&](std::span<const float> values){check(values.size()<=4096,"capture resampling exceeded bounded callback size");capture_cancel.request_stop();return false;},capture_cancel.get_token());});
     capture_discontinuities();
+    native_audio_error_model();
+    stricter_caller_timing_allowance();
+    visible_timing_fallback();
+    bounded_timing_preflight_and_post_start_failure();
+    capture_timing_fallback_preserves_pcm();
+    capture_uncertainty_downgrade_preserves_filter();
+    timed_drain();
+    bounded_clock_provider();
     std::cout<<"ALSA default resolution and streaming tests passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

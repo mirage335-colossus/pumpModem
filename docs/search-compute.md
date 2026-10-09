@@ -83,9 +83,34 @@ This preserves the selected carrier and nominal symbol-duration formula. If an
 aligned clock exceeds the 5% overhead or 120 MHz limit, the minimum valid clock
 remains in use, including any inefficient geometry. Arbitrary long integration endpoints
 can still have clock/RAM gaps; their actual geometry remains part of the estimate.
-The main GUI controls are Baseband Osc, Shift Osc and Margin, with no separate
-Clock selector. Numerical assumptions and requested/covered bank information
+The main frequency-reference controls are Baseband Osc, Shift Osc and Margin.
+The separate editable UTC clock fields do not change that reference topology.
+Numerical assumptions and requested/covered bank information
 appear under the Link planner's hideable **Model limits and references**.
+
+The current local clock candidate has an internal compact-correlator affine
+arrival map. It intersects each original half-chip coverage cell with the
+admitted canonical-phase lattice, retaining original pulse parity and all
+frequency/rate pairs. Raw/pulse regression comparisons cover clipped endpoints,
+negative fractional origins and nonzero clock rates. Custom native compact
+acquisition now uses an explicitly estimated physical timing model. FFT paths
+and missing timing evidence retain the full window. The planner counts the
+complete correction-domain union, including every original lane, and retains
+the full arrival-window cost as a fallback before capture metadata exists. For
+existing eligible long compact banks, the estimate also reports exact retained
+origin/phase counts at a representative anchor using the actual captured timing
+error and rate bounds. The original full-count preflight RAM remains reserved.
+Short FFT banks receive no timing discount. Known unsteered simulation uses its
+original bank; hardware retains every possible peer steering lane. Entering a
+small GPS duration alone earns no CPU discount.
+This is not a measured native acquisition speedup; see [timing conditions](clock-sync.md).
+
+Outer DSSS changes actual fine-chip/sample geometry and template work. The
+current matched-template fallback is included in the work model; there is no
+constant-cost fast despreader or measured 1000x spreading speedup. Probability
+estimates for the complete new receiver remain unqualified; separately labeled
+conditional matched-template AWGN references may be shown. [Spread controls](spread-spectrum-controls.md)
+describe the open structured-interference and qualification limits.
 
 ## Compute boundaries
 
@@ -305,3 +330,9 @@ probability. Run paired comparisons without other CPU-heavy work.
 The separate post-reception hard-bit recovery engine and its resumable search
 are outside these DSP interfaces. Wire formats, source decoding and GUI message
 presentation are also unchanged; see the [development contract](development.md).
+
+The [9 October DSSS follow-up measurements](dsss-followup-validation.md)
+compare actual execution with the preceding optimized local receiver. They
+record coherent-guard CPU regressions as well as bounded RF improvements;
+the new work allowances are conservative accounting, not recalibrated throughput.
+Short FFT scans retain their full cost even with a tight requested UTC window.

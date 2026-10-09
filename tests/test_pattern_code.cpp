@@ -37,6 +37,45 @@ std::uint32_t phase_word(std::complex<double> value) {
     if(phase<0)phase+=2*std::numbers::pi;
     return static_cast<std::uint32_t>(std::llround(phase/(2*std::numbers::pi)*4294967296.-.5));
 }
+void outer_dsss_domains_and_addresses() {
+    constexpr std::uint64_t epoch=1789312671;
+    for(const unsigned factor:{10u,100u,1000u}) {
+        auto c=config();c.scramble=true;c.dsss_factor=factor;
+        c.bandwidth_hz=10;c.sample_rate=400*factor;c.carrier_hz=100*factor;
+        c.spreading_factor=64;
+        modem::PatternCode code(c,epoch);
+        auto inner=c;inner.dsss_factor=1;
+        modem::PatternCode original(inner,epoch);
+        const auto domain=factor==10?StreamDomain::OuterDsss10V1:
+            factor==100?StreamDomain::OuterDsss100V1:StreamDomain::OuterDsss1000V1;
+        Crypto outer(c.dsss_seed);
+        const auto count=code.chips_per_symbol();
+        check(count==factor*original.chips_per_symbol(),"aligned DSSS must retain every inner private chip");
+        check(code.symbol_samples()==original.symbol_samples(),"DSSS changed symbol timing at fixed sample rate");
+        for(const std::uint64_t index:{0ULL,1ULL,3ULL,9ULL}) {
+            const auto address=modem::symbol_stream_address(epoch,0,index,code.symbol_samples(),c.sample_rate);
+            for(const auto local:std::array<std::uint64_t,6>{0,1,factor-1,factor,factor+1,count-1}) {
+                const auto position=modem::symbol_stream_chip(address,count,local);
+                const auto byte=outer.stream(StreamPurpose::Dsss,address.epoch,position/4,1,domain)[0];
+                constexpr std::array<std::complex<double>,4> rotations{{{1,0},{0,1},{-1,0},{0,-1}}};
+                const auto q=rotations[(byte>>(2*(position%4)))&3U];
+                const auto fine=code.values(index*count+local);
+                for(unsigned bit=0;bit<2;++bit)check(fine[bit]==original.value(index*original.chips_per_symbol()+local/factor,bit)*q,
+                    "outer DSSS must multiply both independent inner candidates by the same separate stream");
+            }
+            auto shifted=c;shifted.stream_phase_samples=address.sample_in_second;
+            modem::PatternCode seek(shifted,address.epoch);
+            check(seek.values(0)==code.values(index*count),"outer DSSS lost cold symbol epoch/ordinal reproducibility");
+        }
+        c.memory_limit=code.working_bytes()-1;
+        rejects([&]{modem::PatternCode too_small(c,epoch);},"outer DSSS state escaped the memory bound");
+        const auto reference=outer.stream(StreamPurpose::Dsss,epoch,0,64,domain);
+        for(const auto other:{StreamDomain::Payload,StreamDomain::PatternZeroV2,StreamDomain::PatternOneV2,
+            StreamDomain::OuterDsss10V1,StreamDomain::OuterDsss100V1,StreamDomain::OuterDsss1000V1})
+            if(other!=domain)check(reference!=outer.stream(StreamPurpose::Dsss,epoch,0,64,other),"DSSS counter domains collided");
+        rejects([&]{(void)outer.stream(StreamPurpose::Data,epoch,0,64,domain);},"DSSS domain accepted the Data purpose");
+    }
+}
 void seek_and_domains() {
     auto c = config(); c.scramble = true; c.dsss = true;
     constexpr std::uint64_t epoch = 1789312671;
@@ -708,6 +747,59 @@ void shaped_bandwidth_power_and_constellation() {
         check(spectral_power(frequency)<inband*.0025,
               "actual shaped private PCM must suppress sidelobes beyond the roughly 750Hz band by 26dB");
 }
+// Whole-burst spectra of actual post-limiter real PCM. This exercises outer
+// spreading, finite start/end tails, symbol transitions and partial final chips.
+void outer_dsss_shaped_spectrum() {
+    const auto fft=[](std::vector<std::complex<double>>& x) {
+        for(std::size_t i=1,j=0;i<x.size();++i) {
+            auto bit=x.size()/2;for(;j&bit;bit/=2)j^=bit;j^=bit;
+            if(i<j)std::swap(x[i],x[j]);
+        }
+        for(std::size_t length=2;length<=x.size();length*=2) {
+            const auto step=std::polar(1.,-2*std::numbers::pi/static_cast<double>(length));
+            for(std::size_t begin=0;begin<x.size();begin+=length) {
+                std::complex<double> oscillator{1,0};
+                for(std::size_t j=0;j<length/2;++j) {
+                    const auto first=x[begin+j],second=oscillator*x[begin+j+length/2];
+                    x[begin+j]=first+second;x[begin+j+length/2]=first-second;oscillator*=step;
+                }
+            }
+        }
+    };
+    for(const auto factor:{1U,10U,100U,1000U})for(const bool partial:{false,true}) {
+        auto c=config();c.scramble=true;c.dsss_factor=factor;
+        c.sample_rate=12000;c.carrier_hz=1500;c.bandwidth_hz=3600./factor;
+        const auto chip=modem::pattern_chip_samples(c);
+        const auto wanted=64ULL*factor*chip+(partial?chip/2:0);
+        c.integration_seconds=std::nextafter(static_cast<double>(wanted)/c.sample_rate,0.);
+        check(modem::pattern_pulse_enabled(c),"outer DSSS unexpectedly disabled finite pulse shaping");
+        modem::PatternTransmitter tx(Bytes{0,0,1},c,1789312671,0,false);
+        std::vector<float> pcm(static_cast<std::size_t>(tx.total_samples()));
+        for(std::size_t offset=0;offset<pcm.size();) {
+            const auto count=tx.read(std::span(pcm).subspan(offset,std::min<std::size_t>(503,pcm.size()-offset)));
+            check(count>0,"outer DSSS pulse fixture stopped early");offset+=count;
+        }
+        std::size_t size=1;while(size<pcm.size())size*=2;
+        std::vector<std::complex<double>> bins(size);
+        for(std::size_t i=0;i<pcm.size();++i) {
+            check(std::abs(pcm[i])<=modem::pattern_pcm_radius_limit+1e-6,
+                "outer DSSS shaped output exceeds PCM headroom");
+            bins[i]=pcm[i];
+        }
+        fft(bins);
+        const auto half_band=(1+modem::pattern_pulse_rolloff)*c.sample_rate/(2*static_cast<double>(chip));
+        long double total=0,outside=0,ssb_mid=0,ssb_wide=0;
+        for(std::size_t k=0;k<=size/2;++k) {
+            const auto frequency=static_cast<double>(k)*c.sample_rate/static_cast<double>(size);
+            const auto power=std::norm(bins[k])*(k&&k<size/2?2:1);total+=power;
+            if(std::abs(frequency-c.carrier_hz)>half_band)outside+=power;
+            if(frequency<300 || frequency>2700)ssb_mid+=power;
+            if(frequency<100 || frequency>2900)ssb_wide+=power;
+        }
+        check(total>0 && outside/total<.004L && ssb_mid/total<.003L && ssb_wide/total<.002L,
+            "actual outer DSSS PCM lost shaped spectral containment across pulse/symbol boundaries");
+    }
+}
 void shaped_coordinate_and_duration_bounds() {
     auto c=config();modem::PatternCode code(c);
     for(const auto invalid:{std::numeric_limits<double>::quiet_NaN(),std::numeric_limits<double>::infinity()})
@@ -744,6 +836,7 @@ void shaped_coordinate_and_duration_bounds() {
 }
 int main() {
     try {
+        outer_dsss_domains_and_addresses();
         seek_and_domains(); symbol_epoch_schedule(); symbol_schedule_integer_bounds();
         alphabet_and_repetition();independent_private_candidates(); public_waveform_uses_amplitude_and_phase();
         carrier_phase_integer_positions();exact_pcm_and_chunks(); tones_and_bounded_state();
@@ -753,6 +846,7 @@ int main() {
         private_waveform_has_no_fixed_squared_carrier();
         short_private_patterns_preserve_noise_and_addressing();
         shaped_bandwidth_power_and_constellation();
+        outer_dsss_shaped_spectrum();
         shaped_coordinate_and_duration_bounds();
         std::cout << "Pattern code and binary waveform tests passed\n";
         return 0;

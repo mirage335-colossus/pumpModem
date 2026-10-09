@@ -1,0 +1,18 @@
+{
+  "scope": "spectral CSV is from frozen baseline; final waveform producers match baseline hashes",
+  "unchanged": [
+    {
+      "path": "src/modem.cpp",
+      "unchanged_from_baseline_sha256": "17b8bc58a946f15882f419e7badcc5c9544b79885cfcadfec9f1c2056e024be6"
+    },
+    {
+      "path": "src/pattern_code.cpp",
+      "unchanged_from_baseline_sha256": "0aa354b4f5b05e717e33871bb99cb05df658df853f1df23dc8f1285bf9ce6053"
+    },
+    {
+      "path": "src/streaming_modem.cpp",
+      "unchanged_from_baseline_sha256": "2d1d2a2852a104219067638fa4a672fb376264c7592a3cef1a9b3911376d5ff9"
+    }
+  ],
+  "baseline_manifest_sha256": "d8a70cd34978517844a1245462484e93c1bd9161ed89cf4b31e234f6b7cb6fda"
+}

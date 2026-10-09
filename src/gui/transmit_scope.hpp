@@ -98,7 +98,10 @@ inline std::vector<ui::Record> transmit_scope_records(const modem::TransmitTrace
     else bytes(input,trace.pattern_input,detailed);
     rows.push_back(std::move(input));
     auto dsss=row("tx-dsss-key","DSSS Keystream");
-    if(trace.active&&!trace.dsss)note(dsss,"Unused: DSSS is off");
+    if(trace.active && trace.outer_dsss_factor>1)
+        note(dsss,std::to_string(trace.outer_dsss_factor)+"x outer QPSK; separate DSSS counter domain (outer bytes not captured)"+
+            (trace.dsss?std::string("; legacy mapper XOR also enabled"):std::string{}));
+    else if(trace.active&&!trace.dsss)note(dsss,"Unused: DSSS is off");
     else if(trace.active&&!trace.pattern_available)note(dsss,"Unavailable: this waveform has no pattern-byte mapper");
     else {operation(dsss,"XOR");bytes(dsss,trace.dsss_key,detailed);}
     rows.push_back(std::move(dsss));
@@ -106,7 +109,7 @@ inline std::vector<ui::Record> transmit_scope_records(const modem::TransmitTrace
     if(trace.active&&!trace.pattern_available)note(output,"Unavailable: this waveform has no pattern-byte mapper");
     else {operation(output,"=");bytes(output,trace.pattern_output,detailed);}
     rows.push_back(std::move(output));
-    auto fhss=row("tx-fhss-key","FHSS Keystream");note(fhss,"Unused: FHSS is not implemented");rows.push_back(std::move(fhss));
+    auto fhss=row("tx-fhss-key","FHSS Keystream");note(fhss,"RF hopping not implemented; Fake is display only");rows.push_back(std::move(fhss));
     return rows;
 }
 inline std::string transmit_scope_caption(const modem::TransmitTrace& trace,std::string_view status={}) {

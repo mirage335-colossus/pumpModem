@@ -1,0 +1,30 @@
+{
+  "include/datapump/pattern_receiver.hpp": {
+    "actual": "9e62ba9a4db93904d0dc9293a8dc8d87b889e1f94ea289d23c3bb5f66c443270",
+    "frozen_overlay": "9e62ba9a4db93904d0dc9293a8dc8d87b889e1f94ea289d23c3bb5f66c443270"
+  },
+  "include/datapump/modem.hpp": {
+    "actual": "55cbdda735afe724677da1a7ee6cb8db6e4923a238800e388f5aff4190cfbd4d",
+    "frozen_overlay": "55cbdda735afe724677da1a7ee6cb8db6e4923a238800e388f5aff4190cfbd4d"
+  },
+  "include/datapump/transfer.hpp": {
+    "actual": "1d6e52a51f2697090cfd14a3f16e27f633ce0f221d1cd7f912deaa3344fce95e",
+    "frozen_overlay": "1d6e52a51f2697090cfd14a3f16e27f633ce0f221d1cd7f912deaa3344fce95e"
+  },
+  "include/datapump/tuning.hpp": {
+    "actual": "b01033f3865d99230f6b1cacf8ee0ae72e41e5175acf9c8c49df46d3832f0663",
+    "frozen_overlay": "b01033f3865d99230f6b1cacf8ee0ae72e41e5175acf9c8c49df46d3832f0663"
+  },
+  "include/datapump/pattern_search.hpp": {
+    "actual": "16ca00f10a261d19368bae747e393de8fa2914bbef08742be68251efdd5dab52",
+    "frozen_overlay": "16ca00f10a261d19368bae747e393de8fa2914bbef08742be68251efdd5dab52"
+  },
+  "include/datapump/streaming_modem.hpp": {
+    "actual": "f5413d8527a0be9aacf6b3b943085e660e06f47b52069b5134357fe26bd00307",
+    "frozen_overlay": null
+  },
+  "include/datapump/pattern_code.hpp": {
+    "actual": "e43f28f67a9a34497685c22cd5cad5851b2c8ee626d03b14eb29439f12b9b780",
+    "frozen_overlay": null
+  }
+}

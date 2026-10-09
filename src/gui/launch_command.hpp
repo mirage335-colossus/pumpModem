@@ -14,6 +14,10 @@ struct Patch {
     // translation Shift. The real USB stream uses Carrier minus Shift.
     std::optional<double> rf_shift_hz,search_margin;
     std::optional<std::string> oscillator,rf_oscillator,reference,pattern;
+    std::optional<std::string> clock_sync,fhss;
+    std::optional<double> audio_timing_error_seconds;
+    std::optional<bool> full_duplex;
+    std::optional<unsigned> dsss_factor;
     std::optional<unsigned> workspace_percent;
     bool operator==(const Patch&) const=default;
 };

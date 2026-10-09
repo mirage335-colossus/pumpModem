@@ -1,0 +1,245 @@
+{
+  "family_tests": 4508,
+  "reports": [
+    {
+      "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-outer-guard-measure-20261009/holdout-bit0.csv",
+      "scope": "conditional fixed-waveform real-AWGN sufficient statistic; one coherent correct-bit hypothesis",
+      "trials": 80000,
+      "invalid_or_nonmonotone_draws": 0,
+      "changed_root_draws": 0,
+      "potential_lack_of_fit_activation_draws": 0,
+      "exception_population_probability_upper": 8.35541557510858e-05,
+      "exception_scope": "unbracketed, nonmonotone or nonnested draw; observed-none does not mean population-none",
+      "activation_probability_bound_per_fixed_correct_bit": 1.871524593768035e-13,
+      "maximum_waveform_mismatch_energy": 9.960453994003235,
+      "activation_allowance": 129.6485811642414,
+      "actual_pcm_replayed_noise_seeds_initial": 8,
+      "maximum_observed_production_root_error_db": 5.006790160244634e-08,
+      "production_numerical_scope": "selected raw/automatic float-PCM replay only; no universal floating-point error proof",
+      "statistic_grid_family_confidence": 0.975,
+      "per_test_alpha": 4.4365572315882885e-06,
+      "quantiles": [
+        {
+          "p": 0.9,
+          "guard_off_cn0": 1.791197838425932,
+          "guard_on_cn0": 1.791197838425932,
+          "estimated_additional_cn0_db": 0.0,
+          "baseline_population_quantile_grid_ci": [
+            1.7599999999999998,
+            1.8399999999999999
+          ],
+          "paired_bootstrap_delta_ci": [
+            0.0,
+            0.0
+          ],
+          "bootstrap_note": "All empirical paired roots tie; this interval alone does not bound population loss.",
+          "minimum_simultaneous_cell_mass_lower": 0.004369789609266688,
+          "minimum_cell_count": 436,
+          "conditional_statistic_additional_cn0_upper_db": 0.08,
+          "bound_basis": "Every [q,q+2*cell_width] contains a whole grid cell whose true mass exceeds pointwise activation bound plus twice the simultaneous exceptional-draw allowance; exact-binomial intervals and union bound.",
+          "production_sensitivity_qualification": "Conditional statistic bound plus selected actual PCM replay; not full-bank or universal production qualification."
+        },
+        {
+          "p": 0.99,
+          "guard_off_cn0": 2.8388979538931247,
+          "guard_on_cn0": 2.8388979538931247,
+          "estimated_additional_cn0_db": 0.0,
+          "baseline_population_quantile_grid_ci": [
+            2.76,
+            2.92
+          ],
+          "paired_bootstrap_delta_ci": [
+            0.0,
+            0.0
+          ],
+          "bootstrap_note": "All empirical paired roots tie; this interval alone does not bound population loss.",
+          "minimum_simultaneous_cell_mass_lower": 0.0003245114302328629,
+          "minimum_cell_count": 52,
+          "conditional_statistic_additional_cn0_upper_db": 0.08,
+          "bound_basis": "Every [q,q+2*cell_width] contains a whole grid cell whose true mass exceeds pointwise activation bound plus twice the simultaneous exceptional-draw allowance; exact-binomial intervals and union bound.",
+          "production_sensitivity_qualification": "Conditional statistic bound plus selected actual PCM replay; not full-bank or universal production qualification."
+        }
+      ]
+    },
+    {
+      "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-outer-guard-measure-20261009/holdout-bit1.csv",
+      "scope": "conditional fixed-waveform real-AWGN sufficient statistic; one coherent correct-bit hypothesis",
+      "trials": 80000,
+      "invalid_or_nonmonotone_draws": 0,
+      "changed_root_draws": 0,
+      "potential_lack_of_fit_activation_draws": 0,
+      "exception_population_probability_upper": 8.35541557510858e-05,
+      "exception_scope": "unbracketed, nonmonotone or nonnested draw; observed-none does not mean population-none",
+      "activation_probability_bound_per_fixed_correct_bit": 1.871524593768035e-13,
+      "maximum_waveform_mismatch_energy": 5.899310093495372,
+      "activation_allowance": 129.6485811642414,
+      "actual_pcm_replayed_noise_seeds_initial": 8,
+      "maximum_observed_production_root_error_db": 5.483627307789618e-08,
+      "production_numerical_scope": "selected raw/automatic float-PCM replay only; no universal floating-point error proof",
+      "statistic_grid_family_confidence": 0.975,
+      "per_test_alpha": 4.4365572315882885e-06,
+      "quantiles": [
+        {
+          "p": 0.9,
+          "guard_off_cn0": 2.7908571370628157,
+          "guard_on_cn0": 2.7908571370628157,
+          "estimated_additional_cn0_db": 0.0,
+          "baseline_population_quantile_grid_ci": [
+            2.76,
+            2.84
+          ],
+          "paired_bootstrap_delta_ci": [
+            0.0,
+            0.0
+          ],
+          "bootstrap_note": "All empirical paired roots tie; this interval alone does not bound population loss.",
+          "minimum_simultaneous_cell_mass_lower": 0.0044480884317957825,
+          "minimum_cell_count": 443,
+          "conditional_statistic_additional_cn0_upper_db": 0.08,
+          "bound_basis": "Every [q,q+2*cell_width] contains a whole grid cell whose true mass exceeds pointwise activation bound plus twice the simultaneous exceptional-draw allowance; exact-binomial intervals and union bound.",
+          "production_sensitivity_qualification": "Conditional statistic bound plus selected actual PCM replay; not full-bank or universal production qualification."
+        },
+        {
+          "p": 0.99,
+          "guard_off_cn0": 3.823170365417689,
+          "guard_on_cn0": 3.823170365417689,
+          "estimated_additional_cn0_db": 0.0,
+          "baseline_population_quantile_grid_ci": [
+            3.76,
+            3.880000000000001
+          ],
+          "paired_bootstrap_delta_ci": [
+            0.0,
+            0.0
+          ],
+          "bootstrap_note": "All empirical paired roots tie; this interval alone does not bound population loss.",
+          "minimum_simultaneous_cell_mass_lower": 0.00042203079496170085,
+          "minimum_cell_count": 63,
+          "conditional_statistic_additional_cn0_upper_db": 0.08,
+          "bound_basis": "Every [q,q+2*cell_width] contains a whole grid cell whose true mass exceeds pointwise activation bound plus twice the simultaneous exceptional-draw allowance; exact-binomial intervals and union bound.",
+          "production_sensitivity_qualification": "Conditional statistic bound plus selected actual PCM replay; not full-bank or universal production qualification."
+        }
+      ]
+    },
+    {
+      "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-outer-guard-measure-20261009/holdout-adverse-bit0.csv",
+      "scope": "conditional fixed-waveform real-AWGN sufficient statistic; one coherent correct-bit hypothesis",
+      "trials": 80000,
+      "invalid_or_nonmonotone_draws": 0,
+      "changed_root_draws": 0,
+      "potential_lack_of_fit_activation_draws": 0,
+      "exception_population_probability_upper": 8.35541557510858e-05,
+      "exception_scope": "unbracketed, nonmonotone or nonnested draw; observed-none does not mean population-none",
+      "activation_probability_bound_per_fixed_correct_bit": 1.871524593768035e-13,
+      "maximum_waveform_mismatch_energy": 33.312938360783846,
+      "activation_allowance": 129.6485811642414,
+      "actual_pcm_replayed_noise_seeds_initial": 8,
+      "maximum_observed_production_root_error_db": 6.914138794833491e-08,
+      "production_numerical_scope": "selected raw/automatic float-PCM replay only; no universal floating-point error proof",
+      "statistic_grid_family_confidence": 0.975,
+      "per_test_alpha": 4.4365572315882885e-06,
+      "quantiles": [
+        {
+          "p": 0.9,
+          "guard_off_cn0": 1.8196143267794356,
+          "guard_on_cn0": 1.8196143267794356,
+          "estimated_additional_cn0_db": 0.0,
+          "baseline_population_quantile_grid_ci": [
+            1.7599999999999998,
+            1.88
+          ],
+          "paired_bootstrap_delta_ci": [
+            0.0,
+            0.0
+          ],
+          "bootstrap_note": "All empirical paired roots tie; this interval alone does not bound population loss.",
+          "minimum_simultaneous_cell_mass_lower": 0.004302736066815797,
+          "minimum_cell_count": 430,
+          "conditional_statistic_additional_cn0_upper_db": 0.08,
+          "bound_basis": "Every [q,q+2*cell_width] contains a whole grid cell whose true mass exceeds pointwise activation bound plus twice the simultaneous exceptional-draw allowance; exact-binomial intervals and union bound.",
+          "production_sensitivity_qualification": "Conditional statistic bound plus selected actual PCM replay; not full-bank or universal production qualification."
+        },
+        {
+          "p": 0.99,
+          "guard_off_cn0": 2.865020946047899,
+          "guard_on_cn0": 2.865020946047899,
+          "estimated_additional_cn0_db": 0.0,
+          "baseline_population_quantile_grid_ci": [
+            2.8,
+            2.96
+          ],
+          "paired_bootstrap_delta_ci": [
+            0.0,
+            0.0
+          ],
+          "bootstrap_note": "All empirical paired roots tie; this interval alone does not bound population loss.",
+          "minimum_simultaneous_cell_mass_lower": 0.00046750277533845713,
+          "minimum_cell_count": 68,
+          "conditional_statistic_additional_cn0_upper_db": 0.08,
+          "bound_basis": "Every [q,q+2*cell_width] contains a whole grid cell whose true mass exceeds pointwise activation bound plus twice the simultaneous exceptional-draw allowance; exact-binomial intervals and union bound.",
+          "production_sensitivity_qualification": "Conditional statistic bound plus selected actual PCM replay; not full-bank or universal production qualification."
+        }
+      ]
+    },
+    {
+      "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-outer-guard-measure-20261009/holdout-adverse-bit1.csv",
+      "scope": "conditional fixed-waveform real-AWGN sufficient statistic; one coherent correct-bit hypothesis",
+      "trials": 80000,
+      "invalid_or_nonmonotone_draws": 0,
+      "changed_root_draws": 0,
+      "potential_lack_of_fit_activation_draws": 0,
+      "exception_population_probability_upper": 8.35541557510858e-05,
+      "exception_scope": "unbracketed, nonmonotone or nonnested draw; observed-none does not mean population-none",
+      "activation_probability_bound_per_fixed_correct_bit": 1.871524593768035e-13,
+      "maximum_waveform_mismatch_energy": 25.904565049288497,
+      "activation_allowance": 129.6485811642414,
+      "actual_pcm_replayed_noise_seeds_initial": 8,
+      "maximum_observed_production_root_error_db": 5.9604644331301415e-08,
+      "production_numerical_scope": "selected raw/automatic float-PCM replay only; no universal floating-point error proof",
+      "statistic_grid_family_confidence": 0.975,
+      "per_test_alpha": 4.4365572315882885e-06,
+      "quantiles": [
+        {
+          "p": 0.9,
+          "guard_off_cn0": 2.9462507817593067,
+          "guard_on_cn0": 2.9462507817593067,
+          "estimated_additional_cn0_db": 0.0,
+          "baseline_population_quantile_grid_ci": [
+            2.88,
+            3.0
+          ],
+          "paired_bootstrap_delta_ci": [
+            0.0,
+            0.0
+          ],
+          "bootstrap_note": "All empirical paired roots tie; this interval alone does not bound population loss.",
+          "minimum_simultaneous_cell_mass_lower": 0.003934981854180992,
+          "minimum_cell_count": 397,
+          "conditional_statistic_additional_cn0_upper_db": 0.08,
+          "bound_basis": "Every [q,q+2*cell_width] contains a whole grid cell whose true mass exceeds pointwise activation bound plus twice the simultaneous exceptional-draw allowance; exact-binomial intervals and union bound.",
+          "production_sensitivity_qualification": "Conditional statistic bound plus selected actual PCM replay; not full-bank or universal production qualification."
+        },
+        {
+          "p": 0.99,
+          "guard_off_cn0": 3.9554333060587523,
+          "guard_on_cn0": 3.9554333060587523,
+          "estimated_additional_cn0_db": 0.0,
+          "baseline_population_quantile_grid_ci": [
+            3.880000000000001,
+            4.040000000000001
+          ],
+          "paired_bootstrap_delta_ci": [
+            0.0,
+            0.0
+          ],
+          "bootstrap_note": "All empirical paired roots tie; this interval alone does not bound population loss.",
+          "minimum_simultaneous_cell_mass_lower": 0.00038613882434738707,
+          "minimum_cell_count": 59,
+          "conditional_statistic_additional_cn0_upper_db": 0.08,
+          "bound_basis": "Every [q,q+2*cell_width] contains a whole grid cell whose true mass exceeds pointwise activation bound plus twice the simultaneous exceptional-draw allowance; exact-binomial intervals and union bound.",
+          "production_sensitivity_qualification": "Conditional statistic bound plus selected actual PCM replay; not full-bank or universal production qualification."
+        }
+      ]
+    }
+  ]
+}

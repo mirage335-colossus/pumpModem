@@ -13,7 +13,17 @@ namespace datapump::audio {
 class Resampler {
 public:
     struct Progress { std::size_t consumed=0, produced=0; };
-    Resampler(std::uint32_t input_rate, std::uint32_t output_rate);
+    Resampler(std::uint32_t input_rate, std::uint32_t output_rate, bool adjustable=false);
+    // Optional continuous presentation-clock correction. A positive correction
+    // consumes logical PCM faster. Neither phase nor input history is reset.
+    // Limits are fractions (100 ppm = .0001), with slew measured per second of
+    // output. The fixed-rate default retains its exact integer timestamp path.
+    void set_rate_correction(double correction, double maximum_slew_per_second);
+    // Before the first process call only: align the first output to a fractional
+    // input sample, and apply a rate measured during silent device preroll.
+    void initialize_timing(double fractional_sample, double correction=0);
+    long double source_seconds() const noexcept;
+    double rate_correction() const noexcept;
     // Repeat with the unconsumed input and a fresh output span. end=true marks
     // the final input; subsequently call with empty input to drain the filter.
     Progress process(std::span<const float> input, std::span<float> output, bool end=false);
@@ -28,6 +38,9 @@ private:
     std::uint64_t first_=0, received_=0, source_=0, produced_=0;
     std::uint32_t remainder_=0;
     bool ending_=false;
+    bool adjustable_=false, started_=false;
+    double fraction_=0, correction_=0, target_correction_=0, correction_step_=0;
+    double correction_roundoff_=0;
     std::vector<float> ring_, coefficients_;
     // Factor large downsampling ratios into stages of at most four. All
     // intermediate rates are output_rate * 4^n, so nested finite-stream

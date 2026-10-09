@@ -53,6 +53,13 @@ class StreamCLI(unittest.TestCase):
                 self.assertEqual(value['coded_bytes'],(3*size+7)//8 if size<=16 else 128)
                 self.assertEqual(value['wire_bits'],3*size if size<=16 else 1216)
                 self.assertNotIn('packet_bytes',value)
+    def test_audio_timing_allowance(self):
+        baseline=self.run_pump('estimate','--text','e',*AUDIO).stdout
+        for allowance in ('1us','30ms','1.25s'):
+            # Independent of default-clock waveform/framing/airtime estimates.
+            self.assertEqual(self.run_pump('estimate','--text','e','--audio-error',allowance,*AUDIO).stdout,baseline)
+        for allowance in ('0ms','-1ms','NaNms','61s','30'):
+            self.run_pump('estimate','--text','e','--audio-error',allowance,*AUDIO,ok=False)
     def test_shannon_capacity_estimate(self):
         for bandwidth,target,expected in ((1000,30,1000), (2000,30,1169.9250014423124),
                                           (1000,60,9967.226258835993), (30000000,-200,1.4426950408889634e-20)):

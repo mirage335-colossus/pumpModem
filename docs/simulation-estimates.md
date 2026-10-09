@@ -45,12 +45,40 @@ DSP planning. At Shift zero, Shift Osc is disabled as **N/A** and contributes
 no frequency or phase error; the Baseband model alone remains active. A positive
 Shift can select **Baseband clock** for a shared sampling/mixer reference,
 counting that profile once with linked errors. Compact main controls hold these
-settings without a separate Clock dropdown. Selected numeric assumptions and
+settings. The independent editable UTC accuracy/region/offset controls do not
+select an oscillator reference. Selected numeric assumptions and
 requested/covered bounds appear under the Link planner's hideable **Model limits
 and references**. These are
 illustrative sensitivity models, not measured GPSDO specifications; see
 [oscillator models](oscillator-models.md). The margin affects acquisition
 coverage, without multiplying the simulated impairment.
+
+The local outer-DSSS candidate accounts for actual chip count, sampled bandwidth
+and symbol duration in compute estimates. Its numerical **RX reference** is the
+conditional matched-template AWGN calculation, kept separate from qualified
+receiver probability. UTC steering failures and the conditional outer-code
+presence guard are outside that reference. It carries no confidence interval or
+claim of complete acquisition-bank calibration.
+
+Work models distinguish known unsteered sampled simulation, hardware with a full
+fallback window, and hardware with qualified capture timing. Sampled simulation
+uses the original oscillator bank and its own startup-epoch coverage. Hardware
+retains the union of original and peer steering lanes. Only the existing long
+compact path gets a representative-anchor timing-lattice count from the actual
+capture error/rate bounds; its full-window fallback is displayed separately.
+Short FFT receivers retain full scanning, so tighter clock settings can increase
+cost by adding lanes without reducing that scan. No timing-count discount is
+applied to the full preflight workspace reservation. These are engineering work
+estimates, not measured throughput or running-bank telemetry. The coherent
+outer-code guard adds a conservative candidate-capacity allowance: bounded pulse
+accumulation for compact paths and an additional pass for retained FFT peaks and
+tracking windows. Actual retained-peak rates are data-dependent and uncalibrated.
+Timing-guide state is reserved separately. The model does not credit the affine
+coefficient cache on an outer-guard path which cannot currently use it.
+
+Fake FHSS reserves its highest illustrated frequency for oscillator planning and
+earns no observer-time benefit. See [spread controls](spread-spectrum-controls.md)
+and [clock synchronization](clock-sync.md) for current implementation limits.
 
 The fixed reference machine is an **Intel Core i9-13900H** with an
 **NVIDIA GeForce RTX 4090 Laptop GPU**. The estimator never benchmarks the
@@ -756,3 +784,9 @@ independent sampled channel captures through the production receiver.
 These checks validate model mechanics, not its empirical
 calibration. The independent protocol and physical-completion regressions remain
 the authority for actual transport behavior.
+
+The [9 October DSSS follow-up measurements](dsss-followup-validation.md)
+compare actual execution with the preceding optimized local receiver. They
+record coherent-guard CPU regressions as well as bounded RF improvements;
+the new work allowances are conservative accounting, not recalibrated throughput.
+Short FFT scans retain their full cost even with a tight requested UTC window.

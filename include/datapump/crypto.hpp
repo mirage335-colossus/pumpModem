@@ -10,7 +10,10 @@
 namespace datapump {
 
 enum class StreamPurpose : std::uint8_t { Data, Dsss, Scrambler, Fhss };
-enum class StreamDomain : std::uint8_t { Payload, Preamble, Suppression, PatternZeroV2, PatternOneV2 };
+enum class StreamDomain : std::uint8_t {
+    Payload, Preamble, Suppression, PatternZeroV2, PatternOneV2,
+    OuterDsss10V1, OuterDsss100V1, OuterDsss1000V1, FakeFhssV1
+};
 
 // A 256-bit shared secret with independently derived stream and MAC keys.
 // The timestamp is the same whole-second epoch for every modem layer;

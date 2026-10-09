@@ -1,0 +1,246 @@
+{
+  "completed_utc": "2026-10-09T07:52:21.844688+00:00",
+  "jobs_joined": true,
+  "compile_exit_codes": [
+    0,
+    0
+  ],
+  "selected_replay_exit_codes": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "unique_selected_holdout_draws": 8,
+  "unique_actual_crossing_variants_per_draw": 4,
+  "actual_fit_evidence_rows": 64,
+  "maximum_root_change_final_minus_preceding_db": 0.0,
+  "maximum_paired_fit_score_difference": 3.623767952376511e-13,
+  "maximum_actual_vs_reconstructed_score_error": 5.742015574128345e-07,
+  "maximum_actual_vs_reconstructed_root_error_db": 2.6226043559063328e-08,
+  "unchanged_harness_sha256": "ef40681032de34473dfe391aac6ed1facdc470d3e988e764a91e30491fbd71ee",
+  "final_input_hashes_unchanged": {
+    "src/pattern_correlator_batch.hpp": true,
+    "src/pattern_correlator.cpp": true,
+    "src/pattern_receiver.cpp": true,
+    "include/datapump/pattern_receiver.hpp": true,
+    "include/datapump/pattern_correlator.hpp": true,
+    "build/agents/receiver-opt-20261008/native/libdatapump.a": true
+  },
+  "final_library_sha256": "2bc0dbc37e94f728a512690c4b15c5ae06e6dfcacd40816b1d7ab6f9a92fd68a",
+  "cases": [
+    {
+      "case": "bit0",
+      "selected_population_quantile": 0.9,
+      "seed": 13498207342,
+      "root_difference_final_minus_preceding_db": {
+        "actual_raw_off_cn0": 0.0,
+        "actual_raw_on_cn0": 0.0,
+        "actual_auto_off_cn0": 0.0,
+        "actual_auto_on_cn0": 0.0
+      },
+      "actual_root_cn0_db_hz": 1.7832715835488222,
+      "maximum_actual_vs_reconstructed_root_error_db": 7.1525572131747595e-09,
+      "maximum_paired_fit_score_difference": 1.4077627952246985e-13,
+      "maximum_reconstruction_score_error": 1.1421346712836566e-07,
+      "evidence_rows": 8,
+      "endpoints": [
+        [
+          "48",
+          "1328",
+          "0",
+          "0",
+          "0"
+        ]
+      ]
+    },
+    {
+      "case": "bit0",
+      "selected_population_quantile": 0.99,
+      "seed": 14053375771,
+      "root_difference_final_minus_preceding_db": {
+        "actual_raw_off_cn0": 0.0,
+        "actual_raw_on_cn0": 0.0,
+        "actual_auto_off_cn0": 0.0,
+        "actual_auto_on_cn0": 0.0
+      },
+      "actual_root_cn0_db_hz": 2.847014789239249,
+      "maximum_actual_vs_reconstructed_root_error_db": 2.6226043559063328e-08,
+      "maximum_paired_fit_score_difference": 3.623767952376511e-13,
+      "maximum_reconstruction_score_error": 3.0590148369924464e-07,
+      "evidence_rows": 8,
+      "endpoints": [
+        [
+          "48",
+          "1328",
+          "0",
+          "0",
+          "0"
+        ]
+      ]
+    },
+    {
+      "case": "bit1",
+      "selected_population_quantile": 0.9,
+      "seed": 16302116859,
+      "root_difference_final_minus_preceding_db": {
+        "actual_raw_off_cn0": 0.0,
+        "actual_raw_on_cn0": 0.0,
+        "actual_auto_off_cn0": 0.0,
+        "actual_auto_on_cn0": 0.0
+      },
+      "actual_root_cn0_db_hz": 2.7897601831146184,
+      "maximum_actual_vs_reconstructed_root_error_db": 7.152557657263969e-09,
+      "maximum_paired_fit_score_difference": 1.5987211554602254e-13,
+      "maximum_reconstruction_score_error": 7.717558148101489e-08,
+      "evidence_rows": 8,
+      "endpoints": [
+        [
+          "48",
+          "1328",
+          "0",
+          "0",
+          "0"
+        ]
+      ]
+    },
+    {
+      "case": "bit1",
+      "selected_population_quantile": 0.99,
+      "seed": 14621006951,
+      "root_difference_final_minus_preceding_db": {
+        "actual_raw_off_cn0": 0.0,
+        "actual_raw_on_cn0": 0.0,
+        "actual_auto_off_cn0": 0.0,
+        "actual_auto_on_cn0": 0.0
+      },
+      "actual_root_cn0_db_hz": 3.823960507062848,
+      "maximum_actual_vs_reconstructed_root_error_db": 1.668930060816365e-08,
+      "maximum_paired_fit_score_difference": 1.2789769243681803e-13,
+      "maximum_reconstruction_score_error": 3.186029573498672e-07,
+      "evidence_rows": 8,
+      "endpoints": [
+        [
+          "48",
+          "1328",
+          "0",
+          "0",
+          "0"
+        ]
+      ]
+    },
+    {
+      "case": "adverse-bit0",
+      "selected_population_quantile": 0.9,
+      "seed": 14014730770,
+      "root_difference_final_minus_preceding_db": {
+        "actual_raw_off_cn0": 0.0,
+        "actual_raw_on_cn0": 0.0,
+        "actual_auto_off_cn0": 0.0,
+        "actual_auto_on_cn0": 0.0
+      },
+      "actual_root_cn0_db_hz": 1.8196987014885377,
+      "maximum_actual_vs_reconstructed_root_error_db": 2.3841859597695247e-09,
+      "maximum_paired_fit_score_difference": 0.0,
+      "maximum_reconstruction_score_error": 2.2132418209253046e-07,
+      "evidence_rows": 8,
+      "endpoints": [
+        [
+          "48",
+          "1341",
+          "0",
+          "0",
+          "0"
+        ]
+      ]
+    },
+    {
+      "case": "adverse-bit0",
+      "selected_population_quantile": 0.99,
+      "seed": 13579372317,
+      "root_difference_final_minus_preceding_db": {
+        "actual_raw_off_cn0": 0.0,
+        "actual_raw_on_cn0": 0.0,
+        "actual_auto_off_cn0": 0.0,
+        "actual_auto_on_cn0": 0.0
+      },
+      "actual_root_cn0_db_hz": 2.8673326877501806,
+      "maximum_actual_vs_reconstructed_root_error_db": 2.38418573772492e-09,
+      "maximum_paired_fit_score_difference": 0.0,
+      "maximum_reconstruction_score_error": 5.742015574128345e-07,
+      "evidence_rows": 8,
+      "endpoints": [
+        [
+          "48",
+          "1341",
+          "0",
+          "0",
+          "0"
+        ]
+      ]
+    },
+    {
+      "case": "adverse-bit1",
+      "selected_population_quantile": 0.9,
+      "seed": 13267698813,
+      "root_difference_final_minus_preceding_db": {
+        "actual_raw_off_cn0": 0.0,
+        "actual_raw_on_cn0": 0.0,
+        "actual_auto_off_cn0": 0.0,
+        "actual_auto_on_cn0": 0.0
+      },
+      "actual_root_cn0_db_hz": 2.9428660647133102,
+      "maximum_actual_vs_reconstructed_root_error_db": 7.1525572131747595e-09,
+      "maximum_paired_fit_score_difference": 0.0,
+      "maximum_reconstruction_score_error": 2.2384471520808802e-07,
+      "evidence_rows": 8,
+      "endpoints": [
+        [
+          "48",
+          "1341",
+          "0",
+          "0",
+          "0"
+        ]
+      ]
+    },
+    {
+      "case": "adverse-bit1",
+      "selected_population_quantile": 0.99,
+      "seed": 14233614380,
+      "root_difference_final_minus_preceding_db": {
+        "actual_raw_off_cn0": 0.0,
+        "actual_raw_on_cn0": 0.0,
+        "actual_auto_off_cn0": 0.0,
+        "actual_auto_on_cn0": 0.0
+      },
+      "actual_root_cn0_db_hz": 3.948030768564576,
+      "maximum_actual_vs_reconstructed_root_error_db": 7.152557657263969e-09,
+      "maximum_paired_fit_score_difference": 0.0,
+      "maximum_reconstruction_score_error": 5.055664331621301e-08,
+      "evidence_rows": 8,
+      "endpoints": [
+        [
+          "48",
+          "1341",
+          "0",
+          "0",
+          "0"
+        ]
+      ]
+    }
+  ],
+  "scope": "Conditional single correct origin/frequency/rate, one phase group, compact coherent branch; finite shaped limited PCM and fixed adverse trace. Nominal automatic pulse and adverse automatic raw fallback. This is final storage-layout replay, not independent Monte Carlo qualification, full acquisition-bank coverage, rare false-alarm measurement or timing benchmark. Earlier separately fixed-plan 320000 holdout-draw sensitivity results remain conditional and may be reused since mathematical header/harness unchanged and production replay unchanged."
+}

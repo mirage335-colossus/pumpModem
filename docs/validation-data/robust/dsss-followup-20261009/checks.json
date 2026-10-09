@@ -1,0 +1,49 @@
+{
+  "application_build": "passed ./build.sh; final GUI7a88d9496158 / lib2bc0dbc37e94",
+  "gui_self_check": "passed frozen GUI; session26975 exit0",
+  "complete_gui": {
+    "passed": 37,
+    "total": 37,
+    "seconds": 169.09,
+    "log": "dsss-final-gui-group-2.log"
+  },
+  "complete_core": {
+    "pattern_receiver_seconds": 77.38,
+    "simulation_estimate_seconds": 26.07,
+    "live_profiles_seconds": 151.14,
+    "pattern_correlator_seconds": 114.84
+  },
+  "final_test_only_delta": "parallel_long_tiles passed after retaining initial512-byte worker fallback and then reserving required guide headroom; no runtime delta",
+  "additional_affected_passed": [
+    "pattern_correlator_batch",
+    "pattern_code",
+    "pattern_search",
+    "pattern_start_geometry",
+    "tuning",
+    "alsa_audio_contract",
+    "windows_audio_contract",
+    "resampler",
+    "clock_sync",
+    "audio_rates",
+    "host_audio",
+    "live_resources"
+  ],
+  "focused_live": "8 suites passed including keyed/unkeyed duplex,clear,arrival fallback/backlog/health",
+  "benchmarks": "16 cases x3 paired runs; seven extra cleanup pairs; identical PCM and unchanged events/bit counts in complete cases",
+  "sensitivity": "320k fresh conditional holdout draws; estimate0dB, simultaneous >=95% bound<=0.08dB in four fixed coherent F10 cases; final production replay matches",
+  "not_counted_as_pass": [
+    "cancelled intermediate test jobs",
+    "initial fixed allocation/compile/test failures",
+    "initial new strong factor1 timing fixture admission"
+  ],
+  "remaining_limitations": [
+    "strong factor1 structured-null admission",
+    "arbitrary off-grid nominal endpoints",
+    "enhanced branches/unavailable guard state",
+    "full bank and cumulative sensitivity",
+    "physical hardware/graphical manual validation",
+    "full general/contract/calibration/native/platform/SDK/packaging"
+  ],
+  "running": {},
+  "publication": "none; local manual checkpoint requested"
+}

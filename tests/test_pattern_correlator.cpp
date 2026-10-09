@@ -1572,10 +1572,14 @@ void parallel_long_tiles_preserve_boundaries() {
         search.compact_clock_search=compact;search.candidate_limit=128;search.bit_limit=16;
         search.worker_threads=1;modem::PatternCorrelator scalar(c,search,workspace);
         search.worker_threads=4;modem::PatternCorrelator tiled(c,search,workspace);
-        // Spare bytes cover short pending prefixes but cannot hold even two
-        // PatternCode caches. Optional batching must fall back without changing
-        // coverage, retention limits, admission or physical completion.
-        const auto budget=tight?std::max(scalar.working_bytes(),tiled.working_bytes())+512:workspace;
+        // The finite-push allowance now includes mandatory admitted timing
+        // guides and their transient growth, as well as pending prefixes.
+        // The old 512-byte payload-only allowance predates those guides. Keep
+        // all arithmetic/progress/physical-end assertions at the declared
+        // conservative headroom; optional worker caches must yield to evidence.
+        const auto headroom=std::max<std::size_t>(512,scalar.projection_cache_headroom(2*symbol));
+        const auto base=std::max(scalar.working_bytes(),tiled.working_bytes());
+        auto budget=tight?base+512:workspace;
         scalar.set_workspace_bytes(budget);tiled.set_workspace_bytes(budget);
         bool accepted=false,completed=false;
         const auto compare=[&] {
@@ -1611,6 +1615,14 @@ void parallel_long_tiles_preserve_boundaries() {
                 scalar.push(input);tiled.push(input);position+=count;compare();
             }
         };
+        if(tight) {
+            // Preserve the original +512 optional-worker fallback exercise
+            // before any lane can complete or need admitted timing evidence.
+            check(2*modem::PatternCode(c,c.stream_epoch).working_bytes()>512,
+                  "tight prefix unexpectedly admits two optional private caches");
+            push_until(symbol/2);
+            budget=base+headroom;scalar.set_workspace_bytes(budget);tiled.set_workspace_bytes(budget);
+        }
         // Poll on each side of an exact nominal symbol endpoint, including
         // the first block whose fully observed absence may finish the stream.
         for(std::size_t index=1;index<=4;++index) {

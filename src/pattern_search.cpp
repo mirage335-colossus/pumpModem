@@ -5,13 +5,14 @@
 #include <cmath>
 #include <limits>
 #include <numeric>
+#include <set>
 
 namespace datapump::modem {
 namespace {
 double occupied_half_band(const Config& config) {
     return pattern_pulse_enabled(config)?
         (1+pattern_pulse_rolloff)*config.sample_rate/(2.*static_cast<double>(pattern_chip_samples(config))):
-        config.bandwidth_hz/2;
+        waveform_bandwidth_hz(config)/2;
 }
 double offset_limit(const Config& config) {
     if(config.spreading_mode==SpreadingMode::tone) {
@@ -106,7 +107,7 @@ OscillatorEffects oscillator_effects(const Config& config) {
     return result;
 }
 
-OscillatorPatternSearch oscillator_pattern_search(const Config& config) {
+static OscillatorPatternSearch oscillator_pattern_search_domain(const Config& config) {
     validate(config);
     if(!config.oscillator_search)throw Error("oscillator pattern search requires an oscillator search policy");
     const auto& policy=*config.oscillator_search;
@@ -339,6 +340,60 @@ OscillatorPatternSearch oscillator_pattern_search(const Config& config) {
         result.clock_half_width_ppm=0;
         frequency.limited=result.limited=frequency_bound!=0 || clock_bound!=0;
     }
+    return result;
+}
+
+double utc_transmit_rate_limit(const Config& config) {
+    if(!config.oscillator_search)return 0;
+    const auto& policy=*config.oscillator_search;
+    validate_oscillator_search(policy);
+    if(policy.reference==OscillatorReference::shared_radio && policy.rf_shift_hz!=0)return 0;
+    return std::min(.001,policy.margin*policy.lf.accuracy_ppm*1e-6);
+}
+
+OscillatorPatternSearch oscillator_pattern_search(const Config& config,double correction) {
+    if(!std::isfinite(correction) || correction<0 || correction>.001)
+        throw Error("invalid transmit timing correction search allowance");
+    auto original=oscillator_pattern_search_domain(config);
+    if(correction==0)return original;
+    const auto fallback=[&] {
+        original.timing_correction_unavailable=true;
+        return original;
+    };
+    const auto& policy=*config.oscillator_search;
+    if(original.limited || (policy.reference==OscillatorReference::shared_radio && policy.rf_shift_hz!=0))
+        return fallback();
+    // Steering one transmitter does not consume an assumed spare portion of
+    // the effective-link oscillator bound. Cover (1+a)(1+c) explicitly while
+    // keeping the hardware oscillator description unchanged.
+    const auto a=static_cast<long double>(policy.margin)*policy.lf.accuracy_ppm*1e-6L;
+    const auto expanded=a+correction+a*correction;
+    auto adjusted=config;
+    const auto ppm=expanded*1e6L/policy.margin;
+    if(ppm>10000)return fallback();
+    adjusted.oscillator_search->lf.accuracy_ppm=std::nextafter(static_cast<double>(ppm),
+        std::numeric_limits<double>::infinity());
+    auto result=oscillator_pattern_search_domain(adjusted);
+    if(result.limited)return fallback();
+    std::set<std::pair<double,double>> pairs;
+    std::set<double> frequencies;
+    for(const auto lane:original.hypotheses) {
+        pairs.emplace(lane.frequency_offset_hz,lane.clock_error_ppm);
+        frequencies.insert(lane.frequency_offset_hz);
+    }
+    auto retained=original.hypotheses;
+    for(const auto lane:result.hypotheses) {
+        if(!pairs.emplace(lane.frequency_offset_hz,lane.clock_error_ppm).second)continue;
+        frequencies.insert(lane.frequency_offset_hz);
+        if(retained.size()==maximum_pattern_frequency_rate_hypotheses ||
+           frequencies.size()>maximum_pattern_frequency_hypotheses)return fallback();
+        retained.push_back(lane);
+    }
+    result.hypotheses=std::move(retained);
+    result.frequency.count=frequencies.size();
+    // This is the complete expanded lattice plus the original lanes, not a
+    // claim that the union itself has uniform spacing. Consumers use pairs.
+    result.transmit_rate_correction=correction;
     return result;
 }
 

@@ -1,5 +1,6 @@
 #pragma once
 #include "datapump/transfer.hpp"
+#include "datapump/simulation_estimate.hpp"
 #include <memory>
 #include <optional>
 #include <span>
@@ -19,6 +20,8 @@ struct Inputs {
     bool empty_draft=false; // One-bit preview; the composer remains empty.
     // Presentation only; the actual byte allowance above drives every check.
     unsigned dsp_workspace_percent=0;
+    simulation::ReceiverWorkMode receiver_work_mode=simulation::ReceiverWorkMode::sampled_simulation;
+    simulation::ReceiverTimingModel receiver_timing_model;
 };
 struct Point {
     double target_db_hz=0;
@@ -30,6 +33,8 @@ struct ReceivePoint {
     double target_db_hz=0;
     double success_probability=0;
     bool confidence_available=false;
+    bool reference_available=false;
+    bool probability_reference_only=false;
     bool clock_supported=false;
     bool workspace_supported=false;
     std::size_t probability_trials=0;
@@ -60,6 +65,9 @@ struct Model {
     bool receiver_workspace_supported=false;
     bool confidence_available=false;
     bool one_bit_confidence_available=false;
+    bool probability_reference_only=false;
+    bool reference_probability_available=false;
+    bool one_bit_reference_available=false;
     double bit_seconds=0;
     double send_seconds=0;
     // Earliest modeled finish: whole burst plus fully scored absent symbols.
@@ -69,7 +77,8 @@ struct Model {
     double actual_cn0_db_hz=0;
     double margin_db=0;
     // Rough, conditional raw wire-bit preview at the actual link budget;
-    // requires confidence_available and completed receiver computation.
+    // Requires confidence_available or reference_probability_available, with
+    // their distinct scopes, and completed receiver computation.
     // No interval FEC/source context is available; the full draft is separate.
     double success_probability=0;
     double one_bit_success_probability=0;
@@ -99,6 +108,12 @@ struct Model {
     double cpu_realtime_ratio=0;
     double cpu_realtime_upper_ratio=0;
     double cpu_per_bit_ratio=0;
+    std::size_t frequency_rate_hypotheses=0,epoch_hypotheses=0;
+    std::size_t timing_phase_groups=1;
+    double timing_hypotheses=0;
+    bool timing_window_modeled=false;
+    std::string receiver_work_assumptions;
+    double fallback_cpu_realtime_ratio=0,fallback_timing_hypotheses=0;
     double occupied_bandwidth_hz=0;
     double low_audio_hz=0;
     double high_audio_hz=0;

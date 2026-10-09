@@ -15,28 +15,28 @@ bool contains(Rect outer, Rect inner) {
 }
 void established_default() {
     const DesktopLayout layout;
-    check(DesktopLayout::default_width == 1180 && DesktopLayout::default_height == 1048 &&
-          DesktopLayout::min_width == 1030 && DesktopLayout::min_height == 968,
+    check(DesktopLayout::default_width == 1180 && DesktopLayout::default_height == 1072 &&
+          DesktopLayout::min_width == 1130 && DesktopLayout::min_height == 992,
           "desktop default or minimum size changed");
-    check(layout[Slot::tabs] == Rect{16, 233, 1148, 656}, "header must reserve a separate row for simulation computation estimates");
-    check(layout[Slot::page] == Rect{16, 265, 1148, 624}, "page viewport must start below every persistent header control");
-    check(layout[Slot::message] == Rect{16, 291, 785, 78}, "compact message composition size changed");
-    check(layout[Slot::paste_previous] == Rect{561, 269, 240, 20}, "previous-message button moved");
-    check(layout[Slot::binary] == Rect{815, 291, 220, 78}, "binary editor moved");
-    check(layout[Slot::qr] == Rect{1049, 291, 115, 115}, "QR preview must span the editor and action rows");
-    check(layout[Slot::transmit_scope] == Rect{16, 428, 1148, 206}, "generation scope size changed");
-    check(layout[Slot::profile_reference] == Rect{884, 790, 280, 91}, "profile reference must share the plot row at the right edge");
-    check(layout[Slot::signals] == Rect{16, 657, 882, 110}, "received signals size changed");
-    check(layout[Slot::files] == Rect{912, 657, 252, 74}, "received files size changed");
-    check(layout[Slot::waterfall] == Rect{16, 790, 205, 91}, "header must preserve usable plot height");
-    check(layout[Slot::device] == Rect{16, 913, 200, 27}, "persistent modem controls moved");
-    check(layout[Slot::bandwidth] == Rect{226, 913, 127, 27} &&
-          layout[Slot::carrier] == Rect{363, 913, 150, 27} &&
-          layout[Slot::rf_shift] == Rect{523, 913, 135, 27}, "Rate, Carrier and Shift editors lost their reserved widths");
-    check(layout[Slot::snr] == Rect{16, 956, 260, 27} &&
-          layout[Slot::long_snr] == Rect{286, 956, 260, 27} &&
-          layout[Slot::receive_snr] == Rect{556, 956, 608, 27}, "separate transmit targets lost their persistent row");
-    check(layout[Slot::status] == Rect{16, 1017, 876, 24}, "persistent status must reserve the volume controls");
+    check(layout[Slot::tabs] == Rect{16, 257, 1148, 656}, "header must reserve a separate row for simulation computation estimates");
+    check(layout[Slot::page] == Rect{16, 289, 1148, 624}, "page viewport must start below every persistent header control");
+    check(layout[Slot::message] == Rect{16, 315, 785, 78}, "compact message composition size changed");
+    check(layout[Slot::paste_previous] == Rect{561, 293, 240, 20}, "previous-message button moved");
+    check(layout[Slot::binary] == Rect{815, 315, 220, 78}, "binary editor moved");
+    check(layout[Slot::qr] == Rect{1049, 315, 115, 115}, "QR preview must span the editor and action rows");
+    check(layout[Slot::transmit_scope] == Rect{16, 452, 1148, 206}, "generation scope size changed");
+    check(layout[Slot::profile_reference] == Rect{884, 814, 280, 91}, "profile reference must share the plot row at the right edge");
+    check(layout[Slot::signals] == Rect{16, 681, 882, 110}, "received signals size changed");
+    check(layout[Slot::files] == Rect{912, 681, 252, 74}, "received files size changed");
+    check(layout[Slot::waterfall] == Rect{16, 814, 205, 91}, "header must preserve usable plot height");
+    check(layout[Slot::device] == Rect{16, 937, 200, 27}, "persistent modem controls moved");
+    check(layout[Slot::bandwidth] == Rect{226, 937, 127, 27} &&
+          layout[Slot::carrier] == Rect{363, 937, 150, 27} &&
+          layout[Slot::rf_shift] == Rect{523, 937, 135, 27}, "Rate, Carrier and Shift editors lost their reserved widths");
+    check(layout[Slot::snr] == Rect{16, 980, 260, 27} &&
+          layout[Slot::long_snr] == Rect{286, 980, 260, 27} &&
+          layout[Slot::receive_snr] == Rect{556, 980, 608, 27}, "separate transmit targets lost their persistent row");
+    check(layout[Slot::status] == Rect{16, 1041, 876, 24}, "persistent status must reserve the volume controls");
 }
 void document_widths() {
     for(const auto viewport:{480,1000,1400}) {
@@ -130,32 +130,33 @@ void supported_sizes() {
         check(previous_input.x+previous_input.w+10<=layout[Slot::simulation_confidence].x,
               "Shared link inputs must stop before the always-visible RX confidence");
         const auto oscillator=layout[Slot::simulation_oscillator];
-        check(oscillator.x==simulation.x&&oscillator.w>=300&&oscillator.h==field_height&&
+        check(oscillator.x==396&&oscillator.w>=300&&oscillator.h==field_height&&
               oscillator.y-label_height>simulation.y+simulation.h,
               "LF oscillator must remain below the link assumptions");
-        auto prior_clock=oscillator;
-        for(const auto slot:{Slot::simulation_oscillator,Slot::rf_oscillator,Slot::search_margin}) {
+        auto prior_clock=layout[Slot::clock_accuracy];
+        for(const auto slot:{Slot::clock_accuracy,Slot::clock_region,Slot::clock_offset,Slot::audio_error,Slot::simulation_oscillator,Slot::rf_oscillator,Slot::search_margin}) {
             const auto current=layout[slot];
             check(persistent_slot(slot)&&current.y==oscillator.y&&current.h==field_height&&
                   current.y+current.h<layout[Slot::tabs].y,
                   "All oscillator controls must share one persistent row clear of the page");
-            if(slot!=Slot::simulation_oscillator)
+            if(slot!=Slot::clock_accuracy)
                 check(current.x==prior_clock.x+prior_clock.w+10,"Oscillator controls overlap or lose their spacing");
             prior_clock=current;
         }
         check(layout[Slot::rf_oscillator].w>=300&&
-              layout[Slot::search_margin].w>=88&&prior_clock.x+prior_clock.w==size.w-margin,
+              layout[Slot::search_margin].w>=90&&prior_clock.x+prior_clock.w==size.w-margin,
               "Oscillator models and Margin must fit at the existing minimum window width");
         // Every top-bar control may be visible together during simulation.
         // Include native labels above inputs so a new row cannot obscure them.
         std::vector<Rect> occupied_header;
         for(const auto slot:{Slot::simulation,Slot::link_power,Slot::link_loss,Slot::link_noise,
                              Slot::simulation_confidence,Slot::simulation_cpu_time,Slot::simulation_gpu_time,
+                             Slot::clock_accuracy,Slot::clock_region,Slot::clock_offset,Slot::audio_error,
                              Slot::simulation_oscillator,Slot::rf_oscillator,Slot::search_margin}) {
             auto rect=layout[slot];
             if(slot==Slot::simulation||slot==Slot::link_power||slot==Slot::link_loss||slot==Slot::link_noise||
                slot==Slot::simulation_oscillator||slot==Slot::rf_oscillator||
-               slot==Slot::search_margin) {rect.y-=label_height;rect.h+=label_height;}
+               slot==Slot::search_margin||slot==Slot::clock_accuracy||slot==Slot::clock_region||slot==Slot::clock_offset||slot==Slot::audio_error) {rect.y-=label_height;rect.h+=label_height;}
             for(const auto prior:occupied_header)
                 check(rect.x+rect.w<=prior.x||prior.x+prior.w<=rect.x||rect.y+rect.h<=prior.y||prior.y+prior.h<=rect.y,
                       "Persistent link inputs, their labels and computation estimates must never overlap");
@@ -163,8 +164,11 @@ void supported_sizes() {
         }
         const auto key_action=layout[Slot::key_actions],key_path=layout[Slot::key_path],key=layout[Slot::key];
         check(layout[Slot::repeatable].x+layout[Slot::repeatable].w<key_action.x&&
-              key_action.x+key_action.w<key_path.x&&key_path.x+key_path.w<key.x&&
-              key_action.y==key_path.y&&key_path.y==key.y&&key_path.w>=298,
+              key_action.x+key_action.w<layout[Slot::dsss_factor].x&&
+              layout[Slot::dsss_factor].x+layout[Slot::dsss_factor].w<layout[Slot::fhss].x&&
+              layout[Slot::fhss].x+layout[Slot::fhss].w<key.x&&
+              key_action.y==key.y&&key_path.y>=key.y+key.h&&
+              key_path.y+key_path.h<simulation.y-label_height&&key_path.w>=648,
               "Moving Simulation must preserve the key controls and expose more of the key path");
         const auto message = layout[Slot::message], binary = layout[Slot::binary], qr = layout[Slot::qr];
         check(message.y == binary.y && binary.y == qr.y &&
@@ -275,12 +279,15 @@ void supported_sizes() {
               layout[Slot::receive_snr].w>=166 && layout[Slot::pattern].w>=130 &&
               layout[Slot::fec].w>=148 && layout[Slot::dsp_workspace].w>=121,
               "A modem control is too narrow for its full native label");
-        const auto mono=layout[Slot::mono],diagnostics=layout[Slot::diagnostics],device=layout[Slot::device];
+        const auto mono=layout[Slot::mono],duplex=layout[Slot::live_duplex],diagnostics=layout[Slot::diagnostics],device=layout[Slot::device];
         check(persistent_slot(Slot::mono)&&mono.x==device.x&&mono.y>device.y+device.h&&
               mono.w>=150&&mono.h>=22&&mono.x+mono.w<diagnostics.x&&mono.y==diagnostics.y&&
               diagnostics.w>=552&&diagnostics.x+diagnostics.w+12==layout[Slot::volume].x&&
               mono.y+mono.h<layout[Slot::status].y,
               "Audio-channel choice must fit below its device without overlapping diagnostics or status");
+        check(persistent_slot(Slot::live_duplex)&&duplex.w>=100&&duplex.h==mono.h&&duplex.y==mono.y&&
+            mono.x+mono.w+8<=duplex.x&&duplex.x+duplex.w+10<=diagnostics.x,
+            "Live/Duplex must fit beside audio routing without obscuring diagnostics or status");
     }
 }
 void hidden_scope_reclaims_space() {
@@ -361,7 +368,7 @@ void hidden_simulation_estimates_reclaim_space() {
             check(compact[slot].h==0,"Hidden simulation estimates must reserve no native height");
         for(const auto slot:{Slot::simulation,Slot::link_power,Slot::link_loss,Slot::link_noise,Slot::simulation_confidence,
                              Slot::simulation_oscillator,Slot::rf_oscillator,Slot::search_margin,
-                             Slot::device,Slot::mono,Slot::volume,Slot::exclusive,Slot::bandwidth,Slot::carrier,Slot::rf_shift,Slot::snr,Slot::long_snr,
+                             Slot::device,Slot::mono,Slot::live_duplex,Slot::volume,Slot::exclusive,Slot::bandwidth,Slot::carrier,Slot::rf_shift,Slot::snr,Slot::long_snr,
                              Slot::receive_snr,Slot::pattern,Slot::fec,Slot::dsp_workspace,Slot::diagnostics,Slot::status})
             check(compact[slot]==expanded[slot],"Simulation visibility must not move persistent inputs or bottom settings");
         const auto page=compact[Slot::page],old_page=expanded[Slot::page];

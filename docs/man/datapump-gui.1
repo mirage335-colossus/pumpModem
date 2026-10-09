@@ -76,7 +76,8 @@ Baseband oscillator model for bounded receiver search and simulated impairments:
 .BR gpsdo-tcxo " or " gpsdo-ocxo .
 .TP
 .BI \-\-rf\-oscillator " ID"
-Shift oscillator model; the same choices, default crystal. Inactive at Shift 0.
+Shift oscillator model; the same choices plus ic-7100, default crystal. Inactive at Shift 0.
+The IC-7100 RF example does not specify the USB audio clock.
 For a legacy positive-Shift shared reference, this flag selects the shared model.
 .TP
 .BI \-\-reference " independent|shared-radio"
@@ -85,7 +86,40 @@ reference for a positive Shift. Shift 0 always uses only the Baseband model.
 .B \-\-lf\-reference 0
 is a legacy shared-reference shorthand, unrelated to Shift 0. GUI load maps an
 active shared model into Baseband Osc and selects Shift Osc's Baseband clock
-option; no separate Clock dropdown is shown.
+option. Independent UTC accuracy, region and offset controls do not change that topology.
+.TP
+.BI \-\-clock\-sync " SPEC"
+Default retains the existing epoch search. An explicit example is
+GPS_1ms-400ms_region-2564ms_offset: per-station PC accuracy, total propagation
+region width centered on the fixed offset. Editable ns/us/ms/s values are accepted.
+These are assumptions, not measured audio-device accuracy. Unsupported timing
+paths retain the full search and report their limitation.
+.TP
+.BI \-\-audio\-error " TIME"
+Assumed residual audio timing error per station after reported queue compensation;
+default 30ms. The editable Audio error dropdown is independent of GPS accuracy,
+propagation and oscillator models. Accepts positive ns/us/ms/s durations up to 60s,
+subject to the Live search-window limit. This does not change buffering or
+establish measured hardware accuracy. Saved parameter lists retain this value.
+An unsupported allowance visibly falls back to ordinary playback before private
+output; it is not silently enlarged.
+.TP
+.BI \-\-live\-duplex " yes|no"
+Keep hardware capture running during local transmission for physical loopback;
+default no. Clear received resets queued input and receiver backlog without
+cancelling transmission or clearing its private-key reuse lock.
+.TP
+.BI \-\-dsss\-factor " 1|10|100|1000"
+Additional private outer spreading; 1 is off. Requires a selected key for factors
+above one and retains the existing inner private patterns. Experimental receiver
+sensitivity and structured-interference qualification are incomplete. Selecting
+a factor in the GUI sets Rate 360/36/3.6 Hz for 10x/100x/1000x and stream Carrier
+1500 Hz. Explicit command values retain their supplied Rate and Carrier.
+.TP
+.BI \-\-fhss " off|fake-0.4s-200"
+Illustrate 200 channels with 0.4-second dwell in Carrier and Shift displays.
+This does not retune hardware or change transmitted audio. Genuine and IC-7100
+hardware hopping are unavailable. The illustration is not regulatory certification.
 .TP
 .BI \-\-search\-margin " N"
 Multiply declared frequency and clock accuracy bounds; default 3, minimum 1.

@@ -120,13 +120,13 @@ Chart chart_data(const planner::Model& model, bool observer) {
     chart.selected_target = model.inputs.target_db_hz;
     chart.selected_value = observer ? (model.observer_available ? model.observer_ratio : 0) : model.bit_seconds;
     if(!observer) {
-        chart.receive_available=model.one_bit_confidence_available;
+        chart.receive_available=model.one_bit_confidence_available||model.one_bit_reference_available;
         chart.selected_probability=model.one_bit_success_probability;
         for(const auto& point:model.receive_points) {
             if(!std::isfinite(point.target_db_hz))continue;
             chart.strong=std::max(chart.strong,point.target_db_hz);
             chart.weak=std::min(chart.weak,point.target_db_hz);
-            chart.receive_points.emplace_back(point.target_db_hz,point.confidence_available?
+            chart.receive_points.emplace_back(point.target_db_hz,point.confidence_available||point.reference_available?
                 point.success_probability:std::numeric_limits<double>::quiet_NaN());
         }
         std::sort(chart.receive_points.begin(),chart.receive_points.end(),[](const auto& a,const auto& b){return a.first>b.first;});
@@ -337,9 +337,11 @@ Node graph(const planner::Model& model, bool observer, float width) {
         observer && (!model.observer_available || !std::isfinite(model.observer_ratio) || model.observer_ratio < 8) ?
             Tone::negative : Tone::accent, true, 6);
     if(!observer) {
+        const auto rx_available=model.one_bit_confidence_available||model.one_bit_reference_available;
         paragraph(n,"━ Bit time · left axis",11,Tone::accent,false,2);
-        paragraph(n,"┄ 1-bit RX · right axis"+(model.one_bit_confidence_available?" · "+probability(model.one_bit_success_probability):""),
-            11,model.one_bit_confidence_available&&model.one_bit_success_probability<.8?Tone::negative:Tone::comparison,false,4);
+        paragraph(n,std::string("┄ 1-bit RX")+(model.probability_reference_only?" reference":"")+
+            " · right axis"+(rx_available?" · "+probability(model.one_bit_success_probability):""),
+            11,rx_available&&model.one_bit_success_probability<.8?Tone::negative:Tone::comparison,false,4);
     }
     const auto chart = chart_data(model, observer);
     const float label_width = 44,right_label_width=observer?0.f:36.f;
@@ -518,11 +520,12 @@ void link_budget(Node& root, const planner::Model& model) {
     auto n = card(root.width); n.padding = 8; n.bottom = 8;
     if (model.available) {
         const bool search_fits = model.clock_search_supported && model.receiver_workspace_supported;
-        const auto label=std::string(model.coherent_reference_only?"RX reference":"RX estimate")+
+        const bool probability_available=model.confidence_available||model.reference_probability_available;
+        const auto label=std::string(model.coherent_reference_only||model.probability_reference_only?"RX reference":"RX estimate")+
             (model.inputs.wire_bits==1?": ":" (all bits): ");
-        const auto verdict = !search_fits ? model.receiver_status : !model.confidence_available ?
+        const auto verdict = !search_fits ? model.receiver_status : !probability_available ?
             "RX estimate unavailable" : label+probability(model.success_probability);
-        const auto rx_tone=!search_fits||!model.confidence_available?Tone::text:
+        const auto rx_tone=!search_fits||!probability_available?Tone::text:
             model.success_probability<.8?Tone::negative:Tone::accent;
         const bool cpu_available=search_fits&&model.one_bit_cpu_available;
         const auto cpu_ratio=model.cpu_realtime_ratio;
@@ -551,11 +554,23 @@ void link_budget(Node& root, const planner::Model& model) {
         paragraph(n, "Budget: " + number(std::abs(model.margin_db)) + (model.margin_db < 0 ? " dB short" : " dB margin") +
             "  ·  Whole-bit phase loss: " + (model.phase_coherence_loss_db < .1 ? "<0.1" : number(model.phase_coherence_loss_db)) +
             " dB", 11, Tone::muted, false, 0);
+        if(!model.receiver_work_assumptions.empty())
+            paragraph(n,"Receiver work: "+model.receiver_work_assumptions,11,Tone::muted,false,0);
+        if(model.frequency_rate_hypotheses)
+            paragraph(n,"Engineering bank reference: "+std::to_string(model.frequency_rate_hypotheses)+
+                " frequency/clock pairs × "+std::to_string(model.epoch_hypotheses)+" epochs; "+
+                number(model.timing_hypotheses,6)+" timing origins summed over those pairs per key/epoch; "+
+                std::to_string(model.timing_phase_groups)+" timing phase groups.",11,Tone::muted,false,0);
+        if(model.timing_window_modeled)
+            paragraph(n,"Full-window fallback: "+number(model.fallback_cpu_realtime_ratio,3)+
+                " s processing per 1 s audio; "+number(model.fallback_timing_hypotheses,6)+
+                " timing origins. The timing reduction depends on the admitted capture bounds.",11,Tone::muted,false,0);
         if(model.differential_windows)
             paragraph(n,"Differential detector: "+std::to_string(model.differential_windows)+" windows × "+
                 planner::duration(model.differential_window_seconds)+
                 (model.differential_model_available?
-                    (model.confidence_available?" · included in RX estimate":" · included in first-bit estimate"):
+                    (probability_available?(model.probability_reference_only?" · included in RX reference":" · included in RX estimate"):
+                        " · included in first-bit estimate"):
                     " · probability outside model coverage"),
                 11,Tone::muted,false,0);
         else if(model.drift_model_available)
@@ -569,13 +584,14 @@ void details(Node& root,const planner::Model& model) {
     auto n = card(root.width);
     paragraph(n, "Model limits", 15, Tone::text, true, 8);
     if(!model.probability_model_limit.empty())paragraph(n,"Estimate coverage: "+model.probability_model_limit+".");
-    if(model.one_bit_confidence_available&&model.probability_trials) {
+    if((model.one_bit_confidence_available||model.one_bit_reference_available)&&model.probability_trials) {
         const auto interval=model.probability_interval_available?
             " Draft's 95% sampling interval: "+number(100*model.success_probability_low,4)+"–"+
             number(100*model.success_probability_high,4)+"%.":
             " First bit's 95% sampling interval: "+number(100*model.one_bit_probability_low,4)+"–"+
             number(100*model.one_bit_probability_high,4)+"%.";
-        paragraph(n,"Monte Carlo: "+std::to_string(model.probability_trials)+" shared-noise trials."+interval+
+        paragraph(n,std::string(model.probability_reference_only?"Conditional reference. ":"")+"Monte Carlo: "+
+            std::to_string(model.probability_trials)+" shared-noise trials."+interval+
             " This interval covers sampling uncertainty only; channel and model error can be larger.");
         if(model.probability_search_approximation)
             paragraph(n,"Carrier search is approximated"+
@@ -587,7 +603,7 @@ void details(Node& root,const planner::Model& model) {
         paragraph(n,"Local phase comparisons are included jointly with coherent and four-section scores. In "+
             number(100*model.differential_added_detection_probability,3)+
             "% of all trials, local comparisons supplied a correct first bit that the older detectors did not admit. This counts new recoveries, not net improvement after the extra detector-choice penalty.");
-    if(model.drift_model_available&&model.confidence_available)
+    if(model.drift_model_available&&(model.confidence_available||model.reference_probability_available))
         paragraph(n,"Coherent-only comparison: "+probability(model.coherent_success_probability)+
             ". Phase loss within a section: "+number(model.section_phase_coherence_loss_db)+" dB.");
     paragraph(n, "Link budget. Average transmit power minus path loss gives received power. Noise then sets signal strength; the selected target sets bit duration. Meeting the target is a planning estimate.");
@@ -599,14 +615,14 @@ void details(Node& root,const planner::Model& model) {
     if(model.kernel_rebuild_upper_bound)
         paragraph(n,"CPU cost estimates reuse between nearby clock candidates. Rebuilding every cached kernel would raise receiver work to about "+
             number(model.cpu_realtime_upper_ratio,3)+"× real time. That conservative fallback bound is separate from the displayed estimate.");
-    paragraph(n,"Graph. Solid line: time per bit on the left logarithmic axis. Dashed line: one-bit reception probability on the right percentage axis, using the selected power, path and noise. Both use the same target scale; their visual crossing is not a detection threshold. Gaps have no supported estimate.");
+    paragraph(n,"Graph. Solid line: time per bit on the left logarithmic axis. Dashed line: one-bit reception probability on the right percentage axis, using the selected power, path and noise. RX reference labels conditional calculations outside full receiver qualification. Both use the same target scale; their visual crossing is not a detection threshold. Gaps have no supported estimate.");
     paragraph(n, "Reception. The estimate includes signal strength, phase drift, clock and timing mismatch, acquisition and RAM. It assumes one matching receive target and every wire bit correct, before any error correction. The top-bar RX estimate uses the actual configured draft and receive bank. Oscillator values are illustrative; GPS phase corrections are not modeled.");
     paragraph(n, "Pattern transitions. Long patterns fit four sections with separate gain and phase. Eligible longer patterns also compare nearby local windows, allowing phase to change throughout a bit. One isolated strong quarter cannot carry that detector's match. The local window defaults to 100 seconds, rounded up to whole chips and at least sixteen chips; at least 256 windows are required. Supported estimates include all eligible detector scores, their shared noise and detector-choice penalties. Curves use 512 draws per sampled location; the selected estimate uses 4096. Unsupported geometries show a gap. Small RAM budgets may retain fewer detector branches.");
     paragraph(n, "Clock/RAM gaps. At some bit durations, the receiver can average more samples and use less RAM. Even a tiny duration change can lose that saving. Stronger and Weaker select timings that fit, usually about 1 dB apart. Labels are rounded; selections keep the exact value when applied.");
     paragraph(n, "Observer. Energy-only listener; private waveform; equal signal and noise at both receivers. 90% detection, 1% false alarm; known band, window and stationary noise. Numeric range: at most −10 dB in-band SNR. Each point holds bit energy relative to noise at 18 dB; longer bits use lower power. Repeated traffic, location, noise uncertainty and other detectors change the comparison.");
     paragraph(n, "Red indicators. RX estimates below 80% and observer / receiver times below 8× are red. Observer results outside the model range, unavailable results and errors are also red; calculating is neutral. The 8× cutoff is a listening guideline, not a validated acoustic threshold.");
     paragraph(n, "Sound and structure. A steadier, less abruptly changing sound may reflect less conspicuous envelope or spectral structure, as well as less frequent repetition. Longer pseudorandom patterns can change that texture even without encryption; pulse shaping, rate, filtering and level also matter. A public noise-like pattern remains predictable to a correlating observer. Private patterns can withhold that template, but even genuinely random signals can reveal energy and modulation structure. The ratio assumes a noise-like private waveform; it does not measure randomness, sound quality or interference complaints. With encryption off it remains hypothetical. Tone modes still transmit tones.");
-    paragraph(n, "Voice bandwidth. The ideal shaped signal must fit the radio's passband. At 3.6 kHz rate and 1.5 kHz carrier, the automatic shaped pattern spans 375–2625 Hz. Radio filtering and spectral tails still matter.");
+    paragraph(n, "Voice bandwidth. The ideal shaped signal must fit the radio's passband. At 3.6 kHz rate and 1.5 kHz carrier, the automatic shaped pattern spans 375–2625 Hz. DSSS 10×, 100× and 1000× selections start at inner rates of 360, 36 and 3.6 Hz with the same outer bandwidth and stream carrier. Radio filtering and spectral tails still matter.");
     paragraph(n, "FT8 reference. −8 dB in 1 Hz converts to about −42 dB on the 2500 Hz reporting scale: 21 dB below the published −21 dB reference threshold. This is a scale conversion, not tested sensitivity.");
     paragraph(n, "Quick references", 15, Tone::text, true, 8);
     paragraph(n, "Rough examples; antennas, propagation and noise change the result. Power (dBm) and path loss (dB) are separate quantities.");

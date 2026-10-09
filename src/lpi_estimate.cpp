@@ -12,7 +12,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     // Validate the actual effective transport without deriving/examining keys.
     // Tone clears private layers before validation in the transfer API.
     if(config.spreading_mode==modem::SpreadingMode::tone) {
-        config.scramble=false;config.dsss=false;config.data_key.reset();
+        config.scramble=false;config.dsss=false;config.dsss_factor=1;config.data_key.reset();
     } else if(options.key)config.scramble=true;
     modem::validate(config);
     if(!std::isfinite(transmission.total_seconds) || transmission.total_seconds<0)
@@ -35,7 +35,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     // This models all received power inside that band, not a measured spectrum.
     result.observation_bandwidth_hz=modem::pattern_pulse_enabled(config)?
         (1+modem::pattern_pulse_rolloff)*config.sample_rate/static_cast<double>(modem::pattern_chip_samples(config)):
-        config.bandwidth_hz;
+        modem::waveform_bandwidth_hz(config);
     const auto log_band=std::log(static_cast<long double>(result.observation_bandwidth_hz));
     const auto log_snr=log_energy-log_symbol_seconds-log_band;
     result.in_band_snr_db=result.reference_cn0_db_hz-10*std::log10(result.observation_bandwidth_hz);

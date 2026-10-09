@@ -26,7 +26,13 @@ struct PatternEvidence {
     double admission_threshold = 0;
     // Local search identity distinguishes equal-carrier clock alternatives.
     // Not a transmitted address or a source interpretation.
-    std::size_t frequency_hypothesis = 0;
+    // The bounded frequency bank has at most 4097 entries. Keeping this local
+    // diagnostic identifier compact also preserves small receiver budgets.
+    std::uint32_t frequency_hypothesis = 0;
+    bool outer_presence_active = false;
+    // Independent outer-code evidence when a structured in-band observation
+    // activates the additional presence guard. Diagnostic, not authentication.
+    double outer_presence_score = 0;
 };
 // Internal unknown-slot value; transfer interpretation replaces it with a
 // plaintext zero after advancing the Data mask through the same symbol slot.
@@ -54,6 +60,15 @@ struct PatternBurst {
 // Completed failed-symbol observations covering this much received-media
 // time end the stream. One failed symbol suffices when it lasts >=6s.
 inline constexpr std::uint64_t pattern_absence_seconds = 6;
+// A qualified or explicitly modeled UTC map, in original input coordinates. A
+// canonical private stream phase p may arrive at B + scale*p +/- half_width.
+// The scale is an absolute UTC-to-input map, not a relative oscillator lane.
+// The caller supplies the physical timing assumptions for the initial arrival
+// interval. A callback timestamp alone does not supply that contract. A model
+// using uncalibrated hardware must remain labeled estimated at the application.
+struct PatternStartWindow {
+    long double epoch_origin_samples=0,phase_scale=1,half_width_samples=0;
+};
 struct PatternSearch {
     // Long pattern symbols also fit four fixed sections with independent
     // complex gains. Full-symbol evidence includes the extra noise degrees
@@ -127,6 +142,9 @@ struct PatternSearch {
     // at half-chip resolution; it rejects unaffordable coverage explicitly.
     std::optional<double> start_offset_seconds;
     double start_uncertainty_seconds = 0;
+    // Compact correlator only. Other backends retain the complete legacy
+    // start window rather than silently interpreting this as a point hint.
+    std::optional<PatternStartWindow> qualified_start_window;
     // Independent timing alternatives for each legacy frequency hypothesis.
     // Rate is 1 + ppm*1e-6; observed symbol duration is nominal/rate.
     std::vector<double> clock_errors_ppm{0};
@@ -134,6 +152,9 @@ struct PatternSearch {
     // (at least one). One selects serial scoring. Search coverage and ordered
     // admission are unchanged; spare workspace bounds parallel scratch.
     std::size_t worker_threads = 0;
+    // Internal paired-measurement control; never exported or persisted.
+    // False retains the preceding detector for identical-PCM comparisons.
+    bool outer_presence_guard = true;
 };
 // Whole-symbol sampled absence needed by the fixed six-second policy.
 // Callers add their finite acquisition/lookahead margin when generating tails.

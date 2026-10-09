@@ -1,0 +1,26 @@
+{
+  "created_utc": "2026-10-09T06:51:28.930878+00:00",
+  "source": "clock-spread-manual-manifest.json exact pre-correction compiled baseline",
+  "files": {
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-opt-20261008/dsss-before-libdatapump.a": {
+      "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/agents/receiver-opt-20261008/native/libdatapump.a",
+      "sha256": "13cc4ae7428e1a5afa6813445b79b5cf1c8f130cdee63e8fc0903851bee54995"
+    },
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-opt-20261008/dsss-before-test_pattern_receiver": {
+      "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/agents/receiver-opt-20261008/native/test_pattern_receiver",
+      "sha256": "d6d8febb5284e4aa2af48b0abe996c91090f24a93ee3d7c4d0ad947aac1dda3c"
+    },
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-opt-20261008/dsss-before-test_pattern_code": {
+      "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/agents/receiver-opt-20261008/native/test_pattern_code",
+      "sha256": "4ed1ff2b6dbef6a7f995728eb5cfec29a28ef0715616276a4ee789e26d345f48"
+    },
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-opt-20261008/dsss-before-test_live_profiles": {
+      "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/agents/receiver-opt-20261008/native/test_live_profiles",
+      "sha256": "81bcba926a0a72eb634d260500a546a6656ce2e7701369a3ecf40fa125b5eeee"
+    },
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-opt-20261008/dsss-before-pump": {
+      "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/agents/receiver-opt-20261008/native/pump",
+      "sha256": "f72da5e670274dbe0f0d6ccaab1c27efd4984255482e1f710dabb8e6d4c3a823"
+    }
+  }
+}

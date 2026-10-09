@@ -1,4 +1,5 @@
 #include "datapump/tuning.hpp"
+#include "datapump/pattern_code.hpp"
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -24,6 +25,19 @@ constexpr std::array<std::string_view,19> names{
 constexpr std::array<unsigned,19> lengths{0,0,0,3,4,6,8,12,16,1,2,3,4,8,32,128,1024,4096,16384};
 constexpr std::array<unsigned,11> automatic_lengths{16,32,64,128,256,512,1024,2048,4096,8192,16384};
 unsigned minimum_pattern_chips(const modem::Config& config,double target_snr_db_hz,bool tone) {
+    // Outer chips share an inner coefficient. They cannot satisfy the private
+    // codeword-length floor; shorter outer profiles lack channel qualification.
+    if(config.dsss_factor>1) {
+        auto candidate=config;candidate.integration_seconds=0;
+        const auto fine=modem::pattern_chip_samples(candidate);
+        // Compare actual integer geometry. A ceil() of the inverse bandwidth
+        // calculation could turn 64+one rounding ulp into a 128-chip plan.
+        for(const auto length:automatic_lengths) {
+            candidate.spreading_factor=length;
+            if(modem::symbol_sample_count(candidate)/fine/config.dsss_factor>=64)return length;
+        }
+        throw Error("outer DSSS cannot retain 64 complete inner chips at this sample rate");
+    }
     // A high C/N0 is only a fast-link target relative to the selected band.
     // Preserve the previous weak-signal and tone plans. Shorter patterns need
     // substantial in-band headroom as well as integrated energy: clean PCM
@@ -72,6 +86,9 @@ constexpr std::array presets{
     SimulationPreset{"70dBm -250dB",true,70,-250}};
 constexpr std::array oscillator_models{
     OscillatorPreset{"crystal","Free-running crystal",100,.5},
+    // Icom specifies each radio at +/-0.5 ppm (430 MHz, 0..50 C).
+    // Relative worst-case sum is 1 ppm; diffusion is an illustrative assumption.
+    OscillatorPreset{"ic-7100","IC-7100: +/-0.5 ppm/radio",1,.05},
     // Shared locked-link residual assumption; oscillator class changes the
     // phase-diffusion stress model, not an inferred unlocked frequency budget.
     OscillatorPreset{"gpsdo-xo","GPSDO: hobbyist XO (no oven)",.0001,.5},
@@ -205,7 +222,7 @@ Plan resolve_config(modem::Config config,double target_snr_db_hz,PatternMode mod
     // only a Data mask give every receive key the same acquisition evidence.
     base.scramble=!tone && encryption;
     if(tone) {
-        base.dsss=false;base.data_key.reset();
+        base.dsss=false;base.dsss_factor=1;base.data_key.reset();
         base.spreading_seed.fill(0);base.dsss_seed.fill(0);
     }
     const double chip_seconds=2/base.bandwidth_hz;
@@ -249,13 +266,14 @@ Plan resolve_config(modem::Config config,double target_snr_db_hz,PatternMode mod
 }
 }
 Plan resolve(double bandwidth_hz,double target_snr_db_hz,PatternMode mode,bool encryption,
-             std::optional<double> carrier_hz) {
+             std::optional<double> carrier_hz,unsigned dsss_factor) {
     modem::Config config;
+    config.dsss_factor=dsss_factor;
     config.bandwidth_hz=bandwidth_hz;
-    config.carrier_hz=carrier_hz.value_or(recommended_carrier_hz(bandwidth_hz));
+    config.carrier_hz=carrier_hz.value_or(recommended_carrier_hz(modem::waveform_bandwidth_hz(config)));
     // Real passband PCM must sample the actual carrier independently of the
     // hardware audio clock, including explicit high-frequency carriers.
-    config.sample_rate=recommended_sample_rate(bandwidth_hz,config.carrier_hz);
+    config.sample_rate=recommended_sample_rate(modem::waveform_bandwidth_hz(config),config.carrier_hz);
     return resolve_config(std::move(config),target_snr_db_hz,mode,encryption);
 }
 std::vector<modem::Config> receive_profiles(double bandwidth_hz,std::span<const double> targets_db_hz,
@@ -279,7 +297,7 @@ std::vector<modem::Config> receive_profiles(const modem::Config& base,std::span<
                 prior.pattern_symbols==config.pattern_symbols && prior.spreading_factor==config.spreading_factor &&
                 modem::symbol_sample_count(prior)==modem::symbol_sample_count(config) && prior.spreading_mode==config.spreading_mode &&
                 prior.pulse_shaping==config.pulse_shaping &&
-                prior.scramble==config.scramble && prior.dsss==config.dsss;
+                prior.scramble==config.scramble && prior.dsss==config.dsss && prior.dsss_factor==config.dsss_factor;
         });
         if(!duplicate)profiles.push_back(std::move(config));
     }

@@ -55,12 +55,19 @@ struct CaptureScript {
     std::vector<float> samples;
     std::uint32_t rate = 0;
     std::atomic<std::size_t> released{0}, delivered{0};
+    std::atomic<unsigned> capture_opened{0},capture_closed{0};
+    std::size_t format_bytes=0;
+    bool loopback=false;
+    std::atomic<bool> playback_started{false},playback_source_finished{false},finish_playback{false};
+    std::atomic<std::size_t> played{0};
     std::vector<float> monitor_samples;
     std::uint32_t monitor_rate=0;
     std::size_t monitor_format_bytes=0;
     std::atomic<std::size_t> monitor_released{0},monitor_delivered{0};
     std::atomic<unsigned> interruptions{0},interruptions_delivered{0};
     std::function<void()> after_monitor;
+    std::function<audio::TimePrediction(std::size_t)> timing;
+    std::optional<audio::TimingStatus> timing_status;
 };
 CaptureScript* capture_script = nullptr;
 constexpr std::uint64_t epoch = 1800000000;
@@ -243,7 +250,9 @@ struct Observations {
             }
             if (!allow_revisions)
                 check(!before_absence && snapshot.samples_received >= sample_origin + expected.payload_end + 6 * expected.rate,
-                      "profile observation completed before six seconds of physical absence");
+                      "profile observation completed before six seconds of physical absence: input="+
+                      std::to_string(snapshot.samples_received)+" payload_end="+std::to_string(expected.payload_end)+
+                      " bits="+signal.raw_bits+" before_absence="+std::to_string(before_absence));
             ++complete;
             if (!allow_revisions && !expected.ambiguous_tone) check(signal.binary == expected.binary && signal.validated == expected.interval && signal.text == expected.text &&
                   signal.raw_bits == (expected.interval || expected.binary ? std::string{} : expected.bits) &&
@@ -310,9 +319,11 @@ void receive_wave(live::Session& session, CaptureScript& capture, const Waveform
                 observed, expected, origin, true);
         check(observed.rows.size() == 1 && !observed.rows.begin()->second.complete,
               "long profile completed before a full absent symbol was scored");
+        std::string prefixes;for(const auto& prefix:observed.prefixes)prefixes+='['+prefix+"] ";
         for (std::size_t count = 1; count <= expected.bits.size(); ++count)
             check(observed.prefixes.contains(expected.bits.substr(0, count)),
-                  "a long-profile accepted bit was hidden behind later message progress");
+                  "a long-profile accepted bit was hidden behind later message progress: expected="+
+                  expected.bits.substr(0,count)+" prefixes="+prefixes);
     }
     if (!expected.ambiguous_tone)
         check(observed.prefixes.contains(expected.bits.substr(0, 4096)), "exact transport prefix was hidden until physical completion");
@@ -345,7 +356,7 @@ void run_case(const std::vector<double>& targets, double target, const std::stri
 // Queue processing time must not select the private epoch for already captured
 // PCM. Delay the logical callback after the raw monitor callback, avoiding any
 // dependency on CPU speed or scheduler sleeps in this timestamp regression.
-void receiver_backlog_before_overflow() {
+void receiver_backlog_before_overflow(bool clear=false) {
     CaptureScript capture;capture.rate=modem_config(55,{}).sample_rate;
     capture.monitor_rate=capture.rate;capture.monitor_samples.resize(64);capture.monitor_released=64;
     capture.samples.resize(3*capture.rate);capture.released=64;capture_script=&capture;
@@ -376,6 +387,14 @@ void receiver_backlog_before_overflow() {
     const auto queued=await([&](const auto& x){return x.buffered_samples==capture.samples.size()-64;});
     check(queued.receiver_backlog_seconds==3. && queued.receiver_behind && !queued.receiver_health.failed(),
           "queued hardware backlog changed sample accounting or claimed input loss");
+    if(clear) {
+        session.clear_received();
+        const auto cleared=session.snapshot();
+        check(!cleared.receiver_behind && cleared.receiver_backlog_seconds==0 &&
+              cleared.receiver_oldest_input_seconds==0 && !cleared.buffered_samples && !cleared.decoding_samples &&
+              !cleared.receiver_health.failed() && !cleared.receiver_timing && cleared.signals.empty() && cleared.received.empty(),
+              "Clear received retained a logical queue/backlog or manufactured completion");
+    }
     released=true;
     const auto drained=await([](const auto& x){return !x.buffered_samples && !x.decoding_samples;});
     check(!drained.receiver_behind && drained.receiver_backlog_seconds==0 && drained.receiver_oldest_input_seconds==0 &&
@@ -387,22 +406,81 @@ void receiver_backlog_before_overflow() {
 void captured_epoch_survives_delay() {
     Configuration config;config.keyed=true;config.mode=tuning::PatternMode::auto_keystream;
     const auto wave=waveform(55,"e",false,config);
-    for(const double delay:{0.,30.}) {
+    for(const double delay:{0.,30.})for(const bool timestamped:{false,true}) {
         CaptureScript capture;capture.samples=wave.samples;capture.rate=wave.rate;
         capture.monitor_rate=wave.rate;capture.monitor_samples.resize(64);
         capture.monitor_released=64;
         std::atomic<double> now{epoch+64./wave.rate};
         capture.after_monitor=[&]{now=epoch+delay;};
+        if(timestamped)capture.timing=[&](std::size_t sample) {
+            return audio::TimePrediction{epoch+static_cast<long double>(sample)/wave.rate,
+                .00001,1./wave.rate,audio::TimingQuality::bounded,1e-9};
+        };
         capture_script=&capture;
         auto value=settings({55},config);value.transfer.timestamp=0;value.receive_keys.clear();
+        if(timestamped)value.transfer.clock_sync=clock_sync::Policy{.001,.4,0};
         value.transfer.search_seconds=static_cast<unsigned>(std::ceil((wave.payload_end-3*wave.symbol_samples)/double(wave.rate)))+1;
         live::Session session([&]{return now.load();});session.start(value);
         Observations observed;
         std::cout<<"Capture delay "<<delay<<" s, prefix "<<(wave.payload_end-3*wave.symbol_samples)/double(wave.rate)<<" s\n"<<std::flush;
         receive_wave(session,capture,wave,0,observed);
         check(!session.snapshot().receiver_health.failed(),"delayed captured PCM lost receive coverage");
+        if(timestamped)check(session.snapshot().clock_timing_quality==audio::TimingQuality::bounded &&
+            session.snapshot().clock_backend_uncertainty_seconds==.00001,
+            "queued capture discarded timestamp quality or provider uncertainty");
         session.stop();
     }
+}
+void modeled_arrival_window(bool modeled=true,bool fallback=false) {
+    auto value=settings({});value.transfer.automatic_receive_profiles=false;
+    auto& config=value.transfer.modem;
+    config.sample_rate=64;config.bandwidth_hz=2;config.carrier_hz=16;
+    config.spreading_factor=64;config.integration_seconds=64;config.scramble=true;
+    modem::OscillatorSearchConfig oscillator;oscillator.lf={.0001,0};oscillator.rf={.0001,0};
+    config.oscillator_search=oscillator;
+    value.transfer.key.emplace(Bytes(32,0x67));value.receive_keys.clear();
+    value.transfer.clock_sync=clock_sync::Policy{.001,.4,2.564};
+    // This synthetic provider explicitly reports 100 ms uncertainty. Its
+    // accepted engineering allowance must cover that value.
+    value.transfer.audio_timing_error_seconds=fallback?.001:.1;
+    auto transmitter=transfer::binary_transmitter(Bytes{0,0,1},value.transfer);
+    Waveform wave;wave.bits="001";wave.text="e";wave.rate=config.sample_rate;
+    wave.symbol_samples=modem::symbol_sample_count(config);
+    const auto prefix=modem::training_sample_count(config)+modem::pattern_pulse_padding_samples(config);
+    wave.payload_end=prefix+3*wave.symbol_samples;wave.transmit_end=transmitter->total_samples();
+    wave.samples.resize(wave.payload_end+2*wave.symbol_samples);
+    for(std::size_t offset=0;offset<wave.transmit_end;)
+        offset+=transmitter->read(std::span(wave.samples).subspan(offset,wave.transmit_end-offset));
+    std::mt19937 random(8071);std::normal_distribution<float> noise(0,.1f);
+    for(auto& sample:wave.samples)sample+=noise(random);
+    CaptureScript capture;capture.samples=wave.samples;capture.rate=wave.rate;
+    capture.monitor_rate=wave.rate;capture.monitor_samples.resize(64);capture.monitor_released=64;
+    const auto start=static_cast<long double>(epoch)+2.564L-static_cast<long double>(prefix)/wave.rate;
+    if(modeled)capture.timing=[&](std::size_t sample) {
+        return audio::TimePrediction{start+static_cast<long double>(sample)/wave.rate,
+            .1,1./wave.rate,audio::TimingQuality::estimated,2e-6};
+    };
+    if(fallback)capture.timing_status=audio::TimingStatus{false,.001,.1,
+        "100 ms captured timestamp uncertainty exceeds Audio error 1 ms; ordinary capture/full search"};
+    capture_script=&capture;
+    live::Session session([]{return static_cast<double>(epoch)+30;});session.start(value);
+    Observations observed;
+    try {receive_wave(session,capture,wave,0,observed);}
+    catch(...) {
+        std::cerr<<"UTC arrival diagnostic: modeled="<<session.snapshot().clock_window_modeled
+            <<" audio_error_seconds="<<value.transfer.audio_timing_error_seconds<<'\n';
+        throw;
+    }
+    check(session.snapshot().clock_window_modeled==(modeled && !fallback) && !session.snapshot().receiver_health.failed(),
+        "estimated arrival model failed to reach compact Live acquisition or lost coverage");
+    const auto timing=session.snapshot().receiver_timing;
+    check(bool(timing)==(modeled && !fallback),"Live lost qualified bank timing metadata or retained fallback metadata");
+    if(timing)check(timing->uncertainty_seconds==.1 && timing->rate_uncertainty_fraction==2e-6 &&
+        timing->seconds_per_frame==1./wave.rate,"Live changed actual timing bounds before planner publication");
+    if(fallback)check(session.snapshot().clock_timing_fallback &&
+        session.snapshot().clock_timing_status.find("Audio error 1 ms")!=std::string::npos,
+        "ordinary capture fallback lost its visible timing reason");
+    session.stop();
 }
 
 void sequential_profiles(const std::vector<double>& targets, double first_target, double second_target) {
@@ -666,6 +744,10 @@ void receiver_loss_health() {
         script.released=script.samples.size();
         const auto after=await([&](const auto& x){return script.delivered==script.samples.size() && x.buffered_samples==0 && x.decoding_samples==0;});
         check(after.receiver_health.failed(),"healthy PCM cleared latched loss");
+        session.clear_received();
+        const auto cleared=session.snapshot();
+        check(!cleared.receiver_health.failed() && cleared.signals.empty() && cleared.received.empty() &&
+              !cleared.receiver_behind,"Clear received retained latched loss or manufactured completion");
         session.configure(value);
         check(!session.snapshot().receiver_health.failed(),"reconfiguration retained obsolete receiver failure");
         session.stop();capture_script=nullptr;
@@ -730,6 +812,59 @@ void sampled_long_fft_seeds() {
         }
     }
 }
+void duplex_loopback(bool keyed=false) {
+    Configuration geometry{16.,8.};
+    geometry.keyed=keyed;
+    auto value=settings({55},geometry);value.transfer.automatic_receive_profiles=false;value.full_duplex=true;
+    if(keyed)value.receive_keys.clear(); // selected TX key must also receive its loopback
+    const auto expected=waveform(55,"001",true,geometry);
+    CaptureScript capture;capture.rate=expected.rate;capture.samples.resize(expected.samples.size());
+    capture.loopback=true;capture.format_bytes=16384;capture_script=&capture;
+    live::Session session([]{return static_cast<double>(epoch);});session.start(value);
+    const auto await=[&](auto predicate) {
+        testing::CpuWorkBudget budget(30s,"single-session hardware duplex loopback");
+        while(budget.pending()) {auto snapshot=session.snapshot();
+            check(snapshot.error.empty(),"duplex loopback failed: "+snapshot.error);
+            check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,"duplex audio exceeded workspace");
+            if(predicate(snapshot))return snapshot;std::this_thread::sleep_for(1ms);
+        }
+        throw Error("duplex loopback did not reach checkpoint");
+    };
+    await([&](const auto&){return capture.capture_opened.load()==1;});
+    session.transmit_bits(Bytes{0,0,1});
+    Observations observed;
+    const auto running=await([&](const auto& snapshot) {
+        observed.inspect(snapshot,expected,0,true);return capture.playback_source_finished.load();
+    });
+    check(running.transmitting && capture.capture_opened==1 && !capture.capture_closed &&
+          capture.played==expected.transmit_end && running.samples_received==capture.delivered,
+          "duplex paused/reopened input or double-counted local TX samples");
+    check(std::equal(capture.samples.begin(),capture.samples.begin()+expected.transmit_end,expected.samples.begin()),
+          "duplex changed the transmitted PCM");
+    // Playback has reached EOF but remains open; only actually captured silence
+    // can close reception. Publish each observed prefix while TX is active.
+    advance(session,capture,expected.payload_end+5*expected.rate,observed,expected,0,true);
+    check(observed.complete==0 && observed.received==0 && observed.prefixes.contains(expected.bits),
+          "duplex EOF completed a reception or suppressed pending progress");
+    advance(session,capture,capture.samples.size(),observed,expected,0,false);
+    observed.check_final(expected);
+    check(session.snapshot().transmitting && capture.capture_closed==0,
+          "duplex receiver did not complete independently while playback stayed open");
+    // A clear during the still-open transmission preserves it and removes RX.
+    const auto transmission=session.snapshot().transmission_id;
+    const auto key_lock=session.snapshot().transmit_key_lock_seconds;
+    session.clear_received();
+    const auto cleared=session.snapshot();
+    check(cleared.transmitting && cleared.transmission_id==transmission && !cleared.transmission_cancelled &&
+          cleared.signals.empty() && cleared.received.empty() && !cleared.receiver_health.failed() &&
+          !cleared.receiver_behind && cleared.transmit_key_lock_seconds==key_lock,
+          "Clear received cancelled TX, changed key-use lock or retained receive state");
+    session.cancel_transmit();
+    await([&](const auto& snapshot){return !snapshot.transmitting && snapshot.transmission_cancelled;});
+    check(!capture.capture_closed && capture.capture_opened==1,"cancelling duplex TX closed input");
+    session.stop();
+}
+
 }
 
 // These definitions deliberately replace audio.cpp in this statically linked
@@ -741,6 +876,10 @@ void capture(std::uint32_t rate,const std::string& device,const CaptureCallback&
     validate_options(options);
     if(capture_script && capture_script->monitor_rate) {
         auto& script=*capture_script;
+        if(script.timing_status) {
+            check(bool(options.timing_status),"timing fallback fixture lost status observer");
+            options.timing_status(*script.timing_status);
+        }
         check(rate==script.rate && device=="controlled profile capture","monitor fixture capture identity changed");
         if(format)format({rate,script.monitor_rate,rate/2.,script.monitor_format_bytes});
         while(!stop.stop_requested()) {
@@ -756,7 +895,13 @@ void capture(std::uint32_t rate,const std::string& device,const CaptureCallback&
                 if(script.after_monitor)script.after_monitor();
             }
             begin=script.delivered.load();end=script.released.load();
-            if(end>begin) {if(!callback(std::span(script.samples).subspan(begin,end-begin)))return;script.delivered=end;}
+            if(end>begin) {
+                if(script.timing && (!script.timing_status || script.timing_status->following_system_clock)) {
+                    check(options.follow_system_clock && bool(options.capture_timing),"timed fixture lost its capture callback");
+                    options.capture_timing(script.timing(begin));
+                }
+                if(!callback(std::span(script.samples).subspan(begin,end-begin)))return;script.delivered=end;
+            }
             std::this_thread::sleep_for(1ms);
         }
         return;
@@ -774,7 +919,9 @@ void capture(std::uint32_t rate, const std::string& device, const CaptureCallbac
     check(capture_script && device == "controlled profile capture" && rate == capture_script->rate,
           "unexpected hardware capture request in profile fixture");
     auto& script = *capture_script;
-    if (on_format) on_format({rate, rate, static_cast<double>(rate) / 2, 0});
+    ++script.capture_opened;
+    struct Closed {CaptureScript& script;~Closed(){++script.capture_closed;}}closed{script};
+    if (on_format) on_format({rate, rate, static_cast<double>(rate) / 2, script.format_bytes});
     while (!stop.stop_requested()) {
         const auto begin = script.delivered.load();
         const auto end = std::min(script.released.load(), begin + std::max<std::uint32_t>(8, rate / 50));
@@ -789,8 +936,26 @@ void play(std::span<const float>, std::uint32_t, const std::string&, std::stop_t
           StreamFormatCallback, ChannelMode) { throw Error("profile fixture unexpectedly played audio"); }
 std::vector<float> record(double, std::uint32_t, const std::string&, std::size_t,
                           std::stop_token, StreamFormatCallback) { throw Error("profile fixture unexpectedly recorded audio"); }
-void playback(std::uint32_t, const std::string&, const PlaybackCallback&, std::stop_token,
-              StreamFormatCallback, ChannelMode) { throw Error("profile fixture unexpectedly played audio"); }
+void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& source,std::stop_token stop,
+              StreamFormatCallback format,ChannelMode) {
+    check(capture_script && capture_script->loopback && device=="controlled profile capture" && rate==capture_script->rate,
+          "profile fixture unexpectedly played audio");
+    auto& script=*capture_script;
+    if(format)format({rate,rate,rate/2.,32768});
+    script.playback_started=true;
+    std::vector<float> output(std::max<std::size_t>(8,rate/50));
+    while(!stop.stop_requested()) {
+        const auto count=source(output);
+        if(!count)break;
+        const auto offset=script.played.load();
+        check(offset+count<=script.samples.size(),"duplex loopback output exceeded bounded fixture");
+        std::copy_n(output.begin(),count,script.samples.begin()+offset);
+        script.played=offset+count;script.released=offset+count;
+        while(script.delivered<offset+count && !stop.stop_requested())std::this_thread::sleep_for(1ms);
+    }
+    script.playback_source_finished=true;
+    while(!stop.stop_requested() && !script.finish_playback)std::this_thread::sleep_for(1ms);
+}
 }
 
 int main(int argc, char** argv) {
@@ -800,10 +965,18 @@ int main(int argc, char** argv) {
         const FixtureTimerResolution timer_resolution;
 #endif
         const std::string suite = argc > 1 ? argv[1] : "all";
-        check(suite == "all" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds" || suite == "interval_queue" || suite == "monitor" || suite == "health" || suite == "capture_time" || suite == "backlog",
+        check(suite == "all" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds" || suite == "interval_queue" || suite == "monitor" || suite == "health" || suite == "capture_time" || suite == "arrival_time" || suite == "arrival_time_baseline" || suite == "backlog" || suite == "clear" || suite == "duplex" || suite == "arrival_fallback",
               "unknown profile test suite");
+        if(suite=="all" || suite=="duplex") {
+            context="single-session hardware duplex loopback";duplex_loopback();
+            context="single-session keyed hardware duplex loopback";duplex_loopback(true);
+        }
+        if(suite=="all" || suite=="clear") {context="Clear received backlog cancellation";receiver_backlog_before_overflow(true);}
         if(suite=="all" || suite=="backlog") {context="receiver backlog before overflow";receiver_backlog_before_overflow();}
         if(suite=="all" || suite=="capture_time") {context="captured private epoch survives decode delay";captured_epoch_survives_delay();}
+        if(suite=="all" || suite=="arrival_fallback") {context="unqualified UTC capture falls back visibly";modeled_arrival_window(true,true);}
+        if(suite=="all" || suite=="arrival_time") {context="modeled compact UTC arrival";modeled_arrival_window();}
+        if(suite=="arrival_time_baseline") {context="full-window UTC arrival control";modeled_arrival_window(false);}
         if(suite=="all" || suite=="health") {context="receiver loss health";receiver_loss_health();}
         if(suite=="all" || suite=="monitor") {context="independent environment monitor";independent_environment_monitor();}
         if (suite == "interval_queue") {

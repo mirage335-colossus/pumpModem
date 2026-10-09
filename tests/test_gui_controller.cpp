@@ -162,6 +162,14 @@ void simulation_estimate_controls() {
           "Covered strong 100 Hz channel must not treat target 140 as an admission threshold");
     check(controller.field(F::simulation_confidence).text_tone==ui::TextTone::normal,
           "An RX estimate above 80% must retain the normal foreground");
+    controller.edit(F::clock_accuracy,"1ms");
+    controller.edit(F::clock_region,"10ms");
+    controller.edit(F::clock_offset,"0ms");prepare(controller);
+    check(text(F::simulation_confidence).starts_with("RX reference")&&
+          text(F::simulation_confidence).find('%')!=std::string::npos&&
+          text(F::inspection).find("RX model:")!=std::string::npos&&
+          text(F::inspection).find("Receiver work:")!=std::string::npos,
+          "UTC mode must identify its conditional reference and work assumptions without hiding usable probability");
 }
 void empty_composer_preview() {
     using F=ui::Field;using C=ui::Command;
@@ -218,7 +226,7 @@ void oscillator_controls() {
     using F=ui::Field;
     Controller controller({true,true});
     check(controller.field(F::simulation_oscillator).selected=="crystal"&&
-          controller.field(F::simulation_oscillator).options.size()==tuning::oscillator_presets().size()&&
+          controller.field(F::simulation_oscillator).options.size()+1==tuning::oscillator_presets().size()&&
           controller.settings().simulation_clock_error_ppm==100&&
           controller.settings().simulation_phase_noise_degrees_per_sqrt_second==.5,
           "The default oscillator must preserve the existing independent-clock simulation");
@@ -227,6 +235,7 @@ void oscillator_controls() {
     const auto original_samples=controller.estimate()->waveform_samples;
     check(original_bits==3,"Oscillator fixture changed the exact a dictionary endpoint");
     for(const auto& preset:tuning::oscillator_presets()) {
+        if(preset.id=="ic-7100")continue;
         const auto revision=controller.revision();
         const bool changed=controller.field(F::simulation_oscillator).selected!=preset.id;
         controller.select(F::simulation_oscillator,std::string(preset.id));
@@ -402,6 +411,7 @@ void lpi_estimate_controls() {
         same_advisory(*reference);
     }
     for(const auto& preset:tuning::oscillator_presets()) {
+        if(preset.id=="ic-7100")continue;
         controller.select(F::simulation_oscillator,std::string(preset.id));prepare(controller);
         same_advisory(*reference);
     }
@@ -954,6 +964,56 @@ void rate_carrier_controls() {
     check(controller.settings().transfer.modem.carrier_hz==2700 &&
           controller.settings().transfer.modem.spreading_mode==modem::SpreadingMode::tone,
           "Raising the carrier did not recover the selected tone profile");
+}
+void dsss_voice_carrier_controls() {
+    using F=ui::Field;using C=ui::Command;
+    struct TemporaryKeyring {
+        std::filesystem::path path=std::filesystem::temp_directory_path()/
+            ("datapump-dsss-voice-keys-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        ~TemporaryKeyring(){std::error_code ignored;std::filesystem::remove(path,ignored);}
+    } fixture;
+    create_keyring(fixture.path,{"DSSS voice passband"});
+    Controller controller({true,true});
+    controller.edit(F::message,"e");
+    controller.activate(C::open_keyfile);
+    auto requests=controller.take_services();
+    check(requests.size()==1,"DSSS voice fixture did not receive its keyfile chooser");
+    controller.complete_service({requests.front().id,false,fixture.path.string(),{}});
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(10);
+    while((!controller.settings().transfer.key||!controller.estimate())&&std::chrono::steady_clock::now()<deadline) {
+        controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(controller.settings().transfer.key.has_value(),"DSSS voice fixture did not load its independent keys");
+    controller.edit(F::rf_shift,"10 kHz");
+    for(const auto factor:{10u,100u,1000u}) {
+        controller.select(F::dsss_factor,std::to_string(factor));
+        const auto& config=controller.settings().transfer.modem;
+        check(config.dsss_factor==factor&&config.bandwidth_hz==3600./factor&&config.carrier_hz==1500&&
+            modem::waveform_bandwidth_hz(config)==3600&&
+            controller.field(F::carrier).text=="11.5 kHz"&&controller.field(F::carrier).options.front().id=="11.5 kHz"&&
+            controller.field(F::carrier).options.back().id=="11.8 kHz",
+            "DSSS selection lost its voice-passband width, translated carrier or occupied-band suggestions");
+    }
+    controller.edit(F::planner_command,"--dsss-factor 10 --rate 120 --carrier 11800");
+    controller.activate(C::planner_load_command);
+    check(controller.settings().transfer.modem.dsss_factor==10&&controller.settings().transfer.modem.bandwidth_hz==120&&
+        controller.settings().transfer.modem.carrier_hz==1800,
+        "importing explicit DSSS geometry incorrectly applied interactive defaults");
+    controller.select(F::fhss,"fake-0.4s-200");prepare(controller);
+    check(controller.field(F::fhss).display_text.find("display only")!=std::string::npos&&
+        controller.field(F::lpi_estimate).text.find("observer estimate unchanged")!=std::string::npos,
+        "Fake hopping left its unchanged observer estimate unexplained");
+    check(controller.field(F::simulation_confidence).text.starts_with("RX reference")&&
+        controller.field(F::simulation_confidence).text.find('%')!=std::string::npos&&
+        controller.field(F::inspection).text.find("RX model:")!=std::string::npos,
+        "DSSS mode must identify its conditional reference and validation limit");
+    controller.edit(F::bandwidth,"1.2 kHz");
+    controller.edit(F::carrier,"11.5 kHz");
+    check(!controller.enabled(C::transmit)&&controller.field(F::airtime).text.find("Bandwidth 12 kHz")!=std::string::npos&&
+        controller.field(F::inspection).text.find("Rate x 10 DSSS")!=std::string::npos&&
+        controller.field(F::inspection).text.find("ideal RRC target width 7.5 kHz")!=std::string::npos,
+        "invalid DSSS geometry hid the requested bandwidth and ideal shaping target");
+    controller.close();
 }
 void sub_hertz_controls() {
     using F=ui::Field;using C=ui::Command;
@@ -2560,6 +2620,10 @@ int main(int argc,char** argv) {
     try {
         receiver_health_indicator();
         if(argc>1&&std::string_view(argv[1])=="--receiver-health") {std::cout<<"Receiver health indicator passed\n";return 0;}
+        if(argc>1&&std::string_view(argv[1])=="--dsss-controls") {
+            dsss_voice_carrier_controls();
+            std::cout<<"DSSS voice-passband controls passed\n";return 0;
+        }
         if(argc>1&&std::string_view(argv[1])=="--pending-replay-batch") {
             revised_reception_ingestion();pending_replay_batch();
             std::cout<<"Pending replay batch checks passed\n";
@@ -2579,6 +2643,7 @@ int main(int argc,char** argv) {
         pending_replay_batch();
         delayed_replay_interruption();
         rate_carrier_controls();
+        dsss_voice_carrier_controls();
         sub_hertz_controls();
         shannon_capacity_display();
         profile_reference_display();

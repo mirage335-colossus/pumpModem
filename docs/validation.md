@@ -4,6 +4,66 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## DSSS and live-audio follow-up — manual checkpoint, 9 October 2026
+
+The new local GUI includes Live/Duplex, Clear received queue/backlog reset,
+duration-only clock controls, visible audio-timing fallback, DSSS voice presets
+and separately labeled RX references. The coherent wrong-outer-key control and
+discrete timing-neighbor endpoint regression now pass. Enhanced detector paths,
+arbitrary off-grid endpoints and full acquisition-bank sensitivity remain open.
+
+The final affected GUI suite passes37/37; complete receiver, correlator, Live and
+estimate tests pass. Three paired execution runs per case show about14–21% extra
+CPU for the coherent DSSS check, about1.073x speedup in the tiny RF prefix, and no
+clear Sub9 improvement. Conditional factor10 sensitivity estimates0 dB additional
+loss, with a simultaneous95%-coverage upper bound0.08 dB for four fixed coherent
+cases at90%/99% detection. This is not full-bank or cumulative qualification.
+
+Exact build/baseline hashes, test scope, resolved geometries, CPU/wall/memory/latency
+measurements, uncertainty and remaining limitations are in the
+[DSSS follow-up report](dsss-followup-validation.md). No push, publication or
+hosted CI was performed. Full general/native/platform/SDK/packaging and calibration
+qualification is deferred until requested after manual testing.
+
+## Earlier clock and spread checkpoint — superseded local results, 9 October 2026
+
+The following records the earlier frozen baseline. Its two retained fixture
+failures and test counts are historical; current fixes and limits are above.
+
+
+The local overlay on `ac63e3ab18850daf4f093c9dfeb1bcb6541abf27` adds independent
+clock controls, estimated native audio timing, outer DSSS factors and illustrative
+FHSS. This is not completed qualification. No push, publication or hosted CI is
+authorized; broader general/native/platform/SDK/packaging coverage is deferred
+until the user requests it after manual testing.
+
+Focused tests found and fixed an ordinary pulse-table-knot cache error and a
+rounding-sensitive finite-message timing guard. Full pulse-batch statistics,
+the qualified-window raw/pulse comparison, clock primitives and the native ALSA
+adapter pass their unchanged numerical assertions. The adapter includes active
+default slew, finite tails, partial writes, cancellation and timestamp failure.
+These are software-provider tests, not measurements of an IC-7100.
+
+The rebuilt local GUI adds an independent editable **Audio error**, default
+30 ms per station, with CLI/parameter-list persistence. Known audio queue delay
+is compensated separately; estimated timestamp/codec error and stricter caller
+limits are retained. The full affected GUI group passes **37/37 in 139.68 s**.
+After the final backend limit fix, **13/14** selected complete core cases pass
+in **77.00 s**; the failed receiver case executes all 44 subcases and passes 43.
+Its remaining failure is the outer-key control below. These checks include
+ALSA, Windows and hosted audio adapters, resampling, clock/search statistics,
+crypto/patterns, estimates and CLI. The standalone GUI was relinked
+against the final native backend; its unchanged shared GUI evidence is reused.
+
+Retained failures: a strict Live nominal-end fixture completes 32 samples early
+at 64 samples/s in both the full-window and narrowed-window runs on identical
+PCM (the final diagnostics confirm modeled flags 1 and 0 respectively); the
+strong wrong-outer-key DSSS control admits candidates. Neither is a
+false-alarm-rate measurement. See [clock timing](clock-sync.md) and
+[spread controls](spread-spectrum-controls.md) for scope and assumptions.
+The previous [speed and conditional sensitivity measurements](pulse-moment-validation.md)
+belong to their recorded source/binary hashes and do not qualify these new paths.
+
 ## Pulse-moment candidate — manual-testing checkpoint, 8 October 2026
 
 Local candidate `5a37b78` extends exact finite-pulse projection above the former

@@ -19,6 +19,7 @@
 using namespace datapump;
 namespace {
 void check(bool condition,const char* message) { if(!condition)throw Error(message); }
+void check(bool condition,const std::string& message) { if(!condition)throw Error(message); }
 template<class Work>void rejects(Work work,const char* message) {
     try { work(); } catch(const Error&) { return; }
     throw Error(message);
@@ -109,9 +110,9 @@ bool same_burst(const modem::PatternBurst& a,const modem::PatternBurst& b) {
 }
 bool same_evidence(const modem::PatternEvidence& a,const modem::PatternEvidence& b) {
     return std::tie(a.first_sample,a.end_sample,a.stream_symbol,a.frequency_hz,a.score,a.alternative_score,
-                    a.bit,a.stream_phase_samples,a.admission_threshold,a.frequency_hypothesis)==
+                    a.bit,a.stream_phase_samples,a.admission_threshold,a.frequency_hypothesis,a.outer_presence_score,a.outer_presence_active)==
            std::tie(b.first_sample,b.end_sample,b.stream_symbol,b.frequency_hz,b.score,b.alternative_score,
-                    b.bit,b.stream_phase_samples,b.admission_threshold,b.frequency_hypothesis);
+                    b.bit,b.stream_phase_samples,b.admission_threshold,b.frequency_hypothesis,b.outer_presence_score,b.outer_presence_active);
 }
 struct ComparedProgress {
     Bytes bits;
@@ -234,6 +235,184 @@ void parallel_search_exact_progress() {
             check(phased.bits==bits,"parallel phase bank changed timestamp-dependent private bits");
         }
     }
+}
+void outer_dsss_progress_and_absence() {
+    auto c=config(64,true);c.bandwidth_hz=100;c.dsss_factor=10;
+    for(std::size_t i=0;i<c.dsss_seed.size();++i)c.dsss_seed[i]=static_cast<std::uint8_t>(i*13+29);
+    const Bytes bits{0,0,1};
+    const auto symbol=modem::symbol_sample_count(c),absence=modem::pattern_absence_samples(c);
+    modem::PatternSearch search;search.frequency_offsets_hz={0};
+    search.compact_clock_search=true;search.start_offset_seconds=137./c.sample_rate;search.start_uncertainty_seconds=.01;
+    const auto samples=waveform(c,bits,137,absence+2*symbol+503,.73,.05,671);
+    const auto progress=compare_parallel_progress(samples,c,search,3);
+    if(progress.bits!=bits || progress.pending_polls<bits.size() || progress.complete_events!=1) {
+        std::string observed;for(auto bit:progress.bits)observed+=bit?'1':'0';
+        throw Error("outer DSSS lost independent bit progress or physical completion: bits="+observed+
+            " pending="+std::to_string(progress.pending_polls)+" complete="+std::to_string(progress.complete_events));
+    }
+    check(progress.completed_at>=137+bits.size()*symbol+absence,
+        "outer DSSS completed before fully observed absent symbols");
+    const auto prefix=waveform(c,bits,137,symbol/2,.73,.05,671);
+    const auto incomplete=compare_parallel_progress(prefix,c,search,3);
+    check(incomplete.bits==bits && incomplete.complete_events==0,"outer DSSS treated EOF as observed absence");
+    constexpr std::array<std::size_t,3> chunks{19,503,71};
+    c.dsss_seed[0]^=0x40;
+    const auto wrong=receive(samples,c,chunks,search);
+    check(std::any_of(wrong.candidates.begin(),wrong.candidates.end(),[](const auto& e) {
+        return e.score>=e.admission_threshold && e.outer_presence_active && e.outer_presence_score<e.admission_threshold;
+    }),"outer DSSS fixture did not exercise strong structured-code rejection");
+    check(wrong.bursts.empty(),"outer DSSS accepted a different dedicated outer key");
+}
+void outer_dsss_weak_awgn_preserves_admission() {
+    auto c=config(64,true);c.bandwidth_hz=100;c.dsss_factor=10;
+    for(std::size_t i=0;i<c.dsss_seed.size();++i)c.dsss_seed[i]=static_cast<std::uint8_t>(i*13+29);
+    modem::PatternSearch search;search.frequency_offsets_hz={0};search.worker_threads=1;
+    search.start_offset_seconds=137./c.sample_rate;search.start_uncertainty_seconds=.001;
+    constexpr std::array<std::size_t,3> chunks{19,503,71};
+    for(const bool compact:{true,false})for(const double noise:{3.,5.}) {
+        search.compact_clock_search=compact;search.outer_presence_guard=true;
+        const auto samples=waveform(c,Bytes{0,1},137,modem::symbol_sample_count(c),.73,noise,671);
+        const auto guarded=receive(samples,c,chunks,search);
+        search.outer_presence_guard=false;
+        const auto preceding=receive(samples,c,chunks,search);
+        check(guarded.bursts.size()==preceding.bursts.size() &&
+            std::equal(guarded.bursts.begin(),guarded.bursts.end(),preceding.bursts.begin(),same_burst),
+            "outer guard changed weak AWGN decisions, endpoints or progress");
+        for(const auto& e:guarded.candidates)check(!e.outer_presence_active,
+            "weak AWGN fixture unexpectedly entered strong colored-excess scope");
+    }
+}
+void long_timing_guide_preserves_bit_owner() {
+    auto c=config(64,true);c.sample_rate=64;c.carrier_hz=16;c.bandwidth_hz=2;
+    const Bytes bits{0,0,1};const auto symbol=modem::symbol_sample_count(c);
+    check(symbol==4096,"timing guide fixture changed its long-symbol geometry");
+    modem::PatternSearch search;search.frequency_offsets_hz={0};search.compact_clock_search=true;
+    search.start_offset_seconds=8;search.start_uncertainty_seconds=1;
+    search.drift_tolerant=false;search.chunk_bits=1;search.worker_threads=1;
+    // Keep this boundary regression above threshold but outside the legacy
+    // factor1 strongly colored wrong-pattern failure (sigma=.03 admits bit1
+    // at origin448 with score169.62 before the true origin512 is complete).
+    const auto samples=waveform(c,bits,512,2*symbol,.21,1.5,173);
+    modem::PatternReceiver receiver(c,8*1024*1024,search);
+    Bytes accepted;std::size_t completed=0;std::optional<std::pair<std::uint64_t,std::uint64_t>> identity;
+    const auto end=512+(bits.size()+1)*symbol;
+    for(std::size_t i=0;i<samples.size();++i) {
+        receiver.push(std::span(samples).subspan(i,1));
+        for(const auto& event:receiver.take_bursts()) {
+            const auto current=std::pair(event.stream_first_sample,event.stream_first_symbol);
+            if(!identity)identity=current;
+            check(identity==current,"timing guide replaced immutable accepted-bit ownership");
+            accepted.insert(accepted.end(),event.bits.begin(),event.bits.end());
+            check(accepted.size()<=bits.size() && std::equal(accepted.begin(),accepted.end(),bits.begin()),
+                "timing guide changed a pending canonical bit prefix at sample "+std::to_string(i+1)+
+                " origin "+std::to_string(event.stream_first_sample)+" score "+std::to_string(event.score)+
+                " bits "+[&]{std::string text;for(auto b:accepted)text+=b?'1':'0';return text;}());
+            if(event.complete){check(i+1>=end,"timing guide completed before compatible later absence");++completed;}
+        }
+        if(i+1==end-1)check(completed==0,"timing guide manufactured the final absent sample");
+        if(i+1==end)check(completed==1,"timing guide delayed completed absence by another symbol");
+    }
+    receiver.finish();check(accepted==bits && completed==1,"timing guide lost payload or unique physical end");
+}
+void qualified_clock_window() {
+    constexpr std::size_t workspace=8*1024*1024;
+    // Fixed phase need not lie on the phase-search gcd lattice. In particular
+    // phase7 must never be rounded to0 by a qualified window.
+    for(const unsigned chips:{15U,75U})for(const unsigned phase:{0U,7U}) {
+        auto c=config(chips,true);c.sample_rate=256;c.carrier_hz=64;c.bandwidth_hz=64;
+        c.stream_phase_samples=phase;
+        modem::PatternSearch search;search.frequency_offsets_hz={0};search.compact_clock_search=true;
+        search.start_offset_seconds=0;search.start_uncertainty_seconds=1;search.worker_threads=1;
+        const auto origin=18.L; // original half-chip coverage-cell boundary
+        search.qualified_start_window=modem::PatternStartWindow{origin-1.01L*phase,1.01L,.025L};
+        modem::PatternCorrelator receiver(c,search,workspace);
+        check(receiver.work().hypotheses==2,"sub-chip UTC window lost an original neighboring cell or fixed phase");
+        const auto symbol=modem::symbol_sample_count(c);
+        std::vector<float> silence(symbol+20);
+        receiver.push(std::span(silence).first(symbol));
+        check(!receiver.initial_search_complete(),"UTC clock window retired before its complete symbol");
+        receiver.push(std::span(silence).subspan(symbol));
+        check(receiver.initial_search_complete(),"UTC clock window never completed its finite coverage");
+    }
+    // Multiple canonical phases across both shorter and longer than one-second
+    // symbols. Pruning preserves half-chip coverage without changing PCM.
+    for(const unsigned chips:{15U,75U})for(const unsigned phase:{0U,8U,112U}) {
+        auto tx=config(chips,true);tx.sample_rate=256;tx.carrier_hz=64;tx.bandwidth_hz=64;
+        tx.stream_phase_samples=phase;
+        const Bytes bits{0,0,1};
+        const auto samples=waveform(tx,bits,17,modem::pattern_absence_samples(tx)+512,.31,.04,738);
+        auto rx=tx;rx.stream_phase_samples=0;
+        modem::PatternSearch search;search.frequency_offsets_hz={0};search.compact_clock_search=true;
+        search.search_stream_phases=true;search.start_offset_seconds=0;search.start_uncertainty_seconds=1;
+        search.qualified_start_window=modem::PatternStartWindow{17.L-1.01L*phase,1.01L,.025L};
+        const auto progress=compare_parallel_progress(samples,rx,search,3);
+        check(progress.bits==bits && progress.complete_events==1,"qualified UTC phase map lost sampled payload/absence");
+    }
+    // More than sixteen seconds selects pulse projection. The phase lattice
+    // has large holes after pruning: those holes must not renumber pulse
+    // parity, canonical addresses, or paired frequency/clock alternatives.
+    for(const auto origin:{-.137L,17.125L})for(const auto ppm:{-200.,200.}) {
+        auto tx=config(64,true);tx.sample_rate=256;tx.carrier_hz=64;tx.bandwidth_hz=64;
+        tx.integration_seconds=(4256.-.25)/256;tx.stream_phase_samples=224;
+        const auto symbol=modem::symbol_sample_count(tx);
+        check(symbol==4256 && modem::pattern_chip_samples(tx)==8,"qualified pulse fixture geometry changed");
+        const auto rate=1+static_cast<long double>(ppm)*1e-6L;
+        std::vector<float> samples(static_cast<std::size_t>(std::ceil(origin+2*symbol/rate))+257);
+        modem::PatternCode pattern(tx,tx.stream_epoch);
+        std::mt19937 random(409);std::normal_distribution<float> noise(0,.08F);
+        for(std::size_t n=0;n<samples.size();++n) {
+            samples[n]=noise(random);
+            const auto within=(static_cast<long double>(n)-origin)*rate;
+            if(within>=0 && within<symbol)samples[n]+=static_cast<float>((
+                std::polar(1.,2*std::numbers::pi*(64.03125)*n/256+.71)*
+                pattern.shaped_value(0,1,static_cast<double>(within))).real());
+        }
+        auto rx=tx;rx.stream_phase_samples=0;
+        modem::PatternSearch search;search.compact_clock_search=true;search.search_stream_phases=true;
+        search.start_offset_seconds=-1;search.start_uncertainty_seconds=2;
+        search.hypotheses={{.03125,ppm},{-.03125,-ppm}};search.worker_threads=1;
+        search.retain_score=0;search.candidate_limit=32;
+        search.qualified_start_window=modem::PatternStartWindow{origin-1.01L*224,1.01L,.025L};
+        modem::PatternCorrelator projected(rx,search,workspace),raw(rx,search,workspace,{true});
+        check(projected.work().backend==modem::PatternCorrelationBackend::pulse &&
+            raw.work().backend==modem::PatternCorrelationBackend::raw,
+            "qualified UTC pulse regression did not exercise both scoring paths");
+        check(projected.work().hypotheses==raw.work().hypotheses && projected.work().hypotheses>2,
+            "qualified UTC backend changed supplied search lanes");
+        std::size_t accepted=0;
+        for(std::size_t n=0;n<samples.size();) {
+            const auto count=std::min<std::size_t>(137,samples.size()-n);
+            projected.push(std::span(samples).subspan(n,count));raw.push(std::span(samples).subspan(n,count));n+=count;
+            check(projected.initial_search_complete()==raw.initial_search_complete(),
+                "qualified projection changed complete-symbol coverage");
+            const auto a=projected.candidates(),b=raw.candidates();
+            check(a.size()==b.size(),"qualified projection changed candidate publication");
+            for(std::size_t i=0;i<a.size();++i) {
+                auto x=a[i],y=b[i];
+                check(std::abs(x.score-y.score)<2e-6*std::max(1.,y.score) &&
+                    std::abs(x.alternative_score-y.alternative_score)<2e-6*std::max(1.,y.alternative_score),
+                    "qualified projection changed raw statistical evidence: origin="+std::to_string(double(origin))+
+                    " ppm="+std::to_string(ppm)+" input="+std::to_string(n)+" first="+std::to_string(x.first_sample)+
+                    " phase="+std::to_string(x.stream_phase_samples)+" score="+std::to_string(x.score)+
+                    " raw="+std::to_string(y.score)+" alternative="+std::to_string(x.alternative_score)+
+                    " raw_alternative="+std::to_string(y.alternative_score));
+                x.score=y.score;x.alternative_score=y.alternative_score;
+                check(same_evidence(x,y),"qualified projection changed candidate address, boundary or threshold");
+            }
+            const auto events=projected.take_bursts(),reference=raw.take_bursts();
+            check(events.size()==reference.size(),"qualified projection delayed an accepted bit");
+            for(std::size_t i=0;i<events.size();++i) {
+                auto x=events[i],y=reference[i];x.score=y.score;
+                check(same_burst(x,y),"qualified projection changed pending identity or physical completion");
+                accepted+=x.bits.size();
+            }
+        }
+        check(accepted>0,"qualified pulse map did not admit the sampled candidate");
+    }
+    auto c=config(64,true);modem::PatternSearch search;search.frequency_offsets_hz={0};
+    search.compact_clock_search=true;search.start_offset_seconds=0;search.start_uncertainty_seconds=1;
+    search.qualified_start_window=modem::PatternStartWindow{0,0,0};
+    rejects([&]{modem::PatternCorrelator bad(c,search,workspace);},"zero UTC map scale accepted");
 }
 void parallel_search_physical_absence() {
     auto c=config(32,true);c.pulse_shaping=false;
@@ -1589,6 +1768,10 @@ int main(int argc,char** argv) {
     run("short pattern shared projection phase",short_pattern_shared_projection_phase);
     run("short template cache workspace and exact equivalence",short_template_cache_workspace);
     run("parallel search exact progress",parallel_search_exact_progress);
+    run("outer DSSS progress and physical absence",outer_dsss_progress_and_absence);
+    run("outer DSSS weak AWGN unchanged",outer_dsss_weak_awgn_preserves_admission);
+    run("long timing guide immutable progress",long_timing_guide_preserves_bit_owner);
+    run("qualified UTC clock window",qualified_clock_window);
     run("parallel search physical absence",parallel_search_physical_absence);
     run("parallel long continuation exact progress",parallel_long_continuation_exact_progress);
     run("bounded long clock-window fallback",long_clock_window_fallback);

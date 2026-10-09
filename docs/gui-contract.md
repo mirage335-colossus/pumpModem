@@ -426,6 +426,54 @@ Capture callers without a discontinuity handler fail instead of concatenating
 samples across these gaps; a flat recording cannot describe missing time.
 No gap, receiver reset, EOF or quota event supplies physical absence/completion.
 
+**Live/Duplex** beside the audio controls keeps hardware capture active during
+local transmission for physical loopback or independently isolated radios. The
+default remains half duplex. The setting persists and exports as `--live-duplex`.
+Captured samples alone advance receiver time; local output is not counted twice.
+TX cancellation does not stop duplex capture. Audio conversion buffers share the
+configured DSP reservation; the additional native capture thread has ordinary OS
+thread overhead outside that reservation.
+
+**Clear received** cancels in-flight receiver work, drops queued capture PCM and
+starts fresh acquisition. It clears late/backlog and dropping indicators together
+with received content. It preserves any active transmission and its private-key
+reuse lock. Neither clearing nor discarded input creates physical completion.
+
+The editable **Clock accuracy**, **Clock region** and **Clock offset** controls
+describe PC synchronization and propagation independently of oscillator selection.
+The adjacent editable **Audio error** defaults to 30 ms per station after known
+queue-delay compensation. It is independent of GPS/propagation and oscillator
+models, persists through the same parameter-list/command path, and remains
+unchanged when the clock triplet returns to Default. Its duration presets and
+custom values do not alter the underrun-prevention buffer or establish measured
+hardware accuracy.
+Default in any one resets all three to the existing epoch-search policy. Explicit
+region values are total widths centered on the fixed offset. The accuracy menu
+contains duration entries, not composite policy strings. Composite command and
+parameter-list imports are split into the three fields; individual fractional
+durations remain editable. A narrow entered value must not silently drop
+unsupported timing hypotheses; backend limits remain visible in diagnostics.
+Custom native compact mode labels its audio/radio arrival window **estimated**;
+the GPS entry does not erase the backend allowance. Unsupported paths retain
+the full window and disclose the fallback. The expanded oscillator bank keeps
+every original lane; its complete cost appears in the work estimate.
+If the selected Audio error cannot be met, native playback visibly falls back
+before private PCM is generated. It does not inflate the entered allowance or
+restart after private output begins. The status distinguishes that fallback from
+qualified UTC following. See [timing behavior and qualification](clock-sync.md).
+
+The DSSS factor and FHSS dropdowns sit beside the keyfile control. Outer DSSS
+offers Off/10x/100x/1000x and requires a selected key; its dedicated stream does
+not replace inner private patterns. Selecting an enabled factor sets inner Rate
+360/36/3.6 Hz and stream Carrier 1500 Hz for 10x/100x/1000x. Explicit command imports
+preserve their requested Rate/Carrier. Invalid geometry still displays intended
+outer rate and shaped band edges to help correct Rate, Carrier or sample rate.
+Fake FHSS illustrates 200 channels at
+0.4-second dwell by updating Carrier/Shift display values while the real audio
+and hardware setting remain fixed. Genuine and IC-7100 hardware choices are
+visible but disabled. Neither that illustration nor an unsupported probability
+model may be presented as measured spreading gain. See [spread controls](spread-spectrum-controls.md).
+
 The compact persistent **Baseband Osc**, **Shift Osc** and **Margin** controls
 sit together below the Simulation estimates; **Carrier** and **Shift** are
 adjacent in the modem row. Both oscillator dropdowns offer **Free-running
@@ -433,7 +481,8 @@ crystal** (the unchanged default), **GPSDO: hobbyist XO (no oven)**,
 **GPSDO: TCXO (no oven)** and **GPSDO: OCXO**. Shift Osc additionally offers
 **Baseband clock**, for sampling and mixers that share one hardware reference;
 this uses the selected Baseband profile once with linked frequency/rate errors.
-There is no separate Clock dropdown. Shift defaults to 0 Hz and Margin to 3×.
+Shift Osc also offers the IC-7100 RF example. It does not imply that the USB
+audio codec shares that reference. Shift defaults to 0 Hz and Margin to 3×.
 At Shift zero, Shift Osc is disabled and displays **N/A**; all of its frequency,
 phase and linked-drift contributions are excluded. Its chosen option is retained
 for a later positive Shift. Baseband Osc remains active for sampling and the
@@ -773,15 +822,16 @@ and transmitted constellation display the generated signal from those stages.
 
 ## Layout and documents
 
-`desktop_layout.hpp` defines the desktop arrangement at 1180 by 1048 logical
-pixels, with a 1030 by 968 minimum. A persistent simulation row holds the
+`desktop_layout.hpp` defines the desktop arrangement at 1180 by 1072 logical
+pixels, with a 1130 by 992 minimum. A persistent simulation row holds the
 dropdown, modeled receive probability and reference CPU/GPU compute estimates.
-The following compact persistent row holds Baseband Osc, Shift Osc and Margin;
+The following compact persistent row holds editable Clock accuracy, Clock region
+and Clock offset, followed by Audio error, to the left of Baseband Osc, Shift Osc and Margin;
 Carrier and Shift share the existing modem row. Detailed oscillator/search
 values appear under the Link planner's hideable Model limits and references,
 and LPI assumptions remain in inspection.
-The default and minimum window sizes retain the existing composition,
-reception and plot allocations.
+The wider minimum retains readable oscillator choices alongside all four timing
+fields, preserving the existing composition, reception and plot allocations.
 `control_layout.hpp` computes frame, label,
 editor, preset, caption and footer rectangles once. Both adapters apply these
 rectangles and convert logical to physical coordinates using their display

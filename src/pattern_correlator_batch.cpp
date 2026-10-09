@@ -81,6 +81,11 @@ void accumulate_lane(const CorrelationBatch& batch,CorrelationLane& lane,Pattern
                     const auto left=static_cast<std::size_t>(observed-block.sample);
                     const auto row=block.projection_offset+lane.frequency*(block.count+1);
                     const auto projection=batch.projections[row+left+1]-batch.projections[row+left];
+                    if(g.outer_presence)pattern_pulse_each(static_cast<double>(within),g.symbol_samples,g.chip_samples,
+                        [&](std::uint64_t local,double pulse) {
+                            lane.outer_evidence[group].add(local,pulse*std::complex<double>{projection.xc,projection.xs},
+                                [&](std::uint64_t position){return pattern.values(first_chip+position);});
+                        });
                     const auto phases=pattern.shaped_values(first_chip,static_cast<double>(within));
                     for(unsigned bit=0;bit<2;++bit) {
                         const auto phase=phases[bit];
@@ -104,6 +109,12 @@ void accumulate_lane(const CorrelationBatch& batch,CorrelationLane& lane,Pattern
                 const auto boundary=std::min(static_cast<long double>(end),std::ceil(std::min(chip_end,section_end)));
                 const auto until=static_cast<std::uint64_t>(std::max(static_cast<long double>(observed+1),boundary));
                 const auto left=static_cast<std::size_t>(observed-block.sample),right=static_cast<std::size_t>(until-block.sample);
+                if(g.outer_presence) {
+                    const auto row=block.projection_offset+lane.frequency*(block.count+1);
+                    const auto measured=batch.projections[row+right]-batch.projections[row+left];
+                    lane.outer_evidence[group].add(local,{measured.xc,measured.xs},
+                        [&](std::uint64_t position){return pattern.values(lane.index*g.chips_per_symbol+position);});
+                }
                 for(unsigned bit=0;bit<2;++bit) {
                     const auto bank=g.tone?tone_bank+bit:lane.frequency;
                     require(bank<batch.bank_frequencies.size(),"correlation lane frequency exceeds bank");
@@ -266,7 +277,7 @@ void CorrelationPulseKernel::prepare(long double offset,std::uint64_t count,std:
     std::array<std::array<Wide,correlation_pulse_pairs>,3> square{};
     const auto duration=static_cast<long double>(chip_)/rate_;
     const auto delta=offset-offset_;
-    const bool incremental=valid_ && offset<=1 && offset_<=1 && std::abs(delta)<=.125L;
+    const bool incremental=valid_ && !point_ && offset<=1 && offset_<=1 && std::abs(delta)<=.125L;
     if(incremental)for(std::size_t pair=0;pair<correlation_pulse_pairs;++pair) {
         energy[0][pair]=energy_[0][pair]+delta*(energy_[1][pair]+delta*energy_[2][pair]);
         energy[1][pair]=energy_[1][pair]+2*delta*energy_[2][pair];energy[2][pair]=energy_[2][pair];
@@ -283,6 +294,13 @@ void CorrelationPulseKernel::prepare(long double offset,std::uint64_t count,std:
         if((n&255U)==0)cancelled(stop);
         const auto q=(offset+n)/duration-.5L;
         const auto knot=std::floor(resolution*q);
+        // Per-atom pulse coordinates are rounded to double after their
+        // integer translation. At a table knot they can choose different
+        // one-sided slopes from this common long-double coordinate. The
+        // value at the knot is valid, but its polynomial must not be carried
+        // into another cell. Include the rounding neighborhood of all atoms.
+        const auto knot_guard=32*std::numeric_limits<double>::epsilon()*resolution*correlation_pulse_atoms;
+        if(n<count && std::abs(resolution*q-std::round(resolution*q))<=knot_guard)point=true;
         if(n<count) {
             lower=std::max(lower,duration*(knot/resolution+.5L)-n);
             upper=std::min(upper,duration*((knot+1)/resolution+.5L)-n);

@@ -99,7 +99,7 @@ struct StreamCache {
 
 std::uint64_t pattern_chip_samples(const Config& config) {
     validate(config);
-    return static_cast<std::uint64_t>(std::ceil(2. * config.sample_rate / config.bandwidth_hz));
+    return static_cast<std::uint64_t>(std::ceil(2. * config.sample_rate / waveform_bandwidth_hz(config)));
 }
 std::uint64_t pattern_chips_per_symbol(const Config& config) {
     const auto chip = pattern_chip_samples(config);
@@ -113,6 +113,13 @@ struct PatternCode::Impl {
     bool shaped = false;
     bool private_patterns = false;
     StreamCache pattern, dsss, pattern_one, dsss_one;
+    std::unique_ptr<StreamCache> outer;
+    struct InnerChip {
+        std::uint64_t epoch=0,position=0;
+        std::complex<double> value{};
+        bool valid=false;
+    };
+    std::array<InnerChip,2> inner_chips{};
     struct CachedChip {
         std::uint64_t address=0;
         std::complex<double> value{};
@@ -139,6 +146,11 @@ struct PatternCode::Impl {
         chip = pattern_chip_samples(config);
         symbol = symbol_sample_count(config);
         chips = symbol / chip + (symbol % chip != 0);
+        require(sizeof(Impl)+sizeof(PatternCode)+(config.dsss_factor>1?sizeof(StreamCache):0)<=config.memory_limit,
+                "pattern code exceeds memory limit");
+        if(config.dsss_factor>1)outer=std::make_unique<StreamCache>(config.dsss_seed,StreamPurpose::Dsss,
+            start_epoch,config.dsss_factor==10?StreamDomain::OuterDsss10V1:
+            config.dsss_factor==100?StreamDomain::OuterDsss100V1:StreamDomain::OuterDsss1000V1);
         require(config.stream_phase_samples < config.sample_rate,
                 "pattern stream phase must be within its first second");
         shaped=pattern_pulse_enabled(config);
@@ -148,6 +160,7 @@ struct PatternCode::Impl {
     ~Impl() {
         OPENSSL_cleanse(shaped_chips.data(),sizeof(shaped_chips));
         OPENSSL_cleanse(shaped_chips_one.data(),sizeof(shaped_chips_one));
+        OPENSSL_cleanse(inner_chips.data(),sizeof(inner_chips));
         OPENSSL_cleanse(config.spreading_seed.data(),config.spreading_seed.size());
         OPENSSL_cleanse(config.dsss_seed.data(),config.dsss_seed.size());
     }
@@ -156,10 +169,18 @@ struct PatternCode::Impl {
         require(std::isfinite(fraction) && fraction >= 0 && fraction < 1,
                 "pattern chip fraction must be within [0,1)");
         auto position = absolute_chip % chips;
+        std::complex<double> outer_value{1,0};
         if (config.scramble || config.dsss) {
             const auto address = symbol_stream_address(epoch, config.stream_phase_samples,
                 absolute_chip / chips, symbol, config.sample_rate);
-            position = symbol_stream_chip(address, chips, position);
+            if(outer) {
+                outer->select_epoch(address.epoch);
+                const auto fine_position=symbol_stream_chip(address,chips,position);
+                constexpr std::array<std::complex<double>,4> phases{{{1,0},{0,1},{-1,0},{0,-1}}};
+                outer_value=phases[(outer->byte(fine_position/4)>>(2*(fine_position%4)))&3U];
+                const auto coarse_chips=chips/config.dsss_factor+(chips%config.dsss_factor!=0);
+                position=symbol_stream_chip(address,coarse_chips,position/config.dsss_factor);
+            } else position = symbol_stream_chip(address, chips, position);
             if (config.scramble) { pattern.select_epoch(address.epoch); pattern_one.select_epoch(address.epoch); }
             if (config.dsss) { dsss.select_epoch(address.epoch); dsss_one.select_epoch(address.epoch); }
         }
@@ -181,9 +202,16 @@ struct PatternCode::Impl {
             }
             auto& row = private_patterns && bit ? pattern_one : pattern;
             auto* layer = config.dsss ? (private_patterns && bit ? &dsss_one : &dsss) : nullptr;
-            auto result = row.noise(position,layer,nullptr,nullptr,captured);
+            auto& inner=inner_chips[bit];
+            // Valid only for this candidate's exact epoch and canonical coarse
+            // chip address. Outer chips share the coefficient, never a pattern
+            // across bit positions, keys, epochs or the zero/one alternatives.
+            auto result = outer && inner.valid && inner.epoch==row.epoch &&
+                inner.position==position && !captured ? inner.value :
+                row.noise(position,layer,nullptr,nullptr,captured);
+            if(outer)inner={row.epoch,position,result,true};
             if (bit && !private_patterns) result *= bit_mask[static_cast<std::size_t>((absolute_chip % chips) % bit_mask.size())];
-            return result;
+            return result*outer_value;
         }
         const auto angle = (bit ? 1. : -1.) * std::numbers::pi / 2 *
                            (static_cast<double>(absolute_chip % 4) + fraction);
@@ -264,7 +292,8 @@ std::uint64_t PatternCode::chip_samples() const { return impl_->chip; }
 std::uint64_t PatternCode::chips_per_symbol() const { return impl_->chips; }
 std::uint64_t PatternCode::symbol_samples() const { return impl_->symbol; }
 std::size_t PatternCode::working_bytes() const {
-    return sizeof(PatternCode) + sizeof(Impl)+(impl_->trace?sizeof(Impl::TraceStorage):0);
+    return sizeof(PatternCode) + sizeof(Impl)+(impl_->trace?sizeof(Impl::TraceStorage):0)+
+        (impl_->outer?sizeof(StreamCache):0);
 }
 void PatternCode::enable_transmit_trace(std::uint64_t first_chip) {
     impl_->trace=std::make_unique<Impl::TraceStorage>();impl_->trace->first_chip=first_chip;

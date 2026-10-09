@@ -59,7 +59,7 @@ std::uint32_t recommended_sample_rate(double bandwidth_hz,
     std::optional<double> carrier_hz = std::nullopt);
 double recommended_carrier_hz(double bandwidth_hz);
 Plan resolve(double bandwidth_hz, double target_snr_db_hz, PatternMode mode,
-             bool encryption, std::optional<double> carrier_hz = std::nullopt);
+             bool encryption, std::optional<double> carrier_hz = std::nullopt, unsigned dsss_factor = 1);
 // Selected bandwidth and pattern mode stay fixed. Targets resolving to the
 // same waveform profile share one receiver hypothesis.
 std::vector<modem::Config> receive_profiles(double bandwidth_hz,

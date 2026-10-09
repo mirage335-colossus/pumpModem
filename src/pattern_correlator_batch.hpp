@@ -70,12 +70,14 @@ CorrelationFit correlation_affine_fit(const CorrelationProjection& summed,
 // A common phase fit is a subspace of separate per-chip phase fits. Under
 // white Gaussian noise, projecting both signal and noise into this larger
 // subspace preserves integration gain. Its rank, rather than the PCM sample
-// count, bounds a weak acquisition chain supplied by a structured wrong-key
-// waveform. Standalone and established-stream scoring keep their existing fit.
+// count, bounds an AWGN weak acquisition chain. A keyed structured waveform
+// is not an isotropic Gaussian null; the separate outer-code gate below handles
+// qualified strong colored excess. Standalone scoring retains its original fit.
 struct CorrelationChipEvidence {
     CorrelationFit cell;
     double projected_energy=0;
     std::uint64_t projected_rank=0,cell_index=std::numeric_limits<std::uint64_t>::max();
+    bool nested=true;
     static std::pair<double,unsigned> projection(const CorrelationFit& fit) {
         const auto trace=fit.cc+fit.ss;
         if(!fit.count || trace<=1e-30)return {0,0};
@@ -92,12 +94,41 @@ struct CorrelationChipEvidence {
     void retain(const CorrelationFit& value) {
         const auto [energy,rank]=projection(value);
         projected_energy+=energy;projected_rank+=rank;
+        nested=nested && rank>=std::min<std::uint64_t>(2,value.count);
     }
     void add(const CorrelationProjection& p,std::complex<double> phase,std::size_t n,
              std::uint64_t index=std::numeric_limits<std::uint64_t>::max()) {
         if(index==std::numeric_limits<std::uint64_t>::max())return;
         if(index!=cell_index){retain(cell);cell={};cell_index=index;}
         cell.add(p,phase,n);
+    }
+    void add_fit(const CorrelationFit& fit,std::uint64_t index) {
+        if(index!=cell_index){retain(cell);cell={};cell_index=index;}
+        cell.xc+=fit.xc;cell.xs+=fit.xs;cell.cc+=fit.cc;cell.ss+=fit.ss;
+        cell.cs+=fit.cs;cell.energy+=fit.energy;cell.count+=fit.count;
+    }
+    bool colored_excess(const CorrelationFit& total,double threshold,double weak_energy_scale=1) const {
+        const auto [last_energy,last_rank]=projection(cell);
+        const auto rank=projected_rank+last_rank;
+        const auto [explained,coherent_rank]=projection(total);
+        if(!nested || last_rank<std::min<std::uint64_t>(2,cell.count) ||
+            rank<=coherent_rank || rank>=total.count || total.energy<=1e-30)return false;
+        const auto projected=std::clamp(projected_energy+last_energy,0.,total.energy);
+        const auto lack_of_fit=std::max(0.,projected-explained);
+        const auto residual=total.energy-projected;
+        const auto r=static_cast<double>(rank-coherent_rank),d=static_cast<double>(total.count-rank);
+        // The coherent subspace is contained in the disjoint chip subspace.
+        // Their difference removes an exactly represented correct signal at
+        // any strength. If deterministic mismatch energy is <= (4*T+32)*sigma^2,
+        // noncentral-upper / central-lower chi-square tails bound activation
+        // by 2*exp(-30). Near-singular non-nested cells disable this new guard.
+        constexpr double t=30;
+        const auto delta=(4*threshold+32)*std::max(1.,weak_energy_scale);
+        const auto lower=d-2*std::sqrt(d*t);
+        if(lower<=0)return false;
+        const auto upper=r+delta+2*std::sqrt((r+2*delta)*t)+2*t;
+        const auto limit=std::max(2.,(upper/r)/(lower/d));
+        return residual<=0 || lack_of_fit*d>limit*residual*r;
     }
     double score(const CorrelationFit& total) const {
         const auto raw=total.score();
@@ -113,6 +144,55 @@ struct CorrelationChipEvidence {
         while(static_cast<long double>(sample)>=std::ceil(start+static_cast<long double>(result+1)*chip/rate))++result;
         while(result && static_cast<long double>(sample)<std::ceil(start+static_cast<long double>(result)*chip/rate))--result;
         return result;
+    }
+};
+
+// Conditional independent-outer-code evidence. Pulses overlap in time, so
+// accumulate each complete clipped pulse dot BEFORE squaring it. A 17-slot
+// sliding ring covers the finite +/-8-chip pulse support without symbol-sized
+// storage. The caller supplies fresh 0/1 coefficients at the current symbol's
+// absolute chip address; no secret pattern is shared between bit positions.
+struct CorrelationOuterEvidence {
+    std::array<std::complex<double>,17> pulse{};
+    std::array<std::complex<long double>,2> dot{};
+    std::array<long double,2> variance{};
+    std::array<std::uint64_t,2> contributing_terms{};
+    std::uint64_t first=0,last=0;
+    bool initialized=false;
+    template<class Coefficients> void flush(Coefficients coefficients) {
+        const auto values=coefficients(first);
+        const auto measured=pulse[first%pulse.size()];
+        const auto z=std::complex<long double>{measured.real(),measured.imag()};
+        for(unsigned bit=0;bit<2;++bit) {
+            const auto c=std::complex<long double>{values[bit].real(),values[bit].imag()};
+            dot[bit]+=c*z;const auto weight=std::norm(c)*std::norm(z);variance[bit]+=weight;
+            if(weight>0)++contributing_terms[bit];
+        }
+        pulse[first%pulse.size()]={};++first;
+    }
+    template<class Coefficients> void add(std::uint64_t index,std::complex<double> value,Coefficients coefficients) {
+        if(!initialized){first=index>16?index-16:0;last=index;initialized=true;}
+        if(index<first)throw Error("outer pulse observations are not ordered");
+        while(index-first>=pulse.size())flush(coefficients);
+        last=std::max(last,index);pulse[index%pulse.size()]+=value;
+    }
+    template<class Coefficients> void finish(Coefficients coefficients) {
+        if(initialized)while(first<=last)flush(coefficients);
+    }
+    static constexpr long double log_constant=1.4959226032237258L;
+    bool can_admit(unsigned bit,double threshold)const {
+        // Cauchy bounds |D|^2/V by the number of nonzero terms. A partial
+        // observation must not enter a gate that no possible code can pass.
+        return static_cast<long double>(contributing_terms[bit])>threshold+log_constant;
+    }
+    double score(unsigned bit)const {
+        if(!(variance[bit]>0))return 0;
+        // Pinelis' rank-two orthogonal-projection Rademacher comparison:
+        // P(|sum c_j*q_j*u_j|^2/V >= u) <= (2e^3/9)*exp(-u).
+        // QPSK is two independent Rademacher coordinates and has covariance
+        // (V/2)I, even for unequal private amplitudes and nonorthogonal pulses.
+        const auto ratio=std::norm(dot[bit])/variance[bit];
+        return static_cast<double>(std::max(0.L,ratio-log_constant));
     }
 };
 
@@ -242,6 +322,7 @@ struct CorrelationLane {
     std::size_t tone_bank_base=std::numeric_limits<std::size_t>::max();
     std::array<std::array<CorrelationFit,2>,3> fits{};
     std::array<std::array<CorrelationChipEvidence,2>,3> chip_evidence{};
+    std::array<CorrelationOuterEvidence,3> outer_evidence{};
     std::array<std::array<CorrelationDriftFit,2>,3> drift_fits{};
     std::array<std::array<CorrelationDifferentialFit,2>,3> differential_fits{};
 };
@@ -256,6 +337,7 @@ struct CorrelationBlock {
 struct CorrelationPatternParameters {
     std::uint32_t spreading_mode=0,scramble=0,dsss=0;
     std::array<std::uint8_t,32> spreading_seed{},dsss_seed{};
+    unsigned dsss_factor=1;
 };
 struct CorrelationGeometry {
     std::uint64_t epoch=0,symbol_samples=0,chip_samples=0,chips_per_symbol=0,phase_step=1;
@@ -266,7 +348,7 @@ struct CorrelationGeometry {
     CorrelationPatternParameters pattern;
     unsigned drift_sections=1;
     std::uint64_t differential_window_samples=0;
-    bool guard_chains=false;
+    bool guard_chains=false,outer_presence=false;
 };
 struct CorrelationBatch {
     ~CorrelationBatch();

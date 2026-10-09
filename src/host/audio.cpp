@@ -247,6 +247,7 @@ void AudioEndpoint::playback(std::uint32_t logical,const audio::PlaybackCallback
 namespace datapump::audio {
 bool exclusive_supported(){return false;}
 std::string default_device_description(){return "Browser audio";}
+bool utc_follow_supported(){return false;}
 double minimum_lead_seconds(){return .5;}
 void schedule_output(double epoch,std::stop_token stop){host::audio_endpoint().schedule_output(epoch,stop);}
 std::vector<Device> devices(){return {{"default",default_device_description()}};}

@@ -40,6 +40,10 @@ struct OscillatorPatternSearch {
     // remaining within the independent quarter-chip resolution.
     double clock_step_ppm = 0;
     bool limited = false;
+    // Derived local timing policy, never an oscillator specification. Zero
+    // retains timestamped scheduling without changing transmitted sample rate.
+    double transmit_rate_correction = 0;
+    bool timing_correction_unavailable = false;
 };
 struct OscillatorEffects {
     double physical_rf_hz = 0;
@@ -53,7 +57,10 @@ void validate_oscillator_search(const OscillatorSearchConfig&);
 OscillatorEffects oscillator_effects(const Config&);
 // Finite static search from the declared effective-link oscillator bounds.
 // Requires Config::oscillator_search; no simulated truth is used by this bank.
-OscillatorPatternSearch oscillator_pattern_search(const Config&);
+OscillatorPatternSearch oscillator_pattern_search(const Config&,double transmit_rate_correction=0);
+// Candidate steering range for independent audio clocks. The search builder
+// admits it only when the complete expanded domain AND every original lane fit.
+double utc_transmit_rate_limit(const Config&);
 
 // Pattern offsets may use the available real-PCM passband, reserving the same
 // intended waveform support as modem::validate (including RRC rolloff when

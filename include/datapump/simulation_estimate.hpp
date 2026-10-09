@@ -1,6 +1,7 @@
 #pragma once
 #include "datapump/transfer.hpp"
 #include <span>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -8,12 +9,28 @@ namespace datapump::simulation {
 inline constexpr std::string_view reference_cpu = "Intel Core i9-13900H";
 inline constexpr std::string_view reference_gpu = "RTX 4090 Laptop GPU";
 
+// A sampled simulation has its randomized startup/settling epoch coverage.
+// Hardware keeps the configured peer's oscillator/correction coverage even
+// when local capture timing falls back to the full arrival window.
+// hardware_timing_model is an explicit planning assumption, not device evidence.
+enum class ReceiverWorkMode { sampled_simulation, hardware_fallback, hardware_timing_model };
+struct ReceiverTimingModel {
+    // Omitted fields use the explicitly selected planning assumptions. A
+    // caller with capture metadata must supply its larger uncertainty rather
+    // than replacing it with the user's smaller Audio error selection.
+    std::optional<double> capture_error_seconds;
+    std::optional<double> capture_rate_uncertainty_fraction;
+    std::optional<double> capture_seconds_per_frame;
+    bool operator==(const ReceiverTimingModel&) const = default;
+};
+
 struct Estimate {
     // Engineering estimates, not measurements or calibrated probabilities.
     // Idealized success conditional on completing receiver computation: the
     // supplied draft survives reception/correction. This is not a deadline or
     // an empirical success rate for the implementation.
-    // success_probability is meaningful only when confidence_available is true.
+    // success_probability is meaningful only when confidence_available or
+    // reference_probability_available is true, with their distinct scopes.
     double success_probability = 0;
     // First raw bit in the same geometry, independent of draft length/FEC.
     // Can remain supported when complete-draft tracking is outside coverage.
@@ -28,6 +45,14 @@ struct Estimate {
     bool probability_search_approximation = false;
     std::size_t probability_carrier_candidates = 0;
     std::string probability_model_limit;
+    // Conditional matched-template references remain useful outside the
+    // validated receiver model. They do not make confidence_available true:
+    // device timing, outer-code rejection and adaptive acquisition can remain
+    // unmodeled. The numeric probability fields above carry a reference only
+    // when the corresponding reference_available flag is set.
+    bool probability_reference_only = false;
+    bool reference_probability_available = false;
+    bool one_bit_reference_available = false;
     double cpu_seconds = 0;
     // Receive projection, search, tracking and nominal payload processing;
     // excludes synthetic channel generation and exceptional recovery searches.
@@ -104,6 +129,19 @@ struct Estimate {
     double clock_search_half_width_ppm = 0;
     double requested_clock_search_half_width_ppm = 0;
     std::size_t frequency_rate_hypotheses = 0;
+    std::size_t epoch_hypotheses = 0;
+    // Timing origins summed over the paired frequency/rate bank, per epoch/key.
+    // phase_groups is the same maximum simultaneous canonical phase fit count
+    // used by the compact work allowance, not additional timing origins.
+    double timing_hypotheses = 0;
+    std::size_t timing_phase_groups = 1;
+    ReceiverWorkMode receiver_work_mode = ReceiverWorkMode::sampled_simulation;
+    bool timing_window_modeled = false;
+    std::string receiver_work_assumptions;
+    // Same configured peer oscillator bank with the complete arrival window.
+    // This is a separate engineering fallback, never omitted search coverage.
+    double fallback_receiver_cpu_seconds = 0;
+    double fallback_timing_hypotheses = 0;
     bool oscillator_search_limited = false;
     // Includes membership in the paired region, not just independent extents.
     bool clock_in_search = true;
@@ -143,5 +181,7 @@ Estimate estimate(const transfer::Estimate& transmission,
                   std::size_t receive_key_count = 1,
                   bool compute_probability = true,
                   double differential_window_seconds = 100,
-                  std::size_t probability_trials = 4096);
+                  std::size_t probability_trials = 4096,
+                  ReceiverWorkMode work_mode = ReceiverWorkMode::sampled_simulation,
+                  ReceiverTimingModel timing_model = {});
 }
