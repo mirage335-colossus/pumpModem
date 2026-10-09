@@ -2,9 +2,12 @@
 #include "../src/pattern_drift.hpp"
 #include "../src/search_parallel.hpp"
 #include <algorithm>
+#include <bit>
+#include <cmath>
 #include <iostream>
 #include <numeric>
 #include <numbers>
+#include <random>
 
 using namespace datapump;
 using namespace datapump::modem;
@@ -99,6 +102,13 @@ void prepared_template_and_cancellation() {
     execute_fft_search_cpu(fixture.batch,fixture.jobs,cached,workers);
     check(std::equal(generated.begin(),generated.end(),cached.begin(),equal),
           "FFT uploaded-template view changed exact generated-template scores");
+    const FftStartRange selected{7,1};fixture.batch.start_ranges=std::span(&selected,1);
+    fixture.jobs[0].range_count=1;std::fill(cached.begin(),cached.end(),untouched);
+    std::vector<FftSearchWorkspace> prepared_only;
+    prepared_only.emplace_back(fixture.config,fixture.spectrum.size(),false);
+    execute_fft_search_cpu(fixture.batch,fixture.jobs,cached,prepared_only);
+    for(std::size_t j=0;j<cached.size();++j)check(equal(cached[j],j==7?generated[j]:untouched),
+        "restricted prepared-only FFT row changed a selected score or wrote an excluded cell");
     std::stop_source stopped;stopped.request_stop();
     bool cancelled=false;
     try {execute_fft_search_cpu(fixture.batch,fixture.jobs,cached,workers,stopped.get_token());}
@@ -119,6 +129,81 @@ void prepared_template_and_cancellation() {
     try {execute_fft_search_cpu(fixture.batch,fixture.jobs,cached,workers);}
     catch(const Error&) {rejected=true;}
     check(rejected,"FFT batch accepted a zero private-template chip size");
+}
+void restricted_coherent_direct_and_fft() {
+    for(const bool shaped:{false,true})for(const auto bin:{std::size_t{1},std::size_t{4}}) {
+        Config config;config.sample_rate=64;config.bandwidth_hz=8;config.carrier_hz=15.3;
+        config.integration_seconds=257./64;config.pulse_shaping=shaped;config.scramble=true;
+        for(std::size_t i=0;i<config.spreading_seed.size();++i)config.spreading_seed[i]=static_cast<std::uint8_t>(7+11*i);
+        PatternCode code(config);FftSearchBatch batch;auto& g=batch.geometry;
+        g.pattern={config.stream_epoch,code.chip_samples(),code.chips_per_symbol(),code.symbol_samples(),
+            config.sample_rate,static_cast<std::uint32_t>(config.spreading_mode),shaped?1U:0U,1,0,
+            config.spreading_seed,config.dsss_seed};
+        g.bins_per_symbol=(code.symbol_samples()+bin-1)/bin+3;g.bin_samples=bin;g.carrier_hz=config.carrier_hz;
+        g.sample_fit=bin==1;g.real_rank=bin==1;g.extended_clock_window=1;
+        g.evidence_count=g.sample_fit?std::min<double>(g.bins_per_symbol,4.*g.bins_per_symbol/code.chip_samples()):g.bins_per_symbol;
+        const auto image=std::abs(pattern_projection_image_ratio(bin,config.carrier_hz,config.sample_rate));
+        g.noise_condition=bin==1?1:(1+image)/(1-image);
+        batch.starts=9;batch.score_stride=12;batch.first_bin=37;
+        std::size_t transform=1;while(transform<g.bins_per_symbol+batch.starts-1)transform*=2;
+        std::vector<FftComplex> observations(transform),spectrum,carrier(transform);
+        std::vector<double> energy(transform+1);
+        for(std::size_t i=0;i<transform;++i) {
+            const auto phase=2*std::numbers::pi*config.carrier_hz*
+                ((batch.first_bin+i)*bin+(bin-1)/2.)/config.sample_rate;
+            observations[i]=bin==1?std::sin(.19*i+.3)*std::polar(1.,-phase):
+                FftComplex{std::sin(.19*i),std::cos(.13*i)};
+            carrier[i]=std::polar(1.,2*phase);energy[i+1]=energy[i]+std::norm(observations[i]);
+        }
+        spectrum=observations;pattern_fft(spectrum,false,{});
+        batch.spectrum=spectrum;batch.carrier_square=carrier;batch.energy_prefix=energy;
+        std::array<FftSearchJob,2> jobs{};
+        jobs[0].symbol=3;jobs[0].phase=7;jobs[0].frequency_hz=.03125;jobs[0].clock_ratio=.9998;
+        jobs[1]=jobs[0];jobs[1].symbol=1;jobs[1].clock_ratio=1.0002;
+        std::vector<FftSearchWorkspace> workers;workers.emplace_back(config,transform,true);workers.emplace_back(config,transform,true);
+        std::vector<FftSearchScore> baseline(jobs.size()*batch.score_stride,untouched);
+        execute_fft_search_cpu(batch,jobs,baseline,workers);
+        const std::array<FftStartRange,3> ranges{{{1,1},{7,2},{3,1}}};
+        batch.start_ranges=ranges;batch.observations=observations;
+        for(const auto selected:{std::size_t{0},std::size_t{1},std::size_t{3},std::size_t{4},std::size_t{5}}) {
+            std::array<FftStartRange,1> contiguous{{{2,selected}}};
+            if(selected==3) {batch.start_ranges=ranges;jobs[0].range_begin=0;jobs[0].range_count=2;
+                jobs[1].range_begin=2;jobs[1].range_count=1;}
+            else {batch.start_ranges=contiguous;for(auto& job:jobs){job.range_begin=0;job.range_count=selected?1:0;}}
+            std::vector<FftSearchScore> actual(baseline.size(),untouched);
+            execute_fft_search_cpu(batch,jobs,actual,workers);
+            for(std::size_t job=0;job<jobs.size();++job)for(std::size_t start=0;start<batch.score_stride;++start) {
+                const auto kept=selected==3?(job==0?(start==1||start==7||start==8):start==3):
+                    start>=2&&start<2+selected;
+                const auto a=actual[job*batch.score_stride+start],b=baseline[job*batch.score_stride+start];
+                if(!kept)check(equal(a,untouched),"restricted coherent work overwrote an excluded start or job padding");
+                else check(std::abs(a.zero-b.zero)<=1e-8*std::max({1.,a.zero,b.zero}) &&
+                    std::abs(a.one-b.one)<=1e-8*std::max({1.,a.one,b.one}),
+                    "restricted direct/FFT score changed template energy, clock zeros or original-start covariance");
+            }
+            check(pattern_fft_direct_eligible(g,true,selected,true)==(bin==4&&selected>0&&selected<=32),
+                "pure direct work selector diverged from bounded coherent eligibility");
+            check(pattern_fft_direct_eligible(g,true,32,true)==(bin==4)&&
+                !pattern_fft_direct_eligible(g,true,33,true),"direct crossover lost its measured bound");
+        }
+        const auto rejects=[&](FftStartRange range) {
+            batch.start_ranges=std::span(&range,1);jobs[0].range_begin=0;jobs[0].range_count=1;
+            jobs[1].range_begin=0;jobs[1].range_count=0;std::vector<FftSearchScore> result(baseline.size(),untouched);
+            try {execute_fft_search_cpu(batch,jobs,result,workers);}catch(const Error&){return true;}return false;
+        };
+        check(rejects({8,2})&&rejects({1,std::numeric_limits<std::size_t>::max()})&&rejects({1,0}),
+            "restricted FFT accepted an invalid or overflowing original-start range");
+        const FftStartRange first_start{0,1};batch.start_ranges=std::span(&first_start,1);
+        jobs[0].range_begin=0;jobs[0].range_count=1;jobs[1].range_begin=0;jobs[1].range_count=0;
+        std::stop_source stop;stop.request_stop();bool cancelled=false;
+        try {execute_fft_search_cpu(batch,jobs,baseline,workers,stop.get_token());}catch(const Error&){cancelled=true;}
+        check(cancelled,"nonempty restricted job ignored cancellation");
+        execute_fft_search_cpu(batch,jobs,baseline,workers);
+        const std::array<FftStartRange,2> overlap{{{1,2},{2,1}}};batch.start_ranges=overlap;jobs[0].range_count=2;
+        bool rejected=false;
+        try {execute_fft_search_cpu(batch,jobs,baseline,workers);}catch(const Error&){rejected=true;}
+        check(rejected,"restricted FFT accepted overlapping selected ranges");
+    }
 }
 void public_nominal_reference_exactness() {
     for(const bool shaped:{false,true})for(const auto bin:{std::size_t{1},std::size_t{4}})
@@ -386,8 +471,217 @@ void differential_direct_fft_and_real_gram() {
     }
 }
 } // namespace
+namespace paired_regression {
+using namespace datapump;
+using namespace datapump::modem;
+using namespace datapump::modem::detail;
+namespace paired=datapump::modem::detail::partitioned_paired;
+namespace {
+constexpr FftSearchScore untouched{-19,-23};
+constexpr FftComplex sentinel{-31,17};
+void check(bool b,const char* why){if(!b)throw Error(why);}
+bool close(double a,double b){return std::abs(a-b)<=1e-8*std::max({1.,std::abs(a),std::abs(b)});}
+bool identical(FftComplex a,FftComplex b){return std::bit_cast<std::uint64_t>(a.real())==std::bit_cast<std::uint64_t>(b.real())&&
+    std::bit_cast<std::uint64_t>(a.imag())==std::bit_cast<std::uint64_t>(b.imag());}
+struct Fixture {
+    Config config;
+    FftSearchBatch batch;
+    std::vector<FftComplex> input,spectrum;
+    std::vector<double> energy;
+    std::vector<FftSearchJob> jobs;
+    std::vector<FftStartRange> selected;
+    Fixture(bool shaped,unsigned factor,OuterDsssVersion version,bool public_pattern=false) {
+        config.sample_rate=64;config.bandwidth_hz=8./factor;config.carrier_hz=15.3;
+        config.integration_seconds=1025./64;config.pulse_shaping=shaped;config.scramble=!public_pattern;
+        config.dsss=factor>1;config.dsss_factor=factor;config.outer_dsss_version=version;
+        config.stream_epoch=1789312671;
+        for(std::size_t i=0;i<32;++i) {config.spreading_seed[i]=static_cast<std::uint8_t>(11*i+7);
+            config.dsss_seed[i]=static_cast<std::uint8_t>(251-3*i);}
+        PatternCode code(config,config.stream_epoch);auto& g=batch.geometry;
+        g.pattern={config.stream_epoch,code.chip_samples(),code.chips_per_symbol(),code.symbol_samples(),
+            config.sample_rate,static_cast<std::uint32_t>(config.spreading_mode),shaped?1U:0U,
+            config.scramble?1U:0U,config.dsss?1U:0U,config.spreading_seed,config.dsss_seed,
+            factor,static_cast<std::uint32_t>(version)};
+        g.bin_samples=4;g.bins_per_symbol=(code.symbol_samples()+3)/4+3;
+        g.carrier_hz=config.carrier_hz;g.extended_clock_window=1;g.evidence_count=g.bins_per_symbol;
+        const auto image=std::abs(pattern_projection_image_ratio(g.bin_samples,g.carrier_hz,config.sample_rate));
+        g.noise_condition=(1+image)/(1-image);
+        batch.starts=73;batch.score_stride=78;batch.first_bin=37;
+        std::size_t S=1;while(S<g.bins_per_symbol+batch.starts-1)S*=2;
+        input.resize(S);energy.resize(S+1);
+        // Identical real PCM transformed into disjoint complex projection bins.
+        // Both quadratures and its existing covariance-eigenratio are retained.
+        std::mt19937_64 random(0x12345);std::normal_distribution<double> noise;
+        for(std::size_t i=0;i<S;++i) {
+            for(std::size_t n=0;n<g.bin_samples;++n) {
+                const auto at=(batch.first_bin+i)*g.bin_samples+n;
+                const auto pcm=.6*noise(random)+std::sin(.071*at)+.15*std::cos(.003*at);
+                input[i]+=pcm*std::polar(1.,-2*std::numbers::pi*g.carrier_hz*at/config.sample_rate)/
+                    std::sqrt(static_cast<double>(g.bin_samples));
+            }
+            energy[i+1]=energy[i]+std::norm(input[i]);
+        }
+        spectrum=input;pattern_fft(spectrum,false,{});
+        batch.spectrum=spectrum;batch.observations=input;batch.energy_prefix=energy;
+        selected={{0,1},{3,2},{15,3},{31,3},{63,2},{72,1}};batch.start_ranges=selected;
+        jobs.resize(3);jobs[0].symbol=3;jobs[0].phase=7;jobs[0].frequency_hz=.03125;
+        jobs[0].clock_ratio=.9998;jobs[0].range_count=selected.size();
+        jobs[1]=jobs[0];jobs[1].symbol=1;jobs[1].phase=3;jobs[1].frequency_hz=-.03125;
+        jobs[1].clock_ratio=1.0002;jobs[1].range_begin=2;jobs[1].range_count=3;
+        jobs[2]=jobs[0];jobs[2].symbol=0;jobs[2].range_count=0;
+    }
+};
+
+void score_equivalence() {
+    for(const bool shaped:{false,true})for(unsigned variant=0;variant<4;++variant) {
+        Fixture f(shaped,variant==1||variant==2?10:1,
+            variant==2?OuterDsssVersion::interleaved_v2:OuterDsssVersion::legacy_v1,variant==3);
+        std::vector<std::array<FftComplex,2>> nominal;
+        if(variant==3){nominal.resize(f.batch.geometry.bins_per_symbol);PatternCode code(f.config,f.config.stream_epoch);
+            prepare_fft_nominal_reference(f.batch.geometry,code,nominal);f.batch.nominal_reference=nominal;
+            for(auto& job:f.jobs)job.clock_ratio=1;}
+        std::vector<FftSearchWorkspace> workers;workers.emplace_back(f.config,f.spectrum.size(),true);
+        std::vector<FftSearchScore> expected(f.jobs.size()*f.batch.score_stride,untouched);
+        f.batch.observations={};execute_fft_search_cpu(f.batch,f.jobs,expected,workers);f.batch.observations=f.input;
+        for(const std::size_t B:{2,16,64,256}) {
+            const auto req=paired::preflight(f.batch,f.jobs,B,1024*1024);check(req.has_value(),"paired preflight unsupported");
+            const auto first_size=std::max<std::size_t>(1,req->input_tiles/2)*req->transform;
+            const auto second_size=req->complex_count-first_size;
+            std::vector<FftComplex> first(first_size+3,sentinel),second(second_size+3,sentinel);paired::Work work;
+            auto context=paired::prepare(f.batch,*req,std::span(first).first(first_size),std::span(second).first(second_size),&work);
+            check(context.has_value(),"paired arena preparation failed");
+            PatternCode code(f.config,f.config.stream_epoch);
+            for(std::size_t ji=0;ji<f.jobs.size();++ji) {
+                std::vector<FftComplex> out(f.batch.score_stride,sentinel);
+                check(paired::score_job(*context,f.jobs[ji],code,out,&work),"paired job fallback despite preflight");
+                for(std::size_t j=0;j<out.size();++j) {
+                    const auto e=expected[ji*f.batch.score_stride+j];
+                    if(e.zero==untouched.zero&&e.one==untouched.one)check(out[j]==sentinel,"paired job changed excluded original start/padding");
+                    else check(close(out[j].real(),e.zero)&&close(out[j].imag(),e.one),
+                        "paired shaped_values/rotation/norm/clock/covariance changed a retained score");
+                }
+            }
+            check(first[first_size]==sentinel&&first[first_size+2]==sentinel&&
+                second[second_size]==sentinel&&second[second_size+2]==sentinel,"paired split arena overrun");
+            check(work.input_transforms==req->input_tiles,"paired input FFT repeated across bit/job");
+            check(work.template_values==4*f.batch.geometry.bins_per_symbol,"paired job reused a secret bit/symbol row");
+        }
+    }
+}
+void direct_equivalence() {
+    for(const bool shaped:{false,true})for(unsigned variant=0;variant<4;++variant){
+        Fixture f(shaped,variant==1||variant==2?10:1,
+            variant==2?OuterDsssVersion::interleaved_v2:OuterDsssVersion::legacy_v1,variant==3);
+        std::vector<std::array<FftComplex,2>> nominal;
+        if(variant==3){nominal.resize(f.batch.geometry.bins_per_symbol);PatternCode code(f.config,f.config.stream_epoch);
+            prepare_fft_nominal_reference(f.batch.geometry,code,nominal);f.batch.nominal_reference=nominal;
+            for(auto& job:f.jobs)job.clock_ratio=1;}
+        std::vector<FftSearchWorkspace> workers;workers.emplace_back(f.config,f.spectrum.size(),true);
+        PatternCode code(f.config,f.config.stream_epoch);
+        // The original <=4-start direct path is a strict arithmetic control.
+        f.selected={{0,1},{3,2},{15,1}};f.batch.start_ranges=f.selected;
+        auto job=f.jobs[0];job.range_begin=0;job.range_count=f.selected.size();
+        std::vector<FftSearchScore> old_direct(f.batch.score_stride,untouched);
+        execute_fft_search_cpu(f.batch,std::span(&job,1),old_direct,workers);
+        const auto spectrum=f.batch.spectrum;f.batch.spectrum={};
+        std::vector<FftComplex> out(f.batch.score_stride,sentinel);paired::Work work;
+        check(paired::score_direct(f.batch,job,code,out,&work),"paired direct unsupported at four selected starts");
+        for(std::size_t j=0;j<out.size();++j){const auto expected=old_direct[j];
+            if(expected.zero==untouched.zero&&expected.one==untouched.one)
+                check(out[j]==sentinel,"paired direct changed excluded start or padding");
+            else check(identical(out[j],FftComplex(expected.zero,expected.one)),
+                "paired direct changed original ascending norm/dot arithmetic");}
+        check(work.input_transforms==0&&work.template_transforms==0&&work.inverse_transforms==0&&
+            work.template_values==2*f.batch.geometry.bins_per_symbol&&work.selected_starts==4&&
+            work.complex_products==8*f.batch.geometry.bins_per_symbol,
+            "paired direct unexpectedly used FFT or regenerated per-start private rows");
+        // Exercise the full 32-start stack bound using old full-FFT covariance
+        // and energy scoring, then remove spectrum to prove this API needs none.
+        f.batch.spectrum=spectrum;f.selected={{0,7},{15,12},{47,13}};f.batch.start_ranges=f.selected;
+        job.range_count=f.selected.size();f.batch.observations={};
+        std::vector<FftSearchScore> old_fft(f.batch.score_stride,untouched);
+        execute_fft_search_cpu(f.batch,std::span(&job,1),old_fft,workers);
+        f.batch.observations=f.input;f.batch.spectrum={};std::fill(out.begin(),out.end(),sentinel);
+        check(paired::score_direct(f.batch,job,code,out),"paired direct failed at 32 selected starts");
+        for(std::size_t j=0;j<out.size();++j){const auto expected=old_fft[j];
+            if(expected.zero==untouched.zero&&expected.one==untouched.one)
+                check(out[j]==sentinel,"paired direct32 changed excluded start or padding");
+            else check(close(out[j].real(),expected.zero)&&close(out[j].imag(),expected.one),
+                "paired direct32 changed same-PCM FFT score/covariance");}
+        std::fill(out.begin(),out.end(),sentinel);f.selected.back().count=14;
+        check(!paired::score_direct(f.batch,job,code,out)&&
+            std::all_of(out.begin(),out.end(),[](auto value){return value==sentinel;}),
+            "paired direct exceeded fixed 32-start stack bound");
+    }
+}
+void fallback_and_cancellation() {
+    Fixture f(true,1,OuterDsssVersion::legacy_v1);PatternCode code(f.config,f.config.stream_epoch);
+    check(!paired::preflight(f.batch,f.jobs,64,1),"paired preflight exceeded bounded caller arena");
+    auto req=paired::preflight(f.batch,f.jobs,64,1024*1024);check(req.has_value(),"paired fixture requires supported geometry");
+    std::vector<FftComplex> arena(req->complex_count,sentinel),out(f.batch.score_stride,sentinel);
+    auto malformed=*req;malformed.input_tiles=malformed.chunks-1;
+    check(!paired::prepare(f.batch,malformed,arena),"paired prepare accepted a truncated input-tile envelope");
+    check(!paired::prepare(f.batch,*req,std::span(arena).first(arena.size()-1)),"paired prepare accepted a non-P-aligned arena");
+    auto context=paired::prepare(f.batch,*req,arena);check(context.has_value(),"paired fixture preparation failed");
+    std::stop_source stop;stop.request_stop();bool cancelled=false;
+    try{paired::score_job(*context,f.jobs[0],code,out,nullptr,stop.get_token());}catch(const Error&){cancelled=true;}
+    check(cancelled&&std::all_of(out.begin(),out.end(),[](auto v){return v==sentinel;}),"paired stopped job wrote candidate evidence");
+    cancelled=false;
+    try{paired::score_direct(f.batch,f.jobs[0],code,out,nullptr,stop.get_token());}catch(const Error&){cancelled=true;}
+    check(cancelled&&std::all_of(out.begin(),out.end(),[](auto v){return v==sentinel;}),
+        "paired stopped nonempty direct job wrote candidate evidence");
+    check(paired::score_job(*context,f.jobs[0],code,out),"paired cancellation broke later reuse");
+    check(!paired::score_job(*context,f.jobs[0],code,std::span(arena).first(f.batch.starts)),"paired scores aliased input cache arena");
+    f.batch.geometry.sample_fit=1;check(!paired::preflight(f.batch,f.jobs,64,1024*1024),"paired sample-fit fallback missing");
+    f.batch.geometry.sample_fit=0;const auto saved=f.batch.observations;
+    f.batch.observations=std::span(arena).first(f.input.size());check(!paired::prepare(f.batch,*req,arena),"paired prepare overwrote source observations");
+    f.batch.observations=saved;
+    f.jobs[0].prepared_template=0;check(!paired::preflight(f.batch,f.jobs,64,1024*1024),"paired prepared-template fallback missing");
+    check(!paired::score_direct(f.batch,f.jobs[0],code,out),"paired direct prepared-template fallback missing");
+    f.jobs[0].prepared_template=std::numeric_limits<std::uint64_t>::max();
+    for(auto& job:f.jobs)job.range_count=0;req=paired::preflight(f.batch,f.jobs,64,0);
+    check(req&&req->complex_count==0,"paired empty selection reserved memory");
+    context=paired::prepare(f.batch,*req,{});check(context.has_value(),"paired empty selection preparation failed");
+    std::fill(out.begin(),out.end(),sentinel);check(paired::score_job(*context,f.jobs[0],code,out)&&
+        std::all_of(out.begin(),out.end(),[](auto v){return v==sentinel;}),"paired empty job scored data");
+    std::stop_source direct_stop;direct_stop.request_stop();cancelled=false;
+    try{paired::score_direct(f.batch,f.jobs[0],code,out,nullptr,direct_stop.get_token());}
+    catch(const Error&){cancelled=true;}
+    check(cancelled&&std::all_of(out.begin(),out.end(),[](auto v){return v==sentinel;}),
+        "paired direct cancellation changed evidence");
+    check(paired::score_direct(f.batch,f.jobs[0],code,out),"paired direct empty selection failed");
+    f.jobs[0].range_count=f.selected.size();
+    check(!paired::score_direct(f.batch,f.jobs[0],code,std::span(f.input).first(f.batch.starts)),
+        "paired direct overwrote observations");
+    f.batch.geometry.sample_fit=1;
+    check(!paired::score_direct(f.batch,f.jobs[0],code,out),"paired direct sample-fit fallback missing");
+    f.batch.geometry.sample_fit=0;
+    check(!paired::score_job(*context,f.jobs[0],code,out)&&
+        std::all_of(out.begin(),out.end(),[](auto v){return v==sentinel;}),
+        "paired empty context accepted a later nonempty job");
+}
+}
+void planner_geometry_equivalence() {
+    Fixture f(true,10,OuterDsssVersion::interleaved_v2,false);
+    for(const auto starts:{73U,128U})for(const auto jobs:{1U,5U}) {
+        f.batch.starts=starts;
+        const auto planned=paired::choose_geometry(f.batch.geometry.bins_per_symbol,starts,
+            f.selected,jobs,f.spectrum.size(),1024*1024);
+        const auto runtime=paired::choose(f.batch,f.jobs[0],jobs,f.spectrum.size(),1024*1024);
+        check(planned.has_value()==runtime.has_value(),"planner/runtime partition crossover differs");
+        if(!planned)continue;
+        const auto checked=paired::preflight(f.batch,std::span(f.jobs).first(1),planned->tile_size,1024*1024);
+        check(checked && checked->input_tiles==planned->input_tiles &&
+            checked->max_job_output_tiles==planned->max_job_output_tiles &&
+            checked->complex_count==planned->complex_count && runtime->transform==planned->transform &&
+            paired::operations(*checked,jobs)==paired::operations(*planned,jobs),
+            "size-only partition plan disagrees with validated runtime scratch/work");
+    }
+}
+void run(){score_equivalence();direct_equivalence();fallback_and_cancellation();planner_geometry_equivalence();}
+}
 int main() {
-    try {flat_batch_tiling_and_order();prepared_template_and_cancellation();public_nominal_reference_exactness();
+    try {paired_regression::run();flat_batch_tiling_and_order();prepared_template_and_cancellation();restricted_coherent_direct_and_fft();public_nominal_reference_exactness();
         drift_rank_and_partition();drift_direct_fft_and_real_gram();differential_direct_fft_and_real_gram();}
     catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
     std::cout<<"pattern FFT batch tests passed\n";

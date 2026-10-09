@@ -423,5 +423,75 @@ low CPU cost nor loss below 0.1 dB has been established.
 Local reproducible probes, CSVs, PCM and stage analyses are retained in
 `.agent-work/artifacts/receiver-envelope-20261009/REPORT.md` and its manifest
 SHA256 `19dadd8c1710b82da1d7af19f5954def44de5eb0bdd3cb2a2d1fe53bbce5bfc8`.
-The report records exact compiler commands and hashes. This measured limiter
-limitation remains open at the manual-testing checkpoint.
+The report records exact compiler commands and hashes. That checkpoint preceded
+the versioned construction below.
+
+## Interleaved V2 envelope experiment
+
+The next local candidate independently permutes complete fine-chip coefficient
+positions within each bit, uses new outer-stream rotation domains, then applies
+the unchanged final pulse shaping with 0.5 pre-limiter gain. Its legacy diagnostic
+path reproduces the preceding transmitter byte-for-byte. This experiment uses
+frozen candidate library SHA256
+`056a9ec5ff13047bb06cef7f9dfe0f3485809ee68df2e17437f6cbbbfb215585`
+and the same synthetic seeds, 40 ksample/s, carrier 7500 Hz, 10 kHz nominal outer
+bandwidth and 38.4-second payload methodology described above. It is a digital
+waveform measurement, not a receiver sensitivity or hardware qualification.
+
+| Factor | Guarded OOB, legacy → V2 | Payload limiter occupancy, legacy → V2 | Mean digital power at unchanged downstream gain |
+| ---: | ---: | ---: | ---: |
+| 10 | −29.385 → −48.222 dBc | 5.112% → 0 observed | −5.813 dB |
+| 100 | −29.065 → −48.225 dBc | 5.270% → 0 observed | −5.798 dB |
+| 1000 | −30.145 → −48.218 dBc | 3.826% → 0 observed | −5.844 dB |
+
+For factor 1000, identical coefficient-power runs shrink from 200 ms to 0.8 ms.
+Using 40 ms power windows at 10 ms hops, the longest run above twice the capture's
+mean power falls from 0.60 seconds to none observed. Whole-bit coefficient
+histograms and power variation remain; interleaving is not a proof of an
+indistinguishable noise process. The finite shaped waveform also has overlap
+terms, so coefficient-energy preservation alone does not prove detector
+equivalence.
+
+The factorial controls separate the two changes. Interleaving at unity gain
+still clips 2.394% of the factor-1000 payload and has −35.152 dBc guarded OOB.
+Backoff alone restores the legacy linear spectrum but preserves its normalized
+envelope plateaus. The implemented combination provides both improvements in
+these captures. Zero observed clipping is not a universal bound for all keys.
+
+Power backoff is a link-budget cost, not detector sensitivity loss. Restoring the
+factor-1000 payload's average real power would require 5.844 dB extra gain and a
+real peak about 1.418, exceeding unity. Under equal real peak limits, V2 instead
+retains a 3.103 dB average-power deficit in this capture. Hardware headroom cannot
+be assumed. The transmitter's additional factor-1000 working storage is 555,720
+bytes; this does not measure receiver peak memory.
+
+Full-burst production/instrumented byte identity, legacy compatibility,
+coefficient norm multisets, Parseval consistency and a three-sample partial
+final chip pass. Pulse tails and bit-boundary windows are included. The local
+report `.agent-work/artifacts/outer-envelope-spectrum-20261009/REPORT.md` records
+the exact input, stage controls, metrics and limitations; `results.json` SHA256 is
+`e22e0126b2e22f74a5a9c29b4687dbe40c9c7aad7f011628a872f6c3482e6706`.
+Overlapping deterministic windows do not support a population confidence
+interval. Full acquisition/BER curves, cumulative raw-reference sensitivity,
+actual audio/RF emissions and broader qualification remain outstanding.
+
+### Final local V2 conditional threshold evidence
+
+The 9 October final candidate has four fresh 20,000-draw paired V1/V2 holdouts
+at equal measured finite transmitter payload/tail energy. DSSS1000 uses one
+matched key/epoch/frequency/rate/phase branch and five retained starts, with the
+outer guard disabled. Nominal bits 0/1 and ±100 ppm / ±0.05 Hz matched-branch
+stresses with phase diffusion 0.1 and a four-sample partial final chip are covered.
+At the fixed 0.05 dB grid, all four estimate V2−V1 required C/N0 as 0.00 dB at
+90% detection and −0.05 dB at 99%. Family-corrected conservative 95% enclosures,
+including order statistics, geometry/grid and unseen crossing-exception allowance,
+reach [−0.20,+0.15] dB at 99%. **This is inconclusive against the 0.1 dB limit.**
+No conditional wrong accepted bits occurred, which is not a rare-event rate bound.
+
+These equal-energy, different-waveform tests do not establish same-PCM receiver
+loss, full acquisition/active-guard behavior, raw-reference cumulative loss or a
+hardware power budget. V2 numerical RX probability remains withheld. Exact case
+intervals, saved curves, production replay scope, source hashes and remaining
+qualification are in
+`.agent-work/artifacts/receiver-opt-20261008/MANUAL-BOUNDED-ACQUISITION.md` and
+`.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-mc-analysis2-*.json`.

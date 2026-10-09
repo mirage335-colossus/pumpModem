@@ -565,6 +565,48 @@ void link_budget(Node& root, const planner::Model& model) {
                 " frequency/clock pairs × "+std::to_string(model.epoch_hypotheses)+" epochs; "+
                 number(model.timing_hypotheses,6)+" timing origins summed over those pairs per key/epoch; "+
                 std::to_string(model.timing_phase_groups)+" timing phase groups.",11,Tone::muted,false,0);
+        if(model.receiver_geometry.sample_rate) {
+            const auto& g=model.receiver_geometry;
+            const auto version=g.dsss_factor<=1?"off":g.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2?
+                "interleaved-v2":"legacy";
+            paragraph(n,"Receiver geometry: "+std::to_string(g.sample_rate)+" samples/s; fine chip "+
+                planner::duration(g.fine_chip_seconds)+"; inner chip "+planner::duration(g.inner_chip_seconds)+
+                "; symbol "+planner::duration(g.symbol_seconds)+"; DSSS "+std::to_string(g.dsss_factor)+
+                "× "+version+". Workspace "+number(g.workspace_bytes/1048576.,4)+" MiB total; "+
+                number(g.per_bank_workspace_bytes/1048576.,4)+" MiB per-bank allowance.",11,Tone::muted,false,0);
+            if(g.dsss_factor>1&&g.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2)
+                paragraph(n,"V2 uses 6.02 dB pre-limiter digital backoff; actual mean-power change depends on clipping. "
+                    "Link budget requires actual average radio power; simulation noise remains nominal-power referenced. "
+                    "Full acquisition sensitivity is unqualified.",11,Tone::muted,false,0);
+            paragraph(n,"Arrival grid: "+number(g.timing_grid_seconds*1000,6)+" ms; canonical phase spacing "+
+                number(g.canonical_phase_step_seconds*1000,6)+" ms × "+std::to_string(g.canonical_phases)+
+                (g.arrival_window_available?"; combined admitted timing width "+
+                    number(2*g.combined_arrival_half_width_seconds*1000,6)+" ms":"; full timing window")+
+                ". Backend: "+g.backend+".",11,Tone::muted,false,0);
+            if(g.first_fft_seconds>0)paragraph(n,"Full-hop first batch: "+
+                planner::duration(g.first_fft_seconds)+"; preceding all-selected readiness: "+
+                (g.first_qualified_window_seconds>0?planner::duration(g.first_qualified_window_seconds):"unavailable")+
+                "; first guarded component: "+
+                (g.first_component_window_seconds>0?planner::duration(g.first_component_window_seconds):"unavailable")+
+                "; original start-grid hop: "+planner::duration(g.fft_hop_seconds)+
+                ". Every retained start still requires a complete observed symbol.",11,Tone::muted,false,0);
+            if(g.restricted_fft_modeled)paragraph(n,"Representative epoch/key: "+number(g.retained_template_jobs,6)+
+                " / "+number(g.full_template_jobs,6)+" template dispatches / original jobs; "+number(g.retained_start_positions,6)+
+                " / "+number(g.full_start_positions,6)+" original start positions retained; "+
+                number(g.direct_template_jobs,6)+" direct dispatches; "+number(g.input_fft_transforms,6)+
+                " input FFTs, "+number(g.timing_component_dispatches,6)+" guarded component dispatches and "+
+                number(g.component_fallback_hops,6)+" broad fallback hops. "+g.scope+".",11,Tone::muted,false,0);
+            if(g.paired_direct_template_jobs||g.partitioned_template_jobs||g.paired_fallback_components)
+                paragraph(n,"Paired backend: "+number(g.paired_direct_template_jobs,6)+" direct dispatches; "+
+                    number(g.partitioned_template_jobs,6)+" partitioned dispatches; "+
+                    (g.partitioned_template_jobs>0?"tiles "+std::to_string(g.partitioned_tile_min)+"–"+
+                        std::to_string(g.partitioned_tile_max)+" projected bins":"no partition tiles")+
+                    "; "+number(g.partitioned_input_transforms,6)+" cached input transforms, "+
+                    number(g.partitioned_template_transforms,6)+" template transforms, "+
+                    number(g.partitioned_inverse_transforms,6)+" inverse transforms; "+
+                    number(g.paired_fallback_components,6)+" components retain the shared full FFT.",11,Tone::muted,false,0);
+            if(!g.fallback_reason.empty())paragraph(n,"Work-model fallback: "+g.fallback_reason+".",11,Tone::muted,false,0);
+        }
         if(model.timing_window_modeled)
             paragraph(n,"Full-window fallback: "+number(model.fallback_cpu_realtime_ratio,3)+
                 " s processing per 1 s audio; "+number(model.fallback_timing_hypotheses,6)+

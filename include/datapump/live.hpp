@@ -114,6 +114,11 @@ struct ReceiverHealth {
 };
 struct Snapshot {
     ReceiverHealth receiver_health;
+    // Actual key/profile/epoch receiver instances in the current capture
+    // generation. Admissions include the initial bank and rolling additions;
+    // these are instance counts, not distinct keys or accepted messages.
+    std::size_t receiver_instances = 0, peak_receiver_instances = 0;
+    std::uint64_t receiver_admissions = 0, receiver_retirements = 0;
     audio::TimingQuality clock_timing_quality=audio::TimingQuality::unavailable;
     double clock_backend_uncertainty_seconds=0;
     bool clock_window_modeled=false;

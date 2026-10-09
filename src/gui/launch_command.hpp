@@ -14,7 +14,7 @@ struct Patch {
     // translation Shift. The real USB stream uses Carrier minus Shift.
     std::optional<double> rf_shift_hz,search_margin;
     std::optional<std::string> oscillator,rf_oscillator,reference,pattern;
-    std::optional<std::string> clock_sync,fhss;
+    std::optional<std::string> clock_sync,fhss,dsss_version;
     // File references and named selection only; never serialize key material.
     std::optional<std::string> keyfile,key_name,tx_key;
     std::optional<double> audio_timing_error_seconds;

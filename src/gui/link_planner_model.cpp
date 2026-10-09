@@ -429,7 +429,7 @@ auto curve_key(const transfer::Options& options,const modem::ChannelConfig& chan
     return std::tuple{c.pattern_symbols,c.stream_epoch,c.stream_phase_samples,c.sample_rate,
         c.constellation_bits,c.carrier_hz,c.bandwidth_hz,c.training_seconds,
         modem::symbol_sample_count(c),modem::pattern_chip_samples(c),c.spreading_mode,c.pulse_shaping,c.scramble,c.dsss,
-        c.dsss_factor,c.spreading_seed,c.dsss_seed,c.memory_limit,options.dsp_workspace_bytes,
+        c.dsss_factor,c.dsss_factor>1?c.outer_dsss_version:modem::OuterDsssVersion::legacy_v1,c.spreading_seed,c.dsss_seed,c.memory_limit,options.dsp_workspace_bytes,
         options.timestamp,options.search_seconds,options.audio_timing_error_seconds,options.clock_sync.has_value(),
         options.clock_sync.value_or(clock_sync::Policy{}).accuracy_seconds,
         options.clock_sync.value_or(clock_sync::Policy{}).region_seconds,
@@ -482,7 +482,7 @@ ReceivePoint receive_point(double target,const simulation::Estimate& estimate,bo
 }
 CpuPoint cpu_point(double target,const simulation::Estimate& estimate) {
     const auto ratio=estimate.simulated_seconds>0?estimate.receiver_cpu_seconds/estimate.simulated_seconds:0;
-    return {target,ratio,search_supported(estimate)&&estimate.receiver_workspace_supported&&
+    return {target,ratio,estimate.receiver_work_supported&&search_supported(estimate)&&estimate.receiver_workspace_supported&&
         std::isfinite(ratio)&&ratio>0};
 }
 void receive_curve(Model& model,const simulation::Estimate& selected_one,CurveCache& cache,std::stop_token stop) {
@@ -779,6 +779,7 @@ Model build(const Inputs& inputs,Cache& cache,std::stop_token stop,const std::fu
             (single_receiver.receiver_cpu_seconds+std::max(0.,single_receiver.receiver_kernel_rebuild_upper_seconds-
                 single_receiver.receiver_kernel_rebuild_seconds))/single_receiver.simulated_seconds:0;
         result.cpu_per_bit_ratio=single_receiver.cpu_seconds/result.bit_seconds;
+        result.receiver_geometry=single_receiver.receiver_geometry;
         result.frequency_rate_hypotheses=single_receiver.frequency_rate_hypotheses;
         result.epoch_hypotheses=single_receiver.epoch_hypotheses;
         result.timing_hypotheses=single_receiver.timing_hypotheses;
@@ -788,12 +789,13 @@ Model build(const Inputs& inputs,Cache& cache,std::stop_token stop,const std::fu
         result.initial_fft_retained_acquisition_batches=single_receiver.fft_retained_acquisition_batches;
         result.new_epoch_admissions=single_receiver.new_epoch_admissions;
         result.new_epoch_full_fft_batches=single_receiver.new_epoch_full_fft_batches;
+        result.new_epoch_qualified_ready_batch_slots=single_receiver.new_epoch_qualified_ready_batch_slots;
         result.new_epoch_retained_fft_batches=single_receiver.new_epoch_retained_fft_batches;
         result.receiver_work_assumptions=single_receiver.receiver_work_assumptions;
         result.fallback_cpu_realtime_ratio=single_receiver.simulated_seconds>0?
             single_receiver.fallback_receiver_cpu_seconds/single_receiver.simulated_seconds:0;
         result.fallback_timing_hypotheses=single_receiver.fallback_timing_hypotheses;
-        result.one_bit_cpu_available=single_receiver.receiver_workspace_supported&&
+        result.one_bit_cpu_available=single_receiver.receiver_work_supported&&single_receiver.receiver_workspace_supported&&
             std::isfinite(result.one_bit_cpu_seconds)&&std::isfinite(result.receiver_cpu_seconds)&&
             std::isfinite(result.cpu_realtime_ratio)&&result.one_bit_cpu_seconds>0&&single_receiver.simulated_seconds>0;
         // The selected marker already receives single_receiver directly.
@@ -808,6 +810,10 @@ Model build(const Inputs& inputs,Cache& cache,std::stop_token stop,const std::fu
             if(!result.receiver_status.empty())result.receiver_status+=" · ";
             result.receiver_status+="Wide RX search exceeds RAM";
             if(inputs.dsp_workspace_percent)result.receiver_status+=" ("+std::to_string(inputs.dsp_workspace_percent)+"%)";
+        }
+        if(!receiver.receiver_work_supported) {
+            if(!result.receiver_status.empty())result.receiver_status+=" · ";
+            result.receiver_status+="Receiver work outside model coverage";
         }
         if(result.receiver_status.empty())result.receiver_status="Clock and RAM fit · reception unverified";
 

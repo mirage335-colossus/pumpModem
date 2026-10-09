@@ -17,6 +17,9 @@ inline constexpr double nominal_signal_power = 0.153125;
 inline constexpr double minimum_bandwidth_hz = 0.001;
 inline constexpr double maximum_bandwidth_hz = 30000000;
 enum class SpreadingMode : std::uint8_t { pattern, tone };
+enum class OuterDsssVersion : std::uint8_t { legacy_v1 = 1, interleaved_v2 = 2 };
+// V2 setup and storage are bounded independently of observation duration.
+inline constexpr std::uint64_t maximum_interleaved_dsss_chips = 1ULL << 20;
 // Illustrative or measured effective relative TX/RX errors, not per-end values.
 // Accuracy is a static bound; phase diffusion is a separate coherence model.
 struct OscillatorModel {
@@ -66,6 +69,10 @@ struct Config {
     // Additional outer QPSK spreading. bandwidth_hz remains the inner rate;
     // symbol duration and framing do not change. 1 preserves legacy PCM.
     unsigned dsss_factor = 1;
+    // Explicit wire version; low-level callers retain existing V1 vectors.
+    // Ignored when outer spreading is Off. V2 permutes complete fine chips
+    // within each symbol and reserves additional digital headroom.
+    OuterDsssVersion outer_dsss_version = OuterDsssVersion::legacy_v1;
     std::array<std::uint8_t, 32> spreading_seed{};
     std::array<std::uint8_t, 32> dsss_seed{};
     // Same selected key used to encrypt payload data. Preamble bytes use its
@@ -75,6 +82,9 @@ struct Config {
 };
 inline double waveform_bandwidth_hz(const Config& config) {
     return config.bandwidth_hz * config.dsss_factor;
+}
+inline double outer_dsss_transmit_gain(const Config& config) {
+    return config.dsss_factor > 1 && config.outer_dsss_version == OuterDsssVersion::interleaved_v2 ? .5 : 1.;
 }
 // Duration of independently recognized training evidence. This is evidence
 // coverage, not a correlation percentage or a content-codec admission gate.

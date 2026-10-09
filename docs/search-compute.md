@@ -94,24 +94,52 @@ admitted canonical-phase lattice, retaining original pulse parity and all
 frequency/rate pairs. Raw/pulse regression comparisons cover clipped endpoints,
 negative fractional origins and nonzero clock rates. Custom native compact
 acquisition now uses an explicitly estimated physical timing model. Eligible
-short private FFT paths can skip whole acquisition batches excluded by the UTC
-arrival map. Mixed batches retain all original starts, initial-symbol indices
-and phase groups, and all active continuation work. Other FFT geometries and
-missing timing evidence retain the full window. The planner counts the
-complete correction-domain union, including every original lane, and retains
-the full arrival-window cost as a fallback before capture metadata exists. For
-existing eligible long compact banks, the estimate also reports exact retained
-origin/phase counts at a representative anchor using the actual captured timing
-error and rate bounds. The original full-count preflight RAM remains reserved.
-The short-FFT work model conservatively fills gaps between admitted groups and
-counts overlapping edge batches. At 10 Hz / DSSS 1000× / target 40 dB-Hz / 7500 Hz
-stream carrier, both admitted Audio 50 ms and 10 ms priors retain 1 of 1 fully observed initial
-batches for a one-bit observation; this is a real whole-batch plateau in the
-model. Known unsteered simulation uses its original bank; hardware retains every
-possible peer steering lane. Entering a small GPS duration alone earns no CPU
-discount. A future selector could compare direct matching of a small qualified
-start set against FFT work, but this candidate adds no such production selector.
-This is not a measured native acquisition speedup; see [timing conditions](clock-sync.md).
+short private FFT paths skip whole acquisition batches excluded by the UTC
+arrival map. The newer coherent path additionally intersects every original
+canonical phase with original start cells, retaining fractional/refinement
+margins and the complete admitted clock envelope. Empty template jobs are
+omitted. At most 32 original starts use one template pair followed by direct dot
+products; supported larger sets use automatically chosen partitioned convolution
+when its complete numerical allowance beats the original FFT by at least 10%.
+Otherwise the original shared FFT remains. All-direct execution omits the input
+FFT; partitioned execution transforms only the required tiles. Each path retains
+both complex components and the existing energy/covariance calculation.
+
+Guarded timing components can execute once their own retained starts have complete
+observed symbols plus the four-bin scheduling margin. Split components preserve
+the existing peak-exclusion and candidate-capacity rules; unsupported unions keep
+full-union scheduling. Unobserved samples are zero-padded only where no retained
+dot product can read them, and never supply absent symbols. The complete original
+logical batch is charged once to the trial budget, including excluded starts.
+Stream addresses, independent 0/1 patterns and frequency/rate lanes stay unchanged.
+Ready tracking continues outside acquisition hops only before the earliest
+unscored competing start, including refinement margin. Measured crossovers and
+remaining full-bank qualification limits are recorded below.
+
+The planner counts the complete correction-domain union, including every
+original lane, and reports full arrival-window cost as a fallback before capture
+metadata exists. Long compact banks report representative-anchor lattice counts.
+Short coherent FFT counts use the shared runtime range and direct-method helpers,
+with bounded per-epoch enumeration for initial and rolling cohorts. The GUI
+separates representative retained jobs/positions from all-epoch CPU allowances,
+and reports fine/inner/symbol timing, sample rate, timing grid, phase spacing,
+combined admitted uncertainty, workspace, backend and fallback. The original
+full-count preflight workspace remains reserved. Streamed idle epochs defer their
+four FFT complex arrays and energy-prefix allocation until execution, then release
+that scratch when no candidate tracks remain. Observation rings, partial bins,
+oscillator state and active tracks persist. At transform262144 the five deferred
+arrays total18,874,376 bytes per idle epoch. This is retained-buffer arithmetic,
+not a peak-RSS or end-to-end performance measurement.
+
+At 10 Hz / DSSS 1000× / target 40 dB-Hz / 7500 Hz stream carrier, the original
+full-hop deadline is 26.2144 seconds and the logical start-grid hop is 13.4144
+seconds. These are diagnostic reference coordinates, not mandatory new-backend
+execution spans. Qualified component readiness follows its last retained start
+plus the complete 12.8-second symbol and scheduling margin. The GUI reports
+representative readiness and retained positions separately from the initial and
+rolling epoch allowances. Known unsteered simulation uses its original bank;
+hardware retains all possible peer steering lanes. A small GPS selection alone
+earns no discount without a qualified map. See [timing conditions](clock-sync.md).
 
 Automatic Live FFT estimates distinguish the initial epoch radius (default six
 seconds, 13 epochs) from each receiver's ±7-second start scan and from the fresh
@@ -132,16 +160,23 @@ Outer DSSS changes actual fine-chip/sample geometry and template work. The
 current matched-template fallback is included in the work model; there is no
 constant-cost fast despreader or measured 1000x spreading speedup. Probability
 estimates for the complete new receiver remain unqualified; separately labeled
-conditional matched-template AWGN references may be shown. [Spread controls](spread-spectrum-controls.md)
+legacy conditional matched-template AWGN references may be shown. Interleaved
+V2 has separately versioned maps/streams, a pre-limiter gain change and a
+conservative uncalibrated FFT construction allowance. Its numerical probability
+and compact CPU feasibility remain unavailable pending waveform/receiver
+qualification. [Spread controls](spread-spectrum-controls.md)
 describe the open structured-interference and qualification limits.
 
 ## Compute boundaries
 
 | Path | Input and output | Host responsibilities |
 | --- | --- | --- |
-| FFT acquisition, `src/pattern_fft_batch.hpp` | Indexed symbol/phase/frequency jobs, shared spectrum and energy rows, immutable pattern parameters or prepared templates; flat pairs of scores indexed by job and start position | Search enumeration, trial counts, thresholds, peak selection, tracking, admission and publication |
+| FFT acquisition, `src/pattern_fft_batch.hpp` | Indexed symbol/phase/frequency jobs, shared spectrum or original projections and bounded partition tile caches, energy rows, immutable pattern parameters or prepared templates; flat pairs of scores indexed by job and start position | Search enumeration, trial counts, thresholds, peak selection, tracking, admission and publication |
 | Long-symbol correlation, `src/pattern_correlator_batch.hpp` | Indexed numerical lanes containing coordinates and fits, immutable pattern parameters, shared block projection rows; updated fits for each lane | Symbol completion, phase selection, peer ownership, reception state and publication |
 | CPU execution, `src/search_parallel.hpp` | Contiguous logical ranges with a chosen grain size | A shared, bounded persistent worker pool, worker-private caches and exception collection |
+
+Paired bounded acquisition currently executes synchronously on the CPU; it does
+not use the persistent worker pool or implement GPU dispatch.
 
 Logical indices do not encode a CPU worker number. Range dispatch allocates no
 state proportional to the number of jobs; tests cover 100,003 jobs and sparse
@@ -358,10 +393,122 @@ The [9 October DSSS follow-up measurements](dsss-followup-validation.md)
 compare actual execution with the preceding optimized local receiver. They
 record coherent-guard CPU regressions as well as bounded RF improvements;
 the new work allowances are conservative accounting, not recalibrated throughput.
-The next local candidate adds conservative whole-batch pruning for qualified
-short private FFT arrival windows. Its engineering model retains ingestion,
-continuation and the original trial charges, and separately reports full-window
-fallback. Timing telemetry and measurements remain distinct from this estimate.
+The current local candidate selects original per-phase timing cells, omits empty
+private-template jobs and uses paired direct correlation for at most 32 retained
+starts. Eligible larger sets use partitioned convolution in the existing two FFT
+scratch buffers. Tile selection includes input transforms, both private template
+transforms, products and output transforms; unsuitable geometry uses the original
+full FFT. Paired construction shares pulse evaluation and rotation while retaining
+independent private 0/1 coefficients and ascending per-candidate energy sums.
+Input validation/projection still processes every physical sample. Neither input
+rate nor the waveform changes in this receiver optimization.
+
+Guarded timing components can be scored once their own full-symbol observations
+are available. Components are joined under the existing half-symbol peak exclusion
+radius and only split when every component can retain at most one peak and the
+original candidate capacity covers the complete set. Unsupported unions keep the
+full admitted-union schedule. Full original acquisition trials are prepaid once
+per logical hop. At partial EOF, a cold hop with no established output can be
+replayed from the retained ring using the original finite-final charge. Its small
+checkpoint survives logical advancement until the original full hop is physically
+observed, including a hop whose only selected component finished earlier. Final
+passes cannot prepay excluded, unobserved starts again. This
+repeats bounded work without allocating another PCM buffer or manufacturing
+absence. Already established output is never rewound; exact finite-final threshold
+equivalence for its remaining tentative tail still needs separate qualification. Ready continuation is bounded by the next unscored competing
+start. This preserves next-poll publication without using source decoding or EOF
+as physical absence.
+
+The component metadata is bounded independently of epoch count. Partition input
+statistics belong to one exact observed segment/projection geometry and selected
+tile set; they are shared across independent candidate rows within that execution
+only. Private generated values remain specific to key, canonical epoch/ordinal,
+phase, waveform version/factor and clock/frequency hypothesis. Scratch reuse
+invalidates tracking products before overwrite. Cancellation discards unfinished
+scores. No cross-key or cross-bit private waveform reuse is introduced.
+
+Rolling-bank inspection also found valid repeated canonical templates. In the
+12.8-second/40 ksample/s geometry, the four initial indices address epoch offsets
+{0}, {12,13}, {25,26}, {38,39}, with ordinal zero. Different bank/index labels can
+therefore use the same private pattern. Their PCM ranges, timing/clock searches,
+thresholds and reception states remain distinct. The 73 constructor epochs in the
+60-second Live fixture are themselves unique. An enumeration that retains every
+bank gives 222 fully observed group instances and 48 canonical epochs; this is a
+potential cache-reuse count, not executed telemetry or an achieved speedup.
+
+V2 now retains its existing two canonical map/coefficient states across phase
+changes, while invalidating caches addressed only by absolute chip number. A
+larger shared fine-chip cache was not added: two paired rows for this geometry
+would require about 4.1 MB plus bounded synchronization/ownership state, and its
+benefit still needs measurement. Frontend duplication also remains: coherent
+outer-code guarding reconstructs local-phase projections from raw PCM even when
+Live supplies shared projections. Eliminating that work requires an explicit
+phase/Gram convention; arbitrary-phase input cannot be reused silently.
+
+The final5 candidate repeats the D1000 endpoints on identical 60-second PCM.
+Six-second width takes median 5.988 seconds CPU versus preceding 13.001 seconds
+(2.171× paired median, observed range 1.665–2.221×); one millisecond takes 1.829
+versus 9.866 seconds (5.395×, range 5.380–5.630×). Three alternating pairs per
+endpoint include the slower run. These ranges are not precise confidence
+intervals. Final bookkeeping adds at most 4,344 retained bytes under the same
+64 MiB bound. One cold finite-EOF replay in the six-second case changes executed
+start count to 2,275,570 and costs additional CPU; one millisecond remains 1,500
+starts without replay. Published-tail guard/threshold equivalence is unqualified.
+Single final-source controls at 1 s, 100 ms and 10 ms take 2.986, 2.365 and
+2.168 seconds CPU respectively; each completes the same bit/absence assertions.
+They are not repeated paired intervals. The coarse final-source profile still finds search dominant at 1 ms: fused paired
+direct generation/contraction 0.906 s, separate partition-template generation
+0.460 s and continuation 0.307 s, versus 0.020 s input/projection/ring residual.
+Instrumentation increases that run's total by 12.25% relative to its plain control;
+these component values are diagnostic, not primary throughput. Full covariance
+and template-energy construction remain inside fused scopes. The historical
+width table below precedes that final replay correction. Single final-source arithmetic controls
+keep identical selected cells, scheduling, PCM and trial charges while forcing
+full FFT: automatic CPU is 1.875 versus 3.929 seconds at 1 ms, and 5.956 versus
+7.236 seconds at 6 s. Output/completion agrees. This supports the automatic mix,
+not a measured full-FFT/forced-partition crossover for every retained broad job.
+
+The local 9 October bounded-acquisition sweep compares frozen preceding source
+`9ee268e` with `tight-candidate-paired-3`, using identical saved PCM at 40 ksample/s,
+one key/epoch, all five oscillator/clock pairs and a qualified synthetic capture
+map. Each case processes 60 seconds, including a complete bit and observed absence.
+Three alternating pairs per row run on isolated CPU 11, one numerical worker.
+Construction, input/search, polling/finish and destruction are timed; PCM creation
+and loading are excluded. All measured runs, including outliers, are retained.
+
+| DSSS1000 admitted width | Baseline CPU, median | New CPU, median | Paired speedup median [observed range] |
+| ---: | ---: | ---: | ---: |
+| 6 s | 12.582 s | 5.361 s | 2.356× [2.344, 2.398] |
+| 1 s | 9.730 s | 2.828 s | 3.430× [3.340, 3.576] |
+| 100 ms | 9.500 s | 2.244 s | 4.202× [4.187, 4.295] |
+| 10 ms | 9.452 s | 2.159 s | 4.347× [4.247, 4.472] |
+| 1 ms | 9.783 s | 1.867 s | 5.261× [5.063, 5.344] |
+
+These ranges are descriptive, not precise 95% intervals. The retained start count
+falls from 2,086,730 at 6 s to 1,500 at 1 ms. New total CPU falls by about 2.87×,
+not by the approximately 1,391× position-count ratio: complete-symbol templates,
+input processing and retained epoch alternatives still cost work. At 1 ms the
+receiver executes 25 paired-direct and 15 partitioned jobs with no original broad
+input/template FFT jobs. The peak accounted fixed-bank storage rises by 4,296 bytes
+to 35,867,778; no new large tile buffer is allocated. First-bit media time changes
+from 26.2144 to 13.7728 s; the physical symbol still lasts 12.8 s.
+
+DSSS100 speedups are 1.332× at 6 s and 1.917× at 1 ms. The DSSS10 case uses its
+application-selected 48 ksample/s, 9000 Hz stream carrier and 1200 Hz inner Rate
+(106.667 ms symbols), unchanged within each pair. DSSS10 is essentially
+unchanged (0.996× and 1.025× medians); its 6-second paired range includes 0.875×,
+so a universal no-regression claim is unsupported. Full rolling Live pilots also
+complete within the unchanged 2,216,646,656-byte workspace, while the preceding
+baseline exhausts that budget before acquisition; no completed Live speedup ratio
+is available. These stub runs do not qualify real audio-device deadlines.
+
+Exact source/build hashes, all 54 timing runs, power/spectrum evidence, final-source
+spot checks and remaining qualification are recorded in
+`.agent-work/artifacts/receiver-opt-20261008/MANUAL-BOUNDED-ACQUISITION.md` and
+`../receiver-tight-envelope-measure-20261009/paired3-width-matrix-summary.json`
+(relative to that artifact directory). This is a local manual-test checkpoint.
+Retained-score agreement does not alone qualify full acquisition sensitivity,
+changed continuation order, interference or cumulative raw-reference loss.
 
 The current [local UTC benchmark](validation.md#utc-fft-launch-keys-and-audio-follow-up--manual-checkpoint-9-october-2026)
 measures complete three-bit receptions against the frozen preceding optimized

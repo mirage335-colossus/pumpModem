@@ -1,0 +1,137 @@
+{
+  "preserved_utc": "2026-10-09T22:24:08.036616+00:00",
+  "baseline_commit": "9ee268e23449fbdc43c66a792fd1321b359fcbe3",
+  "candidate_manifest_sha256": "56d2e5107f510346e597d8422118e3b151211fdba601d656d9319a602b215ed8",
+  "candidate_gui_sha256": "343c94b155ffcaa83d6208285ecd232352caad9ebf6c6bd3620c6d504bde8b3b",
+  "status": "Manual checkpoint; full qualification incomplete; not a release",
+  "source_files": {
+    "docs/clock-sync.md": "cf602693a5d3aead44b107d292b704ae8626a9d43f39ee05ab5e00d9b827e6d4",
+    "docs/dsss-followup-validation.md": "88ff5b6d1decb3420caa3ad0f487b1f1334d3ab9f7d871565fbdfcdd7330c2ed",
+    "docs/search-compute.md": "49d424f0059c61a08eb94d8d7ef5df6c03074ea7552ed7363c6f89f049b61cae",
+    "docs/simulation-estimates.md": "1da3b33c85a240bf471349e70bdc1132b273b804450f5f89a7ac0f0066d86887",
+    "docs/spread-spectrum-controls.md": "71942d3e3c4771d54b1df6d31a6aa63f53696c083805da093657d64e8aa2606a",
+    "docs/validation.md": "cb1ee3ce0b66a90a6b2350f86998d2cf7079b49b0cada9220da0230b51ba3cb0",
+    "include/datapump/crypto.hpp": "8cbe53ab71bf95cde9a2a07174459f1503841d0bc03d5ac9317a37a5f875476d",
+    "include/datapump/live.hpp": "fe6379857500336b490336024b8f87f44aba2f08070aa149d93fc1e4d36173e1",
+    "include/datapump/modem.hpp": "4e01dab990821729f174674160b8be702dea30513a14908981591b99397b4373",
+    "include/datapump/pattern_code.hpp": "85d1ee8cf4c6b7a63b93665ca4f0fb59cdb42b506635cbd27396661cec28afff",
+    "include/datapump/pattern_receiver.hpp": "e665414713d47a50586f396b056a39ba014a42d0c3dd89ed63e0716180dd304f",
+    "include/datapump/simulation_estimate.hpp": "5646a202e651b723466062fa0a9441605d4b3a8f9d97449cb028c19b2b4651ac",
+    "include/datapump/transmit_trace.hpp": "9b4e12a60d28afb7061a8358945aba1a48dcc4df9b80457893ef03a6bc7b5901",
+    "include/datapump/tuning.hpp": "1114810ba2ec83bcefef63e83a4e5528f191b69bdb58228860b48b80298cc35b",
+    "src/crypto.cpp": "86958fbeb3ada05186f9419f7113ac19fab2ca494ef64a5110e1d6d83b834c5b",
+    "src/gui/application.cpp": "f1c0092e8bac95b9acb6dac48a72a96ca4c7886437678e673ab3c8d45d04ce9f",
+    "src/gui/controller.cpp": "a8cc50dd5e06816837d24754f3acd2b90a2985dd497c3b9b542e03f34f647833",
+    "src/gui/desktop_layout.hpp": "699b0bcefea6d7e071308ae5345b72b903bbdb4a2c613f16a2043394093650e3",
+    "src/gui/launch_command.cpp": "dffe764855cc3b4e3ca3a1c7c60c95909db4af25f6a88fc55ab42f3bda8c4681",
+    "src/gui/launch_command.hpp": "610dd85099f8ee37c63d88972a55c3a6c591a63beb6bd2ae1b3e1c232da09bbd",
+    "src/gui/link_planner_model.cpp": "008394375478de19587796ca1cfa499cd46481bd173c1f1b14f48ff826f2c0b9",
+    "src/gui/link_planner_model.hpp": "1348e214a14d0c06d2c36875a84da0fbbae10839cf4db8121416cfa517c40cfc",
+    "src/gui/link_planner_page.cpp": "9cda3a138ba367bdca635c92e864d1602878274aa6d88b8ca358ab9ba8aca61c",
+    "src/gui/profile_reference.hpp": "0f012df74a40b596b33c97d9cbc76ba8d219919e5520daa994d841012aaa5299",
+    "src/gui/screen_console.cpp": "e0862d6dbd311c8fe1f096887cd42538e73f4656ab90b5086069ad76172ed279",
+    "src/gui/ui_contract.hpp": "47e3e3f84ee3a99e3a7731a1a9ea6abddddafa965b4020d3902843d2cd84fc1d",
+    "src/live.cpp": "ad1014f28f12546bbdd69eb30530acb40fd612a3488f10059870cd689c3ae08f",
+    "src/main.cpp": "21fd0512a2c79de803b22bef6ef2a5106373b7e1e4b540e7ac805d7e0ae419ef",
+    "src/modem.cpp": "9a914154f52107313f279a4d5edeee8a09f4c6f7723cec1628aefd1c5df85bd6",
+    "src/pattern_code.cpp": "e5c6ad7e9135ba39fb42fc313e2e2443453c790bd655c60d3c8b202207ff7d42",
+    "src/pattern_correlator.cpp": "9c014c9d05e86dbe82ff257a1cf241c57bfe5928853adc1063fd2ef681a5bdbd",
+    "src/pattern_correlator_batch.cpp": "2a29ecf5420547216d2e04fefa4744346e54b36dfce49c32519d16cb8a1b0d6a",
+    "src/pattern_correlator_batch.hpp": "3eab46bbc60e10aa2140745279f20c33c5e3fe78d9025c3b263d2445373a53e8",
+    "src/pattern_fft_batch.cpp": "2a959a33c50a0b5ff229611cd19fdad0c63a3c9d67d70269f8bfb4380d05dbe6",
+    "src/pattern_fft_batch.hpp": "979acfcd37e0ed636d65f1a1b0b1a79b0d92278085abb76ac12d6f1fcb4b62c6",
+    "src/pattern_fft_window.hpp": "9a57f5bc828663c4e48501c31083a8e88587ce90e7fe74af33267f723b4940ef",
+    "src/pattern_receiver.cpp": "a8340a5a052b9ae12923c162b79b6ecd2534bda4518d60c77367c042ee47814c",
+    "src/simulation_estimate.cpp": "830d0dd8638035afc16c285c5b5e7f0022a365c4271b79ef13752d6ef947f4be",
+    "src/streaming_modem.cpp": "1017d5348e62805d678a77d06bf29b0ac53087c8255ba33f8b5a4b93d24e4098",
+    "src/tuning.cpp": "b5a8dc7cedca6048ddd328cb3a45a7c102def2a58708fbc8420b6a39ac39569e",
+    "tests/test_cli.py": "eb4d20df7d888dec7142070bf9894ff73c1fb2c3a73fdc67fd8bcbb943b43ee1",
+    "tests/test_crypto.cpp": "25340f3fe6e299ab153a595e5295a7903ad9024f1671bbed4bdcf8e7abb9276c",
+    "tests/test_gui_controller.cpp": "644f5ab49a84d58ff844354d4791a2101efb0206a21993e2d9f1c1227b3aebdf",
+    "tests/test_gui_launch_command.cpp": "1ca54cee789b445e24e6503a365fd7ef02eeb2f4b6d7d3ad0d4b792d856b2bcf",
+    "tests/test_gui_launch_settings.cpp": "469bd0f60847ce466d8db37a8450c006c384e34ab8eda39317b5973af1b3cc9d",
+    "tests/test_gui_link_planner.cpp": "26c23bf90e693b3554a92a4c1ed10cee23b618300eb8305ebcd7de04ebf6c483",
+    "tests/test_gui_timing_advice.cpp": "88927c9e7b1e868d0ed9054ade0bbc4a85f9868801cb98a19938ffc479d1b377",
+    "tests/test_live_profiles.cpp": "1f0e3808dda750236168f935dea7467cb79d2b8da507af5615b7c0ece7a58ef5",
+    "tests/test_pattern_code.cpp": "e71adc5c0eb00fec085583a3b597eafd08ee733e11e9b9f96d8849e0503547b3",
+    "tests/test_pattern_correlator_batch.cpp": "fdf3634c2c99b6f4eb1b34d6c04fda600bf34c19d9a9e3d3f74e41fe0ebcce52",
+    "tests/test_pattern_fft_batch.cpp": "126e49782e2584966f4e42915046e08bc4ee021bb42348a930bc6fee19a8f3e6",
+    "tests/test_pattern_receiver.cpp": "a4cb0fc7e3f6b294d83170ecd0fa4b08969eb8e9b5ddb87f3f914f6400c0adf1",
+    "tests/test_profile_reference.cpp": "066b8eff09ec8be0c3c5b192a67c0fd61f24b32061e573ec329bba7d80c12353",
+    "tests/test_simulation_estimate.cpp": "d657f665e613150e1b42642212e8e0c1357d29da66caafd73a2abbe8f45ff4e7",
+    "tests/test_streaming_modem.cpp": "458542ad3e24ed8833874a6b2950eae3320270f0523d14a330f714d9d02f56ad",
+    "tests/test_tuning.cpp": "6fd9d26d3cdca552b203e47e1ad3edc98ef41ceb3a3d6a2d68cd78985ea2e381"
+  },
+  "copied_evidence": [
+    {
+      "file": "MANUAL-BOUNDED-ACQUISITION.md",
+      "source_artifact": ".agent-work/artifacts/receiver-opt-20261008/MANUAL-BOUNDED-ACQUISITION.md",
+      "sha256": "0381d43bcd75befbf1ffd9b20547b99d9c4d2c0508225a0948268c5741932a13"
+    },
+    {
+      "file": "affected-validation.json",
+      "source_artifact": ".agent-work/artifacts/receiver-opt-20261008/tight-final-validation.json",
+      "sha256": "79ce2c2f6706040ec79333f9fa405f22b9c3bed2a8184fdc7d4d87dd28eec47a"
+    },
+    {
+      "file": "FINAL5-MEASUREMENT-REPORT.md",
+      "source_artifact": ".agent-work/artifacts/receiver-tight-envelope-measure-20261009/FINAL5-MEASUREMENT-REPORT.md",
+      "sha256": "bf39f366bcb041c522f7cfef2ec9933ae60f52bd5c067c03a80afcf9a9a1107e"
+    },
+    {
+      "file": "SPECTRUM-REPORT.md",
+      "source_artifact": ".agent-work/artifacts/outer-envelope-spectrum-20261009/REPORT.md",
+      "sha256": "8cd55a31dcda57714e7e900ca0a5fe72533de435520a278e34f797f2bcf77af4"
+    },
+    {
+      "file": "spectrum-results.json",
+      "source_artifact": ".agent-work/artifacts/outer-envelope-spectrum-20261009/results.json",
+      "sha256": "e22e0126b2e22f74a5a9c29b4687dbe40c9c7aad7f011628a872f6c3482e6706"
+    },
+    {
+      "file": "final5-primary-summary.json",
+      "source_artifact": ".agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-primary-summary.json",
+      "sha256": "2b880ee3db01a4197396fa5dd526ef0c35392d5dac5203bc2a46fc547e96c5c5"
+    },
+    {
+      "file": "final5-primary-pairs.json",
+      "source_artifact": ".agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-primary-pairs.json",
+      "sha256": "de5c9e599e93f03e2ff0a9e531785555d6097ec09a480e8636317b287d848251"
+    },
+    {
+      "file": "final5-regression-summary.json",
+      "source_artifact": ".agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-regression-summary.json",
+      "sha256": "95fde104a182e478fbc5c6affe996d7edabfcc045d635a8e2d2a1f448fd4e613"
+    },
+    {
+      "file": "final5-arithmetic-profile-summary.json",
+      "source_artifact": ".agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-arithmetic-profile-summary.json",
+      "sha256": "c6fe9c905efad6b70ea08fc1fa1f62b4b8c97713e63fe46b26d0b38acc8ce4c5"
+    },
+    {
+      "file": "final5-corrected-pcm-replay-summary.json",
+      "source_artifact": ".agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-corrected-pcm-replay-summary.json",
+      "sha256": "02e313b8dd85fef8db8e26afb6933d3b23fa2e10eec70748901cf0087d6478fc"
+    },
+    {
+      "file": "final5-mc-analysis2-nominal-b0.json",
+      "source_artifact": ".agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-mc-analysis2-nominal-b0.json",
+      "sha256": "59f37b737b9c40ccae13f45e2c09a203c51d0180bdea42b4e586ee46d7ffe3cf"
+    },
+    {
+      "file": "final5-mc-analysis2-nominal-b1.json",
+      "source_artifact": ".agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-mc-analysis2-nominal-b1.json",
+      "sha256": "2a374b194d29e5c79a8037d747d70092ff12fd4b2ed9b317f39a0bb11f9fac23"
+    },
+    {
+      "file": "final5-mc-analysis2-tail-positive-b0.json",
+      "source_artifact": ".agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-mc-analysis2-tail-positive-b0.json",
+      "sha256": "00156ec24ecaab22dbf55a55453bc028466bbb00c1f6ba83b342e5a71c423e82"
+    },
+    {
+      "file": "final5-mc-analysis2-tail-negative-b1.json",
+      "source_artifact": ".agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-mc-analysis2-tail-negative-b1.json",
+      "sha256": "d7f711b671bf56abc8bbe75a744bd99b13938aa03ccfc80bed0d93b182175872"
+    }
+  ]
+}

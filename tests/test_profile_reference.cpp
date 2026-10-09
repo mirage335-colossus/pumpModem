@@ -60,6 +60,33 @@ void actual_geometry() {
     const auto tones=model(1200,80,1500,false,tuning::PatternMode::auto_tone);
     check(tones.rows.front().nominal_chips==64,"automatic tones retain their floor");
 }
+void bounded_outer_reference() {
+    for(const auto factor:{10U,100U,1000U}) {
+        const auto config=tuning::resolve(10000./factor,60,tuning::PatternMode::auto_keystream,true,7500,factor,
+            modem::OuterDsssVersion::interleaved_v2).config;
+        const auto rows=reference::build(config,60,tuning::PatternMode::auto_keystream,true);
+        check(std::count_if(rows.rows.begin(),rows.rows.end(),[](const auto& row){return row.active;})==1,
+            "valid V2 profile lost its active informational row");
+        const auto& active=*std::find_if(rows.rows.begin(),rows.rows.end(),[](const auto& row){return row.active;});
+        near(active.seconds,modem::symbol_seconds(config),"V2 reference changed selected symbol duration");
+        if(factor==10) {
+            check(rows.rows.back().extended && rows.rows.back().label.find("longer integration")!=std::string::npos,
+                "supported V2 extended integration must remain in the reference");
+            const auto extended=reference::build(config,-2,tuning::PatternMode::auto_keystream,true);
+            const auto resolved=tuning::receive_profiles(config,std::array<double,1>{-2},
+                tuning::PatternMode::auto_keystream,true).front();
+            check(extended.rows.back().active && extended.rows.back().extended,
+                "supported selected V2 extended integration must remain active");
+            near(extended.rows.back().seconds,modem::symbol_seconds(resolved),
+                "V2 extended reference changed selected symbol duration");
+        } else check(rows.rows.back().label.find("unsupported waveform geometry")!=std::string::npos,
+            "V2 reference must explain its bounded weaker-target tail");
+        bool rejected=false;
+        try {(void)reference::build(config,-60,tuning::PatternMode::auto_keystream,true);}
+        catch(const Error&) {rejected=true;}
+        check(rejected,"unsupported selected V2 geometry must still fail strict validation");
+    }
+}
 void fixed_and_extended() {
     const auto fixed=model(1200,-40,1500,true,tuning::PatternMode::pattern_3);
     check(fixed.rows.size()==1 && fixed.rows.front().active && !fixed.rows.front().boundary_db_hz &&
@@ -79,6 +106,6 @@ void fixed_and_extended() {
 }
 }
 int main() {
-    try {default_boundaries();actual_geometry();fixed_and_extended();std::cout<<"profile reference tests passed\n";return 0;}
+    try {default_boundaries();actual_geometry();fixed_and_extended();bounded_outer_reference();std::cout<<"profile reference tests passed\n";return 0;}
     catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

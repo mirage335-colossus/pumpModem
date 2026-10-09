@@ -158,6 +158,9 @@ void execute_drift_search_job(const FftSearchBatch& batch,const FftSearchJob& jo
         g.differential_window_samples%g.pattern.chip_samples)))
         throw Error("invalid drift search geometry");
     code.set_stream_phase_samples(job.phase);
+    if(job.symbol>std::numeric_limits<std::uint64_t>::max()/g.pattern.chips_per_symbol)
+        throw Error("pattern stream coordinate overflow");
+    code.prepare_symbol(job.symbol*g.pattern.chips_per_symbol,stop);
     std::array<std::size_t,5> edges{};edges.back()=length;
     for(unsigned section=1;section<g.drift_sections;++section) {
         const auto boundary=static_cast<long double>(drift_boundary(section,g.pattern.symbol_samples,g.drift_sections));
@@ -307,6 +310,19 @@ void execute_fft_search_cpu(const FftSearchBatch& batch,std::span<const FftSearc
         throw Error("invalid generated pattern FFT geometry");
     for(const auto& workspace:workspaces)if(workspace.product.size()!=transform)
         throw Error("invalid pattern FFT worker workspace");
+    for(const auto& job:jobs) {
+        if(job.range_count==std::numeric_limits<std::size_t>::max())continue;
+        if(geometry.drift_sections>1 || job.range_begin>batch.start_ranges.size() ||
+           job.range_count>batch.start_ranges.size()-job.range_begin)
+            throw Error("invalid restricted pattern FFT ranges");
+        std::size_t previous=0;
+        for(const auto range:batch.start_ranges.subspan(job.range_begin,job.range_count)) {
+            if(!range.count || range.first<previous || range.first>=batch.starts ||
+               range.count>batch.starts-range.first)
+                throw Error("invalid restricted pattern FFT start");
+            previous=range.first+range.count;
+        }
+    }
     // This backend preserves the original within-job floating-point order.
     // A GPU backend can map job/start/bin dimensions to many more execution
     // lanes, but must pass the same score and ordered-publication checks.
@@ -316,6 +332,12 @@ void execute_fft_search_cpu(const FftSearchBatch& batch,std::span<const FftSearc
         for(auto job_index=begin;job_index<end;++job_index) {
             cancelled(stop);
             const auto& job=jobs[job_index];
+            const auto full=job.range_count==std::numeric_limits<std::size_t>::max();
+            const auto ranges=full?std::span<const FftStartRange>{}:
+                batch.start_ranges.subspan(job.range_begin,job.range_count);
+            std::size_t selected=full?batch.starts:0;
+            for(const auto range:ranges)selected+=range.count;
+            if(!selected)continue;
             if(geometry.drift_sections>1) {
                 if(!workspace.code)throw Error("drift search requires a pattern cache");
                 execute_drift_search_job(batch,job,scores.subspan(job_index*batch.score_stride,batch.starts),
@@ -331,7 +353,17 @@ void execute_fft_search_cpu(const FftSearchBatch& batch,std::span<const FftSearc
             } else {
                 if(!workspace.code)throw Error("pattern FFT generation needs a private pattern cache");
                 workspace.code->set_stream_phase_samples(job.phase);
+                if(job.symbol>std::numeric_limits<std::uint64_t>::max()/geometry.pattern.chips_per_symbol)
+                    throw Error("pattern stream coordinate overflow");
+                workspace.code->prepare_symbol(job.symbol*geometry.pattern.chips_per_symbol,stop);
             }
+            const auto direct=pattern_fft_direct_eligible(geometry,!prepared,selected,
+                batch.observations.size()>=length+batch.starts-1);
+            const auto visit=[&](const auto& action) {
+                if(full)for(std::size_t j=0;j<batch.starts;++j)action(j);
+                else for(const auto range:ranges)
+                    for(std::size_t j=range.first;j<range.first+range.count;++j)action(j);
+            };
             for(unsigned bit=0;bit<2;++bit) {
                 auto& row=workspace.product;
                 double norm=0;Complex square{};
@@ -340,26 +372,303 @@ void execute_fft_search_cpu(const FftSearchBatch& batch,std::span<const FftSearc
                     for(std::size_t i=0;i<length;++i) {
                         if((i&4095U)==0)cancelled(stop);
                         const auto value=template_value(*workspace.code,geometry,job,i,bit,batch.nominal_reference);
-                        row[length-1-i]=std::conj(value);norm+=std::norm(value);
+                        row[direct?i:length-1-i]=std::conj(value);norm+=std::norm(value);
                         if(geometry.sample_fit)square+=value*value*carrier_square(geometry,i);
                     }
-                    pattern_fft(row,false,stop);
-                    for(std::size_t i=0;i<transform;++i)row[i]=batch.spectrum[i]*row[i];
+                    if(!direct) {
+                        pattern_fft(row,false,stop);
+                        for(std::size_t i=0;i<transform;++i)row[i]=batch.spectrum[i]*row[i];
+                    }
                 } else {
                     norm=prepared->energy[bit];square=prepared->square[bit];
                     for(std::size_t i=0;i<transform;++i)row[i]=batch.spectrum[i]*prepared->rows[bit][i];
                 }
-                pattern_fft(row,true,stop);
-                for(std::size_t j=0;j<batch.starts;++j) {
-                    const auto score=pattern_evidence(row[length-1+j],
+                if(!direct)pattern_fft(row,true,stop);
+                visit([&](std::size_t j) {
+                    Complex dot{};
+                    if(direct)for(std::size_t i=0;i<length;++i) {
+                        if((i&4095U)==0)cancelled(stop);
+                        dot+=batch.observations[j+i]*row[i];
+                    }
+                    else dot=row[length-1+j];
+                    const auto score=pattern_evidence(dot,
                         batch.energy_prefix[j+length]-batch.energy_prefix[j],norm,
                         geometry.evidence_count,geometry.noise_condition,geometry.real_rank,
                         geometry.sample_fit,geometry.sample_fit?square*batch.carrier_square[j]:Complex{});
                     auto& output=scores[job_index*batch.score_stride+j];
                     if(bit==0)output.zero=score;else output.one=score;
-                }
+                });
             }
         }
     });
 }
 } // namespace datapump::modem::detail
+
+namespace datapump::modem::detail::partitioned_paired {
+namespace {
+using Complex=FftComplex;
+constexpr auto maximum=std::numeric_limits<std::size_t>::max();
+constexpr double tau=2*std::numbers::pi;
+void cancelled(std::stop_token stop){if(stop.stop_requested())throw Error("partitioned pattern search cancelled");}
+std::size_t add(std::size_t a,std::size_t b){if(b>maximum-a)throw Error("partitioned size overflow");return a+b;}
+std::size_t mul(std::size_t a,std::size_t b){if(a&&b>maximum/a)throw Error("partitioned size overflow");return a*b;}
+std::span<const FftStartRange> selected(const FftSearchBatch& batch,const FftSearchJob& job){
+    return batch.start_ranges.subspan(job.range_begin,job.range_count);
+}
+bool supported(const FftSearchBatch& batch){
+    const auto& g=batch.geometry;
+    return !g.sample_fit&&g.drift_sections<=1&&!g.differential_window_samples&&
+        g.bins_per_symbol&&g.bins_per_symbol<=maximum&&g.bin_samples&&g.pattern.chip_samples&&
+        g.pattern.chips_per_symbol&&g.pattern.sample_rate&&g.pattern.symbol_samples&&batch.starts&&
+        (batch.nominal_reference.empty()||batch.nominal_reference.size()==g.bins_per_symbol);
+}
+void validate_job(const FftSearchBatch& batch,const FftSearchJob& job){
+    if(job.range_begin>batch.start_ranges.size()||job.range_count>batch.start_ranges.size()-job.range_begin||
+       !std::isfinite(job.clock_ratio)||job.clock_ratio<=0||!std::isfinite(job.frequency_hz))
+        throw Error("invalid partitioned job/ranges");
+    std::size_t previous=0;const auto L=static_cast<std::size_t>(batch.geometry.bins_per_symbol);
+    for(const auto range:selected(batch,job)){
+        if(!range.count||range.first<previous||range.first>=batch.starts||range.count>batch.starts-range.first)
+            throw Error("invalid partitioned selected start");
+        previous=range.first+range.count;
+        if(previous>batch.observations.size()||L-1>batch.observations.size()-previous||
+           previous>batch.energy_prefix.size()||L>batch.energy_prefix.size()-previous)
+            throw Error("partitioned selected start not fully observed");
+    }
+}
+template<class F> std::size_t tiles(const FftSearchBatch& batch,const FftSearchJob& job,std::size_t B,F&& action){
+    std::size_t next=0,rank=0;
+    for(const auto range:selected(batch,job)){
+        const auto first=std::max(next,range.first/B),last=(range.first+range.count-1)/B;
+        for(auto q=first;q<=last;++q){action(q,rank++);}
+        next=last+1;
+    }
+    return rank;
+}
+std::size_t selected_count(const FftSearchBatch& batch,const FftSearchJob& job){
+    std::size_t n=0;for(const auto range:selected(batch,job))n=add(n,range.count);return n;
+}
+template<class A,class B> bool overlaps(std::span<A> a,std::span<B> b){
+    if(a.empty()||b.empty())return false;
+    const auto first=reinterpret_cast<std::uintptr_t>(a.data()),second=reinterpret_cast<std::uintptr_t>(b.data());
+    const auto a_size=mul(a.size(),sizeof(A)),b_size=mul(b.size(),sizeof(B));
+    if(a_size>std::numeric_limits<std::uintptr_t>::max()-first||b_size>std::numeric_limits<std::uintptr_t>::max()-second)
+        throw Error("partitioned address overflow");
+    return first<second+b_size&&second<first+a_size;
+}
+template<class T> bool aliases_inputs(std::span<T> buffer,const FftSearchBatch& batch){
+    return overlaps(buffer,batch.observations)||overlaps(buffer,batch.energy_prefix)||
+        overlaps(buffer,batch.nominal_reference)||overlaps(buffer,batch.start_ranges);
+}
+std::span<Complex> row_at(Context& context,std::size_t row){
+    const auto offset=mul(row,context.geometry.transform);
+    if(offset<context.first.size())return context.first.subspan(offset,context.geometry.transform);
+    return context.second.subspan(offset-context.first.size(),context.geometry.transform);
+}
+std::array<Complex,2> pair_value(PatternCode& code,const FftSearchBatch& batch,const FftSearchJob& job,std::size_t bin){
+    const auto& g=batch.geometry;const auto& p=g.pattern;
+    const auto position=static_cast<long double>(bin)*g.bin_samples+static_cast<long double>(g.bin_samples-1)/2;
+    const auto source=position*job.clock_ratio;
+    if(g.extended_clock_window&&source>=p.symbol_samples)return {};
+    const auto chip_position=source/p.chip_samples;const auto local=static_cast<std::uint64_t>(chip_position);
+    if(job.symbol>(std::numeric_limits<std::uint64_t>::max()-local)/p.chips_per_symbol)
+        throw Error("pattern stream coordinate overflow");
+    const auto first=job.symbol*p.chips_per_symbol,chip=first+local;
+    const auto fraction=static_cast<double>(chip_position-local);
+    const bool cached=!batch.nominal_reference.empty()&&job.clock_ratio==1&&!p.scramble&&!p.dsss&&
+        p.spreading_mode==static_cast<std::uint32_t>(SpreadingMode::pattern);
+    auto values=cached?batch.nominal_reference[bin]:p.shaped?code.shaped_values(first,static_cast<double>(source)):
+        std::array<Complex,2>{code.value(chip,0,fraction),code.value(chip,1,fraction)};
+    const auto rotation=std::polar(1.,tau*job.frequency_hz*static_cast<double>(position)/p.sample_rate);
+    for(auto& value:values)value=value*rotation;
+    return values;
+}
+} // namespace
+long double operations(const Requirements& r,std::size_t jobs) {
+    const auto p=static_cast<long double>(r.transform),q=static_cast<long double>(r.max_job_output_tiles);
+    return 5*p*std::log2(p)*(r.input_tiles+2.L*jobs*(r.chunks+q))+
+        12.L*jobs*r.chunks*q*p;
+}
+std::optional<Requirements> choose_geometry(std::size_t length,std::size_t starts,
+        std::span<const FftStartRange> ranges,std::size_t jobs,std::size_t transform,std::size_t available) {
+    if(!length||!starts||!jobs||!transform||(transform&(transform-1)))return {};
+    std::size_t previous=0;
+    for(const auto range:ranges) {
+        if(!range.count||range.first<previous||range.first>=starts||range.count>starts-range.first)
+            throw Error("invalid partitioned selected start");
+        previous=range.first+range.count;
+    }
+    const auto n=static_cast<long double>(transform);
+    auto best_work=.9L*(5*n*std::log2(n)+jobs*(20*n*std::log2(n)+12*n));
+    std::optional<Requirements> best;
+    for(std::size_t tile=16;tile<=transform/2 && tile<=16384;tile*=2) {
+        Requirements candidate;candidate.tile_size=tile;candidate.transform=2*tile;
+        candidate.length=length;candidate.chunks=1+(length-1)/tile;
+        std::size_t first=maximum,last=0,next=0;
+        for(const auto range:ranges) {
+            const auto begin=std::max(next,range.first/tile),end=(range.first+range.count-1)/tile;
+            if(begin<=end) {
+                first=std::min(first,begin);last=std::max(last,end);
+                candidate.max_job_output_tiles=add(candidate.max_job_output_tiles,end-begin+1);
+            }
+            next=end+1;
+        }
+        if(first==maximum)continue;
+        candidate.first_input_tile=first;candidate.input_tiles=add(last-first,candidate.chunks);
+        candidate.complex_count=mul(add(add(candidate.input_tiles,mul(2,candidate.max_job_output_tiles)),2),candidate.transform);
+        if(candidate.complex_count>available)continue;
+        const auto work=operations(candidate,jobs);
+        if(work<best_work){best=candidate;best_work=work;}
+    }
+    return best;
+}
+std::optional<Requirements> choose(const FftSearchBatch& batch,const FftSearchJob& job,
+        std::size_t jobs,std::size_t transform,std::size_t available) {
+    if(!supported(batch)||job.prepared_template!=std::numeric_limits<std::uint64_t>::max()||
+        job.range_count==maximum)return {};
+    validate_job(batch,job);
+    return choose_geometry(static_cast<std::size_t>(batch.geometry.bins_per_symbol),batch.starts,
+        selected(batch,job),jobs,transform,available);
+}
+std::optional<Requirements> preflight(const FftSearchBatch& batch,std::span<const FftSearchJob> jobs,
+                                      std::size_t B,std::size_t available){
+    if(!supported(batch)||!B||(B&(B-1))||B>maximum/2)return {};
+    Requirements r;r.tile_size=B;r.transform=2*B;r.length=static_cast<std::size_t>(batch.geometry.bins_per_symbol);
+    r.chunks=1+(r.length-1)/B;std::size_t first=maximum,last=0;
+    for(const auto& job:jobs){
+        if(job.prepared_template!=std::numeric_limits<std::uint64_t>::max()||job.range_count==maximum)return {};
+        validate_job(batch,job);
+        const auto count=tiles(batch,job,B,[&](std::size_t q,std::size_t){first=std::min(first,q);last=std::max(last,q);});
+        r.max_job_output_tiles=std::max(r.max_job_output_tiles,count);
+    }
+    if(first==maximum)return r;
+    r.first_input_tile=first;r.input_tiles=add(last-first,r.chunks);
+    r.complex_count=mul(add(add(r.input_tiles,mul(2,r.max_job_output_tiles)),2),r.transform);
+    if(r.complex_count>available)return {};
+    return r;
+}
+std::optional<Context> prepare(const FftSearchBatch& batch,const Requirements& r,
+                               std::span<Complex> first,std::span<Complex> second,Work* work,std::stop_token stop){
+    if(!supported(batch)||!r.tile_size||(r.tile_size&(r.tile_size-1))||r.tile_size>maximum/2||
+       r.transform!=2*r.tile_size||r.length!=batch.geometry.bins_per_symbol||
+       r.chunks!=1+(r.length-1)/r.tile_size)return {};
+    cancelled(stop);Context context;context.batch=&batch;context.geometry=r;
+    if(!r.input_tiles){if(r.complex_count||r.max_job_output_tiles)return {};return context;}
+    const auto input_count=mul(r.input_tiles,r.transform),sum_count=mul(mul(2,r.max_job_output_tiles),r.transform);
+    if(r.input_tiles<r.chunks||!r.max_job_output_tiles||
+       r.max_job_output_tiles>r.input_tiles-r.chunks+1||
+       r.complex_count!=add(add(input_count,sum_count),mul(2,r.transform))||
+       r.complex_count>add(first.size(),second.size())||first.size()%r.transform||second.size()%r.transform||
+       overlaps(first,second)||aliases_inputs(first,batch)||aliases_inputs(second,batch))return {};
+    context.first=first;context.second=second;
+    for(std::size_t m=0;m<r.input_tiles;++m){
+        cancelled(stop);auto row=row_at(context,m);std::fill(row.begin(),row.end(),Complex{});
+        const auto begin=mul(add(r.first_input_tile,m),r.tile_size);
+        for(std::size_t n=0;n<r.transform-1;++n)if(begin<batch.observations.size()&&n<batch.observations.size()-begin)
+            row[n]=batch.observations[begin+n];
+        pattern_fft(row,false,stop);if(work)++work->input_transforms;
+    }
+    return context;
+}
+bool score_direct(const FftSearchBatch& batch,const FftSearchJob& job,PatternCode& code,
+                  std::span<Complex> output,Work* work,std::stop_token stop){
+    if(!supported(batch)||job.prepared_template!=std::numeric_limits<std::uint64_t>::max()||
+       job.range_count==maximum||output.size()<batch.starts)return false;
+    validate_job(batch,job);cancelled(stop);
+    const auto K=selected_count(batch,job);
+    if(K>32||aliases_inputs(output,batch))return false;
+    if(!K)return true;
+    code.set_stream_phase_samples(job.phase);
+    if(job.symbol>std::numeric_limits<std::uint64_t>::max()/batch.geometry.pattern.chips_per_symbol)
+        throw Error("pattern stream coordinate overflow");
+    code.prepare_symbol(job.symbol*batch.geometry.pattern.chips_per_symbol,stop);
+    std::array<std::array<Complex,2>,32> dots{};
+    std::array<double,2> norm{};
+    const auto L=static_cast<std::size_t>(batch.geometry.bins_per_symbol);
+    for(std::size_t i=0;i<L;++i){
+        if((i&4095U)==0)cancelled(stop);
+        const auto values=pair_value(code,batch,job,i);
+        const std::array<Complex,2> conjugate{std::conj(values[0]),std::conj(values[1])};
+        for(unsigned bit=0;bit<2;++bit)norm[bit]+=std::norm(values[bit]);
+        std::size_t rank=0;
+        for(const auto range:selected(batch,job))for(std::size_t j=range.first;j<range.first+range.count;++j){
+            for(unsigned bit=0;bit<2;++bit)dots[rank][bit]+=batch.observations[j+i]*conjugate[bit];
+            ++rank;
+        }
+        if(work){work->template_values+=2;work->complex_products+=2*K;}
+    }
+    cancelled(stop);std::size_t rank=0;
+    for(const auto range:selected(batch,job))for(std::size_t j=range.first;j<range.first+range.count;++j){
+        cancelled(stop);std::array<double,2> evidence{};
+        for(unsigned bit=0;bit<2;++bit)evidence[bit]=pattern_evidence(dots[rank][bit],
+            batch.energy_prefix[j+L]-batch.energy_prefix[j],norm[bit],batch.geometry.evidence_count,
+            batch.geometry.noise_condition,batch.geometry.real_rank,false);
+        output[j]={evidence[0],evidence[1]};++rank;
+    }
+    if(work)work->selected_starts+=K;
+    return true;
+}
+bool score_job(Context& context,const FftSearchJob& job,PatternCode& code,std::span<Complex> output,
+               Work* work,std::stop_token stop){
+    if(!context.batch)return false;const auto& batch=*context.batch;const auto& r=context.geometry;
+    if(job.prepared_template!=std::numeric_limits<std::uint64_t>::max()||job.range_count==maximum||output.size()<batch.starts)return false;
+    validate_job(batch,job);cancelled(stop);if(!job.range_count)return true;
+    if(!r.input_tiles||!r.max_job_output_tiles)return false;
+    std::size_t qfirst=maximum,qlast=0;
+    const auto Q=tiles(batch,job,r.tile_size,[&](std::size_t q,std::size_t){qfirst=std::min(qfirst,q);qlast=std::max(qlast,q);});
+    if(!Q)return true;
+    if(Q>r.max_job_output_tiles||qfirst<r.first_input_tile||qlast-r.first_input_tile>r.input_tiles-r.chunks||
+       overlaps(output,context.first)||overlaps(output,context.second)||aliases_inputs(output,batch))return false;
+    cancelled(stop);code.set_stream_phase_samples(job.phase);
+    if(job.symbol>std::numeric_limits<std::uint64_t>::max()/batch.geometry.pattern.chips_per_symbol)
+        throw Error("pattern stream coordinate overflow");
+    code.prepare_symbol(job.symbol*batch.geometry.pattern.chips_per_symbol,stop);
+    for(std::size_t slot=0;slot<2*Q;++slot){auto sum=row_at(context,r.input_tiles+slot);
+        std::fill(sum.begin(),sum.end(),Complex{});}
+    std::array<double,2> norm{};
+    const std::array<std::span<Complex>,2> template_rows{row_at(context,r.input_tiles+2*r.max_job_output_tiles),
+        row_at(context,r.input_tiles+2*r.max_job_output_tiles+1)};
+    for(std::size_t offset=0,p=0;offset<r.length;offset+=std::min(r.tile_size,r.length-offset),++p){
+        cancelled(stop);
+        for(const auto row:template_rows)std::fill(row.begin(),row.end(),Complex{});
+        const auto count=std::min(r.tile_size,r.length-offset);
+        for(std::size_t i=0;i<count;++i){
+            if((i&4095U)==0)cancelled(stop);const auto values=pair_value(code,batch,job,offset+i);
+            for(unsigned bit=0;bit<2;++bit){norm[bit]+=std::norm(values[bit]);
+                template_rows[bit][r.tile_size-1-i]=std::conj(values[bit]);}
+            if(work)work->template_values+=2;
+        }
+        for(unsigned bit=0;bit<2;++bit){pattern_fft(template_rows[bit],false,stop);
+            if(work)++work->template_transforms;}
+        tiles(batch,job,r.tile_size,[&](std::size_t q,std::size_t rank){
+            cancelled(stop);const auto input=row_at(context,q+p-r.first_input_tile);
+            for(unsigned bit=0;bit<2;++bit){auto sum=row_at(context,r.input_tiles+2*rank+bit);
+                const auto row=template_rows[bit];
+                for(std::size_t k=0;k<r.transform;++k)sum[k]+=input[k]*row[k];
+                if(work)work->complex_products+=r.transform;}
+        });
+    }
+    for(std::size_t slot=0;slot<2*Q;++slot){pattern_fft(row_at(context,r.input_tiles+slot),true,stop);
+        if(work)++work->inverse_transforms;}
+    // Only now write scores. Host admission/peak publication follows successful
+    // return, in the caller's unchanged job/start order. No component timing
+    // or trial accounting is owned by this kernel.
+    cancelled(stop);
+    tiles(batch,job,r.tile_size,[&](std::size_t q,std::size_t rank){
+        cancelled(stop);const auto low=q*r.tile_size,high=add(low,r.tile_size);
+        const std::array<std::span<Complex>,2> dots{row_at(context,r.input_tiles+2*rank),row_at(context,r.input_tiles+2*rank+1)};
+        for(const auto range:selected(batch,job)){
+            const auto first=std::max(low,range.first),end=std::min(high,range.first+range.count);
+            for(auto j=first;j<end;++j){if((j&4095U)==0)cancelled(stop);std::array<double,2> evidence{};
+                for(unsigned bit=0;bit<2;++bit)evidence[bit]=pattern_evidence(
+                    dots[bit][r.tile_size-1+j%r.tile_size],
+                    batch.energy_prefix[j+r.length]-batch.energy_prefix[j],norm[bit],batch.geometry.evidence_count,
+                    batch.geometry.noise_condition,batch.geometry.real_rank,false);
+                output[j]={evidence[0],evidence[1]};
+            }
+        }
+    });
+    if(work)work->selected_starts+=selected_count(batch,job);
+    return true;
+}
+}

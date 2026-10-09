@@ -112,12 +112,14 @@ struct Model {
     double cpu_realtime_ratio=0;
     double cpu_realtime_upper_ratio=0;
     double cpu_per_bit_ratio=0;
+    simulation::ReceiverSearchDiagnostics receiver_geometry;
     std::size_t frequency_rate_hypotheses=0,epoch_hypotheses=0;
     std::size_t timing_phase_groups=1;
     double timing_hypotheses=0;
     bool timing_window_modeled=false;
     double initial_fft_acquisition_batches=0,initial_fft_retained_acquisition_batches=0;
     double new_epoch_admissions=0,new_epoch_full_fft_batches=0,new_epoch_retained_fft_batches=0;
+    double new_epoch_qualified_ready_batch_slots=0;
     std::string receiver_work_assumptions;
     double fallback_cpu_realtime_ratio=0,fallback_timing_hypotheses=0;
     double occupied_bandwidth_hz=0;

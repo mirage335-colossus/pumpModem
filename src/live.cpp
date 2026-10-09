@@ -156,7 +156,9 @@ Settings normalized(Settings value) {
         auto& longer = *value.long_message_modem;
         const auto& base = value.transfer.modem;
         if (longer.sample_rate != base.sample_rate || longer.carrier_hz != base.carrier_hz ||
-            longer.dsss_factor != base.dsss_factor || longer.bandwidth_hz != base.bandwidth_hz || longer.spreading_mode != base.spreading_mode)
+            longer.dsss_factor != base.dsss_factor ||
+            (base.dsss_factor>1 && longer.outer_dsss_version != base.outer_dsss_version) ||
+            longer.bandwidth_hz != base.bandwidth_hz || longer.spreading_mode != base.spreading_mode)
             throw Error("short and long transmit profiles must share sample rate, carrier, bandwidth and spreading mode");
         if (longer.spreading_mode == modem::SpreadingMode::tone) {
             longer.data_key.reset(); longer.scramble = longer.dsss = false;longer.dsss_factor=1;
@@ -289,6 +291,8 @@ struct Session::Impl {
         std::vector<Receiver> receivers;
         detail::ReceptionHistory receptions;
         std::uint64_t samples = 0, next_candidate = 1,revision=0;
+        std::uint64_t admissions = 0, retirements = 0;
+        std::size_t peak_receivers = 0;
         std::size_t working_bytes = sizeof(detail::ReceptionHistory);
         double created_at = 0;
         // UTC for a captured block, independent of when its search runs. Sample
@@ -770,6 +774,8 @@ struct Session::Impl {
     void reset_input_locked() {
         input.clear(); input_bytes = 0; ++receive_revision;
         current.clock_window_modeled=false;current.receiver_timing.reset();
+        current.receiver_instances=current.peak_receiver_instances=0;
+        current.receiver_admissions=current.receiver_retirements=0;
         decode_stop.request_stop();decode_stop=std::stop_source{};receive_pending=false;
         decoding_remaining_samples=0;decoding_queued_at.reset();
         current.buffered_samples = 0;
@@ -868,7 +874,9 @@ struct Session::Impl {
                     const auto& c=receiver.options.modem;
                     return receiver.key_tag == tag && (tag.empty() || receiver.epoch == epoch) &&
                         c.spreading_factor==profile.spreading_factor && c.integration_seconds==profile.integration_seconds &&
-                        c.dsss_factor==profile.dsss_factor && c.scramble==profile.scramble && c.spreading_mode==profile.spreading_mode &&
+                        c.dsss_factor==profile.dsss_factor &&
+                        (c.dsss_factor==1 || c.outer_dsss_version==profile.outer_dsss_version) &&
+                        c.scramble==profile.scramble && c.spreading_mode==profile.spreading_mode &&
                         c.pulse_shaping==profile.pulse_shaping && c.oscillator_search==profile.oscillator_search;
                 });
                 if (existing != bank.receivers.end()) continue;
@@ -916,6 +924,8 @@ struct Session::Impl {
                 if (bank.working_bytes > bank_capacity(value))
                     throw Error("key and epoch receiver bank exceeds the configured DSP workspace");
                 bank.receivers.push_back(std::move(receiver));
+                ++bank.admissions;
+                bank.peak_receivers=std::max(bank.peak_receivers,bank.receivers.size());
             }
             }
         }
@@ -931,7 +941,7 @@ struct Session::Impl {
         }))return;
         const auto now = observation_epoch(bank,value,bank.samples);
         if (std::floor(now)==std::floor(bank.created_at)) return;
-        std::erase_if(bank.receivers,[&](const auto& receiver){
+        bank.retirements+=std::erase_if(bank.receivers,[&](const auto& receiver){
             // Short streams can hold fewer than one output chunk throughout
             // the physical absence window. Their admitted clock must survive
             // epoch refresh even before any chunk updates last_confident_end.
@@ -1486,6 +1496,8 @@ struct Session::Impl {
         const auto observation_id = pattern_score_observation_id.load(std::memory_order_relaxed);
         std::lock_guard lock(mutex);
         if (current.running && generation == version && bank.revision==receive_revision && !stop.stop_requested()) {
+            current.receiver_instances=bank.receivers.size();current.peak_receiver_instances=bank.peak_receivers;
+            current.receiver_admissions=bank.admissions;current.receiver_retirements=bank.retirements;
             current.clock_window_modeled=std::any_of(bank.receivers.begin(),bank.receivers.end(),
                 [](const auto& receiver){return receiver.clock_window_modeled;});
             if(current.clock_window_modeled && bank.timing &&
@@ -2159,6 +2171,8 @@ struct Session::Impl {
                     current.error = exception.what();
                     current.receiver_health.receiver_reset=true;
                     current.clock_window_modeled=false;current.receiver_timing.reset();
+                    current.receiver_instances=current.peak_receiver_instances=0;
+                    current.receiver_admissions=current.receiver_retirements=0;
                 }
                 bank.reset();
             }

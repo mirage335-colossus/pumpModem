@@ -26,6 +26,15 @@ void parsing_and_formatting() {
         "explicit half duplex was confused with an omitted option");
     check(!launch_command::parse("--rate 1200").full_duplex.has_value(),"older commands must leave duplex unchanged");
     check(launch_command::parse(launch_command::format(clock))==clock,"clock and spreading settings must round trip");
+    for(const auto* version:{"legacy","interleaved-v2"}) {
+        const auto patch=launch_command::parse(std::string("--dsss-factor 10 --dsss-version ")+version);
+        check(patch.dsss_version==version&&launch_command::parse(launch_command::format(patch))==patch,
+            "explicit DSSS waveform version did not survive launch export/import");
+    }
+    check(!launch_command::parse("--dsss-factor 10").dsss_version,
+        "an omitted DSSS version must preserve the destination selection");
+    for(const auto* invalid:{"v2","2","legacy-v1","INTERLEAVED-V2"})
+        rejects([&]{launch_command::parse(std::string("--dsss-version ")+invalid);},"unknown DSSS waveform version accepted");
     for(const auto& path:std::vector<std::string>{"/tmp/private keys/key's file",R"(C:\User Data\O'Brien\private.keys)",
         "/tmp/$(do-not-expand) `literal` $HOME ; & | \"quoted\" \\ ending\\","--looks-like-a-flag"}) {
         launch_command::Patch keyed;keyed.keyfile=path;keyed.key_name="none";keyed.tx_key="named";

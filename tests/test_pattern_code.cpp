@@ -12,6 +12,7 @@
 #include <iostream>
 #include <limits>
 #include <numbers>
+#include <numeric>
 
 using namespace datapump;
 namespace {
@@ -36,6 +37,216 @@ std::uint32_t phase_word(std::complex<double> value) {
     auto phase=std::arg(value);
     if(phase<0)phase+=2*std::numbers::pi;
     return static_cast<std::uint32_t>(std::llround(phase/(2*std::numbers::pi)*4294967296.-.5));
+}
+std::vector<std::uint32_t> reference_interleaving(const modem::Config& c,std::uint64_t epoch,
+                                                std::uint64_t symbol_index) {
+    const auto samples=modem::symbol_sample_count(c),chip=modem::pattern_chip_samples(c);
+    const auto address=modem::symbol_stream_address(epoch,c.stream_phase_samples,symbol_index,samples,c.sample_rate);
+    const auto domain=c.dsss_factor==10?StreamDomain::OuterDsss10PermutationV2:
+        c.dsss_factor==100?StreamDomain::OuterDsss100PermutationV2:StreamDomain::OuterDsss1000PermutationV2;
+    const auto seed=Crypto(c.dsss_seed).stream(StreamPurpose::Dsss,address.epoch,address.ordinal*32,32,domain);
+    const auto count=static_cast<std::size_t>(samples/chip);
+    const auto bytes=Crypto(seed).stream(StreamPurpose::Dsss,0,0,4*(2*count+1024));
+    std::vector<std::uint32_t> result(count);std::iota(result.begin(),result.end(),0U);
+    std::size_t offset=0;
+    for(auto size=result.size();size>1;--size) {
+        const auto bound=static_cast<std::uint32_t>(size),threshold=(std::uint32_t{0}-bound)%bound;
+        std::uint32_t word;
+        do {
+            check(offset+4<=bytes.size(),"reference shuffle draw budget exhausted");
+            word=0;for(unsigned j=0;j<4;++j)word=(word<<8)|bytes[offset++];
+        } while(word<threshold);
+        std::swap(result[size-1],result[word%bound]);
+    }
+    return result;
+}
+void interleaved_dsss_coefficients() {
+    constexpr std::uint64_t epoch=1789312671;
+    constexpr std::array<std::uint32_t,24> frozen_prefix{
+        500,379,116,441,563,28,384,537,194,114,98,240,59,49,253,183,249,84,125,233,295,548,176,357};
+    for(const unsigned factor:{10U,100U,1000U})for(const bool partial:{false,true}) {
+        auto c=config();c.scramble=true;c.dsss=true;c.dsss_factor=factor;
+        c.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;
+        c.bandwidth_hz=10;c.sample_rate=400*factor;c.carrier_hz=100*factor;c.spreading_factor=64;
+        const auto chip=modem::pattern_chip_samples(c);
+        if(partial)c.integration_seconds=std::nextafter(
+            static_cast<double>(modem::symbol_sample_count(c)+chip/2)/c.sample_rate,0.);
+        auto inner=c;inner.dsss_factor=1;
+        // Explicit integration keeps the same partial symbol on the original
+        // coarse geometry as on the fine geometry.
+        inner.integration_seconds=std::nextafter(static_cast<double>(modem::symbol_sample_count(c))/c.sample_rate,0.);
+        modem::PatternCode code(c,epoch),original(inner,epoch);
+        const auto count=code.chips_per_symbol();
+        const auto retained=code.working_bytes();
+        for(const std::uint64_t index:{0ULL,1ULL,9ULL}) {
+            auto map=reference_interleaving(c,epoch,index),sorted=map;
+            std::sort(sorted.begin(),sorted.end());
+            for(std::size_t i=0;i<sorted.size();++i)check(sorted[i]==i,"V2 complete-chip mapping is not a bijection");
+            if(factor==10 && !partial && index==0)
+                check(std::equal(frozen_prefix.begin(),frozen_prefix.end(),map.begin()),
+                      "independent Python/OpenSSL V2 permutation vector changed");
+            const auto address=modem::symbol_stream_address(epoch,c.stream_phase_samples,index,
+                code.symbol_samples(),c.sample_rate);
+            const auto domain=factor==10?StreamDomain::OuterDsss10RotationV2:
+                factor==100?StreamDomain::OuterDsss100RotationV2:StreamDomain::OuterDsss1000RotationV2;
+            const Crypto rotations(c.dsss_seed);
+            const auto bytes=rotations.stream(StreamPurpose::Dsss,address.epoch,
+                address.ordinal*count/4,static_cast<std::size_t>((address.ordinal*count%4+count+3)/4),domain);
+            constexpr std::array<std::complex<double>,4> phases{{{1,0},{0,1},{-1,0},{0,-1}}};
+            long double old_energy[2]{},new_energy[2]{},old_distance=0,new_distance=0;
+            std::complex<long double> old_product{},new_product{};
+            for(std::uint64_t i=0;i<count;++i) {
+                const auto source=i<map.size()?map[static_cast<std::size_t>(i)]:i;
+                const auto fine=address.ordinal*count+i;
+                const auto rotation=phases[(bytes[static_cast<std::size_t>(fine/4-address.ordinal*count/4)]>>
+                    (2*(fine%4)))&3U];
+                const auto actual=code.values(index*count+i);
+                const auto coarse=original.chips_per_symbol();
+                const auto expected0=original.value(index*coarse+source/factor,0)*rotation;
+                const auto expected1=original.value(index*coarse+source/factor,1)*rotation;
+                check(actual[0]==expected0 && actual[1]==expected1,
+                      "V2 must permute the unchanged independent inner candidates and use dedicated rotations");
+                const auto weight=i<code.symbol_samples()/chip?1.L:
+                    static_cast<long double>(code.symbol_samples()%chip)/chip;
+                const auto a=original.values(index*coarse+i/factor);
+                for(unsigned bit=0;bit<2;++bit) {
+                    old_energy[bit]+=weight*std::norm(a[bit]);new_energy[bit]+=weight*std::norm(actual[bit]);
+                }
+                old_distance+=weight*std::norm(a[0]-a[1]);new_distance+=weight*std::norm(actual[0]-actual[1]);
+                old_product+=weight*std::conj(std::complex<long double>(a[0]))*std::complex<long double>(a[1]);
+                new_product+=weight*std::conj(std::complex<long double>(actual[0]))*std::complex<long double>(actual[1]);
+            }
+            for(unsigned bit=0;bit<2;++bit)
+                check(std::abs(old_energy[bit]-new_energy[bit])<1e-11L*(1+old_energy[bit]),
+                      "V2 changed weighted coefficient energy, including the partial final chip");
+            check(std::abs(old_distance-new_distance)<1e-11L*(1+old_distance) &&
+                  std::abs(old_product-new_product)<1e-11L*(1+old_distance),
+                  "shared V2 permutation/rotation changed candidate distance or inner product");
+            auto rebased=c;rebased.stream_phase_samples=address.sample_in_second;
+            modem::PatternCode later(rebased,address.epoch);
+            for(const auto local:std::array<std::uint64_t,4>{0,1,count/2,count-1})
+                check(later.values(local)==code.values(index*count+local),"V2 canonical symbol rebasing changed coefficients");
+        }
+        check(code.working_bytes()==retained,"V2 symbol seeking must not grow retained map/cache memory");
+        auto legacy=c;legacy.outer_dsss_version=modem::OuterDsssVersion::legacy_v1;
+        modem::PatternCode before(legacy,epoch);
+        check(retained>=before.working_bytes()+8*(code.symbol_samples()/chip),
+              "V2 must charge both complete permutation maps upfront");
+        auto too_small=c;too_small.memory_limit=retained-1;
+        rejects([&]{modem::PatternCode unsupported(too_small,epoch);},"V2 silently exceeded workspace or selected legacy");
+        auto exact=c;exact.memory_limit=retained;modem::PatternCode exact_budget(exact,epoch);
+        rejects([&]{exact_budget.enable_transmit_trace(0);},"V2 trace exceeded the configured workspace");
+        check(code.values(0)!=before.values(0),"explicit V2 accidentally selected the legacy waveform");
+    }
+}
+void interleaved_dsss_state_and_waveform() {
+    auto c=config();c.scramble=true;c.dsss=true;c.dsss_factor=10;
+    c.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;
+    c.sample_rate=12000;c.bandwidth_hz=360;c.carrier_hz=1500;c.spreading_factor=16;
+    constexpr std::uint64_t epoch=1789312671;
+    modem::PatternCode code(c,epoch),fresh(c,epoch);
+    const auto chips=code.chips_per_symbol(),samples=code.symbol_samples(),chip=code.chip_samples();
+    const auto retained=code.working_bytes();
+    // Alternate neighboring tails, then evict with a third symbol and seek
+    // back. Cache selection must never change either independently keyed row.
+    for(const auto pair:{0ULL,1ULL,9ULL,0ULL}) {
+        code.prepare_symbol(pair*chips);code.prepare_symbol((pair+1)*chips);
+        for(unsigned repeat=0;repeat<4;++repeat)for(unsigned local=0;local<2*modem::pattern_pulse_half_span;++local) {
+            const auto coordinate=static_cast<double>(samples)-
+                (static_cast<double>(modem::pattern_pulse_half_span)-local+.375)*chip;
+            check(code.shaped_values(pair*chips,coordinate)==fresh.shaped_values(pair*chips,coordinate),
+                  "V2 old-symbol pulse tail changed after neighboring-symbol cache use");
+            check(code.shaped_values((pair+1)*chips,coordinate-samples)==
+                  fresh.shaped_values((pair+1)*chips,coordinate-samples),
+                  "V2 new-symbol pulse tail changed after neighboring-symbol cache use");
+        }
+    }
+    auto shifted=c;shifted.stream_phase_samples=11997;
+    modem::PatternCode changed(shifted,epoch);
+    code.set_stream_phase_samples(shifted.stream_phase_samples);
+    check(code.values(chips)==changed.values(chips),"V2 phase change retained a stale permutation/coarse cache");
+    code.set_stream_phase_samples(0);
+    check(code.values(chips)==fresh.values(chips),"V2 phase restoration changed canonical coefficients");
+    for(const auto phase:std::array<std::uint64_t,5>{1,2,11997,1,0}) {
+        code.set_stream_phase_samples(phase);auto exact=c;exact.stream_phase_samples=phase;
+        modem::PatternCode independent(exact,epoch);
+        for(const auto index:std::array<std::uint64_t,3>{0,1,9})
+            for(const auto local:std::array<std::uint64_t,3>{0,chips/2,chips-1})
+                check(code.values(index*chips+local)==independent.values(index*chips+local),
+                    "V2 canonical phase-cache reuse changed an independent zero/one coefficient");
+    }
+    code.set_stream_phase_samples(0);
+    check(code.working_bytes()==retained,"V2 eviction or phase invalidation grew workspace");
+    std::stop_source cancel;cancel.request_stop();
+    rejects([&]{code.prepare_symbol(2*chips,cancel.get_token());},"V2 setup ignored cancellation");
+    code.prepare_symbol(2*chips);
+    check(code.values(2*chips)==fresh.values(2*chips),"cancelled V2 setup left a partially valid map");
+    rejects([&]{code.prepare_symbol(chips+1);},"V2 setup accepted a misaligned symbol address");
+    modem::PatternTransmitter whole(Bytes{0,0,1},c,epoch,0,false),chunked(Bytes{0,0,1},c,epoch,0,false);
+    std::vector<std::complex<double>> expected(static_cast<std::size_t>(whole.total_samples())),actual(expected.size());
+    check(whole.read_analytic(expected)==expected.size(),"V2 whole waveform ended early");
+    constexpr std::array<std::size_t,6> chunks{1,7,13,79,503,4096};
+    for(std::size_t offset=0,index=0;offset<actual.size();++index) {
+        const auto n=std::min(chunks[index%chunks.size()],actual.size()-offset);
+        check(chunked.read_analytic(std::span(actual).subspan(offset,n))==n,"V2 chunk ended early");
+        std::array<std::complex<double>,79> preview{};chunked.preview_last_analytic(preview);
+        const auto shown=std::min<std::size_t>(preview.size(),offset+n);
+        for(std::size_t i=0;i<shown;++i)
+            check(std::abs(preview[preview.size()-shown+i]-expected[offset+n-shown+i])<1e-11,
+                  "V2 preview changed waveform state or reconstructed a different symbol map");
+        offset+=n;
+    }
+    for(std::size_t i=0;i<actual.size();++i)
+        check(std::abs(expected[i]-actual[i])<1e-11,"V2 chunk boundaries changed shaped PCM");
+    check(whole.finished() && chunked.finished(),"V2 changed physical waveform length");
+    modem::PatternTransmitter stopped(Bytes{0},c,epoch,0,false);
+    std::array<float,17> output{};
+    rejects([&]{stopped.read(output,cancel.get_token());},"V2 transmitter ignored cancellation before private output");
+    check(stopped.samples_emitted()==0,"cancelled V2 transmitter advanced source samples");
+    // Zero/one complete-chip maps are valid, including a fixed partial chip.
+    for(const double duration:{chip*.5/c.sample_rate,chip*1.5/c.sample_rate}) {
+        auto short_c=c;short_c.integration_seconds=duration;short_c.carrier_hz=2400;
+        modem::PatternCode short_code(short_c,epoch);
+        short_code.prepare_symbol(0);
+        check(std::isfinite(std::norm(short_code.value(0,0))),"V2 short map mishandled zero/one complete chips");
+    }
+    auto unsupported=c;unsupported.integration_seconds=std::nextafter(
+        static_cast<double>((modem::maximum_interleaved_dsss_chips+1)*chip)/c.sample_rate,0.);
+    rejects([&]{modem::validate(unsupported);},"V2 exceeded its deterministic geometry cap");
+    unsupported=c;unsupported.outer_dsss_version=static_cast<modem::OuterDsssVersion>(99);
+    rejects([&]{modem::validate(unsupported);},"unknown DSSS wire version accepted");
+}
+void interleaved_dsss_legacy_and_gain() {
+    constexpr std::uint64_t epoch=1789312671;
+    for(const unsigned factor:{1U,10U}) {
+        auto c=config();c.scramble=true;c.dsss=true;c.dsss_factor=factor;
+        c.sample_rate=12000;c.bandwidth_hz=3600./factor;c.carrier_hz=2400;c.spreading_factor=16;
+        auto explicit_legacy=c;explicit_legacy.outer_dsss_version=modem::OuterDsssVersion::legacy_v1;
+        modem::PatternTransmitter original(Bytes{0,0,1},c,epoch),legacy(Bytes{0,0,1},explicit_legacy,epoch);
+        auto new_version=c;new_version.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;
+        modem::PatternTransmitter selected(Bytes{0,0,1},new_version,epoch);
+        std::array<float,503> a{},b{},d{};
+        while(!original.finished()) {
+            const auto n=original.read(a);check(legacy.read(b)==n,"explicit V1 changed duration");
+            check(std::equal(a.begin(),a.begin()+static_cast<std::ptrdiff_t>(n),b.begin()),
+                  "default low-level version changed legacy PCM bytes");
+            if(factor==1) {
+                check(selected.read(d)==n && std::equal(a.begin(),a.begin()+static_cast<std::ptrdiff_t>(n),d.begin()),
+                      "DSSS Off must be byte-identical regardless of version selection");
+            }
+        }
+        check(modem::outer_dsss_transmit_gain(c)==1. &&
+              modem::outer_dsss_transmit_gain(new_version)==(factor==1?1.:.5),"V2 gain is not explicit or altered Off");
+    }
+    auto c=config();c.scramble=true;c.dsss=true;c.dsss_factor=10;c.pulse_shaping=false;
+    c.sample_rate=12000;c.bandwidth_hz=360;c.carrier_hz=2400;c.spreading_factor=16;
+    auto new_c=c;new_c.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;
+    modem::PatternTransmitter v1(Bytes{0},c,epoch),v2(Bytes{0},new_c,epoch);
+    std::vector<std::complex<double>> a(static_cast<std::size_t>(v1.total_samples())),b(a.size());
+    check(v1.read_analytic(a)==a.size() && v2.read_analytic(b)==b.size(),"V2 gain changed surrounding-noise duration");
+    const auto payload_begin=modem::training_sample_count(c),payload_end=payload_begin+modem::symbol_sample_count(c);
+    for(std::size_t i=0;i<a.size();++i)if(i<payload_begin || i>=payload_end)
+        check(std::abs(b[i]-.5*a[i])<1e-14,"V2 must apply headroom to settling and suppression noise too");
 }
 void outer_dsss_domains_and_addresses() {
     constexpr std::uint64_t epoch=1789312671;
@@ -766,8 +977,9 @@ void outer_dsss_shaped_spectrum() {
             }
         }
     };
+    for(const auto version:{modem::OuterDsssVersion::legacy_v1,modem::OuterDsssVersion::interleaved_v2})
     for(const auto factor:{1U,10U,100U,1000U})for(const bool partial:{false,true}) {
-        auto c=config();c.scramble=true;c.dsss_factor=factor;
+        auto c=config();c.scramble=true;c.dsss_factor=factor;c.outer_dsss_version=version;
         c.sample_rate=12000;c.carrier_hz=1500;c.bandwidth_hz=3600./factor;
         const auto chip=modem::pattern_chip_samples(c);
         const auto wanted=64ULL*factor*chip+(partial?chip/2:0);
@@ -837,6 +1049,9 @@ void shaped_coordinate_and_duration_bounds() {
 int main() {
     try {
         outer_dsss_domains_and_addresses();
+        interleaved_dsss_coefficients();
+        interleaved_dsss_state_and_waveform();
+        interleaved_dsss_legacy_and_gain();
         seek_and_domains(); symbol_epoch_schedule(); symbol_schedule_integer_bounds();
         alphabet_and_repetition();independent_private_candidates(); public_waveform_uses_amplitude_and_phase();
         carrier_phase_integer_positions();exact_pcm_and_chunks(); tones_and_bounded_state();

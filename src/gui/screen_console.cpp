@@ -16,7 +16,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     case Slot::search_margin: case Slot::clock_accuracy: case Slot::clock_region: case Slot::clock_offset: case Slot::audio_error:
         control.purpose=ControlPurpose::planning;break;
     case Slot::device:case Slot::mono:case Slot::live_duplex:case Slot::exclusive:case Slot::key:case Slot::key_actions:
-    case Slot::dsss_factor:case Slot::fhss:
+    case Slot::dsss_factor:case Slot::dsss_version:case Slot::fhss:
     case Slot::pattern:case Slot::fec:case Slot::dsp_workspace:case Slot::receive_snr:
     case Slot::developer_mode:case Slot::shellcode_mode:case Slot::send_key:
         control.purpose=ControlPurpose::setup;break;
@@ -77,6 +77,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::clock_offset)control.help="Approximate fixed one-way path delay, or total Earth-Moon-Earth path delay (2564 ms example). Region extends nearer and farther around it. This does not set the PC clock. Default resets all clock controls.";
     if(slot==Slot::audio_error)control.help="Assumed maximum residual audio timing error at each station after compensating reported queued audio; default 0 ms. Separate from GPS accuracy, propagation and the underrun-prevention buffer. Both peers must fit this allowance. Editable ns/us/ms/s, from zero through 60 s. A smaller setting cannot reduce measured provider uncertainty; unsupported timing uses ordinary transmission and the full receive search, with a visible timing status. Retained when Clock sync returns to Default.";
     if(slot==Slot::dsss_factor)control.help="Additional private outer DSSS spreading factor, using separate DSSS key/counter domains while retaining independent inner private patterns. Selecting 10x, 100x or 1000x starts at Rate 360, 36 or 3.6 Hz and a 1.5 kHz stream carrier, preserving the usual voice-passband width. Rate remains editable; occupied bandwidth grows with Rate times factor. Experimental waveform; both peers must match. Requires a selected key; spreading adds no energy per bit.";
+    if(slot==Slot::dsss_version)control.help="Explicit outer DSSS waveform construction. Interleaved v2 is the default for new DSSS use; Legacy v1 is retained for diagnostics and compatibility. Both peers must select the same version. Changing this choice preserves DSSS factor, Rate and Carrier. DSSS Off retains its existing waveform, while remembering this selection. V2 halves digital amplitude before limiting; this is 6.02 dB of linear power backoff at unchanged downstream gain, with actual average power dependent on waveform and clipping. Enter actual average radio power in the link budget. Experimental: sensitivity and interference qualification remain incomplete.";
     if(slot==Slot::fhss)control.help="Fake animates Carrier and Shift during transmission and plans oscillator uncertainty at the highest illustrated frequency. It does not retune hardware or hop the audio signal. The observer preview compares aggregate and channelized energy detection with all channels captured simultaneously and all signal energy intercepted. The illustrative 0.4 s / 200-channel schedule is not a US/EU compliance profile. Genuine and IC-7100 hardware hopping are not implemented.";
 
     if(slot==Slot::mode)control.help="Receiver failures stay visible until restart or reconfiguration. Dropped input means the capture queue discarded audio; interrupted input means device continuity was lost or uncertain. Search limited means required coverage or candidates were omitted by a resource limit; restarted means an error reset acquisition. Normal weak-candidate rejection and slow lossless simulation are not failures. See Status for details.";
@@ -207,6 +208,7 @@ const std::vector<Control>& console_screen() {
         placed({Kind::action,Field::count,Command::show_key_folder,Bitmap::none,Page::console,2,"Show key folder"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::action,Field::count,Command::acknowledge_key_failure,Bitmap::none,Page::console,2,"Keep current keys"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::choice,Field::dsss_factor,Command::none,Bitmap::none,Page::console,3,"DSSS"}, Slot::dsss_factor),
+        placed({Kind::choice,Field::dsss_version,Command::none,Bitmap::none,Page::console,3,"DSSS version"}, Slot::dsss_version),
         placed({Kind::choice,Field::fhss,Command::none,Bitmap::none,Page::console,3,"FHSS"}, Slot::fhss),
         placed({Kind::choice,Field::key,Command::none,Bitmap::none,Page::console,3,"Encryption key entry"}, Slot::key),
         placed({Kind::label,Field::key_path,Command::none,Bitmap::none,Page::console,3,""}, Slot::key_path),

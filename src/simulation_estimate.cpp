@@ -10,6 +10,8 @@
 #include "receiver_probability.hpp"
 #include "estimate_cancellation.hpp"
 #include "pattern_start_geometry.hpp"
+#include "pattern_fft_window.hpp"
+#include "datapump/symbol_schedule.hpp"
 #include "datapump/correlation_experiment.hpp"
 #include <algorithm>
 #include <array>
@@ -147,6 +149,7 @@ double interval_probability(double admitted,double bit_error,FecMode fec) {
 }
 bool same_profile(const modem::Config& a,const modem::Config& b) {
     return a.sample_rate==b.sample_rate && a.carrier_hz==b.carrier_hz && a.bandwidth_hz==b.bandwidth_hz && a.dsss_factor==b.dsss_factor &&
+        (a.dsss_factor<=1||a.outer_dsss_version==b.outer_dsss_version) &&
         a.spreading_mode==b.spreading_mode && a.scramble==b.scramble && a.dsss==b.dsss &&
         a.pulse_shaping==b.pulse_shaping &&
         modem::symbol_sample_count(a)==modem::symbol_sample_count(b) &&
@@ -211,16 +214,19 @@ struct Work {
     bool differential_supported=false;
     bool compact=false,pulse_projected=false,pulse_segmented=false,kernel_upper_bound=false,outer_presence=false;
     std::uint64_t bin_samples=1;
-    bool workspace_supported=true;
+    bool workspace_supported=true,work_supported=true;
     long double epoch_hypotheses=1,timing_hypotheses=1,full_timing_hypotheses=1;
     std::size_t phase_groups=1;
     bool timing_window_modeled=false;
     long double fft_acquisition_batches=0,fft_retained_acquisition_batches=0;
     long double new_epoch_admissions=0,new_epoch_full_fft_batches=0,new_epoch_retained_fft_batches=0;
-    long double new_epoch_frontend_operations=0,new_epoch_setup_operations=0;
+    long double new_epoch_qualified_ready_batch_slots=0;
+    long double initial_epoch_setup_operations=0,new_epoch_frontend_operations=0,new_epoch_setup_operations=0;
+    long double initial_epoch_setup_scoring_operations=0,new_epoch_setup_scoring_operations=0;
+    ReceiverSearchDiagnostics geometry;
 };
 struct RollingFftWork {
-    long double admissions=0,first_batches=0,full_batches=0,input_samples=0;
+    long double admissions=0,first_batches=0,full_batches=0,input_samples=0,maximum_batches=0;
 };
 // Automatic Live refresh adds one fresh epoch at each observed UTC second.
 // This prices the new acquisition cohorts, separately from the initial bank.
@@ -229,7 +235,7 @@ struct RollingFftWork {
 RollingFftWork rolling_fft_work(long double samples,std::uint32_t sample_rate,
         long double bin,long double length,long double hop,long double initial_batch,
         long double symbol_seconds,long double prefix_seconds,unsigned epoch_radius,
-        long double default_rate_uncertainty,const ReceiverTimingModel& timing_model) {
+        long double default_rate_uncertainty,const ReceiverTimingModel& timing_model,bool early_readiness=false) {
     RollingFftWork result;
     if(!(samples>0))return result;
     const auto seconds=samples/sample_rate;
@@ -248,19 +254,20 @@ RollingFftWork rolling_fft_work(long double samples,std::uint32_t sample_rate,
         return std::floor(value+allowance);
     };
     const auto hop_seconds=hop*bin/sample_rate;
-    const auto first_pass=(length+initial_batch-1)*bin/sample_rate;
+    const auto first_full=(length+initial_batch-1)*bin/sample_rate;
+    const auto first_pass=early_readiness?length*bin/sample_rate:first_full;
     // New epochs enter no later than epoch-radius. The ORIGINAL legacy hint
     // ends at epoch+radius+1, independently of a qualified arrival prior.
     const auto last_start=(2.L*epoch_radius+1)*sample_rate/bin;
     const auto passes=last_start<initial_batch?1.L:2+outward_floor((last_start-initial_batch)/hop);
-    const auto sampled_search_end=first_pass+(passes-1)*hop_seconds;
+    const auto sampled_search_end=first_full+(passes-1)*hop_seconds;
     const auto retirement=(prefix_seconds+symbol_seconds+2.L*epoch_radius+1)/minimum_utc_rate;
     // Two UTC intervals conservatively cover strict retirement and integer
     // refresh boundaries. Hardware feeds are shorter than one UTC interval.
     const auto lifetime=std::max(sampled_search_end,retirement)+2/minimum_utc_rate;
     const auto lifetime_batches=1+outward_floor((lifetime-first_pass)/hop_seconds);
-    result.first_batches=std::clamp(outward_floor((samples-(length+initial_batch-1)*bin)/
-        (cadence*sample_rate))+1,0.L,result.admissions);
+    result.maximum_batches=lifetime_batches;
+    result.first_batches=std::clamp(outward_floor((seconds-first_pass)/cadence)+1,0.L,result.admissions);
     // Sum an upper affine envelope of each integer batch count, truncated by
     // remaining input and the legacy lifetime. O(1), including hours-long input.
     const auto ready=result.first_batches;
@@ -278,6 +285,293 @@ RollingFftWork rolling_fft_work(long double samples,std::uint32_t sample_rate,
         throw Error("Automatic Live epoch-refresh work exceeds the finite FFT model");
     return result;
 }
+struct FftWindowWork {
+    long double first_ready_bins=0,first_component_ready_bins=0,early_batches=0;
+    long double input_transforms=0,components=0,component_fallback_hops=0,envelope_fallback_hops=0;
+    long double max_input_transforms=0;
+    long double paired_direct_jobs=0,partitioned_jobs=0,partitioned_input_transforms=0;
+    long double partitioned_template_transforms=0,partitioned_inverse_transforms=0,paired_fallback_components=0;
+    std::size_t partitioned_tile_min=0,partitioned_tile_max=0;
+    long double batches=0,full_jobs=0,jobs=0,direct_jobs=0,full_positions=0,positions=0,operations=0;
+    long double max_operations=0,max_jobs=0,max_positions=0,max_direct_jobs=0;
+};
+// Identical canonical address groups to PatternReceiver::phase_groups. The
+// phase lattice and stream index remain original; only work is intersected.
+std::array<std::pair<std::uint64_t,std::uint64_t>,3> fft_phase_groups(
+        const modem::Config& config,std::uint64_t index,std::uint64_t upper,
+        std::uint64_t step,std::size_t& count) {
+    std::array<std::pair<std::uint64_t,std::uint64_t>,3> groups{};count=0;
+    auto lower=std::uint64_t{0};const auto symbol=modem::symbol_sample_count(config);
+    while(lower<=upper) {
+        const auto address=modem::symbol_stream_address(0,lower,index,symbol,config.sample_rate);
+        auto low=std::uint64_t{0},high=(upper-lower)/step;
+        while(low<high) {
+            const auto mid=low+(high-low+1)/2;
+            const auto next=modem::symbol_stream_address(0,lower+mid*step,index,symbol,config.sample_rate);
+            if(next.epoch==address.epoch&&next.ordinal==address.ordinal)low=mid;else high=mid-1;
+        }
+        const auto end=lower+low*step;
+        if(count==groups.size())throw Error("FFT planning phase groups exceed the finite symbol interval");
+        groups[count++]={lower,end};if(end==upper)break;lower=end+step;
+    }
+    return groups;
+}
+// Upper numeric-work option for every supported subset/segment-origin
+// translation of an anchor envelope. This proves that runtime choose has an
+// eligible option; it does not predict which tile size that runtime selects.
+std::optional<long double> paired_envelope_numeric(std::span<const modem::detail::FftStartRange> ranges,
+        std::size_t length,std::size_t transform,std::size_t frequencies) {
+    if(ranges.empty())return std::nullopt;
+    const auto span=ranges.back().first+ranges.back().count-1-ranges.front().first;
+    const auto n=static_cast<long double>(transform);
+    auto best=.9L*(5*n*std::log2(n)+frequencies*(20*n*std::log2(n)+12*n));
+    bool found=false;
+    for(std::size_t b=16;b<=transform/2&&b<=16384;b*=2) {
+        modem::detail::partitioned_paired::Requirements r;
+        r.tile_size=b;r.transform=2*b;r.length=length;r.chunks=1+(length-1)/b;
+        const auto delta=span/b+(span%b!=0);
+        std::size_t q=0;
+        for(const auto range:ranges)q+=1+(range.count-1)/b+((range.count-1)%b!=0);
+        r.max_job_output_tiles=std::min(q,delta+1);
+        r.input_tiles=r.chunks+delta;
+        const auto complex_count=(static_cast<long double>(r.input_tiles)+2.L*r.max_job_output_tiles+2)*r.transform;
+        if(complex_count>2*n)continue;
+        r.complex_count=static_cast<std::size_t>(complex_count);
+        const auto work=modem::detail::partitioned_paired::operations(r,frequencies);
+        if(work<best){best=work;found=true;}
+    }
+    return found?std::optional<long double>{best}:std::nullopt;
+}
+// Shared operations() counts the two complex products. Execution also adds
+// them to sums and initializes/copies borrowed rows. No allocation is added.
+long double paired_numeric_overhead(const modem::detail::partitioned_paired::Requirements& r,
+        std::size_t frequencies) {
+    const auto p=static_cast<long double>(r.transform);
+    return 4.L*frequencies*r.chunks*r.max_job_output_tiles*p+
+        4*p*(r.input_tiles+static_cast<long double>(frequencies)*(r.chunks+r.max_job_output_tiles));
+}
+std::optional<FftWindowWork> fft_window_work(const modem::Config& config,std::size_t frequencies,
+        std::size_t bin,std::size_t length,std::size_t transform,long double fft_log,
+        std::size_t hop,std::size_t initial_batch,std::size_t batches,
+        const modem::PatternStartWindow& prior,bool sample_fit,bool generated,
+        long double minimum_rate,long double maximum_rate,long double template_work,std::size_t& checks,std::stop_token stop,
+        long double observed_bins=std::numeric_limits<long double>::infinity(),bool minimum_readiness=false,
+        bool component_scheduling=false) {
+    FftWindowWork result;
+    const auto symbol=modem::symbol_sample_count(config);
+    const auto step=std::gcd(symbol,static_cast<std::uint64_t>(config.sample_rate));
+    const auto upper=(std::min(symbol,static_cast<std::uint64_t>(config.sample_rate))-1)/step*step;
+    const auto radius=std::max<std::uint64_t>(1,symbol/2);
+    const auto candidate_limit=modem::PatternSearch{}.candidate_limit;
+    modem::detail::FftSearchGeometry geometry;geometry.sample_fit=sample_fit;
+    geometry.drift_sections=1;geometry.differential_window_samples=0;
+    for(std::size_t b=0;b<batches;++b) {
+        estimate_detail::check(stop);
+        const auto first=b?initial_batch+(static_cast<std::uint64_t>(b)-1)*hop:0;
+        const auto starts=b?hop:initial_batch;
+        std::array<modem::detail::PatternFftStartSelection,12> selections{};
+        std::size_t selection_count=0,ready_end=0;
+        bool input_fft=false,selector_uncertain=false;
+        modem::detail::PatternFftComponents components;
+        for(std::uint64_t index=0;index<4;++index) {
+            std::size_t count=0;const auto groups=fft_phase_groups(config,index,upper,step,count);
+            for(std::size_t g=0;g<count;++g) {
+                if(++checks>1000000)return std::nullopt;
+                const auto [lower,last]=groups[g];
+                auto selected=modem::detail::pattern_fft_select_starts(prior,symbol,index,
+                    lower,last,step,first,starts,bin,minimum_rate,maximum_rate);
+                // Widening the anchor can merge >64 narrow phase ranges. A
+                // narrower runtime map could then overflow the selector and
+                // keep its full job, rather than remain a selected subset.
+                // Retain full work for that uncertain group in cohort pricing.
+                if(minimum_readiness&&(last-lower)/step>=64) {
+                    selected={};selected.selected_count=starts;selector_uncertain=true;
+                }
+                selections[selection_count++]=selected;
+                components.include(selected,bin,radius);
+                if(selected.selected_count) {
+                    input_fft=true;
+                    ready_end=std::max(ready_end,selected.full?starts:
+                        selected.ranges[selected.range_count-1].first+selected.ranges[selected.range_count-1].count);
+                }
+            }
+        }
+        const auto full_ready=static_cast<long double>(length)+first+starts-1;
+        const auto union_ready=static_cast<long double>(length)+first+(input_fft?ready_end:starts)-1;
+        if(input_fft&&!result.first_ready_bins)result.first_ready_bins=union_ready;
+        const bool separated=component_scheduling&&initial_batch==hop&&
+            components.eligible(bin,radius,candidate_limit,true);
+        const auto first_component_ready=separated?static_cast<long double>(length)+first+
+            components.ranges[0].first+components.ranges[0].count+3:union_ready;
+        if(input_fft&&separated&&!result.first_component_ready_bins)result.first_component_ready_bins=first_component_ready;
+        // An eligible enlarged component has diameter <radius, so an actual
+        // subset cannot split it into several runtime components. If the
+        // envelope cannot prove this, narrower actual maps may still split.
+        // Price both the broad fallback and up to Cmax successful components.
+        const auto separation=radius/bin+(radius%bin!=0);
+        const auto component_bound=std::min({std::size_t{256},candidate_limit,
+            std::size_t{1}+(starts-1)/separation});
+        const bool uncertain_partition=minimum_readiness&&component_scheduling&&!separated;
+        const auto dispatches=separated?components.count:std::size_t{1};
+        long double operations=0,jobs=0,positions=0,direct=0,transforms=0;
+        bool started=false;std::size_t executed_components=0;
+        for(std::size_t c=0;c<dispatches;++c) {
+            estimate_detail::check(stop);
+            const auto low=separated?components.ranges[c].first:0;
+            const auto end=separated?low+components.ranges[c].count:starts;
+            const auto exact_ready=separated?static_cast<long double>(length)+first+end+3:union_ready;
+            // A subset can be ready as soon as its first retained cell has
+            // the same four-bin guard, irrespective of the envelope's end.
+            const auto priced_ready=minimum_readiness&&input_fft?
+                static_cast<long double>(length)+first+(separated?low+4:0):exact_ready;
+            if(observed_bins<priced_ready)break;
+            if(!input_fft)continue;
+            const auto repeats=uncertain_partition?component_bound:std::size_t{1};
+            started=true;
+            if(separated)++executed_components;
+            const auto segment_begin=separated&&c?components.ranges[c-1].first+components.ranges[c-1].count:0;
+            const auto segment_count=end-segment_begin;
+            std::array<modem::detail::PatternFftStartSelection,12> local{};
+            std::array<std::optional<modem::detail::partitioned_paired::Requirements>,12> plans{};
+            std::array<std::optional<long double>,12> envelope_numeric{};
+            bool paired=generated&&!sample_fit;
+            for(std::size_t j=0;j<selection_count;++j) {
+                if(++checks>1000000)return std::nullopt;
+                const auto& selected=selections[j];auto& target=local[j];target.full=selected.full;
+                if(selected.full)target.selected_count=segment_count;
+                else for(std::size_t r=0;r<selected.range_count;++r) {
+                    if(++checks>1000000)return std::nullopt;
+                    const auto begin=std::max(low,selected.ranges[r].first);
+                    const auto last=std::min(end,selected.ranges[r].first+selected.ranges[r].count);
+                    if(last>begin) {
+                        target.ranges[target.range_count++]={begin-segment_begin,last-begin};
+                        target.selected_count+=last-begin;
+                    }
+                }
+                const auto k=target.selected_count;if(!k)continue;
+                if(target.full){paired=false;continue;}
+                if(modem::detail::pattern_fft_direct_eligible(geometry,generated,k,!sample_fit))continue;
+                const auto ranges=std::span(target.ranges).first(target.range_count);
+                if(minimum_readiness) {
+                    envelope_numeric[j]=paired_envelope_numeric(ranges,length,transform,frequencies);
+                    if(!envelope_numeric[j])paired=false;
+                } else {
+                    plans[j]=modem::detail::partitioned_paired::choose_geometry(length,segment_count,
+                        ranges,frequencies,transform,2*transform);
+                    if(!plans[j])paired=false;
+                }
+            }
+            // Runtime decides the whole component before overwriting scratch.
+            // One unsupported group keeps its original shared input spectrum.
+            if(!paired) {
+                transforms+=repeats;
+                if(generated&&!sample_fit)result.paired_fallback_components+=repeats;
+            }
+            // work zeroing, original observation copy and energy prefix remain
+            // even for all-direct execution. A cohort envelope keeps the full
+            // transform-sized allowance rather than assuming a tiny PCM copy.
+            const auto observed=minimum_readiness?hop:
+                separated?std::min(hop,segment_count+4):std::min(starts,ready_end);
+            operations+=repeats*(2.L*transform+6.L*(length+observed-1));
+            if(!paired&&!minimum_readiness)operations+=repeats*(5*transform*fft_log+2.L*transform);
+            for(std::size_t j=0;j<selection_count;++j) {
+                const auto& selected=local[j];const auto k=selected.selected_count;if(!k)continue;
+                const auto direct_cost=[&](std::size_t n) {
+                    return length*(template_work+tracking_pair_operations_per_bin*n)+40.L*n;
+                };
+                const auto generation_evidence=frequencies*(template_work*length+40.L*k);
+                const auto full_numeric=5*transform*fft_log+
+                    frequencies*(20*transform*fft_log+12.L*transform);
+                const bool direct_job=modem::detail::pattern_fft_direct_eligible(geometry,generated,k,!sample_fit);
+                long double cost=0;
+                if(paired) {
+                    if(direct_job) {
+                        cost=frequencies*direct_cost(k);
+                        result.paired_direct_jobs+=static_cast<long double>(repeats)*frequencies;
+                    } else if(minimum_readiness) {
+                        // P>=32. Additions/row initialization are bounded
+                        // termwise by1/3 of shared numeric operations. Runtime
+                        // choose minimizes that same numeric work; the fixed
+                        // envelope option therefore bounds all actual choices.
+                        cost=generation_evidence+std::max(4.L/3*(*envelope_numeric[j]),
+                            frequencies*length*tracking_pair_operations_per_bin*std::min<std::size_t>(k,32));
+                    } else {
+                        const auto& r=*plans[j];
+                        cost=generation_evidence+modem::detail::partitioned_paired::operations(r,frequencies)+
+                            paired_numeric_overhead(r,frequencies);
+                        result.partitioned_jobs+=frequencies;
+                        result.partitioned_input_transforms+=r.input_tiles;
+                        result.partitioned_template_transforms+=2.L*frequencies*r.chunks;
+                        result.partitioned_inverse_transforms+=2.L*frequencies*r.max_job_output_tiles;
+                        if(!result.partitioned_tile_min||r.tile_size<result.partitioned_tile_min)result.partitioned_tile_min=r.tile_size;
+                        result.partitioned_tile_max=std::max(result.partitioned_tile_max,r.tile_size);
+                    }
+                } else if(minimum_readiness) {
+                    // Possible paired success has a separate input cache PER
+                    // group. Its chooser ceiling plus4/3 initialization bound
+                    // covers that path and the shared-input full fallback.
+                    const auto dot=modem::detail::pattern_fft_direct_eligible(geometry,generated,1,!sample_fit)?
+                        frequencies*length*tracking_pair_operations_per_bin*std::min<std::size_t>(k,32):0.L;
+                    cost=generation_evidence+std::max(1.2L*full_numeric+2.L*transform,dot);
+                } else cost=frequencies*(direct_job?direct_cost(k):
+                    (20*transform*fft_log+12.L*transform+template_work*length+40.L*k));
+                // Rounded engineering allowance for bounded range validation,
+                // both chooser inspections and selected-cell bookkeeping.
+                if(generated&&!sample_fit)cost+=512.L*(minimum_readiness?65:selected.range_count+1);
+                jobs+=static_cast<long double>(repeats)*frequencies;
+                positions+=static_cast<long double>(repeats)*k*frequencies;
+                if(direct_job)direct+=static_cast<long double>(repeats)*frequencies;
+                operations+=repeats*cost;
+            }
+        }
+        if(!started&&(input_fft||observed_bins<union_ready))break;
+        // Trial/work denominators describe the ORIGINAL logical hop, prepaid
+        // once at its first component; component dispatches are not new trials.
+        result.full_jobs+=static_cast<long double>(selection_count)*frequencies;
+        result.full_positions+=static_cast<long double>(selection_count)*starts*frequencies;
+        if(started) {
+            ++result.batches;
+            if(observed_bins<full_ready)++result.early_batches;
+            if(component_scheduling&&!separated)++result.component_fallback_hops;
+            if(uncertain_partition||selector_uncertain)++result.envelope_fallback_hops;
+        }
+        result.input_transforms+=transforms;result.components+=executed_components;
+        result.jobs+=jobs;result.positions+=positions;result.direct_jobs+=direct;result.operations+=operations;
+        result.max_operations=std::max(result.max_operations,operations);
+        result.max_input_transforms=std::max(result.max_input_transforms,transforms);
+        result.max_jobs=std::max(result.max_jobs,jobs);result.max_positions=std::max(result.max_positions,positions);
+        result.max_direct_jobs=std::max(result.max_direct_jobs,direct);
+    }
+    return result;
+}
+// Union of both fractional-capture-anchor endpoints; the map is affine in
+// capture UTC. Rate/error corners are evaluated at both ends, so the one-second
+// envelope includes every anchor, without pretending it was observed metadata.
+std::optional<modem::PatternStartWindow> fft_anchor_window(const transfer::Options& options,
+        const modem::Config& config,const ReceiverTimingModel& timing,long double rate_uncertainty,
+        long double origin_seconds,long double anchor_half_width,std::uint64_t phase_upper) {
+    constexpr auto epoch=1800000000.L;
+    std::optional<modem::PatternStartWindow> result;
+    for(const auto sign:{-1,1}) {
+        const auto map=clock_sync::arrival_map(*options.clock_sync,epoch,
+            epoch+options.clock_sync->offset_seconds-origin_seconds+sign*anchor_half_width,
+            0,config.sample_rate,timing.capture_seconds_per_frame.value_or(1./config.sample_rate),
+            timing.capture_rate_uncertainty_fraction.value_or(static_cast<double>(rate_uncertainty)),
+            std::max(options.audio_timing_error_seconds,timing.capture_error_seconds.value_or(options.audio_timing_error_seconds)),
+            phase_upper,options.audio_timing_error_seconds);
+        if(!map)return std::nullopt;
+        const modem::PatternStartWindow next{map->origin_samples,map->phase_scale,map->half_width_samples};
+        if(!result)result=next;
+        else {
+            const auto low=std::min(result->epoch_origin_samples-result->half_width_samples,
+                next.epoch_origin_samples-next.half_width_samples);
+            const auto high=std::max(result->epoch_origin_samples+result->half_width_samples,
+                next.epoch_origin_samples+next.half_width_samples);
+            result->epoch_origin_samples=(low+high)/2;result->half_width_samples=(high-low)/2;
+        }
+    }
+    return result;
+}
 Work receiver_work(const modem::Config& config,const SearchBank& bank,long double samples,
                    const transfer::Options& options,std::size_t profiles,std::size_t keys,
                    std::size_t established_stream_bits,double local_window_seconds,ReceiverWorkMode work_mode,
@@ -293,7 +587,7 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     // Rounded allowance for the additional independent candidate stream/map;
     // the detector/FFT costs already include fitting both candidate rows.
     const auto private_pair_generation=private_pattern?40.L:0.L;
-    const auto template_pair_work=template_pair_operations_per_bin+private_pair_generation;
+
     const auto epochs=private_pattern?2.L*options.search_seconds+1+
         (options.timestamp||work_mode!=ReceiverWorkMode::sampled_simulation?0:std::ceil((static_cast<long double>(modem::training_sample_count(config))+
             modem::pattern_pulse_padding_samples(config))/config.sample_rate)):1.L;
@@ -313,6 +607,14 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     const auto observation_samples=static_cast<long double>(symbol)/bank.minimum_rate;
     const auto length=std::max(4.L,std::ceil(observation_samples/bin));
     const auto nominal_length=std::ceil(static_cast<long double>(symbol)/bin);
+    const bool interleaved=config.dsss_factor>1&&config.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2;
+    // Bounded rejection-draw allowance for one generated V2 template pair.
+    // The two-bit pair shares one isolated-symbol map, including finite
+    // shaping tails. Reuse across jobs is not guaranteed or credited. The
+    // rounded 40 operations/draw-byte allowance is an uncalibrated engineering
+    // assumption, not measured V2 cryptographic throughput.
+    const auto permutation_pair_work=interleaved?(2.L*std::floor(static_cast<long double>(symbol)/chip)+1024)*4*40:0.L;
+    const auto template_pair_work=template_pair_operations_per_bin+private_pair_generation+permutation_pair_work/length;
     auto fft_log=std::max(std::ceil(std::log2(2*std::max(4.L,nominal_length))),std::ceil(std::log2(length)));
     auto transform=std::exp2(fft_log),hop=transform-length+1;
     const bool bounded_acquisition=symbol>=16.L*config.sample_rate;
@@ -337,14 +639,18 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     // Live reserves at least half of the total for peer receivers, transmit
     // work and plots even when there is only one requested receive bank.
     const auto allowance=static_cast<long double>(options.dsp_workspace_bytes)/std::max(2.L,banks*profiles);
+    // Two uint32 maps plus a rounded fixed allowance for the two bounded
+    // coarse/rotation caches and metadata (currently below 64 KiB).
+    const auto outer_map_bytes=interleaved?
+        64*1024.L+8.L*std::floor(static_cast<long double>(symbol)/chip):0.L;
     // Expanded coupled banks require the FFT path. A compact private hint or
     // insufficient memory cannot silently substitute a different search path.
     const bool correlator=!coupled &&
-        ((private_pattern && symbol>=60.L*config.sample_rate) || fft_core_bytes>allowance);
+        ((private_pattern && symbol>=60.L*config.sample_rate) || fft_core_bytes+outer_map_bytes>allowance);
     // Live banks stream expanded template rows when several profiles, keys or
     // epochs share the budget, so early banks cannot consume it with caches.
-    const bool streamed_templates=!correlator &&
-        (drift_sections>1 || differential_window || fft_bytes>allowance || (scaled && banks*profiles>1));
+    bool streamed_templates=!correlator &&
+        (drift_sections>1 || differential_window || fft_bytes+outer_map_bytes>allowance || (scaled && banks*profiles>1));
     auto starts=std::ceil(2.L*(options.search_seconds+1.L)*config.sample_rate/
                           std::max(1.L,std::floor(chip/(2.L*(1+maximum_clock_ratio)))))+1;
     if(config.oscillator_search) {
@@ -374,7 +680,7 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
        work_mode==ReceiverWorkMode::hardware_timing_model&&options.clock_sync&&
        (!timing_model.capture_error_seconds||
         *timing_model.capture_error_seconds<=options.audio_timing_error_seconds)&&
-       private_pattern&&config.oscillator_search&&
+       private_pattern&&config.spreading_mode==modem::SpreadingMode::pattern&&config.oscillator_search&&
        !(config.oscillator_search->reference==modem::OscillatorReference::shared_radio&&
          config.oscillator_search->rf_shift_hz!=0)) {
         const auto phase_step=std::gcd(symbol,static_cast<std::uint64_t>(config.sample_rate));
@@ -391,6 +697,8 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         if(map&&map->origin_samples-map->half_width_samples>=0&&
            map->origin_samples+map->phase_scale*phase_upper+map->half_width_samples<=2*radius*config.sample_rate) {
             const modem::PatternStartWindow prior{map->origin_samples,map->phase_scale,map->half_width_samples};
+            result.geometry.arrival_window_available=true;
+            result.geometry.combined_arrival_half_width_seconds=static_cast<double>(map->half_width_samples/config.sample_rate);
             if(!correlator) {fft_prior=prior;fft_phase_upper=phase_upper;}
             else {
             std::map<double,std::optional<std::size_t>> count_by_rate;
@@ -425,7 +733,45 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
             }
         }
     }
+    // Match Live's prefer-streamed constructor for qualified paired scratch.
+    // The prior must be admitted first; merely selecting Clock sync is insufficient.
+    if(fft_prior&&!sample_fit&&banks*profiles>1)streamed_templates=true;
     result.compact=correlator;result.bin_samples=bin;
+    result.geometry.sample_rate=config.sample_rate;
+    result.geometry.dsss_factor=config.dsss_factor;
+    result.geometry.outer_dsss_version=config.dsss_factor>1?config.outer_dsss_version:modem::OuterDsssVersion::legacy_v1;
+    result.geometry.workspace_bytes=options.dsp_workspace_bytes;
+    result.geometry.per_bank_workspace_bytes=finite_seconds(allowance);
+    if(!correlator) {
+        result.geometry.first_fft_seconds=static_cast<double>((length+initial_batch-1)*bin/config.sample_rate);
+        result.geometry.fft_hop_seconds=static_cast<double>(hop*bin/config.sample_rate);
+    }
+    if(interleaved&&correlator) {
+        result.work_supported=false;
+        result.geometry.fallback_reason="V2 compact permutation-cache rebuild work is outside this model";
+    }
+    result.geometry.fine_chip_samples=chip;result.geometry.inner_chip_samples=chip*config.dsss_factor;
+    result.geometry.symbol_samples=symbol;
+    result.geometry.fine_chip_seconds=static_cast<double>(chip)/config.sample_rate;
+    result.geometry.inner_chip_seconds=static_cast<double>(result.geometry.inner_chip_samples)/config.sample_rate;
+    result.geometry.symbol_seconds=static_cast<double>(symbol)/config.sample_rate;
+    result.geometry.canonical_phase_step_seconds=static_cast<double>(std::gcd(symbol,
+        static_cast<std::uint64_t>(config.sample_rate)))/config.sample_rate;
+    result.geometry.canonical_phases=static_cast<std::size_t>((std::min(symbol,
+        static_cast<std::uint64_t>(config.sample_rate))-1)/std::gcd(symbol,
+        static_cast<std::uint64_t>(config.sample_rate))+1);
+    result.geometry.timing_grid_seconds=correlator?
+        static_cast<double>((config.oscillator_search?chip/(2.L*bank.maximum_rate):
+            std::max(1.L,std::floor(chip/(2.L*bank.maximum_rate))))/config.sample_rate):
+        static_cast<double>(bin)/config.sample_rate;
+    result.geometry.backend=correlator?"Compact direct correlation":"FFT acquisition";
+    result.geometry.scope="Source-derived geometry; representative epoch/key work counts, not executed counters";
+    if(fft_prior) {
+        result.geometry.arrival_window_available=true;
+        result.geometry.combined_arrival_half_width_seconds=static_cast<double>(fft_prior->half_width_samples/config.sample_rate);
+    } else if(options.clock_sync&&result.geometry.fallback_reason.empty())result.geometry.fallback_reason=result.timing_window_modeled?
+        "Compact representative lattice; rolling compact admissions remain unmodeled":
+        "Full arrival-window work: timing metadata or backend geometry is unsupported";
     const bool compact_hint=private_pattern&&symbol>=60.L*config.sample_rate;
     const auto block_samples=compact_hint?32.L:128.L;
     const auto candidate_count=compact_hint?32.L:2048.L;
@@ -439,13 +785,13 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         static_cast<long double>(symbol)/bank.maximum_rate<modem::pattern_absence_seconds*config.sample_rate;
     const auto chain_state=guard_chains?
         phase_groups*sizeof(std::array<modem::detail::CorrelationChipEvidence,2>)+sizeof(double):0.L;
-    const auto compact_required=256*1024.L+
+    const auto compact_required=256*1024.L+outer_map_bytes+
         lanes*(512+(phase_groups-1)*sizeof(std::array<modem::detail::CorrelationFit,2>)+2+chain_state)+
         projection_banks*(64+(block_samples+1)*sizeof(modem::detail::CorrelationProjection))+
         candidate_count*sizeof(modem::PatternEvidence)+points*sizeof(std::complex<double>)+
         frequencies*sizeof(modem::PatternFrequencyRateHypothesis);
     result.workspace_supported=correlator?
-        (!config.oscillator_search||compact_required<=allowance):fft_core_bytes<=allowance;
+        (!config.oscillator_search||compact_required<=allowance):fft_core_bytes+outer_map_bytes<=allowance;
     const auto real_rank=static_cast<long double>(bin)-image<=1e-10L*bin;
     const auto count=static_cast<double>(length);
     result.noise_dimensions=correlator?static_cast<double>(symbol)/2:count*(real_rank?.5:1.);
@@ -531,7 +877,8 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     // sharing that carrier reuse its prefix; FFT receives one baseband stream.
     // Cross-key/epoch Live cache hits depend on per-push spare workspace and
     // origin identity, so this work model conservatively charges cache misses.
-    result.serial=samples*projection_operations_per_sample*(correlator?projection_banks:1)*banks;
+    result.serial=samples*projection_operations_per_sample*(correlator?projection_banks:1)*banks+
+        outer_map_bytes/sizeof(std::uint32_t)*banks;
     // Admission thresholds belong to one receiver; unrelated keys and
     // waveform profiles add compute work, not evidence against this signal.
     const auto search_lanes=search_starts*frequencies;
@@ -642,6 +989,18 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
                     differential_operations_per_window:0))*banks;
         }
     } else {
+        // Constructor work occurs even before the first complete FFT window.
+        // Streamed V2 still prepares its first permutation without FFT rows.
+        const auto constructor_setup=(fft_core_bytes+outer_map_bytes)/sizeof(double)+
+            (streamed_templates?permutation_pair_work:0.L);
+        // The same numerical template/FFT work has the same engineering rate
+        // whether performed once during setup or repeatedly in acquisition.
+        // Zeroing/control/permutation-only setup retains the serial allowance.
+        const auto constructor_scoring=streamed_templates?0.L:
+            frequencies*(10*transform*fft_log+template_pair_work*length);
+        result.initial_epoch_setup_operations=constructor_setup*banks;
+        result.initial_epoch_setup_scoring_operations=constructor_scoring*banks;
+        result.serial+=result.initial_epoch_setup_operations;
         auto blocks=std::ceil(samples/(bin*hop));
         auto scored_starts=blocks*hop;
         if(bounded_acquisition || work_mode!=ReceiverWorkMode::sampled_simulation) {
@@ -655,7 +1014,84 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
             scored_starts=blocks>0?initial_batch+(blocks-1)*hop:0;
         }
         result.fft_acquisition_batches=blocks;
-        if(fft_prior && blocks>0) {
+        std::optional<long double> filtered_operations;
+        std::size_t filtered_checks=0;
+        const bool restrict_jobs=fft_prior&&drift_sections==1&&!differential_window&&!options.timestamp;
+        const bool early_readiness=restrict_jobs&&initial_batch==hop;
+        const auto observed_bins=std::floor(samples/bin);
+        const auto qualified_slots=early_readiness?(observed_bins<length?0:
+            1+std::floor((observed_bins-length)/hop)):blocks;
+        result.geometry.qualified_ready_batch_slots=qualified_slots;
+        const auto component_radius=std::max<std::uint64_t>(1,symbol/2);
+        const auto component_separation=component_radius/static_cast<std::size_t>(bin)+
+            (component_radius%static_cast<std::size_t>(bin)!=0);
+        const auto maximum_component_dispatches=std::min({std::size_t{256},modem::PatternSearch{}.candidate_limit,
+            std::size_t{1}+(static_cast<std::size_t>(hop)-1)/component_separation});
+        // If exact enumeration is unavailable, cover each potential group's
+        // separate paired input cache as well as a whole-component fallback.
+        const auto full_group_allowance=frequencies*template_pair_work*length+
+            std::max(1.2L*(5*transform*fft_log+frequencies*(20*transform*fft_log+12.L*transform))+2.L*transform,
+                frequencies*length*tracking_pair_operations_per_bin*std::min(hop,32.L))+
+            512.L*65;
+        if(restrict_jobs&&(epochs>256||qualified_slots>1000000))
+            result.geometry.fallback_reason="Restricted cohort enumeration limit";
+        if(restrict_jobs&&epochs<=256&&qualified_slots<=1000000) {
+            const auto count=[&](const modem::PatternStartWindow& prior,std::size_t passes,bool minimum_readiness=false) {
+                return fft_window_work(config,bank.hypotheses.size(),static_cast<std::size_t>(bin),
+                    static_cast<std::size_t>(length),static_cast<std::size_t>(transform),fft_log,
+                    static_cast<std::size_t>(hop),static_cast<std::size_t>(initial_batch),passes,
+                    prior,sample_fit,streamed_templates,bank.minimum_rate,bank.maximum_rate,
+                    template_pair_work,filtered_checks,stop,early_readiness?observed_bins:
+                        std::numeric_limits<long double>::infinity(),minimum_readiness,early_readiness);
+            };
+            const auto representative=count(*fft_prior,static_cast<std::size_t>(qualified_slots));
+            long double operations=0,retained_batches=0,envelope_fallback_hops=0;bool bounded=representative.has_value();
+            for(long double e=-static_cast<long double>(options.search_seconds);
+                bounded&&e<=options.search_seconds;++e) {
+                const auto prior=fft_anchor_window(options,config,timing_model,maximum_clock_ratio,
+                    e-.5L,.5L,fft_phase_upper);
+                const auto cohort=prior?count(*prior,static_cast<std::size_t>(qualified_slots),true):std::nullopt;
+                if(!cohort){bounded=false;break;}
+                operations+=cohort->operations;retained_batches+=cohort->batches;
+                envelope_fallback_hops+=cohort->envelope_fallback_hops;
+            }
+            if(bounded) {
+                filtered_operations=operations*keys;blocks=retained_batches/epochs;
+                result.geometry.restricted_fft_modeled=true;result.timing_window_modeled=true;
+                result.geometry.first_qualified_window_seconds=finite_seconds(representative->first_ready_bins*bin/config.sample_rate);
+                result.geometry.first_component_window_seconds=finite_seconds(representative->first_component_ready_bins*bin/config.sample_rate);
+                result.geometry.input_fft_transforms=finite_seconds(representative->input_transforms);
+                result.geometry.timing_component_dispatches=finite_seconds(representative->components);
+                result.geometry.component_fallback_hops=finite_seconds(representative->component_fallback_hops);
+                result.geometry.paired_direct_template_jobs=finite_seconds(representative->paired_direct_jobs);
+                result.geometry.partitioned_template_jobs=finite_seconds(representative->partitioned_jobs);
+                result.geometry.partitioned_input_transforms=finite_seconds(representative->partitioned_input_transforms);
+                result.geometry.partitioned_template_transforms=finite_seconds(representative->partitioned_template_transforms);
+                result.geometry.partitioned_inverse_transforms=finite_seconds(representative->partitioned_inverse_transforms);
+                result.geometry.paired_fallback_components=finite_seconds(representative->paired_fallback_components);
+                result.geometry.partitioned_tile_min=representative->partitioned_tile_min;
+                result.geometry.partitioned_tile_max=representative->partitioned_tile_max;
+                if(envelope_fallback_hops)result.geometry.fallback_reason=
+                    "Some anchor envelopes use full-job/component-count allowances to cover narrower-map partition or selector fallback";
+                result.geometry.full_template_jobs=finite_seconds(representative->full_jobs);
+                result.geometry.retained_template_jobs=finite_seconds(representative->jobs);
+                result.geometry.direct_template_jobs=finite_seconds(representative->direct_jobs);
+                result.geometry.full_start_positions=finite_seconds(representative->full_positions);
+                result.geometry.retained_start_positions=finite_seconds(representative->positions);
+                result.geometry.backend="Restricted FFT acquisition";
+                result.geometry.backend+=representative->components>0?" + guarded components":"; broad union fallback";
+                if(representative->partitioned_jobs>0)result.geometry.backend+=" + paired partitioned tiles";
+                if(representative->paired_direct_jobs>0)result.geometry.backend+=" + paired direct <=32-position jobs";
+                else if(representative->direct_jobs>0)result.geometry.backend+=" + direct <=32-position jobs";
+                result.fft_retained_acquisition_batches=representative->batches;
+            } else result.geometry.fallback_reason="Whole-batch FFT fallback: bounded cohort enumeration exhausted";
+        }
+        if(!filtered_operations&&early_readiness) {
+            blocks=qualified_slots;scored_starts=blocks*hop;
+            result.geometry.fallback_reason+=(result.geometry.fallback_reason.empty()?"":"; ")+
+                std::string("Full-job qualified-readiness allowance; bounded cohort enumeration unavailable");
+        }
+        if(!filtered_operations&&!early_readiness&&fft_prior && blocks>0) {
             // Upper bound over every epoch alignment: fill all gaps between
             // initial stream/phase groups, and retain edge-overlapping batches.
             // The runtime uses the tighter per-group predicate. This changes
@@ -674,18 +1110,50 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
                 result.timing_window_modeled=true;
             }
         }
-        result.fft_retained_acquisition_batches=blocks;
+        if(!filtered_operations)result.fft_retained_acquisition_batches=blocks;
         long double first_batches=blocks>0?1.L:0.L;
         if(private_pattern && !options.timestamp && work_mode!=ReceiverWorkMode::sampled_simulation) {
             const auto prefix=static_cast<long double>(modem::training_sample_count(config)+
                 modem::pattern_pulse_padding_samples(config))/config.sample_rate;
-            const auto fresh=rolling_fft_work(samples,config.sample_rate,bin,length,hop,initial_batch,
+            const auto fresh_full=rolling_fft_work(samples,config.sample_rate,bin,length,hop,initial_batch,
                 static_cast<long double>(symbol)/config.sample_rate,prefix,options.search_seconds,
                 maximum_clock_ratio,timing_model);
+            const auto fresh=early_readiness?rolling_fft_work(samples,config.sample_rate,bin,length,hop,initial_batch,
+                static_cast<long double>(symbol)/config.sample_rate,prefix,options.search_seconds,
+                maximum_clock_ratio,timing_model,true):fresh_full;
             result.new_epoch_admissions=fresh.admissions;
-            result.new_epoch_full_fft_batches=fresh.full_batches;
+            result.new_epoch_full_fft_batches=fresh_full.full_batches;
+            result.new_epoch_qualified_ready_batch_slots=fresh.full_batches;
             result.new_epoch_retained_fft_batches=fft_prior?
                 std::min(fresh.full_batches,fresh.first_batches*blocks):fresh.full_batches;
+            if(filtered_operations) {
+                const auto prior=fft_anchor_window(options,config,timing_model,maximum_clock_ratio,
+                    static_cast<long double>(options.search_seconds)-.5L,.5L,fft_phase_upper);
+                const auto cohort=prior&&fresh.maximum_batches<=1000000?
+                    fft_window_work(config,bank.hypotheses.size(),static_cast<std::size_t>(bin),
+                        static_cast<std::size_t>(length),static_cast<std::size_t>(transform),fft_log,
+                        static_cast<std::size_t>(hop),static_cast<std::size_t>(initial_batch),
+                        static_cast<std::size_t>(fresh.maximum_batches),*prior,sample_fit,streamed_templates,
+                        bank.minimum_rate,bank.maximum_rate,template_pair_work,filtered_checks,stop,
+                        std::numeric_limits<long double>::infinity(),true,early_readiness):std::nullopt;
+                if(cohort) {
+                    result.new_epoch_retained_fft_batches=std::min(fresh.full_batches,fresh.first_batches*cohort->batches);
+                    *filtered_operations+=keys*std::min(fresh.full_batches*cohort->max_operations,
+                        fresh.first_batches*cohort->operations);
+                } else {
+                    // Unsupported fresh-cohort geometry keeps all its original
+                    // work, rather than multiplying a representative discount.
+                    const auto jobs=frequencies*phase_groups*4;
+                    if(early_readiness)*filtered_operations+=keys*maximum_component_dispatches*
+                        (fresh.full_batches*(8.L*transform+4*phase_groups*full_group_allowance)+
+                        jobs*40*(fresh.first_batches*initial_batch+(fresh.full_batches-fresh.first_batches)*hop));
+                    else *filtered_operations+=keys*(fresh.full_batches*(5*transform*fft_log*(1+4*jobs)+
+                        jobs*(12*transform+template_pair_work*length))+
+                        jobs*40*(fresh.first_batches*initial_batch+(fresh.full_batches-fresh.first_batches)*hop));
+                    result.new_epoch_retained_fft_batches=fresh.full_batches;
+                    result.geometry.fallback_reason="Fresh-cohort bounded enumeration unavailable; fresh work uses full FFT allowance";
+                }
+            }
             const auto fresh_starts=fft_prior?result.new_epoch_retained_fft_batches*hop:
                 fresh.first_batches*initial_batch+(fresh.full_batches-fresh.first_batches)*hop;
             // Subsequent equations multiply by epochs*keys. Fresh cohort totals
@@ -697,9 +1165,9 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
             // Constructor zero-initialization plus its initial template pair.
             // Streamed rows construct no transforms; every later row generation,
             // input FFT and inverse FFT is already priced by the added batches.
-            const auto setup=fft_core_bytes/sizeof(double)+(streamed_templates?0.L:
-                frequencies*(10*transform*fft_log+template_pair_work*length));
+            const auto setup=constructor_setup;
             result.new_epoch_setup_operations=fresh.admissions*setup*keys;
+            result.new_epoch_setup_scoring_operations=fresh.admissions*constructor_scoring*keys;
             result.serial+=result.new_epoch_frontend_operations+result.new_epoch_setup_operations;
         }
         const auto jobs=frequencies*phase_groups*(private_pattern?4:1);
@@ -738,6 +1206,9 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
             result.parallel=(blocks*(5*transform*fft_log*(1+2*jobs*(generate_templates?2:1))+
                 jobs*(12*transform+(generate_templates?template_pair_work*length:0)))+
                 jobs*40*scored_starts)*banks;
+            if(filtered_operations)result.parallel=*filtered_operations;
+            else if(early_readiness)result.parallel=maximum_component_dispatches*
+                (blocks*(8.L*transform+4*phase_groups*full_group_allowance)+jobs*40*scored_starts);
         }
         if(differential_window) {
             const auto direct_limit=std::max(4.L,static_cast<long double>(differential_windows)*fft_log);
@@ -778,6 +1249,7 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
                 (length*fit_operations+differential_windows*differential_operations_per_window);
         }
     }
+    result.parallel+=result.initial_epoch_setup_scoring_operations+result.new_epoch_setup_scoring_operations;
     return result;
 }
 
@@ -1047,7 +1519,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
         return banks.size()-1;
     };
     std::size_t matching_bank=0;
-    bool matching_supported=false;
+    bool matching_supported=false,all_work_supported=true;
     const auto frequency=channel.frequency_offset_hz+static_cast<long double>(config.carrier_hz)*channel.clock_error_ppm*1e-6L;
     for(const auto& profile:profiles) {
         estimate_detail::check(stop);
@@ -1067,7 +1539,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
             receiver_work(profile,candidate_bank,media*profile.sample_rate,options,profiles.size(),keys,
                           matches?transmission.wire_bits:0,local_window_seconds,work_mode,timing_model,stop);
         if(existing==work_entries.end())work_entries.push_back({index,training_samples,work});
-        serial+=work.serial;parallel+=work.parallel;
+        serial+=work.serial;parallel+=work.parallel;all_work_supported&=work.work_supported;
         const auto fallback_work=work.timing_window_modeled?
             receiver_work(profile,candidate_bank,media*profile.sample_rate,options,profiles.size(),keys,
                 matches?transmission.wire_bits:0,local_window_seconds,ReceiverWorkMode::hardware_fallback,timing_model,stop):work;
@@ -1091,6 +1563,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
         }
     }
     result.receiver_workspace_supported=matching_profile&&matching_work.workspace_supported;
+    result.receiver_work_supported=matching_profile&&all_work_supported;
     result.receiver_frontend_seconds=finite_seconds(receiver_frontend/serial_operations_per_second);
     result.receiver_search_seconds=finite_seconds(search_serial/serial_operations_per_second+parallel/cpu_scoring_operations_per_second);
     result.receiver_kernel_rebuild_seconds=finite_seconds(kernel_serial/serial_operations_per_second);
@@ -1134,6 +1607,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     result.requested_carrier_search_half_width_hz=geometry.requested_half_width_hz;
     result.clock_search_half_width_ppm=bank.clock_ppm;
     result.requested_clock_search_half_width_ppm=bank.requested_clock_ppm;
+    result.receiver_geometry=matching_work.geometry;
     result.frequency_rate_hypotheses=bank.hypotheses.size();
     result.epoch_hypotheses=static_cast<std::size_t>(matching_work.epoch_hypotheses);
     result.timing_hypotheses=static_cast<double>(matching_work.timing_hypotheses);
@@ -1144,12 +1618,18 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     result.fft_retained_acquisition_batches=static_cast<double>(matching_work.fft_retained_acquisition_batches);
     result.new_epoch_admissions=static_cast<double>(matching_work.new_epoch_admissions);
     result.new_epoch_full_fft_batches=static_cast<double>(matching_work.new_epoch_full_fft_batches);
+    result.new_epoch_qualified_ready_batch_slots=static_cast<double>(matching_work.new_epoch_qualified_ready_batch_slots);
     result.new_epoch_retained_fft_batches=static_cast<double>(matching_work.new_epoch_retained_fft_batches);
+    result.initial_epoch_setup_seconds=finite_seconds(matching_work.initial_epoch_setup_operations/serial_operations_per_second+
+        matching_work.initial_epoch_setup_scoring_operations/cpu_scoring_operations_per_second);
     result.new_epoch_frontend_seconds=finite_seconds(matching_work.new_epoch_frontend_operations/serial_operations_per_second);
-    result.new_epoch_setup_seconds=finite_seconds(matching_work.new_epoch_setup_operations/serial_operations_per_second);
+    result.new_epoch_setup_seconds=finite_seconds(matching_work.new_epoch_setup_operations/serial_operations_per_second+
+        matching_work.new_epoch_setup_scoring_operations/cpu_scoring_operations_per_second);
     if(work_mode==ReceiverWorkMode::hardware_timing_model) {
         result.receiver_work_assumptions=matching_work.timing_window_modeled&&!matching_work.compact?
-            "FFT acquisition work allowance: whole excluded batches skipped under selected GPS/audio bounds; all mixed batches, frontend, continuation and original threshold charges retained. Full-window fallback is reported separately":matching_work.timing_window_modeled?
+            (matching_work.geometry.restricted_fft_modeled?
+            "Restricted FFT acquisition work allowance: original per-phase start cells and empty template jobs are omitted under selected GPS/audio bounds; input FFTs per guarded component, repeated private template dispatches, continuation and original logical-hop trial/threshold charges retained. Initial epochs use a one-second anchor envelope; uncertain partition/selector geometry uses full-job component-count allowances. Fresh cohorts use bounded acquisition-lifetime allowances. Paired direct and partitioned convolution use shared geometry selectors; uncertain anchors retain full-cohort fallback or a translation-independent eligible-option allowance. Borrowed-row initialization, repeated group input caches and component observation preparation are included; operation coefficients and V2 generation remain uncalibrated. Full-window fallback is reported separately":
+            "FFT acquisition work allowance: whole excluded batches skipped under selected GPS/audio bounds; mixed batches, frontend, continuation and original threshold charges retained. Full-window fallback is reported separately"):matching_work.timing_window_modeled?
             "Compact bank engineering reference: exact lattice count at a representative anchor under selected GPS/audio bounds and supplied capture metadata (nominal slope and full bank rate allowance when omitted). Full-window fallback is reported separately":
             "Full arrival-window bank; timing prior is unavailable for this backend or model geometry. Configured peer UTC correction lanes are retained";
     }
@@ -1157,15 +1637,16 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
         std::ostringstream diagnostic;
         diagnostic<<(result.receiver_work_assumptions.empty()?"":"; ")<<"Initial epoch cohort: "<<result.epoch_hypotheses
             <<"; initial FFT acquisition batches retained "<<result.fft_retained_acquisition_batches
-            <<" / "<<result.fft_acquisition_batches<<" per epoch";
+            <<"; original full-hop batches "<<result.fft_acquisition_batches<<" at the representative epoch";
         if(result.new_epoch_admissions>0)
             diagnostic<<"; Automatic Live refresh: up to "<<result.new_epoch_admissions
                 <<" newly admitted epochs per key/profile, with "<<result.new_epoch_retained_fft_batches
-                <<" / "<<result.new_epoch_full_fft_batches
-                <<" added retained/full FFT batches. Includes repeated constructor/template and input processing; "
+                <<" retained batches, "<<result.new_epoch_qualified_ready_batch_slots<<" qualified-ready slots and "
+                <<result.new_epoch_full_fft_batches<<" original full-hop batches. Includes repeated constructor/template and input processing; "
                 <<"initial cohort remains conservatively charged over the whole observation. "
                 <<"Resident-bank RAM and extra candidate-track lifetimes are unqualified";
         result.receiver_work_assumptions+=diagnostic.str();
+        if(!result.receiver_geometry.fallback_reason.empty())result.receiver_work_assumptions+="; "+result.receiver_geometry.fallback_reason;
     }
     if(!options.timestamp&&work_mode!=ReceiverWorkMode::sampled_simulation) {
         if(matching_work.compact)
@@ -1173,6 +1654,12 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
         result.receiver_work_assumptions+="; Workspace support covers the initial cohort, not peak resident Live banks. "
             "Synchronized/noise tracks, reconstruction retries and irregular refresh gaps can add work; "
             "this estimate is not a total runtime upper bound";
+    }
+    if(config.dsss_factor>1&&config.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2) {
+        if(!result.receiver_work_assumptions.empty())result.receiver_work_assumptions+="; ";
+        result.receiver_work_assumptions+=matching_work.compact?
+            "V2 compact permutation rebuild work is unsupported; CPU feasibility unavailable":
+            "V2 FFT template generation includes a bounded permutation-draw allowance; its cryptographic throughput is uncalibrated";
     }
     if(matching_work.outer_presence) {
         if(!result.receiver_work_assumptions.empty())result.receiver_work_assumptions+="; ";
@@ -1235,6 +1722,10 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     if(!result.profile_matches || !result.carrier_in_search || !result.clock_in_search ||
        !result.receiver_workspace_supported || result.oscillator_search_limited)return result;
     if(!compute_probability)return result;
+    if(config.dsss_factor>1&&config.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2) {
+        result.probability_model_limit="Interleaved V2 outer DSSS has a new permutation and pre-limiter amplitude; waveform energy and detection sensitivity are not qualified by this probability model";
+        return result;
+    }
     const auto probability_result=[&] {
         if(result.probability_reference_only) {
             result.reference_probability_available=result.confidence_available;

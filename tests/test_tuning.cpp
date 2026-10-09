@@ -18,6 +18,30 @@ template<class F> void rejects(F action,const char* text) {
     throw std::runtime_error(text);
 }
 void near(double a,double b,const char* text) {check(std::abs(a-b)<1e-8,text);}
+void outer_dsss_versions() {
+    using V=modem::OuterDsssVersion;
+    for(const auto version:{V::legacy_v1,V::interleaved_v2}) {
+        check(tuning::parse_outer_dsss_version(tuning::outer_dsss_version_id(version))==version,
+            "outer DSSS version names must round trip explicitly");
+        const auto config=tuning::resolve(360,70,tuning::PatternMode::auto_keystream,true,1500,10,version).config;
+        check(config.outer_dsss_version==version&&config.dsss_factor==10,
+            "tuning discarded the requested outer DSSS waveform version");
+        const auto profiles=tuning::receive_profiles(config,std::array<double,2>{40,80},tuning::PatternMode::auto_keystream,true);
+        check(!profiles.empty()&&std::all_of(profiles.begin(),profiles.end(),[&](const auto& profile){
+            return profile.outer_dsss_version==version&&profile.dsss_factor==10&&
+                profile.sample_rate==config.sample_rate&&profile.carrier_hz==config.carrier_hz;
+        }),"automatic receive profiles discarded the selected DSSS version or geometry");
+        const auto tones=tuning::receive_profiles(config,std::array<double,1>{80},tuning::PatternMode::auto_tone,true);
+        check(tones.front().dsss_factor==1&&tones.front().outer_dsss_version==V::legacy_v1,
+            "tone normalization retained an outer DSSS construction");
+    }
+    check(tuning::resolve(360,70,tuning::PatternMode::auto_keystream,true,1500,10).config.outer_dsss_version==V::legacy_v1,
+        "library callers without a version argument must retain the legacy waveform");
+    check(tuning::resolve(360,70,tuning::PatternMode::auto_keystream,true,1500,1,V::interleaved_v2).config.outer_dsss_version==V::legacy_v1,
+        "DSSS Off must retain its existing configuration");
+    rejects([]{tuning::parse_outer_dsss_version("v2");},"unknown outer DSSS version accepted");
+    rejects([]{tuning::outer_dsss_version_id(static_cast<V>(99));},"invalid outer DSSS enum accepted");
+}
 std::vector<float> raw_capture(const Bytes& bits,const transfer::Options& options) {
     auto source=transfer::binary_transmitter(bits,options);
     std::vector<float> samples(static_cast<std::size_t>(source->total_samples()));
@@ -531,6 +555,6 @@ void receive_target_lists() {
 }
 }
 int main() {
-    try {modes_and_patterns();snr_planning();shannon_capacity();receive_target_lists();automatic_pattern_rates();bandwidth_derived_clocks();nearby_carrier_clocks();sub_hertz_patterns();explicit_carrier_planning();audio_passband_pattern_roundtrips();physical_simulation_presets();oscillator_simulation_presets();sizing_and_validation();std::cout<<"tuning tests passed\n";return 0;}
+    try {outer_dsss_versions();modes_and_patterns();snr_planning();shannon_capacity();receive_target_lists();automatic_pattern_rates();bandwidth_derived_clocks();nearby_carrier_clocks();sub_hertz_patterns();explicit_carrier_planning();audio_passband_pattern_roundtrips();physical_simulation_presets();oscillator_simulation_presets();sizing_and_validation();std::cout<<"tuning tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"tuning tests failed: "<<error.what()<<'\n';return 1;}
 }

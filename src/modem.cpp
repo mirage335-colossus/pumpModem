@@ -117,8 +117,13 @@ void validate(const Config& c) {
           "outer DSSS factor must be 1, 10, 100, or 1000");
     check(c.dsss_factor==1 || (c.scramble && c.spreading_mode==SpreadingMode::pattern),
           "outer DSSS requires independent private inner patterns");
+    check(c.outer_dsss_version==OuterDsssVersion::legacy_v1 ||
+          c.outer_dsss_version==OuterDsssVersion::interleaved_v2,"unknown outer DSSS wire version");
     const auto samples=symbol_sample_count(c);
     const auto chip=chip_samples(c);
+    check(c.dsss_factor==1 || c.outer_dsss_version!=OuterDsssVersion::interleaved_v2 ||
+          samples/chip<=maximum_interleaved_dsss_chips,
+          "interleaved DSSS supports at most 1048576 complete fine chips per symbol; select legacy explicitly for larger geometries");
     // Do not call pattern_pulse_enabled here: its chip helper validates this
     // same configuration. Use the identical complete-chip eligibility rule.
     const bool shaped=c.pulse_shaping && c.spreading_mode==SpreadingMode::pattern &&

@@ -10,6 +10,7 @@
 #include <atomic>
 #include <thread>
 #include "../src/pattern_correlator_batch.hpp"
+#include "../src/pattern_fft_window.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -1057,6 +1058,106 @@ void clock_dsss_reference() {
     near(sampled.receiver_cpu_seconds,without_clock.receiver_cpu_seconds,
         "tight clock fields must not invent simulated timing-bank work");
 }
+void restricted_fft_direct_and_bounded_fallback() {
+    transfer::Options options;options.modem.sample_rate=1024;options.modem.carrier_hz=128;
+    options.modem.bandwidth_hz=256;options.modem.integration_seconds=1;
+    options.modem.scramble=true;options.key.emplace(Bytes(32,0x32));options.search_seconds=6;
+    options.dsp_workspace_bytes=std::size_t{1024}*1024*1024;
+    modem::OscillatorSearchConfig oscillator;oscillator.lf={.000001,0};oscillator.rf={0,0};
+    oscillator.margin=3;options.modem.oscillator_search=oscillator;
+    options.clock_sync=clock_sync::Policy{0,0,0};options.audio_timing_error_seconds=0;
+    const auto draft=wire(1,options.modem);
+    const auto selected=simulation::estimate(draft,options,true,clean_channel(),{},1,false,100,128,
+        simulation::ReceiverWorkMode::hardware_timing_model,{0,0,1./1024});
+    check(selected.receiver_geometry.restricted_fft_modeled&&selected.receiver_geometry.direct_template_jobs>0&&
+          selected.receiver_geometry.retained_start_positions<selected.receiver_geometry.full_start_positions&&
+          selected.receiver_geometry.backend.find("direct")!=std::string::npos,
+          "clipped original batch-edge positions must use the shared tiny-K direct selector");
+    check(selected.receiver_geometry.paired_direct_template_jobs>0&&
+          selected.receiver_geometry.input_fft_transforms==0,
+          "an all-paired-direct acquisition must not charge a broad input FFT");
+    options.search_seconds=128; // Explicitly outside the bounded per-epoch enumeration scope.
+    const auto bounded=simulation::estimate(draft,options,true,clean_channel(),{},1,false,100,128,
+        simulation::ReceiverWorkMode::hardware_timing_model,{0,0,1./1024});
+    check(!bounded.receiver_geometry.restricted_fft_modeled&&bounded.receiver_geometry.full_template_jobs==0&&
+          bounded.receiver_geometry.fallback_reason.find("enumeration limit")!=std::string::npos&&
+          std::isfinite(bounded.receiver_cpu_seconds)&&bounded.fallback_receiver_cpu_seconds>0,
+          "bounded planning fallback must discard partial restricted counts and keep populated original work");
+}
+void guarded_component_workload() {
+    // Widening an anchor can hide a narrow selector's 64-range fallback.
+    // Such cohorts require full-work pricing, not subset-only evidence costs.
+    const modem::PatternStartWindow narrow{0,1,0},wide{0,1,20000};
+    const auto a=modem::detail::pattern_fft_select_starts(narrow,512080,0,0,39920,80,0,134124,4,1,1);
+    const auto b=modem::detail::pattern_fft_select_starts(wide,512080,0,0,39920,80,0,134124,4,1,1);
+    modem::detail::PatternFftComponents envelope;envelope.include(b,4,256040);
+    check(a.full&&!b.full&&envelope.eligible(4,256040,2048,true),
+          "anchor envelope must not erase the narrow selector capacity-fallback regression");
+    transfer::Options options;options.modem.sample_rate=1024;options.modem.carrier_hz=128;
+    options.modem.bandwidth_hz=256;options.modem.integration_seconds=1;options.modem.scramble=true;
+    options.key.emplace(Bytes(32,0x32));options.search_seconds=6;
+    options.dsp_workspace_bytes=std::size_t{1024}*1024*1024;
+    modem::OscillatorSearchConfig oscillator;oscillator.lf={.000001,0};oscillator.rf={0,0};
+    oscillator.margin=3;options.modem.oscillator_search=oscillator;
+    options.clock_sync=clock_sync::Policy{.001,.001,0};options.audio_timing_error_seconds=.01;
+    auto draft=wire(1,options.modem);draft.total_seconds+=12;
+    const auto estimate=simulation::estimate(draft,options,true,clean_channel(),{},1,false,100,128,
+        simulation::ReceiverWorkMode::hardware_timing_model,{0,0,1./1024});
+    const auto& g=estimate.receiver_geometry;
+    check(g.restricted_fft_modeled&&g.timing_component_dispatches>0&&
+          g.input_fft_transforms+g.partitioned_input_transforms+g.paired_direct_template_jobs>
+              estimate.fft_retained_acquisition_batches&&
+          g.retained_template_jobs>0&&estimate.receiver_cpu_seconds>0,
+          "separate components must charge repeated input FFTs within original logical hops");
+    check(g.first_component_window_seconds>0&&
+          g.first_component_window_seconds<=g.first_qualified_window_seconds+4*g.timing_grid_seconds+1e-9,
+          "component readiness must remain separate from all-selected union readiness");
+}
+void versioned_outer_work_and_probability_scope() {
+    transfer::Options options;options.modem=tuning::resolve(1200,70,tuning::PatternMode::auto_keystream,true,9000,10).config;
+    options.key.emplace(Bytes(32,0x41));options.search_seconds=6;options.dsp_workspace_bytes=128*1024*1024;
+    modem::OscillatorSearchConfig oscillator;oscillator.lf={.0001,.5};oscillator.rf={.0001,.005};
+    oscillator.margin=3;oscillator.rf_shift_hz=1000000;options.modem.oscillator_search=oscillator;
+    options.clock_sync=clock_sync::Policy{.0001,.001,0};options.audio_timing_error_seconds=.05;
+    const auto draft=wire(3,options.modem);
+    const auto legacy=simulation::estimate(draft,options,true,clean_channel(),{},1,false,100,128,
+        simulation::ReceiverWorkMode::hardware_timing_model);
+    options.modem.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;
+    const auto interleaved=simulation::estimate(draft,options,true,clean_channel(),{},1,true,100,128,
+        simulation::ReceiverWorkMode::hardware_timing_model);
+    check(interleaved.receiver_work_supported&&interleaved.receiver_workspace_supported&&
+          interleaved.receiver_geometry.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2&&
+          interleaved.receiver_geometry.fine_chip_samples==legacy.receiver_geometry.fine_chip_samples&&
+          interleaved.receiver_geometry.symbol_samples==legacy.receiver_geometry.symbol_samples&&
+          interleaved.receiver_cpu_seconds>legacy.receiver_cpu_seconds,
+          "V2 maps/setup must be charged without changing fine-chip/symbol geometry");
+    check(!interleaved.confidence_available&&!interleaved.one_bit_confidence_available&&
+          !interleaved.reference_probability_available&&!interleaved.one_bit_reference_available&&
+          !interleaved.probability_interval_available&&interleaved.probability_trials==0&&
+          interleaved.probability_model_limit.find("pre-limiter")!=std::string::npos,
+          "new V2 shaped/limited energy must not inherit a legacy numerical probability");
+    auto early_options=options;
+    early_options.modem=tuning::resolve(10,40,tuning::PatternMode::auto_keystream,true,7500,1000,
+        modem::OuterDsssVersion::interleaved_v2).config;
+    early_options.modem.oscillator_search=oscillator;early_options.dsp_workspace_bytes=std::size_t{1024}*1024*1024;
+    auto prefix=wire(1,early_options.modem);prefix.total_seconds=0;
+    const auto early=simulation::estimate(prefix,early_options,true,clean_channel(),{},1,false,100,128,
+        simulation::ReceiverWorkMode::hardware_timing_model);
+    check(early.fft_acquisition_batches==0&&early.receiver_geometry.retained_template_jobs==0&&
+          early.initial_epoch_setup_seconds>0&&early.new_epoch_setup_seconds>0&&
+          early.new_epoch_full_fft_batches==0,
+          "pre-first-FFT V2 must charge initial/fresh constructors and permutations without inventing scored jobs");
+    auto wrong_profile=options.modem;wrong_profile.outer_dsss_version=modem::OuterDsssVersion::legacy_v1;
+    const std::array wrong_profiles{wrong_profile};
+    const auto mismatched=simulation::estimate(draft,options,true,clean_channel(),wrong_profiles,1,false);
+    check(!mismatched.profile_matches,"distinct wire versions must not match a receiver profile");
+    options.modem.dsss_factor=1;
+    auto normalized=options.modem;normalized.outer_dsss_version=modem::OuterDsssVersion::legacy_v1;
+    const std::array normalized_profiles{normalized};
+    const auto off=simulation::estimate(wire(1,options.modem),options,true,clean_channel(),normalized_profiles,1,false);
+    check(off.profile_matches&&off.receiver_geometry.outer_dsss_version==modem::OuterDsssVersion::legacy_v1,
+          "DSSS off must ignore inactive wire-version state");
+}
 void rolling_fft_epoch_workload() {
     transfer::Options options;
     options.modem=tuning::resolve(10,40,tuning::PatternMode::auto_keystream,true,7500,1000).config;
@@ -1088,10 +1189,10 @@ void rolling_fft_epoch_workload() {
           one.frequency_rate_hypotheses==5&&one.fft_acquisition_batches==1&&one.fft_retained_acquisition_batches==1,
           "one-bit GPS reproducer must expose the initial13 epoch and1/1 whole-FFT-batch plateau");
     check(one.new_epoch_admissions>0&&one.new_epoch_full_fft_batches>0&&
-          one.new_epoch_retained_fft_batches<=one.new_epoch_full_fft_batches&&
+          one.new_epoch_retained_fft_batches<=one.new_epoch_qualified_ready_batch_slots&&
           one.new_epoch_frontend_seconds>0&&one.new_epoch_setup_seconds>0,
           "automatic Live work must charge new epochs, constructors and their input processing");
-    check(one.receiver_work_assumptions.find("initial FFT acquisition batches retained 1 / 1")!=std::string::npos&&
+    check(one.receiver_work_assumptions.find("initial FFT acquisition batches retained 1; original full-hop batches 1")!=std::string::npos&&
           one.receiver_work_assumptions.find("newly admitted epochs")!=std::string::npos,
           "rendered engineering diagnostic must distinguish initial and rolling FFT work");
     check(ordinary.frequency_rate_hypotheses==3&&ordinary.new_epoch_admissions>0&&
@@ -1101,8 +1202,37 @@ void rolling_fft_epoch_workload() {
     const auto narrower=estimate(options,draft,simulation::ReceiverWorkMode::hardware_timing_model,metadata);
     check(narrower.timing_window_modeled&&narrower.fft_acquisition_batches==1&&
           narrower.fft_retained_acquisition_batches==1,"Audio10ms cannot invent a saved overlapping initial FFT batch");
-    near(narrower.receiver_cpu_seconds,one.receiver_cpu_seconds,
-         "Audio50ms and10ms must preserve the actual whole-batch CPU plateau for this one-bit geometry");
+    check(one.receiver_geometry.restricted_fft_modeled&&narrower.receiver_geometry.restricted_fft_modeled&&
+          one.receiver_geometry.full_template_jobs==35&&one.receiver_geometry.retained_template_jobs==5&&
+          one.receiver_geometry.direct_template_jobs==0&&one.receiver_geometry.full_start_positions==4695040,
+          "restricted FFT model lost exact canonical-group job/position counts at the representative epoch");
+    check(one.receiver_geometry.partitioned_template_jobs>0&&one.receiver_geometry.partitioned_input_transforms>0&&
+          one.receiver_geometry.partitioned_tile_min>=16&&one.receiver_geometry.partitioned_tile_max<=16384&&
+          one.receiver_geometry.partitioned_template_transforms>0&&one.receiver_geometry.partitioned_inverse_transforms>0,
+          "rate10/DSSS1000 must price shared-selector partition tiles and both private candidate rows");
+    check(one.receiver_geometry.input_fft_transforms+one.receiver_geometry.partitioned_input_transforms+
+              one.receiver_geometry.paired_direct_template_jobs>=one.fft_retained_acquisition_batches&&
+          one.receiver_geometry.timing_component_dispatches>0&&
+          one.receiver_geometry.first_component_window_seconds>0&&
+          one.receiver_geometry.first_component_window_seconds<=one.receiver_geometry.first_qualified_window_seconds+4*one.receiver_geometry.timing_grid_seconds+1e-9,
+          "guarded components must price input transforms and expose their separate readiness");
+    check(narrower.receiver_geometry.retained_template_jobs==one.receiver_geometry.retained_template_jobs&&
+          narrower.receiver_geometry.retained_start_positions<one.receiver_geometry.retained_start_positions&&
+          narrower.receiver_cpu_seconds<one.receiver_cpu_seconds,
+          "unchanged1/1 FFT cadence must still price reduced per-phase start evaluation");
+    near(narrower.receiver_frontend_seconds,one.receiver_frontend_seconds,
+         "tightening admitted starts must not discount shared input processing");
+    const auto& g=one.receiver_geometry;
+    check(g.sample_rate==40000&&g.fine_chip_samples==8&&g.inner_chip_samples==8000&&g.symbol_samples==512000&&
+          g.canonical_phases==5&&g.workspace_bytes==options.dsp_workspace_bytes,
+          "geometry diagnostics must report resolved fine/inner/symbol/sample/workspace quantities");
+    near(g.timing_grid_seconds,.0001,"FFT grid is the actual projection-bin cadence");
+    near(g.first_fft_seconds,26.2144,"prior pruning must not invent earlier acquisition FFT cadence");
+    near(g.fft_hop_seconds,13.4144,"later FFT cadence must preserve original hop");
+    check(g.combined_arrival_half_width_seconds>.1025&&g.combined_arrival_half_width_seconds<.1026&&
+          narrower.receiver_geometry.combined_arrival_half_width_seconds>.0225&&
+          narrower.receiver_geometry.combined_arrival_half_width_seconds<.0226,
+          "combined admitted arrival width omitted GPS, region, both audio bounds or numerical margins");
     auto over_budget=metadata;over_budget.capture_error_seconds=.02;
     const auto unsupported=estimate(options,draft,simulation::ReceiverWorkMode::hardware_timing_model,over_budget);
     const auto fallback=estimate(options,draft,simulation::ReceiverWorkMode::hardware_fallback,over_budget);
@@ -1198,6 +1328,14 @@ void rolling_fft_epoch_workload() {
     check(newborns.new_epoch_full_fft_batches==0&&newborns.new_epoch_admissions>0&&
           newborns.new_epoch_frontend_seconds>0&&newborns.new_epoch_setup_seconds>0,
           "epochs too new for a full FFT still require constructors and input processing");
+    auto qualified_early=draft;qualified_early.total_seconds+=22-one.simulated_seconds;
+    const auto ready=estimate(options,qualified_early,simulation::ReceiverWorkMode::hardware_timing_model,metadata);
+    check(ready.fft_acquisition_batches==0&&ready.fft_retained_acquisition_batches==1&&
+          ready.receiver_geometry.first_qualified_window_seconds>0&&
+          ready.receiver_geometry.first_qualified_window_seconds<26.2144&&
+          ready.initial_epoch_setup_seconds>0&&ready.new_epoch_setup_seconds>0&&
+          ready.new_epoch_retained_fft_batches<=ready.new_epoch_qualified_ready_batch_slots,
+          "qualified readiness must price completed retained starts before the original full FFT window");
     auto fixed=options;fixed.timestamp=1800000000;
     const auto anchored=estimate(fixed,draft,simulation::ReceiverWorkMode::hardware_timing_model,metadata);
     const auto simulated=estimate(options,draft,simulation::ReceiverWorkMode::sampled_simulation,metadata);
@@ -1635,13 +1773,17 @@ void projected_pattern_workload() {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc==2&&std::string_view(argv[1])=="restricted-fft-work") {
+            clock_dsss_reference();restricted_fft_direct_and_bounded_fallback();guarded_component_workload();versioned_outer_work_and_probability_scope();rolling_fft_epoch_workload();
+            std::cout<<"Restricted FFT and versioned outer work diagnostics passed\n";return 0;
+        }
         advisory_cancellation();
         if(argc==2&&std::string(argv[1])=="--cancellation-only") {std::cout<<"advisory cancellation tests passed\n";return 0;}
         if(argc==2&&std::string(argv[1])=="--rolling-epochs-only") {
             rolling_fft_epoch_workload();std::cout<<"rolling FFT epoch work tests passed\n";return 0;
         }
         if(argc==2&&std::string(argv[1])=="--utc-only") {
-            utc_bank_estimate();clock_dsss_reference();rolling_fft_epoch_workload();compact_clock_prior_workload();std::cout<<"UTC bank estimate tests passed\n";return 0;
+            utc_bank_estimate();clock_dsss_reference();restricted_fft_direct_and_bounded_fallback();guarded_component_workload();versioned_outer_work_and_probability_scope();rolling_fft_epoch_workload();compact_clock_prior_workload();std::cout<<"UTC bank estimate tests passed\n";return 0;
         }
         if(argc==2&&std::string(argv[1])=="--affine-work-only") {
             bounded_affine_rf_workload();affine_coefficient_workload();projected_pattern_workload();
@@ -1650,7 +1792,7 @@ int main(int argc,char** argv) {
         if(argc==2&&std::string(argv[1])=="--partial-only") {
             partial_compact_probability();std::cout<<"partial simulation estimate tests passed\n";return 0;
         }
-        utc_bank_estimate();clock_dsss_reference();rolling_fft_epoch_workload();compact_clock_prior_workload();probability_and_framing();workload_and_impairments();receiver_cpu_budget();received_processing_budget();whole_symbol_phase_coherence();partial_compact_probability();differential_model_limits();drift_receiver_estimate();receiver_statistic_controls();raw_sample_probability_geometry();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
+        utc_bank_estimate();clock_dsss_reference();restricted_fft_direct_and_bounded_fallback();guarded_component_workload();versioned_outer_work_and_probability_scope();rolling_fft_epoch_workload();compact_clock_prior_workload();probability_and_framing();workload_and_impairments();receiver_cpu_budget();received_processing_budget();whole_symbol_phase_coherence();partial_compact_probability();differential_model_limits();drift_receiver_estimate();receiver_statistic_controls();raw_sample_probability_geometry();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
         coupled_and_independent_clock_estimates();streamed_template_workload();target_and_channel_are_independent();oscillator_policy_geometry();nearby_shift_workload();equivalent_receive_profiles();affine_coefficient_workload();projected_pattern_workload();
         std::cout<<"simulation estimate tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"simulation estimate tests failed: "<<error.what()<<'\n';return 1;}

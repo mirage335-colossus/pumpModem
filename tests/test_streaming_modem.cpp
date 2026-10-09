@@ -428,6 +428,59 @@ void frame_wide_transmit_constellation() {
     }
 }
 
+void interleaved_streaming_blocks() {
+    modem::Config config;
+    config.bandwidth_hz=120;config.dsss_factor=10;config.scramble=config.dsss=true;
+    config.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;
+    config.stream_epoch=1800000031;config.spreading_seed.fill(0x31);config.dsss_seed.fill(0x92);
+    const Bytes bits{0,1,0};
+    modem::TransmitTrace trace;trace.active=true;
+    modem::StreamingTransmitter whole(modem::RawBits{bits},config),
+        blocked(modem::RawBits{bits},config,default_memory_limit,trace);
+    std::vector<float> reference(whole.total_samples()),actual(reference.size());
+    whole.read(reference);
+    std::size_t position=0;
+    constexpr std::array<std::size_t,7> sizes{1,7,63,317,4093,11,1024};
+    for(std::size_t block=0;position<actual.size();++block) {
+        const auto count=blocked.read(std::span(actual).subspan(position,
+            std::min(sizes[block%sizes.size()],actual.size()-position)));
+        if(!count)throw std::runtime_error("interleaved source ended before its physical waveform");
+        position+=count;
+    }
+    const auto result=blocked.transmit_trace();
+    double maximum_difference=0;
+    for(std::size_t i=0;i<actual.size();++i)maximum_difference=std::max(maximum_difference,
+        std::abs(static_cast<double>(actual[i])-reference[i]));
+    if(maximum_difference>1e-7 || !blocked.finished() || result.outer_dsss_factor!=10 ||
+       result.outer_dsss_version!=2 || result.wire_bits!=bits || result.generated_bits!=bits.size()) {
+        std::cerr<<"stream block maximum PCM difference "<<maximum_difference
+            <<", finished "<<blocked.finished()<<", factor "<<result.outer_dsss_factor
+            <<", version "<<result.outer_dsss_version<<", generated "<<result.generated_bits
+            <<", wire count "<<result.wire_bits.size()<<'\n';
+        throw std::runtime_error("interleaved DSSS changed across streaming block or trace boundaries");
+    }
+
+    // The changed outer waveform still exposes exactly the existing source
+    // bits. Observation completion is driven by real absent samples, not EOF.
+    modem::PatternSearch search;search.frequency_offsets_hz={0};search.clock_errors_ppm={0};
+    search.initial_stream_symbols=1;
+    modem::StreamingReceiver receiver(config,32*1024*1024,search);
+    ReceivedStreams received;
+    const auto harvest=[&]{for(const auto& burst:receiver.take_pattern_bursts())received.append(burst);};
+    const auto prefix=modem::training_sample_count(config)+modem::pattern_pulse_padding_samples(config);
+    for(std::size_t first=prefix;first<actual.size();first+=317) {
+        receiver.push(std::span(actual).subspan(first,std::min<std::size_t>(317,actual.size()-first)));
+        harvest();
+    }
+    std::vector<float> absent(6*config.sample_rate+3*modem::symbol_sample_count(config));
+    for(std::size_t first=0;first<absent.size();first+=317) {
+        receiver.push(std::span(absent).subspan(first,std::min<std::size_t>(317,absent.size()-first)));
+        harvest();
+    }
+    if(received.longest().bits!=bits)
+        throw std::runtime_error("interleaved streaming PCM did not recover exact unpadded bits");
+}
+
 int main() {
     try {
         generated_bits_use_the_ordinary_modem();
@@ -436,6 +489,7 @@ int main() {
         suppression_hides_delayed_echo();
         pattern_transmit_constellation();
         frame_wide_transmit_constellation();
+        interleaved_streaming_blocks();
         modem::Config config;config.memory_limit=1024; // Batch PCM ceiling does not limit explicit streaming DSP.
         const Bytes bits{0,0,1,1,0,1,0,1,1};
         modem::StreamingTransmitter source(modem::RawBits{bits},config);

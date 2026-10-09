@@ -25,6 +25,37 @@ struct ReceiverTimingModel {
     bool operator==(const ReceiverTimingModel&) const = default;
 };
 
+// Source-derived geometry/work diagnostics. These are planning references,
+// never execution counters, observed latency or calibrated sensitivity.
+struct ReceiverSearchDiagnostics {
+    std::uint32_t sample_rate=0;
+    unsigned dsss_factor=1;
+    modem::OuterDsssVersion outer_dsss_version=modem::OuterDsssVersion::legacy_v1;
+    std::size_t workspace_bytes=0;
+    double per_bank_workspace_bytes=0;
+    std::uint64_t fine_chip_samples=0,inner_chip_samples=0,symbol_samples=0;
+    double fine_chip_seconds=0,inner_chip_seconds=0,symbol_seconds=0;
+    double timing_grid_seconds=0,canonical_phase_step_seconds=0;
+    double first_fft_seconds=0,fft_hop_seconds=0;
+    // Previous all-selected union readiness and earliest guarded component.
+    double first_qualified_window_seconds=0,first_component_window_seconds=0,qualified_ready_batch_slots=0;
+    // Representative execution geometry, not all-cohort operation allowances.
+    double input_fft_transforms=0,timing_component_dispatches=0,component_fallback_hops=0;
+    double paired_direct_template_jobs=0,partitioned_template_jobs=0,paired_fallback_components=0;
+    double partitioned_input_transforms=0,partitioned_template_transforms=0,partitioned_inverse_transforms=0;
+    std::size_t partitioned_tile_min=0,partitioned_tile_max=0;
+    std::size_t canonical_phases=0;
+    double combined_arrival_half_width_seconds=0;
+    bool arrival_window_available=false,restricted_fft_modeled=false;
+    // Counts over the modeled observation for ONE representative epoch/key.
+    // Cohort CPU allowances separately cover all initial/rolling epochs.
+    // Retained template jobs are dispatches: one original job can execute in
+    // several components. Full jobs/positions charge each original hop once.
+    double full_template_jobs=0,retained_template_jobs=0,direct_template_jobs=0;
+    double full_start_positions=0,retained_start_positions=0;
+    std::string backend,scope,fallback_reason;
+};
+
 struct Estimate {
     // Engineering estimates, not measurements or calibrated probabilities.
     // Idealized success conditional on completing receiver computation: the
@@ -60,6 +91,9 @@ struct Estimate {
     // Divide by simulated_seconds for a rough real-time workload,
     // not a measured CPU utilization or a guarantee about per-bit latency.
     double receiver_cpu_seconds = 0;
+    // False when additional implemented work lacks a defensible engineering
+    // allowance. Geometry/resource diagnostics remain useful in that case.
+    bool receiver_work_supported = true;
     // Components included in receiver_cpu_seconds. Frontend work follows the
     // original real sample rate; projected private search follows chip cadence
     // and runs serially in the current backend (also in the GPU projection).
@@ -136,6 +170,7 @@ struct Estimate {
     // used by the compact work allowance, not additional timing origins.
     double timing_hypotheses = 0;
     std::size_t timing_phase_groups = 1;
+    ReceiverSearchDiagnostics receiver_geometry;
     ReceiverWorkMode receiver_work_mode = ReceiverWorkMode::sampled_simulation;
     bool timing_window_modeled = false;
     // Per epoch in the INITIAL cohort, before/after the conservative arrival
@@ -147,9 +182,11 @@ struct Estimate {
     // sampled simulation and compact references have no added FFT cohort here.
     double new_epoch_admissions = 0;
     double new_epoch_full_fft_batches = 0, new_epoch_retained_fft_batches = 0;
+    double new_epoch_qualified_ready_batch_slots = 0;
     // Included in frontend/total cost. Constructor allowance covers zeroing and
     // any initial template transforms; fresh batch work includes all later FFTs.
     // These are engineering allowances, not measured execution or RAM bounds.
+    double initial_epoch_setup_seconds = 0;
     double new_epoch_frontend_seconds = 0, new_epoch_setup_seconds = 0;
     std::string receiver_work_assumptions;
     // Same configured peer oscillator bank with the complete arrival window.

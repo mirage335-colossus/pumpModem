@@ -4,6 +4,93 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Bounded timing acquisition and DSSS V2 — manual checkpoint, 9 October 2026
+
+This local candidate is **not fully qualified**. No push, publication, hosted CI,
+platform/SDK or hours-long calibration was started. Frozen source/build/GUI and
+launch commands are in
+`.agent-work/artifacts/receiver-opt-20261008/MANUAL-BOUNDED-ACQUISITION.md`.
+Final candidate manifest SHA256:
+`56d2e5107f510346e597d8422118e3b151211fdba601d656d9319a602b215ed8`;
+GUI SHA256 `343c94b155ffcaa83d6208285ecd232352caad9ebf6c6bd3620c6d504bde8b3b`.
+It builds on local HEAD `9ee268e23449fbdc43c66a792fd1321b359fcbe3`; the
+preceding optimized runnable baseline and raw correlator diagnostic remain.
+
+The receiver uses exact qualified timing-cell unions, paired direct matching or
+bounded partitioned convolution, and independently ready timing components where
+original peak/candidate rules permit. Original I/Q, private 0/1 patterns, oscillator
+lanes, trial charges, progress and physical absence remain. Unsupported geometries
+retain their original paths; this is not universal acquisition qualification.
+Cold EOF replay restores original finite-final thresholds even after the final
+selected component executed. Already established output is not rewound, and
+published-tail EOF equivalence remains unqualified.
+
+Final-candidate unchanged-input DSSS1000 endpoints each retain three alternating
+pairs. At a six-second admitted window, median CPU is 13.001→5.988 seconds
+(2.171× paired speedup; observed range 1.665–2.221×). At one millisecond it is
+9.866→1.829 seconds (5.395×; range 5.380–5.630×). These are descriptive ranges,
+not precise 95% intervals. The new receiver's own CPU falls 3.274×; executed start
+counts fall 2,275,570→1,500, with one finite-EOF replay included in the broad count.
+Retained peak rises by at most 4,344 bytes under the same 64 MiB workspace.
+Full-symbol/template and epoch costs remain; no orders-of-magnitude total CPU
+reduction was achieved. These one-bank complete 60-second captures differ from
+rolling Live and sensitivity measurements. The preceding integration's complete
+27-pair width sweep remains historical evidence, not a substitute for the final
+source. See [search compute](search-compute.md) and the exact-source manual report.
+
+Final5 V2 rolling Live also completes the 60-second capture under the unchanged
+2,216,646,656-byte bound: 21.365 seconds CPU, 24.483 seconds wall, peak retained
+752,267,248 bytes. It publishes at media 13.9 seconds and completes after observed
+absence at 26.3 seconds, with no health/backlog failure. This is one functional
+stub run, not real hardware qualification or a repeated speedup interval; the
+preceding receiver exhausts the same workspace before acquisition.
+
+Interleaved V2 changes the separately keyed outer waveform, preserving the inner
+patterns and framing. Final shaping plus 0.5 pre-limiter gain reduces measured
+guarded out-of-band energy by roughly 18–19 dB and removes observed clipping in
+the captured fixtures. Mean digital power falls approximately 5.8 dB at unchanged
+downstream gain; equal-peak and equal-average-power constraints are reported
+separately. It is not a free link-budget improvement or a detector sensitivity
+loss claim. V2 has an explicit version, legacy diagnostic and unchanged DSSS-Off
+path. Numerical RX probability is withheld pending validation. See
+[DSSS evidence](dsss-followup-validation.md).
+
+Completed local checks: all nine affected core cases (crypto, PatternCode,
+FFT/correlator batches, PatternReceiver, streaming modem, tuning, simulation
+estimates and Live profiles), all 38 GUI cases, complete CLI and application build.
+The final GUI group takes 150.91 seconds, CLI 32.62 seconds; the complete
+PatternReceiver/Live profile repair reruns take 61.86/143.11 seconds. No assertion
+was removed. Original failure logs and corrected fixtures remain recorded: explicit
+legacy version for numerical-advice testing, required synthetic key for encrypted
+profile validation, 328 KiB cache-pressure fixture for new bounded metadata, and
+consistent numerical constructor-FFT accounting. `git diff --check` passes;
+other-owner oscillator-validation edits and the empty index are preserved.
+
+Four fresh 20,000-draw conditional V1/V2 equal-energy holdouts estimate additional
+C/N0 as 0.00 dB at 90% detection and −0.05 dB at 99%. Conservative family-corrected
+95% enclosures reach [−0.20,+0.15] dB at 99%, so the 0.1 dB limit is **not
+established**. These matched single-branch, five-start, guard-disabled DSSS1000
+results do not qualify full acquisition, receiver-only loss or cumulative raw loss.
+Saved BER/detection curves, scope, production replay and component-cost controls
+are in the manual report. No rare-event rate is inferred from zero observed errors.
+
+The final bounded regression matrix completes all 26 pairs / 52 executions with
+bit/completion assertions intact. Ordinary fast/wider/weaker controls and the
+0.5 Hz fixed-rate partial case include a few-percent slowdown; no universal
+nonregression claim is made. Original 0.005/0.5 Hz application-rate captures at
+64 samples/s complete a bit plus absence (actual symbol 6400 s / 32 chips).
+Original fixed-6000/s captures, including carrier 1500 Hz, are explicitly partial
+2000-second observations. Inner compact backend telemetry and final5 repeated
+D10/D100 width curves remain unmeasured. All slower runs and exact input rates,
+PCM, workspace and scope are retained in the final measurement report.
+
+Full acquisition/BER curves, active-guard/wrong-key/interference and cumulative
+raw-reference sensitivity, real device clock/spectrum/loopback, normal full
+contract/calibration, sanitizer and broader native/platform/SDK/packaging
+qualification remain required before overall completion. Unsupported broad
+backends and unmeasured full-FFT/partition crossover geometries also remain
+unfinished optimization; they retain complete coverage.
+
 ## ALSA startup latency readiness — local manual fix, 9 October 2026
 
 The follow-up screenshot identified playback `ALSA -5: Input/output error` at

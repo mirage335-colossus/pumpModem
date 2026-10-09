@@ -51,6 +51,7 @@ struct StreamingTransmitter::Impl {
             trace.tone=config.spreading_mode==SpreadingMode::tone;
             trace.pattern_available=!trace.tone;trace.pattern_private=config.scramble;trace.dsss=config.dsss;
             trace.outer_dsss_factor=config.dsss_factor;
+            trace.outer_dsss_version=config.dsss_factor>1?static_cast<unsigned>(config.outer_dsss_version):1;
             trace.wire_bits.assign(input.bits.begin(),input.bits.begin()+static_cast<std::ptrdiff_t>(
                 std::min(input.bits.size(),TransmitTrace::bit_limit)));
         }

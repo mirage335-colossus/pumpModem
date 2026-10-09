@@ -1,0 +1,909 @@
+{
+  "scope": "Same-PCM complete fixed receiver bank, full60s capture. Not whole rolling Live, hardware timing, sensitivity or universal performance qualification.",
+  "pair_manifest": "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-primary-pairs.json",
+  "pair_manifest_sha256": "de5c9e599e93f03e2ff0a9e531785555d6097ec09a480e8636317b287d848251",
+  "all_declared_pairs_retained": true,
+  "pair_count": 6,
+  "failed_or_incomplete_pairs": 0,
+  "pairs": [
+    {
+      "label": "final5 D1000 width6 repeat1",
+      "state": "complete_paired_fixed_bank",
+      "speedup_reported": true,
+      "burst_event_hash_same": true,
+      "event_hash_scope": "Chunk grouping may change with earlier progress; compare optional diagnostic flattened bit/identity traces rather than interpret this hash as content.",
+      "components": {
+        "input_transforms": {
+          "baseline": 4.0,
+          "candidate": 2.0
+        },
+        "template_jobs": {
+          "baseline": 140.0,
+          "candidate": 75.0
+        },
+        "threshold_trials": {
+          "baseline": 16520028.0,
+          "candidate": 16520014.0
+        },
+        "skipped_start_trials": {
+          "baseline": 0.0,
+          "candidate": 18939470.0
+        },
+        "retained_start_trials": {
+          "baseline": null,
+          "candidate": 2275570.0
+        },
+        "scored_start_trials": {
+          "baseline": null,
+          "candidate": 2275570.0
+        },
+        "direct_jobs": {
+          "baseline": null,
+          "candidate": 0.0
+        },
+        "fft_jobs": {
+          "baseline": null,
+          "candidate": 40.0
+        },
+        "skipped_template_jobs": {
+          "baseline": null,
+          "candidate": 100.0
+        },
+        "partitioned_jobs": {
+          "baseline": null,
+          "candidate": 35.0
+        },
+        "partitioned_input_transforms": {
+          "baseline": null,
+          "candidate": 132.0
+        },
+        "partitioned_transform_points": {
+          "baseline": null,
+          "candidate": 24936448.0
+        },
+        "partitioned_fallbacks": {
+          "baseline": null,
+          "candidate": 2.0
+        },
+        "timing_components": {
+          "baseline": null,
+          "candidate": 1.0
+        },
+        "component_fallbacks": {
+          "baseline": null,
+          "candidate": 3.0
+        },
+        "early_batches": {
+          "baseline": null,
+          "candidate": 1.0
+        },
+        "eof_replays": {
+          "baseline": null,
+          "candidate": 1.0
+        },
+        "mean_scored_origins_per_executed_job": {
+          "baseline": -1.0,
+          "candidate": 30340.933333333334
+        }
+      },
+      "latency": {
+        "acquisition_media_seconds": {
+          "baseline": 26.2144,
+          "candidate": 26.2144
+        },
+        "first_bit_media_seconds": {
+          "baseline": 26.2144,
+          "candidate": 26.2144
+        },
+        "first_complete_physical_symbol_seconds": {
+          "baseline": 12.931291215424114,
+          "candidate": 12.931291215424114
+        },
+        "physical_bit_progress_latency_media_seconds": {
+          "baseline": 13.2831,
+          "candidate": 13.2831
+        },
+        "physical_bit_progress_wall_lower_seconds": {
+          "baseline": 3.377063207,
+          "candidate": 1.192400038
+        },
+        "physical_bit_progress_wall_upper_seconds": {
+          "baseline": 3.3770795380000003,
+          "candidate": 1.19241688
+        },
+        "early_bit_lead_samples": {
+          "baseline": 0.0,
+          "candidate": 0.0
+        },
+        "completion_observed_samples": {
+          "baseline": 1048576.0,
+          "candidate": 1048576.0
+        },
+        "completion_true_absence_lag_samples": {
+          "baseline": 19324.0,
+          "candidate": 19324.0
+        }
+      },
+      "fixture": "fixed",
+      "case": "d1000-60s",
+      "width": "6",
+      "pcm_sha256": "d9d53f1cb5f2458134d503220a36bbb034c7bbbb44ce7fa095b675c5e8ec2780",
+      "baseline_wall_seconds": 12.833708415,
+      "candidate_wall_seconds": 7.952085607,
+      "baseline_cpu_seconds": 12.833287,
+      "candidate_cpu_seconds": 7.70717,
+      "wall_speedup": 1.6138795593074153,
+      "cpu_speedup": 1.6651101506778754,
+      "result_hashes": {
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-primary-d1000-w6-baseline-r1.result.json": "af67395050b3c318cb7ee9c951356a793ac604b27fa787fb61cfc1908190cf49",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-primary-d1000-w6-candidate-r1.result.json": "a6586cbbe1204a72d9960cb19fea51190832036fb5763bf730d10ef6206d5831"
+      }
+    },
+    {
+      "label": "final5 D1000 width6 repeat2",
+      "state": "complete_paired_fixed_bank",
+      "speedup_reported": true,
+      "burst_event_hash_same": true,
+      "event_hash_scope": "Chunk grouping may change with earlier progress; compare optional diagnostic flattened bit/identity traces rather than interpret this hash as content.",
+      "components": {
+        "input_transforms": {
+          "baseline": 4.0,
+          "candidate": 2.0
+        },
+        "template_jobs": {
+          "baseline": 140.0,
+          "candidate": 75.0
+        },
+        "threshold_trials": {
+          "baseline": 16520028.0,
+          "candidate": 16520014.0
+        },
+        "skipped_start_trials": {
+          "baseline": 0.0,
+          "candidate": 18939470.0
+        },
+        "retained_start_trials": {
+          "baseline": null,
+          "candidate": 2275570.0
+        },
+        "scored_start_trials": {
+          "baseline": null,
+          "candidate": 2275570.0
+        },
+        "direct_jobs": {
+          "baseline": null,
+          "candidate": 0.0
+        },
+        "fft_jobs": {
+          "baseline": null,
+          "candidate": 40.0
+        },
+        "skipped_template_jobs": {
+          "baseline": null,
+          "candidate": 100.0
+        },
+        "partitioned_jobs": {
+          "baseline": null,
+          "candidate": 35.0
+        },
+        "partitioned_input_transforms": {
+          "baseline": null,
+          "candidate": 132.0
+        },
+        "partitioned_transform_points": {
+          "baseline": null,
+          "candidate": 24936448.0
+        },
+        "partitioned_fallbacks": {
+          "baseline": null,
+          "candidate": 2.0
+        },
+        "timing_components": {
+          "baseline": null,
+          "candidate": 1.0
+        },
+        "component_fallbacks": {
+          "baseline": null,
+          "candidate": 3.0
+        },
+        "early_batches": {
+          "baseline": null,
+          "candidate": 1.0
+        },
+        "eof_replays": {
+          "baseline": null,
+          "candidate": 1.0
+        },
+        "mean_scored_origins_per_executed_job": {
+          "baseline": -1.0,
+          "candidate": 30340.933333333334
+        }
+      },
+      "latency": {
+        "acquisition_media_seconds": {
+          "baseline": 26.2144,
+          "candidate": 26.2144
+        },
+        "first_bit_media_seconds": {
+          "baseline": 26.2144,
+          "candidate": 26.2144
+        },
+        "first_complete_physical_symbol_seconds": {
+          "baseline": 12.931291215424114,
+          "candidate": 12.931291215424114
+        },
+        "physical_bit_progress_latency_media_seconds": {
+          "baseline": 13.2831,
+          "candidate": 13.2831
+        },
+        "physical_bit_progress_wall_lower_seconds": {
+          "baseline": 3.405621854,
+          "candidate": 1.183214536
+        },
+        "physical_bit_progress_wall_upper_seconds": {
+          "baseline": 3.405638195,
+          "candidate": 1.183231448
+        },
+        "early_bit_lead_samples": {
+          "baseline": 0.0,
+          "candidate": 0.0
+        },
+        "completion_observed_samples": {
+          "baseline": 1048576.0,
+          "candidate": 1048576.0
+        },
+        "completion_true_absence_lag_samples": {
+          "baseline": 19324.0,
+          "candidate": 19324.0
+        }
+      },
+      "fixture": "fixed",
+      "case": "d1000-60s",
+      "width": "6",
+      "pcm_sha256": "d9d53f1cb5f2458134d503220a36bbb034c7bbbb44ce7fa095b675c5e8ec2780",
+      "baseline_wall_seconds": 13.014005479,
+      "candidate_wall_seconds": 5.857567011,
+      "baseline_cpu_seconds": 13.007273,
+      "candidate_cpu_seconds": 5.857298,
+      "wall_speedup": 2.221742483621755,
+      "cpu_speedup": 2.2206951054906203,
+      "result_hashes": {
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-primary-d1000-w6-baseline-r2.result.json": "44ae8b504be4b86e9dff8eb8e1de31eeb5148c908e9de282938b1bb7711aa3df",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-primary-d1000-w6-candidate-r2.result.json": "74fc697efa5bcba7bc68f0ff4428bec0b7c99518ecf6ac37f2abdace06b619ff"
+      }
+    },
+    {
+      "label": "final5 D1000 width6 repeat3",
+      "state": "complete_paired_fixed_bank",
+      "speedup_reported": true,
+      "burst_event_hash_same": true,
+      "event_hash_scope": "Chunk grouping may change with earlier progress; compare optional diagnostic flattened bit/identity traces rather than interpret this hash as content.",
+      "components": {
+        "input_transforms": {
+          "baseline": 4.0,
+          "candidate": 2.0
+        },
+        "template_jobs": {
+          "baseline": 140.0,
+          "candidate": 75.0
+        },
+        "threshold_trials": {
+          "baseline": 16520028.0,
+          "candidate": 16520014.0
+        },
+        "skipped_start_trials": {
+          "baseline": 0.0,
+          "candidate": 18939470.0
+        },
+        "retained_start_trials": {
+          "baseline": null,
+          "candidate": 2275570.0
+        },
+        "scored_start_trials": {
+          "baseline": null,
+          "candidate": 2275570.0
+        },
+        "direct_jobs": {
+          "baseline": null,
+          "candidate": 0.0
+        },
+        "fft_jobs": {
+          "baseline": null,
+          "candidate": 40.0
+        },
+        "skipped_template_jobs": {
+          "baseline": null,
+          "candidate": 100.0
+        },
+        "partitioned_jobs": {
+          "baseline": null,
+          "candidate": 35.0
+        },
+        "partitioned_input_transforms": {
+          "baseline": null,
+          "candidate": 132.0
+        },
+        "partitioned_transform_points": {
+          "baseline": null,
+          "candidate": 24936448.0
+        },
+        "partitioned_fallbacks": {
+          "baseline": null,
+          "candidate": 2.0
+        },
+        "timing_components": {
+          "baseline": null,
+          "candidate": 1.0
+        },
+        "component_fallbacks": {
+          "baseline": null,
+          "candidate": 3.0
+        },
+        "early_batches": {
+          "baseline": null,
+          "candidate": 1.0
+        },
+        "eof_replays": {
+          "baseline": null,
+          "candidate": 1.0
+        },
+        "mean_scored_origins_per_executed_job": {
+          "baseline": -1.0,
+          "candidate": 30340.933333333334
+        }
+      },
+      "latency": {
+        "acquisition_media_seconds": {
+          "baseline": 26.2144,
+          "candidate": 26.2144
+        },
+        "first_bit_media_seconds": {
+          "baseline": 26.2144,
+          "candidate": 26.2144
+        },
+        "first_complete_physical_symbol_seconds": {
+          "baseline": 12.931291215424114,
+          "candidate": 12.931291215424114
+        },
+        "physical_bit_progress_latency_media_seconds": {
+          "baseline": 13.2831,
+          "candidate": 13.2831
+        },
+        "physical_bit_progress_wall_lower_seconds": {
+          "baseline": 3.42710046,
+          "candidate": 1.175669257
+        },
+        "physical_bit_progress_wall_upper_seconds": {
+          "baseline": 3.427116951,
+          "candidate": 1.175686099
+        },
+        "early_bit_lead_samples": {
+          "baseline": 0.0,
+          "candidate": 0.0
+        },
+        "completion_observed_samples": {
+          "baseline": 1048576.0,
+          "candidate": 1048576.0
+        },
+        "completion_true_absence_lag_samples": {
+          "baseline": 19324.0,
+          "candidate": 19324.0
+        }
+      },
+      "fixture": "fixed",
+      "case": "d1000-60s",
+      "width": "6",
+      "pcm_sha256": "d9d53f1cb5f2458134d503220a36bbb034c7bbbb44ce7fa095b675c5e8ec2780",
+      "baseline_wall_seconds": 13.002276232,
+      "candidate_wall_seconds": 5.988545092,
+      "baseline_cpu_seconds": 13.001188,
+      "candidate_cpu_seconds": 5.988077,
+      "wall_speedup": 2.171191171186058,
+      "cpu_speedup": 2.1711791615238085,
+      "result_hashes": {
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-primary-d1000-w6-baseline-r3.result.json": "4aa15212a54e897de0f2ef04c4d61fd9c20245196649276e88f0c8f1ed08155a",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-primary-d1000-w6-candidate-r3.result.json": "833bf286d610e2cfbc56c9f6219ab86a0ca039498c0416256e0f2aac19ac702e"
+      }
+    },
+    {
+      "label": "final5 D1000 width0.001 repeat1",
+      "state": "complete_paired_fixed_bank",
+      "speedup_reported": true,
+      "burst_event_hash_same": false,
+      "event_hash_scope": "Chunk grouping may change with earlier progress; compare optional diagnostic flattened bit/identity traces rather than interpret this hash as content.",
+      "components": {
+        "input_transforms": {
+          "baseline": 3.0,
+          "candidate": 0.0
+        },
+        "template_jobs": {
+          "baseline": 105.0,
+          "candidate": 40.0
+        },
+        "threshold_trials": {
+          "baseline": 16520028.0,
+          "candidate": 16520014.0
+        },
+        "skipped_start_trials": {
+          "baseline": 2434880.0,
+          "candidate": 16518500.0
+        },
+        "retained_start_trials": {
+          "baseline": null,
+          "candidate": 1500.0
+        },
+        "scored_start_trials": {
+          "baseline": null,
+          "candidate": 1500.0
+        },
+        "direct_jobs": {
+          "baseline": null,
+          "candidate": 25.0
+        },
+        "fft_jobs": {
+          "baseline": null,
+          "candidate": 0.0
+        },
+        "skipped_template_jobs": {
+          "baseline": null,
+          "candidate": 100.0
+        },
+        "partitioned_jobs": {
+          "baseline": null,
+          "candidate": 15.0
+        },
+        "partitioned_input_transforms": {
+          "baseline": null,
+          "candidate": 10346.0
+        },
+        "partitioned_transform_points": {
+          "baseline": null,
+          "candidate": 8507232.0
+        },
+        "partitioned_fallbacks": {
+          "baseline": null,
+          "candidate": 0.0
+        },
+        "timing_components": {
+          "baseline": null,
+          "candidate": 5.0
+        },
+        "component_fallbacks": {
+          "baseline": null,
+          "candidate": 1.0
+        },
+        "early_batches": {
+          "baseline": null,
+          "candidate": 5.0
+        },
+        "eof_replays": {
+          "baseline": null,
+          "candidate": 0.0
+        },
+        "mean_scored_origins_per_executed_job": {
+          "baseline": -1.0,
+          "candidate": 37.5
+        }
+      },
+      "latency": {
+        "acquisition_media_seconds": {
+          "baseline": 26.2144,
+          "candidate": 13.7728
+        },
+        "first_bit_media_seconds": {
+          "baseline": 26.2144,
+          "candidate": 13.7728
+        },
+        "first_complete_physical_symbol_seconds": {
+          "baseline": 12.931291215424114,
+          "candidate": 12.931291215424114
+        },
+        "physical_bit_progress_latency_media_seconds": {
+          "baseline": 13.2831,
+          "candidate": 0.8415
+        },
+        "physical_bit_progress_wall_lower_seconds": {
+          "baseline": 3.3919611670000003,
+          "candidate": 0.270071219
+        },
+        "physical_bit_progress_wall_upper_seconds": {
+          "baseline": 3.3919801130000002,
+          "candidate": 0.270088051
+        },
+        "early_bit_lead_samples": {
+          "baseline": 0.0,
+          "candidate": 0.0
+        },
+        "completion_observed_samples": {
+          "baseline": 1048576.0,
+          "candidate": 1046528.0
+        },
+        "completion_true_absence_lag_samples": {
+          "baseline": 19324.0,
+          "candidate": 17276.0
+        }
+      },
+      "fixture": "fixed",
+      "case": "d1000-60s",
+      "width": "0.001",
+      "pcm_sha256": "d9d53f1cb5f2458134d503220a36bbb034c7bbbb44ce7fa095b675c5e8ec2780",
+      "baseline_wall_seconds": 9.870692535,
+      "candidate_wall_seconds": 1.829047722,
+      "baseline_cpu_seconds": 9.866389,
+      "candidate_cpu_seconds": 1.82895,
+      "wall_speedup": 5.3966293040220625,
+      "cpu_speedup": 5.394564640914186,
+      "result_hashes": {
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-primary-d1000-w0p001-baseline-r1.result.json": "c46efb607c25a0abcb6c615eee7ef388909587d0598df647a20d2e9e4db83718",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-primary-d1000-w0p001-candidate-r1.result.json": "f2326058980b50017ec3a68d2377f405a08e445d02a6e3aee0be43cf8bdffe7d"
+      }
+    },
+    {
+      "label": "final5 D1000 width0.001 repeat2",
+      "state": "complete_paired_fixed_bank",
+      "speedup_reported": true,
+      "burst_event_hash_same": false,
+      "event_hash_scope": "Chunk grouping may change with earlier progress; compare optional diagnostic flattened bit/identity traces rather than interpret this hash as content.",
+      "components": {
+        "input_transforms": {
+          "baseline": 3.0,
+          "candidate": 0.0
+        },
+        "template_jobs": {
+          "baseline": 105.0,
+          "candidate": 40.0
+        },
+        "threshold_trials": {
+          "baseline": 16520028.0,
+          "candidate": 16520014.0
+        },
+        "skipped_start_trials": {
+          "baseline": 2434880.0,
+          "candidate": 16518500.0
+        },
+        "retained_start_trials": {
+          "baseline": null,
+          "candidate": 1500.0
+        },
+        "scored_start_trials": {
+          "baseline": null,
+          "candidate": 1500.0
+        },
+        "direct_jobs": {
+          "baseline": null,
+          "candidate": 25.0
+        },
+        "fft_jobs": {
+          "baseline": null,
+          "candidate": 0.0
+        },
+        "skipped_template_jobs": {
+          "baseline": null,
+          "candidate": 100.0
+        },
+        "partitioned_jobs": {
+          "baseline": null,
+          "candidate": 15.0
+        },
+        "partitioned_input_transforms": {
+          "baseline": null,
+          "candidate": 10346.0
+        },
+        "partitioned_transform_points": {
+          "baseline": null,
+          "candidate": 8507232.0
+        },
+        "partitioned_fallbacks": {
+          "baseline": null,
+          "candidate": 0.0
+        },
+        "timing_components": {
+          "baseline": null,
+          "candidate": 5.0
+        },
+        "component_fallbacks": {
+          "baseline": null,
+          "candidate": 1.0
+        },
+        "early_batches": {
+          "baseline": null,
+          "candidate": 5.0
+        },
+        "eof_replays": {
+          "baseline": null,
+          "candidate": 0.0
+        },
+        "mean_scored_origins_per_executed_job": {
+          "baseline": -1.0,
+          "candidate": 37.5
+        }
+      },
+      "latency": {
+        "acquisition_media_seconds": {
+          "baseline": 26.2144,
+          "candidate": 13.7728
+        },
+        "first_bit_media_seconds": {
+          "baseline": 26.2144,
+          "candidate": 13.7728
+        },
+        "first_complete_physical_symbol_seconds": {
+          "baseline": 12.931291215424114,
+          "candidate": 12.931291215424114
+        },
+        "physical_bit_progress_latency_media_seconds": {
+          "baseline": 13.2831,
+          "candidate": 0.8415
+        },
+        "physical_bit_progress_wall_lower_seconds": {
+          "baseline": 3.3449614960000003,
+          "candidate": 0.26713138599999997
+        },
+        "physical_bit_progress_wall_upper_seconds": {
+          "baseline": 3.344977857,
+          "candidate": 0.267148298
+        },
+        "early_bit_lead_samples": {
+          "baseline": 0.0,
+          "candidate": 0.0
+        },
+        "completion_observed_samples": {
+          "baseline": 1048576.0,
+          "candidate": 1046528.0
+        },
+        "completion_true_absence_lag_samples": {
+          "baseline": 19324.0,
+          "candidate": 17276.0
+        }
+      },
+      "fixture": "fixed",
+      "case": "d1000-60s",
+      "width": "0.001",
+      "pcm_sha256": "d9d53f1cb5f2458134d503220a36bbb034c7bbbb44ce7fa095b675c5e8ec2780",
+      "baseline_wall_seconds": 9.799950234,
+      "candidate_wall_seconds": 1.82113933,
+      "baseline_cpu_seconds": 9.796549,
+      "candidate_cpu_seconds": 1.821048,
+      "wall_speedup": 5.3812193677679785,
+      "cpu_speedup": 5.379621514644315,
+      "result_hashes": {
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-primary-d1000-w0p001-baseline-r2.result.json": "a93cf2e13a2a5c48254236d77a1b717bc3c1dce6f1b5db17b4b5e0a2a9f68715",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-primary-d1000-w0p001-candidate-r2.result.json": "9a5cf9f35f5533e5cd6ae6e7c40bccfb0c690641266d9aa978021a76c3ecd2c9"
+      }
+    },
+    {
+      "label": "final5 D1000 width0.001 repeat3",
+      "state": "complete_paired_fixed_bank",
+      "speedup_reported": true,
+      "burst_event_hash_same": false,
+      "event_hash_scope": "Chunk grouping may change with earlier progress; compare optional diagnostic flattened bit/identity traces rather than interpret this hash as content.",
+      "components": {
+        "input_transforms": {
+          "baseline": 3.0,
+          "candidate": 0.0
+        },
+        "template_jobs": {
+          "baseline": 105.0,
+          "candidate": 40.0
+        },
+        "threshold_trials": {
+          "baseline": 16520028.0,
+          "candidate": 16520014.0
+        },
+        "skipped_start_trials": {
+          "baseline": 2434880.0,
+          "candidate": 16518500.0
+        },
+        "retained_start_trials": {
+          "baseline": null,
+          "candidate": 1500.0
+        },
+        "scored_start_trials": {
+          "baseline": null,
+          "candidate": 1500.0
+        },
+        "direct_jobs": {
+          "baseline": null,
+          "candidate": 25.0
+        },
+        "fft_jobs": {
+          "baseline": null,
+          "candidate": 0.0
+        },
+        "skipped_template_jobs": {
+          "baseline": null,
+          "candidate": 100.0
+        },
+        "partitioned_jobs": {
+          "baseline": null,
+          "candidate": 15.0
+        },
+        "partitioned_input_transforms": {
+          "baseline": null,
+          "candidate": 10346.0
+        },
+        "partitioned_transform_points": {
+          "baseline": null,
+          "candidate": 8507232.0
+        },
+        "partitioned_fallbacks": {
+          "baseline": null,
+          "candidate": 0.0
+        },
+        "timing_components": {
+          "baseline": null,
+          "candidate": 5.0
+        },
+        "component_fallbacks": {
+          "baseline": null,
+          "candidate": 1.0
+        },
+        "early_batches": {
+          "baseline": null,
+          "candidate": 5.0
+        },
+        "eof_replays": {
+          "baseline": null,
+          "candidate": 0.0
+        },
+        "mean_scored_origins_per_executed_job": {
+          "baseline": -1.0,
+          "candidate": 37.5
+        }
+      },
+      "latency": {
+        "acquisition_media_seconds": {
+          "baseline": 26.2144,
+          "candidate": 13.7728
+        },
+        "first_bit_media_seconds": {
+          "baseline": 26.2144,
+          "candidate": 13.7728
+        },
+        "first_complete_physical_symbol_seconds": {
+          "baseline": 12.931291215424114,
+          "candidate": 12.931291215424114
+        },
+        "physical_bit_progress_latency_media_seconds": {
+          "baseline": 13.2831,
+          "candidate": 0.8415
+        },
+        "physical_bit_progress_wall_lower_seconds": {
+          "baseline": 3.902767299,
+          "candidate": 0.283202302
+        },
+        "physical_bit_progress_wall_upper_seconds": {
+          "baseline": 3.90278376,
+          "candidate": 0.283219675
+        },
+        "early_bit_lead_samples": {
+          "baseline": 0.0,
+          "candidate": 0.0
+        },
+        "completion_observed_samples": {
+          "baseline": 1048576.0,
+          "candidate": 1046528.0
+        },
+        "completion_true_absence_lag_samples": {
+          "baseline": 19324.0,
+          "candidate": 17276.0
+        }
+      },
+      "fixture": "fixed",
+      "case": "d1000-60s",
+      "width": "0.001",
+      "pcm_sha256": "d9d53f1cb5f2458134d503220a36bbb034c7bbbb44ce7fa095b675c5e8ec2780",
+      "baseline_wall_seconds": 10.642330823,
+      "candidate_wall_seconds": 1.890274168,
+      "baseline_cpu_seconds": 10.641574,
+      "candidate_cpu_seconds": 1.890082,
+      "wall_speedup": 5.63004616111328,
+      "cpu_speedup": 5.6302181598470336,
+      "result_hashes": {
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-primary-d1000-w0p001-baseline-r3.result.json": "3e04ff0c433b11b11841c3bc01eae9899e30f3549f2f23b4ae1d1d0ba99eae7c",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-primary-d1000-w0p001-candidate-r3.result.json": "f6782330d530e5a4bde2074bf12da37246f9e16525b94b991c46bb29bf9d3b78"
+      }
+    }
+  ],
+  "groups": [
+    {
+      "fixture": "fixed",
+      "case": "d1000-60s",
+      "width": "0.001",
+      "complete_pairs": 3,
+      "three_pair_requirement_met": true,
+      "wall_speedup": {
+        "median": 5.3966293040220625,
+        "range": [
+          5.3812193677679785,
+          5.63004616111328
+        ]
+      },
+      "cpu_speedup": {
+        "median": 5.394564640914186,
+        "range": [
+          5.379621514644315,
+          5.6302181598470336
+        ]
+      },
+      "baseline_wall_seconds": {
+        "median": 9.870692535,
+        "range": [
+          9.799950234,
+          10.642330823
+        ]
+      },
+      "candidate_wall_seconds": {
+        "median": 1.829047722,
+        "range": [
+          1.82113933,
+          1.890274168
+        ]
+      },
+      "baseline_cpu_seconds": {
+        "median": 9.866389,
+        "range": [
+          9.796549,
+          10.641574
+        ]
+      },
+      "candidate_cpu_seconds": {
+        "median": 1.82895,
+        "range": [
+          1.821048,
+          1.890082
+        ]
+      }
+    },
+    {
+      "fixture": "fixed",
+      "case": "d1000-60s",
+      "width": "6",
+      "complete_pairs": 3,
+      "three_pair_requirement_met": true,
+      "wall_speedup": {
+        "median": 2.171191171186058,
+        "range": [
+          1.6138795593074153,
+          2.221742483621755
+        ]
+      },
+      "cpu_speedup": {
+        "median": 2.1711791615238085,
+        "range": [
+          1.6651101506778754,
+          2.2206951054906203
+        ]
+      },
+      "baseline_wall_seconds": {
+        "median": 13.002276232,
+        "range": [
+          12.833708415,
+          13.014005479
+        ]
+      },
+      "candidate_wall_seconds": {
+        "median": 5.988545092,
+        "range": [
+          5.857567011,
+          7.952085607
+        ]
+      },
+      "baseline_cpu_seconds": {
+        "median": 13.001188,
+        "range": [
+          12.833287,
+          13.007273
+        ]
+      },
+      "candidate_cpu_seconds": {
+        "median": 5.988077,
+        "range": [
+          5.857298,
+          7.70717
+        ]
+      }
+    }
+  ],
+  "uncertainty": "Paired medians and observed ranges only. Three pairs do not provide precise distribution-free95% performance intervals. Independent warmups excluded by explicit manifest."
+}

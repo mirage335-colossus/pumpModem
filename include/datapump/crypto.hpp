@@ -12,7 +12,9 @@ namespace datapump {
 enum class StreamPurpose : std::uint8_t { Data, Dsss, Scrambler, Fhss };
 enum class StreamDomain : std::uint8_t {
     Payload, Preamble, Suppression, PatternZeroV2, PatternOneV2,
-    OuterDsss10V1, OuterDsss100V1, OuterDsss1000V1, FakeFhssV1
+    OuterDsss10V1, OuterDsss100V1, OuterDsss1000V1, FakeFhssV1,
+    OuterDsss10RotationV2, OuterDsss100RotationV2, OuterDsss1000RotationV2,
+    OuterDsss10PermutationV2, OuterDsss100PermutationV2, OuterDsss1000PermutationV2
 };
 
 // A 256-bit shared secret with independently derived stream and MAC keys.
@@ -31,6 +33,9 @@ public:
     // "suppress" for Suppression, "pat-v2-0" / "pat-v2-1" for the two
     // independent private pattern candidates. The low bytes
     // encode the block offset. Byte offsets cannot carry into the domain.
+    // Outer V2 rotations use "dr2-0010"/"dr2-0100"/"dr2-1000";
+    // symbol permutation seeds use "dp2-0010"/"dp2-0100"/"dp2-1000".
+    // These six domains require the separate DSSS purpose key.
     Bytes stream(StreamPurpose purpose, std::uint64_t timestamp,
                  std::uint64_t offset, std::size_t count,
                  StreamDomain domain = StreamDomain::Payload) const;

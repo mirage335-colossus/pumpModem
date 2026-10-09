@@ -338,6 +338,7 @@ struct CorrelationPatternParameters {
     std::uint32_t spreading_mode=0,scramble=0,dsss=0;
     std::array<std::uint8_t,32> spreading_seed{},dsss_seed{};
     unsigned dsss_factor=1;
+    OuterDsssVersion outer_dsss_version=OuterDsssVersion::legacy_v1;
 };
 struct CorrelationGeometry {
     std::uint64_t epoch=0,symbol_samples=0,chip_samples=0,chips_per_symbol=0,phase_step=1;

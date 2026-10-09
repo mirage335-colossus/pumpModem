@@ -58,8 +58,11 @@ double shannon_capacity_bps(double bandwidth_hz, double target_snr_db_hz);
 std::uint32_t recommended_sample_rate(double bandwidth_hz,
     std::optional<double> carrier_hz = std::nullopt);
 double recommended_carrier_hz(double bandwidth_hz);
+modem::OuterDsssVersion parse_outer_dsss_version(std::string_view name);
+std::string_view outer_dsss_version_id(modem::OuterDsssVersion version);
 Plan resolve(double bandwidth_hz, double target_snr_db_hz, PatternMode mode,
-             bool encryption, std::optional<double> carrier_hz = std::nullopt, unsigned dsss_factor = 1);
+             bool encryption, std::optional<double> carrier_hz = std::nullopt, unsigned dsss_factor = 1,
+             modem::OuterDsssVersion version = modem::OuterDsssVersion::legacy_v1);
 // Selected bandwidth and pattern mode stay fixed. Targets resolving to the
 // same waveform profile share one receiver hypothesis.
 std::vector<modem::Config> receive_profiles(double bandwidth_hz,

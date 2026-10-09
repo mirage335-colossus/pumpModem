@@ -436,6 +436,7 @@ void captured_epoch_survives_delay() {
 }
 void modeled_arrival_window(bool modeled=true,bool fallback=false) {
     auto value=settings({});value.transfer.automatic_receive_profiles=false;
+    value.transfer.key.emplace(Bytes(32,0x67)); // Synthetic key required by the encrypted profile.
     auto& config=value.transfer.modem;
     config.sample_rate=64;config.bandwidth_hz=2;config.carrier_hz=16;
     config.spreading_factor=64;config.integration_seconds=64;config.scramble=true;
@@ -1001,6 +1002,23 @@ void playback(std::uint32_t rate,const std::string& device,const PlaybackCallbac
 }
 }
 
+void outer_version_profile_identity() {
+    auto value=settings({});value.transfer.automatic_receive_profiles=false;
+    value.transfer.key.emplace(Bytes(32,0x67)); // Synthetic key required by the encrypted profile.
+    auto& config=value.transfer.modem;
+    config.bandwidth_hz=120;config.carrier_hz=1500;config.sample_rate=6000;
+    config.scramble=config.dsss=true;config.dsss_factor=10;
+    config.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;
+    value.long_message_modem=config;
+    live::validate_settings(value);
+    value.long_message_modem->outer_dsss_version=modem::OuterDsssVersion::legacy_v1;
+    bool rejected=false;
+    try {live::validate_settings(value);}catch(const Error&){rejected=true;}
+    check(rejected,"short and long hardware profiles must not silently mix outer wire versions");
+    config.dsss_factor=1;value.long_message_modem->dsss_factor=1;
+    live::validate_settings(value); // Version has no effect when outer DSSS is Off.
+}
+
 int main(int argc, char** argv) {
     std::string context;
     try {
@@ -1011,6 +1029,7 @@ int main(int argc, char** argv) {
         check(suite == "all" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds" || suite == "interval_queue" || suite == "monitor" || suite == "health" || suite == "capture_time" || suite == "arrival_time" || suite == "arrival_time_baseline" || suite == "backlog" || suite == "clear" || suite == "duplex" || suite == "arrival_fallback" || suite == "tx_failure",
               "unknown profile test suite");
         if(suite=="all" || suite=="duplex") {
+            context="outer DSSS profile identity";outer_version_profile_identity();
             context="single-session hardware duplex loopback";duplex_loopback();
             context="single-session keyed hardware duplex loopback";duplex_loopback(true);
         }

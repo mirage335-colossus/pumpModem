@@ -76,6 +76,9 @@ inline Model build(const modem::Config& base,double target_db_hz,tuning::Pattern
     const auto resolve=[&](double target) {
         return tuning::receive_profiles(base,std::array<double,1>{target},mode,encryption).front();
     };
+    const auto probe=[&](double target)->std::optional<modem::Config> {
+        try {return resolve(target);}catch(const Error&) {return std::nullopt;}
+    };
     // Every automatic floor has been reached by 200 dB-Hz. This also permits
     // a valid stronger transmit target without exceeding receive-list limits.
     // Forced profiles do not depend on target strength. Keep finite manual
@@ -86,7 +89,7 @@ inline Model build(const modem::Config& base,double target_db_hz,tuning::Pattern
     model.tooltip="Target C/N0 boundaries in dB-Hz, rounded to 0.01 dB. Read downward: each < row applies until the next boundary. "
         "The highlighted row is the current transmit profile. complex = complex I/Q chips per raw bit, including any partial final chip; "
         "duration and bit/s are raw symbol values before message overhead. Boundaries follow the selected rate, carrier, clock, pattern mode and keys. "
-        "Below the final boundary, integration grows continuously. These are tuning boundaries, not measured receive-confidence thresholds.";
+        "Below the final boundary, integration grows continuously only while the selected waveform geometry remains supported. These are tuning boundaries, not measured receive-confidence thresholds.";
     if(!detail::automatic(mode)) {
         auto row=detail::row(selected);row.active=true;row.label="fixed "+detail::quantities(row);
         model.rows.push_back(std::move(row));
@@ -105,8 +108,8 @@ inline Model build(const modem::Config& base,double target_db_hz,tuning::Pattern
         for(unsigned iteration=0;iteration<64;++iteration) {
             const auto midpoint=lower+(higher-lower)/2;
             if(midpoint==lower || midpoint==higher)break;
-            const auto candidate=resolve(midpoint);
-            if(candidate.integration_seconds==0 && candidate.spreading_factor==current.spreading_factor)higher=midpoint;
+            const auto candidate=probe(midpoint);
+            if(candidate && candidate->integration_seconds==0 && candidate->spreading_factor==current.spreading_factor)higher=midpoint;
             else lower=midpoint;
         }
         const auto boundary=higher;
@@ -115,7 +118,13 @@ inline Model build(const modem::Config& base,double target_db_hz,tuning::Pattern
         row.boundary_db_hz=preceding_boundary.value_or(boundary);
         row.label=(preceding_boundary?"<":">=")+detail::fixed(*row.boundary_db_hz,2)+"dB-Hz "+detail::quantities(row);
         model.rows.push_back(std::move(row));
-        auto next=resolve(lower);
+        auto following=probe(lower);
+        if(!following) {
+            Row unsupported;unsupported.boundary_db_hz=boundary;
+            unsupported.label="<"+detail::fixed(boundary,2)+"dB-Hz unsupported waveform geometry";
+            model.rows.push_back(std::move(unsupported));return model;
+        }
+        auto next=std::move(*following);
         if(next.integration_seconds>0) {
             Row extended;
             extended.extended=true;extended.boundary_db_hz=boundary;

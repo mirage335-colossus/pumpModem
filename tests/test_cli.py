@@ -55,11 +55,33 @@ class StreamCLI(unittest.TestCase):
                 self.assertNotIn('packet_bytes',value)
     def test_audio_timing_allowance(self):
         baseline=self.run_pump('estimate','--text','e',*AUDIO).stdout
-        for allowance in ('1us','30ms','1.25s'):
+        for allowance in ('0ms','1us','30ms','1.25s'):
             # Independent of default-clock waveform/framing/airtime estimates.
             self.assertEqual(self.run_pump('estimate','--text','e','--audio-error',allowance,*AUDIO).stdout,baseline)
-        for allowance in ('0ms','-1ms','NaNms','61s','30'):
+        for allowance in ('-1ms','NaNms','61s','30'):
             self.run_pump('estimate','--text','e','--audio-error',allowance,*AUDIO,ok=False)
+    def test_outer_dsss_version(self):
+        self.assertIn(b'--dsss-version',self.run_pump('--help').stdout)
+        for invalid in ('v2','2','legacy-v1','INTERLEAVED-V2'):
+            self.run_pump('estimate','--text','e','--dsss-version',invalid,*AUDIO,ok=False)
+        off=json.loads(self.run_pump('estimate','--text','e','--dsss-version','interleaved-v2',*AUDIO).stdout)
+        self.assertEqual(off['dsss_factor'],1)
+        self.assertEqual(off['dsss_version'],'legacy')
+        with tempfile.TemporaryDirectory() as directory:
+            key=pathlib.Path(directory)/'dsss-version.key'
+            self.run_pump('keygen','--output',key)
+            geometry=('--bw','360','--target-snr','70','--dsss-factor','10','--keyfile',key,'--time','1800000000')
+            default=json.loads(self.run_pump('estimate','--text','e',*geometry).stdout)
+            v2=json.loads(self.run_pump('estimate','--text','e','--dsss-version','interleaved-v2',*geometry).stdout)
+            legacy=json.loads(self.run_pump('estimate','--text','e','--dsss-version','legacy',*geometry).stdout)
+            self.assertEqual(default['dsss_version'],'interleaved-v2')
+            self.assertEqual(v2['dsss_version'],'interleaved-v2')
+            self.assertEqual(legacy['dsss_version'],'legacy')
+            for field in ('wire_bits','coded_bytes','coded_seconds','total_seconds','sample_rate',
+                          'spreading','symbol_seconds','carrier_hz','stream_carrier_hz','dsss_factor'):
+                self.assertEqual(v2[field],legacy[field],field)
+                self.assertEqual(default[field],v2[field],field)
+            self.assertEqual(v2['wire_bits'],3)
     def test_shannon_capacity_estimate(self):
         for bandwidth,target,expected in ((1000,30,1000), (2000,30,1169.9250014423124),
                                           (1000,60,9967.226258835993), (30000000,-200,1.4426950408889634e-20)):

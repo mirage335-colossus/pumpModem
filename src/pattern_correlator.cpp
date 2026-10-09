@@ -983,7 +983,7 @@ struct PatternCorrelator::Impl {
             publish(owner,true);clear(owner);
         }
     }
-    void complete(Hypothesis& h,std::size_t hypothesis,std::uint64_t end) {
+    void complete(Hypothesis& h,std::size_t hypothesis,std::uint64_t end,std::stop_token stop) {
         std::size_t group_count=0;
         const auto groups=phase_groups(h,group_count);
         PatternEvidence e;e.score=-1;std::size_t selected=0;
@@ -1010,6 +1010,9 @@ struct PatternCorrelator::Impl {
         }
         if(outer_presence) {
             code.set_stream_phase_samples(groups[selected].lower);
+            require(h.index<=std::numeric_limits<std::uint64_t>::max()/code.chips_per_symbol(),
+                "pattern chip coordinate overflow");
+            code.prepare_symbol(h.index*code.chips_per_symbol(),stop);
             auto& outer=(*outer_evidence)[hypothesis*(alternate_groups+1)+selected];
             outer.finish([&](std::uint64_t local){return code.values(h.index*code.chips_per_symbol()+local);});
             e.outer_presence_score=outer.score(e.bit);
@@ -1148,7 +1151,7 @@ struct PatternCorrelator::Impl {
         }
     }
     std::uint64_t accumulate(Hypothesis& h,std::size_t hypothesis,std::uint64_t cursor,
-                             std::uint64_t end,PatternCode& pattern) {
+                             std::uint64_t end,PatternCode& pattern,std::stop_token stop) {
         if(cursor<end && !affine_coefficients.empty() && h.affine_groups) {
             const auto base=hypothesis*(alternate_groups+1);
             bool covered=true;
@@ -1192,7 +1195,12 @@ struct PatternCorrelator::Impl {
         h.affine_groups=static_cast<std::uint8_t>(group_count);
         if(!h.fits[0].count)h.observed_start=cursor;
         for(std::size_t group=0;group<group_count;++group) {
-            if(affine_coefficients.empty())pattern.set_stream_phase_samples(groups[group].lower);
+            if(affine_coefficients.empty()) {
+                pattern.set_stream_phase_samples(groups[group].lower);
+                require(h.index<=std::numeric_limits<std::uint64_t>::max()/code.chips_per_symbol(),
+                    "pattern chip coordinate overflow");
+                pattern.prepare_symbol(h.index*code.chips_per_symbol(),stop);
+            }
             auto& fit=fits(h,hypothesis,group);
             auto* drift=!drift_fits.empty()?&section_fits(hypothesis,group):nullptr;
             auto* differential=differential_window?&local_fits(hypothesis,group):nullptr;
@@ -1265,7 +1273,10 @@ struct PatternCorrelator::Impl {
                                         offset+static_cast<long double>(chip-tail)/(2*h.rate),natural_limit,duration);
                                     piece.count=std::min(piece.count,final_piece.count);
                                 }
-                                if(cached)pattern.set_stream_phase_samples(groups[group].lower);
+                                if(cached) {
+                                    pattern.set_stream_phase_samples(groups[group].lower);
+                                    pattern.prepare_symbol(first_chip,stop);
+                                }
                                 for(std::size_t j=0;j<detail::correlation_pulse_atoms;++j) {
                                     if(j<8 && local<8-j)continue;
                                     if(j>8 && local>std::numeric_limits<std::uint64_t>::max()-(j-8))continue;
@@ -1479,6 +1490,7 @@ struct PatternCorrelator::Impl {
                 std::size_t group_count=0;const auto groups=phase_groups(h,group_count);
                 for(std::size_t group=0;group<group_count;++group) {
                     code.set_stream_phase_samples(groups[group].lower);
+                    code.prepare_symbol(h.index*chips,stop);
                     std::array<std::array<Complex,detail::correlation_pulse_atoms>,2> coefficients{};
                     for(std::size_t j=0;j<detail::correlation_pulse_atoms;++j) {
                         const auto position=local+static_cast<std::int64_t>(j)-8;
@@ -1509,7 +1521,7 @@ struct PatternCorrelator::Impl {
                         }
                     }
                 }
-                if(local+1==static_cast<std::int64_t>(chips))complete(h,hypothesis,cell.end);
+                if(local+1==static_cast<std::int64_t>(chips))complete(h,hypothesis,cell.end,stop);
             }
         }
     }
@@ -1582,7 +1594,7 @@ struct PatternCorrelator::Impl {
              config.sample_rate,search.frequency_offsets_hz.size(),config.carrier_hz,shaped,
              config.spreading_mode==SpreadingMode::tone,
              {static_cast<std::uint32_t>(config.spreading_mode),config.scramble,config.dsss,
-              config.spreading_seed,config.dsss_seed,config.dsss_factor},drift_fits.empty()?1:drift_sections,differential_window,!chip_evidence.empty(),outer_presence},
+              config.spreading_seed,config.dsss_seed,config.dsss_factor,config.outer_dsss_version},drift_fits.empty()?1:drift_sections,differential_window,!chip_evidence.empty(),outer_presence},
             {blocks.get(),block_count},{projections.get(),row_offset},{frequencies.get(),banks.size()},search.frequency_offsets_hz};
         // Numeric tiles contain no PatternBurst, heap-owned input, or references
         // to peer admission state. Device implementations can operate on these
@@ -1679,7 +1691,7 @@ struct PatternCorrelator::Impl {
             const auto cursor=initial_cursor(h,end);
             const auto symbol_end=clock_boundary(h,code.symbol_samples());
             if(cursor<end && static_cast<long double>(cursor)<symbol_end)
-                accumulate(h,hypothesis,cursor,end,worker_codes[worker]);
+                accumulate(h,hypothesis,cursor,end,worker_codes[worker],stop);
         });
         for(std::size_t hypothesis=0;hypothesis<hypotheses.size();++hypothesis) {
             auto& h=hypotheses[hypothesis];
@@ -1691,14 +1703,14 @@ struct PatternCorrelator::Impl {
                 const auto symbol_end=clock_boundary(h,code.symbol_samples());
                 if(static_cast<long double>(cursor)<symbol_end) {
                     cursor=static_cast<std::uint64_t>(std::min(static_cast<long double>(end),std::ceil(symbol_end)));
-                    if(static_cast<long double>(cursor)>=symbol_end)complete(h,hypothesis,cursor);
+                    if(static_cast<long double>(cursor)>=symbol_end)complete(h,hypothesis,cursor,stop);
                 }
             }
             while(cursor<end) {
                 const auto symbol_end=clock_boundary(h,code.symbol_samples());
-                if(static_cast<long double>(cursor)>=symbol_end) { complete(h,hypothesis,cursor);continue; }
-                cursor=accumulate(h,hypothesis,cursor,end,code);
-                if(static_cast<long double>(cursor)>=symbol_end)complete(h,hypothesis,cursor);
+                if(static_cast<long double>(cursor)>=symbol_end) { complete(h,hypothesis,cursor,stop);continue; }
+                cursor=accumulate(h,hypothesis,cursor,end,code,stop);
+                if(static_cast<long double>(cursor)>=symbol_end)complete(h,hypothesis,cursor,stop);
             }
         }
         settle_timing();

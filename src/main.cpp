@@ -95,6 +95,7 @@ Modem:
   --scramble            Cryptographic pattern rotation (requires keyfile)
   --dsss                Legacy independent private mapper layer
   --dsss-factor N       Outer private spreading: 1 (off), 10, 100, 1000; requires keyfile
+  --dsss-version NAME   interleaved-v2 (default for outer DSSS) or legacy (diagnostic); peers must match
   --clock-sync SPEC     default or GPS_1ms-400ms_region-2564ms_offset
   --audio-error TIME    Per-station residual audio timing allowance; default0ms
   --fec 20|60|off        Reed-Solomon parity overhead, default60
@@ -174,7 +175,7 @@ public:
     Args(int argc,char** argv) {
         const std::set<std::string> booleans={"json","repeatable","no-compression","no-mono","right-mono","scramble","dsss","progress","help","version"};
         const std::set<std::string> valued={"text","input","output","save","kind","filename","callsign","grid",
-            "bw","sample-rate","carrier","spreading","dsss-factor","clock-sync","audio-error","fec","memory-mb","keyfile","pad","time","search-seconds",
+            "bw","sample-rate","carrier","spreading","dsss-factor","dsss-version","clock-sync","audio-error","fec","memory-mb","keyfile","pad","time","search-seconds",
             "device","device-type","seconds","tx-delay","snr","seed","delay-samples","frequency-offset","bits","format",
             "target-snr","receive-targets","pattern","simulation","oscillator","rf-oscillator","shift","rf-shift","rf-carrier","search-margin","reference","sideband","lf-reference","key-name","key-names","cache-mb","dsp-mb","clock-error-ppm","phase-noise","receiver-time",
             "recovery-seconds","recovery-threads","recovery-bits","recovery-errors",
@@ -229,7 +230,7 @@ public:
         const auto reject=[this](std::initializer_list<const char*> names,const std::string& reason) {
             for(const auto name:names) if(has(name)) throw Error("--"+std::string(name)+" "+reason);
         };
-        if(command=="qr") reject({"keyfile","key-name","pad","scramble","dsss","repeatable","device"},"cannot be used with QR; QR contains plaintext input");
+        if(command=="qr") reject({"keyfile","key-name","pad","scramble","dsss","dsss-factor","dsss-version","repeatable","device"},"cannot be used with QR; QR contains plaintext input");
         if(command=="rx" || command=="status-rx") {
             reject({"output"},"is not a receive output; use --save PATH for decoded source bytes");
             reject({"text"},"is a transmit input; use --input for reception");
@@ -327,6 +328,8 @@ modem::Config config(const Args& a) {
     c.bandwidth_hz=a.number("bw",1200);
     c.dsss_factor=static_cast<unsigned>(a.integer("dsss-factor",1));
     if(c.dsss_factor!=1&&c.dsss_factor!=10&&c.dsss_factor!=100&&c.dsss_factor!=1000)throw Error("dsss-factor must be 1, 10, 100, or 1000");
+    const auto dsss_version=tuning::parse_outer_dsss_version(a.get("dsss-version",c.dsss_factor>1?"interleaved-v2":"legacy"));
+    c.outer_dsss_version=c.dsss_factor>1?dsss_version:modem::OuterDsssVersion::legacy_v1;
     const auto oscillator=oscillator_search_config(a);
     const auto carrier=a.number("carrier",a.number("rf-carrier",tuning::recommended_carrier_hz(modem::waveform_bandwidth_hz(c))));
     if(a.has("carrier")&&a.has("rf-carrier")&&carrier!=a.number("rf-carrier",0))
@@ -340,7 +343,7 @@ modem::Config config(const Args& a) {
         if(a.has("spreading") || a.has("scramble") || a.has("dsss") || a.has("sample-rate"))
             throw Error("automatic tuning cannot be combined with manual spreading/scramble/dsss/sample-rate");
         const auto plan=tuning::resolve(c.bandwidth_hz,a.number("target-snr",32),
-            tuning::parse_pattern_mode(a.get("pattern",a.has("keyfile")?"auto-keystream":"auto-pattern")),a.has("keyfile"),c.carrier_hz,c.dsss_factor);
+            tuning::parse_pattern_mode(a.get("pattern",a.has("keyfile")?"auto-keystream":"auto-pattern")),a.has("keyfile"),c.carrier_hz,c.dsss_factor,c.outer_dsss_version);
         c=plan.config;
         if(a.has("progress") || !plan.target_supported) std::cerr<<plan.explanation<<'\n';
     }
@@ -1034,6 +1037,7 @@ int main(int argc,char** argv) {
                 <<",\"shannon_capacity_bps\":";
             if(std::isfinite(capacity))std::cout<<capacity;else std::cout<<"null";
             std::cout<<",\"spreading\":"<<c.spreading_factor
+                <<",\"dsss_factor\":"<<c.dsss_factor<<",\"dsss_version\":\""<<tuning::outer_dsss_version_id(c.outer_dsss_version)<<'"'
                 <<",\"constellation_bits\":"<<c.constellation_bits
                 <<",\"sample_rate\":"<<c.sample_rate<<",\"carrier_hz\":"<<modem::oscillator_effects(c).physical_rf_hz
                 <<",\"stream_carrier_hz\":"<<c.carrier_hz<<",\"shift_hz\":"<<c.oscillator_search->rf_shift_hz
@@ -1042,7 +1046,7 @@ int main(int argc,char** argv) {
                 <<",\"batch_memory_supported\":"<<(result.batch_memory_supported?"true":"false");
             if(automatic_tuning(a)) {
                 const auto plan=tuning::resolve(c.bandwidth_hz,a.number("target-snr",32),
-                    tuning::parse_pattern_mode(a.get("pattern",a.has("keyfile")?"auto-keystream":"auto-pattern")),a.has("keyfile"),c.carrier_hz,c.dsss_factor);
+                    tuning::parse_pattern_mode(a.get("pattern",a.has("keyfile")?"auto-keystream":"auto-pattern")),a.has("keyfile"),c.carrier_hz,c.dsss_factor,c.outer_dsss_version);
                 std::cout<<",\"estimated_symbol_snr_db\":"<<plan.estimated_symbol_snr_db
                     <<",\"symbol_seconds\":"<<modem::symbol_seconds(c)
                     <<",\"target_supported\":"<<(plan.target_supported?"true":"false");

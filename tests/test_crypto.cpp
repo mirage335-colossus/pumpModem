@@ -226,6 +226,49 @@ void test_private_pattern_domains() {
     }
 }
 
+void test_interleaved_dsss_domains() {
+    Bytes master(32);for(std::size_t i=0;i<master.size();++i)master[i]=static_cast<std::uint8_t>(i);
+    const Crypto crypto(master);
+    constexpr std::array domains{StreamDomain::OuterDsss10RotationV2,StreamDomain::OuterDsss100RotationV2,
+        StreamDomain::OuterDsss1000RotationV2,StreamDomain::OuterDsss10PermutationV2,
+        StreamDomain::OuterDsss100PermutationV2,StreamDomain::OuterDsss1000PermutationV2};
+    // Independent Python hashlib/hmac HKDF and openssl enc AES-256-CTR,
+    // high counter pads dr2-0010/dr2-0100/dr2-1000 and dp2 equivalents.
+    constexpr std::array vectors{
+        "4437244a4f39abf92eb2b81c8dfcd8f5bf3622b6954608607a0e24af7005fb70",
+        "3b1ce5c87fb12d048a3a3dffa9063eafe15b4d7f6324b7302049a4f11cb26bd8",
+        "570bfab8c1f7fc01895eeef0bbe72c2d3bc4bce3703b2610157fb52eee98caea",
+        "84c92df398776c7a5f87ca375dbf5e357f794e934d881b5029487108081b84ad",
+        "2c2ee8aa19ea48777398b0c7292011b6f6374e76df1e289865bf9db6d539bc50",
+        "4c1040d12f59a1b94c0bc5aff21fc63cce0d0b2b5d00e149d88230406c848cd7"};
+    constexpr std::uint64_t epoch=1720000000;
+    for(std::size_t i=0;i<domains.size();++i) {
+        const auto domain=domains[i];
+        check(crypto.stream(StreamPurpose::Dsss,epoch,0,32,domain)==from_hex(vectors[i]),
+              "interleaved DSSS counter vector mismatch");
+        const auto all=crypto.stream(StreamPurpose::Dsss,epoch,0,1024,domain);
+        for(const auto other:domains)if(other!=domain)
+            check(all!=crypto.stream(StreamPurpose::Dsss,epoch,0,1024,other),"V2 DSSS domains alias");
+        for(const auto other:{StreamDomain::Payload,StreamDomain::Preamble,StreamDomain::Suppression,
+            StreamDomain::PatternZeroV2,StreamDomain::PatternOneV2,StreamDomain::OuterDsss10V1,
+            StreamDomain::OuterDsss100V1,StreamDomain::OuterDsss1000V1})
+            check(all!=crypto.stream(StreamPurpose::Dsss,epoch,0,1024,other),"V2 DSSS aliases existing stream");
+        for(const auto purpose:{StreamPurpose::Data,StreamPurpose::Scrambler,StreamPurpose::Fhss}) {
+            rejects([&]{crypto.stream(purpose,epoch,0,32,domain);},"V2 DSSS accepted another purpose key");
+            rejects([&]{crypto.stream(purpose,epoch,0,0,domain);},"empty V2 DSSS accepted another purpose key");
+        }
+        for(const auto offset:{1U,15U,16U,31U,255U,511U}) {
+            const auto part=crypto.stream(StreamPurpose::Dsss,epoch,offset,127,domain);
+            check(std::equal(part.begin(),part.end(),all.begin()+offset),"V2 DSSS random seek mismatch");
+        }
+        check(all!=crypto.stream(StreamPurpose::Dsss,epoch+1,0,1024,domain),"V2 DSSS epoch aliases");
+        constexpr auto final=std::numeric_limits<std::uint64_t>::max();
+        rejects([&]{crypto.stream(StreamPurpose::Dsss,epoch,final,2,domain);},"V2 DSSS byte offset wraps");
+        check(crypto.stream(StreamPurpose::Dsss,epoch,final-31,32,domain).back()==
+              crypto.stream(StreamPurpose::Dsss,epoch,final,1,domain).front(),"V2 DSSS final seek mismatch");
+    }
+}
+
 void test_keyfiles() {
     TempDir dir;
     const testing::KeyfilePolicy policy{4096, 8193};
@@ -312,6 +355,7 @@ int main() {
         test_preamble_domain();
         test_suppression_domain();
         test_private_pattern_domains();
+        test_interleaved_dsss_domains();
         test_authentication();
         test_keyfiles();
         test_production_keyfile();

@@ -223,6 +223,7 @@ Plan resolve_config(modem::Config config,double target_snr_db_hz,PatternMode mod
     base.scramble=!tone && encryption;
     if(tone) {
         base.dsss=false;base.dsss_factor=1;base.data_key.reset();
+        base.outer_dsss_version=modem::OuterDsssVersion::legacy_v1;
         base.spreading_seed.fill(0);base.dsss_seed.fill(0);
     }
     const double chip_seconds=2/base.bandwidth_hz;
@@ -265,10 +266,24 @@ Plan resolve_config(modem::Config config,double target_snr_db_hz,PatternMode mod
     return plan;
 }
 }
+modem::OuterDsssVersion parse_outer_dsss_version(std::string_view name) {
+    if(name=="legacy")return modem::OuterDsssVersion::legacy_v1;
+    if(name=="interleaved-v2")return modem::OuterDsssVersion::interleaved_v2;
+    throw Error("dsss-version must be legacy or interleaved-v2");
+}
+std::string_view outer_dsss_version_id(modem::OuterDsssVersion version) {
+    switch(version) {
+    case modem::OuterDsssVersion::legacy_v1:return "legacy";
+    case modem::OuterDsssVersion::interleaved_v2:return "interleaved-v2";
+    }
+    throw Error("invalid outer DSSS waveform version");
+}
 Plan resolve(double bandwidth_hz,double target_snr_db_hz,PatternMode mode,bool encryption,
-             std::optional<double> carrier_hz,unsigned dsss_factor) {
+             std::optional<double> carrier_hz,unsigned dsss_factor,modem::OuterDsssVersion version) {
     modem::Config config;
     config.dsss_factor=dsss_factor;
+    (void)outer_dsss_version_id(version);
+    config.outer_dsss_version=dsss_factor>1?version:modem::OuterDsssVersion::legacy_v1;
     config.bandwidth_hz=bandwidth_hz;
     config.carrier_hz=carrier_hz.value_or(recommended_carrier_hz(modem::waveform_bandwidth_hz(config)));
     // Real passband PCM must sample the actual carrier independently of the
@@ -297,7 +312,8 @@ std::vector<modem::Config> receive_profiles(const modem::Config& base,std::span<
                 prior.pattern_symbols==config.pattern_symbols && prior.spreading_factor==config.spreading_factor &&
                 modem::symbol_sample_count(prior)==modem::symbol_sample_count(config) && prior.spreading_mode==config.spreading_mode &&
                 prior.pulse_shaping==config.pulse_shaping &&
-                prior.scramble==config.scramble && prior.dsss==config.dsss && prior.dsss_factor==config.dsss_factor;
+                prior.scramble==config.scramble && prior.dsss==config.dsss && prior.dsss_factor==config.dsss_factor &&
+                prior.outer_dsss_version==config.outer_dsss_version;
         });
         if(!duplicate)profiles.push_back(std::move(config));
     }

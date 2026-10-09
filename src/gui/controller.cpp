@@ -318,6 +318,8 @@ struct Controller::Impl {
             f(UiField::audio_error).options.push_back({value,value});
         f(UiField::dsss_factor).options={{"1","Off"},{"10","10x"},{"100","100x"},{"1000","1000x"}};
         f(UiField::dsss_factor).selected="1";
+        f(UiField::dsss_version).options={{"interleaved-v2","Interleaved v2"},{"legacy","Legacy v1 (diagnostic)"}};
+        f(UiField::dsss_version).selected="interleaved-v2";
         f(UiField::fhss).options={{"off","Off"},{"fake-0.4s-200","Fake: 0.4s dwell, 200 channels"},
             {"genuine","Genuine (unavailable)",false},{"ic-7100","IC-7100 (unavailable)",false}};
         f(UiField::fhss).selected="off";
@@ -690,6 +692,8 @@ struct Controller::Impl {
             const auto requested_factor=load&&load->dsss_factor?*load->dsss_factor:
                 static_cast<unsigned>(number(f(UiField::dsss_factor).selected,"DSSS factor"));
             const auto factor=next_encrypted?requested_factor:1u;
+            const auto version=load&&load->dsss_version?*load->dsss_version:f(UiField::dsss_version).selected;
+            const auto dsss_version=tuning::parse_outer_dsss_version(version);
             const auto fhss=load&&load->fhss?*load->fhss:f(UiField::fhss).selected;
             next.transfer.clock_sync=load&&load->clock_sync?clock_sync::parse(*load->clock_sync):clock_policy();
             next.transfer.audio_timing_error_seconds=load&&load->audio_timing_error_seconds?
@@ -776,7 +780,10 @@ struct Controller::Impl {
                 input.receiver_work_mode=next.simulation?simulation::ReceiverWorkMode::sampled_simulation:
                     simulation::ReceiverWorkMode::hardware_fallback;
                 input.receiver_timing_model={};
-                input.options.modem=tuning::resolve(rate,-20,mode,next_encrypted,carrier,factor).config;
+                // Seed only the carrier/rate geometry with a bounded short
+                // profile. nearest_fit_target resolves every actual target;
+                // an artificial weak seed can exceed V2's symbol-map bound.
+                input.options.modem=tuning::resolve(rate,200,mode,next_encrypted,carrier,factor,dsss_version).config;
                 input.options.modem.oscillator_search=oscillator_policy;
                 const auto effects=modem::oscillator_effects(input.options.modem);
                 input.channel.clock_error_ppm=effects.clock_error_ppm;
@@ -811,8 +818,8 @@ struct Controller::Impl {
                 if(fitted!=target)adjustment=TargetEdit{f(*align_target).text,fitted};
                 target=fitted;
             }
-            auto plan=tuning::resolve(rate,short_snr,mode,next_encrypted,carrier,factor);
-            auto longer_plan=tuning::resolve(rate,long_snr,mode,next_encrypted,carrier,factor);
+            auto plan=tuning::resolve(rate,short_snr,mode,next_encrypted,carrier,factor,dsss_version);
+            auto longer_plan=tuning::resolve(rate,long_snr,mode,next_encrypted,carrier,factor,dsss_version);
             plan.config.oscillator_search=oscillator_policy;longer_plan.config.oscillator_search=oscillator_policy;
             const auto receive_text=!align_receive&&receive_target_edit&&receive_target_edit->requested==f(UiField::receive_snr).text?
                 receive_target_edit->canonical:f(UiField::receive_snr).text;
@@ -887,6 +894,7 @@ struct Controller::Impl {
                 clock_fields(next.transfer.clock_sync);
                 f(UiField::audio_error).text=clock_sync::duration_text(next.transfer.audio_timing_error_seconds);
                 f(UiField::dsss_factor).selected=std::to_string(requested_factor);
+                f(UiField::dsss_version).selected=version;
                 f(UiField::fhss).selected=fhss;
                 if(next_tone)f(UiField::key).selected="none";
                 encryption_changed();
@@ -1012,6 +1020,7 @@ struct Controller::Impl {
         values.clock_sync=clock_sync::format(settings.transfer.clock_sync);
         values.audio_timing_error_seconds=settings.transfer.audio_timing_error_seconds;
         values.dsss_factor=static_cast<unsigned>(number(f(UiField::dsss_factor).selected,"DSSS factor"));
+        values.dsss_version=f(UiField::dsss_version).selected;
         values.full_duplex=settings.full_duplex;
         values.fhss=f(UiField::fhss).selected;
         if(!key_path.empty())values.keyfile=path_text(std::filesystem::absolute(key_path).lexically_normal());
@@ -1310,9 +1319,10 @@ struct Controller::Impl {
         f(UiField::planner_target).enabled=!closing;
         f(UiField::planner_command).enabled=!closing;
         sync_launch_command();
-        for(auto id:{UiField::clock_accuracy,UiField::clock_region,UiField::clock_offset,UiField::audio_error,UiField::dsss_factor,UiField::fhss,UiField::simulation,UiField::simulation_oscillator,UiField::rf_oscillator,UiField::rf_shift,UiField::search_margin,
+        for(auto id:{UiField::clock_accuracy,UiField::clock_region,UiField::clock_offset,UiField::audio_error,UiField::dsss_factor,UiField::dsss_version,UiField::fhss,UiField::simulation,UiField::simulation_oscillator,UiField::rf_oscillator,UiField::rf_shift,UiField::search_margin,
             UiField::link_power,UiField::link_loss,UiField::link_noise,UiField::key,UiField::device,UiField::mono,UiField::live_duplex,UiField::volume,UiField::exclusive,UiField::bandwidth,UiField::carrier,UiField::snr,UiField::long_snr,UiField::receive_snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
         f(UiField::dsss_factor).enabled=!busy&&!tone();
+        f(UiField::dsss_version).enabled=!busy&&!tone();
         f(UiField::dsss_factor).display_text=!encrypted()&&f(UiField::dsss_factor).selected!="1"?f(UiField::dsss_factor).selected+"x (key needed)":"";
         bool shifted=false;
         try {shifted=frequency(f(UiField::rf_shift).text,"Shift")>0;}catch(const std::exception&) {}
@@ -1640,7 +1650,7 @@ struct Controller::Impl {
             else if(next.transmit_clock_following)diagnostics<<" | UTC transmit timing qualified";
             diagnostics<<" | Audio error +/-"<<1000*settings.transfer.audio_timing_error_seconds<<" ms per station (assumed)";
             if(next.clock_window_modeled)
-                diagnostics<<" | UTC compact paths use estimated arrival windows; other paths retain full search; not hardware calibrated";
+                diagnostics<<" | UTC arrival window modeled; see Link planner retained positions/backend; audio timing estimated, not hardware calibrated";
             else if(next.clock_timing_quality==audio::TimingQuality::estimated)
                 diagnostics<<" | UTC timestamps estimated ("<<std::fixed<<std::setprecision(1)
                     <<1000*next.clock_backend_uncertainty_seconds<<" ms allowance); full search: radio/audio latency uncalibrated";
@@ -2023,7 +2033,7 @@ void Controller::select(UiField field,std::string id) {
             if(field==UiField::pattern && p.tone())p.notice("Tone modes are unencrypted and do not provide Low-Probability-of-Intercept protection.");
         }
         else if(field==UiField::simulation||field==UiField::simulation_oscillator||field==UiField::rf_oscillator||
-            field==UiField::fec||field==UiField::dsp_workspace||field==UiField::fhss) p.configure();
+            field==UiField::fec||field==UiField::dsp_workspace||field==UiField::fhss||field==UiField::dsss_version) p.configure();
         else if(field==UiField::dsss_factor) {
             const auto factor=static_cast<unsigned>(number(state.selected,"DSSS factor"));
             if(factor>1)p.f(UiField::bandwidth).text=exact_frequency_text(3600./factor);

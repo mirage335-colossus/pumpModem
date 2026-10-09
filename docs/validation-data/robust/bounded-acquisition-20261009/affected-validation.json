@@ -1,0 +1,55 @@
+{
+  "state": "complete affected local checks; broader qualification deferred by manual checkpoint",
+  "candidate": "tight-candidate-final-5",
+  "gui": {
+    "passed": 38,
+    "total": 38,
+    "wall_seconds": 150.91,
+    "log": "tight-full-gui-rerun.log"
+  },
+  "cli": {
+    "passed": 1,
+    "wall_seconds": 32.62,
+    "log": "tight-cli-test.log"
+  },
+  "affected_core": {
+    "passed": [
+      "crypto",
+      "pattern_code",
+      "pattern_fft_batch",
+      "pattern_correlator_batch",
+      "pattern_receiver",
+      "streaming_modem",
+      "tuning",
+      "simulation_estimate",
+      "live_profiles"
+    ],
+    "logs": [
+      "tight-full-affected-core.log",
+      "tight-core-repair-results.json",
+      "tight-full-affected-core-rerun.log"
+    ],
+    "reused_matching_evidence": "Six unmodified cases from first complete affected run; complete simulation_estimate and complete PatternReceiver/LiveProfiles reruns after repairs. No original assertion removed."
+  },
+  "application_build": "tight-application-build.log",
+  "launch": "tight-manual-launch-help.log",
+  "focused": [
+    "tight-final-focused-results.json",
+    "tight-final-focused-4-rerun.log",
+    "tight-eof-ledger-test.log",
+    "tight-timing-advice-rerun.log"
+  ],
+  "failures_preserved": [
+    "Original GUI timing fixture expected numeric advice from now-default unqualifiedV2; explicitlylegacy fixture retains originalassertions.",
+    "New encryptedprofile fixture lacked key; added synthetic key.",
+    "Cachepressure320KiB no longer fit newfixedmetadata;328KiB retainsallcache/bitassertions.",
+    "Constructor FFT wascosted atslowerinputrate; corrected numericsetupbucket, completeexistingtestpass."
+  ],
+  "deferred": [
+    "full general/contract/calibration",
+    "sanitizer",
+    "native platform/SDK/packaging",
+    "hardware loopback/clock/spectrum qualification",
+    "full acquisition and cumulative raw-reference sensitivity"
+  ]
+}

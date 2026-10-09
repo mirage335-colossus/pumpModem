@@ -19,7 +19,7 @@ enum class Slot {
     link_power, link_loss, link_noise,
     simulation_confidence, simulation_cpu_time, simulation_gpu_time,
     simulation_oscillator, rf_oscillator, search_margin, key_actions,
-    key_path, key, clock_accuracy, clock_region, clock_offset, audio_error, dsss_factor, fhss, tabs, page, message_label, paste_previous, force_transmit, binary_label, message,
+    key_path, key, clock_accuracy, clock_region, clock_offset, audio_error, dsss_factor, dsss_version, fhss, tabs, page, message_label, paste_previous, force_transmit, binary_label, message,
     binary, qr_brightness, qr, attach_file, use_text, send_key, transmit, transmit_noise,
     cancel, airtime, transmit_scope_caption, transmit_scope_format, transmit_scope, profile_reference, signal_label, signals, copy_signal, paste_signal, recovery_actions, file_label, files,
     save_file, waterfall_label, waterfall, clear_waterfall, waveform_label,
@@ -45,7 +45,7 @@ inline constexpr bool persistent_slot(Slot slot) {
     case Slot::simulation_confidence: case Slot::simulation_cpu_time: case Slot::simulation_gpu_time:
     case Slot::simulation_oscillator: case Slot::rf_oscillator:
     case Slot::search_margin: case Slot::clock_accuracy: case Slot::clock_region: case Slot::clock_offset: case Slot::audio_error:
-    case Slot::dsss_factor: case Slot::fhss:
+    case Slot::dsss_factor: case Slot::dsss_version: case Slot::fhss:
     case Slot::key_actions: case Slot::key_path: case Slot::key:
     case Slot::device: case Slot::mono: case Slot::live_duplex: case Slot::volume: case Slot::exclusive: case Slot::bandwidth: case Slot::carrier: case Slot::rf_shift: case Slot::snr: case Slot::long_snr: case Slot::receive_snr: case Slot::pattern:
     case Slot::fec: case Slot::dsp_workspace: case Slot::diagnostics: case Slot::status: return true;
@@ -154,7 +154,8 @@ struct DesktopLayout {
         out[Slot::key_actions] = {366, 62, 92, field_height};
         out[Slot::key_path] = {366, 92, width - 382, 18};
         out[Slot::dsss_factor] = {466, 62, 90, field_height};
-        out[Slot::fhss] = {566, 62, width - 824, field_height};
+        out[Slot::dsss_version] = {566, 62, 165, field_height};
+        out[Slot::fhss] = {741, 62, width - 999, field_height};
         out[Slot::key] = {width - 248, 62, 232, field_height};
         // Link assumptions and RX success stay beside the compact Simulation
         // Yes/No choice in both modes. Simulation-only computation estimates

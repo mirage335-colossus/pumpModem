@@ -46,6 +46,10 @@ public:
     // each output keeps shaped_value's within-bit accumulation order.
     std::array<std::complex<double>,2> shaped_values(std::uint64_t first_chip,
                                                    double within_symbol);
+    // Optional cancellable V2 setup before scoring/generating a symbol. Two
+    // neighboring symbol maps are retained for finite-pulse overlap. Other
+    // versions need no setup; ordinary seek methods remain lazy and bounded.
+    void prepare_symbol(std::uint64_t first_chip, std::stop_token stop = {});
     // Reuse one bounded template for a different subsecond start hypothesis.
     // This changes only stream addressing and invalidates mapped chip caches.
     void set_stream_phase_samples(std::uint64_t phase_samples);

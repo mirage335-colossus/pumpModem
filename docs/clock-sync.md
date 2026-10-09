@@ -114,11 +114,24 @@ from canonical stream phase to input sample position. It preserves half-chip
 timing coverage, clipped endpoints, fractional starts, the original phase lattice,
 every supplied frequency/rate lane and complete-symbol retirement. A region
 narrower than one timing step retains all relevant neighboring coverage cells.
-Short private FFT banks with explicit paired clock/frequency hypotheses now skip
-only entire acquisition batches outside every initial-symbol/phase interval. Mixed
-batches retain the original scoring, and all skipped alternatives remain charged
-to the original threshold schedule. Accepted tracks continue on every pass.
-Long FFT, coupled and invalid numerical geometries retain the full scanner.
+Eligible short private FFT banks now select the original timing cells inside each
+canonical phase interval, including the full oscillator-rate envelope and the
+original fractional-cell/two-bin-refinement margin. Empty jobs are skipped before
+private template construction. Small retained sets use paired direct correlation;
+larger sets can use partitioned convolution with an automatically selected tile
+size. Both candidates retain I/Q, the existing noise conditioning, observation
+energy and independently accumulated template norms. No decimation or filtering
+is introduced by this path. Unsupported or uncertain geometry keeps the full
+scanner; no frequency, clock, epoch or private bit alternative is removed.
+
+Acquisition can close when its retained starts have complete symbol observations,
+instead of waiting for the original FFT hop. Disconnected timing components close
+separately only when the existing peak-exclusion radius proves that each can
+produce at most one peak and the total respects the original candidate capacity.
+Otherwise the complete admitted union is observed together. All original logical
+hop alternatives are charged before the first component is admitted. Ready tracks
+continue before the next unscored competing start. A shorter prior does not shorten
+a symbol, invent unobserved input, or change the six-second physical absence rule.
 This internal map is not a new persisted user setting.
 
 Custom hardware mode combines both stations' selected GPS errors and propagation
@@ -141,15 +154,17 @@ GUI simulation retains its full window because its random startup delay is not
 a calibrated provider timestamp. Its known unsteered waveform uses the original
 clock bank. Hardware estimates retain every peer correction-domain lane even if
 local playback falls back: another transmitter may still be steered. The planner
-reports timing-lattice work at a representative anchor for the long compact
-path, or an upper bound on retained acquisition batches for eligible short FFT
-banks, and separately reports the full-window fallback. FFT ingestion, established
-tracks and threshold alternatives are unchanged. Its batch model fills gaps
-between phase groups and stream indices and includes edge-overlapping batches;
-it does not assume all costs scale with the selected timing-window width. These are engineering estimates, not measured speedups
-or evidence of reduced reserved RAM. UTC/DSSS probability values are separately
-labeled conditional matched-template AWGN references; device steering failure and
-the outer-code presence guard are outside that model.
+reports timing-lattice work and separate setup, ingestion, admitted acquisition,
+continuation and rolling-epoch allowances. The GUI distinguishes fine/inner chip
+and symbol durations, search spacing, admitted arrival width, retained positions
+and frequency/clock/epoch counts. A full-symbol observation and canonical phase
+alternatives remain even with an extremely small clock allowance. Unsupported
+geometry and uncertain model enumeration retain explicit fallback estimates.
+These are engineering work estimates, not measured speedups or evidence of
+reduced reserved RAM. Supported legacy UTC/DSSS probability references are
+labeled conditional matched-template AWGN calculations; device steering failure
+and the outer-code presence guard are outside that model. Interleaved V2
+withholds numerical RX probability pending its separate sensitivity validation.
 
 ## Hardware evidence and limits
 

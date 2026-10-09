@@ -27,11 +27,14 @@ struct Fixture {
     std::vector<CorrelationProjection> projections;
     std::vector<double> frequencies,offsets{0,1.5};
 
-    explicit Fixture(bool shaped=false,bool tone=false,bool keyed=false,double bandwidth=1200) {
+    explicit Fixture(bool shaped=false,bool tone=false,bool keyed=false,double bandwidth=1200,
+                     OuterDsssVersion version=OuterDsssVersion::legacy_v1) {
         config.bandwidth_hz=bandwidth;
         config.pulse_shaping=shaped;
         config.spreading_mode=tone?SpreadingMode::tone:SpreadingMode::pattern;
         config.scramble=config.dsss=keyed;
+        config.outer_dsss_version=version;
+        if(version==OuterDsssVersion::interleaved_v2)config.dsss_factor=10;
         config.stream_epoch=8731;
         config.spreading_seed[2]=37;config.dsss_seed[3]=53;
         PatternCode pattern(config,config.stream_epoch);
@@ -43,7 +46,7 @@ struct Fixture {
                   pattern.chips_per_symbol(),1,config.sample_rate,offsets.size(),
                   config.carrier_hz,shaped,tone,
                   {static_cast<std::uint32_t>(config.spreading_mode),config.scramble,config.dsss,
-                   config.spreading_seed,config.dsss_seed}};
+                   config.spreading_seed,config.dsss_seed,config.dsss_factor,config.outer_dsss_version}};
         geometry.guard_chains=keyed && !tone;
         if(tone) {
             const auto deviation=config.sample_rate/(4.*static_cast<double>(geometry.chip_samples));
@@ -114,8 +117,9 @@ void same_lanes(std::span<const CorrelationLane> a,std::span<const CorrelationLa
     }
 }
 
-void exact_workers_and_tiles(bool shaped,bool tone,bool keyed,std::size_t count) {
-    Fixture fixture(shaped,tone,keyed);
+void exact_workers_and_tiles(bool shaped,bool tone,bool keyed,std::size_t count,
+                             OuterDsssVersion version=OuterDsssVersion::legacy_v1) {
+    Fixture fixture(shaped,tone,keyed,version==OuterDsssVersion::interleaved_v2?120:1200,version);
     const auto original=fixture.lanes(count);
     auto serial=original,parallel=original,tiled=original;
     auto one=fixture.workers(1),three=fixture.workers(3);
@@ -638,6 +642,7 @@ int main() {
         exact_workers_and_tiles(false,false,true,129);
         exact_workers_and_tiles(true,false,true,129);
         exact_workers_and_tiles(false,true,false,129);
+        exact_workers_and_tiles(true,false,true,33,OuterDsssVersion::interleaved_v2);
         phase_groups_and_observed_start();
         narrow_bank_with_future_origins();
         invalid_batches_and_cancellation();

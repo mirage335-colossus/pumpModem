@@ -120,6 +120,91 @@ struct PatternCode::Impl {
         bool valid=false;
     };
     std::array<InnerChip,2> inner_chips{};
+    struct Interleaved {
+        static constexpr std::size_t coarse_capacity=256;
+        // Include the explicit temporary seed/draw buffers in the workspace
+        // bound even though setup uses them only until a map is ready.
+        static constexpr std::size_t setup_bytes=sizeof(StreamCache)+32+StreamCache::capacity;
+        struct SymbolState {
+            std::vector<std::uint32_t> permutation;
+            std::array<std::array<InnerChip,coarse_capacity>,2> coarse{};
+            StreamCache rotations;
+            std::uint64_t epoch=0,ordinal=0;
+            bool valid=false;
+            SymbolState(std::size_t count,const Crypto& key,StreamDomain domain):
+                permutation(count),rotations(key,StreamPurpose::Dsss,0,domain) {}
+            ~SymbolState() {
+                OPENSSL_cleanse(permutation.data(),permutation.size()*sizeof(permutation[0]));
+                OPENSSL_cleanse(coarse.data(),sizeof(coarse));
+            }
+        };
+        // Shaped payload boundaries alternate old/new symbols every sample.
+        // Keeping only one map would repeatedly rebuild the whole permutation.
+        std::array<SymbolState,2> symbols;
+        unsigned recent=0;
+        StreamDomain permutation_domain;
+        Interleaved(std::size_t count,const Crypto& key,StreamDomain rotation,StreamDomain permutation):
+            symbols{SymbolState(count,key,rotation),SymbolState(count,key,rotation)},
+            permutation_domain(permutation) {}
+        std::size_t working_bytes() const {
+            return sizeof(Interleaved)+setup_bytes+(symbols[0].permutation.capacity()+symbols[1].permutation.capacity())*
+                sizeof(std::uint32_t);
+        }
+        void invalidate() {
+            for(auto& state:symbols)state.valid=false;
+        }
+        SymbolState& select(const SymbolStreamAddress& address,const Crypto& key,std::stop_token stop={}) {
+            cancelled(stop);
+            for(unsigned i=0;i<symbols.size();++i) {
+                auto& state=symbols[i];
+                if(state.valid && state.epoch==address.epoch && state.ordinal==address.ordinal) {
+                    recent=i;return state;
+                }
+            }
+            const auto index=!symbols[0].valid?0U:!symbols[1].valid?1U:1U-recent;
+            auto& state=symbols[index];state.valid=false;
+            for(auto& row:state.coarse)for(auto& entry:row)entry.valid=false;
+            // Variable rejection draws never consume a neighboring symbol's
+            // stream. Each canonical symbol first derives its own shuffle key
+            // from a fixed, disjoint 32-byte seed address in a separate domain.
+            require(address.ordinal<=(std::numeric_limits<std::uint64_t>::max()-31)/32,
+                    "DSSS permutation seed address would overflow");
+            auto seed=key.stream(StreamPurpose::Dsss,address.epoch,address.ordinal*32,32,permutation_domain);
+            struct CleanSeed {
+                Bytes& value;
+                ~CleanSeed() { OPENSSL_cleanse(value.data(),value.size()); }
+            } clean{seed};
+            StreamCache draws(seed,StreamPurpose::Dsss,0);
+            std::uint64_t offset=0;
+            // Unbiased rejection sampling has an explicit failure bound, not a
+            // modulo-biased fallback or an unbounded setup loop. At this N cap
+            // each draw's rejection probability is below 1/4096.
+            const auto maximum_draws=2*state.permutation.size()+1024;
+            const auto word=[&]() {
+                cancelled(stop);
+                require(offset/4<maximum_draws,"DSSS permutation rejection budget exhausted");
+                std::uint32_t result=0;
+                for(unsigned byte=0;byte<4;++byte)result=(result<<8)|draws.byte(offset++);
+                return result;
+            };
+            for(std::size_t i=0;i<state.permutation.size();++i) {
+                if((i&255U)==0)cancelled(stop);
+                state.permutation[i]=static_cast<std::uint32_t>(i);
+            }
+            for(auto i=state.permutation.size();i>1;--i) {
+                if((i&255U)==0)cancelled(stop);
+                const auto bound=static_cast<std::uint32_t>(i);
+                const auto threshold=(std::uint32_t{0}-bound)%bound;
+                auto selected=word();while(selected<threshold)selected=word();
+                std::swap(state.permutation[i-1],state.permutation[selected%bound]);
+            }
+            state.epoch=address.epoch;state.ordinal=address.ordinal;
+            state.rotations.select_epoch(address.epoch);
+            state.valid=true;recent=index;
+            return state;
+        }
+    };
+    std::unique_ptr<Interleaved> interleaved;
     struct CachedChip {
         std::uint64_t address=0;
         std::complex<double> value{};
@@ -146,11 +231,26 @@ struct PatternCode::Impl {
         chip = pattern_chip_samples(config);
         symbol = symbol_sample_count(config);
         chips = symbol / chip + (symbol % chip != 0);
-        require(sizeof(Impl)+sizeof(PatternCode)+(config.dsss_factor>1?sizeof(StreamCache):0)<=config.memory_limit,
-                "pattern code exceeds memory limit");
-        if(config.dsss_factor>1)outer=std::make_unique<StreamCache>(config.dsss_seed,StreamPurpose::Dsss,
-            start_epoch,config.dsss_factor==10?StreamDomain::OuterDsss10V1:
-            config.dsss_factor==100?StreamDomain::OuterDsss100V1:StreamDomain::OuterDsss1000V1);
+        const bool version2=config.dsss_factor>1 && config.outer_dsss_version==OuterDsssVersion::interleaved_v2;
+        const auto complete=static_cast<std::size_t>(symbol/chip);
+        const auto fixed=sizeof(Impl)+sizeof(PatternCode)+(config.dsss_factor>1?sizeof(StreamCache):0)+
+            (version2?sizeof(Interleaved)+Interleaved::setup_bytes+2*complete*sizeof(std::uint32_t):0);
+        require(fixed<=config.memory_limit,"pattern code exceeds memory limit");
+        if(config.dsss_factor>1) {
+            const auto domain=version2 ?
+                (config.dsss_factor==10?StreamDomain::OuterDsss10RotationV2:
+                 config.dsss_factor==100?StreamDomain::OuterDsss100RotationV2:StreamDomain::OuterDsss1000RotationV2) :
+                (config.dsss_factor==10?StreamDomain::OuterDsss10V1:
+                 config.dsss_factor==100?StreamDomain::OuterDsss100V1:StreamDomain::OuterDsss1000V1);
+            outer=std::make_unique<StreamCache>(config.dsss_seed,StreamPurpose::Dsss,start_epoch,domain);
+            if(version2) {
+                const auto permutation=config.dsss_factor==10?StreamDomain::OuterDsss10PermutationV2:
+                    config.dsss_factor==100?StreamDomain::OuterDsss100PermutationV2:StreamDomain::OuterDsss1000PermutationV2;
+                interleaved=std::make_unique<Interleaved>(complete,outer->key,domain,permutation);
+                require(sizeof(Impl)+sizeof(PatternCode)+sizeof(StreamCache)+interleaved->working_bytes()<=config.memory_limit,
+                        "pattern code exceeds memory limit");
+            }
+        }
         require(config.stream_phase_samples < config.sample_rate,
                 "pattern stream phase must be within its first second");
         shaped=pattern_pulse_enabled(config);
@@ -170,14 +270,25 @@ struct PatternCode::Impl {
                 "pattern chip fraction must be within [0,1)");
         auto position = absolute_chip % chips;
         std::complex<double> outer_value{1,0};
+        Interleaved::SymbolState* symbol_state=nullptr;
         if (config.scramble || config.dsss) {
             const auto address = symbol_stream_address(epoch, config.stream_phase_samples,
                 absolute_chip / chips, symbol, config.sample_rate);
             if(outer) {
-                outer->select_epoch(address.epoch);
+                auto* rotations=outer.get();
+                if(interleaved) {
+                    symbol_state=&interleaved->select(address,outer->key);
+                    rotations=&symbol_state->rotations;
+                }
+                rotations->select_epoch(address.epoch);
                 const auto fine_position=symbol_stream_chip(address,chips,position);
                 constexpr std::array<std::complex<double>,4> phases{{{1,0},{0,1},{-1,0},{0,-1}}};
-                outer_value=phases[(outer->byte(fine_position/4)>>(2*(fine_position%4)))&3U];
+                outer_value=phases[(rotations->byte(fine_position/4)>>(2*(fine_position%4)))&3U];
+                // The final partial chip has a different energy weight and
+                // stays fixed; every complete fine-chip coefficient is merely
+                // reordered before its independent unit-magnitude rotation.
+                if(symbol_state && position<symbol_state->permutation.size())
+                    position=symbol_state->permutation[static_cast<std::size_t>(position)];
                 const auto coarse_chips=chips/config.dsss_factor+(chips%config.dsss_factor!=0);
                 position=symbol_stream_chip(address,coarse_chips,position/config.dsss_factor);
             } else position = symbol_stream_chip(address, chips, position);
@@ -202,7 +313,7 @@ struct PatternCode::Impl {
             }
             auto& row = private_patterns && bit ? pattern_one : pattern;
             auto* layer = config.dsss ? (private_patterns && bit ? &dsss_one : &dsss) : nullptr;
-            auto& inner=inner_chips[bit];
+            auto& inner=symbol_state ? symbol_state->coarse[bit][position%Interleaved::coarse_capacity] : inner_chips[bit];
             // Valid only for this candidate's exact epoch and canonical coarse
             // chip address. Outer chips share the coefficient, never a pattern
             // across bit positions, keys, epochs or the zero/one alternatives.
@@ -280,6 +391,15 @@ std::complex<double> PatternCode::shaped_value(std::uint64_t first_chip,unsigned
 std::array<std::complex<double>,2> PatternCode::shaped_values(std::uint64_t first_chip,double within) {
     return impl_->shaped_values(first_chip,within);
 }
+void PatternCode::prepare_symbol(std::uint64_t first_chip,std::stop_token stop) {
+    cancelled(stop);
+    require(first_chip%impl_->chips==0,"pattern setup requires a symbol-aligned chip address");
+    if(impl_->interleaved) {
+        const auto address=symbol_stream_address(impl_->epoch,impl_->config.stream_phase_samples,
+            first_chip/impl_->chips,impl_->symbol,impl_->config.sample_rate);
+        (void)impl_->interleaved->select(address,impl_->outer->key,stop);
+    }
+}
 void PatternCode::set_stream_phase_samples(std::uint64_t phase_samples) {
     require(phase_samples < impl_->config.sample_rate,
             "pattern stream phase must be within its first second");
@@ -287,15 +407,25 @@ void PatternCode::set_stream_phase_samples(std::uint64_t phase_samples) {
     impl_->config.stream_phase_samples = phase_samples;
     for (auto& entry : impl_->shaped_chips) entry.valid = false;
     for (auto& entry : impl_->shaped_chips_one) entry.valid = false;
+    // The two V2 pattern states are already addressed by canonical epoch and
+    // ordinal, with immutable key/version/factor/geometry. A phase change may
+    // select one of those same symbols again; do not rebuild its permutation.
+    // Absolute-chip shaped caches above still require invalidation. Retain the
+    // conservative behavior for non-pattern modulation.
+    if(impl_->interleaved && impl_->config.spreading_mode!=SpreadingMode::pattern)
+        impl_->interleaved->invalidate();
 }
 std::uint64_t PatternCode::chip_samples() const { return impl_->chip; }
 std::uint64_t PatternCode::chips_per_symbol() const { return impl_->chips; }
 std::uint64_t PatternCode::symbol_samples() const { return impl_->symbol; }
 std::size_t PatternCode::working_bytes() const {
     return sizeof(PatternCode) + sizeof(Impl)+(impl_->trace?sizeof(Impl::TraceStorage):0)+
-        (impl_->outer?sizeof(StreamCache):0);
+        (impl_->outer?sizeof(StreamCache):0)+(impl_->interleaved?impl_->interleaved->working_bytes():0);
 }
 void PatternCode::enable_transmit_trace(std::uint64_t first_chip) {
+    require(impl_->trace || (working_bytes()<=impl_->config.memory_limit &&
+            sizeof(Impl::TraceStorage)<=impl_->config.memory_limit-working_bytes()),
+            "pattern trace exceeds memory limit");
     impl_->trace=std::make_unique<Impl::TraceStorage>();impl_->trace->first_chip=first_chip;
 }
 void PatternCode::capture_transmit_trace(bool enabled) {
@@ -434,7 +564,7 @@ struct PatternTransmitter::Impl {
             static_cast<double>(edge)/static_cast<double>(ramp)),2);
         return value*window;
     }
-    std::complex<double> shaped_sample(std::uint64_t cursor) {
+    std::complex<double> shaped_sample(std::uint64_t cursor,std::stop_token stop) {
         const auto relative=static_cast<long double>(cursor)-padding;
         std::complex<double> result{};
         if(training) {
@@ -452,9 +582,12 @@ struct PatternTransmitter::Impl {
         const auto duration=static_cast<long double>(code.symbol_samples());
         const auto begin=std::max(0.L,std::floor((payload-support)/duration));
         const auto end=std::min(static_cast<long double>(bit_count),std::floor((payload+support)/duration)+1);
-        for(auto symbol=static_cast<std::uint64_t>(begin);symbol<static_cast<std::uint64_t>(std::max(begin,end));++symbol)
+        for(auto symbol=static_cast<std::uint64_t>(begin);symbol<static_cast<std::uint64_t>(std::max(begin,end));++symbol) {
+            if(config.dsss_factor>1 && config.outer_dsss_version==OuterDsssVersion::interleaved_v2)
+                code.prepare_symbol(start+symbol*code.chips_per_symbol(),stop);
             result+=code.shaped_value(start+symbol*code.chips_per_symbol(),bit(symbol),
                 static_cast<double>(payload-symbol*duration));
+        }
         return result;
     }
     template<class Output, class Convert>
@@ -470,11 +603,11 @@ struct PatternTransmitter::Impl {
         const auto angle = detail::pattern_carrier_cycles(cursor,config.sample_rate,config.carrier_hz)*tau;
         auto oscillator = std::polar(1., static_cast<double>(angle));
         const auto step = std::polar(1., tau * config.carrier_hz / config.sample_rate);
-        const auto amplitude = std::sqrt(2 * nominal_signal_power);
+        const auto amplitude = std::sqrt(2 * nominal_signal_power)*outer_dsss_transmit_gain(config);
         if(padding) {
             for(std::size_t i=0;i<count;++i,++cursor) {
                 if((i&4095U)==0)cancelled(stop);
-                const auto baseband=cursor<content_end?shaped_sample(cursor):suppression_sample(cursor-content_end);
+                const auto baseband=cursor<content_end?shaped_sample(cursor,stop):suppression_sample(cursor-content_end);
                 output[i]=convert(oscillator*pattern_limit_pcm(amplitude*baseband));
                 if(observer && cursor>=padding+training && cursor<content_end-padding) {
                     const auto payload=cursor-padding-training;
@@ -513,6 +646,8 @@ struct PatternTransmitter::Impl {
             const auto symbol = payload / code.symbol_samples();
             const auto within = payload % code.symbol_samples();
             const auto chip = start + symbol * code.chips_per_symbol() + within / code.chip_samples();
+            if(config.dsss_factor>1 && config.outer_dsss_version==OuterDsssVersion::interleaved_v2)
+                code.prepare_symbol(start+symbol*code.chips_per_symbol(),stop);
             const auto fraction = static_cast<double>(within % code.chip_samples()) / static_cast<double>(code.chip_samples());
             const auto symbol_bit = bit(symbol);
             auto pattern = code.value(chip, symbol_bit, fraction);

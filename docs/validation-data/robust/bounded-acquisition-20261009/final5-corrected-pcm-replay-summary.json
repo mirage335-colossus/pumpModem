@@ -1,0 +1,31 @@
+{
+  "files": {
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-pcm-checked-nominal-b0-r0.replay.csv": "a1e0d63bd2f4eedb82f94346171150a2fa1bac78a28a5dd8a299c454f72131d8",
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-pcm-checked-nominal-b0-r1.replay.csv": "fe4595f7f5caf99b5883e669562349e2d781450e4c9b8f0b4b1b288dc6104d76",
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-pcm-checked-nominal-b0-r2.replay.csv": "a0160067d2d2e2f593a9a0a9c51ad30e2e87f7c5b881c57d3cf7f3382249c0eb",
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-pcm-checked-nominal-b0-r3.replay.csv": "6f1ffa3ef4cdaf33e22b4e2e527bd7f614d97f0ac301c4c8c08977e01ddef188",
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-pcm-checked-nominal-b1-r0.replay.csv": "93a13f9e5f1ac4282446eb0806b79eef4cd72f4fca53369d354d5157dc10ede5",
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-pcm-checked-nominal-b1-r1.replay.csv": "19d3345531dc6d0299456ef9dc8c510529e57e59177757f0919accb2494cf2e7",
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-pcm-checked-nominal-b1-r2.replay.csv": "8d79180046d0b5c6161e30a7ccc78449bdab6303f75880d436273e7972ccc5b2",
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-pcm-checked-nominal-b1-r3.replay.csv": "75631d98d3b072d3f86085b198057d725a1668d2635c0ba289bc61562c7de94e",
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-pcm-checked2-tail-positive-b0-r0.replay.csv": "eab2c1b0d060a88ccea6809562cbb3ce22a3964daa83bcb2ca3f5b154a5a2e16",
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-pcm-checked2-tail-positive-b0-r1.replay.csv": "30ac3c5e0afdb664f145fb4e6a77a24e531ec1e6546e5702ee027de35ddaf1f3",
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-pcm-checked2-tail-positive-b0-r2.replay.csv": "33eaca72c2fa5382740353dda09be9ee90c11b127ab9580ec7614f47a9203e39",
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-pcm-checked2-tail-positive-b0-r3.replay.csv": "83a1e7ed0680f9215207b063bd26221c38ad2e0e0bea7efe62389a24d8015d3f",
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-pcm-checked2-tail-negative-b1-r0.replay.csv": "de05923bae3f0d597036c42f8fc6493864757ab7183a5ee28a5e37d9477d2086",
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-pcm-checked2-tail-negative-b1-r1.replay.csv": "06c3464688a641202e66d1c5d89e1c854a8cdb96d4cf9f4f707741be075ac662",
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-pcm-checked2-tail-negative-b1-r2.replay.csv": "371dc8e97dbc9f3fba8e42669936c30424b8ca74bfa0af64e25e2d11f6433eec",
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-pcm-checked2-tail-negative-b1-r3.replay.csv": "219ecbcc5a8e99ebdb39ba04027e1689ed06b9ad069e256ba499489332df8015"
+  },
+  "rows": 32,
+  "expected_score_positive": true,
+  "max_score_absolute_error": 3.5933156539158517e-07,
+  "max_alternative_absolute_error": 7.584381478409341e-08,
+  "max_threshold_error": 0.0,
+  "maximum_float_cast_error": 2.3800824511255314e-07,
+  "max_residual_relative_leakage": 4.755317853656427e-18,
+  "max_white_energy_relative_error": 9.348969108326128e-18,
+  "automatic_decision_matches": true,
+  "all_selected_first_and_end_match": true,
+  "scope": "32 actual finite floatPCM version rows; one matched key/epoch/rate/frequency/phase, guard off, selected q90/q99 draws; initial winner statistics, automatic first-component decision; restrictedFFT later continuation decision not inferred. Negative diagnostic-score earlier replay files superseded; probability Monte Carlo unchanged."
+}

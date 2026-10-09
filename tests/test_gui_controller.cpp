@@ -121,6 +121,12 @@ void airtime_and_close() {
     Controller same({false,true,patch});same.edit(F::message,"quick brown");
     wait_until(same,[&]{return same.settings().transfer.key&&same.estimate()&&
         !same.field(F::simulation_cpu_time).text.ends_with("Calculating...");},std::chrono::seconds(10),"same-command key load or estimate stalled");
+    if(!same.enabled(C::transmit)) {
+        std::cerr<<"TX readiness: memory="<<same.estimate()->memory_supported<<" airtime="
+            <<same.field(F::airtime).text<<" status="<<same.field(F::status).text<<'\n';
+        try { (void)transfer::binary_transmitter(Bytes{0},same.settings().transfer); }
+        catch(const Error& e) {std::cerr<<"TX constructor: "<<e.what()<<'\n';}
+    }
     check(same.enabled(C::transmit),"same-command key loading left transmission unavailable");
     same.activate(C::planner_toggle_draft);prepare_plan(same);
     check(same.link_plan()->available,"same-command current-draft planner rejected valid settings");
@@ -1089,6 +1095,23 @@ void dsss_voice_carrier_controls() {
     } fixture;
     create_keyring(fixture.path,{"DSSS voice passband","none"});
     Controller controller({true,true});
+    check(controller.field(F::dsss_version).selected=="interleaved-v2"&&
+        controller.settings().transfer.modem.outer_dsss_version==modem::OuterDsssVersion::legacy_v1,
+        "new app must remember v2 without changing the DSSS Off waveform");
+    const auto& declarations=ui::console_screen();
+    const auto version_control=std::find_if(declarations.begin(),declarations.end(),[](const auto& c){return c.field==F::dsss_version;});
+    check(version_control!=declarations.end()&&version_control->kind==ui::Kind::choice&&version_control->persistent&&
+        !version_control->developer_only&&std::string_view(version_control->help).find("Both peers")!=std::string_view::npos,
+        "DSSS waveform version must be a visible ordinary control with peer compatibility help");
+    for(const auto width:{ui::min_width,ui::default_width,1660}) {
+        const ui::DesktopLayout layout(width);
+        const auto factor=layout[ui::Slot::dsss_factor],version=layout[ui::Slot::dsss_version],hopping=layout[ui::Slot::fhss];
+        check(factor.x+factor.w<version.x&&version.x+version.w<hopping.x&&version.y==factor.y&&version.w>=150&&hopping.w>=130,
+            "DSSS waveform version overlaps its neighboring setup controls");
+    }
+    // Preserve the preceding probability/work-model fixture as explicit legacy
+    // evidence; v2 probability qualification is intentionally unavailable.
+    controller.select(F::dsss_version,"legacy");
     controller.edit(F::message,"e");
     controller.activate(C::open_keyfile);
     auto requests=controller.take_services();
@@ -1235,6 +1258,38 @@ void dsss_voice_carrier_controls() {
         controller.field(F::simulation_confidence).text.find('%')!=std::string::npos&&
         controller.field(F::inspection).text.find("RX model:")!=std::string::npos,
         "DSSS mode must identify its conditional reference and validation limit");
+    // The illustrated high RF crystal bank is outside this audio passband.
+    // Keep its assertions above; use supported geometry for version import.
+    controller.select(F::fhss,"off");prepare(controller);prepare_plan(controller);
+    const auto legacy_config=controller.settings().transfer.modem;
+    const auto legacy_plan=controller.link_plan();
+    controller.select(F::dsss_version,"interleaved-v2");prepare(controller);prepare_plan(controller);
+    const auto& v2_config=controller.settings().transfer.modem;
+    check(v2_config.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2&&
+        v2_config.dsss_factor==legacy_config.dsss_factor&&v2_config.bandwidth_hz==legacy_config.bandwidth_hz&&
+        v2_config.carrier_hz==legacy_config.carrier_hz&&v2_config.sample_rate==legacy_config.sample_rate&&
+        transfer::seeded_config(controller.settings().transfer,1).outer_dsss_version==modem::OuterDsssVersion::interleaved_v2,
+        "version-only toggle changed geometry or failed to reach the actual seeded transmitter");
+    check(controller.link_plan()!=legacy_plan&&
+        controller.link_plan()->inputs.options.modem.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2&&
+        legacy_plan->inputs.options.modem.outer_dsss_version==modem::OuterDsssVersion::legacy_v1&&
+        !controller.link_plan()->confidence_available&&!controller.link_plan()->reference_probability_available,
+        "v2 toggle reused a legacy plan or its unqualified probability");
+    const auto saved_v2=launch_command::parse(controller.field(F::planner_command).text);
+    check(saved_v2.dsss_version=="interleaved-v2","active v2 waveform version was omitted from export");
+    Controller v2_copy({true,true,saved_v2});wait_keys(v2_copy);
+    check(v2_copy.settings().transfer.key&&v2_copy.field(F::dsss_version).selected=="interleaved-v2"&&
+        v2_copy.settings().transfer.modem.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2&&
+        v2_copy.settings().transfer.modem.bandwidth_hz==legacy_config.bandwidth_hz&&
+        v2_copy.settings().transfer.modem.carrier_hz==legacy_config.carrier_hz,
+        "saved v2 key/configuration did not restore the exact active waveform at startup");
+    v2_copy.close();
+    launch_command::Patch legacy_version;legacy_version.dsss_version="legacy";import(controller,legacy_version);prepare(controller);
+    check(controller.settings().transfer.modem.outer_dsss_version==modem::OuterDsssVersion::legacy_v1&&
+        controller.settings().transfer.modem.dsss_factor==legacy_config.dsss_factor&&
+        controller.settings().transfer.modem.bandwidth_hz==legacy_config.bandwidth_hz&&
+        controller.settings().transfer.modem.carrier_hz==legacy_config.carrier_hz,
+        "explicit legacy version-only import changed factor or physical geometry");
     controller.edit(F::bandwidth,"1.2 kHz");
     controller.edit(F::carrier,"11.5 kHz");
     check(!controller.enabled(C::transmit)&&controller.field(F::airtime).text.find("Bandwidth 12 kHz")!=std::string::npos&&

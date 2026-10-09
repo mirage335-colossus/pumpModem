@@ -4,11 +4,13 @@
 #include "pattern_differential.hpp"
 #include <array>
 #include <limits>
+#include <optional>
 #include <type_traits>
 
 namespace datapump::modem::detail {
 
 using FftComplex = std::complex<double>;
+struct FftStartRange { std::size_t first=0,count=0; };
 
 // Logical work has no CPU worker identity, owning object or function pointer.
 // A backend may split/reorder these records arbitrarily; output remains indexed
@@ -19,6 +21,9 @@ struct FftSearchJob {
     double frequency_hz = 0; // Offset from the nominal carrier in the geometry.
     std::uint64_t prepared_template = std::numeric_limits<std::uint64_t>::max();
     double clock_ratio = 1;
+    // Original batch start offsets. The default preserves the complete job;
+    // zero ranges skips it. Ranges are sorted, disjoint and never renumbered.
+    std::size_t range_begin=0,range_count=std::numeric_limits<std::size_t>::max();
 };
 struct FftSearchScore { double zero = 0, one = 0; };
 
@@ -31,6 +36,7 @@ struct FftPatternParameters {
     std::uint32_t shaped = 0, scramble = 0, dsss = 0;
     std::array<std::uint8_t,32> spreading_seed{}, dsss_seed{};
     unsigned dsss_factor=1;
+    std::uint32_t outer_dsss_version=static_cast<std::uint32_t>(OuterDsssVersion::legacy_v1);
 };
 struct FftSearchGeometry {
     FftPatternParameters pattern;
@@ -64,8 +70,17 @@ struct FftSearchBatch {
     // Optional public nominal-clock samples before carrier rotation. Coupled
     // clock alternatives still generate their own time-scaled waveform.
     std::span<const std::array<FftComplex,2>> nominal_reference;
+    std::span<const FftStartRange> start_ranges;
     std::size_t starts = 0, score_stride = 0;
 };
+// Paired D10/100/1000 CPU measurements favor <=32 starts; 64 is marginal
+// and 128 loses. Keep the conservative measured crossover. Direct scoring generates
+// each bit's template once, then contracts only its selected original starts.
+inline bool pattern_fft_direct_eligible(const FftSearchGeometry& g,bool generated,
+        std::size_t selected_starts,bool observations_available) {
+    return generated && observations_available && !g.sample_fit && g.drift_sections<=1 &&
+        !g.differential_window_samples && selected_starts>0 && selected_starts<=32;
+}
 struct FftDriftAccumulator {
     FftComplex dot{};
     double explained = 0, strongest = 0;
@@ -120,3 +135,65 @@ FftComplex pattern_differential_whiten(FftComplex dot,double template_energy,
                                       FftComplex template_square,double projection_image_ratio);
 
 } // namespace datapump::modem::detail
+
+// Bounded paired-template correlation in borrowed FFT scratch.
+namespace datapump::modem::detail::partitioned_paired {
+struct Requirements {
+    std::size_t tile_size=0,transform=0,length=0,chunks=0;
+    std::size_t first_input_tile=0,input_tiles=0,max_job_output_tiles=0;
+    std::size_t complex_count=0;
+};
+struct Work {
+    std::uint64_t input_transforms=0,template_transforms=0,inverse_transforms=0;
+    std::uint64_t complex_products=0,template_values=0,selected_starts=0;
+};
+// No allocation or mutation. Returns empty for unsupported geometry or arena
+// bound, throws for invalid selected ranges/incomplete observations. All jobs
+// must use generated coherent non-sample-fit templates. Bounds are numeric
+// scratch only; PatternCode, output row and fixed Context control are caller-owned.
+std::optional<Requirements> preflight(const FftSearchBatch&,std::span<const FftSearchJob>,
+                                      std::size_t tile_size,std::size_t available_complex);
+// Shared runtime/planner numeric-work crossover. The private template cost is
+// omitted from both sides, conservatively ignoring paired construction savings.
+// Returns empty when the full FFT has lower estimated total numeric work.
+long double operations(const Requirements&,std::size_t jobs);
+std::optional<Requirements> choose(const FftSearchBatch&,const FftSearchJob&,
+    std::size_t jobs,std::size_t original_transform,std::size_t available_complex);
+// Size-only equivalent after runtime eligibility/observation validation; no dummy
+// sample storage is required by the planner. Ranges are relative to segment origin.
+std::optional<Requirements> choose_geometry(std::size_t length,std::size_t starts,
+    std::span<const FftStartRange>,std::size_t jobs,std::size_t original_transform,
+    std::size_t available_complex);
+struct Context {
+    const FftSearchBatch* batch=nullptr;
+    Requirements geometry;
+    std::span<FftComplex> first,second;
+};
+// Cache input tiles once for the complete preflight job set. Borrowed arena and
+// immutable batch/views must outlive Context. Both spans must have P-multiple
+// lengths, be disjoint, and not alias observations/energy/nominal/ranges.
+// Unused spectrum/carrier_square views may alias borrowed scratch. False
+// fallback leaves arena untouched. Cancellation throws and context is discarded.
+std::optional<Context> prepare(const FftSearchBatch&,const Requirements&,
+                               std::span<FftComplex> first,std::span<FftComplex> second,
+                               Work* = nullptr,std::stop_token={});
+inline std::optional<Context> prepare(const FftSearchBatch& batch,const Requirements& r,
+        std::span<FftComplex> arena,Work* work=nullptr,std::stop_token stop={}) {
+    return prepare(batch,r,arena,{},work,stop);
+}
+// Synchronous job-only numeric operation. Output real=zero score, imag=one score,
+// at ORIGINAL selected starts; excluded cells/padding remain untouched. No
+// caller publication until successful return. False means fallback before any
+// output mutation. A cancellation/error may leave partial output, which caller
+// discards exactly as for the existing CPU batch backend. Output must not alias
+// arena or immutable batch input views. Code identity must exactly match batch geometry.
+bool score_job(Context&,const FftSearchJob&,PatternCode&,std::span<FftComplex> output,
+               Work* = nullptr,std::stop_token={});
+// No FFT, no allocation, no arena. Generated coherent jobs with at most 32
+// selected original starts. Two private candidates are generated together once
+// per bin; each norm and each complex dot retains ascending sample order.
+// The same output, alias, fallback and cancellation rules apply as score_job.
+// A host may omit input FFT entirely when all jobs use this entry point.
+bool score_direct(const FftSearchBatch&,const FftSearchJob&,PatternCode&,
+                  std::span<FftComplex> output,Work* = nullptr,std::stop_token={});
+}

@@ -417,6 +417,7 @@ void qualified_clock_window() {
 }
 void qualified_fft_window_geometry() {
     using modem::detail::pattern_fft_batch_may_intersect;
+    using modem::detail::pattern_fft_select_starts;
     // Independent enumeration of original integer-bin cells, including
     // fractional centers and both ends of the validated clock domain. Any
     // covered phase/rate/cell must retain its ENTIRE original FFT batch.
@@ -432,6 +433,15 @@ void qualified_fft_window_geometry() {
                     }
                 if(covered)check(pattern_fft_batch_may_intersect(prior,symbol,index,7,23,first,19,bin),
                     "qualified FFT pruning excluded an original fractional phase/rate coverage cell");
+                const auto selected=pattern_fft_select_starts(prior,symbol,index,7,23,8,first,19,bin);
+                for(const auto phase:{7ULL,15ULL,23ULL})for(const auto rate:{.99L,1.L,1.01L})
+                    for(std::size_t start=0;start<19;++start) {
+                        const auto expected=origin+scale*phase+index*static_cast<long double>(symbol)/rate;
+                        if(std::abs((first+start)*static_cast<long double>(bin)-expected)>.025L+2.5L*bin)continue;
+                        check(selected.full||std::any_of(selected.ranges.begin(),selected.ranges.begin()+selected.range_count,
+                            [&](const auto range){return start>=range.first&&start-range.first<range.count;}),
+                            "restricted FFT work lost an original fractional phase/rate boundary cell");
+                    }
             }
             check(!pattern_fft_batch_may_intersect(prior,symbol,3,7,23,100000,19,bin),
                 "qualified FFT geometry failed to exclude a provably disjoint batch");
@@ -445,6 +455,40 @@ void qualified_fft_window_geometry() {
         "invalid FFT prior authorized work removal");
     check(pattern_fft_batch_may_intersect({1e16L,1,0},64,0,0,0,100,1,4),
         "imprecise FFT prior authorized work removal");
+    const auto separated=pattern_fft_select_starts({0,1,0},64,0,0,256,128,0,300,1);
+    check(!separated.full&&separated.range_count==3&&separated.selected_count==13&&
+        separated.ranges[0].first==0&&separated.ranges[0].count==3&&
+        separated.ranges[1].first==126&&separated.ranges[1].count==5&&
+        separated.ranges[2].first==254&&separated.ranges[2].count==5,
+        "restricted FFT merged disjoint canonical phase windows into a broad envelope");
+    const auto empty=pattern_fft_select_starts({0,1,0},64,0,0,256,128,10000,300,1);
+    check(!empty.full&&empty.selected_count==0&&empty.range_count==0,
+        "restricted FFT retained a separated private template job");
+    check(pattern_fft_select_starts({0,0,0},64,0,0,0,1,100,19,4).full&&
+        pattern_fft_select_starts({1e16L,1,0},64,0,0,0,1,100,19,4).full&&
+        pattern_fft_select_starts({0,1,0},64,0,0,65000,1000,0,65536,1).full,
+        "restricted FFT failed to retain original work for uncertain or over-capacity range unions");
+    // An authoritative paired bank supplies its physical rate extrema. Keep
+    // every original lane/refinement cell while avoiding an invented +/-1%
+    // symbol displacement for a +/-200ppm oscillator bank.
+    const modem::PatternStartWindow tight{-.137L,1.0001L,.025L};
+    constexpr double minimum_rate=1-200e-6,maximum_rate=1+200e-6;
+    const auto narrow=pattern_fft_select_starts(tight,512000,3,0,32000,8000,380000,40000,4,
+        minimum_rate,maximum_rate);
+    const auto broad=pattern_fft_select_starts(tight,512000,3,0,32000,8000,380000,40000,4);
+    check(!narrow.full&&narrow.selected_count<broad.selected_count,
+        "qualified FFT work retained an invented clock domain instead of the authoritative bank bounds");
+    for(const auto phase:{0ULL,8000ULL,16000ULL,24000ULL,32000ULL})
+        for(const auto rate:{minimum_rate,1.,maximum_rate})for(std::size_t j=0;j<40000;++j) {
+            const auto expected=tight.epoch_origin_samples+tight.phase_scale*phase+3.L*512000/rate;
+            if(std::abs((380000.L+j)*4-expected)>tight.half_width_samples+10)continue;
+            check(std::any_of(narrow.ranges.begin(),narrow.ranges.begin()+narrow.range_count,[&](const auto range) {
+                return j>=range.first&&j-range.first<range.count;
+            }),"qualified FFT authoritative clock bounds lost a fractional endpoint/refinement cell");
+        }
+    check(pattern_fft_select_starts(tight,64,0,0,0,1,0,19,4,0,1).full&&
+        pattern_fft_select_starts(tight,64,0,0,0,1,0,19,4,1.001L,.999L).full,
+        "invalid authoritative clock bounds authorized restricted work");
 }
 void qualified_fft_window_preserves_progress() {
     constexpr std::size_t workspace=4*1024*1024;
@@ -482,18 +526,26 @@ void qualified_fft_window_preserves_progress() {
         search.frequency_rate_competition=true;
         search.search_stream_phases=true;search.start_offset_seconds=origin/tx.sample_rate;search.start_uncertainty_seconds=6;
         search.candidate_limit=256;search.track_limit=4;search.bit_limit=32;search.retain_score=30;
+        search.early_qualified_fft=false; // Isolate selection arithmetic from the separately tested early schedule.
+        search.restricted_direct_search=false; // Keep the original bitwise FFT score assertions; direct arithmetic has paired tolerance tests.
+        search.partitioned_timing_search=false; // Partition arithmetic has its independent same-PCM score tests.
         search.worker_threads=phase_edge?3:1;
         modem::PatternReceiver full(rx,workspace,search);
         search.qualified_start_window=modem::PatternStartWindow{
             origin-static_cast<long double>(tx.stream_phase_samples)/rate,1/rate,.025L};
+        search.restricted_timing_search=false;
+        modem::PatternReceiver preceding(rx,workspace,search);
+        search.restricted_timing_search=true;
         modem::PatternReceiver prior(rx,workspace,search);
         check(prior.fft_work().timing_window==modem::PatternFftWindowStatus::active,
             "eligible short FFT prior was not enforced");
         Bytes observed;std::size_t pending=0,complete=0;bool prefix_checked=false,evidence_checked=false;
         const auto poll=[&](std::size_t position) {
-            const auto a=full.take_bursts(),b=prior.take_bursts();
+            const auto a=full.take_bursts(),b=prior.take_bursts(),old=preceding.take_bursts();
             check(a.size()==b.size()&&std::equal(a.begin(),a.end(),b.begin(),same_burst),
                 "qualified FFT pruning changed next-poll bit publication or physical-end events");
+            check(old.size()==b.size()&&std::equal(old.begin(),old.end(),b.begin(),same_burst),
+                "restricted FFT work changed preceding next-poll events or immutable identity");
             for(const auto& event:b) {
                 observed.insert(observed.end(),event.bits.begin(),event.bits.end());
                 if(!event.complete&&!event.bits.empty())++pending;
@@ -505,6 +557,8 @@ void qualified_fft_window_preserves_progress() {
             }
             check(full.fft_work().threshold_trials==prior.fft_work().threshold_trials,
                 "qualified FFT pruning reduced the original alpha-spending trial count");
+            check(preceding.fft_work().threshold_trials==prior.fft_work().threshold_trials,
+                "restricted FFT work changed the preceding full trial penalty");
             const auto original=full.candidates(),retained=prior.candidates();
             for(const auto& candidate:retained)if(candidate.score>=candidate.admission_threshold) {
                 evidence_checked=true;
@@ -520,18 +574,22 @@ void qualified_fft_window_preserves_progress() {
             auto count=std::min(chunks[chunk%chunks.size()],samples.size()-position);
             if(position<eof_samples)count=std::min(count,eof_samples-position);
             const auto block=std::span(samples).subspan(position,count);
-            full.push(block);prior.push(block);position+=count;poll(position);
+            full.push(block);preceding.push(block);prior.push(block);position+=count;poll(position);
             if(position==eof_samples) {
                 check(complete==0,"source EOF substituted for six seconds of observed absence");prefix_checked=true;
             }
         }
-        full.finish();prior.finish();poll(samples.size());
+        full.finish();preceding.finish();prior.finish();poll(samples.size());
         check(prefix_checked&&evidence_checked&&observed==bits&&pending>0&&complete==1,
             "qualified FFT pruning lost exact short/DSSS bits or unique physical completion");
         const auto a=full.fft_work(),b=prior.fft_work();
         check(b.skipped_batches>0&&b.skipped_start_trials>0&&b.input_transforms<a.input_transforms&&
             b.template_jobs<a.template_jobs,
             "qualified FFT prior changed estimates without removing actual transforms and private jobs");
+        const auto old=preceding.fft_work();
+        check(b.restricted_timing_active&&!old.restricted_timing_active&&b.scored_start_trials==b.retained_start_trials&&
+            b.scored_start_trials<old.scored_start_trials&&b.scored_start_trials+b.skipped_start_trials<=b.threshold_trials,
+            "restricted FFT counters did not represent actual selected work and original trial coverage");
         std::stop_source stop;stop.request_stop();
         modem::PatternReceiver cancelled(rx,workspace,search);
         rejects([&]{cancelled.push(std::span(samples).first(1),stop.get_token());},
@@ -564,6 +622,262 @@ void qualified_fft_window_preserves_progress() {
             "unsupported FFT geometry silently pruned required work");
     }
 }
+void qualified_fft_restricted_direct() {
+    auto c=config(8,true);c.sample_rate=64;c.bandwidth_hz=8;c.carrier_hz=16;c.integration_seconds=8;
+    modem::PatternSearch search;search.hypotheses={{0,-200},{0,200}};
+    search.prefer_streamed_templates=true;search.start_offset_seconds=-17./64;
+    search.start_uncertainty_seconds=6;search.qualified_start_window=modem::PatternStartWindow{-17,1,.025L};
+    search.worker_threads=1;search.bit_limit=32;
+    search.early_qualified_fft=false;
+    constexpr std::size_t workspace=4*1024*1024;
+    for(const auto workers:{1U,3U}) {
+        search.worker_threads=workers;search.restricted_timing_search=false;search.release_idle_fft_scratch=false;
+        modem::PatternReceiver preceding(c,workspace,search);
+        search.restricted_timing_search=true;search.release_idle_fft_scratch=true;
+        modem::PatternReceiver selected(c,workspace,search);
+        const auto idle=selected.working_bytes();
+        check(idle<preceding.working_bytes() && selected.reserved_workspace_bytes()>=preceding.working_bytes(),
+            "idle epoch scratch must be released without reducing its active workspace reservation");
+        std::vector<float> silence(48*c.sample_rate);
+        for(std::size_t position=0;position<silence.size();) {
+            const auto block=std::span(silence).subspan(position,std::min<std::size_t>(137,silence.size()-position));
+            preceding.push(block);selected.push(block);position+=block.size();
+            check(preceding.take_bursts().empty()&&selected.take_bursts().empty(),
+                "restricted direct acquisition admitted noise or changed next-poll events");
+            check(preceding.fft_work().threshold_trials==selected.fft_work().threshold_trials,
+                "restricted direct acquisition changed original alpha spending");
+            check(selected.working_bytes()==idle,
+                "unacquired epochs retained scratch after a complete input call");
+        }
+        preceding.finish();selected.finish();
+        const auto old=preceding.fft_work(),now=selected.fft_work();
+        check(now.direct_jobs>0&&old.direct_jobs==0&&now.skipped_template_jobs>0&&
+            now.scored_start_trials<old.scored_start_trials&&
+            now.scored_start_trials+now.skipped_start_trials==now.threshold_trials&&
+            now.threshold_trials==old.threshold_trials&&selected.working_bytes()<=workspace,
+            "restricted direct path did not remove actual numerical work within its original workspace/trial bounds");
+    }
+}
+void qualified_fft_partitioned_reception() {
+    auto c=config(128,true);c.sample_rate=2560;c.bandwidth_hz=64;c.carrier_hz=640;
+    c.dsss=true;c.dsss_factor=10;c.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;
+    for(std::size_t i=0;i<c.dsss_seed.size();++i)c.dsss_seed[i]=static_cast<std::uint8_t>(17+7*i);
+    c.integration_seconds=4;const auto symbol=modem::symbol_sample_count(c);
+    const Bytes bits{0,1,0};constexpr std::size_t delay=1024,workspace=8*1024*1024;
+    const auto pcm=waveform(c,bits,delay,12*c.sample_rate,.37,.001);
+    modem::PatternSearch search;search.hypotheses={{0,0}};search.initial_stream_symbols=1;
+    search.start_offset_seconds=static_cast<double>(delay)/c.sample_rate;search.start_uncertainty_seconds=6;
+    search.qualified_start_window=modem::PatternStartWindow{delay,1,256};
+    search.prefer_streamed_templates=true;search.worker_threads=1;search.bit_limit=32;
+    search.early_qualified_fft=false;search.component_qualified_search=false;
+    search.partitioned_timing_search=false;search.restricted_direct_search=false;
+    modem::PatternReceiver whole(c,workspace,search);
+    search.partitioned_timing_search=true;search.restricted_direct_search=true;
+    modem::PatternReceiver bounded(c,workspace,search);
+    std::array<Bytes,2> recovered;std::array<unsigned,2> completed{};
+    for(std::size_t position=0;position<pcm.size();) {
+        const auto block=std::span(pcm).subspan(position,std::min<std::size_t>(317,pcm.size()-position));
+        whole.push(block);bounded.push(block);position+=block.size();
+        std::array<modem::PatternReceiver*,2> receivers{&whole,&bounded};
+        for(std::size_t j=0;j<receivers.size();++j) {
+            check(receivers[j]->working_bytes()<=workspace,"partitioned reception exceeded workspace");
+            for(const auto& event:receivers[j]->take_bursts()) {
+                recovered[j].insert(recovered[j].end(),event.bits.begin(),event.bits.end());
+                if(event.complete) {++completed[j];check(position>=delay+bits.size()*symbol+modem::pattern_absence_samples(c),
+                    "partitioned reception manufactured physical absence");}
+            }
+        }
+    }
+    check(recovered[0]==bits&&recovered[1]==bits&&completed[0]==1&&completed[1]==1,
+        "partitioned reception changed exact independent private bits or physical completion");
+    const auto a=whole.fft_work(),b=bounded.fft_work();
+    check(b.partitioned_jobs>0&&b.partitioned_input_transforms>0&&a.partitioned_jobs==0&&
+        b.input_transforms<a.input_transforms,"partitioned receiver did not eliminate original broad input transforms: jobs="+
+        std::to_string(b.partitioned_jobs)+" direct="+std::to_string(b.direct_jobs)+" FFT="+std::to_string(b.fft_jobs)+
+        " fallback="+std::to_string(b.partitioned_fallbacks)+" inputs="+std::to_string(b.input_transforms)+"/"+
+        std::to_string(a.input_transforms)+" symbol="+std::to_string(symbol));
+    check(a.scored_start_trials==b.scored_start_trials&&a.skipped_start_trials==b.skipped_start_trials,
+        "partitioned reception changed admitted starts or acquisition trial accounting");
+}
+void qualified_fft_bounded_readiness() {
+    auto c=config(32,true);c.sample_rate=64;c.bandwidth_hz=8;c.carrier_hz=16;
+    c.integration_seconds=8;c.pulse_shaping=false;
+    const Bytes bits{0,1,0};const auto symbol=modem::symbol_sample_count(c);
+    const auto pcm=waveform(c,bits,8,4*symbol,.37,.001);
+    modem::PatternSearch search;search.hypotheses={{0,0}};search.initial_stream_symbols=1;
+    search.start_offset_seconds=8./64;search.start_uncertainty_seconds=6;
+    search.qualified_start_window=modem::PatternStartWindow{8,1,.025L};
+    search.prefer_streamed_templates=true;search.worker_threads=1;search.bit_limit=32;
+    search.early_qualified_fft=false;modem::PatternReceiver broad(c,4*1024*1024,search);
+    search.early_qualified_fft=true;modem::PatternReceiver bounded(c,4*1024*1024,search);
+    std::array<Bytes,2> recovered;std::array<std::size_t,2> first{},completed{};
+    for(std::size_t position=0;position<pcm.size();) {
+        const auto block=std::span(pcm).subspan(position,std::min<std::size_t>(13,pcm.size()-position));
+        broad.push(block);bounded.push(block);position+=block.size();
+        std::array<modem::PatternReceiver*,2> receivers{&broad,&bounded};
+        for(std::size_t i=0;i<receivers.size();++i)for(const auto& event:receivers[i]->take_bursts()) {
+            if(!event.bits.empty() && !first[i])first[i]=position;
+            recovered[i].insert(recovered[i].end(),event.bits.begin(),event.bits.end());
+            if(event.complete) {
+                ++completed[i];
+                check(position>=8+bits.size()*symbol+modem::pattern_absence_samples(c),
+                    "early qualified scheduling manufactured absent physical samples");
+            }
+        }
+    }
+    check(recovered[0]==bits && recovered[1]==bits && completed[0]==1 && completed[1]==1,
+        "bounded FFT readiness changed exact bits or physical completion");
+    check(first[1]>=8+symbol && first[1]+2*c.sample_rate<first[0] && bounded.fft_work().early_batches>0,
+        "qualified acquisition still waited for the original broad FFT hop");
+    modem::PatternReceiver partial(c,4*1024*1024,search);
+    partial.push(std::span(pcm).first(symbol/2));partial.finish();
+    check(partial.take_bursts().empty(),"EOF supplied the rest of an early qualified symbol");
+}
+void qualified_fft_followon_progress() {
+    auto c=config(32,true);c.sample_rate=256;c.bandwidth_hz=64;c.carrier_hz=64;
+    c.integration_seconds=260./256;c.pulse_shaping=false;
+    const Bytes bits{0,1,0};const auto symbol=modem::symbol_sample_count(c);
+    check(symbol==260,"follow-on fixture lost its partial-chip geometry");
+    const auto pcm=waveform(c,bits,8,8*c.sample_rate,.37,.001);
+    modem::PatternSearch search;search.hypotheses={{0,0}};search.initial_stream_symbols=1;
+    search.start_offset_seconds=8./256;search.start_uncertainty_seconds=6;
+    search.qualified_start_window=modem::PatternStartWindow{8,1,.025L};
+    search.prefer_streamed_templates=true;search.worker_threads=1;search.bit_limit=32;
+    modem::PatternReceiver receiver(c,4*1024*1024,search);Bytes recovered;unsigned completed=0;
+    for(std::size_t position=0;position<pcm.size();) {
+        const auto block=std::span(pcm).subspan(position,std::min<std::size_t>(11,pcm.size()-position));
+        receiver.push(block);position+=block.size();
+        for(const auto& event:receiver.take_bursts()) {
+            recovered.insert(recovered.end(),event.bits.begin(),event.bits.end());
+            if(event.complete) {
+                ++completed;check(position>=8+bits.size()*symbol+modem::pattern_absence_samples(c),
+                    "bounded continuation manufactured absent physical samples");
+            }
+        }
+        for(std::size_t k=1;k<=bits.size();++k)
+            if(position>=8+k*symbol+32)check(recovered.size()>=k,
+                "fully observed follow-on bit waited behind an unrelated acquisition hop");
+        if(position>=8+bits.size()*symbol+modem::pattern_absence_samples(c)+32)
+            check(completed==1,"observed physical absence waited behind an unrelated acquisition hop");
+    }
+    check(recovered==bits&&completed==1,"bounded continuation changed exact bits or physical completion");
+}
+void qualified_fft_component_progress() {
+    auto c=config(32,true);c.sample_rate=256;c.bandwidth_hz=64;c.carrier_hz=64;
+    c.integration_seconds=260./256;c.pulse_shaping=false;
+    const Bytes bits{0,1,0};const auto symbol=modem::symbol_sample_count(c);
+    const auto pcm=waveform(c,bits,8,10*c.sample_rate,.37,.001);
+    modem::PatternSearch search;search.hypotheses={{0,0}};search.initial_stream_symbols=3;
+    search.start_offset_seconds=8./256;search.start_uncertainty_seconds=6;
+    search.qualified_start_window=modem::PatternStartWindow{8,1,.025L};
+    search.prefer_streamed_templates=true;search.worker_threads=1;search.bit_limit=32;
+    search.component_qualified_search=false;modem::PatternReceiver whole(c,4*1024*1024,search);
+    search.component_qualified_search=true;modem::PatternReceiver split(c,4*1024*1024,search);
+    std::array<Bytes,2> recovered;std::array<std::size_t,2> first{},completed{};
+    for(std::size_t position=0;position<pcm.size();) {
+        const auto block=std::span(pcm).subspan(position,std::min<std::size_t>(11,pcm.size()-position));
+        whole.push(block);split.push(block);position+=block.size();
+        std::array<modem::PatternReceiver*,2> receivers{&whole,&split};
+        for(std::size_t i=0;i<receivers.size();++i)for(const auto& event:receivers[i]->take_bursts()) {
+            if(!event.bits.empty()&&!first[i])first[i]=position;
+            recovered[i].insert(recovered[i].end(),event.bits.begin(),event.bits.end());
+            if(event.complete) {
+                ++completed[i];check(position>=8+bits.size()*symbol+modem::pattern_absence_samples(c),
+                    "component scheduling manufactured physical absence");
+            }
+        }
+        for(std::size_t k=1;k<=bits.size();++k)if(position>=8+k*symbol+32)
+            check(recovered[1].size()>=k,"independent timing component waited for a distant initial-symbol alternative");
+    }
+    check(recovered[0]==bits&&recovered[1]==bits&&completed[0]==1&&completed[1]==1,
+        "component schedule changed exact bits or completion count");
+    check(first[1]+symbol<first[0]&&split.fft_work().timing_components>=3,
+        "component schedule did not reduce measured first-bit media latency");
+    const auto a=whole.fft_work(),b=split.fft_work();
+    check(a.scored_start_trials+a.skipped_start_trials==b.scored_start_trials+b.skipped_start_trials,
+        "component schedule changed the full acquisition trial charge");
+    modem::PatternReceiver partial(c,4*1024*1024,search);
+    partial.push(std::span(pcm).first(symbol/2));partial.finish();
+    check(partial.take_bursts().empty(),"component EOF supplied unobserved symbol data");
+    search.candidate_limit=1;modem::PatternReceiver limited(c,4*1024*1024,search);
+    limited.push(std::span(pcm).first(2*symbol));
+    check(limited.fft_work().timing_components==0&&limited.fft_work().component_fallbacks>0,
+        "component split bypassed the original logical-hop candidate capacity");
+}
+void qualified_fft_partial_eof_threshold() {
+    auto c=config(32,true);c.sample_rate=256;c.bandwidth_hz=64;c.carrier_hz=64;
+    c.integration_seconds=260./256;c.pulse_shaping=false;
+    const auto clean=waveform(c,Bytes{0},8,32,.37);
+    check(clean.size()==300,"partial EOF fixture changed physical extent");
+    std::mt19937_64 random(173);std::normal_distribution<double> gaussian(0,.2);
+    std::vector<float> noise(clean.size());for(auto& value:noise)value=static_cast<float>(gaussian(random));
+    modem::PatternSearch search;search.hypotheses={{0,0}};search.initial_stream_symbols=3;
+    search.start_offset_seconds=8./256;search.start_uncertainty_seconds=6;
+    search.qualified_start_window=modem::PatternStartWindow{8,1,.025L};
+    search.prefer_streamed_templates=true;search.worker_threads=1;search.bit_limit=32;
+    struct Result {Bytes bits;double score=0,threshold=0;std::uint64_t trials=0,replays=0;};
+    const auto run=[&](double gain,bool component,std::size_t extent=300,bool cancel_finish=false,unsigned alternatives=3) {
+        auto local=search;local.component_qualified_search=component;
+        local.early_qualified_fft=component;local.initial_stream_symbols=alternatives;
+        modem::PatternReceiver receiver(c,4*1024*1024,local);Result out;
+        std::vector<float> pcm(extent);
+        for(std::size_t i=0;i<pcm.size();++i)pcm[i]=static_cast<float>(noise[i]+gain*clean[i]);
+        const auto drain=[&] {
+            for(const auto& event:receiver.take_bursts()) {
+                check(!event.complete,"partial EOF manufactured observed absence");
+                out.bits.insert(out.bits.end(),event.bits.begin(),event.bits.end());
+            }
+        };
+        for(std::size_t i=0;i<pcm.size();i+=11) {
+            receiver.push(std::span(pcm).subspan(i,std::min<std::size_t>(11,pcm.size()-i)));drain();
+        }
+        if(cancel_finish) {
+            std::stop_source canceled;canceled.request_stop();
+            rejects([&]{receiver.finish(canceled.get_token());},"canceled finish performed EOF replay");
+            check(receiver.fft_work().eof_replays==0,"canceled finish changed replay state");
+        }
+        receiver.finish();drain();receiver.finish();
+        check(receiver.take_bursts().empty(),"repeated partial EOF emitted duplicate progress");
+        for(const auto& item:receiver.candidates())if(item.score>out.score) {
+            out.score=item.score;out.threshold=item.admission_threshold;
+        }
+        const auto work=receiver.fft_work();out.trials=work.threshold_trials;out.replays=work.eof_replays;
+        return out;
+    };
+    // One fixed noise realization. Tune only signal amplitude to specified
+    // statistic levels; this is a deterministic threshold regression, not a
+    // detection-probability or sensitivity experiment.
+    for(const unsigned alternatives:{1U,3U}) {
+    const auto reference=run(1,false,300,false,alternatives);const auto old_threshold=reference.threshold;
+    const auto live_threshold=-std::log(search.false_alarm_probability)+2*std::log(192.*alternatives+1)+std::log(6.);
+    check(live_threshold>old_threshold+1,"EOF regression lost its unequal final/live trial geometry");
+    for(unsigned level=0;level<3;++level) {
+        const auto target=level==0?old_threshold-.25:level==1?(old_threshold+live_threshold)/2:live_threshold+.25;
+        double low=0,high=4;
+        check(run(low,false,300,false,alternatives).score<target&&run(high,false,300,false,alternatives).score>target,"EOF amplitude target is not bracketed");
+        for(unsigned k=0;k<30;++k) {
+            const auto middle=(low+high)/2;
+            if(run(middle,false,300,false,alternatives).score<target)low=middle;else high=middle;
+        }
+        const auto a=run((low+high)/2,false,300,false,alternatives),b=run((low+high)/2,true,300,false,alternatives);
+        check(std::abs(a.score-target)<1e-4&&std::abs(a.score-b.score)<1e-8*(1+a.score),
+            "partial EOF replay changed retained same-PCM statistics");
+        check(a.bits==b.bits&&a.bits==(level?Bytes{0}:Bytes{}),
+            "partial EOF prepayment lost a previously admissible pending bit");
+        if(level<2)check(b.replays==1&&a.trials==b.trials&&std::abs(a.threshold-b.threshold)<1e-12,
+            "cold partial EOF replay did not restore original finite-final threshold");
+        else check(b.replays==0,"partial EOF rolled back already established output");
+        if(level==1) {
+            const auto canceled=run((low+high)/2,true,300,true,alternatives);
+            check(canceled.bits==b.bits&&canceled.trials==b.trials&&canceled.replays==1,
+                "canceled-then-retried finish changed partial EOF decisions");
+            const auto early_a=run((low+high)/2,false,268,false,alternatives),early_b=run((low+high)/2,true,268,false,alternatives);
+            check(early_a.bits==Bytes{0}&&early_b.bits==early_a.bits&&early_a.trials==early_b.trials&&early_b.replays==0,
+                "EOF before first component execution changed observed partial-batch admission");
+        }
+    }    }
+}
+
 void parallel_search_physical_absence() {
     auto c=config(32,true);c.pulse_shaping=false;
     c.sample_rate=256;c.bandwidth_hz=64;c.carrier_hz=64;c.integration_seconds=1;
@@ -1596,7 +1910,11 @@ void short_template_cache_workspace() {
     // cache and recreate ordinary template rows without shrinking that limit.
     search.bit_limit=4096;
     modem::PatternReceiver pressure(c,large,search);
-    const auto cached_bytes=pressure.working_bytes();constexpr std::size_t pressure_budget=320*1024;
+    const auto cached_bytes=pressure.working_bytes();
+    // Keep this cache-retention fixture just above its fixed control reservation.
+    // Bounded timing-component metadata adds about 4 KiB to each receiver; the
+    // payload/eviction assertions below remain at the same full bit limit.
+    constexpr std::size_t pressure_budget=328*1024;
     pressure.set_workspace_bytes(pressure_budget);
     check(pressure.working_bytes()==cached_bytes,"a fitting optional cache should survive workspace reduction");
     modem::PatternReceiver reference(c,pressure_budget,search);
@@ -1924,6 +2242,12 @@ int main(int argc,char** argv) {
     run("qualified UTC clock window",qualified_clock_window);
     run("qualified UTC FFT geometry",qualified_fft_window_geometry);
     run("qualified UTC FFT progress",qualified_fft_window_preserves_progress);
+    run("qualified UTC FFT restricted direct",qualified_fft_restricted_direct);
+    run("qualified UTC FFT partitioned reception",qualified_fft_partitioned_reception);
+    run("qualified UTC FFT bounded readiness",qualified_fft_bounded_readiness);
+    run("qualified UTC FFT follow-on progress",qualified_fft_followon_progress);
+    run("qualified UTC FFT component progress",qualified_fft_component_progress);
+    run("qualified UTC FFT partial EOF threshold",qualified_fft_partial_eof_threshold);
     run("parallel search physical absence",parallel_search_physical_absence);
     run("parallel long continuation exact progress",parallel_long_continuation_exact_progress);
     run("bounded long clock-window fallback",long_clock_window_fallback);

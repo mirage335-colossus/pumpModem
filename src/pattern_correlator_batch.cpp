@@ -58,6 +58,9 @@ void accumulate_lane(const CorrelationBatch& batch,CorrelationLane& lane,Pattern
         if(!lane.fits[0][0].count)lane.observed_start=cursor;
         for(std::size_t group=0;group<group_count;++group) {
             pattern.set_stream_phase_samples(groups[group].lower);
+            require(g.chips_per_symbol && lane.index<=std::numeric_limits<std::uint64_t>::max()/g.chips_per_symbol,
+                "pattern chip coordinate overflow");
+            pattern.prepare_symbol(lane.index*g.chips_per_symbol,stop);
             auto& fit=lane.fits[group];
             auto* drift=g.drift_sections>1?&lane.drift_fits[group]:nullptr;
             auto* differential=g.differential_window_samples?&lane.differential_fits[group]:nullptr;

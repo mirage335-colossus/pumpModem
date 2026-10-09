@@ -342,6 +342,15 @@ void clock_and_spread_controls() {
           "outer DSSS must remain inactive and labeled when no private key is selected");
     near(controller.settings().transfer.modem.bandwidth_hz,36,"DSSS 100x did not install its voice-passband Rate");
     near(controller.settings().transfer.modem.carrier_hz,1500,"DSSS default did not retain a 1.5 kHz stream carrier");
+    check(controller.field(F::dsss_version).selected=="interleaved-v2"&&
+        controller.settings().transfer.modem.outer_dsss_version==datapump::modem::OuterDsssVersion::legacy_v1,
+        "new DSSS selection must default to v2 without changing the unkeyed Off waveform");
+    controller.select(F::dsss_version,"legacy");
+    near(controller.settings().transfer.modem.bandwidth_hz,36,"version-only selection reset the entered Rate");
+    near(controller.settings().transfer.modem.carrier_hz,1500,"version-only selection reset Carrier");
+    check(controller.field(F::dsss_factor).selected=="100"&&
+        launch_command::parse(controller.field(F::planner_command).text).dsss_version=="legacy",
+        "legacy diagnostic choice changed DSSS factor or was omitted from export");
     controller.select(F::fhss,"fake-0.4s-200");
     const auto model=controller.link_plan();
     check(controller.settings().transfer.modem.oscillator_search->rf_shift_hz==0 &&
@@ -357,10 +366,30 @@ void clock_and_spread_controls() {
     check(controller.settings().transfer.audio_timing_error_seconds==.012345,
         "audio allowance lost its saved parameter-list value");
     check(controller.settings().transfer.clock_sync==accepted && controller.field(F::dsss_factor).selected=="100" &&
-          controller.field(F::fhss).selected=="fake-0.4s-200","clock/spread settings lost their loaded values");
+          controller.field(F::fhss).selected=="fake-0.4s-200"&&controller.field(F::dsss_version).selected=="legacy",
+          "clock/spread/version settings lost their loaded values");
+    // The saved Fake/crystal combination deliberately exceeds sampled RF
+    // search headroom. Keep that rejection transactional, then use supported
+    // geometry for the independent partial-import preservation assertions.
+    check(controller.field(F::status).text.find("No clock/RAM fit")!=std::string::npos,
+        "unsupported illustrated RF search must not be admitted on import");
+    controller.select(F::fhss,"off");
     load(controller,"--clock-sync default");
+    check(!controller.settings().transfer.clock_sync,
+        "supported partial clock import did not commit Default timing");
     check(controller.settings().transfer.audio_timing_error_seconds==.012345,
         "loading an older command without audio error changed its retained value");
+    check(controller.field(F::dsss_version).selected=="legacy",
+        "partial parameter-list load silently replaced explicit legacy DSSS");
+    load(controller,"--dsss-version interleaved-v2");
+    if(controller.field(F::dsss_version).selected!="interleaved-v2"||
+       controller.field(F::dsss_factor).selected!="100"||controller.settings().transfer.modem.bandwidth_hz!=36)
+        std::cerr<<"version load: "<<controller.field(F::dsss_version).selected<<" / "
+            <<controller.field(F::dsss_factor).selected<<" / "<<controller.settings().transfer.modem.bandwidth_hz
+            <<" / "<<controller.field(F::status).text<<'\n';
+    check(controller.field(F::dsss_version).selected=="interleaved-v2"&&
+        controller.field(F::dsss_factor).selected=="100"&&controller.settings().transfer.modem.bandwidth_hz==36,
+        "version-only parameter-list load changed factor or Rate");
     controller.close();
 }
 void duplex_settings() {

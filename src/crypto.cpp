@@ -500,8 +500,15 @@ Bytes Crypto::stream(StreamPurpose purpose, std::uint64_t timestamp,
     require(domain == StreamDomain::Payload || domain == StreamDomain::Preamble || domain == StreamDomain::Suppression ||
             domain == StreamDomain::PatternZeroV2 || domain == StreamDomain::PatternOneV2 ||
             domain == StreamDomain::OuterDsss10V1 || domain == StreamDomain::OuterDsss100V1 ||
-            domain == StreamDomain::OuterDsss1000V1 || domain == StreamDomain::FakeFhssV1,
+            domain == StreamDomain::OuterDsss1000V1 || domain == StreamDomain::FakeFhssV1 ||
+            domain == StreamDomain::OuterDsss10RotationV2 || domain == StreamDomain::OuterDsss100RotationV2 ||
+            domain == StreamDomain::OuterDsss1000RotationV2 || domain == StreamDomain::OuterDsss10PermutationV2 ||
+            domain == StreamDomain::OuterDsss100PermutationV2 || domain == StreamDomain::OuterDsss1000PermutationV2,
             "invalid keystream domain");
+    const bool outer_v2=domain==StreamDomain::OuterDsss10RotationV2 || domain==StreamDomain::OuterDsss100RotationV2 ||
+        domain==StreamDomain::OuterDsss1000RotationV2 || domain==StreamDomain::OuterDsss10PermutationV2 ||
+        domain==StreamDomain::OuterDsss100PermutationV2 || domain==StreamDomain::OuterDsss1000PermutationV2;
+    require(!outer_v2 || purpose==StreamPurpose::Dsss,"outer spreading requires the dedicated DSSS purpose key");
     require(count == 0 || count - 1 <= std::numeric_limits<std::uint64_t>::max() - offset,
             "keystream byte offset would overflow");
     if (count == 0) return {};
@@ -534,6 +541,14 @@ Bytes Crypto::stream(StreamPurpose purpose, std::uint64_t timestamp,
     if(domain == StreamDomain::FakeFhssV1) {
         require(purpose==StreamPurpose::Fhss,"fake hopping requires the dedicated FHSS purpose key");
         constexpr std::string_view pad="fh-fake1";
+        std::copy(pad.begin(),pad.end(),counter.begin());
+    }
+    if(outer_v2) {
+        const std::string_view pad=domain==StreamDomain::OuterDsss10RotationV2?"dr2-0010":
+            domain==StreamDomain::OuterDsss100RotationV2?"dr2-0100":
+            domain==StreamDomain::OuterDsss1000RotationV2?"dr2-1000":
+            domain==StreamDomain::OuterDsss10PermutationV2?"dp2-0010":
+            domain==StreamDomain::OuterDsss100PermutationV2?"dp2-0100":"dp2-1000";
         std::copy(pad.begin(),pad.end(),counter.begin());
     }
     put_u64(std::span(counter).last(8), offset / 16);

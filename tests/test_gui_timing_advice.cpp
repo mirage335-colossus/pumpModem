@@ -126,7 +126,7 @@ int main(int argc,char** argv) {
         std::filesystem::path path=std::filesystem::temp_directory_path()/("datapump-advice-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         ~KeyFixture(){std::error_code ignored;std::filesystem::remove(path,ignored);}
     } key;create_keyring(key.path,{"Default"});
-    Launch launch;launch.settings=launch_command::parse("--pattern auto-keystream --tx-dbm 36.020599913279625 --path-loss-db 120 --noise-dbm-hz -164 --oscillator gpsdo-xo --rf-oscillator gpsdo-ocxo --shift 1e6 --search-margin 3 --reference independent --target-snr 60 --rate 1200 --carrier 1.009e6 --dsp-workspace 50% --clock-sync GPS_10ms-1ms_region-0ms_offset --audio-error 50ms --dsss-factor 10 --live-duplex yes --fhss fake-0.4s-200");
+    Launch launch;launch.settings=launch_command::parse("--pattern auto-keystream --tx-dbm 36.020599913279625 --path-loss-db 120 --noise-dbm-hz -164 --oscillator gpsdo-xo --rf-oscillator gpsdo-ocxo --shift 1e6 --search-margin 3 --reference independent --target-snr 60 --rate 1200 --carrier 1.009e6 --dsp-workspace 50% --clock-sync GPS_10ms-1ms_region-0ms_offset --audio-error 50ms --dsss-factor 10 --dsss-version legacy --live-duplex yes --fhss fake-0.4s-200");
     launch.settings->keyfile=key.path.string();launch.settings->key_name="Default";launch.settings->tx_key="named";
     Application app(launch);app.start();app.edit(F::message,"quick brown");
     const auto begin=std::chrono::steady_clock::now();std::string previous;unsigned resets=0;bool numeric=false;double ready=-1;

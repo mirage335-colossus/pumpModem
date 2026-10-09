@@ -143,10 +143,32 @@ struct PatternSearch {
     std::optional<double> start_offset_seconds;
     double start_uncertainty_seconds = 0;
     // Compact correlators retain the complete admitted start/phase lattice.
-    // Supported short FFT banks skip only wholly excluded acquisition batches;
-    // mixed batches retain their original scoring, and accepted tracks continue
-    // outside this acquisition window. Unsupported geometries keep legacy work.
+    // Supported short FFT banks restrict acquisition work to intersecting
+    // original start cells; accepted tracks continue outside this acquisition
+    // window. Unsupported geometries keep legacy work.
     std::optional<PatternStartWindow> qualified_start_window;
+    // Internal paired-measurement opt-out. Supported coherent FFT searches
+    // score only the original start cells intersecting the qualified prior.
+    // False preserves the preceding mixed-batch numerical work. Trial counts
+    // retain their original logical alternatives. Set early_qualified_fft
+    // false separately to isolate work selection from scheduling.
+    bool restricted_timing_search = true;
+    // Diagnostic opt-out for direct arithmetic; no coverage change. Disable
+    // partitioned_timing_search too for the original full-FFT arithmetic.
+    bool restricted_direct_search = true;
+    // Diagnostic opt-out for paired, restricted partition/direct execution.
+    // Coverage and original logical trial accounting are unchanged.
+    bool partitioned_timing_search = true;
+    // A qualified batch may run as soon as every retained start has a full
+    // symbol. False keeps the former full-hop cadence for diagnostics.
+    bool early_qualified_fft = true;
+    // Independently close disjoint qualified timing components inside the
+    // original logical hop. False retains the max-retained-end diagnostic.
+    bool component_qualified_search = true;
+    // Multi-epoch Live banks borrow their execution allowance sequentially.
+    // Idle FFT receivers need observation rings, not private FFT scratch.
+    // False retains the preceding allocation for diagnostic comparisons.
+    bool release_idle_fft_scratch = true;
     // Independent timing alternatives for each legacy frequency hypothesis.
     // Rate is 1 + ppm*1e-6; observed symbol duration is nominal/rate.
     std::vector<double> clock_errors_ppm{0};
@@ -168,6 +190,19 @@ struct PatternFftWork {
     // have started). These are execution counters, not timing measurements.
     std::uint64_t input_transforms=0,template_jobs=0;
     std::uint64_t skipped_batches=0,skipped_start_trials=0,threshold_trials=0;
+    // Acquisition start cells only; threshold_trials additionally includes
+    // unchanged tracked timing/frequency refinements. A successful dispatch
+    // scores every retained cell exactly once, without charging bit choices.
+    std::uint64_t retained_start_trials=0,scored_start_trials=0;
+    std::uint64_t early_batches=0;
+    std::uint64_t timing_components=0,component_fallbacks=0;
+    std::uint64_t direct_jobs=0,fft_jobs=0,skipped_template_jobs=0;
+    std::uint64_t partitioned_jobs=0,partitioned_input_transforms=0,partitioned_transform_points=0;
+    std::uint64_t partitioned_fallbacks=0;
+    // Executed scores include bounded unpublished EOF replay; threshold_trials
+    // reflects the original finite-final charge rather than repeated arithmetic.
+    std::uint64_t eof_replays=0;
+    bool restricted_timing_active=false;
     PatternFftWindowStatus timing_window=PatternFftWindowStatus::not_requested;
 };
 class PatternReceiver {

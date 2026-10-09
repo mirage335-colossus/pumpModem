@@ -82,21 +82,39 @@ illustrative sensitivity models, not measured GPSDO specifications; see
 coverage, without multiplying the simulated impairment.
 
 The local outer-DSSS candidate accounts for actual chip count, sampled bandwidth
-and symbol duration in compute estimates. Its numerical **RX reference** is the
-conditional matched-template AWGN calculation, kept separate from qualified
-receiver probability. UTC steering failures and the conditional outer-code
+and symbol duration in compute estimates. Legacy outer DSSS can show a numerical
+**RX reference** from the conditional matched-template AWGN calculation, kept
+separate from qualified receiver probability. Interleaved V2 changes the symbol
+permutation and applies a 0.5 amplitude before limiting. Its shaped/limited PCM
+energy and receiver sensitivity are not yet qualified, so it has **no numerical
+RX probability**, including a conditional reference. Work/geometry diagnostics
+remain available. An inactive version setting is ignored when DSSS is off. UTC steering failures and the conditional outer-code
 presence guard are outside that reference. It carries no confidence interval or
 claim of complete acquisition-bank calibration.
 
 Work models distinguish known unsteered sampled simulation, hardware with a full
 fallback window, and hardware with qualified capture timing. Sampled simulation
 uses the original oscillator bank and its own startup-epoch coverage. Hardware
-retains the union of original and peer steering lanes. Long compact paths use a representative-anchor timing-lattice count. Eligible
-short private FFT banks instead use an upper bound on whole retained acquisition
-batches, filling all initial-symbol/phase gaps and allowing edge overlap.
-Ingestion, active-track continuation and original detection trial charges remain
-unchanged. Unsupported timing/FFT geometry retains full scanning. Both paths
-report the full-window fallback separately. No timing-count discount is
+retains the union of original and peer steering lanes. Long compact paths use a
+representative-anchor timing-lattice count. Eligible short private coherent banks
+intersect each original canonical phase with each original start cell. Empty
+private-template jobs are omitted. For retained jobs, runtime and estimator use
+the same allocation-free chooser: at most 32 positions use paired direct dots;
+larger supported sets can use tiled convolution. The chooser includes input,
+template and inverse transforms and multiplication work. It selects a tiled path
+only below 90% of the original numerical FFT allowance, with scratch fitting the
+existing two transform buffers. Template generation, initialization, energy-prefix
+and buffer-copy allowances are charged separately.
+
+An all-direct batch has no input FFT. Partitioned jobs share input transforms only
+within the exact observed segment, selected tile set and phase group; private 0/1
+rows retain separate energies. Ineligible or more expensive geometries keep the
+original shared input FFT. Guarded timing components can execute after their own
+full-symbol observations arrive, without waiting for distant retained regions.
+Cohort work uses conservative anchor envelopes and translated tile bounds; a
+failed proof charges the full fallback. GUI details distinguish exact
+representative counts from those cohort allowances. Ingestion, active-track
+continuation and original detection trial charges remain. No timing discount is
 applied to the full preflight workspace reservation. These are engineering work
 estimates, not measured throughput or running-bank telemetry.
 
@@ -125,21 +143,76 @@ admissions remain **unmodeled**; the diagnostic says so explicitly.
 In the rate 10 Hz, target 40 dB-Hz, DSSS 1000×, 7500 Hz stream-carrier example,
 resolution gives 40000 samples/s, 8 samples/fine chip, 512000 samples/symbol
 (12.8 seconds), and a 262144-bin FFT with a 13.4144-second acquisition hop.
-A one-bit observation retains **1 of 1** fully observed initial FFT batches per epoch under both
-GPS 1 ms / region 1 ms / Audio 50 ms and Audio 10 ms, even with admitted 5 ms
-capture metadata. Hardware requires a complete FFT input window and never calls
-EOF finalization; the earlier three-batch allowance overcounted partial windows.
-Narrowing a prior which still overlaps the same whole batches
-does not reduce their compute work. With the declared independent GPSDO XO/OCXO
-models and 1 MHz Shift, the original three frequency/clock pairs become a
-five-pair UTC correction union, preserving every original endpoint. A 70-bit
-observation still has new epochs arriving throughout it; a static per-epoch
-retained-batch cap cannot make that work disappear. These figures are resolved
-geometry and model calculations, **not measured acquisition speed or latency**.
+The original full-FFT backend first executes after 26.2144 seconds. The
+qualified coherent path no longer requires that whole input window: it schedules
+retained start components after a full symbol plus the original refinement margin.
+Thus arrival-window width changes both the work within a component and when it
+becomes ready. The full-symbol duration itself remains 12.8 seconds. Initial epoch
+alternatives and newly admitted epochs are separate from arrival uncertainty and
+cannot be removed by narrowing an audio-error control. Measured work and latency
+for this candidate are recorded in [search compute](search-compute.md).
+
+With the declared independent GPSDO XO/OCXO models and 1 MHz Shift, the original
+three frequency/clock pairs become a five-pair UTC correction union, preserving
+every original endpoint. A 70-bit observation still has new epochs arriving
+throughout it; a static per-epoch retained-batch cap cannot make that work disappear.
 Fake FHSS instead reserves its highest illustrated RF for planning: a 1 MHz base
 with 200 channels spaced 100 kHz uses a 20.9 MHz Shift bound, while its actual
 hardware audio remains at the fixed 1 MHz Shift. These oscillator domains must
 be compared separately.
+
+Restricted FFT CPU work is summed over all initial epochs using a conservative
+one-second fractional-capture-anchor envelope for each epoch, rather than
+multiplying one favorable representative epoch. Fresh cohorts use their own
+one-second birth envelope. Their total is capped by both the lifetime sum and
+the maximum per-batch work times the existing batch-count allowance. The
+bounded enumeration charges phase-group, component and range work against a
+one-million-unit cap; unsupported
+or exhausted cases charge full jobs in every potentially ready qualified slot,
+with an explicit reason. Representative epoch/key job and position diagnostics remain
+separate from these cohort allowances. They are not detector-trial counts.
+
+The original full-hop batch count remains a separate diagnostic baseline.
+Qualified short acquisition dispatches guarded components when their last retained
+start has a complete symbol plus the four-bin scheduling margin. Unsupported
+component unions keep the complete retained-union deadline. Both can execute
+before the baseline's first full batch. The representative map uses these exact
+component endpoints. Initial and rolling cohort
+anchor envelopes are priced at the earliest legal full-symbol readiness, so their
+wider unions cannot postpone work that a narrower actual map would execute.
+Constructor and input-processing costs remain charged before either deadline.
+Numerical constructor template/FFT work uses the same scoring allowance as the
+identical operations during acquisition; zero-initialization and control work
+retain the serial allowance. Initial and fresh setup diagnostics include both.
+These classifications do not establish measured parallel constructor throughput
+or an implemented GPU path.
+Fresh-epoch retention still uses the original start scan and physical retirement
+bound; early readiness does not erase required epochs or six-second absence.
+Retained batches can exceed the old full-hop count over a short observation, so
+the model reports a distinct qualified-ready-slot allowance rather than calling
+that ratio a retained fraction. These are conservative operation counts, not
+measured acquisition latency.
+
+The planner shows actual fine-chip, inner-chip and symbol durations, original
+input sample rate, projection-grid and canonical-phase spacing, combined admitted
+arrival width, workspace allowance, backend and fallback. The combined width
+comes from the same affine arrival-map calculation, including both stations'
+GPS errors, propagation region, presentation/capture audio errors, rate corners
+and numerical padding. It is an engineering reference unless device metadata
+supports the selected bounds.
+
+V2 adds two complete-fine-chip permutation maps (8 bytes per complete fine chip)
+and a conservative 64 KiB fixed control/coarse/rotation-cache allowance to the
+initial per-bank workspace gate and repeated constructor accounting. FFT
+template generation has a separate conservative permutation-draw allowance,
+charged once per generated pair rather than once per selected start. It uses one isolated-symbol map per pair (also for finite pulse tails), the
+explicit rejection-draw limit and a separately stated, rounded 40-operation per
+draw-byte engineering allowance. Initial and fresh constructors charge first-map
+preparation even when no complete FFT window has been observed. Cache reuse
+can make actual construction cheaper; this V2 cryptographic throughput is
+**uncalibrated**. Compact V2 permutation-cache rebuild ordering is not priced,
+so its CPU feasibility is explicitly unavailable rather than inheriting the
+legacy compact allowance.
 
 Workspace support continues to describe the initial bank reservation; it does
 not certify peak resident Live banks. Synchronized or accidental candidate tracks,
@@ -696,10 +769,12 @@ The workspace approximation includes the FFT buffers, ring, energy prefix, row
 metadata and separate tracking scratch whenever expanded clocks or a smaller
 transform require it. When that core fits but retaining
 both transformed bit templates for every hypothesis would exceed the allowance,
-the model selects streamed FFT work: generate a template and perform its forward
-transform for each job, using bounded scratch. Expanded live searches sharing
+the model selects streamed work: generate templates in bounded scratch and apply
+the chosen direct, partitioned or original full-FFT calculation. Expanded live searches sharing
 memory with other keys, epochs or profiles also stream their rows, preserving
-room for the other banks. A single bank without section fitting can retain its
+room for the other banks. Qualified non-section-fitting banks also stream so
+constructors do not build unused broad template transforms. A single bank without
+these constraints can retain its
 public transformed templates when they fit. Four-section jobs always generate
 partial templates in shared scratch. An unaffordable legacy expanded core
 leaves confidence unavailable; the model keeps the requested FFT cost rather
@@ -707,9 +782,9 @@ than estimating the runtime's narrower correlator fallback.
 The compact-private/correlator choices apply to explicit policy banks and
 historical unexpanded banks.
 These choices do not reduce the requested hypotheses. The
-streamed-template estimate includes extra forward transforms and template
-generation for public as well as private profiles, without benchmarking the
-computer.
+streamed-template estimate includes template generation and the transforms
+required by its selected backend, for public as well as private profiles, without
+benchmarking the computer.
 
 Four-section acquisition normally performs four forward/inverse template FFT
 pairs per candidate bit and hypothesis. Summing the partial correlations also
@@ -870,10 +945,16 @@ The [9 October DSSS follow-up measurements](dsss-followup-validation.md)
 compare actual execution with the preceding optimized local receiver. They
 record coherent-guard CPU regressions as well as bounded RF improvements;
 the new work allowances are conservative accounting, not recalibrated throughput.
-The current local candidate adds conservative whole-batch pruning for qualified
-short private FFT arrival windows. Its engineering model retains ingestion,
-continuation and the original trial charges, and separately reports full-window
-fallback. Timing telemetry and measurements remain distinct from this estimate.
+The newer local candidate adds per-phase job/start restriction inside qualified
+short coherent FFT batches and bounded direct matching for at most 32 starts.
+Its engineering model selects paired direct or partitioned work with the runtime
+chooser, retaining full input FFT allowances for unsupported or more expensive
+cases. Ingestion, continuation and original trial charges remain, and full-window
+fallback is reported separately. Measured speedup is separate from these modeled
+operation counts and does not establish sensitivity qualification. Equivalence is
+conditional on the retained start set and a qualified arrival map; rejecting
+out-of-prior alternatives can change competition against an out-of-prior signal
+or interferer. Timing telemetry and measurements remain distinct from estimates.
 
 The [UTC follow-up execution measurements](validation.md#utc-fft-launch-keys-and-audio-follow-up--manual-checkpoint-9-october-2026)
 measure about4.93x additional speedup for one qualified50ms acquisition bank at

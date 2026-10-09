@@ -1,0 +1,32 @@
+[
+  {
+    "label": "final5 D1000 width6 repeat1",
+    "baseline_result": "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-primary-d1000-w6-baseline-r1.result.json",
+    "candidate_result": "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-primary-d1000-w6-candidate-r1.result.json"
+  },
+  {
+    "label": "final5 D1000 width6 repeat2",
+    "baseline_result": "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-primary-d1000-w6-baseline-r2.result.json",
+    "candidate_result": "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-primary-d1000-w6-candidate-r2.result.json"
+  },
+  {
+    "label": "final5 D1000 width6 repeat3",
+    "baseline_result": "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-primary-d1000-w6-baseline-r3.result.json",
+    "candidate_result": "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-primary-d1000-w6-candidate-r3.result.json"
+  },
+  {
+    "label": "final5 D1000 width0.001 repeat1",
+    "baseline_result": "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-primary-d1000-w0p001-baseline-r1.result.json",
+    "candidate_result": "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-primary-d1000-w0p001-candidate-r1.result.json"
+  },
+  {
+    "label": "final5 D1000 width0.001 repeat2",
+    "baseline_result": "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-primary-d1000-w0p001-baseline-r2.result.json",
+    "candidate_result": "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-primary-d1000-w0p001-candidate-r2.result.json"
+  },
+  {
+    "label": "final5 D1000 width0.001 repeat3",
+    "baseline_result": "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-primary-d1000-w0p001-baseline-r3.result.json",
+    "candidate_result": "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-primary-d1000-w0p001-candidate-r3.result.json"
+  }
+]

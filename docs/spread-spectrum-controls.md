@@ -7,8 +7,10 @@ a claim of practical 1000x spreading at constant receiver CPU cost.
 ## Separate streams and waveform geometry
 
 The DSSS choices are Off, 10x, 100x and 1000x. Off retains the existing waveform.
-An enabled factor multiplies each existing private inner chip by fine QPSK chips
-from the keyfile's dedicated DSSS stream. The existing independent private zero
+An enabled factor applies fine QPSK chips from the keyfile's dedicated DSSS
+stream. The `legacy` construction holds each inner coefficient for the factor's
+fine chips. The local `interleaved-v2` construction additionally permutes the
+complete fine-chip coefficient positions within each bit before shaping. The existing independent private zero
 and one candidates remain at every bit position. The Data cipher and Scrambler
 streams are not reused as outer spreading streams.
 
@@ -33,15 +35,68 @@ limiter. DSSS does not abruptly switch an already-shaped envelope. Finite pulses
 burst boundaries and limiting still produce spectral tails; ideal RRC support
 is not an emission mask or a guarantee of negligible radio-filtering loss.
 
-The unit-magnitude outer chips retain the inner chip's power envelope. At inner
+The legacy unit-magnitude outer chips retain the inner chip's power envelope. At inner
 Rate 10 Hz, that envelope can persist for 0.2 seconds. Adding independent random
 outer amplitudes does not remove it: conditional mean power remains proportional
 to the inner power, and the extra amplitude variation can increase peak clipping.
 The 9 October spectrum investigation isolated substantial spectral regrowth in
-the existing final limiter, especially in high-amplitude intervals. This is an
-unresolved waveform limitation; the current shaping must not be advertised as
+the existing final limiter, especially in high-amplitude intervals. This is a
+measured legacy waveform limitation; neither version may be advertised as
 a sharp measured emission mask. See the quantitative
 [spectrum follow-up](dsss-followup-validation.md#amplitude-envelope-and-limiter-investigation).
+
+### Versioned interleaving and headroom
+
+The local GUI/CLI defaults to `--dsss-version interleaved-v2` when outer DSSS is
+active. Use `--dsss-version legacy` for the preceding wire construction. Peers
+must select the same version; there is no transmitted version marker or automatic
+cross-version negotiation. Factor Off ignores the version and keeps its existing
+waveform. Saved parameter lists and launch commands carry the explicit version.
+
+V2 uses six new counter domains: an independent permutation-seed domain and a
+rotation domain for each of factors 10, 100 and 1000. A canonical epoch/symbol
+ordinal addresses a fixed 32-byte seed; variable rejection draws then occur in
+that symbol's child stream. They cannot advance into another symbol's seed,
+private zero/one pattern, Data, Scrambler, legacy DSSS or FHSS stream. Fisher–Yates
+uses unbiased rejection draws with an explicit bounded setup budget. Unsupported
+symbols exceeding 1,048,576 complete fine chips fail explicitly, not by silently
+changing the wire construction.
+
+Two adjacent symbol maps are retained because pulse tails overlap symbol
+boundaries. Their storage is eight bytes per complete fine chip plus fixed cache
+and setup accounting. The rate10/factor1000 example has 64,000 complete fine chips,
+so its two maps occupy 512,000 bytes. Each bit alternative has a separate bounded
+inner-coefficient cache. Reuse requires the exact key, version, factor, canonical
+epoch/ordinal and inner-chip address. Pattern-mode phase changes invalidate
+absolute-chip shape caches; the two canonically addressed V2 states remain
+reusable only when their complete epoch/ordinal identities still match. A
+partial final fine chip stays in place, preserving its original weighted energy.
+The permutation and unit-magnitude rotations are common to the two independent
+inner candidates, which preserves unshaped full-symbol norms and distances.
+This is not an equivalence proof after finite pulses, clipping, partial observation,
+interference or phase diffusion.
+
+Interleaving distributes held inner coefficients through the bit rather than
+adding independent multiplicative amplitude randomness. It does not equalize
+whole-bit power or erase repeated coefficient radii/histograms. Public waveform
+statistics remain a limitation; this is not a claim of noise indistinguishability.
+Final RRC shaping and smooth burst boundaries follow the chip transformation.
+V2 halves the complex amplitude before the radial limiter, including training and
+suppression output. Away from limiting, that is 6.0206 dB of digital power backoff
+at unchanged downstream gain. Clipped legacy intervals change that comparison;
+measured average-power and equal-peak comparisons must be reported separately.
+Restoring average power in software or hardware can reintroduce clipping.
+The link budget takes actual average radio transmit power, not digital sample
+peak. Its entered power is not automatically reduced by 6.02 dB. The simulation
+channel still references the common nominal digital signal power for noise, so
+unchanged simulation settings include V2's actual digital backoff. Equal-average-
+power waveform comparisons explicitly normalize the measured finite waveform;
+they do not imply available hardware gain or peak headroom.
+
+V2 is an experimental manual-test construction. Its full-acquisition sensitivity,
+wrong-key behavior and hardware spectrum are not qualified by the previous
+conditional legacy-factor10 evidence. Numerical RX probability remains unavailable
+for V2 until its changed finite-pulse and limiter geometry is validated.
 
 Selecting 10x, 100x or 1000x in the GUI sets a useful voice-passband starting
 point: inner Rate 360, 36 or 3.6 Hz respectively, with stream Carrier 1500 Hz
@@ -61,8 +116,12 @@ The current receiver uses its matched-template paths at the outer chip rate.
 This is a functional fallback, not a qualified fast despreader. Its work can grow
 with the outer bandwidth and search bank. Higher bandwidth does not create extra
 received bit energy at fixed power and bit duration. Qualified full-bank detection probabilities remain unavailable for the new outer factors.
-The GUI can show a separately labeled matched-template AWGN reference, which
-omits the new presence guard and does not predict complete acquisition success.
+For legacy DSSS the GUI can show a separately labeled matched-template AWGN
+reference, which omits the presence guard and does not predict complete acquisition
+success. Interleaved V2 withholds that numerical reference. Qualified coherent
+searches now use bounded timing components and paired direct/tiled contraction;
+this reduces actual acquisition work without claiming a fully qualified fast
+despreader. See [measured search work](search-compute.md).
 
 An early strong-signal control with the correct inner key and a different outer
 key produced a standalone accepted candidate. Independent outer phases can have
@@ -137,7 +196,7 @@ measured phase noise, supported ISM-band operation or timed hardware hopping.
 [Icom specifications](https://www.icomjapan.com/lineup/products/IC-7100USA/)
 
 See [clock synchronization](clock-sync.md), [oscillator models](oscillator-models.md)
-and the [development contract](development.md). Conditional factor10 coherent
-threshold curves now estimate0 dB additional loss with a simultaneous95%-coverage
+and the [development contract](development.md). Conditional **legacy** factor10 coherent
+threshold curves estimate0 dB additional loss with a simultaneous95%-coverage
 upper bound0.08 dB. Full-bank curves, enhanced branches, hardware/regulatory
 measurements and broader platform qualification remain open.

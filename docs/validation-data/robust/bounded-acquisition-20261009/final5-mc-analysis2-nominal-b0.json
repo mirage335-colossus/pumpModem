@@ -1,0 +1,133 @@
+{
+  "confidence_family_nominal": 0.95,
+  "family_cases": 4,
+  "probability_points": [
+    0.9,
+    0.99
+  ],
+  "bootstrap_repetitions": 10000,
+  "bootstrap_seed": 823903,
+  "pairing": "Identical white physical-noise draw across V1/V2; each joint-span draw retained",
+  "bootstrap_law": "paired percentile bootstrap of quantile differences, not quantile of per-draw differences",
+  "quantile_method": "empirical sampled-grid higher order statistic",
+  "comparison": "matched V1 vs matched V2 at equal actual bare-transmitter payload/tail energy; waveforms differ, so this is a waveform-design contrast",
+  "cases": [
+    {
+      "prefix": "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-mc-holdout-nominal-b0",
+      "scope": "single_epoch_frequency_rate_phase_conditional_five_or_six_start_projection_operator_guard_disabled_first_acquisition_only",
+      "metadata": {
+        "scope": "single_epoch_frequency_rate_phase_conditional_five_or_six_start_projection_operator_guard_disabled_first_acquisition_only",
+        "bit": 0,
+        "trials": 20000,
+        "seed": 1000817,
+        "waveform_seed": 117,
+        "sample_rate": 40000,
+        "carrier": 7500,
+        "dsss_factor": 1000,
+        "chip_samples": 8,
+        "symbol_samples": 512000,
+        "tail_samples": 0,
+        "observation_bins": 128000,
+        "input_transform": 262144,
+        "original_start_trials": 134145,
+        "selected_starts": 5,
+        "actual_origin_samples": 5251.648668170988,
+        "threshold": 47.332366186581616,
+        "nominal_alpha": 1e-10,
+        "outer_guard_enabled": false,
+        "clock_ppm": 0,
+        "frequency_offset": 0,
+        "phase_diffusion": 0,
+        "equal_actual_bare_TX_energy": true,
+        "v1_payload_tail_energy": 61099.652727395034,
+        "v2_payload_tail_energy": 15925.974838641296,
+        "v1_energy_scale": 2.894780307516161,
+        "v2_energy_scale": 5.6699857558952065,
+        "eigenvalue_relative_bound": 1.156852391659413e-13,
+        "positive_span_gram_bound": 3.0907178084432e-16,
+        "negative_span_gram_bound": 3.683716535880152e-16,
+        "positive_span_rank": 50,
+        "negative_span_rank": 50,
+        "grid_db": 0.05,
+        "min_cn0": -5,
+        "max_cn0": 25,
+        "exceptional_crossing_components": 0,
+        "ideal_white_coupling": "polar_orthonormal_U=Q(QtQ)^(-1/2); numerical_Q_replay_checked_separately",
+        "root_semantics": "sampled_grid_first_crossing; grid_monotonicity_checked; no_continuous_monotonicity_proof",
+        "physical_completion_qualified": false,
+        "actual_PCM_replay_completed": false,
+        "setup_seconds": 4.41587988,
+        "trials_seconds": 10.965830552,
+        "wall_seconds": 15.381711415
+      },
+      "all_trials_retained": true,
+      "grid_monotone_and_bracketed": true,
+      "sensitivity_qualified": false,
+      "quantiles": [
+        {
+          "detection_probability": 0.9,
+          "v1_cn0_grid": 9.25,
+          "v2_cn0_grid": 9.25,
+          "additional_v2_cn0_db": 0.0,
+          "paired_bootstrap_interval_db": [
+            -0.049999999999998934,
+            0.0
+          ],
+          "paired_bootstrap_with_geometry_and_grid_db": [
+            -0.09999999999999894,
+            0.05
+          ],
+          "absolute_order_stat_v1_db": [
+            9.200000000000001,
+            9.3
+          ],
+          "absolute_order_stat_v2_db": [
+            9.200000000000001,
+            9.25
+          ],
+          "conservative_order_stat_geometry_grid_exception_corrected_difference_db": [
+            -0.14999999999999963,
+            0.09999999999999894
+          ],
+          "bootstrap_tail_draws_expected": 31.25,
+          "conservative_interval_status": "bounded",
+          "conditional_grid_conservative_upper_below_point1_db": true
+        },
+        {
+          "detection_probability": 0.99,
+          "v1_cn0_grid": 9.9,
+          "v2_cn0_grid": 9.850000000000001,
+          "additional_v2_cn0_db": -0.049999999999998934,
+          "paired_bootstrap_interval_db": [
+            -0.049999999999998934,
+            0.049999999999998934
+          ],
+          "paired_bootstrap_with_geometry_and_grid_db": [
+            -0.09999999999999894,
+            0.09999999999999894
+          ],
+          "absolute_order_stat_v1_db": [
+            9.850000000000001,
+            9.950000000000001
+          ],
+          "absolute_order_stat_v2_db": [
+            9.8,
+            9.950000000000001
+          ],
+          "conservative_order_stat_geometry_grid_exception_corrected_difference_db": [
+            -0.20000000000000034,
+            0.14999999999999963
+          ],
+          "bootstrap_tail_draws_expected": 31.25,
+          "conservative_interval_status": "bounded",
+          "conditional_grid_conservative_upper_below_point1_db": false
+        }
+      ],
+      "population_sampled_grid_exception_rate_upper": 0.0002537264967483506,
+      "exception_confidence_tail": 0.00625,
+      "limitation": "Conditional sampled-grid finite operator only. Guard is disabled; covariance/span enclosures exclude FFT/score floating arithmetic and noisy-PCM float casting. Selected production PCM replays must be reviewed independently. The conservative order-statistic enclosure additionally allows a Clopper-Pearson upper bound on unobserved sampled-grid crossing exceptions. No continuous-grid monotonicity, full acquisition bank, active-guard loss, raw cumulative-loss, physical-completion or hardware/filter qualification is claimed."
+    }
+  ],
+  "wall_seconds": 24.22849203099031,
+  "unbounded_interval_serialization": "null endpoint with explicit inconclusive status; never clipped to observed sample extrema"
+}

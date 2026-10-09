@@ -1634,6 +1634,7 @@ void estimate_warning_thresholds() {
 }
 void rolling_epoch_selected_plan_document() {
     auto inputs=example();inputs.target_db_hz=40;inputs.mode=tuning::PatternMode::auto_keystream;
+    inputs.channel.clock_error_ppm=0;inputs.channel.phase_noise_degrees_per_sqrt_second=0;
     inputs.options.modem=tuning::resolve(10,40,inputs.mode,true,7500,1000).config;
     inputs.options.key.emplace(Bytes(32,0x47));inputs.options.search_seconds=6;
     inputs.options.dsp_workspace_bytes=std::size_t{1024}*1024*1024;
@@ -1652,15 +1653,43 @@ void rolling_epoch_selected_plan_document() {
     check(selected->frequency_rate_hypotheses==5&&selected->epoch_hypotheses==13&&
           selected->initial_fft_acquisition_batches==1&&selected->initial_fft_retained_acquisition_batches==1&&
           selected->new_epoch_admissions>0&&selected->new_epoch_full_fft_batches>0&&
-          selected->new_epoch_retained_fft_batches<=selected->new_epoch_full_fft_batches,
+          selected->new_epoch_retained_fft_batches<=selected->new_epoch_qualified_ready_batch_slots,
           "planner lost initial versus fresh epoch/batch work diagnostics");
+    check(selected->receiver_geometry.sample_rate==40000&&selected->receiver_geometry.restricted_fft_modeled&&
+          selected->receiver_geometry.full_template_jobs==35&&selected->receiver_geometry.retained_template_jobs==5,
+          "planner failed to carry resolved geometry and restricted private-template work");
     for(const auto width:{220.f,900.f}) {
         const auto page=planner_page::build(*selected,width,true,false);
-        check(contains_text(page,"initial FFT acquisition batches retained 1 / 1")&&
+        check(contains_text(page,"initial FFT acquisition batches retained 1; original full-hop batches 1")&&
               contains_text(page,"newly admitted epochs per key/profile")&&
-              contains_text(page,"Resident-bank RAM")&&contains_text(page,"unqualified"),
-              "planner must render whole-batch plateau, rolling cost and unqualified resident-memory scope");
+              contains_text(page,"Resident-bank RAM")&&contains_text(page,"unqualified")&&
+              contains_text(page,"40000 samples/s")&&contains_text(page,"Arrival grid: 0.1 ms")&&
+              contains_text(page,"Backend: Restricted FFT acquisition")&&
+              contains_text(page,"Paired backend:")&&contains_text(page,"cached input transforms")&&
+              contains_text(page,"5 / 35 template dispatches / original jobs")&&
+              contains_text(page,"preceding all-selected readiness")&&contains_text(page,"first guarded component"),
+              "planner must render qualified readiness, rolling cost and unqualified resident-memory scope");
     }
+    // Reuse the same advisory cache across wire versions. V2 must not receive
+    // the legacy conditional probability or hide its new construction work.
+    check(selected->reference_probability_available,"legacy comparison must have an available conditional reference");
+    auto versioned=inputs;versioned.options.modem.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;
+    std::stop_source version_stop;std::optional<planner::Model> v2;
+    try {planner::build(versioned,cache,version_stop.get_token(),[&](const auto& current) {
+        v2=current;version_stop.request_stop();
+    });}catch(const estimate_detail::Cancelled&){}
+    check(v2&&v2->available&&v2->receiver_geometry.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2&&
+          !v2->reference_probability_available&&!v2->confidence_available&&
+          v2->one_bit_cpu_available&&v2->receiver_cpu_seconds>selected->receiver_cpu_seconds&&
+          v2->probability_model_limit.find("pre-limiter")!=std::string::npos,
+          "planner cache must distinguish V2 wire/energy/setup scope from legacy references");
+    const auto v2_page=planner_page::build(*v2,900,true,false);
+    check(contains_text(v2_page,"interleaved-v2")&&contains_text(v2_page,"uncalibrated")&&
+          contains_text(v2_page,"RX estimate unavailable")&&
+          contains_text(v2_page,"6.02 dB pre-limiter digital backoff")&&
+          contains_text(v2_page,"actual average radio power")&&
+          contains_text(v2_page,"nominal-power referenced"),
+          "new V2 planner must show its format/work scope without an inherited probability");
 }
 void conditional_reference_and_timing_work_document() {
     planner::Model model;model.inputs=example();model.available=true;
