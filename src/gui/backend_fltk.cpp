@@ -691,6 +691,9 @@ public:
     }
     ~NativeApp() {Fl::remove_timeout(timer_callback,this);services.cancel();application.close();window->overlay=nullptr;overlay_surface.reset();window.reset();}
     Application application;
+#ifdef DATAPUMP_FLTK_ADAPTER_TEST
+    void verify_disabled_editor_presentation();
+#endif
     int run() {
         while(!application.finished()) {
             Fl::wait(.004);
@@ -782,8 +785,8 @@ private:
                     b.editor=new NativeEditor;b.editor->textsize(control.font_size);b.editor->tab_nav(control.tab_navigation);
                     b.editor->changed=[this,c=&control,widget=b.editor](std::string text){if(widget->visible_r()&&widget->active_r())application.edit(*c,std::move(text));};
                     b.editor->synchronize=[this,c=&control,widget=b.editor] {
-                        const auto state=application.control(*c).state;
-                        widget->apply(state.text,state.text_cursor_end_revision,state.text_history_revision);
+                        const auto view=application.control(*c);const auto& state=view.state;
+                        widget->apply(ui::editor_text(state,view.enabled),state.text_cursor_end_revision,state.text_history_revision);
                     };
                     b.editor->submit=[this,c=&control,widget=b.editor](bool ctrl,bool shift){return widget->visible_r()&&widget->active_r()&&application.submit(*c,ctrl,shift);};
                     b.editor->byte_limit=control.byte_limit;
@@ -791,8 +794,8 @@ private:
                 } else {
                     b.input=new NativeInput;b.input->textsize(control.font_size);b.input->when(FL_WHEN_CHANGED);
                     b.input->synchronize=[this,c=&control,widget=b.input] {
-                        const auto state=application.control(*c).state;
-                        widget->apply(state.text,state.text_cursor_end_revision,state.text_history_revision);
+                        const auto view=application.control(*c);const auto& state=view.state;
+                        widget->apply(ui::editor_text(state,view.enabled),state.text_cursor_end_revision,state.text_history_revision);
                     };
                     b.input->submit=[this,c=&control,widget=b.input](bool ctrl,bool shift){return widget->visible_r()&&widget->active_r()&&application.submit(*c,ctrl,shift);};
                     b.input->byte_limit=control.byte_limit;
@@ -916,8 +919,8 @@ private:
             label(b.label,view.control.label);
             if(c.kind==ui::Kind::label)b.label->labelcolor(text_color(state.text_tone,view.enabled));
         }
-        if(b.input){b.input->byte_limit=c.byte_limit;b.input->readonly(c.read_only);b.input->apply(state.text,state.text_cursor_end_revision,state.text_history_revision);}
-        if(b.editor){b.editor->byte_limit=c.byte_limit;b.editor->read_only=c.read_only;if(b.editor->tab_nav()!=c.tab_navigation)b.editor->tab_nav(c.tab_navigation);b.editor->apply(state.text,state.text_cursor_end_revision,state.text_history_revision);}
+        if(b.input){b.input->byte_limit=c.byte_limit;b.input->readonly(c.read_only);b.input->apply(ui::editor_text(state,view.enabled),state.text_cursor_end_revision,state.text_history_revision);}
+        if(b.editor){b.editor->byte_limit=c.byte_limit;b.editor->read_only=c.read_only;if(b.editor->tab_nav()!=c.tab_navigation)b.editor->tab_nav(c.tab_navigation);b.editor->apply(ui::editor_text(state,view.enabled),state.text_cursor_end_revision,state.text_history_revision);}
         if(b.presentation.update_options(view.options,Fl::grab()!=nullptr)) {
             for(auto* menu:std::initializer_list<Fl_Menu_*>{b.choice,b.suggestions,b.menu})
                 if(menu)populate(*menu,b.presentation.options());

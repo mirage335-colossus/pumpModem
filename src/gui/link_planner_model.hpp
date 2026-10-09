@@ -116,6 +116,8 @@ struct Model {
     std::size_t timing_phase_groups=1;
     double timing_hypotheses=0;
     bool timing_window_modeled=false;
+    double initial_fft_acquisition_batches=0,initial_fft_retained_acquisition_batches=0;
+    double new_epoch_admissions=0,new_epoch_full_fft_batches=0,new_epoch_retained_fft_batches=0;
     std::string receiver_work_assumptions;
     double fallback_cpu_realtime_ratio=0,fallback_timing_hypotheses=0;
     double occupied_bandwidth_hz=0;

@@ -212,7 +212,8 @@ struct Session::Impl {
     }
     Editor& editor(const Item& item) {
         auto& e=editors[identity(item)];const auto& state=app.control(item.control).state;
-        if(e.text!=state.text){e.text=state.text;e.selection=e.selection.clamped(e.text);}
+        const auto& shown=ui::editor_text(state,item.enabled);
+        if(e.text!=shown){e.text=shown;e.selection=e.selection.clamped(e.text);}
         if(e.cursor_revision!=state.text_cursor_end_revision) {
             e.cursor_revision=state.text_cursor_end_revision;const int end=static_cast<int>(e.text.size());e.selection={end,end,end};
         }

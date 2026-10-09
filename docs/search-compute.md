@@ -93,17 +93,40 @@ arrival map. It intersects each original half-chip coverage cell with the
 admitted canonical-phase lattice, retaining original pulse parity and all
 frequency/rate pairs. Raw/pulse regression comparisons cover clipped endpoints,
 negative fractional origins and nonzero clock rates. Custom native compact
-acquisition now uses an explicitly estimated physical timing model. FFT paths
-and missing timing evidence retain the full window. The planner counts the
+acquisition now uses an explicitly estimated physical timing model. Eligible
+short private FFT paths can skip whole acquisition batches excluded by the UTC
+arrival map. Mixed batches retain all original starts, initial-symbol indices
+and phase groups, and all active continuation work. Other FFT geometries and
+missing timing evidence retain the full window. The planner counts the
 complete correction-domain union, including every original lane, and retains
 the full arrival-window cost as a fallback before capture metadata exists. For
 existing eligible long compact banks, the estimate also reports exact retained
 origin/phase counts at a representative anchor using the actual captured timing
 error and rate bounds. The original full-count preflight RAM remains reserved.
-Short FFT banks receive no timing discount. Known unsteered simulation uses its
-original bank; hardware retains every possible peer steering lane. Entering a
-small GPS duration alone earns no CPU discount.
+The short-FFT work model conservatively fills gaps between admitted groups and
+counts overlapping edge batches. At 10 Hz / DSSS 1000× / target 40 dB-Hz / 7500 Hz
+stream carrier, both admitted Audio 50 ms and 10 ms priors retain 1 of 1 fully observed initial
+batches for a one-bit observation; this is a real whole-batch plateau in the
+model. Known unsteered simulation uses its original bank; hardware retains every
+possible peer steering lane. Entering a small GPS duration alone earns no CPU
+discount. A future selector could compare direct matching of a small qualified
+start set against FFT work, but this candidate adds no such production selector.
 This is not a measured native acquisition speedup; see [timing conditions](clock-sync.md).
+
+Automatic Live FFT estimates distinguish the initial epoch radius (default six
+seconds, 13 epochs) from each receiver's ±7-second start scan and from the fresh
+epochs admitted at each subsequent observed UTC second. Newly admitted cohorts
+are charged constructor/template setup, mixing and full/retained FFT work over
+a bounded unconfirmed lifetime. Retention must finish both the original start
+scan and the physical prefix/symbol retirement condition; a small prior never
+shortens these compatibility conditions. The initial cohort remains charged for
+the full observation. See [simulation estimates](simulation-estimates.md) for the
+cadence/lifetime assumptions, constant-time count envelope and reproduction.
+This correction prevents a static per-epoch batch cap from hiding long-observation
+acquisition cost. It does not model all synchronized/noise tracks, retries or
+peak resident-bank memory, and compact rolling-admission cost remains unmodeled.
+The CPU reference and initial workspace fit therefore do not certify total
+receiver throughput or peak Live memory.
 
 Outer DSSS changes actual fine-chip/sample geometry and template work. The
 current matched-template fallback is included in the work model; there is no
@@ -345,3 +368,52 @@ measures complete three-bit receptions against the frozen preceding optimized
 receiver. The supplied1200x10 case reduces total CPU from1.389 to0.284s for13s PCM
 (three pairs;48-byte retained-state increase). This is one key/epoch bank; it is
 not a full Live acquisition or broader sensitivity qualification.
+
+
+## Hardware AES and whole-receiver cost
+
+Private pattern and DSSS streams use OpenSSL AES-256-CTR. OpenSSL selects hardware
+AES through CPU capability dispatch when available; this local Ryzen 5 PRO 5650U /
+OpenSSL 3.5.7 build has AES-NI and VAES enabled. The application already receives
+that acceleration. See [OpenSSL capability dispatch](https://docs.openssl.org/3.5/man3/OPENSSL_ia32cap/).
+
+On 9 October, paired frozen-receiver runs selectively disabled only AES-NI/VAES,
+using identical original PCM, synthetic keys and all the same search parameters.
+Each case has three ABBA blocks, twelve fresh processes, CPU-0 affinity and a
+30-second limit per process; no runs timed out. Other cooperative CPU work was
+stopped, but desktop activity/governor were not disabled. These are one-key/epoch
+qualified banks with five oscillator/clock pairs and the actual seven-second
+start allowance, not the entire rolling Live bank.
+
+| Case | Accelerated mean CPU | AES disabled mean CPU | Disabled / accelerated CPU, descriptive 95% interval |
+| --- | ---: | ---: | ---: |
+| Rate 10, DSSS 1000, 40 ksample/s, one bit + absence in 60 s PCM | 10.1864 s | 10.7762 s | 1.0574 [0.9935, 1.1255] |
+| Rate 1200, DSSS 10, 48 ksample/s, 16 bits + absence in 12 s PCM | 0.30970 s | 0.31390 s | 1.0135 [0.9821, 1.0459] |
+
+The intervals use three log block-mean ratios and Student-t with two degrees of
+freedom. Both include one: these captures do not resolve a small total-receiver
+benefit, and do not prove zero effect. The 512-byte `Crypto::stream` refill microbench
+has a 1.259× ratio [1.216, 1.303]; at 64 KiB it is 9.414× [7.616, 11.636]. Each
+includes per-call HKDF/EVP setup. Bulk AES speed is therefore not a receiver speedup
+prediction. FFTs, template construction, pulse processing and searches still cost
+CPU. Dispatch is supported by the controlled capability test and throughput, not
+an instruction trace.
+
+All paired runs preserve accepted-bit events, selected aggregate candidate scores,
+work counters, exact PCM identity and physical-completion assertions. Total receiver
+timing includes construction, push, polls/finish/drain and destruction; generation,
+loading and initial configuration/OpenSSL startup are excluded. The latest case
+retains 35,863,482 bytes inside its diagnostic 64 MiB workspace, with approximately
+55 MB process RSS including PCM. Its nonempty event arrives 13.283 seconds of media
+after that one bit's end; offline computation time is not hardware acquisition
+latency. No new frontend, waveform, receiver optimization or detection-sensitivity
+claim follows from this experiment.
+
+The complete local report and raw paired results are retained in
+`.agent-work/artifacts/receiver-aes-benchmark-20261009/report.md`, `summary7.json`
+and evidence manifest SHA256
+`5c04b72cd80f1b5de0ae7e0590aa157fd1218445cea306acaefc3bb5b13d4671`.
+Frozen source is `1e016a0dffe033c36fc71afad5241d16dc8957e5`, library SHA256
+`66b59da08a5a8444a54bada79a79358bb3b345bb30895702ca6eb1580685ab97`.
+Earlier six-second diagnostic results remain separate. Full Live throughput,
+weak-signal/detection curves and overall optimization qualification remain open.

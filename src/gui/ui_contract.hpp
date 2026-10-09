@@ -156,7 +156,13 @@ struct FieldState {
     // Zero requests nothing; consuming a revision preserves caret and selection.
     std::uint64_t text_history_revision = 0;
     TextTone text_tone = TextTone::normal;
+    // Presentation only: a disabled editor may show a current effective value
+    // without changing the configured text or the choice/label display_text.
+    std::string disabled_text;
 };
+inline const std::string& editor_text(const FieldState& state,bool enabled) {
+    return !enabled&&!state.disabled_text.empty()?state.disabled_text:state.text;
+}
 // A newly reported backend error must be visible on this poll, even while a
 // temporary operation notice is holding ordinary status updates off screen.
 inline void publish_backend_status(FieldState& field,std::string_view status,

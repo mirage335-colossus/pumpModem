@@ -33,6 +33,16 @@ limiter. DSSS does not abruptly switch an already-shaped envelope. Finite pulses
 burst boundaries and limiting still produce spectral tails; ideal RRC support
 is not an emission mask or a guarantee of negligible radio-filtering loss.
 
+The unit-magnitude outer chips retain the inner chip's power envelope. At inner
+Rate 10 Hz, that envelope can persist for 0.2 seconds. Adding independent random
+outer amplitudes does not remove it: conditional mean power remains proportional
+to the inner power, and the extra amplitude variation can increase peak clipping.
+The 9 October spectrum investigation isolated substantial spectral regrowth in
+the existing final limiter, especially in high-amplitude intervals. This is an
+unresolved waveform limitation; the current shaping must not be advertised as
+a sharp measured emission mask. See the quantitative
+[spectrum follow-up](dsss-followup-validation.md#amplitude-envelope-and-limiter-investigation).
+
 Selecting 10x, 100x or 1000x in the GUI sets a useful voice-passband starting
 point: inner Rate 360, 36 or 3.6 Hz respectively, with stream Carrier 1500 Hz
 (displayed absolute Carrier is Shift plus 1500 Hz). Explicit imported commands
@@ -90,7 +100,10 @@ This does not interpolate exact off-grid arrival time or let EOF, cancellation o
 Off and Fake are selectable. Genuine and IC-7100 hardware hopping remain disabled.
 Fake uses a dedicated FHSS stream/domain to illustrate a permutation of 200
 channels with 0.4-second dwell. During transmission, Carrier and Shift display
-the same hop delta. The transmitted audio and radio hardware do not hop.
+the same hop delta in their disabled editors, and the FHSS selector shows the
+current channel. The base values used by settings, launch commands and parameter
+lists remain unchanged, and return to view after transmission or cancellation.
+The transmitted audio and radio hardware do not hop.
 Simulation is changed only when Simulation is actually enabled.
 
 The Link Planner reserves the highest displayed carrier/shift frequency for its

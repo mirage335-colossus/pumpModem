@@ -43,6 +43,19 @@ void resolved_roles() {
           menu.options.size()==1&&menu.options[0].id=="entry",
         "A menu inherited the hidden first entry's presentation or field options");
 }
+void disabled_editor_text() {
+    ui::FieldState state;state.text="1500 Hz";state.display_text="choice label";
+    state.disabled_text="201.5 kHz";
+    check(ui::editor_text(state,false)=="201.5 kHz"&&ui::editor_text(state,true)=="1500 Hz",
+        "Disabled editor presentation escaped its enabled-state boundary");
+    state.disabled_text.clear();
+    check(ui::editor_text(state,false)=="1500 Hz"&&state.display_text=="choice label",
+        "Withdrawing an editor override changed its base text or label");
+    const auto disabled=resolve_binding(ui::Control{ui::Kind::text},{state,"Editor",false,true},{});
+    state.disabled_text="second hop";
+    check(ui::editor_text(disabled.control.state,disabled.enabled)=="second hop"&&state.text=="1500 Hz",
+        "Resolved disabled presentation did not retain authoritative configured text");
+}
 void retained_layout_and_bitmap() {
     BindingState retained;ui::ControlLayout geometry;geometry.frame=geometry.widget={0,0,100,30};
     check(retained.needs_layout(geometry,13),"Initial native geometry was treated as already applied");
@@ -85,6 +98,6 @@ void retained_desktop_layout() {
 }
 }
 int main() {
-    try {deferred_options();resolved_roles();retained_layout_and_bitmap();retained_desktop_layout();std::cout<<"Shared native binding presentation and retention passed\n";}
+    try {deferred_options();resolved_roles();disabled_editor_text();retained_layout_and_bitmap();retained_desktop_layout();std::cout<<"Shared native binding presentation and retention passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

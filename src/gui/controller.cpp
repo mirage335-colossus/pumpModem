@@ -627,9 +627,10 @@ struct Controller::Impl {
         input.channel.phase_noise_degrees_per_sqrt_second=effects.phase_noise_degrees_per_sqrt_second;
     }
     std::array<unsigned,200> fake_channels{};
+    std::string fake_hop_label;
     void fake_display(const live::Snapshot& next) {
         auto& carrier=f(UiField::carrier);auto& shift=f(UiField::rf_shift);
-        carrier.display_text.clear();shift.display_text.clear();
+        carrier.disabled_text.clear();shift.disabled_text.clear();fake_hop_label.clear();
         if(f(UiField::fhss).selected!="fake-0.4s-200"||!next.transmitting||next.simulation_receiving_tail)return;
         if(!snapshot.transmitting) {
             for(unsigned i=0;i<fake_channels.size();++i)fake_channels[i]=i;
@@ -646,8 +647,9 @@ struct Controller::Impl {
         }
         const auto slot=static_cast<std::size_t>(std::fmod(std::floor(std::max(0.,next.transmission_seconds)/.4),200.));
         const auto delta=fake_channels[slot]*fake_spacing(settings.transfer.modem);
-        carrier.display_text=frequency_text(frequency(carrier.text,"Carrier")+delta);
-        shift.display_text=frequency_text(frequency(shift.text,"Shift")+delta);
+        carrier.disabled_text=frequency_text(frequency(carrier.text,"Carrier")+delta);
+        shift.disabled_text=frequency_text(frequency(shift.text,"Shift")+delta);
+        fake_hop_label="Fake: hop "+std::to_string(fake_channels[slot]+1)+" / 200, 0.4s, display only";
     }
     void configure(bool match_receive_target=false,bool match_carrier=false,
                    std::optional<UiField> align_target=std::nullopt,
@@ -1321,7 +1323,8 @@ struct Controller::Impl {
         f(UiField::exclusive).enabled=!busy&&audio_controls::exclusive_supported();
         const bool simulation=f(UiField::simulation).selected=="yes";
         f(UiField::live_duplex).enabled=!busy&&!simulation;
-        f(UiField::fhss).display_text=f(UiField::fhss).selected=="fake-0.4s-200"?"Fake: 0.4s / 200, display only":"";
+        f(UiField::fhss).display_text=f(UiField::fhss).selected=="fake-0.4s-200"?
+            (fake_hop_label.empty()?"Fake: 0.4s / 200, display only":fake_hop_label):"";
         for(auto id:{UiField::link_power,UiField::link_loss,UiField::link_noise})f(id).visible=true;
         f(UiField::simulation_cpu_time).visible=f(UiField::simulation_gpu_time).visible=simulation;
         f(UiField::simulation_confidence).visible=true;

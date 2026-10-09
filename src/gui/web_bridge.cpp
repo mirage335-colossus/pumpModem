@@ -200,6 +200,7 @@ struct Bridge::Impl {
            <<",\"submitCtrlEnter\":"<<(app.submit_gesture(c,true,false)?"true":"false")
            <<",\"tabNavigation\":"<<(c.tab_navigation?"true":"false")
            <<",\"text\":"<<json_string(s.text)<<",\"displayText\":"<<json_string(s.display_text)
+           <<",\"disabledText\":"<<json_string(s.disabled_text)
            <<",\"selected\":"<<json_string(s.selected)<<",\"checked\":"<<(s.checked?"true":"false")
            <<",\"tone\":"<<static_cast<int>(s.text_tone)<<",\"history\":"<<identifier(s.text_history_revision)
            <<",\"cursorEnd\":"<<identifier(s.text_cursor_end_revision)

@@ -1057,6 +1057,167 @@ void clock_dsss_reference() {
     near(sampled.receiver_cpu_seconds,without_clock.receiver_cpu_seconds,
         "tight clock fields must not invent simulated timing-bank work");
 }
+void rolling_fft_epoch_workload() {
+    transfer::Options options;
+    options.modem=tuning::resolve(10,40,tuning::PatternMode::auto_keystream,true,7500,1000).config;
+    options.key.emplace(Bytes(32,0x5d));options.search_seconds=6;
+    options.dsp_workspace_bytes=std::size_t{1024}*1024*1024;
+    modem::OscillatorSearchConfig oscillator;oscillator.lf={.0001,.5};oscillator.rf={.0001,.005};
+    oscillator.rf_shift_hz=1000000;oscillator.margin=3;options.modem.oscillator_search=oscillator;
+    const auto original=modem::oscillator_pattern_search(options.modem);
+    check(options.modem.sample_rate==40000&&modem::pattern_chip_samples(options.modem)==8&&
+          modem::symbol_sample_count(options.modem)==512000&&original.hypotheses.size()==3,
+          "rate10 DSSS1000 reproducer must preserve its exact waveform and original oscillator bank");
+    const simulation::ReceiverTimingModel metadata{.005,0,1./options.modem.sample_rate};
+    const auto estimate=[&](const transfer::Options& current,const transfer::Estimate& draft,
+                            simulation::ReceiverWorkMode mode,
+                            simulation::ReceiverTimingModel timing=simulation::ReceiverTimingModel{.005,0,1./40000}) {
+        return simulation::estimate(draft,current,true,clean_channel(),{},1,false,100,4096,mode,timing);
+    };
+    const auto draft=wire(1,options.modem);
+    const auto ordinary=estimate(options,draft,simulation::ReceiverWorkMode::hardware_fallback,metadata);
+    options.clock_sync=clock_sync::Policy{.001,.001,0};options.audio_timing_error_seconds=.05;
+    const auto expanded=modem::oscillator_pattern_search(options.modem,modem::utc_transmit_rate_limit(options.modem));
+    check(expanded.hypotheses.size()==5,"UTC must preserve the original three lanes and its two correction endpoints");
+    for(const auto& pair:original.hypotheses)
+        check(std::any_of(expanded.hypotheses.begin(),expanded.hypotheses.end(),[&](const auto& candidate) {
+            return candidate.frequency_offset_hz==pair.frequency_offset_hz&&candidate.clock_error_ppm==pair.clock_error_ppm;
+        }),"UTC union dropped an original oscillator frequency/clock endpoint");
+    const auto one=estimate(options,draft,simulation::ReceiverWorkMode::hardware_timing_model,metadata);
+    check(one.receiver_workspace_supported&&one.timing_window_modeled&&one.epoch_hypotheses==13&&
+          one.frequency_rate_hypotheses==5&&one.fft_acquisition_batches==1&&one.fft_retained_acquisition_batches==1,
+          "one-bit GPS reproducer must expose the initial13 epoch and1/1 whole-FFT-batch plateau");
+    check(one.new_epoch_admissions>0&&one.new_epoch_full_fft_batches>0&&
+          one.new_epoch_retained_fft_batches<=one.new_epoch_full_fft_batches&&
+          one.new_epoch_frontend_seconds>0&&one.new_epoch_setup_seconds>0,
+          "automatic Live work must charge new epochs, constructors and their input processing");
+    check(one.receiver_work_assumptions.find("initial FFT acquisition batches retained 1 / 1")!=std::string::npos&&
+          one.receiver_work_assumptions.find("newly admitted epochs")!=std::string::npos,
+          "rendered engineering diagnostic must distinguish initial and rolling FFT work");
+    check(ordinary.frequency_rate_hypotheses==3&&ordinary.new_epoch_admissions>0&&
+          one.frequency_rate_hypotheses>ordinary.frequency_rate_hypotheses,
+          "default clock and qualified GPS work must retain their different actual oscillator domains");
+    options.audio_timing_error_seconds=.01;
+    const auto narrower=estimate(options,draft,simulation::ReceiverWorkMode::hardware_timing_model,metadata);
+    check(narrower.timing_window_modeled&&narrower.fft_acquisition_batches==1&&
+          narrower.fft_retained_acquisition_batches==1,"Audio10ms cannot invent a saved overlapping initial FFT batch");
+    near(narrower.receiver_cpu_seconds,one.receiver_cpu_seconds,
+         "Audio50ms and10ms must preserve the actual whole-batch CPU plateau for this one-bit geometry");
+    auto over_budget=metadata;over_budget.capture_error_seconds=.02;
+    const auto unsupported=estimate(options,draft,simulation::ReceiverWorkMode::hardware_timing_model,over_budget);
+    const auto fallback=estimate(options,draft,simulation::ReceiverWorkMode::hardware_fallback,over_budget);
+    check(!unsupported.timing_window_modeled&&unsupported.frequency_rate_hypotheses==5&&
+          unsupported.timing_hypotheses==fallback.timing_hypotheses,
+          "capture metadata outside Audioerror must retain all UTC lanes and full timing coverage");
+    near(unsupported.receiver_cpu_seconds,fallback.receiver_cpu_seconds,
+         "over-budget timing must use the full arrival-window work fallback");
+
+    // The plotted CPU marker is per bit. Separately test extended observation
+    // with a fixed one-bit desired stream: only acquisition horizon changes.
+    auto long_draft=wire(70,options.modem);long_draft.wire_bits=1;
+    const auto longer=estimate(options,long_draft,simulation::ReceiverWorkMode::hardware_timing_model,metadata);
+    auto twice=wire(140,options.modem);twice.wire_bits=1;
+    const auto doubled=estimate(options,twice,simulation::ReceiverWorkMode::hardware_timing_model,metadata);
+    check(longer.fft_retained_acquisition_batches==doubled.fft_retained_acquisition_batches&&
+          longer.fft_retained_acquisition_batches<longer.fft_acquisition_batches&&
+          doubled.new_epoch_admissions>1.8*longer.new_epoch_admissions&&
+          doubled.new_epoch_retained_fft_batches>1.5*longer.new_epoch_retained_fft_batches&&
+          doubled.receiver_search_seconds>1.5*longer.receiver_search_seconds&&
+          doubled.receiver_search_seconds<2.5*longer.receiver_search_seconds,
+          "static per-epoch prior cap must not hide continuing, lifetime-capped Live acquisition work");
+
+    // Independent explicit birth/batch enumeration, including first-pass and
+    // hop endpoints. The model's affine envelope can exceed integer totals.
+    const long double fs=options.modem.sample_rate,bin=modem::pattern_projection_bin_samples(options.modem,expanded.frequency.half_width_hz);
+    const auto symbol=modem::symbol_sample_count(options.modem);
+    auto minimum_rate=1.L;
+    for(const auto& pair:expanded.hypotheses)
+        minimum_rate=std::min(minimum_rate,1+static_cast<long double>(pair.clock_error_ppm)*1e-6L);
+    const auto length=std::ceil(symbol/(minimum_rate*bin));
+    const auto transform=std::exp2(std::ceil(std::log2(2*std::ceil(symbol/bin))));
+    const auto hop=transform-length+1,first=(length+hop-1)*bin/fs,hop_seconds=hop*bin/fs;
+    const auto upper=(2.L*options.search_seconds+1)*fs;
+    long double complete_scan=first,next_start=hop*bin;
+    while(next_start<=upper){complete_scan+=hop_seconds;next_start+=hop*bin;}
+    const auto prefix=(modem::training_sample_count(options.modem)+modem::pattern_pulse_padding_samples(options.modem))/fs;
+    const auto lifetime=std::max(complete_scan,prefix+symbol/fs+2*options.search_seconds+1)+2;
+    for(const auto pass:{0,1})for(const auto side:{-1,1}) {
+        auto edge=draft;
+        const auto desired=first+pass*hop_seconds+side/fs;
+        edge.total_seconds+=static_cast<double>(desired-one.simulated_seconds);
+        const auto measured=estimate(options,edge,simulation::ReceiverWorkMode::hardware_timing_model,metadata);
+        check(measured.fft_acquisition_batches==pass+(side>0?1:0),
+              "hardware FFT work counted a partial/unobserved batch or omitted a complete one");
+    }
+    for(const auto offset:{-1.L,0.L,1.L,fs/4}) {
+        auto edge=draft;
+        const auto desired=first+hop_seconds+offset/fs;
+        // The API includes physical absence/lookahead. Adjust only this test's
+        // supplied waveform duration to select the desired observation horizon.
+        edge.total_seconds+=static_cast<double>(desired-one.simulated_seconds);
+        const auto measured=estimate(options,edge,simulation::ReceiverWorkMode::hardware_timing_model,metadata);
+        for(const auto phase:{0.L,.25L,.99L}) {
+            long double exact=0;
+            for(auto birth=phase;birth<measured.simulated_seconds;birth+=1)
+                for(auto batch=first;batch<=lifetime&&batch<=measured.simulated_seconds-birth;batch+=hop_seconds)++exact;
+            check(measured.new_epoch_full_fft_batches+1e-9>=exact,
+                  "fresh FFT work envelope undercounted an explicit fractional-birth acquisition batch");
+        }
+    }
+    // Capture clocks need not advance at exactly one UTC second per nominal
+    // sample second. Enumerate births at the fastest admitted cadence and
+    // retirement at the slowest admitted rate, including a nonzero interval.
+    for(const auto ppm:{-100.L,100.L})for(const auto uncertainty:{0.L,25e-6L}) {
+        const auto slope=1+ppm*1e-6L;
+        const auto slow=std::min(1.L,slope-uncertainty);
+        const auto fast=std::max(1.L,slope+uncertainty);
+        const auto retirement=std::max(complete_scan,
+            (prefix+symbol/fs+2*options.search_seconds+1)/slow)+2/slow;
+        auto clocked=metadata;
+        clocked.capture_seconds_per_frame=static_cast<double>(slope/fs);
+        clocked.capture_rate_uncertainty_fraction=static_cast<double>(uncertainty);
+        for(const auto horizon:{first-1/fs,first+1/fs,first+hop_seconds+1/fs,150.L}) {
+            auto edge=draft;
+            edge.total_seconds+=static_cast<double>(horizon-one.simulated_seconds);
+            const auto measured=estimate(options,edge,simulation::ReceiverWorkMode::hardware_timing_model,clocked);
+            for(const auto phase:{0.L,.25L,.99L}) {
+                long double births=0,batches=0;
+                for(auto birth=phase/fast;birth<measured.simulated_seconds;birth+=1/fast) {
+                    ++births;
+                    for(auto batch=first;batch<=retirement&&batch<=measured.simulated_seconds-birth;batch+=hop_seconds)
+                        ++batches;
+                }
+                check(measured.new_epoch_admissions>=births&&
+                      measured.new_epoch_full_fft_batches+1e-9>=batches,
+                      "fresh FFT envelope undercounted nonnominal capture cadence or uncertain retirement");
+            }
+        }
+    }
+    auto early=draft;early.total_seconds+=static_cast<double>(first-one.simulated_seconds-.5L);
+    const auto newborns=estimate(options,early,simulation::ReceiverWorkMode::hardware_timing_model,metadata);
+    check(newborns.new_epoch_full_fft_batches==0&&newborns.new_epoch_admissions>0&&
+          newborns.new_epoch_frontend_seconds>0&&newborns.new_epoch_setup_seconds>0,
+          "epochs too new for a full FFT still require constructors and input processing");
+    auto fixed=options;fixed.timestamp=1800000000;
+    const auto anchored=estimate(fixed,draft,simulation::ReceiverWorkMode::hardware_timing_model,metadata);
+    const auto simulated=estimate(options,draft,simulation::ReceiverWorkMode::sampled_simulation,metadata);
+    check(anchored.new_epoch_admissions==0&&anchored.new_epoch_frontend_seconds==0&&
+          simulated.new_epoch_admissions==0&&simulated.frequency_rate_hypotheses==3,
+          "fixed epoch and known sampled simulation must not invent automatic hardware epoch refresh");
+
+    auto illustrated=options;
+    illustrated.modem.oscillator_search->rf_shift_hz=20900000; // Fake 0.4s/200,100kHz spacing.
+    const auto hop_bank=modem::oscillator_pattern_search(illustrated.modem,modem::utc_transmit_rate_limit(illustrated.modem));
+    const auto hypothetical=estimate(illustrated,draft,simulation::ReceiverWorkMode::hardware_timing_model,metadata);
+    check(hypothetical.frequency_rate_hypotheses==hop_bank.hypotheses.size()&&
+          hypothetical.requested_carrier_search_half_width_hz>one.requested_carrier_search_half_width_hz&&
+          hypothetical.clock_search_half_width_ppm==one.clock_search_half_width_ppm,
+          "Fake FHSS highest illustrated RF must change oscillator frequency coverage without changing audio clock geometry");
+    near(one.requested_carrier_search_half_width_hz,expanded.frequency.requested_half_width_hz,
+         "actual fixed hardware RF coverage must use its1MHz Shift, separately from Fake hopping");
+    near(hypothetical.requested_carrier_search_half_width_hz,hop_bank.frequency.requested_half_width_hz,
+         "hypothetical Fake FHSS must retain highest20.9MHz Shift oscillator boundary");
+}
 void compact_clock_prior_workload() {
     transfer::Options options;options.key.emplace(Bytes(32,0x24));
     options.modem.sample_rate=6000;options.modem.carrier_hz=1500;options.modem.bandwidth_hz=100;
@@ -1476,8 +1637,11 @@ int main(int argc,char** argv) {
     try {
         advisory_cancellation();
         if(argc==2&&std::string(argv[1])=="--cancellation-only") {std::cout<<"advisory cancellation tests passed\n";return 0;}
+        if(argc==2&&std::string(argv[1])=="--rolling-epochs-only") {
+            rolling_fft_epoch_workload();std::cout<<"rolling FFT epoch work tests passed\n";return 0;
+        }
         if(argc==2&&std::string(argv[1])=="--utc-only") {
-            utc_bank_estimate();clock_dsss_reference();compact_clock_prior_workload();std::cout<<"UTC bank estimate tests passed\n";return 0;
+            utc_bank_estimate();clock_dsss_reference();rolling_fft_epoch_workload();compact_clock_prior_workload();std::cout<<"UTC bank estimate tests passed\n";return 0;
         }
         if(argc==2&&std::string(argv[1])=="--affine-work-only") {
             bounded_affine_rf_workload();affine_coefficient_workload();projected_pattern_workload();
@@ -1486,7 +1650,7 @@ int main(int argc,char** argv) {
         if(argc==2&&std::string(argv[1])=="--partial-only") {
             partial_compact_probability();std::cout<<"partial simulation estimate tests passed\n";return 0;
         }
-        utc_bank_estimate();clock_dsss_reference();compact_clock_prior_workload();probability_and_framing();workload_and_impairments();receiver_cpu_budget();received_processing_budget();whole_symbol_phase_coherence();partial_compact_probability();differential_model_limits();drift_receiver_estimate();receiver_statistic_controls();raw_sample_probability_geometry();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
+        utc_bank_estimate();clock_dsss_reference();rolling_fft_epoch_workload();compact_clock_prior_workload();probability_and_framing();workload_and_impairments();receiver_cpu_budget();received_processing_budget();whole_symbol_phase_coherence();partial_compact_probability();differential_model_limits();drift_receiver_estimate();receiver_statistic_controls();raw_sample_probability_geometry();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
         coupled_and_independent_clock_estimates();streamed_template_workload();target_and_channel_are_independent();oscillator_policy_geometry();nearby_shift_workload();equivalent_receive_profiles();affine_coefficient_workload();projected_pattern_workload();
         std::cout<<"simulation estimate tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"simulation estimate tests failed: "<<error.what()<<'\n';return 1;}

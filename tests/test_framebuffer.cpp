@@ -156,6 +156,29 @@ const ui::Control& declaration(ui::Field field) {
     for(const auto& value:ui::console_screen())if(value.field==field)return value;
     throw std::runtime_error("Missing framebuffer test declaration");
 }
+void disabled_editor_presentation() {
+    Application app({});auto control=declaration(ui::Field::carrier);
+    // Keep receiver polling independent of the generic editor fixture.
+    control.field=ui::Field::developer_mode;control.scope=ui::ScreenScope::shared;control.label="Effective value";
+    control.placement={20,40,0,0,300,30};
+    auto& state=const_cast<ui::FieldState&>(app.field(control.field));const auto saved=state;
+    state.text="1500 Hz";state.display_text="choice label";state.disabled_text="201.5 kHz";state.enabled=false;
+    ui::OverlayDefinition overlay;overlay.controls={control};app.show_overlay(std::move(overlay));
+    framebuffer::Session session(app);const surface::Viewport viewport{1200,1048,{6,18}};
+    const auto refresh=[&]{session.resize(viewport);session.tick();};
+    const auto displayed=[&](std::string_view value,bool enabled) {
+        return std::any_of(session.scene().primitives.begin(),session.scene().primitives.end(),[&](const auto& p){
+            return p.kind==surface::Primitive::Kind::text&&p.text==value&&p.enabled==enabled;});
+    };
+    refresh();require(displayed("201.5 kHz",false),"Framebuffer disabled editor did not display its effective value");
+    surface::Event event;event.type=surface::Event::Type::text;event.text="unwanted edit";session.input(event);
+    require(state.text=="1500 Hz"&&state.display_text=="choice label","Framebuffer presentation changed configured values");
+    state.disabled_text="301.5 kHz";refresh();require(displayed("301.5 kHz",false),"Framebuffer ignored a subsequent disabled value");
+    state.enabled=true;refresh();require(displayed("1500 Hz",true),"Framebuffer enabled editor retained its presentation override");
+    state.enabled=false;state.disabled_text.clear();refresh();
+    require(displayed("1500 Hz",false)&&state.text=="1500 Hz","Framebuffer withdrawing presentation did not restore configured text");
+    state=saved;app.close();
+}
 void send(framebuffer::Session& session,surface::Event event){session.input(event);session.tick();}
 void click(framebuffer::Session& session,int x,int y,surface::Event::Type type=surface::Event::Type::pointer) {
     surface::Event event;event.type=type;event.x=x;event.y=y;send(session,std::move(event));
@@ -451,6 +474,6 @@ void mfd_operating_subset() {
 
 }
 int main() {
-    try{render_and_lifetime();clipping_and_mono();growing_waterfall();copy_formats();glyphs();widget_raster();pixel_interaction();pixel_presets();minimal_embedding();overlay_focus_policy();popup_live_options();overlay_keyboard_scope();dropdown_chrome();mfd_tuning_and_pages();mfd_default_size();mfd_input_and_modality();mfd_three_buttons();mfd_operating_subset();std::cout<<"Framebuffer pixel, damage, ownership, clipping, format, interaction and MFD checks passed\n";return 0;}
+    try{render_and_lifetime();clipping_and_mono();growing_waterfall();copy_formats();glyphs();widget_raster();disabled_editor_presentation();pixel_interaction();pixel_presets();minimal_embedding();overlay_focus_policy();popup_live_options();overlay_keyboard_scope();dropdown_chrome();mfd_tuning_and_pages();mfd_default_size();mfd_input_and_modality();mfd_three_buttons();mfd_operating_subset();std::cout<<"Framebuffer pixel, damage, ownership, clipping, format, interaction and MFD checks passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

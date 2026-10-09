@@ -13,6 +13,33 @@
 
 namespace {
 void require(bool value,const char* message) {if(!value)throw std::runtime_error(message);}
+void NativeApp::verify_disabled_editor_presentation() {
+    application.select(ui::Field::fast_mode,"robust");
+    const auto found=std::find_if(bindings.begin(),bindings.end(),[](const auto& b){return b->control->field==ui::Field::carrier;});
+    require(found!=bindings.end()&&(*found)->input,"FLTK carrier editor missing");
+    auto& b=**found;auto& state=const_cast<ui::FieldState&>(application.field(ui::Field::carrier));
+    const auto saved=state;const auto revision=application.revision();
+    const auto present=[&]{apply_binding(b,binding_presentation(application,*b.control,b.menu_items,window->w(),window->h(),b.declarations));};
+    state.text="1500 Hz";state.display_text="choice label";state.disabled_text="201.5 kHz";state.enabled=false;present();
+    require(std::string_view(b.input->value())=="201.5 kHz"&&!b.input->active_r(),
+        "FLTK disabled editor did not display its effective value");
+    b.input->do_callback();
+    require(state.text=="1500 Hz"&&state.display_text=="choice label"&&application.revision()==revision,
+        "FLTK disabled presentation generated an edit or changed configured values");
+    b.input->value("stale native text");b.input->synchronize();
+    require(std::string_view(b.input->value())=="201.5 kHz","FLTK synchronization discarded disabled presentation");
+    state.disabled_text="301.5 kHz";present();
+    require(std::string_view(b.input->value())=="301.5 kHz","FLTK ignored a subsequent disabled value");
+    state.enabled=true;present();
+    require(std::string_view(b.input->value())=="1500 Hz","FLTK enabled editor retained its presentation override");
+    state.enabled=false;state.disabled_text.clear();present();
+    require(std::string_view(b.input->value())=="1500 Hz"&&application.revision()==revision,
+        "FLTK withdrawing presentation did not restore configured text silently");
+    state=saved;present();
+}
+void disabled_editor_presentation() {
+    Launch launch;launch.simulation=true;NativeApp app(launch);app.verify_disabled_editor_presentation();
+}
 NativeWindow* application_window() {
     // first_window() is event ordered, not the application's main window. A
     // tooltip or other native surface can become first during Fl::check().
@@ -1699,6 +1726,9 @@ void clipboard() {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc==2&&std::string_view(argv[1])=="--disabled-text") {
+            theme::apply_palette();disabled_editor_presentation();return 0;
+        }
         if(argc==2&&std::string_view(argv[1])=="--estimate-colors") {
             theme::apply_palette();estimate_warning_colors();return 0;
         }
@@ -1721,6 +1751,7 @@ int main(int argc,char** argv) {
             Probe{"palette_roles",palette_roles},Probe{"estimate_warning_colors",estimate_warning_colors},
             Probe{"menus",menus},Probe{"generic_gestures_and_bitmaps",generic_gestures_and_bitmaps},
             Probe{"editor_cursor_requests",editor_cursor_requests},Probe{"editor_history_requests",editor_history_requests},
+            Probe{"disabled_editor_presentation",disabled_editor_presentation},
             Probe{"editors_and_records",editors_and_records},Probe{"clipboard",clipboard},
             Probe{"clipboard_shortcuts",clipboard_shortcuts},Probe{"prompts",prompts},
             Probe{"fast_mode_visibility",fast_mode_visibility},Probe{"developer_mode_visibility",developer_mode_visibility},

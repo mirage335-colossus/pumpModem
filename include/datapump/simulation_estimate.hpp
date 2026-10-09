@@ -138,9 +138,19 @@ struct Estimate {
     std::size_t timing_phase_groups = 1;
     ReceiverWorkMode receiver_work_mode = ReceiverWorkMode::sampled_simulation;
     bool timing_window_modeled = false;
-    // Per-bank acquisition workload over this observation, before/after the
-    // conservative arrival-prior envelope. Not threshold hypothesis counts.
+    // Per epoch in the INITIAL cohort, before/after the conservative arrival
+    // envelope. These are work counts, never threshold hypothesis counts.
     double fft_acquisition_batches = 0, fft_retained_acquisition_batches = 0;
+    // Automatic hardware FFT acquisition additionally admits fresh epochs.
+    // Counts are conservative totals per key/profile over the observation,
+    // separate from epoch_hypotheses (the initial cohort). Fixed timestamps,
+    // sampled simulation and compact references have no added FFT cohort here.
+    double new_epoch_admissions = 0;
+    double new_epoch_full_fft_batches = 0, new_epoch_retained_fft_batches = 0;
+    // Included in frontend/total cost. Constructor allowance covers zeroing and
+    // any initial template transforms; fresh batch work includes all later FFTs.
+    // These are engineering allowances, not measured execution or RAM bounds.
+    double new_epoch_frontend_seconds = 0, new_epoch_setup_seconds = 0;
     std::string receiver_work_assumptions;
     // Same configured peer oscillator bank with the complete arrival window.
     // This is a separate engineering fallback, never omitted search coverage.

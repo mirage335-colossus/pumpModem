@@ -26,6 +26,34 @@ std::uint64_t id(const std::string& json,const std::string& label) {
 web::Event event(const web::Bridge& bridge,web::EventKind kind,std::uint64_t target,std::uint64_t sequence) {
     web::Event value;value.generation=bridge.generation();value.sequence=sequence;value.kind=kind;value.target=target;return value;
 }
+void disabled_editor_presentation() {
+    Application app({});app.select(ui::Field::fast_mode,"robust");web::Bridge bridge(app);
+    auto& state=const_cast<ui::FieldState&>(app.field(ui::Field::carrier));const auto saved=state;
+    state.text="1500 Hz";state.display_text="choice label";state.disabled_text="201.5 kHz \"hop\"";state.enabled=false;
+    auto snapshot=bridge.snapshot(1200,1048);const auto carrier=id(snapshot,"Carrier");
+    const auto object=[&](const std::string& json) {
+        const auto begin=json.find("{\"id\":\""+std::to_string(carrier)+"\"");
+        check(begin!=std::string::npos,"Carrier target disappeared");
+        return json.substr(begin,json.find(",\"options\":",begin)-begin);
+    };
+    const auto fields=object(snapshot);
+    check(fields.find("\"enabled\":false")!=std::string::npos&&
+          fields.find("\"text\":\"1500 Hz\",\"displayText\":\"choice label\",\"disabledText\":\"201.5 kHz \\\"hop\\\"\"")!=std::string::npos,
+        "Web serialization confused configured text, labels and escaped disabled presentation");
+    const auto revision=app.revision();auto edit=event(bridge,web::EventKind::edit,carrier,1);edit.value="unwanted edit";
+    check(!bridge.accept(edit).accepted&&state.text=="1500 Hz"&&app.revision()==revision,
+        "Disabled web editor accepted an edit or changed configured text");
+    const auto generation=bridge.generation();state.disabled_text="301.5 kHz";snapshot=bridge.snapshot(1200,1048);
+    check(bridge.generation()==generation&&object(snapshot).find("\"disabledText\":\"301.5 kHz\"")!=std::string::npos,
+        "A new disabled presentation was lost or unnecessarily withdrew web identity");
+    state.enabled=true;snapshot=bridge.snapshot(1200,1048);
+    check(object(snapshot).find("\"enabled\":true")!=std::string::npos&&state.text=="1500 Hz",
+        "Restoring web editor availability changed configured text");
+    state.enabled=false;state.disabled_text.clear();snapshot=bridge.snapshot(1200,1048);
+    check(object(snapshot).find("\"disabledText\":\"\"")!=std::string::npos&&state.text=="1500 Hz",
+        "Withdrawing web presentation did not preserve configured text");
+    state=saved;app.close();
+}
 void pixel_runs() {
     using web::detail::rgb_runs;
     check(rgb_runs({1,2,3}).empty(),"One pixel must use raw fallback");
@@ -241,7 +269,7 @@ void measured_document_geometry() {
 int main(int argc,char** argv) {
     try {
         if(argc==2&&std::string(argv[1])=="--snapshot") {Application app({});web::Bridge bridge(app);std::cout<<bridge.snapshot(360,640);app.close();return 0;}
-        pixel_runs();bitmap_history();envelopes_and_edits();layers_and_services();document_withdrawal();service_completion_routing();shared_submit_policy();shared_geometry_and_stable_snapshots();measured_document_geometry();
+        pixel_runs();bitmap_history();disabled_editor_presentation();envelopes_and_edits();layers_and_services();document_withdrawal();service_completion_routing();shared_submit_policy();shared_geometry_and_stable_snapshots();measured_document_geometry();
         std::cout<<"web bridge envelopes, literal text, declarations, generations, layers and services passed\n";return 0;
     } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

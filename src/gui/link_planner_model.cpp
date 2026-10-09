@@ -784,6 +784,11 @@ Model build(const Inputs& inputs,Cache& cache,std::stop_token stop,const std::fu
         result.timing_hypotheses=single_receiver.timing_hypotheses;
         result.timing_phase_groups=single_receiver.timing_phase_groups;
         result.timing_window_modeled=single_receiver.timing_window_modeled;
+        result.initial_fft_acquisition_batches=single_receiver.fft_acquisition_batches;
+        result.initial_fft_retained_acquisition_batches=single_receiver.fft_retained_acquisition_batches;
+        result.new_epoch_admissions=single_receiver.new_epoch_admissions;
+        result.new_epoch_full_fft_batches=single_receiver.new_epoch_full_fft_batches;
+        result.new_epoch_retained_fft_batches=single_receiver.new_epoch_retained_fft_batches;
         result.receiver_work_assumptions=single_receiver.receiver_work_assumptions;
         result.fallback_cpu_realtime_ratio=single_receiver.simulated_seconds>0?
             single_receiver.fallback_receiver_cpu_seconds/single_receiver.simulated_seconds:0;

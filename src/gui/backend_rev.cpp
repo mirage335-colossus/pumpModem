@@ -1257,7 +1257,7 @@ public:
             }
             if(b.editor){b.editor->limit=b.control.byte_limit;b.editor->read_only=b.control.read_only;
                 b.editor->scroll_content=b.control.multiline&&(b.control.document_only||b.control.read_only||b.control.follow_tail);
-                b.editor->apply(value.text,value.text_cursor_end_revision,value.text_history_revision);b.editor->editable=view.enabled&&!b.control.read_only;b.editor->setDisabled(!view.enabled);}
+                b.editor->apply(ui::editor_text(value,view.enabled),value.text_cursor_end_revision,value.text_history_revision);b.editor->editable=view.enabled&&!b.control.read_only;b.editor->setDisabled(!view.enabled);}
             if(b.presentation.update_options(view.options)) {
                 for(auto* menu:{b.choice,b.suggestions,b.menu})if(menu) {
                     menu->params.options.clear();

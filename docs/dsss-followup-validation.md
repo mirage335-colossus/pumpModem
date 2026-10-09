@@ -357,3 +357,71 @@ raw-reference sensitivity; unsupported/enhanced guard paths, strong factor 1
 structured-null behavior and arbitrary off-grid physical-end geometry. Long
 reproduction full-symbol/full-message CPU and sensitivity remain unmeasured.
 The user explicitly requested this bounded manual checkpoint before that stage.
+
+
+## Amplitude envelope and limiter investigation
+
+The later 9 October investigation used source `1e016a0dffe033c36fc71afad5241d16dc8957e5`
+and frozen library SHA256 `66b59da08a5a8444a54bada79a79358bb3b345bb30895702ca6eb1580685ab97`.
+It changes no transmitter or receiver waveform. These are deterministic digital
+spectral measurements, not sensitivity curves, acoustic tests or emission-mask
+qualification.
+
+All three cases use 40 ksample/s, carrier 7500 Hz, nominal outer bandwidth
+10 kHz, eight samples per fine chip, 64 inner chips per bit, and 38.4 seconds
+of payload. Factor 1/10/1000 uses inner Rate 10000/1000/10 Hz and
+3000/300/3 bits respectively, repeating `001`. Synthetic spreading seed byte
+`i` is `3*i+7`, DSSS seed byte `i` is `13*i+29`, epoch 1789312671, phase zero.
+Actual `PatternTransmitter` includes live surrounding noise. An instrumented
+source copy exposes its pre-limiter complex samples and reproduces every actual
+limited output float byte-for-byte, including training, padding and suppression.
+Comparisons isolate the limiter on identical samples within each case; comparisons
+across factors are not sensitivity evidence.
+
+The ideal RRC support is 4375–10625 Hz. The guarded OOB metric integrates real
+spectral power below 4175 Hz or above 10825 Hz, using 40 ms Hann windows with
+10 ms hops. It excludes a 200 Hz transition allowance at each edge. Overlapping
+windows do not establish independent trials or a confidence interval.
+
+| Factor | Limiter occupancy | Complex energy removed | Linear guarded OOB | Limited guarded OOB |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 3.635% | 1.858% | −48.20 dBc | −33.72 dBc |
+| 10 | 5.112% | 4.664% | −48.21 dBc | −29.38 dBc |
+| 1000 | 3.826% | 3.976% | −48.19 dBc | −30.14 dBc |
+
+For factor 1000, an inner coefficient persists for 0.2 seconds. In the eight
+coarse intervals with coefficient power above 3, limiter occupancy is 51.71%.
+Interior windows, excluding eight fine chips at either boundary, have guarded
+OOB −48.06 dBc before limiting and −22.95 dBc afterward: **25.1 dB regrowth**.
+The 38 intervals below coefficient power 0.25 show no limiting and unchanged
+−48.23 dBc. The longer held amplitude therefore produces repeated clipping inside
+an interval, not just a transition at its boundary.
+
+Actual 40→48 ksample/s fixed resampling, or adjustable resampling with fractional
+start 0.37 and constant +100 ppm, changes aggregate OOB by less than 0.06 dB.
+Unity-gain int16 clipping/quantization has similarly small impact in these
+captures. This excludes varying feedback correction, device underruns, analog
+clipping and radio processing; audible clicks remain unmeasured.
+
+Diagnostic pre-limiter backoff of 3.0103/6.0206 dB yields −45.15/−48.19 dBc
+for factor 1000, but reduces digital transmit power by 2.838/5.844 dB relative
+to the current limited waveform. That is not a negligible-power fix. Post-limiter
+volume reduction cannot undo distortion already introduced. The normalized
+squared correlation of the saved linear and limited real payloads is 0.9963493
+(0.01588 dB ideal coherent mismatch); this is **not** measured additional required
+C/N0, and excludes covariance, acquisition and false-accept behavior.
+
+No waveform change is shipped from this investigation. Independent outer random
+gain retains conditional mean power proportional to the inner coefficient and
+can increase the fourth moment and clipping. Radius-quantile or byte whitening
+before the Gaussian mapper could change the held envelope, but requires a new
+versioned waveform/domain, matched templates and sensitivity/false-accept tests.
+A naive implementation also moves Gaussian mapping from once per inner chip to
+once per fine chip and increases outer-stream bytes substantially. Neither its
+low CPU cost nor loss below 0.1 dB has been established.
+
+Local reproducible probes, CSVs, PCM and stage analyses are retained in
+`.agent-work/artifacts/receiver-envelope-20261009/REPORT.md` and its manifest
+SHA256 `19dadd8c1710b82da1d7af19f5954def44de5eb0bdd3cb2a2d1fe53bbce5bfc8`.
+The report records exact compiler commands and hashes. This measured limiter
+limitation remains open at the manual-testing checkpoint.

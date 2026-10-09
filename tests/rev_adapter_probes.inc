@@ -801,6 +801,26 @@
             throw std::runtime_error("Rev closing retained a native dialog or queued platform request");
     }
     void verify_editor_contract() {
+        const auto previous_mode=application.field(ui::Field::fast_mode).selected;
+        application.select(ui::Field::fast_mode,"robust");
+        bool carrier_checked=false;
+        for(auto& binding:bindings)if(binding.control.field==ui::Field::carrier&&binding.editor) {
+            auto& state=const_cast<ui::FieldState&>(application.field(ui::Field::carrier));const auto saved=state;
+            const auto revision=application.revision();auto& editor=*binding.editor;
+            state.text="1500 Hz";state.display_text="choice label";state.disabled_text="201.5 kHz";state.enabled=false;apply();
+            if(editor.content.get()!="201.5 kHz"||editor.editable||state.text!="1500 Hz"||state.display_text!="choice label"||application.revision()!=revision)
+                throw std::runtime_error("Rev smoke: disabled editor presentation changed configured values or emitted an edit");
+            state.disabled_text="301.5 kHz";apply();
+            if(editor.content.get()!="301.5 kHz")throw std::runtime_error("Rev smoke: subsequent disabled value was not displayed");
+            state.enabled=true;apply();
+            if(editor.content.get()!="1500 Hz")throw std::runtime_error("Rev smoke: enabled editor retained its presentation override");
+            state.enabled=false;state.disabled_text.clear();apply();
+            if(editor.content.get()!="1500 Hz"||application.revision()!=revision)
+                throw std::runtime_error("Rev smoke: withdrawing disabled presentation did not restore configured text silently");
+            state=saved;apply();carrier_checked=true;break;
+        }
+        if(!carrier_checked)throw std::runtime_error("Rev smoke: carrier editor missing");
+        application.select(ui::Field::fast_mode,previous_mode);apply();
         for(auto& binding:bindings)if(binding.control.kind==ui::Kind::text&&binding.control.multiline&&binding.editor) {
             const auto field=binding.control.field;auto& editor=*binding.editor;
             const auto saved=application.field(field).text;

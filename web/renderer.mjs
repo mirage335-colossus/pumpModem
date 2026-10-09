@@ -175,12 +175,17 @@ export class Renderer {
         if(c.kind==='text') {
             view.input.readOnly=Boolean(c.readOnly);
             const pending=BigInt(view.pending||'0')>BigInt(this.lastSnapshot.ack);
-            if(!view.composing&&!pending&&view.input.value!==c.text) {
+            const overridden=!enabled&&Boolean(c.disabledText);
+            const shownText=overridden?c.disabledText:c.text;
+            // A disabled presentation is authoritative even while an earlier
+            // edit is awaiting acknowledgment. Restore the base on withdrawal.
+            if((overridden||view.presentationOverride||(!view.composing&&!pending))&&view.input.value!==shownText) {
                 const start=view.input.selectionStart,end=view.input.selectionEnd,scroll=view.input.scrollTop;
-                view.input.value=c.text;
-                if(this.doc.activeElement===view.input)view.input.setSelectionRange(Math.min(start,c.text.length),Math.min(end,c.text.length));
+                view.input.value=shownText;
+                if(this.doc.activeElement===view.input)view.input.setSelectionRange(Math.min(start,shownText.length),Math.min(end,shownText.length));
                 view.input.scrollTop=scroll;
             }
+            view.presentationOverride=overridden;
             if(c.cursorEnd!=='0'&&c.cursorEnd!==view.cursorEnd&&!view.composing) {
                 view.input.setSelectionRange(view.input.value.length,view.input.value.length);view.cursorEnd=c.cursorEnd;
             }

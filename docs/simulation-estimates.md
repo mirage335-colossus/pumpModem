@@ -98,11 +98,62 @@ Ingestion, active-track continuation and original detection trial charges remain
 unchanged. Unsupported timing/FFT geometry retains full scanning. Both paths
 report the full-window fallback separately. No timing-count discount is
 applied to the full preflight workspace reservation. These are engineering work
-estimates, not measured throughput or running-bank telemetry. The coherent
+estimates, not measured throughput or running-bank telemetry.
+
+Automatic hardware FFT acquisition also creates a fresh epoch bank at each
+observed UTC second. The initial epoch radius is six seconds by default: this
+means **13 initial epochs**, not a six-second total timing window. Each receiver
+has a separate start scan of ±(`search_seconds` + 1) seconds. Compute estimates
+now retain the initial-cohort allowance and add the new acquisition cohorts over
+the full observation, including constructors, template setup, input mixing and
+all retained input/template/inverse FFT batches. Epochs which have not yet
+observed one full FFT batch still incur setup and ingestion. The displayed
+initial full/retained batch counts are separate from total new-epoch counts;
+none of these work counts changes detector trials or admission thresholds.
+
+For each newly admitted, unconfirmed receiver, the engineering lifetime is the
+later of the original start-scan completion and the legacy physical retirement
+time, with two extra UTC intervals for strict/integer refresh boundaries. It
+assumes monotonic capture UTC and normal hardware feeds with less than one second
+between refreshes. Capture-rate uncertainty expands both cadence and lifetime.
+A constant-time affine upper envelope prices the integer FFT batch sum, avoiding
+an observation-length loop in the GUI. The initial cohort remains charged over
+the whole observation. Fixed timestamps and known sampled simulation do not
+acquire these extra automatic hardware cohorts. Automatic compact rolling
+admissions remain **unmodeled**; the diagnostic says so explicitly.
+
+In the rate 10 Hz, target 40 dB-Hz, DSSS 1000×, 7500 Hz stream-carrier example,
+resolution gives 40000 samples/s, 8 samples/fine chip, 512000 samples/symbol
+(12.8 seconds), and a 262144-bin FFT with a 13.4144-second acquisition hop.
+A one-bit observation retains **1 of 1** fully observed initial FFT batches per epoch under both
+GPS 1 ms / region 1 ms / Audio 50 ms and Audio 10 ms, even with admitted 5 ms
+capture metadata. Hardware requires a complete FFT input window and never calls
+EOF finalization; the earlier three-batch allowance overcounted partial windows.
+Narrowing a prior which still overlaps the same whole batches
+does not reduce their compute work. With the declared independent GPSDO XO/OCXO
+models and 1 MHz Shift, the original three frequency/clock pairs become a
+five-pair UTC correction union, preserving every original endpoint. A 70-bit
+observation still has new epochs arriving throughout it; a static per-epoch
+retained-batch cap cannot make that work disappear. These figures are resolved
+geometry and model calculations, **not measured acquisition speed or latency**.
+Fake FHSS instead reserves its highest illustrated RF for planning: a 1 MHz base
+with 200 channels spaced 100 kHz uses a 20.9 MHz Shift bound, while its actual
+hardware audio remains at the fixed 1 MHz Shift. These oscillator domains must
+be compared separately.
+
+Workspace support continues to describe the initial bank reservation; it does
+not certify peak resident Live banks. Synchronized or accidental candidate tracks,
+reconstruction/admission retries, irregular refresh gaps, cross-bank scheduling
+and peak resident frontend/state memory are not fully modeled. The resulting
+CPU feasibility reference is not an upper bound on total receiver execution.
+The added acquisition allowances are source-derived; paired host measurements
+and broader runtime/platform qualification remain separate requirements.
+
+The coherent
 outer-code guard adds a conservative candidate-capacity allowance: bounded pulse
 accumulation for compact paths and an additional pass for retained FFT peaks and
 tracking windows. Actual retained-peak rates are data-dependent and uncalibrated.
-Timing-guide state is reserved separately. The model does not credit the affine
+Timing-guide state is allocated after admission rather than for every idle lane. The model does not credit the affine
 coefficient cache on an outer-guard path which cannot currently use it.
 
 Fake FHSS reserves its highest illustrated frequency for oscillator planning and

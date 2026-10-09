@@ -18,6 +18,7 @@
 #include <numbers>
 #include <numeric>
 #include <map>
+#include <sstream>
 
 namespace datapump::simulation {
 namespace {
@@ -215,7 +216,68 @@ struct Work {
     std::size_t phase_groups=1;
     bool timing_window_modeled=false;
     long double fft_acquisition_batches=0,fft_retained_acquisition_batches=0;
+    long double new_epoch_admissions=0,new_epoch_full_fft_batches=0,new_epoch_retained_fft_batches=0;
+    long double new_epoch_frontend_operations=0,new_epoch_setup_operations=0;
 };
+struct RollingFftWork {
+    long double admissions=0,first_batches=0,full_batches=0,input_samples=0;
+};
+// Automatic Live refresh adds one fresh epoch at each observed UTC second.
+// This prices the new acquisition cohorts, separately from the initial bank.
+// Keep the initial cohort's conservative full observation allowance; do not
+// interpret this as a whole-runtime bound (admitted/noise tracks can live longer).
+RollingFftWork rolling_fft_work(long double samples,std::uint32_t sample_rate,
+        long double bin,long double length,long double hop,long double initial_batch,
+        long double symbol_seconds,long double prefix_seconds,unsigned epoch_radius,
+        long double default_rate_uncertainty,const ReceiverTimingModel& timing_model) {
+    RollingFftWork result;
+    if(!(samples>0))return result;
+    const auto seconds=samples/sample_rate;
+    const auto slope=sample_rate*static_cast<long double>(
+        timing_model.capture_seconds_per_frame.value_or(1./sample_rate));
+    const auto uncertainty=static_cast<long double>(
+        timing_model.capture_rate_uncertainty_fraction.value_or(static_cast<double>(default_rate_uncertainty)));
+    const auto minimum_utc_rate=std::min(1.L,slope-uncertainty);
+    const auto maximum_utc_rate=std::max(1.L,slope+uncertainty);
+    if(!(minimum_utc_rate>0) || !std::isfinite(maximum_utc_rate))
+        throw Error("Automatic Live epoch-refresh work requires a finite positive capture-rate interval");
+    const auto cadence=1/maximum_utc_rate;
+    result.admissions=std::ceil(seconds/cadence);
+    const auto outward_floor=[](long double value) {
+        const auto allowance=64*std::numeric_limits<long double>::epsilon()*std::max(1.L,std::abs(value));
+        return std::floor(value+allowance);
+    };
+    const auto hop_seconds=hop*bin/sample_rate;
+    const auto first_pass=(length+initial_batch-1)*bin/sample_rate;
+    // New epochs enter no later than epoch-radius. The ORIGINAL legacy hint
+    // ends at epoch+radius+1, independently of a qualified arrival prior.
+    const auto last_start=(2.L*epoch_radius+1)*sample_rate/bin;
+    const auto passes=last_start<initial_batch?1.L:2+outward_floor((last_start-initial_batch)/hop);
+    const auto sampled_search_end=first_pass+(passes-1)*hop_seconds;
+    const auto retirement=(prefix_seconds+symbol_seconds+2.L*epoch_radius+1)/minimum_utc_rate;
+    // Two UTC intervals conservatively cover strict retirement and integer
+    // refresh boundaries. Hardware feeds are shorter than one UTC interval.
+    const auto lifetime=std::max(sampled_search_end,retirement)+2/minimum_utc_rate;
+    const auto lifetime_batches=1+outward_floor((lifetime-first_pass)/hop_seconds);
+    result.first_batches=std::clamp(outward_floor((samples-(length+initial_batch-1)*bin)/
+        (cadence*sample_rate))+1,0.L,result.admissions);
+    // Sum an upper affine envelope of each integer batch count, truncated by
+    // remaining input and the legacy lifetime. O(1), including hours-long input.
+    const auto ready=result.first_batches;
+    const auto surplus=ready*std::max(0.L,seconds-first_pass-cadence*(ready-1)/2);
+    result.full_batches=std::min(ready*lifetime_batches,
+        std::ceil(std::nextafter(ready+surplus/hop_seconds,std::numeric_limits<long double>::infinity())));
+    const auto capped=std::clamp(outward_floor((seconds-lifetime)/cadence)+1,0.L,result.admissions);
+    const auto remaining=result.admissions-capped;
+    const auto exposure=capped*lifetime+remaining*std::max(0.L,seconds-cadence*(capped+result.admissions-1)/2);
+    result.input_samples=std::nextafter(exposure*sample_rate+
+        64*std::numeric_limits<long double>::epsilon()*std::max(1.L,exposure*sample_rate),
+        std::numeric_limits<long double>::infinity());
+    if(!std::isfinite(result.admissions) || !std::isfinite(result.full_batches) ||
+       !std::isfinite(result.input_samples) || result.full_batches<ready)
+        throw Error("Automatic Live epoch-refresh work exceeds the finite FFT model");
+    return result;
+}
 Work receiver_work(const modem::Config& config,const SearchBank& bank,long double samples,
                    const transfer::Options& options,std::size_t profiles,std::size_t keys,
                    std::size_t established_stream_bits,double local_window_seconds,ReceiverWorkMode work_mode,
@@ -582,10 +644,11 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     } else {
         auto blocks=std::ceil(samples/(bin*hop));
         auto scored_starts=blocks*hop;
-        if(bounded_acquisition) {
+        if(bounded_acquisition || work_mode!=ReceiverWorkMode::sampled_simulation) {
             // Live input scores only fully observed windows. The first small
-            // batch follows one complete symbol; later batches use the fixed
-            // bounded hop without an EOF-triggered partial transform.
+            // batch (or the full short-FFT hop) follows one complete symbol;
+            // later batches use the fixed hop. Hardware never calls finish()
+            // and therefore cannot add EOF-triggered partial transforms.
             const auto observed_bins=std::floor(samples/bin);
             const auto first_batch_end=length+initial_batch-1;
             blocks=observed_bins<first_batch_end?0:1+std::floor((observed_bins-first_batch_end)/hop);
@@ -612,6 +675,33 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
             }
         }
         result.fft_retained_acquisition_batches=blocks;
+        long double first_batches=blocks>0?1.L:0.L;
+        if(private_pattern && !options.timestamp && work_mode!=ReceiverWorkMode::sampled_simulation) {
+            const auto prefix=static_cast<long double>(modem::training_sample_count(config)+
+                modem::pattern_pulse_padding_samples(config))/config.sample_rate;
+            const auto fresh=rolling_fft_work(samples,config.sample_rate,bin,length,hop,initial_batch,
+                static_cast<long double>(symbol)/config.sample_rate,prefix,options.search_seconds,
+                maximum_clock_ratio,timing_model);
+            result.new_epoch_admissions=fresh.admissions;
+            result.new_epoch_full_fft_batches=fresh.full_batches;
+            result.new_epoch_retained_fft_batches=fft_prior?
+                std::min(fresh.full_batches,fresh.first_batches*blocks):fresh.full_batches;
+            const auto fresh_starts=fft_prior?result.new_epoch_retained_fft_batches*hop:
+                fresh.first_batches*initial_batch+(fresh.full_batches-fresh.first_batches)*hop;
+            // Subsequent equations multiply by epochs*keys. Fresh cohort totals
+            // are per key/profile, so divide only by the initial epoch count.
+            blocks+=result.new_epoch_retained_fft_batches/epochs;
+            scored_starts+=fresh_starts/epochs;
+            if(!fft_prior)first_batches+=fresh.first_batches/epochs;
+            result.new_epoch_frontend_operations=fresh.input_samples*projection_operations_per_sample*keys;
+            // Constructor zero-initialization plus its initial template pair.
+            // Streamed rows construct no transforms; every later row generation,
+            // input FFT and inverse FFT is already priced by the added batches.
+            const auto setup=fft_core_bytes/sizeof(double)+(streamed_templates?0.L:
+                frequencies*(10*transform*fft_log+template_pair_work*length));
+            result.new_epoch_setup_operations=fresh.admissions*setup*keys;
+            result.serial+=result.new_epoch_frontend_operations+result.new_epoch_setup_operations;
+        }
         const auto jobs=frequencies*phase_groups*(private_pattern?4:1);
         if(result.outer_presence) {
             // Retained peaks are separated by half a symbol per carrier.
@@ -634,8 +724,8 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
             // also supplies the coherent dot; there is no fifth template FFT.
             // The input spectrum is still computed once per acquisition hop.
             // Tiny batches directly match their <=4 complete start windows.
-            const auto direct_blocks=blocks>0?(hop<=4?blocks:(initial_batch<=4?1.L:0.L)):0.L;
-            const auto direct_starts=hop<=4?scored_starts:(direct_blocks>0?initial_batch:0.L);
+            const auto direct_blocks=blocks>0?(hop<=4?blocks:(initial_batch<=4?first_batches:0.L)):0.L;
+            const auto direct_starts=hop<=4?scored_starts:direct_blocks*initial_batch;
             const auto transformed_blocks=blocks-direct_blocks;
             const auto fit_operations=sample_fit?tracking_real_pair_operations_per_bin:
                 tracking_pair_operations_per_bin;
@@ -651,8 +741,8 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         }
         if(differential_window) {
             const auto direct_limit=std::max(4.L,static_cast<long double>(differential_windows)*fft_log);
-            const auto direct_blocks=blocks>0?(hop<=direct_limit?blocks:(initial_batch<=direct_limit?1.L:0.L)):0.L;
-            const auto direct_starts=hop<=direct_limit?scored_starts:(direct_blocks>0?initial_batch:0.L);
+            const auto direct_blocks=blocks>0?(hop<=direct_limit?blocks:(initial_batch<=direct_limit?first_batches:0.L)):0.L;
+            const auto direct_starts=hop<=direct_limit?scored_starts:direct_blocks*initial_batch;
             const auto fit_operations=sample_fit?tracking_real_pair_operations_per_bin:
                 tracking_pair_operations_per_bin;
             // Each complete local window uses its own template transforms,
@@ -1052,11 +1142,37 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     result.timing_window_modeled=matching_work.timing_window_modeled;
     result.fft_acquisition_batches=static_cast<double>(matching_work.fft_acquisition_batches);
     result.fft_retained_acquisition_batches=static_cast<double>(matching_work.fft_retained_acquisition_batches);
+    result.new_epoch_admissions=static_cast<double>(matching_work.new_epoch_admissions);
+    result.new_epoch_full_fft_batches=static_cast<double>(matching_work.new_epoch_full_fft_batches);
+    result.new_epoch_retained_fft_batches=static_cast<double>(matching_work.new_epoch_retained_fft_batches);
+    result.new_epoch_frontend_seconds=finite_seconds(matching_work.new_epoch_frontend_operations/serial_operations_per_second);
+    result.new_epoch_setup_seconds=finite_seconds(matching_work.new_epoch_setup_operations/serial_operations_per_second);
     if(work_mode==ReceiverWorkMode::hardware_timing_model) {
         result.receiver_work_assumptions=matching_work.timing_window_modeled&&!matching_work.compact?
-            "FFT acquisition engineering upper bound: whole excluded batches skipped under selected GPS/audio bounds; all mixed batches, frontend, continuation and original threshold charges retained. Full-window fallback is reported separately":matching_work.timing_window_modeled?
+            "FFT acquisition work allowance: whole excluded batches skipped under selected GPS/audio bounds; all mixed batches, frontend, continuation and original threshold charges retained. Full-window fallback is reported separately":matching_work.timing_window_modeled?
             "Compact bank engineering reference: exact lattice count at a representative anchor under selected GPS/audio bounds and supplied capture metadata (nominal slope and full bank rate allowance when omitted). Full-window fallback is reported separately":
             "Full arrival-window bank; timing prior is unavailable for this backend or model geometry. Configured peer UTC correction lanes are retained";
+    }
+    if(!matching_work.compact) {
+        std::ostringstream diagnostic;
+        diagnostic<<(result.receiver_work_assumptions.empty()?"":"; ")<<"Initial epoch cohort: "<<result.epoch_hypotheses
+            <<"; initial FFT acquisition batches retained "<<result.fft_retained_acquisition_batches
+            <<" / "<<result.fft_acquisition_batches<<" per epoch";
+        if(result.new_epoch_admissions>0)
+            diagnostic<<"; Automatic Live refresh: up to "<<result.new_epoch_admissions
+                <<" newly admitted epochs per key/profile, with "<<result.new_epoch_retained_fft_batches
+                <<" / "<<result.new_epoch_full_fft_batches
+                <<" added retained/full FFT batches. Includes repeated constructor/template and input processing; "
+                <<"initial cohort remains conservatively charged over the whole observation. "
+                <<"Resident-bank RAM and extra candidate-track lifetimes are unqualified";
+        result.receiver_work_assumptions+=diagnostic.str();
+    }
+    if(!options.timestamp&&work_mode!=ReceiverWorkMode::sampled_simulation) {
+        if(matching_work.compact)
+            result.receiver_work_assumptions+="; Automatic Live compact rolling-admission work is not modeled";
+        result.receiver_work_assumptions+="; Workspace support covers the initial cohort, not peak resident Live banks. "
+            "Synchronized/noise tracks, reconstruction retries and irregular refresh gaps can add work; "
+            "this estimate is not a total runtime upper bound";
     }
     if(matching_work.outer_presence) {
         if(!result.receiver_work_assumptions.empty())result.receiver_work_assumptions+="; ";

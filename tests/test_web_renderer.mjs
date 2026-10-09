@@ -60,6 +60,30 @@ const replacement=renderer.views.get('1').input;assert.notEqual(input,replacemen
 const after=sent.length;input.value='stale unsafe';input.dispatch('compositionend');assert.equal(sent.length,after,'withdrawn editor callback restored old text');
 assert.equal(validText('\0',10),false);assert.equal(validText('é',1),false);assert.equal(validText('a\nb',10,false),false);
 assert.throws(()=>renderer.apply({...snapshot,version:2}));renderer.destroy();
+// Effective values belong only to disabled editor presentation. They neither
+// replace saved text nor emit edits, and cannot be hidden by a pending edit.
+{
+    const events=[],r=new Renderer(doc.root,e=>events.push(e));
+    const base={...control,multiline:false,text:'1500 Hz',displayText:'choice label',disabledText:'201.5 kHz'};
+    r.apply({...snapshot,controls:[base]});const view=r.views.get('1'),edit=view.input;
+    assert.equal(edit.value,'1500 Hz','Enabled editor used the disabled override');
+    edit.value='pending edit';edit.dispatch('input');edit.dispatch('compositionstart');
+    assert.equal(events.length,1);
+    r.apply({...snapshot,controls:[{...base,enabled:false}]});
+    assert.equal(edit.value,'201.5 kHz','Pending input hid disabled presentation');assert.equal(edit.disabled,true);
+    edit.dispatch('compositionend');edit.dispatch('input');
+    assert.equal(events.length,1,'Disabled presentation emitted an edit');
+    r.apply({...snapshot,controls:[{...base,enabled:false,disabledText:'301.5 kHz'}]});
+    assert.equal(edit.value,'301.5 kHz','Subsequent disabled value was ignored');assert.equal(base.text,'1500 Hz');
+    r.apply({...snapshot,controls:[base]});
+    assert.equal(edit.value,'1500 Hz','Enabled editor failed to restore base while an old edit remained unacknowledged');
+    r.apply({...snapshot,ack:'1',controls:[{...base,enabled:false,disabledText:''}]});
+    assert.equal(edit.value,'1500 Hz','Withdrawing disabled presentation failed to restore base');
+    r.apply({...snapshot,ack:'1',controls:[base],layers:{...snapshot.layers,enableBackground:false}});
+    assert.equal(edit.value,'201.5 kHz','Inherited disabled state did not use the presentation override');
+    r.apply({...snapshot,ack:'1',controls:[base]});assert.equal(edit.value,'1500 Hz');
+    assert.equal(events.length,1,'Applying or withdrawing presentation emitted input');r.destroy();
+}
 // Desktop coordinates and retained nodes are backend primitives. Repeated
 // unchanged polls must not interrupt focus, open choices or repaint bitmaps.
 let resized;const viewports=[],layoutEvents=[];

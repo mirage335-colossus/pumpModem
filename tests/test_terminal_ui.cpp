@@ -43,6 +43,23 @@ void show_overlay(Application& app,ui::OverlayDefinition overlay) {
     }
     app.show_overlay(std::move(overlay));
 }
+void disabled_editor_presentation() {
+    Application app({});auto control=declaration(ui::Field::carrier);
+    // This stable shared fixture is not overwritten by receiver polling.
+    control.field=ui::Field::developer_mode;control.scope=ui::ScreenScope::shared;control.label="Effective value";
+    auto& state=const_cast<ui::FieldState&>(app.field(control.field));const auto saved=state;
+    state.text="1500 Hz";state.display_text="choice label";state.disabled_text="201.5 kHz";state.enabled=false;
+    ui::OverlayDefinition overlay;overlay.controls={control};show_overlay(app,std::move(overlay));
+    terminal::Session session(app);const terminal::Viewport viewport{80,24,{1,1}};session.resize(viewport);
+    check(!find(session,"201.5 kHz").enabled,"Terminal disabled editor did not display its effective value");
+    session.input(input("unwanted edit"));
+    check(state.text=="1500 Hz"&&state.display_text=="choice label","Terminal presentation changed configured values");
+    state.disabled_text="301.5 kHz";session.resize(viewport);find(session,"301.5 kHz");
+    state.enabled=true;session.resize(viewport);find(session,"1500 Hz");
+    state.enabled=false;state.disabled_text.clear();session.resize(viewport);find(session,"1500 Hz");
+    check(state.text=="1500 Hz","Terminal withdrawing presentation changed configured text");
+    state=saved;app.close();
+}
 void shared_layout_changes() {
     Application app({});auto editor=declaration(ui::Field::fast_text);editor.label="Layout editor";editor.placement={16,18,0,0,300,72};
     auto toggle=declaration(ui::Field::developer_mode);toggle.label="Layout toggle";toggle.placement={350,18,0,0,200,27};
@@ -406,6 +423,6 @@ void path_dialog_policy() {
 }
 }
 int main() {
-    try {shared_record_layout();record_scrolling();shared_layout_changes();editing_and_security();editable_presets();focus_choices_and_scroll();focus_boundaries();incremental_page_scroll();document_resize_scroll();draft_submit_shortcuts();path_dialog_policy();plot_expansion();overlay_focus_policy();popup_binding_identity();empty_record_placeholder();std::cout<<"Terminal UI interaction checks passed\n";return 0;}
+    try {shared_record_layout();record_scrolling();shared_layout_changes();disabled_editor_presentation();editing_and_security();editable_presets();focus_choices_and_scroll();focus_boundaries();incremental_page_scroll();document_resize_scroll();draft_submit_shortcuts();path_dialog_policy();plot_expansion();overlay_focus_policy();popup_binding_identity();empty_record_placeholder();std::cout<<"Terminal UI interaction checks passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

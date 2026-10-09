@@ -1632,6 +1632,36 @@ void estimate_warning_thresholds() {
           contains_text(detailed,"Tone modes still transmit tones"),
           "Hidden details must explain both thresholds and the limits of the listening guideline");
 }
+void rolling_epoch_selected_plan_document() {
+    auto inputs=example();inputs.target_db_hz=40;inputs.mode=tuning::PatternMode::auto_keystream;
+    inputs.options.modem=tuning::resolve(10,40,inputs.mode,true,7500,1000).config;
+    inputs.options.key.emplace(Bytes(32,0x47));inputs.options.search_seconds=6;
+    inputs.options.dsp_workspace_bytes=std::size_t{1024}*1024*1024;
+    modem::OscillatorSearchConfig oscillator;oscillator.lf={.0001,.5};oscillator.rf={.0001,.005};
+    oscillator.margin=3;oscillator.rf_shift_hz=1000000;inputs.options.modem.oscillator_search=oscillator;
+    inputs.options.clock_sync=clock_sync::Policy{.001,.001,0};inputs.options.audio_timing_error_seconds=.05;
+    inputs.receiver_work_mode=simulation::ReceiverWorkMode::hardware_timing_model;
+    inputs.receiver_timing_model={.005,0,1./40000};
+    planner::Cache cache;std::stop_source stop;std::optional<planner::Model> selected;
+    bool cancelled=false;
+    try {planner::build(inputs,cache,stop.get_token(),[&](const auto& current) {
+        selected=current;stop.request_stop();
+    });}catch(const estimate_detail::Cancelled&){cancelled=true;}
+    check(cancelled&&selected&&selected->available&&selected->curves_calculating,
+          "rolling acquisition fixture must complete selected values before cancelling the unrelated curve sweep");
+    check(selected->frequency_rate_hypotheses==5&&selected->epoch_hypotheses==13&&
+          selected->initial_fft_acquisition_batches==1&&selected->initial_fft_retained_acquisition_batches==1&&
+          selected->new_epoch_admissions>0&&selected->new_epoch_full_fft_batches>0&&
+          selected->new_epoch_retained_fft_batches<=selected->new_epoch_full_fft_batches,
+          "planner lost initial versus fresh epoch/batch work diagnostics");
+    for(const auto width:{220.f,900.f}) {
+        const auto page=planner_page::build(*selected,width,true,false);
+        check(contains_text(page,"initial FFT acquisition batches retained 1 / 1")&&
+              contains_text(page,"newly admitted epochs per key/profile")&&
+              contains_text(page,"Resident-bank RAM")&&contains_text(page,"unqualified"),
+              "planner must render whole-batch plateau, rolling cost and unqualified resident-memory scope");
+    }
+}
 void conditional_reference_and_timing_work_document() {
     planner::Model model;model.inputs=example();model.available=true;
     model.clock_search_supported=model.receiver_workspace_supported=true;
@@ -1847,6 +1877,9 @@ int main(int argc,char** argv) {
         cancelled_planner_and_inspection();
         if(argc==2&&std::string_view(argv[1])=="--progressive-only") {selected_plan_progress_and_support_equivalence();std::cout<<"Progressive planner and support invariants passed\n";return 0;}
         if(argc==2&&std::string_view(argv[1])=="--cancellation-only") {std::cout<<"Planner and inspection cancellation passed\n";return 0;}
+        if(argc==2&&std::string_view(argv[1])=="--rolling-epochs-only") {
+            rolling_epoch_selected_plan_document();std::cout<<"Rolling FFT planner diagnostic passed\n";return 0;
+        }
         if(argc==2&&std::string_view(argv[1])=="--reference-document") {
             conditional_reference_and_timing_work_document();
             std::cout<<"Conditional RX reference and timing work document passed\n";return 0;
@@ -1865,7 +1898,7 @@ int main(int argc,char** argv) {
         selected_workspace_reaches_planner();
         shared_link_budget_without_simulation();shared_link_controls_visibility();
         link_budget_edit_buffers();link_budget_preset_and_dialog_sync();
-        receiver_overlay_and_cpu_status();estimate_warning_thresholds();conditional_reference_and_timing_work_document();document_semantics_layout_and_plots();
+        receiver_overlay_and_cpu_status();estimate_warning_thresholds();rolling_epoch_selected_plan_document();conditional_reference_and_timing_work_document();document_semantics_layout_and_plots();
         std::cout<<"Shared Link planner tests passed\n";
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

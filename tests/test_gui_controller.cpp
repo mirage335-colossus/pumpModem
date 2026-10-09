@@ -940,6 +940,48 @@ void noise_transmission_controls() {
     check(controller.enabled(C::acknowledge_key_failure),"Noise silently acknowledged a keyfile failure");
     controller.close();check(!controller.enabled(C::transmit_noise),"Closing left tuning noise available");
 }
+void fake_hop_display() {
+    using F=ui::Field;using C=ui::Command;
+    Controller controller({true,true});
+    controller.edit(F::rf_shift,"1 MHz");
+    controller.edit(F::carrier,"1.0015 MHz");
+    controller.select(F::fhss,"fake-0.4s-200");
+    const auto carrier=controller.field(F::carrier).text,shift=controller.field(F::rf_shift).text;
+    const auto base=controller.settings().transfer.modem.carrier_hz;
+    check(controller.enabled(C::transmit_noise),"Fake hopping fixture has invalid transmit geometry");
+    controller.start();controller.activate(C::transmit_noise);
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+    std::string first;bool changed=false;
+    while(std::chrono::steady_clock::now()<deadline&&!changed) {
+        controller.poll();
+        const auto& cf=controller.field(F::carrier);const auto& sf=controller.field(F::rf_shift);
+        if(!sf.disabled_text.empty()) {
+            check(!cf.enabled&&!sf.enabled&&cf.text==carrier&&sf.text==shift&&
+                  ui::editor_text(cf,cf.enabled)==cf.disabled_text&&ui::editor_text(sf,sf.enabled)==sf.disabled_text,
+                  "Fake FHSS did not expose hop frequencies in its disabled editors while preserving base settings");
+            const auto hop=launch_command::parse("--carrier '"+cf.disabled_text+"' --shift '"+sf.disabled_text+"'");
+            check(hop.carrier_hz&&hop.rf_shift_hz&&std::abs(*hop.carrier_hz-*hop.rf_shift_hz-base)<.01&&
+                  controller.field(F::fhss).display_text.find("Fake: hop ")!=std::string::npos,
+                  "Fake FHSS changed the audio carrier separation or hid its current hop");
+            const auto exported=launch_command::parse(controller.field(F::planner_command).text);
+            check(exported.carrier_hz&&exported.rf_shift_hz&&
+                  std::abs(*exported.carrier_hz-*exported.rf_shift_hz-base)<.01&&*exported.rf_shift_hz==1e6,
+                  "Fake FHSS overwrote the launch command's configured base frequencies");
+            if(first.empty())first=sf.disabled_text;else changed=first!=sf.disabled_text;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(changed,"Fake FHSS displayed no changing hop during continuous transmission");
+    controller.activate(C::cancel);
+    const auto stop=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+    do {controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));}
+    while(controller.snapshot().transmitting&&std::chrono::steady_clock::now()<stop);
+    check(!controller.snapshot().transmitting&&controller.field(F::carrier).disabled_text.empty()&&
+          controller.field(F::rf_shift).disabled_text.empty()&&controller.field(F::carrier).text==carrier&&
+          controller.field(F::rf_shift).text==shift&&controller.field(F::fhss).display_text.find("Fake: hop ")==std::string::npos,
+          "Ending fake FHSS did not restore the configured frequencies and idle label");
+    controller.close();
+}
 std::size_t check_pending_snapshot(Controller& controller) {
     using F=ui::Field;using C=ui::Command;
     // A poll can consume several updates for the same acquisition. Its newest
@@ -2804,6 +2846,7 @@ void bitmap_source_checks() {
 
 int main(int argc,char** argv) {
     try {
+        if(argc>1&&std::string_view(argv[1])=="--fake-hop-display") {fake_hop_display();std::cout<<"Fake hop display passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--airtime-cancellation") {airtime_and_close();std::cout<<"Airtime and cancellation checks passed\n";return 0;}
         airtime_and_close();
         receiver_health_indicator();
@@ -2839,6 +2882,7 @@ int main(int argc,char** argv) {
         profile_reference_display();
         mono_controls();
         noise_transmission_controls();
+        fake_hop_display();
         tone_mode_controls();
         tone_key_controls();
         composer_conveniences();
