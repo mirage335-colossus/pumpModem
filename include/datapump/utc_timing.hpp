@@ -86,7 +86,7 @@ struct EstimatedDeviceTiming {
     double maximum_prepare_seconds=120;
     void validate() const {
         if(!std::isfinite(variable_timestamp_error_seconds) || variable_timestamp_error_seconds<=0 ||
-           !std::isfinite(maximum_utc_error_seconds) || maximum_utc_error_seconds<=0 ||
+           !std::isfinite(maximum_utc_error_seconds) || maximum_utc_error_seconds<0 ||
            !std::isfinite(maximum_prepare_seconds) || maximum_prepare_seconds<=0)
             throw Error("invalid estimated audio timing model");
     }

@@ -235,6 +235,7 @@ struct Alsa {
     int (*free_hint)(void**)=nullptr;
     int (*wait)(PCM*,int)=nullptr;
     int (*delay)(PCM*,long*)=nullptr;
+    int (*state)(PCM*)=nullptr;
     int (*get_params)(PCM*,unsigned long*,unsigned long*)=nullptr;
     template<class T> void symbol(T& target,const char* name) {
         target=reinterpret_cast<T>(dlsym(library,name));
@@ -253,6 +254,7 @@ struct Alsa {
             // Optional for legacy providers/test doubles. Default audio keeps
             // working; UTC mode must reject a missing timing API explicitly.
             delay=reinterpret_cast<decltype(delay)>(dlsym(library,"snd_pcm_delay"));
+            state=reinterpret_cast<decltype(state)>(dlsym(library,"snd_pcm_state"));
             get_params=reinterpret_cast<decltype(get_params)>(dlsym(library,"snd_pcm_get_params"));
             drop=reinterpret_cast<decltype(drop)>(dlsym(library,"snd_pcm_drop"));
             prepare=reinterpret_cast<decltype(prepare)>(dlsym(library,"snd_pcm_prepare"));
@@ -361,6 +363,14 @@ struct Stream {
     }
     ~Stream(){if(pcm) api.close(pcm);}
 };
+// Keep driver return codes distinct from invalid timestamp/clock evidence.
+// Only a failure before format/source scheduling can become a timing fallback.
+struct DelayObservationFailure : Error {
+    DelayObservationFailure(int code,bool capture,std::uint64_t frames):Error(
+        "audio UTC delay observation failed ("+std::string(capture?"capture":"playback")+
+        ", ALSA "+std::to_string(code)+": "+std::error_code(-code,std::generic_category()).message()+
+        ", stream frames="+std::to_string(frames)+")"){}
+};
 class AlsaTimeline {
     Alsa& api_;
     Stream& stream_;
@@ -368,6 +378,7 @@ class AlsaTimeline {
     LinkRateTimeline rate_;
     std::optional<long double> rate_frame_;
     double allowance_=0,variable_allowance_=0;
+    bool observed_delay_=false;
     const Options* options_=nullptr;
 public:
     AlsaTimeline(Alsa& api,Stream& stream,const Options* options):api_(api),stream_(stream),timeline_(stream.hardware_rate),options_(options) {
@@ -400,28 +411,63 @@ public:
             rate_frame_=value.frame;
         }
     }
-    void observe(std::uint64_t frames,bool capture) {
+    void observe(std::uint64_t frames,bool capture,std::stop_token stop) {
+        check_cancelled(stop);
         if(options_ && options_->frame_timestamp) {
-            observe_timestamp(options_->frame_timestamp(frames,capture));
+            const auto value=options_->frame_timestamp(frames,capture);
+            check_cancelled(stop);
+            observe_timestamp(value);
             return;
         }
-        const auto before_steady=std::chrono::steady_clock::now();
-        const auto before=std::chrono::system_clock::now();
-        long delay=0;
-        if(api_.delay(stream_.pcm,&delay)<0)throw Error("audio UTC delay observation failed");
-        const auto after=std::chrono::system_clock::now();
-        const auto after_steady=std::chrono::steady_clock::now();
-        const auto utc0=std::chrono::duration<long double>(before.time_since_epoch()).count();
-        const auto utc1=std::chrono::duration<long double>(after.time_since_epoch()).count();
-        const auto steady0=std::chrono::duration<long double>(before_steady.time_since_epoch()).count();
-        const auto steady1=std::chrono::duration<long double>(after_steady.time_since_epoch()).count();
-        const auto bracket=static_cast<double>(std::max(utc1-utc0,steady1-steady0));
-        if(delay<0 || utc1<utc0 || bracket<0 || bracket>.05)throw Error("audio UTC timestamp continuity unavailable");
-        const auto frame=static_cast<long double>(frames)+(capture?delay:-static_cast<long double>(delay));
-        if(!capture && !timeline_.ready() && frame<=0)return; // DAC/codec preroll has not reached frame zero
-        if(frame<0)throw Error("audio UTC device position precedes stream origin");
-        observe_timestamp({frame,(utc0+utc1)/2,(steady0+steady1)/2,
-            allowance_+bracket/2+1./stream_.hardware_rate,bracket+1e-6,TimingQuality::estimated,0});
+        // Queries never alter PCM or recover/reset its clock. The PulseAudio
+        // ALSA plugin can map an initial PA_ERR_NODATA to EIO after prepare:
+        // stream readiness does not yet imply a latency update. Only a still
+        // PREPARED playback stream with no successful delay observation may
+        // wait briefly for that first update. It contains silence and has not
+        // started private output. RUNNING, capture and established timelines fail as
+        // before; neither queued samples nor the source callback are repeated.
+        const auto query_started=std::chrono::steady_clock::now();
+        bool awaiting_initial_delay=false;
+        for(unsigned attempt=0;;++attempt) {
+            check_cancelled(stop);
+            if(awaiting_initial_delay && std::chrono::steady_clock::now()-query_started>=std::chrono::milliseconds(20))
+                throw DelayObservationFailure(-EIO,capture,frames);
+            const auto before_steady=std::chrono::steady_clock::now();
+            const auto before=std::chrono::system_clock::now();
+            long delay=0;
+            const auto result=api_.delay(stream_.pcm,&delay);
+            const auto after=std::chrono::system_clock::now();
+            const auto after_steady=std::chrono::steady_clock::now();
+            check_cancelled(stop);
+            if(result<0) {
+                if((result==-EINTR || result==-EAGAIN) && attempt<3)continue;
+                constexpr int prepared_state=2; // SND_PCM_STATE_PREPARED ABI
+                if(result==-EIO && !capture && !observed_delay_ && api_.state && attempt<20 &&
+                   after_steady-query_started<std::chrono::milliseconds(20)) {
+                    const auto state=api_.state(stream_.pcm);
+                    check_cancelled(stop);
+                    if(state==prepared_state) {
+                        awaiting_initial_delay=true;
+                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                        continue;
+                    }
+                }
+                throw DelayObservationFailure(result,capture,frames);
+            }
+            observed_delay_=true;
+            const auto utc0=std::chrono::duration<long double>(before.time_since_epoch()).count();
+            const auto utc1=std::chrono::duration<long double>(after.time_since_epoch()).count();
+            const auto steady0=std::chrono::duration<long double>(before_steady.time_since_epoch()).count();
+            const auto steady1=std::chrono::duration<long double>(after_steady.time_since_epoch()).count();
+            const auto bracket=static_cast<double>(std::max(utc1-utc0,steady1-steady0));
+            if(delay<0 || utc1<utc0 || bracket<0 || bracket>.05)throw Error("audio UTC timestamp continuity unavailable");
+            const auto frame=static_cast<long double>(frames)+(capture?delay:-static_cast<long double>(delay));
+            if(!capture && !timeline_.ready() && frame<=0)return; // DAC/codec preroll has not reached frame zero
+            if(frame<0)throw Error("audio UTC device position precedes stream origin");
+            observe_timestamp({frame,(utc0+utc1)/2,(steady0+steady1)/2,
+                allowance_+bracket/2+1./stream_.hardware_rate,bracket+1e-6,TimingQuality::estimated,0});
+            return;
+        }
     }
 };
 }
@@ -454,6 +500,8 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
         const auto limit=std::min(options->maximum_utc_error_seconds,options->estimated_timing?
             options->estimated_timing->maximum_utc_error_seconds:options->maximum_utc_error_seconds);
         const auto floor=timing->allowance()+(options->frame_timestamp?0.:1./stream.hardware_rate);
+        if(limit==0)throw TimingPreflightUnavailable(floor,
+            "zero Audio error cannot be established by native audio; ordinary playback retains actual uncertainty/full search");
         if(!options->frame_timestamp && floor>limit)
             throw TimingPreflightUnavailable(floor,"provider timing uncertainty exceeds the requested Audio error; ordinary playback retains full search");
         if(options->estimated_timing && floor+options->estimated_timing->variable_timestamp_error_seconds>=limit)
@@ -664,11 +712,25 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
                 }
                 continue;
             }
-            if(n<0) {if(timed || ++failures>8 || api.recover(stream.pcm,static_cast<int>(n),1)<0) throw Error("audio playback failed; UTC continuity lost");}
+            if(n<0) {
+                if(timed || ++failures>8 || api.recover(stream.pcm,static_cast<int>(n),1)<0)
+                    throw Error("audio playback failed; UTC continuity lost");
+                if(options && options->playback_discontinuity && (n==-EPIPE || n==-ESTRPIPE))
+                    options->playback_discontinuity(n==-EPIPE?
+                        "Audio output underrun; transmitted PCM continuity lost":
+                        "Audio output restarted after suspend; transmitted PCM continuity unknown");
+            }
             else if(n==0 || static_cast<std::size_t>(n)>count-offset) throw Error("audio playback returned invalid sample count");
             else {offset+=static_cast<std::size_t>(n);accepted+=static_cast<std::size_t>(n);failures=0;}
         }
-        if(timed)timing->observe(accepted,false);
+        if(timed) {
+            try {timing->observe(accepted,false,stop);}
+            catch(const DelayObservationFailure& e) {
+                if(!reported)throw TimingPreflightUnavailable(timing->allowance(),
+                    std::string(e.what())+"; silence preparation before source scheduling");
+                throw Error(std::string(e.what())+"; source already scheduled, playback stopped without restart");
+            }
+        }
     }
     check_cancelled(stop);
     while(true) {
@@ -710,6 +772,12 @@ static void capture_device(std::uint32_t rate,const std::string& device,const Ca
             if(!options->allow_timing_fallback)throw;
             options->timing_status({false,options->maximum_utc_error_seconds,
                 std::numeric_limits<double>::infinity(),e.what()});timed=false;
+        }
+        if(timed && options->maximum_utc_error_seconds==0) {
+            if(!options->allow_timing_fallback)throw Error("zero Audio error cannot be established by native capture");
+            options->timing_status({false,0,timing->allowance(),
+                "zero Audio error cannot be established by native capture; actual uncertainty/full search retained"});
+            timed=false;
         }
         if(timed && options->allow_timing_fallback && !options->frame_timestamp &&
                 timing->allowance()+1./stream.hardware_rate>options->maximum_utc_error_seconds) {
@@ -762,7 +830,7 @@ static void capture_device(std::uint32_t rate,const std::string& device,const Ca
             if(monitor)monitor(std::span<const float>(converted.data(),static_cast<std::size_t>(n)),stream.hardware_rate);
             check_cancelled(stop);
             received+=static_cast<std::size_t>(n);
-            if(timed)timing->observe(received,true);
+            if(timed)timing->observe(received,true,stop);
             const auto keep=sink.write(std::span<const float>(converted.data(),static_cast<std::size_t>(n)),timed?&timing->timeline():nullptr);
             if(timed && !sink.timed()){timed=false;timing.reset();}
             if(!keep)break;

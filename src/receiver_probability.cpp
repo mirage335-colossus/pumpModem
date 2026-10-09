@@ -1,4 +1,5 @@
 #include "receiver_probability.hpp"
+#include "estimate_cancellation.hpp"
 #include "probability_random.hpp"
 #include "pattern_drift.hpp"
 #include "datapump/correlation_experiment.hpp"
@@ -188,7 +189,8 @@ std::array<double,2> scores(const std::array<Complex,4>& observations,double ene
         energy,p.section_dimensions,4,false);
     return {full,modem::detail::combine_drift_evidence(full,section,p.sections?4:1)};
 }
-ReceiverProbability calculate(const ReceiverProbabilityParameters& p) {
+ReceiverProbability calculate(const ReceiverProbabilityParameters& p,std::stop_token stop) {
+    estimate_detail::check(stop);
     if(!std::isfinite(p.signal_energy)||p.signal_energy<0 || !std::isfinite(p.noise_dimensions) ||
        p.noise_dimensions<16 || !std::isfinite(p.coherent_dimensions) || p.coherent_dimensions<=1 ||
        !std::isfinite(p.section_dimensions) || p.section_dimensions<=4 ||
@@ -223,6 +225,7 @@ ReceiverProbability calculate(const ReceiverProbabilityParameters& p) {
     // as an exact finite-bank receiver search in shared planner diagnostics.
     result.frequency_search_approximation=p.frequency_step_hz>0&&p.frequency_bin_min!=p.frequency_bin_max;
     for(std::size_t trial=0;trial<p.requested_trials;++trial) {
+        estimate_detail::check(stop);
         const auto& draw=random_draws()[trial];
         const auto phasors=phase.sample(draw);
         const auto timing_offset=p.timing_uncertainty_chips*.5*std::erfc(-draw[phase_draws+19]/std::sqrt(2.));
@@ -284,13 +287,15 @@ ReceiverProbability calculate(const ReceiverProbabilityParameters& p) {
     return result;
 }
 } // namespace
-ReceiverProbability receiver_probability(const ReceiverProbabilityParameters& p) {
+ReceiverProbability receiver_probability(const ReceiverProbabilityParameters& p,std::stop_token stop) {
+    estimate_detail::check(stop);
     // Repeated one-bit/current-draft estimates reuse exactly the same per-bit
     // probabilities. A tiny thread-local cache is independent of symbol size.
     struct Entry {ReceiverProbabilityParameters parameters;ReceiverProbability result;};
     thread_local std::vector<Entry> cache;
     for(const auto& entry:cache)if(entry.parameters==p)return entry.result;
-    auto result=(p.differential_windows||!p.real_atoms.empty())?differential_receiver_probability(p):calculate(p);
+    auto result=(p.differential_windows||!p.real_atoms.empty())?differential_receiver_probability(p,stop):calculate(p,stop);
+    estimate_detail::check(stop);
     // Rejected geometry can contain arbitrarily sized caller-owned vectors.
     // Do not copy those into the bounded cache merely to remember a cheap
     // coverage failure; only supported geometries have bounded model storage.

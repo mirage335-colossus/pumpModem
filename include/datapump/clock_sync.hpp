@@ -10,18 +10,18 @@
 #include <string_view>
 
 namespace datapump::clock_sync {
-inline constexpr double default_audio_error_seconds=.03;
+inline constexpr double default_audio_error_seconds=0;
 inline void validate_audio_error(double seconds) {
-    if(!std::isfinite(seconds) || seconds<=0 || seconds>60)
-        throw Error("Audio error must be greater than zero and at most 60 seconds");
+    if(!std::isfinite(seconds) || seconds<0 || seconds>60)
+        throw Error("Audio error must be between zero and 60 seconds");
 }
 // PC UTC synchronization, independent of RF/audio frequency references.
 // Accuracy is a worst-case bound at EACH station. Region is the total width
 // about the propagation offset, not a one-sided distance allowance.
 struct Policy {
     double accuracy_seconds = .001;
-    double region_seconds = .4;
-    double offset_seconds = 2.564;
+    double region_seconds = .001;
+    double offset_seconds = 0;
     bool operator==(const Policy&) const = default;
     double half_window_seconds() const { return 2 * accuracy_seconds + region_seconds / 2; }
 };

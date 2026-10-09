@@ -332,10 +332,14 @@ Node target_axis(const Chart& chart,float inner,float plot_width,float label_wid
 Node graph(const planner::Model& model, bool observer, float width) {
     auto n = card(width); n.padding = 8; const float inner = width - 2 * n.padding;
     paragraph(n, observer ? "Observer / receiver time" : "Time per bit", 14, Tone::text, true, 4);
-    paragraph(n, observer ? (model.observer_available ? ratio(model.observer_ratio) : "Outside model range") :
+    paragraph(n, observer ? (model.calculating ? "Updating observer estimate..." :
+        model.observer_available ? ratio(model.observer_ratio) : "Outside model range") :
         planner::duration(model.bit_seconds) + " per bit", 13,
         observer && (!model.observer_available || !std::isfinite(model.observer_ratio) || model.observer_ratio < 8) ?
             Tone::negative : Tone::accent, true, 6);
+    if(model.curves_calculating)paragraph(n,"Calculating graphs...",11,Tone::text,false,4);
+    if(observer && model.inputs.observer_hopping)
+        paragraph(n,"Full-spectrum capture · faster modeled observer",11,Tone::text,false,4);
     if(!observer) {
         const auto rx_available=model.one_bit_confidence_available||model.one_bit_reference_available;
         paragraph(n,"━ Bit time · left axis",11,Tone::accent,false,2);

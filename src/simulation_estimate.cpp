@@ -8,6 +8,7 @@
 #include "pattern_differential.hpp"
 #include "pattern_correlator_batch.hpp"
 #include "receiver_probability.hpp"
+#include "estimate_cancellation.hpp"
 #include "pattern_start_geometry.hpp"
 #include "datapump/correlation_experiment.hpp"
 #include <algorithm>
@@ -213,11 +214,13 @@ struct Work {
     long double epoch_hypotheses=1,timing_hypotheses=1,full_timing_hypotheses=1;
     std::size_t phase_groups=1;
     bool timing_window_modeled=false;
+    long double fft_acquisition_batches=0,fft_retained_acquisition_batches=0;
 };
 Work receiver_work(const modem::Config& config,const SearchBank& bank,long double samples,
                    const transfer::Options& options,std::size_t profiles,std::size_t keys,
                    std::size_t established_stream_bits,double local_window_seconds,ReceiverWorkMode work_mode,
-                   const ReceiverTimingModel& timing_model) {
+                   const ReceiverTimingModel& timing_model,std::stop_token stop) {
+    estimate_detail::check(stop);
     const auto symbol=modem::symbol_sample_count(config),chip=modem::pattern_chip_samples(config);
     const auto drift_sections=modem::detail::drift_section_count(config);
     const auto differential_window=config.pattern_symbols && config.spreading_mode==modem::SpreadingMode::pattern?
@@ -285,6 +288,7 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     if(config.oscillator_search) {
         long double lanes=0;
         for(const auto& hypothesis:bank.hypotheses) {
+                estimate_detail::check(stop);
             const auto rate=1+static_cast<long double>(hypothesis.clock_error_ppm)*1e-6L;
             lanes+=std::ceil(4.L*(options.search_seconds+1.L)*config.sample_rate*rate/chip)+1;
         }
@@ -296,11 +300,15 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     result.timing_hypotheses=starts*frequencies;result.phase_groups=static_cast<std::size_t>(phase_groups);
     result.full_timing_hypotheses=result.timing_hypotheses;
     auto search_starts=starts;
+    std::optional<modem::PatternStartWindow> fft_prior;
+    std::uint64_t fft_phase_upper=0;
     // The assumed hardware model narrows only a backend which actually
-    // enforces this prior. FFT retains its complete scan. The lattice count
+    // enforces this prior. Compact uses a lattice count; short FFT skips only
+    // complete excluded batches, retaining every mixed batch. The lattice count
     // uses a representative anchor with supplied capture metadata or explicit
     // selected bounds; it is not an actual running bank's hypothesis count.
-    if(correlator&&symbol>=60.L*config.sample_rate&&
+    if(((correlator&&symbol>=60.L*config.sample_rate)||
+        (!correlator&&!coupled&&symbol<16.L*config.sample_rate))&&
        work_mode==ReceiverWorkMode::hardware_timing_model&&options.clock_sync&&
        (!timing_model.capture_error_seconds||
         *timing_model.capture_error_seconds<=options.audio_timing_error_seconds)&&
@@ -321,9 +329,12 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         if(map&&map->origin_samples-map->half_width_samples>=0&&
            map->origin_samples+map->phase_scale*phase_upper+map->half_width_samples<=2*radius*config.sample_rate) {
             const modem::PatternStartWindow prior{map->origin_samples,map->phase_scale,map->half_width_samples};
+            if(!correlator) {fft_prior=prior;fft_phase_upper=phase_upper;}
+            else {
             std::map<double,std::optional<std::size_t>> count_by_rate;
             long double retained=0;std::size_t intersections=0;bool bounded=true;
             for(const auto& hypothesis:bank.hypotheses) {
+                estimate_detail::check(stop);
                 auto [entry,fresh]=count_by_rate.try_emplace(hypothesis.clock_error_ppm);
                 if(fresh) {
                     const auto rate=1+static_cast<long double>(hypothesis.clock_error_ppm)*1e-6L;
@@ -335,7 +346,12 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
                     // bank merely to obtain a planning number. Such cases
                     // retain the full-window engineering fallback.
                     if(checks>1000000-intersections){bounded=false;break;}
-                    intersections+=checks;entry->second=lattice.retained_origin_count();
+                    intersections+=checks;std::size_t count=0;
+                    for(auto i=range.first;i<range.second;++i) {
+                        if(i%256==0)estimate_detail::check(stop);
+                        if(lattice.retained_phases(i))++count;
+                    }
+                    entry->second=count;
                 }
                 retained+=*entry->second;
             }
@@ -343,6 +359,7 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
                 search_starts=retained/frequencies;
                 result.timing_hypotheses=retained;
                 result.timing_window_modeled=true;
+            }
             }
         }
     }
@@ -505,6 +522,7 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         } else if(result.pulse_projected) {
             long double lattice_cells=0,kernel_samples=0,kernel_upper_samples=0;
             for(const auto& hypothesis:bank.hypotheses) {
+                estimate_detail::check(stop);
                 const auto rate=1+static_cast<long double>(hypothesis.clock_error_ppm)*1e-6L;
                 const auto cells=3*std::ceil(samples*rate/chip);lattice_cells+=cells;
                 // Engineering estimate of changed-knot density: 256 finite
@@ -573,6 +591,27 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
             blocks=observed_bins<first_batch_end?0:1+std::floor((observed_bins-first_batch_end)/hop);
             scored_starts=blocks>0?initial_batch+(blocks-1)*hop:0;
         }
+        result.fft_acquisition_batches=blocks;
+        if(fft_prior && blocks>0) {
+            // Upper bound over every epoch alignment: fill all gaps between
+            // initial stream/phase groups, and retain edge-overlapping batches.
+            // The runtime uses the tighter per-group predicate. This changes
+            // acquisition only; ingestion, tracks and all trial charges remain.
+            const auto lower=fft_prior->epoch_origin_samples-fft_prior->half_width_samples;
+            const auto offset=3.L*symbol/.99L;
+            const auto upper=fft_prior->epoch_origin_samples+
+                fft_prior->phase_scale*fft_phase_upper+fft_prior->half_width_samples+offset;
+            const auto magnitude=std::max({1.L,std::abs(lower),std::abs(upper),samples,
+                std::abs(fft_prior->epoch_origin_samples),std::abs(offset),
+                std::abs(fft_prior->phase_scale*fft_phase_upper)});
+            if(std::isfinite(magnitude)&&magnitude<1e15L) {
+                const auto margin=2.5L*bin+64*std::numeric_limits<double>::epsilon()*magnitude;
+                const auto retained=std::min(blocks,std::ceil((upper-lower+2*margin+(hop-1)*bin)/(hop*bin))+1);
+                blocks=retained;scored_starts=std::min(scored_starts,retained*hop);
+                result.timing_window_modeled=true;
+            }
+        }
+        result.fft_retained_acquisition_batches=blocks;
         const auto jobs=frequencies*phase_groups*(private_pattern?4:1);
         if(result.outer_presence) {
             // Retained peaks are separated by half a symbol per carrier.
@@ -582,7 +621,8 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
                 (1+std::ceil(2*hop*bin/symbol))*frequencies);
             const auto pass=length*(template_pair_work+outer_operations_per_sample)+
                 std::ceil(static_cast<long double>(symbol)/chip)*outer_operations_per_chip;
-            result.serial+=blocks*peaks_per_block*pass*banks;
+            const auto guard_work=blocks*peaks_per_block*pass*banks;
+            result.serial+=guard_work;result.search_serial+=guard_work;
             result.tracking_serial+=result.tracking_windows*pass;
         }
         // Five real operations per complex FFT element per stage. Streamed
@@ -657,7 +697,8 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
 // Unsupported cases keep their timing/resource diagnostics without inventing
 // a reception percentage from a different detector.
 bool real_differential_statistics(const transfer::Options& options,std::uint64_t window,
-                                 detail::ReceiverProbabilityParameters& p,unsigned source_bit) {
+                                 detail::ReceiverProbabilityParameters& p,unsigned source_bit,std::stop_token stop) {
+    estimate_detail::check(stop);
     const auto& config=options.modem;
     const auto total=modem::symbol_sample_count(config),chip=modem::pattern_chip_samples(config);
     const auto step=modem::pattern_pulse_enabled(config)?std::max<std::uint64_t>(1,chip/16):chip;
@@ -685,6 +726,7 @@ bool real_differential_statistics(const transfer::Options& options,std::uint64_t
             modem::detail::drift_boundary(section+1,total,4)});
         detail::ReceiverProbabilityAtom atom;atom.first_sample=first;atom.samples=end-first;atom.section=section;
         for(auto at=first;at<end;) {
+            estimate_detail::check(stop);
             const auto until=std::min(end,(at/step+1)*step),count=until-at;
             const auto position=static_cast<double>(at)+(static_cast<double>(count)-1)/2;
             const auto index=static_cast<std::uint64_t>(position/chip);
@@ -726,7 +768,8 @@ bool real_differential_statistics(const transfer::Options& options,std::uint64_t
 }
 
 bool differential_statistics(const transfer::Options& options,const Work& work,
-                             std::uint64_t window,detail::ReceiverProbabilityParameters& p,unsigned source_bit=0) {
+                             std::uint64_t window,detail::ReceiverProbabilityParameters& p,unsigned source_bit,std::stop_token stop) {
+    estimate_detail::check(stop);
     const auto& config=options.modem;
     const auto total=modem::symbol_sample_count(config),chip=modem::pattern_chip_samples(config);
     const auto windows=total/window;
@@ -735,7 +778,7 @@ bool differential_statistics(const transfer::Options& options,const Work& work,
         // The old circular approximation has no representation of a tail or
         // a window crossing a drift boundary. Preserve it for aligned cases;
         // raw compact fits use the joint real-covariance atom model instead.
-        return work.compact&&real_differential_statistics(options,window,p,source_bit);
+        return work.compact&&real_differential_statistics(options,window,p,source_bit,stop);
     }
     // Private raw-bin FFT fits use a different trace-only legacy score scale;
     // the joint model currently supports compact raw fits or complex FFT bins.
@@ -768,6 +811,7 @@ bool differential_statistics(const transfer::Options& options,const Work& work,
     const auto amplitude=std::sqrt(2*modem::nominal_signal_power);
     double source_energy=0;
     for(std::uint64_t at=0;at<total;at+=step) {
+        if((at/step)%128==0)estimate_detail::check(stop);
         const auto position=static_cast<long double>(at)+(step-1)/2.L;
         const auto index=static_cast<std::uint64_t>(position/chip);
         const auto fraction=static_cast<double>(position/chip-index);
@@ -841,7 +885,8 @@ std::array<double,2> sampling_interval(double probability,std::size_t trials,dou
 Estimate estimate(const transfer::Estimate& transmission,const transfer::Options& options,bool raw_bits,
                   const modem::ChannelConfig& channel,std::span<const modem::Config> profiles,std::size_t keys,
                   bool compute_probability,double local_window_seconds,std::size_t probability_trials,
-                  ReceiverWorkMode work_mode,ReceiverTimingModel timing_model) {
+                  ReceiverWorkMode work_mode,ReceiverTimingModel timing_model,std::stop_token stop) {
+    estimate_detail::check(stop);
     modem::validate(options.modem);modem::validate_channel(options.modem,channel);
     if(!std::isfinite(transmission.total_seconds) || transmission.total_seconds<0 || !keys ||
        !std::isfinite(local_window_seconds) || local_window_seconds<0)
@@ -915,6 +960,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     bool matching_supported=false;
     const auto frequency=channel.frequency_offset_hz+static_cast<long double>(config.carrier_hz)*channel.clock_error_ppm*1e-6L;
     for(const auto& profile:profiles) {
+        estimate_detail::check(stop);
         modem::validate(profile);
         const auto matches=same_profile(config,profile);
         result.profile_matches|=matches;
@@ -929,12 +975,12 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
         });
         const auto work=existing!=work_entries.end()?existing->work:
             receiver_work(profile,candidate_bank,media*profile.sample_rate,options,profiles.size(),keys,
-                          matches?transmission.wire_bits:0,local_window_seconds,work_mode,timing_model);
+                          matches?transmission.wire_bits:0,local_window_seconds,work_mode,timing_model,stop);
         if(existing==work_entries.end())work_entries.push_back({index,training_samples,work});
         serial+=work.serial;parallel+=work.parallel;
         const auto fallback_work=work.timing_window_modeled?
             receiver_work(profile,candidate_bank,media*profile.sample_rate,options,profiles.size(),keys,
-                matches?transmission.wire_bits:0,local_window_seconds,ReceiverWorkMode::hardware_fallback,timing_model):work;
+                matches?transmission.wire_bits:0,local_window_seconds,ReceiverWorkMode::hardware_fallback,timing_model,stop):work;
         fallback_serial+=fallback_work.serial;fallback_parallel+=fallback_work.parallel;
         fallback_tracking+=fallback_work.tracking_serial;
         receiver_frontend+=work.serial-work.kernel_serial-work.search_serial;kernel_serial+=work.kernel_serial;
@@ -1004,8 +1050,11 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     result.timing_phase_groups=matching_work.phase_groups;
     result.fallback_timing_hypotheses=static_cast<double>(matching_work.full_timing_hypotheses);
     result.timing_window_modeled=matching_work.timing_window_modeled;
+    result.fft_acquisition_batches=static_cast<double>(matching_work.fft_acquisition_batches);
+    result.fft_retained_acquisition_batches=static_cast<double>(matching_work.fft_retained_acquisition_batches);
     if(work_mode==ReceiverWorkMode::hardware_timing_model) {
-        result.receiver_work_assumptions=matching_work.timing_window_modeled?
+        result.receiver_work_assumptions=matching_work.timing_window_modeled&&!matching_work.compact?
+            "FFT acquisition engineering upper bound: whole excluded batches skipped under selected GPS/audio bounds; all mixed batches, frontend, continuation and original threshold charges retained. Full-window fallback is reported separately":matching_work.timing_window_modeled?
             "Compact bank engineering reference: exact lattice count at a representative anchor under selected GPS/audio bounds and supplied capture metadata (nominal slope and full bank rate allowance when omitted). Full-window fallback is reported separately":
             "Full arrival-window bank; timing prior is unavailable for this backend or model geometry. Configured peer UTC correction lanes are retained";
     }
@@ -1029,6 +1078,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     if(oscillator_policy) {
         long double best=-1;
         for(const auto& hypothesis:bank.hypotheses) {
+                estimate_detail::check(stop);
             const auto angle=std::numbers::pi_v<long double>*(frequency-hypothesis.frequency_offset_hz)*seconds;
             const auto loss=std::abs(angle)<1e-10L?1.L:std::pow(std::sin(angle)/angle,2);
             const auto clock=std::abs(static_cast<long double>(channel.clock_error_ppm)-hypothesis.clock_error_ppm);
@@ -1119,6 +1169,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
         // local model below also accounts for shaping and limiter distortion.
         const auto chip=modem::pattern_chip_samples(config);
         const auto configure_statistics=[&](detail::ReceiverProbabilityParameters& p,unsigned source_bit) {
+    estimate_detail::check(stop);
             if(!differential_window && samples_per_symbol/chip<=1024) {
                 auto code_config=config;
                 if(options.timestamp)code_config.stream_epoch=options.timestamp;
@@ -1153,12 +1204,12 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
             // power and covariance. Retry from pristine parameters so the
             // real-covariance fallback applies that normalization exactly once.
             auto candidate=p;
-            if(differential_statistics(options,matching_work,differential_window,candidate,source_bit)) {
+            if(differential_statistics(options,matching_work,differential_window,candidate,source_bit,stop)) {
                 p=std::move(candidate);return true;
             }
             if(!matching_work.compact)return false;
             candidate=p;candidate.real_atoms.clear();
-            if(!real_differential_statistics(options,differential_window,candidate,source_bit))return false;
+            if(!real_differential_statistics(options,differential_window,candidate,source_bit,stop))return false;
             p=std::move(candidate);return true;
         };
         auto alternative_parameters=parameters;
@@ -1167,7 +1218,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
             result.probability_model_limit="Template geometry exceeds the bounded probability model";
             return probability_result();
         }
-        auto probability=detail::receiver_probability(parameters);
+        auto probability=detail::receiver_probability(parameters,stop);
         bool averaged_private_candidates=false;
         // The planner has no wire-bit content. Independent finite candidates
         // need an equiprobable-bit estimate, including each source's limiter
@@ -1180,7 +1231,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
                 result.probability_model_limit="Alternative template geometry exceeds the bounded probability model";
                 return probability_result();
             }
-            const auto other=detail::receiver_probability(alternative_parameters);
+            const auto other=detail::receiver_probability(alternative_parameters,stop);
             if(!other.available)probability=other;
             else {
                 averaged_private_candidates=true;

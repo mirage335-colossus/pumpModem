@@ -4,6 +4,241 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## ALSA startup latency readiness — local manual fix, 9 October 2026
+
+The follow-up screenshot identified playback `ALSA -5: Input/output error` at
+stream frame2400 immediately after source scheduling. A bounded silence-only
+probe on the user's PC reproduced initial EIO in8/12 starts; every failed first
+query succeeded at the same accepted-frame count approximately1.1ms later.
+ALSA reported PREPARED throughout. The default direct hardware route was busy;
+Data Pump's existing advertised-server fallback uses PulseAudio on PipeWire1.4.2.
+No mixer, routing or device settings were changed.
+
+The installed ALSA PulseAudio plugin1.2.12 compares `pa_stream_get_latency`'s
+error against positive `PA_ERR_NODATA`, while libpulse17 returns its negative.
+The plugin's prepare operation recreates the stream and waits for stream
+readiness, which does not guarantee arrival of its first latency update.
+[ALSA plugin source](https://github.com/alsa-project/alsa-plugins/blob/v1.2.12/pulse/pcm_pulse.c)
+and [libpulse contract](https://github.com/pulseaudio/pulseaudio/blob/v17.0/src/pulse/stream.h)
+match the installed binary disassembly. This explains a transient initial EIO;
+EIO in general is not treated as a harmless error.
+
+The native adapter now retries that query only before its first successful delay
+observation, only for playback still in PREPARED. A20ms steady deadline,21-query
+cap and1ms cancellable waits bound readiness. No additional PCM is submitted,
+no source callback repeats and no timestamp is fabricated. A successful
+frame-zero delay ends the grace, even before the presentation timeline becomes
+ready. Established playback/capture errors, discontinuities, cancellation and
+no-replay behavior remain intact. The existing Audio error allowance is unchanged.
+This adds at most20ms of query waiting per startup phase, no growing buffer,
+no per-sample search work and no DSP/waveform change.
+
+All5 affected audio cases pass in19.28s (native ALSA including the new regression,
+Windows-provider stub, audio rates, resampler and clock sync). Previous assertions
+remain; new tests cover initial/restarted transient errors, persistent errors,
+state changes, cancellation, deadline expiry and successful frame-zero exclusion.
+The application was rebuilt with `./build.sh`, Release/GCC14.2/FLTK. Two complete
+native GUI-controller physical-loopback runs with different fresh synthetic keys
+and the reported GPS10ms/region1ms/Audio50ms/DSSS10 command each transmitted70
+bits of `quick brown`, received that text, retained UTC following and closed
+cleanly. First-run TX completed15.16s after fixture launch, including preparation/
+preroll. The second complete fixture used6.985 CPU seconds over23.935s wall and
+42872KiB peak RSS, including preparation, RX/TX, GUI advice and an8s post-TX
+observation. These are physical functional observations, not a paired speedup,
+calibrated latency or sensitivity measurement. Local evidence is retained under
+the receiver-opt-20261008 board.
+
+The preceding manual binary remains frozen. The DSP library is byte-identical
+SHA256 `66b59da08a5a8444a54bada79a79358bb3b345bb30895702ca6eb1580685ab97`.
+No new receiver speedup or sensitivity-loss interval is claimed. Full general,
+contract/calibration, sensitivity, sanitizer, native graphics, other platform,
+SDK and packaging qualification remains outstanding, as does IC-7100-specific
+validation. This is a local manual-test checkpoint; no publication or hosted CI.
+
+## Hardware advice churn and ALSA delay — local follow-up, 9 October 2026
+
+This follow-up preserves the preceding local manual GUI (SHA256
+`3001d9c1e9b694d6251afdda029ece637971ff5fca154b470dafc115f18241dd`).
+The reported command uses GPS10ms, region1ms, Audio50ms, DSSS10, fake FHSS,
+rate1200Hz, audio carrier9000Hz and one synthetic key. It resolves to48kHz PCM,
+8-sample outer chips,5120-sample/106.667ms symbols and70 wire bits for `quick brown`.
+Its normalized full-spectrum observer model is approximately15×. No strong-signal
+probability/range guard was removed to obtain that value.
+
+An Application fixture with continuous capture timing reproduced18 RX-advice
+resets in8s. Admitted timestamp jitter repeatedly cancelled the worker and
+invalidated the planner. The new advice envelope preserves the configured error
+allowance and conservatively contains slope evidence; it does not alter receiver
+admission. Advice refreshes reuse the prepared draft. A second bottleneck was
+arrival-pruning enumeration inside clock/RAM-only navigation checks. Those checks
+now skip that irrelevant work, retaining full-bank coverage and RAM decisions.
+Selected planner values publish before the unchanged complete graph sweep.
+
+Focused observations: before the support-check fix, a stable-advice30s capture
+still had no completed plan (34.19 process CPU seconds,34464KiB peak RSS; includes
+capture/receiver/GUI work). Afterward, a run prepared airtime in0.290s, published
+selected planner values in0.372s, completed graphs in3.401s, and had zero RX-advice
+resets over8s. These are bounded local GUI-fixture observations, not a paired
+receiver CPU speedup or new sensitivity qualification. Percentage-based workspace
+resolves from host memory at launch; exact per-run displays are retained in local
+logs. Hardware-only long preparation has not been reproduced on an IC-7100.
+
+A separate single-CPU benchmark used the exact preceding planner source
+reconstructed and hash-checked against the frozen overlay, the same unchanged
+DSP library, a fixed3GiB workspace, synthetic key and identical GPS/audio/FHSS
+geometry. The baseline was cancelled at30.18 process CPU seconds without a
+completed plan. Three fresh candidate runs completed in3.069–3.086 CPU seconds
+(median3.076; wall3.074–3.096s), retaining185 observer points and543 support
+evaluations. Candidate numerical output hashes were identical across runs.
+This establishes a **greater than9.77× lower bound for this planner request**,
+not an exact completed-baseline speedup or a receiver speedup. Candidate peak RSS
+was16628KiB; baseline RSS at cancellation was16488KiB, so completed-baseline memory
+is unmeasured. No concurrent builds/tests ran during this pinned comparison.
+
+The core DSP library remains byte-identical to the preceding optimized candidate
+(SHA256 `66b59da08a5a8444a54bada79a79358bb3b345bb30895702ca6eb1580685ab97`).
+No additional detector/bit-error curve or sensitivity-loss interval is claimed;
+previous cumulative raw-reference qualification is still incomplete. Audio queues,
+receiver workspace and filtering delays are unchanged by this follow-up.
+
+The generic `audio UTC delay observation failed` discarded ALSA's error code.
+The candidate reports that code/position, retries only EINTR/EAGAIN (at most four
+queries), and permits existing visible ordinary-timing fallback only before
+source scheduling. Later failures stop without resetting/replaying private PCM.
+The exact physical driver error remains unknown. Scripted ALSA failure, transient,
+cancellation, silence/pre-source and post-private-output tests pass; native audio
+contract1.91s. The timed GUI fixture passes8.67s, including playback deferral,
+resume, conservative interval bounds, zero churn and bounded close.
+
+Final affected validation passed:38/38 complete GUI tests in154.67s through
+`./build.sh test gui`, and5/5 complete audio/timing cases in21.49s (ALSA,
+Windows-provider stub, clock sync, resampler and audio rates). The preceding
+GUI run exposed a full-plan test helper accepting selected values before its
+milestone assertions; that helper now waits for all curves and retains every
+assertion. The added stale-result regression also protects invalid settings from
+an old partial/final worker. The application rebuilt through `./build.sh`.
+Native graphics and a real Windows device are not covered by these shared/stub
+checks. Final binary identity is retained at the local manual handoff.
+Physical hardware confirmation and full general,
+calibration/sensitivity, sanitizer, platform, SDK and packaging qualification
+remain outstanding. No push, publication or hosted CI is authorized at this stage.
+
+## Airtime, key loading and close — local manual candidate, 9 October 2026
+
+This follow-up remains local on `bd225fc561b7a0dac24fb7f877113cf45be6c239`.
+The previous optimized GUI and library are preserved. The reported same-command
+hardware GUI hang was **not reproduced** in the controller-only probe (no capture
+device opened). Source inspection nevertheless identified three definite faults:
+airtime waited for potentially expensive probability advice; cancellation did
+not reach that advice; and editing an invalid configuration could advertise
+“Calculating airtime” although no calculation could run. Per-block capture timing
+also invalidated encoded airtime unnecessarily.
+
+The candidate publishes the completed draft inspection before RX advice,
+propagates cancellation through inspection/FHSS, statistic construction,
+probability trials and the planner/cache wait, and keeps timing advice invalidation
+separate from the draft. Cancelled work publishes no partial numerical result.
+Completed calculations retain every requested trial, seed, detector and hypothesis;
+no receiver, waveform, framing or physical completion code changes in this fix.
+Bounded source encoding, keyfile I/O and cold random-table initialization still
+finish their current operation before observing stop. Ongoing timing metadata
+changes can still refresh RX advice; that no longer clears airtime/TX readiness.
+
+Local evidence: focused same-command synthetic-key/current-draft checks pass,
+as do explicit invalid-state, long-symbol early-airtime, stale-result/key replacement
+and close-during-advice tests (two-second close gate). All four complete affected
+estimator groups pass: simulation, coherent probability, differential probability
+and LPI. Eight cases linked independently against the frozen preceding library
+and candidate have identical hexadecimal floating-point statistics, intervals and
+selected work-model outputs, with a live cancellation token on the candidate.
+This is statistic-regression evidence, **not** new acquisition sensitivity data
+or a receiver speedup measurement. All 37 shared GUI tests pass (144.02 seconds);
+the four estimator groups pass in 28.39 seconds. The previous GUI run exposed
+one test readiness assumption; its confidence assertion was retained and now
+waits for RX advice independently of airtime.
+
+Physical IC-7100/sound-card reproduction, full receiver sensitivity/calibration,
+normal full native/general coverage, sanitizers, platform, SDK and packaging
+qualification remain outstanding. No hosted CI was dispatched. Stop at the
+requested manual checkpoint; this is not overall optimization qualification.
+
+## UTC FFT, launch keys and audio follow-up — manual checkpoint, 9 October 2026
+
+This local overlay on `bd225fc561b7a0dac24fb7f877113cf45be6c239` adds automatic
+whole-batch pruning for qualified short private FFT arrival windows. Retained
+batches keep their original scoring, energies, covariance and thresholds;
+excluded initial trials remain charged and established tracks still run. Invalid
+or unsupported timing geometry uses the full scanner. The planner models retained
+acquisition work conservatively and separately reports full-window fallback.
+It is an engineering work estimate, not newly calibrated CPU/GPU throughput.
+
+Launch commands now preserve keyfile and selected TX key, with transactional
+loading; all loaded keys remain receive keys. The keyed DSSS Off/10x round-trip
+regression passes. First custom clock settings use region1ms/offset0ms; independent
+Audio error defaults0ms. Zero is a strict requested uncertainty bound, so ordinary
+hardware with nonzero uncertainty visibly falls back to full search/ordinary TX.
+A50ms per-station allowance with GPS0.1ms and region1ms permits a201.4ms arrival
+window, not a0.1ms window. Native playback discontinuities fail visibly and TX
+failure survives capture restart/Clear received; private epoch lockout remains.
+The reported intermittent immediate TX completion was not reproduced on hardware.
+
+Fake FHSS now has an explicitly hypothetical analytical full-capture observer
+preview. Both compared strategies receive all signal energy in all channels;
+there is no channel-count interception bonus. This is not an optimal-adversary
+bound or measured hopping performance; actual Fake output remains fixed.
+
+Measured single-key/single-epoch PatternReceiver execution used13s complete PCM
+captures of bits001, including source startup, tails and observed absence. Each
+case used one warmup pair and three interleaved pairs, pinned to one CPU, with no
+concurrent builds/tests. Both variants read identical original PCM at unchanged
+application-selected rates and a fixed64MiB workspace. Total timing includes
+construction, ingestion/search, polling/finish, evidence copying and destruction.
+The baseline library SHA256 starts`2bc0dbc37e94`; its preserved GUI starts`7a88d9496158`.
+
+| Case | Median CPU before → after | Median paired speedup [observed range] |
+| --- | --- | --- |
+|1200Hz ×10, carrier9kHz, Fs48kHz, Audio50ms |1.389 →0.284s |4.928× [4.830,4.983] |
+|Same PCM, ideal qualified Audio1ms |1.411 →0.262s |5.331× [5.153,5.823] |
+|Same geometry, C/N0=32dB-Hz |1.365 →0.276s |4.990× [4.703,5.034] |
+|Ordinary3600Hz, Fs14.4kHz, no prior |0.399 →0.401s |0.999× [0.944,1.002] |
+|Wider12000Hz, Fs48kHz, no prior |1.221 →1.214s |0.989× [0.944,1.009] |
+
+Ranges are three observed pair ratios, not statistical confidence intervals.
+All pairs preserved accepted bits, unique physical completion and progress sample
+positions. Retained workspace increased48 bytes/receiver; median process peak RSS
+was unchanged. For the50ms case, acquisition CPU-wall elapsed dropped from0.243 to
+0.050s while acquisition media position stayed2.475s. Bit-progress media latency
+remained0.21025s; no added publication delay was measured. The apparent wider-case
+median discrepancy follows pairing versus separate medians, not different input.
+These are single-bank results, not full Live multi-key/13-epoch speedups. Internal
+frontend versus covariance/template/search CPU was not separately instrumented.
+
+Current validation: complete affected GUI37/37 (148.64s), complete selected
+receiver/correlator/search/Live/audio/transfer/short-codec/estimate groups17/17
+(252.24s), focused regressions, and final GUI self-check passed. Four fractional
+start/frequency-clock edge F1/F10 regressions retain identical admitted evidence
+and next-poll events, including phase diffusion and physical absence. This does
+not estimate a q90/q99 sensitivity difference or confidence interval. The preceding
+conditional F10 holdout below remains scoped to its source and known candidate;
+full acquisition-bank and cumulative raw-reference loss below0.1dB remain unqualified.
+
+The native DAC fixture includes settling, payload, tails, partial writes and
+resampling. Its256768 int16 samples are invariant across callback sizes.14 samples
+clip after interpolation; clamp residual energy is1.31826e-9 of float output
+energy. Whole-record out-of-band fractions are0.000495624 before final clamp and
+0.000495594 after int16 conversion at this geometry. These measurements neither
+identify nor exclude physical clicking; finite-pulse tails and radial limiting
+remain. No new waveform backoff was introduced.
+
+Local exact inputs, hashes and all rows are retained under
+`.agent-work/artifacts/receiver-opt-20261008/utc-*`, with
+`MANUAL-UTC-FOLLOWUP.md` for launch instructions. The prior report below describes
+the preceding candidate; its full-FFT-scan/no-FHSS-preview statements are historical.
+No push, publication or hosted CI occurred. Full general/contract/calibration,
+sanitisers, native graphical/Rev, Windows/macOS/web/SDK/packaging, long-duration and
+multi-bank sensitivity/performance, radio filtering and physical IC-7100 timing
+qualification remain deferred until requested after manual testing.
+
 ## DSSS and live-audio follow-up — manual checkpoint, 9 October 2026
 
 The new local GUI includes Live/Duplex, Clear received queue/backlog reset,

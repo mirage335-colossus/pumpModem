@@ -7,6 +7,7 @@
 #include <vector>
 #include <optional>
 #include <string>
+#include <stop_token>
 
 namespace datapump::simulation::detail {
 
@@ -81,11 +82,11 @@ struct ReceiverProbability {
 // couple the two bits and every detector branch; the denominator retains
 // unfitted signal. Local-detector work is bounded at 4096 windows, independently
 // of the represented PCM sample count. Unsupported geometry is explicit.
-ReceiverProbability receiver_probability(const ReceiverProbabilityParameters&);
+ReceiverProbability receiver_probability(const ReceiverProbabilityParameters&,std::stop_token = {});
 
 // Shared implementation entry point; unsupported geometry returns available
 // false rather than extrapolating a probability or silently dropping a detector.
-ReceiverProbability differential_receiver_probability(const ReceiverProbabilityParameters&);
+ReceiverProbability differential_receiver_probability(const ReceiverProbabilityParameters&,std::stop_token = {});
 
 // Shared production-algebra evaluation, also used to check the atom reduction
 // against direct PCM fits. Each dot contains the unnormalized four raw sums.

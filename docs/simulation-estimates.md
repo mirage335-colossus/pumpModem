@@ -13,6 +13,34 @@ geometries use a joint model of all three detector branches. Unsupported
 geometries retain timing, search and compute diagnostics, with an explicit
 coverage reason instead of a probability from a different detector.
 
+GUI estimates run off the event thread. Draft airtime can be ready while the
+receiver advisory is still calculating. Closing, replacing a keyfile or editing
+inputs requests cancellation through the statistic construction, probability
+trials and planner cache wait. Cancellation produces no partial numerical
+estimate and does not reduce the trial count of a completed calculation. The
+optional stop token is execution control, excluded from probability cache keys.
+Bounded source encoding and the cold deterministic random-table initialization
+finish their current operation before cancellation is observed.
+
+Hardware capture's continuously fitted timestamps do not require continuous
+recalculation. GUI advice retains a conservative slope interval centred on the
+nominal sample period. Its fractional radius contains the measured centre error
+plus the timestamp model's nominal-normalized rate uncertainty, rounded outward
+to a power of two, without a fixed ppm floor. Admitted capture errors use the
+selected Audio error bound (already the work estimator's effective minimum).
+Widening or loss of qualified timing takes effect immediately; a fourfold smaller
+bound must persist for two seconds before tightening. This is advice caching,
+not a change to live admission or the receiver's timing map.
+
+The planner's clock/RAM support checks use the full hardware bank without
+enumerating arrival-pruning intersections: pruning changes work, not those
+coverage booleans or the allocated workspace. Selected CPU figures and all curve
+CPU points retain the qualified timing work model. Completed selected values
+publish before the full target/curve sweep; all original curve targets and trial
+counts remain. Optional GUI work yields to hardware transmission and resumes
+afterward. Neither these scheduling changes nor a displayed >99% conditional
+reference establishes real-time receiver throughput or successful hardware RX.
+
 The separate [LPI relative observation advisory](lpi-estimates.md) compares an
 unkeyed energy detector's total observation with a one-symbol receiver design
 reference. It normalizes both listeners to 18 dB Es/N0 in that one symbol, an
@@ -63,11 +91,12 @@ claim of complete acquisition-bank calibration.
 Work models distinguish known unsteered sampled simulation, hardware with a full
 fallback window, and hardware with qualified capture timing. Sampled simulation
 uses the original oscillator bank and its own startup-epoch coverage. Hardware
-retains the union of original and peer steering lanes. Only the existing long
-compact path gets a representative-anchor timing-lattice count from the actual
-capture error/rate bounds; its full-window fallback is displayed separately.
-Short FFT receivers retain full scanning, so tighter clock settings can increase
-cost by adding lanes without reducing that scan. No timing-count discount is
+retains the union of original and peer steering lanes. Long compact paths use a representative-anchor timing-lattice count. Eligible
+short private FFT banks instead use an upper bound on whole retained acquisition
+batches, filling all initial-symbol/phase gaps and allowing edge overlap.
+Ingestion, active-track continuation and original detection trial charges remain
+unchanged. Unsupported timing/FFT geometry retains full scanning. Both paths
+report the full-window fallback separately. No timing-count discount is
 applied to the full preflight workspace reservation. These are engineering work
 estimates, not measured throughput or running-bank telemetry. The coherent
 outer-code guard adds a conservative candidate-capacity allowance: bounded pulse
@@ -77,7 +106,8 @@ Timing-guide state is reserved separately. The model does not credit the affine
 coefficient cache on an outer-guard path which cannot currently use it.
 
 Fake FHSS reserves its highest illustrated frequency for oscillator planning and
-earns no observer-time benefit. See [spread controls](spread-spectrum-controls.md)
+uses a hypothetical full-capture observer model comparing aggregate and
+channelized energy detection. Its channel count is not an automatic time multiplier. See [spread controls](spread-spectrum-controls.md)
 and [clock synchronization](clock-sync.md) for current implementation limits.
 
 The fixed reference machine is an **Intel Core i9-13900H** with an
@@ -789,4 +819,13 @@ The [9 October DSSS follow-up measurements](dsss-followup-validation.md)
 compare actual execution with the preceding optimized local receiver. They
 record coherent-guard CPU regressions as well as bounded RF improvements;
 the new work allowances are conservative accounting, not recalibrated throughput.
-Short FFT scans retain their full cost even with a tight requested UTC window.
+The current local candidate adds conservative whole-batch pruning for qualified
+short private FFT arrival windows. Its engineering model retains ingestion,
+continuation and the original trial charges, and separately reports full-window
+fallback. Timing telemetry and measurements remain distinct from this estimate.
+
+The [UTC follow-up execution measurements](validation.md#utc-fft-launch-keys-and-audio-follow-up--manual-checkpoint-9-october-2026)
+measure about4.93x additional speedup for one qualified50ms acquisition bank at
+48kHz, with unchanged input PCM and retained thresholds. They do not calibrate
+the full Live key/epoch bank or GPU projection. Ordinary/wider no-prior cases
+show no clear speedup; modeled savings must remain conditional on qualified timing.

@@ -97,8 +97,8 @@ paths retain the full search and report their limitation.
 .TP
 .BI \-\-audio\-error " TIME"
 Assumed residual audio timing error per station after reported queue compensation;
-default 30ms. The editable Audio error dropdown is independent of GPS accuracy,
-propagation and oscillator models. Accepts positive ns/us/ms/s durations up to 60s,
+default 0ms. The editable Audio error dropdown is independent of GPS accuracy,
+propagation and oscillator models. Accepts nonnegative ns/us/ms/s durations up to 60s,
 subject to the Live search-window limit. This does not change buffering or
 establish measured hardware accuracy. Saved parameter lists retain this value.
 An unsupported allowance visibly falls back to ordinary playback before private
@@ -247,6 +247,10 @@ Received files are never opened or executed automatically.
 .PP
 Developer mode reveals advanced controls and inspection pages.
 The Robust Link planner previews a link independently of the live targets.
+Its Launch command includes the loaded keyfile path and named transmit key via
+\-\-keyfile, \-\-tx-key named and \-\-key-name (or \-\-tx-key none).
+It contains no key bytes; all ring entries remain receive keys. Missing files or
+key names leave the previous settings unchanged.
 Its Launch command can be copied for reuse; Load applies validated settings
 without executing a shell command or starting a transmission.
 .SH FILES

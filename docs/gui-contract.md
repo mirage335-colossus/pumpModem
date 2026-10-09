@@ -159,7 +159,12 @@ At normal window widths, target controls, the compact native multiline
 below the target controls, then stack them when needed.
 The generated command exports the current link budget, Baseband/Shift models, clock
 reference, margin, waveform, rate, absolute Carrier, Shift, DSP allowance and
-independent preview target. Its
+independent preview target. With a loaded keyring it also exports the absolute
+`--keyfile` path, `--tx-key named` and `--key-name` selection (or `--tx-key none`).
+No secret bytes are exported. All loaded ring entries remain receive keys. A real
+key named `none` remains distinct from disabled TX encryption. Keyfile loading is
+asynchronous and transactional; missing files/names or invalid settings leave the
+previous ring/configuration intact. Commands use host-shell literal quoting. Its
 common `--target-snr` sets both short and long targets; the parser also accepts
 explicit `--short-target-snr` and `--long-target-snr` overrides without changing
 the common preview target.
@@ -289,6 +294,43 @@ GUI airtime, inspection, RX and LPI estimates use one raw `0` bit at the short
 target and explicitly identify a preview. This does not change byte-API empty
 sources or attachment framing. Clearing a draft does not repopulate it with a
 default message. Nonempty short/raw input and pending reception are unchanged.
+
+Airtime and transmit readiness are published as soon as the bounded draft
+inspection finishes. RX probability and CPU/GPU advice may still say
+**Calculating...**; they are advisory and do not gate sending. Editing the draft,
+loading another keyfile or closing the window cancels obsolete advisory work.
+Cancellation never publishes a partial probability or changes a receiver trial.
+Invalid modem settings keep an explicit invalid status after a draft edit,
+rather than advertising an estimate that cannot run. Capture timing metadata
+invalidates receiver advice separately from the encoded draft and airtime.
+For hardware capture, advice uses a conservative nominal-centred slope envelope
+and the selected Audio error allowance. A wider bound or loss of qualified
+capture timing refreshes advice immediately; small contained fit fluctuations do
+not. A substantially tighter fit must persist for two seconds before tightening
+the advice envelope. Actual receiver timestamps, admission and hypotheses are
+unchanged. During a refresh, completed numbers are explicitly marked **updating**.
+The prepared draft is reused. Optional advice work is cancelled/deferred during
+hardware playback, including tuning noise, and resumes afterward.
+
+Link Planner publishes completed selected-target values before the full graph
+sweep. **Calculating graphs...** identifies that intermediate view; it is not a
+partial probability trial. A changed-input previous graph remains explicitly
+previous and cannot report its old observer range as the new selection's result.
+Clock/RAM navigation checks omit arrival-pruning work because those two tests
+use the full allocated bank; displayed CPU costs still model the admitted prior.
+
+Native ALSA delay-query failures retain the driver error code, direction and
+frame position. Interrupted/nonblocking queries have a bounded, cancellable
+retry. Before the first successful delay observation only, playback in ALSA's
+PREPARED state can also wait up to20ms for an initial latency update reported as
+EIO by the PulseAudio plugin. It retries only the query, at1ms intervals with at
+most21 queries; it neither generates private samples nor repeats queued PCM,
+source scheduling, or device preparation. A successful frame-zero observation
+ends this grace too. Cancellation, a non-PREPARED state or expiry stops it.
+Only a failure during silent preparation, before source scheduling, may use the
+existing explicitly reported timing fallback. An unresolved failure after source
+scheduling stops playback without recovery or replay of private output. RUNNING
+playback, capture and established delay observations retain their error behavior.
 
 The tab uses one general LPI warning: **LPI is not guaranteed. See model limits.**
 Its private-pattern hypothetical state is a short qualifier. The current-draft
@@ -438,22 +480,29 @@ thread overhead outside that reservation.
 starts fresh acquisition. It clears late/backlog and dropping indicators together
 with received content. It preserves any active transmission and its private-key
 reuse lock. Neither clearing nor discarded input creates physical completion.
+A transmit failure remains visible as **FAIL: transmit**, with its error text,
+across capture restart and Clear received. Receiver-dropping failures retain
+priority. Starting a new transmission clears the old TX failure. Device failures
+after private generation never unlock/replay the generated epoch.
 
 The editable **Clock accuracy**, **Clock region** and **Clock offset** controls
 describe PC synchronization and propagation independently of oscillator selection.
-The adjacent editable **Audio error** defaults to 30 ms per station after known
+The adjacent editable **Audio error** defaults to 0 ms per station after known
 queue-delay compensation. It is independent of GPS/propagation and oscillator
 models, persists through the same parameter-list/command path, and remains
 unchanged when the clock triplet returns to Default. Its duration presets and
 custom values do not alter the underrun-prevention buffer or establish measured
 hardware accuracy.
+A first custom selection uses region 1 ms and offset 0 ms. Audio error accepts
+zero as a strict requested bound; actual device uncertainty still forces a visible
+full-window fallback when it cannot fit.
 Default in any one resets all three to the existing epoch-search policy. Explicit
 region values are total widths centered on the fixed offset. The accuracy menu
 contains duration entries, not composite policy strings. Composite command and
 parameter-list imports are split into the three fields; individual fractional
 durations remain editable. A narrow entered value must not silently drop
 unsupported timing hypotheses; backend limits remain visible in diagnostics.
-Custom native compact mode labels its audio/radio arrival window **estimated**;
+Custom native mode labels its audio/radio arrival window **estimated**;
 the GPS entry does not erase the backend allowance. Unsupported paths retain
 the full window and disclose the fallback. The expanded oscillator bank keeps
 every original lane; its complete cost appears in the work estimate.
@@ -471,7 +520,9 @@ outer rate and shaped band edges to help correct Rate, Carrier or sample rate.
 Fake FHSS illustrates 200 channels at
 0.4-second dwell by updating Carrier/Shift display values while the real audio
 and hardware setting remain fixed. Genuine and IC-7100 hardware choices are
-visible but disabled. Neither that illustration nor an unsupported probability
+visible but disabled. Its observer preview assumes simultaneous full-spectrum
+capture and selects the faster modeled aggregate/channelized detector; it does
+not credit missing signal energy or a universal 200× gain. Neither that illustration nor an unsupported probability
 model may be presented as measured spreading gain. See [spread controls](spread-spectrum-controls.md).
 
 The compact persistent **Baseband Osc**, **Shift Osc** and **Margin** controls

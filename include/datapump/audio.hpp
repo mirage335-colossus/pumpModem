@@ -34,6 +34,10 @@ using CaptureMonitor = std::function<void(std::span<const float>,std::uint32_t)>
 // old resampler tail into the next continuous segment. Without an observer,
 // capture fails on such a gap: a flat recording cannot represent lost time.
 using CaptureDiscontinuity = std::function<void()>;
+// Report a recovered output underrun/suspend gap. Its duration is unknown;
+// recovery does not make transmitted PCM continuous. An observer may throw to
+// stop the source. Timed output never recovers/replays and fails before this.
+using PlaybackDiscontinuity = std::function<void(const std::string&)>;
 // Preflight outcome, reported before scheduling or requesting private PCM.
 // Accepted estimated timing remains an engineering assumption, not certification.
 struct TimingStatus {
@@ -54,6 +58,8 @@ struct Options {
     bool follow_system_clock=false;
     // Total residual UTC presentation-error allowance, after compensating
     // known queued audio. It cannot reduce a provider's reported uncertainty.
+    // Zero is a valid requested hard bound, but native audio cannot establish
+    // it. Visible pre-source fallback or strict failure retains actual error.
     double maximum_utc_error_seconds=.03;
     double maximum_timing_slew_per_second=1e-5;
     // Zero requests timestamped scheduling only. A nonzero correction needs
@@ -81,6 +87,7 @@ struct Options {
     std::function<void(const TimingStatus&)> timing_status={};
     // First output sample's UTC coordinate after capture rate conversion.
     std::function<void(const TimePrediction&)> capture_timing={};
+    PlaybackDiscontinuity playback_discontinuity={};
 };
 // Capabilities belong to the selected audio provider, not the UI or target OS.
 bool exclusive_supported();
@@ -94,9 +101,9 @@ void schedule_output(double epoch_seconds,std::stop_token stop={});
 inline void validate_options(const Options& options) {
     if(options.allow_timing_fallback && !options.timing_status)
         throw Error("audio timing fallback requires a visible status observer");
-    if(!std::isfinite(options.maximum_utc_error_seconds) || options.maximum_utc_error_seconds<=0 ||
+    if(!std::isfinite(options.maximum_utc_error_seconds) || options.maximum_utc_error_seconds<0 ||
        options.maximum_utc_error_seconds>60)
-        throw Error("Audio error must be greater than zero and at most 60 seconds");
+        throw Error("Audio error must be nonnegative and at most 60 seconds");
     if(!std::isfinite(options.transmit_gain) || options.transmit_gain<0.0001 || options.transmit_gain>1.75)
         throw Error("transmit volume must be between 0.01% and 175%");
     if(options.exclusive && !exclusive_supported())

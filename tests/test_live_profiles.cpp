@@ -60,6 +60,9 @@ struct CaptureScript {
     bool loopback=false;
     std::atomic<bool> playback_started{false},playback_source_finished{false},finish_playback{false};
     std::atomic<std::size_t> played{0};
+    std::atomic<unsigned> source_calls{0};
+    std::atomic<bool> restart_capture{false};
+    bool fail_playback_before_source=false,fail_playback_after_source=false;
     std::vector<float> monitor_samples;
     std::uint32_t monitor_rate=0;
     std::size_t monitor_format_bytes=0;
@@ -865,6 +868,42 @@ void duplex_loopback(bool keyed=false) {
     session.stop();
 }
 
+void duplex_transmit_failure(bool after_generation) {
+    Configuration geometry{16.,8.};geometry.keyed=true;
+    auto value=settings({55},geometry);value.transfer.automatic_receive_profiles=false;
+    value.full_duplex=true;value.receive_keys.clear();
+    CaptureScript capture;capture.rate=value.transfer.modem.sample_rate;capture.loopback=true;
+    capture.fail_playback_before_source=!after_generation;
+    capture.fail_playback_after_source=after_generation;capture_script=&capture;
+    live::Session session([]{return static_cast<double>(epoch);});session.start(value);
+    const auto await=[&](auto predicate) {
+        testing::CpuWorkBudget budget(10s,"duplex failed transmission visibility");
+        while(budget.pending()) {auto state=session.snapshot();
+            if(predicate(state))return state;std::this_thread::sleep_for(1ms);
+        }
+        throw Error("duplex failure fixture did not reach checkpoint");
+    };
+    await([&](const auto&){return capture.capture_opened==1;});
+    session.transmit_bits(Bytes{0,0,1});
+    auto failed=await([](const auto& state){return state.transmission_failed;});
+    check(!failed.transmitting && failed.transmission_finished && failed.transmission_fraction<1 &&
+          failed.error=="injected audio output failure" && failed.status=="Transmission failed",
+          "failed output was presented as successful transmission");
+    check(capture.played==0 && capture.source_calls==(after_generation?1U:0U),
+          "failed playback retried or submitted generated PCM");
+    check((failed.transmit_key_lock_seconds>0)==after_generation,
+          "TX failure either consumed an unused key epoch or released generated private patterns");
+    capture.restart_capture=true;
+    failed=await([&](const auto&){return capture.capture_opened>=2;});
+    check(failed.transmission_failed && failed.error=="injected audio output failure",
+          "duplex capture restart erased the TX failure");
+    session.clear_received();failed=session.snapshot();
+    check(failed.transmission_failed && failed.error=="injected audio output failure" &&
+          (failed.transmit_key_lock_seconds>0)==after_generation,
+          "Clear received erased TX failure or changed private epoch protection");
+    session.stop();
+}
+
 }
 
 // These definitions deliberately replace audio.cpp in this statically linked
@@ -923,6 +962,7 @@ void capture(std::uint32_t rate, const std::string& device, const CaptureCallbac
     struct Closed {CaptureScript& script;~Closed(){++script.capture_closed;}}closed{script};
     if (on_format) on_format({rate, rate, static_cast<double>(rate) / 2, script.format_bytes});
     while (!stop.stop_requested()) {
+        if(script.restart_capture.exchange(false))return;
         const auto begin = script.delivered.load();
         const auto end = std::min(script.released.load(), begin + std::max<std::uint32_t>(8, rate / 50));
         if (end > begin) {
@@ -941,11 +981,14 @@ void playback(std::uint32_t rate,const std::string& device,const PlaybackCallbac
     check(capture_script && capture_script->loopback && device=="controlled profile capture" && rate==capture_script->rate,
           "profile fixture unexpectedly played audio");
     auto& script=*capture_script;
+    if(script.fail_playback_before_source)throw Error("injected audio output failure");
     if(format)format({rate,rate,rate/2.,32768});
     script.playback_started=true;
     std::vector<float> output(std::max<std::size_t>(8,rate/50));
     while(!stop.stop_requested()) {
         const auto count=source(output);
+        ++script.source_calls;
+        if(script.fail_playback_after_source)throw Error("injected audio output failure");
         if(!count)break;
         const auto offset=script.played.load();
         check(offset+count<=script.samples.size(),"duplex loopback output exceeded bounded fixture");
@@ -965,11 +1008,15 @@ int main(int argc, char** argv) {
         const FixtureTimerResolution timer_resolution;
 #endif
         const std::string suite = argc > 1 ? argv[1] : "all";
-        check(suite == "all" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds" || suite == "interval_queue" || suite == "monitor" || suite == "health" || suite == "capture_time" || suite == "arrival_time" || suite == "arrival_time_baseline" || suite == "backlog" || suite == "clear" || suite == "duplex" || suite == "arrival_fallback",
+        check(suite == "all" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds" || suite == "interval_queue" || suite == "monitor" || suite == "health" || suite == "capture_time" || suite == "arrival_time" || suite == "arrival_time_baseline" || suite == "backlog" || suite == "clear" || suite == "duplex" || suite == "arrival_fallback" || suite == "tx_failure",
               "unknown profile test suite");
         if(suite=="all" || suite=="duplex") {
             context="single-session hardware duplex loopback";duplex_loopback();
             context="single-session keyed hardware duplex loopback";duplex_loopback(true);
+        }
+        if(suite=="all" || suite=="tx_failure") {
+            context="duplex failed output before generation";duplex_transmit_failure(false);
+            context="duplex failed output after generation";duplex_transmit_failure(true);
         }
         if(suite=="all" || suite=="clear") {context="Clear received backlog cancellation";receiver_backlog_before_overflow(true);}
         if(suite=="all" || suite=="backlog") {context="receiver backlog before overflow";receiver_backlog_before_overflow();}

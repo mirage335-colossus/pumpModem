@@ -31,7 +31,15 @@ int snd_pcm_set_params(void*,int format,int access,unsigned channels,unsigned ra
 int snd_pcm_get_params(void*,unsigned long* buffer,unsigned long* period) {
     *buffer=alsa_test::state.buffer_frames;*period=alsa_test::state.period_frames;return 0;
 }
-int snd_pcm_delay(void*,long* delay) {*delay=alsa_test::state.delay_frames;return 0;}
+int snd_pcm_delay(void*,long* delay) {
+    auto& s=alsa_test::state;++s.delay_calls;if(s.before_delay)s.before_delay();
+    const auto result=s.delay_result<s.delay_results.size()?s.delay_results[s.delay_result++]:0;
+    if(result<0)return result;
+    *delay=s.delay_observation?s.delay_observation():s.delay_frames;return result;
+}
+int snd_pcm_state(void*) {
+    auto& s=alsa_test::state;return s.observe_state?s.observe_state():s.pcm_state;
+}
 long snd_pcm_readi(void*,void* buffer,unsigned long count) {
     auto* pcm=static_cast<std::int16_t*>(buffer);
     auto& s=alsa_test::state;
@@ -48,14 +56,14 @@ long snd_pcm_readi(void*,void* buffer,unsigned long count) {
     return static_cast<long>(count);
 }
 long snd_pcm_writei(void*,const void* buffer,unsigned long count) {
-    auto& s=alsa_test::state;s.write_frames.push_back(count);
+    auto& s=alsa_test::state;s.write_frames.push_back(count);if(s.before_write)s.before_write();
     if(s.write_result<s.write_results.size()) {
         const auto result=s.write_results[s.write_result++];
         if(result<=0)return result;
         count=std::min(count,static_cast<unsigned long>(result));
     }
     count=std::min(count,static_cast<unsigned long>(s.write_limit));
-    const auto* pcm=static_cast<const std::int16_t*>(buffer);s.played.insert(s.played.end(),pcm,pcm+count*s.channels);
+    const auto* pcm=static_cast<const std::int16_t*>(buffer);s.played.insert(s.played.end(),pcm,pcm+count*s.channels);if(s.after_write)s.after_write(count);
     return static_cast<long>(count);
 }
 int snd_pcm_recover(void*,int error,int){
@@ -78,8 +86,8 @@ int snd_pcm_prepare(void*){
     if(s.after_prepare)s.after_prepare();return 0;
 }
 int snd_pcm_close(void*){++alsa_test::state.closes;--alsa_test::state.live;return 0;}
-int snd_pcm_wait(void*,int){
-    auto& s=alsa_test::state;
+int snd_pcm_wait(void*,int timeout){
+    auto& s=alsa_test::state;if(s.before_wait)s.before_wait(timeout);
     return s.wait_result<s.wait_results.size()?s.wait_results[s.wait_result++]:1;
 }
 int snd_device_name_hint(int,const char*,void*** hints) {

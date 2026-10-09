@@ -3,6 +3,7 @@
 #include "document_layout.hpp"
 #include "link_planner_model.hpp"
 #include "link_planner_page.hpp"
+#include "../src/estimate_cancellation.hpp"
 #include "datapump/correlation_experiment.hpp"
 #include "datapump/execution.hpp"
 #include "datapump/pattern_code.hpp"
@@ -44,6 +45,57 @@ bool contains_text(const ui::DocumentNode& root,std::string_view text) {
     const auto flat=nodes(root);
     return std::any_of(flat.begin(),flat.end(),[&](const auto* node){return node->text.find(text)!=std::string::npos;});
 }
+void cancelled_planner_and_inspection() {
+    std::stop_source stopped;stopped.request_stop();
+    planner::Cache cache;
+    bool cancelled=false;
+    try {planner::build(example(),cache,stopped.get_token());}
+    catch(const estimate_detail::Cancelled&){cancelled=true;}
+    check(cancelled,"planner cancellation returned an unavailable or partial plan");
+    InspectionRequest request;request.binary=Bytes{0};request.observer_hopping=lpi::Hopping{};
+    cancelled=false;
+    try {inspect(request,stopped.get_token());}
+    catch(const estimate_detail::Cancelled&){cancelled=true;}
+    check(cancelled,"inspection ignored the advisory cancellation token");
+}
+
+void selected_plan_progress_and_support_equivalence() {
+    auto inputs=example();inputs.target_db_hz=23;
+    inputs.options.clock_sync=clock_sync::Policy{.01,.001,0};
+    inputs.options.audio_timing_error_seconds=.05;
+    inputs.receiver_work_mode=simulation::ReceiverWorkMode::hardware_timing_model;
+    inputs.receiver_timing_model={.05,2e-6,1./inputs.options.modem.sample_rate};
+    for(const bool keyed:{false,true})for(const auto target:{-30.,0.,23.}) {
+        auto options=inputs.options;
+        if(keyed)options.key=Crypto(Bytes(32,0x59));
+        modem::OscillatorSearchConfig oscillator;oscillator.lf={1e-5,.005};oscillator.rf=oscillator.lf;
+        options.modem.oscillator_search=oscillator;
+        options.modem=tuning::receive_profiles(options.modem,std::array{target},inputs.mode,keyed).front();
+        transfer::Estimate one;one.wire_bits=1;one.total_seconds=modem::symbol_seconds(options.modem);
+        const auto full=simulation::estimate(one,options,true,inputs.channel,{},1,false,100,4096,
+            simulation::ReceiverWorkMode::hardware_timing_model,inputs.receiver_timing_model);
+        const auto support=simulation::estimate(one,options,true,inputs.channel,{},1,false,100,4096,
+            simulation::ReceiverWorkMode::hardware_fallback);
+        check(std::tie(full.carrier_in_search,full.clock_in_search,full.oscillator_search_limited,full.receiver_workspace_supported)==
+              std::tie(support.carrier_in_search,support.clock_in_search,support.oscillator_search_limited,support.receiver_workspace_supported),
+              "support-only planning changed required clock coverage or workspace admission");
+    }
+    planner::Cache cache;std::optional<planner::Model> selected;
+    const auto complete=planner::build(inputs,cache,{},[&](const auto& current) {
+        check(!selected&&current.available&&current.curves_calculating&&current.points.empty(),
+              "selected result must publish once, before the complete curve sweep");selected=current;
+    });
+    check(selected&&complete.available&&!complete.curves_calculating&&!complete.points.empty(),
+          "progressive planner lost selected values or omitted its final curve coverage");
+    near(selected->observer_ratio,complete.observer_ratio,"partial publication altered completed observer result");
+    near(selected->success_probability,complete.success_probability,"partial publication altered completed probability");
+    near(selected->cpu_realtime_ratio,complete.cpu_realtime_ratio,"partial publication altered completed work estimate");
+    std::stop_source stop;bool cancelled=false;unsigned published=0;
+    try {planner::build(inputs,cache,stop.get_token(),[&](const auto& current){++published;check(current.available,"cancel preview unavailable");stop.request_stop();});}
+    catch(const estimate_detail::Cancelled&){cancelled=true;}
+    check(cancelled&&published==1,"cancelled curve sweep returned partial numerical trials as a full plan");
+}
+
 void independent_reference_values() {
     const auto inputs=example();
     const auto short_bit=planner::build(inputs);
@@ -613,10 +665,10 @@ void quantization_fixed_modes_and_limits() {
 }
 std::shared_ptr<const planner::Model> prepared_plan(Controller& controller) {
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(30);
-    while(controller.link_plan()->error.starts_with("Calculating")&&std::chrono::steady_clock::now()<deadline) {
+    while((controller.link_plan()->error.starts_with("Calculating")||controller.link_plan()->curves_calculating)&&std::chrono::steady_clock::now()<deadline) {
         controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
-    check(!controller.link_plan()->error.starts_with("Calculating"),"Planner worker did not complete");
+    check(!controller.link_plan()->error.starts_with("Calculating")&&!controller.link_plan()->curves_calculating,"Planner worker did not complete");
     return controller.link_plan();
 }
 void persistent_worker_curve_cache() {
@@ -763,10 +815,11 @@ void stable_planner_navigation_document() {
 }
 void prepare(Controller& controller) {
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
-    while(!controller.estimate()&&std::chrono::steady_clock::now()<deadline) {
+    while((!controller.estimate()||controller.field(ui::Field::simulation_cpu_time).text.ends_with("Calculating..."))&&std::chrono::steady_clock::now()<deadline) {
         controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     check(controller.estimate().has_value(),"Current-draft estimate was not prepared");
+    check(!controller.field(ui::Field::simulation_cpu_time).text.ends_with("Calculating..."),"Current-draft receiver advice was not prepared");
 }
 void asynchronous_planner_edits() {
     using F=ui::Field;using C=ui::Command;
@@ -792,7 +845,7 @@ void asynchronous_planner_edits() {
           latest->inputs.options.modem.oscillator_search->rf_shift_hz==2000000,
           "Rapid edits must retain only the newest absolute Carrier and Shift");
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(30);
-    while(!controller.link_plan()->available&&std::chrono::steady_clock::now()<deadline) {
+    while((!controller.link_plan()->available||controller.link_plan()->curves_calculating)&&std::chrono::steady_clock::now()<deadline) {
         controller.poll();
         const auto current=controller.link_plan();
         check(current->inputs.options.modem.oscillator_search->rf_shift_hz==2000000&&
@@ -1791,10 +1844,14 @@ void document_semantics_layout_and_plots() {
 }
 int main(int argc,char** argv) {
     try {
+        cancelled_planner_and_inspection();
+        if(argc==2&&std::string_view(argv[1])=="--progressive-only") {selected_plan_progress_and_support_equivalence();std::cout<<"Progressive planner and support invariants passed\n";return 0;}
+        if(argc==2&&std::string_view(argv[1])=="--cancellation-only") {std::cout<<"Planner and inspection cancellation passed\n";return 0;}
         if(argc==2&&std::string_view(argv[1])=="--reference-document") {
             conditional_reference_and_timing_work_document();
             std::cout<<"Conditional RX reference and timing work document passed\n";return 0;
         }
+        selected_plan_progress_and_support_equivalence();
         independent_reference_values();exact_geometry_and_physical_finish();timing_milestones();
         clock_and_ram_milestones();sampled_clock_ram_islands();checked_clock_ram_navigation();
         nearest_usable_targets();bounded_navigation_preview();nearest_target_shares_receiver_budget();

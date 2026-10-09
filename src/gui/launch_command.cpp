@@ -2,6 +2,7 @@
 #include "launch_command.hpp"
 #include "datapump/tuning.hpp"
 #include "datapump/clock_sync.hpp"
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cctype>
@@ -34,6 +35,12 @@ std::vector<std::string> tokenize(std::string_view command) {
             }
         }
         if(quote) {
+#ifdef _WIN32
+            // PowerShell single-quoted literals escape an apostrophe by doubling it.
+            if(quote=='\''&&ch=='\''&&i+1<command.size()&&command[i+1]=='\'') {
+                token+='\'';++i;started=true;continue;
+            }
+#endif
             if(ch==quote)quote=0;else token+=ch;
             started=true;
         } else if(ch=='\''||ch=='"') {quote=ch;started=true;}
@@ -84,6 +91,24 @@ std::string numeric(double value) {
     if(result.ec!=std::errc{})invalid("Cannot format a launch setting.");
     return {buffer.data(),result.ptr};
 }
+std::string quoted_argument(std::string_view value) {
+    const auto safe=[](unsigned char ch) {
+        return (ch>='a'&&ch<='z')||(ch>='A'&&ch<='Z')||(ch>='0'&&ch<='9')||
+            std::string_view("-_./:=+,%").find(static_cast<char>(ch))!=std::string_view::npos;
+    };
+    if(!value.empty()&&std::all_of(value.begin(),value.end(),safe))return std::string(value);
+    std::string result="'";
+    for(const auto ch:value) {
+        if(ch=='\'') {
+#ifdef _WIN32
+            result+="''"; // PowerShell
+#else
+            result+="'\\''"; // POSIX shell: close, escaped apostrophe, reopen
+#endif
+        } else result+=ch;
+    }
+    return result+"'";
+}
 }
 
 Patch parse_arguments(std::span<const std::string> arguments) {
@@ -112,7 +137,8 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             flag=="--rate"||flag=="--bw"||flag=="--carrier"||flag=="--dsp-workspace"||flag=="--pattern"||
             flag=="--rf-oscillator"||flag=="--shift"||flag=="--rf-shift"||flag=="--rf-carrier"||flag=="--search-margin"||
             flag=="--reference"||flag=="--sideband"||flag=="--lf-reference"||
-            flag=="--clock-sync"||flag=="--audio-error"||flag=="--dsss-factor"||flag=="--fhss"||flag=="--live-duplex";
+            flag=="--clock-sync"||flag=="--audio-error"||flag=="--dsss-factor"||flag=="--fhss"||flag=="--live-duplex"||
+            flag=="--keyfile"||flag=="--key-name"||flag=="--tx-key";
         if(!known)invalid("Unknown launch option: "+std::string(flag));
         std::string_view value;
         if(equal!=std::string_view::npos)value=argument.substr(equal+1);
@@ -132,6 +158,12 @@ Patch parse_arguments(std::span<const std::string> arguments) {
         else if(flag=="--carrier")result.carrier_hz=frequency(value,flag,0,false,std::numeric_limits<double>::max());
         else if(flag=="--dsp-workspace")result.workspace_percent=workspace(value);
         else if(flag=="--clock-sync")result.clock_sync=clock_sync::format(clock_sync::parse(value));
+        else if(flag=="--keyfile")result.keyfile=value;
+        else if(flag=="--key-name")result.key_name=value;
+        else if(flag=="--tx-key") {
+            if(value!="none"&&value!="named")invalid("--tx-key must be none or named.");
+            result.tx_key=value;
+        }
         else if(flag=="--audio-error") {
             result.audio_timing_error_seconds=clock_sync::duration(value);
             clock_sync::validate_audio_error(*result.audio_timing_error_seconds);
@@ -186,6 +218,7 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             invalid("Carrier minus Shift must be positive and at most 30 MHz for the real USB stream.");
     }
     if(lf_zero_reference&&explicit_reference=="independent")invalid("--lf-reference 0 conflicts with independent reference.");
+    if(result.tx_key=="none"&&result.key_name)invalid("--key-name conflicts with --tx-key none.");
     return result;
 }
 Patch parse(std::string_view command) {
@@ -224,15 +257,19 @@ std::string format(const Patch& settings) {
     if(settings.dsss_factor)add("--dsss-factor",std::to_string(*settings.dsss_factor));
     if(settings.full_duplex)add("--live-duplex",*settings.full_duplex?"yes":"no");
     if(settings.fhss)add("--fhss",*settings.fhss);
+    // Equal syntax preserves a filename or key name beginning with '--'.
+    if(settings.keyfile)arguments.push_back("--keyfile="+*settings.keyfile);
+    if(settings.key_name)arguments.push_back("--key-name="+*settings.key_name);
+    if(settings.tx_key)add("--tx-key",*settings.tx_key);
     // Validate programmatic exports as strictly as pasted text before returning
-    // any command. Canonical enum values contain no shell metacharacters.
+    // any command. File references are quoted for the host shell below.
     (void)parse_arguments(arguments);
 #ifdef _WIN32
     std::string result=".\\datapump-gui.exe";
 #else
     std::string result="./datapump-gui";
 #endif
-    for(const auto& argument:arguments){result+=' ';result+=argument;}
+    for(const auto& argument:arguments){result+=' ';result+=quoted_argument(argument);}
     return result;
 }
 }

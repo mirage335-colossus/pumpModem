@@ -1,4 +1,5 @@
 #include "inspection_model.hpp"
+#include "../estimate_cancellation.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include <array>
 #include <cmath>
@@ -38,8 +39,8 @@ std::string lpi_ratio(double value) {
     else output<<value;
     return "~"+output.str()+"×";
 }
-void lpi_presentation(Inspection& result,const transfer::Options& options) {
-    result.lpi_estimate=lpi::estimate(result.estimate,options);
+void lpi_presentation(Inspection& result,const transfer::Options& options,std::optional<lpi::Hopping> hopping,std::stop_token stop) {
+    result.lpi_estimate=lpi::estimate(result.estimate,options,hopping,stop);
     const auto& model=result.lpi_estimate;
     const auto reference="RX 1 bit at "+number(lpi::receiver_reference_symbol_snr_db)+" dB Es/N0 design reference";
     const auto cn0=number(model.reference_cn0_db_hz)+" dB-Hz (normalized to RX 1 bit; not measured link power)";
@@ -62,6 +63,14 @@ void lpi_presentation(Inspection& result,const transfer::Options& options) {
     if(model.hypothetical_encryption)
         result.lpi_description=warning+". Figures assume encrypted private patterns with the current sample, chip and symbol timing at the normalized receiver reference. The actual public pattern or tone can be easier to detect; these figures do not describe it. The draft exposure uses only the current draft's duration, without selecting an encrypted automatic profile or adding interval authentication. No key, waveform or transmission setting is changed. ";
     result.lpi_description+="This relative model normalizes received power so one receiver symbol has "+number(lpi::receiver_reference_symbol_snr_db)+" dB Es/N0, the existing pattern design reference. It is not a calibrated reception threshold, guaranteed reception, or one accepted bit out of N transmitted bits. An unkeyed energy detector has the same received C/N0 and observation opportunity and is assumed to know the occupied band, on-air window and stationary Gaussian noise power. The ratio compares its total on-air observation with the receiver's one bit duration; additional durations subtract that first duration. The estimate targets 90% detection with 1% false alarm per known window; unknown searches, other detectors and changing noise are not modeled. Simulation on/off, simulated power and oscillator presets do not enter this comparison. TX targets affect it only through changed symbol geometry. Numerical times apply only at normalized in-band SNR <= -10 dB. Counts are equivalent wire bits (one symbol each), not source bits or a safe traffic quota; repeated traffic accumulates exposure. Encryption does not reduce transmitted power or physical interference. There is no guaranteed hidden traffic.";
+    if(model.hypothetical_hopping) {
+        result.lpi_summary+=" · full-spectrum FHSS";
+        result.lpi_description+=" The hopping scenario captures every channel simultaneously and intercepts all signal energy. Known unused gaps are excluded. It selects the faster of hop-set energy integration and a channelized dwell-maximum detector, each with the same global false-alarm criterion. This is a modeled detector comparison, not an optimal-observer bound or a measured hopping waveform.";
+        result.fields.push_back({"LPI hop capture",std::to_string(model.hopping_channels)+
+            " channels simultaneously / "+number(model.captured_noise_bandwidth_hz)+" Hz / 100% signal energy"});
+        result.fields.push_back({"LPI observer strategy",model.observer_strategy==lpi::ObserverStrategy::dwell_channel_maximum?
+            "Channelized dwell maximum":"Aggregate hop-set radiometer"});
+    }
     result.fields.insert(result.fields.end(),{{"LPI scenario",scenario},{"LPI observer : receiver",threshold},
         {"LPI receiver reference",reference+"; not a calibrated reception threshold"},
         {"LPI reference C/N0",cn0},
@@ -77,7 +86,8 @@ void lpi_presentation(Inspection& result,const transfer::Options& options) {
 }
 }
 
-Inspection inspect(const InspectionRequest& request) {
+Inspection inspect(const InspectionRequest& request,std::stop_token stop) {
+    estimate_detail::check(stop);
     Inspection result;
     result.preview_only=request.binary?request.binary->empty():
         request.message.kind==MessageKind::text&&request.message.data.empty();
@@ -96,6 +106,7 @@ Inspection inspect(const InspectionRequest& request) {
     constexpr std::array<std::uint8_t,1> preview{0};
     result.estimate=result.preview_only?transfer::estimate_binary(preview,options):
         result.binary?transfer::estimate_binary(*request.binary,options):transfer::estimate(request.message,options,&layout);
+    estimate_detail::check(stop);
     const auto symbol_samples=modem::symbol_sample_count(config);
     const auto symbol_seconds=static_cast<double>(symbol_samples)/config.sample_rate;
     const auto keyed=options.key.has_value();
@@ -161,7 +172,7 @@ Inspection inspect(const InspectionRequest& request) {
             {"Transmitted bits",count(transmitted)}});
     }
     result.pattern_space=inspection::inspect_pattern_space(config,request.target_snr,config.scramble || config.dsss);
-    lpi_presentation(result,options);
+    lpi_presentation(result,options,request.observer_hopping,stop);
     result.lanes.push_back({"Transmit • pattern symbols",{{"Hardware settling",result.preamble_description,hardware_samples?InspectionState::active:InspectionState::off},
         {"Source encoding",source_encoding},
         {"Fixed interval coding",raw?"Raw bits have no byte codec.":"Fill the fixed data area, append the keyed HMAC when enabled, then add systematic Reed-Solomon parity to complete 128 coded bytes.",raw?InspectionState::off:InspectionState::active},

@@ -188,6 +188,7 @@ struct Snapshot {
     double simulation_compute_seconds = 0;
     bool transmission_finished = true; // CPU/audio work complete; simulation presentation may still be active.
     bool transmission_cancelled = false;
+    bool transmission_failed = false; // Failed request is not successful completion; error persists through RX restart.
     // Completed simulations present training, measured plots and provisional
     // reception over three wall-clock seconds. Verified signals and received
     // content are delivered once at the deadline, then plots return live.

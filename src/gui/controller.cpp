@@ -4,7 +4,9 @@
 #include <utility>
 #include "datapump/compression.hpp"
 #include "controller.hpp"
+#include "../estimate_cancellation.hpp"
 #include "receiver_health.hpp"
+#include "receiver_timing_advice.hpp"
 #include "audio_controls.hpp"
 #include "datapump/received_text.hpp"
 #include "record_presentations.hpp"
@@ -211,19 +213,21 @@ struct Controller::Impl {
     bool planner_input_notice=false;
     bool target_input_notice=false;
     std::optional<bool> displayed_short_target;
-    std::string draft_error,tuning_explanation,estimate_error,ordinary_airtime;
+    std::string draft_error,tuning_explanation,estimate_error,ordinary_airtime,settings_error;
     std::vector<KeyEntry> keys;
     std::shared_ptr<const Bytes> attachment;
     std::filesystem::path attachment_path,key_path;
     std::optional<std::string> attached_message_draft;
     std::optional<std::filesystem::path> pending_key,pending_file;
+    std::optional<launch_command::Patch> pending_key_settings;
+    bool pending_key_simulation_off=true;
     std::vector<std::string> pending_names;
     std::uint64_t pending_key_completion=0;
     std::optional<transfer::Estimate> estimate;
     std::shared_ptr<const Inspection> inspection;
     planner::Inputs planner_inputs;
     std::array<bool,3> invalid_link_inputs{};
-    mutable std::shared_ptr<const planner::Model> planner_model;
+    mutable std::shared_ptr<const planner::Model> planner_model,planner_identity;
     std::shared_ptr<planner::Cache> planner_cache=std::make_shared<planner::Cache>();
     struct PlannerRequest {
         planner::Inputs inputs;
@@ -233,17 +237,24 @@ struct Controller::Impl {
     bool planner_details=false,planner_draft=false;
     std::string generated_launch_command;
     std::uint64_t revision=0,estimated_revision=0,service_id=0,attachment_revision=0;
+    std::uint64_t advice_revision=0,completed_advice_revision=0;
+    ReceiverTimingAdvice timing_advice;
+    bool advice_displayed=false;
     Clock::time_point estimate_requested=Clock::now(),notice_until{},cpu_time=Clock::now();
     std::clock_t cpu_clock=std::clock();
     enum class PrepKind { estimate,keys,file,devices,planner };
+    PrepKind active_kind=PrepKind::devices;
     struct Prepared {
         PrepKind kind=PrepKind::estimate;
-        std::uint64_t revision=0;
+        std::uint64_t revision=0,advice_revision=0;
+        bool cancelled=false;
         std::uint64_t completion_id=0;
         std::shared_ptr<const Inspection> inspection;
         std::shared_ptr<const planner::Model> planner_pending,planner_result;
         std::optional<simulation::Estimate> simulation_estimate;
         std::vector<KeyEntry> keys;
+        std::optional<launch_command::Patch> key_settings;
+        bool key_simulation_off=true;
         std::vector<std::string> names;
         std::vector<audio::Device> devices;
         std::shared_ptr<const Bytes> file;
@@ -253,7 +264,7 @@ struct Controller::Impl {
     };
     execution::Task worker;
     execution::Mutex mutex;
-    std::optional<Prepared> prepared;
+    std::optional<Prepared> prepared,prepared_preview;
     enum class Purpose { open_key,generate_names,generate_path,attach,save,clipboard,folder,
         planner_target,planner_power,planner_loss,planner_noise };
     struct Pending { Purpose purpose; std::shared_ptr<const Bytes> bytes; std::vector<std::string> names; std::uint64_t attachment_revision=0; };
@@ -302,8 +313,8 @@ struct Controller::Impl {
         for(const auto* value:{"0.1ms","1ms","10ms"})f(UiField::clock_accuracy).options.push_back({value,value});
         for(const auto* value:{"1ms","10ms","20ms","75ms","150ms","400ms"})f(UiField::clock_region).options.push_back({value,value});
         for(const auto* value:{"0ms","1ms","2ms","3ms","4ms","5ms","2564ms"})f(UiField::clock_offset).options.push_back({value,value});
-        f(UiField::audio_error).text="30ms";
-        for(const auto* value:{"1ms","3ms","10ms","20ms","30ms","50ms","100ms","200ms","500ms"})
+        f(UiField::audio_error).text="0ms";
+        for(const auto* value:{"0ms","1ms","3ms","10ms","20ms","30ms","50ms","100ms","200ms","500ms"})
             f(UiField::audio_error).options.push_back({value,value});
         f(UiField::dsss_factor).options={{"1","Off"},{"10","10x"},{"100","100x"},{"1000","1000x"}};
         f(UiField::dsss_factor).selected="1";
@@ -339,11 +350,13 @@ struct Controller::Impl {
         f(UiField::compression_codes).text=compression_reference();
         f(UiField::mode).text="Starting continuous reception";
         encryption_changed();
-        configure(false,false,std::nullopt,options.launch_settings?&*options.launch_settings:nullptr,false);
+        if(options.launch_settings&&options.launch_settings->keyfile) {
+            configure();apply_launch(*options.launch_settings,false);
+        } else configure(false,false,std::nullopt,options.launch_settings?&*options.launch_settings:nullptr,false);
         dirty(); controls();
         need_devices=!options.smoke;
     }
-    ~Impl() { session.stop(); worker.request_stop(); if(worker.joinable()) worker.join(); }
+    ~Impl() { worker.request_stop(); session.stop(); if(worker.joinable()) worker.join(); }
     bool tone() const {
         const auto& mode=f(UiField::pattern).selected;
         return mode=="auto-tone" || mode.starts_with("tone-");
@@ -352,6 +365,14 @@ struct Controller::Impl {
     const KeyEntry* selected_key() const {
         for(const auto& key:keys) if("key:"+key.name==f(UiField::key).selected) return &key;
         return nullptr;
+    }
+    void key_fields(std::string selected) {
+        auto& state=f(UiField::key);state.options={{"none","None"}};
+        std::vector<std::string> names;for(const auto& key:keys)names.push_back(key.name);
+        const auto labels=key_choice_labels(names);
+        for(std::size_t i=0;i<keys.size();++i)state.options.push_back({"key:"+keys[i].name,labels[i+1]});
+        state.selected=std::move(selected);
+        f(UiField::key_path).text=key_path.empty()?"None":path_text(key_path.filename());
     }
     Message message() const {
         Message value;
@@ -397,7 +418,11 @@ struct Controller::Impl {
                 {{row.label,5,1,-5,16,10,row.active?ui::TextTone::data:ui::TextTone::muted,row.active}}});
         }
     }
+    void cancel_advisory() {
+        if(preparing&&(active_kind==PrepKind::estimate||active_kind==PrepKind::planner))worker.request_stop();
+    }
     void dirty() {
+        cancel_advisory();++advice_revision;advice_displayed=false;
         // Only the draft's transmit presentation changes here. Reconfiguring
         // live reception would discard a pending symbol when crossing 16 bytes.
         refresh_transmit_target();
@@ -405,7 +430,12 @@ struct Controller::Impl {
         planner_model.reset();
         simulation_estimate_status(!settings_valid?"Invalid settings":!attachment&&!draft_error.empty()?"Unavailable":"Calculating...");
         lpi_estimate_status(!settings_valid?"Invalid settings":!attachment&&!draft_error.empty()?"Unavailable":"Calculating...");
-        ordinary_airtime="Calculating airtime..."; f(UiField::inspection).text="Calculating current transmission...";
+        ordinary_airtime=settings_valid?"Calculating airtime...":"Invalid modem settings";
+        f(UiField::inspection).text=settings_valid?"Calculating current transmission...":settings_error;
+        if(!settings_valid) {
+            const auto hint=requested_bandwidth_hint(true);
+            if(!hint.empty())ordinary_airtime+="\n"+hint;
+        }
         f(UiField::flow_detail).text.clear(); f(UiField::transmission_detail).text.clear();
         f(UiField::payload_alphabet).visible=false; f(UiField::reference_alphabet).visible=false;
         if(!attachment && !draft_error.empty()) { estimated_revision=revision; ordinary_airtime=draft_error; f(UiField::inspection).text=draft_error; }
@@ -422,6 +452,13 @@ struct Controller::Impl {
     }
     void simulation_estimate_status(std::string state) {
         simulation_estimate_text(state,state,state);
+    }
+    void refresh_advice_status() {
+        if(!advice_displayed) {simulation_estimate_status(settings_valid?"Calculating...":"Invalid settings");return;}
+        for(const auto field:{UiField::simulation_confidence,UiField::simulation_cpu_time,UiField::simulation_gpu_time}) {
+            auto& text=f(field).text;
+            if(!text.ends_with(" (updating)"))text+=" (updating)";
+        }
     }
     void lpi_estimate_status(const std::string& state) {
         f(UiField::lpi_estimate).text="Observer / receiver time: "+state;
@@ -533,30 +570,10 @@ struct Controller::Impl {
     }
     simulation::ReceiverWorkMode receiver_work_mode() const {
         if(settings.simulation)return simulation::ReceiverWorkMode::sampled_simulation;
-        return snapshot.clock_window_modeled&&snapshot.receiver_timing&&!snapshot.clock_timing_fallback?
-            simulation::ReceiverWorkMode::hardware_timing_model:
+        return timing_advice.qualified()?simulation::ReceiverWorkMode::hardware_timing_model:
             simulation::ReceiverWorkMode::hardware_fallback;
     }
-    simulation::ReceiverTimingModel receiver_timing_model(const live::Snapshot& state) const {
-        simulation::ReceiverTimingModel result;
-        if(!settings.simulation&&state.clock_window_modeled&&state.receiver_timing&&!state.clock_timing_fallback) {
-            const auto& timing=*state.receiver_timing;
-            // Cache engineering work on outward-rounded bounds, never the
-            // per-block UTC anchor. Include slope rounding in its uncertainty.
-            constexpr double error_step=.0001,rate_step=1e-6;
-            const auto error_ceiling=std::ceil(timing.uncertainty_seconds/error_step)*error_step;
-            result.capture_error_seconds=timing.uncertainty_seconds<=settings.transfer.audio_timing_error_seconds?
-                std::min(error_ceiling,settings.transfer.audio_timing_error_seconds):error_ceiling;
-            const auto slope_step=rate_step/settings.transfer.modem.sample_rate;
-            const auto slope=std::round(timing.seconds_per_frame/slope_step)*slope_step;
-            result.capture_seconds_per_frame=slope;
-            const auto rounding=std::abs(slope-timing.seconds_per_frame)/timing.seconds_per_frame;
-            result.capture_rate_uncertainty_fraction=
-                std::ceil((timing.rate_uncertainty_fraction+rounding)/rate_step)*rate_step;
-        }
-        return result;
-    }
-    simulation::ReceiverTimingModel receiver_timing_model() const {return receiver_timing_model(snapshot);}
+    simulation::ReceiverTimingModel receiver_timing_model() const {return timing_advice.model();}
     static std::size_t target_index(UiField field) {return field==UiField::snr?0:1;}
     double effective_target(UiField field) const {
         const auto& edited=target_edits[target_index(field)];
@@ -594,6 +611,7 @@ struct Controller::Impl {
     void fake_planning(planner::Inputs& input,bool enabled,
                        std::optional<modem::OscillatorModel> proposed_rf=std::nullopt,
                        std::optional<bool> proposed_shared=std::nullopt) const {
+        input.observer_hopping=enabled?std::optional<lpi::Hopping>{lpi::Hopping{}}:std::nullopt;
         if(!enabled||!input.options.modem.oscillator_search)return;
         auto& config=input.options.modem;
         const auto& id=f(UiField::rf_oscillator).selected;
@@ -633,7 +651,9 @@ struct Controller::Impl {
     }
     void configure(bool match_receive_target=false,bool match_carrier=false,
                    std::optional<UiField> align_target=std::nullopt,
-                   const launch_command::Patch* load=nullptr,bool simulation_off=true) {
+                   const launch_command::Patch* load=nullptr,bool simulation_off=true,
+                   const std::vector<KeyEntry>* loaded_keys=nullptr,
+                   const std::filesystem::path* loaded_path=nullptr) {
         const bool align_receive=receive_targets_due.has_value()||align_target==UiField::receive_snr;
         if(!load) {
             receive_targets_due.reset();dirty();
@@ -642,11 +662,29 @@ struct Controller::Impl {
         }
         try {
             live::Settings next;
+            const auto& next_keys=loaded_keys?*loaded_keys:keys;
+            auto selected=f(UiField::key).selected;
+            if(loaded_keys)selected=next_keys.empty()?"none":"key:"+next_keys.front().name;
+            if(load&&load->key_name)selected="key:"+*load->key_name;
+            if(load&&load->tx_key=="none")selected="none";
+            else if(load&&load->tx_key=="named"&&selected=="none")
+                selected=next_keys.empty()?"none":"key:"+next_keys.front().name;
+            const auto selected_entry=std::find_if(next_keys.begin(),next_keys.end(),
+                [&](const auto& entry){return "key:"+entry.name==selected;});
+            if((selected!="none"&&selected_entry==next_keys.end())||
+               (load&&load->tx_key=="named"&&selected=="none"))
+                throw Error("The requested transmit key is not present in the loaded keyfile");
             auto pattern=load&&load->pattern?*load->pattern:f(UiField::pattern).selected;
-            if(load&&pattern=="auto-keystream"&&f(UiField::key).selected=="none")pattern="auto-pattern";
+            if(load&&pattern=="auto-keystream"&&selected=="none") {
+                if(load->keyfile||load->key_name||load->tx_key=="named")
+                    throw Error("Encrypted pattern requires a named transmit key; keyfile import was not applied");
+                pattern="auto-pattern";
+            }
             const auto mode=tuning::parse_pattern_mode(pattern);
             const bool next_tone=pattern=="auto-tone"||pattern.starts_with("tone-");
-            const bool next_encrypted=!next_tone&&f(UiField::key).selected!="none";
+            if(next_tone&&load&&(load->key_name||load->tx_key=="named"))
+                throw Error("Tone modes cannot select a named transmit encryption key");
+            const bool next_encrypted=!next_tone&&selected!="none";
             const auto requested_factor=load&&load->dsss_factor?*load->dsss_factor:
                 static_cast<unsigned>(number(f(UiField::dsss_factor).selected,"DSSS factor"));
             const auto factor=next_encrypted?requested_factor:1u;
@@ -683,8 +721,8 @@ struct Controller::Impl {
             next.transfer.receive_pattern_mode=mode;
             if(options.smoke) next.transfer.search_seconds=0;
             next.transfer.fec=f(UiField::fec).selected=="rs20"?FecMode::rs20:f(UiField::fec).selected=="rs60"?FecMode::rs60:FecMode::off;
-            if(next_encrypted) { const auto* key=selected_key(); if(!key) throw Error("Select a valid encryption key entry"); next.transfer.key=key->key; }
-            if(!next_tone)for(const auto& key:keys) next.receive_keys.push_back(key.key);
+            if(next_encrypted)next.transfer.key=selected_entry->key;
+            if(!next_tone)for(const auto& key:next_keys)next.receive_keys.push_back(key.key);
             next.device=f(UiField::device).text.empty()?"default":f(UiField::device).text;
             next.transmit_gain=audio_controls::volume_gain(f(UiField::volume).selected);
             next.exclusive=f(UiField::exclusive).checked;
@@ -824,6 +862,8 @@ struct Controller::Impl {
             if(load) {
                 (void)link_channel(next,next_planner);
                 live::validate_settings(next);
+                if(loaded_keys) {keys=*loaded_keys;key_path=*loaded_path;}
+                key_fields(next_tone?"none":selected);
                 dirty();receive_targets_due.reset();
                 f(UiField::profile_reference).records.clear();f(UiField::profile_reference).selected.clear();
                 planner_inputs=next_planner;sync_link_fields();planner_target_valid=true;
@@ -857,7 +897,7 @@ struct Controller::Impl {
             update_link_channel(next);
             if(match_receive_target||align_receive)receive_target_edit=std::move(receive_adjustment);
             if(!receive_target_edit)f(UiField::receive_snr).text=targets.canonical;
-            settings=std::move(next); settings_valid=true;
+            settings=std::move(next);timing_advice.reset(); settings_valid=true;settings_error.clear();
             reset_carrier(rate*factor,shift,false);
             if(target_input_notice) {
                 target_input_notice=false;notice_until={};
@@ -873,7 +913,7 @@ struct Controller::Impl {
             if(started) session.configure(settings);
         } catch(const std::exception& error) {
             if(!load) {
-                settings_valid=false;target_labels();simulation_estimate_status("Invalid settings");lpi_estimate_status("Invalid settings");
+                settings_valid=false;settings_error=error.what();target_labels();simulation_estimate_status("Invalid settings");lpi_estimate_status("Invalid settings");
                 const auto hint=requested_bandwidth_hint();
                 const auto compact_hint=requested_bandwidth_hint(true);
                 ordinary_airtime="Invalid modem settings"+(compact_hint.empty()?std::string{}:"\n"+compact_hint);
@@ -900,7 +940,7 @@ struct Controller::Impl {
             auto model=std::make_shared<planner::Model>();model->inputs=std::move(input);
             model->error=!planner_target_valid?"Check planner target":!link_inputs_valid()?"Check link inputs":!settings_valid?"Fix the modem settings to continue planning.":
                 (!draft_error.empty()?draft_error:!estimate_error.empty()?estimate_error:"Calculating the current draft...");
-            planner_model=std::move(model);
+            planner_model=std::move(model);planner_identity=planner_model;
         } else {
             // Presentation and command enablement must never run the expensive
             // target sweep on the event thread. A single replaceable request
@@ -914,7 +954,8 @@ struct Controller::Impl {
             const auto steps=planner::preview_steps(model->inputs);
             model->stronger_fit_target=steps.stronger;model->weaker_fit_target=steps.weaker;
             planner_model=std::move(model);
-            pending_planner=PlannerRequest{planner_model->inputs,planner_model};
+            planner_identity=planner_model;
+            pending_planner=PlannerRequest{planner_model->inputs,planner_identity};
         }
         return planner_model;
     }
@@ -971,6 +1012,9 @@ struct Controller::Impl {
         values.dsss_factor=static_cast<unsigned>(number(f(UiField::dsss_factor).selected,"DSSS factor"));
         values.full_duplex=settings.full_duplex;
         values.fhss=f(UiField::fhss).selected;
+        if(!key_path.empty())values.keyfile=path_text(std::filesystem::absolute(key_path).lexically_normal());
+        values.tx_key=encrypted()?"named":"none";
+        if(encrypted())values.key_name=selected_key()->name;
         auto command=launch_command::format(values);
         // A poll, draft edit or document repaint must not erase pasted input.
         // Only a new accepted launch setting (or successful Load) replaces it.
@@ -1305,12 +1349,13 @@ struct Controller::Impl {
         if(std::none_of(state.records.begin(),state.records.end(),[&](const auto& row){return row.id==state.selected;}))state.selected.clear();
     }
     void start_worker(std::function<void(Prepared&,std::stop_token)> work,Prepared result) {
-        preparing=true;
+        preparing=true;active_kind=result.kind;
         const auto kind=result.kind;
         const auto completion_id=result.completion_id;
         const auto planner_pending=result.planner_pending;
         try { worker=execution::Task([this,work=std::move(work),result=std::move(result)](std::stop_token stop) mutable {
-            try { work(result,stop); if(stop.stop_requested()) throw Error("Operation cancelled"); } catch(const std::exception& e) { result.error=e.what(); }
+            try { work(result,stop); estimate_detail::check(stop); } catch(const std::exception& e) { result.error=e.what(); }
+            result.cancelled=stop.stop_requested();
             std::lock_guard lock(mutex); prepared=std::move(result);
         }); } catch(...) {
             if(completion_id)service_completions.push_back({completion_id,"Could not start file operation"});
@@ -1318,7 +1363,7 @@ struct Controller::Impl {
             if(kind==PrepKind::keys) { key_loading=false; key_failed=true; }
             if(kind==PrepKind::file) file_loading=false;
             if(kind==PrepKind::estimate) estimated_revision=revision;
-            if(kind==PrepKind::planner&&planner_model==planner_pending) {
+            if(kind==PrepKind::planner&&planner_model&&planner_identity==planner_pending) {
                 auto failed=std::make_shared<planner::Model>();failed->inputs=planner_pending->inputs;
                 failed->error="Could not start planner calculation";planner_model=std::move(failed);
             }
@@ -1327,11 +1372,13 @@ struct Controller::Impl {
     }
     void dispatch() {
         if(preparing||closing) return;
-        if(pending_planner&&pending_planner->pending!=planner_model)pending_planner.reset();
+        if(pending_planner&&(!planner_model||pending_planner->pending!=planner_identity))pending_planner.reset();
         Prepared result;
         if(pending_key) {
             result.kind=PrepKind::keys; result.path=*pending_key; pending_key.reset(); result.names=std::move(pending_names); pending_names.clear(); result.generate=!result.names.empty();
             result.completion_id=std::exchange(pending_key_completion,0);
+            result.key_settings=std::exchange(pending_key_settings,std::nullopt);
+            result.key_simulation_off=pending_key_simulation_off;
             start_worker([](Prepared& value,std::stop_token stop) { if(stop.stop_requested()) throw Error("Operation cancelled"); if(value.generate) { create_keyring(value.path,value.names); value.created=true; } value.keys=load_keyring(value.path); },std::move(result));
         } else if(pending_file) {
             result.kind=PrepKind::file; result.path=*pending_file; result.revision=attachment_revision; pending_file.reset();
@@ -1343,16 +1390,26 @@ struct Controller::Impl {
             },std::move(result));
         } else if(need_devices) {
             need_devices=false; result.kind=PrepKind::devices; start_worker([](Prepared& value,std::stop_token) { value.devices=audio::devices(); },std::move(result));
-        } else if(settings_valid&&!estimate&&estimated_revision!=revision&&Clock::now()-estimate_requested>=std::chrono::milliseconds(120)) {
-            result.kind=PrepKind::estimate; result.revision=revision; InspectionRequest request;
+        } else if(!settings.simulation&&(transmit_requested||snapshot.transmitting)) {
+            // Optional advice must not compete with a hardware playback deadline.
+            return;
+        } else if(settings_valid&&((!estimate&&estimated_revision!=revision)||(estimate&&completed_advice_revision!=advice_revision))&&Clock::now()-estimate_requested>=std::chrono::milliseconds(120)) {
+            result.kind=PrepKind::estimate; result.revision=revision;result.advice_revision=advice_revision; InspectionRequest request;
             request.message=message(); request.options=settings.transfer;
+            if(f(UiField::fhss).selected=="fake-0.4s-200")request.observer_hopping=lpi::Hopping{};
             request.options.modem=transmit_config();
             if(empty_draft())request.binary=Bytes{};
             else if(!attachment&&composer.raw_bits()) request.binary=*composer.raw_bits();
             request.requested_pattern=f(UiField::pattern).selected; request.target_snr=short_draft()?short_target:long_target; request.simulation=settings.simulation; request.device=settings.device;
-            start_worker([request=std::move(request),simulation_settings=settings,work_mode=receiver_work_mode(),
-                          timing_model=receiver_timing_model()](Prepared& value,std::stop_token) {
-                value.inspection=std::make_shared<const Inspection>(inspect(request));
+            const auto reusable=estimate&&estimated_revision==revision?inspection:nullptr;
+            start_worker([this,request=std::move(request),reusable,simulation_settings=settings,work_mode=receiver_work_mode(),
+                          timing_model=receiver_timing_model()](Prepared& value,std::stop_token stop) {
+                estimate_detail::check(stop);
+                value.inspection=reusable?reusable:std::make_shared<const Inspection>(inspect(request,stop));
+                estimate_detail::check(stop);
+                // Airtime and TX readiness do not wait for advisory probability trials.
+                // Timing-only refreshes reuse the exact prepared draft.
+                if(!reusable) {std::lock_guard lock(mutex);prepared_preview=value;}
                 // Keep a failed advisory model independent of transmission preparation.
                 try {
                     modem::ChannelConfig channel;
@@ -1373,27 +1430,39 @@ struct Controller::Impl {
                     if(banks.plaintext)add_profiles(false);
                     for(std::size_t key=0;key<banks.private_keys;++key)add_profiles(true);
                     value.simulation_estimate=simulation::estimate(value.inspection->estimate,request.options,
-                        value.inspection->binary||transfer::uses_raw_message(request.message),channel,profiles,1,true,100,4096,work_mode,timing_model);
-                } catch(const std::exception&) { value.simulation_estimate.reset(); }
+                        value.inspection->binary||transfer::uses_raw_message(request.message),channel,profiles,1,true,100,4096,work_mode,timing_model,stop);
+                } catch(const std::exception&) {
+                    if(stop.stop_requested())throw;
+                    value.simulation_estimate.reset();
+                }
             },std::move(result));
         } else if(pending_planner) {
             auto request=std::move(*pending_planner);pending_planner.reset();
             result.kind=PrepKind::planner;result.planner_pending=std::move(request.pending);
-            start_worker([input=std::move(request.inputs),cache=planner_cache](Prepared& value,std::stop_token stop) {
+            start_worker([this,input=std::move(request.inputs),cache=planner_cache](Prepared& value,std::stop_token stop) {
                 if(stop.stop_requested())throw Error("Operation cancelled");
-                value.planner_result=std::make_shared<const planner::Model>(planner::build(input,*cache));
+                value.planner_result=std::make_shared<const planner::Model>(planner::build(input,*cache,stop,[&](const planner::Model& current) {
+                    auto preview=value;preview.planner_result=std::make_shared<const planner::Model>(current);
+                    std::lock_guard lock(mutex);prepared_preview=std::move(preview);
+                }));
             },std::move(result));
         }
     }
-    void accept(Prepared result) {
-        if(worker.joinable()) worker.join();
-        preparing=false;
+    void accept(Prepared result,bool finished=true) {
+        if(finished) {if(worker.joinable())worker.join();preparing=false;}
+        if(result.cancelled) {
+            // TX may interrupt an optional curve sweep after its selected
+            // values were published. Resume the same current request afterward.
+            if(result.kind==PrepKind::planner&&planner_model&&planner_identity==result.planner_pending)
+                pending_planner=PlannerRequest{result.planner_pending->inputs,result.planner_pending};
+            return;
+        }
         if(result.completion_id)service_completions.push_back({result.completion_id,result.error});
         if(result.kind==PrepKind::keys) key_loading=pending_key.has_value();
         if(result.kind==PrepKind::file) file_loading=pending_file.has_value();
         if(result.kind==PrepKind::file&&result.revision!=attachment_revision) return;
         if(result.kind==PrepKind::planner) {
-            if(planner_model==result.planner_pending) {
+            if(planner_model&&planner_identity==result.planner_pending) {
                 if(result.error.empty())planner_model=std::move(result.planner_result);
                 else {
                     auto failed=std::make_shared<planner::Model>();failed->inputs=result.planner_pending->inputs;
@@ -1403,19 +1472,30 @@ struct Controller::Impl {
             return;
         }
         if(!result.error.empty()) {
-            if(result.kind==PrepKind::keys) { key_failed=true; f(UiField::key_path).text=result.created?"Keyfile saved; load failed":"Keyfile operation failed"; }
+            if(result.kind==PrepKind::keys) {
+                key_failed=true;
+                f(UiField::key_path).text=result.key_settings?(key_path.empty()?"None":path_text(key_path.filename())):
+                    result.created?"Keyfile saved; load failed":"Keyfile operation failed";
+            }
             if(result.kind==PrepKind::estimate) { if(result.revision==revision) { estimated_revision=revision; estimate_error=result.error; if(planner_draft)planner_model.reset(); simulation_estimate_status("Unavailable"); lpi_estimate_status("Unavailable"); ordinary_airtime=result.error; f(UiField::inspection).text=result.error; } }
             else if(result.kind!=PrepKind::devices) notice(result.error,10);
             return;
         }
         if(result.kind==PrepKind::keys&&!pending_key) {
+            if(result.key_settings) {
+                try {
+                    configure(false,false,std::nullopt,&*result.key_settings,result.key_simulation_off,&result.keys,&result.path);
+                    key_failed=false;sync_launch_command(true);
+                    notice("Keyfile and settings loaded; selected transmit key and receive bank retained.");
+                } catch(const std::exception& error) {
+                    key_failed=true;
+                    f(UiField::key_path).text=key_path.empty()?"None":path_text(key_path.filename());
+                    notice(std::string("Settings not applied: ")+error.what(),10);
+                }
+                return;
+            }
             key_failed=false; keys=std::move(result.keys); key_path=result.path;
-            auto& state=f(UiField::key); state.options={{"none","None"}};
-            std::vector<std::string> names;for(const auto& key:keys)names.push_back(key.name);
-            const auto labels=key_choice_labels(names);
-            for(std::size_t i=0;i<keys.size();++i)state.options.push_back({"key:"+keys[i].name,labels[i+1]});
-            state.selected=keys.empty()?"none":"key:"+keys.front().name;
-            f(UiField::key_path).text=path_text(key_path.filename()); encryption_changed(); configure();
+            key_fields(keys.empty()?"none":"key:"+keys.front().name);encryption_changed();configure();
             notice(tone()?"Key entries loaded. Tone modes keep encryption off.":result.created?"New keyfile saved and loaded. First key entry selected.":"Encryption key entries loaded. First key entry selected.");
         } else if(result.kind==PrepKind::file&&!pending_file) {
             attachment=std::move(result.file); attachment_path=result.path; attachment_image=result.image;
@@ -1427,16 +1507,20 @@ struct Controller::Impl {
             audio_devices=result.devices;
             auto& state=f(UiField::device); state.options={{"default","default"}}; for(const auto& device:result.devices) if(device.id!="default") state.options.push_back({device.id,device.id});
         } else if(result.kind==PrepKind::estimate&&result.revision==revision) {
+            const bool draft_changed=inspection!=result.inspection;
             inspection=std::move(result.inspection); estimate=inspection->estimate; estimated_revision=revision;
-            if(planner_draft)planner_model.reset();
-            f(UiField::lpi_estimate).text=inspection->lpi_summary+
-                (f(UiField::fhss).selected=="fake-0.4s-200"?" · Fake FHSS is display only; observer estimate unchanged":"");
+            const bool current_advice=result.advice_revision==advice_revision;
+            if(finished&&current_advice)completed_advice_revision=advice_revision;
+            if(!current_advice)result.simulation_estimate.reset();
+            if(planner_draft&&draft_changed)planner_model.reset();
+            f(UiField::lpi_estimate).text=inspection->lpi_summary;
             f(UiField::lpi_estimate).text_tone=inspection->lpi_estimate.status==lpi::Status::available&&
                 inspection->lpi_estimate.equivalent_symbols>=8?ui::TextTone::normal:ui::TextTone::negative;
-            if(receive_targets_due)simulation_estimate_status("Calculating...");
+            if(receive_targets_due||!finished||!current_advice)refresh_advice_status();
             else if(!estimate->memory_supported)simulation_estimate_status("Budget exceeded");
             else if(!estimate->wire_bits)simulation_estimate_status("Enter a message");
             else if(result.simulation_estimate) {
+                advice_displayed=true;
                 const auto& model=*result.simulation_estimate;
                 const auto probability_available=model.confidence_available||model.reference_probability_available;
                 const auto confidence=!model.profile_matches?"No matching RX profile":
@@ -1491,12 +1575,15 @@ struct Controller::Impl {
         }
     }
     void accept_snapshot(live::Snapshot next) {
-        if(!next.simulation&&(next.clock_window_modeled!=snapshot.clock_window_modeled||
-           next.clock_timing_fallback!=snapshot.clock_timing_fallback||
-           receiver_timing_model(next)!=receiver_timing_model(snapshot))) {
-            // Recompute work only when the effective timing path changes.
-            // Ordinary timestamp/progress updates must not restart estimation.
-            dirty();
+        const auto observation=!settings.simulation&&next.clock_window_modeled&&!next.clock_timing_fallback?
+            next.receiver_timing:std::nullopt;
+        if(timing_advice.observe(observation,settings.transfer.modem.sample_rate,
+                                 settings.transfer.audio_timing_error_seconds,Clock::now())) {
+            // Only a changed conservative work envelope invalidates advice.
+            // Capture's original timing model and admission remain untouched.
+            ++advice_revision;planner_model.reset();
+            if(estimate)cancel_advisory();
+            refresh_advice_status();
         }
         // Scope changes follow generation itself, independently of plot cadence
         // or draft estimation. A one-bit prefix reaches this same poll.
@@ -1529,13 +1616,9 @@ struct Controller::Impl {
                 "Simulating / audio "+audio_percent+"%")+" / "+elapsed_text(next.simulation_compute_seconds)+" elapsed":
             "Transmitting "+audio_percent+"% / "+seconds_text(next.transmission_seconds)+" media";
         receiver_mode(f(UiField::mode),next,next.transmitting?tx_mode:next.simulation_replay?"Simulation replay "+std::to_string(static_cast<int>(std::clamp(next.simulation_sample_fraction,0.0,1.0)*100))+"%":mode);
-        if(next.simulation_replay||snapshot.simulation_replay||Clock::now()>=notice_until||
-           (next.clock_timing_fallback&&!snapshot.clock_timing_fallback)) {
-            f(UiField::status).text=next.error.empty()?next.status:next.error;
-            if(!next.clock_timing_status.empty())
-                f(UiField::status).text=next.error.empty()?next.clock_timing_status+" · "+next.status:
-                    next.error+" · "+next.clock_timing_status;
-        }
+        ui::publish_backend_status(f(UiField::status),next.status,next.error,next.clock_timing_status,snapshot.error,
+            next.simulation_replay||snapshot.simulation_replay||Clock::now()>=notice_until||
+            (next.clock_timing_fallback&&!snapshot.clock_timing_fallback));
         if(Clock::now()-cpu_time>=std::chrono::seconds(1)) { const auto now=Clock::now(); cpu_percent=100*static_cast<double>(std::clock()-cpu_clock)/CLOCKS_PER_SEC/std::chrono::duration<double>(now-cpu_time).count(); cpu_clock=std::clock(); cpu_time=now; }
         std::ostringstream diagnostics;
         diagnostics<<format_bit_rate(modem::bit_rate(transmit_config()))
@@ -1578,14 +1661,22 @@ struct Controller::Impl {
         pending_key_completion=completion_id;
         f(UiField::key_path).text=pending_names.empty()?"Loading key entries...":"Generating 128 MiB keyfile..."; dirty(); notice(f(UiField::key_path).text,10);
     }
+    void apply_launch(const launch_command::Patch& values,bool simulation_off=true) {
+        if(values.keyfile) {
+            begin_key(std::filesystem::absolute(std::filesystem::u8path(*values.keyfile)).lexically_normal());
+            pending_key_settings=values;pending_key_simulation_off=simulation_off;
+        } else {
+            configure(false,false,std::nullopt,&values,simulation_off);
+            sync_launch_command(true);notice("Settings loaded · Simulation No");
+        }
+    }
     std::size_t last_pattern_page() const { const auto size=inspection&&inspection->pattern_space?inspection->pattern_space->code.size():0; return size?((size-1)/page_size)*page_size:0; }
     void action(Command command) {
         if(!enabled(command)) throw Error("This action is currently unavailable");
         switch(command) {
         case Command::planner_load_command: {
             const auto values=launch_command::parse(f(UiField::planner_command).text);
-            configure(false,false,std::nullopt,&values);
-            sync_launch_command(true);notice("Settings loaded · Simulation No");break;
+            apply_launch(values);break;
         }
         case Command::planner_target:
             request(Purpose::planner_target,ui::ServiceKind::prompt,"Plan for signal level (dB in 1 Hz)",planner_number(planner_inputs.target_db_hz));break;
@@ -1597,7 +1688,7 @@ struct Controller::Impl {
         case Command::planner_day: {const auto value=*link_plan()->day_target;planner_target(value);break;}
         case Command::planner_clock: {const auto value=*link_plan()->clock_target;planner_target(value);break;}
         case Command::planner_toggle_details: planner_details=!planner_details;break;
-        case Command::planner_toggle_draft: planner_draft=!planner_draft;planner_model.reset();break;
+        case Command::planner_toggle_draft: planner_draft=!planner_draft;planner_model.reset();cancel_advisory();break;
         case Command::planner_power:
             request(Purpose::planner_power,ui::ServiceKind::prompt,"Average transmit power (W, mW, µW or dBm)",planner_number(planner_inputs.tx_dbm)+" dBm");break;
         case Command::planner_loss:
@@ -1629,6 +1720,7 @@ struct Controller::Impl {
                 if(!attachment&&composer.raw_bits())session.transmit_bits(*composer.raw_bits(),force);
                 else session.transmit(message(),force);
             } catch(...) { transmit_requested=false; gate.abort_start(); throw; }
+            if(!settings.simulation)cancel_advisory();
             if(sent) { previous_received=composer_received; previous_message=std::move(sent); previous_repeatable_prefix=has_repeatable_prefix()?repeatable_prefix:std::string{}; seed_composer(); }
             notice(settings.simulation?"Calculating the simulated transmission...":"Transmitting audio..."); break;
         }
@@ -1636,6 +1728,7 @@ struct Controller::Impl {
             transmit_requested=true; noise_requested=true;
             try { session.transmit_noise(); }
             catch(...) { transmit_requested=false; noise_requested=false; throw; }
+            if(!settings.simulation)cancel_advisory();
             notice(settings.simulation?"Simulating noise with temporary keys. Stop noise to finish.":
                 "Transmitting noise with temporary keys. Stop noise to finish."); break;
         case Command::paste_previous:
@@ -1763,11 +1856,12 @@ void Controller::set_shellcode_mode(bool value) {
 
 void Controller::start() { auto& p=*impl_; if(!p.started&&!p.closing) { p.session.start(p.settings); p.started=true; } }
 void Controller::poll() {
-    auto& p=*impl_; std::optional<Impl::Prepared> prepared;
-    { std::lock_guard lock(p.mutex); prepared.swap(p.prepared); }
+    auto& p=*impl_; std::optional<Impl::Prepared> prepared,airtime;
+    { std::lock_guard lock(p.mutex); prepared.swap(p.prepared);airtime.swap(p.prepared_preview); }
     try {
         if(!p.closing && !p.transmit_requested && !p.snapshot.transmitting &&
            p.receive_targets_due && Clock::now()>=*p.receive_targets_due)p.configure();
+        if(airtime&&!p.closing)p.accept(std::move(*airtime),false);
         if(prepared) {
             if(p.closing) {
                 if(p.worker.joinable()) p.worker.join(); p.preparing=false;
@@ -1781,7 +1875,7 @@ void Controller::poll() {
     p.controls();
 }
 void Controller::close() {
-    auto& p=*impl_; p.closing=true; p.session.stop(); p.worker.request_stop(); p.pending_services.clear(); p.services.clear();
+    auto& p=*impl_; p.closing=true; p.worker.request_stop(); p.session.stop(); p.pending_services.clear(); p.services.clear();
     if(p.pending_key_completion)p.service_completions.push_back({std::exchange(p.pending_key_completion,0),"Operation cancelled"});
     p.controls();
 }
@@ -1822,7 +1916,7 @@ void Controller::edit(UiField field,std::string text) {
             if(clock_sync::is_default(text))policy.reset();
             else if(text.starts_with("GPS_"))policy=clock_sync::parse(text);
             else {
-                if(!policy)policy=clock_sync::Policy{.001,.4,0};
+                if(!policy)policy=clock_sync::Policy{.001,.001,0};
                 const auto duration=clock_sync::duration(text);
                 if(field==UiField::clock_accuracy)policy->accuracy_seconds=duration;
                 if(field==UiField::clock_region)policy->region_seconds=duration;

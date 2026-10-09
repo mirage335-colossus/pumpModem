@@ -4,6 +4,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <stop_token>
 
 namespace datapump::simulation {
 inline constexpr std::string_view reference_cpu = "Intel Core i9-13900H";
@@ -137,6 +138,9 @@ struct Estimate {
     std::size_t timing_phase_groups = 1;
     ReceiverWorkMode receiver_work_mode = ReceiverWorkMode::sampled_simulation;
     bool timing_window_modeled = false;
+    // Per-bank acquisition workload over this observation, before/after the
+    // conservative arrival-prior envelope. Not threshold hypothesis counts.
+    double fft_acquisition_batches = 0, fft_retained_acquisition_batches = 0;
     std::string receiver_work_assumptions;
     // Same configured peer oscillator bank with the complete arrival window.
     // This is a separate engineering fallback, never omitted search coverage.
@@ -183,5 +187,6 @@ Estimate estimate(const transfer::Estimate& transmission,
                   double differential_window_seconds = 100,
                   std::size_t probability_trials = 4096,
                   ReceiverWorkMode work_mode = ReceiverWorkMode::sampled_simulation,
-                  ReceiverTimingModel timing_model = {});
+                  ReceiverTimingModel timing_model = {},
+                  std::stop_token stop = {});
 }

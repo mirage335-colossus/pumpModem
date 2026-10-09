@@ -115,7 +115,12 @@ int main() {try {
     rejects([&]{presentation_correction(boundary,1,48000,.03);});
     require(presentation_correction(boundary,1,48000,.04).uncertainty_seconds==.014,
         "larger selected audio error was ignored");
-    for(const auto error:{0.,-1.,61.,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()})
+    datapump::clock_sync::validate_audio_error(0.);
+    require(datapump::clock_sync::default_audio_error_seconds==0 &&
+        datapump::clock_sync::Policy{}.region_seconds==.001 &&
+        datapump::clock_sync::Policy{}.offset_seconds==0,
+        "local clock defaults restored the Earth-Moon-Earth preset");
+    for(const auto error:{-1.,61.,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()})
         rejects([&]{datapump::clock_sync::validate_audio_error(error);});
     for(const auto horizon:{1.,3600.,86400.})for(const auto initial:{-.0001,.0001}) {
         constexpr long double origin=.375L/48000;

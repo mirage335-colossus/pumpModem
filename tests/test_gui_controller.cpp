@@ -57,13 +57,35 @@ void receiver_health_indicator() {
     }
     snapshot.running=false;show();check(field.text=="Stopped" && field.text_tone==ui::TextTone::normal,"stopped receiver claimed active loss");
     snapshot={};snapshot.running=true;show();check(field.text=="Listening / default" && field.text_tone==ui::TextTone::normal,"fresh receiver retained red mode");
+    snapshot.transmission_failed=true;show();
+    check(field.text=="FAIL: transmit"&&field.text_tone==ui::TextTone::negative,"failed transmit returned to healthy listening mode");
+    snapshot.receiver_health.input_overruns=1;show();
+    check(field.text.starts_with("FAIL: receiver "),"transmit failure hid dropped receiver input");
+    snapshot={};snapshot.running=true;show();
+    check(field.text=="Listening / default"&&field.text_tone==ui::TextTone::normal,"fresh request retained the transmit failure");
+}
+void backend_status_notice() {
+    ui::FieldState field;field.text="Transmission started";
+    live::Snapshot previous,next;next.status="Listening";next.error="TX output device stopped";
+    ui::publish_backend_status(field,next.status,next.error,next.clock_timing_status,previous.error,false);
+    check(field.text==next.error,"a newly failed backend request stayed hidden behind the four-second start notice");
+    previous=next;field.text="Settings retained";
+    ui::publish_backend_status(field,next.status,next.error,next.clock_timing_status,previous.error,false);
+    check(field.text=="Settings retained","an unchanged error displaced a newer operation notice");
+    next.error="TX output underrun";next.clock_timing_status="UTC timing fallback";
+    ui::publish_backend_status(field,next.status,next.error,next.clock_timing_status,previous.error,false);
+    check(field.text=="TX output underrun · UTC timing fallback","changed backend failure or its timing explanation was deferred");
+    previous=next;next.error.clear();
+    ui::publish_backend_status(field,next.status,next.error,next.clock_timing_status,previous.error,true);
+    check(field.text=="UTC timing fallback · Listening","ordinary status did not resume after the notice expired");
 }
 void prepare(Controller& controller) {
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
-    while(!controller.estimate()&&std::chrono::steady_clock::now()<deadline) {
+    while((!controller.estimate()||controller.field(ui::Field::simulation_cpu_time).text.ends_with("Calculating..."))&&std::chrono::steady_clock::now()<deadline) {
         controller.poll(); std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     check(controller.estimate().has_value(),"Payload estimate was not prepared");
+    check(!controller.field(ui::Field::simulation_cpu_time).text.ends_with("Calculating..."),"Receiver advice was not prepared");
 }
 void prepare_plan(Controller& controller) {
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(30);
@@ -72,6 +94,57 @@ void prepare_plan(Controller& controller) {
     }
     check(controller.link_plan()->available,"Planner worker did not prepare the fixture");
 }
+
+void airtime_and_close() {
+    using F=ui::Field;using C=ui::Command;
+    const auto wait_until=[&](Controller& controller,const auto& done,std::chrono::seconds limit,const char* why) {
+        const auto end=std::chrono::steady_clock::now()+limit;
+        while(!done()&&std::chrono::steady_clock::now()<end) {
+            controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        check(done(),why);
+    };
+    Controller invalid({false,true});invalid.edit(F::bandwidth,"unfinished");invalid.edit(F::message,"quick brown");
+    invalid.activate(C::planner_toggle_draft);invalid.poll();
+    check(invalid.field(F::airtime).text.find("Invalid modem settings")!=std::string::npos&&
+        invalid.field(F::simulation_cpu_time).text.ends_with("Invalid settings")&&
+        !invalid.enabled(C::transmit),"an invalid draft advertised an estimate that can never run");
+    invalid.close();wait_until(invalid,[&]{return invalid.ready_to_close();},std::chrono::seconds(2),"invalid settings prevented close");
+    struct KeyFixture {
+        std::filesystem::path path=std::filesystem::temp_directory_path()/
+            ("datapump-airtime-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        ~KeyFixture(){std::error_code ignored;std::filesystem::remove(path,ignored);}
+    } fixture;
+    create_keyring(fixture.path,{"synthetic airtime cancellation"});
+    auto patch=launch_command::parse("--pattern auto-keystream --tx-dbm 36.020599913279625 --path-loss-db 120 --noise-dbm-hz -164 --oscillator gpsdo-xo --rf-oscillator gpsdo-ocxo --shift 1e6 --search-margin 3 --reference independent --target-snr 60 --rate 1200 --carrier 1.009e6 --dsp-workspace 50% --clock-sync GPS_0.1ms-1ms_region-0ms_offset --audio-error 50ms --dsss-factor 10 --live-duplex yes --fhss fake-0.4s-200");
+    patch.keyfile=fixture.path.string();
+    Controller same({false,true,patch});same.edit(F::message,"quick brown");
+    wait_until(same,[&]{return same.settings().transfer.key&&same.estimate()&&
+        !same.field(F::simulation_cpu_time).text.ends_with("Calculating...");},std::chrono::seconds(10),"same-command key load or estimate stalled");
+    check(same.enabled(C::transmit),"same-command key loading left transmission unavailable");
+    same.activate(C::planner_toggle_draft);prepare_plan(same);
+    check(same.link_plan()->available,"same-command current-draft planner rejected valid settings");
+    same.close();wait_until(same,[&]{return same.ready_to_close();},std::chrono::seconds(2),"same-command close stalled");
+
+    auto slow=launch_command::parse("--pattern auto-keystream --tx-dbm 36.020599913279625 --path-loss-db 200 --noise-dbm-hz -164 --oscillator gpsdo-xo --shift 0 --search-margin 3 --reference independent --target-snr -38 --rate 0.1 --carrier 0.05 --dsp-workspace 50%");
+    slow.keyfile=fixture.path.string();
+    Controller costly({false,true,slow});costly.edit(F::short_bits,"1");
+    wait_until(costly,[&]{return costly.settings().transfer.key&&costly.estimate();},std::chrono::seconds(10),"airtime waited behind long-symbol probability trials");
+    check(costly.field(F::simulation_cpu_time).text.ends_with("Calculating...")&&costly.enabled(C::transmit),
+        "long-symbol airtime and TX readiness did not precede advisory computation");
+    costly.close();wait_until(costly,[&]{return costly.ready_to_close();},std::chrono::seconds(2),"close waited for obsolete long-symbol probability trials");
+    Controller replacing({false,true,slow});replacing.edit(F::short_bits,"1");
+    wait_until(replacing,[&]{return replacing.settings().transfer.key&&replacing.estimate();},std::chrono::seconds(10),"replacement fixture never published airtime");
+    replacing.activate(C::open_keyfile);const auto requests=replacing.take_services();
+    check(requests.size()==1,"replacement keyfile chooser missing");
+    replacing.complete_service({requests.front().id,false,fixture.path.string(),{}});
+    replacing.edit(F::short_bits,"010");
+    wait_until(replacing,[&]{return replacing.field(F::key_path).text!="Loading key entries..."&&replacing.estimate();},
+        std::chrono::seconds(5),"key replacement waited behind obsolete advice");
+    check(replacing.estimate()->wire_bits==3,"stale partial airtime replaced the newly edited draft");
+    replacing.close();wait_until(replacing,[&]{return replacing.ready_to_close();},std::chrono::seconds(2),"replacement fixture close stalled");
+}
+
 void apply_exact_target(Controller& controller,const std::string& target) {
     // Deliberately unsupported geometry remains available through explicit
     // planner Apply; dropdown edits now select a nearby clock/RAM fit.
@@ -969,10 +1042,10 @@ void dsss_voice_carrier_controls() {
     using F=ui::Field;using C=ui::Command;
     struct TemporaryKeyring {
         std::filesystem::path path=std::filesystem::temp_directory_path()/
-            ("datapump-dsss-voice-keys-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+            ("datapump DSSS voice key's "+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         ~TemporaryKeyring(){std::error_code ignored;std::filesystem::remove(path,ignored);}
     } fixture;
-    create_keyring(fixture.path,{"DSSS voice passband"});
+    create_keyring(fixture.path,{"DSSS voice passband","none"});
     Controller controller({true,true});
     controller.edit(F::message,"e");
     controller.activate(C::open_keyfile);
@@ -984,6 +1057,118 @@ void dsss_voice_carrier_controls() {
         controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     check(controller.settings().transfer.key.has_value(),"DSSS voice fixture did not load its independent keys");
+    const auto wait_keys=[&](Controller& target) {
+        const auto until=std::chrono::steady_clock::now()+std::chrono::seconds(10);
+        while(target.field(F::key_path).text=="Loading key entries..."&&std::chrono::steady_clock::now()<until) {
+            target.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        check(target.field(F::key_path).text!="Loading key entries...","asynchronous launch keyfile load did not finish");
+    };
+    const auto import=[&](Controller& target,const launch_command::Patch& patch) {
+        target.edit(F::planner_command,launch_command::format(patch));target.activate(C::planner_load_command);wait_keys(target);
+    };
+    controller.select(F::key,"key:none");
+    const auto keyed=launch_command::parse(controller.field(F::planner_command).text);
+    check(keyed.keyfile==std::filesystem::absolute(fixture.path).string()&&keyed.key_name=="none"&&keyed.tx_key=="named"&&
+        controller.settings().receive_keys.size()==2,
+        "launch export lost the actual keyfile, named transmit selection or complete receive bank");
+    const auto seeded=transfer::seeded_config(controller.settings().transfer,1).spreading_seed;
+    Controller restored({true,true,keyed});wait_keys(restored);prepare(restored);
+    check(restored.field(F::key).selected=="key:none"&&restored.settings().receive_keys.size()==2&&
+        restored.settings().transfer.key&&transfer::seeded_config(restored.settings().transfer,1).spreading_seed==seeded,
+        "startup failed to restore the exact named key and receive bank without exporting secret material");
+    launch_command::Patch partial;partial.rate_hz=1200;partial.carrier_hz=900;
+    import(restored,partial);
+    check(restored.field(F::key).selected=="key:none"&&restored.settings().receive_keys.size()==2&&restored.settings().transfer.key,
+        "partial numeric import discarded a retained transmit or receive key");
+    launch_command::Patch disabled;disabled.tx_key="none";import(restored,disabled);
+    const auto receive_only=launch_command::parse(restored.field(F::planner_command).text);
+    check(!restored.settings().transfer.key&&restored.field(F::key).selected=="none"&&restored.settings().receive_keys.size()==2&&
+        receive_only.keyfile==keyed.keyfile&&receive_only.tx_key=="none"&&!receive_only.key_name,
+        "disabling the transmit key discarded the receive-only keyfile or confused its explicit selection");
+    Controller receive_copy({true,true,receive_only});wait_keys(receive_copy);prepare(receive_copy);
+    check(!receive_copy.settings().transfer.key&&receive_copy.field(F::key).selected=="none"&&receive_copy.settings().receive_keys.size()==2,
+        "receive-only launch roundtrip accidentally selected the first transmit key");
+    receive_copy.close();
+    launch_command::Patch select_named;select_named.key_name="none";import(restored,select_named);
+    check(restored.field(F::key).selected=="key:none"&&restored.settings().transfer.key,
+        "a real entry named none could not be selected separately from disabled encryption");
+    const auto accepted_rate=restored.settings().transfer.modem.bandwidth_hz;
+    auto missing=keyed;missing.keyfile=*keyed.keyfile+".missing";missing.rate_hz=360;
+    import(restored,missing);
+    check(restored.enabled(C::acknowledge_key_failure)&&restored.settings().transfer.modem.bandwidth_hz==accepted_rate&&
+        restored.field(F::key).selected=="key:none"&&restored.settings().receive_keys.size()==2&&
+        transfer::seeded_config(restored.settings().transfer,1).spreading_seed==seeded&&
+        restored.field(F::key_path).text==fixture.path.filename().string(),
+        "missing keyfile import partially changed settings, keys or retained path");
+    restored.activate(C::acknowledge_key_failure);
+    auto wrong_name=keyed;wrong_name.key_name="not present";
+    import(restored,wrong_name);
+    check(restored.enabled(C::acknowledge_key_failure)&&restored.field(F::key).selected=="key:none"&&
+        restored.settings().transfer.modem.bandwidth_hz==accepted_rate&&restored.settings().receive_keys.size()==2,
+        "unknown named key import silently selected another key or changed geometry");
+    restored.activate(C::acknowledge_key_failure);
+    auto invalid_geometry=keyed;invalid_geometry.rate_hz=3600;invalid_geometry.carrier_hz=100;
+    import(restored,invalid_geometry);
+    check(restored.enabled(C::acknowledge_key_failure)&&restored.field(F::key).selected=="key:none"&&
+        restored.settings().transfer.modem.bandwidth_hz==accepted_rate&&restored.settings().receive_keys.size()==2,
+        "keyfile loaded before geometry validation partially committed an invalid launch");
+    restored.activate(C::acknowledge_key_failure);restored.close();
+    const auto work_metrics=[&](const char* state) {
+        const auto& settings=controller.settings();const auto& config=settings.transfer.modem;
+        modem::ChannelConfig channel;channel.snr_db=settings.simulation_snr_db;
+        channel.clock_error_ppm=settings.simulation_clock_error_ppm;
+        channel.frequency_offset_hz=settings.simulation_frequency_offset_hz;
+        channel.phase_noise_degrees_per_sqrt_second=settings.simulation_phase_noise_degrees_per_sqrt_second;
+        channel.seed=settings.simulation_seed;
+        // This fixture loads distinct keys and selects one of them for TX, so
+        // the active bank contains each of the two private entries once.
+        const auto family=tuning::receive_profiles(config,settings.transfer.receive_targets_db_hz,
+            settings.transfer.receive_pattern_mode,true);
+        std::vector<modem::Config> profiles;
+        for(std::size_t key=0;key<settings.receive_keys.size();++key)
+            profiles.insert(profiles.end(),family.begin(),family.end());
+        const auto metric=simulation::estimate(*controller.estimate(),settings.transfer,true,channel,profiles,1,false);
+        std::cout<<"DSSS GUI work model (not measured execution), "<<state
+            <<": factor="<<config.dsss_factor<<" inner_Hz="<<config.bandwidth_hz
+            <<" outer_Hz="<<modem::waveform_bandwidth_hz(config)<<" sample_Hz="<<config.sample_rate
+            <<" chip_samples="<<modem::pattern_chip_samples(config)<<" symbol_samples="<<modem::symbol_sample_count(config)
+            <<" cpu_s="<<metric.cpu_seconds<<" receiver_s="<<metric.receiver_cpu_seconds
+            <<" frontend_s="<<metric.receiver_frontend_seconds<<" search_s="<<metric.receiver_search_seconds
+            <<" frequency_clock="<<metric.frequency_rate_hypotheses<<" epochs="<<metric.epoch_hypotheses
+            <<" timing="<<metric.timing_hypotheses<<" profiles="<<metric.receiver_profiles<<'\n';
+        check(controller.field(F::simulation_cpu_time).text.find("Calculating")==std::string::npos&&
+            controller.field(F::simulation_cpu_time).text.find("~")!=std::string::npos,
+            "accepted DSSS geometry left the displayed CPU estimate stale or unavailable");
+        return metric;
+    };
+    controller.select(F::dsss_factor,"10");prepare(controller);
+    const auto first_dsss=controller.settings().transfer.modem;
+    const auto first_metric=work_metrics("first 10x");
+    const auto first_cpu_label=controller.field(F::simulation_cpu_time).text;
+    controller.select(F::dsss_factor,"1");prepare(controller);
+    check(controller.settings().transfer.key&&controller.settings().transfer.modem.dsss_factor==1&&
+        controller.settings().transfer.modem.bandwidth_hz==360&&
+        modem::waveform_bandwidth_hz(controller.settings().transfer.modem)==360&&
+        controller.link_plan()->inputs.options.modem.dsss_factor==1,
+        "DSSS Off did not update the keyed receiver and planner geometry");
+    (void)work_metrics("Off");
+    controller.select(F::dsss_factor,"10");prepare(controller);
+    check(controller.settings().transfer.key&&controller.settings().transfer.modem.dsss_factor==10&&
+        controller.settings().transfer.modem.sample_rate==first_dsss.sample_rate&&
+        modem::pattern_chip_samples(controller.settings().transfer.modem)==modem::pattern_chip_samples(first_dsss)&&
+        modem::symbol_sample_count(controller.settings().transfer.modem)==modem::symbol_sample_count(first_dsss)&&
+        modem::waveform_bandwidth_hz(controller.settings().transfer.modem)==3600&&
+        controller.link_plan()->inputs.options.modem.dsss_factor==10&&
+        controller.field(F::simulation_confidence).text.starts_with("RX reference"),
+        "DSSS Off/On restored a stale Off plan instead of the original keyed 10x geometry");
+    const auto restored_metric=work_metrics("restored 10x");
+    check(restored_metric.cpu_seconds==first_metric.cpu_seconds&&
+        restored_metric.receiver_search_seconds==first_metric.receiver_search_seconds&&
+        restored_metric.frequency_rate_hypotheses==first_metric.frequency_rate_hypotheses&&
+        controller.field(F::simulation_cpu_time).text==first_cpu_label,
+        "restored keyed DSSS geometry changed its work estimate or displayed a stale Off cost");
+    controller.select(F::dsss_factor,"1");
     controller.edit(F::rf_shift,"10 kHz");
     for(const auto factor:{10u,100u,1000u}) {
         controller.select(F::dsss_factor,std::to_string(factor));
@@ -1001,8 +1186,9 @@ void dsss_voice_carrier_controls() {
         "importing explicit DSSS geometry incorrectly applied interactive defaults");
     controller.select(F::fhss,"fake-0.4s-200");prepare(controller);
     check(controller.field(F::fhss).display_text.find("display only")!=std::string::npos&&
-        controller.field(F::lpi_estimate).text.find("observer estimate unchanged")!=std::string::npos,
-        "Fake hopping left its unchanged observer estimate unexplained");
+        controller.field(F::lpi_estimate).text.find("full-spectrum FHSS")!=std::string::npos&&
+        controller.link_plan()->inputs.observer_hopping.has_value(),
+        "Fake hopping did not include its full-capture observer model");
     check(controller.field(F::simulation_confidence).text.starts_with("RX reference")&&
         controller.field(F::simulation_confidence).text.find('%')!=std::string::npos&&
         controller.field(F::inspection).text.find("RX model:")!=std::string::npos,
@@ -2618,8 +2804,12 @@ void bitmap_source_checks() {
 
 int main(int argc,char** argv) {
     try {
+        if(argc>1&&std::string_view(argv[1])=="--airtime-cancellation") {airtime_and_close();std::cout<<"Airtime and cancellation checks passed\n";return 0;}
+        airtime_and_close();
         receiver_health_indicator();
+        backend_status_notice();
         if(argc>1&&std::string_view(argv[1])=="--receiver-health") {std::cout<<"Receiver health indicator passed\n";return 0;}
+        if(argc>1&&std::string_view(argv[1])=="--backend-status") {std::cout<<"Backend status notice checks passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--dsss-controls") {
             dsss_voice_carrier_controls();
             std::cout<<"DSSS voice-passband controls passed\n";return 0;

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace datapump::gui::ui {
@@ -156,6 +157,16 @@ struct FieldState {
     std::uint64_t text_history_revision = 0;
     TextTone text_tone = TextTone::normal;
 };
+// A newly reported backend error must be visible on this poll, even while a
+// temporary operation notice is holding ordinary status updates off screen.
+inline void publish_backend_status(FieldState& field,std::string_view status,
+    std::string_view error,std::string_view timing,std::string_view previous_error,
+    bool ordinary_refresh) {
+    if(!ordinary_refresh&&(error.empty()||error==previous_error))return;
+    field.text=error.empty()?std::string(status):std::string(error);
+    if(!timing.empty())field.text=error.empty()?std::string(timing)+" · "+std::string(status):
+        std::string(error)+" · "+std::string(timing);
+}
 enum class ServiceKind { open_file, save_file, prompt, clipboard, open_folder };
 struct ServiceRequest {
     std::uint64_t id = 0;

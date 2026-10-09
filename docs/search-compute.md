@@ -335,4 +335,13 @@ The [9 October DSSS follow-up measurements](dsss-followup-validation.md)
 compare actual execution with the preceding optimized local receiver. They
 record coherent-guard CPU regressions as well as bounded RF improvements;
 the new work allowances are conservative accounting, not recalibrated throughput.
-Short FFT scans retain their full cost even with a tight requested UTC window.
+The next local candidate adds conservative whole-batch pruning for qualified
+short private FFT arrival windows. Its engineering model retains ingestion,
+continuation and the original trial charges, and separately reports full-window
+fallback. Timing telemetry and measurements remain distinct from this estimate.
+
+The current [local UTC benchmark](validation.md#utc-fft-launch-keys-and-audio-follow-up--manual-checkpoint-9-october-2026)
+measures complete three-bit receptions against the frozen preceding optimized
+receiver. The supplied1200x10 case reduces total CPU from1.389 to0.284s for13s PCM
+(three pairs;48-byte retained-state increase). This is one key/epoch bank; it is
+not a full Live acquisition or broader sensitivity qualification.

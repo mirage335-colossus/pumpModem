@@ -1,4 +1,5 @@
 #include "receiver_probability.hpp"
+#include "estimate_cancellation.hpp"
 #include "probability_random.hpp"
 #include "pattern_differential.hpp"
 #include "pattern_drift.hpp"
@@ -36,12 +37,13 @@ std::array<Evidence,2> evaluate(const ReceiverProbabilityParameters& p,
                               const std::array<std::array<double,4>,2>& quarter_weights,
                               const std::array<std::vector<double>,2>& aggregation_weights,
                               const std::array<modem::detail::DifferentialAccumulator,2>& differential,
-                              double energy,int bin) {
+                              double energy,int bin,std::stop_token stop = {}) {
     std::array<std::array<Complex,4>,2> section{};
     const auto angle=-tau*bin*p.frequency_step_hz*p.differential_window_seconds;
     auto rotation=std::polar(1.,angle/2);
     const auto step=std::polar(1.,angle);
     for(std::size_t index=0;index<observations.size();++index) {
+        if(index%64==0)estimate_detail::check(stop);
         const auto quarter=index/(observations.size()/4);
         const std::array local{observations[index].correct*rotation,observations[index].wrong*rotation};
         for(unsigned bit=0;bit<2;++bit) {
@@ -83,10 +85,11 @@ struct RealBank {
     std::array<std::array<modem::detail::CorrelationFit,5>,2> fits{};
     std::array<std::vector<modem::detail::CorrelationFit>,2> windows;
 };
-RealBank real_bank(const ReceiverProbabilityParameters& p,int bin) {
+RealBank real_bank(const ReceiverProbabilityParameters& p,int bin,std::stop_token stop = {}) {
     RealBank bank;
     for(auto& windows:bank.windows)windows.resize(p.differential_windows);
     for(const auto& atom:p.real_atoms) {
+        estimate_detail::check(stop);
         const auto time=(atom.first_sample+(static_cast<double>(atom.samples)-1)/2)/p.real_sample_rate;
         const auto angle=tau*bin*p.frequency_step_hz*time;
         const auto c=std::cos(angle),s=std::sin(angle);
@@ -106,9 +109,10 @@ RealBank real_bank(const ReceiverProbabilityParameters& p,int bin) {
     return bank;
 }
 std::array<ReceiverProbabilityEvidence,2> real_evaluate(const ReceiverProbabilityParameters& p,
-    const RealBank& bank,const std::vector<std::array<double,4>>& dots,double energy) {
+    const RealBank& bank,const std::vector<std::array<double,4>>& dots,double energy,std::stop_token stop = {}) {
     auto fits=bank.fits;auto windows=bank.windows;
     for(std::size_t i=0;i<p.real_atoms.size();++i) {
+        if(i%64==0)estimate_detail::check(stop);
         const auto& atom=p.real_atoms[i];const auto c=bank.rotations[i][0],s=bank.rotations[i][1];
         const auto window=atom.first_sample/p.real_window_samples;
         for(unsigned bit=0;bit<2;++bit) {
@@ -203,7 +207,8 @@ bool atom_span(const ReceiverProbabilityAtom& atom,AtomSpan& span) {
         c*c<=std::max(0.,a)*std::max(0.,b)+tolerance*tolerance;
 }
 
-ReceiverProbability real_probability(const ReceiverProbabilityParameters& p) {
+ReceiverProbability real_probability(const ReceiverProbabilityParameters& p,std::stop_token stop) {
+    estimate_detail::check(stop);
     const auto windows=p.differential_windows;
     if(windows<256||windows>4096)
         return unsupported("The real-covariance probability model supports 256–4096 complete local windows.");
@@ -246,6 +251,7 @@ ReceiverProbability real_probability(const ReceiverProbabilityParameters& p) {
         return unsupported("Carrier-search rotation exceeds the real-covariance model limit of 0.05 cycle per local window.");
     std::vector<AtomSpan> spans(p.real_atoms.size());std::uint64_t position=0;unsigned rank=0;
     for(std::size_t i=0;i<p.real_atoms.size();++i) {
+        if(i%64==0)estimate_detail::check(stop);
         const auto& atom=p.real_atoms[i];
         if(atom.first_sample!=position||!atom.samples||atom.samples>p.real_samples-position||atom.section>3||
            atom.first_sample<modem::detail::drift_boundary(atom.section,p.real_samples,4)||
@@ -263,6 +269,7 @@ ReceiverProbability real_probability(const ReceiverProbabilityParameters& p) {
     std::vector<PhaseAtom> phase_atoms;
     constexpr unsigned nodes=8;
     for(const auto& atom:p.real_atoms) {
+        estimate_detail::check(stop);
         const auto seconds=static_cast<double>(atom.samples)/p.real_sample_rate;
         const auto interval=seconds/nodes;
         double discrete=nodes;
@@ -274,7 +281,7 @@ ReceiverProbability real_probability(const ReceiverProbabilityParameters& p) {
             std::sqrt(std::max(0.,expected)/std::max(expected,discrete))/nodes});
     }
     std::vector<RealBank> banks;
-    for(int bin=p.frequency_bin_min;bin<=p.frequency_bin_max;++bin)banks.push_back(real_bank(p,bin));
+    for(int bin=p.frequency_bin_min;bin<=p.frequency_bin_max;++bin)banks.push_back(real_bank(p,bin,stop));
     ReceiverProbability result;result.differential_model=true;result.trials=p.requested_trials;
     result.frequency_search_approximation=p.frequency_step_hz>0&&
         (p.frequency_bin_min!=0||p.frequency_bin_max!=0);
@@ -283,6 +290,7 @@ ReceiverProbability real_probability(const ReceiverProbabilityParameters& p) {
     std::vector<std::array<double,4>> dots(p.real_atoms.size());
     const auto accepted=[](double a,double b,double threshold){return a>=threshold&&a-b>=1;};
     for(std::size_t trial=0;trial<p.requested_trials;++trial) {
+        estimate_detail::check(stop);
         const auto timing_offset=p.timing_uncertainty_chips*probability_uniform(generator);
         auto timing=1-timing_offset;
         if(p.pulse_shaping&&timing_offset>1e-9) {
@@ -292,6 +300,7 @@ ReceiverProbability real_probability(const ReceiverProbabilityParameters& p) {
         timing*=std::sqrt(p.timing_coherence);
         double phase=0,energy=0,represented=0,physical=0;
         for(std::size_t i=0;i<p.real_atoms.size();++i) {
+        if(i%64==0)estimate_detail::check(stop);
             const auto& atom=p.real_atoms[i];const auto& span=spans[i];
             const auto& local_phase=phase_atoms[i];const auto drift=local_phase.drift,sd=local_phase.sd;
             Complex integrated{};double cc=0,ss=0,cs=0;
@@ -320,7 +329,7 @@ ReceiverProbability real_probability(const ReceiverProbabilityParameters& p) {
         std::array<ReceiverProbabilityEvidence,2> combined{},coherent{},older{};
         double best=-1,coherent_best=-1,older_best=-1;
         for(const auto& bank:banks) {
-            const auto scores=real_evaluate(p,bank,dots,energy);
+            const auto scores=real_evaluate(p,bank,dots,energy,stop);
             const auto a=std::max(scores[0].combined,scores[1].combined),b=std::max(scores[0].coherent,scores[1].coherent);
             const auto c=std::max(scores[0].older,scores[1].older);
             if(a>best){best=a;combined=scores;}if(b>coherent_best){coherent_best=b;coherent=scores;}
@@ -350,8 +359,9 @@ std::array<ReceiverProbabilityEvidence,2> receiver_real_atom_evidence(const Rece
     return real_evaluate(p,real_bank(p,bin),dots,energy);
 }
 
-ReceiverProbability differential_receiver_probability(const ReceiverProbabilityParameters& p) {
-    if(!p.real_atoms.empty())return real_probability(p);
+ReceiverProbability differential_receiver_probability(const ReceiverProbabilityParameters& p,std::stop_token stop) {
+    estimate_detail::check(stop);
+    if(!p.real_atoms.empty())return real_probability(p,stop);
     const auto windows=p.differential_windows;
     if(windows<256 || windows>4096 || windows%4 || p.differential_tail_seconds!=0 ||
        !(p.seconds>0) || !std::isfinite(p.seconds) ||
@@ -384,6 +394,7 @@ ReceiverProbability differential_receiver_probability(const ReceiverProbabilityP
         return unsupported("Local matched-noise geometry is outside the supported model range.");
     std::array<double,4> weights{},alternative_weights{};
     for(std::size_t i=0;i<windows;++i) {
+        if(i%64==0)estimate_detail::check(stop);
         if(!(p.differential_weights[i]>0) || !std::isfinite(p.differential_weights[i]) ||
            !std::isfinite(p.differential_correlations[i].real()) ||
            !std::isfinite(p.differential_correlations[i].imag()) ||
@@ -471,6 +482,7 @@ ReceiverProbability differential_receiver_probability(const ReceiverProbabilityP
     std::vector<LocalDraw> observations(windows);
     std::vector<int> candidates;candidates.reserve(24);
     for(std::size_t trial=0;trial<p.requested_trials;++trial) {
+        estimate_detail::check(stop);
         const auto timing_offset=p.timing_uncertainty_chips*probability_uniform(generator);
         auto timing_amplitude=1-timing_offset;
         if(p.pulse_shaping&&timing_offset>1e-9) {
@@ -485,6 +497,7 @@ ReceiverProbability differential_receiver_probability(const ReceiverProbabilityP
         double phase=0,represented=0,energy=0,slope_sum=0,time_square=0;
         std::array<modem::detail::DifferentialAccumulator,2> differential{};
         for(std::size_t i=0;i<windows;++i) {
+        if(i%64==0)estimate_detail::check(stop);
             Complex integrated{};
             // Half steps at both ends join successive local windows into one
             // continuous Brownian path. There are no independent phase resets.
@@ -542,7 +555,7 @@ ReceiverProbability differential_receiver_probability(const ReceiverProbabilityP
         std::array<Evidence,2> combined{},coherent{},older{};
         double combined_best=-1,coherent_best=-1,older_best=-1;
         for(const auto bin:candidates) {
-            const auto scores=evaluate(p,observations,quarter_weights,aggregation_weights,differential,energy,bin);
+            const auto scores=evaluate(p,observations,quarter_weights,aggregation_weights,differential,energy,bin,stop);
             const auto a=std::max(scores[0].combined,scores[1].combined);
             const auto b=std::max(scores[0].coherent,scores[1].coherent);
             const auto c=std::max(scores[0].older,scores[1].older);

@@ -1,12 +1,17 @@
 #include "datapump/lpi_estimate.hpp"
 #include "datapump/pattern_pulse.hpp"
+#include "lpi_hopping.hpp"
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <numbers>
 
 namespace datapump::lpi {
-Estimate estimate(const transfer::Estimate& transmission,const transfer::Options& options) {
+Estimate estimate(const transfer::Estimate& transmission,const transfer::Options& options,
+                  std::optional<Hopping> hopping,std::stop_token stop) {
+    estimate_detail::check(stop);
+    if(hopping && (!hopping->channels||!std::isfinite(hopping->dwell_seconds)||hopping->dwell_seconds<=0))
+        throw Error("invalid hypothetical FHSS observer geometry");
     auto config=options.modem;
     const bool private_transmission=options.key.has_value() && config.spreading_mode==modem::SpreadingMode::pattern;
     // Validate the actual effective transport without deriving/examining keys.
@@ -36,6 +41,12 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     result.observation_bandwidth_hz=modem::pattern_pulse_enabled(config)?
         (1+modem::pattern_pulse_rolloff)*config.sample_rate/static_cast<double>(modem::pattern_chip_samples(config)):
         modem::waveform_bandwidth_hz(config);
+    result.captured_noise_bandwidth_hz=result.observation_bandwidth_hz;
+    if(hopping) {
+        result.hypothetical_hopping=true;
+        result.hopping_channels=hopping->channels;
+        result.hopping_dwell_seconds=hopping->dwell_seconds;
+    }
     const auto log_band=std::log(static_cast<long double>(result.observation_bandwidth_hz));
     const auto log_snr=log_energy-log_symbol_seconds-log_band;
     result.in_band_snr_db=result.reference_cn0_db_hz-10*std::log10(result.observation_bandwidth_hz);
@@ -72,6 +83,42 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
         return result;
     }
     result.status=Status::available;
+    result.single_channel_detection_seconds=result.detection_seconds;
+    result.aggregate_detection_seconds=result.detection_seconds;
+    if(hopping && hopping->channels>1) {
+        const auto channels=static_cast<long double>(hopping->channels);
+        // All hop energy is captured. K-1 inactive bands contribute only noise;
+        // the active band's variance is (1+rho)^2, rather than K such bands.
+        const auto numerator=z_false_alarm*std::sqrt(channels)+
+            z_detection*std::sqrt(channels+2*snr+snr*snr);
+        const auto aggregate_log=2*std::log(numerator)-log_band-2*log_snr;
+        const auto capture_band=channels*result.observation_bandwidth_hz;
+        if(!std::isfinite(aggregate_log)||aggregate_log>maximum_log||
+           capture_band>std::numeric_limits<double>::max()) {
+            result.status=Status::numeric_limit;return result;
+        }
+        result.captured_noise_bandwidth_hz=static_cast<double>(capture_band);
+        result.aggregate_detection_seconds=static_cast<double>(std::exp(aggregate_log));
+        result.detection_seconds=result.aggregate_detection_seconds;
+        result.observer_strategy=ObserverStrategy::hopset_aggregate;
+        const auto bank=detail::channel_bank(result.observation_bandwidth_hz,snr,*hopping,
+                                             result.aggregate_detection_seconds,stop);
+        result.channel_bank_status=bank.status;
+        result.channel_bank_detection_seconds=bank.seconds;
+        result.channel_bank_dwells=bank.dwells;
+        result.channel_bank_samples_per_cell=bank.samples_per_cell;
+        if(bank.status==ChannelBankStatus::available&&bank.seconds<result.detection_seconds) {
+            result.detection_seconds=bank.seconds;
+            result.observer_strategy=ObserverStrategy::dwell_channel_maximum;
+        }
+        // Choose the strategy before observing data; this is not an OR of two
+        // 1%-false-alarm decisions. It is not an optimal-observer lower bound.
+        result.equivalent_symbols=result.detection_seconds/result.symbol_seconds;
+        result.additional_symbols=std::max(0.,result.equivalent_symbols-1);
+        result.burst_exposure_ratio=transmission.total_seconds/result.detection_seconds;
+        if(!std::isfinite(result.equivalent_symbols)||!std::isfinite(result.burst_exposure_ratio))
+            result.status=Status::numeric_limit;
+    }
     return result;
 }
 }

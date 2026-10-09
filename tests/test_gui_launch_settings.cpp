@@ -293,8 +293,17 @@ void clock_and_spread_controls() {
           controller.field(F::clock_region).text=="Default" && controller.field(F::clock_offset).text=="Default",
           "UTC controls must preserve the existing default search");
     const auto oscillator=controller.settings().transfer.modem.oscillator_search;
-    check(controller.field(F::audio_error).text=="30ms" && controller.settings().transfer.audio_timing_error_seconds==.03,
-        "audio timing needs its independent 30 ms default");
+    check(controller.field(F::audio_error).text=="0ms" && controller.settings().transfer.audio_timing_error_seconds==0&&
+        std::any_of(controller.field(F::audio_error).options.begin(),controller.field(F::audio_error).options.end(),
+            [](const auto& option){return option.id=="0ms";}),
+        "audio timing needs its independently editable zero starting allowance");
+    controller.edit(F::clock_accuracy,"0.1ms");
+    check(controller.field(F::clock_region).text=="1ms"&&controller.field(F::clock_offset).text=="0ms"&&
+        controller.settings().transfer.clock_sync->region_seconds==.001&&
+        controller.settings().transfer.clock_sync->offset_seconds==0&&
+        controller.settings().transfer.audio_timing_error_seconds==0,
+        "initial custom clock selection must start at a one-ms region, zero offset and zero additional audio allowance");
+    controller.edit(F::clock_accuracy,"Default");
     controller.edit(F::audio_error,"12345us");
     check(controller.settings().transfer.audio_timing_error_seconds==.012345 &&
         !controller.settings().transfer.clock_sync && controller.settings().transfer.modem.oscillator_search==oscillator,
@@ -318,7 +327,7 @@ void clock_and_spread_controls() {
     controller.edit(F::clock_accuracy,"100ns");controller.edit(F::clock_region,"1us");controller.edit(F::clock_offset,"0ms");
     const auto accepted=controller.settings().transfer.clock_sync;
     const auto command=controller.field(F::planner_command).text;
-    for(const auto* invalid:{"0ms","NaNms","-1ms","61s"}) {
+    for(const auto* invalid:{"NaNms","-1ms","61s"}) {
         controller.edit(F::audio_error,invalid);
         check(controller.settings().transfer.audio_timing_error_seconds==.012345 &&
             controller.field(F::planner_command).text==command,

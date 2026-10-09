@@ -49,6 +49,7 @@ struct InspectionRequest {
     std::optional<Bytes> binary;
     transfer::Options options;
     std::string requested_pattern;
+    std::optional<lpi::Hopping> observer_hopping;
     double target_snr=0;
     bool simulation=false;
     std::string device;
@@ -56,5 +57,5 @@ struct InspectionRequest {
 // Run alongside the transmission estimate worker. Encodes a bounded source to
 // inspect its fixed interval layout; never generates a waveform or retains
 // source data, metadata strings, key bytes, masks, or coded bytes in the model.
-Inspection inspect(const InspectionRequest& request);
+Inspection inspect(const InspectionRequest& request,std::stop_token stop = {});
 }

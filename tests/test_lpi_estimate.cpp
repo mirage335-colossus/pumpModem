@@ -1,6 +1,9 @@
 #include "datapump/lpi_estimate.hpp"
 #include "datapump/tuning.hpp"
+#include "../src/lpi_hopping.hpp"
 #include <algorithm>
+#include <array>
+#include <bit>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -166,8 +169,156 @@ void framing_unchanged() {
     check(longer.burst_exposure_ratio>1216/longer.equivalent_symbols,
           "interval exposure must include every marker and coded bit plus waveform overhead");
 }
+void close_math(long double actual,long double expected,const char* message) {
+    check(std::abs(actual-expected)<=3e-9L*std::max(std::abs(expected),1e-300L),message);
+}
+void gamma_references() {
+    using namespace lpi::detail;
+    for(const auto x:{.01L,1.L,20.L,500.L}) {
+        MathBudget budget;
+        const auto result=gamma_logs(1,x,budget);
+        check(result.has_value(),"exponential gamma evaluation failed");
+        close_math(result->survival,-x,"exact exponential survival changed");
+        const auto log_cdf=x>.5L?std::log1p(-std::exp(-x)):std::log(-std::expm1(-x));
+        close_math(result->cdf,log_cdf,"exact exponential CDF changed");
+    }
+    MathBudget budget;
+    const auto extreme=gamma_upper_quantile(1,std::log(1e-280L),budget);
+    check(extreme.has_value(),"extreme exponential family tail failed");
+    close_math(*extreme,-std::log(1e-280L),"extreme exponential quantile changed");
+    const auto below_mean=gamma_upper_quantile(2,std::log(.9L),budget);
+    check(below_mean&&*below_mean<2,"gamma inversion cannot assume its quantile exceeds the mean");
+    const auto closed=gamma_logs(2,3,budget);
+    check(closed.has_value(),"shape-two gamma evaluation failed");
+    close_math(closed->survival,-3+std::log(4.L),"shape-two closed survival changed");
+    // Independent 65-digit Decimal references from the integer-shape identity
+    // Q(n,x)=exp(-x)*sum(k=0..n-1,x^k/k!), with 180 bisections.
+    struct Reference {long double shape,tail,quantile,active_tail;};
+    constexpr Reference references[]{
+        {2,.001L,9.23341347645158573043L,.00184925460647338654061L},
+        {25,5e-8L,61.2776832048408818694L,7.74765026526549656718e-7L},
+        {900,1e-7L,1064.75109450192262546L,.00265653460500352596028L}
+    };
+    for(const auto& ref:references) {
+        MathBudget local;
+        const auto threshold=gamma_upper_quantile(ref.shape,std::log(ref.tail),local);
+        check(threshold.has_value(),"reference gamma inversion failed");
+        close_math(*threshold,ref.quantile,"independent gamma quantile reference changed");
+        const auto null=gamma_logs(ref.shape,*threshold,local);
+        const auto active=gamma_logs(ref.shape,*threshold/1.08L,local);
+        check(null&&active,"reference gamma tail evaluation failed");
+        close_math(std::exp(null->survival),ref.tail,"gamma null tail reference changed");
+        close_math(std::exp(active->survival),ref.active_tail,"gamma active tail reference changed");
+    }
+    MathBudget empty{0};
+    check(!gamma_logs(25,20,empty),"gamma iteration budget was ignored");
+    check(!gamma_logs(maximum_gamma_shape+1,20,budget)&&!gamma_logs(0,20,budget)&&
+          !gamma_upper_quantile(2,0,budget),"unsupported gamma inputs were accepted");
+}
+void channel_bank_probabilities() {
+    using namespace lpi::detail;
+    MathBudget budget;
+    const auto fit=channel_cells(900,.08L,200,500,budget);
+    check(fit.has_value(),"channel/dwell probability evaluation failed");
+    // Independent Decimal65 finite-sum result, not a receiver Monte Carlo rate.
+    close_math(-std::expm1(fit->log_miss),.739141440192579852277L,
+               "globally corrected channel-bank detection reference changed");
+    close_math(-std::expm1(fit->log_false_alarm_survival),.01L,
+               "channel-bank family false-alarm allocation changed");
+    check(-std::expm1(fit->log_false_alarm_survival)<=.01L+3e-12L,
+          "channel-bank quantile spent more than the global false-alarm budget");
+    long double previous=0;
+    for(const auto dwells:{1u,10u,100u,500u,1000u}) {
+        MathBudget local;
+        const auto point=channel_cells(900,.08L,200,dwells,local);
+        check(point.has_value(),"complete-dwell probability evaluation failed");
+        const auto power=-std::expm1(point->log_miss);
+        check(power>previous,"complete-dwell maximum-test power must increase");previous=power;
+    }
+    const auto bank=channel_bank(2250,.08L,lpi::Hopping{200,.4},1e6L);
+    check(bank.status==lpi::ChannelBankStatus::available&&bank.dwells>1&&bank.seconds>0,
+          "complete-dwell bank search failed");
+    MathBudget endpoints;
+    const auto accepted=channel_cells(bank.samples_per_cell,.08L,200,bank.dwells,endpoints);
+    const auto preceding=channel_cells(bank.samples_per_cell,.08L,200,bank.dwells-1,endpoints);
+    check(accepted&&preceding&&accepted->log_miss<=std::log(.1L)+3e-9L&&
+          preceding->log_miss>std::log(.1L)-3e-9L,"bank search did not bracket 90% detection");
+    check(channel_bank(.01L,.08L,lpi::Hopping{200,.4},1e6L).status==
+          lpi::ChannelBankStatus::insufficient_time_bandwidth,
+          "subsample dwell must be explicitly unsupported, not a zero-time detection");
+    check(channel_bank(1,.000001L,lpi::Hopping{200,1e9},1e30L).status==
+          lpi::ChannelBankStatus::numeric_limit,"large-shape bank limitation was hidden");
+    check(channel_bank(2.5L,.001L,lpi::Hopping{200,.4},1e30L).status==
+          lpi::ChannelBankStatus::numeric_limit,"dwell-count limitation was hidden");
+    check(!channel_cells(0,.08L,200,1,budget)&&!channel_cells(1,0,200,1,budget),
+          "empty cell or zero signal was treated as a meaningful bank fit");
+}
+void same_legacy_values(const lpi::Estimate& a,const lpi::Estimate& b) {
+    check(a.status==b.status&&a.hypothetical_encryption==b.hypothetical_encryption,
+          "optional hopping changed legacy status");
+    const auto values=[](const lpi::Estimate& e) {return std::array{
+        e.reference_cn0_db_hz,e.observation_bandwidth_hz,e.in_band_snr_db,e.noise_rise_db,
+        e.symbol_seconds,e.detection_seconds,e.equivalent_symbols,e.additional_symbols,e.burst_exposure_ratio};};
+    const auto av=values(a),bv=values(b);
+    for(std::size_t i=0;i<av.size();++i)
+        check(std::bit_cast<std::uint64_t>(av[i])==std::bit_cast<std::uint64_t>(bv[i]),
+              "Off or one-channel hopping changed a legacy numeric bit");
+}
+void full_capture_hopping() {
+    auto options=private_options();
+    const auto transmission=transfer::estimate_binary(Bytes{0,0,1},options);
+    const auto baseline=lpi::estimate(transmission,options);
+    const auto off=lpi::estimate(transmission,options,std::nullopt);
+    same_legacy_values(baseline,off);
+    const auto one=lpi::estimate(transmission,options,lpi::Hopping{1,.4});
+    same_legacy_values(baseline,one);
+    check(one.hypothetical_hopping&&one.captured_signal_fraction==1&&
+          one.observer_strategy==lpi::ObserverStrategy::known_band_radiometer,
+          "one-channel hypothetical hopping metadata changed");
+    const auto short_dwell=lpi::estimate(transmission,options,lpi::Hopping{200,.4});
+    check(short_dwell.status==lpi::Status::available&&short_dwell.hypothetical_hopping&&
+          short_dwell.captured_signal_fraction==1&&
+          short_dwell.observer_strategy==lpi::ObserverStrategy::hopset_aggregate&&
+          short_dwell.channel_bank_status==lpi::ChannelBankStatus::not_faster,
+          "weak short dwells must retain the faster full-capture aggregate model");
+    near(short_dwell.captured_noise_bandwidth_hz,200*baseline.observation_bandwidth_hz,
+         "full capture must account for every channel's noise bandwidth");
+    near(short_dwell.single_channel_detection_seconds,baseline.detection_seconds,
+         "FHSS must not discard 199/200 of the captured signal energy");
+    // Independent Decimal65 evaluation at B=62.5 Hz, Ts=163.84 s and K=200.
+    near(short_dwell.aggregate_detection_seconds,1097155.72723892256031,
+         "full-capture aggregate reference changed");
+    check(short_dwell.detection_seconds>190*baseline.detection_seconds&&
+          short_dwell.detection_seconds<200*baseline.detection_seconds,
+          "aggregate capture variance scaling changed");
+    options.modem.integration_seconds=12.8;
+    const auto long_dwell=lpi::estimate(transmission,options,lpi::Hopping{200,100});
+    check(long_dwell.status==lpi::Status::available&&
+          long_dwell.channel_bank_status==lpi::ChannelBankStatus::available&&
+          long_dwell.observer_strategy==lpi::ObserverStrategy::dwell_channel_maximum&&
+          long_dwell.channel_bank_dwells==1&&long_dwell.channel_bank_samples_per_cell>0&&
+          long_dwell.detection_seconds>0&&long_dwell.detection_seconds<100&&
+          long_dwell.detection_seconds<long_dwell.aggregate_detection_seconds,
+          "long dwells must let a channelized observer avoid a universal 200x penalty");
+    const auto rho=std::pow(10.L,static_cast<long double>(long_dwell.in_band_snr_db)/10);
+    lpi::detail::MathBudget budget;
+    const auto fit=lpi::detail::channel_cells(long_dwell.channel_bank_samples_per_cell,rho,200,1,budget);
+    const auto previous=lpi::detail::channel_cells(long_dwell.channel_bank_samples_per_cell-1,rho,200,1,budget);
+    check(fit&&previous&&fit->log_miss<=std::log(.1L)+3e-9L&&
+          previous->log_miss>std::log(.1L)-3e-9L,
+          "first-dwell whole-sample search did not bracket the detection target");
+    for(const auto hopping:{lpi::Hopping{0,.4},lpi::Hopping{200,0},
+                            lpi::Hopping{200,std::numeric_limits<double>::infinity()}}) {
+        bool rejected=false;try{(void)lpi::estimate(transmission,options,hopping);}catch(const Error&){rejected=true;}
+        check(rejected,"invalid hypothetical hopping geometry was accepted");
+    }
+    check(options.modem.dsss_factor==1&&transmission.wire_bits==3,
+          "hypothetical hopping changed modem geometry or framing");
+}
 }
 int main() {
-    try {reference_and_scaling();eligibility_and_limits();hypothetical_scenarios();framing_unchanged();std::cout<<"LPI estimate tests passed\n";}
+    try {reference_and_scaling();eligibility_and_limits();hypothetical_scenarios();framing_unchanged();
+         gamma_references();channel_bank_probabilities();full_capture_hopping();
+         std::cout<<"LPI estimate tests passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

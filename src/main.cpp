@@ -96,7 +96,7 @@ Modem:
   --dsss                Legacy independent private mapper layer
   --dsss-factor N       Outer private spreading: 1 (off), 10, 100, 1000; requires keyfile
   --clock-sync SPEC     default or GPS_1ms-400ms_region-2564ms_offset
-  --audio-error TIME    Per-station residual audio timing allowance; default30ms
+  --audio-error TIME    Per-station residual audio timing allowance; default0ms
   --fec 20|60|off        Reed-Solomon parity overhead, default60
   --no-compression      Diagnostic override; both peers must select the same source codec
   --memory-mb N         Legacy batch PCM workspace budget, default256 MiB

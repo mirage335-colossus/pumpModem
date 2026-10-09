@@ -6,6 +6,7 @@
 #include "datapump/symbol_schedule.hpp"
 #include "search_parallel.hpp"
 #include "pattern_fft_batch.hpp"
+#include "pattern_fft_window.hpp"
 #include "pattern_correlator_batch.hpp"
 #include "pattern_drift.hpp"
 #include <algorithm>
@@ -84,6 +85,7 @@ struct PatternReceiver::Impl {
     bool templates_valid=false,streamed_templates=false,local_search_fallback=false;
     bool long_symbol=false,required_tracking_reference=false,variable_clock=false;
     std::uint64_t active_stream_phase=0,phase_step=1,phase_upper=0;
+    PatternFftWork fft_workload;
     std::uint64_t sample=0,bins=0,next_start=0;
     Complex sum{},oscillator{1,0},rotation{},previous_chip{};
     double noise_condition=1;
@@ -201,10 +203,6 @@ struct PatternReceiver::Impl {
             [](const auto& hypothesis){return hypothesis.clock_error_ppm!=0;});
         configured_bit_limit=search.bit_limit;
         if(!c.scramble&&!c.dsss)search.initial_stream_symbols=1;
-        // The FFT scanner does not yet enforce phase-dependent UTC windows.
-        // It must keep its complete original search and retirement geometry.
-        if(!search.compact_clock_search || search.couple_clock_to_carrier)
-            search.qualified_start_window.reset();
         if(search.compact_clock_search && !search.couple_clock_to_carrier) {
             const auto wrapper=wrapper_bytes();
             if(wrapper>=bytes)throw Error("pattern workspace cannot retain correlator control state");
@@ -217,6 +215,17 @@ struct PatternReceiver::Impl {
         phase_step=std::gcd(symbols,static_cast<std::uint64_t>(c.sample_rate));
         phase_upper=search.search_stream_phases?
             (std::min(symbols,static_cast<std::uint64_t>(c.sample_rate))-1)/phase_step*phase_step:c.stream_phase_samples;
+        if(search.qualified_start_window) {
+            // Only skip wholly excluded short FFT batches. The original
+            // phase groups, scoring and retirement grid remain intact.
+            fft_workload.timing_window=PatternFftWindowStatus::unsupported_geometry;
+            if(!long_symbol && (c.scramble||c.dsss) && c.spreading_mode==SpreadingMode::pattern &&
+               !search.hypotheses.empty() && !search.couple_clock_to_carrier && search.start_offset_seconds) {
+                fft_workload.timing_window=detail::pattern_fft_window_finite(*search.qualified_start_window,phase_upper)?
+                    PatternFftWindowStatus::active:PatternFftWindowStatus::invalid_numerics;
+            }
+            if(fft_workload.timing_window!=PatternFftWindowStatus::active)search.qualified_start_window.reset();
+        }
         // Chip and symbol boundaries must fall on bin boundaries. Rounding a
         // symbol to whole bins would accumulate timing drift and count edges
         // of adjacent symbols twice, especially with partial final chips.
@@ -307,6 +316,8 @@ struct PatternReceiver::Impl {
                 const auto wrapper=wrapper_bytes();
                 if(wrapper>=bytes)throw Error("pattern workspace cannot retain correlator control state");
                 fallback=std::make_unique<PatternCorrelator>(config,search,bytes-wrapper);
+                if(fft_workload.timing_window==PatternFftWindowStatus::active)
+                    fft_workload.timing_window=PatternFftWindowStatus::correlator_fallback;
                 local_search_fallback=true;
                 return;
             }
@@ -315,6 +326,8 @@ struct PatternReceiver::Impl {
             const auto wrapper=wrapper_bytes();
             if(wrapper>=bytes)throw Error("pattern workspace cannot retain correlator control state");
             fallback=std::make_unique<PatternCorrelator>(config,search,bytes-wrapper);
+            if(fft_workload.timing_window==PatternFftWindowStatus::active)
+                fft_workload.timing_window=PatternFftWindowStatus::correlator_fallback;
             return;
         }
         if(required>bytes)
@@ -1243,6 +1256,26 @@ struct PatternReceiver::Impl {
         for(std::size_t j=0;j<scores.size();++j)
             collect_score(scores[j].real(),scores[j].imag(),j,index,phase,f);
     }
+    bool fft_batch_may_intersect(std::size_t count)const {
+        if(!search.qualified_start_window)return true;
+        for(std::uint64_t index=0;index<search.initial_stream_symbols;++index) {
+            std::size_t group_count=0;
+            const auto groups=phase_groups(index,search.search_stream_phases?0:config.stream_phase_samples,phase_upper,group_count);
+            for(std::size_t g=0;g<group_count;++g)
+                if(detail::pattern_fft_batch_may_intersect(*search.qualified_start_window,code.symbol_samples(),index,
+                    groups[g].lower,groups[g].upper,next_start,count,bin_samples))return true;
+        }
+        return false;
+    }
+    std::uint64_t acquisition_trials(std::size_t count)const {
+        std::uint64_t total=0;
+        for(std::size_t index=0;index<search.initial_stream_symbols;++index) {
+            std::size_t groups=0;
+            (void)phase_groups(index,search.search_stream_phases?0:config.stream_phase_samples,phase_upper,groups);
+            total+=static_cast<std::uint64_t>(count)*templates.size()*groups;
+        }
+        return total;
+    }
     void score_parallel(std::size_t count,std::stop_token stop) {
         auto& storage=scoring.front();
         auto& scoring_jobs=storage.jobs;auto& scoring_templates=storage.templates;
@@ -1263,6 +1296,7 @@ struct PatternReceiver::Impl {
         batch.starts=count;batch.score_stride=hop;
         const auto flush=[&] {
             batch.prepared=std::span<const detail::FftPreparedTemplate>(scoring_templates).first(queued);
+            fft_workload.template_jobs+=queued;
             detail::execute_fft_search_cpu(batch,std::span<const detail::FftSearchJob>(scoring_jobs).first(queued),
                 std::span(scoring_outputs).first(queued*hop),scoring_workspaces,stop);
             // Trials, tie-breaking and peak replacement use the original
@@ -1313,6 +1347,7 @@ struct PatternReceiver::Impl {
                 for(std::size_t f=0;f<templates.size();++f) {
                     detail::FftSearchJob job{index,groups[g].lower,f,search.frequency_offsets_hz[f]};
                     job.clock_ratio=clock_ratio(f);
+                    ++fft_workload.template_jobs;
                     detail::execute_drift_search_job(batch,job,drift_scores,product,drift_scratch,code,stop,differential_scratch);
                     for(std::size_t j=0;j<count;++j)
                         collect_score(drift_scores[j].zero,drift_scores[j].one,j,index,groups[g].lower,f);
@@ -1331,6 +1366,15 @@ struct PatternReceiver::Impl {
         };
         while(bins>=length+next_start && (final || bins-length+1-next_start>=next_count())) {
             cancelled(stop);const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(hop,bins-length+1-next_start));
+            if(!fft_batch_may_intersect(count)) {
+                // Charge precisely the original acquisition alternatives.
+                // Continue existing tracks even after this acquisition bank's
+                // initial templates have passed their qualified UTC window.
+                const auto skipped=acquisition_trials(count);
+                trials+=skipped;fft_workload.skipped_start_trials+=skipped;
+                ++fft_workload.skipped_batches;
+                next_start+=count;continue_tracks(stop);continue;
+            }
             // Drained decisions already veto overlapping acquisition in
             // admit(). If one retained span rejects this entire batch for
             // every carrier, its transforms cannot yield an admissible peak.
@@ -1363,7 +1407,7 @@ struct PatternReceiver::Impl {
             for(std::size_t i=0;i<count+length-1;++i) {
                 work[i]=at(next_start+i);energy_prefix[i+1]=energy_prefix[i]+std::norm(work[i]);
             }
-            spectrum=work;pattern_fft(spectrum,false,stop);
+            spectrum=work;pattern_fft(spectrum,false,stop);++fft_workload.input_transforms;
             // The input transform no longer needs work. Reuse it for the
             // identical carrier Gram phase shared by every bit/frequency/
             // stream hypothesis at a start, without new allocations or a
@@ -1386,6 +1430,7 @@ struct PatternReceiver::Impl {
             const auto& energies=cached_templates.empty()?template_energy:cached_templates[stream_index].energy;
             const auto& squares=cached_templates.empty()?template_square:cached_templates[stream_index].square;
             for(std::size_t f=0;f<templates.size();++f) {
+                ++fft_workload.template_jobs;
                 for(unsigned b=0;b<2;++b) {
                     auto norm=energies[f][b];auto square=squares[f][b];
                     if(streamed_templates) {
@@ -1608,6 +1653,9 @@ bool PatternReceiver::clock_windowed()const{return static_cast<bool>(impl_->fall
 bool PatternReceiver::local_clock_fallback()const{return impl_->local_search_fallback;}
 bool PatternReceiver::candidate_limited()const{return impl_->candidate_limit_reached;}
 bool PatternReceiver::drift_tolerant()const{return impl_->fallback?impl_->fallback->drift_tolerant():impl_->drift_sections>1;}
+PatternFftWork PatternReceiver::fft_work()const {
+    auto result=impl_->fft_workload;result.threshold_trials=impl_->trials;return result;
+}
 std::size_t PatternReceiver::working_bytes()const {
     return impl_->working_bytes();
 }

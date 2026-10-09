@@ -6,6 +6,9 @@
 #include "datapump/pattern_receiver.hpp"
 #include "datapump/pattern_search.hpp"
 #include "../src/receiver_probability.hpp"
+#include "../src/estimate_cancellation.hpp"
+#include <atomic>
+#include <thread>
 #include "../src/pattern_correlator_batch.hpp"
 #include <algorithm>
 #include <array>
@@ -32,6 +35,56 @@ modem::ChannelConfig clean_channel() {
     modem::ChannelConfig value;value.clock_error_ppm=0;value.phase_noise_degrees_per_sqrt_second=0;
     return value;
 }
+
+void advisory_cancellation() {
+    using simulation::detail::ReceiverProbabilityParameters;
+    using simulation::detail::receiver_probability;
+    std::stop_source stopped;stopped.request_stop();
+    const auto cancelled=[&](const auto& call) {
+        bool caught=false;try {call();}catch(const estimate_detail::Cancelled&){caught=true;}
+        check(caught,"cancelled advisory must abort explicitly, never return partial probability");
+    };
+    transfer::Options options;const auto draft=wire(1,options.modem);
+    cancelled([&]{simulation::estimate(draft,options,true,clean_channel(),{},1,true,100,4096,
+        simulation::ReceiverWorkMode::sampled_simulation,{},stopped.get_token());});
+    ReceiverProbabilityParameters p;p.signal_energy=30;p.noise_dimensions=128;
+    const auto completed=receiver_probability(p);
+    cancelled([&]{receiver_probability(p,stopped.get_token());}); // Including a populated cache.
+    std::stop_source live;
+    const auto repeated=receiver_probability(p,live.get_token());
+    check(completed.trials==4096&&repeated.trials==completed.trials&&
+        completed.acquired_correct==repeated.acquired_correct&&completed.acquired_wrong==repeated.acquired_wrong&&
+        completed.retained_correct==repeated.retained_correct&&completed.retained_wrong==repeated.retained_wrong&&
+        completed.acquired_correct_lower==repeated.acquired_correct_lower&&
+        completed.acquired_correct_upper==repeated.acquired_correct_upper,
+        "a live cancellation token changed completed trials or probability statistics");
+    p.differential_windows=4096;p.differential_window_seconds=1;p.seconds=4096;
+    p.differential_weights.assign(4096,1./4096);p.differential_correlations.resize(4096);
+    p.noise_dimensions=p.coherent_dimensions=p.section_dimensions=65536;
+    p.frequency_step_hz=.25/4096;p.frequency_bin_min=-8;p.frequency_bin_max=8;
+    std::atomic<bool> entered=false,aborted=false,returned=false;
+    std::jthread worker([&](std::stop_token stop) {
+        entered=true;
+        try {receiver_probability(p,stop);returned=true;}catch(const estimate_detail::Cancelled&){aborted=true;}
+    });
+    while(!entered)std::this_thread::yield();
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    const auto begin=std::chrono::steady_clock::now();worker.request_stop();worker.join();
+    check(aborted&&!returned,"mid-calculation cancellation returned or cached a partial result");
+    check(std::chrono::steady_clock::now()-begin<std::chrono::seconds(2),
+        "probability calculation did not promptly honor cancellation");
+    // The shared cache lock must also be interruptible, even if another caller owns it.
+    execution::Mutex mutex;std::unique_lock held(mutex);
+    entered=false;aborted=false;
+    std::jthread waiter([&](std::stop_token stop) {
+        entered=true;std::unique_lock pending(mutex,std::defer_lock);
+        try {estimate_detail::lock(pending,stop);}catch(const estimate_detail::Cancelled&){aborted=true;}
+    });
+    while(!entered)std::this_thread::yield();
+    waiter.request_stop();waiter.join();
+    check(aborted,"waiting for an advisory cache lock ignored cancellation");
+}
+
 void probability_and_framing() {
     transfer::Options options;auto channel=clean_channel();
     auto value=wire(3,options.modem);
@@ -979,10 +1032,15 @@ void clock_dsss_reference() {
         "work contexts must retain their actual oscillator banks");
     check(sampled.epoch_hypotheses==16&&hardware.epoch_hypotheses==13,
         "sampled startup and hardware initial epoch coverage must remain distinct");
-    check(!short_timed.timing_window_modeled&&short_timed.timing_hypotheses==hardware.timing_hypotheses,
-        "FFT work must not claim a timing-prior reduction the scanner does not implement");
-    near(short_timed.receiver_cpu_seconds,hardware.receiver_cpu_seconds,
-        "unsupported short timing geometry must retain its full receiver cost");
+    check(short_timed.timing_window_modeled&&short_timed.timing_hypotheses==hardware.timing_hypotheses&&
+        short_timed.fft_retained_acquisition_batches<short_timed.fft_acquisition_batches,
+        "short FFT prior must retain threshold alternatives while skipping excluded acquisition batches");
+    check(short_timed.receiver_cpu_seconds<hardware.receiver_cpu_seconds,
+        "implemented short FFT pruning must reduce acquisition work");
+    near(short_timed.receiver_frontend_seconds,hardware.receiver_frontend_seconds,
+        "FFT pruning must retain all input processing");
+    near(short_timed.fallback_receiver_cpu_seconds,hardware.receiver_cpu_seconds,
+        "FFT prior must report full-window fallback cost");
     for(const auto* estimate:{&sampled,&hardware}) {
         check(estimate->probability_reference_only&&estimate->reference_probability_available&&
             estimate->one_bit_reference_available&&!estimate->confidence_available&&
@@ -1416,6 +1474,8 @@ void projected_pattern_workload() {
 }
 int main(int argc,char** argv) {
     try {
+        advisory_cancellation();
+        if(argc==2&&std::string(argv[1])=="--cancellation-only") {std::cout<<"advisory cancellation tests passed\n";return 0;}
         if(argc==2&&std::string(argv[1])=="--utc-only") {
             utc_bank_estimate();clock_dsss_reference();compact_clock_prior_workload();std::cout<<"UTC bank estimate tests passed\n";return 0;
         }

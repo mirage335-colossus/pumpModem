@@ -375,6 +375,9 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   target_include_directories(test_binary_editor PRIVATE src/gui)
   target_link_libraries(test_binary_editor PRIVATE datapump)
   add_test(NAME gui_binary_editor COMMAND test_binary_editor)
+  add_executable(test_gui_timing_advice tests/test_gui_timing_advice.cpp)
+  target_link_libraries(test_gui_timing_advice PRIVATE datapump_gui_application datapump)
+  add_test(NAME gui_timing_advice COMMAND test_gui_timing_advice)
   add_executable(test_gui_controller tests/test_gui_controller.cpp)
   target_include_directories(test_gui_controller PRIVATE src/gui)
   target_link_libraries(test_gui_controller PRIVATE datapump_gui_application datapump)
@@ -455,7 +458,7 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
     endif()
   endif()
   set_tests_properties(gui_layout gui_contract gui_link_boundary gui_document_layout gui_interactions gui_services gui_bindings gui_record_reconciliation gui_document_presentation gui_chrome gui_inspection gui_pattern_space
-    gui_plots gui_bitmaps gui_inspection_page gui_binary_editor gui_controller gui_profile_reference gui_link_planner link_planner_curves gui_launch_command gui_launch_settings gui_application gui_overlay gui_adapter_boundary gui_boundary_regression gui_native_policy
+    gui_plots gui_bitmaps gui_inspection_page gui_binary_editor gui_controller gui_timing_advice gui_profile_reference gui_link_planner link_planner_curves gui_launch_command gui_launch_settings gui_application gui_overlay gui_adapter_boundary gui_boundary_regression gui_native_policy
     PROPERTIES LABELS "gui")
   if(UNIX)
     add_library(alsa_stub SHARED tests/alsa_stub.cpp)
@@ -463,7 +466,7 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
       LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/audio-test-lib")
     add_executable(test_alsa_audio tests/test_alsa_audio.cpp src/audio.cpp src/resampler.cpp)
     target_include_directories(test_alsa_audio PRIVATE include tests)
-    target_link_libraries(test_alsa_audio PRIVATE alsa_stub Threads::Threads ${CMAKE_DL_LIBS})
+    target_link_libraries(test_alsa_audio PRIVATE alsa_stub datapump Threads::Threads ${CMAKE_DL_LIBS})
     add_test(NAME alsa_audio_contract COMMAND test_alsa_audio)
     add_executable(test_windows_audio tests/test_windows_audio.cpp src/audio.cpp src/resampler.cpp)
     target_include_directories(test_windows_audio PRIVATE tests/winmm_stub include)
@@ -546,7 +549,7 @@ endif()
 # before declaring the browser-audio targets. Objects avoid static archive
 # ordering when Application introduces audio references through another archive.
 if(NOT DATAPUMP_BUILD_WASM)
-  set(_datapump_mock_audio_tests test_legacy_session test_live_profiles
+  set(_datapump_mock_audio_tests test_gui_timing_advice test_legacy_session test_live_profiles
     test_fast_session test_live_transmit_lock test_fast_telemetry
     test_gui_legacy_live test_gui_fast_live)
   set(_datapump_direct_audio_tests test_alsa_audio test_windows_audio)

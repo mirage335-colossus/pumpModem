@@ -50,7 +50,7 @@ flat response or negligible filtering loss.
 The current receiver uses its matched-template paths at the outer chip rate.
 This is a functional fallback, not a qualified fast despreader. Its work can grow
 with the outer bandwidth and search bank. Higher bandwidth does not create extra
-received bit energy at fixed power and bit duration. Qualified detection probabilities remain unavailable for the new outer factors.
+received bit energy at fixed power and bit duration. Qualified full-bank detection probabilities remain unavailable for the new outer factors.
 The GUI can show a separately labeled matched-template AWGN reference, which
 omits the new presence guard and does not predict complete acquisition success.
 
@@ -94,16 +94,15 @@ the same hop delta. The transmitted audio and radio hardware do not hop.
 Simulation is changed only when Simulation is actually enabled.
 
 The Link Planner reserves the highest displayed carrier/shift frequency for its
-oscillator calculation. Fake FHSS does not receive an observer collection-time
-gain: changing a display does not change the signal. Channel spacing accounts
-for the proposed occupied bandwidth, but this is not a measured emission mask
-or a regulatory conformity statement.
-
-Secret genuine hopping could delay an observer with restricted capture bandwidth.
-An observer covering the whole hop set still captures the energy; channelized
-detection avoids a universal channel-count penalty. Without an explicit observer
-capture/scanning model, neither 200 channels nor secret hop order implies a 200x
-collection-time gain. See the [observer model](lpi-estimates.md#frequency-hopping).
+oscillator calculation. The observer preview now models secret hopping with every
+channel captured simultaneously, including all signal energy. It compares the
+hop-set radiometer with a channelized dwell-energy maximum at the same global
+false-alarm criterion and selects the faster strategy. No interception loss or
+universal channel-count gain is assumed. This is an analytical detector comparison,
+not calibrated adversary performance. The actual Fake output remains fixed.
+Channel spacing accounts for the proposed occupied bandwidth, but this is not
+a measured emission mask or regulatory conformity statement. See the
+[observer model](lpi-estimates.md#frequency-hopping).
 
 ## Regulatory scope
 

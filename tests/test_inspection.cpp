@@ -122,6 +122,15 @@ void lpi_advisory() {
           "Unencrypted pattern must show a hypothetical encrypted estimate without enabling private settings");
     request.options.key.emplace(Bytes(32,0x31));
     const auto private_pattern=gui::inspect(request);
+    request.observer_hopping=lpi::Hopping{};
+    const auto hopped=gui::inspect(request);
+    check(hopped.lpi_estimate.hypothetical_hopping&&hopped.lpi_estimate.captured_signal_fraction==1&&
+        hopped.lpi_summary.find("full-spectrum FHSS")!=std::string::npos&&
+        field(hopped,"LPI hop capture").find("100% signal energy")!=std::string::npos&&
+        hopped.estimate.waveform_samples==private_pattern.estimate.waveform_samples&&
+        hopped.estimate.wire_bits==private_pattern.estimate.wire_bits,
+        "full-capture FHSS advisory must reach inspection without changing emitted samples or bits");
+    request.observer_hopping.reset();
     check(private_pattern.lpi_estimate.status==lpi::Status::available&&!private_pattern.lpi_estimate.hypothetical_encryption&&
           private_pattern.lpi_estimate.equivalent_symbols==public_pattern.lpi_estimate.equivalent_symbols&&
           private_pattern.lpi_estimate.detection_seconds==public_pattern.lpi_estimate.detection_seconds&&

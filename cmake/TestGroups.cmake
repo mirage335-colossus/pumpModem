@@ -66,7 +66,7 @@ set(_contract
   pattern_drift pattern_differential receiver_differential pattern_fft_batch
   pattern_correlator_batch pattern_search pattern_start_geometry tuning simulation_estimate
   receiver_probability differential_probability differential_receiver_probability
-  weak_signal gui_application gui_controller gui_inspection gui_binary_editor cli)
+  weak_signal gui_application gui_controller gui_timing_advice gui_inspection gui_binary_editor cli)
 set(_ci_live_tests live live_profiles)
 
 foreach(_test IN LISTS _tests)

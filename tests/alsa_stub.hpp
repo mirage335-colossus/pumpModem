@@ -25,9 +25,21 @@ struct State {
     std::size_t captured=0,write_limit=137,read_limit=4096;
     std::vector<long> read_results;
     std::vector<long> write_results;
-    std::vector<int> wait_results,drain_results,recovered_errors;
+    std::vector<int> wait_results,drain_results,recovered_errors,delay_results;
+    std::size_t delay_result=0,delay_calls=0;
+    std::function<void()> before_delay;
+    // Existing unpaced fixtures consume writes immediately (RUNNING). Model
+    // PREPARED explicitly for native plugins awaiting their first latency.
+    int pcm_state=3;
+    std::function<int()> observe_state;
     std::size_t read_result=0,write_result=0,wait_result=0,drain_result=0,drain_calls=0;
     std::function<void()> after_drain;
+    // Script a bounded device queue independently from producer callbacks.
+    // Hooks run only for the corresponding native adapter operation.
+    std::function<void()> before_write;
+    std::function<void(std::size_t)> after_write;
+    std::function<void(int)> before_wait;
+    std::function<long()> delay_observation;
     std::function<void()> after_drop,after_prepare;
     unsigned drops=0,prepares=0;
     bool stopped=false;

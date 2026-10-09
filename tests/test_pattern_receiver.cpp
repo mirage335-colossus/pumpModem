@@ -5,6 +5,7 @@
 #include "datapump/channel.hpp"
 #include "datapump/symbol_schedule.hpp"
 #include "../src/pattern_fft_batch.hpp"
+#include "../src/pattern_fft_window.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -413,6 +414,155 @@ void qualified_clock_window() {
     search.compact_clock_search=true;search.start_offset_seconds=0;search.start_uncertainty_seconds=1;
     search.qualified_start_window=modem::PatternStartWindow{0,0,0};
     rejects([&]{modem::PatternCorrelator bad(c,search,workspace);},"zero UTC map scale accepted");
+}
+void qualified_fft_window_geometry() {
+    using modem::detail::pattern_fft_batch_may_intersect;
+    // Independent enumeration of original integer-bin cells, including
+    // fractional centers and both ends of the validated clock domain. Any
+    // covered phase/rate/cell must retain its ENTIRE original FFT batch.
+    for(const auto origin:{-.137L,17.125L,65.5L})for(const auto scale:{.99L,1.01L})
+        for(const auto bin:{1U,4U,8U})for(const auto symbol:{125ULL,500ULL}) {
+            const modem::PatternStartWindow prior{origin,scale,.025L};
+            for(std::uint64_t index=0;index<4;++index)for(std::uint64_t first=0;first<2200;first+=37) {
+                bool covered=false;
+                for(const auto phase:{7ULL,15ULL,23ULL})for(const auto rate:{.99L,1.L,1.01L})
+                    for(std::uint64_t start=first;start<first+19;++start) {
+                        const auto expected=origin+scale*phase+index*static_cast<long double>(symbol)/rate;
+                        if(std::abs(start*static_cast<long double>(bin)-expected)<=.025L+2.5L*bin)covered=true;
+                    }
+                if(covered)check(pattern_fft_batch_may_intersect(prior,symbol,index,7,23,first,19,bin),
+                    "qualified FFT pruning excluded an original fractional phase/rate coverage cell");
+            }
+            check(!pattern_fft_batch_may_intersect(prior,symbol,3,7,23,100000,19,bin),
+                "qualified FFT geometry failed to exclude a provably disjoint batch");
+        }
+    const modem::PatternStartWindow boundary{10.L,1,.125L};
+    check(pattern_fft_batch_may_intersect(boundary,64,0,0,0,0,1,4),
+        "qualified FFT pruning lost the two-bin refinement/half-cell boundary");
+    check(!pattern_fft_batch_may_intersect(boundary,64,0,0,0,100,1,4),
+        "qualified FFT pruning kept a separated coverage cell");
+    check(pattern_fft_batch_may_intersect({0,0,0},64,0,0,0,100,1,4),
+        "invalid FFT prior authorized work removal");
+    check(pattern_fft_batch_may_intersect({1e16L,1,0},64,0,0,0,100,1,4),
+        "imprecise FFT prior authorized work removal");
+}
+void qualified_fft_window_preserves_progress() {
+    constexpr std::size_t workspace=4*1024*1024;
+    const Bytes bits{0,0,1};
+    for(const auto factor:{1U,10U})for(const bool phase_edge:{false,true}) {
+        auto tx=config(64,true);tx.sample_rate=256*factor;tx.carrier_hz=tx.sample_rate/4.;
+        tx.bandwidth_hz=64;tx.dsss_factor=factor;
+        tx.integration_seconds=(500.L*factor-.25L)/tx.sample_rate;
+        for(std::size_t i=0;i<tx.dsss_seed.size();++i)tx.dsss_seed[i]=static_cast<std::uint8_t>(29+13*i);
+        const auto symbol=modem::symbol_sample_count(tx);
+        const auto step=std::gcd(symbol,static_cast<std::uint64_t>(tx.sample_rate));
+        const auto maximum_phase=(std::min(symbol,static_cast<std::uint64_t>(tx.sample_rate))-1)/step*step;
+        tx.stream_phase_samples=phase_edge?maximum_phase:0;
+        const auto ppm=phase_edge?200.:-200.,frequency=phase_edge?.03125:-.03125;
+        modem::ChannelConfig impairment;impairment.snr_db=35;impairment.seed=671+factor+phase_edge;
+        impairment.clock_error_ppm=ppm;impairment.frequency_offset_hz=frequency-tx.carrier_hz*ppm*1e-6;
+        impairment.phase_noise_degrees_per_sqrt_second=.05;
+        modem::SampledSimulationChannel channel(tx,impairment);
+        modem::StreamingTransmitter source(modem::RawBits{bits},tx,workspace);
+        const auto rate=1+ppm*1e-6L;
+        const auto origin=channel.startup_offset_samples()+
+            (modem::training_sample_count(tx)+static_cast<long double>(modem::pattern_pulse_padding_samples(tx)))/rate;
+        check(origin!=std::floor(origin),"qualified FFT fixture lost its fractional sampled start");
+        std::vector<float> samples;std::array<float,503> buffer{};
+        while(const auto count=channel.read(source,buffer))samples.insert(samples.end(),buffer.begin(),buffer.begin()+count);
+        const auto eof_samples=samples.size();
+        auto trailing=modem::pattern_absence_samples(tx)+2*symbol+503;
+        while(trailing) {
+            const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(trailing,buffer.size()));
+            channel.read_noise(std::span(buffer).first(count));samples.insert(samples.end(),buffer.begin(),buffer.begin()+count);
+            trailing-=count;
+        }
+        auto rx=tx;rx.stream_phase_samples=0;
+        modem::PatternSearch search;search.hypotheses={{-.03125,-200},{.03125,200}};
+        search.frequency_rate_competition=true;
+        search.search_stream_phases=true;search.start_offset_seconds=origin/tx.sample_rate;search.start_uncertainty_seconds=6;
+        search.candidate_limit=256;search.track_limit=4;search.bit_limit=32;search.retain_score=30;
+        search.worker_threads=phase_edge?3:1;
+        modem::PatternReceiver full(rx,workspace,search);
+        search.qualified_start_window=modem::PatternStartWindow{
+            origin-static_cast<long double>(tx.stream_phase_samples)/rate,1/rate,.025L};
+        modem::PatternReceiver prior(rx,workspace,search);
+        check(prior.fft_work().timing_window==modem::PatternFftWindowStatus::active,
+            "eligible short FFT prior was not enforced");
+        Bytes observed;std::size_t pending=0,complete=0;bool prefix_checked=false,evidence_checked=false;
+        const auto poll=[&](std::size_t position) {
+            const auto a=full.take_bursts(),b=prior.take_bursts();
+            check(a.size()==b.size()&&std::equal(a.begin(),a.end(),b.begin(),same_burst),
+                "qualified FFT pruning changed next-poll bit publication or physical-end events");
+            for(const auto& event:b) {
+                observed.insert(observed.end(),event.bits.begin(),event.bits.end());
+                if(!event.complete&&!event.bits.empty())++pending;
+                if(event.complete) {
+                    ++complete;
+                    check(position>=origin+bits.size()*symbol/rate+modem::pattern_absence_samples(tx),
+                        "qualified FFT pruning manufactured early physical absence");
+                }
+            }
+            check(full.fft_work().threshold_trials==prior.fft_work().threshold_trials,
+                "qualified FFT pruning reduced the original alpha-spending trial count");
+            const auto original=full.candidates(),retained=prior.candidates();
+            for(const auto& candidate:retained)if(candidate.score>=candidate.admission_threshold) {
+                evidence_checked=true;
+                check(std::any_of(original.begin(),original.end(),[&](const auto& reference) {
+                    return same_evidence(candidate,reference);
+                }),"qualified FFT pruning changed an eligible score, energy, covariance or threshold");
+            }
+            check(full.working_bytes()<=workspace&&prior.working_bytes()<=workspace,
+                "qualified FFT pruning exceeded the configured workspace");
+        };
+        constexpr std::array<std::size_t,5> chunks{1,137,19,503,71};
+        for(std::size_t position=0,chunk=0;position<samples.size();++chunk) {
+            auto count=std::min(chunks[chunk%chunks.size()],samples.size()-position);
+            if(position<eof_samples)count=std::min(count,eof_samples-position);
+            const auto block=std::span(samples).subspan(position,count);
+            full.push(block);prior.push(block);position+=count;poll(position);
+            if(position==eof_samples) {
+                check(complete==0,"source EOF substituted for six seconds of observed absence");prefix_checked=true;
+            }
+        }
+        full.finish();prior.finish();poll(samples.size());
+        check(prefix_checked&&evidence_checked&&observed==bits&&pending>0&&complete==1,
+            "qualified FFT pruning lost exact short/DSSS bits or unique physical completion");
+        const auto a=full.fft_work(),b=prior.fft_work();
+        check(b.skipped_batches>0&&b.skipped_start_trials>0&&b.input_transforms<a.input_transforms&&
+            b.template_jobs<a.template_jobs,
+            "qualified FFT prior changed estimates without removing actual transforms and private jobs");
+        std::stop_source stop;stop.request_stop();
+        modem::PatternReceiver cancelled(rx,workspace,search);
+        rejects([&]{cancelled.push(std::span(samples).first(1),stop.get_token());},
+            "qualified FFT pruning ignored cancellation");
+    }
+    auto c=config(64,true);c.sample_rate=256;c.carrier_hz=64;c.bandwidth_hz=64;
+    modem::PatternSearch search;search.hypotheses={{0,0}};search.start_offset_seconds=0;search.start_uncertainty_seconds=6;
+    search.worker_threads=1;
+    std::vector<float> silence(12*c.sample_rate);
+    modem::PatternReceiver full(c,workspace,search);
+    search.qualified_start_window=modem::PatternStartWindow{0,1,.025L};
+    modem::PatternReceiver prior(c,workspace,search);
+    full.push(silence);prior.push(silence);full.finish();prior.finish();
+    check(full.take_bursts().empty()&&prior.take_bursts().empty()&&
+        full.fft_work().threshold_trials==prior.fft_work().threshold_trials&&prior.fft_work().skipped_batches>0,
+        "qualified FFT noise-only pruning changed false-acceptance trial spending");
+    for(const bool invalid:{false,true}) {
+        auto unsupported=search;
+        if(invalid)unsupported.qualified_start_window->phase_scale=0;
+        else {unsupported.hypotheses.clear();unsupported.frequency_offsets_hz={0};}
+        modem::PatternReceiver fallback(c,workspace,unsupported);
+        check(fallback.fft_work().timing_window==(invalid?modem::PatternFftWindowStatus::invalid_numerics:
+            modem::PatternFftWindowStatus::unsupported_geometry),
+            "qualified FFT unsupported/numerical fallback was not reported");
+        fallback.push(silence);fallback.finish();
+        const auto original=full.fft_work(),unchanged=fallback.fft_work();
+        check(unchanged.skipped_batches==0 && unchanged.input_transforms==original.input_transforms &&
+            unchanged.template_jobs==original.template_jobs && unchanged.threshold_trials==original.threshold_trials &&
+            fallback.take_bursts().empty(),
+            "unsupported FFT geometry silently pruned required work");
+    }
 }
 void parallel_search_physical_absence() {
     auto c=config(32,true);c.pulse_shaping=false;
@@ -1772,6 +1922,8 @@ int main(int argc,char** argv) {
     run("outer DSSS weak AWGN unchanged",outer_dsss_weak_awgn_preserves_admission);
     run("long timing guide immutable progress",long_timing_guide_preserves_bit_owner);
     run("qualified UTC clock window",qualified_clock_window);
+    run("qualified UTC FFT geometry",qualified_fft_window_geometry);
+    run("qualified UTC FFT progress",qualified_fft_window_preserves_progress);
     run("parallel search physical absence",parallel_search_physical_absence);
     run("parallel long continuation exact progress",parallel_long_continuation_exact_progress);
     run("bounded long clock-window fallback",long_clock_window_fallback);

@@ -16,6 +16,7 @@ inline void receiver_mode(ui::FieldState& field,const live::Snapshot& snapshot,s
         health.input_interrupted?"FAIL: receiver input interrupted":
         health.receiver_reset?"FAIL: receiver restarted":
         health.search_limited?"FAIL: receiver search limited":nullptr;
+    if(!failure && snapshot.transmission_failed && !snapshot.transmitting)failure="FAIL: transmit";
     if(!failure && !(snapshot.receiver_behind && !snapshot.simulation)) {field.text=std::move(activity);return;}
     if(failure)field.text=failure;
     else {

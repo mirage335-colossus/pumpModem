@@ -142,8 +142,10 @@ struct PatternSearch {
     // at half-chip resolution; it rejects unaffordable coverage explicitly.
     std::optional<double> start_offset_seconds;
     double start_uncertainty_seconds = 0;
-    // Compact correlator only. Other backends retain the complete legacy
-    // start window rather than silently interpreting this as a point hint.
+    // Compact correlators retain the complete admitted start/phase lattice.
+    // Supported short FFT banks skip only wholly excluded acquisition batches;
+    // mixed batches retain their original scoring, and accepted tracks continue
+    // outside this acquisition window. Unsupported geometries keep legacy work.
     std::optional<PatternStartWindow> qualified_start_window;
     // Independent timing alternatives for each legacy frequency hypothesis.
     // Rate is 1 + ppm*1e-6; observed symbol duration is nominal/rate.
@@ -159,6 +161,15 @@ struct PatternSearch {
 // Whole-symbol sampled absence needed by the fixed six-second policy.
 // Callers add their finite acquisition/lookahead margin when generating tails.
 std::uint64_t pattern_absence_samples(const Config&);
+enum class PatternFftWindowStatus { not_requested, active, unsupported_geometry, invalid_numerics, correlator_fallback };
+struct PatternFftWork {
+    // Acquisition only: one input transform and one pair-of-bits job per
+    // executed stream-index/phase/frequency alternative (a cancelled job may
+    // have started). These are execution counters, not timing measurements.
+    std::uint64_t input_transforms=0,template_jobs=0;
+    std::uint64_t skipped_batches=0,skipped_start_trials=0,threshold_trials=0;
+    PatternFftWindowStatus timing_window=PatternFftWindowStatus::not_requested;
+};
 class PatternReceiver {
 public:
     PatternReceiver(Config, std::size_t workspace_bytes = 8 * 1024 * 1024,
@@ -203,6 +214,7 @@ public:
     bool candidate_limited() const;
     // Whether the additional section detector fits this profile and budget.
     bool drift_tolerant() const;
+    PatternFftWork fft_work() const;
     std::size_t working_bytes() const;
     // Includes admitted detector state whose allocation is deferred until PCM.
     std::size_t reserved_workspace_bytes() const;

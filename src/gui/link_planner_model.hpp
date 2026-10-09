@@ -1,7 +1,9 @@
 #pragma once
 #include "datapump/transfer.hpp"
+#include "datapump/lpi_estimate.hpp"
 #include "datapump/simulation_estimate.hpp"
 #include <memory>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -12,6 +14,7 @@ struct Inputs {
     transfer::Options options;
     tuning::PatternMode mode=tuning::PatternMode::auto_pattern;
     modem::ChannelConfig channel;
+    std::optional<lpi::Hopping> observer_hopping;
     double target_db_hz=-8;
     double tx_dbm=3;
     double path_loss_db=120;
@@ -57,6 +60,7 @@ struct Model {
     bool available=false;
     // A valid background request; a previous completed view may remain visible.
     bool calculating=false;
+    bool curves_calculating=false; // Selected values complete; full target sweep pending.
     bool automatic_mode=true;
     bool observer_available=false;
     bool observer_hypothetical=true;
@@ -147,11 +151,14 @@ public:
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
-    friend Model build(const Inputs&,Cache&);
+    friend Model build(const Inputs&,Cache&,std::stop_token,const std::function<void(const Model&)>&);
 };
 // Bounded analytical planning only; no sampled audio or transmission occurs.
-Model build(const Inputs& inputs);
-Model build(const Inputs& inputs,Cache& cache);
+Model build(const Inputs& inputs,std::stop_token stop = {});
+// The optional callback receives completed selected values before curve work.
+// Called under the cache lock; it must not reenter this cache.
+Model build(const Inputs& inputs,Cache& cache,std::stop_token stop = {},
+            const std::function<void(const Model&)>& selected = {});
 struct TargetSteps {
     std::optional<double> stronger,weaker;
 };

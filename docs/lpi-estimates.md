@@ -159,14 +159,40 @@ a reduction in actual transmitted power.
 
 ## Frequency hopping
 
-Secret genuine hopping can reduce a narrowband observer's opportunities to capture
-the signal. An observer covering the whole hop set still receives its energy.
-Detection time depends on capture bandwidth, channelization, dwell, tuning gaps,
-noise and search thresholds; channel count alone is not a time multiplier. The
-current known-band radiometer does not model these effects. Fake FHSS changes
-frequency displays and conservative oscillator planning while actual audio and
-hardware remain fixed, so its observer estimate is unchanged. Genuine hardware
-hopping remains unavailable.
+The GUI's Fake FHSS selection previews secret hopping while the observer captures
+**all channels simultaneously**, intercepting all signal energy. It excludes known
+empty frequency gaps, rather than diluting the signal in noise from DC through
+hundreds of GHz. The current illustration uses K=200 disjoint channel bands and
+d=0.4 s dwell. Genuine hardware hopping remains unavailable; the actual Fake
+output stays fixed. No receiver CPU credit is assigned to a nonexistent dehopper.
+
+The model chooses the faster of two strategies *before observing data*, each at
+90% detection and a global 1% false-alarm probability per specified window:
+
+* Aggregate energy over the whole hop set. At channel bandwidth B and active-band
+  SNR rho, the Gaussian approximation gives
+  `T = [z_.99 sqrt(K) + z_.90 sqrt(K + 2 rho + rho^2)]^2 / (B rho^2)`.
+  One channel carries the signal at each instant; the other channels add noise.
+* A channelized dwell-energy maximum. For n=floor(Bd) independent complex samples
+  per full dwell and M observed dwells, each noise-cell energy has Gamma(n,1)
+  distribution, while the occupied cell has Gamma(n,1+rho). The threshold h
+  satisfies `P(Gamma(n,1)>h) = 1 - .99^(1/(KM))`. With occupied-cell exceedance
+  q1, the miss probability is `(1-q1)^M (1-q0)^((K-1)M)`.
+  First-dwell whole-sample endpoints and later complete-dwell endpoints are
+  searched using bounded Gamma calculations. No zero-duration fractional cell is
+  treated as evidence. Unsupported/numerically unresolved channel banks retain
+  the aggregate reference and expose their status.
+
+The model assumes known dwell alignment, stationary independent Gaussian cells,
+known noise power and occupied channel set, and no tuning gaps. It does not know
+the secret channel order. It is not an optimum-detector lower bound: joint
+likelihood detectors, spectral structure, finite pulse tails, limiting and
+sequential observation can change performance. In particular, 200 channels do
+not imply a universal 200x gain. Off and K=1 retain the previous model's numbers.
+The [NIST Gamma distribution reference](https://itl.nist.gov/div898/handbook/eda/section3/eda366b.htm)
+and [DLMF incomplete-Gamma numerical methods](https://dlmf.nist.gov/8.25) describe
+the distributions and numerical functions; deterministic tests check global
+false-alarm accounting and independent high-precision reference points.
 
 ## Symbols, whole bursts and examples
 
@@ -246,3 +272,10 @@ Detection of a transmission, recovery of its bits, decryption of its contents
 and interference to another service are different outcomes. This estimate
 addresses only the first, under its stated assumptions. It changes no waveform,
 receiver admission decision, physical-end condition or pending-message progress.
+
+### Advisory cancellation
+
+The GUI passes its advisory cancellation token through draft inspection and
+planner FHSS calculations. Gamma iterations check it within the existing
+numerical work budget. Cancelled calculations do not publish partial observer
+ratios; completed calculations retain the same detector, bounds and budget.

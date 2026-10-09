@@ -24,12 +24,15 @@ or a calculated lunar ephemeris. Fields accept editable durations, including
 fractional ns/us/ms/s. The accuracy menu shows durations rather than composite
 policy strings. Composite `--clock-sync` values remain supported for commands
 and parameter lists, and are split into the three editable controls.
+The first custom selection starts with a 1 ms region and zero offset.
 Entering a smaller number cannot improve the timing evidence of an audio device.
+Zero Audio error is a strict requested allowance: ordinary native device uncertainty
+then forces the visible ordinary-playback/full-search fallback, not fictitious exact timing.
 
 The adjacent editable **Audio error** dropdown is independent of that triplet.
-Its default is **30 ms per station**, interpreted as the assumed maximum residual
+Its default is **0 ms per station**, interpreted as the assumed maximum residual
 audio/radio timing error after compensating the driver-reported queue. It is
-saved/exported as `--audio-error 30ms`; fractional ns/us/ms/s values greater than
+saved/exported as `--audio-error 0ms`; fractional ns/us/ms/s values from
 zero and up to 60 seconds are accepted. Live's finite epoch-radius limit can
 reject a larger combined window. Returning Clock sync to Default preserves this
 field and restores ordinary playback/search behavior. Both peers must satisfy
@@ -93,7 +96,11 @@ effective-link bound A and correction cap C, the bank covers A+C+AC and retains
 every original lane. If its complete union cannot fit the existing bank/passband
 bounds, steering stays zero and the original bank remains. Shared RF-clock
 topologies, Windows and hosted timing adapters retain their documented fallback.
-Default clock mode preserves existing playback.
+Default clock mode preserves existing playback. A recovered native output underrun
+or suspension during a message now fails visibly rather than silently continuing
+a private transmission across a gap. The failure survives capture restart and
+Clear received; a new transmit request clears it. Generated private epochs remain
+reserved even if a device fails before audible output.
 
 Receive PCM and its noise covariance remain unchanged. A timestamp is mapped
 through the existing fixed-rate converter's source coordinate, including filter
@@ -107,8 +114,12 @@ from canonical stream phase to input sample position. It preserves half-chip
 timing coverage, clipped endpoints, fractional starts, the original phase lattice,
 every supplied frequency/rate lane and complete-symbol retirement. A region
 narrower than one timing step retains all relevant neighboring coverage cells.
-The FFT path keeps its legacy search until equivalent phase-dependent scanning
-is implemented. This internal map is not a new persisted user setting.
+Short private FFT banks with explicit paired clock/frequency hypotheses now skip
+only entire acquisition batches outside every initial-symbol/phase interval. Mixed
+batches retain the original scoring, and all skipped alternatives remain charged
+to the original threshold schedule. Accepted tracks continue on every pass.
+Long FFT, coupled and invalid numerical geometries retain the full scanner.
+This internal map is not a new persisted user setting.
 
 Custom hardware mode combines both stations' selected GPS errors and propagation
 region with the selected peer TX Audio error and the larger of that per-station
@@ -121,7 +132,7 @@ pruning and retains the full search. Both stations must satisfy the selected
 timing assumptions. A capture
 timestamp alone cannot establish the peer's timing behavior.
 
-The map narrows compact acquisition; FFT/coupled paths and missing/invalid timing
+The map narrows compact and eligible short FFT acquisition; unsupported paths and missing/invalid timing
 metadata keep the full fallback. The fixed propagation offset shifts the receive
 epoch center and retirement time. Subsequent symbols retain all frequency/rate
 lanes and the original physical completion rule. A cold listener inside a long
@@ -130,11 +141,12 @@ GUI simulation retains its full window because its random startup delay is not
 a calibrated provider timestamp. Its known unsteered waveform uses the original
 clock bank. Hardware estimates retain every peer correction-domain lane even if
 local playback falls back: another transmitter may still be steered. The planner
-reports timing-lattice work at a representative anchor only for the existing long
-compact path when qualified capture metadata is available, and separately reports
-the full-window fallback. Short FFT paths retain full scan cost. Tight clock
-settings can therefore increase their estimate through extra clock lanes without
-reducing their timing scan. These are engineering estimates, not measured speedups
+reports timing-lattice work at a representative anchor for the long compact
+path, or an upper bound on retained acquisition batches for eligible short FFT
+banks, and separately reports the full-window fallback. FFT ingestion, established
+tracks and threshold alternatives are unchanged. Its batch model fills gaps
+between phase groups and stream indices and includes edge-overlapping batches;
+it does not assume all costs scale with the selected timing-window width. These are engineering estimates, not measured speedups
 or evidence of reduced reserved RAM. UTC/DSSS probability values are separately
 labeled conditional matched-template AWGN references; device steering failure and
 the outer-code presence guard are outside that model.

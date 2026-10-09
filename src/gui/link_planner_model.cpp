@@ -1,4 +1,5 @@
 #include "link_planner_model.hpp"
+#include "../estimate_cancellation.hpp"
 #include "datapump/execution.hpp"
 #include "datapump/lpi_estimate.hpp"
 #include "datapump/pattern_code.hpp"
@@ -50,8 +51,15 @@ struct SupportCache {
 bool search_supported(const simulation::Estimate& estimate) {
     return estimate.carrier_in_search&&estimate.clock_in_search&&!estimate.oscillator_search_limited;
 }
+simulation::ReceiverWorkMode support_work_mode(const Inputs& inputs) {
+    // Timing pruning changes execution cost, not clock coverage or allocated
+    // full-bank workspace. Avoid enumerating arrival lattices just to ask fit.
+    return inputs.receiver_work_mode==simulation::ReceiverWorkMode::hardware_timing_model?
+        simulation::ReceiverWorkMode::hardware_fallback:inputs.receiver_work_mode;
+}
 ReceiverSupport receiver_support(const Inputs& inputs,const modem::Config& config,
-        std::span<const modem::Config> profiles={}) {
+        std::span<const modem::Config> profiles={},std::stop_token stop={}) {
+    estimate_detail::check(stop);
     auto options=inputs.options;options.modem=config;
     auto channel=inputs.channel;
     channel.snr_db=std::clamp(inputs.tx_dbm-inputs.path_loss_db-inputs.noise_density_dbm_hz-
@@ -61,16 +69,17 @@ ReceiverSupport receiver_support(const Inputs& inputs,const modem::Config& confi
     // neither a draft, a transfer probe, nor PCM inside the bounded search.
     transfer::Estimate one;one.wire_bits=1;one.total_seconds=seconds(config);
     const auto estimate=simulation::estimate(one,options,true,channel,profiles,1,false,100,4096,
-        inputs.receiver_work_mode,inputs.receiver_timing_model);
+        support_work_mode(inputs),{},stop);
     return {search_supported(estimate),estimate.receiver_workspace_supported};
 }
 
 // All searches have fixed iteration counts. Preserve discrete tuner steps:
 // a boundary is the weakest target whose actual sampled duration meets it.
-std::optional<double> duration_boundary(const Inputs& inputs,double minimum,double maximum,double limit) {
+std::optional<double> duration_boundary(const Inputs& inputs,double minimum,double maximum,double limit,std::stop_token stop={}) {
     const auto weak=try_resolve(inputs,minimum),strong=try_resolve(inputs,maximum);
     if(!weak || !strong || seconds(*weak)<=limit || seconds(*strong)>limit)return std::nullopt;
     for(unsigned i=0;i<56;++i) {
+        estimate_detail::check(stop);
         const auto middle=(minimum+maximum)/2;
         const auto config=try_resolve(inputs,middle);
         if(config && seconds(*config)<=limit)maximum=middle;
@@ -135,6 +144,7 @@ class ClockSearch {
     SupportCache* persistent_support;
     std::span<const double> companion_targets;
     std::optional<ReceiveBanks> receive_banks;
+    std::stop_token stop;
 
     void add(double target) {
         if(std::isfinite(target)&&target>=minimum&&target<=maximum)targets.push_back(target);
@@ -160,6 +170,7 @@ class ClockSearch {
             near_samples(modem::symbol_sample_count(*config),all_divisors);
     }
     ReceiverSupport check(double target) {
+        estimate_detail::check(stop);
         const auto config=try_resolve(inputs,target);
         if(!config)return {};
         const auto samples=modem::symbol_sample_count(*config);
@@ -189,7 +200,7 @@ class ClockSearch {
                 if(profiles.empty())return {};
             } else append(inputs.options.key.has_value(),1);
         }
-        const auto support=receiver_support(inputs,*config,profiles);
+        const auto support=receiver_support(inputs,*config,profiles,stop);
         if(persistent_support) {
             ++persistent_support->evaluations;
             // Preserve the common scan entries at capacity. The per-run map
@@ -227,6 +238,7 @@ class ClockSearch {
         if(check(desired).fits())return desired;
         std::optional<double> beyond,remaining;
         for(const auto target:targets) {
+            estimate_detail::check(stop);
             if(!correct_direction(target)||!check(target).fits())continue;
             if(stronger?target>=desired:target<=desired) {
                 if(!beyond || (stronger?target<*beyond:target>*beyond))beyond=target;
@@ -242,15 +254,18 @@ class ClockSearch {
 public:
     ClockSearch(const Inputs& value,double low,double high,
             std::span<const double> companions={},std::optional<ReceiveBanks> banks=std::nullopt,
-            SupportCache* persistent=nullptr):
+            SupportCache* persistent=nullptr,std::stop_token cancel={}):
         inputs(value),minimum(low),maximum(high),
         persistent_support(companions.empty()&&!banks?persistent:nullptr),
-        companion_targets(companions),receive_banks(banks) {
+        companion_targets(companions),receive_banks(banks),stop(cancel) {
+        estimate_detail::check(stop);
         const auto chip=modem::pattern_chip_samples(inputs.options.modem);
         alignment=std::gcd(chip,std::max<std::uint64_t>(1,chip/2));
         // Divisor work is bounded by the validated rate/sample-clock geometry,
         // never by the number of bits or their simulated duration.
-        for(std::uint64_t divisor=1;divisor<=alignment/divisor;++divisor)if(alignment%divisor==0) {
+        for(std::uint64_t divisor=1;divisor<=alignment/divisor;++divisor) {
+            estimate_detail::check(stop);
+            if(alignment%divisor!=0)continue;
             divisors.push_back(divisor);
             if(divisor!=alignment/divisor)divisors.push_back(alignment/divisor);
         }
@@ -432,7 +447,7 @@ auto support_context(const Inputs& inputs) {
     // Explicit key presence selects the public/private profile family, beyond
     // the derived pattern identity already retained by curve_key.
     auto options=inputs.options;options.modem=resolve(inputs,200);
-    return std::tuple{curve_key(options,inputs.channel,inputs.receiver_work_mode,inputs.receiver_timing_model),inputs.mode,
+    return std::tuple{curve_key(options,inputs.channel,support_work_mode(inputs),{}),inputs.mode,
         inputs.options.key.has_value(),inputs.tx_dbm,inputs.path_loss_db,inputs.noise_density_dbm_hz};
 }
 using SupportContext=decltype(support_context(Inputs{}));
@@ -446,14 +461,15 @@ struct CurveCache {
     std::size_t probability_evaluations=0,probability_reuses=0;
 };
 CurveEntry& curve_entry(CurveCache& cache,const transfer::Options& options,const modem::ChannelConfig& channel,
-                       simulation::ReceiverWorkMode work_mode,const simulation::ReceiverTimingModel& timing_model) {
+                       simulation::ReceiverWorkMode work_mode,const simulation::ReceiverTimingModel& timing_model,std::stop_token stop) {
+    estimate_detail::check(stop);
     auto& entries=cache.entries;
     const auto key=curve_key(options,channel,work_mode,timing_model);
     const auto found=std::find_if(entries.begin(),entries.end(),[&](const auto& entry){return entry.key==key;});
     if(found!=entries.end())return *found;
     if(entries.size()==512)entries.erase(entries.begin());
     entries.push_back({key,simulation::estimate(one_bit_estimate(options.modem),options,true,channel,{},1,false,100,4096,
-        work_mode,timing_model),false});
+        work_mode,timing_model,stop),false});
     return entries.back();
 }
 ReceivePoint receive_point(double target,const simulation::Estimate& estimate,bool numerical_range) {
@@ -469,7 +485,7 @@ CpuPoint cpu_point(double target,const simulation::Estimate& estimate) {
     return {target,ratio,search_supported(estimate)&&estimate.receiver_workspace_supported&&
         std::isfinite(ratio)&&ratio>0};
 }
-void receive_curve(Model& model,const simulation::Estimate& selected_one,CurveCache& cache) {
+void receive_curve(Model& model,const simulation::Estimate& selected_one,CurveCache& cache,std::stop_token stop) {
     if(model.points.empty())return;
     const auto& inputs=model.inputs;
     const auto low=model.points.front().target_db_hz,high=model.points.back().target_db_hz;
@@ -478,6 +494,7 @@ void receive_curve(Model& model,const simulation::Estimate& selected_one,CurveCa
     std::map<double,ReceivePoint> output;
     std::map<double,CpuPoint> cpu_output;
     const auto evaluate=[&](double target,bool permit_expensive) -> bool {
+        estimate_detail::check(stop);
         if(target<low||target>high||output.contains(target))return false;
         const auto geometry=try_resolve(inputs,target);
         if(!geometry){
@@ -488,7 +505,7 @@ void receive_curve(Model& model,const simulation::Estimate& selected_one,CurveCa
         const auto sample_snr=model.actual_cn0_db_hz-10*std::log10(geometry->sample_rate/2.);
         const bool numerical_range=sample_snr>=-300&&sample_snr<=300;
         channel.snr_db=std::clamp(sample_snr,-300.,300.);
-        auto& entry=curve_entry(cache,options,channel,inputs.receiver_work_mode,inputs.receiver_timing_model);
+        auto& entry=curve_entry(cache,options,channel,inputs.receiver_work_mode,inputs.receiver_timing_model,stop);
         // Receiver work is already available from the cheap support check;
         // the denser CPU curve adds no statistical trials or sampled audio.
         cpu_output.emplace(target,cpu_point(target,entry.estimate));
@@ -504,7 +521,7 @@ void receive_curve(Model& model,const simulation::Estimate& selected_one,CurveCa
             // Curve locations are illustrative; the selected estimate uses
             // 4096 draws and exposes its own sampling interval separately.
             entry.estimate=simulation::estimate(one_bit_estimate(*geometry),options,true,channel,{},1,true,100,512,
-                inputs.receiver_work_mode,inputs.receiver_timing_model);
+                inputs.receiver_work_mode,inputs.receiver_timing_model,stop);
             entry.probability_computed=true;
             ++cache.probability_evaluations;
         } else ++cache.probability_reuses;
@@ -525,7 +542,7 @@ void receive_curve(Model& model,const simulation::Estimate& selected_one,CurveCa
                     auto channel=inputs.channel;
                     const auto snr=model.actual_cn0_db_hz-10*std::log10(aligned->config.sample_rate/2.);
                     channel.snr_db=std::clamp(snr,-300.,300.);
-                    const auto& support=curve_entry(cache,options,channel,inputs.receiver_work_mode,inputs.receiver_timing_model).estimate;
+                    const auto& support=curve_entry(cache,options,channel,inputs.receiver_work_mode,inputs.receiver_timing_model,stop).estimate;
                     if(snr>=-300&&snr<=300&&search_supported(support)&&support.receiver_workspace_supported) {
                         output.erase(target);cpu_output.erase(target);
                     }
@@ -609,9 +626,9 @@ std::optional<double> nearest_fit_target(const Inputs& inputs,
     } catch(const Error&) {return std::nullopt;}
 }
 
-Model build(const Inputs& inputs) {
+Model build(const Inputs& inputs,std::stop_token stop) {
     thread_local Cache cache;
-    return build(inputs,cache);
+    return build(inputs,cache,stop);
 }
 TargetSteps preview_steps(const Inputs& inputs) {
     TargetSteps result;
@@ -651,8 +668,9 @@ TargetSteps preview_steps(const Inputs& inputs) {
     } catch(const Error&) {return {};}
     return result;
 }
-Model build(const Inputs& inputs,Cache& cache) {
-    std::lock_guard lock(cache.impl_->mutex);
+Model build(const Inputs& inputs,Cache& cache,std::stop_token stop,const std::function<void(const Model&)>& selected) {
+    std::unique_lock lock(cache.impl_->mutex,std::defer_lock);
+    estimate_detail::lock(lock,stop);
     Model result;result.inputs=inputs;result.automatic_mode=automatic(inputs.mode);
     try {
         if(!std::isfinite(inputs.target_db_hz) || inputs.target_db_hz< -200 || inputs.target_db_hz>200 ||
@@ -700,7 +718,7 @@ Model build(const Inputs& inputs,Cache& cache) {
             config.bandwidth_hz;
         result.low_audio_hz=config.carrier_hz-result.occupied_bandwidth_hz/2;
         result.high_audio_hz=config.carrier_hz+result.occupied_bandwidth_hz/2;
-        const auto observer=lpi::estimate(transmission,options);
+        const auto observer=lpi::estimate(transmission,options,inputs.observer_hopping,stop);
         result.observer_available=observer.status==lpi::Status::available;
         result.observer_hypothetical=observer.hypothetical_encryption;
         result.observer_ratio=observer.equivalent_symbols;
@@ -712,7 +730,7 @@ Model build(const Inputs& inputs,Cache& cache) {
         // confidence unavailable outside the estimator's supported range.
         channel.snr_db=std::clamp(sample_snr,-300.,300.);
         const auto receiver=simulation::estimate(transmission,options,true,channel,{},1,true,100,4096,
-            inputs.receiver_work_mode,inputs.receiver_timing_model);
+            inputs.receiver_work_mode,inputs.receiver_timing_model,stop);
         result.clock_search_supported=search_supported(receiver);
         result.receiver_workspace_supported=receiver.receiver_workspace_supported;
         result.confidence_available=receiver.confidence_available&&sample_snr>=-300&&sample_snr<=300;
@@ -742,7 +760,7 @@ Model build(const Inputs& inputs,Cache& cache) {
         result.differential_added_detection_probability=receiver.differential_added_detection_probability;
         auto single_receiver=inputs.wire_bits==1?receiver:
             simulation::estimate(single_transmission,options,true,channel,{},1,false,100,4096,
-                inputs.receiver_work_mode,inputs.receiver_timing_model);
+                inputs.receiver_work_mode,inputs.receiver_timing_model,stop);
         // Draft length changes continuation and total work, but acquisition
         // already supplies this one-bit probability without another trial run.
         single_receiver.success_probability=receiver.one_bit_success_probability;
@@ -788,6 +806,13 @@ Model build(const Inputs& inputs,Cache& cache) {
         }
         if(result.receiver_status.empty())result.receiver_status="Clock and RAM fit · reception unverified";
 
+        if(selected) {
+            estimate_detail::check(stop);
+            auto current=result;current.available=true;current.curves_calculating=true;
+            const auto steps=preview_steps(inputs);
+            current.stronger_fit_target=steps.stronger;current.weaker_fit_target=steps.weaker;
+            selected(current);
+        }
         // Leave sample-counter headroom for one symbol of physical absence
         // and the fixed waveform overhead even at the graph's weakest end.
         const auto maximum_seconds=static_cast<long double>(std::numeric_limits<std::uint64_t>::max())/
@@ -796,14 +821,14 @@ Model build(const Inputs& inputs,Cache& cache) {
             10*std::log10(static_cast<double>(maximum_seconds)));
         constexpr double maximum_target=200;
         if(result.automatic_mode) {
-            result.fast_target=duration_boundary(inputs,minimum_target,maximum_target,1);
-            result.day_target=duration_boundary(inputs,minimum_target,maximum_target,seconds_per_day);
+            result.fast_target=duration_boundary(inputs,minimum_target,maximum_target,1,stop);
+            result.day_target=duration_boundary(inputs,minimum_target,maximum_target,seconds_per_day,stop);
             const auto context=support_context(inputs);
             if(cache.impl_->support_context!=context) {
                 cache.impl_->support.entries.clear();cache.impl_->support_context=context;
             }
             const auto choices=ClockSearch(inputs,minimum_target,maximum_target,{},std::nullopt,
-                &cache.impl_->support).run();
+                &cache.impl_->support,stop).run();
             if(choices.boundary) {
                 result.clock_target=choices.boundary->target;result.clock_limit_reason=choices.boundary->reason;
             }
@@ -824,17 +849,19 @@ Model build(const Inputs& inputs,Cache& cache) {
         targets.erase(std::unique(targets.begin(),targets.end()),targets.end());
         result.points.reserve(targets.size());
         for(const auto target:targets) {
+            estimate_detail::check(stop);
             const auto geometry=try_resolve(inputs,target);
             if(!geometry)continue;
             auto point_options=inputs.options;point_options.modem=*geometry;
             Point point;point.target_db_hz=target;point.bit_seconds=seconds(*geometry);
             transfer::Estimate one;one.wire_bits=1;one.total_seconds=point.bit_seconds;
-            const auto estimate=lpi::estimate(one,point_options);
+            const auto estimate=lpi::estimate(one,point_options,inputs.observer_hopping,stop);
             point.observer_available=estimate.status==lpi::Status::available;
             point.observer_ratio=estimate.equivalent_symbols;
             result.points.push_back(point);
         }
-        receive_curve(result,single_receiver,cache.impl_->curves);
+        receive_curve(result,single_receiver,cache.impl_->curves,stop);
+        estimate_detail::check(stop);
         result.available=true;
     } catch(const Error& error) {
         result.error=error.what();result.receiver_status="Plan unavailable";

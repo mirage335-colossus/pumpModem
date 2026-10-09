@@ -26,6 +26,23 @@ void parsing_and_formatting() {
         "explicit half duplex was confused with an omitted option");
     check(!launch_command::parse("--rate 1200").full_duplex.has_value(),"older commands must leave duplex unchanged");
     check(launch_command::parse(launch_command::format(clock))==clock,"clock and spreading settings must round trip");
+    for(const auto& path:std::vector<std::string>{"/tmp/private keys/key's file",R"(C:\User Data\O'Brien\private.keys)",
+        "/tmp/$(do-not-expand) `literal` $HOME ; & | \"quoted\" \\ ending\\","--looks-like-a-flag"}) {
+        launch_command::Patch keyed;keyed.keyfile=path;keyed.key_name="none";keyed.tx_key="named";
+        const auto saved=launch_command::format(keyed);
+        check(launch_command::parse(saved)==keyed,"keyfile paths and named selection must survive host-safe shell quoting");
+        check(saved.find("--keyfile=")!=std::string::npos&&saved.find("--key-name=none")!=std::string::npos,
+            "key references must export paths/names without confusing a real key named none with disabled encryption");
+        keyed.key_name="--named key's $HOME";
+        check(launch_command::parse(launch_command::format(keyed))==keyed,
+            "flag-looking and metacharacter key names must remain literal saved arguments");
+    }
+    const auto receive_only=launch_command::parse("--keyfile='private keys' --tx-key none");
+    check(receive_only.keyfile=="private keys"&&receive_only.tx_key=="none"&&!receive_only.key_name&&
+        launch_command::parse(launch_command::format(receive_only))==receive_only,
+        "receive-only keyfile selection must round trip without selecting a transmit key");
+    check(!launch_command::parse("--rate 1200").keyfile&&!launch_command::parse("--rate 1200").tx_key,
+        "older partial commands must omit key changes");
     const auto policy=datapump::clock_sync::parse(*clock.clock_sync);
     check(policy && std::abs(policy->half_window_seconds()-.2002)<1e-12 && policy->offset_seconds==2.564,
           "region must be total width with BOTH stations GPS bounds outside it");
@@ -33,8 +50,12 @@ void parsing_and_formatting() {
           "sub-millisecond scientific clock input lost precision");
     check(!datapump::clock_sync::parse("Default"),"Default clock policy must remain absent");
     for(const auto* command:{"--fhss genuine","--fhss ic-7100","--dsss-factor 2","--clock-sync GPS_nanms-1ms_region-0ms_offset",
-        "--clock-sync GPS_1ms--1ms_region-0ms_offset","--audio-error 0ms","--audio-error -1ms",
+        "--clock-sync GPS_1ms--1ms_region-0ms_offset","--audio-error -1ms",
         "--audio-error NaNms","--audio-error 61s","--audio-error 30","--live-duplex maybe","--live-duplex 1"})rejects([&]{launch_command::parse(command);},"invalid clock/spreading setting accepted");
+    check(launch_command::parse("--audio-error 0ms").audio_timing_error_seconds==0,
+        "zero additional audio allowance must remain an explicit supported assumption");
+    for(const auto* command:{"--tx-key all","--keyfile=","--key-name=","--tx-key none --key-name none"})
+        rejects([&]{launch_command::parse(command);},"invalid key reference or conflicting selection accepted");
     const auto settings=launch_command::parse(
         "./datapump-gui --auto-pattern --tx-dbm 3 --path-loss-db=170 --noise-dbm-hz -164 "
         "--oscillator gpsdo-ocxo --target-snr -8 --rate 3600 --carrier 1500 --dsp-workspace 50%");
@@ -142,9 +163,11 @@ void startup() {
     };
     unsigned called=0;
     check(invoke({"--monochrome","--simulation","--auto-pattern","--target-snr=-8","--rate","3.6kHz",
-                  "--carrier","1500","--dsp-workspace","75%"},[&](Launch launch) {
+                  "--carrier","1500","--dsp-workspace","75%","--keyfile","private keys/key's file",
+                  "--key-name","none","--tx-key","named"},[&](Launch launch) {
         ++called;check(!launch.color&&launch.simulation&&launch.settings&&launch.settings->target_db_hz==-8&&
-            launch.settings->rate_hz==3600&&launch.settings->workspace_percent==75,
+            launch.settings->rate_hz==3600&&launch.settings->workspace_percent==75&&
+            launch.settings->keyfile=="private keys/key's file"&&launch.settings->key_name=="none"&&launch.settings->tx_key=="named",
             "GUI startup must forward validated settings alongside existing launch flags");return 27;
     })==27&&called==1,"GUI startup callback must run once with the parsed settings");
     check(invoke({},[&](Launch launch){++called;check(!launch.settings&&!launch.simulation,

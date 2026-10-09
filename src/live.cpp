@@ -348,6 +348,10 @@ struct Session::Impl {
     std::size_t input_bytes = 0, decoding_bytes = 0, received_bytes = 0, receiver_bytes = 0;
     std::size_t audio_bytes = 0,capture_audio_bytes=0,playback_audio_bytes=0;
     std::string capture_timing_status,playback_timing_status;
+    // Duplex capture can restart after output fails. Keep the TX failure until
+    // an explicit new transmission or configuration reset, independently of
+    // transient input status and Clear received.
+    std::string transmit_error;
     bool capture_timing_fallback=false,playback_timing_fallback=false;
     std::optional<Clock::time_point> decoding_queued_at;
     std::size_t decoding_remaining_samples=0;
@@ -471,7 +475,7 @@ struct Session::Impl {
         pending_points = {}; replay_omitted = 0;
         current.constellation.clear(); current.constellation_source = ConstellationSource::input;
         current.constellation_dropped = 0;
-        current.error.clear(); changed.notify_all();
+        transmit_error.clear(); current.error.clear(); changed.notify_all();
     }
     void queue_points(modem::ConstellationBatch batch, ConstellationSource source_kind) {
         if (batch.points.empty() && !batch.dropped) return;
@@ -589,7 +593,7 @@ struct Session::Impl {
         auto unavailable=unavailable_recovery_events();invalidate_recoveries();
         clear_replay(); pending_points = {};
         replay_omitted = 0;
-        current = {}; current.running = true; current.simulation = settings.simulation;
+        current = {}; transmit_error.clear(); current.running = true; current.simulation = settings.simulation;
         simulation_compute_started.reset();
         capture_timing_status.clear();playback_timing_status.clear();
         capture_timing_fallback=playback_timing_fallback=false;
@@ -794,7 +798,11 @@ struct Session::Impl {
             std::uint64_t epoch,const Bank& bank,const Settings& value,std::uint64_t origin) {
         if(!value.transfer.clock_sync || value.simulation || !bank.timing ||
            bank.timing->quality==audio::TimingQuality::unavailable ||
-           bank.timing->uncertainty_seconds>value.transfer.audio_timing_error_seconds || !search.compact_clock_search ||
+           bank.timing->uncertainty_seconds>value.transfer.audio_timing_error_seconds || !search.start_offset_seconds ||
+           !(search.compact_clock_search ||
+             (modem::symbol_sample_count(config)<16ULL*config.sample_rate && (config.scramble||config.dsss) &&
+              config.spreading_mode==modem::SpreadingMode::pattern && !search.hypotheses.empty() &&
+              !search.couple_clock_to_carrier)) ||
            !config.oscillator_search || (config.oscillator_search->reference==modem::OscillatorReference::shared_radio &&
              config.oscillator_search->rf_shift_hz!=0))return false;
         const auto& stamp=*bank.timing;
@@ -1553,7 +1561,7 @@ struct Session::Impl {
         current.transmitting_noise = false;
         current.transmission_finished = settings.simulation || queued.empty(); current.transmission_cancelled = wave.stop.stop_requested();
         current.status = idle_status();
-        if (!error.empty()) { current.error = error; staged_received_bytes = 0; }
+        if (!error.empty()) { transmit_error=error; current.error = error; staged_received_bytes = 0; }
         else if (!wave.stop.stop_requested()) {
             current.transmission_fraction = 1;
             if (settings.simulation && !wave.replay.empty()) {
@@ -1764,6 +1772,9 @@ struct Session::Impl {
                         output_options.estimated_timing->maximum_utc_error_seconds=value.transfer.audio_timing_error_seconds;
                     }
                     output_options.allow_timing_fallback=output_options.follow_system_clock;
+                    if(!wave->noise) output_options.playback_discontinuity=[](const std::string& reason) {
+                        throw Error(reason); // A recovered device gap invalidates this private transmission.
+                    };
                     output_options.timing_status=[&,version](const audio::TimingStatus& status) {
                         timing_status(status,version,false);
                         if(!status.following_system_clock) {
@@ -1946,6 +1957,7 @@ struct Session::Impl {
                 queued.pop_front(); value = settings; key=selected_transmit_key;
                 version = generation;clear_generation=receive_clear_generation; serial = ++tx_serial; tx_stop = std::stop_source{}; token = tx_stop.get_token();
                 current.transmission_id = serial;current.transmit_clock_following=false;
+                transmit_error.clear(); current.error.clear();
                 playback_timing_status.clear();playback_timing_fallback=false;
                 current.clock_timing_status=capture_timing_status;
                 current.clock_timing_fallback=capture_timing_fallback;
@@ -2099,7 +2111,9 @@ struct Session::Impl {
                 finish_simulation_elapsed();
                 tx_busy = false; current.transmitting = !queued.empty(); current.transmission_finished = queued.empty();
                 current.transmitting_noise = false;
-                current.status = idle_status(); if (!token.stop_requested()) current.error = exception.what(); changed.notify_all();
+                current.status = idle_status();
+                if (!token.stop_requested()) {transmit_error=exception.what();current.error=transmit_error;}
+                changed.notify_all();
             }
         }
     }
@@ -2340,6 +2354,11 @@ Snapshot Session::snapshot() {
     // A transient warning, with hysteresis; only observed loss flags latch.
     impl_->current.receiver_behind=delay>1. || (impl_->current.receiver_behind && delay>.25);
     auto result = impl_->current; result.signals = std::move(signals); result.received = std::move(received);
+    if(!impl_->transmit_error.empty()) {
+        result.transmission_failed=true;
+        result.error=impl_->transmit_error;
+        if(!result.transmitting)result.status="Transmission failed";
+    }
     result.decoding_samples=impl_->decoder_generation==impl_->generation?impl_->decoding_remaining_samples:0;
     impl_->replay_snapshot(result, now);
     count_dropped(result.constellation_dropped, impl_->replay_omitted); impl_->replay_omitted = 0;
