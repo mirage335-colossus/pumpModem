@@ -171,39 +171,107 @@ This does not interpolate exact off-grid arrival time or let EOF, cancellation o
 
 ## Fake FHSS
 
-Off and Fake are selectable. Genuine and IC-7100 hardware hopping remain disabled.
-Fake uses a dedicated FHSS stream/domain to illustrate a permutation of 200
-channels with 0.4-second dwell. During transmission, Carrier and Shift display
-the same hop delta in their disabled editors, and the FHSS selector shows the
-current channel. The base values used by settings, launch commands and parameter
-lists remain unchanged, and return to view after transmission or cancellation.
-The transmitted audio and radio hardware do not hop.
-Simulation is changed only when Simulation is actually enabled.
+The three selectable choices are **Off**, **Fake: FCC**, and **Fake: EU**.
+`--fhss off|fake-fcc|fake-eu` is shared by GUI startup, Link Planner launch
+commands and parameter-list load/save. An omitted option preserves the current
+selection on partial import (new configurations default to Off). The historical
+`fake-0.4s-200` identifier maps to `fake-fcc` and exports canonically as such.
+It previously selected no jurisdiction; this mapping preserves Fake intent,
+not its obsolete universal 200-channel/100 kHz geometry. Changing RF frequency
+never changes the saved FCC/EU preference.
 
-The Link Planner reserves the highest displayed carrier/shift frequency for its
-oscillator calculation. The observer preview now models secret hopping with every
-channel captured simultaneously, including all signal energy. It compares the
-hop-set radiometer with a channelized dwell-energy maximum at the same global
-false-alarm criterion and selects the faster strategy. No interception loss or
-universal channel-count gain is assumed. This is an analytical detector comparison,
-not calibrated adversary performance. The actual Fake output remains fixed.
-Channel spacing accounts for the proposed occupied bandwidth, but this is not
-a measured emission mask or regulatory conformity statement. See the
-[observer model](lpi-estimates.md#frequency-hopping).
+Fake uses the existing dedicated `Fhss` / `FakeFhssV1` key/counter domain for a
+keyed channel permutation, repeated during that transmission. No Data, Scrambler,
+private-pattern or DSSS key stream is borrowed. Without a selected key the
+illustration is sequential. Every illustrated channel receives equal residence.
+Carrier and Shift display the same hop delta during TX, retaining their baseband
+difference. Their configured values, launch exports, physical transmitted PCM
+and radio tuning stay fixed; the configured displays return after completion
+or cancellation. No access protocol or actual RF hopping is implemented. The 0.4 s residence is
+a display interval, not permission for an uninterrupted 0.4 s EU LBT burst;
+required burst splitting and idle periods are not generated.
 
-## Regulatory scope
+### Automatic geometry
 
-US [47 CFR 15.247](https://www.ecfr.gov/current/title-47/chapter-I/subchapter-A/part-15/subpart-C/section-15.247)
-has band-specific channel-count, spacing, bandwidth, power and occupancy rules.
-It does not prescribe one universal hopping pattern or require a particular
-internal oscillator architecture. Passing a dropdown preset is not certification.
+Below **800 MHz actual RF**, both preferences resolve to the same narrow
+experimental profile. This threshold is a **product convention**, not a
+regulatory boundary. Actual RF includes the manual Doppler adjustment. A shaped
+waveform uses its sampled chip rate times `(1 + rolloff)` for ideal occupied
+width; other waveforms use their nominal width. Channel spacing is 1.25 times
+the larger of that ideal width and nominal `Rate × DSSS factor`: an additional
+12.5% edge allowance on each side of this conservative width envelope. The
+nominal envelope also covers the rectangular-pulse alternative, so fractional
+rates that cross pulse eligibility as the planner changes target do not leave
+a stale hop set. This is deliberately wider than the ideal shaped width. The
+allowance is an engineering choice, not a measured 20 dB bandwidth, emission mask or bound on all
+finite-pulse tails. There is no absolute spacing floor in this mode.
 
-European requirements also depend on band and equipment category. The relevant
-examples include [ETSI EN 300 328 V2.2.2](https://www.etsi.org/deliver/etsi_en/300300_300399/300328/02.02.02_60/en_300328v020202p.pdf)
-for 2.4 GHz equipment and [ETSI EN 300 220-2 V3.3.1](https://www.etsi.org/deliver/etsi_en/300200_300299/30022002/03.03.01_60/en_30022002v030301p.pdf)
-for specified sub-GHz equipment. A 200-channel/0.4-second illustration is not
-universally compliant with their occupancy, duty-cycle or return-time conditions.
-Real hopping needs an appropriate hardware control path and band-specific testing.
+The experimental list has up to 200 channels and 0.4 s residence. Center span is
+`(N - 1) * spacing`; total guarded extent additionally includes one guarded
+channel width. The entire set stays below 800 MHz and within supplied band
+limits. It shifts down near the upper edge, and reduces the experimental count
+if necessary; an impossible set is reported unavailable. Illustrations never
+require negative Shift. The current GUI has no independent operating-band
+selector; the resolver accepts explicit bounds and tests cover them. Regulatory
+profiles use their own band bounds and never shrink their required count/coverage
+to fit a narrower band.
+
+For example, resolving the existing application configurations gives:
+
+| Experimental configuration | Ideal shaped width | Spacing | 200-channel center span |
+| --- | --- | --- | --- |
+| Rate 0.01, DSSS Off | 0.00625 Hz | 0.0125 Hz | 2.4875 Hz |
+| Rate 360, DSSS 10× | 2250 Hz | 4500 Hz | 895500 Hz |
+| Rate 10, DSSS 1000× | 6250 Hz | 12500 Hz | 2487500 Hz |
+
+These are resolved geometry values, not measured RF emissions or receiver speedups.
+
+### Band profiles and sources
+
+These are illustrative engineering profiles checked against primary sources on
+2026-10-10. They are not regulatory approval, and the entered transmit power is
+not silently reduced to meet the listed ceilings. Antenna gains, spurious
+emissions, national availability and hardware certification still matter.
+
+| Preference / actual RF band | Channels / spacing | Residence and access assumptions |
+| --- | --- | --- |
+| FCC 902–928 MHz | 50 for guarded width <250 kHz; otherwise 25; spacing=max(25 kHz, guarded width), width <=500 kHz | 0.4 s/channel in 20 s or 10 s; 1 W or 250 mW conducted ceiling before antenna restrictions |
+| FCC 2400–2483.5 MHz | Prefer 75; 15 if 75 cannot fit; same spacing rule | 0.4 s/channel in 0.4×N s; 1 W with 75 nonoverlapping channels, otherwise 125 mW conducted before antenna restrictions |
+| FCC 5725–5850 MHz | 75; same spacing rule, guarded width <=1 MHz | 0.4 s/channel in 30 s; 1 W conducted before antenna restrictions |
+| EU 863–870 MHz national SRD example | 47 at 100 kHz, guarded width <=100 kHz; this implementation uses only 863–868.6 MHz to avoid alarm exclusions | 0.4 s residence; return within 20 s; **0.1% whole-transmission duty**, 25 mW e.r.p.; national availability must be checked |
+| EU 2400–2483.5 MHz adaptive | 79 at max(1 MHz, guarded width); complete set must fit | 0.4 s accumulated/channel in 6 s (0.4×minimum required 15 channels), >=70% band capability; 100 mW e.i.r.p.; adaptive CCA/DAA required; LBT burst <=60 ms followed by >=5% idle, minimum 100 µs |
+| EU 5725–5875 MHz SRD | 20 at max(7.2 MHz, guarded width); >135 MHz center span | 0.4 s residence (standard allows <=1 s), every channel within 4×residence×N; 25 mW e.i.r.p. |
+
+FCC source: [47 CFR 15.247(a)(1), (b)](https://www.ecfr.gov/current/title-47/chapter-I/subchapter-A/part-15/subpart-C/section-15.247).
+The resolver substitutes the guarded waveform estimate for unmeasured RF 20 dB
+width, and uses conservative nonoverlapping spacing rather than the optional
+2.4 GHz two-thirds-bandwidth alternative.
+
+European sources are band-specific:
+[EN 300 220-2 V3.3.1 Table 4 band V, clause 4.4.11 and Annex C](https://www.etsi.org/deliver/etsi_en/300200_300299/30022002/03.03.01_60/en_30022002v030301p.pdf)
+for the national sub-GHz example;
+[EN 300 328 V2.2.2 clauses 4.3.1.4–7](https://www.etsi.org/deliver/etsi_en/300300_300399/300328/02.02.02_60/en_300328v020202p.pdf)
+for adaptive 2.4 GHz;
+[EN 300 440 V2.2.1 clause 4.2.6](https://www.etsi.org/deliver/etsi_en/300400_300499/300440/02.02.01_60/en_300440v020201p.pdf)
+and [EU 2025/105 Annex row 61](https://eur-lex.europa.eu/eli/dec_impl/2025/105/oj/eng)
+for 5.8 GHz SRD. EU sub-GHz operation is not assigned the EU 2.4 GHz rules.
+Other bands, excluded subbands and geometries that cannot fit return an explicit
+unavailable reason while preserving the selected preference. Fake transmission
+remains fixed-band and is not disabled by this advisory result.
+
+### Planner and observer scope
+
+Link Planner shows resolved channels, spacing, residence, center span, guarded
+width, RF endpoints and access assumptions under **Model limits and references**.
+Its oscillator/search estimates use the highest illustrated actual RF and Shift.
+The observer and draft inspection receive the actual resolved count/residence,
+not the old 200-channel defaults. Unsupported profiles retain fixed-band estimates.
+The observer captures every channel simultaneously, including all signal energy,
+and compares aggregate and channelized dwell-energy detection. No automatic
+channel-count multiplier or receiver CPU credit is granted. Access gaps, duty
+restrictions and retransmission scheduling are not modeled: EU estimates are
+conditional on the illustrated on-air dwell, not elapsed compliant operation.
+See the [observer model](lpi-estimates.md#frequency-hopping).
 
 The IC-7100 RF oscillator preset uses the published ±0.5 ppm per-radio frequency
 stability as an illustrative relative-link model. It does not assert an oven,

@@ -4,6 +4,50 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## FHSS profiles — local manual checkpoint, 10 October 2026
+
+The GUI now has exactly Off, Fake: FCC and Fake: EU choices. Preferences survive
+RF changes and the historical `fake-0.4s-200` setting imports as `fake-fcc`.
+Below 800 MHz (a product convention) both use bandwidth-proportional experimental
+spacing with no 100 kHz floor. Higher bands resolve distinct FCC 902/2.4/5.8 GHz
+and EU national 863 MHz/adaptive 2.4 GHz/SRD 5.8 GHz illustrations, or report an
+unsupported profile. Full guarded sets stay in their band bounds; the planner
+uses their highest RF and actual count/residence. The observer still records all
+channels simultaneously. Regulatory sources, access assumptions, examples and
+limitations are in [spread-spectrum controls](spread-spectrum-controls.md#fake-fhss).
+
+A fractional-rate review found pulse eligibility can change with target. The
+resolver uses a conservative nominal/shaped width envelope plus 25% margin,
+covered by a rectangular-to-shaped regression. This avoids stale spacing during
+a planner sweep. The Rate360/DSSS10 example resolves to 4.5 kHz spacing and
+895.5 kHz center span; Rate0.01/DSSSOff to 0.0125 Hz and 2.4875 Hz. These are
+calculated configuration values, not measured RF emissions or CPU speedups.
+
+Focused profile/parser/setting and both-mode TX-display/cancellation checks
+passed. Final complete affected GUI group **38/38 passed** (162.12 s), including
+GUI self-check and planner regressions. The complete existing LPI-estimate suite
+also passed. An earlier group was interrupted after the fractional-rate review
+and is not credited. Existing assertions were preserved, with obsolete fixed
+19.9 MHz geometry/import-rejection expectations replaced by the new resolved
+geometry and successful narrow-profile round trip. No receiver arithmetic,
+cryptographic implementation, transmitted waveform or physical-end change.
+
+Baseline HEAD `5230c15626325d24f4ac6ade531a25fc2aa819d7`, runnable GUI
+`c046a9658fecce3e153384561c9977ac3909dbe32d0992511421aaf55b85bed1` preserved.
+New Release GCC14.2/FLTK GUI SHA256
+`12be2a40014a9c38a3bd863338349b796885d31145de1544e16c622a943a54d6`.
+Local exact source/build manifest: `.agent-work/artifacts/receiver-opt-20261008/fhss-profiles-final/manifest.json`.
+Manual launcher: `.agent-work/artifacts/receiver-opt-20261008/manual-fhss-profiles.sh`.
+No push, hosted CI, GPU work or broader platform/SDK qualification was performed.
+
+This is a manual-test checkpoint, not overall qualification. Real RF hopping,
+access/duty enforcement, measured emission masks, national eligibility and
+hardware compliance are not implemented or established. EU observer results are
+conditional continuous-on-air references, excluding required access gaps.
+Manual hardware feedback and the prior receiver's outstanding full-bank
+sensitivity, ARM, broader regression/calibration, sanitizer, platform, SDK and
+packaging qualification remain outstanding.
+
 ## Spread RX reference and Sub-9kHz preset — local manual checkpoint, 10 October 2026
 
 The Sub-9kHz button now selects Rate **0.01 Hz**. The supplied Spread360,

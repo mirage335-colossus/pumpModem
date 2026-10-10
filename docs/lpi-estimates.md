@@ -162,8 +162,9 @@ a reduction in actual transmitted power.
 The GUI's Fake FHSS selection previews secret hopping while the observer captures
 **all channels simultaneously**, intercepting all signal energy. It excludes known
 empty frequency gaps, rather than diluting the signal in noise from DC through
-hundreds of GHz. The current illustration uses K=200 disjoint channel bands and
-d=0.4 s dwell. Genuine hardware hopping remains unavailable; the actual Fake
+hundreds of GHz. The selected FCC/EU profile supplies the actual channel count K and residence
+d (currently 0.4 s); below 800 MHz both use the experimental narrow profile.
+See [profile resolution](spread-spectrum-controls.md#automatic-geometry). Genuine hardware hopping remains unavailable; the actual Fake
 output stays fixed. No receiver CPU credit is assigned to a nonexistent dehopper.
 
 The model chooses the faster of two strategies *before observing data*, each at
@@ -184,7 +185,10 @@ The model chooses the faster of two strategies *before observing data*, each at
   the aggregate reference and expose their status.
 
 The model assumes known dwell alignment, stationary independent Gaussian cells,
-known noise power and occupied channel set, and no tuning gaps. It does not know
+known noise power and occupied channel set, and no tuning or access gaps.
+EU adaptive-access and sub-GHz duty requirements are not simulated; their
+numerical observer comparisons are conditional on on-air dwell, not elapsed
+compliant operation. Unsupported profiles retain the fixed-band model. It does not know
 the secret channel order. It is not an optimum-detector lower bound: joint
 likelihood detectors, spectral structure, finite pulse tails, limiting and
 sequential observation can change performance. In particular, 200 channels do

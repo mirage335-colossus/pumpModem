@@ -975,10 +975,11 @@ void noise_transmission_controls() {
 }
 void fake_hop_display() {
     using F=ui::Field;using C=ui::Command;
+    for(const auto* preference:{"fake-fcc","fake-eu"}) {
     Controller controller({true,true});
     controller.edit(F::rf_shift,"1 MHz");
     controller.edit(F::carrier,"1.0015 MHz");
-    controller.select(F::fhss,"fake-0.4s-200");
+    controller.select(F::fhss,preference);
     const auto carrier=controller.field(F::carrier).text,shift=controller.field(F::rf_shift).text;
     const auto base=controller.settings().transfer.modem.carrier_hz;
     check(controller.enabled(C::transmit_noise),"Fake hopping fixture has invalid transmit geometry");
@@ -1014,6 +1015,7 @@ void fake_hop_display() {
           controller.field(F::rf_shift).text==shift&&controller.field(F::fhss).display_text.find("Fake: hop ")==std::string::npos,
           "Ending fake FHSS did not restore the configured frequencies and idle label");
     controller.close();
+    }
 }
 std::size_t check_pending_snapshot(Controller& controller) {
     using F=ui::Field;using C=ui::Command;
@@ -1144,10 +1146,10 @@ void planner_examples() {
     const auto receive_keys=controller.settings().receive_keys.size();
     struct Example {C command;double rate,carrier,shift,target,power,loss,audio;const char *osc,*rf,*mode,*fhss;};
     const Example examples[]{
-        {C::planner_example_spread,360,30001500,30000000,40,36.020599913279625,60,0,"crystal","gpsdo-xo","interleave","fake-0.4s-200"},
+        {C::planner_example_spread,360,30001500,30000000,40,36.020599913279625,60,0,"crystal","gpsdo-xo","interleave","fake-fcc"},
         {C::planner_example_weak,36,30001500,30000000,8,36.020599913279625,180,0,"gpsdo-xo","gpsdo-xo","interleave","off"},
         {C::planner_example_sub9,.01,1500,0,-46,0,200,.05,"gpsdo-ocxo","gpsdo-ocxo","off","off"},
-        {C::planner_example_eme,1,5800001500,5800000000,-3.0720996964786846,36.020599913279625,220,0,"gpsdo-ocxo","gpsdo-ocxo","off","fake-0.4s-200"},
+        {C::planner_example_eme,1,5800001500,5800000000,-3.0720996964786846,36.020599913279625,220,0,"gpsdo-ocxo","gpsdo-ocxo","off","fake-fcc"},
     };
     for(const auto& example:examples) {
         controller.activate(example.command);
@@ -1442,7 +1444,7 @@ void dsss_voice_carrier_controls() {
     check(controller.settings().transfer.modem.dsss_factor==10&&controller.settings().transfer.modem.bandwidth_hz==120&&
         controller.settings().transfer.modem.carrier_hz==1800,
         "importing explicit DSSS geometry incorrectly applied interactive defaults");
-    controller.select(F::fhss,"fake-0.4s-200");prepare(controller);
+    controller.select(F::fhss,"fake-fcc");prepare(controller);
     check(controller.field(F::fhss).display_text.find("display only")!=std::string::npos&&
         controller.field(F::lpi_estimate).text.find("full-spectrum FHSS")!=std::string::npos&&
         controller.link_plan()->inputs.observer_hopping.has_value(),

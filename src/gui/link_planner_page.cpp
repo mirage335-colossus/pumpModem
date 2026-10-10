@@ -626,6 +626,18 @@ void details(Node& root,const planner::Model& model) {
     oscillator_details(root,model);
     auto n = card(root.width);
     paragraph(n, "Model limits", 15, Tone::text, true, 8);
+    const auto& hop=model.inputs.fake_hopping;
+    if(hop.preference!=fhss::Preference::off) {
+        if(!hop.available)paragraph(n,"Fake FHSS: "+hop.reason+". Fixed-band estimates retained.",11,Tone::negative,false,4);
+        else {
+            paragraph(n,"Fake FHSS: "+hop.name+" · "+std::to_string(hop.channels)+" channels · "+
+                number(hop.spacing_hz,8)+" Hz spacing · "+planner::duration(hop.dwell_seconds)+" residence · "+
+                number(hop.span_hz,8)+" Hz center span.",11,Tone::text,false,4);
+            paragraph(n,"Illustrated RF centers "+number(hop.first_hz,12)+"–"+number(hop.last_hz,12)+
+                " Hz; guarded channel width "+number(hop.guarded_hz,8)+" Hz. Highest RF feeds oscillator/search estimates. Physical audio and radio tuning stay fixed.",11,Tone::muted,false,4);
+            paragraph(n,hop.assumptions+" This illustration does not establish compliance. Observer captures every channel simultaneously; no automatic channel-count gain.",11,Tone::muted,false,4);
+        }
+    }
     geometry_details(n,model);
     const auto& g=model.receiver_geometry;
     if(!g.arithmetic_backend.empty()) {

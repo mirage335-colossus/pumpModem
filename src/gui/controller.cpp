@@ -1,4 +1,5 @@
 #include "../frequency_parse.hpp"
+#include "fhss_profile.hpp"
 #include "datapump/attachment.hpp"
 #include "datapump/execution.hpp"
 #include <utility>
@@ -324,8 +325,7 @@ struct Controller::Impl {
         f(UiField::search_arithmetic).options={{"default","Default — automatic"},
             {"fp32-min","FP32 minimum"},{"fp64-force","FP64 force"}};
         f(UiField::search_arithmetic).selected="default";
-        f(UiField::fhss).options={{"off","Off"},{"fake-0.4s-200","Fake: 0.4s dwell, 200 channels"},
-            {"genuine","Genuine (unavailable)",false},{"ic-7100","IC-7100 (unavailable)",false}};
+        f(UiField::fhss).options={{"off","Off"},{"fake-fcc","Fake: FCC"},{"fake-eu","Fake: EU"}};
         f(UiField::fhss).selected="off";
         f(UiField::rf_oscillator).options.push_back({"baseband-clock","Baseband clock"});
         for(const auto& preset:tuning::oscillator_presets()) {
@@ -624,16 +624,15 @@ struct Controller::Impl {
         f(UiField::clock_region).text=policy?clock_sync::duration_text(policy->region_seconds):"Default";
         f(UiField::clock_offset).text=policy?clock_sync::duration_text(policy->offset_seconds):"Default";
     }
-    static double fake_spacing(const modem::Config& config) {
-        // Illustration only: conservative grid, not an emitted-bandwidth measurement
-        // or a jurisdiction/band-specific regulatory profile.
-        return std::max(100000.,25000.*std::ceil(1.25*modem::waveform_bandwidth_hz(config)/25000.));
+    fhss::Profile fake_profile(const modem::Config& config) const {
+        return fhss::resolve(fhss::parse(f(UiField::fhss).selected),config);
     }
-    void fake_planning(planner::Inputs& input,bool enabled,
+    void fake_planning(planner::Inputs& input,std::string_view preference,
                        std::optional<modem::OscillatorModel> proposed_rf=std::nullopt,
                        std::optional<bool> proposed_shared=std::nullopt) const {
-        input.observer_hopping=enabled?std::optional<lpi::Hopping>{lpi::Hopping{}}:std::nullopt;
-        if(!enabled||!input.options.modem.oscillator_search)return;
+        input.fake_hopping=fhss::resolve(fhss::parse(preference),input.options.modem);
+        input.observer_hopping=input.fake_hopping.observer();
+        if(!input.fake_hopping.available||!input.options.modem.oscillator_search)return;
         auto& config=input.options.modem;
         const auto& id=f(UiField::rf_oscillator).selected;
         const auto model=tuning::oscillator_model(tuning::parse_oscillator_preset(
@@ -641,7 +640,7 @@ struct Controller::Impl {
         config.oscillator_search->rf=proposed_rf.value_or(model);
         config.oscillator_search->reference=proposed_shared.value_or(id=="baseband-clock")?
             modem::OscillatorReference::shared_radio:modem::OscillatorReference::independent_audio;
-        config.oscillator_search->rf_shift_hz+=199*fake_spacing(config);
+        config.oscillator_search->rf_shift_hz=input.fake_hopping.last_hz-config.carrier_hz;
         const auto effects=modem::oscillator_effects(config);
         input.channel.clock_error_ppm=effects.clock_error_ppm;
         input.channel.frequency_offset_hz=effects.frequency_offset_hz;
@@ -652,25 +651,28 @@ struct Controller::Impl {
     void fake_display(const live::Snapshot& next) {
         auto& carrier=f(UiField::carrier);auto& shift=f(UiField::rf_shift);
         carrier.disabled_text.clear();shift.disabled_text.clear();fake_hop_label.clear();
-        if(f(UiField::fhss).selected!="fake-0.4s-200"||!next.transmitting||next.simulation_receiving_tail)return;
+        if(!next.transmitting||next.simulation_receiving_tail)return;
+        const auto profile=fake_profile(settings.transfer.modem);
+        if(!profile.available)return;
         if(!snapshot.transmitting) {
-            for(unsigned i=0;i<fake_channels.size();++i)fake_channels[i]=i;
+            for(unsigned i=0;i<profile.channels;++i)fake_channels[i]=i;
             if(const auto* entry=selected_key()) {
                 const auto epoch=static_cast<std::uint64_t>(std::time(nullptr));
                 auto bytes=entry->key.stream(StreamPurpose::Fhss,epoch,0,800,StreamDomain::FakeFhssV1);
-                for(unsigned i=199;i>0;--i) {
-                    const auto at=4*(199-i);
+                for(unsigned i=profile.channels-1;i>0;--i) {
+                    const auto at=4*(profile.channels-1-i);
                     std::uint32_t random=0;for(unsigned j=0;j<4;++j)random=(random<<8)|bytes[at+j];
                     std::swap(fake_channels[i],fake_channels[random%(i+1)]);
                 }
                 std::fill(bytes.begin(),bytes.end(),0);
             }
         }
-        const auto slot=static_cast<std::size_t>(std::fmod(std::floor(std::max(0.,next.transmission_seconds)/.4),200.));
-        const auto delta=fake_channels[slot]*fake_spacing(settings.transfer.modem);
+        const auto slot=static_cast<std::size_t>(std::fmod(std::floor(std::max(0.,next.transmission_seconds)/profile.dwell_seconds),profile.channels));
+        const auto delta=profile.first_hz+fake_channels[slot]*profile.spacing_hz-profile.configured_rf_hz;
         carrier.disabled_text=frequency_text(frequency(carrier.text,"Carrier")+delta);
         shift.disabled_text=frequency_text(frequency(shift.text,"Shift")+delta);
-        fake_hop_label="Fake: hop "+std::to_string(fake_channels[slot]+1)+" / 200, 0.4s, display only";
+        fake_hop_label="Fake: hop "+std::to_string(fake_channels[slot]+1)+" / "+std::to_string(profile.channels)+", "+
+            seconds_text(profile.dwell_seconds)+", display only";
     }
     void configure(bool match_receive_target=false,bool match_carrier=false,
                    std::optional<UiField> align_target=std::nullopt,
@@ -720,7 +722,7 @@ struct Controller::Impl {
             const auto dsss_version=tuning::parse_outer_dsss_version(mode_selection=="legacy"?"legacy":"interleave");
             const auto arithmetic_id=load&&load->search_arithmetic?*load->search_arithmetic:f(UiField::search_arithmetic).selected;
             const auto arithmetic=tuning::parse_search_arithmetic(arithmetic_id);
-            const auto fhss=load&&load->fhss?*load->fhss:f(UiField::fhss).selected;
+            const auto fhss=std::string(fhss::id(fhss::parse(load&&load->fhss?*load->fhss:f(UiField::fhss).selected)));
             next.transfer.clock_sync=load&&load->clock_sync?clock_sync::parse(*load->clock_sync):clock_policy();
             next.transfer.audio_timing_error_seconds=load&&load->audio_timing_error_seconds?
                 *load->audio_timing_error_seconds:clock_sync::duration(f(UiField::audio_error).text);
@@ -816,7 +818,7 @@ struct Controller::Impl {
                 input.channel.clock_error_ppm=effects.clock_error_ppm;
                 input.channel.frequency_offset_hz=effects.frequency_offset_hz;
                 input.channel.phase_noise_degrees_per_sqrt_second=effects.phase_noise_degrees_per_sqrt_second;
-                fake_planning(input,fhss=="fake-0.4s-200",tuning::oscillator_model(rf_oscillator),shift_oscillator_id=="baseband-clock");
+                fake_planning(input,fhss,tuning::oscillator_model(rf_oscillator),shift_oscillator_id=="baseband-clock");
                 const auto fitted=planner::nearest_fit_target(input,companions,receive_banks(next));
                 if(!fitted)throw Error("No clock/RAM fit found for this target.");
                 return *fitted;
@@ -972,7 +974,7 @@ struct Controller::Impl {
         input.channel.clock_error_ppm=settings.simulation_clock_error_ppm;
         input.channel.frequency_offset_hz=settings.simulation_frequency_offset_hz;
         input.channel.phase_noise_degrees_per_sqrt_second=settings.simulation_phase_noise_degrees_per_sqrt_second;
-        fake_planning(input,f(UiField::fhss).selected=="fake-0.4s-200");
+        fake_planning(input,f(UiField::fhss).selected);
         input.wire_bits=planner_draft&&estimate?estimate->wire_bits:1;
         input.empty_draft=empty_draft();
         if(!planner_target_valid || !link_inputs_valid() || !settings_valid || (planner_draft&&(!estimate||estimated_revision!=revision))) {
@@ -1009,7 +1011,7 @@ struct Controller::Impl {
             input.target_db_hz=value;input.channel.clock_error_ppm=settings.simulation_clock_error_ppm;
             input.channel.frequency_offset_hz=settings.simulation_frequency_offset_hz;
             input.channel.phase_noise_degrees_per_sqrt_second=settings.simulation_phase_noise_degrees_per_sqrt_second;
-            fake_planning(input,f(UiField::fhss).selected=="fake-0.4s-200");
+            fake_planning(input,f(UiField::fhss).selected);
             if(input.mode==tuning::PatternMode::auto_pattern||input.mode==tuning::PatternMode::auto_keystream||
                input.mode==tuning::PatternMode::auto_tone) {
                 const auto fitted=planner::nearest_fit_target(input);
@@ -1371,8 +1373,11 @@ struct Controller::Impl {
         f(UiField::exclusive).enabled=!busy&&audio_controls::exclusive_supported();
         const bool simulation=f(UiField::simulation).selected=="yes";
         f(UiField::live_duplex).enabled=!busy&&!simulation;
-        f(UiField::fhss).display_text=f(UiField::fhss).selected=="fake-0.4s-200"?
-            (fake_hop_label.empty()?"Fake: 0.4s / 200, display only":fake_hop_label):"";
+        const auto hopping=fake_profile(settings.transfer.modem);
+        f(UiField::fhss).display_text=fhss::parse(f(UiField::fhss).selected)==fhss::Preference::off?"":
+            !fake_hop_label.empty()?fake_hop_label:!hopping.available?"Fake: "+hopping.reason:
+            std::string("Fake: ")+(hopping.preference==fhss::Preference::fcc?"FCC":"EU")+
+                (hopping.experimental?" · experimental":"")+" · "+std::to_string(hopping.channels)+" ch, display only";
         for(auto id:{UiField::link_power,UiField::link_loss,UiField::link_noise})f(id).visible=true;
         f(UiField::simulation_cpu_time).visible=f(UiField::simulation_gpu_time).visible=simulation;
         f(UiField::simulation_confidence).visible=true;
@@ -1447,8 +1452,8 @@ struct Controller::Impl {
         } else if(settings_valid&&((!estimate&&estimated_revision!=revision)||(estimate&&completed_advice_revision!=advice_revision))&&Clock::now()-estimate_requested>=std::chrono::milliseconds(120)) {
             result.kind=PrepKind::estimate; result.revision=revision;result.advice_revision=advice_revision; InspectionRequest request;
             request.message=message(); request.options=settings.transfer;
-            if(f(UiField::fhss).selected=="fake-0.4s-200")request.observer_hopping=lpi::Hopping{};
             request.options.modem=transmit_config();
+            request.observer_hopping=fake_profile(request.options.modem).observer();
             if(empty_draft())request.binary=Bytes{};
             else if(!attachment&&composer.raw_bits()) request.binary=*composer.raw_bits();
             request.requested_pattern=f(UiField::pattern).selected; request.target_snr=short_draft()?short_target:long_target; request.simulation=settings.simulation; request.device=settings.device;
@@ -1739,7 +1744,7 @@ struct Controller::Impl {
         case Command::planner_example_spread:
             specific="--pattern auto-keystream --tx-key named --tx-dbm 36.020599913279625 --path-loss-db 60"
                 " --oscillator crystal --rf-oscillator gpsdo-xo --shift 3e7 --target-snr 40 --rate 360"
-                " --carrier 30001500 --audio-error 0ms --dsss-mode interleave --fhss fake-0.4s-200";break;
+                " --carrier 30001500 --audio-error 0ms --dsss-mode interleave --fhss fake-fcc";break;
         case Command::planner_example_weak:
             specific="--pattern auto-keystream --tx-key named --tx-dbm 36.020599913279625 --path-loss-db 180"
                 " --oscillator gpsdo-xo --rf-oscillator gpsdo-xo --shift 3e7 --target-snr 8 --rate 36"
@@ -1752,7 +1757,7 @@ struct Controller::Impl {
             specific="--auto-pattern --tx-key none --tx-dbm 36.020599913279625 --path-loss-db 220"
                 " --oscillator gpsdo-ocxo --rf-oscillator gpsdo-ocxo --shift 5.8e9"
                 " --target-snr -3.0720996964786846 --rate 1 --carrier 5800001500"
-                " --audio-error 0ms --dsss-mode off --fhss fake-0.4s-200";break;
+                " --audio-error 0ms --dsss-mode off --fhss fake-fcc";break;
         default:throw Error("Unknown planner example");
         }
         apply_launch(launch_command::parse(specific+common));

@@ -116,10 +116,14 @@ sensitivity and structured-interference qualification are incomplete. Selecting
 a factor in the GUI sets Rate 360/36/3.6 Hz for 10x/100x/1000x and stream Carrier
 1500 Hz. Explicit command values retain their supplied Rate and Carrier.
 .TP
-.BI \-\-fhss " off|fake-0.4s-200"
-Illustrate 200 channels with 0.4-second dwell in Carrier and Shift displays.
-This does not retune hardware or change transmitted audio. Genuine and IC-7100
-hardware hopping are unavailable. The illustration is not regulatory certification.
+.BI \-\-fhss " off|fake-fcc|fake-eu"
+Select a persistent FCC or EU preference for illustrative Carrier/Shift hopping.
+Below 800 MHz both use narrow experimental spacing derived from the waveform;
+800 MHz is a product convention, not a regulatory boundary. Higher frequencies
+use band-specific profiles or report no applicable profile. The legacy
+fake-0.4s-200 identifier maps to fake-fcc. This does not retune hardware or
+change transmitted audio. Profile details and unimplemented access assumptions
+appear under Model limits and references; the illustration is not certification.
 .TP
 .BI \-\-search\-margin " N"
 Multiply declared frequency and clock accuracy bounds; default 3, minimum 1.

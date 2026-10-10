@@ -1,5 +1,6 @@
 #include "../frequency_parse.hpp"
 #include "launch_command.hpp"
+#include "fhss_profile.hpp"
 #include "datapump/tuning.hpp"
 #include "datapump/clock_sync.hpp"
 #include <algorithm>
@@ -186,8 +187,7 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             result.full_duplex=value=="yes";
         }
         else if(flag=="--fhss") {
-            if(value!="off"&&value!="fake-0.4s-200")invalid("Only off or fake-0.4s-200 FHSS is implemented.");
-            result.fhss=std::string(value);
+            result.fhss=fhss::id(fhss::parse(value));
         }
         else if(flag=="--oscillator") {
             const auto preset=tuning::parse_oscillator_preset(value);
@@ -274,7 +274,7 @@ std::string format(const Patch& settings) {
     if(settings.dsss_version)add("--dsss-version",std::string(tuning::outer_dsss_version_id(tuning::parse_outer_dsss_version(*settings.dsss_version))));
     if(settings.search_arithmetic)add("--search-arithmetic",std::string(tuning::search_arithmetic_id(tuning::parse_search_arithmetic(*settings.search_arithmetic))));
     if(settings.full_duplex)add("--live-duplex",*settings.full_duplex?"yes":"no");
-    if(settings.fhss)add("--fhss",*settings.fhss);
+    if(settings.fhss)add("--fhss",std::string(fhss::id(fhss::parse(*settings.fhss))));
     // Equal syntax preserves a filename or key name beginning with '--'.
     if(settings.keyfile)arguments.push_back("--keyfile="+*settings.keyfile);
     if(settings.key_name)arguments.push_back("--key-name="+*settings.key_name);

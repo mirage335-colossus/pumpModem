@@ -28,10 +28,10 @@ device and loaded receive keys, and never start transmission.
 
 | Example | Power / path loss | Rate / absolute Carrier / Shift | Target | DSSS / Fake FHSS | Baseband / Shift oscillator | Audio error |
 | --- | --- | --- | --- | --- | --- | --- |
-| Spread-Spectrum DSSS FHSS | 4 W / 60 dB | 360 Hz / 30.0015 MHz / 30 MHz | 40 dB-Hz | Interleave 10× / 0.4 s, 200 channels | Crystal / GPSDO XO | 0 ms |
+| Spread-Spectrum DSSS FHSS | 4 W / 60 dB | 360 Hz / 30.0015 MHz / 30 MHz | 40 dB-Hz | Interleave 10× / Fake: FCC (experimental below 800 MHz) | Crystal / GPSDO XO | 0 ms |
 | Weak-Signal | 4 W / 180 dB | 36 Hz / 30.0015 MHz / 30 MHz | 8 dB-Hz | Interleave 10× / Off | GPSDO XO / GPSDO XO | 0 ms |
 | Sub-9kHz | 1 mW / 200 dB | 0.01 Hz / 1500 Hz / 0 Hz | −46 dB-Hz | Off / Off | GPSDO OCXO / inactive | 50 ms |
-| Earth-Moon-Earth | 4 W / 220 dB | 1 Hz / 5.8000015 GHz / 5.8 GHz | −3.0720996964786846 dB-Hz | Off / 0.4 s, 200 channels | GPSDO OCXO / GPSDO OCXO | 0 ms |
+| Earth-Moon-Earth | 4 W / 220 dB | 1 Hz / 5.8000015 GHz / 5.8 GHz | −3.0720996964786846 dB-Hz | Off / Fake: FCC (5.8 GHz, 75 channels) | GPSDO OCXO / GPSDO OCXO | 0 ms |
 
 All use −164 dBm/Hz noise, independent oscillator references and a 3× search
 margin. DSSS Off remembers the 10× Interleave selection. The first three require

@@ -1,4 +1,5 @@
 #pragma once
+#include "fhss_profile.hpp"
 #include "datapump/transfer.hpp"
 #include "datapump/lpi_estimate.hpp"
 #include "datapump/simulation_estimate.hpp"
@@ -15,6 +16,7 @@ struct Inputs {
     tuning::PatternMode mode=tuning::PatternMode::auto_pattern;
     modem::ChannelConfig channel;
     std::optional<lpi::Hopping> observer_hopping;
+    fhss::Profile fake_hopping;
     double target_db_hz=-8;
     double tx_dbm=3;
     double path_loss_db=120;

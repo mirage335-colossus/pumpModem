@@ -68,6 +68,13 @@ void parsing_and_formatting() {
     launch_command::Patch unsupported;unsupported.search_arithmetic="matrix4";
     rejects([&]{launch_command::format(unsupported);},"programmatic export silently enabled unimplemented 4-bit arithmetic");
     const auto clock=launch_command::parse("--clock-sync GPS_0.1ms-400ms_region-2564ms_offset --audio-error 30ms --dsss-factor 1000 --fhss fake-0.4s-200 --live-duplex yes");
+    check(clock.fhss=="fake-fcc"&&launch_command::format(clock).find("--fhss fake-fcc")!=std::string::npos,
+        "legacy Fake FHSS must migrate to the persistent FCC preference");
+    for(const auto* choice:{"off","fake-fcc","fake-eu"}) {
+        const auto patch=launch_command::parse(std::string("--fhss ")+choice);
+        check(patch.fhss==choice&&launch_command::parse(launch_command::format(patch))==patch,
+            "FHSS preference did not survive CLI/parameter-list round trip");
+    }
     check(clock.audio_timing_error_seconds==.03,"audio allowance lost duration units");
     check(clock.full_duplex==true,"duplex selection was omitted from the saved settings");
     const auto half_duplex=launch_command::parse("--live-duplex no");

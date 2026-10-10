@@ -1,6 +1,7 @@
 #include "application.hpp"
 #include "controller.hpp"
 #include "launch_command.hpp"
+#include "fhss_profile.hpp"
 #include "datapump/tuning.hpp"
 #include <algorithm>
 #include <cmath>
@@ -363,28 +364,28 @@ void clock_and_spread_controls() {
     check(controller.field(F::dsss_factor).selected=="100"&&
         launch_command::parse(controller.field(F::planner_command).text).dsss_version=="legacy",
         "legacy diagnostic choice changed DSSS factor or was omitted from export");
-    controller.select(F::fhss,"fake-0.4s-200");
+    controller.select(F::fhss,"fake-fcc");
     const auto model=controller.link_plan();
     check(controller.settings().transfer.modem.oscillator_search->rf_shift_hz==0 &&
-          model->inputs.options.modem.oscillator_search->rf_shift_hz==19900000 &&
+          model->inputs.fake_hopping.available &&
+          model->inputs.fake_hopping.experimental && model->inputs.fake_hopping.spacing_hz<100000 &&
+          model->inputs.options.modem.oscillator_search->rf_shift_hz==
+              model->inputs.fake_hopping.last_hz-controller.settings().transfer.modem.carrier_hz &&
           model->inputs.options.modem.oscillator_search->rf.accuracy_ppm==100,
           "fake hopping must plan the highest shift with the RF model without tuning the actual stream");
     for(const auto* unsupported:{"genuine","ic-7100"}) {
         controller.select(F::fhss,unsupported);
-        check(controller.field(F::fhss).selected=="fake-0.4s-200","disabled hardware hopping became selectable");
+        check(controller.field(F::fhss).selected=="fake-fcc","disabled hardware hopping became selectable");
     }
     const auto exported=controller.field(F::planner_command).text;
     load(controller,exported);
     check(controller.settings().transfer.audio_timing_error_seconds==.012345,
         "audio allowance lost its saved parameter-list value");
     check(controller.settings().transfer.clock_sync==accepted && controller.field(F::dsss_factor).selected=="100" &&
-          controller.field(F::fhss).selected=="fake-0.4s-200"&&controller.field(F::dsss_version).selected=="legacy",
+          controller.field(F::fhss).selected=="fake-fcc"&&controller.field(F::dsss_version).selected=="legacy",
           "clock/spread/version settings lost their loaded values");
-    // The saved Fake/crystal combination deliberately exceeds sampled RF
-    // search headroom. Keep that rejection transactional, then use supported
-    // geometry for the independent partial-import preservation assertions.
-    check(controller.field(F::status).text.find("No clock/RAM fit")!=std::string::npos,
-        "unsupported illustrated RF search must not be admitted on import");
+    check(controller.field(F::status).text.find("No clock/RAM fit")==std::string::npos,
+        "narrow experimental hopping retained the obsolete 19.9 MHz search expansion");
     controller.select(F::fhss,"off");
     load(controller,"--clock-sync default");
     check(!controller.settings().transfer.clock_sync,
@@ -532,8 +533,85 @@ void duplex_settings() {
     check(!controller.field(F::live_duplex).enabled&&controller.settings().full_duplex,
         "closing controller accepted a duplex callback");
 }
-int main() {
-    try {doppler_settings();arithmetic_settings();duplex_settings();clock_and_spread_controls();generated_and_pasted_settings();rejected_settings_remain_atomic();startup_and_submit_behavior();narrow_rate_round_trips();live_validation_is_atomic();real_radio_configuration();invalid_shift_edit_recovers();absolute_carrier_and_shift();zero_shift_legacy_and_shared_round_trip();
+void fhss_profiles() {
+    using P=fhss::Preference;
+    auto config=tuning::resolve(360,40,tuning::PatternMode::auto_keystream,true,1500,10).config;
+    config.oscillator_search=modem::OscillatorSearchConfig{};
+    const auto rf=[&](double carrier){config.oscillator_search->rf_shift_hz=carrier-config.carrier_hz;};
+    const auto contains=[&](const fhss::Profile& p) {
+        check(p.available&&p.channels>=2&&p.channels<=200,"FHSS profile unavailable or invalid count");
+        check(p.first_hz>=config.carrier_hz,"illustrated hop requires negative Shift");
+        check(p.first_hz-p.guarded_hz/2>=p.band.lower_hz-.000001&&
+              p.last_hz+p.guarded_hz/2<=p.band.upper_hz+.000001,"guarded hop set escaped band");
+        near(p.span_hz,(p.channels-1)*p.spacing_hz,"FHSS span/count mismatch");
+        check(p.observer()->channels==p.channels&&p.observer()->dwell_seconds==p.dwell_seconds,
+            "observer received a different channel count/dwell");
+    };
+    rf(30001500);
+    for(const auto pref:{P::fcc,P::eu}) {
+        const auto p=fhss::resolve(pref,config);contains(p);
+        check(p.experimental&&p.channels==200&&p.spacing_hz<10000,"experimental FHSS retained wide spacing floor");
+        near(p.spacing_hz,1.25*std::max(p.occupied_hz,modem::waveform_bandwidth_hz(config)),"experimental filter margin incorrect");
+        const auto limited=fhss::resolve(pref,config,fhss::Band{30e6,30.03e6});contains(limited);
+        check(limited.channels<200,"narrow operating band failed to bound channel count");
+        check(!fhss::resolve(pref,config,fhss::Band{30e6,30e6+10}).available,"impossible experimental band admitted");
+    }
+    const auto strong=tuning::resolve(15.17055,200,tuning::PatternMode::auto_keystream,true,10).config;
+    const auto weak=tuning::resolve(15.17055,0,tuning::PatternMode::auto_keystream,true,10).config;
+    check(!modem::pattern_pulse_enabled(strong)&&modem::pattern_pulse_enabled(weak),
+        "fractional target fixture lost the rectangular-to-shaped transition");
+    const auto strong_hop=fhss::resolve(P::fcc,strong),weak_hop=fhss::resolve(P::fcc,weak);
+    near(strong_hop.spacing_hz,weak_hop.spacing_hz,"planner target changed conservative hop geometry");
+    check(strong_hop.guarded_hz>=1.25*strong_hop.occupied_hz&&weak_hop.guarded_hz>=1.25*weak_hop.occupied_hz,
+        "hop envelope did not retain both pulse eligibility alternatives");
+    auto wide=config;wide.pulse_shaping=false;wide.dsss_factor=1;wide.oscillator_search->rf_shift_hz=915e6-wide.carrier_hz;
+    wide.bandwidth_hz=200000;
+    check(fhss::resolve(P::fcc,wide).channels==25,"FCC 250 kHz boundary did not select 25 channels");
+    wide.bandwidth_hz=400001;
+    check(!fhss::resolve(P::fcc,wide).available,"FCC width limit accepted oversized channel");
+    rf(800e6-1);check(fhss::resolve(P::eu,config).experimental,"sub-800 convention boundary wrong");
+    rf(800e6);check(!fhss::resolve(P::eu,config).available,"800MHz silently uses experimental profile");
+    rf(915e6);auto p=fhss::resolve(P::fcc,config);contains(p);check(p.channels==50&&p.spacing_hz==25000,"FCC902 narrow profile wrong");
+    check(!fhss::resolve(P::eu,config).available,"EU915 borrowed FCC profile");
+    rf(866e6);p=fhss::resolve(P::eu,config);contains(p);
+    check(p.channels==47&&p.spacing_hz==100000&&p.last_hz+p.guarded_hz/2<=868.6e6&&
+        p.assumptions.find("0.1%")!=std::string::npos,"EU subGHz profile/exclusions/duty missing");
+    rf(868.65e6);check(!fhss::resolve(P::eu,config).available,"alarm band borrowed 2.4GHz profile");
+    rf(2440e6);p=fhss::resolve(P::fcc,config);contains(p);check(p.channels==75,"FCC2.4 profile wrong");
+    p=fhss::resolve(P::eu,config);contains(p);
+    check(p.channels==79&&p.occupancy_window_seconds==6&&p.span_hz>=.7*83.5e6&&p.assumptions.find("CCA/DAA")!=std::string::npos,"EU2.4 coverage/access missing");
+    check(!fhss::resolve(P::eu,config,fhss::Band{2400e6,2420e6}).available,"EU coverage silently shrunk to selected band");
+    rf(5800e6);p=fhss::resolve(P::fcc,config);contains(p);check(p.channels==75,"FCC5.8 profile wrong");
+    p=fhss::resolve(P::eu,config);contains(p);check(p.channels==20&&p.span_hz>135e6,"EU5.8 coverage wrong");
+    rf(5870e6);contains(fhss::resolve(P::eu,config));check(!fhss::resolve(P::fcc,config).available,"FCC band extended to EU upper limit");
+    rf(928e6-1);contains(fhss::resolve(P::fcc,config));
+    rf(433e6);const auto narrow=fhss::resolve(P::fcc,config);
+    config.bandwidth_hz=.01;config.spreading_factor=64;config.dsss_factor=1;
+    const auto tiny=fhss::resolve(P::fcc,config);contains(tiny);
+    check(tiny.spacing_hz<1&&tiny.span_hz<narrow.span_hz/1000,"very narrow waveform kept fixed floor");
+    Controller controller({false,true});
+    const auto& choices=controller.field(F::fhss).options;
+    check(choices.size()==3&&choices[0].label=="Off"&&choices[1].label=="Fake: FCC"&&choices[2].label=="Fake: EU",
+        "FHSS must have exactly the three requested choices");
+    load(controller,"--oscillator gpsdo-ocxo --rf-oscillator gpsdo-ocxo --shift 30MHz --carrier 30.0015MHz --fhss fake-eu");
+    check(controller.field(F::fhss).selected=="fake-eu"&&controller.link_plan()->inputs.fake_hopping.experimental,
+        "EU preference lost below 800MHz");
+    load(controller,"--shift 2.44GHz --carrier 2.4400015GHz");
+    check(controller.field(F::fhss).selected=="fake-eu"&&controller.link_plan()->inputs.fake_hopping.channels==79,
+        "RF change lost EU preference or profile");
+    load(controller,"--shift 30MHz --carrier 30.0015MHz");
+    check(controller.field(F::fhss).selected=="fake-eu"&&controller.link_plan()->inputs.fake_hopping.experimental,
+        "returning to low RF lost EU preference");
+    load(controller,"--shift 1GHz --carrier 1.0000015GHz");
+    check(controller.field(F::fhss).selected=="fake-eu"&&!controller.link_plan()->inputs.fake_hopping.available&&
+        !controller.link_plan()->inputs.observer_hopping,"unsupported band retained a hopping estimate");
+    // Doppler-adjusted RF, not the unchanged carrier editor, chooses the band.
+    load(controller,"--shift 799.99MHz --carrier 799.999MHz --doppler -0.00001c");
+    check(!controller.link_plan()->inputs.fake_hopping.experimental,"manual Doppler ignored in actual RF boundary");
+    controller.close();
+}
+int main(int argc,char** argv) {
+    try {fhss_profiles();if(argc>1&&std::string_view(argv[1])=="--fhss-profiles"){std::cout<<"FHSS profiles passed\n";return 0;}doppler_settings();arithmetic_settings();duplex_settings();clock_and_spread_controls();generated_and_pasted_settings();rejected_settings_remain_atomic();startup_and_submit_behavior();narrow_rate_round_trips();live_validation_is_atomic();real_radio_configuration();invalid_shift_edit_recovers();absolute_carrier_and_shift();zero_shift_legacy_and_shared_round_trip();
         std::cout<<"Planner launch setting round trips passed.\n";return 0;
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }
