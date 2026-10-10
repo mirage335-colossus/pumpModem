@@ -877,6 +877,7 @@ struct Session::Impl {
                         c.dsss_factor==profile.dsss_factor &&
                         (c.dsss_factor==1 || c.outer_dsss_version==profile.outer_dsss_version) &&
                         c.scramble==profile.scramble && c.spreading_mode==profile.spreading_mode &&
+                        c.search_arithmetic==profile.search_arithmetic &&
                         c.pulse_shaping==profile.pulse_shaping && c.oscillator_search==profile.oscillator_search;
                 });
                 if (existing != bank.receivers.end()) continue;

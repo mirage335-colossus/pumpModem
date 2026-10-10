@@ -392,6 +392,62 @@ void clock_and_spread_controls() {
         "version-only parameter-list load changed factor or Rate");
     controller.close();
 }
+void arithmetic_settings() {
+    using A=modem::SearchArithmetic;
+    Controller controller;
+    check(controller.field(F::search_arithmetic).selected=="default"&&
+        controller.settings().transfer.modem.search_arithmetic==A::default_mode,
+        "new application must retain the distinct default arithmetic request");
+    controller.edit(F::short_bits,"001");
+    const auto base=controller.settings().transfer.modem;
+    for(const auto* id:{"fp32-min","fp64-force","default"}) {
+        controller.select(F::search_arithmetic,id);
+        const auto arithmetic=tuning::parse_search_arithmetic(id);
+        const auto& settings=controller.settings();
+        check(controller.field(F::search_arithmetic).selected==id&&
+            settings.transfer.modem.search_arithmetic==arithmetic&&settings.long_message_modem&&
+            settings.long_message_modem->search_arithmetic==arithmetic&&
+            settings.transfer.modem.sample_rate==base.sample_rate&&
+            settings.transfer.modem.carrier_hz==base.carrier_hz&&
+            modem::symbol_sample_count(settings.transfer.modem)==modem::symbol_sample_count(base)&&
+            controller.field(F::short_bits).text=="001",
+            "arithmetic selection failed to reach both runtime profiles or changed waveform/draft geometry");
+        const auto saved=launch_command::parse(controller.field(F::planner_command).text);
+        check(saved.search_arithmetic==id,"launch export merged distinct arithmetic aliases");
+        Controller restored({false,false,saved});
+        check(restored.settings().transfer.modem.search_arithmetic==arithmetic&&
+            restored.field(F::search_arithmetic).selected==id,
+            "saved arithmetic selection failed to restore at startup");
+        restored.close();
+    }
+    load(controller,"--search-arithmetic fp64");
+    load(controller,"--tx-dbm 20");
+    check(controller.field(F::search_arithmetic).selected=="fp64-force"&&
+        controller.settings().transfer.modem.search_arithmetic==A::fp64,
+        "older partial settings reset the omitted arithmetic request");
+    const auto accepted_rate=controller.settings().transfer.modem.bandwidth_hz;
+    load(controller,"--rate 100 --search-arithmetic matrix4");
+    check(controller.field(F::search_arithmetic).selected=="fp64-force"&&
+        controller.settings().transfer.modem.bandwidth_hz==accepted_rate&&
+        controller.field(F::status).text.find("not implemented")!=std::string::npos,
+        "unavailable 4-bit import partially changed active settings or lacked an explanation");
+    load(controller,"--rate 100 --search-arithmetic unknown");
+    check(controller.field(F::search_arithmetic).selected=="fp64-force"&&
+        controller.settings().transfer.modem.bandwidth_hz==accepted_rate,
+        "unknown arithmetic import partially applied another setting");
+    for(const auto* legacy:{"int8","INT8","matrix8","8-bit"}) {
+        load(controller,std::string("--search-arithmetic ")+legacy);
+        check(controller.field(F::search_arithmetic).selected=="default"&&
+            controller.settings().transfer.modem.search_arithmetic==A::default_mode&&
+            launch_command::parse(controller.field(F::planner_command).text).search_arithmetic=="default",
+            "legacy integer settings did not migrate atomically to the automatic policy");
+    }
+    load(controller,"--search-arithmetic default");
+    check(controller.field(F::search_arithmetic).selected=="default"&&
+        controller.settings().transfer.modem.search_arithmetic==A::default_mode,
+        "explicit default failed to restore the saved default request");
+    controller.close();
+}
 void duplex_settings() {
     Controller controller({false,false});
     const auto& screen=ui::console_screen();
@@ -425,7 +481,7 @@ void duplex_settings() {
         "closing controller accepted a duplex callback");
 }
 int main() {
-    try {duplex_settings();clock_and_spread_controls();generated_and_pasted_settings();rejected_settings_remain_atomic();startup_and_submit_behavior();narrow_rate_round_trips();live_validation_is_atomic();real_radio_configuration();invalid_shift_edit_recovers();absolute_carrier_and_shift();zero_shift_legacy_and_shared_round_trip();
+    try {arithmetic_settings();duplex_settings();clock_and_spread_controls();generated_and_pasted_settings();rejected_settings_remain_atomic();startup_and_submit_behavior();narrow_rate_round_trips();live_validation_is_atomic();real_radio_configuration();invalid_shift_edit_recovers();absolute_carrier_and_shift();zero_shift_legacy_and_shared_round_trip();
         std::cout<<"Planner launch setting round trips passed.\n";return 0;
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

@@ -54,6 +54,12 @@ struct ReceiverSearchDiagnostics {
     double full_template_jobs=0,retained_template_jobs=0,direct_template_jobs=0;
     double full_start_positions=0,retained_start_positions=0;
     std::string backend,scope,fallback_reason;
+    // Source-derived dispatch description; observed execution counters remain
+    // on PatternReceiver. Never infer a hardware measurement from this model.
+    modem::SearchArithmetic search_arithmetic=modem::SearchArithmetic::default_mode;
+    std::string arithmetic_operands,arithmetic_accumulation,arithmetic_backend,arithmetic_limit;
+    std::string template_reuse;
+    bool arithmetic_experimental=false;
 };
 
 struct Estimate {

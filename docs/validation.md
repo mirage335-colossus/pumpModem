@@ -4,6 +4,177 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Automatic arithmetic policy — experimental local checkpoint, 9 October 2026
+
+This supersedes the **policy**, not the historical measurements, of the CPU
+precision checkpoint below. Developer-only choices are now Default automatic,
+FP32 minimum and FP64 force. Default uses supported native FP32 acquisition;
+INT8 remains an internal diagnostic because complete-execution benefit is not
+established. FP64 remains for unsupported/cached/parallel and numerical/resource
+fallback. Approximate template reuse has a separate explicit permission with all
+existing identity, pulse and workspace checks; FP64 force bypasses it. Exact reuse
+is allowed at every precision. See [current policy](search-compute.md#experimental-cpu-search-arithmetic-local-manual-candidate)
+for persisted-ID migration, actual arithmetic coverage and limitations.
+
+Source builds locally on `1fa172019f37b280129a26f105df0b36f2cba2ff`. The preceding
+GUI/source/build, optimized and raw references remain frozen. New launcher and
+full report: `.agent-work/artifacts/receiver-opt-20261008/MANUAL-ARITHMETIC-POLICY.md`.
+The exact source overlay, GUI/build hashes and evidence manifest are under
+`arithmetic-policy-final/` in that directory. No push, publication, hosted CI or
+GPU work; this is a manual-test checkpoint, not overall qualification.
+
+The bounded policy check completed69 fresh-process executions, three alternating
+paired/triple repeats per geometry, identical saved original PCM, synthetic keys,
+impairments, hypotheses and rates, CPU2 affinity and no cooperating build/test
+load. Construction, setup, search, polls, finish and destruction are included;
+common input creation/loading is excluded. Desktop/governor activity was not
+controlled. Primary complete60s captures contain one bit plus observed absence,
+one key/epoch, DSSS1000, Fs40000,200µs fine chip,200ms inner chip,12.8s symbol,
+five qualified frequency/clock pairs (three without a prior) and64MiB workspace.
+These are not rolling Live or full
+short-text receptions.
+
+| Arrival prior | Preceding Default → new Default CPU seconds | Paired speedup [descriptive95%] |
+| --- | --- | --- |
+| Qualified1ms | 2.2014 → 1.8927 | 1.163× [1.070,1.264] |
+| Qualified6s | 5.3388 → 2.9723 | 1.796× [1.719,1.877] |
+| No qualified prior | 7.3641 → 4.4740 | 1.646× [1.505,1.801] |
+
+Intervals are Student-t on three paired log ratios, not platform guarantees.
+New Default and preceding **explicit FP32** exactly match all nine primary pairs'
+recorded score summaries, counters, event hashes, workspace and media publication/
+completion times. Relative to that already-selected FP32 path, ratios are .892×
+[.762,1.045] tight,1.037× [1.029,1.046] at6s and1.021× [.945,1.103] no-prior.
+There is no new algorithmic speedup claim. Tight's slower point remains inconclusive.
+Retained workspace remains36.42–38.52MB; peak RSS increases58.17→60.37MB tight
+and60.60→64.43MB at6s. Scored starts remain1500/2275570, and media first-bit
+publication remains13.7728/26.2144s. No added media delay is observed.
+
+DSSS10/100 (legacy diagnostic waveforms), ordinary fast/wide and weaker controls
+retain FP64 fallbacks with matching scores, coverage and media semantics. They do
+not qualify native-FP32 gains in those branches. D100 broad's .893× [.780,1.023]
+is inconclusive; the weak control has an observed3.1% CPU increase, about2.2ms,
+with ratio .970× [.942,.998]. No universal speedup is claimed. The first D10
+baseline attempt used an incorrect outer-version fixture flag; its failed log is
+retained, corrected fixture metadata was used for the42 controls, and the27
+completed primary runs were reused without receiver changes.
+
+The unchanged native/cache operator reuses the6544 conditional sensitivity pairs
+below. No substantial sensitivity loss was observed; q90/q99 differences were0dB
+where reached, but bounds remain inconclusive (q90±1–2dB, q99±3–4dB/censored).
+Those bounds and the earlier2dB allowance are **not observed losses**. Neither
+full-bank loss nor cumulative raw-reference loss is qualified, and interpolation
+must not be described as universally negligible-loss.
+
+Focused arithmetic/FFT, Default/minimum/reference progress and tuning checks
+passed. Complete affected coverage is19/19:18 matching initial passes plus the
+complete receiver case rerun (55.55s) after making its exact algorithm/cache
+fixture explicitly FP64. Every original assertion remains. The initial failed
+fixture log is retained; automatic arithmetic had selected different widths
+across its serial/parallel/workspace members. Separate tests retain Default and
+FP32-minimum comparisons against the independent reference at each progress poll,
+including numerical, low-memory and mixed-cohort fallback.
+
+The complete `./build.sh test gui` group passed38/38 (145.79s CTest,196.69s with
+build). `./build.sh` rebuilt the GUI successfully. Existing filesystem-u8path
+compiler deprecation warnings remain. Final launcher syntax/help checks and exact
+source/build/binary identity are recorded in the final manifest. Broader contract,
+calibration, sanitizer, hardware, ARM and platform/SDK/packaging validation is
+explicitly deferred until requested; no overall qualification is claimed.
+
+## CPU search precision — preceding experimental checkpoint, 9 October 2026
+
+The following records the preceding candidate's policy and evidence; Default's
+partial INT8 selection has been superseded by the automatic policy above.
+
+Local source builds on `1fa172019f37b280129a26f105df0b36f2cba2ff`; preceding
+optimized source/build/GUI and raw diagnostics are preserved. No push, publication,
+hosted CI or GPU work. Full source/build identities, launch commands, raw results
+and strategy dispositions are in
+`.agent-work/artifacts/receiver-opt-20261008/MANUAL-CPU-ARITHMETIC.md`.
+
+Default/matrix8/int8 have **partial INT8 coverage**: bounded direct screening with
+fixed compensated integer operands, wide exact reductions and original-FP64 pair
+verification. Explicit FP32 adds native float whole/partition FFT buffers and
+runtime AVX2 butterflies, and a close-clock paired private-template cache. It
+retains the original nominal shaped pair in float, then interpolates each eligible
+clock lane before its frequency rotation. Precise timing/epochs, original crypto,
+I/Q, actual-row energies, covariance, thresholds and physical completion remain.
+INT4 is disabled; CPU mode IDs persist separately; GPU execution is deferred.
+The [precision inventory](search-compute.md#precision-audit-and-strategy-disposition)
+identifies expensive paths still executing FP64 and other partial coverage.
+
+Final27 alternating fresh-process primary runs use identical original PCM, keys,
+hypotheses and input rates against the preceding optimized baseline. CPU2 affinity,
+no cooperating builds; setup/packing/cache/FFT/search/polls/destruction included.
+Three paired log ratios yield descriptive Student-t95% intervals, not platform
+promises. FP32 at1ms:2.1753→1.5217CPU s, **1.429× [1.327,1.539]**; at6s:
+6.2555→3.0177s, **2.074× [1.865,2.306]**. Default respectively .994× [.988,1.001]
+and1.167× [1.074,1.268]. No-qualified-prior FP32:8.8091→4.4402s,
+1.984× [1.850,2.127]. All compared trial, bit/event, publication and completion
+fields match. These are complete one-bit-plus-absence60s captures, one key/epoch,
+not rolling Live or application short-text qualification.
+
+The preceding135-run matrix covers1ms–6s, DSSS10/100/1000 and ordinary fast/wide/
+weaker cases. Intermediate20ms/205ms/1s FP32 CPU is1.501/1.588/1.714s, compared
+with2.331/2.509/3.045s baseline. Application-selected D10/D100 and ordinary cases
+execute higher-precision detector fallbacks and show no clear total improvement.
+They do not qualify new native-float execution in those branches. Final primary
+runs follow reviewed finite-edge, exception-cleanup and memory-fallback fixes.
+The larger matrix retains its exact earlier identity and no outlier removal.
+
+Primary Fs40000, fine chip200µs, inner chip200ms, symbol12.8s, projection10000/s,
+N262144, five qualified frequency/clock pairs,64MiBworkspace. Timing positions
+fall from2275570 at6s to1500 at1ms. Full-symbol/template work still sets a floor;
+orders-of-magnitude total speedup was not achieved. The private cache uses2.05MB;
+FP32 retained workspace stays36.42–38.52MB. Final RSS55.94→60.39MB tight and
+56.03→64.37MB broad; streaming redundant no-prior rows reduces81.05→64.43MB.
+No added media publication delay is observed. Detailed wall/acquisition/poll and
+memory fields remain in the CSVs; no new final fine-grained profiler fractions
+are invented. N65536 crossover is an extrapolation from measured N262144.
+
+Current FP32/cache sensitivity: **6544 paired PCM cases**, all asserting native
+float and cache execution, versus original-operand FP64. DSSS10 partition: 4,608,
+DSSS10 whole: 1,280, DSSS100: 320, DSSS1000: 80, noise: 64, interference/clipping: 192. Zero detection,
+wrong-bit, accepted-count, trial or completion-sample disagreements. Maximum
+retained-score relative change5.76e-6. The impairment set includes2412802 clipped
+samples. This is conditional three-lane acquisition, one key/epoch, oracle arrival
+±.51sample,4s symbols; not full-bank sensitivity or the primary12.8s curve.
+
+Grid q90/q99 differences are0dB where reached. Family-corrected exact95% grid
+inversion bounds D10 partition q90 differences by±1–2dB and q99 by±3–4dB.
+Whole D10 q90 is±2dB; q99 and other-factor endpoints remain censored/unresolved.
+**No full-bank2dB or cumulative raw-reference bound is established.** The user's
+revised allowance accepts less than a few dB for substantial CPU improvement;
+it does not relax false acceptance or physical completion. Noise0/64 is not a
+rare-event-rate estimate. Earlier11808 native-FP32 and15648INT8 pairs retain
+separate identities and cannot qualify the new cache.
+
+Both block-scaled Q15 and a second fixed-Q15/FP32 hybrid were prototyped/rejected.
+Removing stage scans/rescales still left all50paired fixture medians slower than
+native float (geometric cost1.38–1.76× by size); atN262144 partial/tail/impulse/
+cancellation outputs vanished. This rejects those implementations, not all integer
+FFTs. Q8 input followed by float transforms also added cost. The close-clock
+private-template prototype instead reduced complete5-lane construction142.3→53.2ms
+(2.676×), distinct from the total receiver gains above. Cached/parallel native
+float, other integer transform/scaling strategies, compact/tracking/Gram and ARM
+remain explicitly outstanding. Default's tight INT8 screen has no established
+total benefit despite fast integer products.
+
+New regressions cover odd finite-pulse cutoffs, cache identity, unsafe input,
+cache-attached exact fallback, low-memory direct dispatch, original-FP64 serial
+whole memory fallback, next-poll identity and observed absence. Existing assertions
+remain intact. Final affected receiver coverage passed **19/19** cases (202.29s),
+and the complete `./build.sh test gui` group passed **38/38** (145.05s CTest;
+188.04s including its build). `./build.sh` rebuilt the application successfully;
+the copied manual launcher passes shell syntax and GUI help checks. Final GUI
+SHA256 is `3e27e29480364b179dcd6705af8cc6485f6a1084780ce4ff9fc7bc3bb0ec4eb7`;
+the source overlay, cache, library and manifest are preserved under
+`.agent-work/artifacts/receiver-opt-20261008/cpu-arithmetic-final/`.
+Full contract/general calibration, sanitizers/native graphics,
+platform/SDK/packaging, ARM and full-bank/raw-reference sensitivity remain required
+before overall qualification. This checkpoint stops for requested manual testing.
+
 ## Bounded timing acquisition and DSSS V2 — manual checkpoint, 9 October 2026
 
 This local candidate is **not fully qualified**. No push, publication, hosted CI,

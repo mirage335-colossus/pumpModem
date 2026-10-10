@@ -101,6 +101,10 @@ void discard(std::istream& in, std::size_t count) {
 }
 }
 void validate(const Config& c) {
+    check(c.search_arithmetic!=SearchArithmetic::matrix4,
+          "INT4 search operands are not implemented on the CPU");
+    check(static_cast<unsigned>(c.search_arithmetic)<=static_cast<unsigned>(SearchArithmetic::fp64),
+          "unknown search arithmetic");
     if(c.oscillator_search)validate_oscillator_search(*c.oscillator_search);
     check(c.pattern_symbols && c.constellation_bits==1,
           "APSK transport has been removed; use one-bit pattern transport");

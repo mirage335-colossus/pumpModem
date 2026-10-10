@@ -699,6 +699,160 @@ void qualified_fft_partitioned_reception() {
     check(a.scored_start_trials==b.scored_start_trials&&a.skipped_start_trials==b.skipped_start_trials,
         "partitioned reception changed admitted starts or acquisition trial accounting");
 }
+void search_arithmetic_preserves_retained_progress() {
+    auto c=config(128,true);c.sample_rate=2560;c.bandwidth_hz=64;c.carrier_hz=640;
+    c.dsss=true;c.dsss_factor=10;c.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;
+    c.integration_seconds=4;
+    for(std::size_t i=0;i<c.dsss_seed.size();++i)c.dsss_seed[i]=static_cast<std::uint8_t>(91+3*i);
+    const Bytes bits{0,1,0};constexpr std::size_t delay=1024,workspace=8*1024*1024;
+    const auto pcm=waveform(c,bits,delay,12*c.sample_rate,.37,.003);
+    modem::PatternSearch search;search.hypotheses={{0,0}};search.initial_stream_symbols=1;
+    search.start_offset_seconds=static_cast<double>(delay)/c.sample_rate;search.start_uncertainty_seconds=6;
+    search.qualified_start_window=modem::PatternStartWindow{delay,1,.025L};
+    search.prefer_streamed_templates=true;search.worker_threads=1;search.bit_limit=32;
+    c.search_arithmetic=modem::SearchArithmetic::fp64;
+    modem::PatternReceiver reference(c,workspace,search);
+    c.search_arithmetic=modem::SearchArithmetic::int8;
+    modem::PatternReceiver integer(c,workspace,search);
+    Bytes received;unsigned completed=0;
+    const auto poll=[&] {
+        const auto a=reference.take_bursts(),b=integer.take_bursts();
+        check(a.size()==b.size(),"INT8 screening changed next-poll publication count");
+        for(std::size_t i=0;i<a.size();++i) {
+            check(same_burst(a[i],b[i]),"INT8 screening changed retained evidence, pending identity or completion");
+            received.insert(received.end(),b[i].bits.begin(),b[i].bits.end());completed+=b[i].complete;
+        }
+        const auto aw=reference.fft_work(),bw=integer.fft_work();
+        check(aw.threshold_trials==bw.threshold_trials&&aw.scored_start_trials==bw.scored_start_trials,
+              "search precision removed an admitted hypothesis or trial charge");
+        check(integer.working_bytes()<=workspace,"integer screening exceeded the workspace bound");
+    };
+    for(std::size_t position=0;position<pcm.size();) {
+        const auto block=std::span(pcm).subspan(position,std::min<std::size_t>(317,pcm.size()-position));
+        reference.push(block);integer.push(block);position+=block.size();poll();
+    }
+    reference.finish();integer.finish();poll();
+    check(received==bits&&completed==1,"integer search changed exact bits or observed absence");
+    const auto work=integer.fft_work();
+    check(work.int8_jobs>0&&work.int8_dots>0&&work.exact_refines>0,
+          "explicit diagnostic search did not execute INT8 operands and original-statistic verification");
+    check(reference.fft_work().int8_dots==0,"FP64 diagnostic reference quantized operands");
+}
+void native_fp32_whole_preserves_progress() {
+    auto c=config(128,true);c.sample_rate=2560;c.bandwidth_hz=64;c.carrier_hz=640;
+    c.dsss=true;c.dsss_factor=10;c.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;
+    c.integration_seconds=4;
+    for(std::size_t i=0;i<c.dsss_seed.size();++i)c.dsss_seed[i]=static_cast<std::uint8_t>(91+3*i);
+    const Bytes bits{0,1,0};constexpr std::size_t delay=1024,workspace=8*1024*1024;
+    const auto original=waveform(c,bits,delay,12*c.sample_rate,.37,.003);
+    for(const double scale:{1.,1e-30,1e30}) {
+    auto pcm=original;for(auto& sample:pcm)sample=static_cast<float>(sample*scale);
+    modem::PatternSearch search;search.hypotheses={{0,.0003}};search.drift_tolerant=false;search.initial_stream_symbols=1;
+    search.start_offset_seconds=static_cast<double>(delay)/c.sample_rate;search.start_uncertainty_seconds=6;
+    search.qualified_start_window=modem::PatternStartWindow{delay,1,.025L};
+    search.prefer_streamed_templates=true;search.worker_threads=1;search.bit_limit=32;
+    search.partitioned_timing_search=false;search.restricted_direct_search=false;
+    c.search_arithmetic=modem::SearchArithmetic::fp64;modem::PatternReceiver reference(c,workspace,search);
+    c.search_arithmetic=modem::SearchArithmetic::fp32;modem::PatternReceiver candidate(c,workspace,search);
+    Bytes received;unsigned completed=0;std::size_t observed=0;
+    const auto poll=[&] {
+        const auto a=reference.take_bursts();auto b=candidate.take_bursts();
+        check(a.size()==b.size(),"native FP32 whole FFT delayed next-poll publication");
+        for(std::size_t i=0;i<a.size();++i) {
+            check(std::abs(a[i].score-b[i].score)<=2e-5*std::max(1.,std::abs(a[i].score)),
+                "native FP32 whole FFT exceeded the numerical score tolerance");
+            // Scores are allowed to round, identity and every physical field are not.
+            b[i].score=a[i].score;
+            check(same_burst(a[i],b[i]),"native FP32 changed pending identity, bits or physical support");
+            check(b[i].end_sample<=observed,"native FP32 used unobserved samples");
+            if(b[i].complete)check(observed>=delay+bits.size()*modem::symbol_sample_count(c)+modem::pattern_absence_samples(c),
+                "native FP32 manufactured physical absence");
+            received.insert(received.end(),b[i].bits.begin(),b[i].bits.end());completed+=b[i].complete;
+        }
+        const auto aw=reference.fft_work(),bw=candidate.fft_work();
+        check(aw.threshold_trials==bw.threshold_trials&&aw.scored_start_trials==bw.scored_start_trials&&
+            aw.retained_start_trials==bw.retained_start_trials,"native FP32 changed acquisition coverage");
+        check(candidate.working_bytes()<=workspace,"native FP32 whole FFT exceeded workspace");
+    };
+    while(observed<pcm.size()) {
+        const auto block=std::span(pcm).subspan(observed,std::min<std::size_t>(317,pcm.size()-observed));
+        reference.push(block);candidate.push(block);observed+=block.size();poll();
+    }
+    reference.finish();candidate.finish();poll();
+    reference.finish();candidate.finish();poll();
+    const auto work=candidate.fft_work();
+    check((scale==1.?work.native_fp32_transforms>0:work.native_fp32_transforms==0)&&
+        work.fft_jobs>0&&work.int8_dots==0&&work.partitioned_jobs==0&&work.direct_jobs==0,
+        "whole FP32 regression did not execute native float transforms");
+    if(scale!=1.)check(work.arithmetic_fallback_jobs>0,"unsafe FP32 input did not report range fallback");
+    check(scale!=1. || (received==bits&&completed==1),"native FP32 changed the received bits or completion count: scale="+std::to_string(scale)+" received="+std::to_string(received.size())+" completions="+std::to_string(completed));
+    }
+}
+void native_fp32_private_template_progress() {
+    auto c=config(128,true);c.sample_rate=2560;c.bandwidth_hz=64;c.carrier_hz=640;
+    c.dsss=true;c.dsss_factor=10;c.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;
+    c.integration_seconds=4;
+    for(std::size_t i=0;i<c.dsss_seed.size();++i)c.dsss_seed[i]=static_cast<std::uint8_t>(91+3*i);
+    const Bytes bits{0,1,0};constexpr std::size_t delay=1024,workspace=8*1024*1024;
+    const auto original=waveform(c,bits,delay,12*c.sample_rate,.37,.003);
+    for(const unsigned path:{0U,1U,2U})for(const double scale:{1.,1e-30,1e30,0.}) {
+    const bool bounded=path==1,mixed=path==2;
+    const bool small=scale==0.;
+    auto pcm=original;for(auto& sample:pcm)sample=static_cast<float>(sample*(small?1.:scale));
+    modem::PatternSearch search;search.hypotheses={{0,0},{.0003,.0006},{-.0003,-.0006}};search.drift_tolerant=false;search.initial_stream_symbols=1;
+    search.start_offset_seconds=static_cast<double>(delay)/c.sample_rate;search.start_uncertainty_seconds=6;
+    search.qualified_start_window=modem::PatternStartWindow{delay,1,.025L};
+    search.prefer_streamed_templates=true;search.worker_threads=1;search.bit_limit=32;
+    search.partitioned_timing_search=bounded;search.restricted_direct_search=bounded||mixed;
+    c.search_arithmetic=modem::SearchArithmetic::fp64;modem::PatternReceiver reference(c,workspace,search);
+    c.search_arithmetic=modem::SearchArithmetic::fp32;modem::PatternReceiver candidate(c,workspace,search);
+    c.search_arithmetic=modem::SearchArithmetic::default_mode;modem::PatternReceiver automatic(c,workspace,search);
+    const auto allowance=small?std::max(reference.reserved_workspace_bytes(),candidate.reserved_workspace_bytes())+48*1024:workspace;
+    if(small){reference.set_workspace_bytes(allowance);candidate.set_workspace_bytes(allowance);automatic.set_workspace_bytes(allowance);}
+    Bytes received;unsigned completed=0;std::size_t observed=0;
+    const auto poll=[&] {
+        const auto a=reference.take_bursts();auto b=candidate.take_bursts();const auto d=automatic.take_bursts();
+        check(b.size()==d.size(),"automatic policy delayed publication relative to FP32 minimum");
+        for(std::size_t i=0;i<b.size();++i)check(same_burst(b[i],d[i]),"automatic policy changed resolved FP32 evidence or pending identity");
+        check(a.size()==b.size(),"native FP32 whole FFT delayed next-poll publication");
+        for(std::size_t i=0;i<a.size();++i) {
+            check(std::abs(a[i].score-b[i].score)<=2e-5*std::max(1.,std::abs(a[i].score)),
+                "private cache numerical score mismatch small="+std::to_string(small)+" bounded="+std::to_string(bounded)+" scale="+std::to_string(scale)+" old="+std::to_string(a[i].score)+" new="+std::to_string(b[i].score));
+            // Scores are allowed to round, identity and every physical field are not.
+            b[i].score=a[i].score;
+            check(same_burst(a[i],b[i]),"native FP32 changed pending identity, bits or physical support");
+            check(b[i].end_sample<=observed,"native FP32 used unobserved samples");
+            if(b[i].complete)check(observed>=delay+bits.size()*modem::symbol_sample_count(c)+modem::pattern_absence_samples(c),
+                "native FP32 manufactured physical absence");
+            received.insert(received.end(),b[i].bits.begin(),b[i].bits.end());completed+=b[i].complete;
+        }
+        const auto aw=reference.fft_work(),bw=candidate.fft_work();
+        check(aw.threshold_trials==bw.threshold_trials&&aw.scored_start_trials==bw.scored_start_trials&&
+            aw.retained_start_trials==bw.retained_start_trials,"native FP32 changed acquisition coverage");
+        check(automatic.working_bytes()<=allowance&&candidate.working_bytes()<=allowance,"native FP32 whole FFT exceeded workspace");
+    };
+    while(observed<pcm.size()) {
+        const auto block=std::span(pcm).subspan(observed,std::min<std::size_t>(317,pcm.size()-observed));
+        reference.push(block);candidate.push(block);automatic.push(block);observed+=block.size();poll();
+    }
+    reference.finish();candidate.finish();automatic.finish();poll();
+    reference.finish();candidate.finish();automatic.finish();poll();
+    const auto work=candidate.fft_work(),auto_work=automatic.fft_work();
+    check(auto_work.int8_dots==0&&auto_work.int8_jobs==0&&auto_work.native_fp32_transforms==work.native_fp32_transforms&&
+        auto_work.private_template_builds==work.private_template_builds&&auto_work.threshold_trials==work.threshold_trials&&
+        auto_work.scored_start_trials==work.scored_start_trials,"automatic policy changed arithmetic, reuse or retained hypotheses");
+    if(mixed&&scale==1.)check(auto_work.native_fp32_transforms==0&&auto_work.arithmetic_fallback_jobs>0,
+        "mixed generic fallback executed unsupported wide-buffer FP32");
+    if(scale==1.&&!mixed)check(work.private_template_builds>0&&work.private_template_lane_jobs>=3*work.private_template_builds&&
+        work.private_template_peak_bytes>0&&work.int8_dots==0,"private acquisition cache was not exercised");
+    else if(!small || bounded || mixed)check(work.private_template_builds==0,"fallback used approximate private cache");
+    if(small && bounded)check(work.direct_jobs>0&&work.fp32_dots==0,
+        "a small cache enabled direct arithmetic after its stack reservation was denied");
+    check(reference.fft_work().private_template_builds==0,"FP64 control used approximate private cache");
+    if(scale!=1. && !small)check(work.arithmetic_fallback_jobs>0,"unsafe FP32 input did not report range fallback");
+    check((scale!=1. && !small) || (received==bits&&completed==1),"native FP32 changed the received bits or completion count: scale="+std::to_string(scale)+" received="+std::to_string(received.size())+" completions="+std::to_string(completed));
+    }
+}
 void qualified_fft_bounded_readiness() {
     auto c=config(32,true);c.sample_rate=64;c.bandwidth_hz=8;c.carrier_hz=16;
     c.integration_seconds=8;c.pulse_shaping=false;
@@ -1987,7 +2141,14 @@ void hardware_settling_is_not_payload() {
     for(const auto mode:{0U,3U})verify(100.,64,1800000174ULL,mode,true);
 }
 void streamed_template_rows_preserve_exact_search() {
-    const auto c=config(128,true);
+    auto c=config(128,true);
+    // This is an exact algorithm/cache comparison across serial, parallel and
+    // workspace dispatch. Automatic arithmetic may deliberately choose FP32
+    // for the serial streamed member and FP64 for the other members. Keep the
+    // original exact-score assertions on the independent FP64 reference;
+    // native_fp32_private_template_progress separately compares Default,
+    // FP32 minimum and that reference on identical PCM at every progress poll.
+    c.search_arithmetic=modem::SearchArithmetic::fp64;
     modem::PatternSearch search;search.initial_stream_symbols=1;
     search.candidate_limit=31;search.track_limit=4;search.bit_limit=128;
     const auto duration=modem::symbol_seconds(c);
@@ -2244,6 +2405,9 @@ int main(int argc,char** argv) {
     run("qualified UTC FFT progress",qualified_fft_window_preserves_progress);
     run("qualified UTC FFT restricted direct",qualified_fft_restricted_direct);
     run("qualified UTC FFT partitioned reception",qualified_fft_partitioned_reception);
+    run("search arithmetic retained progress",search_arithmetic_preserves_retained_progress);
+    run("native FP32 whole progress",native_fp32_whole_preserves_progress);
+    run("native FP32 private template progress",native_fp32_private_template_progress);
     run("qualified UTC FFT bounded readiness",qualified_fft_bounded_readiness);
     run("qualified UTC FFT follow-on progress",qualified_fft_followon_progress);
     run("qualified UTC FFT component progress",qualified_fft_component_progress);

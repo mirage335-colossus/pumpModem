@@ -1738,6 +1738,64 @@ void conditional_reference_and_timing_work_document() {
             "Unsupported timing backends must explain their full bank rather than imply a compact speedup");
     }
 }
+void search_arithmetic_document_and_cache() {
+    using F=ui::Field;using P=ui::Page;using A=modem::SearchArithmetic;
+    const auto& screen=ui::console_screen();
+    const auto declaration=std::find_if(screen.begin(),screen.end(),[](const auto& c) {
+        return c.field==F::search_arithmetic;
+    });
+    check(declaration!=screen.end()&&declaration->kind==ui::Kind::choice&&
+        declaration->document_only&&declaration->developer_only&&!declaration->persistent&&
+        declaration->page==P::planner&&declaration->slot==ui::Slot::none&&
+        std::string_view(declaration->help).find("no GPU receiver is implemented")!=std::string_view::npos,
+        "arithmetic selector must be a developer-only native planner control with truthful GPU help");
+    Application app({});app.select(F::fast_mode,"robust");app.select_page(P::planner);
+    check(!app.control(*declaration).visible,"arithmetic control leaked outside developer mode");
+    app.select(*declaration,"fp64-force");
+    check(app.field(F::search_arithmetic).selected=="default","hidden native arithmetic control accepted input");
+    app.toggle(F::developer_mode,true);
+    check(app.control(*declaration).visible,"developer mode failed to reveal the arithmetic control");
+    app.select(*declaration,"fp64-force");app.toggle(F::developer_mode,false);app.toggle(F::developer_mode,true);
+    check(app.field(F::search_arithmetic).selected=="fp64-force","hiding advanced controls reset arithmetic");
+    app.select_page(P::console);check(!app.control(*declaration).visible,"planner arithmetic control leaked onto Console");
+    app.close();
+    planner::Model model;model.inputs=example();model.available=true;
+    auto& g=model.receiver_geometry;g.sample_rate=6000;g.fine_chip_seconds=.001;g.inner_chip_seconds=.001;
+    g.symbol_seconds=1;g.arithmetic_backend="CPU test matrix";g.arithmetic_operands="INT8";
+    g.arithmetic_accumulation="INT32; FP64 verification";g.arithmetic_limit="Broad FFT retains FP64 fallback";
+    for(const auto width:{220.f,900.f}) {
+        const auto page=planner_page::build(model,width,false,false);const auto flat=nodes(page);
+        const auto choice=std::find_if(flat.begin(),flat.end(),[](const auto* n) {
+            return n->control&&n->control->field==F::search_arithmetic;
+        });
+        const auto toggle=std::find_if(flat.begin(),flat.end(),[](const auto* n) {
+            return n->command==ui::Command::planner_toggle_details;
+        });
+        check(choice!=flat.end()&&toggle!=flat.end()&&choice<toggle&&
+            contains_text(page,"Arithmetic model: CPU test matrix; operands INT8; accumulation INT32; FP64 verification")&&
+            contains_text(page,"Broad FFT retains FP64 fallback")&&!contains_text(page,"Receiver geometry:"),
+            "planner footer lost arithmetic widths/fallback or left detailed geometry expanded");
+        const auto detailed=planner_page::build(model,width,true,false);
+        check(contains_text(detailed,"Model limits")&&contains_text(detailed,"Receiver geometry: 6000 samples/s"),
+            "hiding geometry discarded required receiver diagnostics");
+        model.available=false;const auto invalid=planner_page::build(model,width,false,false);model.available=true;
+        const auto invalid_nodes=nodes(invalid);
+        check(std::any_of(invalid_nodes.begin(),invalid_nodes.end(),[](const auto* n) {
+            return n->control&&n->control->field==F::search_arithmetic;
+        }),"invalid modem geometry hid the arithmetic selector needed for recovery");
+    }
+    planner::Cache cache;auto input=example();input.target_db_hz=23;
+    for(const auto arithmetic:{A::fp64,A::fp32,A::matrix8,A::int8,A::default_mode}) {
+        input.options.modem.search_arithmetic=arithmetic;
+        std::optional<planner::Model> selected;std::stop_source stop;
+        try {planner::build(input,cache,stop.get_token(),[&](const auto& current) {
+            selected=current;stop.request_stop();
+        });}catch(const estimate_detail::Cancelled&){}
+        check(selected&&selected->available&&selected->inputs.options.modem.search_arithmetic==arithmetic&&
+            selected->receiver_geometry.search_arithmetic==arithmetic,
+            "planner cache returned diagnostics for a previous arithmetic request");
+    }
+}
 void document_semantics_layout_and_plots() {
     const auto model=planner::build(example());
     for(const float width:{220.f,460.f,720.f,740.f,900.f,1200.f}) {
@@ -1904,6 +1962,7 @@ void document_semantics_layout_and_plots() {
 int main(int argc,char** argv) {
     try {
         cancelled_planner_and_inspection();
+        if(argc==2&&std::string_view(argv[1])=="--search-arithmetic") {search_arithmetic_document_and_cache();std::cout<<"Search arithmetic document/cache passed\n";return 0;}
         if(argc==2&&std::string_view(argv[1])=="--progressive-only") {selected_plan_progress_and_support_equivalence();std::cout<<"Progressive planner and support invariants passed\n";return 0;}
         if(argc==2&&std::string_view(argv[1])=="--cancellation-only") {std::cout<<"Planner and inspection cancellation passed\n";return 0;}
         if(argc==2&&std::string_view(argv[1])=="--rolling-epochs-only") {
@@ -1927,6 +1986,7 @@ int main(int argc,char** argv) {
         selected_workspace_reaches_planner();
         shared_link_budget_without_simulation();shared_link_controls_visibility();
         link_budget_edit_buffers();link_budget_preset_and_dialog_sync();
+        search_arithmetic_document_and_cache();
         receiver_overlay_and_cpu_status();estimate_warning_thresholds();rolling_epoch_selected_plan_document();conditional_reference_and_timing_work_document();document_semantics_layout_and_plots();
         std::cout<<"Shared Link planner tests passed\n";
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}

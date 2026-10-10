@@ -18,6 +18,15 @@ inline constexpr double minimum_bandwidth_hz = 0.001;
 inline constexpr double maximum_bandwidth_hz = 30000000;
 enum class SpreadingMode : std::uint8_t { pattern, tone };
 enum class OuterDsssVersion : std::uint8_t { legacy_v1 = 1, interleaved_v2 = 2 };
+// Receiver execution preference only: never part of a waveform, key or epoch
+// identity. Public policies are Default, FP32 minimum and FP64 force. The integer
+// enum values remain stable for internal experiments and old-value migration.
+enum class SearchArithmetic : std::uint8_t { default_mode, matrix4, matrix8, int8, fp32, fp64 };
+inline bool search_arithmetic_is_int8(SearchArithmetic value) {
+    // Explicit internal diagnostics only. No geometry currently demonstrates a
+    // complete-execution benefit sufficient to enable INT8 automatically.
+    return value==SearchArithmetic::matrix8 || value==SearchArithmetic::int8;
+}
 // V2 setup and storage are bounded independently of observation duration.
 inline constexpr std::uint64_t maximum_interleaved_dsss_chips = 1ULL << 20;
 // Illustrative or measured effective relative TX/RX errors, not per-end values.
@@ -73,6 +82,7 @@ struct Config {
     // Ignored when outer spreading is Off. V2 permutes complete fine chips
     // within each symbol and reserves additional digital headroom.
     OuterDsssVersion outer_dsss_version = OuterDsssVersion::legacy_v1;
+    SearchArithmetic search_arithmetic = SearchArithmetic::default_mode;
     std::array<std::uint8_t, 32> spreading_seed{};
     std::array<std::uint8_t, 32> dsss_seed{};
     // Same selected key used to encrypt payload data. Preamble bytes use its

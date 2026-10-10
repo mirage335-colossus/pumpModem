@@ -278,9 +278,38 @@ std::string_view outer_dsss_version_id(modem::OuterDsssVersion version) {
     }
     throw Error("invalid outer DSSS waveform version");
 }
+modem::SearchArithmetic parse_search_arithmetic(std::string_view name) {
+    using A=modem::SearchArithmetic;
+    if(name=="default"||name=="automatic")return A::default_mode;
+    if(name=="matrix4"||name=="4-bit")
+        throw Error("4-bit matrix search arithmetic is not implemented");
+    // Old integer selections migrate to the supported automatic policy. The
+    // explicit enum/kernel diagnostics remain available to internal experiments.
+    if(name=="matrix8"||name=="8-bit"||name=="int8"||name=="INT8")return A::default_mode;
+    if(name=="fp32-min"||name=="fp32"||name=="FP32")return A::fp32;
+    if(name=="fp64-force"||name=="fp64"||name=="FP64")return A::fp64;
+    throw Error("search-arithmetic must be default, fp32-min or fp64-force (legacy integer identifiers select default; matrix4 is unavailable)");
+}
+std::string_view search_arithmetic_id(modem::SearchArithmetic arithmetic) {
+    using A=modem::SearchArithmetic;
+    switch(arithmetic) {
+    case A::default_mode:return "default";
+    case A::matrix4:return "matrix4";
+    case A::matrix8:return "matrix8";
+    case A::int8:return "int8";
+    case A::fp32:return "fp32-min";
+    case A::fp64:return "fp64-force";
+    }
+    throw Error("invalid receiver search arithmetic");
+}
 Plan resolve(double bandwidth_hz,double target_snr_db_hz,PatternMode mode,bool encryption,
-             std::optional<double> carrier_hz,unsigned dsss_factor,modem::OuterDsssVersion version) {
+             std::optional<double> carrier_hz,unsigned dsss_factor,modem::OuterDsssVersion version,
+             modem::SearchArithmetic arithmetic) {
     modem::Config config;
+    // Validate even enum-valued callers; matrix4 remains a disabled placeholder.
+    (void)search_arithmetic_id(arithmetic); // Validate while preserving internal diagnostic enums.
+    if(arithmetic==modem::SearchArithmetic::matrix4)throw Error("4-bit matrix search arithmetic is not implemented");
+    config.search_arithmetic=arithmetic;
     config.dsss_factor=dsss_factor;
     (void)outer_dsss_version_id(version);
     config.outer_dsss_version=dsss_factor>1?version:modem::OuterDsssVersion::legacy_v1;

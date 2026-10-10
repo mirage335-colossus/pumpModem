@@ -18,6 +18,23 @@ template<class Function> void rejects(Function function,const std::string& messa
     throw std::runtime_error(message);
 }
 void parsing_and_formatting() {
+    for(const auto* id:{"default","fp32-min","fp64-force"}) {
+        const auto arithmetic=launch_command::parse(std::string("--search-arithmetic ")+id);
+        check(arithmetic.search_arithmetic==id&&launch_command::parse(launch_command::format(arithmetic))==arithmetic,
+            "requested search arithmetic must retain its distinct saved identity");
+    }
+    check(launch_command::parse("--search-arithmetic 8-bit").search_arithmetic=="default"&&
+        launch_command::parse("--search-arithmetic INT8").search_arithmetic=="default"&&
+        launch_command::parse("--search-arithmetic FP32").search_arithmetic=="fp32-min"&&
+        launch_command::parse("--search-arithmetic FP64").search_arithmetic=="fp64-force",
+        "legacy arithmetic aliases must migrate to the supported public policies");
+    check(!launch_command::parse("--rate 1200").search_arithmetic,
+        "older partial commands must preserve the destination's arithmetic selection");
+    for(const auto* id:{"matrix4","4-bit","fp8","gpu","","unknown"})
+        rejects([&]{launch_command::parse(std::string("--search-arithmetic ")+id);},
+            "unsupported or unimplemented search arithmetic accepted");
+    launch_command::Patch unsupported;unsupported.search_arithmetic="matrix4";
+    rejects([&]{launch_command::format(unsupported);},"programmatic export silently enabled unimplemented 4-bit arithmetic");
     const auto clock=launch_command::parse("--clock-sync GPS_0.1ms-400ms_region-2564ms_offset --audio-error 30ms --dsss-factor 1000 --fhss fake-0.4s-200 --live-duplex yes");
     check(clock.audio_timing_error_seconds==.03,"audio allowance lost duration units");
     check(clock.full_duplex==true,"duplex selection was omitted from the saved settings");

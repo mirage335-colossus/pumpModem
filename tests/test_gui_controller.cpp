@@ -64,6 +64,31 @@ void receiver_health_indicator() {
     snapshot={};snapshot.running=true;show();
     check(field.text=="Listening / default"&&field.text_tone==ui::TextTone::normal,"fresh request retained the transmit failure");
 }
+void search_arithmetic_controls() {
+    using F=ui::Field;using A=modem::SearchArithmetic;
+    Controller controller;
+    const auto& state=controller.field(F::search_arithmetic);
+    check(state.options.size()==3&&state.selected=="default"&&
+        state.options[0].label=="Default — automatic"&&
+        state.options[1].id=="fp32-min"&&state.options[1].label=="FP32 minimum"&&
+        state.options[2].id=="fp64-force"&&state.options[2].label=="FP64 force"&&
+        std::all_of(state.options.begin(),state.options.end(),[](const auto& option){return option.enabled;}),
+        "arithmetic dropdown lost its exact choices or enabled unimplemented 4-bit execution");
+    controller.edit(F::short_bits,"001");
+    const auto before=controller.revision();
+    controller.select(F::search_arithmetic,"matrix4");
+    check(controller.field(F::search_arithmetic).selected=="default"&&controller.revision()==before&&
+        controller.settings().transfer.modem.search_arithmetic==A::default_mode,
+        "disabled arithmetic callback changed the configured receiver");
+    controller.select(F::search_arithmetic,"fp32-min");
+    check(controller.settings().transfer.modem.search_arithmetic==A::fp32&&
+        controller.revision()>before&&controller.field(F::short_bits).text=="001",
+        "arithmetic selection retained stale advisory identity or changed raw bits");
+    controller.close();controller.select(F::search_arithmetic,"fp64-force");
+    check(!controller.field(F::search_arithmetic).enabled&&
+        controller.settings().transfer.modem.search_arithmetic==A::fp32,
+        "closing controller accepted an arithmetic callback");
+}
 void backend_status_notice() {
     ui::FieldState field;field.text="Transmission started";
     live::Snapshot previous,next;next.status="Listening";next.error="TX output device stopped";
@@ -2901,6 +2926,7 @@ void bitmap_source_checks() {
 
 int main(int argc,char** argv) {
     try {
+        if(argc>1&&std::string_view(argv[1])=="--search-arithmetic") {search_arithmetic_controls();std::cout<<"Search arithmetic controls passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--fake-hop-display") {fake_hop_display();std::cout<<"Fake hop display passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--airtime-cancellation") {airtime_and_close();std::cout<<"Airtime and cancellation checks passed\n";return 0;}
         airtime_and_close();
@@ -2922,6 +2948,7 @@ int main(int argc,char** argv) {
             std::cout<<"Delayed replay interruption checks passed\n";
             return 0;
         }
+        search_arithmetic_controls();
         datapump::gui::controller_self_check();
         simulation_estimate_controls();
         empty_composer_preview();

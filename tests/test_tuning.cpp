@@ -51,6 +51,39 @@ std::vector<float> raw_capture(const Bytes& bits,const transfer::Options& option
                    options.modem.sample_rate+2*modem::symbol_sample_count(options.modem));
     return samples;
 }
+void search_arithmetic_modes() {
+    using A=modem::SearchArithmetic;
+    check(tuning::parse_search_arithmetic("8-bit")==A::default_mode&&
+        tuning::parse_search_arithmetic("INT8")==A::default_mode&&
+        tuning::parse_search_arithmetic("FP32")==A::fp32&&
+        tuning::parse_search_arithmetic("FP64")==A::fp64,
+        "receiver arithmetic aliases lost their requested identity");
+    rejects([]{tuning::parse_search_arithmetic("matrix4");},"unimplemented 4-bit arithmetic accepted");
+    rejects([]{tuning::parse_search_arithmetic("fp8");},"unimplemented FP8 arithmetic accepted");
+    rejects([]{tuning::search_arithmetic_id(static_cast<A>(99));},"invalid arithmetic enum accepted");
+    transfer::Options reference;reference.timestamp=1800000000;reference.search_seconds=0;
+    reference.key.emplace(Bytes(32,0x73));
+    reference.modem=tuning::resolve(1200,55,tuning::PatternMode::pattern_16,true,1500).config;
+    const Bytes bits{0,0,1};const auto pcm=raw_capture(bits,reference);
+    for(const auto arithmetic:{A::default_mode,A::matrix8,A::int8,A::fp32,A::fp64}) {
+        check(tuning::parse_search_arithmetic(tuning::search_arithmetic_id(arithmetic))==
+            (modem::search_arithmetic_is_int8(arithmetic)?A::default_mode:arithmetic),
+            "public arithmetic migration did not preserve policies or normalize old integer IDs");
+        auto options=reference;
+        options.modem=tuning::resolve(1200,55,tuning::PatternMode::pattern_16,true,1500,1,
+            modem::OuterDsssVersion::legacy_v1,arithmetic).config;
+        check(options.modem.search_arithmetic==arithmetic&&raw_capture(bits,options)==pcm,
+            "receiver arithmetic changed private transmitted PCM or discarded the requested mode");
+        for(const auto mode:{tuning::PatternMode::auto_keystream,tuning::PatternMode::auto_tone}) {
+            const auto profiles=tuning::receive_profiles(options.modem,std::array<double,2>{32,55},mode,true);
+            check(!profiles.empty()&&std::all_of(profiles.begin(),profiles.end(),[&](const auto& profile) {
+                return profile.search_arithmetic==arithmetic;
+            }),"receiver profile replacement or tone normalization lost receiver arithmetic");
+        }
+    }
+    rejects([]{tuning::resolve(1200,55,tuning::PatternMode::auto_pattern,false,1500,1,
+        modem::OuterDsssVersion::legacy_v1,A::matrix4);},"enum-valued 4-bit arithmetic bypassed validation");
+}
 void changing_pattern(const modem::Config& config) {
     check(config.spreading_mode==modem::SpreadingMode::pattern,"automatic waveform checks require changing patterns");
     modem::PatternCode code(config);
@@ -555,6 +588,6 @@ void receive_target_lists() {
 }
 }
 int main() {
-    try {outer_dsss_versions();modes_and_patterns();snr_planning();shannon_capacity();receive_target_lists();automatic_pattern_rates();bandwidth_derived_clocks();nearby_carrier_clocks();sub_hertz_patterns();explicit_carrier_planning();audio_passband_pattern_roundtrips();physical_simulation_presets();oscillator_simulation_presets();sizing_and_validation();std::cout<<"tuning tests passed\n";return 0;}
+    try {search_arithmetic_modes();outer_dsss_versions();modes_and_patterns();snr_planning();shannon_capacity();receive_target_lists();automatic_pattern_rates();bandwidth_derived_clocks();nearby_carrier_clocks();sub_hertz_patterns();explicit_carrier_planning();audio_passband_pattern_roundtrips();physical_simulation_presets();oscillator_simulation_presets();sizing_and_validation();std::cout<<"tuning tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"tuning tests failed: "<<error.what()<<'\n';return 1;}
 }

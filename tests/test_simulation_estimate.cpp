@@ -36,6 +36,37 @@ modem::ChannelConfig clean_channel() {
     modem::ChannelConfig value;value.clock_error_ppm=0;value.phase_noise_degrees_per_sqrt_second=0;
     return value;
 }
+void search_arithmetic_model_identity() {
+    transfer::Options options;
+    const auto draft=wire(1,options.modem);
+    auto other=options.modem;other.search_arithmetic=modem::SearchArithmetic::fp64;
+    const auto baseline=simulation::estimate(draft,options,true,clean_channel(),std::span(&other,1),1,false);
+    check(baseline.profile_matches,"search arithmetic became a waveform or private-key identity");
+    options.modem.search_arithmetic=modem::SearchArithmetic::fp32;
+    const auto changed=simulation::estimate(draft,options,true,clean_channel(),{},1,false);
+    check(changed.receiver_geometry.search_arithmetic==modem::SearchArithmetic::fp32&&
+          (changed.receiver_geometry.arithmetic_operands.find("FP32")!=std::string::npos||
+           changed.receiver_geometry.arithmetic_operands.find("FP64")!=std::string::npos)&&
+          changed.receiver_geometry.arithmetic_experimental,
+          "planner lost requested arithmetic or concealed experimental precision");
+    near(changed.timing_hypotheses,baseline.timing_hypotheses,"arithmetic changed required timing hypotheses");
+    check(changed.frequency_rate_hypotheses==baseline.frequency_rate_hypotheses,
+          "arithmetic changed the oscillator search bank");
+    options.modem.search_arithmetic=modem::SearchArithmetic::default_mode;
+    const auto automatic=simulation::estimate(draft,options,true,clean_channel(),{},1,false);
+    check(automatic.receiver_geometry.arithmetic_operands.find("INT8")==std::string::npos&&
+          !automatic.receiver_geometry.template_reuse.empty(),"automatic planner conflated operands with approximate reuse");
+    options.modem.search_arithmetic=modem::SearchArithmetic::fp64;
+    const auto exact=simulation::estimate(draft,options,true,clean_channel(),{},1,false);
+    check(exact.receiver_geometry.template_reuse.find("prohibited")!=std::string::npos&&
+          exact.receiver_geometry.arithmetic_operands.find("Original")!=std::string::npos,
+          "FP64 force planner lost its independent original-template contract");
+    options.modem.search_arithmetic=modem::SearchArithmetic::int8;
+    const auto integer=simulation::estimate(draft,options,true,clean_channel(),{},1,false);
+    check(integer.receiver_geometry.arithmetic_accumulation.find("INT64")!=std::string::npos&&
+          integer.receiver_geometry.arithmetic_limit.find("GPU")!=std::string::npos,
+          "planner omitted integer accumulation or deferred GPU scope");
+}
 
 void advisory_cancellation() {
     using simulation::detail::ReceiverProbabilityParameters;
@@ -1773,6 +1804,10 @@ void projected_pattern_workload() {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc==2&&std::string_view(argv[1])=="--arithmetic-only") {
+            search_arithmetic_model_identity();std::cout<<"search arithmetic model tests passed\n";return 0;
+        }
+        search_arithmetic_model_identity();
         if(argc==2&&std::string_view(argv[1])=="restricted-fft-work") {
             clock_dsss_reference();restricted_fft_direct_and_bounded_fallback();guarded_component_workload();versioned_outer_work_and_probability_scope();rolling_fft_epoch_workload();
             std::cout<<"Restricted FFT and versioned outer work diagnostics passed\n";return 0;

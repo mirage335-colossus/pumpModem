@@ -650,7 +650,9 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     // Live banks stream expanded template rows when several profiles, keys or
     // epochs share the budget, so early banks cannot consume it with caches.
     bool streamed_templates=!correlator &&
-        (drift_sections>1 || differential_window || fft_bytes+outer_map_bytes>allowance || (scaled && banks*profiles>1));
+        (drift_sections>1 || differential_window || fft_bytes+outer_map_bytes>allowance || (scaled && banks*profiles>1) ||
+         (config.search_arithmetic!=modem::SearchArithmetic::fp64 && transform>=65536 &&
+          !sample_fit && drift_sections==1 && !differential_window && private_pattern && symbol>256));
     auto starts=std::ceil(2.L*(options.search_seconds+1.L)*config.sample_rate/
                           std::max(1.L,std::floor(chip/(2.L*(1+maximum_clock_ratio)))))+1;
     if(config.oscillator_search) {
@@ -1250,6 +1252,36 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         }
     }
     result.parallel+=result.initial_epoch_setup_scoring_operations+result.new_epoch_setup_scoring_operations;
+    auto& arithmetic=result.geometry;
+    arithmetic.search_arithmetic=config.search_arithmetic;
+    arithmetic.arithmetic_experimental=config.search_arithmetic!=modem::SearchArithmetic::fp64;
+    if(modem::search_arithmetic_is_int8(config.search_arithmetic)) {
+        arithmetic.arithmetic_operands="INT8 screening operands; original FP64 verification";
+        arithmetic.arithmetic_accumulation="INT32 bounded chunks / INT64 dot totals; FP64 scales and evidence";
+        arithmetic.arithmetic_backend=arithmetic.paired_direct_template_jobs>0?
+            "Bounded direct INT8 screening; FP64 FFT/compact/tracking fallback":
+            "FP64 FFT/compact fallback: no modeled eligible INT8 direct jobs";
+        arithmetic.arithmetic_limit="Experimental partial INT8 coverage. Supported FFTs use native FP64 SIMD; template construction, compact and tracking remain FP64. Packing, exact refinements and FFT plan setup are not calibrated in this work model; no universal INT8 speedup is predicted. GPU execution is unavailable.";
+    } else if(config.search_arithmetic==modem::SearchArithmetic::fp32 ||
+              config.search_arithmetic==modem::SearchArithmetic::default_mode) {
+        const bool native=!correlator && streamed_templates && !sample_fit && drift_sections==1 && !differential_window;
+        arithmetic.arithmetic_operands=native?"FP32 acquisition operands; FP64 fallback":"FP64 operands for modeled geometry";
+        arithmetic.arithmetic_accumulation=native?"FP32 acquisition; FP64 energy, covariance, timing and final evidence":
+            "FP64 products, accumulation and evidence";
+        arithmetic.arithmetic_backend=native?"Native serial streamed FP32 direct / partitioned / whole FFT acquisition":
+            "FP64 compact / unsupported detector / cached or parallel fallback";
+        arithmetic.arithmetic_limit="Experimental automatic/minimum policy, not receiver-wide FP32. INT8 is not selected automatically: complete-execution benefit is unproven. Cached/parallel and mixed-cohort generic FFTs retain FP64; memory/range checks can also require original FP64 before upload. Source coefficients, precise coordinates, energies and final scores remain wide. The model is a dispatch reference, not observed counters; native setup coefficients are uncalibrated and conservative template charges remain. GPU deferred.";
+        arithmetic.template_reuse=native?
+            "Exact caches plus separately admitted close-clock interpolation (<=0.001 input sample), only with all identity, even pulse-boundary and workspace checks. No observed paired detection disagreements in conditional tests; sensitivity bounds remain inconclusive and full-bank sensitivity is unqualified.":
+            "Exact reuse only for this modeled fallback; approximate interpolation requires a supported native acquisition stage.";
+    } else {
+        arithmetic.arithmetic_operands="Original unquantized FP64 operands";
+        arithmetic.arithmetic_accumulation="FP64 products, accumulation and evidence";
+        arithmetic.arithmetic_backend="FP64 direct / partitioned / FFT / compact";
+        arithmetic.arithmetic_limit="Independent original-template reference with native SIMD FFTs where supported; precise coordinates retain their existing wider precision. Plan setup is not calibrated in the work model. GPU execution is unavailable.";
+        arithmetic.template_reuse="Exact caches allowed; approximate interpolation prohibited by FP64 force.";
+    }
+
     return result;
 }
 

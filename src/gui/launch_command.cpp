@@ -137,7 +137,7 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             flag=="--rate"||flag=="--bw"||flag=="--carrier"||flag=="--dsp-workspace"||flag=="--pattern"||
             flag=="--rf-oscillator"||flag=="--shift"||flag=="--rf-shift"||flag=="--rf-carrier"||flag=="--search-margin"||
             flag=="--reference"||flag=="--sideband"||flag=="--lf-reference"||
-            flag=="--clock-sync"||flag=="--audio-error"||flag=="--dsss-factor"||flag=="--dsss-version"||flag=="--fhss"||flag=="--live-duplex"||
+            flag=="--clock-sync"||flag=="--audio-error"||flag=="--dsss-factor"||flag=="--dsss-version"||flag=="--search-arithmetic"||flag=="--fhss"||flag=="--live-duplex"||
             flag=="--keyfile"||flag=="--key-name"||flag=="--tx-key";
         if(!known)invalid("Unknown launch option: "+std::string(flag));
         std::string_view value;
@@ -175,6 +175,7 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             result.dsss_factor=static_cast<unsigned>(factor);
         }
         else if(flag=="--dsss-version")result.dsss_version=tuning::outer_dsss_version_id(tuning::parse_outer_dsss_version(value));
+        else if(flag=="--search-arithmetic")result.search_arithmetic=tuning::search_arithmetic_id(tuning::parse_search_arithmetic(value));
         else if(flag=="--live-duplex") {
             if(value!="yes"&&value!="no")invalid("--live-duplex must be yes or no.");
             result.full_duplex=value=="yes";
@@ -257,6 +258,7 @@ std::string format(const Patch& settings) {
     if(settings.audio_timing_error_seconds)add("--audio-error",clock_sync::duration_text(*settings.audio_timing_error_seconds));
     if(settings.dsss_factor)add("--dsss-factor",std::to_string(*settings.dsss_factor));
     if(settings.dsss_version)add("--dsss-version",*settings.dsss_version);
+    if(settings.search_arithmetic)add("--search-arithmetic",std::string(tuning::search_arithmetic_id(tuning::parse_search_arithmetic(*settings.search_arithmetic))));
     if(settings.full_duplex)add("--live-duplex",*settings.full_duplex?"yes":"no");
     if(settings.fhss)add("--fhss",*settings.fhss);
     // Equal syntax preserves a filename or key name beginning with '--'.

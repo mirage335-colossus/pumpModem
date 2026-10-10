@@ -961,3 +961,56 @@ measure about4.93x additional speedup for one qualified50ms acquisition bank at
 48kHz, with unchanged input PCM and retained thresholds. They do not calibrate
 the full Live key/epoch bank or GPU projection. Ordinary/wider no-prior cases
 show no clear speedup; modeled savings must remain conditional on qualified timing.
+
+
+### Experimental search arithmetic accounting
+
+The local CPU-arithmetic candidate exposes requested precision, actual operands,
+accumulation and eligible/fallback algorithms in the planner's model details.
+Default automatic and FP32 minimum use supported native FP32 acquisition, with
+FP64 for other stages and numerical/resource fallback. FP64 force uses original
+templates. The retained internal INT8 screen is not selected automatically: its
+complete-execution benefit is unproven. The 32-start direct crossover is unchanged.
+GPU and INT4 execution are unavailable. Approximate template reuse is separately
+permitted only for eligible Default/FP32-minimum acquisition.
+
+The engineering operation model still describes the preceding floating path.
+It is labeled as such: packing, conservative certificates, native-array/plan setup and data-dependent
+exact refinements are not yet a calibrated throughput prediction. Native float
+buffers are not silently treated as a total receiver memory reduction. Measured
+whole/partition timing improvements do not supply a universal FFT speed factor;
+small/tight geometries can favor FP64 even when FP32 transforms are faster. No optimistic
+INT8 coefficient or GPU speedup is applied. Initial and rolling epoch setup,
+qualified timing cells, oscillator/clock pairs, full observation duration and
+six-second observed absence retain their existing accounting. FP32 close-clock
+private-template reuse constructs one nominal pair per eligible key/epoch/bit/
+phase cohort and interpolates each lane; its bounded cache is additional workspace.
+The present work model conservatively retains the old per-lane construction
+charge and explicitly labels that charge uncalibrated for the new cache. Large
+private serial banks may stream rows to execute native transforms; this changes
+row lifetime, not the admitted search or physical duration. A developer
+arithmetic selection does not change waveform duration or observer collection
+requirements. See [search arithmetic](search-compute.md#experimental-cpu-search-arithmetic-local-manual-candidate)
+for implementation and qualification limits.
+
+
+### Simplified arithmetic policy (local manual follow-up)
+
+The developer control now offers Default automatic, FP32 minimum and FP64 force.
+Default uses the demonstrated native serial streamed FP32 acquisition paths where
+supported; it no longer implies INT8. FP32 minimum currently shares that execution
+policy while prohibiting narrower operands. Compact, unsupported detector,
+cached/parallel/generic FFT and unsafe-range/resource paths retain FP64. FP64 force
+uses original templates, preserving an independent reference. The planner reports
+modeled operands, accumulation and fallback coverage separately from the permission
+for approximate private-template interpolation; execution counters remain a receiver
+diagnostic, not a planner observation. Exact caches remain allowed at every precision.
+
+The work model includes the existing large-private-row streaming crossover rather
+than charging cached constructor rows for that implemented path. It retains
+conservative arithmetic/template charges and labels native setup and interpolation
+coefficients uncalibrated. The policy change does not justify a numerical CPU/GPU
+multiplier or a manufactured detection probability. Existing total execution and
+conditional sensitivity evidence is reused only for unchanged resolved operators.
+No substantial sensitivity loss was measured; a full-bank bound remains unqualified.
+See [search arithmetic policy and ID migration](search-compute.md#experimental-cpu-search-arithmetic-local-manual-candidate).

@@ -429,7 +429,7 @@ void oscillator_details(Node& root,const planner::Model& model) {
     root.children.push_back(std::move(clocks));
 }
 
-void planner_controls(Node& root,const planner::Model& model,bool show_details,bool use_draft) {
+void planner_controls(Node& root,const planner::Model& model,bool use_draft) {
     const auto& declarations=ui::console_screen();
     const auto native=[&](ui::Field field,float width,float height) {
         const auto declaration=std::find_if(declarations.begin(),declarations.end(),
@@ -463,7 +463,6 @@ void planner_controls(Node& root,const planner::Model& model,bool show_details,b
         paragraph(controls,"Stronger / Weaker skip clock and RAM gaps.",11,Tone::muted,false,6);
     if(model.available)buttons(controls,{{"Use target for short messages",Command::planner_apply_short},
         {"Use target for long messages",Command::planner_apply_long}});
-    buttons(controls,{{show_details?"Hide details":"Model limits and references",Command::planner_toggle_details}});
     auto command=column(command_width);
     auto editor=native(ui::Field::planner_command,command_width,ui::label_height+56);
     editor.bottom=6;command.children.push_back(std::move(editor));
@@ -560,57 +559,9 @@ void link_budget(Node& root, const planner::Model& model) {
             " dB", 11, Tone::muted, false, 0);
         if(!model.receiver_work_assumptions.empty())
             paragraph(n,"Receiver work: "+model.receiver_work_assumptions,11,Tone::muted,false,0);
-        if(model.frequency_rate_hypotheses)
-            paragraph(n,"Engineering bank reference: "+std::to_string(model.frequency_rate_hypotheses)+
-                " frequency/clock pairs × "+std::to_string(model.epoch_hypotheses)+" epochs; "+
-                number(model.timing_hypotheses,6)+" timing origins summed over those pairs per key/epoch; "+
-                std::to_string(model.timing_phase_groups)+" timing phase groups.",11,Tone::muted,false,0);
-        if(model.receiver_geometry.sample_rate) {
-            const auto& g=model.receiver_geometry;
-            const auto version=g.dsss_factor<=1?"off":g.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2?
-                "interleaved-v2":"legacy";
-            paragraph(n,"Receiver geometry: "+std::to_string(g.sample_rate)+" samples/s; fine chip "+
-                planner::duration(g.fine_chip_seconds)+"; inner chip "+planner::duration(g.inner_chip_seconds)+
-                "; symbol "+planner::duration(g.symbol_seconds)+"; DSSS "+std::to_string(g.dsss_factor)+
-                "× "+version+". Workspace "+number(g.workspace_bytes/1048576.,4)+" MiB total; "+
-                number(g.per_bank_workspace_bytes/1048576.,4)+" MiB per-bank allowance.",11,Tone::muted,false,0);
-            if(g.dsss_factor>1&&g.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2)
-                paragraph(n,"V2 uses 6.02 dB pre-limiter digital backoff; actual mean-power change depends on clipping. "
-                    "Link budget requires actual average radio power; simulation noise remains nominal-power referenced. "
-                    "Full acquisition sensitivity is unqualified.",11,Tone::muted,false,0);
-            paragraph(n,"Arrival grid: "+number(g.timing_grid_seconds*1000,6)+" ms; canonical phase spacing "+
-                number(g.canonical_phase_step_seconds*1000,6)+" ms × "+std::to_string(g.canonical_phases)+
-                (g.arrival_window_available?"; combined admitted timing width "+
-                    number(2*g.combined_arrival_half_width_seconds*1000,6)+" ms":"; full timing window")+
-                ". Backend: "+g.backend+".",11,Tone::muted,false,0);
-            if(g.first_fft_seconds>0)paragraph(n,"Full-hop first batch: "+
-                planner::duration(g.first_fft_seconds)+"; preceding all-selected readiness: "+
-                (g.first_qualified_window_seconds>0?planner::duration(g.first_qualified_window_seconds):"unavailable")+
-                "; first guarded component: "+
-                (g.first_component_window_seconds>0?planner::duration(g.first_component_window_seconds):"unavailable")+
-                "; original start-grid hop: "+planner::duration(g.fft_hop_seconds)+
-                ". Every retained start still requires a complete observed symbol.",11,Tone::muted,false,0);
-            if(g.restricted_fft_modeled)paragraph(n,"Representative epoch/key: "+number(g.retained_template_jobs,6)+
-                " / "+number(g.full_template_jobs,6)+" template dispatches / original jobs; "+number(g.retained_start_positions,6)+
-                " / "+number(g.full_start_positions,6)+" original start positions retained; "+
-                number(g.direct_template_jobs,6)+" direct dispatches; "+number(g.input_fft_transforms,6)+
-                " input FFTs, "+number(g.timing_component_dispatches,6)+" guarded component dispatches and "+
-                number(g.component_fallback_hops,6)+" broad fallback hops. "+g.scope+".",11,Tone::muted,false,0);
-            if(g.paired_direct_template_jobs||g.partitioned_template_jobs||g.paired_fallback_components)
-                paragraph(n,"Paired backend: "+number(g.paired_direct_template_jobs,6)+" direct dispatches; "+
-                    number(g.partitioned_template_jobs,6)+" partitioned dispatches; "+
-                    (g.partitioned_template_jobs>0?"tiles "+std::to_string(g.partitioned_tile_min)+"–"+
-                        std::to_string(g.partitioned_tile_max)+" projected bins":"no partition tiles")+
-                    "; "+number(g.partitioned_input_transforms,6)+" cached input transforms, "+
-                    number(g.partitioned_template_transforms,6)+" template transforms, "+
-                    number(g.partitioned_inverse_transforms,6)+" inverse transforms; "+
-                    number(g.paired_fallback_components,6)+" components retain the shared full FFT.",11,Tone::muted,false,0);
-            if(!g.fallback_reason.empty())paragraph(n,"Work-model fallback: "+g.fallback_reason+".",11,Tone::muted,false,0);
-        }
-        if(model.timing_window_modeled)
-            paragraph(n,"Full-window fallback: "+number(model.fallback_cpu_realtime_ratio,3)+
-                " s processing per 1 s audio; "+number(model.fallback_timing_hypotheses,6)+
-                " timing origins. The timing reduction depends on the admitted capture bounds.",11,Tone::muted,false,0);
+        if(model.receiver_geometry.dsss_factor>1&&
+           model.receiver_geometry.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2)
+            paragraph(n,"Interleaved-v2 DSSS: full acquisition sensitivity is unqualified. Link budget requires actual average radio power; simulation noise remains nominal-power referenced.",11,Tone::muted,false,0);
         if(model.differential_windows)
             paragraph(n,"Differential detector: "+std::to_string(model.differential_windows)+" windows × "+
                 planner::duration(model.differential_window_seconds)+
@@ -625,10 +576,80 @@ void link_budget(Node& root, const planner::Model& model) {
     } else paragraph(n, "Link estimate unavailable", 13, Tone::text, true, 0);
     root.children.push_back(std::move(n));
 }
+void planner_footer(Node& root,const planner::Model& model,bool show_details) {
+    const auto& declarations=ui::console_screen();
+    const auto declaration=std::find_if(declarations.begin(),declarations.end(),[](const auto& c) {
+        return c.field==ui::Field::search_arithmetic;
+    });
+    auto choice=column(std::min(root.width,480.f));choice.kind=Kind::control;
+    choice.control=*declaration;choice.height=ui::label_height+28;choice.bottom=4;
+    root.children.push_back(std::move(choice));
+    const auto& g=model.receiver_geometry;
+    if(!g.arithmetic_backend.empty()) {
+        paragraph(root,"Arithmetic model: "+g.arithmetic_backend+"; operands "+g.arithmetic_operands+
+            "; accumulation "+g.arithmetic_accumulation+".",11,Tone::muted,false,4);
+        if(!g.arithmetic_limit.empty())paragraph(root,g.arithmetic_limit,11,Tone::muted,false,4);
+        if(!g.template_reuse.empty())paragraph(root,"Template reuse: "+g.template_reuse,11,Tone::muted,false,4);
+    } else paragraph(root,"Requested arithmetic: "+std::string(tuning::search_arithmetic_id(
+        model.inputs.options.modem.search_arithmetic))+"; backend model diagnostics pending.",11,Tone::muted,false,4);
+    buttons(root,{{show_details?"Hide details":"Model limits and references",Command::planner_toggle_details}});
+}
+void geometry_details(Node& n,const planner::Model& model) {
+    if(model.frequency_rate_hypotheses)
+        paragraph(n,"Engineering bank reference: "+std::to_string(model.frequency_rate_hypotheses)+
+            " frequency/clock pairs × "+std::to_string(model.epoch_hypotheses)+" epochs; "+
+            number(model.timing_hypotheses,6)+" timing origins summed over those pairs per key/epoch; "+
+            std::to_string(model.timing_phase_groups)+" timing phase groups.",11,Tone::muted,false,0);
+    if(model.receiver_geometry.sample_rate) {
+        const auto& g=model.receiver_geometry;
+        const auto version=g.dsss_factor<=1?"off":g.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2?
+            "interleaved-v2":"legacy";
+        paragraph(n,"Receiver geometry: "+std::to_string(g.sample_rate)+" samples/s; fine chip "+
+            planner::duration(g.fine_chip_seconds)+"; inner chip "+planner::duration(g.inner_chip_seconds)+
+            "; symbol "+planner::duration(g.symbol_seconds)+"; DSSS "+std::to_string(g.dsss_factor)+
+            "× "+version+". Workspace "+number(g.workspace_bytes/1048576.,4)+" MiB total; "+
+            number(g.per_bank_workspace_bytes/1048576.,4)+" MiB per-bank allowance.",11,Tone::muted,false,0);
+        paragraph(n,"Arrival grid: "+number(g.timing_grid_seconds*1000,6)+" ms; canonical phase spacing "+
+            number(g.canonical_phase_step_seconds*1000,6)+" ms × "+std::to_string(g.canonical_phases)+
+            (g.arrival_window_available?"; combined admitted timing width "+
+                number(2*g.combined_arrival_half_width_seconds*1000,6)+" ms":"; full timing window")+
+            ". Backend: "+g.backend+".",11,Tone::muted,false,0);
+        if(g.first_fft_seconds>0)paragraph(n,"Full-hop first batch: "+
+            planner::duration(g.first_fft_seconds)+"; preceding all-selected readiness: "+
+            (g.first_qualified_window_seconds>0?planner::duration(g.first_qualified_window_seconds):"unavailable")+
+            "; first guarded component: "+
+            (g.first_component_window_seconds>0?planner::duration(g.first_component_window_seconds):"unavailable")+
+            "; original start-grid hop: "+planner::duration(g.fft_hop_seconds)+
+            ". Every retained start still requires a complete observed symbol.",11,Tone::muted,false,0);
+        if(g.restricted_fft_modeled)paragraph(n,"Representative epoch/key: "+number(g.retained_template_jobs,6)+
+            " / "+number(g.full_template_jobs,6)+" template dispatches / original jobs; "+number(g.retained_start_positions,6)+
+            " / "+number(g.full_start_positions,6)+" original start positions retained; "+
+            number(g.direct_template_jobs,6)+" direct dispatches; "+number(g.input_fft_transforms,6)+
+            " input FFTs, "+number(g.timing_component_dispatches,6)+" guarded component dispatches and "+
+            number(g.component_fallback_hops,6)+" broad fallback hops. "+g.scope+".",11,Tone::muted,false,0);
+        if(g.paired_direct_template_jobs||g.partitioned_template_jobs||g.paired_fallback_components)
+            paragraph(n,"Paired backend: "+number(g.paired_direct_template_jobs,6)+" direct dispatches; "+
+                number(g.partitioned_template_jobs,6)+" partitioned dispatches; "+
+                (g.partitioned_template_jobs>0?"tiles "+std::to_string(g.partitioned_tile_min)+"–"+
+                    std::to_string(g.partitioned_tile_max)+" projected bins":"no partition tiles")+
+                "; "+number(g.partitioned_input_transforms,6)+" cached input transforms, "+
+                number(g.partitioned_template_transforms,6)+" template transforms, "+
+                number(g.partitioned_inverse_transforms,6)+" inverse transforms; "+
+                number(g.paired_fallback_components,6)+" components retain the shared full FFT.",11,Tone::muted,false,0);
+        if(!g.fallback_reason.empty())paragraph(n,"Work-model fallback: "+g.fallback_reason+".",11,Tone::muted,false,0);
+    }
+    if(model.timing_window_modeled)
+        paragraph(n,"Full-window fallback: "+number(model.fallback_cpu_realtime_ratio,3)+
+            " s processing per 1 s audio; "+number(model.fallback_timing_hypotheses,6)+
+            " timing origins. The timing reduction depends on the admitted capture bounds.",11,Tone::muted,false,0);
+}
 void details(Node& root,const planner::Model& model) {
     oscillator_details(root,model);
     auto n = card(root.width);
     paragraph(n, "Model limits", 15, Tone::text, true, 8);
+    geometry_details(n,model);
+    if(model.receiver_geometry.dsss_factor>1&&model.receiver_geometry.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2)
+        paragraph(n,"V2 uses 6.02 dB pre-limiter digital backoff; actual mean-power change depends on clipping. Link budget requires actual average radio power; simulation noise remains nominal-power referenced. Full acquisition sensitivity is unqualified.");
     if(!model.probability_model_limit.empty())paragraph(n,"Estimate coverage: "+model.probability_model_limit+".");
     if((model.one_bit_confidence_available||model.one_bit_reference_available)&&model.probability_trials) {
         const auto interval=model.probability_interval_available?
@@ -696,9 +717,10 @@ ui::DocumentNode build(const planner::Model& model, float width, bool show_detai
     paragraph(root, "Rate " + frequency(config.bandwidth_hz) + "  ·  Stream tone " + frequency(config.carrier_hz) +
         "  ·  DSP " + (model.inputs.dsp_workspace_percent ? std::to_string(model.inputs.dsp_workspace_percent) + "% RAM · " : "") +
         number(static_cast<double>(model.inputs.options.dsp_workspace_bytes) / (1024 * 1024 * 1024)) + " GiB", 11, Tone::muted, false, 6);
-    planner_controls(root,model,show_details,use_draft);
+    planner_controls(root,model,use_draft);
     if (!model.available) {
         paragraph(root, "Adjust the target or modem settings to calculate this link.", 13, Tone::text);
+        planner_footer(root,model,show_details);
         if (show_details) details(root,model);
         return root;
     }
@@ -728,6 +750,7 @@ ui::DocumentNode build(const planner::Model& model, float width, bool show_detai
     paragraph(root, std::string(model.observer_hypothetical ? "Hypothetical private pattern. " : "Private pattern. ") +
         "LPI is not guaranteed. See model limits.", 11, Tone::muted, false, 8);
     notable_points(root, model);
+    planner_footer(root,model,show_details);
     if (show_details) details(root,model);
     return root;
 }

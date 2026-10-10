@@ -330,8 +330,9 @@ ControlPresentation Application::control(const ui::Control& declaration) const {
     ControlPresentation view{state,declaration.label,state.enabled,state.visible};
     if(declaration.developer_only&&!impl_->developer_mode.checked)view.visible=false;
     if(!declaration.surface&&!declaration.persistent&&!page_visible(declaration.page))view.visible=false;
-    if(!declaration.surface&&(declaration.field==ui::Field::planner_target||declaration.field==ui::Field::planner_command))
-        view.visible=page()==ui::Page::planner;
+    if(!declaration.surface&&(declaration.field==ui::Field::planner_target||declaration.field==ui::Field::planner_command||
+                             declaration.field==ui::Field::search_arithmetic))
+        view.visible=view.visible&&page()==ui::Page::planner;
     if(declaration.surface) {
         view.visible=view.visible&&impl_->overlay&&impl_->overlay->generation==declaration.surface;
     }
@@ -585,7 +586,7 @@ int gui_main(int argc,char** argv,const char* backend,const std::function<int(La
         std::vector<std::string> settings_arguments;
         for(int i=1;i<argc;++i) {
             const std::string arg=argv[i];
-            if(arg=="--help") {std::cout<<"Data Pump continuous console\n"<<frontend_label<<backend<<" (selected at build time)\nUsage: "<<program_name<<" [--color|--monochrome] [--simulation] [--self-check] [--smoke-test]\nLink settings: --tx-dbm DBM --path-loss-db DB --noise-dbm-hz DBM/Hz\n  --oscillator ID --rf-oscillator ID --shift HZ (default 0) --search-margin N (default 3)\n  --clock-sync default|GPS_1ms-400ms_region-2564ms_offset\n  --audio-error TIME (default 0ms per station)\n  --keyfile PATH --tx-key named|none --key-name NAME (all loaded entries remain RX keys)\n  --dsss-factor 1|10|100|1000 --dsss-version interleaved-v2|legacy (both peers must match)\n  --fhss off|fake-0.4s-200\n  --live-duplex yes|no (default no; simultaneous hardware input/output)\n  --reference independent|shared-radio --lf-reference 0 (shared-radio shorthand)\n  --carrier HZ is absolute; fixed USB stream is Carrier minus Shift (>0)\n  --target-snr DB-Hz --rate HZ --carrier HZ --dsp-workspace 25%|50%|75%\n  --auto-pattern or --pattern MODE; --bw is an alias for --rate\n  --target-snr sets preview, short and long targets; --short-target-snr / --long-target-snr override them\nSmoke options: --smoke-dir PATH --smoke-hold SECONDS --smoke-timeout SECONDS --smoke-view NAME --smoke-scroll 0..1\n";return 0;}
+            if(arg=="--help") {std::cout<<"Data Pump continuous console\n"<<frontend_label<<backend<<" (selected at build time)\nUsage: "<<program_name<<" [--color|--monochrome] [--simulation] [--self-check] [--smoke-test]\nLink settings: --tx-dbm DBM --path-loss-db DB --noise-dbm-hz DBM/Hz\n  --oscillator ID --rf-oscillator ID --shift HZ (default 0) --search-margin N (default 3)\n  --clock-sync default|GPS_1ms-400ms_region-2564ms_offset\n  --audio-error TIME (default 0ms per station)\n  --keyfile PATH --tx-key named|none --key-name NAME (all loaded entries remain RX keys)\n  --dsss-factor 1|10|100|1000 --dsss-version interleaved-v2|legacy (both peers must match)\n  --search-arithmetic default|fp32-min|fp64-force (experimental CPU policy; legacy IDs accepted)\n  --fhss off|fake-0.4s-200\n  --live-duplex yes|no (default no; simultaneous hardware input/output)\n  --reference independent|shared-radio --lf-reference 0 (shared-radio shorthand)\n  --carrier HZ is absolute; fixed USB stream is Carrier minus Shift (>0)\n  --target-snr DB-Hz --rate HZ --carrier HZ --dsp-workspace 25%|50%|75%\n  --auto-pattern or --pattern MODE; --bw is an alias for --rate\n  --target-snr sets preview, short and long targets; --short-target-snr / --long-target-snr override them\nSmoke options: --smoke-dir PATH --smoke-hold SECONDS --smoke-timeout SECONDS --smoke-view NAME --smoke-scroll 0..1\n";return 0;}
             if(arg=="--version") {std::cout<<"Data Pump "<<DATAPUMP_VERSION<<' '<<frontend_label<<backend<<'\n';return 0;}
             if(arg=="--self-check") {gui_self_check();return 0;}
             if(arg=="--color")launch.color=true;

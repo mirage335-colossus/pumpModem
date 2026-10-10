@@ -148,6 +148,10 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.help="Copy to launch with this plan. Paste settings, then Load. Uses this target for short and long messages. Enter inserts a new line.";
     }
     if(control.field==Field::planner_target) {control.document_only=true;control.help="Preview target only: typing or choosing a preset selects a clock/RAM fit for one matching receiver profile, preferring an equal or weaker target. The edit buffer is retained; Enter or a preset shows the exact accepted value. Apply a planner target explicitly to change short or long transmission settings.";}
+    if(control.field==Field::search_arithmetic) {
+        control.document_only=true;control.developer_only=true;control.purpose=ControlPurpose::setup;
+        control.help="Receiver execution only; transmitted waveforms, private patterns and required search coverage are unchanged. Default automatically chooses supported implementations with measured total-execution benefit. FP32 minimum prohibits narrower search operands and retains FP64 fallbacks. FP64 force uses original templates and FP64 search. Exact caching is available at every precision; bounded close-clock interpolation is separately permitted for Default/FP32 minimum. No automatic INT8 path is currently demonstrated; no GPU receiver is implemented. Diagnostics distinguish requested policy, modeled arithmetic and template reuse; full-bank sensitivity remains unqualified.";
+    }
     if(slot==Slot::dsp_workspace)control.help="Upper limit for waveform history and DSP processing, measured at startup and when this choice changes. Storage grows only as useful receiver state needs it. The default is 50% of available RAM. Received messages and files have a separate 256 MiB limit.";
     if(slot==Slot::diagnostics)control.help="Gross modem bitrate followed by the Shannon-Hartley theoretical capacity for an ideal Gaussian-noise channel. Uses the selected nominal Rate as bandwidth B in Hz and the current draft's short or long TX target as C/N0 in dB-Hz: B * log2(1 + 10^(C/N0 / 10) / B). This is a channel capacity estimate; actual payload throughput depends on the modem and coding overhead.";
     if(slot==Slot::waterfall) {control.footer_height=24;control.click=Command::clear_waterfall;control.help="Click to clear the spectrum history. Simulation uses a 40 dB display range with default receiver noise shown in dark blue. Path loss dims the signal; receiver noise density changes the background. The scale follows sample rate, not signal peaks.";}
@@ -203,6 +207,7 @@ const std::vector<Control>& console_screen() {
         placed({Kind::text,Field::search_margin,Command::none,Bitmap::none,Page::console,3,"Margin",1,false,64}, Slot::search_margin),
         placed({Kind::text,Field::planner_target,Command::none,Bitmap::none,Page::planner,3,"Target SNR (dB-Hz)",1,false,64}, Slot::none),
         placed({Kind::text,Field::planner_command,Command::none,Bitmap::none,Page::planner,3,"Launch command",1,true,8192}, Slot::none),
+        placed({Kind::choice,Field::search_arithmetic,Command::none,Bitmap::none,Page::planner,4,"Search arithmetic"}, Slot::none),
         placed({Kind::action,Field::count,Command::open_keyfile,Bitmap::none,Page::console,2,"Open keyfile"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::action,Field::count,Command::generate_keyfile,Bitmap::none,Page::console,2,"Generate keyfile"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::action,Field::count,Command::show_key_folder,Bitmap::none,Page::console,2,"Show key folder"}, Slot::key_actions, Menu::keyfile),

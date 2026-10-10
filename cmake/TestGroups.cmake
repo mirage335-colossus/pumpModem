@@ -63,7 +63,7 @@ set(_prerequisites_native_relocation ${datapump_executables})
 set(_contract
   live_profiles live_receptions live live_resources live_transmit_lock compression_short transfer
   stream_codec stream_receive recovery attachment pattern_correlator pattern_receiver
-  pattern_drift pattern_differential receiver_differential pattern_fft_batch
+  pattern_drift pattern_differential receiver_differential pattern_fft_batch search_fft search_arithmetic
   pattern_correlator_batch pattern_search pattern_start_geometry tuning simulation_estimate
   receiver_probability differential_probability differential_receiver_probability
   weak_signal gui_application gui_controller gui_timing_advice gui_inspection gui_binary_editor cli)

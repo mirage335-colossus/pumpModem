@@ -429,7 +429,7 @@ auto curve_key(const transfer::Options& options,const modem::ChannelConfig& chan
     return std::tuple{c.pattern_symbols,c.stream_epoch,c.stream_phase_samples,c.sample_rate,
         c.constellation_bits,c.carrier_hz,c.bandwidth_hz,c.training_seconds,
         modem::symbol_sample_count(c),modem::pattern_chip_samples(c),c.spreading_mode,c.pulse_shaping,c.scramble,c.dsss,
-        c.dsss_factor,c.dsss_factor>1?c.outer_dsss_version:modem::OuterDsssVersion::legacy_v1,c.spreading_seed,c.dsss_seed,c.memory_limit,options.dsp_workspace_bytes,
+        c.dsss_factor,c.dsss_factor>1?c.outer_dsss_version:modem::OuterDsssVersion::legacy_v1,c.search_arithmetic,c.spreading_seed,c.dsss_seed,c.memory_limit,options.dsp_workspace_bytes,
         options.timestamp,options.search_seconds,options.audio_timing_error_seconds,options.clock_sync.has_value(),
         options.clock_sync.value_or(clock_sync::Policy{}).accuracy_seconds,
         options.clock_sync.value_or(clock_sync::Policy{}).region_seconds,

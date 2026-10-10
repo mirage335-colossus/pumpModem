@@ -202,6 +202,19 @@ struct PatternFftWork {
     // Executed scores include bounded unpublished EOF replay; threshold_trials
     // reflects the original finite-final charge rather than repeated arithmetic.
     std::uint64_t eof_replays=0;
+    // INT8 is a certified screening stage. Possible retained candidates are
+    // verified from original operands before entering the unchanged detector.
+    std::uint64_t int8_jobs=0,int8_dots=0,certified_rejects=0,exact_refines=0,fp32_dots=0;
+    // Branch-specific fallback events, not a fraction of template_jobs: a
+    // partition context, an unsafe whole-FFT bit, or an input batch can each
+    // trigger one event. Compact mode reports its FP64 template-job count.
+    std::uint64_t arithmetic_fallback_jobs=0;
+    std::uint64_t native_fp32_transforms=0,tabulated_fp64_transforms=0;
+    std::uint64_t fp32_retry_fp64_transforms=0;
+    std::size_t native_scratch_peak_bytes=0;
+    // Lane jobs offered the cache; a numerical retry can bypass its values.
+    std::uint64_t private_template_builds=0,private_template_lane_jobs=0;
+    std::size_t private_template_peak_bytes=0;
     bool restricted_timing_active=false;
     PatternFftWindowStatus timing_window=PatternFftWindowStatus::not_requested;
 };

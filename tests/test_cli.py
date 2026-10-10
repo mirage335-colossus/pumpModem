@@ -60,6 +60,34 @@ class StreamCLI(unittest.TestCase):
             self.assertEqual(self.run_pump('estimate','--text','e','--audio-error',allowance,*AUDIO).stdout,baseline)
         for allowance in ('-1ms','NaNms','61s','30'):
             self.run_pump('estimate','--text','e','--audio-error',allowance,*AUDIO,ok=False)
+    def test_search_arithmetic(self):
+        self.assertIn(b'--search-arithmetic',self.run_pump('--help').stdout)
+        fields=('wire_bits','coded_bytes','coded_seconds','total_seconds','sample_rate',
+                'spreading','symbol_seconds','carrier_hz','stream_carrier_hz','dsss_factor','dsss_version')
+        for geometry in (AUDIO,('--bw','1000','--target-snr','55','--time','1800000000')):
+            baseline=json.loads(self.run_pump('estimate','--text','e',*geometry).stdout)
+            self.assertEqual(baseline['search_arithmetic'],'default')
+            for requested,canonical in (('default','default'),('matrix8','default'),('8-bit','default'),
+                                        ('int8','default'),('INT8','default'),('fp32','fp32-min'),('fp64','fp64-force'),
+                                        ('fp32-min','fp32-min'),('fp64-force','fp64-force')):
+                value=json.loads(self.run_pump('estimate','--text','e','--search-arithmetic',requested,*geometry).stdout)
+                self.assertEqual(value['search_arithmetic'],canonical)
+                for field in fields:
+                    if field == 'symbol_seconds' and field not in baseline:
+                        continue  # Manual estimate output uses coded_seconds/bit_rate instead.
+                    self.assertEqual(value[field],baseline[field],(requested,field))
+        for invalid in ('matrix4','4-bit','fp8','gpu','unknown'):
+            error=self.run_pump('estimate','--text','e','--search-arithmetic',invalid,*AUDIO,ok=False)
+            self.assertIn(b'arithmetic',error.stderr)
+        with tempfile.TemporaryDirectory() as directory:
+            reference=None
+            for arithmetic in ('default','matrix8','int8','fp32','fp64','fp32-min','fp64-force'):
+                output=pathlib.Path(directory)/(arithmetic+'.wav')
+                self.run_pump('tx','--text','e','--output',output,'--search-arithmetic',arithmetic,*AUDIO)
+                pcm=output.read_bytes()
+                if reference is None:
+                    reference=pcm
+                self.assertEqual(pcm,reference,'receiver arithmetic changed transmitted WAV')
     def test_outer_dsss_version(self):
         self.assertIn(b'--dsss-version',self.run_pump('--help').stdout)
         for invalid in ('v2','2','legacy-v1','INTERLEAVED-V2'):

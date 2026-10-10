@@ -490,9 +490,9 @@ struct Fixture {
     std::vector<double> energy;
     std::vector<FftSearchJob> jobs;
     std::vector<FftStartRange> selected;
-    Fixture(bool shaped,unsigned factor,OuterDsssVersion version,bool public_pattern=false) {
+    Fixture(bool shaped,unsigned factor,OuterDsssVersion version,bool public_pattern=false,bool even_endpoint=false) {
         config.sample_rate=64;config.bandwidth_hz=8./factor;config.carrier_hz=15.3;
-        config.integration_seconds=1025./64;config.pulse_shaping=shaped;config.scramble=!public_pattern;
+        config.integration_seconds=(even_endpoint?1024.:1025.)/64;config.pulse_shaping=shaped;config.scramble=!public_pattern;
         config.dsss=factor>1;config.dsss_factor=factor;config.outer_dsss_version=version;
         config.stream_epoch=1789312671;
         for(std::size_t i=0;i<32;++i) {config.spreading_seed[i]=static_cast<std::uint8_t>(11*i+7);
@@ -678,7 +678,282 @@ void planner_geometry_equivalence() {
             "size-only partition plan disagrees with validated runtime scratch/work");
     }
 }
-void run(){score_equivalence();direct_equivalence();fallback_and_cancellation();planner_geometry_equivalence();}
+void arithmetic_direct_screening() {
+    for(const bool cached:{false,true})for(const bool shaped:{false,true})for(const unsigned factor:{1U,10U}) {
+        Fixture f(shaped,factor,OuterDsssVersion::interleaved_v2);
+        PatternCode code(f.config,f.config.stream_epoch);
+        f.selected={{0,1},{3,2},{72,1}};f.batch.start_ranges=f.selected;
+        auto job=f.jobs[0];job.range_begin=0;job.range_count=f.selected.size();
+        // Includes a partial final integer tile and template padding beyond the
+        // physical source symbol. Coverage and original starts remain unchanged.
+        f.batch.geometry.bins_per_symbol=1031;f.batch.geometry.evidence_count=1031;
+        f.input.resize(2048);f.energy.resize(2049);
+        for(std::size_t i=0;i<f.input.size();++i){
+            if(i>=f.spectrum.size())f.input[i]={std::sin(.071*i),std::cos(.031*i)};
+            f.energy[i+1]=f.energy[i]+std::norm(f.input[i]);
+        }
+        f.batch.observations=f.input;f.batch.energy_prefix=f.energy;
+        const auto L=static_cast<std::size_t>(f.batch.geometry.bins_per_symbol);
+        FftQuantizedDirect packed(f.input.size(),L);
+        check(packed.working_bytes()<=FftQuantizedDirect::required_bytes(f.input.size(),L),"packed workspace accounting missed storage");
+        if(cached)f.batch.quantized_direct=&packed;
+        std::vector<FftComplex> first(L+2,sentinel),second(L+2,sentinel),expected(f.batch.score_stride,sentinel),out=expected;
+        check(paired::score_direct(f.batch,job,code,expected),"reference direct arithmetic fixture unsupported");
+        for(const auto mode:{SearchArithmetic::int8,SearchArithmetic::matrix8}){
+            f.batch.geometry.search_arithmetic=static_cast<std::uint32_t>(mode);f.batch.retain_floor=0;
+            std::fill(out.begin(),out.end(),sentinel);paired::Work work;
+            check(paired::score_direct(f.batch,job,code,out,std::span(first).first(L),std::span(second).first(L),&work),
+                "fixed INT8 aliases failed supported direct geometry");
+            check(std::equal(out.begin(),out.end(),expected.begin(),identical),
+                "INT8 zero-floor refinement changed original FP64 candidate scores");
+            check(work.int8_dots==(cached?66U:16U)&&work.exact_refines==8&&work.certified_rejects==0&&
+                work.fp32_dots==0&&work.precision_fallback_jobs==0&&work.template_values==2*L,
+                "INT8 aliases did not execute bounded integer operands then exact paired refinement");
+            f.batch.retain_floor=100;work={};std::fill(out.begin(),out.end(),sentinel);
+            check(paired::score_direct(f.batch,job,code,out,std::span(first).first(L),std::span(second).first(L),&work),
+                "INT8 certified noise rejection failed");
+            check(work.certified_rejects>0&&work.certified_rejects+work.exact_refines==8,
+                "INT8 screening never certified bounded below-floor evidence");
+            for(std::size_t j=0;j<out.size();++j){
+                if(expected[j]==sentinel)check(out[j]==sentinel,"INT8 changed excluded start or padding");
+                else for(unsigned bit=0;bit<2;++bit){const auto e=bit?expected[j].imag():expected[j].real();
+                    const auto v=bit?out[j].imag():out[j].real();
+                    check(v==e||(v==0&&e<f.batch.retain_floor),"INT8 rejected possibly retained original evidence");}
+            }
+            check(first[L]==sentinel&&second[L+1]==sentinel,"INT8 template scratch exceeded declared row");
+        }
+        f.batch.geometry.search_arithmetic=static_cast<std::uint32_t>(SearchArithmetic::default_mode);
+        f.batch.retain_floor=0;paired::Work automatic;std::fill(out.begin(),out.end(),sentinel);
+        check(paired::score_direct(f.batch,job,code,out,std::span(first).first(L),std::span(second).first(L),&automatic)&&
+            automatic.int8_dots==0&&automatic.fp32_dots==0&&std::equal(out.begin(),out.end(),expected.begin(),identical),
+            "unresolved low-level Default must preserve FP64 instead of enabling an unmeasured integer path");
+        // Same immutable input/template arithmetic with a strong correct row:
+        // all potentially retained scores, including a one-ulp retention edge,
+        // must survive with their exact original value.
+        for(std::size_t i=0;i<L;++i)f.input[i]+=2.*first[i];
+        // Mutating observations begins a new batch, even at the same address.
+        packed.source=nullptr;packed.source_size=0;
+        f.energy[0]=0;for(std::size_t i=0;i<f.input.size();++i)f.energy[i+1]=f.energy[i]+std::norm(f.input[i]);
+        f.batch.geometry.search_arithmetic=static_cast<std::uint32_t>(SearchArithmetic::fp64);
+        std::fill(expected.begin(),expected.end(),sentinel);check(paired::score_direct(f.batch,job,code,expected),"strong reference unsupported");
+        check(expected[0].real()>5&&expected[0].imag()<expected[0].real(),
+            "strong integer fixture lacks a retained winner and lower alternative");
+        f.batch.geometry.search_arithmetic=static_cast<std::uint32_t>(SearchArithmetic::int8);
+        for(const auto floor:{5.,std::nextafter(expected[0].real(),0.),expected[0].real()}){
+            f.batch.retain_floor=floor;std::fill(out.begin(),out.end(),sentinel);paired::Work work;
+            check(paired::score_direct(f.batch,job,code,out,std::span(first).first(L),std::span(second).first(L),&work),
+                "strong INT8 direct unsupported");
+            for(std::size_t j=0;j<out.size();++j)if(expected[j]!=sentinel)
+                for(unsigned bit=0;bit<2;++bit){const auto e=bit?expected[j].imag():expected[j].real();
+                    const auto v=bit?out[j].imag():out[j].real();
+                    check(v==e||(out[j]==FftComplex{}&&std::max(expected[j].real(),expected[j].imag())<floor),
+                        "INT8 certificate lost retained pair/alternative-bit evidence");}
+        }
+        paired::Work fallback;std::fill(out.begin(),out.end(),sentinel);
+        check(paired::score_direct(f.batch,job,code,out,{}, {},&fallback)&&fallback.precision_fallback_jobs==1&&
+            std::equal(out.begin(),out.end(),expected.begin(),identical),
+            "insufficient INT8 scratch changed geometry or hid exact fallback");
+        check(!paired::score_direct(f.batch,job,code,out,std::span(f.input).first(L),std::span(second).first(L)),
+            "integer template scratch overwrote immutable observations");
+        check(!paired::score_direct(f.batch,job,code,out,std::span(first).first(L),std::span(first).first(L)),
+            "integer paired template scratch accepted overlapping rows");
+        std::fill(out.begin(),out.end(),sentinel);std::stop_source stopped;stopped.request_stop();bool cancelled=false;
+        try{paired::score_direct(f.batch,job,code,out,std::span(first).first(L),std::span(second).first(L),nullptr,stopped.get_token());}
+        catch(const Error&){cancelled=true;}
+        check(cancelled&&std::all_of(out.begin(),out.end(),[](auto v){return v==sentinel;}),
+            "cancelled integer job published evidence");
+        f.batch.geometry.search_arithmetic=static_cast<std::uint32_t>(SearchArithmetic::fp32);f.batch.retain_floor=0;
+        paired::Work fp32;check(paired::score_direct(f.batch,job,code,out,std::span(first).first(L),std::span(second).first(L),&fp32),
+            "unquantized FP32 direct unsupported");
+        check(fp32.fp32_dots==8&&fp32.int8_dots==0&&fp32.exact_refines==0,"FP32 override executed integer/refinement path");
+        for(std::size_t j=0;j<out.size();++j)if(expected[j]!=sentinel)
+            check(std::abs(out[j].real()-expected[j].real())<2e-3*std::max(1.,expected[j].real())&&
+                std::abs(out[j].imag()-expected[j].imag())<2e-3*std::max(1.,expected[j].imag()),
+                "FP32 direct departed from same-source normalized covariance fit");
+    }
+}
+void arithmetic_fft_override() {
+    std::vector<FftComplex> input(1024);
+    for(std::size_t i=0;i<input.size();++i)input[i]={std::sin(.093*i)+1e-9,std::cos(.071*i)-3e-10};
+    auto reference=input,fp32=input,original=input;
+    pattern_fft(reference,false,{});pattern_fft(original,false,{},SearchArithmetic::fp64);
+    check(std::equal(reference.begin(),reference.end(),original.begin(),identical),"FP64 FFT override changed original arithmetic");
+    pattern_fft(fp32,false,{},SearchArithmetic::fp32);
+    bool differs=false;
+    for(std::size_t i=0;i<fp32.size();++i){
+        differs|=!identical(fp32[i],reference[i]);
+        check(fp32[i].real()==static_cast<double>(static_cast<float>(fp32[i].real()))&&
+            fp32[i].imag()==static_cast<double>(static_cast<float>(fp32[i].imag())),"FP32 FFT retained double butterfly operands");
+    }
+    check(differs,"FP32 FFT silently used FP64 arithmetic");
+    pattern_fft(fp32,true,{},SearchArithmetic::fp32);
+    for(std::size_t i=0;i<fp32.size();++i)check(std::abs(fp32[i]-input[i])<6e-5,"FP32 FFT roundtrip failed");
+    Fixture f(true,10,OuterDsssVersion::interleaved_v2);PatternCode code(f.config,f.config.stream_epoch);
+    f.batch.geometry.search_arithmetic=static_cast<std::uint32_t>(SearchArithmetic::fp32);
+    const auto req=paired::preflight(f.batch,std::span(f.jobs).first(1),16,1024*1024);
+    check(req.has_value(),"FP32 partition fixture unsupported");
+    std::vector<FftComplex> arena(req->complex_count),scores(f.batch.score_stride,sentinel),direct=scores;
+    paired::Work work;auto context=paired::prepare(f.batch,*req,arena,&work,{},paired::native_bytes(*req,SearchArithmetic::fp32));
+    check(context&&paired::score_job(*context,f.jobs[0],code,scores,&work),"FP32 partition failed");
+    std::vector<FftComplex> first(f.batch.geometry.bins_per_symbol),second(first.size());
+    check(paired::score_direct(f.batch,f.jobs[0],code,direct,first,second),"FP32 paired direct control failed");
+    for(std::size_t j=0;j<scores.size();++j)if(direct[j]!=sentinel)
+        check(std::abs(scores[j].real()-direct[j].real())<3e-4*std::max(1.,direct[j].real())&&
+            std::abs(scores[j].imag()-direct[j].imag())<3e-4*std::max(1.,direct[j].imag()),
+            "FP32 partition changed same-source template energy or covariance");
+    check(work.int8_dots==0&&work.precision_fallback_jobs==0,"FP32 partition used INT8/fallback");
+    // INT8 currently retains the measured favorable FFT algorithm at broader
+    // selections; expose this actual FP64 fallback, rather than mislabel it.
+    f.batch.geometry.search_arithmetic=static_cast<std::uint32_t>(SearchArithmetic::int8);
+    work={};context=paired::prepare(f.batch,*req,arena,&work);
+    check(context&&paired::score_job(*context,f.jobs[0],code,scores,&work)&&work.precision_fallback_jobs==1&&work.int8_dots==0,
+        "broad INT8 FFT fallback was hidden or changed algorithm");
+    const FftComplex x{.123456789,-.987654321},y{.43864127,.137546};
+    volatile float xr=static_cast<float>(x.real()),xi=static_cast<float>(x.imag());
+    volatile float yr=static_cast<float>(y.real()),yi=static_cast<float>(y.imag());
+    const std::complex<float> product{xr*yr-xi*yi,xr*yi+xi*yr};
+    check(identical(pattern_fft_product(x,y,SearchArithmetic::fp32),{product.real(),product.imag()}),
+        "FP32 frequency products used quantized or double operands");
+}
+void native_partition_precision() {
+    for(const bool shaped:{false,true})for(const auto factor:{1U,10U,100U,1000U})
+        for(const auto version:{OuterDsssVersion::legacy_v1,OuterDsssVersion::interleaved_v2}) {
+        Fixture f(shaped,factor,version);
+        const auto r=paired::preflight(f.batch,f.jobs,16,1024*1024);
+        check(r.has_value(),"native precision lost supported geometry");
+        std::vector<FftComplex> first(r->complex_count),second(r->complex_count);
+        f.batch.geometry.search_arithmetic=static_cast<std::uint32_t>(SearchArithmetic::fp64);
+        paired::Work rw,fw;auto reference=paired::prepare(f.batch,*r,first,&rw);
+        f.batch.geometry.search_arithmetic=static_cast<std::uint32_t>(SearchArithmetic::fp32);
+        const auto bytes=paired::native_bytes(*r,SearchArithmetic::fp32);
+        auto native=paired::prepare(f.batch,*r,second,&fw,{},bytes);
+        check(native&&reference&&!native->native.empty()&&native->extra_bytes()<=bytes,
+            "native float storage missing or unbudgeted");
+        PatternCode nc(f.config,f.config.stream_epoch),rc(f.config,f.config.stream_epoch);
+        for(const auto& job:f.jobs) {
+            std::vector<FftComplex> n(f.batch.score_stride,sentinel),ref=n;
+            check(paired::score_job(*native,job,nc,n,&fw)&&paired::score_job(*reference,job,rc,ref,&rw),
+                "native/reference job failed");
+            for(std::size_t i=0;i<n.size();++i) {
+                if(ref[i]==sentinel)check(n[i]==sentinel,"native FFT wrote excluded timing or padding");
+                else check(std::abs(n[i]-ref[i])<=3e-4*std::max(1.,std::abs(ref[i])),
+                    "native FFT changed covariance/energy fit beyond FP32 tolerance");
+            }
+        }
+        check(fw.native_fp32_transforms>0&&fw.input_transforms==rw.input_transforms&&
+            fw.template_transforms==rw.template_transforms&&fw.inverse_transforms==rw.inverse_transforms&&
+            fw.template_values==rw.template_values&&fw.selected_starts==rw.selected_starts,
+            "native precision altered transform geometry or hypotheses");
+        std::stop_source stop;stop.request_stop();std::vector<FftComplex> output(f.batch.score_stride,sentinel);bool caught=false;
+        try{paired::score_job(*native,f.jobs[0],nc,output,nullptr,stop.get_token());}catch(const Error&){caught=true;}
+        check(caught&&std::all_of(output.begin(),output.end(),[](auto x){return x==sentinel;}),
+            "native FFT cancellation published scores");
+        // Every temporary allocation has an explicit opt-in allowance. Small
+        // workspaces preserve the full original search using original operands.
+        paired::Work small;auto fallback=paired::prepare(f.batch,*r,second,&small,{},0);
+        check(fallback&&fallback->native.empty()&&fallback->execution==SearchArithmetic::fp64&&
+            small.precision_fallback_jobs==1&&fallback->extra_bytes()==0,"native memory fallback is not bounded FP64");
+    }
+    for(const double scale:{1e-30,1e30}) {
+        Fixture f(true,10,OuterDsssVersion::interleaved_v2);
+        for(auto& x:f.input)x*=scale;
+        f.energy[0]=0;for(std::size_t i=0;i<f.input.size();++i)f.energy[i+1]=f.energy[i]+std::norm(f.input[i]);
+        const auto r=paired::preflight(f.batch,f.jobs,16,1024*1024);check(r.has_value(),"extreme range fixture unsupported");
+        std::vector<FftComplex> arena(r->complex_count);paired::Work work;
+        f.batch.geometry.search_arithmetic=static_cast<std::uint32_t>(SearchArithmetic::fp32);
+        auto context=paired::prepare(f.batch,*r,arena,&work,{},paired::native_bytes(*r,SearchArithmetic::fp32));
+        check(context&&context->execution==SearchArithmetic::fp64&&context->native.empty()&&work.precision_fallback_jobs==1,
+            "extreme finite input did not preserve FP64 fallback");
+        PatternCode code(f.config,f.config.stream_epoch);std::vector<FftComplex> out(f.batch.score_stride,sentinel);
+        check(paired::score_job(*context,f.jobs[0],code,out,&work),"extreme fallback failed full job");
+        for(auto x:out)check(std::isfinite(x.real())&&std::isfinite(x.imag()),"extreme fallback produced nonfinite score");
+    }
+}
+void private_template_exact_fallback() {
+    for(const double scale:{1e-30,1e30}) {
+        Fixture f(true,10,OuterDsssVersion::interleaved_v2,false,true);
+        f.jobs.resize(1);f.jobs[0].clock_ratio=1;
+        for(auto& value:f.input)value*=scale;
+        f.energy[0]=0;for(std::size_t i=0;i<f.input.size();++i)f.energy[i+1]=f.energy[i]+std::norm(f.input[i]);
+        auto& g=f.batch.geometry;g.search_arithmetic=static_cast<std::uint32_t>(SearchArithmetic::fp32);
+        PatternCode code(f.config,f.config.stream_epoch),original_code(f.config,f.config.stream_epoch);
+        g.private_template_reuse=PrivateTemplateReuse::bounded_interpolation;
+        check(FftPrivateTemplate::eligible(g,f.jobs[0]),"cache fallback fixture geometry unsupported");
+        FftPrivateTemplate cache(g,f.jobs[0],code,{});f.batch.private_template=&cache;
+        const auto req=paired::preflight(f.batch,f.jobs,16,1024*1024);check(req.has_value(),"cache fallback preflight failed");
+        std::vector<FftComplex> arena(req->complex_count),original_arena(req->complex_count);
+        paired::Work work,original_work;
+        auto context=paired::prepare(f.batch,*req,arena,&work,{},paired::native_bytes(*req,SearchArithmetic::fp32));
+        check(context&&context->execution==SearchArithmetic::fp64&&work.precision_fallback_jobs==1,
+            "attached cache prevented original precision fallback");
+        auto original=f.batch;original.private_template=nullptr;original.geometry.search_arithmetic=static_cast<std::uint32_t>(SearchArithmetic::fp64);
+        auto reference=paired::prepare(original,*req,original_arena,&original_work);
+        std::vector<FftComplex> output(f.batch.score_stride,sentinel),expected=output;
+        check(paired::score_job(*context,f.jobs[0],code,output,&work)&&paired::score_job(*reference,f.jobs[0],original_code,expected,&original_work),
+            "cache-attached exact fallback did not score original job");
+        check(std::equal(output.begin(),output.end(),expected.begin(),identical),
+            "cache-attached FP64 fallback used interpolated operands");
+    }
+}
+void private_template_interpolation() {
+    for(const auto factor:{10U,100U,1000U})for(const auto version:{OuterDsssVersion::legacy_v1,OuterDsssVersion::interleaved_v2}) {
+        Config c;c.sample_rate=40000;c.carrier_hz=7500;c.bandwidth_hz=10000./factor;
+        c.spreading_factor=4;c.scramble=true;c.dsss=true;c.dsss_factor=factor;c.outer_dsss_version=version;
+        c.stream_epoch=1800000000;c.stream_phase_samples=137;c.search_arithmetic=SearchArithmetic::fp32;
+        for(std::size_t i=0;i<c.spreading_seed.size();++i){c.spreading_seed[i]=static_cast<std::uint8_t>(3*i+7);c.dsss_seed[i]=static_cast<std::uint8_t>(5*i+11);}
+        // Half a final chip checks its finite pulse contribution at both edges.
+        c.integration_seconds=std::nextafter(static_cast<double>(symbol_sample_count(c)+4)/c.sample_rate,0.);
+        PatternCode code(c,c.stream_epoch);FftSearchGeometry g;
+        check(code.symbol_samples()%code.chip_samples()==4,"partial-chip fixture rounded away its half chip");
+        g.pattern={c.stream_epoch,code.chip_samples(),code.chips_per_symbol(),code.symbol_samples(),c.sample_rate,
+            static_cast<std::uint32_t>(c.spreading_mode),1,1,1,c.spreading_seed,c.dsss_seed,factor,static_cast<std::uint32_t>(version)};
+        g.bin_samples=4;g.bins_per_symbol=(code.symbol_samples()+3)/4;g.search_arithmetic=static_cast<std::uint32_t>(SearchArithmetic::fp32);
+        FftSearchJob job{1,c.stream_phase_samples};
+        check(!FftPrivateTemplate::eligible(g,job),"FP32 alone enabled approximate template reuse");
+        g.private_template_reuse=PrivateTemplateReuse::bounded_interpolation;
+        check(FftPrivateTemplate::eligible(g,job),"private cache rejected nominal supported geometry");
+        FftPrivateTemplate cache(g,job,code,{});
+        check(cache.working_bytes()<=FftPrivateTemplate::required_bytes(g),"private cache exceeded budget");
+        const auto last=static_cast<long double>(g.bins_per_symbol-1)*g.bin_samples+(g.bin_samples-1)/2.L;
+        for(const double direction:{-1.,0.,1.}) {
+            job.clock_ratio=1+direction*.99*FftPrivateTemplate::maximum_displacement_samples/static_cast<double>(last);
+            check(cache.matches(g,job),"private cache lost eligible clock endpoint");
+            std::array<long double,2> norm{},error{};
+            for(std::size_t i=0;i<g.bins_per_symbol;++i) {
+                const auto position=static_cast<long double>(i)*g.bin_samples+(g.bin_samples-1)/2.L;
+                const auto exact=code.shaped_values(job.symbol*code.chips_per_symbol(),static_cast<double>(position*job.clock_ratio));
+                const auto approximate=cache.value(i,job.clock_ratio);
+                for(unsigned bit=0;bit<2;++bit){norm[bit]+=std::norm(exact[bit]);error[bit]+=std::norm(exact[bit]-approximate[bit]);}
+            }
+            for(unsigned bit=0;bit<2;++bit)check(norm[bit]>0&&error[bit]/norm[bit]<1e-7L,
+                "close-clock private cache changed finite template beyond measured allowance");
+        }
+        job.clock_ratio=std::nextafter(1+FftPrivateTemplate::maximum_displacement_samples/static_cast<double>(last),2.);
+        check(!FftPrivateTemplate::eligible(g,job),"private cache silently widened clock eligibility");
+        job.clock_ratio=1;
+        // Every final-chip remainder, including support edges that land on a
+        // bin center, must either meet the measured geometry or fall back.
+        for(unsigned remainder=0;remainder<8;++remainder) {
+            auto partial=g;partial.pattern.symbol_samples=(g.pattern.symbol_samples/8)*8+remainder;
+            check(FftPrivateTemplate::eligible(partial,job)==(remainder%2==0),
+                "odd partial-chip cutoff entered private interpolation");
+        }
+        auto odd=g;++odd.bin_samples;check(!FftPrivateTemplate::eligible(odd,job),"odd bin entered private interpolation");
+        odd=g;++odd.pattern.chip_samples;check(!FftPrivateTemplate::eligible(odd,job),"odd chip entered private interpolation");
+        const auto stale=[&](FftSearchGeometry changed,FftSearchJob altered){check(!cache.matches(changed,altered),"private cache reused a different secret/address/geometry");};
+        auto altered=job;++altered.symbol;stale(g,altered);altered=job;++altered.phase;stale(g,altered);
+        auto changed=g;changed.pattern.spreading_seed[0]^=1;stale(changed,job);
+        changed=g;changed.pattern.dsss_seed[0]^=1;stale(changed,job);
+        changed=g;++changed.pattern.epoch;stale(changed,job);changed=g;++changed.pattern.outer_dsss_version;stale(changed,job);
+        changed=g;++changed.bin_samples;stale(changed,job);changed=g;++changed.pattern.symbol_samples;stale(changed,job);
+        changed=g;changed.search_arithmetic=static_cast<std::uint32_t>(SearchArithmetic::fp64);stale(changed,job);
+        changed=g;changed.private_template_reuse=PrivateTemplateReuse::exact_only;stale(changed,job);
+        std::stop_source stop;stop.request_stop();bool caught=false;
+        try{FftPrivateTemplate cancelled(g,job,code,stop.get_token());}catch(const Error&){caught=true;}
+        check(caught,"cancelled private cache completed setup");
+    }
+}
+void run(){score_equivalence();direct_equivalence();fallback_and_cancellation();planner_geometry_equivalence();arithmetic_direct_screening();arithmetic_fft_override();native_partition_precision();private_template_interpolation();private_template_exact_fallback();}
 }
 int main() {
     try {paired_regression::run();flat_batch_tiling_and_order();prepared_template_and_cancellation();restricted_coherent_direct_and_fft();public_nominal_reference_exactness();

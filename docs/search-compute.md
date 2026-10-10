@@ -517,6 +517,228 @@ receiver. The supplied1200x10 case reduces total CPU from1.389 to0.284s for13s P
 not a full Live acquisition or broader sensitivity qualification.
 
 
+## Experimental CPU search arithmetic (local manual candidate)
+
+`--search-arithmetic default|fp32-min|fp64-force` is a receiver-only policy.
+The developer-only **Search arithmetic** control, immediately before the persistent
+planner's **Model limits and references**, offers exactly:
+
+* **Default — automatic:** native FP32 for supported coherent serial streamed
+  direct/partitioned/whole FFT acquisition, with FP64 elsewhere. This selects the
+  previously measured FP32 implementation instead of retaining INT8 solely for
+  its narrower operands. No current geometry has sufficient complete-execution
+  evidence to enable INT8 automatically.
+* **FP32 minimum:** prohibit lower-precision search operands; currently use the
+  same supported native FP32 paths and original-FP64 numerical/resource fallbacks.
+  This is a minimum operand width, not a demand to narrow every calculation.
+* **FP64 force:** original templates and FP64 search, with existing wider timing,
+  phase, energy and cancellation-sensitive calculations preserved. Exact caching
+  remains allowed; approximate interpolation is prohibited.
+
+Fresh startup with no setting selects Default; a partial parameter-list import
+with no arithmetic field preserves the current choice. `fp32`/`FP32` and
+`fp64`/`FP64` remain aliases for `fp32-min` and `fp64-force`. Old `matrix8`,
+`8-bit`, `int8` and `INT8` selections migrate to Default on CLI/import/load;
+export/save writes the canonical policy. `matrix4`/`4-bit` remains rejected.
+Internal integer enum values and kernels remain available to diagnostics, with
+no public dropdown choice and no automatic integer dispatch. Requested policy,
+resolved arithmetic and template reuse are distinct. GPU work remains deferred.
+Transmitter samples, framing and cryptographic addresses do not depend on policy.
+
+Approximate template reuse has a separate low-level permission, defaulting to
+exact-only. Default and FP32 minimum may authorize the existing checked close-clock
+interpolation in supported acquisition. Selecting FP32 alone in a low-level batch
+does not authorize it. Identity, finite-pulse boundaries, displacement and workspace
+checks remain mandatory. FP64 force and original-operand numerical fallbacks bypass
+it. This does not disable any existing exact template or transform cache.
+
+The retained internal integer diagnostic coverage is deliberately explicit: coherent bounded
+paired direct acquisition with at most 32 admitted starts. Broader partitioned/FFT
+searches, compact pulse statistics and tracking still execute FP64. This is
+**partial INT8 coverage**, not a completed conversion of every CPU search path.
+The selection never widens an admitted timing set to make a matrix. Experiments
+with a 128-position direct crossover were slower than the preceding partitioned
+algorithm on this host, so the manual candidate keeps the 32-position crossover.
+FP32 direct and coherent FFT acquisition avoid integer quantization; eligible
+private templates may use the bounded interpolation described below. Supported
+streamed serial whole FFTs and bounded partitioned
+FFTs now use native `complex<float>` storage, multiplication and accumulation,
+with stage-contiguous public twiddle tables and optional runtime AVX2 butterflies.
+The FP64 fallback can use the same tabulated kernel with double operands. Scalar
+kernels preserve portable binaries; neither AVX2 nor GPU dependencies are global
+requirements. Phase origins, absolute times, epochs, private coefficient generation,
+template-energy sums, covariance and final scores remain wide. Sample-fit,
+differential and drift reductions normalize to FP64 **before** input/template
+preparation. Compact statistics and tracking retain FP64.
+
+The requested mode is independent of execution ISA and storage. Native float
+whole/partition arrays do not replace all receiver buffers: original observations
+remain double for accurate energy and fallback. Optional plans/arrays are charged
+against workspace before allocation and cannot lower retained-bit capacity.
+Insufficient allowance retains the complete original search in higher precision;
+serial whole-FFT scratch fallback regenerates original FP64 operands.
+Cached/parallel whole FFTs and mixed-cohort generic fallbacks retain original FP64.
+The old wide-buffer FP32 kernel remains an internal diagnostic, not an automatic
+or minimum-policy fallback.
+Huge/tiny finite input ranges switch to original FP64 operands. Native float
+products are checked before scores are published; unsafe templates/products retry
+from original operands. No quantized observation is used as a fallback reference.
+FP64 remains unquantized. Its public tables cache the exact legacy stage
+recurrence; scalar/AVX2 forward and independent inverse tests preserve numeric
+equality on this host. This does not claim universal bitwise equality (signed
+zero and platform libm behavior remain distinct). Earlier direct-polar table
+measurements retain their separate source identity.
+
+The separate bounded-interpolation policy admits a paired private-template cache for at least three close-clock
+lanes. It evaluates the original shaped 0/1 pair once on the nominal projection
+grid, including a genuine finite-pulse sample beyond each end. Two complex float
+values per grid position are then interpolated before the original per-lane
+frequency rotation. Eligibility requires coherent shaped acquisition, at least
+two original samples per bin and no more than half a fine chip per bin, and
+at most **0.001 original input sample** of clock displacement at the last bin.
+Chip, symbol and bin durations must be even sample counts: bin centers then
+remain at least half a sample from a finite-pulse cutoff. Other parity geometries
+use original construction, including potentially aligned odd partial chips.
+This is an explicit, independently gated approximation, not an INT8 certificate
+or a change to private-pattern generation. Energies are computed from the actual
+interpolated operands; I/Q covariance and final scoring remain wide.
+
+The cache identity includes all pattern parameters and keys, outer construction,
+epoch, symbol, canonical phase and grid. It is destroyed before advancing that
+cohort; independent bit candidates and new bit positions never reuse another
+pattern. Clock interpolation is allowed only inside its checked displacement
+bound; frequency rotation is applied afterward. Unsupported geometry, fewer than
+three lanes or insufficient spare workspace retain original construction. The
+FP64 diagnostic, tracking, outer-presence guard and range-error retry use original
+operands. Cancellation destroys and cleanses the private cache. Its nominal
+primary allocation is about 2.05 MB, charged together with native FFT scratch.
+
+Large serial private whole-FFT banks can stream regenerated rows to make room
+for native arrays/plans, even without a qualified arrival prior. Small persistent
+caches, parallel banks and the explicit FP64 control retain their existing choice.
+No arrival cell, epoch, frequency or clock lane is removed; scheduling and full
+observation requirements are unchanged. The measured primary crossover uses
+N=262144. The implementation starts at N=65536; the intermediate-size crossover
+is still an extrapolation, not separately qualified timing evidence.
+
+INT8 is a conservative rejection screen. Each complex tile uses a common I/Q
+scale, zero point 0 and symmetric operands [−127, 127]. A fixed second INT8 plane
+represents the first plane's residual; three integer products approximate the
+complex dot. This is fixed compensated INT8 arithmetic, not automatic precision
+selection. Exact integer chunks of at most 16,384 complex values accumulate into
+INT32, then checked INT64 totals. Even explicit −128 operands are supported:
+each complex component contributes at most 32768, so a complete chunk is bounded
+by 536,870,912. Scale reconstruction and evidence calculations remain FP64.
+
+Outward residual-norm and floating-roundoff bounds enclose the original ascending
+FP64 dot. A pair is discarded only when *both* score upper bounds are strictly
+below the unchanged retention floor. Otherwise both original FP64 candidate
+scores are recomputed, including the losing-bit score needed by admission.
+Template energy, transformed observation energy/covariance, trial charges and
+thresholds are unchanged. This avoids treating quantization error or shaped
+samples as independent white noise. Unsupported floating environments (including
+flush-to-zero) produce inconclusive certificates and exact verification. The
+certificate relies on IEEE arithmetic without fast-math and a conservative
+64-epsilon allowance for the platform evidence function; C++ does not itself
+specify a universal libm accuracy bound. Cross-platform validation remains open.
+
+The input planes are packed once per immutable bounded batch. Their lifetime
+ends before the observation buffer is reused. Template planes are replaced for
+every exact key/epoch/bit pair, symbol, canonical phase, clock and frequency job;
+no private sequence is shared across a changed address. Shifted rows refer to
+the same packed input rather than storing duplicated PCM matrices. Reductions
+split at both input and template tile boundaries. Cancellation discards local
+work before publication. The cache is admitted only after workspace preflight,
+released before retained payload growth, and does not reduce the existing bit
+retention limit. Insufficient workspace uses the existing smaller direct path.
+The integer ISA dispatch is local to the kernel: AVX2, SSE2 or portable scalar,
+without global VNNI, DOTPROD or I8MM requirements. ARM execution is untested here.
+
+Near-threshold tests and whole-receiver measurements are reported in the local
+`MANUAL-CPU-ARITHMETIC.md` artifact under
+`.agent-work/artifacts/receiver-opt-20261008/`. This stage preserves the preceding
+optimized runnable GUI and raw diagnostic reference. It is an experimental
+manual-testing checkpoint, not full sensitivity/platform qualification. In
+particular, exact conditional retained-statistic agreement does not supply a
+full acquisition-bank or cumulative raw-reference 0.1 dB sensitivity bound.
+
+### Precision audit and strategy disposition
+
+The precision boundary is a numeric kernel interface (`search_fft.hpp` for typed
+float/double arrays and public plans; `search_arithmetic.hpp` for integer operand
+packing and exact wide reductions). It does not include waveform generation,
+cryptographic addressing or admission state. Public IDs describe policy rather than a hardware format; legacy IDs migrate as
+described above. Internal integer diagnostic enums remain stable.
+FP8 is not INT8. No FP8 emulation, GPU kernel, VNNI, DOTPROD or I8MM requirement
+was introduced.
+
+| Stage under Default | Actual storage / multiplication / reduction |
+| --- | --- |
+| PCM input | float source; promoted for processing |
+| Downconversion and disjoint projection bins | complex double; double sums, precise phase coordinates |
+| Private templates and finite pulses | integer crypto/permutation; double coefficients/shaping/rotation |
+| Compact pulse moments | double statistics; selected construction/coordinates long double |
+| Supported bounded direct | FP32 products/reduction; FP64 energy and final evidence; no automatic INT8 |
+| Supported native whole/partitioned FFT | native complex float; scalar/runtime AVX2 float butterflies/products |
+| Unsupported/cached/parallel/generic FFT fallback | original complex double; FP64 butterflies/products |
+| Energy, covariance/Gram, thresholds | double; no assumed independent shaped samples |
+| Tracking, outer-presence guard, timing refinement | FP64 with precise coordinate/address state |
+
+Default and FP32 minimum narrow supported acquisition planes, FFT products and
+reductions, not the table above indiscriminately. Native transform counters
+identify executed coverage. Both use FP64 for cached/parallel/generic FFT paths,
+compact statistics and tracking. This remains a **partial receiver precision
+implementation**. The earlier 2 dB working allowance and wide statistical bounds
+were not observed losses: no substantial loss was measured, but full acquisition
+bank sensitivity and universal negligible loss for interpolation remain unqualified.
+
+The local audit tried the following substantial alternatives:
+
+* **Implemented/measured:** compensated INT8 direct screening and SIMD dots;
+  native float whole/partition FFTs; tabulated scalar/AVX2 float and double
+  butterflies; close-clock FP32 private-template reuse and bounded native row
+  streaming. Whole-receiver results and uncertainty are in the manual report.
+* **Prototyped, not promoted:** INT8 time-domain input/template blocks followed by
+  FP32 FFTs. It adds packing and nonlinear quantization while retaining FP32
+  transforms; the primary forced-whole pilot was slower than native FP32. It has
+  no conservative FFT certificate or qualified covariance/sensitivity model.
+* **Prototyped/rejected:** block-scaled Q15 FFTs, also with INT8 input promotion,
+  explicit exponents, INT32 products and bounded rescaling. Across 256–262144
+  points the tested AVX2 pipeline took about 3.8–5.0 times native FP32, with larger
+  errors. Packing, rescale scans, products, inverse and bounds are included.
+  This rejects that implementation, not every possible integer transform.
+* **Prototyped/rejected:** a second fixed-Q15 forward / FP32 product-and-inverse
+  hybrid removes the repeated scans and rescale passes. Runtime AVX2 uses packed
+  integer products; every forward stage scales by one half, with ties-to-even
+  rounding. Across N256–262144 its paired median pipeline cost is 1.38–1.76 times
+  native FP32 (all 50 fixture medians slower). At N262144 it erases impulse,
+  partial, finite-tail and cancellation inputs. Q8 promotion does not help.
+  These results reject this scaling/kernel, not all integer FFTs. Fully 16-bit
+  multiply-high/averaging butterflies and other scaling schedules remain open.
+* **Prototyped; integration outstanding:** native FP32 paired finite-pulse
+  contraction. On DSSS1000 v2, complete template construction improved 1.029×
+  [1.006,1.062] without a cache, or 1.102× [1.072,1.138] with a bounded 1 KiB
+  converted-chip cache. Much of the latter gain is valid reuse, not precision.
+  Given the preceding measured 38.1% template fraction, the conditional total
+  ceilings at those measured rates are only 1.011× and 1.037×; these are
+  projections, not receiver speedups. An exact FP64 reuse cache is unimplemented.
+* **Bounded out on this host:** native FP8 arithmetic is unavailable. Converting
+  FP8 operands to supported float operations cannot increase float FFT arithmetic
+  throughput and adds packing; it could reduce operand traffic, but no such
+  bandwidth benefit is established here. GPU/native FP8 work remains deferred.
+* **Explicitly outstanding:** a useful certified integer FFT/spectral screen,
+  low-precision compact moments/tracking/Gram fits, cached/parallel native float
+  whole FFTs, and ARM execution. Gram rank tests reaching 1e-12 and cancellation
+  in prefix/moment reductions preclude blindly replacing those values by FP32.
+
+For the preceding primary profile, perfect acceleration of the 3.28% integer
+reduction/certificate portion could improve total time at most 1.034×. Halving
+its 29.4% partition-scoring portion gives at most 1.172×; halving the 38.1%
+private-preparation portion gives at most 1.235×. These Amdahl bounds refer to
+that recorded profile and are not additive. Later FFT improvements alter the
+fractions. Three timing repetitions and conditional score agreement do not
+establish full-bank or cumulative raw-reference loss below 0.1 dB.
+
 ## Hardware AES and whole-receiver cost
 
 Private pattern and DSSS streams use OpenSSL AES-256-CTR. OpenSSL selects hardware
@@ -564,3 +786,14 @@ Frozen source is `1e016a0dffe033c36fc71afad5241d16dc8957e5`, library SHA256
 `66b59da08a5a8444a54bada79a79358bb3b345bb30895702ca6eb1580685ab97`.
 Earlier six-second diagnostic results remain separate. Full Live throughput,
 weak-signal/detection curves and overall optimization qualification remain open.
+
+The later user-approved experimental tradeoff permits less than a few dB of
+measured sensitivity loss when it buys a substantial CPU ceiling increase. The
+earlier investigation used about 2 dB as an experimental working target. That
+allowance and the statistical uncertainty are not observed sensitivity loss: no
+substantial loss was measured. The simplified policy introduces no new relaxed
+accuracy budget, and preserves false-acceptance, hypothesis coverage and physical-end
+requirements. Earlier 0.1 dB experiments and their uncertainty retain their
+historical scope. Close-clock cross-lane template reuse is now implemented in
+experimental FP32 and measured at this checkpoint; full-bank sensitivity and
+raw-reference cumulative loss remain unqualified.
