@@ -18,6 +18,51 @@ template<class F> void rejects(F action,const char* text) {
     throw std::runtime_error(text);
 }
 void near(double a,double b,const char* text) {check(std::abs(a-b)<1e-8,text);}
+void doppler_calculator() {
+    const auto zero=tuning::parse_doppler("0.000000c");
+    check(zero.velocity_c==0&&zero.frequency_ratio==1&&zero.frequency_shift_percent==0&&
+        zero.canonical=="0.000000c"&&tuning::doppler_carrier_hz(1001500,zero)==1001500,
+        "default Doppler must leave the configured carrier exactly unchanged");
+    for(const auto& [text,beta]:std::array<std::pair<std::string_view,double>,6>{{
+        {"0.001c",.001},{"-0.001c",-.001},{"+1 knots",1852./3600/299792458},
+        {"1 MPH",1609.344/3600/299792458},{"1kph",1000./3600/299792458},
+        {"  -0.25 C  ",-.25}}}) {
+        const auto value=tuning::parse_doppler(text);
+        check(std::abs(value.velocity_c-beta)<1e-15,"Doppler velocity unit conversion changed");
+        const auto expected=std::sqrt((1-beta)/(1+beta));
+        check(std::abs(value.frequency_ratio-expected)<1e-15,
+            "signed radial Doppler must use the relativistic frequency ratio");
+        const auto roundtrip=tuning::parse_doppler(value.canonical);
+        check(roundtrip.canonical==value.canonical&&roundtrip.velocity_c==value.velocity_c&&
+            roundtrip.frequency_ratio==value.frequency_ratio,
+            "Doppler canonical export must retain the calculated carrier exactly");
+    }
+    const auto receding=tuning::parse_doppler("0.001c");
+    const auto approaching=tuning::parse_doppler("-0.001c");
+    check(receding.frequency_shift_percent<0&&approaching.frequency_shift_percent>0&&
+        std::abs(receding.frequency_ratio*approaching.frequency_ratio-1)<1e-15,
+        "receding and approaching Doppler sign or reciprocal relation changed");
+    for(const auto percent:{-50.,-0.1,0.,0.1,100.}) {
+        const auto value=tuning::parse_doppler(std::to_string(percent)+"%");
+        check(std::abs(value.frequency_shift_percent-percent)<1e-12,
+            "frequency-percentage Doppler input must describe the shift directly");
+        check((percent<0&&value.velocity_c>0)||(percent>0&&value.velocity_c<0)||percent==0,
+            "percentage input confused velocity and frequency-shift signs");
+    }
+    const auto physical=tuning::doppler_carrier_hz(1001500,receding);
+    check(std::abs((physical-1000000)-(1001500*receding.frequency_ratio-1000000))<1e-9&&
+        std::abs((physical-1000000)-1500*receding.frequency_ratio)>900,
+        "Doppler must adjust physical Carrier before unchanged Shift");
+    for(const auto* text:{"","0","1c","-1c","1.01c","-100%","nan c","inf%","1m/s","1 2c","++1c","+-0.1c","0.1c extra"})
+        rejects([&]{tuning::parse_doppler(text);},"invalid Doppler input accepted");
+    check(tuning::parse_doppler("-0c").canonical==zero.canonical,
+        "negative-zero Doppler must use the unchanged default identity");
+    check(tuning::parse_doppler("0.999999999999c").frequency_ratio>0,
+        "valid sub-light-speed Doppler was arbitrarily capped");
+    rejects([&]{tuning::doppler_carrier_hz(0,zero);},"zero physical carrier accepted");
+    rejects([&]{tuning::doppler_carrier_hz(std::numeric_limits<double>::max(),approaching);},
+        "overflowed Doppler-adjusted carrier accepted");
+}
 void outer_dsss_versions() {
     using V=modem::OuterDsssVersion;
     for(const auto version:{V::legacy_v1,V::interleaved_v2}) {
@@ -40,6 +85,9 @@ void outer_dsss_versions() {
     check(tuning::resolve(360,70,tuning::PatternMode::auto_keystream,true,1500,1,V::interleaved_v2).config.outer_dsss_version==V::legacy_v1,
         "DSSS Off must retain its existing configuration");
     rejects([]{tuning::parse_outer_dsss_version("v2");},"unknown outer DSSS version accepted");
+    check(tuning::parse_outer_dsss_version("interleaved-v2")==V::interleaved_v2&&
+        tuning::outer_dsss_version_id(V::interleaved_v2)=="interleave",
+        "legacy V2 alias must import while public construction exports interleave");
     rejects([]{tuning::outer_dsss_version_id(static_cast<V>(99));},"invalid outer DSSS enum accepted");
 }
 std::vector<float> raw_capture(const Bytes& bits,const transfer::Options& options) {
@@ -588,6 +636,6 @@ void receive_target_lists() {
 }
 }
 int main() {
-    try {search_arithmetic_modes();outer_dsss_versions();modes_and_patterns();snr_planning();shannon_capacity();receive_target_lists();automatic_pattern_rates();bandwidth_derived_clocks();nearby_carrier_clocks();sub_hertz_patterns();explicit_carrier_planning();audio_passband_pattern_roundtrips();physical_simulation_presets();oscillator_simulation_presets();sizing_and_validation();std::cout<<"tuning tests passed\n";return 0;}
+    try {doppler_calculator();search_arithmetic_modes();outer_dsss_versions();modes_and_patterns();snr_planning();shannon_capacity();receive_target_lists();automatic_pattern_rates();bandwidth_derived_clocks();nearby_carrier_clocks();sub_hertz_patterns();explicit_carrier_planning();audio_passband_pattern_roundtrips();physical_simulation_presets();oscillator_simulation_presets();sizing_and_validation();std::cout<<"tuning tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"tuning tests failed: "<<error.what()<<'\n';return 1;}
 }

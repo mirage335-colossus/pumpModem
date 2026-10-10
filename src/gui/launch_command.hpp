@@ -11,10 +11,11 @@ struct Patch {
     std::optional<double> tx_dbm,path_loss_db,noise_dbm_hz,target_db_hz;
     std::optional<double> short_target_db_hz,long_target_db_hz,rate_hz,carrier_hz;
     // Carrier is the absolute physical frequency; rf_shift_hz stores the
-    // translation Shift. The real USB stream uses Carrier minus Shift.
+    // translation Shift. Doppler adjusts physical Carrier before subtracting
+    // Shift; the configured Carrier and Shift are saved unchanged.
     std::optional<double> rf_shift_hz,search_margin;
     std::optional<std::string> oscillator,rf_oscillator,reference,pattern;
-    std::optional<std::string> clock_sync,fhss,dsss_version,search_arithmetic;
+    std::optional<std::string> clock_sync,fhss,dsss_version,dsss_mode,search_arithmetic,doppler;
     // File references and named selection only; never serialize key material.
     std::optional<std::string> keyfile,key_name,tx_key;
     std::optional<double> audio_timing_error_seconds;

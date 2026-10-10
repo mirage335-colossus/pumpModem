@@ -66,6 +66,56 @@ void search_arithmetic_model_identity() {
     check(integer.receiver_geometry.arithmetic_accumulation.find("INT64")!=std::string::npos&&
           integer.receiver_geometry.arithmetic_limit.find("GPU")!=std::string::npos,
           "planner omitted integer accumulation or deferred GPU scope");
+    transfer::Options measured;
+    measured.modem=tuning::resolve(10,40,tuning::PatternMode::auto_keystream,true,7500,1000,
+        modem::OuterDsssVersion::interleaved_v2).config;
+    measured.key.emplace(Bytes(32,0x57));measured.search_seconds=6;
+    measured.dsp_workspace_bytes=std::size_t{1024}*1024*1024;
+    modem::OscillatorSearchConfig oscillator;oscillator.lf={.0001,.5};oscillator.rf={.0001,.005};
+    oscillator.rf_shift_hz=1000000;oscillator.margin=3;measured.modem.oscillator_search=oscillator;
+    const auto complete=wire(1,measured.modem);
+    const auto priced=[&] {return simulation::estimate(complete,measured,true,clean_channel(),{},1,false,
+        100,256,simulation::ReceiverWorkMode::hardware_fallback);};
+    const auto default_cost=priced();
+    measured.modem.search_arithmetic=modem::SearchArithmetic::fp32;const auto minimum_cost=priced();
+    measured.modem.search_arithmetic=modem::SearchArithmetic::fp64;const auto forced_cost=priced();
+    near(default_cost.cpu_seconds,minimum_cost.cpu_seconds,"Default and FP32 minimum share actual eligible execution pricing");
+    near(default_cost.gpu_seconds,minimum_cost.gpu_seconds,"equivalent arithmetic policies changed hypothetical host/GPU split");
+    check(default_cost.receiver_geometry.arithmetic_backend.find("Native serial")!=std::string::npos&&
+          default_cost.receiver_geometry.arithmetic_limit.find("local Ryzen")!=std::string::npos&&
+          default_cost.cpu_seconds<forced_cost.cpu_seconds&&
+          forced_cost.receiver_geometry.arithmetic_limit.find("Generic FP64")!=std::string::npos&&
+          default_cost.frequency_rate_hypotheses==forced_cost.frequency_rate_hypotheses&&
+          default_cost.fallback_timing_hypotheses==forced_cost.fallback_timing_hypotheses,
+          "measured native arithmetic/cache pricing must distinguish FP64 without removing hypotheses");
+    check(default_cost.gpu_seconds>.1*default_cost.cpu_seconds,
+          "hypothetical GPU must retain private construction, plan, frontend and tracking host costs");
+
+    // 500 canonical phases: a499-phase group exceeds the selector range cap,
+    // while a singleton is eligible for direct matching. The mixed component
+    // must rebuild original FP64 templates, independent of requested precision.
+    measured.modem.integration_seconds=std::nextafter(520080./40000.,0.);
+    measured.modem.oscillator_search->lf={.000001,0};
+    measured.modem.oscillator_search->rf={0,0};
+    measured.modem.oscillator_search->rf_shift_hz=0;
+    measured.clock_sync=clock_sync::Policy{0,0,0};measured.audio_timing_error_seconds=0;
+    auto mixed_draft=wire(1,measured.modem);mixed_draft.total_seconds=45;
+    const auto mixed_price=[&] {return simulation::estimate(mixed_draft,measured,true,clean_channel(),{},1,false,
+        100,256,simulation::ReceiverWorkMode::hardware_timing_model,{0,0,1./40000});};
+    measured.modem.search_arithmetic=modem::SearchArithmetic::default_mode;const auto mixed=mixed_price();
+    measured.modem.search_arithmetic=modem::SearchArithmetic::fp64;const auto mixed_exact=mixed_price();
+    const auto& m=mixed.receiver_geometry;const auto& e=mixed_exact.receiver_geometry;
+    check(modem::symbol_sample_count(measured.modem)==520080&&mixed.receiver_workspace_supported&&
+          m.paired_fallback_components>0&&m.direct_template_jobs>0&&m.input_fft_transforms>0&&
+          m.paired_direct_template_jobs==0,
+          "mixed selector fixture must actually combine full and direct jobs before pricing fallback");
+    near(m.retained_start_positions,e.retained_start_positions,"mixed arithmetic fallback removed admitted starts");
+    near(m.full_start_positions,e.full_start_positions,"mixed arithmetic fallback changed full timing charges");
+    check(mixed.frequency_rate_hypotheses==mixed_exact.frequency_rate_hypotheses&&
+          mixed.epoch_hypotheses==mixed_exact.epoch_hypotheses&&
+          mixed.receiver_cpu_seconds>=.99*mixed_exact.receiver_cpu_seconds,
+          "mixed FP64 fallback must not retain an automatic arithmetic/cache discount or remove lanes/epochs");
+
 }
 
 void advisory_cancellation() {
@@ -410,6 +460,81 @@ void partial_compact_probability() {
     check(aligned.confidence_available&&aligned.one_bit_confidence_available&&aligned.differential_model_available&&
           aligned.pulse_projection_modeled&&!aligned.pulse_segment_projection_modeled,
           "aligned noncircular templates must retry a pristine real-covariance model");
+}
+
+
+void spread_example_reference() {
+    transfer::Options o;o.search_seconds=6;o.timestamp=1800000000;o.dsp_workspace_bytes=1024ULL*1024*1024;
+    o.modem=tuning::resolve(360,40,tuning::PatternMode::auto_keystream,true,1500,10,
+        modem::OuterDsssVersion::interleaved_v2).config;
+    modem::OscillatorSearchConfig osc;
+    osc.lf=tuning::oscillator_model(tuning::parse_oscillator_preset("crystal"));
+    osc.rf=tuning::oscillator_model(tuning::parse_oscillator_preset("gpsdo-xo"));osc.rf_shift_hz=30000000;osc.margin=3;
+    o.modem.oscillator_search=osc;
+    const auto effects=modem::oscillator_effects(o.modem);
+    auto channel=clean_channel();channel.clock_error_ppm=effects.clock_error_ppm;
+    channel.frequency_offset_hz=effects.frequency_offset_hz;
+    channel.phase_noise_degrees_per_sqrt_second=effects.phase_noise_degrees_per_sqrt_second;
+    check(o.modem.sample_rate==14400&&modem::symbol_sample_count(o.modem)==5120,
+        "Spread example lost its actual application-selected geometry");
+    for(unsigned key:{0x57,0x31,0xa9}) {
+        o.key.emplace(Bytes(32,static_cast<std::uint8_t>(key)));
+        double previous=0;
+        for(const double cn0:{10.,20.,30.,140.020599913279625}) {
+            channel.snr_db=cn0-10*std::log10(o.modem.sample_rate/2.);
+            const auto e=simulation::estimate(wire(1,o.modem),o,true,channel,{},1,true,100,256,
+                simulation::ReceiverWorkMode::hardware_fallback);
+            check(e.profile_matches&&e.receiver_workspace_supported&&e.carrier_in_search&&e.clock_in_search&&
+                  e.reference_probability_available&&e.one_bit_reference_available&&!e.confidence_available&&
+                  !e.probability_interval_available&&e.probability_model_limit.find("principal planes")!=std::string::npos,
+                  "Spread crystal Interleave example must expose a covariance-aware conditional RX reference");
+            check(e.one_bit_success_probability>=previous,"Spread conditional reference decreases as received power increases");
+            previous=e.one_bit_success_probability;
+            std::cout<<"Spread key "<<key<<", C/N0 "<<cn0<<", conditional first-bit "<<previous<<'\n';
+        }
+        check(previous>.99,"Strong spread example was incorrectly rejected by the probability model");
+    }
+}
+
+void sub9_probability_model_limits() {
+    transfer::Options options;options.timestamp=1800000000;options.search_seconds=6;
+    options.dsp_workspace_bytes=std::size_t{512}*1024*1024;
+    modem::OscillatorSearchConfig oscillator;
+    oscillator.lf=oscillator.rf=tuning::oscillator_model(tuning::parse_oscillator_preset("gpsdo-ocxo"));
+    for(const auto rate:{.1,.01}) {
+        options.modem=tuning::resolve(rate,-46,tuning::PatternMode::auto_keystream,true,1500).config;
+        options.modem.stream_epoch=options.timestamp;options.modem.oscillator_search=oscillator;
+        for(std::size_t i=0;i<options.modem.spreading_seed.size();++i)
+            options.modem.spreading_seed[i]=static_cast<std::uint8_t>(37*i+11);
+        const auto effects=modem::oscillator_effects(options.modem);
+        auto channel=clean_channel();channel.clock_error_ppm=effects.clock_error_ppm;
+        channel.frequency_offset_hz=effects.frequency_offset_hz;
+        channel.phase_noise_degrees_per_sqrt_second=effects.phase_noise_degrees_per_sqrt_second;
+        channel.snr_db=0-200-(-164)-10*std::log10(options.modem.sample_rate/2.);
+        const auto value=simulation::estimate(wire(1,options.modem),options,true,channel,{},1,true,100,256);
+        near(channel.snr_db+10*std::log10(options.modem.sample_rate/2.),-36,"Sub9 actual link budget changed");
+        check(value.profile_matches&&value.receiver_workspace_supported&&value.carrier_in_search&&value.clock_in_search,
+              "Sub9 model availability test lost receiver/search support");
+        if(rate==.1) {
+            check(!value.confidence_available&&!value.one_bit_confidence_available&&value.differential_windows==7849&&
+                  value.differential_window_seconds==320&&
+                  value.probability_model_limit.find("7849 local windows exceed 4096")!=std::string::npos&&
+                  value.probability_model_limit.find("template integration blocks exceed 524288")!=std::string::npos,
+                  "Sub9 .1 must explain both probability work limits without inventing receiver confidence");
+        } else {
+            check(value.confidence_available&&value.one_bit_confidence_available&&value.differential_windows==1024&&
+                  value.differential_window_seconds==3200&&value.differential_model_available&&value.probability_trials==256,
+                  "Sub9 .01 lost its supported first-bit joint detector model");
+            const auto draft=simulation::estimate(wire(70,options.modem),options,true,channel,{},1,true,100,256);
+            check(!draft.confidence_available&&draft.one_bit_confidence_available&&
+                  draft.probability_model_limit.find("timing ownership")!=std::string::npos,
+                  "Sub9 first-bit confidence was promoted to full-draft confidence");
+        }
+        std::cout<<"Sub9 rate "<<rate<<": sample rate "<<options.modem.sample_rate<<", symbol "
+                 <<modem::symbol_seconds(options.modem)<<" s, windows "<<value.differential_windows
+                 <<", model "<<value.confidence_available<<", probability "<<value.success_probability
+                 <<", limit "<<value.probability_model_limit<<'\n';
+    }
 }
 
 void differential_model_limits() {
@@ -1163,10 +1288,10 @@ void versioned_outer_work_and_probability_scope() {
           interleaved.receiver_cpu_seconds>legacy.receiver_cpu_seconds,
           "V2 maps/setup must be charged without changing fine-chip/symbol geometry");
     check(!interleaved.confidence_available&&!interleaved.one_bit_confidence_available&&
-          !interleaved.reference_probability_available&&!interleaved.one_bit_reference_available&&
-          !interleaved.probability_interval_available&&interleaved.probability_trials==0&&
-          interleaved.probability_model_limit.find("pre-limiter")!=std::string::npos,
-          "new V2 shaped/limited energy must not inherit a legacy numerical probability");
+          interleaved.reference_probability_available&&interleaved.one_bit_reference_available&&
+          !interleaved.probability_interval_available&&interleaved.probability_trials==256&&
+          interleaved.probability_model_limit.find("actual-source")!=std::string::npos,
+          "Interleave must use its own bounded source statistics and minimum trial budget without claiming bank qualification");
     auto early_options=options;
     early_options.modem=tuning::resolve(10,40,tuning::PatternMode::auto_keystream,true,7500,1000,
         modem::OuterDsssVersion::interleaved_v2).config;
@@ -1178,6 +1303,33 @@ void versioned_outer_work_and_probability_scope() {
           early.initial_epoch_setup_seconds>0&&early.new_epoch_setup_seconds>0&&
           early.new_epoch_full_fft_batches==0,
           "pre-first-FFT V2 must charge initial/fresh constructors and permutations without inventing scored jobs");
+    const auto reference=simulation::estimate(wire(1,early_options.modem),early_options,true,clean_channel(),{},1,true,
+        100,256,simulation::ReceiverWorkMode::hardware_fallback);
+    check(reference.reference_probability_available&&reference.one_bit_reference_available&&
+          !reference.confidence_available&&!reference.one_bit_confidence_available&&
+          !reference.probability_interval_available&&reference.probability_trials==256&&
+          reference.probability_model_limit.find("actual-source")!=std::string::npos&&
+          reference.probability_model_limit.find("fixed initial-phase")!=std::string::npos&&
+          std::isfinite(reference.modeled_symbol_snr_db),
+          "bounded shaped V2 must expose an actual-source conditional reference without full-bank confidence");
+    const auto repeated=simulation::estimate(wire(1,early_options.modem),early_options,true,clean_channel(),{},1,true,
+        100,256,simulation::ReceiverWorkMode::hardware_fallback);
+    near(repeated.modeled_symbol_snr_db,reference.modeled_symbol_snr_db,"cached V2 source statistics changed actual projected energy");
+    near(repeated.one_bit_success_probability,reference.one_bit_success_probability,"cached V2 source statistics changed conditional draws");
+    const auto simulated=simulation::estimate(wire(1,early_options.modem),early_options,true,clean_channel(),{},1,true,
+        100,256,simulation::ReceiverWorkMode::sampled_simulation);
+    check(simulated.reference_probability_available&&
+          simulated.modeled_symbol_snr_db<reference.modeled_symbol_snr_db-3,
+          "nominal-noise simulation must charge actual V2 backoff while actual-power hardware avoids double charging it");
+    auto voice_options=early_options;
+    voice_options.modem=tuning::resolve(3.6,70,tuning::PatternMode::auto_keystream,true,1500,1000,
+        modem::OuterDsssVersion::interleaved_v2).config;
+    const auto voice=simulation::estimate(wire(1,voice_options.modem),voice_options,true,clean_channel(),{},1,true,
+        100,256,simulation::ReceiverWorkMode::hardware_fallback);
+    check(voice_options.modem.sample_rate==14400&&modem::symbol_sample_count(voice_options.modem)==512000&&
+          voice.drift_sections==4&&voice.differential_windows==0&&voice.drift_model_available&&
+          voice.reference_probability_available&&!voice.confidence_available&&!voice.probability_interval_available,
+          "Interleave voice default must expose the supported quarter-section conditional reference");
     auto wrong_profile=options.modem;wrong_profile.outer_dsss_version=modem::OuterDsssVersion::legacy_v1;
     const std::array wrong_profiles{wrong_profile};
     const auto mismatched=simulation::estimate(draft,options,true,clean_channel(),wrong_profiles,1,false);
@@ -1804,6 +1956,8 @@ void projected_pattern_workload() {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc==2&&std::string_view(argv[1])=="--spread-only") {spread_example_reference();return 0;}
+        if(argc==2&&std::string_view(argv[1])=="--sub9-only") {sub9_probability_model_limits();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--arithmetic-only") {
             search_arithmetic_model_identity();std::cout<<"search arithmetic model tests passed\n";return 0;
         }
@@ -1827,7 +1981,7 @@ int main(int argc,char** argv) {
         if(argc==2&&std::string(argv[1])=="--partial-only") {
             partial_compact_probability();std::cout<<"partial simulation estimate tests passed\n";return 0;
         }
-        utc_bank_estimate();clock_dsss_reference();restricted_fft_direct_and_bounded_fallback();guarded_component_workload();versioned_outer_work_and_probability_scope();rolling_fft_epoch_workload();compact_clock_prior_workload();probability_and_framing();workload_and_impairments();receiver_cpu_budget();received_processing_budget();whole_symbol_phase_coherence();partial_compact_probability();differential_model_limits();drift_receiver_estimate();receiver_statistic_controls();raw_sample_probability_geometry();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
+        utc_bank_estimate();clock_dsss_reference();restricted_fft_direct_and_bounded_fallback();guarded_component_workload();versioned_outer_work_and_probability_scope();rolling_fft_epoch_workload();compact_clock_prior_workload();probability_and_framing();workload_and_impairments();receiver_cpu_budget();received_processing_budget();whole_symbol_phase_coherence();partial_compact_probability();spread_example_reference();sub9_probability_model_limits();differential_model_limits();drift_receiver_estimate();receiver_statistic_controls();raw_sample_probability_geometry();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
         coupled_and_independent_clock_estimates();streamed_template_workload();target_and_channel_are_independent();oscillator_policy_geometry();nearby_shift_workload();equivalent_receive_profiles();affine_coefficient_workload();projected_pattern_workload();
         std::cout<<"simulation estimate tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"simulation estimate tests failed: "<<error.what()<<'\n';return 1;}

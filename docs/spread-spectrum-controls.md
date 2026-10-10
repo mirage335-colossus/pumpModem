@@ -6,10 +6,13 @@ a claim of practical 1000x spreading at constant receiver CPU cost.
 
 ## Separate streams and waveform geometry
 
-The DSSS choices are Off, 10x, 100x and 1000x. Off retains the existing waveform.
+The public DSSS mode choices are **Off** and **Interleave**, with a separate
+10x, 100x or 1000x Spreading selector. Off retains the existing waveform and
+remembers the selected factor, including save/load. Selecting a factor enables
+Interleave.
 An enabled factor applies fine QPSK chips from the keyfile's dedicated DSSS
 stream. The `legacy` construction holds each inner coefficient for the factor's
-fine chips. The local `interleaved-v2` construction additionally permutes the
+fine chips. The local `interleave` construction additionally permutes the
 complete fine-chip coefficient positions within each bit before shaping. The existing independent private zero
 and one candidates remain at every bit position. The Data cipher and Scrambler
 streams are not reused as outer spreading streams.
@@ -47,11 +50,20 @@ a sharp measured emission mask. See the quantitative
 
 ### Versioned interleaving and headroom
 
-The local GUI/CLI defaults to `--dsss-version interleaved-v2` when outer DSSS is
+The local GUI/CLI defaults to `--dsss-version interleave` when outer DSSS is
 active. Use `--dsss-version legacy` for the preceding wire construction. Peers
 must select the same version; there is no transmitted version marker or automatic
-cross-version negotiation. Factor Off ignores the version and keeps its existing
-waveform. Saved parameter lists and launch commands carry the explicit version.
+cross-version negotiation. Off exports `--dsss-mode off` with the remembered factor and Interleave construction and keeps its existing
+waveform. Saved parameter lists and launch commands carry the explicit factor and
+construction. The old `interleaved-v2` identifier remains an accepted alias;
+canonical export uses `interleave`. The explicit mode is saved separately from
+the factor; older factor1 commands still load as Off, and older active factor
+commands preserve their specified construction. Explicit `legacy` imports stay visibly labeled
+Legacy (diagnostic), preserving their exact waveform until Interleave is selected.
+Legacy is absent from the ordinary mode menu, but retained internally and through
+CLI for diagnostic comparisons. There is no established universal 20% CPU penalty
+that would justify deleting that reference. Cryptographic version/counter domains
+and the internal `interleaved_v2` identifier are unchanged by this UI simplification.
 
 V2 uses six new counter domains: an independent permutation-seed domain and a
 rotation domain for each of factors 10, 100 and 1000. A canonical epoch/symbol
@@ -95,10 +107,12 @@ they do not imply available hardware gain or peak headroom.
 
 V2 is an experimental manual-test construction. Its full-acquisition sensitivity,
 wrong-key behavior and hardware spectrum are not qualified by the previous
-conditional legacy-factor10 evidence. Numerical RX probability remains unavailable
-for V2 until its changed finite-pulse and limiter geometry is validated.
+conditional legacy-factor10 evidence. The planner may display an explicitly conditional RX reference when its bounded
+finite-shape/limiter calculation is supported. It does not qualify full acquisition
+or cumulative sensitivity. Unsupported geometries continue to show an unavailable
+reason; see [simulation estimates](simulation-estimates.md).
 
-Selecting 10x, 100x or 1000x in the GUI sets a useful voice-passband starting
+Enabling Interleave from Off, or selecting 10x, 100x or 1000x in the GUI, sets a useful voice-passband starting
 point: inner Rate 360, 36 or 3.6 Hz respectively, with stream Carrier 1500 Hz
 (displayed absolute Carrier is Shift plus 1500 Hz). Explicit imported commands
 retain their supplied Rate and Carrier. The outer nominal Rate is 3600 Hz in
@@ -118,7 +132,8 @@ with the outer bandwidth and search bank. Higher bandwidth does not create extra
 received bit energy at fixed power and bit duration. Qualified full-bank detection probabilities remain unavailable for the new outer factors.
 For legacy DSSS the GUI can show a separately labeled matched-template AWGN
 reference, which omits the presence guard and does not predict complete acquisition
-success. Interleaved V2 withholds that numerical reference. Qualified coherent
+success. Interleave uses its own bounded actual-source conditional reference,
+including finite shaping and limiting, where that geometry is supported. Qualified coherent
 searches now use bounded timing components and paired direct/tiled contraction;
 this reduces actual acquisition work without claiming a fully qualified fast
 despreader. See [measured search work](search-compute.md).
@@ -200,3 +215,8 @@ and the [development contract](development.md). Conditional **legacy** factor10 
 threshold curves estimate0 dB additional loss with a simultaneous95%-coverage
 upper bound0.08 dB. Full-bank curves, enhanced branches, hardware/regulatory
 measurements and broader platform qualification remain open.
+
+The receiver geometry, arithmetic coverage, template reuse, arrival grid and bank
+work details are grouped under **Model limits and references** in Link Planner.
+The developer arithmetic selector and the main RX/CPU results remain visible.
+Manual Doppler is documented in the [modem reference](modem.md#manual-doppler-calculator).

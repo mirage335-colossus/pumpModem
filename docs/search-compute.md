@@ -160,11 +160,12 @@ Outer DSSS changes actual fine-chip/sample geometry and template work. The
 current matched-template fallback is included in the work model; there is no
 constant-cost fast despreader or measured 1000x spreading speedup. Probability
 estimates for the complete new receiver remain unqualified; separately labeled
-legacy conditional matched-template AWGN references may be shown. Interleaved
-V2 has separately versioned maps/streams, a pre-limiter gain change and a
-conservative uncalibrated FFT construction allowance. Its numerical probability
-and compact CPU feasibility remain unavailable pending waveform/receiver
-qualification. [Spread controls](spread-spectrum-controls.md)
+conditional AWGN references may be shown. Interleave has separately versioned
+maps/streams and a pre-limiter gain change. Eligible complex FFT geometries now
+use an actual shaped/limited source reference; it is not full-bank sensitivity
+qualification. Its finite template family uses measured construction/reuse costs
+where eligible, with engineering allowances elsewhere. Compact CPU feasibility
+and unsupported probability geometries remain unavailable. [Spread controls](spread-spectrum-controls.md)
 describe the open structured-interference and qualification limits.
 
 ## Compute boundaries
@@ -180,8 +181,9 @@ not use the persistent worker pool or implement GPU dispatch.
 
 Logical indices do not encode a CPU worker number. Range dispatch allocates no
 state proportional to the number of jobs; tests cover 100,003 jobs and sparse
-ranges spanning `SIZE_MAX`. CPU concurrency still defaults to all but one
-available logical CPU, with at least one. Available work and workspace can lower
+ranges spanning `SIZE_MAX`. The generic CPU pool defaults to all but one available logical CPU, with at least
+one. Automatic large coherent private acquisition selects the measured serial
+native path when eligible and its scratch fits; see the dispatch follow-up below. Available work and workspace can lower
 the actual concurrency of the numerical batch paths.
 
 CPU correlation chooses its range grain from both lane count and worker count,
@@ -535,6 +537,17 @@ planner's **Model limits and references**, offers exactly:
   phase, energy and cancellation-sensitive calculations preserved. Exact caching
   remains allowed; approximate interpolation is prohibited.
 
+| Option | Actual execution | Expected CPU ceiling |
+| --- | --- | --- |
+| Default — automatic | Native FP32 and eligible template reuse where supported; higher-precision fallbacks elsewhere | Best demonstrated path in the measured geometries |
+| FP32 minimum | Currently the same paths as Default; prohibits lower-precision operands | Essentially the same as Default today |
+| FP64 force | FP64 operands and original templates; bypasses approximate template interpolation | Independent diagnostic reference; usually slower in the demanding tested cases |
+
+The FP64 interpolation bypass is deliberate: it protects the independent original
+template reference from interpolation error, in addition to forcing arithmetic
+precision. A Default/FP64 comparison therefore measures both arithmetic and reuse
+choices. It must not be labeled a pure floating-point-width speedup.
+
 Fresh startup with no setting selects Default; a partial parameter-list import
 with no arithmetic field preserves the current choice. `fp32`/`FP32` and
 `fp64`/`FP64` remain aliases for `fp32-min` and `fp64-force`. Old `matrix8`,
@@ -797,3 +810,61 @@ requirements. Earlier 0.1 dB experiments and their uncertainty retain their
 historical scope. Close-clock cross-lane template reuse is now implemented in
 experimental FP32 and measured at this checkpoint; full-bank sensitivity and
 raw-reference cumulative loss remain unqualified.
+
+
+### Application arithmetic dispatch and estimate calibration follow-up
+
+The application previously passed automatic worker count0, which bypassed the
+serial-only native FP32 acquisition path used by the precision benchmarks. This
+was a real dispatch limitation, not a reason to price that fallback as FP32.
+Automatic Default/FP32-minimum now selects one worker for large private coherent
+FFT geometry: N>=65536, more than256 symbol samples, multiple initial stream
+alternatives, no exact raw-sample fit, no quarter/differential branch. Explicit
+worker counts and FP64-force retain their original scheduling. The automatic scheduling change requires native scratch to fit the workspace;
+runtime range, cache and mixed-cohort fallback checks still apply. Every hypothesis is retained.
+
+Final validation used72 fresh-process executions, three alternating paired runs
+per geometry, with identical original PCM, synthetic keys, oscillator banks and
+input rates. The primary60s capture contains one accepted bit and observed
+absence: Rate10/DSSS1000 Interleave, Fs40000,64MiB, one key/epoch, five qualified
+frequency/clock pairs (three without a prior). Construction, setup, push, polls,
+finish and destruction are included; common fixture preparation/loading is
+excluded. CPUs2–5 were isolated from other cooperating tests/builds; desktop
+activity and the governor were uncontrolled.
+
+| Arrival prior | Frozen automatic CPU → new automatic CPU | Paired speedup [descriptive95%] |
+| --- | --- | --- |
+|1ms|2.0874 →1.5265s|1.367× [1.312,1.426]|
+|6s|7.3807 →2.9433s|2.506× [2.250,2.792]|
+|None qualified|8.3646 →4.6432s|1.803× [1.572,2.068]|
+
+Intervals are Student-t on three paired log ratios. Broad6s wall time changes
+4.538→2.945s; an all12-core-affinity check gives2.099× CPU [2.040,2.160] and
+4.140→3.098s wall. New Default and FP32 minimum agree in recorded execution
+fields and CPU ratio1.003 [0.995,1.010]. FP64 force remains the independent
+original-template reference; broad6s CPU is7.258s versus Default2.943s, a
+2.466× difference [2.400,2.534]. No hypotheses, trial charges, accepted bits,
+physical completion or media publication identities changed.
+
+DSSS10/100 legacy diagnostics and ordinary fast/wide/weak controls have no
+statistically resolved regression in these runs. They do not establish
+Interleave10/100 native arithmetic speedups. Peak RSS rises53.40→57.44MiB
+in the tight primary and falls77.28→61.34MiB in the broad primary. Retained
+workspace grows by2MiB in the broad case, within64MiB. Media first-bit publication
+remains13.7728s tight and26.2144s broad: there is no added media delay. These are
+single-bank measurements, not full rolling Live, multi-key or short-text
+qualification. Native operator/cache sensitivity evidence is unchanged and
+still conditional/inconclusive; no negligible-loss bound is newly established.
+
+The arithmetic cost model separately prices production generic/native transforms,
+plan setup and whole/paired original versus eligible cached template creation.
+Rolling-epoch, outer-code guard and unknown-anchor allowances remain conservative
+and uncalibrated; they can dominate and dilute the total predicted precision
+ratio. A fixed-bank speedup must not be applied as a multiplier to that broader
+workload. GPU times remain hypothetical host/offload projections.
+
+Manual Doppler changes the effective physical carrier to `r*Carrier` before
+unchanged Shift is subtracted. Frequency/clock uncertainty follows that adjusted
+carrier and the resolved illustrative hopping plan. It does not reduce unknown
+residual oscillator/Doppler uncertainty or the admitted timing set. See the
+[calculator definition](modem.md#manual-doppler-calculator).

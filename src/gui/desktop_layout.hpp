@@ -28,7 +28,7 @@ enum class Slot {
     compression_explanation, short_bits_label, short_bits, short_bits_detail, compression_codes,
     short_use_text, short_send_key, short_transmit, short_transmit_noise, short_cancel, short_airtime,
     compression_signals, copy_raw_signal, paste_raw_signal, raw_recovery_actions, received_raw_bits,
-    device, mono, live_duplex, volume, exclusive, bandwidth, carrier, rf_shift, snr, long_snr, receive_snr, pattern, fec, dsp_workspace, diagnostics, status,
+    device, mono, live_duplex, volume, exclusive, bandwidth, carrier, rf_shift, doppler, snr, long_snr, receive_snr, pattern, fec, dsp_workspace, diagnostics, status,
     fast_profile, fast_expected_snr, fast_symbol_rate, fast_constellation, fast_coding, fast_fec, fast_depth, fast_device, fast_mono, fast_encryption,
     fast_key, fast_key_path, fast_open_key, fast_generate_key, fast_text, fast_file, fast_choose_file,
     fast_transmit, fast_cancel, fast_save, fast_progress, fast_rate, fast_tracking,
@@ -47,7 +47,7 @@ inline constexpr bool persistent_slot(Slot slot) {
     case Slot::search_margin: case Slot::clock_accuracy: case Slot::clock_region: case Slot::clock_offset: case Slot::audio_error:
     case Slot::dsss_factor: case Slot::dsss_version: case Slot::fhss:
     case Slot::key_actions: case Slot::key_path: case Slot::key:
-    case Slot::device: case Slot::mono: case Slot::live_duplex: case Slot::volume: case Slot::exclusive: case Slot::bandwidth: case Slot::carrier: case Slot::rf_shift: case Slot::snr: case Slot::long_snr: case Slot::receive_snr: case Slot::pattern:
+    case Slot::device: case Slot::mono: case Slot::live_duplex: case Slot::volume: case Slot::exclusive: case Slot::bandwidth: case Slot::carrier: case Slot::rf_shift: case Slot::doppler: case Slot::snr: case Slot::long_snr: case Slot::receive_snr: case Slot::pattern:
     case Slot::fec: case Slot::dsp_workspace: case Slot::diagnostics: case Slot::status: return true;
     default: return false;
     }
@@ -153,8 +153,8 @@ struct DesktopLayout {
         out[Slot::repeatable] = {238, 61, 119, 28};
         out[Slot::key_actions] = {366, 62, 92, field_height};
         out[Slot::key_path] = {366, 92, width - 382, 18};
-        out[Slot::dsss_factor] = {466, 62, 90, field_height};
-        out[Slot::dsss_version] = {566, 62, 165, field_height};
+        out[Slot::dsss_version] = {466, 62, 165, field_height};
+        out[Slot::dsss_factor] = {641, 62, 90, field_height};
         out[Slot::fhss] = {741, 62, width - 999, field_height};
         out[Slot::key] = {width - 248, 62, 232, field_height};
         // Link assumptions and RX success stay beside the compact Simulation
@@ -313,21 +313,23 @@ struct DesktopLayout {
         constexpr int control_gap = 10;
         const int device_width = 170 + extra * 20 / 100, bandwidth_width = 112 + extra * 10 / 100;
         const int carrier_width = 135 + extra * 10 / 100, shift_width = 120 + extra * 10 / 100;
-        const int pattern_width = 130 + extra * 10 / 100, fec_width = 148 + extra * 15 / 100;
+        constexpr int doppler_width = 220, pattern_width = 140;
         int x = margin;
         out[Slot::device] = {x, controls_y, device_width, field_height}; x += device_width + control_gap;
         out[Slot::bandwidth] = {x, controls_y, bandwidth_width, field_height}; x += bandwidth_width + control_gap;
         out[Slot::carrier] = {x, controls_y, carrier_width, field_height}; x += carrier_width + control_gap;
         out[Slot::rf_shift] = {x, controls_y, shift_width, field_height}; x += shift_width + control_gap;
-        out[Slot::pattern] = {x, controls_y, pattern_width, field_height}; x += pattern_width + control_gap;
-        out[Slot::fec] = {x, controls_y, fec_width, field_height}; x += fec_width + control_gap;
+        out[Slot::doppler] = {x, controls_y, doppler_width, field_height}; x += doppler_width + control_gap;
         out[Slot::dsp_workspace] = {x, controls_y, width - margin - x, field_height};
         constexpr int snr_width = 260;
         const int targets_y = content_height - 92;
         out[Slot::snr] = {margin, targets_y, snr_width, field_height};
         out[Slot::long_snr] = {margin + snr_width + control_gap, targets_y, snr_width, field_height};
         const int receive_x = margin + 2 * (snr_width + control_gap);
-        out[Slot::receive_snr] = {receive_x, targets_y, width - margin - receive_x, field_height};
+        out[Slot::receive_snr] = {receive_x, targets_y, 180, field_height};
+        x=receive_x+180+control_gap;
+        out[Slot::pattern] = {x, targets_y, pattern_width, field_height}; x += pattern_width + control_gap;
+        out[Slot::fec] = {x, targets_y, width-margin-x, field_height};
         // Audio routing and diagnostics sit below the modem settings without
         // narrowing the editors or their labels at the minimum desktop width.
         out[Slot::mono] = {margin, content_height - 56, 156, 22};

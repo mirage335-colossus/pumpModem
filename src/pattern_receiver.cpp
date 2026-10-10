@@ -334,6 +334,23 @@ struct PatternReceiver::Impl {
         // them frees the redundant per-frequency rows for native FFT plans.
         // Keep small/public/parallel geometries and the FP64 diagnostic control
         // on their existing choice; the crossover is execution-measured.
+        // Automatic application searches otherwise choose the parallel FP64
+        // fallback before reaching the measured native path. For large coherent
+        // private rows, serial FP32 plus shared template reuse reduced complete
+        // CPU and wall time versus that fallback in the paired local crossover.
+        // Explicit worker requests, small/public and drift geometries keep their
+        // existing scheduling; no timing/frequency/epoch alternative is removed.
+        // Do not serialize an automatic bank unless streamed fixed storage,
+        // native float buffers and its plan fit together. Runtime checks still
+        // account for tracks/caches and fall back if later payload growth wins.
+        const bool automatic_native_fits=required-
+            2.L*search.frequency_offsets_hz.size()*transform*sizeof(Complex)+
+            24.L*transform+65536.L<=bytes;
+        if(search.worker_threads==0 && automatic_native_fits &&
+           (config.search_arithmetic==SearchArithmetic::default_mode || config.search_arithmetic==SearchArithmetic::fp32) &&
+           transform>=65536 && !sample_fit && drift_sections==1 && !differential_window &&
+           (c.scramble||c.dsss) && symbols>256 && search.initial_stream_symbols>1)
+            search.worker_threads=1;
         const bool native_private_rows=config.search_arithmetic!=SearchArithmetic::fp64 &&
             transform>=65536 && !sample_fit && drift_sections==1 && !differential_window &&
             search.worker_threads==1 && (c.scramble||c.dsss) && symbols>256 &&

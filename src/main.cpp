@@ -87,6 +87,8 @@ Modem:
   --sample-rate HZ      Internal real-stream clock, 64..120000000; covers bandwidth and Carrier minus Shift
   --carrier HZ          Absolute physical carrier; accepts Hz/kHz/MHz/GHz/THz; default max(1500,0.75*bw)
   --shift HZ            Oscillator translation; same units; default0; real USB stream = Carrier minus Shift
+  --doppler VALUE       Static radial velocity in c/knots/mph/kph or frequency shift in %; default0.000000c
+                        Positive velocity recedes; adjusts physical Carrier before unchanged Shift
   --spreading N         Manual 4-bit APSK chips/symbol, 1..16384 (disables auto)
   --target-snr DBHZ     Automatic target C/N0; default32, auto unless manual controls
   --receive-targets LIST Receive C/N0 search list, e.g. 40,6,-6; default32
@@ -95,7 +97,8 @@ Modem:
   --scramble            Cryptographic pattern rotation (requires keyfile)
   --dsss                Legacy independent private mapper layer
   --dsss-factor N       Outer private spreading: 1 (off), 10, 100, 1000; requires keyfile
-  --dsss-version NAME   interleaved-v2 (default for outer DSSS) or legacy (diagnostic); peers must match
+  --dsss-mode MODE      off or interleave; keeps a saved spreading factor while off
+  --dsss-version NAME   interleave (default for outer DSSS) or legacy (diagnostic); peers must match
   --search-arithmetic MODE  Receiver policy: default, fp32-min, fp64-force (legacy IDs accepted)
                         Default selects demonstrated supported paths; FP64 fallbacks remain
                         Legacy integer IDs migrate to Default; no GPU receiver is implemented
@@ -178,7 +181,7 @@ public:
     Args(int argc,char** argv) {
         const std::set<std::string> booleans={"json","repeatable","no-compression","no-mono","right-mono","scramble","dsss","progress","help","version"};
         const std::set<std::string> valued={"text","input","output","save","kind","filename","callsign","grid",
-            "bw","sample-rate","carrier","spreading","dsss-factor","dsss-version","search-arithmetic","clock-sync","audio-error","fec","memory-mb","keyfile","pad","time","search-seconds",
+            "bw","sample-rate","carrier","doppler","spreading","dsss-factor","dsss-version","dsss-mode","search-arithmetic","clock-sync","audio-error","fec","memory-mb","keyfile","pad","time","search-seconds",
             "device","device-type","seconds","tx-delay","snr","seed","delay-samples","frequency-offset","bits","format",
             "target-snr","receive-targets","pattern","simulation","oscillator","rf-oscillator","shift","rf-shift","rf-carrier","search-margin","reference","sideband","lf-reference","key-name","key-names","cache-mb","dsp-mb","clock-error-ppm","phase-noise","receiver-time",
             "recovery-seconds","recovery-threads","recovery-bits","recovery-errors",
@@ -233,7 +236,7 @@ public:
         const auto reject=[this](std::initializer_list<const char*> names,const std::string& reason) {
             for(const auto name:names) if(has(name)) throw Error("--"+std::string(name)+" "+reason);
         };
-        if(command=="qr") reject({"keyfile","key-name","pad","scramble","dsss","dsss-factor","dsss-version","repeatable","device"},"cannot be used with QR; QR contains plaintext input");
+        if(command=="qr") reject({"keyfile","key-name","pad","scramble","dsss","dsss-factor","dsss-version","dsss-mode","repeatable","device"},"cannot be used with QR; QR contains plaintext input");
         if(command=="rx" || command=="status-rx") {
             reject({"output"},"is not a receive output; use --save PATH for decoded source bytes");
             reject({"text"},"is a transmit input; use --input for reception");
@@ -244,7 +247,7 @@ public:
         if(command!="simulate" && command!="listen" && command!="analyze-link") reject({"simulation"},"is only valid for simulate/listen/analyze-link");
         if(command!="simulate" && command!="listen" && command!="analyze-link") reject({"clock-error-ppm","phase-noise"},"is only valid for simulate/listen/analyze-link");
         if(command=="qr"||command=="keygen"||command=="devices")
-            reject({"oscillator","rf-oscillator","shift","rf-shift","rf-carrier","search-margin","reference","sideband","lf-reference"},"requires a Robust modem command");
+            reject({"oscillator","rf-oscillator","shift","rf-shift","rf-carrier","doppler","search-margin","reference","sideband","lf-reference"},"requires a Robust modem command");
         if(command!="analyze-link")
             reject({"tx-dbm","attenuation-db","noise-figure-db","symbol-seconds","coherent-seconds","trials",
                 "hypotheses","false-alarm","residual-frequency-hz","template-correlation"},"is only valid for analyze-link");
@@ -329,18 +332,24 @@ bool automatic_tuning(const Args& a) {
 modem::Config config(const Args& a) {
     modem::Config c;
     c.bandwidth_hz=a.number("bw",1200);
-    c.dsss_factor=static_cast<unsigned>(a.integer("dsss-factor",1));
+    const auto dsss_mode=a.get("dsss-mode","");
+    if(!dsss_mode.empty()&&dsss_mode!="off"&&dsss_mode!="interleave")throw Error("dsss-mode must be off or interleave");
+    c.dsss_factor=static_cast<unsigned>(a.integer("dsss-factor",dsss_mode=="interleave"?10:1));
     if(c.dsss_factor!=1&&c.dsss_factor!=10&&c.dsss_factor!=100&&c.dsss_factor!=1000)throw Error("dsss-factor must be 1, 10, 100, or 1000");
-    const auto dsss_version=tuning::parse_outer_dsss_version(a.get("dsss-version",c.dsss_factor>1?"interleaved-v2":"legacy"));
+    const auto dsss_version=tuning::parse_outer_dsss_version(a.get("dsss-version",c.dsss_factor>1?"interleave":"legacy"));
+    if(dsss_mode=="interleave"&&(c.dsss_factor==1||dsss_version==modem::OuterDsssVersion::legacy_v1))
+        throw Error("Interleave mode requires a spreading factor above one and the interleave construction");
+    if(dsss_mode=="off")c.dsss_factor=1;
     c.search_arithmetic=tuning::parse_search_arithmetic(a.get("search-arithmetic","default"));
     c.outer_dsss_version=c.dsss_factor>1?dsss_version:modem::OuterDsssVersion::legacy_v1;
     const auto oscillator=oscillator_search_config(a);
     const auto carrier=a.number("carrier",a.number("rf-carrier",tuning::recommended_carrier_hz(modem::waveform_bandwidth_hz(c))));
     if(a.has("carrier")&&a.has("rf-carrier")&&carrier!=a.number("rf-carrier",0))
         throw Error("carrier and rf-carrier must specify the same absolute frequency");
-    const auto stream=static_cast<long double>(carrier)-oscillator.rf_shift_hz;
+    const auto adjusted_carrier=tuning::doppler_carrier_hz(carrier,tuning::parse_doppler(a.get("doppler","0.000000c")));
+    const auto stream=static_cast<long double>(adjusted_carrier)-oscillator.rf_shift_hz;
     if(!std::isfinite(carrier)||carrier<=0||!std::isfinite(stream)||stream<=0||stream>30000000)
-        throw Error("Carrier minus Shift must be positive and at most 30 MHz for the real USB stream");
+        throw Error("Doppler-adjusted Carrier minus Shift must be positive and at most 30 MHz for the real USB stream");
     c.carrier_hz=static_cast<double>(stream);
     const bool automatic=automatic_tuning(a);
     if(automatic) {

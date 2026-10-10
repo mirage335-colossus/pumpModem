@@ -21,6 +21,35 @@ calibrated probability, measured SNR, near-capacity throughput result, radio
 sensitivity measurement or proof of low probability of intercept. The finite
 frequency, clock and memory limits below remain material.
 
+## Manual Doppler calculator
+
+The persistent editable Doppler control follows Shift. It is a static calculator
+shortcut, independent of oscillator uncertainty, clock synchronization and channel
+impairment simulation. `--doppler 0.000000c` is the default. Values accept a signed
+fraction of light speed (`c`), `knots`, `mph`, `kph`, or a signed frequency-shift
+percentage (`%`). Positive radial velocity means receding and lowers frequency;
+negative means approaching. Percentage input instead directly specifies the signed
+frequency change. The GUI shows the calculated percentage beside the editor label.
+
+For velocity fraction beta, the frequency multiplier is
+`sqrt((1-beta)/(1+beta))`; the calculation requires finite `abs(beta)<1` and a
+positive finite resulting frequency. Actual physical Carrier is the configured
+Carrier times this multiplier. The real audio carrier is then that value minus
+unchanged Shift. Planning, oscillator uncertainty, reception and transmission use
+this adjusted frequency. Export retains the configured Carrier and the separate
+Doppler value, preventing double application on load. Bandwidth/sample-rate limits
+are checked after adjustment. Enter the effective radial propagation velocity;
+there is no automatic doubling for a reflecting path or transmit pre-compensation.
+
+This does **not** track Doppler drift, velocity, position, the Moon or an aircraft.
+It is useful only when the chosen correction remains suitable during reception.
+It also does not tune external radio hardware. The configured Carrier editor is
+unchanged; zero correction restores its nominal value. A partial parameter-list
+import without Doppler retains the current setting; older fresh-start commands use
+zero. Invalid combined imports remain atomic. Interactive voice presets and
+Carrier suggestions invert the retained correction to put the effective stream
+at the recommended tone; explicit imported Carrier values are preserved.
+
 ## Timing, training, and spreading
 
 The default CLI/internal configuration is mono 6,000 Hz PCM, a 1500 Hz carrier and
@@ -28,7 +57,7 @@ The default CLI/internal configuration is mono 6,000 Hz PCM, a 1500 Hz carrier a
 from 0.001 Hz through 30 MHz, the legacy carrier recommendation is
 `max(1500, 0.75B)`. Public Carrier is the absolute transmitted/received
 frequency; Shift defaults to zero, and the positive real USB stream tone is
-`fc = Carrier - Shift`. Automatic planning chooses
+`fc = Doppler-adjusted Carrier - Shift`. Automatic planning chooses
 `Fs >= ceil(max(64, 4B, 4fc))` from that stream tone. An exactly represented
 decimal Rate can round this minimum upward to whole sampled half-chips, with at most
 5% extra samples and the same 120 MHz ceiling. Rate 100 Hz therefore uses

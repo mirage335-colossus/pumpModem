@@ -35,7 +35,10 @@ void established_default() {
           layout[Slot::rf_shift] == Rect{523, 937, 135, 27}, "Rate, Carrier and Shift editors lost their reserved widths");
     check(layout[Slot::snr] == Rect{16, 980, 260, 27} &&
           layout[Slot::long_snr] == Rect{286, 980, 260, 27} &&
-          layout[Slot::receive_snr] == Rect{556, 980, 608, 27}, "separate transmit targets lost their persistent row");
+          layout[Slot::receive_snr] == Rect{556, 980, 180, 27}, "separate transmit targets lost their persistent row");
+    check(layout[Slot::doppler]==Rect{668,937,220,27}&&layout[Slot::dsp_workspace]==Rect{898,937,266,27}&&
+        layout[Slot::pattern]==Rect{746,980,140,27}&&layout[Slot::fec]==Rect{896,980,268,27},
+        "Doppler or advanced controls lost their separate usable row widths");
     check(layout[Slot::status] == Rect{16, 1041, 876, 24}, "persistent status must reserve the volume controls");
 }
 void document_widths() {
@@ -254,7 +257,7 @@ void supported_sizes() {
         auto previous = layout[Slot::device];
         const auto control_gap = layout[Slot::bandwidth].x - previous.x - previous.w;
         check(control_gap == 10, "Modem row lost its shared control spacing");
-        for (const auto slot : {Slot::bandwidth, Slot::carrier, Slot::rf_shift, Slot::pattern, Slot::fec, Slot::dsp_workspace}) {
+        for (const auto slot : {Slot::bandwidth, Slot::carrier, Slot::rf_shift, Slot::doppler, Slot::dsp_workspace}) {
             const auto current = layout[slot];
             check(current.x == previous.x + previous.w + control_gap && current.y == previous.y &&
                   current.h == previous.h, "modem control row is misaligned");
@@ -264,7 +267,7 @@ void supported_sizes() {
         previous = layout[Slot::snr];
         check(previous.x == margin && previous.y - label_height >= layout[Slot::device].y + field_height,
               "Transmit target labels overlap the modem controls");
-        for (const auto slot : {Slot::long_snr, Slot::receive_snr}) {
+        for (const auto slot : {Slot::long_snr, Slot::receive_snr, Slot::pattern, Slot::fec}) {
             const auto current = layout[slot];
             check(persistent_slot(slot) && current.x == previous.x + previous.w + control_gap &&
                   current.y == previous.y && current.h == previous.h,
@@ -277,7 +280,7 @@ void supported_sizes() {
               persistent_slot(Slot::carrier) && persistent_slot(Slot::rf_shift), "Rate, Carrier or Shift is unusable at the minimum window size");
         check(layout[Slot::device].w>=112 && layout[Slot::snr].w>=260 && layout[Slot::long_snr].w>=260 &&
               layout[Slot::receive_snr].w>=166 && layout[Slot::pattern].w>=130 &&
-              layout[Slot::fec].w>=148 && layout[Slot::dsp_workspace].w>=121,
+              layout[Slot::fec].w>=148 && layout[Slot::dsp_workspace].w>=121 && layout[Slot::doppler].w>=220,
               "A modem control is too narrow for its full native label");
         const auto mono=layout[Slot::mono],duplex=layout[Slot::live_duplex],diagnostics=layout[Slot::diagnostics],device=layout[Slot::device];
         check(persistent_slot(Slot::mono)&&mono.x==device.x&&mono.y>device.y+device.h&&
@@ -368,7 +371,7 @@ void hidden_simulation_estimates_reclaim_space() {
             check(compact[slot].h==0,"Hidden simulation estimates must reserve no native height");
         for(const auto slot:{Slot::simulation,Slot::link_power,Slot::link_loss,Slot::link_noise,Slot::simulation_confidence,
                              Slot::simulation_oscillator,Slot::rf_oscillator,Slot::search_margin,
-                             Slot::device,Slot::mono,Slot::live_duplex,Slot::volume,Slot::exclusive,Slot::bandwidth,Slot::carrier,Slot::rf_shift,Slot::snr,Slot::long_snr,
+                             Slot::device,Slot::mono,Slot::live_duplex,Slot::volume,Slot::exclusive,Slot::bandwidth,Slot::carrier,Slot::rf_shift,Slot::doppler,Slot::snr,Slot::long_snr,
                              Slot::receive_snr,Slot::pattern,Slot::fec,Slot::dsp_workspace,Slot::diagnostics,Slot::status})
             check(compact[slot]==expanded[slot],"Simulation visibility must not move persistent inputs or bottom settings");
         const auto page=compact[Slot::page],old_page=expanded[Slot::page];

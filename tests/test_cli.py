@@ -90,6 +90,13 @@ class StreamCLI(unittest.TestCase):
                 self.assertEqual(pcm,reference,'receiver arithmetic changed transmitted WAV')
     def test_outer_dsss_version(self):
         self.assertIn(b'--dsss-version',self.run_pump('--help').stdout)
+        self.assertIn(b'--dsss-mode',self.run_pump('--help').stdout)
+        saved_off=json.loads(self.run_pump('estimate','--text','e','--dsss-mode','off',
+            '--dsss-factor','100','--dsss-version','interleave',*AUDIO).stdout)
+        self.assertEqual(saved_off['dsss_factor'],1)
+        for args in (('--dsss-mode','legacy'),('--dsss-mode','interleave','--dsss-factor','1'),
+                     ('--dsss-mode','interleave','--dsss-version','legacy')):
+            self.run_pump('estimate','--text','e',*args,*AUDIO,ok=False)
         for invalid in ('v2','2','legacy-v1','INTERLEAVED-V2'):
             self.run_pump('estimate','--text','e','--dsss-version',invalid,*AUDIO,ok=False)
         off=json.loads(self.run_pump('estimate','--text','e','--dsss-version','interleaved-v2',*AUDIO).stdout)
@@ -102,8 +109,10 @@ class StreamCLI(unittest.TestCase):
             default=json.loads(self.run_pump('estimate','--text','e',*geometry).stdout)
             v2=json.loads(self.run_pump('estimate','--text','e','--dsss-version','interleaved-v2',*geometry).stdout)
             legacy=json.loads(self.run_pump('estimate','--text','e','--dsss-version','legacy',*geometry).stdout)
-            self.assertEqual(default['dsss_version'],'interleaved-v2')
-            self.assertEqual(v2['dsss_version'],'interleaved-v2')
+            public=json.loads(self.run_pump('estimate','--text','e','--dsss-version','interleave',*geometry).stdout)
+            self.assertEqual(default['dsss_version'],'interleave')
+            self.assertEqual(v2['dsss_version'],'interleave')
+            self.assertEqual(public,v2)
             self.assertEqual(legacy['dsss_version'],'legacy')
             for field in ('wire_bits','coded_bytes','coded_seconds','total_seconds','sample_rate',
                           'spreading','symbol_seconds','carrier_hz','stream_carrier_hz','dsss_factor'):
@@ -292,7 +301,7 @@ class StreamCLI(unittest.TestCase):
             self.assertEqual(value['current_receiver']['clock_error_ppm'],100)
             self.assertEqual(value['current_receiver']['frequency_offset_hz'],0)
             self.assertTrue(value['current_receiver']['gpu_hypothetical'])
-            self.assertIn('i9-13900H',value['current_receiver']['cpu_reference'])
+            self.assertIn('Ryzen 5 PRO 5650U',value['current_receiver']['cpu_reference'])
             self.assertIn('4090 Laptop GPU',value['current_receiver']['gpu_reference'])
             self.assertGreaterEqual(value['current_receiver']['tracking_seconds'],0)
             self.assertGreaterEqual(value['current_receiver']['mitigation_seconds'],0)
@@ -515,6 +524,29 @@ class StreamCLI(unittest.TestCase):
                       ('--shift','nan'),('--shift','-1'),('--carrier','inf'),
                       ('--sideband','lower'),('--shift','0','--rf-shift','0')):
             self.run_pump(*args,*flags,ok=False)
+    def test_static_radial_doppler(self):
+        self.assertIn(b'--doppler',self.run_pump('--help').stdout)
+        args=('estimate','--text','a','--bw','100','--target-snr','32','--time','1800000000',
+              '--carrier','1.0015MHz','--shift','1MHz')
+        baseline=json.loads(self.run_pump(*args).stdout)
+        for zero in ('0c','-0c','0knots','0mph','0kph','0%'):
+            self.assertEqual(json.loads(self.run_pump(*args,'--doppler',zero).stdout),baseline)
+        for value,beta in (('0.001c',.001),('-0.001c',-.001),('1knots',1852/3600/299792458),
+                           ('1mph',1609.344/3600/299792458),('1kph',1000/3600/299792458)):
+            actual=json.loads(self.run_pump(*args,'--doppler',value).stdout)
+            expected=1001500*math.sqrt((1-beta)/(1+beta))
+            self.assertAlmostEqual(actual['carrier_hz'],expected,places=8)
+            self.assertAlmostEqual(actual['stream_carrier_hz'],expected-1000000,places=8)
+            self.assertEqual(actual['shift_hz'],1000000)
+            self.assertEqual(actual['wire_bits'],baseline['wire_bits'])
+        percentage=json.loads(self.run_pump(*args,'--doppler','-0.01%').stdout)
+        self.assertAlmostEqual(percentage['carrier_hz'],1001500*.9999,places=8)
+        # Doppler may make equal nominal Carrier/Shift a valid positive stream.
+        approaching=json.loads(self.run_pump('estimate','--text','a','--bw','100','--target-snr','32',
+            '--carrier','1MHz','--shift','1MHz','--doppler','-0.001c').stdout)
+        self.assertGreater(approaching['stream_carrier_hz'],0)
+        for value in ('1c','-1c','nan%','-100%','10','10Hz','0.01c'):
+            self.run_pump(*args,'--doppler',value,ok=False)
     def test_frequency_order_units_and_zero_shift(self):
         args=('estimate','--text','a','--bw','100','--target-snr','32','--time','1800000000')
         for carrier,shift,expected in (

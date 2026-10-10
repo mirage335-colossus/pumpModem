@@ -24,6 +24,30 @@ struct ReceiverProbabilityAtom {
     bool operator==(const ReceiverProbabilityAtom&) const = default;
 };
 
+// Real-input boxcar noise has two rotating principal axes with constant
+// variances. Each Gram describes six real projection vectors in one white
+// plane: correct I/Q, alternative I/Q and actual source I/Q. Keeping the source
+// projections couples matched noise to the received-energy denominator.
+struct ReceiverProjectionSection {
+    std::size_t samples=0;
+    std::array<double,2> variance{.5,.5};
+    std::array<std::array<double,36>,2> gram{};
+    bool operator==(const ReceiverProjectionSection&) const = default;
+};
+struct ReceiverProjectionDraw {
+    std::array<std::complex<double>,3> dots{};
+    double energy=0;
+};
+class ReceiverProjectionModel {
+    ReceiverProjectionSection section_;
+    std::array<std::array<double,36>,2> lower_{};
+    std::array<unsigned,2> rank_{};
+public:
+    explicit ReceiverProjectionModel(const ReceiverProjectionSection&);
+    // 6 Gaussian coordinates and one remainder coordinate for each plane.
+    ReceiverProjectionDraw sample(const std::array<double,14>&) const;
+};
+
 // Matched-statistic approximation; no PCM, adaptive search or receiver state.
 // Energies use one complex noise dimension (two real noise dimensions).
 struct ReceiverProbabilityParameters {
@@ -41,6 +65,11 @@ struct ReceiverProbabilityParameters {
     // have different envelopes and a complex overlap in every section.
     std::array<std::complex<double>,4> correlations{};
     std::optional<std::array<double,4>> alternative_weights;
+    // Actual shaped/limited source means against each normalized quarter
+    // template, divided by sqrt(total physical source energy). Empty retains
+    // the exactly matched-source model. Orthogonal residual energy is retained.
+    std::optional<std::array<std::array<std::complex<double>,2>,4>> section_signal_coefficients;
+    std::optional<std::array<ReceiverProjectionSection,4>> projected_noise;
     bool sections=true;
     // Complete receiver-local windows. Correlations and weights describe the
     // actual two projected templates; weights sum to one over the symbol.

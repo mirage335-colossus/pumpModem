@@ -336,16 +336,28 @@ void clock_and_spread_controls() {
     controller.edit(F::clock_region,"NaNms");
     check(controller.settings().transfer.clock_sync==accepted && controller.field(F::planner_command).text==command,
           "invalid clock edit partially changed live timing or export");
+    check(controller.field(F::dsss_version).options.size()==2&&
+        controller.field(F::dsss_version).options[0].label=="Off"&&controller.field(F::dsss_version).options[1].label=="Interleave",
+        "public DSSS mode must be exactly Off and Interleave");
+    controller.select(F::dsss_version,"interleave");
+    near(controller.settings().transfer.modem.bandwidth_hz,360,"direct Interleave activation did not install its usable voice pair");
     controller.select(F::dsss_factor,"100");
     check(controller.field(F::dsss_factor).selected=="100" && controller.settings().transfer.modem.dsss_factor==1 &&
           controller.field(F::dsss_factor).display_text.find("key needed")!=std::string::npos,
           "outer DSSS must remain inactive and labeled when no private key is selected");
     near(controller.settings().transfer.modem.bandwidth_hz,36,"DSSS 100x did not install its voice-passband Rate");
     near(controller.settings().transfer.modem.carrier_hz,1500,"DSSS default did not retain a 1.5 kHz stream carrier");
-    check(controller.field(F::dsss_version).selected=="interleaved-v2"&&
+    check(controller.field(F::dsss_version).selected=="interleave"&&
         controller.settings().transfer.modem.outer_dsss_version==datapump::modem::OuterDsssVersion::legacy_v1,
         "new DSSS selection must default to v2 without changing the unkeyed Off waveform");
-    controller.select(F::dsss_version,"legacy");
+    controller.select(F::dsss_version,"off");
+    const auto off_saved=launch_command::parse(controller.field(F::planner_command).text);
+    check(off_saved.dsss_mode=="off"&&off_saved.dsss_factor==100,"Off export lost remembered spreading");
+    Controller off_copy({false,false,off_saved});
+    check(off_copy.field(F::dsss_version).selected=="off"&&off_copy.field(F::dsss_factor).selected=="100"&&
+        off_copy.settings().transfer.modem.dsss_factor==1,"saved Off mode activated spreading or lost its factor");off_copy.close();
+    controller.select(F::dsss_version,"interleave");
+    load(controller,"--dsss-version legacy");
     near(controller.settings().transfer.modem.bandwidth_hz,36,"version-only selection reset the entered Rate");
     near(controller.settings().transfer.modem.carrier_hz,1500,"version-only selection reset Carrier");
     check(controller.field(F::dsss_factor).selected=="100"&&
@@ -382,12 +394,12 @@ void clock_and_spread_controls() {
     check(controller.field(F::dsss_version).selected=="legacy",
         "partial parameter-list load silently replaced explicit legacy DSSS");
     load(controller,"--dsss-version interleaved-v2");
-    if(controller.field(F::dsss_version).selected!="interleaved-v2"||
+    if(controller.field(F::dsss_version).selected!="interleave"||
        controller.field(F::dsss_factor).selected!="100"||controller.settings().transfer.modem.bandwidth_hz!=36)
         std::cerr<<"version load: "<<controller.field(F::dsss_version).selected<<" / "
             <<controller.field(F::dsss_factor).selected<<" / "<<controller.settings().transfer.modem.bandwidth_hz
             <<" / "<<controller.field(F::status).text<<'\n';
-    check(controller.field(F::dsss_version).selected=="interleaved-v2"&&
+    check(controller.field(F::dsss_version).selected=="interleave"&&
         controller.field(F::dsss_factor).selected=="100"&&controller.settings().transfer.modem.bandwidth_hz==36,
         "version-only parameter-list load changed factor or Rate");
     controller.close();
@@ -448,6 +460,46 @@ void arithmetic_settings() {
         "explicit default failed to restore the saved default request");
     controller.close();
 }
+void doppler_settings() {
+    Controller controller;
+    check(controller.field(F::doppler).text=="0.000000c"&&controller.field(F::doppler).display_text=="0%",
+        "manual Doppler must default to zero with a visible percentage");
+    const auto& screen=ui::console_screen();
+    const auto control=std::find_if(screen.begin(),screen.end(),[](const auto& c){return c.field==F::doppler;});
+    check(control!=screen.end()&&control->kind==ui::Kind::text&&control->persistent&&!control->developer_only,
+        "Doppler must remain an ordinary editable persistent control");
+    load(controller,"--rate 1200 --carrier 1009000 --shift 1000000 --oscillator gpsdo-xo --doppler \"100 kph\"");
+    const auto configured=controller.field(F::carrier).text;
+    const auto expected=tuning::doppler_carrier_hz(1009000,tuning::parse_doppler("100 kph"))-1000000;
+    near(controller.settings().transfer.modem.carrier_hz,expected,"Doppler failed to adjust carrier before subtracting Shift");
+    near(controller.link_plan()->inputs.options.modem.carrier_hz,expected,"Planner used the unadjusted frequency");
+    const auto saved=controller.field(F::planner_command).text;const auto patch=launch_command::parse(saved);
+    check(patch.carrier_hz==1009000&&patch.rf_shift_hz==1000000&&patch.doppler,
+        "Export compounded Doppler into the configured carrier");
+    load(controller,saved);
+    near(controller.settings().transfer.modem.carrier_hz,expected,"Doppler round trip compounded frequency adjustment");
+    check(controller.field(F::carrier).text==configured,"Doppler changed configured Carrier display");
+    controller.edit(F::doppler,"-100 mph");
+    check(controller.settings().transfer.modem.carrier_hz>9000&&controller.field(F::doppler).display_text.find('%')!=std::string::npos,
+        "Approaching manual velocity did not raise carrier or show percentage");
+    const auto accepted=controller.settings().transfer.modem.carrier_hz;
+    load(controller,"--rate 100 --doppler 2c");
+    near(controller.settings().transfer.modem.carrier_hz,accepted,"Invalid Doppler import partially applied settings");
+    near(controller.settings().transfer.modem.bandwidth_hz,1200,"Invalid Doppler changed Rate");
+    load(controller,"--carrier 1009500 --shift 1000000");
+    near(controller.settings().transfer.modem.carrier_hz,
+        tuning::doppler_carrier_hz(1009500,tuning::parse_doppler("-100 mph"))-1000000,
+        "partial frequency import lost the retained Doppler correction");
+    const auto accepted_command=controller.field(F::planner_command).text;
+    const auto accepted_carrier=controller.field(F::carrier).text;
+    load(controller,"--carrier 1000000 --shift 1000000 --doppler 100kph");
+    check(controller.field(F::carrier).text==accepted_carrier&&controller.field(F::planner_command).text!=accepted_command&&
+        controller.field(F::doppler).text==tuning::parse_doppler("-100 mph").canonical,
+        "invalid complete adjusted stream partially committed field state");
+    controller.edit(F::doppler,"0.000000c");
+    near(controller.settings().transfer.modem.carrier_hz,9500,"Zero Doppler failed to restore configured carrier");
+    controller.close();
+}
 void duplex_settings() {
     Controller controller({false,false});
     const auto& screen=ui::console_screen();
@@ -481,7 +533,7 @@ void duplex_settings() {
         "closing controller accepted a duplex callback");
 }
 int main() {
-    try {arithmetic_settings();duplex_settings();clock_and_spread_controls();generated_and_pasted_settings();rejected_settings_remain_atomic();startup_and_submit_behavior();narrow_rate_round_trips();live_validation_is_atomic();real_radio_configuration();invalid_shift_edit_recovers();absolute_carrier_and_shift();zero_shift_legacy_and_shared_round_trip();
+    try {doppler_settings();arithmetic_settings();duplex_settings();clock_and_spread_controls();generated_and_pasted_settings();rejected_settings_remain_atomic();startup_and_submit_behavior();narrow_rate_round_trips();live_validation_is_atomic();real_radio_configuration();invalid_shift_edit_recovers();absolute_carrier_and_shift();zero_shift_legacy_and_shared_round_trip();
         std::cout<<"Planner launch setting round trips passed.\n";return 0;
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

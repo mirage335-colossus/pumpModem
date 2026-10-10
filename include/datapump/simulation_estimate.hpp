@@ -7,7 +7,7 @@
 #include <stop_token>
 
 namespace datapump::simulation {
-inline constexpr std::string_view reference_cpu = "Intel Core i9-13900H";
+inline constexpr std::string_view reference_cpu = "Ryzen 5 PRO 5650U (local acquisition calibration)";
 inline constexpr std::string_view reference_gpu = "RTX 4090 Laptop GPU";
 
 // A sampled simulation has its randomized startup/settling epoch coverage.

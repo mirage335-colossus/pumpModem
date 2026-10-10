@@ -155,6 +155,65 @@ ReceiveTargets parse_receive_targets(std::string_view text) {
     }
     return result;
 }
+Doppler parse_doppler(std::string_view text) {
+    const auto invalid=[] {throw Error("doppler must be a finite velocity in c, knots, mph or kph, or a frequency shift in %; velocity must be below light speed");};
+    while(!text.empty()&&std::isspace(static_cast<unsigned char>(text.front())))text.remove_prefix(1);
+    while(!text.empty()&&std::isspace(static_cast<unsigned char>(text.back())))text.remove_suffix(1);
+    if(text.empty()||text.size()>128)invalid();
+    if(text.front()=='+') {
+        text.remove_prefix(1);
+        if(text.empty()||text.front()=='+'||text.front()=='-')invalid();
+    }
+    double value=0;
+    const auto parsed=std::from_chars(text.data(),text.data()+text.size(),value);
+    if(parsed.ec!=std::errc{}||parsed.ptr==text.data()||!std::isfinite(value))invalid();
+    auto suffix=std::string_view(parsed.ptr,static_cast<std::size_t>(text.data()+text.size()-parsed.ptr));
+    while(!suffix.empty()&&std::isspace(static_cast<unsigned char>(suffix.front())))suffix.remove_prefix(1);
+    std::string unit(suffix);
+    for(auto& character:unit)if(character>='A'&&character<='Z')character=static_cast<char>(character-'A'+'a');
+    constexpr long double light_speed=299792458.L;
+    long double beta=0;
+    if(unit=="c")beta=value;
+    else if(unit=="knots")beta=static_cast<long double>(value)*(1852.L/3600)/light_speed;
+    else if(unit=="mph")beta=static_cast<long double>(value)*(1609.344L/3600)/light_speed;
+    else if(unit=="kph")beta=static_cast<long double>(value)*(1000.L/3600)/light_speed;
+    else if(unit=="%") {
+        if(value<=-100)invalid();
+        const auto ratio=1+static_cast<long double>(value)/100;
+        // The reciprocal form avoids squaring an arbitrarily large ratio.
+        const auto squared=ratio>1?1/(ratio*ratio):ratio*ratio;
+        beta=ratio>1?(squared-1)/(squared+1):(1-squared)/(1+squared);
+    } else invalid();
+    Doppler result;
+    result.velocity_c=static_cast<double>(beta);
+    if(!std::isfinite(result.velocity_c)||std::abs(result.velocity_c)>=1)invalid();
+    if(result.velocity_c==0)result.velocity_c=0;
+    // Use the canonical velocity for every derived value, including percentage
+    // imports, so launch export/import cannot change the calculated carrier.
+    beta=result.velocity_c;
+    const auto ratio=std::sqrt((1-beta)/(1+beta));
+    result.frequency_ratio=static_cast<double>(ratio);
+    result.frequency_shift_percent=static_cast<double>((ratio-1)*100);
+    if(!std::isfinite(result.frequency_ratio)||result.frequency_ratio<=0)invalid();
+    if(result.velocity_c!=0) {
+        std::array<char,64> buffer{};
+        const auto formatted=std::to_chars(buffer.data(),buffer.data()+buffer.size(),result.velocity_c,
+            std::chars_format::general,std::numeric_limits<double>::max_digits10);
+        if(formatted.ec!=std::errc{})invalid();
+        result.canonical.assign(buffer.data(),formatted.ptr);result.canonical+='c';
+    }
+    return result;
+}
+double doppler_carrier_hz(double configured_physical_carrier_hz,const Doppler& doppler) {
+    if(!std::isfinite(configured_physical_carrier_hz)||configured_physical_carrier_hz<=0||
+       !std::isfinite(doppler.frequency_ratio)||doppler.frequency_ratio<=0)
+        throw Error("Doppler-adjusted physical carrier must be finite and positive");
+    const auto adjusted=static_cast<long double>(configured_physical_carrier_hz)*doppler.frequency_ratio;
+    if(!std::isfinite(adjusted)||adjusted>std::numeric_limits<double>::max()||
+       static_cast<double>(adjusted)<=0)
+        throw Error("Doppler-adjusted physical carrier must be finite and positive");
+    return static_cast<double>(adjusted);
+}
 std::uint32_t recommended_sample_rate(double bandwidth_hz,std::optional<double> carrier_hz) {
     const auto automatic_carrier=recommended_carrier_hz(bandwidth_hz);
     const auto carrier=carrier_hz.value_or(automatic_carrier);
@@ -268,13 +327,13 @@ Plan resolve_config(modem::Config config,double target_snr_db_hz,PatternMode mod
 }
 modem::OuterDsssVersion parse_outer_dsss_version(std::string_view name) {
     if(name=="legacy")return modem::OuterDsssVersion::legacy_v1;
-    if(name=="interleaved-v2")return modem::OuterDsssVersion::interleaved_v2;
-    throw Error("dsss-version must be legacy or interleaved-v2");
+    if(name=="interleave"||name=="interleaved-v2")return modem::OuterDsssVersion::interleaved_v2;
+    throw Error("dsss-version must be interleave or legacy (diagnostic)");
 }
 std::string_view outer_dsss_version_id(modem::OuterDsssVersion version) {
     switch(version) {
     case modem::OuterDsssVersion::legacy_v1:return "legacy";
-    case modem::OuterDsssVersion::interleaved_v2:return "interleaved-v2";
+    case modem::OuterDsssVersion::interleaved_v2:return "interleave";
     }
     throw Error("invalid outer DSSS waveform version");
 }

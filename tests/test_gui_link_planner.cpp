@@ -465,7 +465,8 @@ void narrow_band_differential_model() {
     near(shorter.bit_seconds,409600,"The shorter narrow-band command changed exact bit duration");
     check(shorter.confidence_available && shorter.differential_windows==0 && !shorter.differential_model_available,
           "128 local windows must retain the appropriate older receiver probability");
-    check(contains_text(planner_page::build(shorter,900,false,false),"local differential geometry not eligible"),
+    check(!contains_text(planner_page::build(shorter,900,false,false),"local differential geometry not eligible")&&
+          contains_text(planner_page::build(shorter,900,true,false),"local differential geometry not eligible"),
           "The shorter command must explain why local comparisons are absent from its estimate");
     inputs.target_db_hz=-44.25748830262745;
     inputs.options.modem=tuning::resolve(.01,inputs.target_db_hz,inputs.mode,false,1500).config;
@@ -1670,8 +1671,8 @@ void rolling_epoch_selected_plan_document() {
               contains_text(page,"preceding all-selected readiness")&&contains_text(page,"first guarded component"),
               "planner must render qualified readiness, rolling cost and unqualified resident-memory scope");
     }
-    // Reuse the same advisory cache across wire versions. V2 must not receive
-    // the legacy conditional probability or hide its new construction work.
+    // Reuse the advisory cache across wire versions. Interleave must construct
+    // its own shaped/limited source statistics and account for setup work.
     check(selected->reference_probability_available,"legacy comparison must have an available conditional reference");
     auto versioned=inputs;versioned.options.modem.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;
     std::stop_source version_stop;std::optional<planner::Model> v2;
@@ -1679,13 +1680,13 @@ void rolling_epoch_selected_plan_document() {
         v2=current;version_stop.request_stop();
     });}catch(const estimate_detail::Cancelled&){}
     check(v2&&v2->available&&v2->receiver_geometry.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2&&
-          !v2->reference_probability_available&&!v2->confidence_available&&
-          v2->one_bit_cpu_available&&v2->receiver_cpu_seconds>selected->receiver_cpu_seconds&&
-          v2->probability_model_limit.find("pre-limiter")!=std::string::npos,
-          "planner cache must distinguish V2 wire/energy/setup scope from legacy references");
+          v2->reference_probability_available&&!v2->confidence_available&&
+          v2->one_bit_cpu_available&&v2->receiver_cpu_seconds>0&&
+          v2->probability_model_limit.find("actual-source")!=std::string::npos,
+          "planner cache must distinguish Interleave source energy/setup and conditional probability scope");
     const auto v2_page=planner_page::build(*v2,900,true,false);
-    check(contains_text(v2_page,"interleaved-v2")&&contains_text(v2_page,"uncalibrated")&&
-          contains_text(v2_page,"RX estimate unavailable")&&
+    check(contains_text(v2_page,"Interleave")&&contains_text(v2_page,"unqualified")&&
+          contains_text(v2_page,"RX reference")&&
           contains_text(v2_page,"6.02 dB pre-limiter digital backoff")&&
           contains_text(v2_page,"actual average radio power")&&
           contains_text(v2_page,"nominal-power referenced"),
@@ -1733,7 +1734,9 @@ void conditional_reference_and_timing_work_document() {
             "Unqualified references require an explicit availability flag and must otherwise leave a graph gap");
         auto fallback=model;fallback.timing_window_modeled=false;
         fallback.receiver_work_assumptions="Full arrival-window bank; extra UTC correction lanes retained";
-        const auto full_page=planner_page::build(fallback,width,false,false);
+        check(!contains_text(planner_page::build(fallback,width,false,false),"Receiver work:"),
+            "collapsed planner leaked engineering bank details");
+        const auto full_page=planner_page::build(fallback,width,true,false);
         check(contains_text(full_page,"extra UTC correction lanes retained")&&!contains_text(full_page,"Full-window fallback:"),
             "Unsupported timing backends must explain their full bank rather than imply a compact speedup");
     }
@@ -1772,11 +1775,13 @@ void search_arithmetic_document_and_cache() {
             return n->command==ui::Command::planner_toggle_details;
         });
         check(choice!=flat.end()&&toggle!=flat.end()&&choice<toggle&&
-            contains_text(page,"Arithmetic model: CPU test matrix; operands INT8; accumulation INT32; FP64 verification")&&
-            contains_text(page,"Broad FFT retains FP64 fallback")&&!contains_text(page,"Receiver geometry:"),
+            !contains_text(page,"Arithmetic model:")&&
+            !contains_text(page,"Broad FFT retains FP64 fallback")&&!contains_text(page,"Receiver geometry:"),
             "planner footer lost arithmetic widths/fallback or left detailed geometry expanded");
         const auto detailed=planner_page::build(model,width,true,false);
-        check(contains_text(detailed,"Model limits")&&contains_text(detailed,"Receiver geometry: 6000 samples/s"),
+        check(contains_text(detailed,"Model limits")&&contains_text(detailed,"Receiver geometry: 6000 samples/s")&&
+            contains_text(detailed,"Arithmetic model: CPU test matrix; operands INT8; accumulation INT32; FP64 verification")&&
+            contains_text(detailed,"Broad FFT retains FP64 fallback"),
             "hiding geometry discarded required receiver diagnostics");
         model.available=false;const auto invalid=planner_page::build(model,width,false,false);model.available=true;
         const auto invalid_nodes=nodes(invalid);
@@ -1817,8 +1822,10 @@ void document_semantics_layout_and_plots() {
               "Planner must label its probability axis and CPU feasibility alongside reception");
         check(std::none_of(flat.begin(),flat.end(),[](const auto* node){return node->command==ui::Command::planner_target;}),
               "Native planner dropdown must replace the former target prompt button");
-        for(const auto command:{ui::Command::planner_example_short,
-                                ui::Command::planner_example_lpi,ui::Command::planner_fast,
+        check(!contains_text(document,"−8 example")&&!contains_text(document,"+23 LPI example"),
+              "Obsolete example buttons remain visible");
+        for(const auto command:{ui::Command::planner_example_spread,ui::Command::planner_example_weak,
+                                ui::Command::planner_example_sub9,ui::Command::planner_example_eme,ui::Command::planner_fast,
                                 ui::Command::planner_day,ui::Command::planner_clock,
                                 ui::Command::planner_toggle_draft,ui::Command::planner_toggle_details,ui::Command::planner_load_command})
             check(std::any_of(flat.begin(),flat.end(),[&](const auto* node) {

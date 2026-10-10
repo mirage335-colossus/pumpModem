@@ -13,6 +13,18 @@ geometries use a joint model of all three detector branches. Unsupported
 geometries retain timing, search and compute diagnostics, with an explicit
 coverage reason instead of a probability from a different detector.
 
+The header distinguishes whole-draft confidence from a supported **First bit**
+reference when compact continuation timing is unmodeled. It does not substitute
+that reference for whole-draft success. Advice publishes through ordinary
+Console polling without changing tabs. Probability work-limit diagnostics name
+the actual local-window and template-integration counts. In particular, the
+Sub-9kHz configuration at 0.1 Hz, −46 dB-Hz target and 1500 Hz carrier requires 7,849
+local 320-second windows and 2,009,509 template integration blocks, exceeding
+the existing 4,096 and 524,288 caps. The example now selects 0.01 Hz, where 1,024 local 3,200-second windows
+fit that bounded model. Both rates have actual C/N0 of −36 dB-Hz with 1 mW transmit
+power, 200 dB loss and −164 dBm/Hz noise. Neither model availability nor the
+separate observer-time ratio proves full receiver acquisition or completion.
+
 GUI estimates run off the event thread. Draft airtime can be ready while the
 receiver advisory is still calculating. Closing, replacing a keyfile or editing
 inputs requests cancellation through the statistic construction, probability
@@ -68,8 +80,9 @@ claim for the full receiver or its long, wide carrier search.
 The **Baseband Osc** and **Shift Osc** selectors provide
 free-running crystal and three GPSDO cases: hobbyist XO without an oven, TCXO
 without an oven, and OCXO. Shift defaults to 0 Hz and the search margin to
-3×. Absolute Carrier minus Shift is the positive real USB stream tone used for
-DSP planning. At Shift zero, Shift Osc is disabled as **N/A** and contributes
+3×. Doppler-adjusted absolute Carrier minus Shift is the positive real USB stream
+tone used for DSP planning. The Carrier editor retains its nominal value; see
+the static calculator in [modem](modem.md). At Shift zero, Shift Osc is **N/A** and contributes
 no frequency or phase error; the Baseband model alone remains active. A positive
 Shift can select **Baseband clock** for a shared sampling/mixer reference,
 counting that profile once with linked errors. Compact main controls hold these
@@ -86,11 +99,38 @@ and symbol duration in compute estimates. Legacy outer DSSS can show a numerical
 **RX reference** from the conditional matched-template AWGN calculation, kept
 separate from qualified receiver probability. Interleaved V2 changes the symbol
 permutation and applies a 0.5 amplitude before limiting. Its shaped/limited PCM
-energy and receiver sensitivity are not yet qualified, so it has **no numerical
-RX probability**, including a conditional reference. Work/geometry diagnostics
-remain available. An inactive version setting is ignored when DSSS is off. UTC steering failures and the conditional outer-code
-presence guard are outside that reference. It carries no confidence interval or
-claim of complete acquisition-bank calibration.
+energy and receiver sensitivity remain unqualified. A bounded **RX reference**
+now uses actual shaped, radially limited real PCM for an isolated symbol at a
+fixed initial phase, projected through the receiver's boxcar bins. It includes
+finite candidate overlap and projected source energy. This is available only
+for shaped coherent or supported four-section complex-FFT geometry with at least
+two samples/bin, aligned quarters and at most 524288 original symbol samples.
+Approximately circular template covariance retains the existing reference.
+Noncircular covariance uses the two real-input noise principal planes, their
+signed carrier image and actual bin-center phase. It additionally requires
+at least eight bins per quarter and two nondegenerate noise planes. Each quarter
+retains two 6×6 Gram matrices for both candidates’ I/Q and the actual source’s
+I/Q. Rank-aware factors preserve joint dots, source/noise cross terms and their
+dependent received-energy denominator; each independent plane remainder keeps
+its own variance and degrees of freedom. No PCM is retained. Up to four extra
+clock-envelope guard bins contribute unmatched noise; larger nominal/window
+discrepancies remain unsupported. Compact, differential and unsupported
+geometries remain unavailable. Work/geometry diagnostics remain available.
+An inactive version setting is ignored when DSSS is off. UTC steering failures
+and the conditional outer-code presence guard are outside that reference. It
+carries no draft or complete acquisition-bank confidence interval. Expanded
+model details may show the first-bit Monte Carlo sampling interval; this covers
+sampling only, not channel/model error or complete acquisition calibration.
+
+The noncircular reduction is exact joint-noise algebra for the supplied source
+and fixed section phasors. The orthogonal chi-square remainder uses the existing
+Wilson–Hilferty approximation. Quarter phase diffusion and fractional timing
+remain approximations: spoiled signal energy stays in the denominator, while
+its unmatched noise cross terms, opposite carrier-image rotation and varying
+limiter weights are unresolved. The new reference does not certify full-bank
+sensitivity. The fixed additional draw table is 1.75 MiB, shared across calls;
+per-waveform summaries are a few KiB in the existing eight-entry thread-local
+cache. Receiver execution, workspace, thresholds and transmitted PCM are unchanged.
 
 Work models distinguish known unsteered sampled simulation, hardware with a full
 fallback window, and hardware with qualified capture timing. Sampled simulation
@@ -156,10 +196,10 @@ With the declared independent GPSDO XO/OCXO models and 1 MHz Shift, the original
 three frequency/clock pairs become a five-pair UTC correction union, preserving
 every original endpoint. A 70-bit observation still has new epochs arriving
 throughout it; a static per-epoch retained-batch cap cannot make that work disappear.
-Fake FHSS instead reserves its highest illustrated RF for planning: a 1 MHz base
-with 200 channels spaced 100 kHz uses a 20.9 MHz Shift bound, while its actual
-hardware audio remains at the fixed 1 MHz Shift. These oscillator domains must
-be compared separately.
+Fake FHSS instead reserves the resolved profile's highest illustrated RF for
+planning. Below the 800 MHz product convention, experimental spacing follows
+waveform bandwidth and filter margins rather than a fixed 100 kHz floor. Physical
+radio tuning remains fixed. These oscillator domains must be compared separately.
 
 Restricted FFT CPU work is summed over all initial epochs using a conservative
 one-second fractional-capture-anchor envelope for each epoch, rather than
@@ -209,8 +249,9 @@ charged once per generated pair rather than once per selected start. It uses one
 explicit rejection-draw limit and a separately stated, rounded 40-operation per
 draw-byte engineering allowance. Initial and fresh constructors charge first-map
 preparation even when no complete FFT window has been observed. Cache reuse
-can make actual construction cheaper; this V2 cryptographic throughput is
-**uncalibrated**. Compact V2 permutation-cache rebuild ordering is not priced,
+can make actual construction cheaper. The measured 40000 sample/s, eight-sample
+fine-chip family has a separate bounded construction allowance; other V2
+cryptographic throughput is **uncalibrated**. Compact V2 permutation-cache rebuild ordering is not priced,
 so its CPU feasibility is explicitly unavailable rather than inheriting the
 legacy compact allowance.
 
@@ -234,8 +275,10 @@ uses a hypothetical full-capture observer model comparing aggregate and
 channelized energy detection. Its channel count is not an automatic time multiplier. See [spread controls](spread-spectrum-controls.md)
 and [clock synchronization](clock-sync.md) for current implementation limits.
 
-The fixed reference machine is an **Intel Core i9-13900H** with an
-**NVIDIA GeForce RTX 4090 Laptop GPU**. The estimator never benchmarks the
+The CPU reference combines **local Ryzen AVX2 calibration** for supported native
+FFT pipelines (including the generic FP64 recurrence) and a bounded Interleave template-construction family with the existing
+engineering allowances for other work. The **NVIDIA GeForce RTX 4090 Laptop GPU**
+remains a hypothetical projection. The estimator never benchmarks the
 computer, queries CPU/GPU identity, counts local processor threads, or measures
 simulation execution. The GPU figure is hypothetical: the current numerical
 search backends execute on the CPU. It describes a possible implementation
@@ -247,7 +290,8 @@ projection work on the CPU. It does not promise an available GPU mode.
 The model takes the existing exact `transfer::Estimate`, the actual selected
 transmit modem profile, independently selected receive profiles, FEC setting,
 channel configuration and receive-key count. It does not encode a second draft
-or allocate PCM. Short dictionary text and explicit binary input use their
+or allocate a complete capture. The bounded Interleave reference generates one
+isolated symbol per candidate through a fixed-size PCM buffer. Short dictionary text and explicit binary input use their
 exact wire-bit count and receive **no FEC benefit**, regardless of the saved FEC
 choice. Longer text and attachments use the actual count of fixed 128-byte coded
 intervals and their existing 192-bit markers.
@@ -881,13 +925,9 @@ cores by advertised FP32 clock rates. A tenfold scoring budget never becomes a
 tenfold whole-program speedup because CPU work, transfers and startup remain.
 Very small jobs can consequently have a slower hypothetical GPU estimate.
 
-The hardware names anchor a single repeatable high-end-laptop planning case.
-[Intel's processor listing](https://www.intel.com/content/www/us/en/ark/products/series/230485/13th-generation-intel-core-i9-processors.html)
-identifies the i9-13900H as a 14-core part with up to 5.40 GHz turbo.
-[NVIDIA's laptop comparison](https://www.nvidia.com/en-us/geforce/laptops/compare/)
-lists the RTX 4090 **Laptop** GPU with 9,728 CUDA cores, a 1,455–2,040 MHz boost
-range and an 80–150 W subsystem range. Those specifications identify the
-reference products; **they do not establish the assumed throughput rates**.
+The local CPU measurements anchor supported native arithmetic on the development
+host; they are not measurements of the user's processor. The hypothetical GPU
+name identifies a planning reference and does not establish measured GPU throughput.
 Laptop power limits, sustained thermals, compiler choices, caching and eventual
 GPU implementation can change runtime substantially. Treat the displayed times
 as order-of-magnitude estimates; even a factor of four is not a validated error
@@ -974,23 +1014,64 @@ complete-execution benefit is unproven. The 32-start direct crossover is unchang
 GPU and INT4 execution are unavailable. Approximate template reuse is separately
 permitted only for eligible Default/FP32-minimum acquisition.
 
-The engineering operation model still describes the preceding floating path.
-It is labeled as such: packing, conservative certificates, native-array/plan setup and data-dependent
-exact refinements are not yet a calibrated throughput prediction. Native float
-buffers are not silently treated as a total receiver memory reduction. Measured
-whole/partition timing improvements do not supply a universal FFT speed factor;
-small/tight geometries can favor FP64 even when FP32 transforms are faster. No optimistic
-INT8 coefficient or GPU speedup is applied. Initial and rolling epoch setup,
-qualified timing cells, oscillator/clock pairs, full observation duration and
-six-second observed absence retain their existing accounting. FP32 close-clock
-private-template reuse constructs one nominal pair per eligible key/epoch/bit/
-phase cohort and interpolates each lane; its bounded cache is additional workspace.
-The present work model conservatively retains the old per-lane construction
-charge and explicitly labels that charge uncalibrated for the new cache. Large
-private serial banks may stream rows to execute native transforms; this changes
-row lifetime, not the admitted search or physical duration. A developer
-arithmetic selection does not change waveform duration or observer collection
-requirements. See [search arithmetic](search-compute.md#experimental-cpu-search-arithmetic-local-manual-candidate)
+Coherent FFT work uses three alternating measurements of the actual native
+FP32, native FP64 and generic FP64 pipelines on one isolated Ryzen AVX2 core.
+Each pipeline includes two forward transforms, complex multiplication, inverse,
+row copies, conversion and allocation; native plan creation is measured
+separately. This is CPU time, not parallel wall time. The table records median
+seconds from the final dispatch probe, not application speedups:
+
+| Transform points | Native FP32 | Native FP64 | Generic FP64 | FP32 plan | FP64 plan |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+|256|0.000004676|0.000005691|0.000009640|0.000004358|0.000001276|
+|1024|0.000018598|0.000022140|0.000045480|0.000016946|0.000002750|
+|4096|0.000079156|0.000118256|0.000228559|0.000063275|0.000009543|
+|32768|0.000844095|0.001196233|0.002397923|0.000507920|0.000072115|
+|262144|0.012189667|0.018888000|0.028560667|0.003992143|0.000593047|
+
+The model interpolates normalized pipeline cost over log2 size only within
+256..262144 points. Native FP32 requires automatic serial dispatch and sufficient
+native scratch; native FP64 applies to supported partitioned jobs with that
+scratch proof. Whole generic FP64 uses its own measured recurrence pipeline,
+which has no allocated plan. The earlier generic engineering rate priced the
+262144-point pipeline at9.04ms, below even native FP32; that dispatch mismatch is
+corrected. Direct products, unsupported detector/arithmetic geometry and
+out-of-range transforms retain engineering allowances. Unknown cohort anchors
+retain the slowest supported rate and existing component/fallback allowances;
+they do not receive an exact representative tile discount. Transferring one
+measured pipeline mix to other FFT mixes is approximate, not a calibrated
+complete-receiver runtime bound. Mixed direct/unsupported cohorts rebuild original
+FP64 templates; that fallback remains sticky for the bank. Unknown fallback
+anchors receive the same conservative original-template allowance. Coefficients describe this local x86 host;
+ARM and other processors are not calibrated.
+
+A separate five-lane Interleave prototype at40000 samples/s, eight samples/fine
+chip, four samples/bin and128000 bins measured215.54ns per original paired
+traversal/bin/lane,200.26ns per nominal cached pair/bin and34.92ns per
+interpolation/rotation lane. A production-order follow-up measured358–369ns
+for two separate bit traversals versus216–222ns for the shared traversal.
+Whole original-template scoring performs the former; pricing it as the latter
+understated the FP64-force cost. The model uses rounded375/225ns for original
+whole/paired work and250/40ns for nominal cache/interpolation work in this family
+with65536..262144 bins. Whole native scoring evaluates the cached pair twice;
+paired tiled/direct preparation evaluates it once. Another5.2ms per generated
+group covers measured cache setup and cleanup. Cache pricing requires every
+runtime identity/even-boundary/<=0.001-sample displacement and workspace check;
+otherwise original private construction remains charged. These coefficients are
+bounded local prototype evidence, not general cryptographic throughput or
+guaranteed cache hit counts.
+
+Default and FP32 minimum automatically select serial native execution only for
+the implemented large private coherent geometry. Explicit scheduling and FP64
+force retain their existing alternatives. The CPU model does not assign a
+universal FP32 multiplier. In the hypothetical GPU projection, private waveform
+and cache construction, native plan setup, frontend and tracking stay on the
+host; only separately counted arithmetic gets the assumed GPU scoring rate.
+No GPU implementation or benchmark exists. Initial and rolling epoch setup,
+qualified timing cells, all oscillator/clock pairs, full observation duration
+and six-second observed absence retain their accounting. Data-dependent tracks,
+resident bank lifetimes and rolling compact admissions remain model limitations.
+See [search arithmetic](search-compute.md#experimental-cpu-search-arithmetic-local-manual-candidate)
 for implementation and qualification limits.
 
 
@@ -1007,10 +1088,51 @@ for approximate private-template interpolation; execution counters remain a rece
 diagnostic, not a planner observation. Exact caches remain allowed at every precision.
 
 The work model includes the existing large-private-row streaming crossover rather
-than charging cached constructor rows for that implemented path. It retains
-conservative arithmetic/template charges and labels native setup and interpolation
-coefficients uncalibrated. The policy change does not justify a numerical CPU/GPU
-multiplier or a manufactured detection probability. Existing total execution and
+than charging cached constructor rows for that implemented path. It uses the bounded local native pipeline/plan and V2 template-family calibration
+above, keeping engineering allowances elsewhere. Those measurements do not justify
+a universal CPU/GPU multiplier or a manufactured detection probability. Existing total execution and
 conditional sensitivity evidence is reused only for unchanged resolved operators.
 No substantial sensitivity loss was measured; a full-bank bound remains unqualified.
+Arithmetic selection does not invent a probability penalty or bonus: the RX
+reference uses the same original waveform statistics. Equal displayed RX values
+do not establish full-bank equivalence of interpolated FP32 and original-template
+FP64 execution; that sensitivity comparison remains unqualified.
 See [search arithmetic policy and ID migration](search-compute.md#experimental-cpu-search-arithmetic-local-manual-candidate).
+
+
+### Interleaved actual-source conditional reference
+
+The V2 reference reads the real transmitter's isolated-symbol shaped/limited
+analytic PCM in bounded 4096-sample chunks, then reconstructs real PCM and the
+receiver's complex projection, including its carrier image. It retains both
+candidate dots and energies in each quarter. Signal means are normalized to
+**projected** signal energy, so energy discarded by averaging is absent from
+the detector denominator; unmatched projected signal remains in that denominator.
+Approximately circular template covariance is required (each normalized image
+term at most 1%). This remains an approximation, not a 0.1 dB sensitivity bound.
+
+For sampled simulation, noise is nominal-power referenced, so the reference
+charges the actual V2 digital backoff, clipping and projection power. For
+hardware, entered TX power must be actual measured mean radio power: only the
+projection/physical-energy ratio is charged, avoiding a second 6.02 dB digital
+backoff deduction. The precise change in mean PCM power depends on clipping.
+Statistics are cached for at most eight exact waveform/seed/epoch/phase/carrier/
+bin/source-bit identities; PCM and template rows are not retained. Cooperative
+cancellation applies during construction and probability trials.
+
+The percentage is a conditional isolated-symbol, fixed initial-phase AWGN
+reference averaged across the two private bit candidates. Adjacent unknown
+symbols, timing steering failures, the outer presence guard, adaptive complete
+key/epoch/frequency acquisition and cumulative sensitivity against raw remain
+unqualified. Strict confidence and acquisition-calibration flags stay false. The first-bit
+Monte Carlo interval in expanded details describes sampling only; no numerical
+interval bounds model uncertainty or complete acquisition. Unsupported geometry
+continues to show its reason rather than inheriting the legacy waveform model.
+
+The bounded Interleave source reference also admits supported four-section FFT
+geometry (including the 3.6 Hz / 1000× / 1500 Hz voice preset). Its per-quarter
+means and correlated candidate noise feed the existing section/coherent detector
+union. Phase diffusion remains the existing quarter approximation: it does not
+resolve time-varying limiter weights or opposite carrier-image phase rotation.
+Compact/differential, unsupported allocation and oversized source cases still
+return a model limit, not an invented probability.

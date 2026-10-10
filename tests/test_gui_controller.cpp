@@ -1,4 +1,5 @@
 #include "../src/gui/gui_smoke.hpp"
+#include "../src/gui/application.hpp"
 #include "../src/gui/gui_smoke_pending.hpp"
 #include "../src/gui/bitmap_sources.hpp"
 #include "../src/gui/binary_editor.hpp"
@@ -6,6 +7,7 @@
 #include "../src/gui/receiver_health.hpp"
 #include "datapump/compression.hpp"
 #include "datapump/runtime.hpp"
+#include "../src/frequency_parse.hpp"
 #include "datapump/received_text.hpp"
 #include "datapump/simulation_estimate.hpp"
 #include <filesystem>
@@ -199,7 +201,7 @@ void simulation_estimate_controls() {
     }
     controller.edit(F::message,"e");prepare(controller);
     check(text(F::simulation_confidence).find('%')!=std::string::npos&&
-          text(F::simulation_cpu_time).find("i9-13900H\n~")!=std::string::npos&&
+          text(F::simulation_cpu_time).find("Ryzen 5 PRO 5650U")!=std::string::npos&&
           text(F::simulation_gpu_time).find("RTX 4090 Laptop (projected)\n~")!=std::string::npos,
           "Simulation estimates omitted modeled probability or named reference hardware");
     const auto dictionary_cpu=text(F::simulation_cpu_time);
@@ -1111,6 +1113,131 @@ void rate_carrier_controls() {
           controller.settings().transfer.modem.spreading_mode==modem::SpreadingMode::tone,
           "Raising the carrier did not recover the selected tone profile");
 }
+void planner_examples() {
+    using F=ui::Field;using C=ui::Command;
+    Controller controller({true,false});controller.edit(F::short_bits,"00101");
+    const auto original=controller.field(F::planner_command).text;
+    for(const auto command:{C::planner_example_spread,C::planner_example_weak,C::planner_example_sub9}) {
+        controller.activate(command);
+        check(controller.field(F::planner_command).text==original&&
+              controller.field(F::status).text.find("Load an encryption keyfile")!=std::string::npos,
+              "An encrypted example silently selected an unkeyed waveform or partially applied without a key");
+    }
+    struct Fixture {
+        std::filesystem::path path=std::filesystem::temp_directory_path()/
+            ("datapump-planner-examples-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        ~Fixture(){std::error_code ignored;std::filesystem::remove(path,ignored);}
+    } fixture;
+    create_keyring(fixture.path,{"First synthetic key","Chosen synthetic key"});
+    controller.activate(C::open_keyfile);const auto services=controller.take_services();
+    check(services.size()==1,"Example fixture key chooser missing");
+    controller.complete_service({services.front().id,false,fixture.path.string(),{}});
+    check(!controller.enabled(C::planner_example_spread)&&!controller.enabled(C::planner_example_eme),
+          "Full example settings must be disabled while keys are loading");
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(10);
+    while(!controller.settings().transfer.key&&std::chrono::steady_clock::now()<deadline) {
+        controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(controller.settings().transfer.key.has_value(),"Example fixture key load failed");
+    controller.select(F::key,"key:Chosen synthetic key");
+    const auto key=controller.settings().transfer.key->stream(StreamPurpose::Data,1234,0,32);
+    const auto receive_keys=controller.settings().receive_keys.size();
+    struct Example {C command;double rate,carrier,shift,target,power,loss,audio;const char *osc,*rf,*mode,*fhss;};
+    const Example examples[]{
+        {C::planner_example_spread,360,30001500,30000000,40,36.020599913279625,60,0,"crystal","gpsdo-xo","interleave","fake-0.4s-200"},
+        {C::planner_example_weak,36,30001500,30000000,8,36.020599913279625,180,0,"gpsdo-xo","gpsdo-xo","interleave","off"},
+        {C::planner_example_sub9,.01,1500,0,-46,0,200,.05,"gpsdo-ocxo","gpsdo-ocxo","off","off"},
+        {C::planner_example_eme,1,5800001500,5800000000,-3.0720996964786846,36.020599913279625,220,0,"gpsdo-ocxo","gpsdo-ocxo","off","fake-0.4s-200"},
+    };
+    for(const auto& example:examples) {
+        controller.activate(example.command);
+        const auto patch=launch_command::parse(controller.field(F::planner_command).text);
+        check(patch.rate_hz==example.rate&&patch.carrier_hz==example.carrier&&patch.rf_shift_hz==example.shift&&
+              patch.target_db_hz==example.target&&patch.tx_dbm==example.power&&patch.path_loss_db==example.loss&&
+              patch.noise_dbm_hz==-164&&patch.oscillator==example.osc&&
+              (example.shift==0?!patch.rf_oscillator:patch.rf_oscillator==example.rf)&&
+              controller.field(F::rf_oscillator).selected==example.rf&&
+              patch.reference=="independent"&&patch.search_margin==3&&patch.workspace_percent==50&&
+              patch.clock_sync=="default"&&patch.audio_timing_error_seconds==example.audio&&
+              patch.dsss_mode==example.mode&&patch.dsss_factor==10&&patch.dsss_version=="interleave"&&
+              patch.search_arithmetic=="default"&&patch.full_duplex==true&&patch.fhss==example.fhss,
+              "Full planner example missed a requested link, waveform, timing or work setting");
+        check(std::stod(controller.field(F::snr).text)==example.target&&
+              std::stod(controller.field(F::long_snr).text)==example.target&&
+              tuning::parse_doppler(*patch.doppler).velocity_c==0,
+              "Example preview target diverged from TX targets or retained Doppler");
+        const bool keyed=example.command!=C::planner_example_eme;
+        check(patch.pattern==(keyed?"auto-keystream":"auto-pattern")&&patch.tx_key==(keyed?"named":"none")&&
+              (keyed?patch.key_name=="Chosen synthetic key":!patch.key_name)&&
+              patch.keyfile==std::filesystem::absolute(fixture.path).string()&&
+              controller.settings().receive_keys.size()==receive_keys,
+              "Example changed the loaded receive bank/path or lost explicit transmit-key policy");
+        if(keyed)check(controller.settings().transfer.key->stream(StreamPurpose::Data,1234,0,32)==key,
+              "Example replaced the selected private key material");
+        check(controller.field(F::short_bits).text=="00101"&&controller.field(F::device).text=="default"&&
+              controller.take_services().empty()&&!controller.snapshot().transmitting&&!controller.settings().simulation,
+              "Example changed the exact draft/device, reloaded keys, enabled simulation or started TX");
+        std::cout<<"example "<<static_cast<int>(example.command)<<": rate "<<example.rate<<", "
+                 <<controller.settings().transfer.modem.sample_rate<<" samples/s, "
+                 <<modem::symbol_seconds(controller.settings().transfer.modem)<<" s/symbol\n";
+    }
+    // Switching from unkeyed EME back to a private example selects a loaded
+    // key without reloading its file, and restores spreading from Off.
+    controller.activate(C::planner_example_spread);
+    check(controller.settings().transfer.key.has_value()&&controller.field(F::key).selected=="key:First synthetic key"&&
+          controller.settings().transfer.modem.dsss_factor==10&&controller.take_services().empty(),
+          "Private example after EME failed to restore a loaded key and spreading");
+    Launch spread_launch;spread_launch.settings=launch_command::parse(controller.field(F::planner_command).text);
+    controller.activate(C::planner_example_sub9);
+    Launch launch;launch.settings=launch_command::parse(controller.field(F::planner_command).text);
+    controller.close();
+    Application app(launch);
+    // Exercise the actual application polling path while staying on Console.
+    // No hardware, transmission, planner document or tab switch is involved.
+    const auto wait_advice=[&](Application& app) {
+        const auto until=std::chrono::steady_clock::now()+std::chrono::seconds(45);
+        while((app.field(F::simulation_cpu_time).text.ends_with("Calculating...")||
+               app.field(F::simulation_cpu_time).text.ends_with("(updating)"))&&std::chrono::steady_clock::now()<until) {
+            app.tick();std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        check(app.page()==ui::Page::console&&app.field(F::simulation_cpu_time).text.find("\n~")!=std::string::npos,
+              "Console advice did not finish independently of planner/tab navigation");
+    };
+    app.edit(F::message,"");wait_advice(app);
+    check(app.field(F::simulation_confidence).text.find('%')!=std::string::npos,
+          "Sub9 .01 preset must start with its supported one-bit reference");
+    app.edit(F::bandwidth,".1 Hz");wait_advice(app);
+    check(app.field(F::simulation_confidence).text.ends_with("Outside model range")&&
+          app.field(F::inspection).text.find("7849 local windows exceed 4096")!=std::string::npos,
+          "Console Sub9 preview hid the probability-model limit");
+    app.edit(F::bandwidth,".01 Hz");wait_advice(app);
+    check(app.field(F::simulation_confidence).text.find('%')!=std::string::npos&&
+          app.field(F::simulation_confidence).text.find("unmodeled")==std::string::npos,
+          "Rate edit did not replace the unsupported one-bit header without a tab switch");
+    app.edit(F::message,"quick brown");wait_advice(app);
+    check(app.field(F::simulation_confidence).text.find("First bit ")!=std::string::npos&&
+          app.field(F::simulation_confidence).text.ends_with("draft unmodeled"),
+          "Supported first-bit model was hidden or mislabeled as whole-draft confidence");
+    const auto final=app.field(F::simulation_confidence).text;
+    for(unsigned poll=0;poll<12;++poll){app.tick();std::this_thread::sleep_for(std::chrono::milliseconds(10));}
+    check(app.field(F::simulation_confidence).text==final&&app.page()==ui::Page::console,
+          "Late previous advice replaced current Console probability scope");
+    std::cout<<"Sub9 Console without tab switch: "<<final<<'\n';
+    app.edit(F::clock_accuracy,"1ms");wait_advice(app);
+    check(app.field(F::simulation_confidence).text.starts_with("RX reference")&&
+          app.field(F::simulation_confidence).text.find("First bit ")!=std::string::npos&&
+          app.field(F::simulation_confidence).text.ends_with("draft unmodeled"),
+          "Custom clock's conditional first-bit reference was hidden or promoted to draft confidence");
+    app.close();
+    Application spread(spread_launch);spread.edit(F::message,"quick brown");wait_advice(spread);
+    check(spread.field(F::simulation_confidence).text.starts_with("RX reference")&&
+          spread.field(F::simulation_confidence).text.find('%')!=std::string::npos&&
+          spread.field(F::inspection).text.find("principal planes")!=std::string::npos,
+          "Spread example Console still hides the noncircular conditional reference");
+    std::cout<<"Spread Console without tab switch: "<<spread.field(F::simulation_confidence).text<<'\n';
+    spread.close();
+}
+
 void dsss_voice_carrier_controls() {
     using F=ui::Field;using C=ui::Command;
     struct TemporaryKeyring {
@@ -1120,23 +1247,28 @@ void dsss_voice_carrier_controls() {
     } fixture;
     create_keyring(fixture.path,{"DSSS voice passband","none"});
     Controller controller({true,true});
-    check(controller.field(F::dsss_version).selected=="interleaved-v2"&&
+    check(controller.field(F::dsss_version).selected=="off"&&
         controller.settings().transfer.modem.outer_dsss_version==modem::OuterDsssVersion::legacy_v1,
         "new app must remember v2 without changing the DSSS Off waveform");
     const auto& declarations=ui::console_screen();
     const auto version_control=std::find_if(declarations.begin(),declarations.end(),[](const auto& c){return c.field==F::dsss_version;});
     check(version_control!=declarations.end()&&version_control->kind==ui::Kind::choice&&version_control->persistent&&
-        !version_control->developer_only&&std::string_view(version_control->help).find("Both peers")!=std::string_view::npos,
+        !version_control->developer_only&&std::string_view(version_control->help).find("independent DSSS key")!=std::string_view::npos,
         "DSSS waveform version must be a visible ordinary control with peer compatibility help");
     for(const auto width:{ui::min_width,ui::default_width,1660}) {
         const ui::DesktopLayout layout(width);
         const auto factor=layout[ui::Slot::dsss_factor],version=layout[ui::Slot::dsss_version],hopping=layout[ui::Slot::fhss];
-        check(factor.x+factor.w<version.x&&version.x+version.w<hopping.x&&version.y==factor.y&&version.w>=150&&hopping.w>=130,
+        check(version.x+version.w<factor.x&&factor.x+factor.w<hopping.x&&version.y==factor.y&&version.w>=150&&hopping.w>=130,
             "DSSS waveform version overlaps its neighboring setup controls");
     }
     // Preserve the preceding probability/work-model fixture as explicit legacy
     // evidence; v2 probability qualification is intentionally unavailable.
-    controller.select(F::dsss_version,"legacy");
+    const auto legacy_diagnostic=[&] {
+        controller.edit(F::planner_command,"--dsss-version legacy");controller.activate(C::planner_load_command);
+        check(controller.settings().transfer.modem.outer_dsss_version==modem::OuterDsssVersion::legacy_v1,
+            ("legacy diagnostic import failed factor "+controller.field(F::dsss_factor).selected+
+             " rate "+controller.field(F::bandwidth).text+": "+controller.field(F::status).text).c_str());
+    };
     controller.edit(F::message,"e");
     controller.activate(C::open_keyfile);
     auto requests=controller.take_services();
@@ -1232,18 +1364,18 @@ void dsss_voice_carrier_controls() {
             "accepted DSSS geometry left the displayed CPU estimate stale or unavailable");
         return metric;
     };
-    controller.select(F::dsss_factor,"10");prepare(controller);
+    controller.select(F::dsss_factor,"10");legacy_diagnostic();prepare(controller);
     const auto first_dsss=controller.settings().transfer.modem;
     const auto first_metric=work_metrics("first 10x");
     const auto first_cpu_label=controller.field(F::simulation_cpu_time).text;
-    controller.select(F::dsss_factor,"1");prepare(controller);
+    controller.select(F::dsss_version,"off");prepare(controller);
     check(controller.settings().transfer.key&&controller.settings().transfer.modem.dsss_factor==1&&
         controller.settings().transfer.modem.bandwidth_hz==360&&
         modem::waveform_bandwidth_hz(controller.settings().transfer.modem)==360&&
         controller.link_plan()->inputs.options.modem.dsss_factor==1,
         "DSSS Off did not update the keyed receiver and planner geometry");
     (void)work_metrics("Off");
-    controller.select(F::dsss_factor,"10");prepare(controller);
+    controller.select(F::dsss_factor,"10");legacy_diagnostic();prepare(controller);
     check(controller.settings().transfer.key&&controller.settings().transfer.modem.dsss_factor==10&&
         controller.settings().transfer.modem.sample_rate==first_dsss.sample_rate&&
         modem::pattern_chip_samples(controller.settings().transfer.modem)==modem::pattern_chip_samples(first_dsss)&&
@@ -1258,7 +1390,7 @@ void dsss_voice_carrier_controls() {
         restored_metric.frequency_rate_hypotheses==first_metric.frequency_rate_hypotheses&&
         controller.field(F::simulation_cpu_time).text==first_cpu_label,
         "restored keyed DSSS geometry changed its work estimate or displayed a stale Off cost");
-    controller.select(F::dsss_factor,"1");
+    controller.select(F::dsss_version,"off");
     controller.edit(F::rf_shift,"10 kHz");
     for(const auto factor:{10u,100u,1000u}) {
         controller.select(F::dsss_factor,std::to_string(factor));
@@ -1269,6 +1401,42 @@ void dsss_voice_carrier_controls() {
             controller.field(F::carrier).options.back().id=="11.8 kHz",
             "DSSS selection lost its voice-passband width, translated carrier or occupied-band suggestions");
     }
+    auto before_doppler=launch_command::parse(controller.field(F::planner_command).text);
+    // Restore the supported 10x voice import below; the 1000x interactive
+    // reference above may have no exact clock/RAM fit under its older targets.
+    before_doppler.dsss_factor=10;before_doppler.rate_hz=360;
+    auto moving=before_doppler;moving.rate_hz=360;moving.rf_shift_hz=5.8e9;moving.carrier_hz=5.8000015e9;
+    moving.doppler="100 kph";moving.dsss_factor=10;moving.dsss_mode="off";moving.dsss_version="interleave";
+    moving.fhss="off";moving.oscillator="gpsdo-ocxo";moving.rf_oscillator="gpsdo-ocxo";
+    moving.target_db_hz=60;moving.short_target_db_hz=60;moving.long_target_db_hz=60;
+    import(controller,moving);
+    check(controller.settings().transfer.modem.dsss_factor==1&&
+          controller.settings().transfer.modem.carrier_hz>960&&controller.settings().transfer.modem.carrier_hz<965,
+          "Doppler voice fixture failed to import its valid narrow Off geometry");
+    controller.select(F::dsss_version,"interleave");
+    for(const auto factor:{10u,100u,1000u,10u}) {
+        if(factor!=10||controller.settings().transfer.modem.dsss_factor!=10)
+            controller.select(F::dsss_factor,std::to_string(factor));
+        const auto& c=controller.settings().transfer.modem;
+        const auto d=tuning::parse_doppler(controller.field(F::doppler).text);
+        check(c.dsss_factor==factor&&c.bandwidth_hz==3600./factor&&std::abs(c.carrier_hz-1500)<3e-6&&
+              modem::waveform_bandwidth_hz(c)==3600&&d.canonical==tuning::parse_doppler("100kph").canonical,
+              "DSSS voice preset did not preserve its effective carrier under manual Doppler");
+        const auto& suggestions=controller.field(F::carrier).options;
+        const auto tone=[&](const std::string& text) {return tuning::doppler_carrier_hz(*frequency_input::parse(text),d)-5.8e9;};
+        check(std::abs(tone(suggestions.front().id)-1500)<3e-6&&std::abs(tone(suggestions.back().id)-1800)<3e-6,
+              "Doppler-aware Carrier suggestions do not target the intended stream tones");
+        const auto command=launch_command::parse(controller.field(F::planner_command).text);
+        check(command.doppler&&std::abs(tuning::doppler_carrier_hz(*command.carrier_hz,d)-*command.rf_shift_hz-1500)<3e-6,
+              "Doppler-aware preset export compounded or lost the correction");
+    }
+    prepare_plan(controller);
+    check(std::abs(controller.link_plan()->inputs.options.modem.carrier_hz-1500)<3e-6,
+          "Doppler-aware preset left the planner on an obsolete tone");
+    controller.edit(F::doppler,"incomplete");controller.select(F::dsss_factor,"100");
+    check(controller.field(F::doppler).text=="incomplete","preset silently replaced malformed Doppler with zero");
+    import(controller,before_doppler);
+    check(controller.field(F::doppler).text=="0.000000c", ("restore preset fixture: "+controller.field(F::status).text).c_str());
     controller.edit(F::planner_command,"--dsss-factor 10 --rate 120 --carrier 11800");
     controller.activate(C::planner_load_command);
     check(controller.settings().transfer.modem.dsss_factor==10&&controller.settings().transfer.modem.bandwidth_hz==120&&
@@ -1285,10 +1453,11 @@ void dsss_voice_carrier_controls() {
         "DSSS mode must identify its conditional reference and validation limit");
     // The illustrated high RF crystal bank is outside this audio passband.
     // Keep its assertions above; use supported geometry for version import.
-    controller.select(F::fhss,"off");prepare(controller);prepare_plan(controller);
+    controller.select(F::fhss,"off");controller.select(F::dsss_factor,"10");
+    legacy_diagnostic();prepare(controller);prepare_plan(controller);
     const auto legacy_config=controller.settings().transfer.modem;
     const auto legacy_plan=controller.link_plan();
-    controller.select(F::dsss_version,"interleaved-v2");prepare(controller);prepare_plan(controller);
+    controller.select(F::dsss_version,"interleave");prepare(controller);prepare_plan(controller);
     const auto& v2_config=controller.settings().transfer.modem;
     check(v2_config.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2&&
         v2_config.dsss_factor==legacy_config.dsss_factor&&v2_config.bandwidth_hz==legacy_config.bandwidth_hz&&
@@ -1298,12 +1467,16 @@ void dsss_voice_carrier_controls() {
     check(controller.link_plan()!=legacy_plan&&
         controller.link_plan()->inputs.options.modem.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2&&
         legacy_plan->inputs.options.modem.outer_dsss_version==modem::OuterDsssVersion::legacy_v1&&
-        !controller.link_plan()->confidence_available&&!controller.link_plan()->reference_probability_available,
-        "v2 toggle reused a legacy plan or its unqualified probability");
+        !controller.link_plan()->confidence_available,
+        ("Interleave toggle reused a legacy plan or claimed full-bank qualification: current="+
+        std::to_string(static_cast<int>(controller.link_plan()->inputs.options.modem.outer_dsss_version))+
+        " old="+std::to_string(static_cast<int>(legacy_plan->inputs.options.modem.outer_dsss_version))+
+        " confidence="+std::to_string(controller.link_plan()->confidence_available)+
+        " error="+controller.link_plan()->error).c_str());
     const auto saved_v2=launch_command::parse(controller.field(F::planner_command).text);
-    check(saved_v2.dsss_version=="interleaved-v2","active v2 waveform version was omitted from export");
+    check(saved_v2.dsss_version=="interleave","active v2 waveform version was omitted from export");
     Controller v2_copy({true,true,saved_v2});wait_keys(v2_copy);
-    check(v2_copy.settings().transfer.key&&v2_copy.field(F::dsss_version).selected=="interleaved-v2"&&
+    check(v2_copy.settings().transfer.key&&v2_copy.field(F::dsss_version).selected=="interleave"&&
         v2_copy.settings().transfer.modem.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2&&
         v2_copy.settings().transfer.modem.bandwidth_hz==legacy_config.bandwidth_hz&&
         v2_copy.settings().transfer.modem.carrier_hz==legacy_config.carrier_hz,
@@ -2926,6 +3099,7 @@ void bitmap_source_checks() {
 
 int main(int argc,char** argv) {
     try {
+        if(argc>1&&std::string_view(argv[1])=="--planner-examples") {planner_examples();std::cout<<"Planner examples passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--search-arithmetic") {search_arithmetic_controls();std::cout<<"Search arithmetic controls passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--fake-hop-display") {fake_hop_display();std::cout<<"Fake hop display passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--airtime-cancellation") {airtime_and_close();std::cout<<"Airtime and cancellation checks passed\n";return 0;}
@@ -2959,6 +3133,7 @@ int main(int argc,char** argv) {
         delayed_replay_interruption();
         rate_carrier_controls();
         dsss_voice_carrier_controls();
+        planner_examples();
         sub_hertz_controls();
         shannon_capacity_display();
         profile_reference_display();

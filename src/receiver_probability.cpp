@@ -32,6 +32,16 @@ const std::vector<Draw>& random_draws() {
     }();
     return values;
 }
+const std::vector<std::array<double,56>>& projection_draws() {
+    // Independent fixed draws leave every existing circular-model trial intact.
+    static const auto values=[] {
+        std::vector<std::array<double,56>> result(trials);
+        std::mt19937_64 generator(0x937aa492360218abULL);ProbabilityNormal normal;
+        for(auto& row:result)for(auto& value:row)value=normal(generator);
+        return result;
+    }();
+    return values;
+}
 Complex average_exponential(Complex z) {
     if(std::abs(z)<.01) {
         Complex term{1,0},sum=term;
@@ -218,7 +228,41 @@ ReceiverProbability calculate(const ReceiverProbabilityParameters& p,std::stop_t
         weight_sum+=p.weights[j];alternative_sum+=alternative_weights[j];
     }
     if(std::abs(weight_sum-1)>1e-8 || std::abs(alternative_sum-1)>1e-8)throw Error("receiver probability weights must sum to one");
+    if(p.section_signal_coefficients) {
+        double represented=0;
+        for(std::size_t j=0;j<4;++j) {
+            const auto& means=(*p.section_signal_coefficients)[j];
+            for(const auto mean:means)if(!std::isfinite(mean.real())||!std::isfinite(mean.imag()))
+                throw Error("invalid receiver probability signal mean");
+            const auto orthogonal=(means[1]-p.correlations[j]*means[0])/
+                std::sqrt(1-std::norm(p.correlations[j]));
+            represented+=std::norm(means[0])+std::norm(orthogonal);
+        }
+        if(!std::isfinite(represented)||represented>1+1e-8)
+            throw Error("receiver probability signal means exceed physical energy");
+    }
     const PhaseModel phase(p);
+    std::vector<ReceiverProjectionModel> projection;
+    if(p.projected_noise) {
+        if(!p.section_signal_coefficients)throw Error("projected noise requires actual source means");
+        std::size_t count=0;
+        for(const auto& section:*p.projected_noise)count+=section.samples;
+        const auto represented_dimensions=static_cast<double>(count);
+        if(p.noise_dimensions<represented_dimensions||p.noise_dimensions!=std::floor(p.noise_dimensions)||
+           p.noise_dimensions-represented_dimensions>4) {
+            ReceiverProbability unavailable;unavailable.available=false;
+            unavailable.unsupported_reason="Clock-scaled projected noise dimensions exceed the nominal-window reference (at most four unmatched guard bins)";
+            return unavailable;
+        }
+        for(std::size_t j=0;j<4;++j) {
+            auto section=(*p.projected_noise)[j];
+            // The work model rounds its worst clock-scaled observation span
+            // upward. Retain up to four extra guard bins as unmatched noise;
+            // larger clock/window discrepancies remain outside this reference.
+            if(j==3)section.samples+=static_cast<std::size_t>(p.noise_dimensions)-count;
+            projection.emplace_back(section);
+        }
+    }
     ReceiverProbability result;result.trials=p.requested_trials;
     // The legacy phase model chooses a small carrier neighborhood by signal
     // fit before matched noise is applied. Do not present that approximation
@@ -244,25 +288,60 @@ ReceiverProbability calculate(const ReceiverProbabilityParameters& p,std::stop_t
         // observations still stays in the denominator below.
         const auto projected_energy=p.signal_energy*(!p.pulse_shaping&&p.projection_bin_chips>0?
             1-2*timing_offset*(1-timing_offset/p.projection_bin_chips):1);
+        std::array<ReceiverProjectionDraw,4> projected{};
+        if(!projection.empty())for(std::size_t j=0;j<4;++j) {
+            std::array<double,14> coordinates{};
+            std::copy_n(projection_draws()[trial].begin()+14*j,14,coordinates.begin());
+            projected[j]=projection[j].sample(coordinates);
+        }
         const auto observe=[&](const std::array<Complex,4>& fit) {
         std::array<Complex,4> correct{},wrong{};
         double represented=0,energy=0;
         for(std::size_t j=0;j<4;++j) {
+            if(!projection.empty()) {
+                const auto amplitude=std::sqrt(p.signal_energy*timing)*fit[j];
+                const auto& means=(*p.section_signal_coefficients)[j];
+                correct[j]=amplitude*means[0]+projected[j].dots[0];
+                wrong[j]=amplitude*means[1]+projected[j].dots[1];
+                energy+=projected[j].energy+2*std::real(amplitude*std::conj(projected[j].dots[2]));
+                continue;
+            }
             const auto signal=std::sqrt(p.signal_energy*p.weights[j]*timing)*fit[j];
             const Complex noise{draw[phase_draws+4*j]/std::sqrt(2.),draw[phase_draws+4*j+1]/std::sqrt(2.)};
             const Complex other{draw[phase_draws+4*j+2]/std::sqrt(2.),draw[phase_draws+4*j+3]/std::sqrt(2.)};
-            correct[j]=signal+noise;
             const auto correlation=p.correlations[j];
-            wrong[j]=correlation*correct[j]+std::sqrt(1-std::norm(correlation))*other;
-            represented+=std::norm(signal);
-            energy+=std::norm(correct[j])+std::norm(other);
+            const auto scale=std::sqrt(1-std::norm(correlation));
+            if(p.section_signal_coefficients) {
+                const auto amplitude=std::sqrt(p.signal_energy*timing)*fit[j];
+                const auto& coefficients=(*p.section_signal_coefficients)[j];
+                const auto ma=amplitude*coefficients[0],mb=amplitude*coefficients[1];
+                const auto mo=(mb-correlation*ma)/scale;
+                correct[j]=ma+noise;
+                const auto orthogonal=mo+other;
+                wrong[j]=correlation*correct[j]+scale*orthogonal;
+                represented+=std::norm(ma)+std::norm(mo);
+                energy+=std::norm(correct[j])+std::norm(orthogonal);
+            } else {
+                correct[j]=signal+noise;
+                wrong[j]=correlation*correct[j]+scale*other;
+                represented+=std::norm(signal);
+                energy+=std::norm(correct[j])+std::norm(other);
+            }
         }
         // Unmatched signal remains in the denominator. It cannot become an
         // artificial SNR improvement just because phase drift spoiled its fit.
-        const auto remainder=std::max(0.,projected_energy-represented);
-        const Complex residual{std::sqrt(remainder)+draw[phase_draws+16]/std::sqrt(2.),
-            draw[phase_draws+17]/std::sqrt(2.)};
-        energy+=std::norm(residual)+gamma_remainder(p.noise_dimensions-9,draw[phase_draws+18]);
+        if(!projection.empty()) {
+            // Exact for fixed section phasors and the supplied projected source.
+            // As in the existing phase/timing approximation, spoiled signal
+            // stays in the denominator. Its changing projection onto unmatched
+            // noise is not resolved by the isolated-symbol reference.
+            energy+=projected_energy;
+        } else {
+            const auto remainder=std::max(0.,projected_energy-represented);
+            const Complex residual{std::sqrt(remainder)+draw[phase_draws+16]/std::sqrt(2.),
+                draw[phase_draws+17]/std::sqrt(2.)};
+            energy+=std::norm(residual)+gamma_remainder(p.noise_dimensions-9,draw[phase_draws+18]);
+        }
         const auto a=scores(correct,energy,p,p.weights),b=scores(wrong,energy,p,alternative_weights);
         return std::array{a,b};
         };
@@ -287,8 +366,59 @@ ReceiverProbability calculate(const ReceiverProbabilityParameters& p,std::stop_t
     return result;
 }
 } // namespace
+ReceiverProjectionModel::ReceiverProjectionModel(const ReceiverProjectionSection& section):section_(section) {
+    if(section.samples<8||section.samples>262144||
+       !(section.variance[0]>0&&section.variance[1]>0)||
+       std::abs(section.variance[0]+section.variance[1]-1)>1e-12)
+        throw Error("invalid projected noise plane geometry");
+    for(unsigned plane=0;plane<2;++plane) {
+        auto residual=section.gram[plane];auto& lower=lower_[plane];
+        double scale=0;
+        for(unsigned i=0;i<6;++i)scale=std::max(scale,std::abs(residual[6*i+i]));
+        const auto tolerance=1e-11*std::max(1.,scale);
+        for(unsigned i=0;i<6;++i)for(unsigned j=0;j<6;++j)
+            if(!std::isfinite(residual[6*i+j])||
+               std::abs(residual[6*i+j]-residual[6*j+i])>tolerance)
+                throw Error("invalid projected noise Gram symmetry");
+        // Pivot on the largest residual diagonal. A tiny leading vector can
+        // have a legitimate large cross term with a later vector; unpivoted
+        // thresholding would wrongly reject that positive-semidefinite Gram.
+        for(unsigned k=0;k<6;++k) {
+            unsigned pivot=0;
+            for(unsigned i=1;i<6;++i)if(residual[6*i+i]>residual[6*pivot+pivot])pivot=i;
+            const auto diagonal=residual[6*pivot+pivot];
+            if(diagonal<=tolerance)break;
+            for(unsigned i=0;i<6;++i)lower[6*i+k]=residual[6*i+pivot]/std::sqrt(diagonal);
+            for(unsigned i=0;i<6;++i)for(unsigned j=0;j<6;++j)
+                residual[6*i+j]-=lower[6*i+k]*lower[6*j+k];
+            ++rank_[plane];
+        }
+        for(const auto value:residual)if(std::abs(value)>8*tolerance)
+            throw Error("projected noise Gram is not positive semidefinite");
+    }
+}
+ReceiverProjectionDraw ReceiverProjectionModel::sample(const std::array<double,14>& draw) const {
+    ReceiverProjectionDraw result;
+    for(unsigned plane=0;plane<2;++plane) {
+        const auto& lower=lower_[plane];const auto variance=section_.variance[plane];
+        std::array<double,6> dots{};double energy=0;
+        for(unsigned i=0;i<6;++i) {
+            if(i<rank_[plane])energy+=draw[7*plane+i]*draw[7*plane+i];
+            for(unsigned j=0;j<rank_[plane];++j)dots[i]+=lower[6*i+j]*draw[7*plane+j];
+        }
+        for(unsigned i=0;i<3;++i)result.dots[i]+=std::sqrt(variance)*Complex{dots[2*i],dots[2*i+1]};
+        // Orthogonal white-plane energy is independent of all retained dots.
+        // Same bounded chi-square approximation as the established model,
+        // now weighted separately for the two actual covariance eigenvalues.
+        const auto shape=(static_cast<double>(section_.samples)-rank_[plane])/2;
+        result.energy+=variance*(energy+2*gamma_remainder(shape,draw[7*plane+6]));
+    }
+    return result;
+}
 ReceiverProbability receiver_probability(const ReceiverProbabilityParameters& p,std::stop_token stop) {
     estimate_detail::check(stop);
+    if((p.section_signal_coefficients||p.projected_noise)&&(p.differential_windows||!p.real_atoms.empty()))
+        throw Error("quarter signal means cannot be used with the differential probability model");
     // Repeated one-bit/current-draft estimates reuse exactly the same per-bit
     // probabilities. A tiny thread-local cache is independent of symbol size.
     struct Entry {ReceiverProbabilityParameters parameters;ReceiverProbability result;};

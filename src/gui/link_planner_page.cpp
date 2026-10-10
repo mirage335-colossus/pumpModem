@@ -457,8 +457,11 @@ void planner_controls(Node& root,const planner::Model& model,bool use_draft) {
     first.bottom=6;controls.children.push_back(std::move(first));
     if(!one_row)buttons(controls,{{"Stronger",Command::planner_stronger,model.stronger_fit_target.has_value()},
         {"Weaker",Command::planner_weaker,model.weaker_fit_target.has_value()}});
-    buttons(controls,{{"−8 example",Command::planner_example_short},{"+23 LPI example",Command::planner_example_lpi},
-        {use_draft?"Plan 1 bit":"Use current draft",Command::planner_toggle_draft}});
+    buttons(controls,{{"Spread-Spectrum DSSS FHSS Example",Command::planner_example_spread},
+        {"Weak-Signal Example",Command::planner_example_weak},
+        {"Sub-9kHz Example",Command::planner_example_sub9},
+        {"Earth-Moon-Earth Example",Command::planner_example_eme}});
+    buttons(controls,{{use_draft?"Plan 1 bit":"Use current draft",Command::planner_toggle_draft}});
     if(model.available&&model.automatic_mode)
         paragraph(controls,"Stronger / Weaker skip clock and RAM gaps.",11,Tone::muted,false,6);
     if(model.available)buttons(controls,{{"Use target for short messages",Command::planner_apply_short},
@@ -557,22 +560,6 @@ void link_budget(Node& root, const planner::Model& model) {
         paragraph(n, "Budget: " + number(std::abs(model.margin_db)) + (model.margin_db < 0 ? " dB short" : " dB margin") +
             "  ·  Whole-bit phase loss: " + (model.phase_coherence_loss_db < .1 ? "<0.1" : number(model.phase_coherence_loss_db)) +
             " dB", 11, Tone::muted, false, 0);
-        if(!model.receiver_work_assumptions.empty())
-            paragraph(n,"Receiver work: "+model.receiver_work_assumptions,11,Tone::muted,false,0);
-        if(model.receiver_geometry.dsss_factor>1&&
-           model.receiver_geometry.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2)
-            paragraph(n,"Interleaved-v2 DSSS: full acquisition sensitivity is unqualified. Link budget requires actual average radio power; simulation noise remains nominal-power referenced.",11,Tone::muted,false,0);
-        if(model.differential_windows)
-            paragraph(n,"Differential detector: "+std::to_string(model.differential_windows)+" windows × "+
-                planner::duration(model.differential_window_seconds)+
-                (model.differential_model_available?
-                    (probability_available?(model.probability_reference_only?" · included in RX reference":" · included in RX estimate"):
-                        " · included in first-bit estimate"):
-                    " · probability outside model coverage"),
-                11,Tone::muted,false,0);
-        else if(model.drift_model_available)
-            paragraph(n,"Detector model: coherent and four-section fits · local differential geometry not eligible",
-                11,Tone::muted,false,0);
     } else paragraph(n, "Link estimate unavailable", 13, Tone::text, true, 0);
     root.children.push_back(std::move(n));
 }
@@ -584,14 +571,6 @@ void planner_footer(Node& root,const planner::Model& model,bool show_details) {
     auto choice=column(std::min(root.width,480.f));choice.kind=Kind::control;
     choice.control=*declaration;choice.height=ui::label_height+28;choice.bottom=4;
     root.children.push_back(std::move(choice));
-    const auto& g=model.receiver_geometry;
-    if(!g.arithmetic_backend.empty()) {
-        paragraph(root,"Arithmetic model: "+g.arithmetic_backend+"; operands "+g.arithmetic_operands+
-            "; accumulation "+g.arithmetic_accumulation+".",11,Tone::muted,false,4);
-        if(!g.arithmetic_limit.empty())paragraph(root,g.arithmetic_limit,11,Tone::muted,false,4);
-        if(!g.template_reuse.empty())paragraph(root,"Template reuse: "+g.template_reuse,11,Tone::muted,false,4);
-    } else paragraph(root,"Requested arithmetic: "+std::string(tuning::search_arithmetic_id(
-        model.inputs.options.modem.search_arithmetic))+"; backend model diagnostics pending.",11,Tone::muted,false,4);
     buttons(root,{{show_details?"Hide details":"Model limits and references",Command::planner_toggle_details}});
 }
 void geometry_details(Node& n,const planner::Model& model) {
@@ -603,7 +582,7 @@ void geometry_details(Node& n,const planner::Model& model) {
     if(model.receiver_geometry.sample_rate) {
         const auto& g=model.receiver_geometry;
         const auto version=g.dsss_factor<=1?"off":g.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2?
-            "interleaved-v2":"legacy";
+            "Interleave":"legacy diagnostic";
         paragraph(n,"Receiver geometry: "+std::to_string(g.sample_rate)+" samples/s; fine chip "+
             planner::duration(g.fine_chip_seconds)+"; inner chip "+planner::duration(g.inner_chip_seconds)+
             "; symbol "+planner::duration(g.symbol_seconds)+"; DSSS "+std::to_string(g.dsss_factor)+
@@ -648,8 +627,33 @@ void details(Node& root,const planner::Model& model) {
     auto n = card(root.width);
     paragraph(n, "Model limits", 15, Tone::text, true, 8);
     geometry_details(n,model);
+    const auto& g=model.receiver_geometry;
+    if(!g.arithmetic_backend.empty()) {
+        paragraph(n,"Arithmetic model: "+g.arithmetic_backend+"; operands "+g.arithmetic_operands+
+            "; accumulation "+g.arithmetic_accumulation+".",11,Tone::muted,false,4);
+        if(!g.arithmetic_limit.empty())paragraph(n,g.arithmetic_limit,11,Tone::muted,false,4);
+        if(!g.template_reuse.empty())paragraph(n,"Template reuse: "+g.template_reuse,11,Tone::muted,false,4);
+    } else paragraph(n,"Requested arithmetic: "+std::string(tuning::search_arithmetic_id(
+        model.inputs.options.modem.search_arithmetic))+"; backend model diagnostics pending.",11,Tone::muted,false,4);
+        if(!model.receiver_work_assumptions.empty())
+            paragraph(n,"Receiver work: "+model.receiver_work_assumptions,11,Tone::muted,false,0);
+        if(model.receiver_geometry.dsss_factor>1&&
+           model.receiver_geometry.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2)
+            paragraph(n,"Interleave DSSS: full acquisition sensitivity is unqualified. Link budget requires actual average radio power; simulation noise remains nominal-power referenced.",11,Tone::muted,false,0);
+        if(model.differential_windows)
+            paragraph(n,"Differential detector: "+std::to_string(model.differential_windows)+" windows × "+
+                planner::duration(model.differential_window_seconds)+
+                (model.differential_model_available?
+                    ((model.confidence_available||model.reference_probability_available)?(model.probability_reference_only?" · included in RX reference":" · included in RX estimate"):
+                        " · included in first-bit estimate"):
+                    " · probability outside model coverage"),
+                11,Tone::muted,false,0);
+        else if(model.drift_model_available)
+            paragraph(n,"Detector model: coherent and four-section fits · local differential geometry not eligible",
+                11,Tone::muted,false,0);
+
     if(model.receiver_geometry.dsss_factor>1&&model.receiver_geometry.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2)
-        paragraph(n,"V2 uses 6.02 dB pre-limiter digital backoff; actual mean-power change depends on clipping. Link budget requires actual average radio power; simulation noise remains nominal-power referenced. Full acquisition sensitivity is unqualified.");
+        paragraph(n,"Interleave uses 6.02 dB pre-limiter digital backoff; actual mean-power change depends on clipping. Link budget requires actual average radio power; simulation noise remains nominal-power referenced. Full acquisition sensitivity is unqualified.");
     if(!model.probability_model_limit.empty())paragraph(n,"Estimate coverage: "+model.probability_model_limit+".");
     if((model.one_bit_confidence_available||model.one_bit_reference_available)&&model.probability_trials) {
         const auto interval=model.probability_interval_available?
@@ -676,7 +680,7 @@ void details(Node& root,const planner::Model& model) {
     paragraph(n, "Link budget. Average transmit power minus path loss gives received power. Noise then sets signal strength; the selected target sets bit duration. Meeting the target is a planning estimate.");
     paragraph(n, "Timing. Uses the selected modem profile, exact wire-bit count and waveform overhead. Finish adds complete absent symbols covering at least six seconds; processing takes extra time. No reception is tested here.");
     if(model.one_bit_cpu_available)
-        paragraph(n,"CPU. Reference: Intel Core i9-13900H. A one-bit simulation takes about "+
+        paragraph(n,"CPU. Reference: Ryzen 5 PRO 5650U local acquisition calibration; other work uses engineering allowances. A one-bit simulation takes about "+
             planner::duration(model.one_bit_cpu_seconds)+" of processing for "+planner::duration(model.bit_seconds)+
             " per bit. The CPU indicator counts receiver work and ordinary payload processing, including CPU-mitigation overhead, averaged over incoming audio including the final silence check. Additional recovery searches are excluded. Green: below 0.5× real time; yellow: 0.5–1×; red: 1× or more. Search bursts, extra receive targets and slower computers can need more headroom. This is an estimate, not a measurement of this computer.");
     if(model.kernel_rebuild_upper_bound)

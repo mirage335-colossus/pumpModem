@@ -788,6 +788,43 @@ void native_fp32_whole_preserves_progress() {
     check(scale!=1. || (received==bits&&completed==1),"native FP32 changed the received bits or completion count: scale="+std::to_string(scale)+" received="+std::to_string(received.size())+" completions="+std::to_string(completed));
     }
 }
+void automatic_workers_select_native_private_search() {
+    auto c=config(64,true);c.sample_rate=40000;c.bandwidth_hz=10;c.carrier_hz=7500;
+    c.dsss=true;c.dsss_factor=1000;c.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;
+    c.integration_seconds=0;c.search_arithmetic=modem::SearchArithmetic::default_mode;
+    for(std::size_t i=0;i<c.dsss_seed.size();++i)c.dsss_seed[i]=static_cast<std::uint8_t>(91+3*i);
+    modem::PatternSearch search;search.worker_threads=0;search.drift_tolerant=false;
+    search.hypotheses={{0,0}};search.initial_stream_symbols=2;
+    search.start_offset_seconds=.1;search.start_uncertainty_seconds=7;
+    search.qualified_start_window=modem::PatternStartWindow{4000,1,20};
+    constexpr std::size_t workspace=64*1024*1024;
+    modem::PatternReceiver automatic(c,workspace,search);search.worker_threads=1;
+    modem::PatternReceiver serial(c,workspace,search);
+    // A complete logical FFT window tests dispatch even when no signal admits.
+    std::vector<float> pcm(1048576);for(std::size_t i=0;i<pcm.size();++i)pcm[i]=static_cast<float>(.01*std::sin(i*.317));
+    automatic.push(pcm);serial.push(pcm);
+    const auto a=automatic.fft_work(),b=serial.fft_work();
+    check(a.native_fp32_transforms+a.fp32_dots>0&&
+        a.native_fp32_transforms==b.native_fp32_transforms&&a.fp32_dots==b.fp32_dots&&
+        a.threshold_trials==b.threshold_trials&&a.scored_start_trials==b.scored_start_trials,
+        "application automatic workers missed the supported native precision path: "+
+        std::to_string(a.native_fp32_transforms)+"/"+std::to_string(b.native_fp32_transforms)+" transforms, "+
+        std::to_string(a.fp32_dots)+"/"+std::to_string(b.fp32_dots)+" dots, symbol "+
+        std::to_string(modem::symbol_sample_count(c)));
+    const auto ap=automatic.take_bursts(),bp=serial.take_bursts();
+    check(ap.size()==bp.size(),"automatic worker selection changed progress");
+    for(std::size_t i=0;i<ap.size();++i)check(same_burst(ap[i],bp[i]),"automatic workers changed scored identity");
+    check(automatic.working_bytes()<=workspace,"automatic native dispatch exceeded workspace");
+    // Optional native scratch must fit before changing automatic scheduling.
+    // Keep the whole-FFT algorithm here so a partitioned path cannot mask it.
+    const auto tight=automatic.reserved_workspace_bytes()+1024*1024;
+    search.worker_threads=0;search.partitioned_timing_search=false;search.restricted_direct_search=false;
+    modem::PatternReceiver pressure(c,tight,search);pressure.push(pcm);
+    const auto p=pressure.fft_work();
+    check(p.native_fp32_transforms==0&&p.arithmetic_fallback_jobs==0&&p.fft_jobs>0&&
+          pressure.working_bytes()<=tight,
+          "automatic workers forced serial native execution without workspace for its buffers");
+}
 void native_fp32_private_template_progress() {
     auto c=config(128,true);c.sample_rate=2560;c.bandwidth_hz=64;c.carrier_hz=640;
     c.dsss=true;c.dsss_factor=10;c.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;
@@ -2407,6 +2444,7 @@ int main(int argc,char** argv) {
     run("qualified UTC FFT partitioned reception",qualified_fft_partitioned_reception);
     run("search arithmetic retained progress",search_arithmetic_preserves_retained_progress);
     run("native FP32 whole progress",native_fp32_whole_preserves_progress);
+    run("automatic workers select native private search",automatic_workers_select_native_private_search);
     run("native FP32 private template progress",native_fp32_private_template_progress);
     run("qualified UTC FFT bounded readiness",qualified_fft_bounded_readiness);
     run("qualified UTC FFT follow-on progress",qualified_fft_followon_progress);

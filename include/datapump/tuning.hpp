@@ -48,6 +48,21 @@ inline constexpr double maximum_bandwidth_hz = modem::maximum_bandwidth_hz;
 // in dB-Hz, so in-band linear SNR is 10^(target_snr_db_hz/10)/bandwidth_hz.
 // This theoretical ceiling is independent of modem framing and coding.
 double shannon_capacity_bps(double bandwidth_hz, double target_snr_db_hz);
+// Static radial Doppler calculator. Positive velocity means receding and
+// lowers the physical carrier. This is not transmit precompensation or drift
+// tracking; a reflected path's effective radial velocity is supplied by the
+// caller, without an automatic round-trip multiplier.
+struct Doppler {
+    double velocity_c = 0;
+    double frequency_ratio = 1;
+    double frequency_shift_percent = 0;
+    std::string canonical = "0.000000c";
+};
+// Accept c, knots, mph, kph or a signed frequency shift in percent (%).
+// Velocity must be strictly below light speed; the shifted carrier must remain
+// positive. Canonical text uses c and preserves the parsed double precision.
+Doppler parse_doppler(std::string_view text);
+double doppler_carrier_hz(double configured_physical_carrier_hz, const Doppler& doppler);
 // Automatic real-PCM plans center narrow audio bands at 1500 Hz. Wider bands
 // retain the 0.75 * bandwidth carrier. The logical clock covers both the band
 // and carrier with four samples per hertz, keeping the nominal upper edge in

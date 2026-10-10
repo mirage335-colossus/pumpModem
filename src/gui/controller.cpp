@@ -289,6 +289,7 @@ struct Controller::Impl {
         f(UiField::mono).selected="left";
         f(UiField::bandwidth).text="3.6 kHz";
         for(const auto* s:{"0.001 Hz","0.01 Hz","0.1 Hz","1 Hz","3.6 Hz","10 Hz","36 Hz","100 Hz","360 Hz","1.2 kHz","2.4 kHz","3.6 kHz","12 kHz","18 kHz","24 kHz","1 MHz","30 MHz"}) f(UiField::bandwidth).options.push_back({s,s});
+        f(UiField::doppler).text="0.000000c";
         reset_carrier(3600);
         f(UiField::snr).text="32"; f(UiField::long_snr).text="55";
         f(UiField::planner_target).text="-8";
@@ -316,10 +317,10 @@ struct Controller::Impl {
         f(UiField::audio_error).text="0ms";
         for(const auto* value:{"0ms","1ms","3ms","10ms","20ms","30ms","50ms","100ms","200ms","500ms"})
             f(UiField::audio_error).options.push_back({value,value});
-        f(UiField::dsss_factor).options={{"1","Off"},{"10","10x"},{"100","100x"},{"1000","1000x"}};
-        f(UiField::dsss_factor).selected="1";
-        f(UiField::dsss_version).options={{"interleaved-v2","Interleaved v2"},{"legacy","Legacy v1 (diagnostic)"}};
-        f(UiField::dsss_version).selected="interleaved-v2";
+        f(UiField::dsss_factor).options={{"10","10x"},{"100","100x"},{"1000","1000x"}};
+        f(UiField::dsss_factor).selected="10";
+        f(UiField::dsss_version).options={{"off","Off"},{"interleave","Interleave"}};
+        f(UiField::dsss_version).selected="off";
         f(UiField::search_arithmetic).options={{"default","Default — automatic"},
             {"fp32-min","FP32 minimum"},{"fp64-force","FP64 force"}};
         f(UiField::search_arithmetic).selected="default";
@@ -333,6 +334,8 @@ struct Controller::Impl {
         }
         f(UiField::simulation_oscillator).selected="crystal";
         f(UiField::rf_oscillator).selected="crystal";
+        for(const auto* value:{"0.000000c","100 knots","-100 knots","100 mph","-100 mph","100 kph","-100 kph"})
+            f(UiField::doppler).options.push_back({value,value});
         f(UiField::rf_shift).text="0 Hz";
         for(const auto hz:{0.,1000000.,3500000.,7000000.,10000000.,14000000.,30000000.})
             f(UiField::rf_shift).options.push_back({frequency_text(hz),frequency_text(hz)});
@@ -452,7 +455,7 @@ struct Controller::Impl {
         std::ostringstream label;label<<(coherent_reference?"RX reference · ":"RX estimate · ")<<(target>0?"+":"")<<std::setprecision(4)<<target<<" dB target\n";
         f(UiField::simulation_confidence).text=label.str()+std::move(confidence);
         f(UiField::simulation_confidence).text_tone=tone;
-        f(UiField::simulation_cpu_time).text="CPU / i9-13900H\n"+std::move(cpu);
+        f(UiField::simulation_cpu_time).text="CPU / Ryzen 5 PRO 5650U\n"+std::move(cpu);
         f(UiField::simulation_gpu_time).text="GPU / RTX 4090 Laptop (projected)\n"+std::move(gpu);
     }
     void simulation_estimate_status(std::string state) {
@@ -546,19 +549,32 @@ struct Controller::Impl {
         was_encrypted=encrypted();
     }
     void reset_carrier(double rate,double shift=0,bool replace_text=true) {
-        auto& carrier=f(UiField::carrier);
-        const auto recommended=exact_frequency_text(shift+recommended_gui_carrier(rate));
-        if(replace_text)carrier.text=recommended;
-        carrier.options={{recommended,recommended}};
-        const auto center=exact_frequency_text(shift+rate/2);
-        if(center!=recommended)carrier.options.push_back({center,center});
+        // Presets describe the desired stream tone after the manual Doppler
+        // calculator. Explicit imported Carrier values remain untouched.
+        // An incomplete velocity edit must not throw from a dropdown callback.
+        try {
+            const auto ratio=tuning::parse_doppler(f(UiField::doppler).text).frequency_ratio;
+            const auto nominal=[&](double tone) {
+                const auto value=static_cast<double>((static_cast<long double>(shift)+tone)/ratio);
+                if(!std::isfinite(value)||value<=0)throw Error("Doppler-adjusted carrier suggestion is out of range");
+                return exact_frequency_text(value);
+            };
+            const auto recommended=nominal(recommended_gui_carrier(rate));
+            const auto center=nominal(rate/2);
+            auto& carrier=f(UiField::carrier);
+            if(replace_text)carrier.text=recommended;
+            carrier.options={{recommended,recommended}};
+            if(center!=recommended)carrier.options.push_back({center,center});
+        } catch(const Error&) {
+            // configure() reports the invalid field and retains accepted DSP.
+        }
     }
     std::string requested_bandwidth_hint(bool compact=false) const {
         // An invalid carrier or sample geometry must not hide the requested
         // spreading width. This is a nominal design hint, not a measured mask.
         try {
             const auto rate=frequency(f(UiField::bandwidth).text,"Rate");
-            const auto factor=encrypted()?number(f(UiField::dsss_factor).selected,"DSSS factor"):1.;
+            const auto factor=encrypted()&&f(UiField::dsss_version).selected!="off"?number(f(UiField::dsss_factor).selected,"DSSS factor"):1.;
             const auto bandwidth=rate*factor;
             if(!std::isfinite(bandwidth)||bandwidth<=0)return {};
             if(compact)return "Bandwidth "+frequency_text(bandwidth);
@@ -566,7 +582,7 @@ struct Controller::Impl {
                 (factor>1?" (Rate x "+std::to_string(static_cast<unsigned>(factor))+" DSSS)":"")+
                 "; ideal RRC target width "+frequency_text(.625*bandwidth)+" when pulse shaping is eligible.";
             try {
-                const auto carrier=frequency(f(UiField::carrier).text,"Carrier")-frequency(f(UiField::rf_shift).text,"Shift");
+                const auto carrier=tuning::doppler_carrier_hz(frequency(f(UiField::carrier).text,"Carrier"),tuning::parse_doppler(f(UiField::doppler).text))-frequency(f(UiField::rf_shift).text,"Shift");
                 hint+=" Ideal shaped stream edges "+frequency_text(carrier-.3125*bandwidth)+" to "+
                     frequency_text(carrier+.3125*bandwidth)+" relative to Shift; finite pulse tails are outside these ideal edges.";
             } catch(const std::exception&) {}
@@ -692,11 +708,16 @@ struct Controller::Impl {
             if(next_tone&&load&&(load->key_name||load->tx_key=="named"))
                 throw Error("Tone modes cannot select a named transmit encryption key");
             const bool next_encrypted=!next_tone&&selected!="none";
-            const auto requested_factor=load&&load->dsss_factor?*load->dsss_factor:
-                static_cast<unsigned>(number(f(UiField::dsss_factor).selected,"DSSS factor"));
-            const auto factor=next_encrypted?requested_factor:1u;
-            const auto version=load&&load->dsss_version?*load->dsss_version:f(UiField::dsss_version).selected;
-            const auto dsss_version=tuning::parse_outer_dsss_version(version);
+            const auto remembered_factor=static_cast<unsigned>(number(f(UiField::dsss_factor).selected,"DSSS factor"));
+            const auto loaded_factor=load&&load->dsss_factor?*load->dsss_factor:remembered_factor;
+            const auto requested_factor=loaded_factor>1?loaded_factor:remembered_factor;
+            auto mode_selection=f(UiField::dsss_version).selected;
+            if(load&&load->dsss_factor)mode_selection=loaded_factor==1?"off":mode_selection=="legacy"?"legacy":"interleave";
+            if(load&&load->dsss_version&&mode_selection!="off")
+                mode_selection=std::string(tuning::outer_dsss_version_id(tuning::parse_outer_dsss_version(*load->dsss_version)));
+            if(load&&load->dsss_mode)mode_selection=*load->dsss_mode;
+            const auto factor=next_encrypted&&mode_selection!="off"?requested_factor:1u;
+            const auto dsss_version=tuning::parse_outer_dsss_version(mode_selection=="legacy"?"legacy":"interleave");
             const auto arithmetic_id=load&&load->search_arithmetic?*load->search_arithmetic:f(UiField::search_arithmetic).selected;
             const auto arithmetic=tuning::parse_search_arithmetic(arithmetic_id);
             const auto fhss=load&&load->fhss?*load->fhss:f(UiField::fhss).selected;
@@ -713,11 +734,12 @@ struct Controller::Impl {
             auto long_snr=load&&load->long_target_db_hz?*load->long_target_db_hz:
                 load&&load->target_db_hz?*load->target_db_hz:effective_target(UiField::long_snr);
             const auto physical_carrier=load&&load->carrier_hz?*load->carrier_hz:frequency(f(UiField::carrier).text,"Carrier");
+            const auto doppler=tuning::parse_doppler(load&&load->doppler?*load->doppler:f(UiField::doppler).text);
             // Public frequencies are absolute. DSP consumes only the real USB
             // stream above Shift; reject partial/invalid edits before planning.
-            const auto carrier=physical_carrier-shift;
+            const auto carrier=tuning::doppler_carrier_hz(physical_carrier,doppler)-shift;
             if(!std::isfinite(physical_carrier)||!std::isfinite(carrier)||carrier<=0)
-                throw Error("Carrier must be greater than Shift (stream = Carrier - Shift)");
+                throw Error("Adjusted Carrier must be greater than Shift (stream = adjusted Carrier - Shift)");
             auto next_planner=planner_inputs;
             if(load) {
                 if(load->tx_dbm)next_planner.tx_dbm=*load->tx_dbm;
@@ -885,6 +907,7 @@ struct Controller::Impl {
                 f(UiField::planner_target).display_text.clear();
                 f(UiField::bandwidth).text=exact_frequency_text(rate);reset_carrier(rate*factor,shift);
                 f(UiField::carrier).text=exact_frequency_text(physical_carrier);
+                f(UiField::doppler).text=doppler.canonical;
                 f(UiField::snr).text=planner_number(short_snr);f(UiField::long_snr).text=planner_number(long_snr);
                 target_edits={};receive_target_edit.reset();
                 f(UiField::simulation_oscillator).selected=oscillator_id;
@@ -899,7 +922,7 @@ struct Controller::Impl {
                 clock_fields(next.transfer.clock_sync);
                 f(UiField::audio_error).text=clock_sync::duration_text(next.transfer.audio_timing_error_seconds);
                 f(UiField::dsss_factor).selected=std::to_string(requested_factor);
-                f(UiField::dsss_version).selected=version;
+                f(UiField::dsss_version).selected=mode_selection;
                 f(UiField::search_arithmetic).selected=tuning::search_arithmetic_id(arithmetic);
                 f(UiField::fhss).selected=fhss;
                 if(next_tone)f(UiField::key).selected="none";
@@ -1021,12 +1044,14 @@ struct Controller::Impl {
         values.target_db_hz=planner_inputs.target_db_hz;
         values.pattern=f(UiField::pattern).selected;
         values.rate_hz=settings.transfer.modem.bandwidth_hz;
-        values.carrier_hz=settings.transfer.modem.carrier_hz+*values.rf_shift_hz;
+        values.carrier_hz=frequency(f(UiField::carrier).text,"Carrier");
+        values.doppler=tuning::parse_doppler(f(UiField::doppler).text).canonical;
         values.workspace_percent=dsp_workspace_percent;
         values.clock_sync=clock_sync::format(settings.transfer.clock_sync);
         values.audio_timing_error_seconds=settings.transfer.audio_timing_error_seconds;
         values.dsss_factor=static_cast<unsigned>(number(f(UiField::dsss_factor).selected,"DSSS factor"));
-        values.dsss_version=f(UiField::dsss_version).selected;
+        if(f(UiField::dsss_version).selected!="legacy")values.dsss_mode=f(UiField::dsss_version).selected;
+        values.dsss_version=f(UiField::dsss_version).selected=="legacy"?"legacy":"interleave";
         values.search_arithmetic=f(UiField::search_arithmetic).selected;
         values.full_duplex=settings.full_duplex;
         values.fhss=f(UiField::fhss).selected;
@@ -1256,7 +1281,10 @@ struct Controller::Impl {
         if(closing) return false;
         const bool busy=transmit_requested || snapshot.transmitting;
         switch(command) {
-        case Command::planner_load_command: return !busy&&!key_loading&&!key_failed;
+        case Command::planner_load_command:
+        case Command::planner_example_spread: case Command::planner_example_weak:
+        case Command::planner_example_sub9: case Command::planner_example_eme:
+            return !busy&&!key_loading&&!key_failed;
         case Command::planner_apply_short: case Command::planner_apply_long:
             return !busy&&!key_loading&&!key_failed&&settings_valid&&link_plan()->available;
         case Command::planner_power: case Command::planner_loss: case Command::planner_noise:
@@ -1326,11 +1354,14 @@ struct Controller::Impl {
         f(UiField::planner_target).enabled=!closing;
         f(UiField::planner_command).enabled=!closing;
         sync_launch_command();
-        for(auto id:{UiField::clock_accuracy,UiField::clock_region,UiField::clock_offset,UiField::audio_error,UiField::dsss_factor,UiField::dsss_version,UiField::search_arithmetic,UiField::fhss,UiField::simulation,UiField::simulation_oscillator,UiField::rf_oscillator,UiField::rf_shift,UiField::search_margin,
+        for(auto id:{UiField::clock_accuracy,UiField::clock_region,UiField::clock_offset,UiField::audio_error,UiField::dsss_factor,UiField::dsss_version,UiField::search_arithmetic,UiField::fhss,UiField::simulation,UiField::simulation_oscillator,UiField::rf_oscillator,UiField::rf_shift,UiField::doppler,UiField::search_margin,
             UiField::link_power,UiField::link_loss,UiField::link_noise,UiField::key,UiField::device,UiField::mono,UiField::live_duplex,UiField::volume,UiField::exclusive,UiField::bandwidth,UiField::carrier,UiField::snr,UiField::long_snr,UiField::receive_snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
         f(UiField::dsss_factor).enabled=!busy&&!tone();
         f(UiField::dsss_version).enabled=!busy&&!tone();
-        f(UiField::dsss_factor).display_text=!encrypted()&&f(UiField::dsss_factor).selected!="1"?f(UiField::dsss_factor).selected+"x (key needed)":"";
+        f(UiField::dsss_factor).display_text=!encrypted()&&f(UiField::dsss_version).selected!="off"?f(UiField::dsss_factor).selected+"x (key needed)":"";
+        f(UiField::dsss_version).display_text=f(UiField::dsss_version).selected=="legacy"?"Legacy (diagnostic)":"";
+        f(UiField::doppler).display_text.clear();
+        try {std::ostringstream label;label<<std::setprecision(6)<<tuning::parse_doppler(f(UiField::doppler).text).frequency_shift_percent<<'%';f(UiField::doppler).display_text=label.str();}catch(const std::exception&) {}
         bool shifted=false;
         try {shifted=frequency(f(UiField::rf_shift).text,"Shift")>0;}catch(const std::exception&) {}
         f(UiField::rf_oscillator).enabled=!busy&&shifted;
@@ -1543,15 +1574,18 @@ struct Controller::Impl {
                 advice_displayed=true;
                 const auto& model=*result.simulation_estimate;
                 const auto probability_available=model.confidence_available||model.reference_probability_available;
+                const bool first_bit_only=!probability_available&&
+                    (model.one_bit_confidence_available||model.one_bit_reference_available);
                 const auto confidence=!model.profile_matches?"No matching RX profile":
                     !model.carrier_in_search?"Carrier outside RX search":
                     !model.clock_in_search?"Clock outside RX search":
                     model.oscillator_search_limited?"Oscillator margin coverage incomplete":
                     !model.receiver_workspace_supported?"Wide RX search exceeds RAM":
-                    !probability_available?"Unavailable":probability_text(model.success_probability);
+                    first_bit_only?"First bit "+probability_text(model.one_bit_success_probability)+" · draft unmodeled":
+                    !probability_available?"Outside model range":probability_text(model.success_probability);
                 simulation_estimate_text(confidence,
                     "~"+seconds_text(model.cpu_seconds),"~"+seconds_text(model.gpu_seconds),
-                    model.coherent_reference_only||model.probability_reference_only,
+                    model.coherent_reference_only||model.probability_reference_only||first_bit_only,
                     model.profile_matches&&model.carrier_in_search&&model.receiver_workspace_supported&&
                     probability_available&&model.success_probability<.8?ui::TextTone::negative:ui::TextTone::normal);
             } else simulation_estimate_status("Unavailable");
@@ -1690,6 +1724,39 @@ struct Controller::Impl {
             sync_launch_command(true);notice("Settings loaded · Simulation No");
         }
     }
+    void planner_example(Command command) {
+        // Complete, atomic launch patches. Examples never open a developer's
+        // keyfile path or assume a key name. Keep the user's selected key (or
+        // first loaded key), device and draft; the EME example is receive-only
+        // with respect to the loaded keys, as explicitly requested.
+        const bool private_example=command!=Command::planner_example_eme;
+        if(private_example&&keys.empty())throw Error("Load an encryption keyfile before selecting this example");
+        const std::string common=" --noise-dbm-hz -164 --search-margin 3 --reference independent"
+            " --doppler 0c --dsp-workspace 50% --clock-sync default --dsss-factor 10"
+            " --dsss-version interleave --search-arithmetic default --live-duplex yes";
+        const char* specific=nullptr;
+        switch(command) {
+        case Command::planner_example_spread:
+            specific="--pattern auto-keystream --tx-key named --tx-dbm 36.020599913279625 --path-loss-db 60"
+                " --oscillator crystal --rf-oscillator gpsdo-xo --shift 3e7 --target-snr 40 --rate 360"
+                " --carrier 30001500 --audio-error 0ms --dsss-mode interleave --fhss fake-0.4s-200";break;
+        case Command::planner_example_weak:
+            specific="--pattern auto-keystream --tx-key named --tx-dbm 36.020599913279625 --path-loss-db 180"
+                " --oscillator gpsdo-xo --rf-oscillator gpsdo-xo --shift 3e7 --target-snr 8 --rate 36"
+                " --carrier 30001500 --audio-error 0ms --dsss-mode interleave --fhss off";break;
+        case Command::planner_example_sub9:
+            specific="--pattern auto-keystream --tx-key named --tx-dbm 0 --path-loss-db 200"
+                " --oscillator gpsdo-ocxo --rf-oscillator gpsdo-ocxo --shift 0 --target-snr -46 --rate .01"
+                " --carrier 1500 --audio-error 50ms --dsss-mode off --fhss off";break;
+        case Command::planner_example_eme:
+            specific="--auto-pattern --tx-key none --tx-dbm 36.020599913279625 --path-loss-db 220"
+                " --oscillator gpsdo-ocxo --rf-oscillator gpsdo-ocxo --shift 5.8e9"
+                " --target-snr -3.0720996964786846 --rate 1 --carrier 5800001500"
+                " --audio-error 0ms --dsss-mode off --fhss fake-0.4s-200";break;
+        default:throw Error("Unknown planner example");
+        }
+        apply_launch(launch_command::parse(specific+common));
+    }
     std::size_t last_pattern_page() const { const auto size=inspection&&inspection->pattern_space?inspection->pattern_space->code.size():0; return size?((size-1)/page_size)*page_size:0; }
     void action(Command command) {
         if(!enabled(command)) throw Error("This action is currently unavailable");
@@ -1704,6 +1771,9 @@ struct Controller::Impl {
         case Command::planner_weaker: {const auto value=*link_plan()->weaker_fit_target;planner_target(value);break;}
         case Command::planner_example_short: planner_target(-8);break;
         case Command::planner_example_lpi: planner_target(23);break;
+        case Command::planner_example_spread: case Command::planner_example_weak:
+        case Command::planner_example_sub9: case Command::planner_example_eme:
+            planner_example(command);break;
         case Command::planner_fast: {const auto value=*link_plan()->fast_target;planner_target(value);break;}
         case Command::planner_day: {const auto value=*link_plan()->day_target;planner_target(value);break;}
         case Command::planner_clock: {const auto value=*link_plan()->clock_target;planner_target(value);break;}
@@ -1969,7 +2039,7 @@ void Controller::edit(UiField field,std::string text) {
         }
         else if(field==UiField::snr||field==UiField::long_snr) p.configure(true,false,field);
         else if(field==UiField::bandwidth) p.configure(false,true);
-        else if(field==UiField::device||field==UiField::carrier||field==UiField::rf_shift||field==UiField::search_margin) p.configure();
+        else if(field==UiField::device||field==UiField::carrier||field==UiField::rf_shift||field==UiField::doppler||field==UiField::search_margin) p.configure();
         else if(field==UiField::callsign||field==UiField::grid) { if(untouched&&!p.attachment&&!p.file_loading)p.seed_composer(); }
         else p.dirty();
     } catch(const std::exception& e) {
@@ -2018,11 +2088,12 @@ void Controller::select(UiField field,std::string id) {
             }
             id=preset.enabled?"yes":"no";
         }
-        if(state.selected==id&&!legacy_budget)return;
+        if(state.selected==id&&!legacy_budget&&!(field==UiField::dsss_factor&&p.f(UiField::dsss_version).selected!="interleave"))return;
         const bool list=std::any_of(ui::console_screen().begin(),ui::console_screen().end(),[&](const auto& control){return control.field==field&&control.kind==ui::Kind::list;});
         const bool available=list?std::any_of(state.records.begin(),state.records.end(),[&](const auto& row){return row.id==id&&row.enabled;}):
             std::any_of(state.options.begin(),state.options.end(),[&](const auto& option){return option.id==id&&option.enabled;});
         if(!available)throw Error("Select an available item");
+        const auto previous_selection=state.selected;
         state.selected=std::move(id);
         if(field==UiField::volume) {
             p.settings.transmit_gain=audio_controls::volume_gain(state.selected);
@@ -2039,9 +2110,15 @@ void Controller::select(UiField field,std::string id) {
             p.encryption_changed(); p.configure();
             if(field==UiField::pattern && p.tone())p.notice("Tone modes are unencrypted and do not provide Low-Probability-of-Intercept protection.");
         }
+        else if(field==UiField::dsss_version&&previous_selection=="off"&&state.selected=="interleave") {
+            const auto factor=number(p.f(UiField::dsss_factor).selected,"DSSS factor");
+            p.f(UiField::bandwidth).text=exact_frequency_text(3600./factor);
+            p.reset_carrier(3600,frequency(p.f(UiField::rf_shift).text,"Shift"));p.configure();
+        }
         else if(field==UiField::simulation||field==UiField::simulation_oscillator||field==UiField::rf_oscillator||
             field==UiField::fec||field==UiField::dsp_workspace||field==UiField::fhss||field==UiField::dsss_version||field==UiField::search_arithmetic) p.configure();
         else if(field==UiField::dsss_factor) {
+            p.f(UiField::dsss_version).selected="interleave";
             const auto factor=static_cast<unsigned>(number(state.selected,"DSSS factor"));
             if(factor>1)p.f(UiField::bandwidth).text=exact_frequency_text(3600./factor);
             // User selections install a useful voice-passband starting point;

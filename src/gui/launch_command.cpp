@@ -137,7 +137,7 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             flag=="--rate"||flag=="--bw"||flag=="--carrier"||flag=="--dsp-workspace"||flag=="--pattern"||
             flag=="--rf-oscillator"||flag=="--shift"||flag=="--rf-shift"||flag=="--rf-carrier"||flag=="--search-margin"||
             flag=="--reference"||flag=="--sideband"||flag=="--lf-reference"||
-            flag=="--clock-sync"||flag=="--audio-error"||flag=="--dsss-factor"||flag=="--dsss-version"||flag=="--search-arithmetic"||flag=="--fhss"||flag=="--live-duplex"||
+            flag=="--clock-sync"||flag=="--audio-error"||flag=="--dsss-factor"||flag=="--dsss-version"||flag=="--dsss-mode"||flag=="--search-arithmetic"||flag=="--doppler"||flag=="--fhss"||flag=="--live-duplex"||
             flag=="--keyfile"||flag=="--key-name"||flag=="--tx-key";
         if(!known)invalid("Unknown launch option: "+std::string(flag));
         std::string_view value;
@@ -168,6 +168,10 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             result.audio_timing_error_seconds=clock_sync::duration(value);
             clock_sync::validate_audio_error(*result.audio_timing_error_seconds);
         }
+        else if(flag=="--dsss-mode") {
+            if(value!="off"&&value!="interleave")invalid("--dsss-mode must be off or interleave.");
+            result.dsss_mode=value;
+        }
         else if(flag=="--dsss-factor") {
             const auto factor=number(value,flag,1,1000);
             if(factor!=1&&factor!=10&&factor!=100&&factor!=1000)
@@ -175,6 +179,7 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             result.dsss_factor=static_cast<unsigned>(factor);
         }
         else if(flag=="--dsss-version")result.dsss_version=tuning::outer_dsss_version_id(tuning::parse_outer_dsss_version(value));
+        else if(flag=="--doppler")result.doppler=tuning::parse_doppler(value).canonical;
         else if(flag=="--search-arithmetic")result.search_arithmetic=tuning::search_arithmetic_id(tuning::parse_search_arithmetic(value));
         else if(flag=="--live-duplex") {
             if(value!="yes"&&value!="no")invalid("--live-duplex must be yes or no.");
@@ -214,13 +219,20 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             invalid("--carrier and --rf-carrier must specify the same absolute frequency.");
         result.carrier_hz=carrier_alias;
     }
-    if(result.carrier_hz&&result.rf_shift_hz) {
-        const auto stream=static_cast<long double>(*result.carrier_hz)-*result.rf_shift_hz;
+    // Omitted Doppler preserves the destination value. Validate a complete
+    // triplet here; the controller validates every partial patch against the
+    // retained settings before applying it.
+    if(result.carrier_hz&&result.rf_shift_hz&&result.doppler) {
+        const auto carrier=tuning::doppler_carrier_hz(*result.carrier_hz,
+            tuning::parse_doppler(result.doppler.value_or("0.000000c")));
+        const auto stream=static_cast<long double>(carrier)-*result.rf_shift_hz;
         if(!std::isfinite(stream)||stream<=0||stream>30000000)
-            invalid("Carrier minus Shift must be positive and at most 30 MHz for the real USB stream.");
+            invalid("Doppler-adjusted Carrier minus Shift must be positive and at most 30 MHz for the real USB stream.");
     }
     if(lf_zero_reference&&explicit_reference=="independent")invalid("--lf-reference 0 conflicts with independent reference.");
     if(result.tx_key=="none"&&result.key_name)invalid("--key-name conflicts with --tx-key none.");
+    if(result.dsss_mode=="interleave"&&(result.dsss_factor==1||result.dsss_version=="legacy"))
+        invalid("Interleave mode requires a spreading factor above one and the interleave construction.");
     return result;
 }
 Patch parse(std::string_view command) {
@@ -253,11 +265,13 @@ std::string format(const Patch& settings) {
     if(settings.long_target_db_hz)add("--long-target-snr",numeric(*settings.long_target_db_hz));
     if(settings.rate_hz)add("--rate",numeric(*settings.rate_hz));
     if(settings.carrier_hz)add("--carrier",numeric(*settings.carrier_hz));
+    if(settings.doppler)add("--doppler",tuning::parse_doppler(*settings.doppler).canonical);
     if(settings.workspace_percent)add("--dsp-workspace",std::to_string(*settings.workspace_percent)+"%");
     if(settings.clock_sync)add("--clock-sync",clock_sync::format(clock_sync::parse(*settings.clock_sync)));
     if(settings.audio_timing_error_seconds)add("--audio-error",clock_sync::duration_text(*settings.audio_timing_error_seconds));
+    if(settings.dsss_mode)add("--dsss-mode",*settings.dsss_mode);
     if(settings.dsss_factor)add("--dsss-factor",std::to_string(*settings.dsss_factor));
-    if(settings.dsss_version)add("--dsss-version",*settings.dsss_version);
+    if(settings.dsss_version)add("--dsss-version",std::string(tuning::outer_dsss_version_id(tuning::parse_outer_dsss_version(*settings.dsss_version))));
     if(settings.search_arithmetic)add("--search-arithmetic",std::string(tuning::search_arithmetic_id(tuning::parse_search_arithmetic(*settings.search_arithmetic))));
     if(settings.full_duplex)add("--live-duplex",*settings.full_duplex?"yes":"no");
     if(settings.fhss)add("--fhss",*settings.fhss);

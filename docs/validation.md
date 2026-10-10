@@ -4,6 +4,178 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Spread RX reference and Sub-9kHz preset — local manual checkpoint, 10 October 2026
+
+The Sub-9kHz button now selects Rate **0.01 Hz**. The supplied Spread360,
+Interleave10, Crystal/GPSDO-XO example previously failed the conditional
+probability model's per-quarter 1% circular-covariance gate. Its receiver geometry
+is 14400 samples/s and 5120 samples / 0.355555556 seconds per symbol. The new
+conditional reference retains signed, rotating principal noise planes, both
+candidates' I/Q and actual-source I/Q in two 6×6 Grams per quarter. Pivoted PSD
+factors preserve joint dots and their dependent energy; separate noise-plane
+remainders retain their variances and ranks. Circular cases keep the existing
+model. No waveform, receiver arithmetic/search, threshold, private addressing,
+workspace policy, progress or physical-end change is involved.
+
+Focused checks cover singular and scaled Grams, signed image, exact reduced
+noise/source algebra, amplitude changes, incompatible-model rejection and
+clock-window guard limits. Twenty-one synthetic-template conditional threshold
+points use 8192 direct projected-bin draws and 4096 model draws; the maximum
+probability difference is 0.805664 percentage points, with combined sampling SE
+at most 0.957 percentage points (worst-case pointwise 95% width ±1.88 points).
+This does not establish C/N0 sensitivity, full acquisition or rare false-acceptance
+rates. Quarter timing/diffusion residuals and the chi-square approximation remain
+explicit model limitations. Three synthetic Spread keys retain numeric references
+and the Console shows **RX reference >99%** for the supplied strong budget,
+without changing tabs. Sub9 .01/.1 scope and prior assertions remain covered.
+
+Final complete GUI group **38/38 passed** (157.01 s). Complete simulation-estimate,
+receiver-probability and differential-probability suites passed (19.19, 31.62 and
+7.61 s). The extended differential receiver calibration was inadvertently
+included with those targets and then interrupted at the manual checkpoint; it
+is **not a pass** and receives no qualification credit. Independent read-only
+review found no remaining blocker after the pivot/guard regressions.
+
+Five isolated alternating cold-process estimator pairs gave updated median
+25.52 ms wall / 25.14 ms CPU, versus 7.93 / 7.50 ms for the baseline's rejected
+case. These are estimator times, not receiver throughput. Peak RSS was 16756
+versus 10156 KiB: the new 1.75 MiB draw table and previously uninitialized
+4.875 MiB common phase/draw table account for most of the increase. Receiver
+CPU/GPU work predictions remain unchanged. The preceding runnable GUI and raw
+references remain intact. Exact source/build/GUI identity and all evidence are
+under `.agent-work/artifacts/receiver-opt-20261008/spread-estimate-final/manifest.json`;
+use `manual-spread-estimate.sh` in the parent directory. The detailed local report
+is `MANUAL-SPREAD-ESTIMATE.md`.
+
+All changes remain local. Manual audio/native feedback, complete bank and
+phase/timing calibration, long/partial model coverage, ARM, broader contract,
+sanitisers, alternate GUI/platform, SDK and packaging remain outstanding. No
+push, publication, hosted CI or GPU work. This is not overall qualification.
+
+## Link Planner examples and estimate scope — local manual checkpoint, 10 October 2026
+
+Replaced the two −8/+23 target-only buttons with Spread-Spectrum DSSS FHSS,
+Weak-Signal, Sub-9kHz and Earth-Moon-Earth examples. The complete atomic patches
+use the supplied link/waveform/timing/arithmetic values. They preserve draft and
+audio device, set Simulation No and Live/Duplex Yes, and never transmit. The
+first three require loaded keys and retain the selected key (or select the first
+loaded entry); EME explicitly turns transmit encryption off while retaining RX
+keys. No keyfile path or entry name is built in. CLI export retains the actual
+loaded path/selection. Existing saved settings and parameter-list behavior are
+unchanged.
+
+Sub-9kHz at Rate 0.1, target −46 and Carrier 1500 resolves to approximately 2,511,886.432 seconds per
+bit, 7,849 local 320-second windows and 2,009,509 nominal template integration blocks.
+The unchanged probability-model caps are 4,096 windows / 524,288 blocks. A detailed
+reason replaces the generic geometry error; no unsupported percentage is added.
+Rate 0.01 resolves to 3,276,800 seconds per bit and 1,024 local 3,200-second windows;
+the conditional first-bit model remains available. Both actual link budgets are
+−36 dB-Hz. Neither the modeled observer ratio nor first-bit probability establishes
+whole-message success. The header now distinguishes an available first-bit
+reference from unmodeled compact multi-bit continuation, including custom-clock
+conditional references. Application polling tests verify the Console rate edit
+without a tab switch and reject stale prior-result publication. No native
+redraw defect was reproduced or claimed fixed.
+
+Validation: final complete GUI group **38/38 passed** (155.57 s); full simulation-estimate suite **1/1 passed** (16.57 s); focused preset/default/custom-clock checks passed; final app was rebuilt by `./build.sh test gui`. Focused checks cover exact preset fields/key bank,
+missing-key atomicity, unchanged raw bits, Off-to-Interleave transitions,
+all supported planner layout widths, and paired Sub9 one-bit/multi-bit model
+scopes. The paired fixed-seed model checks use 256 trials and establish model
+availability/labels, not calibrated full-bank sensitivity. Existing assertions
+remain. No receiver algorithm, transmitted waveform, cryptographic addressing,
+admission threshold, arithmetic policy, interpolation eligibility or physical
+completion semantics changed. FP64 force still uses original templates and
+bypasses approximate interpolation; exact reuse remains allowed.
+
+The prior runnable estimates-doppler candidate and all older/raw diagnostic
+references remain intact. New exact source/build/library/GUI hashes are in
+`.agent-work/artifacts/receiver-opt-20261008/planner-examples-final/manifest.json`;
+launch with `manual-planner-examples.sh` in the parent directory. All changes stay
+local. No push, publication, hosted CI, GPU or broader platform/SDK qualification
+was run. Outstanding: hardware/manual feedback, long/partial compact joint
+probability coverage beyond existing caps, complete acquisition-bank sensitivity
+and approximate-reuse qualification, ARM execution, full contract/general,
+calibration, sanitizer, alternate GUI/platform, SDK and packaging validation.
+This is a manual-test checkpoint, not overall receiver qualification.
+
+## Estimates, Interleave controls and static Doppler — local manual checkpoint, 10 October 2026
+
+Local source is based on`c56d0e1a63ad4cb82112e154d9bb72566db4e5ea` plus the
+recorded working-tree overlay. Frozen preceding optimized GUI, library, source,
+build configuration and raw diagnostic references remain unchanged. The new
+manifest/report/launcher are under
+`.agent-work/artifacts/receiver-opt-20261008/estimates-doppler-final/`,
+`MANUAL-ESTIMATES-DOPPLER.md` and`manual-estimates-doppler.sh`.
+Nothing was pushed or published; no hosted CI or GPU work was run. This checkpoint
+is for manual testing, not overall qualification.
+
+Public DSSS choices are Off/Interleave plus the remembered spreading factor.
+The internal legacy reference remains because a universal20% cost comparison
+has not been demonstrated. Supported Interleave geometries now provide an
+isolated actual-source conditional RX reference, including digital limiting,
+finite overlap and projected source energy. Covariance, compact/differential,
+source-size and other unsupported cases remain explicit. No full acquisition
+probability or precision-specific sensitivity penalty is invented. Engineering
+geometry/arithmetic/reuse details are under Model limits and references.
+
+Static Doppler accepts signed c/knots/mph/kph/% and applies its frequency ratio
+to nominal Carrier before unchanged Shift is subtracted. The Carrier editor
+stays nominal; CLI/launch-command/parameter-list persistence preserve the
+separate adjustment. Voice presets invert the same ratio to preserve their
+intended stream tone. This is a calculator, not drift tracking or an implicit
+two-way reflection correction. Tests cover joint-invalid imports, units/signs,
+persistence and keyed DSSS preset changes.
+
+The application automatic-worker path previously missed serial native FP32.
+The bounded dispatch fix enables that existing optimized path only in supported
+large private coherent geometry with proved workspace. FP64 force deliberately
+retains original templates and bypasses approximate interpolation; exact reuse
+remains allowed. Default and FP32 minimum currently share the same supported
+native path. Numerical fallback, precise timing and thresholds remain unchanged.
+
+Seventy-two fresh-process executions used three alternating paired repeats,
+identical original PCM, synthetic keys, banks and rates. Full60s primary captures
+include one accepted bit plus observed absence, one key/epoch, Rate10/DSSS1000,
+Fs40000,12.8s symbols and64MiB workspace. CPU includes setup/push/poll/finish/
+destruction; fixture loading is excluded. In tight1ms, broad6s and no-qualified-
+prior cases, additional CPU speedup over the frozen automatic baseline is
+1.367× [1.312,1.426],2.506× [2.250,2.792] and1.803× [1.572,2.068]. Intervals
+are descriptive95% Student-t on three paired log ratios. On all12allowed cores,
+broad CPU speedup is2.099× [2.040,2.160]; wall falls4.140→3.098s. DSSS10/100
+legacy diagnostics and ordinary fast/wide/weak controls show no statistically
+resolved regression. This does not qualify Interleave10/100 native gains.
+
+All recorded bits/errors, scored-start and threshold charges, media publication
+and physical completion match within each pair. Tight media first-bit remains
+13.7728s; broad26.2144s. Peak RSS changes53.40→57.44MiB tight and77.28→61.34MiB
+broad; broad retained workspace grows2MiB within the64MiB bound. These single-bank
+runs do not measure rolling multi-key Live or a complete70-bit short message.
+
+Cost models now separately price native FP32, native FP64 and production generic
+FP64 pipelines, native setup, original per-bit/shared-pair construction and
+eligible cache work. Three short alternating CPU2 probes measured a262144-point
+pipeline at12.19/18.89/28.56ms respectively. Whole original templates measured
+358–369ns/bin/lane versus216–222ns for shared pairs. These stage measurements
+correct dispatch accounting; they are not global receiver multipliers. Unknown
+cohort, guard and rolling allowances remain uncalibrated; GPU remains hypothetical.
+See[simulation estimates](simulation-estimates.md#experimental-search-arithmetic-accounting).
+
+The unchanged native/cache operators reuse6544 conditional sensitivity pairs:
+no substantial loss was measured, but q90 uncertainty remains roughly±1–2dB and
+q99±3–4dB or censored. The earlier2dB allowance and these uncertainties are not
+observed loss. Neither cumulative raw-reference loss below0.1dB nor full-bank
+sensitivity is established. Conditional actual-source probability itself needs
+independent production-PCM calibration, including carrier-image phase diffusion
+and neighboring symbols. Full-bank/raw sensitivity, rolling hardware/multi-key
+progress/backlog, ARM execution, sanitizers, full calibration and broader
+platform/SDK/packaging remain outstanding until the user requests qualification.
+
+Focused checks then all20affected native cases and the complete38-case GUI group
+passed on the candidate; matching unchanged results were reused. Final model,
+GUI, application and CLI checks after the last pricing corrections are recorded
+in the manual report/manifest. Existing assertions, wire formats, private-stream
+addresses, next-poll progress and observed-absence requirements were retained.
+
 ## Automatic arithmetic policy — experimental local checkpoint, 9 October 2026
 
 This supersedes the **policy**, not the historical measurements, of the CPU

@@ -18,6 +18,38 @@ template<class Function> void rejects(Function function,const std::string& messa
     throw std::runtime_error(message);
 }
 void parsing_and_formatting() {
+    for(const auto* mode:{"off","interleave"}) {
+        const auto patch=launch_command::parse(std::string("--dsss-mode ")+mode+" --dsss-factor 100 --dsss-version interleave");
+        check(patch.dsss_mode==mode&&patch.dsss_factor==100&&
+            launch_command::parse(launch_command::format(patch))==patch,
+            "DSSS mode must preserve its remembered spreading factor in saved commands");
+    }
+    check(!launch_command::parse("--dsss-factor 1").dsss_mode,
+        "older commands must retain their factor-based activation semantics");
+    for(const auto* command:{"--dsss-mode legacy","--dsss-mode interleave --dsss-factor 1",
+        "--dsss-mode interleave --dsss-version legacy"})
+        rejects([&]{launch_command::parse(command);},"contradictory DSSS mode accepted");
+    check(!launch_command::parse("--carrier 1500").doppler,
+        "an omitted Doppler value must preserve the destination selection");
+    for(const auto* input:{"0c","0.001c","-35knots","100mph","20kph","-0.1%"}) {
+        const auto patch=launch_command::parse(std::string("--doppler ")+input);
+        check(patch.doppler==datapump::tuning::parse_doppler(input).canonical&&
+            launch_command::parse(launch_command::format(patch))==patch,
+            "Doppler units and signed adjustment must survive launch round trips");
+    }
+    const auto doppler=launch_command::parse("--carrier 1001500 --shift 1000000 --doppler 0.001c");
+    check(doppler.carrier_hz==1001500&&doppler.rf_shift_hz==1000000&&doppler.doppler=="0.001c"&&
+        launch_command::parse(launch_command::format(doppler))==doppler,
+        "Doppler export must keep the nominal Carrier and Shift unchanged");
+    const auto approaching=launch_command::parse("--carrier 1000000 --shift 1000000 --doppler -0.001c");
+    check(approaching.carrier_hz==1000000&&approaching.rf_shift_hz==1000000,
+        "joint validation must apply Doppler before subtracting Shift");
+    check(launch_command::parse("--carrier 1000000 --shift 1000000").carrier_hz==1000000,
+        "partial Carrier/Shift import must defer joint validation to retained Doppler");
+    for(const auto* input:{"1c","-1c","nan%","-100%","10","10Hz"})
+        rejects([&]{launch_command::parse(std::string("--doppler ")+input);},"invalid Doppler launch input accepted");
+    rejects([]{launch_command::parse("--carrier 1001500 --shift 1000000 --doppler 0.01c");},
+        "nonpositive Doppler-adjusted real stream accepted");
     for(const auto* id:{"default","fp32-min","fp64-force"}) {
         const auto arithmetic=launch_command::parse(std::string("--search-arithmetic ")+id);
         check(arithmetic.search_arithmetic==id&&launch_command::parse(launch_command::format(arithmetic))==arithmetic,
@@ -43,11 +75,15 @@ void parsing_and_formatting() {
         "explicit half duplex was confused with an omitted option");
     check(!launch_command::parse("--rate 1200").full_duplex.has_value(),"older commands must leave duplex unchanged");
     check(launch_command::parse(launch_command::format(clock))==clock,"clock and spreading settings must round trip");
-    for(const auto* version:{"legacy","interleaved-v2"}) {
+    for(const auto* version:{"legacy","interleave"}) {
         const auto patch=launch_command::parse(std::string("--dsss-factor 10 --dsss-version ")+version);
         check(patch.dsss_version==version&&launch_command::parse(launch_command::format(patch))==patch,
             "explicit DSSS waveform version did not survive launch export/import");
     }
+    const auto old_v2=launch_command::parse("--dsss-version interleaved-v2");
+    check(old_v2.dsss_version=="interleave"&&
+        launch_command::format(old_v2).find("--dsss-version interleave")!=std::string::npos,
+        "older V2 launch identifiers must migrate to public interleave construction");
     check(!launch_command::parse("--dsss-factor 10").dsss_version,
         "an omitted DSSS version must preserve the destination selection");
     for(const auto* invalid:{"v2","2","legacy-v1","INTERLEAVED-V2"})
@@ -170,9 +206,9 @@ void invalid_commands() {
             "--target-snr nan", "--target-snr inf", "--target-snr +-1", "--target-snr 201",
             "--tx-dbm -201", "--tx-dbm 101", "--path-loss-db -1", "--path-loss-db 501",
             "--noise-dbm-hz -251", "--noise-dbm-hz 1", "--rate 0", "--rate .0009", "--rate 31MHz",
-            "--rate 3.6watts", "--carrier 0", "--carrier 30000001 --shift 0", "--dsp-workspace 90%",
-            "--rf-shift -1", "--rf-shift NaN", "--rf-shift 1e308MHz", "--shift 1e308GHz", "--carrier 1e308THz", "--rate 1GHz", "--carrier '1 2 MHz'", "--carrier '1 GHz extra'", "--carrier '+-1GHz'", "--rf-carrier 0", "--rf-shift 1 --rf-carrier 1",
-            "--search-margin .99", "--search-margin inf", "--reference imaginary", "--sideband imaginary", "--sideband lower", "--carrier 1500 --shift 1MHz", "--carrier 1MHz --shift 1MHz", "--carrier 1500 --rf-carrier 10001500", "--lf-reference 1500",
+            "--rate 3.6watts", "--carrier 0", "--carrier 30000001 --shift 0 --doppler 0c", "--dsp-workspace 90%",
+            "--rf-shift -1", "--rf-shift NaN", "--rf-shift 1e308MHz", "--shift 1e308GHz", "--carrier 1e308THz", "--rate 1GHz", "--carrier '1 2 MHz'", "--carrier '1 GHz extra'", "--carrier '+-1GHz'", "--rf-carrier 0", "--rf-shift 1 --rf-carrier 1 --doppler 0c",
+            "--search-margin .99", "--search-margin inf", "--reference imaginary", "--sideband imaginary", "--sideband lower", "--carrier 1500 --shift 1MHz --doppler 0c", "--carrier 1MHz --shift 1MHz --doppler 0c", "--carrier 1500 --rf-carrier 10001500", "--lf-reference 1500",
             "--reference independent --lf-reference 0", "--lf-reference 0 --reference independent", "--rf-oscillator imaginary",
             "--oscillator imaginary", "--pattern imaginary", "--rate $(touch /tmp/never)",
             "--rate 3600;echo", "--tx-dbm `whoami`"})

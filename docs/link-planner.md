@@ -20,6 +20,38 @@ Rate, carrier, waveform, key, oscillator and DSP allowance follow the shared
 controls. Choose **Use target for short messages** or **Use target for long
 messages** to apply a preview.
 
+Four example buttons replace the former −8 and +23 target-only buttons. They
+load complete configurations, including both transmit targets, and select
+**Simulation: No**, Default arithmetic, 50% DSP workspace, zero Doppler,
+default clock synchronization and Live/Duplex. They preserve the draft, audio
+device and loaded receive keys, and never start transmission.
+
+| Example | Power / path loss | Rate / absolute Carrier / Shift | Target | DSSS / Fake FHSS | Baseband / Shift oscillator | Audio error |
+| --- | --- | --- | --- | --- | --- | --- |
+| Spread-Spectrum DSSS FHSS | 4 W / 60 dB | 360 Hz / 30.0015 MHz / 30 MHz | 40 dB-Hz | Interleave 10× / 0.4 s, 200 channels | Crystal / GPSDO XO | 0 ms |
+| Weak-Signal | 4 W / 180 dB | 36 Hz / 30.0015 MHz / 30 MHz | 8 dB-Hz | Interleave 10× / Off | GPSDO XO / GPSDO XO | 0 ms |
+| Sub-9kHz | 1 mW / 200 dB | 0.01 Hz / 1500 Hz / 0 Hz | −46 dB-Hz | Off / Off | GPSDO OCXO / inactive | 50 ms |
+| Earth-Moon-Earth | 4 W / 220 dB | 1 Hz / 5.8000015 GHz / 5.8 GHz | −3.0720996964786846 dB-Hz | Off / 0.4 s, 200 channels | GPSDO OCXO / GPSDO OCXO | 0 ms |
+
+All use −164 dBm/Hz noise, independent oscillator references and a 3× search
+margin. DSSS Off remembers the 10× Interleave selection. The first three require
+a loaded encryption keyfile and retain the selected transmit key, selecting the
+first loaded entry if transmission encryption was off. They do not assume a
+particular path or entry name. EME explicitly uses an unkeyed automatic pattern;
+loaded receive keys remain present. Fake FHSS illustrates tuning without changing
+physical audio or radio tuning. These presets are starting points, not evidence
+of real-time CPU feasibility, regulatory compliance or successful propagation.
+
+The Sub-9kHz button selects 0.01 Hz. At the same target, manually choosing 0.1 Hz resolves to approximately 29.07 days per bit.
+Its probability model exceeds both the 4,096-local-window and 524,288-template-
+block work limits; details report the actual counts. At 0.01 Hz, the 37.93-day
+symbol uses fewer, longer local windows and fits the conditional first-bit
+model. This availability change is a model boundary, not a receiver gain or
+loss. A high observer/receiver ratio does not establish receive probability.
+When a multi-bit draft exceeds model coverage but its first bit is supported,
+the header explicitly shows **First bit … · draft unmodeled**. The planner's
+default one-bit preview and a whole-draft estimate have different scopes.
+
 The compact **Launch command** box sits between the target controls and CPU
 graph, with **Load** beneath it. It lets you copy the preview's settings or
 paste a command to load. It includes the link budget, oscillator,
@@ -81,7 +113,7 @@ time** retains its separate logarithmic ratio scale and existing LPI model.
 
 The headline's **CPU estimate** is available in either simulation mode. It
 compares receiver processing with incoming audio for a one-bit preview,
-including the final silence check, on the reference Intel Core i9-13900H.
+including the final silence check, on the reference Ryzen 5 PRO 5650U.
 It includes the [ordinary receive-processing and CPU-mitigation allowance](robust-cpu-costs.md).
 The preview remains one raw bit regardless of the draft or saved interval FEC
 and compression settings. Additional recovery searches are excluded because

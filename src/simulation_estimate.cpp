@@ -37,6 +37,8 @@ constexpr long double tracking_pair_operations_per_bin = 32;
 constexpr long double tracking_real_pair_operations_per_bin = 64;
 constexpr long double tracking_evidence_operations_per_fit = 64;
 constexpr long double differential_operations_per_window = 128;
+constexpr std::uint64_t maximum_probability_windows = 4096;
+constexpr std::uint64_t maximum_probability_observations = 524288;
 // Bounded scalar operation allowances for the coherent outer-code guard.
 // These count the added pulse dots/rank fits; they are not measured throughput.
 constexpr long double outer_operations_per_sample = 17*8+64;
@@ -223,6 +225,11 @@ struct Work {
     long double new_epoch_qualified_ready_batch_slots=0;
     long double initial_epoch_setup_operations=0,new_epoch_frontend_operations=0,new_epoch_setup_operations=0;
     long double initial_epoch_setup_scoring_operations=0,new_epoch_setup_scoring_operations=0;
+    // FFT acquisition separates host-only construction/setup from hypothetical
+    // device arithmetic. Both remain included in parallel for the CPU total.
+    long double fft_host_operations=0,fft_gpu_operations=0;
+    long double fft_setup_host_operations=0,fft_setup_gpu_operations=0;
+    bool fft_cost_split=false;
     ReceiverSearchDiagnostics geometry;
 };
 struct RollingFftWork {
@@ -294,6 +301,58 @@ struct FftWindowWork {
     std::size_t partitioned_tile_min=0,partitioned_tile_max=0;
     long double batches=0,full_jobs=0,jobs=0,direct_jobs=0,full_positions=0,positions=0,operations=0;
     long double max_operations=0,max_jobs=0,max_positions=0,max_direct_jobs=0;
+    long double host_operations=0,gpu_operations=0,max_host_operations=0,max_gpu_operations=0;
+};
+// Local production-dispatch pipeline calibration, 10 October 2026, three alternating repeats.
+// The measured operation is two forward transforms, a complex product and an
+// inverse, including row copies/conversion/allocation. Plan creation is timed
+// separately. Transfer to other convolution mixes is an approximation, not an
+// isolated butterfly measurement or a total receiver runtime upper bound.
+// Outside this bounded serial/coherent scope retain the engineering model.
+struct FftPricing {
+    bool calibrated=false,fp32=false,partition_native=false,template_calibrated=false,reuse=false;
+    long double template_work=0;
+    static long double interpolate(std::size_t n,bool single,bool plan,bool native_double) {
+        constexpr std::array<std::size_t,5> sizes{256,1024,4096,32768,262144};
+        constexpr std::array<long double,5> float_pipeline{4.676286e-6L,18.597768e-6L,79.155756e-6L,.844095238e-3L,12.189666667e-3L};
+        constexpr std::array<long double,5> double_pipeline{5.690619e-6L,22.139785e-6L,118.255892e-6L,1.196233333e-3L,18.888e-3L};
+        constexpr std::array<long double,5> generic_pipeline{9.64e-6L,45.480303e-6L,228.558935e-6L,2.397923077e-3L,28.560666667e-3L};
+        constexpr std::array<long double,5> float_plan{4.358201e-6L,16.945799e-6L,63.275253e-6L,.50792e-3L,3.992142857e-3L};
+        constexpr std::array<long double,5> double_plan{1.275677e-6L,2.749588e-6L,9.542748e-6L,72.115274e-6L,.593046512e-3L};
+        const auto& values=plan?(single?float_plan:double_plan):(single?float_pipeline:(native_double?double_pipeline:generic_pipeline));
+        const auto high=static_cast<std::size_t>(std::lower_bound(sizes.begin(),sizes.end(),n)-sizes.begin());
+        if(high==0)return values.front()*static_cast<long double>(n)/sizes.front();
+        if(high==sizes.size())return values.back()*static_cast<long double>(n)/sizes.back();
+        if(n==sizes[high])return values[high];
+        // Interpolate normalized cost over log2 size, retaining the measured
+        // cache-size dependence rather than extrapolating a precision ratio.
+        const auto x=std::log2(static_cast<long double>(n));
+        const auto lo=std::log2(static_cast<long double>(sizes[high-1])),hi=std::log2(static_cast<long double>(sizes[high]));
+        const auto denominator=[&](std::size_t k){return plan?static_cast<long double>(k):15.L*k*std::log2(static_cast<long double>(k))+6.L*k;};
+        return denominator(n)*((hi-x)/(hi-lo)*values[high-1]/denominator(sizes[high-1])+
+            (x-lo)/(hi-lo)*values[high]/denominator(sizes[high]));
+    }
+    long double numeric(long double operations,std::size_t n,bool partitioned=false)const {
+        if(!calibrated||n<256||n>262144)return operations;
+        return operations*interpolate(n,fp32,false,partitioned&&partition_native)*cpu_scoring_operations_per_second/
+            (15.L*n*std::log2(static_cast<long double>(n))+6.L*n);
+    }
+    long double plan(std::size_t n,bool partitioned=false)const {
+        return calibrated&&(fp32||(partitioned&&partition_native))&&n>=256&&n<=262144?
+            interpolate(n,fp32,true,true)*cpu_scoring_operations_per_second:0;
+    }
+    long double templates(std::size_t frequencies,long double length,bool paired)const {
+        if(!template_calibrated)return frequencies*length*template_work;
+        // Existing five-lane L128000 preparation prototype: genuine pair
+        // 215.54ns/bin/lane; separate-bit whole preparation358..369ns;
+        // nominal cache200.26ns/bin, lane34.92ns/bin,
+        // setup+cleanup5.193ms/group. Rounded local allowances include that
+        // setup; whole native evaluates/interpolates the pair once per bit.
+        constexpr long double original_pair=225e-9L,original_whole=375e-9L,nominal=250e-9L,lane=40e-9L;
+        const auto seconds=reuse?.0052L+length*(nominal+frequencies*lane*(paired?1:2)):
+            frequencies*length*(paired?original_pair:original_whole);
+        return seconds*cpu_scoring_operations_per_second;
+    }
 };
 // Identical canonical address groups to PatternReceiver::phase_groups. The
 // phase lattice and stream index remain original; only work is intersected.
@@ -354,10 +413,11 @@ std::optional<FftWindowWork> fft_window_work(const modem::Config& config,std::si
         std::size_t bin,std::size_t length,std::size_t transform,long double fft_log,
         std::size_t hop,std::size_t initial_batch,std::size_t batches,
         const modem::PatternStartWindow& prior,bool sample_fit,bool generated,
-        long double minimum_rate,long double maximum_rate,long double template_work,std::size_t& checks,std::stop_token stop,
+        long double minimum_rate,long double maximum_rate,const FftPricing& pricing,std::size_t& checks,std::stop_token stop,
         long double observed_bins=std::numeric_limits<long double>::infinity(),bool minimum_readiness=false,
         bool component_scheduling=false) {
     FftWindowWork result;
+    auto active_pricing=pricing; // Exact numerical fallback is sticky per receiver bank.
     const auto symbol=modem::symbol_sample_count(config);
     const auto step=std::gcd(symbol,static_cast<std::uint64_t>(config.sample_rate));
     const auto upper=(std::min(symbol,static_cast<std::uint64_t>(config.sample_rate))-1)/step*step;
@@ -413,7 +473,7 @@ std::optional<FftWindowWork> fft_window_work(const modem::Config& config,std::si
             std::size_t{1}+(starts-1)/separation});
         const bool uncertain_partition=minimum_readiness&&component_scheduling&&!separated;
         const auto dispatches=separated?components.count:std::size_t{1};
-        long double operations=0,jobs=0,positions=0,direct=0,transforms=0;
+        long double operations=0,host=0,gpu=0,jobs=0,positions=0,direct=0,transforms=0;
         bool started=false;std::size_t executed_components=0;
         for(std::size_t c=0;c<dispatches;++c) {
             estimate_detail::check(stop);
@@ -434,7 +494,7 @@ std::optional<FftWindowWork> fft_window_work(const modem::Config& config,std::si
             std::array<modem::detail::PatternFftStartSelection,12> local{};
             std::array<std::optional<modem::detail::partitioned_paired::Requirements>,12> plans{};
             std::array<std::optional<long double>,12> envelope_numeric{};
-            bool paired=generated&&!sample_fit;
+            bool paired=generated&&!sample_fit,direct_member=false;
             for(std::size_t j=0;j<selection_count;++j) {
                 if(++checks>1000000)return std::nullopt;
                 const auto& selected=selections[j];auto& target=local[j];target.full=selected.full;
@@ -450,7 +510,7 @@ std::optional<FftWindowWork> fft_window_work(const modem::Config& config,std::si
                 }
                 const auto k=target.selected_count;if(!k)continue;
                 if(target.full){paired=false;continue;}
-                if(modem::detail::pattern_fft_direct_eligible(geometry,generated,k,!sample_fit))continue;
+                if(modem::detail::pattern_fft_direct_eligible(geometry,generated,k,!sample_fit)){direct_member=true;continue;}
                 const auto ranges=std::span(target.ranges).first(target.range_count);
                 if(minimum_readiness) {
                     envelope_numeric[j]=paired_envelope_numeric(ranges,length,transform,frequencies);
@@ -460,6 +520,13 @@ std::optional<FftWindowWork> fft_window_work(const modem::Config& config,std::si
                         ranges,frequencies,transform,2*transform);
                     if(!plans[j])paired=false;
                 }
+            }
+            // A mixed cohort cannot enter whole native scoring after bounded
+            // scoring declines it. Runtime then rebuilds original FP64 operands
+            // and keeps that fallback for the bank. Unknown anchor subsets can
+            // have the same mixed dispatch; do not promise native/cache savings.
+            if(!paired&&(direct_member||minimum_readiness)) {
+                active_pricing.fp32=false;active_pricing.reuse=false;
             }
             // Runtime decides the whole component before overwriting scratch.
             // One unsupported group keeps its original shared input spectrum.
@@ -472,33 +539,41 @@ std::optional<FftWindowWork> fft_window_work(const modem::Config& config,std::si
             // transform-sized allowance rather than assuming a tiny PCM copy.
             const auto observed=minimum_readiness?hop:
                 separated?std::min(hop,segment_count+4):std::min(starts,ready_end);
-            operations+=repeats*(2.L*transform+6.L*(length+observed-1));
-            if(!paired&&!minimum_readiness)operations+=repeats*(5*transform*fft_log+2.L*transform);
+            const auto overhead=repeats*(2.L*transform+6.L*(length+observed-1));
+            operations+=overhead;gpu+=overhead;
+            if(!paired&&!minimum_readiness) {
+                const auto numeric=repeats*(5*transform*fft_log+2.L*transform);
+                operations+=active_pricing.numeric(numeric,transform);gpu+=numeric;
+            }
             for(std::size_t j=0;j<selection_count;++j) {
                 const auto& selected=local[j];const auto k=selected.selected_count;if(!k)continue;
-                const auto direct_cost=[&](std::size_t n) {
-                    return length*(template_work+tracking_pair_operations_per_bin*n)+40.L*n;
-                };
-                const auto generation_evidence=frequencies*(template_work*length+40.L*k);
+                const auto generation=(generated||config.scramble||config.dsss)?active_pricing.templates(frequencies,length,paired):0.L;
+                const auto evidence=40.L*k*frequencies;
                 const auto full_numeric=5*transform*fft_log+
                     frequencies*(20*transform*fft_log+12.L*transform);
                 const bool direct_job=modem::detail::pattern_fft_direct_eligible(geometry,generated,k,!sample_fit);
-                long double cost=0;
+                long double numeric=0,plans_work=0;std::size_t numeric_size=transform;
                 if(paired) {
                     if(direct_job) {
-                        cost=frequencies*direct_cost(k);
+                        numeric=frequencies*length*tracking_pair_operations_per_bin*k;
+                        numeric_size=0; // Direct products keep the engineering rate.
                         result.paired_direct_jobs+=static_cast<long double>(repeats)*frequencies;
                     } else if(minimum_readiness) {
-                        // P>=32. Additions/row initialization are bounded
-                        // termwise by1/3 of shared numeric operations. Runtime
-                        // choose minimizes that same numeric work; the fixed
-                        // envelope option therefore bounds all actual choices.
-                        cost=generation_evidence+std::max(4.L/3*(*envelope_numeric[j]),
+                        numeric=std::max(4.L/3*(*envelope_numeric[j]),
                             frequencies*length*tracking_pair_operations_per_bin*std::min<std::size_t>(k,32));
+                        // Unknown anchor can change the selected tile. Retain
+                        // the slower calibrated ratio over every legal size.
+                        numeric_size=0;
+                        long double factor=1;
+                        for(std::size_t n=256;n<=transform&&n<=262144;n*=2)
+                            factor=std::max(factor,active_pricing.numeric(1,n,true));
+                        numeric*=factor;
+                        plans_work=active_pricing.plan(std::min<std::size_t>(32768,transform),true);
                     } else {
-                        const auto& r=*plans[j];
-                        cost=generation_evidence+modem::detail::partitioned_paired::operations(r,frequencies)+
+                        const auto& r=*plans[j];numeric_size=r.transform;
+                        numeric=modem::detail::partitioned_paired::operations(r,frequencies)+
                             paired_numeric_overhead(r,frequencies);
+                        plans_work=active_pricing.plan(r.transform,true);
                         result.partitioned_jobs+=frequencies;
                         result.partitioned_input_transforms+=r.input_tiles;
                         result.partitioned_template_transforms+=2.L*frequencies*r.chunks;
@@ -507,17 +582,31 @@ std::optional<FftWindowWork> fft_window_work(const modem::Config& config,std::si
                         result.partitioned_tile_max=std::max(result.partitioned_tile_max,r.tile_size);
                     }
                 } else if(minimum_readiness) {
-                    // Possible paired success has a separate input cache PER
-                    // group. Its chooser ceiling plus4/3 initialization bound
-                    // covers that path and the shared-input full fallback.
                     const auto dot=modem::detail::pattern_fft_direct_eligible(geometry,generated,1,!sample_fit)?
                         frequencies*length*tracking_pair_operations_per_bin*std::min<std::size_t>(k,32):0.L;
-                    cost=generation_evidence+std::max(1.2L*full_numeric+2.L*transform,dot);
-                } else cost=frequencies*(direct_job?direct_cost(k):
-                    (20*transform*fft_log+12.L*transform+template_work*length+40.L*k));
+                    numeric=std::max(1.2L*full_numeric+2.L*transform,dot);
+                    numeric_size=0;
+                    long double factor=1;
+                    for(std::size_t n=256;n<=transform&&n<=262144;n*=2)
+                        factor=std::max(factor,active_pricing.numeric(1,n));
+                    numeric*=factor;
+                    plans_work=active_pricing.plan(std::min<std::size_t>(32768,transform));
+                } else {
+                    numeric=frequencies*(direct_job?length*tracking_pair_operations_per_bin*k:
+                        20*transform*fft_log+12.L*transform);
+                    if(direct_job)numeric_size=0;
+                }
+                // Private waveform/cache construction and native plans remain
+                // host work in the hypothetical GPU projection.
+                const auto fixed=generation+plans_work;
+                long double cost=fixed+evidence+active_pricing.numeric(numeric,numeric_size,paired);
+                host+=repeats*fixed;gpu+=repeats*(numeric+evidence);
                 // Rounded engineering allowance for bounded range validation,
                 // both chooser inspections and selected-cell bookkeeping.
-                if(generated&&!sample_fit)cost+=512.L*(minimum_readiness?65:selected.range_count+1);
+                if(generated&&!sample_fit) {
+                    const auto controls=512.L*(minimum_readiness?65:selected.range_count+1);
+                    cost+=controls;host+=repeats*controls;
+                }
                 jobs+=static_cast<long double>(repeats)*frequencies;
                 positions+=static_cast<long double>(repeats)*k*frequencies;
                 if(direct_job)direct+=static_cast<long double>(repeats)*frequencies;
@@ -537,6 +626,9 @@ std::optional<FftWindowWork> fft_window_work(const modem::Config& config,std::si
         }
         result.input_transforms+=transforms;result.components+=executed_components;
         result.jobs+=jobs;result.positions+=positions;result.direct_jobs+=direct;result.operations+=operations;
+        result.host_operations+=host;result.gpu_operations+=gpu;
+        result.max_host_operations=std::max(result.max_host_operations,host);
+        result.max_gpu_operations=std::max(result.max_gpu_operations,gpu);
         result.max_operations=std::max(result.max_operations,operations);
         result.max_input_transforms=std::max(result.max_input_transforms,transforms);
         result.max_jobs=std::max(result.max_jobs,jobs);result.max_positions=std::max(result.max_positions,positions);
@@ -738,6 +830,37 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     // Match Live's prefer-streamed constructor for qualified paired scratch.
     // The prior must be admitted first; merely selecting Clock sync is insufficient.
     if(fft_prior&&!sample_fit&&banks*profiles>1)streamed_templates=true;
+    const bool automatic_native=!correlator&&streamed_templates&&!sample_fit&&drift_sections==1&&
+        !differential_window&&private_pattern&&symbol>256&&transform>=65536&&
+        (config.search_arithmetic==modem::SearchArithmetic::default_mode||config.search_arithmetic==modem::SearchArithmetic::fp32);
+    FftPricing pricing;
+    const bool coherent_fft_pricing=!correlator&&!sample_fit&&drift_sections==1&&!differential_window&&
+        !modem::search_arithmetic_is_int8(config.search_arithmetic);
+    const bool native_scratch=fft_core_bytes+outer_map_bytes+24*transform+65536<=allowance;
+    pricing.calibrated=coherent_fft_pricing;
+    pricing.fp32=automatic_native&&native_scratch;
+    pricing.partition_native=native_scratch;
+    pricing.template_work=template_pair_work;
+    // Template preparation measurements are for this finite shaped V2 family,
+    // not a generic cryptographic/sample throughput coefficient.
+    pricing.template_calibrated=coherent_fft_pricing&&interleaved&&config.sample_rate==40000&&
+        chip==8&&bin==4&&length>=65536&&length<=262144;
+    if(automatic_native&&bank.hypotheses.size()>=3) {
+        modem::detail::FftSearchGeometry g;g.bins_per_symbol=static_cast<std::size_t>(length);
+        g.bin_samples=bin;g.search_arithmetic=static_cast<std::uint32_t>(modem::SearchArithmetic::fp32);
+        g.private_template_reuse=modem::detail::PrivateTemplateReuse::bounded_interpolation;
+        g.drift_sections=1;g.pattern.chip_samples=chip;g.pattern.chips_per_symbol=modem::pattern_chips_per_symbol(config);
+        g.pattern.symbol_samples=symbol;g.pattern.sample_rate=config.sample_rate;g.pattern.shaped=modem::pattern_pulse_enabled(config);
+        g.pattern.scramble=config.scramble;g.pattern.dsss=config.dsss;g.pattern.spreading_mode=static_cast<std::uint32_t>(config.spreading_mode);
+        bool eligible=true;
+        for(const auto& h:bank.hypotheses) {modem::detail::FftSearchJob job;
+            job.clock_ratio=1+h.clock_error_ppm*1e-6;eligible&=modem::detail::FftPrivateTemplate::eligible(g,job);}
+        // Reserve whole-native buffers/plan plus the bounded direct scratch;
+        // this intentionally declines reuse when its actual workspace cannot
+        // be proved from the per-bank geometry allowance.
+        pricing.reuse=eligible&&fft_core_bytes+outer_map_bytes+24*transform+65536+
+            modem::detail::FftPrivateTemplate::required_bytes(g)<=allowance;
+    }
     result.compact=correlator;result.bin_samples=bin;
     result.geometry.sample_rate=config.sample_rate;
     result.geometry.dsss_factor=config.dsss_factor;
@@ -998,8 +1121,13 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         // The same numerical template/FFT work has the same engineering rate
         // whether performed once during setup or repeatedly in acquisition.
         // Zeroing/control/permutation-only setup retains the serial allowance.
-        const auto constructor_scoring=streamed_templates?0.L:
-            frequencies*(10*transform*fft_log+template_pair_work*length);
+        const auto constructor_templates=streamed_templates?0.L:
+            pricing.templates(bank.hypotheses.size(),length,false);
+        const auto constructor_numeric=streamed_templates?0.L:frequencies*10*transform*fft_log;
+        const auto constructor_scoring=constructor_templates+
+            pricing.numeric(constructor_numeric,static_cast<std::size_t>(transform));
+        result.fft_setup_host_operations=constructor_templates*banks;
+        result.fft_setup_gpu_operations=constructor_numeric*banks;
         result.initial_epoch_setup_operations=constructor_setup*banks;
         result.initial_epoch_setup_scoring_operations=constructor_scoring*banks;
         result.serial+=result.initial_epoch_setup_operations;
@@ -1017,6 +1145,7 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         }
         result.fft_acquisition_batches=blocks;
         std::optional<long double> filtered_operations;
+        long double filtered_host=0,filtered_gpu=0;
         std::size_t filtered_checks=0;
         const bool restrict_jobs=fft_prior&&drift_sections==1&&!differential_window&&!options.timestamp;
         const bool early_readiness=restrict_jobs&&initial_batch==hop;
@@ -1043,7 +1172,7 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
                     static_cast<std::size_t>(length),static_cast<std::size_t>(transform),fft_log,
                     static_cast<std::size_t>(hop),static_cast<std::size_t>(initial_batch),passes,
                     prior,sample_fit,streamed_templates,bank.minimum_rate,bank.maximum_rate,
-                    template_pair_work,filtered_checks,stop,early_readiness?observed_bins:
+                    pricing,filtered_checks,stop,early_readiness?observed_bins:
                         std::numeric_limits<long double>::infinity(),minimum_readiness,early_readiness);
             };
             const auto representative=count(*fft_prior,static_cast<std::size_t>(qualified_slots));
@@ -1054,11 +1183,12 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
                     e-.5L,.5L,fft_phase_upper);
                 const auto cohort=prior?count(*prior,static_cast<std::size_t>(qualified_slots),true):std::nullopt;
                 if(!cohort){bounded=false;break;}
-                operations+=cohort->operations;retained_batches+=cohort->batches;
+                operations+=cohort->operations;filtered_host+=cohort->host_operations;
+                filtered_gpu+=cohort->gpu_operations;retained_batches+=cohort->batches;
                 envelope_fallback_hops+=cohort->envelope_fallback_hops;
             }
             if(bounded) {
-                filtered_operations=operations*keys;blocks=retained_batches/epochs;
+                filtered_operations=operations*keys;filtered_host*=keys;filtered_gpu*=keys;blocks=retained_batches/epochs;
                 result.geometry.restricted_fft_modeled=true;result.timing_window_modeled=true;
                 result.geometry.first_qualified_window_seconds=finite_seconds(representative->first_ready_bins*bin/config.sample_rate);
                 result.geometry.first_component_window_seconds=finite_seconds(representative->first_component_ready_bins*bin/config.sample_rate);
@@ -1136,22 +1266,26 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
                         static_cast<std::size_t>(length),static_cast<std::size_t>(transform),fft_log,
                         static_cast<std::size_t>(hop),static_cast<std::size_t>(initial_batch),
                         static_cast<std::size_t>(fresh.maximum_batches),*prior,sample_fit,streamed_templates,
-                        bank.minimum_rate,bank.maximum_rate,template_pair_work,filtered_checks,stop,
+                        bank.minimum_rate,bank.maximum_rate,pricing,filtered_checks,stop,
                         std::numeric_limits<long double>::infinity(),true,early_readiness):std::nullopt;
                 if(cohort) {
                     result.new_epoch_retained_fft_batches=std::min(fresh.full_batches,fresh.first_batches*cohort->batches);
                     *filtered_operations+=keys*std::min(fresh.full_batches*cohort->max_operations,
                         fresh.first_batches*cohort->operations);
+                    filtered_host+=keys*std::min(fresh.full_batches*cohort->max_host_operations,fresh.first_batches*cohort->host_operations);
+                    filtered_gpu+=keys*std::min(fresh.full_batches*cohort->max_gpu_operations,fresh.first_batches*cohort->gpu_operations);
                 } else {
                     // Unsupported fresh-cohort geometry keeps all its original
                     // work, rather than multiplying a representative discount.
                     const auto jobs=frequencies*phase_groups*4;
+                    const auto before=*filtered_operations;
                     if(early_readiness)*filtered_operations+=keys*maximum_component_dispatches*
                         (fresh.full_batches*(8.L*transform+4*phase_groups*full_group_allowance)+
                         jobs*40*(fresh.first_batches*initial_batch+(fresh.full_batches-fresh.first_batches)*hop));
                     else *filtered_operations+=keys*(fresh.full_batches*(5*transform*fft_log*(1+4*jobs)+
                         jobs*(12*transform+template_pair_work*length))+
                         jobs*40*(fresh.first_batches*initial_batch+(fresh.full_batches-fresh.first_batches)*hop));
+                    filtered_host+=*filtered_operations-before;
                     result.new_epoch_retained_fft_batches=fresh.full_batches;
                     result.geometry.fallback_reason="Fresh-cohort bounded enumeration unavailable; fresh work uses full FFT allowance";
                 }
@@ -1170,6 +1304,8 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
             const auto setup=constructor_setup;
             result.new_epoch_setup_operations=fresh.admissions*setup*keys;
             result.new_epoch_setup_scoring_operations=fresh.admissions*constructor_scoring*keys;
+            result.fft_setup_host_operations+=fresh.admissions*constructor_templates*keys;
+            result.fft_setup_gpu_operations+=fresh.admissions*constructor_numeric*keys;
             result.serial+=result.new_epoch_frontend_operations+result.new_epoch_setup_operations;
         }
         const auto jobs=frequencies*phase_groups*(private_pattern?4:1);
@@ -1230,6 +1366,27 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
                 direct_starts*jobs*length*fit_operations+
                 jobs*differential_operations_per_window*differential_windows*scored_starts)*banks;
         }
+        if(coherent_fft_pricing) {
+            result.fft_cost_split=true;
+            if(filtered_operations) {
+                result.fft_host_operations=filtered_host;result.fft_gpu_operations=filtered_gpu;
+            } else {
+                // Whole FFT acquisition: generation is host work, numerical
+                // transforms/products use the local width-specific pipeline.
+                const auto generation=generate_templates?blocks*phase_groups*(private_pattern?4:1)*
+                    pricing.templates(bank.hypotheses.size(),length,false)*banks:0.L;
+                const auto old_generation=generate_templates?blocks*jobs*template_pair_work*length*banks:0.L;
+                const auto numeric=std::max(0.L,result.parallel-old_generation);
+                result.parallel=generation+pricing.numeric(numeric,static_cast<std::size_t>(transform));
+                result.fft_host_operations=generation;result.fft_gpu_operations=numeric;
+            }
+            // Whole native plans persist per bank. Partition plans are already
+            // charged for each generated group above. The persistent allowance
+            // is conservative if a bank only executes paired/direct jobs.
+            const auto plan=pricing.plan(static_cast<std::size_t>(transform))*
+                (banks+result.new_epoch_admissions*keys);
+            result.parallel+=plan;result.fft_host_operations+=plan;
+        }
         if(established_stream_bits) {
             // Acquisition supplies the first bit. An established track then
             // scores each remaining bit and complete absent symbols covering
@@ -1251,7 +1408,14 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
                 (length*fit_operations+differential_windows*differential_operations_per_window);
         }
     }
-    result.parallel+=result.initial_epoch_setup_scoring_operations+result.new_epoch_setup_scoring_operations;
+    const auto setup_scoring=result.initial_epoch_setup_scoring_operations+result.new_epoch_setup_scoring_operations;
+    result.parallel+=setup_scoring;
+    if(result.fft_cost_split) {
+        // Template generation remains host work; a hypothetical device can
+        // transform cached constructor rows just as it can streamed rows.
+        result.fft_host_operations+=result.fft_setup_host_operations;
+        result.fft_gpu_operations+=result.fft_setup_gpu_operations;
+    }
     auto& arithmetic=result.geometry;
     arithmetic.search_arithmetic=config.search_arithmetic;
     arithmetic.arithmetic_experimental=config.search_arithmetic!=modem::SearchArithmetic::fp64;
@@ -1264,13 +1428,13 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         arithmetic.arithmetic_limit="Experimental partial INT8 coverage. Supported FFTs use native FP64 SIMD; template construction, compact and tracking remain FP64. Packing, exact refinements and FFT plan setup are not calibrated in this work model; no universal INT8 speedup is predicted. GPU execution is unavailable.";
     } else if(config.search_arithmetic==modem::SearchArithmetic::fp32 ||
               config.search_arithmetic==modem::SearchArithmetic::default_mode) {
-        const bool native=!correlator && streamed_templates && !sample_fit && drift_sections==1 && !differential_window;
+        const bool native=automatic_native&&native_scratch;
         arithmetic.arithmetic_operands=native?"FP32 acquisition operands; FP64 fallback":"FP64 operands for modeled geometry";
         arithmetic.arithmetic_accumulation=native?"FP32 acquisition; FP64 energy, covariance, timing and final evidence":
             "FP64 products, accumulation and evidence";
         arithmetic.arithmetic_backend=native?"Native serial streamed FP32 direct / partitioned / whole FFT acquisition":
             "FP64 compact / unsupported detector / cached or parallel fallback";
-        arithmetic.arithmetic_limit="Experimental automatic/minimum policy, not receiver-wide FP32. INT8 is not selected automatically: complete-execution benefit is unproven. Cached/parallel and mixed-cohort generic FFTs retain FP64; memory/range checks can also require original FP64 before upload. Source coefficients, precise coordinates, energies and final scores remain wide. The model is a dispatch reference, not observed counters; native setup coefficients are uncalibrated and conservative template charges remain. GPU deferred.";
+        arithmetic.arithmetic_limit="Experimental automatic/minimum policy, not receiver-wide FP32. INT8 is not selected automatically: complete-execution benefit is unproven. Cached/parallel and mixed-cohort generic FFTs retain FP64; memory/range checks can also require original FP64 before upload. Source coefficients, precise coordinates, energies and final scores remain wide. The model is a dispatch reference, not observed counters; local Ryzen native AVX2 FP32/FP64 and generic FP64 pipeline and separate plan setup measurements are interpolated only over 256..262144 points. V2 private-cache construction uses a separately labeled local measured family where applicable; other costs retain engineering allowances. GPU execution is unavailable.";
         arithmetic.template_reuse=native?
             "Exact caches plus separately admitted close-clock interpolation (<=0.001 input sample), only with all identity, even pulse-boundary and workspace checks. No observed paired detection disagreements in conditional tests; sensitivity bounds remain inconclusive and full-bank sensitivity is unqualified.":
             "Exact reuse only for this modeled fallback; approximate interpolation requires a supported native acquisition stage.";
@@ -1278,11 +1442,149 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         arithmetic.arithmetic_operands="Original unquantized FP64 operands";
         arithmetic.arithmetic_accumulation="FP64 products, accumulation and evidence";
         arithmetic.arithmetic_backend="FP64 direct / partitioned / FFT / compact";
-        arithmetic.arithmetic_limit="Independent original-template reference with native SIMD FFTs where supported; precise coordinates retain their existing wider precision. Plan setup is not calibrated in the work model. GPU execution is unavailable.";
+        arithmetic.arithmetic_limit="Independent original-template reference; exact/native partitioned or generic parallel FFT dispatch depends on geometry and workspace. Precise coordinates retain their existing wider precision. Generic FP64 and scratch-eligible native partitioned FP64 pipelines use separate bounded local measurements; original separate-bit and shared-pair template construction are priced separately in the measured family. Other work and rolling-cohort/guard allowances remain uncalibrated. GPU execution is unavailable.";
         arithmetic.template_reuse="Exact caches allowed; approximate interpolation prohibited by FP64 force.";
     }
 
     return result;
+}
+
+// A bounded isolated-symbol V2 reference. Read the real transmitter's shaped,
+// limited analytic PCM, including its finite pulse tails, and use the same
+// projected template centers as the complex FFT receiver. This is conditional
+// matched-statistic algebra, not an adaptive timing/key/epoch acquisition run.
+bool interleaved_statistics(const transfer::Options& options,const Work& work,
+        detail::ReceiverProbabilityParameters& p,unsigned source_bit,ReceiverWorkMode mode,
+        std::string& reason,std::stop_token stop) {
+    estimate_detail::check(stop);
+    const auto& config=options.modem;
+    const auto total=modem::symbol_sample_count(config),bin=work.bin_samples;
+    if(work.compact||bin<2||total>524288||!bin||total%bin||total%(4*bin)||
+       !modem::pattern_pulse_enabled(config)||work.noise_dimensions<16) {
+        reason="Interleave actual-source conditional reference requires a shaped complex FFT geometry, 2+ samples/bin, aligned quarters and at most 524288 source samples";
+        return false;
+    }
+    auto configured=config;
+    if(options.timestamp)configured.stream_epoch=options.timestamp;
+    if(options.key)configured=transfer::seeded_config(options,configured.stream_epoch);
+    const modem::detail::FftPatternParameters identity{configured.stream_epoch,modem::pattern_chip_samples(config),
+        modem::pattern_chips_per_symbol(config),total,config.sample_rate,static_cast<std::uint32_t>(config.spreading_mode),
+        1U,config.scramble?1U:0U,config.dsss?1U:0U,configured.spreading_seed,configured.dsss_seed,
+        config.dsss_factor,static_cast<std::uint32_t>(config.outer_dsss_version)};
+    struct Statistics {
+        std::array<double,4> weights{},other{};
+        std::array<std::complex<double>,4> correlations{};
+        std::array<std::array<std::complex<double>,2>,4> means{};
+        std::array<detail::ReceiverProjectionSection,4> noise{};
+        bool noncircular=false;
+        double simulation_power=0,hardware_projection=0;
+    };
+    struct Entry {modem::detail::FftPatternParameters identity;std::uint64_t phase,bin;double carrier;unsigned bit;Statistics value;};
+    // No PCM or rows are retained. Exact waveform/seed/epoch/phase/source-bit
+    // identity prevents sharing a private pattern with another candidate.
+    thread_local std::vector<Entry> cache;
+    Statistics statistics;bool found=false;
+    for(const auto& entry:cache)if(entry.identity==identity&&entry.phase==configured.stream_phase_samples&&
+        entry.bin==bin&&entry.carrier==config.carrier_hz&&entry.bit==source_bit){statistics=entry.value;found=true;break;}
+    if(!found) {
+        modem::PatternCode code(configured,configured.stream_epoch);
+        code.prepare_symbol(0,stop);
+        modem::PatternTransmitter source(Bytes{static_cast<std::uint8_t>(source_bit)},configured,
+            configured.stream_epoch,0,false);
+        const auto padding=modem::pattern_pulse_padding_samples(configured);
+        const auto amplitude=std::sqrt(2*modem::nominal_signal_power);
+        std::array<std::complex<double>,4096> pcm{};
+        std::array<std::complex<double>,4> cross{},pseudo_a{},pseudo_b{},pseudo_cross{};
+        std::complex<double> cell{};std::uint64_t emitted=0,payload=0;
+        long double physical=0,projected=0;
+        const auto omega=2*std::numbers::pi*config.carrier_hz/config.sample_rate;
+        const auto sine=std::sin(omega);
+        const auto image=std::abs(sine)>1e-12?std::sin(static_cast<double>(bin)*omega)/(static_cast<double>(bin)*sine):1.;
+        while(payload<total) {
+            estimate_detail::check(stop);
+            const auto count=source.read_analytic(pcm,stop);
+            if(!count){reason="V2 shaped source ended before its complete reference symbol";return false;}
+            auto rotation=std::polar(1.,-omega*static_cast<double>(emitted));
+            const auto step=std::polar(1.,-omega);
+            for(std::size_t i=0;i<count;++i,++emitted,rotation*=step) {
+                if(emitted<padding||emitted>=padding+total)continue;
+                const auto real=pcm[i].real()/amplitude;
+                physical+=2*real*real;
+                // Match real PCM input, including its conjugate carrier image.
+                cell+=2.*pcm[i].real()*rotation/amplitude;++payload;
+                if(payload%bin)continue;
+                const auto first=payload-bin,section=static_cast<std::size_t>(first/(total/4));
+                const auto position=static_cast<double>(first)+(static_cast<double>(bin)-1)/2;
+                const auto pair=code.shaped_values(0,position);
+                const auto a=pair[source_bit],b=pair[1-source_bit],s=cell/static_cast<double>(bin);
+                projected+=std::norm(s);
+                statistics.weights[section]+=std::norm(a);statistics.other[section]+=std::norm(b);
+                cross[section]+=a*std::conj(b);
+                statistics.means[section][0]+=s*std::conj(a);statistics.means[section][1]+=s*std::conj(b);
+                auto& noise=statistics.noise[section];++noise.samples;
+                noise.variance={(1+image)/2,(1-image)/2};
+                // Principal axes of the real-PCM boxcar covariance. Retain
+                // the signed carrier image and the actual source-padding phase.
+                auto axis=std::polar(1.,-omega*(static_cast<double>(padding)+position));
+                for(unsigned plane=0;plane<2;++plane,axis*=std::complex<double>{0,1}) {
+                    const auto x=axis*std::conj(a),y=axis*std::conj(b),z=axis*std::conj(s);
+                    const std::array<double,6> v{x.real(),x.imag(),y.real(),y.imag(),z.real(),z.imag()};
+                    for(unsigned row=0;row<6;++row)for(unsigned column=0;column<6;++column)
+                        noise.gram[plane][6*row+column]+=v[row]*v[column];
+                }
+                const auto carrier=image*std::polar(1.,2*omega*position);
+                pseudo_a[section]+=a*a*carrier;pseudo_b[section]+=b*b*carrier;pseudo_cross[section]+=a*b*carrier;
+                cell={};
+            }
+        }
+        const auto projected_reference=static_cast<double>(projected);
+        const auto total_a=std::accumulate(statistics.weights.begin(),statistics.weights.end(),0.);
+        const auto total_b=std::accumulate(statistics.other.begin(),statistics.other.end(),0.);
+        if(!(projected_reference>0&&total_a>0&&total_b>0)) {
+            reason="V2 shaped source/template energy is degenerate";return false;
+        }
+        double represented=0;
+        for(std::size_t j=0;j<4;++j) {
+            const auto a=statistics.weights[j],b=statistics.other[j],denominator=std::sqrt(a*b);
+            if(!(denominator>0)){reason="Interleave source has an empty template section";return false;}
+            statistics.noncircular|=std::abs(pseudo_a[j])>.01*a||std::abs(pseudo_b[j])>.01*b||
+                std::abs(pseudo_cross[j])>.01*denominator;
+            const std::array<double,6> scale{std::sqrt(a),std::sqrt(a),std::sqrt(b),std::sqrt(b),
+                std::sqrt(projected_reference),std::sqrt(projected_reference)};
+            for(auto& gram:statistics.noise[j].gram)
+                for(unsigned row=0;row<6;++row)for(unsigned column=0;column<6;++column)
+                    gram[6*row+column]/=scale[row]*scale[column];
+            const auto rho=cross[j]/denominator;
+            if(std::norm(rho)>=.999999) {reason="V2 alternative templates are nearly rank deficient";return false;}
+            statistics.correlations[j]=rho;
+            statistics.means[j][0]/=std::sqrt(a*projected_reference);
+            statistics.means[j][1]/=std::sqrt(b*projected_reference);
+            const auto residual=(statistics.means[j][1]-rho*statistics.means[j][0])/std::sqrt(1-std::norm(rho));
+            represented+=std::norm(statistics.means[j][0])+std::norm(residual);
+            statistics.weights[j]/=total_a;statistics.other[j]/=total_b;
+        }
+        if(represented>1+1e-8) {reason="V2 projected signal means exceed complete physical energy";return false;}
+        statistics.simulation_power=static_cast<double>(projected*bin/total);
+        statistics.hardware_projection=static_cast<double>(projected*bin/physical);
+        estimate_detail::check(stop);
+        if(cache.size()==8)cache.erase(cache.begin());
+        cache.push_back({identity,configured.stream_phase_samples,bin,config.carrier_hz,source_bit,statistics});
+    }
+    p.weights=statistics.weights;p.alternative_weights=statistics.other;
+    p.correlations=statistics.correlations;p.section_signal_coefficients=statistics.means;
+    if(statistics.noncircular) {
+        for(const auto& section:statistics.noise)if(section.samples<8||
+            !(section.variance[0]>0&&section.variance[1]>0)) {
+            reason="Noncircular Interleave reference requires eight bins per quarter and two nondegenerate noise planes";
+            return false;
+        }
+        p.projected_noise=statistics.noise;
+    }
+    // Simulation's AWGN remains referenced to nominal_signal_power. Hardware
+    // link budgets instead take the user's measured average transmitted power;
+    // retain shape/projection mismatch without charging digital backoff twice.
+    p.signal_energy*=mode==ReceiverWorkMode::sampled_simulation?statistics.simulation_power:statistics.hardware_projection;
+    return true;
 }
 
 // Build the same nominal local template statistics used by FFT matching.
@@ -1298,7 +1600,7 @@ bool real_differential_statistics(const transfer::Options& options,std::uint64_t
     const auto step=modem::pattern_pulse_enabled(config)?std::max<std::uint64_t>(1,chip/16):chip;
     // Same compact per-chip quadrature limit as the aligned approximation.
     // Intersections and a short final block are length weighted, never padded.
-    if(!step || total/step>524288 || total/window>4096)return false;
+    if(!step || total/step>maximum_probability_observations || total/window>maximum_probability_windows)return false;
     auto configured=config;
     if(options.timestamp)configured.stream_epoch=options.timestamp;
     if(options.key)configured=transfer::seeded_config(options,configured.stream_epoch);
@@ -1367,7 +1669,7 @@ bool differential_statistics(const transfer::Options& options,const Work& work,
     const auto& config=options.modem;
     const auto total=modem::symbol_sample_count(config),chip=modem::pattern_chip_samples(config);
     const auto windows=total/window;
-    if(windows>4096)return false;
+    if(windows>maximum_probability_windows)return false;
     if(total%window || windows%4) {
         // The old circular approximation has no representation of a tail or
         // a window crossing a drift boundary. Preserve it for aligned cases;
@@ -1381,8 +1683,7 @@ bool differential_statistics(const transfer::Options& options,const Work& work,
     if(!modem::pattern_pulse_enabled(config)&&work.compact)step=chip;
     const auto quadrature=modem::pattern_pulse_enabled(config)&&!work.compact?
         std::min<std::uint64_t>(step,4):1;
-    constexpr std::uint64_t maximum_observations=524288;
-    if(!step || total/step>maximum_observations/quadrature || total%step || window%step)return false;
+    if(!step || total/step>maximum_probability_observations/quadrature || total%step || window%step)return false;
     auto configured=config;
     if(options.timestamp)configured.stream_epoch=options.timestamp;
     if(options.key)configured=transfer::seeded_config(options,configured.stream_epoch);
@@ -1524,7 +1825,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
         static_cast<long double>(channel.delay_samples)/config.sample_rate+.175L+tail;
     result.simulated_seconds=finite_seconds(media);
     const auto samples=media*config.sample_rate;
-    long double serial=samples*channel_operations_per_sample,parallel=0,tracking_serial=0,tracking_windows=0,trials=1;
+    long double serial=samples*channel_operations_per_sample,parallel=0,gpu_host=0,gpu_numeric=0,tracking_serial=0,tracking_windows=0,trials=1;
     long double receiver_frontend=0,kernel_serial=0,kernel_upper_serial=0,search_serial=0;
     long double fallback_serial=0,fallback_parallel=0,fallback_tracking=0;
     bool any_pulse_projected=false,any_pulse_segmented=false,any_kernel_upper_bound=false;
@@ -1572,6 +1873,8 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
                           matches?transmission.wire_bits:0,local_window_seconds,work_mode,timing_model,stop);
         if(existing==work_entries.end())work_entries.push_back({index,training_samples,work});
         serial+=work.serial;parallel+=work.parallel;all_work_supported&=work.work_supported;
+        gpu_host+=work.fft_cost_split?work.fft_host_operations:0;
+        gpu_numeric+=work.fft_cost_split?work.fft_gpu_operations:work.parallel;
         const auto fallback_work=work.timing_window_modeled?
             receiver_work(profile,candidate_bank,media*profile.sample_rate,options,profiles.size(),keys,
                 matches?transmission.wire_bits:0,local_window_seconds,ReceiverWorkMode::hardware_fallback,timing_model,stop):work;
@@ -1620,7 +1923,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     result.fallback_receiver_cpu_seconds=finite_seconds(.03L+
         (fallback_serial+fallback_tracking)/serial_operations_per_second+
         fallback_parallel/cpu_scoring_operations_per_second+processing);
-    result.gpu_seconds=finite_seconds(.11L+serial_seconds+parallel/gpu_scoring_operations_per_second+
+    result.gpu_seconds=finite_seconds(.11L+serial_seconds+gpu_host/cpu_scoring_operations_per_second+gpu_numeric/gpu_scoring_operations_per_second+
         samples*sizeof(float)/gpu_transfer_bytes_per_second+processing);
     if(!transmission.wire_bits)return result;
 
@@ -1660,7 +1963,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     if(work_mode==ReceiverWorkMode::hardware_timing_model) {
         result.receiver_work_assumptions=matching_work.timing_window_modeled&&!matching_work.compact?
             (matching_work.geometry.restricted_fft_modeled?
-            "Restricted FFT acquisition work allowance: original per-phase start cells and empty template jobs are omitted under selected GPS/audio bounds; input FFTs per guarded component, repeated private template dispatches, continuation and original logical-hop trial/threshold charges retained. Initial epochs use a one-second anchor envelope; uncertain partition/selector geometry uses full-job component-count allowances. Fresh cohorts use bounded acquisition-lifetime allowances. Paired direct and partitioned convolution use shared geometry selectors; uncertain anchors retain full-cohort fallback or a translation-independent eligible-option allowance. Borrowed-row initialization, repeated group input caches and component observation preparation are included; operation coefficients and V2 generation remain uncalibrated. Full-window fallback is reported separately":
+            "Restricted FFT acquisition work allowance: original per-phase start cells and empty template jobs are omitted under selected GPS/audio bounds; input FFTs per guarded component, repeated private template dispatches, continuation and original logical-hop trial/threshold charges retained. Initial epochs use a one-second anchor envelope; uncertain partition/selector geometry uses full-job component-count allowances. Fresh cohorts use bounded acquisition-lifetime allowances. Paired direct and partitioned convolution use shared geometry selectors; uncertain anchors retain full-cohort fallback or a translation-independent eligible-option allowance. Borrowed-row initialization, repeated group input caches and component observation preparation are included; native FFT pipeline/plan and the measured V2 template family use bounded local calibration, while other operation coefficients and rolling admission allowances remain engineering assumptions. Full-window fallback is reported separately":
             "FFT acquisition work allowance: whole excluded batches skipped under selected GPS/audio bounds; mixed batches, frontend, continuation and original threshold charges retained. Full-window fallback is reported separately"):matching_work.timing_window_modeled?
             "Compact bank engineering reference: exact lattice count at a representative anchor under selected GPS/audio bounds and supplied capture metadata (nominal slope and full bank rate allowance when omitted). Full-window fallback is reported separately":
             "Full arrival-window bank; timing prior is unavailable for this backend or model geometry. Configured peer UTC correction lanes are retained";
@@ -1691,7 +1994,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
         if(!result.receiver_work_assumptions.empty())result.receiver_work_assumptions+="; ";
         result.receiver_work_assumptions+=matching_work.compact?
             "V2 compact permutation rebuild work is unsupported; CPU feasibility unavailable":
-            "V2 FFT template generation includes a bounded permutation-draw allowance; its cryptographic throughput is uncalibrated";
+            "V2 FFT construction uses the bounded local shaped-template/cache calibration when eligible; other V2 geometries retain an uncalibrated permutation-draw allowance";
     }
     if(matching_work.outer_presence) {
         if(!result.receiver_work_assumptions.empty())result.receiver_work_assumptions+="; ";
@@ -1754,8 +2057,10 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     if(!result.profile_matches || !result.carrier_in_search || !result.clock_in_search ||
        !result.receiver_workspace_supported || result.oscillator_search_limited)return result;
     if(!compute_probability)return result;
-    if(config.dsss_factor>1&&config.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2) {
-        result.probability_model_limit="Interleaved V2 outer DSSS has a new permutation and pre-limiter amplitude; waveform energy and detection sensitivity are not qualified by this probability model";
+    const bool interleaved_reference=config.dsss_factor>1&&config.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2;
+    if(interleaved_reference&&(matching_work.compact||differential_window||
+       (result.drift_sections>1&&!matching_work.drift_supported))) {
+        result.probability_model_limit="Interleave actual-source reference is unavailable for compact, unsupported section allocation or differential geometry; full acquisition sensitivity remains unqualified";
         return result;
     }
     const auto probability_result=[&] {
@@ -1777,9 +2082,13 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
         return probability_result();
     }
     result.confidence_available=true;
-    if(matching_work.drift_supported) {
+    if(matching_work.drift_supported||interleaved_reference) {
         detail::ReceiverProbabilityParameters parameters;
-        parameters.requested_trials=probability_trials;
+        parameters.sections=matching_work.drift_supported;
+        // Coherent planner curves historically request fewer draws because the
+        // legacy branch was analytic. This actual-source reference uses the
+        // joint statistic engine and must honor its minimum trial budget.
+        parameters.requested_trials=interleaved_reference?std::max<std::size_t>(256,probability_trials):probability_trials;
         parameters.signal_energy=static_cast<double>(std::pow(10.L,symbol_db/10));
         parameters.seconds=static_cast<double>(seconds);
         parameters.diffusion_degrees=channel.phase_noise_degrees_per_sqrt_second;
@@ -1809,6 +2118,8 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
         const auto chip=modem::pattern_chip_samples(config);
         const auto configure_statistics=[&](detail::ReceiverProbabilityParameters& p,unsigned source_bit) {
     estimate_detail::check(stop);
+            if(interleaved_reference)return interleaved_statistics(options,matching_work,p,source_bit,
+                work_mode,result.probability_model_limit,stop);
             if(!differential_window && samples_per_symbol/chip<=1024) {
                 auto code_config=config;
                 if(options.timestamp)code_config.stream_epoch=options.timestamp;
@@ -1839,6 +2150,28 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
                     p.signal_energy*=weight/static_cast<double>(samples_per_symbol);
             }
             if(!differential_window)return true;
+            // Report the actual bounded-work rejection, including both limits
+            // when present. These are probability-model limits, not receiver
+            // search limits or evidence that reception is impossible.
+            const auto step=matching_work.compact?
+                (modem::pattern_pulse_enabled(config)?std::max<std::uint64_t>(1,chip/16):chip):
+                matching_work.bin_samples;
+            const auto quadrature=modem::pattern_pulse_enabled(config)&&!matching_work.compact?
+                std::min<std::uint64_t>(step,4):1;
+            const auto windows=samples_per_symbol/differential_window;
+            const auto blocks=step?samples_per_symbol/step:0;
+            std::string budget_limit;
+            if(windows>maximum_probability_windows)
+                budget_limit=std::to_string(windows)+" local windows exceed "+std::to_string(maximum_probability_windows);
+            if(step&&blocks>maximum_probability_observations/quadrature) {
+                if(!budget_limit.empty())budget_limit+="; ";
+                budget_limit+=std::to_string(blocks*quadrature)+" template integration blocks exceed "+
+                    std::to_string(maximum_probability_observations);
+            }
+            if(!budget_limit.empty()) {
+                result.probability_model_limit="Probability model work limit: "+budget_limit;
+                return false;
+            }
             // A failed circular fit may have partially normalized its source
             // power and covariance. Retry from pristine parameters so the
             // real-covariance fallback applies that normalization exactly once.
@@ -1854,7 +2187,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
         auto alternative_parameters=parameters;
         if(!configure_statistics(parameters,0)) {
             result.confidence_available=false;
-            result.probability_model_limit="Template geometry exceeds the bounded probability model";
+            if(result.probability_model_limit.empty())result.probability_model_limit="Template geometry exceeds the bounded probability model";
             return probability_result();
         }
         auto probability=detail::receiver_probability(parameters,stop);
@@ -1864,10 +2197,11 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
         // projections. Common random draws are paired, so retain the smaller
         // trial count rather than counting correlated draws as extra evidence.
         if(probability.available && (config.scramble || config.dsss) &&
-           (samples_per_symbol/chip<=1024 || differential_window)) {
+           (samples_per_symbol/chip<=1024 || differential_window || interleaved_reference)) {
             if(!configure_statistics(alternative_parameters,1)) {
                 result.confidence_available=false;
-                result.probability_model_limit="Alternative template geometry exceeds the bounded probability model";
+                if(result.probability_model_limit.empty())
+                    result.probability_model_limit="Alternative template geometry exceeds the bounded probability model";
                 return probability_result();
             }
             const auto other=detail::receiver_probability(alternative_parameters,stop);
@@ -1893,7 +2227,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
         result.probability_carrier_candidates=probability.frequency_candidates;
         result.differential_model_available=probability.differential_model;
         result.differential_added_detection_probability=probability.differential_acquired_correct;
-        result.drift_model_available=true;result.coherent_reference_only=false;
+        result.drift_model_available=matching_work.drift_supported;result.coherent_reference_only=false;
         result.one_bit_success_probability=probability.acquired_correct;
         const auto count=static_cast<long double>(transmission.wire_bits);
         const auto draft_probability=[&](double acquired_correct,double acquired_wrong,double retained_correct,double retained_wrong) {
@@ -1932,6 +2266,11 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
             parameters.residual_frequency)*parameters.timing_coherence;
         const auto fitted_energy=[](const detail::ReceiverProbabilityParameters& p) {
             double fitted_fraction=1;
+            if(p.section_signal_coefficients) {
+                std::complex<double> fitted{};
+                for(std::size_t j=0;j<4;++j)fitted+=std::sqrt(p.weights[j])*(*p.section_signal_coefficients)[j][0];
+                fitted_fraction=std::norm(fitted);
+            }
             if(!p.differential_signal_coefficients.empty()) {
                 std::complex<double> fitted{};
                 for(std::size_t i=0;i<p.differential_windows;++i)
@@ -1966,6 +2305,8 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
             result.success_probability_low=0;result.success_probability_high=1;
             result.probability_model_limit="Compact multi-bit timing ownership is not modeled; the first-bit estimate remains available";
         }
+        if(interleaved_reference)result.probability_model_limit=
+            "Interleave isolated-symbol, fixed initial-phase actual-source reference: shaped and radially limited real PCM, projected signal energy and finite candidate overlap. Noncircular projection uses both real-noise principal planes, joint template/source covariance and dependent received energy; circular geometry retains its existing approximation. Orthogonal noise energy uses a bounded chi-square approximation. Hardware uses user-entered actual mean radio power; simulation uses nominal-power-referenced noise. Quarter phase/timing changes remain approximate: time-varying limiter weights, opposite carrier-image rotation and unmatched signal/noise cross terms are unresolved. Adjacent unknown symbols, complete acquisition-bank behavior, outer presence guard and sensitivity qualification are not modeled";
         return probability_result();
     }
     const auto energy=static_cast<double>(std::pow(10.L,std::clamp(effective_db/10,-30.L,12.L)));

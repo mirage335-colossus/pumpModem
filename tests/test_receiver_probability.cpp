@@ -5,6 +5,7 @@
 #include "datapump/pattern_correlator.hpp"
 #include "datapump/simulation_estimate.hpp"
 #include "../src/receiver_probability.hpp"
+#include "../src/probability_random.hpp"
 #include "../src/pattern_correlator_batch.hpp"
 #include "../src/pattern_differential.hpp"
 #include "../src/pattern_drift.hpp"
@@ -15,6 +16,7 @@
 #include <cmath>
 #include <iostream>
 #include <string>
+#include <numeric>
 
 using namespace datapump;
 namespace {
@@ -306,6 +308,33 @@ void sampled_estimates() {
     check(section_recoveries>=coherent_recoveries+8,
           "independent sampled phase trajectories no longer demonstrate the implemented reception improvement");
 }
+void explicit_signal_means() {
+    using namespace simulation::detail;
+    ReceiverProbabilityParameters p;p.signal_energy=80;p.requested_trials=512;
+    p.correlations.fill({.1,.2});
+    const auto matched=receiver_probability(p);
+    p.section_signal_coefficients.emplace();
+    for(std::size_t j=0;j<4;++j) {
+        (*p.section_signal_coefficients)[j][0]=std::sqrt(p.weights[j]);
+        (*p.section_signal_coefficients)[j][1]=p.correlations[j]*std::sqrt(p.weights[j]);
+    }
+    const auto explicit_match=receiver_probability(p);
+    check(matched.acquired_correct==explicit_match.acquired_correct&&
+          matched.acquired_wrong==explicit_match.acquired_wrong&&
+          matched.retained_correct==explicit_match.retained_correct,
+          "explicit matched means changed the conditional reference");
+    // Unmodeled physical signal energy must remain in the denominator.
+    for(auto& quarter:*p.section_signal_coefficients)for(auto& mean:quarter)mean*=.25;
+    const auto mismatch=receiver_probability(p);
+    check(mismatch.acquired_correct<matched.acquired_correct,
+          "mismatched source means discarded unfitted physical energy");
+    (*p.section_signal_coefficients)[0][0]=2;
+    bool rejected=false;try{(void)receiver_probability(p);}catch(const Error&){rejected=true;}
+    check(rejected,"impossible source projections were accepted");
+    std::stop_source stop;stop.request_stop();rejected=false;
+    try{(void)receiver_probability(p,stop.get_token());}catch(const std::exception&){rejected=true;}
+    check(rejected,"cancelled explicit-mean calculation continued");
+}
 void sampled_partial_estimates() {
     // A bounded production-PCM check of the newly supported real covariance
     // branch. These model-error gates are not receiver sensitivity-loss gates.
@@ -362,8 +391,171 @@ void sampled_partial_estimates() {
     }
 }
 }
+
+
+void projected_probability_curve() {
+    using namespace simulation::detail;using Z=std::complex<double>;
+    constexpr unsigned n=64,captures=8192;
+    for(const double image:{-.55,0.,.55}) {
+        ReceiverProbabilityParameters p;p.sections=false;p.seconds=.355555555555;
+        p.noise_dimensions=p.coherent_dimensions=p.section_dimensions=4*n;
+        p.noise_condition=(1+std::abs(image))/(1-std::abs(image));
+        p.requested_trials=4096;p.acquisition_threshold=30;
+        p.section_signal_coefficients.emplace();p.projected_noise.emplace();p.alternative_weights.emplace();
+        std::array<std::array<Z,n>,4> a{},b{},source{};
+        std::array<double,4> ea{},eb{};double es=0,total_a=0,total_b=0;
+        for(unsigned j=0;j<4;++j)for(unsigned k=0;k<n;++k) {
+            const auto t=static_cast<double>(j*n+k)+.5;
+            a[j][k]={std::sin(.31*t),.7*std::cos(.27*t)};
+            b[j][k]={.8*std::sin(.41*t+.4),std::cos(.51*t)};
+            // Nonlinear limiting creates a real source/template mismatch.
+            source[j][k]=a[j][k]/std::max(1.,std::abs(a[j][k])*1.3);
+            ea[j]+=std::norm(a[j][k]);eb[j]+=std::norm(b[j][k]);es+=std::norm(source[j][k]);
+        }
+        for(unsigned j=0;j<4;++j){total_a+=ea[j];total_b+=eb[j];}
+        for(unsigned j=0;j<4;++j) {
+            p.weights[j]=ea[j]/total_a;(*p.alternative_weights)[j]=eb[j]/total_b;
+            auto& g=(*p.projected_noise)[j];g.samples=n;g.variance={(1+image)/2,(1-image)/2};
+            for(unsigned k=0;k<n;++k) {
+                a[j][k]/=std::sqrt(ea[j]);b[j][k]/=std::sqrt(eb[j]);source[j][k]/=std::sqrt(es);
+                p.correlations[j]+=a[j][k]*std::conj(b[j][k]);
+                (*p.section_signal_coefficients)[j][0]+=source[j][k]*std::conj(a[j][k]);
+                (*p.section_signal_coefficients)[j][1]+=source[j][k]*std::conj(b[j][k]);
+                auto axis=std::polar(1.,-.39*(j*n+k+.5));
+                for(unsigned plane=0;plane<2;++plane,axis*=Z{0,1}) {
+                    const auto x=axis*std::conj(a[j][k]),y=axis*std::conj(b[j][k]),z=axis*std::conj(source[j][k]);
+                    const std::array<double,6> v{x.real(),x.imag(),y.real(),y.imag(),z.real(),z.imag()};
+                    for(unsigned row=0;row<6;++row)for(unsigned column=0;column<6;++column)
+                        g.gram[plane][6*row+column]+=v[row]*v[column];
+                }
+            }
+        }
+        p.signal_energy=160;p.noise_dimensions=4*n+4;
+        check(receiver_probability(p).available,"four unmatched clock guard bins lost conditional support");
+        p.noise_dimensions=4*n+5;
+        const auto excessive=receiver_probability(p);
+        check(!excessive.available&&excessive.unsupported_reason.find("guard bins")!=std::string::npos,
+              "excess clock guard geometry must retain an explicit unsupported reason");
+        p.noise_dimensions=4*n-1;
+        check(!receiver_probability(p).available,"a shorter observation cannot contain all projected source statistics");
+        p.noise_dimensions=4*n;
+        for(const double power:{0.,35.,45.,120.,160.,190.,240.}) {
+            p.signal_energy=power;const auto modeled=receiver_probability(p);
+            std::mt19937_64 rng(0x45fe9111);ProbabilityNormal normal;unsigned correct=0,wrong=0;
+            for(unsigned trial=0;trial<captures;++trial) {
+                Z da{},db{};double energy=0;
+                for(unsigned j=0;j<4;++j)for(unsigned k=0;k<n;++k) {
+                    const auto rotation=std::polar(1.,-.39*(j*n+k+.5));
+                    const auto noise=rotation*Z{std::sqrt((1+image)/2)*normal(rng),std::sqrt((1-image)/2)*normal(rng)};
+                    const auto pcm=noise+std::sqrt(power)*source[j][k];energy+=std::norm(pcm);
+                    da+=std::sqrt(p.weights[j])*pcm*std::conj(a[j][k]);
+                    db+=std::sqrt((*p.alternative_weights)[j])*pcm*std::conj(b[j][k]);
+                }
+                const auto score=[&](Z dot){return modem::detail::drift_evidence(std::norm(dot)/p.noise_condition,
+                    energy,p.coherent_dimensions,1,false);};
+                const auto x=score(da),y=score(db);
+                correct+=x>=p.acquisition_threshold&&x-y>=1;
+                wrong+=y>=p.acquisition_threshold&&y-x>=1;
+            }
+            const auto direct=static_cast<double>(correct)/captures;
+            const auto difference=std::abs(direct-modeled.acquired_correct);
+            // Independent model/direct ensembles: at p=.5 their combined SE
+            // is .00957. This bounded regression is not a sensitivity certificate.
+            check(difference<.04&&std::abs(static_cast<double>(wrong)/captures-modeled.acquired_wrong)<.02,
+                "covariance-aware conditional score curve disagrees with direct projected-bin noise");
+            std::cout<<"Projection image "<<image<<", energy "<<power<<", direct "<<direct
+                     <<", model "<<modeled.acquired_correct<<", difference "<<difference<<'\n';
+        }
+    }
+}
+
+void projected_noise_reduction() {
+    using namespace simulation::detail;
+    constexpr unsigned n=64;
+    // Independent Gram-Schmidt reconstruction of identical white-plane PCM.
+    // A duplicate source/template pair deliberately makes both Grams singular.
+    for(const double image:{-.81,0.,.81})for(const bool singular:{false,true}) {
+        ReceiverProjectionSection section;section.samples=n;section.variance={(1+image)/2,(1-image)/2};
+        std::array<std::array<std::array<double,n>,6>,2> coefficients{},basis{};
+        std::array<std::array<double,n>,2> residual{};
+        std::array<unsigned,2> rank{};
+        for(unsigned plane=0;plane<2;++plane) {
+            auto& c=coefficients[plane];auto& q=basis[plane];
+            for(unsigned row=0;row<6;++row)for(unsigned k=0;k<n;++k)
+                c[row][k]=.2*std::cos((row+1)*.37*(k+.5)+plane*.41)+.03*std::sin(.17*k);
+            if(singular){c[4]=c[0];c[5]=c[1];}
+            for(unsigned row=0;row<6;++row)for(unsigned column=0;column<6;++column)
+                section.gram[plane][6*row+column]=std::inner_product(c[row].begin(),c[row].end(),c[column].begin(),0.);
+            auto remainder=c;
+            for(unsigned row=0;row<6;++row) {
+                unsigned pivot=0;double largest=0;
+                for(unsigned i=0;i<6;++i) {
+                    const auto norm=std::inner_product(remainder[i].begin(),remainder[i].end(),remainder[i].begin(),0.);
+                    if(norm>largest){largest=norm;pivot=i;}
+                }
+                if(largest<1e-11)break;
+                q[row]=remainder[pivot];for(auto& x:q[row])x/=std::sqrt(largest);
+                ++rank[plane];
+                for(auto& vector:remainder) {
+                    const auto dot=std::inner_product(vector.begin(),vector.end(),q[row].begin(),0.);
+                    for(unsigned k=0;k<n;++k)vector[k]-=dot*q[row][k];
+                }
+            }
+            auto& rest=residual[plane];rest.fill(1);
+            for(const auto& vector:q) {
+                const auto dot=std::inner_product(rest.begin(),rest.end(),vector.begin(),0.);
+                for(unsigned k=0;k<n;++k)rest[k]-=dot*vector[k];
+            }
+            const auto norm=std::sqrt(std::inner_product(rest.begin(),rest.end(),rest.begin(),0.));
+            for(auto& x:rest)x/=norm;
+        }
+        ReceiverProjectionModel model(section);
+        for(unsigned trial=0;trial<64;++trial) {
+            std::array<double,14> draws{};for(unsigned i=0;i<14;++i)draws[i]=2*std::sin(.51*(trial+1)*(i+1));
+            const auto reduced=model.sample(draws);ReceiverProjectionDraw direct;
+            for(unsigned plane=0;plane<2;++plane) {
+                std::array<double,n> pcm{};
+                const auto shape=(n-rank[plane])/2.;
+                const auto base=std::max(0.,1-1/(9*shape)+draws[7*plane+6]/(3*std::sqrt(shape)));
+                const auto remainder=std::sqrt(2*shape*base*base*base);
+                for(unsigned k=0;k<n;++k) {
+                    pcm[k]=remainder*residual[plane][k];
+                    for(unsigned row=0;row<6;++row)pcm[k]+=draws[7*plane+row]*basis[plane][row][k];
+                }
+                const auto variance=section.variance[plane];
+                direct.energy+=variance*std::inner_product(pcm.begin(),pcm.end(),pcm.begin(),0.);
+                for(unsigned i=0;i<3;++i)direct.dots[i]+=std::sqrt(variance)*std::complex<double>{
+                    std::inner_product(pcm.begin(),pcm.end(),coefficients[plane][2*i].begin(),0.),
+                    std::inner_product(pcm.begin(),pcm.end(),coefficients[plane][2*i+1].begin(),0.)};
+            }
+            check(std::abs(reduced.energy-direct.energy)<1e-9,"projection reduction lost dependent plane noise energy");
+            for(unsigned i=0;i<3;++i)check(std::abs(reduced.dots[i]-direct.dots[i])<1e-9,
+                "projection reduction changed a joint template/source I/Q dot");
+            for(const double power:{0.,.1,10.,10000.}) {
+                const auto amplitude=std::polar(std::sqrt(power),.37*trial);
+                const auto energy=[&](const auto& x){return x.energy+power+2*std::real(amplitude*std::conj(x.dots[2]));};
+                check(std::abs(energy(reduced)-energy(direct))<1e-8,
+                    "projected signal/noise cross term uses an independent denominator draw");
+            }
+        }
+    }
+    ReceiverProjectionSection scaled;scaled.samples=64;
+    scaled.gram[0][0]=1e-12;scaled.gram[0][1]=scaled.gram[0][6]=1e-6;scaled.gram[0][7]=1;
+    std::array<double,14> unit{};unit[0]=1;
+    const auto small=ReceiverProjectionModel(scaled).sample(unit);
+    check(std::abs(small.dots[0]-std::complex<double>{1e-6,1}/std::sqrt(2.))<1e-12,
+          "a tiny leading Gram vector rejected a valid correlated source");
+    ReceiverProbabilityParameters mixed;mixed.projected_noise.emplace();mixed.differential_windows=256;
+    bool mixed_rejected=false;try{receiver_probability(mixed);}catch(const Error&){mixed_rejected=true;}
+    check(mixed_rejected,"projected covariance was silently ignored by the differential model");
+    ReceiverProjectionSection invalid;invalid.samples=64;invalid.gram[0][0]=-1;
+    bool rejected=false;try{ReceiverProjectionModel model(invalid);}catch(const Error&){rejected=true;}
+    check(rejected,"indefinite projected covariance must not manufacture a probability");
+}
+
 int main(int argc,char** argv) {
-    try {real_atom_reduction();
+    try {projected_noise_reduction();projected_probability_curve();if(argc==2&&std::string(argv[1])=="--projection-only"){std::cout<<"projection tests passed\n";return 0;}
+        explicit_signal_means();real_atom_reduction();
         if(argc==1||std::string(argv[1])!="--atoms-only")sampled_partial_estimates();
         if(argc==1||(std::string(argv[1])!="--atoms-only"&&std::string(argv[1])!="--partial-sampled-only"))sampled_estimates();
         std::cout<<"receiver probability tests passed\n";return 0;}
