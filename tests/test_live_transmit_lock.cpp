@@ -34,9 +34,11 @@ struct Playback {
     ~Playback() { script=nullptr; }
     std::atomic<std::uint64_t> released{0},delivered{0};
     std::atomic<unsigned> opened{0},started{0},closed{0},captures{0};
-    std::atomic<bool> finish{false};
-    std::atomic<double> gain{0};
+    std::atomic<bool> finish{false},hold_drain{false},draining{false},inject_gap{false};
+    std::atomic<double> gain{0},timing_rate{0},timing_stop{0};
+    std::atomic<bool> protected_hook{false};
     std::atomic<bool> exclusive{false};
+    bool timed_mock=false,timing_accepted=false;std::atomic<bool> requested_timing{false};
 };
 live::Settings slow_settings() {
     live::Settings settings;
@@ -56,6 +58,96 @@ live::Settings faster(live::Settings settings) {
     settings.transfer.timestamp=0;
     return settings;
 }
+void graceful_drain() {
+    for(const bool noise:{false,true}) {
+        Playback playback;playback.hold_drain=true;
+        auto value=slow_settings();value.transfer.modem.bandwidth_hz=16;value.transfer.modem.integration_seconds=2;
+        const auto& c=value.transfer.modem;
+        live::Session session([]{return static_cast<double>(epoch);});session.start(value);
+        const auto point=modem::training_sample_count(c)+modem::pattern_pulse_padding_samples(c)+13;
+        playback.released=point;
+        if(noise)session.transmit_noise();else session.transmit_bits(Bytes{0,1,0});
+        await([&]{return playback.delivered==point;},"graceful fixture did not emit initial PCM");
+        session.finish_transmit();
+        check(session.snapshot().transmission_stopping && session.snapshot().transmitting,"graceful request was an immediate abort");
+        playback.released=point+modem::transmit_stop_sample_count(c)+100;
+        await([&]{return playback.draining.load();},"graceful source did not reach finite EOF");
+        check(session.snapshot().transmitting && playback.closed==0,"TX finished before physical DAC drain");
+        playback.hold_drain=false;
+        await([&]{return session.snapshot().transmission_finished;},"graceful drain never completed");
+        const auto done=session.snapshot();
+        check(done.transmission_cancelled && !done.transmission_stopping && !done.transmitting &&
+            done.transmit_separation_seconds==0,"graceful stop invented completion or a full-symbol quiet lock");
+        check(done.received.empty(),"source EOF manufactured a received message");
+        session.stop();
+    }
+    Playback playback;auto value=slow_settings();
+    live::Session session([]{return static_cast<double>(epoch);});session.start(value);
+    playback.released=17;session.transmit_bits(Bytes{0,1});
+    await([&]{return playback.delivered==17;},"slow graceful fixture did not start");
+    session.finish_transmit();check(session.snapshot().transmission_stopping,"slow stop did not offer pulse finishing");
+    session.finish_transmit();await([&]{return playback.closed==1;},"second cancellation did not immediately abort long tails");
+    check(!session.snapshot().transmitting,"hard abort retained long-symbol work");session.stop();
+}
+
+void tuning_profile() {
+    Playback playback;playback.hold_drain=true;
+    auto value=slow_settings();value.transfer.modem.bandwidth_hz=16;value.transfer.modem.integration_seconds=2;
+    value.long_message_modem=value.transfer.modem;
+    value.long_message_modem->integration_seconds=64;
+    const auto padding=modem::pattern_pulse_padding_samples(*value.long_message_modem);
+    live::Session session([]{return static_cast<double>(epoch);});session.start(value);
+    const auto point=padding+17;
+    playback.released=point;session.transmit_noise({},true);
+    await([&]{return playback.delivered==point;},"long-profile tuning did not start");
+    check(session.snapshot().transmit_trace.generated_chips>0,
+          "tuning retained short-profile prefix instead of selected long symbol geometry");
+    session.finish_transmit();playback.released=point+modem::transmit_stop_sample_count(*value.long_message_modem)+100;
+    await([&]{return playback.draining.load();},"long-profile tuning did not drain");
+    check(playback.delivered==point+4*padding+3*value.long_message_modem->sample_rate+1,
+          "tuning lost long-profile pulse support or three useful seconds of protection");
+    playback.hold_drain=false;await([&]{return session.snapshot().transmission_finished;},"long-profile tuning stayed busy");
+    session.stop();
+}
+void tuning_utc() {
+    if(!audio::utc_follow_supported())return; // Explicit unsupported host branch.
+    std::optional<double> expected_rate,expected_stop;
+    for(const bool noise:{false,true})for(const bool accepted:{false,true}) {
+        Playback playback;playback.timed_mock=true;playback.timing_accepted=accepted;
+        auto value=slow_settings();value.transfer.timestamp=0;
+        value.transfer.modem.bandwidth_hz=16;value.transfer.modem.integration_seconds=2;
+        value.transfer.clock_sync=clock_sync::Policy{.001,.4,0};
+        modem::OscillatorSearchConfig oscillator;oscillator.lf={.0001,0};oscillator.rf={.0001,0};
+        value.transfer.modem.oscillator_search=oscillator;
+        value.transfer.audio_timing_error_seconds=.05;
+        live::Session session([]{return static_cast<double>(epoch);});session.start(value);
+        playback.released=modem::training_sample_count(value.transfer.modem)+
+            modem::pattern_pulse_padding_samples(value.transfer.modem)+17;
+        if(noise)session.transmit_noise();else session.transmit_bits(Bytes{0,1});
+        await([&]{return playback.delivered==playback.released;},"UTC tuning/message never emitted scheduled PCM");
+        const auto state=session.snapshot();
+        if(!expected_rate){expected_rate=playback.timing_rate;expected_stop=playback.timing_stop;}
+        check(playback.timing_rate>0 && playback.timing_rate==*expected_rate &&
+              playback.timing_stop==*expected_stop && playback.protected_hook,
+              "finite message and open tuning resolved different timing/stop controllers");
+        check(playback.requested_timing && state.transmit_clock_following==accepted &&
+              state.clock_timing_fallback==!accepted,"tuning/message UTC request or visible fallback differed");
+        session.cancel_transmit();await([&]{return playback.closed==1;},"UTC source failed immediate abort");session.stop();
+    }
+}
+void private_discontinuity() {
+    for(const bool noise:{false,true}) {
+        Playback playback;playback.inject_gap=true;playback.released=2048;
+        auto value=slow_settings();value.transfer.modem.bandwidth_hz=16;value.transfer.modem.integration_seconds=2;
+        live::Session session([]{return static_cast<double>(epoch);});session.start(value);
+        if(noise)session.transmit_noise();else session.transmit_bits(Bytes{0,1});
+        await([&]{return playback.closed==1 && session.snapshot().transmission_failed;},"private playback discontinuity was not a failed stopped burst");
+        check(session.snapshot().error.find("synthetic private playback discontinuity")!=std::string::npos &&
+              !session.snapshot().transmitting && playback.opened==1,"failed private output restarted or hid its discontinuity");
+        session.stop();
+    }
+}
+
 void boundary_accounting() {
     auto config=slow_settings().transfer.modem;
     check(datapump::detail::transmit_epoch_lock_seconds(config,epoch+1600,epoch+800)==1 &&
@@ -323,7 +415,31 @@ void playback(std::uint32_t rate,const std::string& device,const PlaybackCallbac
               std::stop_token stop,StreamFormatCallback format,ChannelMode channels,Options options) {
     validate_options(options);
     script->gain=options.transmit_gain;script->exclusive=options.exclusive;
-    playback(rate,device,callback,stop,std::move(format),channels);
+    script->timing_rate=options.maximum_timing_rate_correction;script->timing_stop=options.timing_stop_duration_seconds;
+    script->protected_hook=static_cast<bool>(options.timing_protected_stop);
+    // The deterministic provider accepts schedules without sleeping. Its
+    // status callback tests successful and fallback preflight independently
+    // of physical device qualification; real provider timing has its own tests.
+    struct MockSchedule {
+        bool prior=detail::utc_playback_active;
+        ~MockSchedule(){detail::utc_playback_active=prior;}
+    } schedule;
+    if(script->timed_mock) {
+        script->requested_timing=options.follow_system_clock && options.allow_timing_fallback;
+        detail::utc_playback_active=true;
+        check(static_cast<bool>(options.timing_status),"timed source omitted status callback");
+        options.timing_status({script->timing_accepted,.05,.03,"synthetic timed provider preflight"});
+    }
+    const auto checked=[&](std::span<float> output) {
+        const auto n=callback(output);
+        if(n && script->inject_gap) {
+            check(static_cast<bool>(options.playback_discontinuity),"private tuning/message output omitted discontinuity protection");
+            options.playback_discontinuity("synthetic private playback discontinuity");
+            throw Error("discontinuity callback permitted private-source restart");
+        }
+        return n;
+    };
+    playback(rate,device,checked,stop,std::move(format),channels);
 }
 std::vector<Device> devices() { return {{"epoch guard test","deterministic output"}}; }
 void capture(std::uint32_t rate,const std::string&,const CaptureCallback&,std::stop_token stop,
@@ -345,7 +461,11 @@ void playback(std::uint32_t rate,const std::string&,const PlaybackCallback& next
         if(delivered<released) {
             const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(samples.size(),released-delivered));
             const auto got=next(std::span(samples).first(count));
-            if(!got)return;
+            if(!got) {
+                state.draining=true;
+                while(state.hold_drain && !stop.stop_requested())std::this_thread::sleep_for(1ms);
+                return;
+            }
             state.delivered+=got;
         } else if(state.finish)return;
         else std::this_thread::sleep_for(1ms);
@@ -360,7 +480,7 @@ std::vector<float> record(double,std::uint32_t,const std::string&,std::size_t,st
 }
 int main() {
     try {
-        boundary_accounting();shaped_future_exposure();queued_request_rechecks();normal_quiet_override();
+        private_discontinuity();graceful_drain();tuning_profile();tuning_utc();boundary_accounting();shaped_future_exposure();queued_request_rechecks();normal_quiet_override();
         unkeyed_slow_quiet_override();
         std::cout<<"live transmit epoch lock passed\n";
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}

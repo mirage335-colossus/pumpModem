@@ -62,16 +62,19 @@ struct Options {
     // it. Visible pre-source fallback or strict failure retains actual error.
     double maximum_utc_error_seconds=.03;
     double maximum_timing_slew_per_second=1e-5;
-    // Zero requests timestamped scheduling only. A nonzero correction needs
-    // a separately validated rate estimate and corresponding search coverage.
+    // Zero requests timestamped scheduling only. A nonzero domain bounds BOTH
+    // software correction and the independently admitted stationary device
+    // clock, with corresponding receiver coverage. EstimatedDeviceTiming uses
+    // that assumption during preparation and protected stopping; it is not a
+    // claim that noisy native timestamps measure the rate this accurately.
     double maximum_timing_rate_correction=0;
-    // Exact finite logical waveform duration, including lead-in and tails.
-    // Required before enabling rate steering; bounds deviation from the
-    // initial affine map over the whole message, not just one symbol.
-    double timing_source_duration_seconds=0;
+    // Maximum remaining logical duration after a protected stop. Independent
+    // of final message/noise length. The backend adds prefetch/filter/queue
+    // allowance; the affine reference itself NEVER has a resettable horizon.
+    double timing_stop_duration_seconds=0;
     // Opt-in engineering model for generic native timestamps. Quality remains
     // estimated; the caller must cover maximum_timing_rate_correction in its
-    // receiver bank. Preparation emits only silence until its finite horizon
+    // receiver bank. Preparation emits only silence until its protected-stop horizon
     // is supported, and remains cancellable.
     std::optional<EstimatedDeviceTiming> estimated_timing;
     // Provider integration seam for a device with an independently validated
@@ -88,6 +91,9 @@ struct Options {
     // First output sample's UTC coordinate after capture rate conversion.
     std::function<void(const TimePrediction&)> capture_timing={};
     PlaybackDiscontinuity playback_discontinuity={};
+    // Anticipated loss of UTC headroom, while protection still fits. Called
+    // once before further source generation; abrupt discontinuities still abort.
+    std::function<void(const std::string&)> timing_protected_stop={};
 };
 // Capabilities belong to the selected audio provider, not the UI or target OS.
 bool exclusive_supported();
@@ -114,13 +120,13 @@ inline void validate_options(const Options& options) {
     if(!std::isfinite(options.maximum_timing_rate_correction) ||
        options.maximum_timing_rate_correction<0 || options.maximum_timing_rate_correction>.001)
         throw Error("invalid audio timing rate allowance");
-    if(!std::isfinite(options.timing_source_duration_seconds) || options.timing_source_duration_seconds<0 ||
-       (options.maximum_timing_rate_correction>0 && options.timing_source_duration_seconds==0))
-        throw Error("audio timing correction requires the finite source duration");
+    if(!std::isfinite(options.timing_stop_duration_seconds) || options.timing_stop_duration_seconds<0 ||
+       (options.maximum_timing_rate_correction>0 && options.timing_stop_duration_seconds==0))
+        throw Error("audio timing correction requires a protected stop duration");
     if(options.estimated_timing) {
         options.estimated_timing->validate();
         if(!options.follow_system_clock || options.maximum_timing_rate_correction<=0)
-            throw Error("estimated timing requires an explicit finite correction domain");
+            throw Error("estimated timing requires an explicit correction domain");
     }
 }
 // Compatibility callers can still disable mono with the existing boolean.

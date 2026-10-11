@@ -78,6 +78,21 @@ void test_streams() {
     check(all != Crypto(other_master).stream(StreamPurpose::Data, 1720000000, 0, 1024), "master keys overlap");
 }
 
+void test_cover_domains() {
+    const Crypto key(Bytes(32,0x6a));
+    std::vector<Bytes> all;
+    for(const auto domain:{StreamDomain::Payload,StreamDomain::Preamble,StreamDomain::Suppression,
+        StreamDomain::PatternZeroV2,StreamDomain::PatternOneV2,
+        StreamDomain::CoverPreambleV1,StreamDomain::CoverSuppressionV1})
+        for(const auto purpose:{StreamPurpose::Data,StreamPurpose::Scrambler,StreamPurpose::Dsss,StreamPurpose::Fhss}) {
+            const auto bytes=key.stream(purpose,1800000321,0,1024,domain);
+            check(std::find(all.begin(),all.end(),bytes)==all.end(),"cover domain or purpose reused old stream bytes");
+            const auto part=key.stream(purpose,1800000321,509,131,domain);
+            check(std::equal(part.begin(),part.end(),bytes.begin()+509),"cover stream restarted across a cache/block boundary");
+            all.push_back(bytes);
+        }
+}
+
 void test_preamble_domain() {
     Bytes master(32);
     for(std::size_t i=0;i<master.size();++i)master[i]=static_cast<std::uint8_t>(i);
@@ -375,7 +390,7 @@ void test_production_keyfile() {
 
 int main() {
     try {
-        test_streams();
+        test_streams();test_cover_domains();
         test_preamble_domain();
         test_suppression_domain();
         test_private_pattern_domains();

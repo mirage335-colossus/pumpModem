@@ -620,6 +620,55 @@ void exhaustive_recovery_preserves_physical_end_and_source() {
                       "FEC-off reception must not accumulate unused recovery anchors after diagnostic retention fills");
     }
 }
+void dictionary_interpretation_preserves_timed_coordinates() {
+    auto sender=options(true);sender.modem.integration_seconds=.5;
+    Message sent;const std::string_view text="quick brown";sent.data.assign(text.begin(),text.end());
+    Bytes expected;
+    for(const char bit:std::string_view("1111101110001110101101011011011111011010110001111001100101001110011011"))
+        expected.push_back(static_cast<std::uint8_t>(bit-'0'));
+    const auto wire=transfer::message_wire_bits(sent,sender);
+    const auto samples=modem::symbol_sample_count(sender.modem);
+    check(samples==4000 && wire.size()==expected.size(),"timed dictionary fixture must retain half-second symbols and exact 70-bit endpoint");
+    // The same intact transmission can be acquired relative to either clock origin.
+    for(const auto earlier_seconds:{0U,1U}) {
+        auto value=sender;value.timestamp-=earlier_seconds;
+        const std::uint64_t first=2*earlier_seconds;
+        for(std::size_t i=0;i<wire.size();++i) {
+            const auto tx=modem::symbol_stream_address(sender.timestamp,0,i,samples,sender.modem.sample_rate);
+            const auto rx=modem::symbol_stream_address(value.timestamp,0,first+i,samples,value.modem.sample_rate);
+            check(tx.epoch==rx.epoch && tx.ordinal==rx.ordinal && tx.sample_in_second==rx.sample_in_second,
+                  "shifted dictionary acquisition must address the identical keyed symbols");
+        }
+        const auto event=[&](std::span<const std::uint8_t> bits,std::size_t offset,bool complete=false) {
+            auto result=chunk(bits,first+offset,100,complete);result.stream_first_symbol=first;
+            result.first_sample=100+offset*samples;result.end_sample=result.first_sample+bits.size()*samples;
+            return result;
+        };
+        transfer::StreamReceiver receiver(value,value.timestamp);
+        constexpr std::size_t split=17;
+        auto pending=receiver.push(event(std::span(wire).first(split),0));
+        check(!pending.stream_complete && !pending.short_text_decoded && pending.content.message.data.empty() &&
+              pending.raw_bits==Bytes(expected.begin(),expected.begin()+split),
+              "shifted dictionary reception must expose its exact pending prefix");
+        pending=receiver.push(event(std::span(wire).subspan(split),split));
+        check(!pending.stream_complete && !pending.short_text_decoded && pending.content.message.data.empty() &&
+              pending.raw_bits==expected,"all dictionary bits must remain pending until physical completion");
+        const auto complete=receiver.push(event({},wire.size(),true));
+        check(complete.stream_complete && complete.short_text_decoded && !complete.content_validated &&
+              !complete.content.authenticated && !complete.missing_symbols && complete.error.empty() &&
+              complete.raw_bits==expected && complete.observed_bits==expected.size() &&
+              complete.content.message.data==sent.data && complete.content.message.local_id==pending.content.message.local_id,
+              "equivalent clock origins must produce the same completed unvalidated dictionary text and exact bits");
+
+        // A copied zero placeholder may look correct but is still not an observed bit.
+        auto missing_wire=wire;missing_wire[5]=modem::missing_pattern_bit;
+        transfer::StreamReceiver missing(value,value.timestamp);
+        const auto rejected=missing.push(event(missing_wire,0,true));
+        check(rejected.stream_complete && rejected.missing_symbols==1 && rejected.raw_bits==expected &&
+              !rejected.short_text_decoded && rejected.content.message.data.empty(),
+              "nonzero keyed coordinates must not allow missing slots to become dictionary text");
+    }
+}
 void dictionary_interpretation_is_bounded_and_post_end() {
     auto value=options();
     const Bytes source{'e','i'};const auto bits=compression::encode_short_bits(source);
@@ -663,6 +712,7 @@ int main() {
          late_acquisition_preserves_error_correction();late_acquisition_authenticates_actual_coordinates();
          marker_preserves_recovery_when_all_parity_is_absent();
          exhaustive_recovery_preserves_physical_end_and_source();
-         shared_quota_cleanup_and_identity();retain_widest_validated_source();diagnostics_accounting();few_bits_remain_visible_until_physical_end();dictionary_interpretation_is_bounded_and_post_end();std::cout<<"stream receive integration passed\n";}
+         shared_quota_cleanup_and_identity();retain_widest_validated_source();diagnostics_accounting();few_bits_remain_visible_until_physical_end();dictionary_interpretation_is_bounded_and_post_end();
+         dictionary_interpretation_preserves_timed_coordinates();std::cout<<"stream receive integration passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

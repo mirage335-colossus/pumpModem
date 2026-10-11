@@ -408,3 +408,11 @@ The receiver geometry, arithmetic coverage, template reuse, arrival grid and ban
 work details are grouped under **Model limits and references** in Link Planner.
 The developer arithmetic selector and the main RX/CPU results remain visible.
 Manual Doppler is documented in the [modem reference](modem.md#manual-doppler-calculator).
+
+## Cover and tuning transmission
+
+Transmit noise and private surrounding cover now use full virtual-symbol outer
+DSSS, including the selected permutation/rotation construction. The enclosing
+TX retains one continuous dedicated-key Fake-FHSS schedule. See
+[transmitter cover](transmit-cover.md) for domains, workspace, controlled stopping,
+fixed-duration narrowband limitations and the manual qualification checkpoint.

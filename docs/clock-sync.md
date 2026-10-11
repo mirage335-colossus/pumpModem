@@ -11,7 +11,7 @@ oscillator model or imply GPS discipline of an ADC, DAC or radio oscillator.
 Conversely, a GPSDO oscillator does not establish synchronization of PC clocks.
 
 `Default` preserves the existing six-second epoch search setting and its complete
-receiver bank. Selecting Default in any clock field resets all three. An explicit
+receiver bank. Selecting Default in any timing field resets all four controls. An explicit
 policy such as `GPS_1ms-400ms_region-2564ms_offset` means:
 
 * Each station's system-clock error allowance is 1 ms; the link allowance is 2 ms.
@@ -29,15 +29,26 @@ Entering a smaller number cannot improve the timing evidence of an audio device.
 Zero Audio error is a strict requested allowance: ordinary native device uncertainty
 then forces the visible ordinary-playback/full-search fallback, not fictitious exact timing.
 
-The adjacent editable **Audio error** dropdown is independent of that triplet.
-Its default is **0 ms per station**, interpreted as the assumed maximum residual
+The adjacent editable **Audio error** dropdown has a **Default** entry, resolving
+to **50 ms per station**, interpreted as the assumed maximum residual
 audio/radio timing error after compensating the driver-reported queue. It is
-saved/exported as `--audio-error 0ms`; fractional ns/us/ms/s values from
+saved/exported as `--audio-error 50ms`; fractional ns/us/ms/s values from
 zero and up to 60 seconds are accepted. Live's finite epoch-radius limit can
-reject a larger combined window. Returning Clock sync to Default preserves this
-field and restores ordinary playback/search behavior. Both peers must satisfy
+reject a larger combined window. Choosing Default in any of the four timing
+editors resets all four and restores ordinary playback/search behavior. A numeric
+Audio error edit remains independent: it does not enable GPS timing or change
+oscillator models. Existing explicit numeric imports remain valid; a partial
+command that omits Audio error preserves its value. Both peers must satisfy
 the selected assumption; it is not a measured device specification. This control
-does not change the audio buffer used to prevent underruns.
+does not change the audio buffer used to prevent underruns. The first custom clock
+selection uses 50 ms unless an explicit numeric audio allowance is already set.
+With clock sync at Default, the audio allowance does not widen or narrow the
+ordinary search, add oscillator hypotheses or change its modeled CPU cost. With
+custom timing it contributes at both stations (100 ms added to the half-width
+for the 50 ms default), in addition to GPS and propagation. A capture bound
+exceeding the selected allowance still forces the full-search fallback.
+The default is a configurable assumption, not a loopback measurement or proof
+of a particular sound card's accuracy.
 
 ## Timing and private pattern addresses
 
@@ -65,31 +76,57 @@ transmission then visibly fall back to ordinary playback before private PCM or
 source scheduling. The selected allowance is not enlarged or falsely satisfied.
 Low-level callers remain strict unless they opt in and provide a status observer.
 These are engineering assumptions, not IC-7100 specifications or measurements.
-The clock is assumed stationary over the finite waveform. A longer waveform
-can require silent rate preparation, capped at 120 seconds; inconclusive rate
-evidence triggers the same visible pre-transmission fallback. A known impossible
-allowance falls back immediately, without waiting through that preparation cap. Short waveforms
-that fit the allowance at the declared rate limit need no extended preparation.
-For example, a 48 kHz route with a 25 ms period and a 300 ppm correction cap
-has only about 1 ms of conservative rate-error slack under a 30 ms tolerance.
-That permits roughly 3.3 seconds without rate preparation. The endpoint bounds
-cannot establish this cap within the 120-second preparation limit, so longer
-transmissions on that assumed route can require ordinary-playback fallback. This is an analytical
-limitation, not measured IC-7100 performance; smaller declared clock bounds,
-finer timestamp evidence or a larger selected allowance change it. The GUI does
-not silently replace the selected Audio error with a larger value.
+The future native clock is assumed stationary within its measured/admitted
+rate interval; this is not a guarantee against arbitrary wander. Message and
+open-ended noise use the same preparation based on their protected stopping
+horizon, including pulse support, useful cover and converter/prefetch allowance.
+They no longer select different timing policies based on known message length.
+Preparation emits only silence, remains capped at 120 seconds and may visibly
+fall back before source scheduling. Zero initial correction is valid when that
+common stopping horizon fits without an extended rate measurement. This makes
+no promise about unlimited transmission duration.
 
-After preparation, only the silent stream is stopped. Source construction and
-fresh-epoch scheduling run while the device is stopped, followed by a fresh
-device/UTC timeline. The private source advances once and never restarts. The
-whole finite message is constrained to within 0.01 logical sample of its initial
-affine trajectory, with arithmetic allowance reserved, as well as the UTC error
-limit. This limits ongoing correction; it cannot follow arbitrary clock wander.
-The rate-deviation cap is fixed from the complete finite duration, reserving
-arithmetic error once. It does not shrink after rounding each callback's position.
-Clock steps, lost continuity, a missed start or exceeded error allowance stop
-timed playback; there is no fallback restart after private output begins. Nonblocking completion drains the actual buffered tail, with
-cancellation checks, without replaying it.
+After preparation only the silent stream stops. Source construction and fresh
+scheduling happen with the DAC stopped, then the source advances continuously.
+The receiver still assumes one affine clock rate, so correction stays within
+0.01 logical sample of ONE original source origin and initial rate. For warp e,
+rate deviation v and slew a, the braking invariant is
+`e + max(v,0)^2/(2a) <= W` and `e - max(-v,0)^2/(2a) >= -W`.
+The implementation reserves the additional whole-frame partial-braking distance
+`a/(8*hardware_rate^2)`, and an arithmetic reserve growing with original elapsed
+time and prospective braking. It forecasts full ramp steps, the last partial
+step and the hold, including internal extrema. An inner feedback corridor leaves
+outer braking room for the next callback. No budget is replenished at a block
+or symbol boundary. Absolute timestamps/epochs remain high precision.
+
+The final adjustable converter measures actual per-frame warp extrema, including
+rate-reversal extrema. A certificate checks these, the endpoint/rate and the
+remaining braking corridor BEFORE any part of a generated block is submitted.
+Source prefetch is not confused with output progress. Known output queue time is
+already included in the provider prediction of that frontier. The stop forecast
+adds prefetched source, filter lookahead, support/cover duration and one further
+output block. It distinguishes safe continuation, a protected stop that still
+fits, and an already-infeasible stop requiring immediate abort. Native future
+rate evidence retains its explicitly assumed stationary domain; reported UTC
+position uncertainty is never discarded. Unexpected jumps can still abort before
+a full tail is possible.
+
+Both production entry points install the same protected-stop hook. Low-level
+arbitrary PCM diagnostics without a coefficient source retain strict runtime
+error rejection. The CLI reports a timing-protected truncated transmission as
+unsuccessful after drain; the GUI marks it cancelled. Clock steps, missed starts,
+uncertainty/domain failures and output discontinuities never trigger a silent
+policy switch, waveform restart or reused address. A finite-horizon guard remains
+only as a separately tested historical diagnostic utility.
+
+Native estimated preparation can accept zero correction using the independently
+admitted stationary device-rate domain (derived from the configured oscillator
+bound); otherwise it requires the complete measured rate interval inside that
+domain. Runtime stopping intersects the measured interval with that domain.
+This is an explicit engineering assumption, not measured rate precision. A
+disjoint interval fails. UTC position uncertainty is never reduced by that
+intersection. Arbitrary device wander outside that domain is unsupported,
+including during a protected stop.
 
 The correction domain is separate from the oscillator description. For existing
 effective-link bound A and correction cap C, the bank covers A+C+AC and retains
@@ -251,3 +288,15 @@ objects occupy 5,216 and 192 bytes in this build, excluding their surrounding
 adapter. These are component allocations, not a peak-RSS measurement or a new
 end-to-end CPU/acquisition benchmark. Silent preparation can add wall latency;
 receive PCM buffering and per-bit publication are unchanged by the audio field.
+
+## Open-ended tuning source
+
+Tuning and messages share fresh epoch scheduling, prefix alignment, continuous
+original-reference timing, protected-stop preparation and discontinuity abort.
+The controller does not need the final source length. Its accumulated deviation
+budget is never renewed at a block or symbol boundary. If the original affine
+receiver map and UTC allowance become incompatible, both sources request a
+protected stop while feasible, otherwise abort visibly. Stationary-clock
+assumptions and physical-device qualification limits still apply; this does not
+promise indefinite tracking of arbitrary clock wander. See
+[transmitter cover](transmit-cover.md#playback-and-timing).

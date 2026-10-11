@@ -103,7 +103,7 @@ Modem:
                         Default selects demonstrated supported paths; FP64 fallbacks remain
                         Legacy integer IDs migrate to Default; no GPU receiver is implemented
   --clock-sync SPEC     default or GPS_1ms-400ms_region-2564ms_offset
-  --audio-error TIME    Per-station residual audio timing allowance; default0ms
+  --audio-error TIME    Per-station residual audio timing allowance; default50ms
   --fec 20|60|off        Reed-Solomon parity overhead, default60
   --no-compression      Diagnostic override; both peers must select the same source codec
   --memory-mb N         Legacy batch PCM workspace budget, default256 MiB
@@ -388,8 +388,12 @@ audio::StreamFormatCallback audio_passband_guard(const modem::Config& config) {
 template<class Factory>
 void play_transmission(const Args& a, transfer::Options& options, Factory make) {
     std::unique_ptr<modem::StreamingTransmitter> source;
+    bool protected_stop=false;
     audio::Options output;
     output.maximum_utc_error_seconds=options.audio_timing_error_seconds;
+    auto timing_config=options.modem;
+    if(options.key)timing_config.scramble=true;
+    output.timing_stop_duration_seconds=static_cast<double>(modem::transmit_stop_sample_count(timing_config))/timing_config.sample_rate;
     output.follow_system_clock=options.clock_sync && audio::utc_follow_supported() &&
         (!options.modem.oscillator_search || options.modem.oscillator_search->reference==modem::OscillatorReference::independent_audio);
     output.allow_timing_fallback=options.clock_sync.has_value();
@@ -403,14 +407,15 @@ void play_transmission(const Args& a, transfer::Options& options, Factory make) 
         output.maximum_timing_rate_correction=bank.transmit_rate_correction;
         if(output.maximum_timing_rate_correction>0) {
             options.modem.stream_phase_samples=0;
-            const auto sized=make(options); // no source samples are requested
-            output.timing_source_duration_seconds=static_cast<double>(sized->total_samples())/options.modem.sample_rate;
             output.estimated_timing=audio::EstimatedDeviceTiming{};
             output.estimated_timing->maximum_utc_error_seconds=options.audio_timing_error_seconds;
             output.maximum_timing_slew_per_second=audio::conservative_timing_slew(options.modem.sample_rate,
                 static_cast<double>(modem::symbol_sample_count(options.modem))/options.modem.sample_rate);
         }
     }
+    output.timing_protected_stop=[&](const std::string& reason) {
+        protected_stop=true;std::cerr<<reason<<"\n";if(source)source->request_finish();
+    };
     if(a.has("time"))source=make(options);
     audio::playback(options.modem.sample_rate,a.get("device"),[&](std::span<float> chunk) {
         return source->read(chunk);
@@ -425,6 +430,7 @@ void play_transmission(const Args& a, transfer::Options& options, Factory make) 
         source=std::move(scheduled.transmitter);
         audio::schedule_output(scheduled.playback_epoch);
     },a.has("no-mono")?audio::ChannelMode::stereo:a.has("right-mono")?audio::ChannelMode::right_mono:audio::ChannelMode::left_mono,output);
+    if(protected_stop)throw Error("transmission truncated by UTC timing protection; cover and device drain completed");
 }
 std::uint64_t epoch(const Args& a) {
     return a.integer("time",static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(

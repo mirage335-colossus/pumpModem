@@ -187,8 +187,25 @@ std::uint64_t training_sample_count(const Config& c) {
     check(count<=std::numeric_limits<std::uint64_t>::max()/symbol,"hardware preamble duration overflow");
     return count*symbol;
 }
+bool private_cover_enabled(const Config& c) {
+    // PatternCode enables the private/outer construction only inside its
+    // Scrambler-or-inner-DSSS path. A factor alone does not enable that path.
+    return c.spreading_mode==SpreadingMode::pattern && (c.scramble || (c.dsss && c.data_key));
+}
 std::uint64_t suppression_sample_count(const Config& c) {
-    return static_cast<std::uint64_t>(c.sample_rate)*3;
+    const auto useful=static_cast<std::uint64_t>(c.sample_rate)*3;
+    if(!private_cover_enabled(c))return useful;
+    const auto support=pattern_pulse_padding_samples(c);
+    const auto extra=support?2*support+1:std::max<std::uint64_t>(1,c.sample_rate/100);
+    check(extra<=std::numeric_limits<std::uint64_t>::max()-useful,"suppression duration overflow");
+    return useful+extra;
+}
+std::uint64_t transmit_stop_sample_count(const Config& c) {
+    const auto support=pattern_pulse_padding_samples(c);
+    const auto pending=support?2*support+1:pattern_chip_samples(c);
+    const auto tail=suppression_sample_count(c);
+    check(pending<=std::numeric_limits<std::uint64_t>::max()-tail,"stop duration overflow");
+    return pending+tail;
 }
 double symbol_seconds(const Config& c) { validate(c); return c.integration_seconds>0?c.integration_seconds:2.*c.spreading_factor/c.bandwidth_hz; }
 double bit_rate(const Config& c) { return c.constellation_bits/symbol_seconds(c); }

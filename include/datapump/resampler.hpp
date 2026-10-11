@@ -24,6 +24,13 @@ public:
     void initialize_timing(double fractional_sample, double correction=0);
     long double source_seconds() const noexcept;
     double rate_correction() const noexcept;
+    // Original affine reference and actual generated-frame extrema. The map is
+    // immutable; begin_timing_block only clears the observation summary.
+    void observe_affine_timing(long double origin,double initial_rate);
+    void begin_timing_block();
+    struct TimingBlock {std::uint64_t frames=0;long double minimum=0,maximum=0;};
+    TimingBlock timing_block() const noexcept;
+    double source_lookahead_seconds() const noexcept;
     // Repeat with the unconsumed input and a fresh output span. end=true marks
     // the final input; subsequently call with empty input to drain the filter.
     Progress process(std::span<const float> input, std::span<float> output, bool end=false);
@@ -41,6 +48,8 @@ private:
     bool adjustable_=false, started_=false;
     double fraction_=0, correction_=0, target_correction_=0, correction_step_=0;
     double correction_roundoff_=0;
+    bool observe_timing_=false;
+    long double timing_origin_=0,timing_rate_=0,timing_min_=0,timing_max_=0;
     std::vector<float> ring_, coefficients_;
     // Factor large downsampling ratios into stages of at most four. All
     // intermediate rates are output_rate * 4^n, so nested finite-stream

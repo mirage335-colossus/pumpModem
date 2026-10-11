@@ -55,9 +55,9 @@ stay inside PCM headroom, with unit expected complex power before scaling.
 [Cryptographic addressing](crypto.md#binary-pattern-chip-addressing) defines
 the exact byte and amplitude/phase convention.
 
-The two bit alternatives mix this row with distinct public internal-transition
-masks. They are neither a global phase reversal nor an alternating carrier
-shift, so unknown common phase does not erase their distinction. Only one
+Private zero/one alternatives use independent versioned cryptographic domains;
+there is no public transition mask relating them. Unknown common phase does
+not erase their independent waveform distinction. Only one
 alternative is transmitted at each private position. Fresh secret positions
 across symbols prevent the paired waveform cancellation that reuse would allow.
 
@@ -65,8 +65,9 @@ The previous real +/-1 mapping left a fixed carrier after squaring PCM. That
 signature was a mapping defect, not a necessary property of pattern search.
 Circular I/Q noise removes it and avoids a fixed payload envelope. Public rows
 remain recognizable through repetition and provide no encryption or LPI. The
-new prefix and private payload also share noise statistics and chip cadence.
-Finite bandwidth, rectangular chip holds, capped amplitudes and burst edges
+private prefix and suppression use full virtual-symbol outer DSSS under separate
+cover secrets, as described in [transmitter cover](transmit-cover.md).
+Finite bandwidth, pulse support, capped amplitudes and burst edges
 remain observable physical properties; there is no claim of absolute
 indistinguishability from ambient noise.
 

@@ -310,13 +310,12 @@ struct Controller::Impl {
         for(const auto* value:{"-174 dBm/Hz","-170 dBm/Hz","-164 dBm/Hz","-150 dBm/Hz","-130 dBm/Hz"})
             f(UiField::link_noise).options.push_back({value,value});
         sync_link_fields();
-        for(const auto field:{UiField::clock_accuracy,UiField::clock_region,UiField::clock_offset}) {
+        for(const auto field:{UiField::clock_accuracy,UiField::clock_region,UiField::clock_offset,UiField::audio_error}) {
             f(field).text="Default";f(field).options={{"Default","Default"}};
         }
         for(const auto* value:{"0.1ms","1ms","10ms"})f(UiField::clock_accuracy).options.push_back({value,value});
         for(const auto* value:{"1ms","10ms","20ms","75ms","150ms","400ms"})f(UiField::clock_region).options.push_back({value,value});
         for(const auto* value:{"0ms","1ms","2ms","3ms","4ms","5ms","2564ms"})f(UiField::clock_offset).options.push_back({value,value});
-        f(UiField::audio_error).text="0ms";
         for(const auto* value:{"0ms","1ms","3ms","10ms","20ms","30ms","50ms","100ms","200ms","500ms"})
             f(UiField::audio_error).options.push_back({value,value});
         f(UiField::dsss_factor).options={{"10","10x"},{"100","100x"},{"1000","1000x"}};
@@ -733,7 +732,8 @@ struct Controller::Impl {
             const auto next_fhss_list=load&&load->fhss_list?fhss::parse_list(*load->fhss_list):fhss_list;
             next.transfer.clock_sync=load&&load->clock_sync?clock_sync::parse(*load->clock_sync):clock_policy();
             next.transfer.audio_timing_error_seconds=load&&load->audio_timing_error_seconds?
-                *load->audio_timing_error_seconds:clock_sync::duration(f(UiField::audio_error).text);
+                *load->audio_timing_error_seconds:clock_sync::is_default(f(UiField::audio_error).text)?
+                clock_sync::default_audio_error_seconds:clock_sync::duration(f(UiField::audio_error).text);
             clock_sync::validate_audio_error(next.transfer.audio_timing_error_seconds);
             const auto rate=load&&load->rate_hz?*load->rate_hz:frequency(f(UiField::bandwidth).text,"Rate");
             const auto shift=load&&load->rf_shift_hz?*load->rf_shift_hz:frequency(f(UiField::rf_shift).text,"Shift");
@@ -930,7 +930,9 @@ struct Controller::Impl {
                 f(UiField::live_duplex).checked=next.full_duplex;
                 f(UiField::pattern).selected=pattern;
                 clock_fields(next.transfer.clock_sync);
-                f(UiField::audio_error).text=clock_sync::duration_text(next.transfer.audio_timing_error_seconds);
+                f(UiField::audio_error).text=!next.transfer.clock_sync &&
+                    next.transfer.audio_timing_error_seconds==clock_sync::default_audio_error_seconds?
+                    "Default":clock_sync::duration_text(next.transfer.audio_timing_error_seconds);
                 f(UiField::dsss_factor).selected=std::to_string(requested_factor);
                 f(UiField::dsss_version).selected=mode_selection;
                 f(UiField::search_arithmetic).selected=tuning::search_arithmetic_id(arithmetic);
@@ -1867,7 +1869,7 @@ struct Controller::Impl {
         }
         case Command::transmit_noise:
             transmit_requested=true; noise_requested=true;
-            try { session.transmit_noise(fake_plan(settings.transfer.modem)); }
+            try { session.transmit_noise(fake_plan(transmit_config()),!short_draft()); }
             catch(...) { transmit_requested=false; noise_requested=false; throw; }
             if(!settings.simulation)cancel_advisory();
             notice(settings.simulation?"Simulating noise with temporary keys. Stop noise to finish.":
@@ -1876,8 +1878,11 @@ struct Controller::Impl {
             if(composer_received&&!previous_received)reset_received_edit_history();
             composer_received=previous_received;composer=*previous_message; repeatable_prefix=previous_repeatable_prefix; pending_repeatable_removal=false; f(UiField::repeatable).checked=false;
             seeded_message.clear(); sync_composer(); ++f(UiField::message).text_cursor_end_revision; dirty(); break;
-        case Command::cancel: session.cancel_transmit(); notice(noise_requested||snapshot.transmitting_noise?
-            "Stopping noise...":snapshot.simulation_replay?"Stopping simulation replay...":"Cancelling transmission..."); break;
+        case Command::cancel:
+            session.finish_transmit();
+            snapshot=session.snapshot();
+            notice(snapshot.transmission_stopping?"Finishing echo protection and pulse tails. Cancel again to abort immediately.":
+                "Transmission stopped.");break;
         case Command::clear_received: session.clear_received();inbox.clear();signals.clear();refresh_files();refresh_signals();notice("Received content and receiver backlog cleared; acquisition restarted.");break;
         case Command::attach_file:
             ++attachment_revision; pending_file.reset(); file_loading=false;
@@ -2059,9 +2064,17 @@ void Controller::edit(UiField field,std::string text) {
             p.f(field).display_text.clear();
             p.planner_target(number(p.f(field).text,"Planner target"),true,true);p.controls();return;
         }
-        if(field==UiField::clock_accuracy||field==UiField::clock_region||field==UiField::clock_offset) {
+        if(field==UiField::clock_accuracy||field==UiField::clock_region||field==UiField::clock_offset||field==UiField::audio_error) {
             auto policy=p.clock_policy();
-            if(clock_sync::is_default(text))policy.reset();
+            const auto previous=policy;
+            const auto previous_audio=p.f(UiField::audio_error).text;
+            auto audio=previous_audio;
+            if(clock_sync::is_default(text)) {policy.reset();audio="Default";}
+            else if(field==UiField::audio_error) {
+                const auto value=clock_sync::duration(text);
+                clock_sync::validate_audio_error(value);
+                audio=clock_sync::duration_text(value);
+            }
             else if(text.starts_with("GPS_"))policy=clock_sync::parse(text);
             else {
                 if(!policy)policy=clock_sync::Policy{.001,.001,0};
@@ -2071,19 +2084,12 @@ void Controller::edit(UiField field,std::string text) {
                 if(field==UiField::clock_offset)policy->offset_seconds=duration;
                 clock_sync::validate(*policy);
             }
-            const auto previous=p.clock_policy();
+            if(policy && clock_sync::is_default(audio))
+                audio=clock_sync::duration_text(clock_sync::default_audio_error_seconds);
             p.clock_fields(policy);
+            p.f(UiField::audio_error).text=audio;
             try {p.configure();}
-            catch(...) {p.clock_fields(previous);p.configure();throw;}
-            p.controls();return;
-        }
-        if(field==UiField::audio_error) {
-            const auto value=clock_sync::duration(text);
-            clock_sync::validate_audio_error(value);
-            const auto previous=p.f(field).text;
-            p.f(field).text=clock_sync::duration_text(value);
-            try {p.configure();}
-            catch(...) {p.f(field).text=previous;p.configure();throw;}
+            catch(...) {p.clock_fields(previous);p.f(UiField::audio_error).text=previous_audio;p.configure();throw;}
             p.controls();return;
         }
         const bool untouched=!p.composer.raw_bits()&&p.draft_error.empty()&&p.f(UiField::message).text==p.seeded_message;
@@ -2215,6 +2221,7 @@ std::vector<ui::ServiceCompletion> Controller::take_service_completions() {std::
 const ui::FieldState& Controller::field(UiField field) const { return impl_->f(field); }
 bool Controller::enabled(Command command) const { return impl_->enabled(command); }
 std::string Controller::command_label(Command command) const {
+    if(command==Command::cancel && impl_->snapshot.transmission_stopping)return "Abort now";
     if(command==Command::cancel)return impl_->noise_requested||impl_->snapshot.transmitting_noise?
         "Stop noise":impl_->snapshot.simulation_replay?"Stop replay":"Cancel TX";
     if((command==Command::transmit||command==Command::transmit_short_bits)&&

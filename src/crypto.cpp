@@ -504,7 +504,8 @@ Bytes Crypto::stream(StreamPurpose purpose, std::uint64_t timestamp,
             domain == StreamDomain::OuterDsss10RotationV2 || domain == StreamDomain::OuterDsss100RotationV2 ||
             domain == StreamDomain::OuterDsss1000RotationV2 || domain == StreamDomain::OuterDsss10PermutationV2 ||
             domain == StreamDomain::OuterDsss100PermutationV2 || domain == StreamDomain::OuterDsss1000PermutationV2 ||
-            domain == StreamDomain::FhssCycleV2,
+            domain == StreamDomain::FhssCycleV2 || domain == StreamDomain::CoverPreambleV1 ||
+            domain == StreamDomain::CoverSuppressionV1,
             "invalid keystream domain");
     const bool outer_v2=domain==StreamDomain::OuterDsss10RotationV2 || domain==StreamDomain::OuterDsss100RotationV2 ||
         domain==StreamDomain::OuterDsss1000RotationV2 || domain==StreamDomain::OuterDsss10PermutationV2 ||
@@ -548,6 +549,10 @@ Bytes Crypto::stream(StreamPurpose purpose, std::uint64_t timestamp,
     }
     if(domain == StreamDomain::FhssCycleV2) {
         constexpr std::string_view pad="fh-cyc02";
+        std::copy(pad.begin(),pad.end(),counter.begin());
+    }
+    if(domain == StreamDomain::CoverPreambleV1 || domain == StreamDomain::CoverSuppressionV1) {
+        const std::string_view pad=domain==StreamDomain::CoverPreambleV1?"cv-pre01":"cv-sup01";
         std::copy(pad.begin(),pad.end(),counter.begin());
     }
     if(outer_v2) {

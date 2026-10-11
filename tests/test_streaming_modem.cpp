@@ -33,13 +33,15 @@ struct ReceivedStreams {
 };
 
 void generated_bits_use_the_ordinary_modem() {
-    for(const bool shaped:{false,true}) {
+    for(const bool shaped:{false,true})for(const bool inner_dsss:{false,true})for(const unsigned factor:{1U,10U,100U,1000U}) {
         transfer::Options options;
         options.timestamp=1800000123;
         options.key.emplace(Bytes(32,0x59));
-        options.modem.scramble=true;options.modem.dsss=true;
+        options.modem.scramble=true;options.modem.dsss=inner_dsss;
         options.modem.pulse_shaping=shaped;
-        options.modem.bandwidth_hz=1100;
+        options.modem.bandwidth_hz=1100./factor;
+        options.modem.dsss_factor=factor;
+        options.modem.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;
         options.modem.integration_seconds=.071; // Partial chips, multiple symbols per epoch.
         options.modem.stream_phase_samples=5573;
         auto config=transfer::seeded_config(options,options.timestamp);
@@ -203,12 +205,13 @@ void exact_suppression_noise() {
         const auto training=modem::training_sample_count(config),padding=modem::pattern_pulse_padding_samples(config);
         const auto noise=modem::suppression_sample_count(config);
         const auto content=training+2*padding+bits.size()*modem::symbol_sample_count(config);
-        if(noise!=3*config.sample_rate || packed.total_samples()!=content+noise || raw.total_samples()!=content+noise ||
+        const auto expected_noise=3*config.sample_rate+(keyed?(padding?2*padding+1:std::max<std::uint64_t>(1,config.sample_rate/100)):0);
+        if(noise!=expected_noise || packed.total_samples()!=content+noise || raw.total_samples()!=content+noise ||
            modem::waveform_sample_count(wire.size(),config)!=content+noise)
-            throw std::runtime_error("all nonempty input forms need exactly three seconds of trailing noise");
+            throw std::runtime_error("all nonempty input forms need three useful seconds plus private pulse support");
         std::vector<Complex> a(packed.total_samples()),b(a.size());
         packed.read_analytic(a);raw.read_analytic(b);
-        if(a!=b || a[content]!=Complex{} || a.back()!=Complex{})
+        if(a!=b || (!keyed && a[content]!=Complex{}) || a.back()!=Complex{})
             throw std::runtime_error("raw and byte inputs must share tapered suppression noise");
         double energy=0;Complex circularity{};
         for(std::size_t i=content;i<a.size();++i) {
@@ -222,7 +225,7 @@ void exact_suppression_noise() {
         modem::PatternTransmitter bare(bits,config,config.stream_epoch,0,false);
         std::vector<Complex> reference(bare.total_samples());bare.read_analytic(reference);
         const auto rotation=std::polar(1.,2*std::numbers::pi*training*config.carrier_hz/config.sample_rate);
-        for(std::size_t i=2*padding;i<reference.size();++i)
+        for(std::size_t i=2*padding;i+(keyed?2*padding:0)<reference.size();++i)
             if(std::abs(a[training+i]-reference[i]*rotation)>1e-9)
                 throw std::runtime_error("surrounding noise changed payload or its final filter samples");
         if(std::equal(a.begin()+static_cast<std::ptrdiff_t>(content),a.end(),a.begin()))
@@ -467,18 +470,23 @@ void interleaved_streaming_blocks() {
     modem::StreamingReceiver receiver(config,32*1024*1024,search);
     ReceivedStreams received;
     const auto harvest=[&]{for(const auto& burst:receiver.take_pattern_bursts())received.append(burst);};
-    const auto prefix=modem::training_sample_count(config)+modem::pattern_pulse_padding_samples(config);
-    for(std::size_t first=prefix;first<actual.size();first+=317) {
+    for(std::size_t first=0;first<actual.size();first+=317) {
         receiver.push(std::span(actual).subspan(first,std::min<std::size_t>(317,actual.size()-first)));
         harvest();
     }
+    if(received.longest().complete)
+        throw std::runtime_error("cover manufactured six seconds of scored absence");
+    modem::StreamingReceiver eof_receiver(config,32*1024*1024,search);
+    eof_receiver.push(actual);eof_receiver.finish();
+    for(const auto& burst:eof_receiver.take_pattern_bursts())if(burst.complete)
+        throw std::runtime_error("cover EOF manufactured physical completion");
     std::vector<float> absent(6*config.sample_rate+3*modem::symbol_sample_count(config));
     for(std::size_t first=0;first<absent.size();first+=317) {
         receiver.push(std::span(absent).subspan(first,std::min<std::size_t>(317,absent.size()-first)));
         harvest();
     }
-    if(received.longest().bits!=bits)
-        throw std::runtime_error("interleaved streaming PCM did not recover exact unpadded bits");
+    if(received.longest().bits!=bits || !received.longest().complete)
+        throw std::runtime_error("interleaved full-cover PCM did not recover exact unpadded bits and physical completion");
 }
 
 int main() {

@@ -201,7 +201,8 @@ one candidate does not reveal the opposite under the AES assumption. Reusing an
 address still enables recognition/replay; this change supplies no authentication
 for exact short/raw messages and does not prevent jamming or cancellation.
 Private chips and protected settling use capped circular I/Q values with varying amplitude/phase.
-Settling uses separate preamble counter positions and supplies no acquisition
+Private settling uses separated child cover secrets and full outer DSSS;
+public/Data-only diagnostics retain separate preamble positions. It supplies no acquisition
 condition. Tone modes clear private protections. Bandwidth, chip cadence, capped
 amplitudes and finite edges remain observable; no measured interception or
 indistinguishability guarantee is made. Exact raw-bit/status signals have no MAC
@@ -247,3 +248,12 @@ Analog modulation does not establish protection against hostile peripherals,
 BadUSB, electrical faults, host compromise or driver defects. Hardware isolation
 and attenuation remain external engineering responsibilities. Tests and source
 review do not replace independent security assessment on the intended hardware.
+
+## Transmitter cover domains
+
+Private surrounding noise now derives separate child secrets through `cv-pre01`
+and `cv-sup01`; tuning retains fresh temporary cryptographic roots. Full outer
+DSSS does not consume communication candidate addresses. These roots never enter
+a receiver bank, saved keyfile or TX diagnostic root field. See
+[transmitter cover](transmit-cover.md) for purpose separation, finite-stream bounds,
+remaining distinguishers and the limits of finite false-acceptance testing.

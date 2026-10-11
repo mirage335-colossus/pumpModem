@@ -193,6 +193,7 @@ struct Snapshot {
     double simulation_compute_seconds = 0;
     bool transmission_finished = true; // CPU/audio work complete; simulation presentation may still be active.
     bool transmission_cancelled = false;
+    bool transmission_stopping = false; // Graceful finite pulse tail is draining; abort remains available.
     bool transmission_failed = false; // Failed request is not successful completion; error persists through RX restart.
     // Completed simulations present training, measured plots and provisional
     // reception over three wall-clock seconds. Verified signals and received
@@ -256,7 +257,12 @@ public:
     // Continuous noise at the selected carrier/bandwidth and normal signal
     // level, with fresh temporary private streams. Does not encode a message
     // or use/register saved keys. Stop with cancel_transmit().
-    void transmit_noise(std::shared_ptr<const modem::FhssPlan> hopping = {});
+    // Use the same short/long profile as the current draft; secrets remain temporary.
+    void transmit_noise(std::shared_ptr<const modem::FhssPlan> hopping = {}, bool long_profile = false);
+    // First request finishes already-generated pulse support. Repeating aborts
+    // immediately, as does cancel_transmit(). Before PCM starts it cancels
+    // preparation immediately. Neither operation completes a receiver burst.
+    void finish_transmit();
     void cancel_transmit();
     // Resume a retained incomplete search with another configured time budget,
     // or stop one search without interrupting reception or audio capture.

@@ -324,10 +324,14 @@ std::unique_ptr<modem::StreamingTransmitter> binary_transmitter(
     std::span<const std::uint8_t> bits,const Options& input_options) {
     const auto options=effective_options(input_options);
     const auto value=binary_options(bits,options);
+    const auto production=seeded_config(value,value.timestamp);
+    if((value.key || production.dsss || production.dsss_factor>1 || production.fake_hopping) &&
+       (!value.key || !modem::private_cover_enabled(production)))
+        throw Error("production transmission cannot use diagnostic surrounding waveforms");
     modem::RawBits raw{Bytes(bits.begin(),bits.end())};
     modem::TransmitTrace trace;trace.active=true;trace.raw=true;
     mask_binary_bits(raw.bits,value,0,&trace);
-    return std::make_unique<modem::StreamingTransmitter>(std::move(raw),seeded_config(value,value.timestamp),
+    return std::make_unique<modem::StreamingTransmitter>(std::move(raw),production,
         value.dsp_workspace_bytes/4,std::move(trace));
 }
 
@@ -346,6 +350,10 @@ Bytes message_wire_bits(const Message& message,const Options& input) {
 }
 std::unique_ptr<modem::StreamingTransmitter> message_transmitter(const Message& message,const Options& input) {
     const auto options=effective_options(input);
+    const auto production=seeded_config(options,options.timestamp);
+    if((options.key || production.dsss || production.dsss_factor>1 || production.fake_hopping) &&
+       (!options.key || !modem::private_cover_enabled(production)))
+        throw Error("production transmission cannot use diagnostic surrounding waveforms");
     modem::TransmitTrace trace;trace.active=true;trace.short_text=uses_raw_message(message);
     trace.source_available=message.kind==MessageKind::text;
     if(trace.source_available)trace.source.assign(message.data.begin(),message.data.begin()+
@@ -367,7 +375,7 @@ std::unique_ptr<modem::StreamingTransmitter> message_transmitter(const Message& 
        static_cast<double>(bits.size())*modem::symbol_seconds(options.modem)>options.repeat_policy.maximum_seconds)
         throw Error("repeatable content exceeds airtime limit");
     return std::make_unique<modem::StreamingTransmitter>(modem::RawBits{std::move(bits)},
-        seeded_config(options,options.timestamp),options.dsp_workspace_bytes/4,std::move(trace));
+        production,options.dsp_workspace_bytes/4,std::move(trace));
 }
 namespace {
 void mask_binary_bits(std::span<std::uint8_t> bits,const Options& input_options,std::size_t bit_offset,
@@ -612,9 +620,11 @@ struct StreamReceiver::Impl {
         // The fixed short dictionary is a bounded application interpretation,
         // never a framing or confidence test. It consumes the exact physical
         // endpoint and cannot pad an unfinished token or a missing symbol.
+        // Equivalent clock origins can give an intact keyed stream a nonzero
+        // local starting symbol; that coordinate does not imply a missing prefix.
         if(burst.complete && !state.failed && !state.aligned &&
            !state.collector.leading_marker_recognized() && !state.result.missing_symbols &&
-           !(options.key && burst.stream_first_symbol) && !state.result.raw_bits.empty() &&
+           !state.result.raw_bits.empty() &&
            state.result.observed_bits==state.result.raw_bits.size() && state.result.observed_bits<=short_message_bits) {
             try {
                 state.result.content.message.data=compression::decode_short_bits(

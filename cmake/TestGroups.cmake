@@ -32,6 +32,7 @@ set(_aliases
   "gui_profile_reference=test_profile_reference"
   "gui_native_policy=test_gui_native"
   "alsa_audio_contract=test_alsa_audio"
+  "alsa_interleave_playback=test_alsa_audio"
   "windows_audio_contract=test_windows_audio"
   "fast_acoustic_short_convolutional=test_fast_acoustic_short_weak"
   "gui_self_check=datapump-gui"

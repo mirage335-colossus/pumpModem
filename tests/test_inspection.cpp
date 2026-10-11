@@ -146,8 +146,10 @@ void lpi_advisory() {
           field(reference,"LPI detection criterion").find("90% detection / 1% false alarm")!=std::string::npos&&
           field(reference,"LPI observer : receiver").find("bit durations : RX 1 bit")!=std::string::npos&&
           reference.lpi_summary.find("90% detection")==std::string::npos&&
-          reference.estimate.wire_bits==3&&reference.estimate.waveform_samples==public_pattern.estimate.waveform_samples,
-          "Private LPI advisory must show the one-bit relative reference and preserve exact short wire/airtime");
+          reference.estimate.wire_bits==3&&
+          reference.estimate.waveform_samples==public_pattern.estimate.waveform_samples+
+              2*modem::pattern_pulse_padding_samples(request.options.modem)+1,
+          "Private LPI advisory must preserve exact short bits and add shaping support outside useful suppression");
     check(field(reference,"LPI draft exposure").find("including settling, pulse tails and suppression")!=std::string::npos&&
           field(reference,"LPI draft exposure").find("not an actual link budget")!=std::string::npos&&
           std::abs(model.burst_exposure_ratio-reference.estimate.total_seconds/model.detection_seconds)<1e-12&&

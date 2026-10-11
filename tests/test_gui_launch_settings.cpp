@@ -317,23 +317,25 @@ void clock_and_spread_controls() {
           controller.field(F::clock_region).text=="Default" && controller.field(F::clock_offset).text=="Default",
           "UTC controls must preserve the existing default search");
     const auto oscillator=controller.settings().transfer.modem.oscillator_search;
-    check(controller.field(F::audio_error).text=="0ms" && controller.settings().transfer.audio_timing_error_seconds==0&&
+    check(controller.field(F::audio_error).text=="Default" && controller.settings().transfer.audio_timing_error_seconds==.05&&
+        controller.field(F::audio_error).options.front().id=="Default"&&
         std::any_of(controller.field(F::audio_error).options.begin(),controller.field(F::audio_error).options.end(),
             [](const auto& option){return option.id=="0ms";}),
-        "audio timing needs its independently editable zero starting allowance");
+        "audio timing needs a 50 ms Default and an independently editable explicit zero allowance");
     controller.edit(F::clock_accuracy,"0.1ms");
     check(controller.field(F::clock_region).text=="1ms"&&controller.field(F::clock_offset).text=="0ms"&&
         controller.settings().transfer.clock_sync->region_seconds==.001&&
         controller.settings().transfer.clock_sync->offset_seconds==0&&
-        controller.settings().transfer.audio_timing_error_seconds==0,
-        "initial custom clock selection must start at a one-ms region, zero offset and zero additional audio allowance");
+        controller.settings().transfer.audio_timing_error_seconds==.05 && controller.field(F::audio_error).text=="50ms",
+        "initial custom clock selection must start at a one-ms region, zero offset and 50 ms audio allowance");
     controller.edit(F::clock_accuracy,"Default");
     controller.edit(F::audio_error,"12345us");
     check(controller.settings().transfer.audio_timing_error_seconds==.012345 &&
         !controller.settings().transfer.clock_sync && controller.settings().transfer.modem.oscillator_search==oscillator,
         "editing audio error changed GPS/oscillator mode or lost precision");
-    for(const auto reset:{F::clock_accuracy,F::clock_region,F::clock_offset}) {
+    for(const auto reset:{F::clock_accuracy,F::clock_region,F::clock_offset,F::audio_error}) {
         controller.edit(F::clock_accuracy,"GPS_0.1ms-400ms_region-2564ms_offset");
+        controller.edit(F::audio_error,"12345us");
         const auto policy=controller.settings().transfer.clock_sync;
         check(policy && policy->accuracy_seconds==.0001 && policy->region_seconds==.4 && policy->offset_seconds==2.564,
               "clock preset did not atomically set all three independent controls");
@@ -344,11 +346,28 @@ void clock_and_spread_controls() {
         controller.edit(reset,"Default");
         check(!controller.settings().transfer.clock_sync && controller.field(F::clock_accuracy).text=="Default" &&
               controller.field(F::clock_region).text=="Default" && controller.field(F::clock_offset).text=="Default",
-              "Default in any editor must reset the complete clock triplet");
-        check(controller.settings().transfer.audio_timing_error_seconds==.012345,
-            "Default clock reset erased independent audio allowance");
+              "Default in any timing editor must reset the complete clock triplet");
+        check(controller.settings().transfer.audio_timing_error_seconds==.05 && controller.field(F::audio_error).text=="Default",
+            "Default timing reset did not reset Audio error");
+        load(controller,controller.field(F::planner_command).text);
+        check(!controller.settings().transfer.clock_sync && controller.field(F::audio_error).text=="Default" &&
+            controller.settings().transfer.audio_timing_error_seconds==.05,
+            "Default timing launch round-trip changed Audio error");
+    }
+    for(const auto duration:{"0ms","30ms"}) {
+        load(controller,std::string("--clock-sync default --audio-error ")+duration);
+        const auto allowance=clock_sync::duration(duration);
+        check(!controller.settings().transfer.clock_sync && controller.field(F::audio_error).text==duration &&
+            controller.settings().transfer.audio_timing_error_seconds==allowance,"older explicit audio setting was discarded");
+        load(controller,"--clock-sync default");
+        check(controller.settings().transfer.audio_timing_error_seconds==allowance,
+            "partial clock import erased omitted audio allowance");
+        controller.edit(F::clock_accuracy,"1ms");
+        check(controller.settings().transfer.audio_timing_error_seconds==allowance,
+            "enabling custom clocks overwrote an explicit audio allowance");
     }
     controller.edit(F::clock_accuracy,"100ns");controller.edit(F::clock_region,"1us");controller.edit(F::clock_offset,"0ms");
+    controller.edit(F::audio_error,"12345us");
     const auto accepted=controller.settings().transfer.clock_sync;
     const auto command=controller.field(F::planner_command).text;
     for(const auto* invalid:{"NaNms","-1ms","61s"}) {

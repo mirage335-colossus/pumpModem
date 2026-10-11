@@ -203,8 +203,9 @@ void exact_raw_masking_and_scheduling() {
     for(bool encrypted:{false,true}) {
         auto value=options(encrypted);value.modem.dsss=encrypted;
         const auto estimate=transfer::estimate_binary(bits,value);
+        const auto geometry=transfer::seeded_config(value,value.timestamp);
         const auto payload=bits.size()*modem::symbol_sample_count(value.modem);
-        const auto total=payload+modem::training_sample_count(value.modem)+2*modem::pattern_pulse_padding_samples(value.modem)+modem::suppression_sample_count(value.modem);
+        const auto total=payload+modem::training_sample_count(geometry)+2*modem::pattern_pulse_padding_samples(geometry)+modem::suppression_sample_count(geometry);
         check(estimate.waveform_samples==total && estimate.coded_bytes==2,"raw path preserves exact unpadded bits");
         auto masked=bits;transfer::xor_binary_bits(masked,value);const auto encrypted_bits=masked;
         for(std::size_t offset=0;offset<masked.size();) {

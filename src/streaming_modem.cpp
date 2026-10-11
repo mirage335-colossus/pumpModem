@@ -62,15 +62,15 @@ struct StreamingTransmitter::Impl {
         pattern=std::make_unique<PatternTransmitter>(std::move(input.bits),config,config.stream_epoch,0,true,trace.active);
         if(pattern->working_bytes()>remaining)throw Error("pattern transmitter workspace is too small");
     }
-    Impl(Noise,Config config,std::size_t workspace) {
+    Impl(Noise input,Config config,std::size_t workspace) {
         trace.temporary_key=true;trace.pattern_available=true;
-        trace.pattern_private=true;trace.dsss=true;trace.data_masked=true;
+        trace.pattern_private=true;trace.dsss=config.dsss;trace.data_masked=true;
         trace.outer_dsss_factor=config.dsss_factor;
         trace.outer_dsss_version=static_cast<unsigned>(config.outer_dsss_version);
         chips_per_symbol=pattern_chips_per_symbol(config);
         const auto remaining=initialize_constellation(config,workspace);
         config.memory_limit=remaining;
-        noise=std::make_unique<NoiseTransmitter>(config);
+        noise=std::make_unique<NoiseTransmitter>(config,input.symbols);
         if(noise->working_bytes()>remaining)throw Error("noise transmitter workspace is too small");
     }
     void retain_constellation(Complex value) {
@@ -101,16 +101,20 @@ std::size_t StreamingTransmitter::constellation_history_capacity(const Config& c
 StreamingTransmitter::StreamingTransmitter(Bytes wire,Config c,std::size_t workspace):impl_(std::make_unique<Impl>(std::move(wire),c,workspace)){}
 StreamingTransmitter::StreamingTransmitter(RawBits bits,Config c,std::size_t workspace,TransmitTrace trace):
     impl_(std::make_unique<Impl>(std::move(bits),c,workspace,std::move(trace))){}
-StreamingTransmitter::StreamingTransmitter(Noise,Config c,std::size_t workspace) {
+StreamingTransmitter::StreamingTransmitter(Noise input,Config c,std::size_t workspace) {
     c.data_key.reset();
     OPENSSL_cleanse(c.spreading_seed.data(),c.spreading_seed.size());
     OPENSSL_cleanse(c.dsss_seed.data(),c.dsss_seed.size());
-    c.spreading_mode=SpreadingMode::pattern;
-    impl_=std::make_unique<Impl>(Noise{},c,workspace);
+    c.spreading_mode=SpreadingMode::pattern;c.scramble=true;
+    impl_=std::make_unique<Impl>(input,c,workspace);
 }
 StreamingTransmitter::~StreamingTransmitter()=default;
 StreamingTransmitter::StreamingTransmitter(StreamingTransmitter&&) noexcept=default;
 StreamingTransmitter& StreamingTransmitter::operator=(StreamingTransmitter&&) noexcept=default;
+void StreamingTransmitter::request_finish() { if(impl_->noise)impl_->noise->request_finish();else impl_->pattern->request_finish(); }
+std::uint64_t StreamingTransmitter::original_total_samples()const {
+    return impl_->noise?impl_->noise->original_total_samples():impl_->pattern->original_total_samples();
+}
 bool StreamingTransmitter::finished()const{return impl_->noise?impl_->noise->finished():impl_->pattern->finished();}
 std::uint64_t StreamingTransmitter::total_samples()const{return impl_->noise?impl_->noise->total_samples():impl_->pattern->total_samples();}
 std::uint64_t StreamingTransmitter::samples_emitted()const{return impl_->noise?impl_->noise->samples_emitted():impl_->pattern->samples_emitted();}

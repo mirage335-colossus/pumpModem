@@ -47,7 +47,7 @@ void stricter_caller_timing_allowance() {
     for(const auto limit:{.005,.02}) {
         f::reset();f::state.available={"default"};f::state.supported_rates={48000};
         a::Options options;options.follow_system_clock=true;options.maximum_utc_error_seconds=limit;
-        options.maximum_timing_rate_correction=.0003;options.timing_source_duration_seconds=.2;
+        options.maximum_timing_rate_correction=.0003;options.timing_stop_duration_seconds=.2;
         options.estimated_timing=a::EstimatedDeviceTiming{}; // its 30 ms cannot override the caller
         const auto epoch=std::ceil(std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count())+5;
         options.frame_timestamp=[&](std::uint64_t frames,bool) {
@@ -64,7 +64,7 @@ void stricter_caller_timing_allowance() {
         if(limit<.01)check(generated==0 && !error.empty() &&
             std::all_of(f::state.played.begin(),f::state.played.end(),[](auto s){return s==0;}),
             "estimated model enlarged the caller's audio error and generated private PCM");
-        else check(generated==7003 && error.empty(),"valid caller timing allowance was ignored");
+        else {if(!error.empty())std::cerr<<"caller allowance error: "<<error<<"\n";check(generated==7003 && error.empty(),"valid caller timing allowance was ignored");}
         check(!f::state.live,"caller timing allowance leaked its stream");
     }
 }
@@ -80,7 +80,7 @@ void visible_timing_fallback() {
         f::reset();f::state.available={"default"};f::state.supported_rates={rate};
         a::Options options;options.follow_system_clock=true;options.maximum_utc_error_seconds=.001;
         if(estimated) {
-            options.maximum_timing_rate_correction=.0003;options.timing_source_duration_seconds=1;
+            options.maximum_timing_rate_correction=.0003;options.timing_stop_duration_seconds=1;
             options.estimated_timing=a::EstimatedDeviceTiming{};
             options.estimated_timing->maximum_utc_error_seconds=.001;
         }
@@ -113,7 +113,7 @@ void visible_timing_fallback() {
     // started. Fallback still precedes source scheduling and all private PCM.
     f::reset();f::state.available={"default"};f::state.supported_rates={rate};
     a::Options delayed;delayed.follow_system_clock=true;delayed.maximum_utc_error_seconds=.005;
-    delayed.maximum_timing_rate_correction=.0003;delayed.timing_source_duration_seconds=1;
+    delayed.maximum_timing_rate_correction=.0003;delayed.timing_stop_duration_seconds=1;
     delayed.estimated_timing=a::EstimatedDeviceTiming{};delayed.allow_timing_fallback=true;
     bool delayed_fallback=false,delayed_format=false;std::size_t delayed_generated=0;
     delayed.frame_timestamp=[](std::uint64_t frames,bool) {
@@ -156,7 +156,7 @@ void native_delay_failures() {
     };
     const auto timing_options=[] {
         a::Options value;value.follow_system_clock=true;value.maximum_utc_error_seconds=.05;
-        value.maximum_timing_rate_correction=3e-10;value.timing_source_duration_seconds=1;
+        value.maximum_timing_rate_correction=3e-10;value.timing_stop_duration_seconds=1;
         value.estimated_timing=a::EstimatedDeviceTiming{.001,.05,120};
         return value;
     };
@@ -294,7 +294,7 @@ void native_prepared_delay_readiness() {
         f::state.pcm_state=2;
         std::stop_source cancellation;
         a::Options options;options.follow_system_clock=true;options.maximum_utc_error_seconds=.05;
-        options.maximum_timing_rate_correction=3e-10;options.timing_source_duration_seconds=1;
+        options.maximum_timing_rate_correction=3e-10;options.timing_stop_duration_seconds=1;
         options.estimated_timing=a::EstimatedDeviceTiming{.001,.05,120};
         options.allow_timing_fallback=true;
         unsigned formats=0,statuses=0,generated=0,initial_queries=0,restarted_queries=0;
@@ -528,7 +528,7 @@ void zero_audio_error_requests() {
         a::Options options;options.follow_system_clock=true;options.maximum_utc_error_seconds=0;
         options.allow_timing_fallback=true;
         if(estimated) {
-            options.maximum_timing_rate_correction=3e-10;options.timing_source_duration_seconds=1;
+            options.maximum_timing_rate_correction=3e-10;options.timing_stop_duration_seconds=1;
             options.estimated_timing=a::EstimatedDeviceTiming{};
             options.estimated_timing->maximum_utc_error_seconds=0;
         }
@@ -650,10 +650,11 @@ struct QueuedPlayback {
         return {static_cast<long double>(presented),origin+time,time,.028,1e-6,a::TimingQuality::estimated,771};
     }
 };
-std::vector<float> dsss_audio_pcm() {
+std::vector<float> dsss_audio_pcm(bool interleave) {
     datapump::modem::Config config;
     config.sample_rate=48000;config.carrier_hz=9000;config.bandwidth_hz=1200;
     config.spreading_factor=64;config.scramble=true;config.dsss_factor=10;
+    if(interleave)config.outer_dsss_version=datapump::modem::OuterDsssVersion::interleaved_v2;
     for(std::size_t i=0;i<config.spreading_seed.size();++i) {
         config.spreading_seed[i]=static_cast<std::uint8_t>(17+3*i);
         config.dsss_seed[i]=static_cast<std::uint8_t>(101+5*i);
@@ -669,6 +670,64 @@ std::vector<float> dsss_audio_pcm() {
         check(count>0,"DSSS PCM fixture stopped before finite tails");offset+=count;
     }
     return result;
+}
+void protected_timing_playback() {
+    f::reset();f::state.available={"default"};f::state.supported_rates={48000};f::state.write_limit=137;
+    const auto epoch=std::ceil(std::chrono::duration<long double>(std::chrono::system_clock::now().time_since_epoch()).count())+6;
+    QueuedPlayback driver(epoch-.125L-.375L/48000,0);
+    datapump::modem::Config config;config.sample_rate=48000;config.carrier_hz=9000;config.bandwidth_hz=1200;
+    config.spreading_factor=64;config.scramble=true;config.dsss_factor=10;
+    config.outer_dsss_version=datapump::modem::OuterDsssVersion::interleaved_v2;
+    config.spreading_seed.fill(0x31);config.dsss_seed.fill(0x7a);
+    datapump::Bytes bits(256);for(std::size_t i=0;i<bits.size();++i)bits[i]=i%2;
+    datapump::modem::PatternTransmitter source(bits,config,1800000000),reference(bits,config,1800000000);
+    const auto original=source.total_samples(),stop_bound=datapump::modem::transmit_stop_sample_count(config);
+    unsigned statuses=0,formats=0,stops=0;std::uint64_t stopped_at=0;long double scheduled_epoch=0;
+    std::optional<long double> first_private_time;
+    a::Options options;options.follow_system_clock=true;options.maximum_utc_error_seconds=.03;
+    options.maximum_timing_rate_correction=.0002;options.maximum_timing_slew_per_second=1e-14;
+    options.timing_stop_duration_seconds=double(stop_bound)/48000;
+    options.estimated_timing=a::EstimatedDeviceTiming{.001,.03,120};options.allow_timing_fallback=true;
+    options.frame_timestamp=[&](auto submitted,bool capture) {
+        check(!capture && submitted==driver.accepted,"protected provider confused accepted/presented position");
+        const auto elapsed=static_cast<long double>(driver.elapsed)/48000;
+        const auto age=first_private_time?std::max(0.L,elapsed-*first_private_time):0.L;
+        return a::FrameTimestamp{static_cast<long double>(driver.presented),driver.origin+elapsed*1.0001L,
+            elapsed*1.0001L,.028+static_cast<double>(std::min(age,20.L))*1e-6,1e-6,a::TimingQuality::estimated,771};
+    };
+    options.timing_status=[&](const auto& status) {
+        ++statuses;check(status.following_system_clock && !source.samples_emitted(),"protected stop silently fell back or requalified");
+    };
+    options.timing_protected_stop=[&](const std::string&) {
+        check(++stops==1 && source.samples_emitted()<original-stop_bound,"timing stop depends on known source EOF");
+        stopped_at=source.samples_emitted();source.request_finish();
+        check(source.total_samples()<=stopped_at+stop_bound,"timing stop lost its bounded protection horizon");
+    };
+    a::playback(48000,"default",[&](std::span<float> output) {
+        const auto count=source.read(output);
+        if(count) {
+            if(!stops) {
+                std::vector<float> expected(count);check(reference.read(expected)==count &&
+                    std::equal(expected.begin(),expected.end(),output.begin()),"timing policy altered emitted private source prefix");
+            }
+            if(!first_private_time)first_private_time=static_cast<long double>(driver.elapsed)/48000;
+            driver.private_generated=true;driver.advance(24);
+        }
+        return count;
+    },{},[&](const auto&) {
+        ++formats;check(!source.samples_emitted() && f::state.stopped,"protected source scheduled on a running DAC");
+        scheduled_epoch=std::ceil(driver.origin+.125L);a::schedule_output(static_cast<double>(scheduled_epoch));
+    },a::ChannelMode::left_mono,options);
+    check(stops==1 && statuses==1 && formats==1 && stopped_at>datapump::modem::training_sample_count(config) &&
+          source.finished() && source.total_samples()<original && driver.presented==driver.accepted &&
+          !driver.underrun && !f::state.live && f::state.configured_streams==1 && f::state.drops==1 &&
+          f::state.prepares==1 && f::state.recovered_errors.empty(),
+          "anticipated UTC failure did not protect, drain once and stop without fallback/restart");
+    const auto true_error=std::abs(driver.origin+static_cast<long double>(driver.accepted)*1.0001L/48000-
+        scheduled_epoch-static_cast<long double>(source.total_samples())/48000);
+    check(true_error+.028020L<.03L,"protected source drained beyond the physical UTC allowance");
+    std::cout<<"protected UTC stop after "<<double(stopped_at)/48000<<" s, tail "
+        <<double(source.total_samples()-stopped_at)/48000<<" s, original "<<double(original)/48000<<" s\n";
 }
 long double outside_energy(std::span<const float> pcm,double low,double high) {
     std::size_t size=1;while(size<pcm.size())size*=2;
@@ -695,8 +754,8 @@ long double outside_energy(std::span<const float> pcm,double low,double high) {
     }
     return outside;
 }
-void native_queued_dsss_playback() {
-    const auto input=dsss_audio_pcm();
+void native_queued_dsss_playback(bool interleave=false) {
+    const auto input=dsss_audio_pcm(interleave);
     std::vector<std::int16_t> reference_pcm;
     std::vector<float> expected;
     std::optional<std::array<std::uint64_t,3>> reference_start;
@@ -709,7 +768,7 @@ void native_queued_dsss_playback() {
         QueuedPlayback driver(epoch-.125L-.375L/48000,scenario);
         a::Options options;options.follow_system_clock=true;options.maximum_utc_error_seconds=.05;
         options.maximum_timing_rate_correction=3e-10;
-        options.timing_source_duration_seconds=static_cast<double>(input.size())/48000;
+        options.timing_stop_duration_seconds=static_cast<double>(input.size())/48000;
         options.estimated_timing=a::EstimatedDeviceTiming{.001,.05,120};options.allow_timing_fallback=true;
         unsigned statuses=0,formats=0;std::size_t cursor=0;
         long double start_origin=0;double fraction=0;std::size_t first_frame=0;
@@ -797,6 +856,7 @@ void native_queued_dsss_playback() {
         clamp_error+=error*error;
         const auto q=expected[i]-quantized[i];pcm_error+=q*q;
     }
+    std::cerr<<"clipping audit peak="<<peak_converted<<" clipped="<<clipped<<" energy_fraction="<<double(clamp_error/energy(expected))<<"\n";
     check(clamp_error/energy(expected)<1e-8L,
         "fractional DSSS reconstruction clipping exceeds the bounded reference distortion");
     const auto raw_out=outside_energy(input,5250,12750),converted_out=outside_energy(expected,5250,12750);
@@ -875,7 +935,7 @@ void bounded_clock_provider() {
         const auto jitter=slewing?2e-6:0.;
         const auto variable_error=slewing?jitter:2e-9;
         a::Options options;options.follow_system_clock=true;options.maximum_timing_rate_correction=.0003;
-        options.timing_source_duration_seconds=modeled?1:.1;
+        options.timing_stop_duration_seconds=modeled?1:.1;
         if(modeled) {
             options.estimated_timing=a::EstimatedDeviceTiming{variable_error,.00025,120};
             // Isolate the selected initial affine map in this exact-PCM test.
@@ -980,7 +1040,7 @@ void bounded_clock_provider() {
         f::reset();f::state.available={"default"};f::state.supported_rates={rate};
         const auto epoch=std::ceil(std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count())+5;
         a::Options options;options.follow_system_clock=true;options.maximum_timing_rate_correction=.0003;
-        options.timing_source_duration_seconds=.1;
+        options.timing_stop_duration_seconds=.1;
         options.frame_timestamp=[&](std::uint64_t frames,bool) {
             const auto t=static_cast<long double>(frames)/rate;
             return a::FrameTimestamp{static_cast<long double>(frames),epoch-.125L+t,t,
@@ -1406,7 +1466,11 @@ void audio_options() {
     check(f::state.attempts==std::vector<std::string>{"hw:1,2","plug:SLAVE='dsnoop:1,2'","plug:SLAVE='dsnoop:1,2'"},
           "shared capture did not keep its own route after exclusive access was busy");
 }
-int main(){try{
+int main(int argc,char** argv){try{
+    if(argc==2 && std::string(argv[1])=="--interleave") {
+        protected_timing_playback();native_queued_dsss_playback(true);
+        std::cout<<"Interleave queued UTC playback passed\n";return 0;
+    }
     plugin_directories();selected_endpoint();default_shared_routes();
     channel_routing();audio_options();
     f::reset();f::state.available={"default:CARD=Good"};f::state.hints={{"default:CARD=Good",""}};
@@ -1523,6 +1587,7 @@ int main(){try{
     bounded_clock_provider();
     zero_audio_error_requests();
     playback_discontinuity_observer();
+    protected_timing_playback();
     native_queued_dsss_playback();
     std::cout<<"ALSA default resolution and streaming tests passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

@@ -26,7 +26,9 @@ struct ConstellationBatch {
 struct RawBits { Bytes bits; };
 // Continuous random bits through the ordinary encrypted pattern modem, with
 // a private temporary key per start and no message contents or framing.
-struct Noise {};
+// Zero symbols is open-ended tuning; a finite fixture/request shares the
+// ordinary complete burst endpoint. This is local source control, never framing.
+struct Noise { std::uint64_t symbols=0; };
 
 class StreamingTransmitter {
 public:
@@ -37,7 +39,7 @@ public:
     // bitmap frame of physical chips, including a chip already in progress.
     static std::size_t constellation_history_capacity(const Config& config);
     // Both input forms include the rounded settling prefix and an exact
-    // three-second suppression-noise tail, outside all payload symbol slots.
+    // protected suppression-noise tail (three useful seconds plus shaping support), outside all payload symbol slots.
     StreamingTransmitter(Bytes wire, Config config, std::size_t workspace_bytes = 8 * 1024 * 1024);
     StreamingTransmitter(RawBits bits, Config config, std::size_t workspace_bytes = 8 * 1024 * 1024,
                          TransmitTrace trace = {});
@@ -52,6 +54,10 @@ public:
                               std::stop_token stop = {});
     // Removed integrated-symbol interface: throws; use physical samples.
     std::optional<SymbolObservation> next_symbol(std::stop_token stop = {});
+    // Source-thread request: retain already-emitted pulse contributions and
+    // finish protected cover and finite tails. A stopped read token remains immediate abort.
+    void request_finish();
+    std::uint64_t original_total_samples() const;
     bool finished() const;
     std::uint64_t total_samples() const;
     std::uint64_t samples_emitted() const;

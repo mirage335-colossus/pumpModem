@@ -4,6 +4,165 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Continuous transmitter timing and protected echo cover — manual checkpoint, 11 October 2026
+
+Encrypted messages and tuning noise now share one immutable profile and one
+length-independent timing controller. Its original-reference affine/braking
+budget is never renewed between blocks or symbols. Generated output is verified
+before submission, and queued/converter/source work and protected stopping enter
+the forecast. Imminent incompatibility requests a protected stop when feasible;
+discontinuity or an infeasible stop aborts visibly. No post-start policy fallback,
+source restart or address rewind is allowed. Physical device timing remains
+unqualified.
+
+Independent full-DSSS cover meets payload at the coefficient layer before the
+common shaper/limiter. The last valid pulse contribution is followed by at least
+three useful seconds of cover, then shaped shutdown. Normal shaped-private duration
+is prefix + payload + 4H + three seconds + one sample, for half-support H. First
+Cancel/Stop noise retains protection; second Cancel aborts promptly. The original
+16 KiB long-symbol storage assertion passes. Encrypted production entry points
+reject unsupported diagnostic cover fallbacks; ordinary unencrypted messaging,
+legacy evidence and receiver/physical-completion contracts are retained.
+
+Focused checks passed. The final combined affected run completed all **60 cases
+in 416.03 seconds: 59 passed, one failed**. All **38 GUI cases** and **21 of 22
+runtime/native cases** passed. The retained legacy-V1 ALSA clipping assertion
+fails; its unchanged bound is also exceeded by the frozen baseline's fixed-phase
+probe. Supported Interleave passes the same conversion/clipping checks and a
+new protected-stop timestamp scenario. Native physical graphical display tests
+remain disabled in this profile. The final local application is rebuilt through
+`./build.sh`; no hosted CI, platform/SDK or broader qualification is dispatched.
+
+Forty paired full-channel normal/cancel captures retain intended completed
+streams; surplus echo admissions decline 22→8, with two strong 0.6-amplitude
+Off/10× reflection cases still producing duplicate streams. First publication
+positions are unchanged at the measured polling resolution. Four no-suppression
+controls and wrong-key/disjoint-epoch checks are retained. These are bounded
+synthetic channels, not room/propagation guarantees. A 128-seed DSSS10 threshold
+pilot observes zero interpolated 90%/99% full-message sensitivity shift, but one
+final-bit outcome worsens and finite-sample uncertainty cannot establish a
+sub-0.1 dB bound. Full-bank and rare-event qualification remain outstanding.
+
+Seven isolated paired runs measure a 12–22% total CPU increase for protected
+cover across Off/10/100/1000, with 40 source bytes added without a shaped prefix
+or 1576 bytes with one. A separate 48 kHz conversion/guard probe rises from
+0.89% to 4.24% of one core. These are measured costs, not a receiver speedup.
+Whole-burst median out-of-band energy changes by less than 0.004 dB in four-key
+fixtures; DSSS cases do not clip, Off retains limiter activity. A partial four-hour
+symbol with two-second chips takes 67.015625 source seconds to stop protectively;
+real device buffering adds latency. See [transmitter evidence](transmit-cover.md)
+and [timing invariant](clock-sync.md#timing-and-private-pattern-addresses) for
+geometry, uncertainty, spectra, stopping and failure details.
+
+Baseline GUI SHA256 is
+`03d74447afb10698c393c0f31047e4737227fd4473472f11afa6a240fb678702`.
+Exact local source/build identity and final GUI are recorded under
+`.agent-work/artifacts/receiver-opt-20261008/timing-echo-final/manifest.json`;
+launcher `manual-transmit-timing-echo.sh`, report `MANUAL-TRANSMIT-TIMING-ECHO.md`.
+All prior runnable/reference candidates and other agents' changes are preserved.
+This is **manual testing only**, not overall timing, receiver, security or platform
+qualification. Strong echoes, legacy clipping, unsupported diagnostic false
+admissions, full-bank sensitivity, physical loopback/timing and broader
+ARM/Windows/SDK/sanitizer/packaging validation remain unresolved or unmeasured.
+
+## Audio-error Default — local manual checkpoint, 11 October 2026
+
+The Audio error editor now offers Default and joins the three clock editors in
+an atomic four-control reset. Its internal per-station residual allowance is
+50 ms, used when custom clock timing is first enabled unless an explicit numeric
+allowance was entered. Explicit saved values, including 0 ms, remain valid;
+partial imports preserve omitted values. Default exports numerically as
+`--audio-error 50ms`, with `--clock-sync default`, and reloads as four Default
+controls. Numeric audio edits do not enable GPS timing or alter oscillator models.
+
+Regression checks compare no-clock allowances of 0 ms, 50 ms and 60 s: timing,
+frequency and rolling-epoch counts, frontend/receiver/total CPU work and the
+hypothetical GPU estimate are unchanged. Custom arrival maps include the separate
+TX/RX allowances; the default contributes 100 ms to their half-width. Unsupported
+capture timing retains the full-search fallback. This is a configured assumption,
+not measured PC/IC-7100 accuracy, a buffer-size change or new loopback evidence.
+
+Focused clock, launch-settings and UTC-estimate checks passed, followed by the
+complete **38-test GUI group** (186.88 s) and **9 affected runtime/CLI suites**
+(144.92 s): clock sync, simulation estimate, Live, Live resources/profiles/
+receptions/transmit lock, transfer and CLI. `./build.sh` rebuilt the native Release
+FLTK application in the existing profile. Existing filesystem `u8path` warnings
+remain; physical graphical display tests were disabled in that profile.
+
+The preserved baseline is the preceding transmitter-cover GUI/source manifest;
+the local follow-up snapshot and launcher are under
+`.agent-work/artifacts/receiver-opt-20261008/audio-default-final/manifest.json`
+and `manual-audio-default.sh`. No receiver or waveform algorithm changed.
+This is a manual-test checkpoint, not overall qualification. Actual sound-card
+latency/calibration, prior receiver/transmitter sensitivity limits, other
+platform/SDK/sanitizer checks and broader qualification remain outstanding.
+Nothing was pushed, published or dispatched to hosted CI.
+
+## Full-DSSS transmitter cover — local manual checkpoint, 11 October 2026
+
+Transmit noise retains fresh temporary keys and now uses the current draft's
+short/long geometry and the ordinary complete private-pattern/DSSS engine.
+Encrypted prefix/suppression use independent versioned child secrets and full
+virtual-symbol Interleave maps, including when only a short section is emitted.
+Payload addresses, framing/bits, receiver algorithms and thresholds are unchanged.
+Message/noise share scheduled output, discontinuity failure and graceful stopping;
+a second cancellation remains immediate. [Transmitter cover](transmit-cover.md)
+documents exact eligibility, pulse overlap, workspace and timing limits.
+
+Focused checks passed, followed by all **18 affected runtime suites** (213.26 s)
+and the complete **38-test GUI group** (200.61 s) on the final candidate. These
+cover crypto, transfer/streaming, full cover, shaping, correlation/acquisition,
+noise, live resources/profiles, cancellation, resampling/timing, planner/controller
+and shared GUI assertions. The final application build through `./build.sh`
+passed. Existing GCC filesystem `u8path` deprecation warnings remain; native
+physical graphical display tests are disabled in this reused profile.
+
+The first runtime run was 17/18: full-symbol cover exposed an extra 13-bit prefix
+admission in the low-level unencrypted DSSS-only diagnostic (no Data key or
+Scrambler). Paired frozen-baseline/current runs reproduced it. That unsupported
+GUI geometry retains its established surrounding PCM, checked against frozen
+samples and the original receiver assertion. The rejected variant and failure
+logs remain saved for investigation; no seed, assertion or threshold was changed.
+Encrypted GUI/tuning retain full cover. Passing finite cases do not qualify rare
+false accepts or the rejected variant.
+
+Seven CPU-pinned alternating pairs on an AMD Ryzen 5 PRO 5650U measured full
+PatternTransmitter generation at 1.13–2.46× preceding cost across DSSS
+Off/10/100/1000, or 0.28–0.58% of emission time for these geometries. Charged TX
+workspace increased from 13,692–183,364 to 16,196–361,172 bytes. Complete spread
+bursts stayed near −54.6 dB out-of-band energy without clipping in four-key
+fixtures; Off retained its existing limiter and median −36.56→−36.08 dB.
+Graceful stops traded extra finite pulse duration/energy for reduced spectral
+transients; hardware latency is unmeasured. These are transmitter-engine metrics,
+not total application/receiver CPU or a universal performance bound.
+
+A paired D10 threshold pilot had no harmed detections over 128 reused seed
+clusters. Empirical 90%/99% shifts were −0.151/−0.0036 dB; conditional paired
+bootstrap intervals were [−0.345, 0]/[−0.0533, 0] dB. They cannot exclude unseen
+harm or qualify population 99%/full-bank sensitivity. First/last publication
+indices matched in all 693 pairs with output on both sides; per-bit and physical
+absence regressions remain intact. Exact fixture scope and uncertainty are in
+the maintained transmitter-cover document and retained JSON evidence.
+
+Source base `889bb4a2325ca9b249eb33dd19d5e56579acdf60` plus this local delta;
+GCC14.2 Release FLTK, `-O3 -DNDEBUG -ffp-contract=off`. Rebuilt GUI SHA256:
+`c7df23dfc432a821badb32449b4338d690baa75ff7a619d6fc649202cb9e8b6a`.
+Exact source/build/evidence manifest:
+`.agent-work/artifacts/receiver-opt-20261008/transmit-cover-final/manifest.json`.
+Launcher: `.agent-work/artifacts/receiver-opt-20261008/manual-transmit-cover.sh`.
+The preceding GUI and optimized/raw reference chain remain preserved. No user
+keys were read; fixtures use synthetic secrets. Unrelated work remains untouched.
+
+**Manual-test checkpoint only.** Open-ended tuning uses timestamp-only UTC
+start/fallback while finite messages can use affine rate preparation; continuous
+open-ended steering remains outstanding. Extremely narrow three-second cover
+sections need a smooth window that broadens their spectrum. Duration, operator
+activity, finite envelope/outer structure and hardware effects remain observable.
+Full-bank/rare-event sensitivity, multiple keys/rolling epochs, broad interference,
+physical PC/IC-7100 timing and stop spectra, native graphics, sanitizers,
+ARM/Windows/Web, SDK/packaging and broader qualification remain outstanding.
+No push, publication, hosted CI or broader qualification was run.
+
 ## Developer FHSS Shift lists — local manual checkpoint, 10 October 2026
 
 Developer mode adds **Fake: List** and an **FHSS** multiline editor. The list

@@ -130,6 +130,13 @@ std::size_t SampledSimulationChannel::read(StreamingTransmitter& source,std::spa
             throw Error("sampled simulation duration exceeds the receiver counter");
     } else if(s.source!=&source || source.samples_emitted()!=s.buffer_start+s.buffer_count)
         throw Error("sampled simulation source changed without begin_burst");
+    // A graceful stop may shorten the endpoint after interpolation has prefetched
+    // source samples. Those samples remain valid; only the future endpoint moves.
+    const auto endpoint=source.total_samples();
+    if(endpoint>s.total || endpoint<source.samples_emitted())
+        throw Error("sampled simulation source endpoint changed incompatibly");
+    s.total=endpoint;
+    if(!s.total){s.complete=true;return 0;}
     std::size_t written=0;
     while(written<output.size()) {
         if((written&4095U)==0 && stop.stop_requested())throw Error("modem operation cancelled");

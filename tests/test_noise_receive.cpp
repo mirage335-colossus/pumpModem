@@ -73,10 +73,10 @@ struct Outcome {
     double peak_score = 0;
 };
 
-Outcome receive(std::span<const float> samples, const modem::Config& c) {
+Outcome receive(std::span<const float> samples, const modem::Config& c,std::size_t budget=8*1024*1024) {
     // Real sampled PCM reaches the ordinary acquisition bank. There is no
     // symbol clock, transmitted key, aligned observation or injected decision.
-    modem::PatternReceiver receiver(c);
+    modem::PatternReceiver receiver(c,budget);
     Outcome result;
     const auto drain = [&] {
         for (const auto& burst : receiver.take_bursts()) {
@@ -109,6 +109,37 @@ std::vector<float> message_control(const modem::Config& c, const Bytes& bits) {
               static_cast<std::size_t>(transmitter.total_samples()))) == transmitter.total_samples(),
           "message control did not supply its full sampled waveform");
     return samples;
+}
+
+void structured_outer_cover() {
+    for(const unsigned factor:{10U,100U,1000U}) {
+        auto c=config(64);c.sample_rate=1024;c.carrier_hz=256;c.bandwidth_hz=128./factor;
+        c.scramble=c.dsss=true;c.dsss_factor=factor;c.integration_seconds=.25*factor;
+        c.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;
+        c.data_key.emplace(Bytes(32,0x31));
+        modem::StreamingTransmitter tuning(modem::Noise{5},c);
+        std::vector<float> pcm(tuning.total_samples());tuning.read(pcm);
+        check(power(pcm)>0,"outer cover fixture is silent");
+        const Bytes bits{0,1,0};
+        const auto control=message_control(c,bits);
+        check(receive(control,c,64*1024*1024).bits==bits,"outer rejection control lost real sensitivity");
+        // A genuine burst must still acquire with independent structured cover
+        // and a narrow interferer present. This finite strong-signal regression
+        // is separate from threshold-region sensitivity calibration.
+        auto mixed=control;
+        for(std::size_t i=0;i<mixed.size();++i) {
+            if(i<pcm.size())mixed[i]+=.1F*pcm[i];
+            mixed[i]+=static_cast<float>(.03*std::sin(2*3.141592653589793*(c.carrier_hz+9.)*
+                                                     static_cast<double>(i)/c.sample_rate));
+        }
+        check(receive(mixed,c,64*1024*1024).bits==bits,"structured cover/interference hid valid private bits");
+        for(const double gain:{1.,4.}) {
+            auto scaled=pcm;for(auto& sample:scaled)sample=static_cast<float>(gain*sample);
+            const auto outcome=receive(scaled,c,64*1024*1024);
+            check(outcome.bits.empty() && outcome.completed==0,"structured outer cover admitted valid private bits");
+            std::cout<<"full outer cover D"<<factor<<" amplitude "<<gain<<": zero accepted bits, peak "<<outcome.peak_score<<'\n';
+        }
+    }
 }
 
 void independent_noise_reception() {
@@ -178,7 +209,7 @@ void independent_noise_reception() {
 
 int main() {
     try {
-        independent_noise_reception();
+        independent_noise_reception();structured_outer_cover();
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

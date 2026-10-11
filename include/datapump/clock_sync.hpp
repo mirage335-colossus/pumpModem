@@ -10,7 +10,10 @@
 #include <string_view>
 
 namespace datapump::clock_sync {
-inline constexpr double default_audio_error_seconds=0;
+// Configured per-station residual allowance, not measured device accuracy.
+// It constrains UTC timing only when a clock-sync policy is active; the
+// ordinary broad search and underrun-prevention buffers are unchanged.
+inline constexpr double default_audio_error_seconds=.05;
 inline void validate_audio_error(double seconds) {
     if(!std::isfinite(seconds) || seconds<0 || seconds>60)
         throw Error("Audio error must be between zero and 60 seconds");

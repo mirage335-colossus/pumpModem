@@ -10,6 +10,48 @@
 namespace {
 void require(bool value,const char* message) {if(!value)throw std::runtime_error(message);}
 template<class F> void rejects(F function) {try {function();}catch(const datapump::Error&){return;}throw std::runtime_error("unsafe timing accepted");}
+void continuous_guard() {
+    using namespace datapump::audio;
+    require(protected_timing_action(.001,.001,.0003,3,.05,1e-6,.004)==ProtectedTimingAction::proceed,
+        "safe protected tail spuriously stopped");
+    require(protected_timing_action(.001,.001,.0003,3,.05,1e-6,.00291)==ProtectedTimingAction::finish,
+        "controller spent the one-block protected-stop reaction margin");
+    require(protected_timing_action(.001,.002,.0003,3,.05,1e-6,.00291)==ProtectedTimingAction::abort,
+        "infeasible protected tail was falsely promised after uncertainty increased");
+    for(const auto fs:{64U,6000U,48000U})for(const double initial:{-.0001,0.,.0001})for(const bool steering:{false,true}) {
+        Resampler resampler(fs,fs,true);resampler.initialize_timing(.375,initial);
+        const auto origin=resampler.source_seconds();resampler.observe_affine_timing(origin,initial);
+        ContinuousAffineTimingGuard guard(origin,initial,fs,fs,.01/fs);
+        std::array<float,257> input{},output{};std::size_t offset=0;
+        double greatest=0;
+        for(unsigned block=0;block<400;++block) {
+            const auto before=resampler.timing_block();
+            const auto size=1+(block*79)%output.size();
+            const auto plan=guard.plan(steering?(block%71<35?.0008:-.0008):initial,
+                {resampler.source_seconds(),before.frames,resampler.rate_correction()},size,1e-5);
+            resampler.begin_timing_block();resampler.set_rate_correction(plan.target,plan.slew);
+            std::size_t count=0;
+            while(count<size) {
+                const auto p=resampler.process(std::span(input).subspan(offset),std::span(output).subspan(count,size-count));
+                offset=(offset+p.consumed)%input.size();count+=p.produced;
+                require(p.consumed || p.produced,"continuous guard fixture stalled");
+            }
+            const auto actual=resampler.timing_block();
+            const ContinuousAffineTimingGuard::Point end{resampler.source_seconds(),actual.frames,resampler.rate_correction()};
+            guard.verify(plan,end,actual.minimum,actual.maximum);
+            greatest=std::max(greatest,static_cast<double>(std::max(std::abs(actual.minimum),std::abs(actual.maximum))));
+            rejects([&]{guard.verify(plan,end,actual.minimum,actual.maximum);}); // stale certificate
+        }
+        require(greatest<=.01/fs,"continuous correction reset the original affine allowance");
+        rejects([&]{resampler.observe_affine_timing(resampler.source_seconds(),0);});
+    }
+    ContinuousAffineTimingGuard check(0,0,48000,48000,.01/48000);
+    const auto plan=check.plan(.0001,{0,0,0},1,1e-5);
+    rejects([&]{check.verify(plan,{1.L/48000,1,0},-1.,1.);}); // safe-looking endpoint, unsafe interior
+    const auto shorter=check.plan(0,{0,0,0},29,1e-5);
+    check.verify(shorter,{1.L/48000,1,0},0,0); // final short block needs no horizon reset
+}
+
 void shaped_timing_error(datapump::modem::Config config) {
     using namespace datapump::modem;
     config.scramble=true;config.stream_epoch=1800000100;
@@ -63,6 +105,7 @@ void shaped_timing_error(datapump::modem::Config config) {
 }
 }
 int main() {try {
+    continuous_guard();
     using namespace datapump::audio;
     constexpr long double epoch=1800000000.L;
     for(const auto fs:{64U,6000U,48000U})for(const auto ppm:{-200.,0.,200.})for(const auto age:{-7.,0.,8.}) {
@@ -108,6 +151,11 @@ int main() {try {
     const auto wide=datapump::clock_sync::arrival_map({},epoch,epoch,0,48000,1./48000,0,.03,0,.08);
     require(narrow && wide && std::abs((wide->half_width_samples-narrow->half_width_samples)/48000-.05)<1e-12,
         "editable audio error did not propagate exactly into arrival coverage");
+    const auto default_audio=datapump::clock_sync::arrival_map({},epoch,epoch,0,48000,1./48000,0,.05,0);
+    const auto zero_audio=datapump::clock_sync::arrival_map({},epoch,epoch,0,48000,1./48000,0,0,0,0);
+    require(default_audio && zero_audio &&
+        std::abs((default_audio->half_width_samples-zero_audio->half_width_samples)/48000-.1)<1e-12,
+        "default arrival map must account for 50 ms at each station, separately from GPS and propagation");
     TimePrediction boundary{1.015L,.014,1./48000,TimingQuality::bounded,0};
     require(presentation_correction(boundary,1,48000,.03).uncertainty_seconds==.014,
         "valid 30 ms presentation allowance rejected");
@@ -116,10 +164,10 @@ int main() {try {
     require(presentation_correction(boundary,1,48000,.04).uncertainty_seconds==.014,
         "larger selected audio error was ignored");
     datapump::clock_sync::validate_audio_error(0.);
-    require(datapump::clock_sync::default_audio_error_seconds==0 &&
+    require(datapump::clock_sync::default_audio_error_seconds==.05 &&
         datapump::clock_sync::Policy{}.region_seconds==.001 &&
         datapump::clock_sync::Policy{}.offset_seconds==0,
-        "local clock defaults restored the Earth-Moon-Earth preset");
+        "local clock defaults lost the 50 ms audio allowance or restored the Earth-Moon-Earth preset");
     for(const auto error:{-1.,61.,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()})
         rejects([&]{datapump::clock_sync::validate_audio_error(error);});
     for(const auto horizon:{1.,3600.,86400.})for(const auto initial:{-.0001,.0001}) {

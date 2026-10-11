@@ -254,6 +254,117 @@ private:
     long double origin_;
     double rate_,horizon_,limit_,roundoff_;
 };
+// One immutable receiver-compatible affine map, with a braking-invariant
+// corridor. This does not promise unlimited UTC tracking under clock wander.
+class ContinuousAffineTimingGuard {
+    using Real=long double;
+public:
+    struct Point {Real source=0;std::uint64_t frames=0;double rate=0;};
+    struct Plan {Point begin;std::uint64_t count=0,serial=0;double target=0,slew=0;Real available=0,reserve=0;};
+    ContinuousAffineTimingGuard(Real origin,double initial,std::uint32_t logical,std::uint32_t hardware,double limit)
+        :origin_(origin),initial_(initial),logical_(logical),hardware_(hardware),limit_(limit),frontier_{origin,0,initial} {
+        if(!std::isfinite(origin) || origin<0 || !valid(initial) || !logical || !hardware || !std::isfinite(limit) || limit<=0)
+            throw Error("invalid continuous UTC guard");
+    }
+    Real warp(Point p) const {return std::fma(-(1.L+initial_),Real(p.frames)/hardware_,p.source-origin_);}
+    Plan plan(double proposed,Point p,std::uint64_t count,double slew) const {
+        if(!same(p,frontier_) || !valid(proposed) || !count || count>std::numeric_limits<std::uint32_t>::max() ||
+           count>std::numeric_limits<std::uint64_t>::max()-p.frames || !std::isfinite(slew) || slew<=0 || slew>.001)
+            throw Error("invalid continuous UTC plan");
+        const Real step=static_cast<double>(slew/hardware_),a=step*hardware_;
+        // Every viable state has v²/(2a)<=2W. An unachievable, unclipped
+        // proposal must not inflate this reserve to decades at a tiny slew.
+        const auto future=Real(p.frames+count)/hardware_+std::sqrt(4*limit_/a)+1.L/hardware_;
+        // Reserve is spent once against ORIGINAL elapsed time, including future
+        // braking. A new callback or symbol never replenishes this budget.
+        const Real reserve=32.L*std::numeric_limits<double>::epsilon()*future*(1.L+Real(hardware_)/logical_)+
+            64.L*std::numeric_limits<Real>::epsilon()*(std::abs(origin_)+1.001L*future+1.L/logical_);
+        // Last partial rate step occupies a whole frame. Its extra stopping
+        // distance is p(h-p)/(2a), bounded by a/(8Fh²).
+        const Real available=limit_-reserve-a/(8.L*hardware_*hardware_);
+        if(!(available>0))throw Error("continuous UTC arithmetic allowance exhausted");
+        Plan result{p,count,serial_,initial_,slew,available,reserve};
+        if(!forecast(p,count,initial_,a,step,available).safe)
+            throw Error("UTC correction has no safe affine continuation");
+        // Feedback may spend only the inner corridor. The outer corridor is
+        // retained for braking and for growth of the original-time arithmetic
+        // reserve on later callbacks. Never clip a proposal onto the final
+        // braking barrier and discover that braking is impossible next block.
+        const auto safe=[&](double target){
+            const auto f=forecast(p,count,target,a,step,available);
+            return f.safe && viable(f.error,f.rate-initial_,a,.8L*available);
+        };
+        if(safe(proposed)){result.target=proposed;return result;}
+        if(!safe(initial_))return result;
+        Real low=0,high=1;
+        for(unsigned i=0;i<56;++i) {
+            const auto mid=(low+high)/2;
+            const auto candidate=static_cast<double>(std::fma(mid,Real(proposed)-initial_,Real(initial_)));
+            if(safe(candidate)){low=mid;result.target=candidate;}else high=mid;
+        }
+        return result;
+    }
+    void verify(const Plan& plan,Point end,Real minimum,Real maximum) {
+        if(plan.serial!=serial_ || !same(plan.begin,frontier_) || end.frames<frontier_.frames ||
+           end.frames-frontier_.frames>plan.count || !std::isfinite(end.source) || end.source<frontier_.source ||
+           !valid(end.rate) || !std::isfinite(minimum) || !std::isfinite(maximum) || minimum>maximum)
+            throw Error("invalid generated UTC timing block");
+        const auto e=warp(end);const Real step=static_cast<double>(plan.slew/hardware_),a=step*hardware_;
+        const Real slack=64.L*std::numeric_limits<Real>::epsilon()*(std::abs(end.source)+std::abs(origin_)+
+            (1.L+std::abs(initial_))*Real(end.frames)/hardware_+1.L/logical_);
+        const auto predicted=forecast(plan.begin,end.frames-plan.begin.frames,plan.target,a,step,plan.available);
+        const Real rate_slack=64.L*std::numeric_limits<double>::epsilon()*
+            std::max({std::abs(Real(plan.begin.rate)),std::abs(Real(plan.target)),std::abs(Real(initial_)),Real(std::numeric_limits<double>::min())});
+        if(minimum>e+slack || maximum<e-slack || minimum<-plan.available || maximum>plan.available ||
+           !predicted.safe || std::abs(e-predicted.error)>plan.reserve+slack ||
+           std::abs(Real(end.rate)-predicted.rate)>rate_slack || !viable(e,Real(end.rate)-initial_,a,plan.available))
+            throw Error("generated UTC output exceeds its continuous affine allowance");
+        frontier_=end;++serial_;
+    }
+private:
+    struct Forecast {bool safe=true;Real error=0,rate=0;};
+    const Real origin_;const double initial_;const std::uint32_t logical_,hardware_;const Real limit_;
+    Point frontier_;std::uint64_t serial_=0;
+    static bool valid(double r){return std::isfinite(r) && std::abs(r)<=.001;}
+    static bool same(Point a,Point b){return a.frames==b.frames && a.source==b.source && a.rate==b.rate;}
+    static bool viable(Real e,Real v,Real a,Real available) {
+        const auto up=e+std::pow(std::max(v,0.L),2)/(2*a),down=e-std::pow(std::max(-v,0.L),2)/(2*a);
+        return std::isfinite(up) && std::isfinite(down) && up<=available && down>=-available;
+    }
+    Forecast forecast(Point p,std::uint64_t count,double target,Real a,Real step,Real available) const {
+        Real e=warp(p),v=Real(p.rate)-initial_;bool safe=viable(e,v,a,available);
+        const auto segment=[&](Real duration,Real next) {
+            if(!duration)return;
+            const auto acceleration=(next-v)/duration;
+            const auto at=[&](Real t){return std::fma(.5L*acceleration*t,t,std::fma(v,t,e));};
+            safe &= viable(e,v,a,available);
+            if(acceleration!=0) {const auto zero=-v/acceleration;if(zero>0 && zero<duration)safe &= viable(at(zero),0,a,available);}
+            e=at(duration);v=next;safe &= viable(e,v,a,available);
+        };
+        const Real difference=Real(target)-p.rate,distance=std::abs(difference),direction=difference<0?-1.L:1.L;
+        const auto quotient=distance/step;
+        auto full=quotient>=count?count:static_cast<std::uint64_t>(std::floor(quotient));
+        if(full && Real(full)*step>distance)--full;
+        if(full<count && Real(full+1)*step<=distance)++full;
+        segment(Real(full)/hardware_,v+direction*Real(full)*step);
+        auto used=full;
+        if(used<count && Real(full)*step<distance){segment(1.L/hardware_,Real(target)-initial_);++used;}
+        if(used<count)segment(Real(count-used)/hardware_,v);
+        return {safe,e,initial_+v};
+    }
+};
+
+enum class ProtectedTimingAction { proceed, finish, abort };
+inline ProtectedTimingAction protected_timing_action(double error,double uncertainty,double drift,
+        double stop_seconds,double next_block_seconds,double warp,double allowance) {
+    if(!std::isfinite(error) || !std::isfinite(uncertainty) || uncertainty<0 ||
+       !std::isfinite(drift) || drift<0 || !std::isfinite(stop_seconds) || stop_seconds<0 ||
+       !std::isfinite(next_block_seconds) || next_block_seconds<0 || !std::isfinite(warp) || warp<0 ||
+       !std::isfinite(allowance) || allowance<=0)throw Error("invalid protected timing forecast");
+    const auto stop=std::abs(error)+uncertainty+drift*stop_seconds+2*warp;
+    if(stop>=allowance)return ProtectedTimingAction::abort;
+    return stop+drift*next_block_seconds>=allowance?ProtectedTimingAction::finish:ProtectedTimingAction::proceed;
+}
 inline UtcCorrection presentation_correction(const TimePrediction& predicted,long double desired_utc,
         std::uint32_t hardware_rate,double maximum_error_seconds=.03,double response_seconds=8,
         double maximum_rate_fraction=.001,double current_rate_fraction=0) {

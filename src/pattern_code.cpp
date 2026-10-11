@@ -485,11 +485,103 @@ void PatternCode::copy_transmit_trace(TransmitTrace& result,std::uint64_t begun_
     }
 }
 
+namespace {
+// Cover roots never enter the receive bank or diagnostic trace. Enabled input
+// purposes contribute in NEW versioned domains; child purposes are separated
+// again exactly as for an ordinary private transmission. Payload addresses and
+// selected communication secrets are not used as legal cover candidates.
+Config cover_config(Config config, std::uint64_t epoch, StreamDomain domain) {
+    std::array<std::uint8_t,32> root{};
+    struct WipeRoot { std::array<std::uint8_t,32>& value;~WipeRoot(){OPENSSL_cleanse(value.data(),value.size());} } wipe{root};
+    const auto mix=[&](const Crypto& key,StreamPurpose purpose) {
+        auto bytes=key.stream(purpose,epoch,0,root.size(),domain);
+        for(std::size_t i=0;i<root.size();++i)root[i]^=bytes[i];
+        OPENSSL_cleanse(bytes.data(),bytes.size());
+    };
+    if(config.data_key)mix(*config.data_key,StreamPurpose::Data);
+    if(config.scramble)mix(Crypto(config.spreading_seed),StreamPurpose::Scrambler);
+    if(config.dsss || config.dsss_factor>1)mix(Crypto(config.dsss_seed),StreamPurpose::Dsss);
+    config.data_key=Crypto(root);OPENSSL_cleanse(root.data(),root.size());
+    const auto seed=[&](StreamPurpose purpose,auto& target) {
+        auto bytes=config.data_key->stream(purpose,0,0,target.size());
+        std::copy(bytes.begin(),bytes.end(),target.begin());OPENSSL_cleanse(bytes.data(),bytes.size());
+    };
+    seed(StreamPurpose::Scrambler,config.spreading_seed);seed(StreamPurpose::Dsss,config.dsss_seed);
+    config.fake_hopping.reset(); // The enclosing TX owns the ONE continuous FHSS schedule.
+    return config;
+}
+double smooth_edge(double x) {
+    x=std::clamp(x,0.,1.);return x*x*x*(10+x*(-15+6*x));
+}
+struct VirtualCover {
+    Config config;
+    PatternCode code;
+    StreamCache data;
+    std::uint64_t epoch;
+    struct Entry { std::uint64_t chip=0;std::complex<double> value{};bool valid=false; };
+    std::array<Entry,24> cache{};
+    VirtualCover(Config value,std::uint64_t time):config(value),code(value,time),
+        data(*value.data_key,StreamPurpose::Data,time,StreamDomain::Payload),epoch(time) {}
+    ~VirtualCover() {
+        OPENSSL_cleanse(cache.data(),sizeof(cache));
+        OPENSSL_cleanse(config.spreading_seed.data(),config.spreading_seed.size());
+        OPENSSL_cleanse(config.dsss_seed.data(),config.dsss_seed.size());
+    }
+    std::complex<double> chip(std::uint64_t symbol,std::uint64_t local,std::stop_token stop) {
+        const auto first=symbol*code.chips_per_symbol(),absolute=first+local;
+        auto& entry=cache[absolute%cache.size()];
+        if(!entry.valid || entry.chip!=absolute) {
+            code.prepare_symbol(first,stop); // FULL map, including unobserved portions of long bits.
+            const auto address=symbol_stream_address(epoch,config.stream_phase_samples,symbol,
+                code.symbol_samples(),config.sample_rate);
+            data.select_epoch(address.epoch);
+            const auto bit=(data.byte(address.ordinal/8)>>(7-address.ordinal%8))&1U;
+            entry.value=code.value(absolute,bit);entry.chip=absolute;entry.valid=true;
+        }
+        return entry.value;
+    }
+    template<class Weight>
+    std::complex<double> sample(long double sample,Weight weight,std::stop_token stop) {
+        const auto duration=static_cast<long double>(code.symbol_samples());
+        const auto support=static_cast<long double>(pattern_pulse_padding_samples(config));
+        std::complex<double> result{};
+        if(!support) {
+            if(sample<0)return {};
+            const auto symbol=static_cast<std::uint64_t>(std::floor(sample/duration));
+            const auto within=sample-static_cast<long double>(symbol)*duration;
+            return weight(sample)*chip(symbol,static_cast<std::uint64_t>(within/static_cast<double>(code.chip_samples())),stop);
+        }
+        const auto begin=std::max(0.L,std::floor((sample-support)/duration));
+        const auto end=std::max(begin,std::floor((sample+support)/duration)+1);
+        for(auto symbol=static_cast<std::uint64_t>(begin);symbol<static_cast<std::uint64_t>(end);++symbol)
+            pattern_pulse_each(static_cast<double>(sample-static_cast<long double>(symbol)*duration),code.symbol_samples(),code.chip_samples(),
+                [&](std::uint64_t local,double pulse) {
+                    const auto first=local*code.chip_samples();
+                    const auto length=std::min(code.chip_samples(),code.symbol_samples()-first);
+                    const auto center=static_cast<long double>(symbol)*duration+first+.5L*length;
+                    const auto gain=weight(center);
+                    if(gain!=0)result+=pulse*gain*chip(symbol,local,stop);
+                });
+        return result;
+    }
+};
+}
+
 struct PatternTransmitter::Impl {
     Bytes bits;
     Config config;
     std::unique_ptr<FhssSchedule> hopping;
     PatternCode code;
+    std::unique_ptr<VirtualCover> cover;
+    bool cover_is_tail=false,private_cover=false,protected_cover=false;
+    std::uint64_t cover_start=0,cover_end=0,cover_origin=0;
+    struct RetainedPrefix {long double center=0;double scale=0;std::complex<double> value{};};
+    using PrefixSnapshot=std::array<RetainedPrefix,32>;
+    std::unique_ptr<PrefixSnapshot> retained_prefix;
+    std::size_t retained_prefix_count=0;
+    std::size_t cover_bytes=0;
+    std::optional<std::uint64_t> stop_at;
+    std::uint64_t original_total=0;
     std::unique_ptr<StreamCache> generated_data;
     std::unique_ptr<StreamCache> settling, settling_data, settling_pattern, settling_dsss;
     std::unique_ptr<StreamCache> suppression, suppression_data, suppression_pattern, suppression_dsss;
@@ -497,7 +589,7 @@ struct PatternTransmitter::Impl {
     struct SettlingChip {
         std::uint64_t address=0;
         std::complex<double> value{};
-        bool valid=false;
+        bool valid=false,payload=false;
     };
     std::array<SettlingChip,32> settling_chips{};
     std::array<SettlingChip,32> suppression_chips{};
@@ -533,6 +625,27 @@ struct PatternTransmitter::Impl {
         require(suppression_samples<=std::numeric_limits<std::uint64_t>::max()-total,
                 "pattern suppression duration would overflow");
         total+=suppression_samples;
+        original_total=total;
+        // Preserve the established DSSS-only diagnostic surrounding waveform:
+        // it has neither Data encryption nor private Scrambler. Full-symbol
+        // cover in that unsupported GUI geometry exposed an extra prefix
+        // admission in the 6000Hz/32-chip regression. Do not re-seed around the
+        // fixture or change RX thresholds. Encrypted GUI/message and tuning
+        // paths retain full cover; broader false-accept calibration is pending.
+        private_cover=private_cover_enabled(config);
+        protected_cover=private_cover && surrounding_noise;
+        cover_start=content_end-padding;
+        // Retain the role-local virtual stream origin. Bring the same cover
+        // forward through the common shaper; do not skip to payload-length-
+        // dependent cover addresses. Once any cover is emitted this is fixed.
+        cover_origin=cover_start;
+        cover_end=padding?total-padding-1:total-std::max<std::uint64_t>(1,config.sample_rate/100);
+        // A single reusable cover map, never two full PCM symbols. Charge the
+        // worst-case map plus derivation scratch even before its lazy allocation.
+        if(private_cover && (training || suppression_samples))
+            cover_bytes=sizeof(VirtualCover)+code.working_bytes()+sizeof(Config)+2*sizeof(Crypto)+64;
+        const bool retain_prefix=protected_cover && training && padding;
+        if(retain_prefix)cover_bytes+=sizeof(PrefixSnapshot);
         require(bit_count <= std::numeric_limits<std::uint64_t>::max() / code.chips_per_symbol(),
                 "pattern transmission chip count would overflow");
         const auto chip_count = bit_count * code.chips_per_symbol();
@@ -541,15 +654,18 @@ struct PatternTransmitter::Impl {
         if(config.scramble || config.dsss)
             require(start+chip_count-1 <= (std::numeric_limits<std::uint64_t>::max()-7)/8,
                     "private pattern byte address would overflow");
-        const auto caches=(static_cast<unsigned>(training!=0)+static_cast<unsigned>(suppression_samples!=0))*
+        const auto caches=private_cover?0U:(static_cast<unsigned>(training!=0)+static_cast<unsigned>(suppression_samples!=0))*
             (1U+static_cast<unsigned>(config.data_key.has_value())+
              static_cast<unsigned>(config.scramble)+static_cast<unsigned>(config.dsss));
-        const auto fixed = sizeof(Impl) + sizeof(PatternTransmitter) + code.working_bytes()+
+        const auto fixed = sizeof(Impl) + sizeof(PatternTransmitter) + code.working_bytes()+cover_bytes+
             (hopping?sizeof(FhssSchedule)+sizeof(FhssPlan)+FhssSchedule::cycle_bytes+sizeof(std::array<unsigned,FhssPlan::capacity>):0)+
             (caches+static_cast<unsigned>(generated_data!=nullptr))*sizeof(StreamCache);
         require(fixed <= config.memory_limit && bits.capacity() <= config.memory_limit - fixed,
                 "pattern transmitter exceeds memory limit");
-        if(training) {
+        // Long symbols have no prefix. Reserve this bounded snapshot only when
+        // it can be needed, but before playback so cancellation never allocates.
+        if(retain_prefix)retained_prefix=std::make_unique<PrefixSnapshot>();
+        if(training && !private_cover) {
             // Private layers use the same keys, purposes and epoch as the
             // payload; only the fixed CTR pad changes. Encrypt noise bytes
             // together with every enabled spreading stream before I/Q mapping.
@@ -562,7 +678,7 @@ struct PatternTransmitter::Impl {
             if(config.dsss)settling_dsss=std::make_unique<StreamCache>(
                 config.dsss_seed,StreamPurpose::Dsss,epoch,domain);
         }
-        if(suppression_samples) {
+        if(suppression_samples && !private_cover) {
             // A third CTR domain makes the tail independent of both the
             // settling prefix and every valid payload pattern/mask position.
             constexpr auto domain=StreamDomain::Suppression;
@@ -576,6 +692,7 @@ struct PatternTransmitter::Impl {
         }
     }
     ~Impl() {
+        if(retained_prefix)OPENSSL_cleanse(retained_prefix->data(),sizeof(*retained_prefix));
         OPENSSL_cleanse(settling_chips.data(),sizeof(settling_chips));
         OPENSSL_cleanse(suppression_chips.data(),sizeof(suppression_chips));
         OPENSSL_cleanse(config.spreading_seed.data(),config.spreading_seed.size());
@@ -588,8 +705,105 @@ struct PatternTransmitter::Impl {
         generated_data->select_epoch(address.epoch);
         return (generated_data->byte(address.ordinal/8)>>(7-address.ordinal%8))&1U;
     }
-    std::complex<double> suppression_sample(std::uint64_t offset) {
+    VirtualCover& virtual_cover(bool tail) {
+        if(!cover || cover_is_tail!=tail) {
+            cover.reset(); // release the old complete permutation before allocation
+            auto child=cover_config(config,source_epoch,tail?StreamDomain::CoverSuppressionV1:StreamDomain::CoverPreambleV1);
+            cover=std::make_unique<VirtualCover>(child,source_epoch);cover_is_tail=tail;
+            OPENSSL_cleanse(child.spreading_seed.data(),child.spreading_seed.size());
+            OPENSSL_cleanse(child.dsss_seed.data(),child.dsss_seed.size());
+        }
+        return *cover;
+    }
+    bool keep_center(long double center) const {
+        return !stop_at || center<static_cast<long double>(*stop_at)+padding;
+    }
+    std::complex<double> payload_symbol(std::uint64_t symbol,double within,std::stop_token stop) {
+        const auto first=start+symbol*code.chips_per_symbol();
+        const auto origin=static_cast<long double>(padding)+training+symbol*code.symbol_samples();
+        if(!keep_center(origin+.5L*std::min(code.chip_samples(),code.symbol_samples())))return {};
+        code.prepare_symbol(first,stop);
+        if(!stop_at)return code.shaped_value(first,bit(symbol),within);
+        return pattern_pulse_sum(within,code.symbol_samples(),code.chip_samples(),[&](std::uint64_t local) {
+            const auto offset=local*code.chip_samples();
+            const auto length=std::min(code.chip_samples(),code.symbol_samples()-offset);
+            if(!keep_center(origin+offset+.5L*length))return std::complex<double>{};
+            const auto absolute=first+local;
+            auto& entry=settling_chips[absolute%settling_chips.size()];
+            if(!entry.valid || !entry.payload || entry.address!=absolute) {
+                entry.value=code.value(absolute,bit(symbol));entry.address=absolute;entry.valid=true;entry.payload=true;
+            }
+            return entry.value;
+        });
+    }
+    void finish() {
+        if(stop_at || position==total)return;
+        stop_at=position;
+        if(!position) { total=0;return; }
+        if(protected_cover) {
+            if(position>=cover_start || padding>=cover_start-position)return; // already committed to this cover; never restart it
+            // A coefficient whose support touched output is immutable. Retain
+            // the next support radius, then replace only untouched coefficients.
+            auto cut=position+padding;
+            if(!padding) {
+                const auto within=(position>=training?position-training:position)%code.symbol_samples();
+                cut=position+std::min(code.chip_samples()-within%code.chip_samples(),code.symbol_samples()-within);
+            }
+            cover_start=std::min(cover_start,cut);
+            // Keep the original symbol/partial-chip lattice, even for a
+            // fractional-chip stop. The child stream remains role-local.
+            cover_origin=padding+(position/code.symbol_samples())*code.symbol_samples();
+            if(retained_prefix && position<training+2*padding) {
+                // Keep just the prefix coefficients whose tails can survive P.
+                // Enumerate support, including coefficients zero exactly at P.
+                auto& prefix=virtual_cover(false);
+                const auto lo=std::max(0.L,static_cast<long double>(position)-2*padding);
+                const auto hi=std::min(static_cast<long double>(training),static_cast<long double>(cut)-padding);
+                const auto duration=code.symbol_samples(),chip=code.chip_samples();
+                for(auto symbol=static_cast<std::uint64_t>(lo/duration);symbol*duration<hi;++symbol) {
+                    const auto origin=symbol*duration;
+                    const auto first=lo>origin?static_cast<std::uint64_t>((lo-origin)/chip):0;
+                    for(auto k=first;k<code.chips_per_symbol();++k) {
+                        const auto offset=k*chip,length=std::min(chip,duration-offset);
+                        const auto center=static_cast<long double>(origin)+offset+.5L*length;
+                        if(center>=hi)break;
+                        if(center<lo)continue;
+                        require(retained_prefix_count<retained_prefix->size(),"prefix pulse support exceeds bounded retention");
+                        (*retained_prefix)[retained_prefix_count++]={center+padding,std::sqrt(double(length)/chip),prefix.chip(symbol,k,{})};
+                    }
+                }
+                cover.reset();
+            }
+            const auto useful=static_cast<std::uint64_t>(config.sample_rate)*3;
+            const auto ramp=std::max<std::uint64_t>(1,config.sample_rate/100);
+            cover_end=cover_start+2*padding+useful;
+            total=cover_end+(padding?padding+1:ramp);
+            return;
+        }
+        // Diagnostic/no-surrounding path retains its original drain reference.
+        const auto remaining=padding?2*padding+1:std::max<std::uint64_t>(1,config.sample_rate/100);
+        total=position+std::min(remaining,total-position);
+    }
+    double unshaped_finish_gain(std::uint64_t cursor) const {
+        if(protected_cover) {
+            if(cursor<cover_end)return 1.;
+            return total-cover_end>1?1-smooth_edge(double(cursor-cover_end)/double(total-cover_end-1)):0.;
+        }
+        if(!stop_at || cursor<*stop_at)return 1.;
+        const auto duration=total-*stop_at;
+        return duration>1?1-smooth_edge(static_cast<double>(cursor-*stop_at)/static_cast<double>(duration-1)):0.;
+    }
+    std::complex<double> protected_sample(std::uint64_t cursor,std::stop_token stop) {
+        if(static_cast<long double>(cursor)+padding<cover_start)return {};
+        return virtual_cover(true).sample(static_cast<long double>(cursor)-cover_origin,[&](long double center) {
+            const auto absolute=center+cover_origin;
+            return absolute>=cover_start && (absolute<cover_end || !padding)?1.:0.;
+        },stop);
+    }
+    std::complex<double> suppression_sample(std::uint64_t offset,std::stop_token stop) {
         const auto noise=[&](std::uint64_t chip) {
+            if(!keep_center(static_cast<long double>(content_end)-padding+(chip+.5L)*code.chip_samples()))
+                return std::complex<double>{};
             auto& entry=suppression_chips[chip%suppression_chips.size()];
             if(!entry.valid || entry.address!=chip) {
                 entry.value=suppression->noise(chip,suppression_data.get(),suppression_pattern.get(),suppression_dsss.get());
@@ -612,10 +826,25 @@ struct PatternTransmitter::Impl {
     std::complex<double> shaped_sample(std::uint64_t cursor,std::stop_token stop) {
         const auto relative=static_cast<long double>(cursor)-padding;
         std::complex<double> result{};
-        if(training) {
+        if(training && private_cover && relative<=static_cast<long double>(training)+padding) {
+            if(stop_at && cursor>=*stop_at && retained_prefix_count) {
+                for(std::size_t i=0;i<retained_prefix_count;++i) {
+                    const auto& p=(*retained_prefix)[i];
+                    result+=p.value*p.scale*pattern_pulse(static_cast<double>((static_cast<long double>(cursor)-p.center)/code.chip_samples()));
+                }
+            } else if(!stop_at || cursor<*stop_at || !protected_cover) {
+                result+=virtual_cover(false).sample(relative,[&](long double center) {
+                    return center<training && keep_center(static_cast<long double>(padding)+center)?1.:0.;
+                },stop);
+            }
+        } else if(training && !private_cover) {
             result+=pattern_pulse_sum(static_cast<double>(relative),training,code.chip_samples(),[&](std::uint64_t chip) {
+                const auto duration=std::min(code.chip_samples(),training-chip*code.chip_samples());
+                if(!keep_center(static_cast<long double>(padding)+chip*code.chip_samples()+.5L*duration))
+                    return std::complex<double>{};
                 auto& entry=settling_chips[chip%settling_chips.size()];
-                if(!entry.valid || entry.address!=chip) {
+                if(!entry.valid || entry.payload || entry.address!=chip) {
+                    entry.payload=false;
                     entry.value=settling->noise(chip,settling_data.get(),settling_pattern.get(),settling_dsss.get());
                     entry.address=chip;entry.valid=true;
                 }
@@ -628,10 +857,14 @@ struct PatternTransmitter::Impl {
         const auto begin=std::max(0.L,std::floor((payload-support)/duration));
         const auto end=std::min(static_cast<long double>(bit_count),std::floor((payload+support)/duration)+1);
         for(auto symbol=static_cast<std::uint64_t>(begin);symbol<static_cast<std::uint64_t>(std::max(begin,end));++symbol) {
-            if(config.dsss_factor>1 && config.outer_dsss_version==OuterDsssVersion::interleaved_v2)
-                code.prepare_symbol(start+symbol*code.chips_per_symbol(),stop);
-            result+=code.shaped_value(start+symbol*code.chips_per_symbol(),bit(symbol),
-                static_cast<double>(payload-symbol*duration));
+            const auto within=static_cast<double>(payload-symbol*duration);
+            if(!stop_at) {
+                // Ordinary transmission keeps the existing hot path; stopping
+                // must not add coefficient gates to every payload sample.
+                if(config.dsss_factor>1 && config.outer_dsss_version==OuterDsssVersion::interleaved_v2)
+                    code.prepare_symbol(start+symbol*code.chips_per_symbol(),stop);
+                result+=code.shaped_value(start+symbol*code.chips_per_symbol(),bit(symbol),within);
+            } else result+=payload_symbol(symbol,within,stop);
         }
         return result;
     }
@@ -652,13 +885,15 @@ struct PatternTransmitter::Impl {
         if(padding) {
             for(std::size_t i=0;i<count;++i,++cursor) {
                 if((i&4095U)==0)cancelled(stop);
-                const auto baseband=cursor<content_end?shaped_sample(cursor,stop):suppression_sample(cursor-content_end);
+                const auto baseband=protected_cover?shaped_sample(cursor,stop)+protected_sample(cursor,stop):
+                    (cursor<content_end?shaped_sample(cursor,stop):suppression_sample(cursor-content_end,stop));
                 output[i]=convert(oscillator*pattern_limit_pcm(amplitude*baseband));
                 if(observer && cursor>=padding+training && cursor<content_end-padding) {
                     const auto payload=cursor-padding-training;
                     const auto symbol=payload/code.symbol_samples();
                     const auto within=payload%code.symbol_samples();
-                    if(within%code.chip_samples()==0)
+                    if(within%code.chip_samples()==0 && keep_center(static_cast<long double>(cursor)+
+                        .5L*std::min(code.chip_samples(),code.symbol_samples()-within)))
                         observer(amplitude*code.value(start+symbol*code.chips_per_symbol()+within/code.chip_samples(),
                             bit(symbol)));
                 }
@@ -668,22 +903,25 @@ struct PatternTransmitter::Impl {
         }
         for (std::size_t i = 0; i < count;) {
             cancelled(stop);
-            if(cursor>=content_end) {
+            if(cursor>=(protected_cover?cover_start:content_end)) {
                 for(;i<count;++i,++cursor) {
                     if((i&4095U)==0)cancelled(stop);
-                    output[i]=convert(amplitude*oscillator*suppression_sample(cursor-content_end));
+                    output[i]=convert(unshaped_finish_gain(cursor)*amplitude*oscillator*(protected_cover?protected_sample(cursor,stop):suppression_sample(cursor-content_end,stop)));
                     oscillator*=step;
                 }
                 continue;
             }
             if(cursor<training) {
                 const auto chip=cursor/code.chip_samples();
-                auto pattern=settling->noise(chip,settling_data.get(),settling_pattern.get(),settling_dsss.get());
-                const auto run=static_cast<std::size_t>(std::min<std::uint64_t>({count-i,training-cursor,
-                    code.chip_samples()-cursor%code.chip_samples()}));
+                auto pattern=private_cover?virtual_cover(false).sample(static_cast<long double>(cursor),[](long double){return 1.;},stop):
+                    settling->noise(chip,settling_data.get(),settling_pattern.get(),settling_dsss.get());
+                const auto within=private_cover?cursor%code.symbol_samples():cursor;
+                const auto run=static_cast<std::size_t>(std::min<std::uint64_t>({count-i,training-cursor,protected_cover?cover_start-cursor:training-cursor,
+                    private_cover?code.symbol_samples()-within:training-cursor,
+                    code.chip_samples()-within%code.chip_samples()}));
                 for(std::size_t j=0;j<run;++j,++i,++cursor) {
                     if((i&4095U)==0)cancelled(stop);
-                    output[i]=convert(amplitude*oscillator*pattern);oscillator*=step;
+                    output[i]=convert(unshaped_finish_gain(cursor)*amplitude*oscillator*pattern);oscillator*=step;
                 }
                 continue;
             }
@@ -699,12 +937,12 @@ struct PatternTransmitter::Impl {
             const auto pattern_step = config.spreading_mode == SpreadingMode::tone ?
                 std::polar(1., (symbol_bit ? 1. : -1.) * std::numbers::pi / (2 * static_cast<double>(code.chip_samples()))) :
                 std::complex<double>{1, 0};
-            const auto run = static_cast<std::size_t>(std::min<std::uint64_t>({count - i,
+            const auto run = static_cast<std::size_t>(std::min<std::uint64_t>({count - i,protected_cover?cover_start-cursor:content_end-cursor,
                 code.symbol_samples() - within, code.chip_samples() - within % code.chip_samples()}));
             for (std::size_t j = 0; j < run; ++j, ++i, ++cursor) {
                 if ((i & 4095U) == 0) cancelled(stop);
-                output[i] = convert(amplitude * oscillator * pattern);
-                if (j == 0 && within % code.chip_samples() == 0 && observer)
+                output[i] = convert(unshaped_finish_gain(cursor)*amplitude * oscillator * pattern);
+                if (j == 0 && within % code.chip_samples() == 0 && observer && unshaped_finish_gain(cursor)>0)
                     observer(amplitude * pattern);
                 oscillator *= step; pattern *= pattern_step;
             }
@@ -735,12 +973,14 @@ void PatternTransmitter::preview_last_analytic(std::span<std::complex<double>> o
     auto cursor = impl_->position - count;
     impl_->render(cursor, output.subspan(leading), [](auto value) { return value; }, {}, {});
 }
+void PatternTransmitter::request_finish() { impl_->finish(); }
+std::uint64_t PatternTransmitter::original_total_samples() const { return impl_->original_total; }
 bool PatternTransmitter::finished() const { return impl_->position == impl_->total; }
 std::uint64_t PatternTransmitter::total_samples() const { return impl_->total; }
 std::uint64_t PatternTransmitter::samples_emitted() const { return impl_->position; }
 double PatternTransmitter::bit_rate() const { return static_cast<double>(impl_->config.sample_rate) / static_cast<double>(impl_->code.symbol_samples()); }
 std::size_t PatternTransmitter::working_bytes() const {
-    return sizeof(PatternTransmitter) + sizeof(Impl) + impl_->code.working_bytes() + impl_->bits.capacity()+
+    return sizeof(PatternTransmitter) + sizeof(Impl) + impl_->code.working_bytes() + impl_->cover_bytes + impl_->bits.capacity()+
         (impl_->hopping?sizeof(FhssSchedule)+sizeof(FhssPlan)+FhssSchedule::cycle_bytes+sizeof(std::array<unsigned,FhssPlan::capacity>):0)+
         ((impl_->generated_data?1U:0U)+(impl_->settling?1U:0U)+(impl_->settling_data?1U:0U)+(impl_->settling_pattern?1U:0U)+
          (impl_->settling_dsss?1U:0U)+(impl_->suppression?1U:0U)+(impl_->suppression_data?1U:0U)+
@@ -768,13 +1008,13 @@ struct NoiseTransmitter::Impl {
         pattern(config,PatternTransmitter::MaskedZeroBits{count},config.stream_epoch,true) {}
 };
 
-NoiseTransmitter::NoiseTransmitter(Config config) {
+NoiseTransmitter::NoiseTransmitter(Config config,std::uint64_t symbols) {
     // Replace every selected secret before constructing the ordinary modem.
     // The roots below match transfer::seeded_config: PatternCode then derives
     // each symbol's normal epoch and position under the purpose-separated key.
     config.data_key=Crypto::random();
-    config.scramble=true;config.dsss=true;config.spreading_mode=SpreadingMode::pattern;
-    config.stream_epoch=0;config.stream_phase_samples=0;
+    config.scramble=true;config.spreading_mode=SpreadingMode::pattern;
+    // Honor the same scheduled epoch and fractional origin as messages.
     struct CleanSeeds {
         Config& value;
         ~CleanSeeds() {
@@ -790,11 +1030,14 @@ NoiseTransmitter::NoiseTransmitter(Config config) {
     seed(StreamPurpose::Scrambler,config.spreading_seed);
     seed(StreamPurpose::Dsss,config.dsss_seed);
     validate(config);
+    require(private_cover_enabled(config),"tuning transmission cannot use diagnostic surrounding waveforms");
     const auto symbol=symbol_sample_count(config);
     const auto overhead=training_sample_count(config)+2*pattern_pulse_padding_samples(config)+suppression_sample_count(config);
     require(overhead<sample_target && symbol<=sample_target-overhead,
             "noise symbol duration exceeds the stream safety limit");
-    const auto count=(sample_target-overhead)/symbol;
+    const auto maximum=(sample_target-overhead)/symbol;
+    require(symbols<=maximum,"finite noise duration exceeds the stream safety limit");
+    const auto count=symbols?symbols:maximum;
     require(sizeof(NoiseTransmitter)+sizeof(Impl)<=config.memory_limit,
             "noise transmitter exceeds memory limit");
     config.memory_limit-=sizeof(NoiseTransmitter)+sizeof(Impl)-sizeof(PatternTransmitter);
@@ -813,6 +1056,8 @@ std::size_t NoiseTransmitter::read_analytic(std::span<std::complex<double>> outp
 void NoiseTransmitter::preview_last_analytic(std::span<std::complex<double>> output) const {
     impl_->pattern.preview_last_analytic(output);
 }
+void NoiseTransmitter::request_finish() { impl_->pattern.request_finish(); }
+std::uint64_t NoiseTransmitter::original_total_samples() const { return impl_->pattern.original_total_samples(); }
 bool NoiseTransmitter::finished() const { return impl_->pattern.finished(); }
 std::uint64_t NoiseTransmitter::total_samples() const { return impl_->pattern.total_samples(); }
 std::uint64_t NoiseTransmitter::samples_emitted() const { return impl_->pattern.samples_emitted(); }

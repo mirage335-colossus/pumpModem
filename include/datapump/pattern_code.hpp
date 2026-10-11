@@ -68,7 +68,7 @@ private:
 
 // Binary pattern PCM: exactly bits.size() payload symbols,
 // optionally preceded by rounded hardware-settling audio and followed by
-// exactly three seconds of independent suppression noise. Shaped patterns add
+// at least three useful seconds of independent private suppression noise. Shaped patterns add
 // eight chip times at either payload edge to emit the full finite filter tails;
 // the suppression noise starts after those tails. Neither noise section carries
 // payload or an acquisition marker. Input bytes are individual 0/1 bits;
@@ -100,6 +100,10 @@ public:
     // Bounded reconstruction from stream coordinates; no waveform history is
     // retained and preview does not advance the transmitter.
     void preview_last_analytic(std::span<std::complex<double>> output) const;
+    // Source-thread request: retain already-emitted pulse contributions and
+    // finish protected cover and finite tails. A stopped read token remains immediate abort.
+    void request_finish();
+    std::uint64_t original_total_samples() const;
     bool finished() const;
     std::uint64_t total_samples() const;
     std::uint64_t samples_emitted() const;
@@ -119,7 +123,7 @@ class NoiseTransmitter {
 public:
     using ChipObserver = PatternTransmitter::ChipObserver;
     static constexpr std::uint64_t sample_target = 1ULL << 48;
-    explicit NoiseTransmitter(Config config);
+    explicit NoiseTransmitter(Config config, std::uint64_t symbols = 0);
     ~NoiseTransmitter();
     NoiseTransmitter(NoiseTransmitter&&) noexcept;
     NoiseTransmitter& operator=(NoiseTransmitter&&) noexcept;
@@ -128,6 +132,10 @@ public:
     std::size_t read_analytic(std::span<std::complex<double>> output,
                               std::stop_token stop = {}, const ChipObserver& observer = {});
     void preview_last_analytic(std::span<std::complex<double>> output) const;
+    // Source-thread request: retain already-emitted pulse contributions and
+    // finish protected cover and finite tails. A stopped read token remains immediate abort.
+    void request_finish();
+    std::uint64_t original_total_samples() const;
     bool finished() const;
     std::uint64_t total_samples() const;
     std::uint64_t samples_emitted() const;

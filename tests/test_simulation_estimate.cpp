@@ -1147,6 +1147,30 @@ void utc_bank_estimate() {
     modem::OscillatorSearchConfig policy;policy.lf={10,.05};policy.rf={.01,.005};policy.margin=3;
     options.modem.oscillator_search=policy;
     const auto baseline=simulation::estimate(wire(3,options.modem),options,true,clean_channel(),{},1,false);
+    check(options.audio_timing_error_seconds==.05,"default transfer audio allowance must be 50 ms");
+    // Audio uncertainty is relevant only to qualified clock-sync arrivals.
+    // With the ordinary search, even an explicit large allowance must not add
+    // epochs, timing/frequency trials, work or a fictitious arrival prior.
+    for(const auto mode:{simulation::ReceiverWorkMode::hardware_fallback,
+                         simulation::ReceiverWorkMode::hardware_timing_model}) {
+        auto ordinary=options;
+        ordinary.timestamp=0; // Exercise the rolling epoch bank as well.
+        ordinary.audio_timing_error_seconds=0;
+        const auto full=simulation::estimate(wire(3,ordinary.modem),ordinary,true,clean_channel(),{},1,false,100,4096,mode);
+        for(const auto allowance:{.05,60.}) {
+            ordinary.audio_timing_error_seconds=allowance;
+            const auto same=simulation::estimate(wire(3,ordinary.modem),ordinary,true,clean_channel(),{},1,false,100,4096,mode);
+            check(!same.timing_window_modeled && !same.receiver_geometry.arrival_window_available &&
+                same.frequency_rate_hypotheses==full.frequency_rate_hypotheses &&
+                same.epoch_hypotheses==full.epoch_hypotheses && same.new_epoch_admissions==full.new_epoch_admissions &&
+                same.timing_hypotheses==full.timing_hypotheses,
+                "audio allowance alone changed the default broad search geometry");
+            near(same.receiver_cpu_seconds,full.receiver_cpu_seconds,"audio allowance alone changed broad-search CPU work");
+            near(same.receiver_frontend_seconds,full.receiver_frontend_seconds,"audio allowance alone changed preprocessing work");
+            near(same.cpu_seconds,full.cpu_seconds,"audio allowance alone changed total CPU estimate");
+            near(same.gpu_seconds,full.gpu_seconds,"audio allowance alone changed hypothetical GPU estimate");
+        }
+    }
     options.clock_sync=clock_sync::Policy{.001,.4,2.564};
     const auto actual=modem::oscillator_pattern_search(options.modem,modem::utc_transmit_rate_limit(options.modem));
     const auto estimate=simulation::estimate(wire(3,options.modem),options,true,clean_channel(),{},1,true,100,4096,
@@ -1787,7 +1811,10 @@ void affine_coefficient_workload() {
           modem::symbol_sample_count(scaled.modem)==2*modem::symbol_sample_count(options.modem),
           "fixed waveform scaling fixture must preserve chip and symbol time");
     const auto larger=simulation::estimate(wire(1,scaled.modem),scaled,true,clean_channel(),{},1,false);
-    near(larger.simulated_seconds,base.simulated_seconds,"paired work-model sample rates must preserve physical duration");
+    // Protected cover has one terminal zero PCM sample after its support.
+    // The continuous waveform durations agree; that sample scales with Fs.
+    near(larger.simulated_seconds-1./scaled.modem.sample_rate,base.simulated_seconds-1./options.modem.sample_rate,
+         "paired work-model sample rates must preserve physical duration apart from the terminal zero sample");
     check(larger.pulse_segment_projection_modeled&&larger.frequency_rate_hypotheses==base.frequency_rate_hypotheses&&
           larger.receiver_frontend_seconds>base.receiver_frontend_seconds&&
           larger.receiver_search_seconds>base.receiver_search_seconds&&

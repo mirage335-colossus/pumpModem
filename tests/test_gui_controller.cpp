@@ -1046,6 +1046,10 @@ void fake_hop_display() {
     if(!changed)throw Error(std::string("Fake FHSS displayed no changing hop: ")+preference+", status="+controller.field(F::status).text+", mode="+controller.field(F::mode).text+", fhss="+controller.field(F::fhss).display_text+", snapshot="+controller.snapshot().status+", error="+controller.snapshot().error);
     check(!short_list||cycle_without_chip,"FHSS fixture must cross a cycle while its long chip is unchanged");
     controller.activate(C::cancel);
+    if(short_list && controller.snapshot().transmission_stopping) {
+        check(controller.command_label(C::cancel)=="Abort now","long pulse stop lost its immediate-abort action");
+        controller.activate(C::cancel); // Preserve this fixture's immediate cancellation deadline.
+    }
     const auto stop=std::chrono::steady_clock::now()+std::chrono::seconds(5);
     do {controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));}
     while(controller.snapshot().transmitting&&std::chrono::steady_clock::now()<stop);

@@ -223,13 +223,15 @@ struct Session::Impl {
         modem::Config modem;
         std::unique_ptr<modem::StreamingTransmitter> transmitter;
         std::function<void(Prepared&)> prepare_hardware;
-        double timing_source_seconds=0,timing_rate_fraction=0;
-        std::uint64_t timing_source_samples=0;
+        double timing_stop_seconds=0,timing_rate_fraction=0;
+        audio::ChannelMode output_channels=audio::ChannelMode::left_mono;
+        double output_gain=1;
         std::optional<std::uint64_t> protected_epoch;
         Bytes protected_key;
         bool hardware = false;
         bool binary = false;
         bool noise = false;
+        bool graceful = false;
         std::uint64_t generation = 0, serial = 0;
         std::uint64_t transmitted_samples = 0;
         std::uint64_t tail_remaining = 0;
@@ -347,6 +349,7 @@ struct Session::Impl {
     using Transmission = std::variant<Message, Bytes, modem::Noise>;
     struct TransmitRequest {
         Transmission content; bool force = false;
+        bool noise_long_profile = false;
         std::shared_ptr<const modem::FhssPlan> hopping;
     };
     std::deque<TransmitRequest> queued;
@@ -379,6 +382,7 @@ struct Session::Impl {
     std::size_t first_visible_replay_frame = 0;
     double replay_bin_hz = 0;
     std::stop_source capture_stop, tx_stop, decode_stop;
+    bool source_pcm_started=false,finish_requested=false;
     execution::Task source, capture_worker, encoder, decoder, recovery_worker;
 
     explicit Impl(EpochClock clock, ReplayClock presentation_clock)
@@ -458,7 +462,7 @@ struct Session::Impl {
         }
         return datapump::detail::transmit_epoch_lock_seconds(config,used->second,current_epoch());
     }
-    void enqueue(Transmission transmission, bool force = false,std::shared_ptr<const modem::FhssPlan> hopping = {}) {
+    void enqueue(Transmission transmission, bool force = false,std::shared_ptr<const modem::FhssPlan> hopping = {}, bool noise_long_profile = false) {
         if(capture_suspended)throw Error("Audio is reserved by the other mode");
         if (current.transmitting_noise) throw Error("stop noise before transmitting a message");
         const bool noise = std::holds_alternative<modem::Noise>(transmission);
@@ -476,7 +480,7 @@ struct Session::Impl {
         if (noise && (tx_busy || !queued.empty())) throw Error("wait for transmission to finish before starting noise");
         if (queued.size() >= 8) throw Error("transmit queue contains eight pending messages");
         advance_replay(replay_clock());
-        queued.push_back({std::move(transmission),force,std::move(hopping)}); current.transmitting = true;
+        queued.push_back({std::move(transmission),force,noise_long_profile,std::move(hopping)}); current.transmitting = true;
         current.transmission_finished = current.transmission_cancelled = false;
         if (!tx_busy) {
             current.transmitting_noise = noise;
@@ -1574,17 +1578,20 @@ struct Session::Impl {
         // Keep the existing normal-completion quiet interval. Cancellation
         // retains key exposure independently, without adding a full-symbol
         // backend delay to the GUI's existing cancellation separation.
-        if(wave.hardware && !wave.noise && wave.transmitter && wave.transmitter->samples_emitted())
+        if(wave.hardware && !wave.noise && !wave.graceful && !finish_requested && wave.transmitter && wave.transmitter->samples_emitted())
             next_hardware_send=std::max(next_hardware_send,Clock::now()+std::chrono::duration_cast<Clock::duration>(
                 std::chrono::duration<double>(static_cast<double>(modem::pattern_absence_samples(wave.modem))/wave.modem.sample_rate+1.)));
         finish_simulation_elapsed();
         if (wave.transmitter) current.transmit_trace = wave.transmitter->transmit_trace();
         tx_busy = false; current.transmitting = settings.simulation ? false : !queued.empty();
         current.transmitting_noise = false;
-        current.transmission_finished = settings.simulation || queued.empty(); current.transmission_cancelled = wave.stop.stop_requested();
+        current.transmission_finished = settings.simulation || queued.empty();
+        wave.graceful=wave.graceful || finish_requested;
+        current.transmission_cancelled = wave.stop.stop_requested() || wave.graceful;
+        current.transmission_stopping=false;source_pcm_started=false;finish_requested=false;
         current.status = idle_status();
         if (!error.empty()) { transmit_error=error; current.error = error; staged_received_bytes = 0; }
-        else if (!wave.stop.stop_requested()) {
+        else if (!wave.stop.stop_requested() && !wave.graceful) {
             current.transmission_fraction = 1;
             if (settings.simulation && !wave.replay.empty()) {
                 if(wave.receive_clear_generation!=receive_clear_generation) {
@@ -1613,14 +1620,23 @@ struct Session::Impl {
         if (generation != wave.generation || tx_serial != wave.serial) return;
         current.transmit_trace = wave.transmitter->transmit_trace();
         current.transmission_seconds = static_cast<double>(value.simulation ? wave.transmitted_samples : wave.transmitter->samples_emitted()) / wave.modem.sample_rate;
-        current.transmission_fraction = wave.noise ? 0 : static_cast<double>(value.simulation ? wave.transmitted_samples : wave.transmitter->samples_emitted()) /
+        current.transmission_fraction = wave.noise || !wave.transmitter->total_samples() ? 0 : static_cast<double>(value.simulation ? wave.transmitted_samples : wave.transmitter->samples_emitted()) /
                                         static_cast<double>(wave.transmitter->total_samples());
         current.simulation_receiving_tail=value.simulation && !wave.noise && wave.tail_started;
+    }
+    void prepare_source_read(Prepared& wave) {
+        std::lock_guard lock(mutex);
+        if(generation!=wave.generation || tx_serial!=wave.serial || wave.stop.stop_requested())
+            throw Error("transmission cancelled");
+        source_pcm_started=true;
+        if(finish_requested && !wave.graceful) {
+            wave.transmitter->request_finish();wave.graceful=true;
+        }
     }
     void retain_emitted_epoch(const Prepared& wave) {
         if(!wave.protected_epoch || !wave.transmitter->samples_emitted())return;
         const auto epoch=datapump::detail::exposed_transmit_epoch(wave.modem,*wave.protected_epoch,
-            wave.transmitter->total_samples(),wave.transmitter->samples_emitted());
+            wave.transmitter->original_total_samples(),wave.transmitter->samples_emitted());
         std::lock_guard lock(mutex);
         auto& retained=transmit_epochs[wave.protected_key];
         retained=std::max(retained,epoch);
@@ -1693,6 +1709,7 @@ struct Session::Impl {
                         const auto block_start = Clock::now();
                         const auto capacity = std::min<std::size_t>(samples.size(),
                             std::max<std::size_t>(1, value.transfer.modem.sample_rate / 20));
+                        prepare_source_read(*wave);
                         const auto count = simulation_channel->read(*wave->transmitter,
                             std::span(samples).first(capacity), wave->stop);
                         wave->transmitted_samples = simulation_channel->transmitted_samples();
@@ -1711,6 +1728,13 @@ struct Session::Impl {
                         });
                         continue;
                     }
+                    if(wave && wave->tail_started) {
+                        bool finish_after_source=false;
+                        {std::lock_guard lock(mutex);finish_after_source=finish_requested;}
+                        if(finish_after_source) {
+                            wave->graceful=true;complete_tx(*wave);wave.reset();continue;
+                        }
+                    }
                     if (wave) {
                         // First replay frame records the independently running
                         // receiver before any newly transmitted samples arrive.
@@ -1724,9 +1748,16 @@ struct Session::Impl {
                                 wave->transmitter->total_samples();
                             const auto remaining = target > wave->transmitted_samples ? target - wave->transmitted_samples : 1;
                             const auto capacity = static_cast<std::size_t>(std::min<std::uint64_t>(samples.size(), remaining));
+                            prepare_source_read(*wave);
                             count = simulation_channel->read(*wave->transmitter, std::span(samples).first(capacity), wave->stop);
                             wave->transmitted_samples = simulation_channel->transmitted_samples();
                             if (!count) {
+                                if(wave->graceful) {
+                                    // Stop only the source/replay work. The same
+                                    // receiver continues on ordinary idle PCM;
+                                    // no scored absence or completion is invented.
+                                    complete_tx(*wave);wave.reset();continue;
+                                }
                                 wave->tail_started = true;
                                 wave->tail_remaining = modem::pattern_absence_samples(transmit_modem)+transmit_modem.sample_rate+2*modem::pattern_pulse_padding_samples(transmit_modem);
                             }
@@ -1779,22 +1810,22 @@ struct Session::Impl {
                 if (wave) {
                     audio::ChannelMode channels;
                     audio::Options output_options;
-                    { std::lock_guard lock(mutex); channels = audio::output_channels(settings.mono,settings.channel_mode);
-                        output_options={settings.transmit_gain,value.exclusive}; }
+                    channels=wave->output_channels;
+                    output_options={wave->output_gain,value.exclusive};
                     output_options.maximum_utc_error_seconds=value.transfer.audio_timing_error_seconds;
-                    output_options.follow_system_clock=value.transfer.clock_sync && !wave->noise &&
+                    output_options.timing_stop_duration_seconds=wave->timing_stop_seconds;
+                    output_options.follow_system_clock=value.transfer.clock_sync &&
                         audio::utc_follow_supported() && (!transmit_modem.oscillator_search ||
                         transmit_modem.oscillator_search->reference==modem::OscillatorReference::independent_audio);
                     output_options.maximum_timing_slew_per_second=audio::conservative_timing_slew(
                         transmit_modem.sample_rate,static_cast<double>(modem::symbol_sample_count(transmit_modem))/transmit_modem.sample_rate);
                     if(output_options.follow_system_clock && wave->timing_rate_fraction>0) {
                         output_options.maximum_timing_rate_correction=wave->timing_rate_fraction;
-                        output_options.timing_source_duration_seconds=wave->timing_source_seconds;
                         output_options.estimated_timing=audio::EstimatedDeviceTiming{};
                         output_options.estimated_timing->maximum_utc_error_seconds=value.transfer.audio_timing_error_seconds;
                     }
                     output_options.allow_timing_fallback=output_options.follow_system_clock;
-                    if(!wave->noise) output_options.playback_discontinuity=[](const std::string& reason) {
+                    output_options.playback_discontinuity=[](const std::string& reason) {
                         throw Error(reason); // A recovered device gap invalidates this private transmission.
                     };
                     output_options.timing_status=[&,version](const audio::TimingStatus& status) {
@@ -1802,12 +1833,17 @@ struct Session::Impl {
                         if(!status.following_system_clock) {
                             // Preflight runs before scheduling/private generation.
                             // Keep monotonic fresh epochs but use ordinary playback.
-                            wave->timing_rate_fraction=wave->timing_source_seconds=0;
-                            wave->timing_source_samples=0;
+                            wave->timing_rate_fraction=wave->timing_stop_seconds=0;
+
                         }
+                    };
+                    output_options.timing_protected_stop=[&,version](const std::string& reason) {
+                        wave->transmitter->request_finish();wave->graceful=true;
+                        timing_status({true,value.transfer.audio_timing_error_seconds,0,reason},version,false);
                     };
                     if(!value.full_duplex)discontinuity();
                     audio::playback(transmit_modem.sample_rate, value.device, [&](std::span<float> output) {
+                        prepare_source_read(*wave);
                         const auto before=wave->transmitter->samples_emitted();
                         const auto count = wave->transmitter->read(output, wave->stop);
                         retain_emitted_epoch(*wave);
@@ -1969,7 +2005,7 @@ struct Session::Impl {
     }
     void encode_loop(std::stop_token stop) {
         while (!stop.stop_requested()) {
-            Transmission transmission; Settings value; Bytes key; bool force=false;
+            Transmission transmission; Settings value; Bytes key; bool force=false,noise_long_profile=false;
             std::shared_ptr<const modem::FhssPlan> hopping;
             std::uint64_t version, serial,clear_generation; std::stop_token token;
             {
@@ -1977,10 +2013,11 @@ struct Session::Impl {
                 changed.wait(lock, stop, [this] { return current.running && !tx_busy && replay.empty() && !queued.empty(); });
                 if (stop.stop_requested()) break;
                 transmission = std::move(queued.front().content); force=queued.front().force;
-                hopping=std::move(queued.front().hopping);
+                hopping=std::move(queued.front().hopping);noise_long_profile=queued.front().noise_long_profile;
                 queued.pop_front(); value = settings; key=selected_transmit_key;
                 version = generation;clear_generation=receive_clear_generation; serial = ++tx_serial; tx_stop = std::stop_source{}; token = tx_stop.get_token();
                 current.transmission_id = serial;current.transmit_clock_following=false;
+                current.transmission_stopping=false;source_pcm_started=false;finish_requested=false;
                 transmit_error.clear(); current.error.clear();
                 playback_timing_status.clear();playback_timing_fallback=false;
                 current.clock_timing_status=capture_timing_status;
@@ -2004,27 +2041,22 @@ struct Session::Impl {
                     message && value.long_message_modem && !transfer::uses_raw_message(*message))
                     value.transfer.modem = *value.long_message_modem;
                 value.transfer.modem.fake_hopping=std::move(hopping);
-                if (std::holds_alternative<modem::Noise>(transmission)) {
-                    // Ephemeral streams need no saved-key epoch scheduling,
-                    // source encoding, receiver-bank key or message replay.
-                    auto prepared = std::make_shared<Prepared>();
-                    prepared->modem = value.transfer.modem;
-                    prepared->generation = version; prepared->serial = serial;prepared->receive_clear_generation=clear_generation;
-                    prepared->stop = token; prepared->noise = true;
-                    prepared->transmitter = std::make_unique<modem::StreamingTransmitter>(
-                        modem::Noise{}, value.transfer.modem, value.dsp_workspace_bytes / 4);
-                    std::lock_guard lock(mutex);
-                    if (!current.running || generation != version || tx_serial != serial || token.stop_requested()) continue;
-                    ready = std::move(prepared);
-                    if (!value.simulation && !value.full_duplex) capture_stop.request_stop();
-                    changed.notify_all();
-                    continue;
+                const bool noise=std::holds_alternative<modem::Noise>(transmission);
+                if(noise) {
+                    if(noise_long_profile && value.long_message_modem) {
+                        auto plan=std::move(value.transfer.modem.fake_hopping);
+                        value.transfer.modem=*value.long_message_modem;
+                        value.transfer.modem.fake_hopping=std::move(plan);
+                    }
+                    key.clear(); // No saved-key history or receive-bank insertion.
+                    value.transfer.modem.spreading_mode=modem::SpreadingMode::pattern;
+                    value.transfer.modem.scramble=true;
                 }
                 // Simulation has its own deterministic sample timeline and
                 // never consumes the hardware key-use history.
                 if(value.simulation && !value.transfer.timestamp)
                     value.transfer.timestamp=static_cast<std::uint64_t>(current_epoch());
-                if(!value.simulation && !force) {
+                if(!value.simulation && !force && !noise) {
                     // Keep capture available during potentially hours-long
                     // absence waits. The source thread rechecks, rather than
                     // waiting with the output device open, if a later
@@ -2037,8 +2069,12 @@ struct Session::Impl {
                     throw Error("UTC transmission cannot override the key epoch reuse guard");
                 auto prepared = std::make_shared<Prepared>();
                 prepared->modem = value.transfer.modem;
+                prepared->timing_stop_seconds=static_cast<double>(modem::transmit_stop_sample_count(value.transfer.modem))/value.transfer.modem.sample_rate;
+                prepared->output_gain=value.transmit_gain;
+                prepared->output_channels=audio::output_channels(value.mono,value.channel_mode);
                 prepared->generation = version; prepared->serial = serial;prepared->receive_clear_generation=clear_generation; prepared->stop = token;
                 prepared->binary = std::holds_alternative<Bytes>(transmission);
+                prepared->noise=noise;
                 prepared->hardware = !value.simulation;
                 if (!value.simulation) {
                     if(value.transfer.clock_sync && value.transfer.modem.oscillator_search && audio::utc_follow_supported()) {
@@ -2046,15 +2082,9 @@ struct Session::Impl {
                             modem::utc_transmit_rate_limit(value.transfer.modem));
                         prepared->timing_rate_fraction=geometry.transmit_rate_correction;
                         if(prepared->timing_rate_fraction>0) {
-                            // Encode/size outside the live PCM callback. No
-                            // private waveform is emitted or epoch reserved by
-                            // this finite-horizon estimate; the fresh epoch is
-                            // selected after silent timing preparation.
-                            auto estimated_options=value.transfer;estimated_options.modem.stream_phase_samples=0;
-                            const auto size=prepared->binary?transfer::estimate_binary(std::get<Bytes>(transmission),estimated_options):
-                                transfer::estimate(std::get<Message>(transmission),estimated_options);
-                            prepared->timing_source_seconds=static_cast<double>(size.waveform_samples)/value.transfer.modem.sample_rate;
-                            prepared->timing_source_samples=size.waveform_samples;
+                            // Same immutable geometry and stopping horizon for
+                            // finite messages and open-ended temporary-key noise.
+                            prepared->timing_stop_seconds=static_cast<double>(modem::transmit_stop_sample_count(value.transfer.modem))/value.transfer.modem.sample_rate;
                         }
                     }
                     prepared->prepare_hardware=[this,transmission=std::move(transmission),
@@ -2063,7 +2093,7 @@ struct Session::Impl {
                         // any cancelled preceding playback has fully returned.
                         // A queued request must recheck history here: the
                         // preceding waveform can advance it after enqueue.
-                        if(!force) {
+                        if(!force && !wave.noise) {
                             std::lock_guard lock(mutex);
                             if(wave.stop.stop_requested())throw Error("transmission cancelled");
                             if(Clock::now()<next_hardware_send)
@@ -2076,6 +2106,10 @@ struct Session::Impl {
                             throw Error("UTC hardware transmission requires a freshly scheduled epoch");
                         const auto make=[&](std::uint64_t epoch) {
                             options.timestamp=epoch;
+                            if(wave.noise) {
+                                auto config=options.modem;config.stream_epoch=epoch;
+                                return std::make_unique<modem::StreamingTransmitter>(modem::Noise{},config,value.dsp_workspace_bytes/4);
+                            }
                             return wave.binary?transfer::binary_transmitter(std::get<Bytes>(transmission),options):
                                 transfer::message_transmitter(std::get<Message>(transmission),options);
                         };
@@ -2102,18 +2136,19 @@ struct Session::Impl {
                             if(!key.empty())wave.protected_epoch=options.timestamp;
                         }
                         wave.protected_key=key;
-                        if(wave.timing_source_samples && wave.transmitter->total_samples()!=wave.timing_source_samples)
-                            throw Error("UTC source duration changed after timing preparation");
                         // Reservation itself happens after each successful read
                         // and before its PCM is handed back to the device.
                     };
+                } else if(noise) {
+                    auto config=value.transfer.modem;config.stream_epoch=value.transfer.timestamp;
+                    prepared->transmitter=std::make_unique<modem::StreamingTransmitter>(modem::Noise{},config,value.dsp_workspace_bytes/4);
                 } else if (prepared->binary) {
                     prepared->transmitter = transfer::binary_transmitter(std::get<Bytes>(transmission),value.transfer);
                 } else {
                     if (token.stop_requested()) continue;
                     prepared->transmitter = transfer::message_transmitter(std::get<Message>(transmission), value.transfer);
                 }
-                if (value.simulation) {
+                if (value.simulation && !noise) {
                     const auto reserved = replay_workspace(value);
                     if (reserved <= replay_result_workspace) throw Error("DSP workspace cannot hold simulation results");
                     const auto budget = reserved - replay_result_workspace;
@@ -2325,10 +2360,23 @@ void Session::transmit_bits(std::span<const std::uint8_t> bits, bool force,std::
         throw Error("binary input must contain only 0 and 1 bits");
     impl_->enqueue(Bytes(bits.begin(), bits.end()),force,std::move(hopping));
 }
-void Session::transmit_noise(std::shared_ptr<const modem::FhssPlan> hopping) {
+void Session::transmit_noise(std::shared_ptr<const modem::FhssPlan> hopping,bool long_profile) {
     std::lock_guard lock(impl_->mutex);
     if (!impl_->current.running) throw Error("continuous receiver is not running");
-    impl_->enqueue(modem::Noise{},false,std::move(hopping));
+    impl_->enqueue(modem::Noise{},false,std::move(hopping),long_profile);
+}
+void Session::finish_transmit() {
+    {
+        std::lock_guard lock(impl_->mutex);
+        if(impl_->source_pcm_started && impl_->current.transmitting && !impl_->current.simulation_receiving_tail && !impl_->finish_requested) {
+            impl_->finish_requested=true;impl_->current.transmission_stopping=true;
+            impl_->queued.clear();
+            impl_->current.status="Finishing echo protection and pulse tails; cancel again to abort immediately";
+            impl_->changed.notify_all();return;
+        }
+    }
+    // Preparation/replay and a repeated request retain responsive hard abort.
+    cancel_transmit();
 }
 void Session::cancel_transmit() {
     std::lock_guard lock(impl_->mutex);
@@ -2337,6 +2385,7 @@ void Session::cancel_transmit() {
     impl_->tx_stop.request_stop(); ++impl_->tx_serial; impl_->queued.clear(); impl_->ready.reset(); impl_->tx_busy = false;
     impl_->current.transmitting = impl_->current.transmitting_noise = false;
     impl_->current.transmission_finished = true; impl_->current.transmission_cancelled = true;
+    impl_->current.transmission_stopping=false;impl_->finish_requested=false;impl_->source_pcm_started=false;
     impl_->clear_replay(); impl_->pending_points = {}; impl_->replay_omitted = 0;
     impl_->current.constellation.clear(); impl_->current.constellation_source = ConstellationSource::input;
     impl_->current.constellation_dropped = 0;

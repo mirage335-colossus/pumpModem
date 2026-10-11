@@ -245,8 +245,13 @@ void interleaved_dsss_legacy_and_gain() {
     std::vector<std::complex<double>> a(static_cast<std::size_t>(v1.total_samples())),b(a.size());
     check(v1.read_analytic(a)==a.size() && v2.read_analytic(b)==b.size(),"V2 gain changed surrounding-noise duration");
     const auto payload_begin=modem::training_sample_count(c),payload_end=payload_begin+modem::symbol_sample_count(c);
-    for(std::size_t i=0;i<a.size();++i)if(i<payload_begin || i>=payload_end)
-        check(std::abs(b[i]-.5*a[i])<1e-14,"V2 must apply headroom to settling and suppression noise too");
+    bool outer_cover_changed=false;
+    for(std::size_t i=0;i<a.size();++i)if(i<payload_begin || i>=payload_end) {
+        outer_cover_changed|=std::abs(b[i]-.5*a[i])>1e-14;
+        check(std::abs(b[i])<=modem::pattern_pcm_radius_limit,
+              "full-DSSS surrounding noise exceeded PCM headroom");
+    }
+    check(outer_cover_changed,"surroundings bypassed the selected full outer construction");
 }
 void outer_dsss_domains_and_addresses() {
     constexpr std::uint64_t epoch=1789312671;
@@ -732,6 +737,10 @@ void hardware_noise_keystreams() {
     modem::PatternTransmitter original({0,0,1},c,epoch,first_chip),other({0,0,1},changed,epoch,first_chip),bare({0,0,1},c,epoch,first_chip,false);
     std::vector<std::complex<double>> a(static_cast<std::size_t>(original.total_samples())),b(a.size()),payload(static_cast<std::size_t>(bare.total_samples()));
     original.read_analytic(a);other.read_analytic(b);bare.read_analytic(payload);
+    modem::PatternTransmitter bare_other({0,0,1},changed,epoch,first_chip,false);
+    std::vector<std::complex<double>> other_payload(static_cast<std::size_t>(bare_other.total_samples()));
+    bare_other.read_analytic(other_payload);
+    check(payload==other_payload,"hardware Data key changed the complete bare payload waveform or pulse tails");
     const auto offset=static_cast<std::size_t>(modem::training_sample_count(c));
     std::complex<double> mean{},quadrature{};double power=0;std::size_t observations=0;
     for(std::size_t i=2*modem::pattern_pulse_padding_samples(c);i<offset;++i) {
@@ -743,10 +752,19 @@ void hardware_noise_keystreams() {
           std::abs(power/observations-1)<.1,
           "hardware noise must fill both quadratures with the payload's mean power, not a binary line");
     const auto settled=offset+2*modem::pattern_pulse_padding_samples(c);
-    check(std::equal(a.begin()+static_cast<std::ptrdiff_t>(settled),a.end()-static_cast<std::ptrdiff_t>(modem::suppression_sample_count(c)),b.begin()+static_cast<std::ptrdiff_t>(settled)),
+    // The former three-second total tail began after payload ring-out. The
+    // protected tail now overlaps its last support radius before the shared
+    // limiter. Retain the equality over every sample outside BOTH overlaps;
+    // also check all payload coefficients, including those in the overlap.
+    const auto trailing_overlap=2*modem::pattern_pulse_padding_samples(c);
+    modem::PatternCode original_code(c,epoch),changed_code(changed,epoch);
+    for(std::uint64_t chip=first_chip;chip<first_chip+3*original_code.chips_per_symbol();++chip)
+        check(original_code.values(chip)==changed_code.values(chip),
+              "hardware Data key changed a payload candidate in the final cover overlap");
+    check(std::equal(a.begin()+static_cast<std::ptrdiff_t>(settled),a.end()-static_cast<std::ptrdiff_t>(modem::suppression_sample_count(c)+trailing_overlap),b.begin()+static_cast<std::ptrdiff_t>(settled)),
           "hardware Data encryption key must not change payload beyond the filter overlap");
     const auto rotation=std::polar(1.,2*std::numbers::pi*static_cast<double>(offset)*c.carrier_hz/c.sample_rate);
-    for(std::size_t i=2*modem::pattern_pulse_padding_samples(c);i<payload.size();++i)
+    for(std::size_t i=2*modem::pattern_pulse_padding_samples(c);i<payload.size()-trailing_overlap;++i)
         check(std::abs(a[offset+i]-payload[i]*rotation)<1e-8,"settling must not consume or reset payload stream positions");
     transfer::Options options;options.modem=config();
     options.key.emplace(Bytes(32,0x19));
@@ -788,16 +806,30 @@ void hardware_data_byte_encryption() {
         auto spread=encrypted;spread.scramble=(layers&1U)!=0;spread.dsss=(layers&2U)!=0;
         modem::PatternTransmitter tx({0},spread,epoch);
         std::vector<std::complex<double>> observed(b.size());tx.read_analytic(observed);
-        const Crypto pattern(spread.spreading_seed),dsss(spread.dsss_seed);
+        auto child=spread;Bytes root(32,0);
+        const auto mix=[&](const Crypto& key,StreamPurpose purpose) {
+            const auto bytes=key.stream(purpose,epoch,0,32,StreamDomain::CoverPreambleV1);
+            for(std::size_t i=0;i<32;++i)root[i]^=bytes[i];
+        };
+        mix(*spread.data_key,StreamPurpose::Data);
+        if(spread.scramble)mix(Crypto(spread.spreading_seed),StreamPurpose::Scrambler);
+        if(spread.dsss)mix(Crypto(spread.dsss_seed),StreamPurpose::Dsss);
+        child.data_key=Crypto(root);
+        for(const auto purpose:{StreamPurpose::Scrambler,StreamPurpose::Dsss}) {
+            const auto seed=child.data_key->stream(purpose,0,0,32);
+            std::copy(seed.begin(),seed.end(),purpose==StreamPurpose::Scrambler?child.spreading_seed.begin():child.dsss_seed.begin());
+        }
+        modem::PatternCode expected(child,epoch);
         const auto chips=observed.size()/refresh;
-        const auto pattern_mask=pattern.stream(StreamPurpose::Scrambler,epoch,0,chips*8,StreamDomain::Preamble);
-        const auto dsss_mask=dsss.stream(StreamPurpose::Dsss,epoch,0,chips*8,StreamDomain::Preamble);
         for(std::size_t chip=0;chip<chips;++chip) {
-            std::uint32_t word=0;
-            for(unsigned j=4;j<8;++j)word=(word<<8)|
-                ((spread.scramble?pattern_mask[chip*8+j]:0)^(spread.dsss?dsss_mask[chip*8+j]:0));
-            check((phase_word(observed[chip*refresh],chip*refresh)^phase_word(b[chip*refresh],chip*refresh))==word,
-                  "preamble must mix every enabled private stream before amplitude and phase mapping");
+            const auto sample=chip*refresh,symbol=sample/expected.symbol_samples();
+            const auto address=modem::symbol_stream_address(epoch,child.stream_phase_samples,symbol,
+                expected.symbol_samples(),child.sample_rate);
+            const auto bit=(child.data_key->stream(StreamPurpose::Data,address.epoch,address.ordinal/8,1)[0]>>(7-address.ordinal%8))&1U;
+            const auto value=expected.value(symbol*expected.chips_per_symbol()+(sample%expected.symbol_samples())/refresh,bit);
+            const auto oscillator=std::polar(1.,2*std::numbers::pi*sample*child.carrier_hz/child.sample_rate);
+            check(std::abs(observed[sample]-std::sqrt(2*modem::nominal_signal_power)*oscillator*value)<1e-9,
+                  "preamble must mix every enabled purpose into separated full-symbol cover before mapping");
         }
     }
     const auto used=encrypted_tx.working_bytes();

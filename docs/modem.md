@@ -79,7 +79,8 @@ The modem's nominal chip rate is bandwidth / 2.
 independent of the hardware clock. `symbol_sample_count` rounds that duration
 up once to an internal PCM sample; exact airtime estimates include this rounding.
 Shaped transmissions also include the two finite filter tails described below.
-Every nonempty transmission then adds exactly three seconds of suppression noise;
+Private transmissions add at least three useful seconds of suppression, with
+establishment/shutdown support outside that interval;
 these durations do not change any payload-symbol duration.
 The nominal gross bit rate is selected bits per symbol divided by nominal symbol
 duration, before interval markers, integrity/parity and surrounding-noise overhead. Audio conversion does not alter
@@ -95,21 +96,15 @@ length `T`; it is absent when `T` exceeds four seconds. The first payload symbol
 then follows at its normal duration, starting at payload stream position zero.
 An empty payload emits no prefix.
 
-The settling waveform uses independent circular Gaussian-derived I/Q noise,
-refreshed once per chip, at the payload's mean transmit power.
-Its radius is limited and normalized to keep peaks inside PCM headroom.
-Private payload and prefix use the same update cadence and noise mapping.
-Eligible pattern profiles apply the same pulse shaping continuously across the
-prefix and payload. The prefix helps external gain control and muting settle before
-fast payload symbols arrive, and is not made from the legal payload patterns.
-It supplies no training, header or acquisition condition: pattern evidence
-alone accepts the following symbols even when the prefix is lost or distorted.
-Any selected key XOR-encrypts the preamble noise bytes with its existing
-Data-purpose key and transmission epoch before I/Q mapping. Enabled Scrambler and DSSS bytes XOR in before that same
-mapping, using
-the same keys and epoch as their payload streams. The high eight CTR counter
-bytes contain the fixed ASCII pad `preamble`, separating prefix positions
-without generating or deriving extra keys. Tone mode uses the same noise
+Private settling uses independently separated cover secrets and the complete
+ordinary private-pattern construction, including the selected full-symbol DSSS
+interleaving/rotations and final pulse shaping. It supplies no training, header
+or acquisition condition and is not a legal communication-key candidate.
+The new `cv-pre01` derivation domain is separate from payload and suppression.
+Public, Data-only and unencrypted DSSS-only diagnostic prefixes retain the earlier circular noise and
+`preamble` mapping. See [transmitter cover](transmit-cover.md) for exact domains,
+partial-symbol handling, bounded state and remaining observer distinctions.
+Tone mode uses the same noise
 prefix, refreshing phase and amplitude once per chip;
 it reserves no payload constellation points. Automatically timed hardware
 output schedules the first payload symbol on a whole system-clock second;
@@ -124,22 +119,18 @@ payload bits. For shaped profiles the first payload position is
 
 ### Trailing suppression noise
 
-Every nonempty transmission, including raw bits and tone mode, appends exactly
-`3 * sample_rate` samples of independent circular noise after the payload's
-complete final filter tail. It is never rounded to a symbol boundary, even
-when a symbol lasts hours and the rounded settling prefix is absent. The
-noise is generated from fixed-size caches; no duration-sized tail buffer is
-allocated. Input bits, symbol epochs, Data positions and the original payload
-waveform remain unchanged. Low-level bare-capture tests may explicitly disable
-both surrounding noise sections with `surrounding_noise=false`.
+Private message and tuning sources share a coefficient-level handover to
+independently keyed full-DSSS cover. At least three seconds of ordinary
+statistical cover power follow the last payload pulse contribution; establishment
+and shutdown support add airtime outside that interval. No duration-sized PCM
+buffer or extra payload bits are introduced. The public/tone and unsupported
+low-level diagnostic reference retains its original three-second tail. Bare
+captures can explicitly disable surrounding sections with `surrounding_noise=false`.
 
-The tail uses the same chip cadence, noise mapping and selected protections as
-the settling prefix, with the independent `Suppression` counter domain: its
-high eight bytes are ASCII `suppress`, rather than `preamble` or zero. Eligible
-profiles shape this noise with the same pulse, using virtual neighboring noise
-chips without overlapping the payload waveform. Ten-millisecond edge tapers
-are included within the exact three-second duration. Waveform previews include
-the tail, while payload constellation observations exclude it.
+See [cover boundaries and graceful stopping](transmit-cover.md#edges-short-sections-and-stop-latency)
+for the exact duration and stopping bound. Previews include the tail; payload
+constellation observations exclude it. Normal and graceful-cancel output drains
+through the same shaper and audio device. Immediate abort forfeits protection.
 
 The noise can mask weaker delayed copies of recently transmitted patterns.
 The three-second guard duration is selected for the Earth–Moon–Earth case. It
@@ -682,15 +673,17 @@ or the sampled simulation channel. Binary mode does not send callsign/grid
 metadata, an attachment, repeat requests, compression, interval markers,
 integrity tags or error correction. The separate hardware-settling prefix
 uses the same rounded duration as other pattern transmissions, and the
-suppression tail adds exactly three seconds after the final filter samples.
+suppression tail preserves three useful seconds after final payload pulse
+contributions, then drains its own shutdown support.
 
 In default pattern mode, each bit occupies exactly one complete pattern symbol,
 so a three-bit draft occupies three payload symbols with no byte padding. Any
 hardware-settling prefix and the suppression tail add airtime but no payload symbols or bits. Selected keys
-mask the actual data bits and seed independent pattern/DSSS streams. When a
-prefix is present, those same keys also mask its noise through the separate
-`preamble` CTR range. They mask the tail through the independent `suppress`
-range; neither section adds transmitted data bits.
+mask the actual data bits and seed independent pattern/DSSS streams. Private prefix/tail sections derive independent cover roles with the same full
+DSSS construction; neither section adds transmitted data bits. Public and
+Data-only and unencrypted DSSS-only diagnostic modes retain their separate
+`preamble`/`suppress` ranges.
+See [transmitter cover](transmit-cover.md).
 
 Raw signals have no interval coding or authentication. Simulation and audio
 feed their waveform to the same blind pattern receiver, without transmitting

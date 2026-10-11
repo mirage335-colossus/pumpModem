@@ -341,11 +341,13 @@ preview; no standalone header LPI row is retained.
 Compression. It starts the regular encrypted pattern modulation with fresh
 temporary keys and dummy bits, independently of draft/attachment validity or
 the selected saved key. Valid modem settings and an idle transmitter are
-required; key loading disables startup. **Stop noise** cancels it, and the mode
+required; key loading disables startup. **Stop noise** finishes pulse tails;
+**Abort now** immediately cancels them. The mode
 line shows elapsed time. Drafts, prepared inspection, previous-message history
 and saved keys remain intact. Simulation runs continuously without a completion
 replay. Automatic transmission capture stays hidden during noise; manual Hex/Bits
-show an explanatory caption and no retained temporary keystream diagnostics.
+show bounded generated private/DSSS/FHSS purpose bytes, without temporary root
+keys or encoded message content. See [transmitter cover](transmit-cover.md).
 
 Regular hardware transmission keeps an in-memory usage record for each selected
 key. When prior output has already used a future symbol epoch, including its
@@ -487,17 +489,22 @@ after private generation never unlock/replay the generated epoch.
 
 The editable **Clock accuracy**, **Clock region** and **Clock offset** controls
 describe PC synchronization and propagation independently of oscillator selection.
-The adjacent editable **Audio error** defaults to 0 ms per station after known
-queue-delay compensation. It is independent of GPS/propagation and oscillator
-models, persists through the same parameter-list/command path, and remains
-unchanged when the clock triplet returns to Default. Its duration presets and
+The adjacent editable **Audio error** starts at **Default**, resolving to 50 ms
+per station after known queue-delay compensation. It is independent of GPS/propagation and oscillator
+models and persists through the same parameter-list/command path. Its duration presets and
 custom values do not alter the underrun-prevention buffer or establish measured
 hardware accuracy.
-A first custom selection uses region 1 ms and offset 0 ms. Audio error accepts
+A first custom selection uses region 1 ms, offset 0 ms and the 50 ms audio default
+unless an explicit numeric audio allowance is already set. Audio error accepts
 zero as a strict requested bound; actual device uncertainty still forces a visible
 full-window fallback when it cannot fit.
-Default in any one resets all three to the existing epoch-search policy. Explicit
-region values are total widths centered on the fixed offset. The accuracy menu
+Default in any of the four timing editors resets all four, with the existing
+epoch-search policy and the 50 ms audio default. Numeric audio edits do
+not enable GPS timing. A complete reset exports as `--clock-sync default
+--audio-error 50ms` and loads back as Default in all four controls. Explicit older
+numeric imports (including 0 ms) remain valid; partial imports preserve omitted
+fields. Without clock sync the audio allowance does not change the search bank or
+CPU work. Explicit region values are total widths centered on the fixed offset. The accuracy menu
 contains duration entries, not composite policy strings. Composite command and
 parameter-list imports are split into the three fields; individual fractional
 durations remain editable. A narrow entered value must not silently drop
@@ -1196,3 +1203,13 @@ and dependencies that cross into a toolkit or application internals.
 
 See [GUI architecture](gui-architecture.md) for file ownership, extension tests
 and the architectural regression guard.
+
+## Graceful Robust stopping
+
+The first Cancel TX / Stop noise finishes retained finite pulse contributions;
+the button becomes **Abort now**. A second activation uses immediate cancellation,
+including for very narrow signals with long pulse tails. Before source generation
+and during simulation reception-only/replay work, cancellation remains immediate.
+The source thread owns the transition; the GUI does not splice PCM or end RX.
+TX remains active through physical buffer drain, and key-exposure history retains
+the original payload extent. See [transmitter cover](transmit-cover.md).

@@ -204,6 +204,23 @@ void preview_interpolation_edges(){
     }
 }
 
+void graceful_endpoint() {
+    for(const bool before:{false,true}) {
+        auto cfg=config();cfg.scramble=true;cfg.integration_seconds=1;
+        m::StreamingTransmitter source(m::RawBits{Bytes(12,0)},cfg);
+        m::SampledSimulationChannel channel(cfg,ideal());std::array<float,31> chunk{};
+        std::uint64_t received=0;
+        if(!before)received+=channel.read(source,chunk);
+        const auto emitted=source.samples_emitted(),original=source.total_samples();
+        source.request_finish();const auto final=source.total_samples();
+        require(final<original && final>=emitted,"finish did not retain prefetched PCM");
+        while(const auto count=channel.read(source,chunk))received+=count;
+        require(source.samples_emitted()==final,"channel did not drain the shortened source");
+        require(!before || received==0,"finish before output manufactured a startup burst");
+        const auto coordinate=channel.received_samples();channel.read_noise(chunk);
+        require(channel.received_samples()==coordinate+chunk.size(),"observed absence did not advance independently");
+    }
+}
 void invalid(){
     const auto cfg=config();auto model=ideal();model.clock_error_ppm=std::numeric_limits<double>::quiet_NaN();
     rejects([&]{m::SimulationChannel channel(cfg,model);},"NaNclockaccepted");
@@ -215,4 +232,4 @@ void invalid(){
     require(m::ChannelConfig{}.clock_error_ppm==100 && m::ChannelConfig{}.phase_noise_degrees_per_sqrt_second==.5,"simulationdefaultsarenotbadcrystalmodel");
 }
 }
-int main(){try{clock_and_carrier();long_coherence();phase_diffusion();pcm_clock();analytic_source_matches_hardware_pcm();sampled_startup_and_carrier();sampled_chunking_and_idle();stream_and_preview();preview_interpolation_edges();invalid();std::cout<<"channel tests passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
+int main(){try{clock_and_carrier();long_coherence();phase_diffusion();pcm_clock();analytic_source_matches_hardware_pcm();sampled_startup_and_carrier();sampled_chunking_and_idle();stream_and_preview();preview_interpolation_edges();graceful_endpoint();invalid();std::cout<<"channel tests passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

@@ -67,6 +67,23 @@ long double Resampler::source_seconds() const noexcept {
 double Resampler::rate_correction() const noexcept {
     return last_stage_?last_stage_->rate_correction():correction_;
 }
+void Resampler::observe_affine_timing(long double origin,double initial_rate) {
+    if(last_stage_){last_stage_->observe_affine_timing(origin,initial_rate);return;}
+    if(started_ || observe_timing_ || !std::isfinite(origin) || !std::isfinite(initial_rate))
+        throw Error("cannot replace the original resampler timing reference");
+    observe_timing_=true;timing_origin_=origin;timing_rate_=initial_rate;begin_timing_block();
+}
+void Resampler::begin_timing_block() {
+    if(last_stage_){last_stage_->begin_timing_block();return;}
+    timing_min_=timing_max_=std::fma(-(1.L+timing_rate_),static_cast<long double>(produced_)/output_rate_,source_seconds()-timing_origin_);
+}
+Resampler::TimingBlock Resampler::timing_block() const noexcept {
+    return last_stage_?last_stage_->timing_block():TimingBlock{produced_,timing_min_,timing_max_};
+}
+double Resampler::source_lookahead_seconds() const noexcept {
+    return first_stage_?first_stage_->source_lookahead_seconds()+last_stage_->source_lookahead_seconds()+
+        static_cast<double>(intermediate_.size())/last_stage_->input_rate_:static_cast<double>(radius_+2)/input_rate_;
+}
 std::uint64_t Resampler::final_count() const {
     // Quotient/remainder avoids multiplying a long-running input counter.
     const auto whole=received_/input_rate_;
@@ -156,6 +173,8 @@ Resampler::Progress Resampler::process(std::span<const float> input,std::span<fl
             const auto sample=interpolate();
             if(!std::isfinite(sample))throw Error("resampler output overflow");
             output[progress.produced++]=sample;
+            const auto before=observe_timing_?std::fma(-(1.L+timing_rate_),static_cast<long double>(produced_)/output_rate_,source_seconds()-timing_origin_):0;
+            const auto previous_rate=correction_;
             ++produced_;
             if(adjustable_) {
                 // Slew the derivative only. No sample insertion/deletion, phase
@@ -173,6 +192,19 @@ Resampler::Progress Resampler::process(std::span<const float> input,std::span<fl
                 if(source_>std::numeric_limits<std::uint64_t>::max()-advance/output_rate_)
                     throw Error("resampler duration exceeds counter range");
                 source_+=advance/output_rate_;remainder_=static_cast<std::uint32_t>(advance%output_rate_);
+            }
+            if(observe_timing_) {
+                const auto after=std::fma(-(1.L+timing_rate_),static_cast<long double>(produced_)/output_rate_,source_seconds()-timing_origin_);
+                timing_min_=std::min({timing_min_,before,after});timing_max_=std::max({timing_max_,before,after});
+                const auto velocity=static_cast<long double>(previous_rate)-timing_rate_;
+                const auto acceleration=(static_cast<long double>(correction_)-previous_rate)*output_rate_;
+                if(acceleration!=0) {
+                    const auto t=-velocity/acceleration;
+                    if(t>0 && t<1.L/output_rate_) {
+                        const auto extremum=before+.5L*velocity*t;
+                        timing_min_=std::min(timing_min_,extremum);timing_max_=std::max(timing_max_,extremum);
+                    }
+                }
             }
             discard_history();
         } else if(progress.consumed<input.size()) {

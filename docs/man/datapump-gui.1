@@ -97,10 +97,12 @@ paths retain the full search and report their limitation.
 .TP
 .BI \-\-audio\-error " TIME"
 Assumed residual audio timing error per station after reported queue compensation;
-default 0ms. The editable Audio error dropdown is independent of GPS accuracy,
+default 50ms. Default in any timing dropdown resets all four timing controls.
+Numeric Audio error edits are independent of GPS accuracy,
 propagation and oscillator models. Accepts nonnegative ns/us/ms/s durations up to 60s,
 subject to the Live search-window limit. This does not change buffering or
-establish measured hardware accuracy. Saved parameter lists retain this value.
+establish measured hardware accuracy. It does not change the ordinary search
+when clock sync is Default. Saved parameter lists retain this value.
 An unsupported allowance visibly falls back to ordinary playback before private
 output; it is not silently enlarged.
 .TP

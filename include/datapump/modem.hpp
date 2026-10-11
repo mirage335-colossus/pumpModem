@@ -147,9 +147,14 @@ double bit_rate(const Config& config);
 double symbol_seconds(const Config& config);
 std::uint64_t symbol_sample_count(const Config& config);
 std::uint64_t training_sample_count(const Config& config);
-// Exactly three seconds of independent noise after the complete waveform.
-// Unlike the settling prefix, this is never rounded to a symbol boundary.
+// Production private patterns use full, independently keyed cover. Low-level
+// public/DSSS-only diagnostic waveforms retain their historical reference tail.
+bool private_cover_enabled(const Config& config);
+// Additional samples after payload ring-out: three useful seconds PLUS the
+// support needed to establish and shut down ordinary statistical cover power.
 std::uint64_t suppression_sample_count(const Config& config);
+// Worst remaining source duration after a graceful stop (no symbol-length wait).
+std::uint64_t transmit_stop_sample_count(const Config& config);
 std::size_t payload_symbol_count(std::size_t payload_bytes, const Config& config);
 std::size_t waveform_sample_count(std::size_t wire_bytes, const Config& config);
 // Checks modulation and acquisition working buffers without allocating either.
@@ -171,7 +176,7 @@ void write_wav(std::ostream& output, std::span<const float> samples,
                std::uint32_t sample_rate);
 Wav read_wav(std::istream& input, std::size_t memory_limit = default_memory_limit);
 // Each element is one 0/1 payload bit, with no padding bits. Pattern output
-// includes rounded hardware-settling audio and exactly three seconds of trailing
+// includes rounded hardware-settling audio and at least three useful seconds of private trailing
 // suppression noise; neither carries payload.
 std::vector<float> modulate_status(std::span<const std::uint8_t> bits, const Config& config);
 double detect_status(std::span<const float> samples, std::span<const std::uint8_t> known_bits,
