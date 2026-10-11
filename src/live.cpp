@@ -1,4 +1,5 @@
 #include "datapump/live.hpp"
+#include "datapump/fhss_schedule.hpp"
 #include "datapump/execution.hpp"
 #include "datapump/audio.hpp"
 #include "datapump/channel.hpp"
@@ -69,8 +70,7 @@ struct ReplayFrame {
     std::uint64_t dropped = 0;
     modem::TransmitTrace transmit_trace;
 };
-constexpr std::size_t trace_prefix_workspace = modem::TransmitTrace::source_limit +
-    4 * modem::TransmitTrace::bit_limit + 4 * modem::TransmitTrace::byte_limit;
+constexpr std::size_t trace_prefix_workspace = modem::TransmitTrace::dynamic_storage_limit;
 constexpr std::size_t replay_frame_base = sizeof(ReplayFrame) +
     (replay_wave_samples + replay_bins) * sizeof(float) +
     pattern_score_limit * (sizeof(std::complex<float>) + sizeof(PatternScoreObservation)) +
@@ -345,7 +345,10 @@ struct Session::Impl {
     std::optional<Clock::time_point> simulation_compute_started;
     Clock::time_point next_hardware_send{};
     using Transmission = std::variant<Message, Bytes, modem::Noise>;
-    struct TransmitRequest { Transmission content; bool force = false; };
+    struct TransmitRequest {
+        Transmission content; bool force = false;
+        std::shared_ptr<const modem::FhssPlan> hopping;
+    };
     std::deque<TransmitRequest> queued;
     std::shared_ptr<Prepared> ready;
     std::deque<AudioBlock> input;
@@ -455,10 +458,16 @@ struct Session::Impl {
         }
         return datapump::detail::transmit_epoch_lock_seconds(config,used->second,current_epoch());
     }
-    void enqueue(Transmission transmission, bool force = false) {
+    void enqueue(Transmission transmission, bool force = false,std::shared_ptr<const modem::FhssPlan> hopping = {}) {
         if(capture_suspended)throw Error("Audio is reserved by the other mode");
         if (current.transmitting_noise) throw Error("stop noise before transmitting a message");
         const bool noise = std::holds_alternative<modem::Noise>(transmission);
+        if(hopping) {
+            hopping->validate();
+            if(!noise && !settings.transfer.key)throw Error("FHSS requires an encryption key");
+            // Freeze caller-owned values for this queued TX, independently of UI edits.
+            hopping=std::make_shared<const modem::FhssPlan>(*hopping);
+        }
         const auto* message=std::get_if<Message>(&transmission);
         const auto& config=message && settings.long_message_modem && !transfer::uses_raw_message(*message)?
             *settings.long_message_modem:settings.transfer.modem;
@@ -467,7 +476,7 @@ struct Session::Impl {
         if (noise && (tx_busy || !queued.empty())) throw Error("wait for transmission to finish before starting noise");
         if (queued.size() >= 8) throw Error("transmit queue contains eight pending messages");
         advance_replay(replay_clock());
-        queued.push_back({std::move(transmission),force}); current.transmitting = true;
+        queued.push_back({std::move(transmission),force,std::move(hopping)}); current.transmitting = true;
         current.transmission_finished = current.transmission_cancelled = false;
         if (!tx_busy) {
             current.transmitting_noise = noise;
@@ -1961,12 +1970,14 @@ struct Session::Impl {
     void encode_loop(std::stop_token stop) {
         while (!stop.stop_requested()) {
             Transmission transmission; Settings value; Bytes key; bool force=false;
+            std::shared_ptr<const modem::FhssPlan> hopping;
             std::uint64_t version, serial,clear_generation; std::stop_token token;
             {
                 std::unique_lock lock(mutex);
                 changed.wait(lock, stop, [this] { return current.running && !tx_busy && replay.empty() && !queued.empty(); });
                 if (stop.stop_requested()) break;
                 transmission = std::move(queued.front().content); force=queued.front().force;
+                hopping=std::move(queued.front().hopping);
                 queued.pop_front(); value = settings; key=selected_transmit_key;
                 version = generation;clear_generation=receive_clear_generation; serial = ++tx_serial; tx_stop = std::stop_source{}; token = tx_stop.get_token();
                 current.transmission_id = serial;current.transmit_clock_following=false;
@@ -1992,6 +2003,7 @@ struct Session::Impl {
                 if (const auto* message = std::get_if<Message>(&transmission);
                     message && value.long_message_modem && !transfer::uses_raw_message(*message))
                     value.transfer.modem = *value.long_message_modem;
+                value.transfer.modem.fake_hopping=std::move(hopping);
                 if (std::holds_alternative<modem::Noise>(transmission)) {
                     // Ephemeral streams need no saved-key epoch scheduling,
                     // source encoding, receiver-bank key or message replay.
@@ -2298,25 +2310,25 @@ void Session::clear_recoveries() {
         std::erase_if(impl_->current.signals,[&](const auto& event){return event.id==task->event.id;});
     impl_->invalidate_recoveries();
 }
-void Session::transmit(const Message& message, bool force) {
+void Session::transmit(const Message& message, bool force,std::shared_ptr<const modem::FhssPlan> hopping) {
     std::lock_guard lock(impl_->mutex);
     if (!impl_->current.running) throw Error("continuous receiver is not running");
     if (message.data.size() > impl_->settings.content_limit) throw Error("message exceeds content capacity");
-    impl_->enqueue(message,force);
+    impl_->enqueue(message,force,std::move(hopping));
 }
-void Session::transmit_bits(std::span<const std::uint8_t> bits, bool force) {
+void Session::transmit_bits(std::span<const std::uint8_t> bits, bool force,std::shared_ptr<const modem::FhssPlan> hopping) {
     std::lock_guard lock(impl_->mutex);
     if (!impl_->current.running) throw Error("continuous receiver is not running");
     if (bits.empty()) throw Error("enter at least one binary bit");
     if (bits.size() > impl_->settings.content_limit) throw Error("binary input exceeds content capacity");
     if (std::any_of(bits.begin(), bits.end(), [](auto bit) { return bit > 1; }))
         throw Error("binary input must contain only 0 and 1 bits");
-    impl_->enqueue(Bytes(bits.begin(), bits.end()),force);
+    impl_->enqueue(Bytes(bits.begin(), bits.end()),force,std::move(hopping));
 }
-void Session::transmit_noise() {
+void Session::transmit_noise(std::shared_ptr<const modem::FhssPlan> hopping) {
     std::lock_guard lock(impl_->mutex);
     if (!impl_->current.running) throw Error("continuous receiver is not running");
-    impl_->enqueue(modem::Noise{});
+    impl_->enqueue(modem::Noise{},false,std::move(hopping));
 }
 void Session::cancel_transmit() {
     std::lock_guard lock(impl_->mutex);

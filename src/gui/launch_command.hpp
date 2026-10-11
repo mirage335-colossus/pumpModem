@@ -16,6 +16,8 @@ struct Patch {
     std::optional<double> rf_shift_hz,search_margin;
     std::optional<std::string> oscillator,rf_oscillator,reference,pattern;
     std::optional<std::string> clock_sync,fhss,dsss_version,dsss_mode,search_arithmetic,doppler;
+    // Inline list contents or a file reference; parser never opens files.
+    std::optional<std::string> fhss_list,fhss_list_file;
     // File references and named selection only; never serialize key material.
     std::optional<std::string> keyfile,key_name,tx_key;
     std::optional<double> audio_timing_error_seconds;

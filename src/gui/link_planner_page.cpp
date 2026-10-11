@@ -631,7 +631,7 @@ void details(Node& root,const planner::Model& model) {
         if(!hop.available)paragraph(n,"Fake FHSS: "+hop.reason+". Fixed-band estimates retained.",11,Tone::negative,false,4);
         else {
             paragraph(n,"Fake FHSS: "+hop.name+" · "+std::to_string(hop.channels)+" channels · "+
-                number(hop.spacing_hz,8)+" Hz spacing · "+planner::duration(hop.dwell_seconds)+" residence · "+
+                number(hop.spacing_hz,8)+(hop.preference==fhss::Preference::list?" Hz minimum spacing · ":" Hz spacing · ")+planner::duration(hop.dwell_seconds)+" residence · "+
                 number(hop.span_hz,8)+" Hz center span.",11,Tone::text,false,4);
             paragraph(n,"Illustrated RF centers "+number(hop.first_hz,12)+"–"+number(hop.last_hz,12)+
                 " Hz; guarded channel width "+number(hop.guarded_hz,8)+" Hz. Highest RF feeds oscillator/search estimates. Physical audio and radio tuning stay fixed.",11,Tone::muted,false,4);

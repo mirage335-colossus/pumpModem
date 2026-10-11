@@ -1,4 +1,5 @@
 #include "datapump/live.hpp"
+#include "datapump/fhss_schedule.hpp"
 #include "cpu_work_budget.hpp"
 #include "datapump/symbol_schedule.hpp"
 #include "../src/live_pattern_scores.hpp"
@@ -238,6 +239,11 @@ bool same_capture(const modem::TransmitTrace& a,const modem::TransmitTrace& b) {
     const auto fields=[](const auto& value) {
         return std::tie(value.source,value.compressed_bits,value.wire_plain_bits,value.wire_bits,
             value.data_key_bits,value.pattern_input,value.pattern_output,value.pattern_key,value.dsss_key,
+            value.outer_dsss_key,value.dsss_permutation_seed,value.fhss_key,
+            value.outer_dsss_epoch,value.outer_dsss_byte_offset,value.dsss_permutation_byte_offset,value.outer_dsss_first_pair,
+            value.fhss,value.fhss_available,value.temporary_key,value.fhss_epoch,value.fhss_hop,
+            value.fhss_cycle,value.fhss_byte_offset,value.fhss_channel,value.fhss_channels,value.fhss_shift_hz,value.fhss_dwell_seconds,
+            value.outer_dsss_factor,value.outer_dsss_version,
             value.active,value.raw,value.short_text,value.source_available,value.compressed_available,
             value.data_masked,value.pattern_private,value.pattern_available,value.dsss,value.tone,
             value.total_wire_bits,value.generated_bits,value.generated_chips,value.revision);
@@ -460,6 +466,9 @@ void transmit_capture_tracks_generation_and_replay() {
     }
     const auto check_prefix=[&](const Trace& trace) {
         const auto count=std::min(Trace::bit_limit,trace.generated_bits);
+        if(trace.generated_bits)check(trace.fhss_available&&trace.fhss_key==value.transfer.key->stream(
+            StreamPurpose::Fhss,value.transfer.timestamp,trace.fhss_byte_offset,8,StreamDomain::FhssCycleV2),
+            "replay lost the actual transmitter-owned FHSS prefix or epoch");
         check(trace.generated_bits<=trace.total_wire_bits && trace.total_wire_bits==wire.size(),
               "capture payload count differs from the actual transmission");
         check(trace.source.size()<=Trace::source_limit && trace.compressed_bits.size()<=Trace::bit_limit &&
@@ -471,7 +480,9 @@ void transmit_capture_tracks_generation_and_replay() {
               trace.data_key_bits==Bytes(key.begin(),key.begin()+static_cast<std::ptrdiff_t>(count)),
               "live capture omitted or shifted actual encrypted marker and coded payload bits");
     };
-    session.start(value);session.transmit(sent);
+    auto hopping=std::make_shared<modem::FhssPlan>();hopping->channels=3;hopping->dwell_seconds=.4;
+    hopping->shifts[0]=1e6;hopping->shifts[1]=1.01e6;hopping->shifts[2]=1.033e6;
+    session.start(value);session.transmit(sent,false,hopping);
     const auto first=wait_for_sampled(session,"initial transmission trace replay",[&](const auto& snapshot) {
         check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,"capture replay exceeded live workspace");
         return snapshot.transmission_finished && snapshot.simulation_replay;

@@ -517,10 +517,11 @@ not replace inner private patterns. Selecting an enabled factor sets inner Rate
 360/36/3.6 Hz and stream Carrier 1500 Hz for 10x/100x/1000x. Explicit command imports
 preserve their requested Rate/Carrier. Invalid geometry still displays intended
 outer rate and shaped band edges to help correct Rate, Carrier or sample rate.
-Fake FHSS illustrates 200 channels at
-0.4-second dwell by updating Carrier/Shift display values while the real audio
-and hardware setting remain fixed. Genuine and IC-7100 hardware choices are
-visible but disabled. Its observer preview assumes simultaneous full-spectrum
+Fake FHSS offers Off, Fake: FCC and Fake: EU, plus Developer-only Fake: List.
+The resolved profile or Shift list determines channel count, spacing and
+0.4-second illustrative slots. Carrier/Shift display values change while real
+audio and hardware tuning remain fixed. Fresh keyed permutations replace the
+old repeated order; profile occupancy/access requirements remain unenforced. Its observer preview assumes simultaneous full-spectrum
 capture and selects the faster modeled aggregate/channelized detector; it does
 not credit missing signal energy or a universal 200× gain. Neither that illustration nor an unsupported probability
 model may be presented as measured spreading gain. See [spread controls](spread-spectrum-controls.md).
@@ -807,10 +808,34 @@ used to map circular I/Q amplitude and phase. Columns 00–07 belong to symbol 0
 public template input visible beside the changing private input, without
 retaining a duration-sized pattern. A private Pattern stream replaces the public template;
 there is no public-template XOR keystream to display. Its replacement bytes
-appear in Pattern Bitstream. DSSS, when enabled, is XORed into those bytes to
-produce Transmitted Pattern Bitstream. The Pattern Keystream row explicitly
-identifies the absent XOR operation. FHSS is not applied by this transmitter
-and its row says so. These are local diagnostic values, not extra wire fields.
+appear in Pattern Bitstream. Mapper DSSS, when enabled, is XORed into those bytes
+to produce Transmitted Pattern Bitstream; that row retains the actual mapper
+key bytes even when outer DSSS is also enabled. The Pattern Keystream row
+explicitly identifies the absent XOR operation.
+
+Two additional rows show the first payload symbol's actual outer DSSS rotation
+bytes (four QPSK chips per byte, up to 32 bytes) and the 32-byte Interleave
+permutation seed. These are separate counter domains, not XOR operands for the
+mapper output. Capture copies bytes already consumed by generation. Pulse
+lookahead and preview cannot publish future payload chips. The snapshot retains
+the canonical epoch, starting byte offsets and starting two-bit pair; displayed
+columns are offsets within each captured group, not a shared stream address.
+
+The FHSS row shows up to 32 bytes actually consumed by the transmitter-owned
+current-cycle keyed channel permutation, in hexadecimal in both Hex and Bits
+views. A short list ordinarily consumes `4 × (channels − 1)` bytes, plus any
+rejected draws, so unused columns stay blank. Every cycle uses fresh disjoint
+addresses. Cycle/byte-offset changes refresh this row even when a long chip has
+not advanced its generation revision. The snapshot retains that cycle and offset.
+The schedule's epoch is the actual TX source epoch, not the GUI's polling time.
+Temporary noise uses its own fresh key for FHSS as well as its waveform streams.
+Select **Hex** or **Bits** to inspect noise generation; the existing **Hex,
+auto-hide** policy continues to hide the scope during continuous tuning noise.
+Noise diagnostics do not set the message-trace `active` flag or create source
+bytes, Data-trace bytes, a finite wire endpoint or received message content.
+The GUI displays the channel from the captured sample timeline, including replay;
+it never draws an independent hop order. Fake modes still leave PCM and physical
+radio tuning fixed. These are local diagnostic values, not extra wire fields.
 The pattern-byte rows are marked as mapper inputs: payload-dependent pattern
 selection, pulse shaping and carrier modulation follow. The existing waveform
 and transmitted constellation display the generated signal from those stages.

@@ -89,7 +89,7 @@ public:
     PatternTransmitter(Bytes bits, Config config, std::uint64_t stream_epoch = 0,
                        std::uint64_t start_chip = 0, bool surrounding_noise = true,
                        bool trace = false);
-    PatternTransmitter(Config config, MaskedZeroBits bits, std::uint64_t stream_epoch = 0);
+    PatternTransmitter(Config config, MaskedZeroBits bits, std::uint64_t stream_epoch = 0, bool trace = false);
     ~PatternTransmitter();
     PatternTransmitter(PatternTransmitter&&) noexcept;
     PatternTransmitter& operator=(PatternTransmitter&&) noexcept;
@@ -132,6 +132,7 @@ public:
     std::uint64_t total_samples() const;
     std::uint64_t samples_emitted() const;
     std::size_t working_bytes() const;
+    void copy_transmit_trace(TransmitTrace&, std::uint64_t begun_chips) const;
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

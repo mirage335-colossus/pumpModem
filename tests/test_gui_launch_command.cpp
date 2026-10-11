@@ -70,11 +70,15 @@ void parsing_and_formatting() {
     const auto clock=launch_command::parse("--clock-sync GPS_0.1ms-400ms_region-2564ms_offset --audio-error 30ms --dsss-factor 1000 --fhss fake-0.4s-200 --live-duplex yes");
     check(clock.fhss=="fake-fcc"&&launch_command::format(clock).find("--fhss fake-fcc")!=std::string::npos,
         "legacy Fake FHSS must migrate to the persistent FCC preference");
-    for(const auto* choice:{"off","fake-fcc","fake-eu"}) {
+    for(const auto* choice:{"off","fake-fcc","fake-eu","fake-list"}) {
         const auto patch=launch_command::parse(std::string("--fhss ")+choice);
         check(patch.fhss==choice&&launch_command::parse(launch_command::format(patch))==patch,
             "FHSS preference did not survive CLI/parameter-list round trip");
     }
+    const auto custom=launch_command::parse("--fhss fake-list --fhss-list '30.0015MHz,30.0075MHz,30.0215MHz'");
+    check(custom.fhss_list=="30001500,30007500,30021500"&&launch_command::parse(launch_command::format(custom))==custom,"Inline FHSS list round trip failed");
+    const auto file=launch_command::parse("--fhss fake-list --fhss-list-file '/no/such file;$(echo test)'");
+    check(file.fhss_list_file=="/no/such file;$(echo test)"&&launch_command::parse(launch_command::format(file))==file,"FHSS path parsing opened or expanded a file");
     check(clock.audio_timing_error_seconds==.03,"audio allowance lost duration units");
     check(clock.full_duplex==true,"duplex selection was omitted from the saved settings");
     const auto half_duplex=launch_command::parse("--live-duplex no");
@@ -118,7 +122,7 @@ void parsing_and_formatting() {
     check(datapump::clock_sync::parse("GPS_1e-3ms-1us_region-0ms_offset")->accuracy_seconds==1e-6,
           "sub-millisecond scientific clock input lost precision");
     check(!datapump::clock_sync::parse("Default"),"Default clock policy must remain absent");
-    for(const auto* command:{"--fhss genuine","--fhss ic-7100","--dsss-factor 2","--clock-sync GPS_nanms-1ms_region-0ms_offset",
+    for(const auto* command:{"--fhss-list '1MHz'","--fhss-list '1MHz,1MHz'","--fhss-list '1MHz,2MHz' --fhss-list-file file","--fhss genuine","--fhss ic-7100","--dsss-factor 2","--clock-sync GPS_nanms-1ms_region-0ms_offset",
         "--clock-sync GPS_1ms--1ms_region-0ms_offset","--audio-error -1ms",
         "--audio-error NaNms","--audio-error 61s","--audio-error 30","--live-duplex maybe","--live-duplex 1"})rejects([&]{launch_command::parse(command);},"invalid clock/spreading setting accepted");
     check(launch_command::parse("--audio-error 0ms").audio_timing_error_seconds==0,

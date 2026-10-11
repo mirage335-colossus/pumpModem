@@ -58,6 +58,28 @@ void fast_default_console() {
     check(app.overlay_key({ui::Key::escape})&&!app.overlay(),"Escape did not dismiss Fast QR");
     app.close();
 }
+void fhss_developer_editor() {
+    using F=ui::Field;using C=ui::Command;using P=ui::Page;
+    Launch launch;launch.settings=launch_command::parse("--oscillator gpsdo-xo --rf-oscillator gpsdo-ocxo --shift 1MHz --carrier 1.0015MHz --fhss fake-list --fhss-list '1MHz,1.01MHz'");
+    Application app(launch);const auto& editor=control(F::fhss_list);
+    const auto visible=[&] {const auto tabs=app.tab_layout(ui::default_width,ui::default_height);return std::any_of(tabs.begin(),tabs.end(),[](const auto& tab){return tab.page==P::fhss&&tab.visible;});};
+    check(!visible()&&!app.control(editor).visible&&app.field(F::fhss).options.size()==3,"FHSS editor exposed outside Developer mode");
+    const auto original=app.field(F::fhss_list).text;
+    app.edit(F::fhss_list,"invalid");check(app.field(F::fhss_list).text==original,"Hidden FHSS edit accepted");
+    app.toggle(F::developer_mode,true);app.navigate(P::fhss);
+    check(app.page()==P::fhss&&app.control(editor).visible&&app.field(F::fhss).options.size()==4&&
+        app.field(F::fhss).options.back().label=="Fake: List","Developer FHSS mode/tab missing");
+    check(editor.multiline&&editor.tab_navigation&&editor.submit==C::none&&editor.byte_limit==8192,"FHSS editor has message-submit behavior or unbounded input");
+    for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
+        const auto frame=app.control_layout(editor,size.w,size.h).frame;
+        check(frame.h>250&&frame.w>800&&frame.y+frame.h<size.h-130,"FHSS editor does not fit usable page viewport");
+    }
+    app.edit(F::fhss_list,"1.005MHz\n1.02MHz");app.activate(C::fhss_apply);
+    check(launch_command::parse(app.field(F::planner_command).text).fhss_list=="1005000,1020000","FHSS apply did not export contents");
+    app.toggle(F::developer_mode,false);
+    check(app.page()==P::console&&!visible()&&app.field(F::fhss).options.size()==3&&app.field(F::fhss).selected=="fake-list", "Hiding Developer mode discarded active custom FHSS");
+    app.close();
+}
 void developer_mode_presentation() {
     using F=ui::Field;using P=ui::Page;
     Launch launch;
@@ -173,7 +195,7 @@ void transmission_scope_records() {
           "TX scope must be a shared first-tab native list without copy/completion actions");
     Application app({.simulation=true});
     const auto empty=app.field(F::transmit_scope).records;
-    check(empty.size()==11&&app.field(F::transmit_scope_caption).text.find("waiting for transmission")!=std::string::npos,
+    check(empty.size()==13&&app.field(F::transmit_scope_caption).text.find("waiting for transmission")!=std::string::npos,
           "Scope must expose all diagnostic rows before any real generation");
     app.edit(control(F::message),"e");
     check(app.field(F::transmit_scope).records==empty,"Draft edits populated a purported generation capture");
@@ -220,6 +242,9 @@ void transmission_scope_records() {
     trace.pattern_available=true;trace.pattern_private=true;trace.dsss=true;
     trace.pattern_input={0xa5,0x00};trace.pattern_key=trace.pattern_input;
     trace.dsss_key={0x3c,0xff};trace.pattern_output={0x99,0xff};
+    trace.outer_dsss_factor=10;trace.outer_dsss_version=2;
+    trace.outer_dsss_key={0xe4};trace.dsss_permutation_seed={0xb7};
+    trace.fhss=true;trace.fhss_available=true;trace.fhss_key={0x52};
     const auto rows=transmit_scope_records(trace,true);
     const auto compact=transmit_scope_records(trace);
     check(get(compact,"tx-wire").cells.front().text.ends_with("[10]")&&
@@ -237,6 +262,11 @@ void transmission_scope_records() {
           value(get(rows,"tx-pattern-output"),0).text=="99 10011001"&&
           value(get(rows,"tx-pattern-key"),0).text=="null (private replacement, no XOR mask)",
           "Final mapper input, actual DSSS mixing or private replacement was misrepresented");
+    check(value(get(rows,"tx-dsss-outer"),0).text=="E4 11100100"&&
+          value(get(rows,"tx-dsss-permutation"),0).text=="B7 10110111"&&
+          value(get(rows,"tx-fhss-key"),0).text=="52 01010010"&&
+          value(get(compact,"tx-fhss-key"),0).text=="52",
+          "Actual DSSS/FHSS streams must show hexadecimal bytes with optional binary detail");
     for(const auto& row:rows) {
         check(!row.activatable&&row.cells.size()<=66,"Scope became activatable or exceeded its bounded native cells");
         for(const auto& cell:row.cells)check(cell.h==17&&cell.y==0,"Diagnostic rows lost common vertical alignment");
@@ -246,12 +276,13 @@ void transmission_scope_records() {
           "Input, XOR key and output stages must remain adjacent for direct comparison");
     trace.raw=true;trace.short_text=false;trace.source_available=false;trace.compressed_available=false;
     trace.data_masked=false;trace.pattern_private=false;trace.pattern_available=false;trace.dsss=false;
+    trace.fhss=false;trace.outer_dsss_factor=1;
     const auto unused=transmit_scope_records(trace,true);
     check(value(get(unused,"tx-source"),0).text.find("Unavailable")!=std::string::npos&&
           value(get(unused,"tx-compressed"),0).text.find("Unused")!=std::string::npos&&
           value(get(unused,"tx-data-key"),0).text.find("off")!=std::string::npos&&
           value(get(unused,"tx-pattern"),0).text.find("Unavailable")!=std::string::npos&&
-          value(get(unused,"tx-fhss-key"),0).text.find("not implemented")!=std::string::npos,
+          value(get(unused,"tx-fhss-key"),0).text.find("off")!=std::string::npos,
           "Unused or unavailable stages were presented as generated keystream bytes");
     check(transmit_scope_caption(trace,"cancelled").find("cancelled")!=std::string::npos,
           "Cancelled generation lost its truthful capture status");
@@ -1381,6 +1412,6 @@ void smoke_shutdown_does_not_resume_workflow() {
 }
 }
 int main() {
-    try {fast_default_console();developer_mode_presentation();transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();fitted_target_editing();mono_declaration();oscillator_declaration();planner_clock_details();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();force_transmit_declaration();noise_declarations_and_dispatch();smoke_shutdown_does_not_resume_workflow();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {fhss_developer_editor();fast_default_console();developer_mode_presentation();transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();fitted_target_editing();mono_declaration();oscillator_declaration();planner_clock_details();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();force_transmit_declaration();noise_declarations_and_dispatch();smoke_shutdown_does_not_resume_workflow();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

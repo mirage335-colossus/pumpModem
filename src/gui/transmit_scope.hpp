@@ -61,14 +61,16 @@ inline void bytes(ui::Record& row,const Bytes& values,bool detailed) {
 // accidentally populate a transmission scope.
 inline std::vector<ui::Record> transmit_scope_records(const modem::TransmitTrace& trace,bool detailed=false) {
     using namespace transmit_scope;
+    const bool captured=trace.active || trace.temporary_key;
     std::vector<ui::Record> rows;
-    rows.reserve(11);
+    rows.reserve(13);
     auto heading=row("tx-offsets","Byte offset (hex); source pairs / pattern starts");
     for(int column=0;column<columns;++column)cell(heading,column,hex(static_cast<std::uint8_t>(column)),ui::TextTone::muted,detailed);
     rows.push_back(std::move(heading));
 
     auto source=row("tx-source","Transmitted Uncompressed Plaintext Alphanumeric");
-    if(trace.active&&!trace.source_available)note(source,trace.raw?"Unavailable: explicit raw bits have no plaintext source":"Unavailable: attachment or non-text source");
+    if(trace.temporary_key)note(source,"Unused: temporary-key noise has no message source");
+    else if(captured&&!trace.source_available)note(source,trace.raw?"Unavailable: explicit raw bits have no plaintext source":"Unavailable: attachment or non-text source");
     else for(int column=0;column<columns;++column) {
         std::string text;
         for(std::size_t index=static_cast<std::size_t>(column)*2;index<std::min(trace.source.size(),static_cast<std::size_t>(column)*2+2);++index) {
@@ -78,45 +80,58 @@ inline std::vector<ui::Record> transmit_scope_records(const modem::TransmitTrace
         const bool empty=text.empty();cell(source,column,empty?"--":text,empty?ui::TextTone::muted:ui::TextTone::data,detailed);
     }
     rows.push_back(std::move(source));
-    auto compressed=row("tx-compressed",trace.active&&!trace.short_text?"Transmitted Compressed Plaintext (source coding)":"Transmitted Compressed Plaintext");
-    if(trace.active&&!trace.compressed_available)note(compressed,"Unused: explicit raw bits bypass compression");
+    auto compressed=row("tx-compressed",captured&&!trace.short_text?"Transmitted Compressed Plaintext (source coding)":"Transmitted Compressed Plaintext");
+    if(trace.temporary_key)note(compressed,"Unused: temporary-key noise bypasses source encoding");
+    else if(captured&&!trace.compressed_available)note(compressed,"Unused: explicit raw bits bypass compression");
     else bits(compressed,trace.compressed_bits,detailed);
     rows.push_back(std::move(compressed));
-    auto plain=row("tx-wire-plain",trace.active&&!trace.raw&&!trace.short_text?"Wire Plaintext (includes markers / FEC)":"Wire Plaintext (exact payload bits)");
+    auto plain=row("tx-wire-plain",captured&&!trace.raw&&!trace.short_text?"Wire Plaintext (includes markers / FEC)":"Wire Plaintext (exact payload bits)");
     bits(plain,trace.wire_plain_bits,detailed);rows.push_back(std::move(plain));
     auto data_key=row("tx-data-key","Encryption Keystream Bytes");
-    if(trace.active&&!trace.data_masked)note(data_key,"Unused: Data encryption is off");
+    if(trace.temporary_key)note(data_key,"Not captured: temporary noise Data stream");
+    else if(captured&&!trace.data_masked)note(data_key,"Unused: Data encryption is off");
     else {operation(data_key,"XOR");bits(data_key,trace.data_key_bits,detailed);}
     rows.push_back(std::move(data_key));
     auto wire=row("tx-wire",trace.data_masked?"Transmitted Bytes (ciphertext)":"Transmitted Bytes (unmasked wire)");
     operation(wire,"=");bits(wire,trace.wire_bits,detailed);rows.push_back(std::move(wire));
     auto pattern_key=row("tx-pattern-key","Pattern Keystream");
-    note(pattern_key,!trace.active?"--":trace.pattern_private?"null (private replacement, no XOR mask)":"null (no Pattern XOR mask)");
+    note(pattern_key,!captured?"--":trace.pattern_private?"null (private replacement, no XOR mask)":"null (no Pattern XOR mask)");
     rows.push_back(std::move(pattern_key));
     auto input=row("tx-pattern",trace.pattern_private?"Pattern Bitstream (private symbol starts)":"Pattern Bitstream (public symbol starts)");
-    if(trace.active&&!trace.pattern_available)note(input,"Unavailable: this waveform has no pattern-byte mapper");
+    if(captured&&!trace.pattern_available)note(input,"Unavailable: this waveform has no pattern-byte mapper");
     else bytes(input,trace.pattern_input,detailed);
     rows.push_back(std::move(input));
-    auto dsss=row("tx-dsss-key","DSSS Keystream");
-    if(trace.active && trace.outer_dsss_factor>1)
-        note(dsss,std::to_string(trace.outer_dsss_factor)+"x outer QPSK; separate DSSS counter domain (outer bytes not captured)"+
-            (trace.dsss?std::string("; legacy mapper XOR also enabled"):std::string{}));
-    else if(trace.active&&!trace.dsss)note(dsss,"Unused: DSSS is off");
-    else if(trace.active&&!trace.pattern_available)note(dsss,"Unavailable: this waveform has no pattern-byte mapper");
+    auto dsss=row("tx-dsss-key","DSSS Mapper Keystream (symbol starts)");
+    if(captured&&!trace.dsss)note(dsss,"Unused: mapper DSSS is off");
+    else if(captured&&!trace.pattern_available)note(dsss,"Unavailable: this waveform has no pattern-byte mapper");
     else {operation(dsss,"XOR");bytes(dsss,trace.dsss_key,detailed);}
     rows.push_back(std::move(dsss));
     auto output=row("tx-pattern-output","Transmitted Pattern Bitstream (mapper input)");
-    if(trace.active&&!trace.pattern_available)note(output,"Unavailable: this waveform has no pattern-byte mapper");
+    if(captured&&!trace.pattern_available)note(output,"Unavailable: this waveform has no pattern-byte mapper");
     else {operation(output,"=");bytes(output,trace.pattern_output,detailed);}
     rows.push_back(std::move(output));
-    auto fhss=row("tx-fhss-key","FHSS Keystream");note(fhss,"RF hopping not implemented; Fake is display only");rows.push_back(std::move(fhss));
+    auto fhss=row("tx-fhss-key","FHSS Keystream (current cycle prefix)");
+    if(captured&&!trace.fhss)note(fhss,"Unused: FHSS is off");
+    else bytes(fhss,trace.fhss_key,detailed);
+    rows.push_back(std::move(fhss));
+    auto outer=row("tx-dsss-outer","DSSS Rotation Keystream (first symbol)");
+    auto permutation=row("tx-dsss-permutation","DSSS Permutation Seed (first symbol)");
+    if(captured&&trace.outer_dsss_factor<=1) {
+        note(outer,"Unused: outer DSSS is off");note(permutation,"Unused: outer DSSS is off");
+    } else {
+        bytes(outer,trace.outer_dsss_key,detailed);
+        if(captured&&trace.outer_dsss_version!=2)note(permutation,"Unused: legacy outer DSSS has no permutation");
+        else bytes(permutation,trace.dsss_permutation_seed,detailed);
+    }
+    rows.push_back(std::move(outer));rows.push_back(std::move(permutation));
     return rows;
 }
 inline std::string transmit_scope_caption(const modem::TransmitTrace& trace,std::string_view status={}) {
-    if(!trace.active)return "TX generation scope: waiting for transmission | source pairs; pattern: 8 bytes / symbol start; choose Hex / Bits";
+    if(!trace.active && !trace.temporary_key)return "TX generation scope: waiting for transmission | source pairs; pattern: 8 bytes / symbol start; choose Hex / Bits";
     std::string caption="TX generation scope: ";
     caption+=status.empty()?"captured":status;
-    caption+=" | "+std::to_string(trace.generated_bits)+" / "+std::to_string(trace.total_wire_bits)+" wire bits begun";
+    caption+=" | "+std::to_string(trace.generated_bits)+(trace.temporary_key?" temporary-key noise bits begun":
+        " / "+std::to_string(trace.total_wire_bits)+" wire bits begun");
     caption+=" | separate offsets; pattern: 8 bytes / symbol start";
     return caption;
 }

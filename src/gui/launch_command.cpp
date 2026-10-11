@@ -138,7 +138,7 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             flag=="--rate"||flag=="--bw"||flag=="--carrier"||flag=="--dsp-workspace"||flag=="--pattern"||
             flag=="--rf-oscillator"||flag=="--shift"||flag=="--rf-shift"||flag=="--rf-carrier"||flag=="--search-margin"||
             flag=="--reference"||flag=="--sideband"||flag=="--lf-reference"||
-            flag=="--clock-sync"||flag=="--audio-error"||flag=="--dsss-factor"||flag=="--dsss-version"||flag=="--dsss-mode"||flag=="--search-arithmetic"||flag=="--doppler"||flag=="--fhss"||flag=="--live-duplex"||
+            flag=="--clock-sync"||flag=="--audio-error"||flag=="--dsss-factor"||flag=="--dsss-version"||flag=="--dsss-mode"||flag=="--search-arithmetic"||flag=="--doppler"||flag=="--fhss"||flag=="--fhss-list"||flag=="--fhss-list-file"||flag=="--live-duplex"||
             flag=="--keyfile"||flag=="--key-name"||flag=="--tx-key";
         if(!known)invalid("Unknown launch option: "+std::string(flag));
         std::string_view value;
@@ -186,6 +186,8 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             if(value!="yes"&&value!="no")invalid("--live-duplex must be yes or no.");
             result.full_duplex=value=="yes";
         }
+        else if(flag=="--fhss-list")result.fhss_list=fhss::list_text(fhss::parse_list(value));
+        else if(flag=="--fhss-list-file")result.fhss_list_file=value;
         else if(flag=="--fhss") {
             result.fhss=fhss::id(fhss::parse(value));
         }
@@ -219,6 +221,7 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             invalid("--carrier and --rf-carrier must specify the same absolute frequency.");
         result.carrier_hz=carrier_alias;
     }
+    if(result.fhss_list&&result.fhss_list_file)invalid("Use only one of --fhss-list and --fhss-list-file.");
     // Omitted Doppler preserves the destination value. Validate a complete
     // triplet here; the controller validates every partial patch against the
     // retained settings before applying it.
@@ -275,6 +278,8 @@ std::string format(const Patch& settings) {
     if(settings.search_arithmetic)add("--search-arithmetic",std::string(tuning::search_arithmetic_id(tuning::parse_search_arithmetic(*settings.search_arithmetic))));
     if(settings.full_duplex)add("--live-duplex",*settings.full_duplex?"yes":"no");
     if(settings.fhss)add("--fhss",std::string(fhss::id(fhss::parse(*settings.fhss))));
+    if(settings.fhss_list)add("--fhss-list",fhss::list_text(fhss::parse_list(*settings.fhss_list)));
+    if(settings.fhss_list_file)arguments.push_back("--fhss-list-file="+*settings.fhss_list_file);
     // Equal syntax preserves a filename or key name beginning with '--'.
     if(settings.keyfile)arguments.push_back("--keyfile="+*settings.keyfile);
     if(settings.key_name)arguments.push_back("--key-name="+*settings.key_name);

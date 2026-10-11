@@ -29,6 +29,7 @@ enum class Slot {
     short_use_text, short_send_key, short_transmit, short_transmit_noise, short_cancel, short_airtime,
     compression_signals, copy_raw_signal, paste_raw_signal, raw_recovery_actions, received_raw_bits,
     device, mono, live_duplex, volume, exclusive, bandwidth, carrier, rf_shift, doppler, snr, long_snr, receive_snr, pattern, fec, dsp_workspace, diagnostics, status,
+    fhss_list, fhss_apply, fhss_list_status,
     fast_profile, fast_expected_snr, fast_symbol_rate, fast_constellation, fast_coding, fast_fec, fast_depth, fast_device, fast_mono, fast_encryption,
     fast_key, fast_key_path, fast_open_key, fast_generate_key, fast_text, fast_file, fast_choose_file,
     fast_transmit, fast_cancel, fast_save, fast_progress, fast_rate, fast_tracking,
@@ -306,6 +307,10 @@ struct DesktopLayout {
         out[Slot::paste_raw_signal] = {margin + 160, raw_actions_y, 180, action_height};
         out[Slot::raw_recovery_actions] = {margin + 350, raw_actions_y, 150, action_height};
         out[Slot::received_raw_bits] = {margin, raw_detail_y, compression_width, 52};
+
+        out[Slot::fhss_list_status]={margin,173,width-2*margin,54};
+        out[Slot::fhss_apply]={margin,233,160,action_height};
+        out[Slot::fhss_list]={margin,275,width-2*margin,out[Slot::page].y+out[Slot::page].h-285};
 
         // Two persistent rows keep both target labels readable at the minimum
         // width without reducing the composition, reception or plot areas.

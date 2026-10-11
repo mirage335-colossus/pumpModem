@@ -178,12 +178,20 @@ A long fade may terminate a receiving segment rather than the intended file.
 ## Keys, replay and private waveforms
 
 AES-256-CTR and HKDF purpose separation retain distinct Data, MAC, Scrambler,
-DSSS and reserved FHSS roles. A symbol selects its start-second epoch for its
+DSSS and FHSS roles. A symbol selects its start-second epoch for its
 entire duration; same-second ordinals and fixed seek caches preserve addresses
 through missing bits and interval drains. A canonical schedule address is not a
 fresh nonce. Reusing key/epoch/ordinal positions exposes XOR relationships between
 plaintexts and permits replay within accepted timing windows. Local cooldowns do
 not coordinate separate processes or hosts; there is no durable replay database.
+
+The Fake FHSS illustration uses the separate `FhssCycleV2` counter domain
+(`fh-cyc02`) and fresh, disjoint 1024-byte regions for successive channel
+permutations. It no longer recycles one permutation. Bounded unbiased draws and
+checked offsets fail explicitly on exhaustion. Coincidental equal permutations
+are possible; key/epoch reuse still recreates the same schedule. Fake does not
+control RF tuning or enforce regulatory sliding occupancy. See
+[the schedule and hardware requirements](spread-spectrum-controls.md#fresh-cycle-addresses-and-bounded-work).
 
 Every selected non-tone key enables private pattern templates. Each bit value
 uses a separate versioned cryptographic domain, and each successive symbol uses

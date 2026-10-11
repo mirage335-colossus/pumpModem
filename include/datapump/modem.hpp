@@ -7,11 +7,13 @@
 #include <cstdint>
 #include <iosfwd>
 #include <optional>
+#include <memory>
 #include <span>
 #include <stop_token>
 #include <vector>
 
 namespace datapump::modem {
+struct FhssPlan;
 namespace detail { class CorrelationProjectionCache; }
 inline constexpr double nominal_signal_power = 0.153125;
 inline constexpr double minimum_bandwidth_hz = 0.001;
@@ -88,6 +90,8 @@ struct Config {
     // Same selected key used to encrypt payload data. Preamble bytes use its
     // Data stream with the fixed preamble CTR pad, even without spreading.
     std::optional<Crypto> data_key;
+    // TX-only illustrated tuning schedule. Never changes sampled PCM or RX.
+    std::shared_ptr<const FhssPlan> fake_hopping;
     std::size_t memory_limit = default_memory_limit;
 };
 inline double waveform_bandwidth_hz(const Config& config) {

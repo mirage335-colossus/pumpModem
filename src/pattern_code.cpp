@@ -1,4 +1,5 @@
 #include "datapump/pattern_code.hpp"
+#include "datapump/fhss_schedule.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/symbol_schedule.hpp"
 #include "datapump/crypto.hpp"
@@ -127,6 +128,7 @@ struct PatternCode::Impl {
         static constexpr std::size_t setup_bytes=sizeof(StreamCache)+32+StreamCache::capacity;
         struct SymbolState {
             std::vector<std::uint32_t> permutation;
+            std::array<std::uint8_t,32> seed{};
             std::array<std::array<InnerChip,coarse_capacity>,2> coarse{};
             StreamCache rotations;
             std::uint64_t epoch=0,ordinal=0;
@@ -136,6 +138,7 @@ struct PatternCode::Impl {
             ~SymbolState() {
                 OPENSSL_cleanse(permutation.data(),permutation.size()*sizeof(permutation[0]));
                 OPENSSL_cleanse(coarse.data(),sizeof(coarse));
+                OPENSSL_cleanse(seed.data(),seed.size());
             }
         };
         // Shaped payload boundaries alternate old/new symbols every sample.
@@ -170,6 +173,7 @@ struct PatternCode::Impl {
             require(address.ordinal<=(std::numeric_limits<std::uint64_t>::max()-31)/32,
                     "DSSS permutation seed address would overflow");
             auto seed=key.stream(StreamPurpose::Dsss,address.epoch,address.ordinal*32,32,permutation_domain);
+            std::copy(seed.begin(),seed.end(),state.seed.begin());
             struct CleanSeed {
                 Bytes& value;
                 ~CleanSeed() { OPENSSL_cleanse(value.data(),value.size()); }
@@ -213,9 +217,18 @@ struct PatternCode::Impl {
     std::array<CachedChip,32> shaped_chips{}, shaped_chips_one{};
     struct TraceStorage {
         std::array<NoiseTrace,TransmitTrace::byte_limit/8> symbol_starts{};
+        std::array<std::uint8_t,TransmitTrace::byte_limit> rotations{},permutation{};
+        std::array<bool,TransmitTrace::byte_limit> rotation_valid{};
+        std::uint64_t outer_epoch=0,rotation_offset=0,permutation_offset=0;
+        unsigned first_pair=0;
+        bool outer_valid=false,permutation_valid=false;
         std::uint64_t first_chip=0;
         bool capture=false;
-        ~TraceStorage() { OPENSSL_cleanse(symbol_starts.data(),sizeof(symbol_starts)); }
+        ~TraceStorage() {
+            OPENSSL_cleanse(symbol_starts.data(),sizeof(symbol_starts));
+            OPENSSL_cleanse(rotations.data(),rotations.size());
+            OPENSSL_cleanse(permutation.data(),permutation.size());
+        }
     };
     std::unique_ptr<TraceStorage> trace;
     Impl(Config value, std::uint64_t start_epoch): config(value), epoch(start_epoch),
@@ -283,7 +296,22 @@ struct PatternCode::Impl {
                 rotations->select_epoch(address.epoch);
                 const auto fine_position=symbol_stream_chip(address,chips,position);
                 constexpr std::array<std::complex<double>,4> phases{{{1,0},{0,1},{-1,0},{0,-1}}};
-                outer_value=phases[(rotations->byte(fine_position/4)>>(2*(fine_position%4)))&3U];
+                const auto rotation=rotations->byte(fine_position/4);
+                outer_value=phases[(rotation>>(2*(fine_position%4)))&3U];
+                if(trace && trace->capture && absolute_chip>=trace->first_chip &&
+                   absolute_chip-trace->first_chip<chips) {
+                    const auto first=symbol_stream_chip(address,chips,0);
+                    trace->outer_valid=true;trace->outer_epoch=address.epoch;
+                    trace->rotation_offset=first/4;trace->first_pair=static_cast<unsigned>(first%4);
+                    const auto at=fine_position/4-first/4;
+                    if(at<trace->rotations.size()) {
+                        trace->rotations[at]=rotation;trace->rotation_valid[at]=true;
+                    }
+                    if(symbol_state && !trace->permutation_valid) {
+                        trace->permutation=symbol_state->seed;trace->permutation_valid=true;
+                        trace->permutation_offset=address.ordinal*32;
+                    }
+                }
                 // The final partial chip has a different energy weight and
                 // stays fixed; every complete fine-chip coefficient is merely
                 // reordered before its independent unit-magnitude rotation.
@@ -433,7 +461,18 @@ void PatternCode::capture_transmit_trace(bool enabled) {
 }
 void PatternCode::copy_transmit_trace(TransmitTrace& result,std::uint64_t begun_chips) const {
     result.pattern_input.clear();result.pattern_output.clear();result.pattern_key.clear();result.dsss_key.clear();
+    result.outer_dsss_key.clear();result.dsss_permutation_seed.clear();
     if(!impl_->trace || impl_->config.spreading_mode!=SpreadingMode::pattern)return;
+    const auto& trace=*impl_->trace;
+    if(begun_chips && trace.outer_valid) {
+        result.outer_dsss_epoch=trace.outer_epoch;result.outer_dsss_byte_offset=trace.rotation_offset;
+        result.outer_dsss_first_pair=trace.first_pair;
+        result.dsss_permutation_byte_offset=trace.permutation_offset;
+        const auto count=std::min<std::uint64_t>(TransmitTrace::byte_limit,
+            (std::min(begun_chips,impl_->chips)-1+trace.first_pair)/4+1);
+        for(std::size_t i=0;i<count && trace.rotation_valid[i];++i)result.outer_dsss_key.push_back(trace.rotations[i]);
+        if(trace.permutation_valid)result.dsss_permutation_seed.assign(trace.permutation.begin(),trace.permutation.end());
+    }
     const auto begun_symbols=begun_chips?(begun_chips-1)/impl_->chips+1:0;
     const auto count=std::min<std::uint64_t>(begun_symbols,impl_->trace->symbol_starts.size());
     for(std::size_t i=0;i<count;++i) {
@@ -449,6 +488,7 @@ void PatternCode::copy_transmit_trace(TransmitTrace& result,std::uint64_t begun_
 struct PatternTransmitter::Impl {
     Bytes bits;
     Config config;
+    std::unique_ptr<FhssSchedule> hopping;
     PatternCode code;
     std::unique_ptr<StreamCache> generated_data;
     std::unique_ptr<StreamCache> settling, settling_data, settling_pattern, settling_dsss;
@@ -465,6 +505,10 @@ struct PatternTransmitter::Impl {
          std::uint64_t generated_count=0):
         bits(std::move(input)), config(value), code(config, epoch),
         bit_count(generated_count?generated_count:bits.size()),source_epoch(epoch),start(start_chip) {
+        if(config.fake_hopping) {
+            require(config.data_key.has_value(),"FHSS requires an encryption key");
+            hopping=std::make_unique<FhssSchedule>(config.fake_hopping,*config.data_key,epoch);
+        }
         if(trace)code.enable_transmit_trace(start);
         require(bit_count, "pattern transmission requires at least one bit");
         if(generated_count) {
@@ -501,6 +545,7 @@ struct PatternTransmitter::Impl {
             (1U+static_cast<unsigned>(config.data_key.has_value())+
              static_cast<unsigned>(config.scramble)+static_cast<unsigned>(config.dsss));
         const auto fixed = sizeof(Impl) + sizeof(PatternTransmitter) + code.working_bytes()+
+            (hopping?sizeof(FhssSchedule)+sizeof(FhssPlan)+FhssSchedule::cycle_bytes+sizeof(std::array<unsigned,FhssPlan::capacity>):0)+
             (caches+static_cast<unsigned>(generated_data!=nullptr))*sizeof(StreamCache);
         require(fixed <= config.memory_limit && bits.capacity() <= config.memory_limit - fixed,
                 "pattern transmitter exceeds memory limit");
@@ -670,8 +715,8 @@ struct PatternTransmitter::Impl {
 
 PatternTransmitter::PatternTransmitter(Bytes bits, Config config, std::uint64_t epoch, std::uint64_t start_chip, bool surrounding_noise,bool trace):
     impl_(std::make_unique<Impl>(std::move(bits), config, epoch, start_chip, surrounding_noise,trace)) {}
-PatternTransmitter::PatternTransmitter(Config config,MaskedZeroBits bits,std::uint64_t epoch):
-    impl_(std::make_unique<Impl>(Bytes{},config,epoch,0,true,false,bits.count)) {}
+PatternTransmitter::PatternTransmitter(Config config,MaskedZeroBits bits,std::uint64_t epoch,bool trace):
+    impl_(std::make_unique<Impl>(Bytes{},config,epoch,0,true,trace,bits.count)) {}
 PatternTransmitter::~PatternTransmitter() = default;
 PatternTransmitter::PatternTransmitter(PatternTransmitter&&) noexcept = default;
 PatternTransmitter& PatternTransmitter::operator=(PatternTransmitter&&) noexcept = default;
@@ -696,18 +741,31 @@ std::uint64_t PatternTransmitter::samples_emitted() const { return impl_->positi
 double PatternTransmitter::bit_rate() const { return static_cast<double>(impl_->config.sample_rate) / static_cast<double>(impl_->code.symbol_samples()); }
 std::size_t PatternTransmitter::working_bytes() const {
     return sizeof(PatternTransmitter) + sizeof(Impl) + impl_->code.working_bytes() + impl_->bits.capacity()+
+        (impl_->hopping?sizeof(FhssSchedule)+sizeof(FhssPlan)+FhssSchedule::cycle_bytes+sizeof(std::array<unsigned,FhssPlan::capacity>):0)+
         ((impl_->generated_data?1U:0U)+(impl_->settling?1U:0U)+(impl_->settling_data?1U:0U)+(impl_->settling_pattern?1U:0U)+
          (impl_->settling_dsss?1U:0U)+(impl_->suppression?1U:0U)+(impl_->suppression_data?1U:0U)+
          (impl_->suppression_pattern?1U:0U)+(impl_->suppression_dsss?1U:0U))*sizeof(StreamCache);
 }
 void PatternTransmitter::copy_transmit_trace(TransmitTrace& result,std::uint64_t begun_chips) const {
     impl_->code.copy_transmit_trace(result,begun_chips);
+    if(const auto& hopping=impl_->hopping) {
+        result.fhss=true;result.fhss_available=impl_->position>0;
+        result.fhss_epoch=hopping->epoch;result.fhss_channels=hopping->plan->channels;
+        result.fhss_dwell_seconds=hopping->plan->dwell_seconds;
+        if(result.fhss_available) {
+            result.fhss_hop=hopping->ordinal(impl_->position-1,impl_->config.sample_rate);
+            result.fhss_channel=hopping->channel(result.fhss_hop);
+            result.fhss_cycle=hopping->cycle;result.fhss_byte_offset=hopping->byte_offset;
+            result.fhss_key.assign(hopping->prefix.begin(),hopping->prefix.begin()+hopping->prefix_size);
+            result.fhss_shift_hz=hopping->plan->shifts[result.fhss_channel];
+        }
+    }
 }
 
 struct NoiseTransmitter::Impl {
     PatternTransmitter pattern;
     Impl(const Config& config,std::uint64_t count):
-        pattern(config,PatternTransmitter::MaskedZeroBits{count},config.stream_epoch) {}
+        pattern(config,PatternTransmitter::MaskedZeroBits{count},config.stream_epoch,true) {}
 };
 
 NoiseTransmitter::NoiseTransmitter(Config config) {
@@ -760,6 +818,9 @@ std::uint64_t NoiseTransmitter::total_samples() const { return impl_->pattern.to
 std::uint64_t NoiseTransmitter::samples_emitted() const { return impl_->pattern.samples_emitted(); }
 std::size_t NoiseTransmitter::working_bytes() const {
     return sizeof(NoiseTransmitter)+sizeof(Impl)-sizeof(PatternTransmitter)+impl_->pattern.working_bytes();
+}
+void NoiseTransmitter::copy_transmit_trace(TransmitTrace& trace,std::uint64_t begun_chips) const {
+    impl_->pattern.copy_transmit_trace(trace,begun_chips);
 }
 
 } // namespace datapump::modem

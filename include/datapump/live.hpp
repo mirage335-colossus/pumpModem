@@ -247,16 +247,16 @@ public:
     void clear_received();
     // Force applies only to this request, bypassing local key/quiet waits.
     // It never clears previously recorded key use or changes the waveform.
-    void transmit(const Message& message, bool force = false);
+    void transmit(const Message& message, bool force = false, std::shared_ptr<const modem::FhssPlan> hopping = {});
     // One 0/1 per element, including leading zeros. Uses streaming APSK and
     // the selected data key, with no interval coding, preamble or FEC. Raw
     // simulations pass sampled audio to ordinary blind acquisition. Without
     // raw discovery framing, no timing/length-assisted raw result is emitted.
-    void transmit_bits(std::span<const std::uint8_t> bits, bool force = false);
+    void transmit_bits(std::span<const std::uint8_t> bits, bool force = false, std::shared_ptr<const modem::FhssPlan> hopping = {});
     // Continuous noise at the selected carrier/bandwidth and normal signal
     // level, with fresh temporary private streams. Does not encode a message
     // or use/register saved keys. Stop with cancel_transmit().
-    void transmit_noise();
+    void transmit_noise(std::shared_ptr<const modem::FhssPlan> hopping = {});
     void cancel_transmit();
     // Resume a retained incomplete search with another configured time budget,
     // or stop one search without interrupting reception or audio capture.

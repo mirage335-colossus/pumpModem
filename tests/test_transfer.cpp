@@ -3,6 +3,7 @@
 #include "datapump/boundary_sync.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/pattern_code.hpp"
+#include "datapump/fhss_schedule.hpp"
 #include "datapump/symbol_schedule.hpp"
 #include "../src/transmit_timing.hpp"
 #include <algorithm>
@@ -240,6 +241,150 @@ void protection_and_cancellation() {
     rejects([&]{transfer::receive({},value,{},stop.get_token());},"cancelled reception stops");
     rejects([&]{transfer::simulate(sent,value,channel,{},stop.get_token());},"cancelled simulation stops");
 }
+void spreading_generation_trace() {
+    const auto advance=[](modem::StreamingTransmitter& tx,std::uint64_t end) {
+        std::array<float,317> samples{};
+        while(tx.samples_emitted()<end) {
+            const auto n=static_cast<std::size_t>(std::min<std::uint64_t>(samples.size(),end-tx.samples_emitted()));
+            check(tx.read(std::span(samples).first(n))==n,"spreading trace fixture ended early");
+        }
+    };
+    for(unsigned factor:{10U,100U,1000U})for(auto version:{modem::OuterDsssVersion::legacy_v1,modem::OuterDsssVersion::interleaved_v2}) {
+        auto value=options(true);value.modem.scramble=value.modem.dsss=true;
+        value.modem.dsss_factor=factor;value.modem.bandwidth_hz=1000./factor;
+        value.modem.outer_dsss_version=version;value.modem.pulse_shaping=true;
+        value.modem.stream_phase_samples=37;
+        const auto config=transfer::seeded_config(value,value.timestamp);
+        auto tx=transfer::binary_transmitter(Bytes{1,0},value);
+        auto reference_config=config;reference_config.fake_hopping.reset();
+        modem::StreamingTransmitter reference(modem::RawBits{[&]{Bytes bits{1,0};transfer::xor_binary_bits(bits,value);return bits;}()},reference_config);
+        const auto prefix=modem::training_sample_count(config)+modem::pattern_pulse_padding_samples(config);
+        advance(*tx,prefix);
+        check(tx->transmit_trace().outer_dsss_key.empty()&&tx->transmit_trace().dsss_permutation_seed.empty(),
+              "filter lookahead published future outer bytes");
+        advance(*tx,prefix+1);
+        auto first=tx->transmit_trace();
+        const auto address=modem::symbol_stream_address(value.timestamp,config.stream_phase_samples,0,
+            modem::symbol_sample_count(config),config.sample_rate);
+        const auto chips=modem::pattern_chips_per_symbol(config);
+        const auto fine=modem::symbol_stream_chip(address,chips,0);
+        const bool interleave=version==modem::OuterDsssVersion::interleaved_v2;
+        const auto rotation=interleave?(factor==10?StreamDomain::OuterDsss10RotationV2:factor==100?StreamDomain::OuterDsss100RotationV2:StreamDomain::OuterDsss1000RotationV2):
+            (factor==10?StreamDomain::OuterDsss10V1:factor==100?StreamDomain::OuterDsss100V1:StreamDomain::OuterDsss1000V1);
+        const auto permutation=factor==10?StreamDomain::OuterDsss10PermutationV2:factor==100?StreamDomain::OuterDsss100PermutationV2:StreamDomain::OuterDsss1000PermutationV2;
+        check(first.outer_dsss_key==Crypto(config.dsss_seed).stream(StreamPurpose::Dsss,address.epoch,fine/4,1,rotation)&&
+              first.outer_dsss_epoch==address.epoch&&first.outer_dsss_byte_offset==fine/4&&first.outer_dsss_first_pair==fine%4,
+              "outer scope bytes differ from actual dedicated rotation address");
+        check(first.dsss_permutation_seed==(interleave?Crypto(config.dsss_seed).stream(StreamPurpose::Dsss,address.epoch,address.ordinal*32,32,permutation):Bytes{}),
+              "interleaved scope seed differs from actual dedicated permutation address");
+        std::array<float,2048> preview{};tx->preview_last(preview);
+        check(first.outer_dsss_key==tx->transmit_trace().outer_dsss_key&&first.dsss_permutation_seed==tx->transmit_trace().dsss_permutation_seed,
+              "preview advanced outer scope bytes");
+        advance(*tx,prefix+129*modem::pattern_chip_samples(config));
+        const auto trace=tx->transmit_trace();
+        check(trace.outer_dsss_key==Crypto(config.dsss_seed).stream(StreamPurpose::Dsss,address.epoch,fine/4,32,rotation)&&
+              trace.working_bytes()<=modem::TransmitTrace::dynamic_storage_limit,"outer prefix capture is inaccurate or unbounded");
+        // Compare the identical generated prefix against instrumentation disabled.
+        auto traced=transfer::binary_transmitter(Bytes{1,0},value);
+        std::array<float,317> actual{},expected{};
+        for(unsigned block=0;block<8;++block)check(traced->read(actual)==reference.read(expected)&&actual==expected,
+              "capturing outer streams changed the waveform");
+    }
+    { // Partial final chip + nonzero ordinal begins inside a packed rotation byte.
+        auto value=options(true);value.modem.scramble=true;value.modem.dsss_factor=10;
+        value.modem.bandwidth_hz=100;value.modem.integration_seconds=2570./8000;
+        value.modem.stream_phase_samples=7000;
+        value.modem.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;
+        auto tx=transfer::binary_transmitter(Bytes{1},value);
+        const auto prefix=modem::training_sample_count(value.modem)+modem::pattern_pulse_padding_samples(value.modem);
+        advance(*tx,prefix+1);const auto first=tx->transmit_trace();
+        check(first.outer_dsss_first_pair==2&&first.outer_dsss_key.size()==1,"partial-chip trace did not retain its first packed pair");
+        advance(*tx,prefix+17);check(tx->transmit_trace().outer_dsss_key.size()==1,"rotation byte published too early");
+        advance(*tx,prefix+33);check(tx->transmit_trace().outer_dsss_key.size()==2,"rotation byte boundary lost actual stream bytes");
+    }
+    auto value=options(true);value.modem.scramble=true;
+    auto plan=std::make_shared<modem::FhssPlan>();plan->channels=3;plan->dwell_seconds=.001;
+    plan->shifts[0]=1000000;plan->shifts[1]=1010000;plan->shifts[2]=1033000;
+    value.modem.fake_hopping=plan;
+    const auto config=transfer::seeded_config(value,value.timestamp);
+    auto tx=transfer::binary_transmitter(Bytes{1,0},value);
+    const auto expected=value.key->stream(StreamPurpose::Fhss,value.timestamp,0,8,StreamDomain::FhssCycleV2);
+    check(tx->transmit_trace().fhss_key.empty(),"FHSS published before actual generation");
+    auto plain=config;plain.fake_hopping.reset();
+    modem::StreamingTransmitter reference(modem::RawBits{[&]{Bytes bits{1,0};transfer::xor_binary_bits(bits,value);return bits;}()},plain);
+    for(unsigned sample=0;sample<80;++sample) {
+        float a=0,b=0;tx->read(std::span(&a,1));reference.read(std::span(&b,1));
+        const auto trace=tx->transmit_trace();
+        const auto cycle=(sample/8)/3;
+        const auto draws=value.key->stream(StreamPurpose::Fhss,value.timestamp,cycle*1024,8,StreamDomain::FhssCycleV2);
+        std::array<unsigned,3> order{0,1,2};
+        for(unsigned i=2;i>0;--i) {
+            std::uint32_t word=0;for(unsigned j=0;j<4;++j)word=(word<<8)|draws[4*(2-i)+j];
+            check(word<(std::uint64_t{1}<<32)/(i+1)*(i+1),"fixture requires independent rejection reference");
+            std::swap(order[i],order[word%(i+1)]);
+        }
+        check(a==b&&trace.fhss_key==draws&&trace.fhss_epoch==value.timestamp&&trace.fhss_hop==sample/8&&
+              trace.fhss_cycle==cycle&&trace.fhss_byte_offset==cycle*1024&&
+              trace.fhss_channel==order[(sample/8)%3]&&trace.fhss_shift_hz==plan->shifts[trace.fhss_channel],
+              "FHSS must consume its dedicated stream at exact sample boundaries without changing PCM");
+    }
+    auto blocked=plain;blocked.data_key.reset();blocked.fake_hopping=plan;
+    rejects([&]{modem::StreamingTransmitter unkeyed(modem::RawBits{Bytes{1}},blocked);},"unkeyed FHSS fallback must not exist");
+    modem::StreamingTransmitter noise(modem::Noise{},config),other_noise(modem::Noise{},config);
+    advance(noise,1);advance(other_noise,1);
+    const auto n=noise.transmit_trace(),other=other_noise.transmit_trace();
+    check(n.temporary_key&&n.fhss_key.size()==8&&n.fhss_key!=expected&&n.fhss_key!=other.fhss_key,
+          "noise FHSS must use its actual fresh temporary key, never the selected message key");
+    auto second=transfer::binary_transmitter(Bytes{1,0},value);advance(*second,80);
+    check(second->transmit_trace().fhss_key==tx->transmit_trace().fhss_key&&second->transmit_trace().fhss_hop==tx->transmit_trace().fhss_hop,
+          "FHSS schedule changed with PCM block size");
+}
+void fresh_hopping_schedule() {
+    using modem::FhssSchedule;
+    auto plan=std::make_shared<modem::FhssPlan>();plan->channels=200;plan->dwell_seconds=.4;
+    for(unsigned i=0;i<200;++i)plan->shifts[i]=1e6+i*10000;
+    Bytes master(32);for(unsigned i=0;i<32;++i)master[i]=static_cast<std::uint8_t>(i);
+    const Crypto key(master);FhssSchedule schedule(plan,key,1720000000);
+    // Independent Python/OpenSSL stream + permutation + FNV1a of all200 indices.
+    const std::array<std::uint64_t,3> cycles{0,1,1234567};
+    const std::array<std::uint64_t,3> hashes{17015576251182137421ULL,17593779355000373555ULL,8815251092063295537ULL};
+    for(unsigned test:{2U,0U,1U,2U,1U}) {
+        std::array<bool,200> seen{};std::uint64_t hash=14695981039346656037ULL;
+        for(unsigned hop=0;hop<200;++hop) {
+            const auto channel=schedule.channel(cycles[test]*200+hop);
+            check(channel<200&&!seen[channel],"cycle must visit each channel exactly once");seen[channel]=true;
+            hash=(hash^channel)*1099511628211ULL;
+        }
+        check(hash==hashes[test]&&schedule.byte_offset==cycles[test]*1024&&schedule.cycle==cycles[test],
+              "fresh FHSS seek/address/permutation reference changed");
+        check(schedule.prefix_size==32&&schedule.consumed_bytes>=796&&schedule.consumed_bytes<=1024,
+              "FHSS cache/draw budget incorrect");
+    }
+    for(unsigned count:{2U,3U,15U,25U,47U,50U,75U,79U,200U}) {
+        auto local=std::make_shared<modem::FhssPlan>(*plan);local->channels=count;
+        FhssSchedule current(local,key,1720000000);Bytes previous;
+        for(unsigned cycle=0;cycle<40;++cycle) {
+            std::array<bool,200> seen{};
+            for(unsigned hop=0;hop<count;++hop) {
+                const auto c=current.channel(cycle*count+hop);
+                check(c<count&&!seen[c],"fresh cycles lost equal channel use");seen[c]=true;
+            }
+            Bytes prefix(current.prefix.begin(),current.prefix.begin()+current.prefix_size);
+            check(prefix!=previous&&current.byte_offset==cycle*1024,"fixture recycled FHSS bytes");previous=prefix;
+        }
+    }
+    check(schedule.ordinal(19199,48000)==0&&schedule.ordinal(19200,48000)==1,"FHSS dwell boundary drifted");
+    rejects([&]{schedule.ordinal(0,0);},"zero rate accepted");
+    schedule.channel(FhssSchedule::maximum_cycle*200);
+    const auto saved=schedule.cycle;
+    rejects([&]{schedule.channel((FhssSchedule::maximum_cycle+1)*200);},"FHSS cycle wrapped");
+    check(schedule.cycle==saved,"failed seek changed valid cache");
+    std::array<unsigned,200> result{};
+    const Bytes rejected{255,255,255,255,0,0,0,0,0,0,0,1};
+    check(modem::fhss_detail::permutation(3,rejected,result)==12&&result[0]==2&&result[1]==1&&result[2]==0,
+          "FHSS unbiased rejection draw failed");
+    rejects([&]{modem::fhss_detail::permutation(3,Bytes(1024,255),result);},"FHSS exhausted draws silently recycled or biased");
+}
 void transmission_generation_trace() {
     const auto advance=[](modem::StreamingTransmitter& tx,std::uint64_t end) {
         std::array<float,317> samples{};
@@ -390,4 +535,4 @@ void transmission_generation_trace() {
           "trace-aware memory admission must allow the actual bounded TX without changing airtime or wire geometry");
 }
 }
-int main(){try{representable_pattern_ceiling();fixed_pipeline_and_local_metadata();short_text_uses_exact_dictionary_bits();keys_and_unknown_slots();content_limits_and_streaming_storage();exact_raw_masking_and_scheduling();protection_and_cancellation();transmission_generation_trace();std::cout<<"stream transfer passed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{representable_pattern_ceiling();fixed_pipeline_and_local_metadata();short_text_uses_exact_dictionary_bits();keys_and_unknown_slots();content_limits_and_streaming_storage();exact_raw_masking_and_scheduling();protection_and_cancellation();transmission_generation_trace();spreading_generation_trace();fresh_hopping_schedule();std::cout<<"stream transfer passed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

@@ -4,6 +4,52 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Developer FHSS Shift lists — local manual checkpoint, 10 October 2026
+
+Developer mode adds **Fake: List** and an **FHSS** multiline editor. The list
+contains Shift frequencies, not Carrier frequencies. CLI accepts
+`--fhss fake-list --fhss-list '30MHz,30.006MHz,30.02MHz'` or
+`--fhss-list-file PATH`; exports save applied contents inline. Bounded input is
+2–200 nonnegative distinct frequencies and 8192 bytes, including unit parsing
+and comments. Draft validation is atomic. Applying an editor list changes
+presentation/planning without restarting live reception or refitting modem
+settings. Carrier follows Shift by the same display delta. RF planner centers
+add the unchanged Doppler-adjusted audio carrier. For a 1500 Hz audio carrier,
+the example resolves to three RF centers, 6 kHz minimum spacing, 20 kHz center
+span, 30.0215 MHz highest RF and 0.4 s dwell. These are resolved geometry values,
+not measured performance or emissions.
+
+DSSS and all FHSS modes now require an active transmit encryption key. Without
+one, controls are disabled, DSSS is effectively Off, hopping and associated
+planner adjustments stop, and remembered settings remain visibly inactive.
+There is no unkeyed sequential hopping fallback. List editing is still allowed
+for configuration. Dedicated FHSS stream/domain and transmitted DSP are unchanged.
+Overlapping custom channels retain the fixed-band observer estimate with an
+explicit limitation; no automatic channel-count multiplier is introduced.
+
+Focused parser, settings, editor/layout and keyed animation checks passed,
+followed by the complete affected GUI group: **38/38 passed**, 164.78 seconds
+of test execution. This includes controller/live, boundary, launch/settings,
+planner, timing, shared application and GUI self-check coverage. The keyed
+animation fixture uses GPSDO bounds while retaining its original five-second
+deadline: the crystal fixture had advanced only 352 ms of simulated noise within
+that deadline, below a 400 ms hop dwell. This was a bounded fixture observation,
+not a receiver performance benchmark. Synthetic production-format key fixtures
+were used; no user key material was examined. Native graphical display tests
+are disabled in this reused build profile; manual GUI/hardware testing follows.
+
+Baseline HEAD `7ec8bf3854df73e5346dc77a9419da52a6c1e5f9` and runnable GUI
+`12be2a40014a9c38a3bd863338349b796885d31145de1544e16c622a943a54d6` remain preserved.
+Rebuilt Release GCC14.2/FLTK GUI SHA256:
+`23162b8a637dfc5db7bfd80aed2957bb7728fd74ce6ff54ab0c5b9ffb7cb354c`.
+Exact local source/build manifest: `.agent-work/artifacts/receiver-opt-20261008/fhss-list-final/manifest.json`.
+Launcher: `.agent-work/artifacts/receiver-opt-20261008/manual-fhss-list.sh`.
+
+This is a manual-test checkpoint, not overall qualification. Real hopping and
+regulatory conformity remain unimplemented. Prior full-bank sensitivity,
+ARM/Windows execution, sanitizer, SDK/packaging and broader qualification remain
+outstanding. No push, hosted CI, GPU work or broad qualification was performed.
+
 ## FHSS profiles — local manual checkpoint, 10 October 2026
 
 The GUI now has exactly Off, Fake: FCC and Fake: EU choices. Preferences survive
@@ -9151,3 +9197,113 @@ Published release: [v001_00-2026-09-24-0856CDT](https://github.com/mirage335-col
 This record does not claim completed release certification. Undispatched, pending or failed stages are not passes.
 
 Coordinator state and retained metadata are in `build/release-1.0-20260924-resume-1/`. Physical-device qualification is not established by these hosted checks.
+
+
+### 2026-10-11 UTC — actual DSSS/FHSS generation scope, local checkpoint
+
+The local follow-up to `fhss-list-final` captures the actual outer DSSS rotation
+bytes and Interleave permutation seed in addition to the existing mapper XOR
+bytes. Every row supports hexadecimal display. Payload-prefix publication is
+still gated by begun chips; finite-pulse lookahead and previews cannot expose
+future payload generation. No waveform, framing, candidate or receiver-search
+algorithm changed.
+
+Fake FHSS now uses the shared transmitter-owned `FhssSchedule`, with the actual
+TX source key/epoch and sample timeline. GUI polling no longer constructs a
+second schedule from wall-clock time or the selected UI key. Temporary noise
+uses its own fresh key. The existing `Fhss` / `FakeFhssV1` domain, modulo shuffle
+and repeating permutation are retained. Scope bytes are the consumed prefix,
+not an additional diagnostic stream. Fake still leaves physical audio and radio
+tuning fixed; a future radio adapter must consume the same schedule and qualify
+its timing, settling, access policy and receiver behavior separately.
+
+Validation: all 38 GUI suites have matching passing evidence. The full group
+passed 37/38 in 128.17 s; its only failure was the previous assertion that a
+forced noise scope must be an empty placeholder. That assertion now checks the
+actual temporary-key snapshot while retaining no-message/source/wire/Data and
+visibility assertions. With no runtime change, the full corrected controller
+suite passed in 119.43 s; the other 37 matching results were reused.
+The seven complete affected runtime suites passed: `transfer`,
+`streaming_modem`, `pattern_code`, `noise_receive`, `live`, `live_resources` and
+`live_transmit_lock`. Evidence includes exact independent stream addresses for
+DSSS 10/100/1000 in both constructions, partial packed-byte starts, unchanged
+traced/untraced PCM, exact FHSS dwell boundaries, block-size independence,
+unkeyed rejection, fresh noise keys, replay, cancellation and workspace bounds.
+
+On this x86-64 build, `TransmitTrace` grows from 272 to 416 fixed bytes and its
+maximum dynamic prefix from 1216 to 1312 bytes: 240 additional bytes per snapshot,
+at most 14,400 across 60 replay frames. The immutable Shift plan is 1616 bytes,
+the schedule 864 bytes, and setup consumes at most 796 stream bytes (800 reserved).
+The bounded DSSS capture and two retained permutation seeds are included in
+transmitter workspace accounting. This is diagnostic storage, not input-history
+retention. No receiver speedup or new sensitivity qualification is claimed.
+
+The preceding runnable GUI remains preserved (SHA256
+`23162b8a637dfc5db7bfd80aed2957bb7728fd74ce6ff54ab0c5b9ffb7cb354c`).
+The rebuilt GUI SHA256 is
+`96d8ea1ab149be7b526b611bab1835ae3a55dd27739c8da42d2d387f15ab06d4`.
+Exact local source, build, logs and launcher are recorded under
+`.agent-work/artifacts/receiver-opt-20261008/keystream-scope-final/manifest.json`.
+The source base is `7ec8bf3854df73e5346dc77a9419da52a6c1e5f9` plus the preserved
+preceding candidate and this local delta; GCC 14.2 Release FLTK configuration.
+
+This is a rebuilt-GUI manual-test checkpoint, **not overall qualification**.
+Native graphical display tests remain disabled in the reused profile. Manual
+PC sound-card feedback, broader native/platform, sanitizer, ARM, SDK/packaging
+and earlier full-bank sensitivity qualification remain outstanding. No physical
+RF hopping or regulatory conformity is claimed. No push, publication, hosted
+CI, GPU work or hours-long qualification was performed.
+
+
+## 2026-10-11 — Fresh FHSS cycles, local manual checkpoint
+
+Supersedes the preceding keystream-scope entry's deliberate repeating V1 FHSS
+limitation. The new `FhssCycleV2`/`fh-cyc02` domain supplies checked, disjoint
+1024-byte regions for successive unbiased channel permutations. Direct seeking
+constructs only one requested cycle and retains one cache. TX scope captures the
+current consumed prefix, cycle and byte offset; it refreshes even while a long
+chip has not advanced. Fake still changes only Carrier/Shift presentation,
+not physical PCM, radio tuning, receiver algorithms, DSSS or framing.
+
+Preserved baseline GUI SHA256 `96d8ea1ab149be7b526b611bab1835ae3a55dd27739c8da42d2d387f15ab06d4`;
+source/build is `keystream-scope-final/manifest.json` under the ignored
+`.agent-work/artifacts/receiver-opt-20261008/` evidence directory. Current local
+candidate uses HEAD `7ec8bf3854df73e5346dc77a9419da52a6c1e5f9` plus the frozen
+`fhss-fresh-final` working-tree snapshot, GCC14.2 Release FLTK. Launcher:
+`manual-fhss-fresh.sh`. Index and unrelated oscillator-validation edits preserved.
+
+Validation: focused crypto/transfer 2/2; focused FCC/EU/List animation passed,
+including a real three-channel cycle crossing during an unchanged 0.1Hz chip.
+Then complete GUI group **38/38 passed** (163.25s) and eight complete affected
+runtime suites **8/8 passed** (85.89s): crypto, transfer, streaming_modem,
+pattern_code, noise_receive, live, live_resources, live_transmit_lock. Existing
+assertions retained. Added independent Python HKDF/OpenSSL stream vectors and
+full permutation hashes, all profile channel counts, distant/backward seeks,
+last-region/overflow checks, rejection and draw-exhaustion fixtures, current-cycle
+trace and exact PCM/block-size checks. Replay, cancellation, physical completion,
+noise-key separation and existing DSSS-factor assertions remain covered.
+Two read-only reviews found the stale long-chip scope issue; the corrected final
+candidate has no remaining blocking review findings.
+
+A bounded scheduler-only benchmark after the tests joined compared the frozen
+old scheduler header and the current scheduler, using the same library's
+unchanged legacy stream format: three alternating process pairs, five trials
+each, one million lookups/5000 200-channel cycles per trial. Median CPU was
+1.672ms old versus 22.861ms fresh. Added CPU per fresh cycle was about **4.2us**
+(observed paired range 4.1–4.4us), once per80s at this illustrative geometry.
+This measures the cost of generating fresh permutations instead of recycling;
+it is not a whole-receiver performance or sensitivity measurement. Working
+storage charge rises by1208bytes to4488bytes for plan/schedule/scratch. Trace
+metadata adds16bytes per snapshot, or960bytes over60 replay frames. No growing
+history is retained. Exact raw measurements, source and scripts are in
+`fhss-fresh-benchmark.log` and `fhss-fresh-benchmark-summary.json`.
+
+Natural coincident permutations remain possible, and key/epoch reuse reproduces
+addresses. Equal use per fresh cycle does not enforce regulatory sliding-window
+occupancy or all return deadlines: up to0.8s boundary residence and37.2s return
+for47channels are documented. Real hardware needs dwell/access scheduling and
+cross-transmission airtime history; no compliance claim is made. Native graphical
+display tests are disabled in this reused build. Manual hardware feedback,
+broader native/platform/sanitizer/ARM/SDK/packaging qualification and prior
+receiver/full-bank sensitivity qualification remain outstanding. No push,
+publication, hosted CI or hours-long qualification was performed.

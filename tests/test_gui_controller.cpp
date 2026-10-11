@@ -881,9 +881,11 @@ void noise_start_stop(Controller& controller) {
         controller.select(F::transmit_scope_format,format);
         check(controller.field(F::transmit_scope).visible&&controller.field(F::transmit_scope_caption).visible&&
               controller.field(F::transmit_scope_caption).text.find("Tuning noise / ordinary encrypted modulation")!=std::string::npos&&
-              !controller.snapshot().transmit_trace.active&&
-              controller.field(F::transmit_scope).records==transmit_scope_records({},std::string_view(format)=="bits"),
-              "Manual noise preview claimed to wait for transmission or showed a retained message capture");
+              !controller.snapshot().transmit_trace.active&&controller.snapshot().transmit_trace.temporary_key&&
+              controller.snapshot().transmit_trace.source.empty()&&controller.snapshot().transmit_trace.wire_bits.empty()&&
+              controller.snapshot().transmit_trace.data_key_bits.empty()&&
+              controller.field(F::transmit_scope).records==transmit_scope_records(controller.snapshot().transmit_trace,std::string_view(format)=="bits"),
+              "Manual noise preview lost its actual temporary-key diagnostics or showed retained message content");
     }
     controller.select(F::transmit_scope_format,"hex-auto-hide");
     check(!controller.field(F::transmit_scope).visible,
@@ -975,21 +977,53 @@ void noise_transmission_controls() {
 }
 void fake_hop_display() {
     using F=ui::Field;using C=ui::Command;
-    for(const auto* preference:{"fake-fcc","fake-eu"}) {
+    struct Fixture {
+        std::filesystem::path path=std::filesystem::temp_directory_path()/"dp-fhss-list-20261011"/("animation-key-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        ~Fixture(){std::error_code ec;std::filesystem::remove(path,ec);}
+    } fixture;
+    std::filesystem::create_directories(fixture.path.parent_path());
+    create_keyring(fixture.path,{"FHSS display synthetic key"});
+    for(const auto* preference:{"fake-fcc","fake-eu","fake-list"}) {
     Controller controller({true,true});
     controller.edit(F::rf_shift,"1 MHz");
     controller.edit(F::carrier,"1.0015 MHz");
+    // This checks presentation cadence, not broad crystal acquisition throughput.
+    // Keep the original deadline with a qualified narrow oscillator bank.
+    controller.select(F::simulation_oscillator,"gpsdo-xo");
+    controller.select(F::rf_oscillator,"gpsdo-xo");
+    controller.activate(C::open_keyfile);const auto requests=controller.take_services();
+    check(requests.size()==1,"FHSS key chooser missing");
+    controller.complete_service({requests.front().id,false,fixture.path.string(),{}});
+    const auto key_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(10);
+    while(!controller.settings().transfer.key&&std::chrono::steady_clock::now()<key_deadline) {
+        controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(controller.settings().transfer.key.has_value(),"FHSS display key failed to load");
+    controller.set_developer_mode(true);
+    controller.edit(F::fhss_list,"1MHz\n1.01MHz\n1.033MHz");controller.activate(C::fhss_apply);
     controller.select(F::fhss,preference);
+    const bool short_list=std::string_view(preference)=="fake-list";
+    if(short_list)controller.edit(F::bandwidth,"0.1 Hz");
+    controller.select(F::transmit_scope_format,"hex");
     const auto carrier=controller.field(F::carrier).text,shift=controller.field(F::rf_shift).text;
     const auto base=controller.settings().transfer.modem.carrier_hz;
     check(controller.enabled(C::transmit_noise),"Fake hopping fixture has invalid transmit geometry");
     controller.start();controller.activate(C::transmit_noise);
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
-    std::string first;bool changed=false;
-    while(std::chrono::steady_clock::now()<deadline&&!changed) {
+    std::string first;bool changed=false,cycle_without_chip=false;
+    std::optional<modem::TransmitTrace> previous_trace;
+    while(std::chrono::steady_clock::now()<deadline&&(!changed||(short_list&&!cycle_without_chip))) {
         controller.poll();
         const auto& cf=controller.field(F::carrier);const auto& sf=controller.field(F::rf_shift);
         if(!sf.disabled_text.empty()) {
+            const auto& trace=controller.snapshot().transmit_trace;
+            check(controller.field(F::transmit_scope).records==transmit_scope_records(trace,false),
+                  "FHSS current-cycle scope prefix remained stale between chip revisions");
+            if(previous_trace&&trace.fhss_cycle!=previous_trace->fhss_cycle&&trace.revision==previous_trace->revision)
+                cycle_without_chip=true;
+            previous_trace=trace;
+            check(trace.fhss_available&&!trace.fhss_key.empty()&&trace.temporary_key,
+                  "Fake noise display did not consume the actual temporary-key TX schedule");
             check(!cf.enabled&&!sf.enabled&&cf.text==carrier&&sf.text==shift&&
                   ui::editor_text(cf,cf.enabled)==cf.disabled_text&&ui::editor_text(sf,sf.enabled)==sf.disabled_text,
                   "Fake FHSS did not expose hop frequencies in its disabled editors while preserving base settings");
@@ -997,6 +1031,10 @@ void fake_hop_display() {
             check(hop.carrier_hz&&hop.rf_shift_hz&&std::abs(*hop.carrier_hz-*hop.rf_shift_hz-base)<.01&&
                   controller.field(F::fhss).display_text.find("Fake: hop ")!=std::string::npos,
                   "Fake FHSS changed the audio carrier separation or hid its current hop");
+            if(std::string_view(preference)=="fake-list") {
+                check(*hop.rf_shift_hz==1000000||*hop.rf_shift_hz==1010000||*hop.rf_shift_hz==1033000,"List display invented a uniform intermediate frequency");
+                check(!controller.field(F::fhss_list).enabled&&!controller.enabled(C::fhss_apply),"List remained editable during TX");
+            }
             const auto exported=launch_command::parse(controller.field(F::planner_command).text);
             check(exported.carrier_hz&&exported.rf_shift_hz&&
                   std::abs(*exported.carrier_hz-*exported.rf_shift_hz-base)<.01&&*exported.rf_shift_hz==1e6,
@@ -1005,7 +1043,8 @@ void fake_hop_display() {
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
-    check(changed,"Fake FHSS displayed no changing hop during continuous transmission");
+    if(!changed)throw Error(std::string("Fake FHSS displayed no changing hop: ")+preference+", status="+controller.field(F::status).text+", mode="+controller.field(F::mode).text+", fhss="+controller.field(F::fhss).display_text+", snapshot="+controller.snapshot().status+", error="+controller.snapshot().error);
+    check(!short_list||cycle_without_chip,"FHSS fixture must cross a cycle while its long chip is unchanged");
     controller.activate(C::cancel);
     const auto stop=std::chrono::steady_clock::now()+std::chrono::seconds(5);
     do {controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));}
@@ -1014,7 +1053,12 @@ void fake_hop_display() {
           controller.field(F::rf_shift).disabled_text.empty()&&controller.field(F::carrier).text==carrier&&
           controller.field(F::rf_shift).text==shift&&controller.field(F::fhss).display_text.find("Fake: hop ")==std::string::npos,
           "Ending fake FHSS did not restore the configured frequencies and idle label");
-    controller.close();
+    controller.select(F::key,"none");
+    check(!controller.field(F::fhss).enabled&&!controller.link_plan()->inputs.fake_hopping.available,"Unkeyed FHSS retained an active profile");
+    controller.activate(C::transmit_noise);
+    for(unsigned i=0;i<20;++i){controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));}
+    check(controller.field(F::carrier).disabled_text.empty()&&controller.field(F::rf_shift).disabled_text.empty(),"Unkeyed noise used sequential hopping fallback");
+    controller.activate(C::cancel);controller.close();
     }
 }
 std::size_t check_pending_snapshot(Controller& controller) {

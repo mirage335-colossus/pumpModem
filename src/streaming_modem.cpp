@@ -63,13 +63,18 @@ struct StreamingTransmitter::Impl {
         if(pattern->working_bytes()>remaining)throw Error("pattern transmitter workspace is too small");
     }
     Impl(Noise,Config config,std::size_t workspace) {
+        trace.temporary_key=true;trace.pattern_available=true;
+        trace.pattern_private=true;trace.dsss=true;trace.data_masked=true;
+        trace.outer_dsss_factor=config.dsss_factor;
+        trace.outer_dsss_version=static_cast<unsigned>(config.outer_dsss_version);
+        chips_per_symbol=pattern_chips_per_symbol(config);
         const auto remaining=initialize_constellation(config,workspace);
         config.memory_limit=remaining;
         noise=std::make_unique<NoiseTransmitter>(config);
         if(noise->working_bytes()>remaining)throw Error("noise transmitter workspace is too small");
     }
     void retain_constellation(Complex value) {
-        if(trace.active) {
+        if(trace.active || trace.temporary_key) {
             ++trace.generated_chips;
             trace.generated_bits=static_cast<std::size_t>((trace.generated_chips-1)/chips_per_symbol+1);
             ++trace.revision;
@@ -129,6 +134,7 @@ TransmitTrace StreamingTransmitter::transmit_trace()const {
     for(auto* bits:{&result.wire_plain_bits,&result.wire_bits,&result.data_key_bits})
         if(bits->size()>count)bits->resize(count);
     if(impl_->pattern)impl_->pattern->copy_transmit_trace(result,result.generated_chips);
+    else if(impl_->noise)impl_->noise->copy_transmit_trace(result,result.generated_chips);
     return result;
 }
 std::size_t StreamingTransmitter::read(std::span<float> output,std::stop_token stop) {

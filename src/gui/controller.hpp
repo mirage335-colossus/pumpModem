@@ -39,6 +39,7 @@ public:
     void select(ui::Field field, std::string option_id);
     void toggle(ui::Field field, bool value);
     void set_shellcode_mode(bool value);
+    void set_developer_mode(bool value);
     void activate(ui::Command command);
     void complete_service(ui::ServiceResult result);
     std::vector<ui::ServiceRequest> take_services();

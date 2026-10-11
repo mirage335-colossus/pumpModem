@@ -503,12 +503,15 @@ Bytes Crypto::stream(StreamPurpose purpose, std::uint64_t timestamp,
             domain == StreamDomain::OuterDsss1000V1 || domain == StreamDomain::FakeFhssV1 ||
             domain == StreamDomain::OuterDsss10RotationV2 || domain == StreamDomain::OuterDsss100RotationV2 ||
             domain == StreamDomain::OuterDsss1000RotationV2 || domain == StreamDomain::OuterDsss10PermutationV2 ||
-            domain == StreamDomain::OuterDsss100PermutationV2 || domain == StreamDomain::OuterDsss1000PermutationV2,
+            domain == StreamDomain::OuterDsss100PermutationV2 || domain == StreamDomain::OuterDsss1000PermutationV2 ||
+            domain == StreamDomain::FhssCycleV2,
             "invalid keystream domain");
     const bool outer_v2=domain==StreamDomain::OuterDsss10RotationV2 || domain==StreamDomain::OuterDsss100RotationV2 ||
         domain==StreamDomain::OuterDsss1000RotationV2 || domain==StreamDomain::OuterDsss10PermutationV2 ||
         domain==StreamDomain::OuterDsss100PermutationV2 || domain==StreamDomain::OuterDsss1000PermutationV2;
     require(!outer_v2 || purpose==StreamPurpose::Dsss,"outer spreading requires the dedicated DSSS purpose key");
+    require((domain!=StreamDomain::FhssCycleV2 && domain!=StreamDomain::FakeFhssV1) ||
+            purpose==StreamPurpose::Fhss,"hopping requires the dedicated FHSS purpose key");
     require(count == 0 || count - 1 <= std::numeric_limits<std::uint64_t>::max() - offset,
             "keystream byte offset would overflow");
     if (count == 0) return {};
@@ -541,6 +544,10 @@ Bytes Crypto::stream(StreamPurpose purpose, std::uint64_t timestamp,
     if(domain == StreamDomain::FakeFhssV1) {
         require(purpose==StreamPurpose::Fhss,"fake hopping requires the dedicated FHSS purpose key");
         constexpr std::string_view pad="fh-fake1";
+        std::copy(pad.begin(),pad.end(),counter.begin());
+    }
+    if(domain == StreamDomain::FhssCycleV2) {
+        constexpr std::string_view pad="fh-cyc02";
         std::copy(pad.begin(),pad.end(),counter.begin());
     }
     if(outer_v2) {

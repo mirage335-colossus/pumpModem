@@ -131,6 +131,30 @@ void test_preamble_domain() {
     rejects([&]{crypto.stream(StreamPurpose::Data,epoch,0,0,static_cast<StreamDomain>(99));},"empty stream ignored invalid domain");
 }
 
+void test_fresh_fhss_domain() {
+    Bytes master(32);for(unsigned i=0;i<32;++i)master[i]=static_cast<std::uint8_t>(i);
+    const Crypto key(master);constexpr auto domain=StreamDomain::FhssCycleV2;
+    constexpr std::uint64_t epoch=1720000000;
+    // Independent Python hashlib/hmac HKDF + openssl enc AES-256-CTR,
+    // high counter ASCII fh-cyc02, low counter byte_offset/16.
+    const auto first=from_hex("55ab83752a6e89b7fc0d36ac4bf8b7d92c326bef53d26224e5d0c41144f75233");
+    const auto second=from_hex("7940e22cafc1939c3cca246dfd7d655534dbf62d79aba58b3433cf5aa6efdc40");
+    check(key.stream(StreamPurpose::Fhss,epoch,0,32,domain)==first&&
+          key.stream(StreamPurpose::Fhss,epoch,1024,32,domain)==second,"fresh FHSS format vectors changed");
+    check(key.stream(StreamPurpose::Fhss,epoch,1025,31,domain)==Bytes(second.begin()+1,second.end()),
+          "fresh FHSS unaligned addressing changed");
+    check(first!=key.stream(StreamPurpose::Fhss,epoch+1,0,32,domain)&&
+          first!=Crypto(Bytes(32,7)).stream(StreamPurpose::Fhss,epoch,0,32,domain),"FHSS key/epoch separation lost");
+    for(auto purpose:{StreamPurpose::Data,StreamPurpose::Dsss,StreamPurpose::Scrambler})
+        for(auto count:{0U,32U})rejects([&]{key.stream(purpose,epoch,0,count,domain);},"FHSS domain accepted wrong purpose");
+    for(auto other:{StreamDomain::Payload,StreamDomain::Preamble,StreamDomain::Suppression,
+                   StreamDomain::PatternZeroV2,StreamDomain::PatternOneV2,StreamDomain::FakeFhssV1})
+        check(first!=key.stream(StreamPurpose::Fhss,epoch,0,32,other),"FHSS domain reused old addresses");
+    const auto last=std::numeric_limits<std::uint64_t>::max();
+    check(key.stream(StreamPurpose::Fhss,epoch,last-1023,1024,domain).size()==1024,"last FHSS region failed");
+    rejects([&]{key.stream(StreamPurpose::Fhss,epoch,last-1023,1025,domain);},"FHSS stream wrapped");
+}
+
 void test_authentication() {
     Crypto crypto(Bytes(32, 0x72));
     const auto first = bytes("timestamp|metadata|message one");
@@ -356,6 +380,7 @@ int main() {
         test_suppression_domain();
         test_private_pattern_domains();
         test_interleaved_dsss_domains();
+        test_fresh_fhss_domain();
         test_authentication();
         test_keyfiles();
         test_production_keyfile();

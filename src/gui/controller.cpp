@@ -1,5 +1,6 @@
 #include "../frequency_parse.hpp"
 #include "fhss_profile.hpp"
+#include "datapump/fhss_schedule.hpp"
 #include "datapump/attachment.hpp"
 #include "datapump/execution.hpp"
 #include <utility>
@@ -358,7 +359,7 @@ struct Controller::Impl {
         f(UiField::compression_codes).text=compression_reference();
         f(UiField::mode).text="Starting continuous reception";
         encryption_changed();
-        if(options.launch_settings&&options.launch_settings->keyfile) {
+        if(options.launch_settings&&(options.launch_settings->keyfile||options.launch_settings->fhss_list_file)) {
             configure();apply_launch(*options.launch_settings,false);
         } else configure(false,false,std::nullopt,options.launch_settings?&*options.launch_settings:nullptr,false);
         dirty(); controls();
@@ -624,13 +625,26 @@ struct Controller::Impl {
         f(UiField::clock_region).text=policy?clock_sync::duration_text(policy->region_seconds):"Default";
         f(UiField::clock_offset).text=policy?clock_sync::duration_text(policy->offset_seconds):"Default";
     }
+    bool developer_mode=false;
+    std::vector<double> fhss_list;
+    std::string fhss_list_error;
+    static fhss::Profile private_hopping(fhss::Preference preference,const modem::Config& config,
+                                        bool keyed,std::span<const double> list) {
+        if(preference!=fhss::Preference::off&&!keyed) {
+            fhss::Profile p;p.preference=preference;p.name="Off";p.reason="Encryption key required";return p;
+        }
+        return fhss::resolve(preference,config,std::nullopt,list);
+    }
     fhss::Profile fake_profile(const modem::Config& config) const {
-        return fhss::resolve(fhss::parse(f(UiField::fhss).selected),config);
+        return private_hopping(fhss::parse(f(UiField::fhss).selected),config,
+            encrypted()&&selected_key(),fhss_list);
     }
     void fake_planning(planner::Inputs& input,std::string_view preference,
                        std::optional<modem::OscillatorModel> proposed_rf=std::nullopt,
-                       std::optional<bool> proposed_shared=std::nullopt) const {
-        input.fake_hopping=fhss::resolve(fhss::parse(preference),input.options.modem);
+                       std::optional<bool> proposed_shared=std::nullopt,
+                       const std::vector<double>* proposed_list=nullptr) const {
+        input.fake_hopping=private_hopping(fhss::parse(preference),input.options.modem,
+            input.options.key.has_value(),proposed_list?*proposed_list:fhss_list);
         input.observer_hopping=input.fake_hopping.observer();
         if(!input.fake_hopping.available||!input.options.modem.oscillator_search)return;
         auto& config=input.options.modem;
@@ -646,33 +660,26 @@ struct Controller::Impl {
         input.channel.frequency_offset_hz=effects.frequency_offset_hz;
         input.channel.phase_noise_degrees_per_sqrt_second=effects.phase_noise_degrees_per_sqrt_second;
     }
-    std::array<unsigned,200> fake_channels{};
+    std::shared_ptr<const modem::FhssPlan> fake_plan(const modem::Config& config) const {
+        const auto profile=fake_profile(config);
+        if(!profile.available)return {};
+        auto plan=std::make_shared<modem::FhssPlan>();
+        plan->channels=profile.channels;plan->dwell_seconds=profile.dwell_seconds;
+        for(unsigned i=0;i<plan->channels;++i)plan->shifts[i]=profile.preference==fhss::Preference::list?
+            fhss_list[i]:profile.center(i)-config.carrier_hz;
+        plan->validate();return plan;
+    }
     std::string fake_hop_label;
     void fake_display(const live::Snapshot& next) {
         auto& carrier=f(UiField::carrier);auto& shift=f(UiField::rf_shift);
         carrier.disabled_text.clear();shift.disabled_text.clear();fake_hop_label.clear();
-        if(!next.transmitting||next.simulation_receiving_tail)return;
-        const auto profile=fake_profile(settings.transfer.modem);
-        if(!profile.available)return;
-        if(!snapshot.transmitting) {
-            for(unsigned i=0;i<profile.channels;++i)fake_channels[i]=i;
-            if(const auto* entry=selected_key()) {
-                const auto epoch=static_cast<std::uint64_t>(std::time(nullptr));
-                auto bytes=entry->key.stream(StreamPurpose::Fhss,epoch,0,800,StreamDomain::FakeFhssV1);
-                for(unsigned i=profile.channels-1;i>0;--i) {
-                    const auto at=4*(profile.channels-1-i);
-                    std::uint32_t random=0;for(unsigned j=0;j<4;++j)random=(random<<8)|bytes[at+j];
-                    std::swap(fake_channels[i],fake_channels[random%(i+1)]);
-                }
-                std::fill(bytes.begin(),bytes.end(),0);
-            }
-        }
-        const auto slot=static_cast<std::size_t>(std::fmod(std::floor(std::max(0.,next.transmission_seconds)/profile.dwell_seconds),profile.channels));
-        const auto delta=profile.first_hz+fake_channels[slot]*profile.spacing_hz-profile.configured_rf_hz;
+        const auto& trace=next.transmit_trace;
+        if(!next.transmitting||next.simulation_receiving_tail||!trace.fhss_available)return;
+        const auto delta=trace.fhss_shift_hz-frequency(shift.text,"Shift");
         carrier.disabled_text=frequency_text(frequency(carrier.text,"Carrier")+delta);
-        shift.disabled_text=frequency_text(frequency(shift.text,"Shift")+delta);
-        fake_hop_label="Fake: hop "+std::to_string(fake_channels[slot]+1)+" / "+std::to_string(profile.channels)+", "+
-            seconds_text(profile.dwell_seconds)+", display only";
+        shift.disabled_text=frequency_text(trace.fhss_shift_hz);
+        fake_hop_label="Fake: hop "+std::to_string(trace.fhss_channel+1)+" / "+std::to_string(trace.fhss_channels)+", "+
+            seconds_text(trace.fhss_dwell_seconds)+", display only";
     }
     void configure(bool match_receive_target=false,bool match_carrier=false,
                    std::optional<UiField> align_target=std::nullopt,
@@ -723,6 +730,7 @@ struct Controller::Impl {
             const auto arithmetic_id=load&&load->search_arithmetic?*load->search_arithmetic:f(UiField::search_arithmetic).selected;
             const auto arithmetic=tuning::parse_search_arithmetic(arithmetic_id);
             const auto fhss=std::string(fhss::id(fhss::parse(load&&load->fhss?*load->fhss:f(UiField::fhss).selected)));
+            const auto next_fhss_list=load&&load->fhss_list?fhss::parse_list(*load->fhss_list):fhss_list;
             next.transfer.clock_sync=load&&load->clock_sync?clock_sync::parse(*load->clock_sync):clock_policy();
             next.transfer.audio_timing_error_seconds=load&&load->audio_timing_error_seconds?
                 *load->audio_timing_error_seconds:clock_sync::duration(f(UiField::audio_error).text);
@@ -818,7 +826,7 @@ struct Controller::Impl {
                 input.channel.clock_error_ppm=effects.clock_error_ppm;
                 input.channel.frequency_offset_hz=effects.frequency_offset_hz;
                 input.channel.phase_noise_degrees_per_sqrt_second=effects.phase_noise_degrees_per_sqrt_second;
-                fake_planning(input,fhss,tuning::oscillator_model(rf_oscillator),shift_oscillator_id=="baseband-clock");
+                fake_planning(input,fhss,tuning::oscillator_model(rf_oscillator),shift_oscillator_id=="baseband-clock",&next_fhss_list);
                 const auto fitted=planner::nearest_fit_target(input,companions,receive_banks(next));
                 if(!fitted)throw Error("No clock/RAM fit found for this target.");
                 return *fitted;
@@ -927,6 +935,8 @@ struct Controller::Impl {
                 f(UiField::dsss_version).selected=mode_selection;
                 f(UiField::search_arithmetic).selected=tuning::search_arithmetic_id(arithmetic);
                 f(UiField::fhss).selected=fhss;
+                fhss_list=next_fhss_list;fhss_list_error.clear();
+                f(UiField::fhss_list).text=fhss::list_text(fhss_list,'\n');
                 if(next_tone)f(UiField::key).selected="none";
                 encryption_changed();
             }
@@ -1057,6 +1067,7 @@ struct Controller::Impl {
         values.search_arithmetic=f(UiField::search_arithmetic).selected;
         values.full_duplex=settings.full_duplex;
         values.fhss=f(UiField::fhss).selected;
+        if(!fhss_list.empty())values.fhss_list=fhss::list_text(fhss_list);
         if(!key_path.empty())values.keyfile=path_text(std::filesystem::absolute(key_path).lexically_normal());
         values.tx_key=encrypted()?"named":"none";
         if(encrypted())values.key_name=selected_key()->name;
@@ -1283,6 +1294,7 @@ struct Controller::Impl {
         if(closing) return false;
         const bool busy=transmit_requested || snapshot.transmitting;
         switch(command) {
+        case Command::fhss_apply: return developer_mode&&!busy&&!key_loading&&!key_failed;
         case Command::planner_load_command:
         case Command::planner_example_spread: case Command::planner_example_weak:
         case Command::planner_example_sub9: case Command::planner_example_eme:
@@ -1356,12 +1368,14 @@ struct Controller::Impl {
         f(UiField::planner_target).enabled=!closing;
         f(UiField::planner_command).enabled=!closing;
         sync_launch_command();
-        for(auto id:{UiField::clock_accuracy,UiField::clock_region,UiField::clock_offset,UiField::audio_error,UiField::dsss_factor,UiField::dsss_version,UiField::search_arithmetic,UiField::fhss,UiField::simulation,UiField::simulation_oscillator,UiField::rf_oscillator,UiField::rf_shift,UiField::doppler,UiField::search_margin,
+        for(auto id:{UiField::clock_accuracy,UiField::clock_region,UiField::clock_offset,UiField::audio_error,UiField::dsss_factor,UiField::dsss_version,UiField::search_arithmetic,UiField::fhss,UiField::fhss_list,UiField::simulation,UiField::simulation_oscillator,UiField::rf_oscillator,UiField::rf_shift,UiField::doppler,UiField::search_margin,
             UiField::link_power,UiField::link_loss,UiField::link_noise,UiField::key,UiField::device,UiField::mono,UiField::live_duplex,UiField::volume,UiField::exclusive,UiField::bandwidth,UiField::carrier,UiField::snr,UiField::long_snr,UiField::receive_snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
-        f(UiField::dsss_factor).enabled=!busy&&!tone();
-        f(UiField::dsss_version).enabled=!busy&&!tone();
+        f(UiField::dsss_factor).enabled=!busy&&encrypted()&&selected_key();
+        f(UiField::dsss_version).enabled=!busy&&encrypted()&&selected_key();
+        f(UiField::fhss).enabled=!busy&&encrypted()&&selected_key();
         f(UiField::dsss_factor).display_text=!encrypted()&&f(UiField::dsss_version).selected!="off"?f(UiField::dsss_factor).selected+"x (key needed)":"";
-        f(UiField::dsss_version).display_text=f(UiField::dsss_version).selected=="legacy"?"Legacy (diagnostic)":"";
+        f(UiField::dsss_version).display_text=!encrypted()?"Off · encryption key required":
+            f(UiField::dsss_version).selected=="legacy"?"Legacy (diagnostic)":"";
         f(UiField::doppler).display_text.clear();
         try {std::ostringstream label;label<<std::setprecision(6)<<tuning::parse_doppler(f(UiField::doppler).text).frequency_shift_percent<<'%';f(UiField::doppler).display_text=label.str();}catch(const std::exception&) {}
         bool shifted=false;
@@ -1374,9 +1388,14 @@ struct Controller::Impl {
         const bool simulation=f(UiField::simulation).selected=="yes";
         f(UiField::live_duplex).enabled=!busy&&!simulation;
         const auto hopping=fake_profile(settings.transfer.modem);
-        f(UiField::fhss).display_text=fhss::parse(f(UiField::fhss).selected)==fhss::Preference::off?"":
+        f(UiField::fhss_list).enabled=f(UiField::fhss_list).enabled&&developer_mode;
+        f(UiField::fhss_list_status).text=!fhss_list_error.empty()?fhss_list_error:
+            "Shift frequencies · 2–200 distinct centers · 0.4 s dwell · display only\n"+
+            (fhss_list.empty()?std::string("Enter frequencies, then Apply list."):
+                std::to_string(fhss_list.size())+" applied frequencies. Select Fake: List to use them.");
+        f(UiField::fhss).display_text=!encrypted()?"Off · encryption key required":fhss::parse(f(UiField::fhss).selected)==fhss::Preference::off?"":
             !fake_hop_label.empty()?fake_hop_label:!hopping.available?"Fake: "+hopping.reason:
-            std::string("Fake: ")+(hopping.preference==fhss::Preference::fcc?"FCC":"EU")+
+            std::string("Fake: ")+(hopping.preference==fhss::Preference::fcc?"FCC":hopping.preference==fhss::Preference::eu?"EU":"List")+
                 (hopping.experimental?" · experimental":"")+" · "+std::to_string(hopping.channels)+" ch, display only";
         for(auto id:{UiField::link_power,UiField::link_loss,UiField::link_noise})f(id).visible=true;
         f(UiField::simulation_cpu_time).visible=f(UiField::simulation_gpu_time).visible=simulation;
@@ -1648,6 +1667,10 @@ struct Controller::Impl {
         // or draft estimation. A one-bit prefix reaches this same poll.
         if(next.transmission_id!=snapshot.transmission_id ||
            next.transmit_trace.active!=snapshot.transmit_trace.active ||
+           next.transmit_trace.fhss_available!=snapshot.transmit_trace.fhss_available ||
+           next.transmit_trace.temporary_key!=snapshot.transmit_trace.temporary_key ||
+           next.transmit_trace.fhss_cycle!=snapshot.transmit_trace.fhss_cycle ||
+           next.transmit_trace.fhss_byte_offset!=snapshot.transmit_trace.fhss_byte_offset ||
            next.transmit_trace.revision!=snapshot.transmit_trace.revision)
             f(UiField::transmit_scope).records=transmit_scope_records(next.transmit_trace,f(UiField::transmit_scope_format).selected=="bits");
         const auto scope_status=next.simulation_replay?"replay":next.transmission_cancelled?"cancelled":
@@ -1720,7 +1743,18 @@ struct Controller::Impl {
         pending_key_completion=completion_id;
         f(UiField::key_path).text=pending_names.empty()?"Loading key entries...":"Generating 128 MiB keyfile..."; dirty(); notice(f(UiField::key_path).text,10);
     }
-    void apply_launch(const launch_command::Patch& values,bool simulation_off=true) {
+    void apply_launch(launch_command::Patch values,bool simulation_off=true) {
+        if(values.fhss_list_file) {
+            const auto path=std::filesystem::u8path(*values.fhss_list_file);
+            if(!std::filesystem::is_regular_file(path)||std::filesystem::file_size(path)>fhss::list_byte_limit)
+                throw Error("FHSS list file must be a regular file of at most 8192 bytes");
+            std::ifstream file(path,std::ios::binary);std::string contents(fhss::list_byte_limit+1,'\0');
+            if(!file)throw Error("Cannot open FHSS list file");
+            file.read(contents.data(),static_cast<std::streamsize>(contents.size()));
+            contents.resize(static_cast<std::size_t>(file.gcount()));
+            if(file.bad())throw Error("Cannot read FHSS list file");
+            values.fhss_list=fhss::list_text(fhss::parse_list(contents));values.fhss_list_file.reset();
+        }
         if(values.keyfile) {
             begin_key(std::filesystem::absolute(std::filesystem::u8path(*values.keyfile)).lexically_normal());
             pending_key_settings=values;pending_key_simulation_off=simulation_off;
@@ -1766,6 +1800,18 @@ struct Controller::Impl {
     void action(Command command) {
         if(!enabled(command)) throw Error("This action is currently unavailable");
         switch(command) {
+        case Command::fhss_apply: {
+            try {
+                auto next=fhss::parse_list(f(UiField::fhss_list).text);
+                const auto canonical=fhss::list_text(next,'\n');
+                fhss_list=std::move(next);f(UiField::fhss_list).text=canonical;
+                // Presentation/planning change only: do not restart live RX or
+                // refit physical modem targets when committing an editor list.
+                dirty();sync_launch_command(true);
+                fhss_list_error.clear();notice("FHSS list applied");
+            } catch(const std::exception& e) {fhss_list_error=e.what();throw;}
+            break;
+        }
         case Command::planner_load_command: {
             const auto values=launch_command::parse(f(UiField::planner_command).text);
             apply_launch(values);break;
@@ -1812,8 +1858,8 @@ struct Controller::Impl {
             const bool force=command==Command::force_transmit;
             gate.started(settings.simulation,encrypted(),Clock::now(),force); transmit_requested=true;
             try {
-                if(!attachment&&composer.raw_bits())session.transmit_bits(*composer.raw_bits(),force);
-                else session.transmit(message(),force);
+                if(!attachment&&composer.raw_bits())session.transmit_bits(*composer.raw_bits(),force,fake_plan(transmit_config()));
+                else session.transmit(message(),force,fake_plan(transmit_config()));
             } catch(...) { transmit_requested=false; gate.abort_start(); throw; }
             if(!settings.simulation)cancel_advisory();
             if(sent) { previous_received=composer_received; previous_message=std::move(sent); previous_repeatable_prefix=has_repeatable_prefix()?repeatable_prefix:std::string{}; seed_composer(); }
@@ -1821,7 +1867,7 @@ struct Controller::Impl {
         }
         case Command::transmit_noise:
             transmit_requested=true; noise_requested=true;
-            try { session.transmit_noise(); }
+            try { session.transmit_noise(fake_plan(settings.transfer.modem)); }
             catch(...) { transmit_requested=false; noise_requested=false; throw; }
             if(!settings.simulation)cancel_advisory();
             notice(settings.simulation?"Simulating noise with temporary keys. Stop noise to finish.":
@@ -1930,6 +1976,12 @@ struct Controller::Impl {
 Controller::Controller():Controller(Options{}) {}
 Controller::Controller(Options options):impl_(std::make_unique<Impl>(options)) {}
 Controller::~Controller()=default;
+void Controller::set_developer_mode(bool value) {
+    auto& p=*impl_;p.developer_mode=value;
+    p.f(UiField::fhss).options={{"off","Off"},{"fake-fcc","Fake: FCC"},{"fake-eu","Fake: EU"}};
+    if(value)p.f(UiField::fhss).options.push_back({"fake-list","Fake: List"});
+    p.controls();
+}
 void Controller::set_shellcode_mode(bool value) {
     auto& p=*impl_;
     if(p.shellcode_mode==value)return;
@@ -1997,6 +2049,7 @@ void Controller::edit(UiField field,std::string text) {
             p.f(field).text="32";p.configure();p.controls();return;
         }
         if(field==UiField::message) { p.message_changed(text); p.controls(); return; }
+        if(field==UiField::fhss_list) {p.f(field).text=std::move(text);p.fhss_list_error="Unapplied changes · Apply list to use these frequencies.";p.controls();return;}
         if(field==UiField::planner_command) {p.f(field).text=std::move(text);p.controls();return;}
         if(field==UiField::link_power||field==UiField::link_loss||field==UiField::link_noise) {
             p.edit_link_budget(field,text,true);p.controls();return;

@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <fstream>
+#include <thread>
 #include <string>
 
 using namespace datapump;
@@ -20,6 +22,27 @@ void near(double a,double b,const char* message) {
 void load(Controller& controller,const std::string& command) {
     controller.edit(F::planner_command,command);
     controller.activate(C::planner_load_command);
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(10);
+    while(controller.field(F::key_path).text=="Loading key entries..."&&std::chrono::steady_clock::now()<deadline) {
+        controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(controller.field(F::key_path).text!="Loading key entries...","Parameter-list key loading did not finish");
+}
+void load_synthetic_key(Controller& controller) {
+    struct Fixture {
+        std::filesystem::path dir=std::filesystem::temp_directory_path()/"dp-fhss-list-20261011",path=dir/"synthetic-key.bin";
+        Fixture(){std::filesystem::create_directories(dir);create_keyring(path,{"FHSS synthetic key"});}
+        ~Fixture(){std::error_code ec;std::filesystem::remove(path,ec);std::filesystem::remove(dir,ec);}
+    };
+    static Fixture fixture;
+    controller.activate(C::open_keyfile);const auto services=controller.take_services();
+    check(services.size()==1,"Synthetic key chooser missing");
+    controller.complete_service({services.front().id,false,fixture.path.string(),{}});
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(10);
+    while(!controller.settings().transfer.key&&std::chrono::steady_clock::now()<deadline) {
+        controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(controller.settings().transfer.key.has_value(),"Synthetic FHSS key load failed");
 }
 void generated_and_pasted_settings() {
     Controller controller({true,true});
@@ -340,9 +363,13 @@ void clock_and_spread_controls() {
     check(controller.field(F::dsss_version).options.size()==2&&
         controller.field(F::dsss_version).options[0].label=="Off"&&controller.field(F::dsss_version).options[1].label=="Interleave",
         "public DSSS mode must be exactly Off and Interleave");
-    controller.select(F::dsss_version,"interleave");
+    check(!controller.field(F::dsss_version).enabled&&!controller.field(F::dsss_factor).enabled&&!controller.field(F::fhss).enabled,
+        "Spreading controls enabled without encryption");
+    controller.select(F::dsss_version,"interleave");controller.select(F::fhss,"fake-fcc");
+    check(controller.field(F::dsss_version).selected=="off"&&controller.field(F::fhss).selected=="off","Unkeyed callback enabled spreading");
+    load(controller,"--dsss-mode interleave --dsss-factor 10 --rate 360 --carrier 1500");
     near(controller.settings().transfer.modem.bandwidth_hz,360,"direct Interleave activation did not install its usable voice pair");
-    controller.select(F::dsss_factor,"100");
+    load(controller,"--dsss-factor 100 --rate 36 --carrier 1500");
     check(controller.field(F::dsss_factor).selected=="100" && controller.settings().transfer.modem.dsss_factor==1 &&
           controller.field(F::dsss_factor).display_text.find("key needed")!=std::string::npos,
           "outer DSSS must remain inactive and labeled when no private key is selected");
@@ -351,19 +378,22 @@ void clock_and_spread_controls() {
     check(controller.field(F::dsss_version).selected=="interleave"&&
         controller.settings().transfer.modem.outer_dsss_version==datapump::modem::OuterDsssVersion::legacy_v1,
         "new DSSS selection must default to v2 without changing the unkeyed Off waveform");
-    controller.select(F::dsss_version,"off");
+    load(controller,"--dsss-mode off");
     const auto off_saved=launch_command::parse(controller.field(F::planner_command).text);
     check(off_saved.dsss_mode=="off"&&off_saved.dsss_factor==100,"Off export lost remembered spreading");
     Controller off_copy({false,false,off_saved});
     check(off_copy.field(F::dsss_version).selected=="off"&&off_copy.field(F::dsss_factor).selected=="100"&&
         off_copy.settings().transfer.modem.dsss_factor==1,"saved Off mode activated spreading or lost its factor");off_copy.close();
-    controller.select(F::dsss_version,"interleave");
+    load(controller,"--dsss-mode interleave");
     load(controller,"--dsss-version legacy");
     near(controller.settings().transfer.modem.bandwidth_hz,36,"version-only selection reset the entered Rate");
     near(controller.settings().transfer.modem.carrier_hz,1500,"version-only selection reset Carrier");
     check(controller.field(F::dsss_factor).selected=="100"&&
         launch_command::parse(controller.field(F::planner_command).text).dsss_version=="legacy",
         "legacy diagnostic choice changed DSSS factor or was omitted from export");
+    load_synthetic_key(controller);
+    // Isolate the original narrow FHSS geometry from the remembered 100x mode.
+    controller.select(F::dsss_version,"off");
     controller.select(F::fhss,"fake-fcc");
     const auto model=controller.link_plan();
     check(controller.settings().transfer.modem.oscillator_search->rf_shift_hz==0 &&
@@ -377,6 +407,8 @@ void clock_and_spread_controls() {
         controller.select(F::fhss,unsupported);
         check(controller.field(F::fhss).selected=="fake-fcc","disabled hardware hopping became selectable");
     }
+    controller.select(F::key,"none");
+    load(controller,"--dsss-mode interleave");load(controller,"--dsss-version legacy");
     const auto exported=controller.field(F::planner_command).text;
     load(controller,exported);
     check(controller.settings().transfer.audio_timing_error_seconds==.012345,
@@ -590,6 +622,7 @@ void fhss_profiles() {
     const auto tiny=fhss::resolve(P::fcc,config);contains(tiny);
     check(tiny.spacing_hz<1&&tiny.span_hz<narrow.span_hz/1000,"very narrow waveform kept fixed floor");
     Controller controller({false,true});
+    load_synthetic_key(controller);
     const auto& choices=controller.field(F::fhss).options;
     check(choices.size()==3&&choices[0].label=="Off"&&choices[1].label=="Fake: FCC"&&choices[2].label=="Fake: EU",
         "FHSS must have exactly the three requested choices");
@@ -610,8 +643,74 @@ void fhss_profiles() {
     check(!controller.link_plan()->inputs.fake_hopping.experimental,"manual Doppler ignored in actual RF boundary");
     controller.close();
 }
+void fhss_list_settings() {
+    const auto list=fhss::parse_list("# Shift frequencies, irregular\n30 MHz;30.006MHz\n30020000Hz # last\n");
+    check(list==std::vector<double>({30000000,30006000,30020000}),"FHSS units/order/comments incorrect");
+    check(fhss::parse_list(fhss::list_text(list))==list,"FHSS frequency serialization lost precision");
+    for(const auto text:{"1 MHz","1MHz,1000000Hz","NaN,2MHz","-1,2MHz","1MHz,inf"}) {
+        bool rejected=false;try{(void)fhss::parse_list(text);}catch(const std::invalid_argument&){rejected=true;}
+        check(rejected,"Invalid FHSS list accepted");
+    }
+    std::vector<double> full(200);for(unsigned i=0;i<200;++i)full[i]=1e6+i*1e4;
+    check(fhss::parse_list(fhss::list_text(full))==full,"Full bounded list failed");
+    bool rejected=false;try{(void)fhss::parse_list(fhss::list_text(full)+",4MHz");}catch(const std::invalid_argument&){rejected=true;}
+    check(rejected,"Oversized list accepted");
+    check(fhss::parse_list("0,6000")==std::vector<double>({0,6000}),"Zero Shift rejected");
+    const std::vector<double> rf_list{30001500,30007500,30021500};
+    Controller controller({false,true});controller.set_developer_mode(true);load_synthetic_key(controller);
+    load(controller,"--oscillator gpsdo-xo --rf-oscillator gpsdo-ocxo --shift 30MHz --carrier 30.0015MHz --rate 360 --fhss fake-list --fhss-list '30MHz,30.006MHz,30.02MHz'");
+    const auto profile=controller.link_plan()->inputs.fake_hopping;
+    check(profile.available&&profile.centers==rf_list&&profile.channels==3&&profile.spacing_hz==6000&&profile.span_hz==20000&&profile.last_hz==30021500,
+        "Irregular list geometry not used by planner");
+    check(profile.observer()&&profile.center(1)==30007500,"Indexed irregular center or observer model incorrect");
+    const auto zero=fhss::resolve(fhss::Preference::list,controller.settings().transfer.modem,std::nullopt,std::vector<double>{0,6000});
+    check(zero.available&&zero.first_hz==1500&&zero.last_hz==7500,"Shift list failed to add unchanged audio carrier");
+    auto adjusted=controller.settings().transfer.modem;adjusted.carrier_hz+=7;
+    const auto shifted=fhss::resolve(fhss::Preference::list,adjusted,std::nullopt,list);
+    check(shifted.last_hz==profile.last_hz+7,"List RF geometry ignored adjusted audio carrier");
+    const auto& input=controller.link_plan()->inputs;
+    near(input.options.modem.carrier_hz+input.options.modem.oscillator_search->rf_shift_hz,profile.last_hz,"Planner did not use highest listed RF");
+    check(!fhss::resolve(fhss::Preference::list,controller.settings().transfer.modem,fhss::Band{30e6,30.01e6},list).available,"Out-of-band custom list admitted");
+    const std::vector<double> overlap{30000000,30000001};
+    const auto overlapping=fhss::resolve(fhss::Preference::list,controller.settings().transfer.modem,std::nullopt,overlap);
+    check(overlapping.available&&!overlapping.observer(),"Overlapping custom channels received disjoint observer model");
+    const auto before=launch_command::parse(controller.field(F::planner_command).text);
+    controller.edit(F::fhss_list,"1MHz");controller.activate(C::fhss_apply);
+    check(controller.link_plan()->inputs.fake_hopping.centers==rf_list&&controller.field(F::fhss_list_status).text.find("requires")!=std::string::npos,
+        "Invalid editor list changed applied profile or lacked error");
+    controller.edit(F::fhss_list,"30.005MHz\n30.03MHz");controller.activate(C::fhss_apply);
+    auto saved=launch_command::parse(controller.field(F::planner_command).text);
+    check(saved.fhss_list=="30005000,30030000"&&saved.fhss=="fake-list","Applied list missing from launch export");
+    controller.select(F::fhss,"off");load(controller,"--path-loss-db 100");
+    check(launch_command::parse(controller.field(F::planner_command).text).fhss_list==saved.fhss_list,"Partial load or Off discarded list");
+    load(controller,launch_command::format(before));
+    const auto dir=std::filesystem::temp_directory_path()/"dp-fhss-list-20261011";
+    std::filesystem::create_directories(dir);const auto path=dir/"frequencies with spaces.txt";
+    {std::ofstream out(path);out<<"30 MHz\n30.006 MHz\n30.02 MHz\n";}
+    const auto file_patch=launch_command::parse("--oscillator gpsdo-xo --rf-oscillator gpsdo-ocxo --shift 30MHz --carrier 30.0015MHz --fhss fake-list --fhss-list-file '"+path.string()+"'");
+    Controller startup({false,true,file_patch});
+    check(!startup.link_plan()->inputs.fake_hopping.available&&!startup.link_plan()->inputs.observer_hopping&&
+        startup.field(F::fhss).display_text.find("key required")!=std::string::npos,"Unkeyed CLI enabled FHSS");
+    check(launch_command::parse(startup.field(F::planner_command).text).fhss_list==fhss::list_text(list),"File-only unkeyed startup discarded saved list");
+    load_synthetic_key(startup);
+    check(startup.link_plan()->inputs.fake_hopping.centers==rf_list,"File-only startup did not load frequencies");
+    const auto file_export=launch_command::parse(startup.field(F::planner_command).text);
+    check(file_export.fhss_list==fhss::list_text(list)&&!file_export.fhss_list_file,"Export retained mutable source file dependency");
+    {std::ofstream out(path);out<<"bad";}
+    load(controller,launch_command::format(file_patch));
+    check(controller.link_plan()->inputs.fake_hopping.centers==rf_list,"Bad file partially applied settings");
+    {std::ofstream out(path);out<<std::string(8193,'0');}
+    load(controller,launch_command::format(file_patch));
+    check(controller.field(F::status).text.find("8192")!=std::string::npos&&controller.link_plan()->inputs.fake_hopping.centers==rf_list,"Oversized file not rejected atomically");
+    std::filesystem::remove(path);startup.close();
+    controller.select(F::key,"none");
+    check(!controller.field(F::fhss).enabled&&!controller.link_plan()->inputs.fake_hopping.available&&
+        !controller.link_plan()->inputs.observer_hopping&&!controller.settings().transfer.modem.dsss,
+        "Removing encryption key left spreading active");
+    controller.close();
+}
 int main(int argc,char** argv) {
-    try {fhss_profiles();if(argc>1&&std::string_view(argv[1])=="--fhss-profiles"){std::cout<<"FHSS profiles passed\n";return 0;}doppler_settings();arithmetic_settings();duplex_settings();clock_and_spread_controls();generated_and_pasted_settings();rejected_settings_remain_atomic();startup_and_submit_behavior();narrow_rate_round_trips();live_validation_is_atomic();real_radio_configuration();invalid_shift_edit_recovers();absolute_carrier_and_shift();zero_shift_legacy_and_shared_round_trip();
+    try {fhss_list_settings();if(argc>1&&std::string_view(argv[1])=="--fhss-list"){std::cout<<"FHSS list passed\n";return 0;}fhss_profiles();if(argc>1&&std::string_view(argv[1])=="--fhss-profiles"){std::cout<<"FHSS profiles passed\n";return 0;}doppler_settings();arithmetic_settings();duplex_settings();clock_and_spread_controls();generated_and_pasted_settings();rejected_settings_remain_atomic();startup_and_submit_behavior();narrow_rate_round_trips();live_validation_is_atomic();real_radio_configuration();invalid_shift_edit_recovers();absolute_carrier_and_shift();zero_shift_legacy_and_shared_round_trip();
         std::cout<<"Planner launch setting round trips passed.\n";return 0;
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

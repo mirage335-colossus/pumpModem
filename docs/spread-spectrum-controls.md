@@ -171,8 +171,9 @@ This does not interpolate exact off-grid arrival time or let EOF, cancellation o
 
 ## Fake FHSS
 
-The three selectable choices are **Off**, **Fake: FCC**, and **Fake: EU**.
-`--fhss off|fake-fcc|fake-eu` is shared by GUI startup, Link Planner launch
+The ordinary choices are **Off**, **Fake: FCC**, and **Fake: EU**.
+Developer mode additionally exposes **Fake: List** and the **FHSS** editor tab.
+`--fhss off|fake-fcc|fake-eu|fake-list` is shared by GUI startup, Link Planner launch
 commands and parameter-list load/save. An omitted option preserves the current
 selection on partial import (new configurations default to Off). The historical
 `fake-0.4s-200` identifier maps to `fake-fcc` and exports canonically as such.
@@ -180,16 +181,135 @@ It previously selected no jurisdiction; this mapping preserves Fake intent,
 not its obsolete universal 200-channel/100 kHz geometry. Changing RF frequency
 never changes the saved FCC/EU preference.
 
-Fake uses the existing dedicated `Fhss` / `FakeFhssV1` key/counter domain for a
-keyed channel permutation, repeated during that transmission. No Data, Scrambler,
-private-pattern or DSSS key stream is borrowed. Without a selected key the
-illustration is sequential. Every illustrated channel receives equal residence.
+DSSS and every FHSS mode require an active transmit encryption key. Without
+one, their selectors are disabled, effective DSSS is Off, and FHSS generates no
+hops or hopping-based planner adjustments. Saved/CLI preferences and list
+contents are retained but explicitly labeled **Off · encryption key required**;
+loading a key and selecting it enables those remembered choices. A receive-only
+keyfile or selecting transmit key None does not enable spreading. Developer
+list editing remains available for preparing a configuration.
+
+### Developer frequency lists
+
+`--fhss fake-list --fhss-list '30MHz,30.006MHz,30.02MHz'`
+selects exact, possibly nonuniform Shift frequencies. Alternatively use
+`--fhss fake-list --fhss-list-file frequencies.txt`. A file or the multiline
+FHSS editor accepts one frequency per line, commas or semicolons, optional
+Hz/kHz/MHz/GHz/THz units (bare numbers are Hz), and `#` comments to end of line.
+Lists contain 2–200 distinct nonnegative finite Shift frequencies (zero is
+allowed) within 8192 bytes.
+Files must be regular files; arguments are never evaluated as shell commands.
+The launch parser itself performs no file I/O. Loading and validation precede
+application of the settings, including asynchronous keyfile loading.
+
+**Apply list** commits an editor draft. Invalid edits retain the last applied
+list and show an FHSS-specific error. Choosing Off/FCC/EU or hiding Developer
+mode retains the list; hiding Developer mode also retains an active CLI/list
+selection. The editor and Apply action are disabled during transmission.
+Launch exports and parameter-list saves contain canonical inline frequencies,
+so subsequent edits to the original file cannot change a saved configuration.
+Omitted list options preserve the current applied list on partial import.
+Supplying both inline and file options is rejected.
+
+Every list entry gets the existing 0.4-second residence. The dedicated keyed
+permutation indexes the entered order. The list specifies Shift, not Carrier.
+Each illustrated RF center equals its
+listed Shift plus the unchanged Doppler-adjusted audio carrier. Carrier and Shift
+receive equal display deltas, so Carrier minus Shift stays fixed. Physical audio,
+radio tuning, framing and keystream addressing are unchanged.
+
+The planner uses the exact count, minimum adjacent spacing, min/max RF and
+center span. It adds the unchanged audio carrier to the highest listed Shift for
+oscillator/search uncertainty.
+A list is a custom experimental illustration with no regulatory profile.
+Guarded spectra must fit any resolver operating-band limits and stay above DC;
+illustrated Shift cannot become negative. Unsupported geometry is reported and
+retains fixed-band estimates. Overlapping guarded channels can still illustrate
+hops, but cannot use the disjoint-channel observer model: fixed-band observer
+estimates are retained with an explicit model limitation. The observer captures
+the entire list simultaneously; no automatic channel-count benefit is added.
+
+Fake uses the dedicated `Fhss` purpose key and `FhssCycleV2` counter domain
+(`fh-cyc02`). Each complete channel cycle uses a fresh keyed permutation;
+the previous fixed repeated permutation is no longer selected. `FhssSchedule`
+owns this algorithm below the GUI. It receives the actual TX key and source epoch;
+its sample-indexed result is the sole source of the displayed hop. No Data,
+Scrambler, private-pattern or DSSS stream is borrowed. An active transmit
+encryption key is required; there is no unkeyed sequential fallback.
+Every illustrated channel receives equal residence in each complete cycle.
 Carrier and Shift display the same hop delta during TX, retaining their baseband
 difference. Their configured values, launch exports, physical transmitted PCM
 and radio tuning stay fixed; the configured displays return after completion
-or cancellation. No access protocol or actual RF hopping is implemented. The 0.4 s residence is
-a display interval, not permission for an uninterrupted 0.4 s EU LBT burst;
-required burst splitting and idle periods are not generated.
+or cancellation. No access protocol or actual RF hopping is implemented.
+
+### Fresh cycle addresses and bounded work
+
+For hop `h` and channel count `N`, cycle `c = floor(h/N)` owns byte region
+`[1024*c, 1024*c + 1023]` in the FHSS purpose/epoch/domain stream. A descending
+Fisher–Yates shuffle reads big-endian 32-bit draws from that region. For each
+bound `b`, draws at or above `floor(2^32/b)*b` are rejected before modulo
+selection, avoiding modulo bias. Unused reserve bytes are skipped, never lent
+to another cycle or cryptographic role. All 64-bit byte arithmetic is checked;
+exhaustion fails explicitly instead of wrapping or replaying an earlier order.
+`FakeFhssV1` remains available for diagnostic vectors only; existing keyfiles,
+FCC/EU/List selections and configured lists need no migration.
+
+Only the requested cycle is constructed, even on a distant or backward seek.
+The cache holds one order (at most 200 indices), with an immutable key, epoch and
+plan; its exact cycle is the validity key. Repeated lookups in that cycle reuse
+the same order. A cycle construction has 1024 bytes of stream scratch and an
+800-byte replacement order. It needs at most 256 draws for at most 199 accepted
+shuffle selections; exhausting the draw budget throws, with no biased fallback.
+Assuming independent pseudorandom 32-bit draws, a conservative union bound on
+58 rejections among 256 draws is `2^256*(199/2^32)^58 < 2^-1150`.
+This is a conditional analytical bound, not an observed rare-event rate.
+
+Fresh cryptographic input does **not** imply unique channel sequences forever.
+There are only `N!` permutations, so independent cycles can coincide, especially
+for short lists. The scheduler removes programmed recycling; it does not reject
+legitimate repeated random outcomes. Equal-use permutations also constrain the
+remaining channel choices within a cycle; they are not independent uniform
+channel draws at every hop. It is also not literally infinite: the
+address space is finite, checked and far beyond practical transmission lengths.
+Reusing the same key, TX epoch and cycle recreates the same schedule. This fix
+adds no cross-process nonce/replay coordination.
+
+### Generation scope and future tuning adapters
+
+The TX scope captures the first up-to-32 bytes actually consumed by the **current
+FHSS cycle**, alongside separate DSSS mapper, outer-rotation and Interleave-seed
+bytes. Its snapshot includes cycle and byte offset, and selects the new order
+before copying its prefix. It does not regenerate bytes using a GUI-side key.
+Noise transmission uses the fresh temporary key inside its transmitter, never
+the saved message key. Exact sample coordinates rather than GUI polling determine
+each hop; the first generated sample belongs to hop zero. Completion/cancellation
+retains the last trace; replay restores its matching trace; a new request starts
+a new schedule. The sequence includes settling and suppression audio.
+
+A future hardware adapter **must consume the same keyed `FhssSchedule`**, with
+its immutable Shift list and actual TX epoch, and map sample coordinates to DAC
+presentation time. It must also implement device command latency, settling,
+channel/band constraints, dwell/access policy, cancellation and receiver tuning.
+Equal use within each fresh cycle does **not** establish a sliding-window
+occupancy limit. A channel can appear at the end of one cycle and start of the
+next: at 0.4 s per slot this gives up to 0.8 s contiguous residence, or two visits
+in a window crossing a cycle boundary. Maximum start-to-start return is
+`(2*N - 1)*dwell`, including 37.2 s for 47 channels versus the quoted 20 s
+sub-GHz requirement. The EU 20-channel example has a 15.6 s upper bound, within
+its 32 s return target, but remains Fake with no conformity claim.
+
+The profile descriptions quote requirements; the fresh schedule does not enforce
+FCC/EU sliding occupancy or the EU sub-GHz return requirement. At full duty,
+when all per-channel caps sum exactly to the window duration, preserving each
+sliding cap forces a window-periodic schedule. A varying physical implementation
+therefore needs explicit scheduling slack/access gaps or another constrained
+construction. Those tradeoffs are not silently added to the illustrated profiles. A physical
+scheduler must also retain per-channel airtime history across transmissions and
+key/epoch changes; a fresh epoch does not reset a regulatory observation window.
+The 0.4 s slot is also not permission for an uninterrupted EU LBT burst;
+required burst splitting and idle periods remain unimplemented. The observer
+still captures the entire hop set simultaneously; there is no new channel-count
+multiplier or RF-hopping claim.
 
 ### Automatic geometry
 
