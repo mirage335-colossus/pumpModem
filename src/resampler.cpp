@@ -150,6 +150,11 @@ void Resampler::discard_history() {
     const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(size_,keep>first_?keep-first_:0));
     head_=(head_+count)%ring_.size();size_-=count;first_+=count;
 }
+void Resampler::set_output_gain(std::function<double(long double)> gain) {
+    if(started_)throw Error("resampler output envelope must be set before processing");
+    if(last_stage_)last_stage_->set_output_gain(std::move(gain));
+    else output_gain_=std::move(gain);
+}
 Resampler::Progress Resampler::process(std::span<const float> input,std::span<float> output,bool end) {
     if(ending_ && !input.empty())throw Error("cannot append to a finished resampler");
     started_=true;
@@ -159,7 +164,9 @@ Resampler::Progress Resampler::process(std::span<const float> input,std::span<fl
         const auto count=std::min(input.size(),output.size());
         for(std::size_t i=0;i<count;++i) {
             if(!std::isfinite(input[i]))throw Error("nonfinite resampler input");
-            output[i]=input[i];
+            const auto gain=output_gain_?output_gain_((static_cast<long double>(source_)+i)/input_rate_):1.;
+            if(!std::isfinite(gain)||gain<0||gain>1)throw Error("invalid output safety gain");
+            output[i]=static_cast<float>(gain*input[i]);
         }
         if(received_>std::numeric_limits<std::uint64_t>::max()-count)throw Error("resampler duration exceeds counter range");
         received_+=count;source_=received_;produced_=received_;
@@ -172,7 +179,9 @@ Resampler::Progress Resampler::process(std::span<const float> input,std::span<fl
         if((source_<=std::numeric_limits<std::uint64_t>::max()-radius_ && received_>source_+radius_) || ending_) {
             const auto sample=interpolate();
             if(!std::isfinite(sample))throw Error("resampler output overflow");
-            output[progress.produced++]=sample;
+            const auto gain=output_gain_?output_gain_(source_seconds()):1.;
+            if(!std::isfinite(gain)||gain<0||gain>1)throw Error("invalid output safety gain");
+            output[progress.produced++]=static_cast<float>(gain*sample);
             const auto before=observe_timing_?std::fma(-(1.L+timing_rate_),static_cast<long double>(produced_)/output_rate_,source_seconds()-timing_origin_):0;
             const auto previous_rate=correction_;
             ++produced_;

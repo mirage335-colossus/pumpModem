@@ -166,7 +166,7 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             result.tx_key=value;
         }
         else if(flag=="--audio-error") {
-            result.audio_timing_error_seconds=clock_sync::duration(value);
+            result.audio_timing_error_seconds=clock_sync::parse_audio_error(value);
             clock_sync::validate_audio_error(*result.audio_timing_error_seconds);
         }
         else if(flag=="--dsss-mode") {

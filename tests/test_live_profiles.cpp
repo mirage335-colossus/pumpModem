@@ -446,7 +446,7 @@ void modeled_arrival_window(bool modeled=true,bool fallback=false) {
     value.transfer.clock_sync=clock_sync::Policy{.001,.4,2.564};
     // This synthetic provider explicitly reports 100 ms uncertainty. Its
     // accepted engineering allowance must cover that value.
-    value.transfer.audio_timing_error_seconds=fallback?.001:.1;
+    value.transfer.audio_timing_error_seconds=fallback?.001:.2;
     auto transmitter=transfer::binary_transmitter(Bytes{0,0,1},value.transfer);
     Waveform wave;wave.bits="001";wave.text="e";wave.rate=config.sample_rate;
     wave.symbol_samples=modem::symbol_sample_count(config);

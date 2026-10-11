@@ -110,7 +110,7 @@ inline std::vector<ui::Record> transmit_scope_records(const modem::TransmitTrace
     if(captured&&!trace.pattern_available)note(output,"Unavailable: this waveform has no pattern-byte mapper");
     else {operation(output,"=");bytes(output,trace.pattern_output,detailed);}
     rows.push_back(std::move(output));
-    auto fhss=row("tx-fhss-key","FHSS Keystream (current cycle prefix)");
+    auto fhss=row("tx-fhss-key",trace.fhss_utc_calendar?"FHSS Keystream (UTC calendar, fh-utc03)":"FHSS Keystream (current cycle prefix)");
     if(captured&&!trace.fhss)note(fhss,"Unused: FHSS is off");
     else bytes(fhss,trace.fhss_key,detailed);
     rows.push_back(std::move(fhss));

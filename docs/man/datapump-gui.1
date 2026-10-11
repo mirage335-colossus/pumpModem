@@ -98,6 +98,8 @@ paths retain the full search and report their limitation.
 .BI \-\-audio\-error " TIME"
 Assumed residual audio timing error per station after reported queue compensation;
 default 50ms. Default in any timing dropdown resets all four timing controls.
+Audio error is total nonnegative lag, zero through the entered value (Default: +50 ms).
+It is not a plus/minus allowance; GPS accuracy keeps its existing plus/minus interpretation.
 Numeric Audio error edits are independent of GPS accuracy,
 propagation and oscillator models. Accepts nonnegative ns/us/ms/s durations up to 60s,
 subject to the Live search-window limit. This does not change buffering or
@@ -322,6 +324,12 @@ Check an installation without opening a window:
 .nf
     datapump-gui \-\-self\-check
 .fi
+.PP
+Audio error accepts default or a duration; default means total positive lag
+from zero through 50ms. GPS accuracy retains its symmetric per-station bound.
+Fake FHSS guards include both endpoint clocks and the propagation region.
+Offset delays the nominal receiving hop preview without delaying TX tuning.
+
 .SH SEE ALSO
 .BR pump (1),
 .BR pump-fast (1)

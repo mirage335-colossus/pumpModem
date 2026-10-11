@@ -1,5 +1,8 @@
 #pragma once
 #include "datapump/crypto.hpp"
+#include "datapump/fhss_schedule.hpp"
+#include "datapump/pattern_pulse.hpp"
+#include "datapump/symbol_schedule.hpp"
 #include "datapump/clock_sync.hpp"
 #include "datapump/modem.hpp"
 #include "datapump/stream_codec.hpp"
@@ -32,8 +35,8 @@ struct Options {
     std::optional<double> capture_epoch;
     unsigned search_seconds = 6;
     std::optional<clock_sync::Policy> clock_sync;
-    // Per-station residual audio presentation-error allowance after known
-    // queue delay compensation. Independent of GPS and propagation settings.
+    // Per-station total audio lag [0,A] after known queue compensation.
+    // Includes provider uncertainty; independent of GPS and propagation.
     double audio_timing_error_seconds=clock_sync::default_audio_error_seconds;
     // Manual callers retain their explicit modem profile. Automatic GUI/CLI
     // receive searches resolve only these targets at the selected band/mode.
@@ -44,6 +47,20 @@ struct Options {
     // Receiver-only hard-bit search after physical completion. No wire fields.
     RecoveryOptions recovery_options;
 };
+// Freeze the same production hop-power policy for message/noise, estimation and
+// playback. Default clock error is a local 10 ms assumption, not UTC qualification.
+// Audio error is nonnegative residual lag [0,A], not symmetric uncertainty.
+inline std::shared_ptr<const modem::FhssPlan> transmit_hopping(
+        const modem::FhssPlan& source,const Options& options) {
+    auto plan=std::make_shared<modem::FhssPlan>(source);
+    plan->power_ramps=true;plan->defer_symbols=false;
+    plan->clock_error_seconds=options.clock_sync?options.clock_sync->accuracy_seconds:.01;
+    plan->peer_clock_error_seconds=plan->clock_error_seconds;
+    plan->audio_error_seconds=options.audio_timing_error_seconds;
+    plan->region_seconds=options.clock_sync?options.clock_sync->region_seconds:0;
+    plan->offset_seconds=options.clock_sync?options.clock_sync->offset_seconds:0;
+    return modem::resolve_fhss_power(*plan,options.modem);
+}
 struct Estimate {
     std::size_t coded_bytes = 0;
     std::size_t wire_bits = 0;

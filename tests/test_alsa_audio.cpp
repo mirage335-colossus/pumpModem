@@ -920,7 +920,7 @@ void bounded_clock_provider() {
         waveform_lipschitz=std::max(waveform_lipschitz,.065*variation+.6*std::abs(cumulative));
     }
     check(waveform_lipschitz<.26,"FIR interpolation exceeded the default-slew waveform derivative bound");
-    for(const auto error:{-.0001,0.,.0001})for(const bool modeled:{false,true})for(const bool slewing:{false,true}) {
+    for(const auto error:{-.0001,0.,.0001})for(const bool modeled:{false,true})for(const bool slewing:{false,true})for(const double presentation_lag:{0.,.025}) {
         if(slewing && (!modeled || error==0))continue;
         f::reset();f::state.available={"default"};f::state.supported_rates={rate};
         f::state.write_limit=137;
@@ -935,6 +935,7 @@ void bounded_clock_provider() {
         const auto jitter=slewing?2e-6:0.;
         const auto variable_error=slewing?jitter:2e-9;
         a::Options options;options.follow_system_clock=true;options.maximum_timing_rate_correction=.0003;
+        options.presentation_lag_seconds=presentation_lag;
         options.timing_stop_duration_seconds=modeled?1:.1;
         if(modeled) {
             options.estimated_timing=a::EstimatedDeviceTiming{variable_error,.00025,120};
@@ -996,12 +997,18 @@ void bounded_clock_provider() {
         },a::ChannelMode::left_mono,options);
         const auto first=static_cast<std::size_t>(std::find_if(f::state.played.begin(),f::state.played.end(),
             [](auto sample){return sample!=0;})-f::state.played.begin());
-        const auto expected_start=calibration_frames+static_cast<std::size_t>(std::ceil((epoch-origin-jitter)*rate/(1+error)));
+        const auto presentation_epoch=static_cast<long double>(epoch)+presentation_lag;
+        auto first_coordinate=(presentation_epoch-origin-jitter)*rate/(1+error);
+        const auto ulps=16*std::numeric_limits<long double>::epsilon()*
+            std::max(std::abs(presentation_epoch),std::abs(origin))*rate/(1+error);
+        if(std::abs(first_coordinate-std::round(first_coordinate))<=ulps)first_coordinate=std::round(first_coordinate);
+        const auto expected_start=calibration_frames+static_cast<std::size_t>(std::ceil(first_coordinate));
         if((!slewing && first!=expected_start) || cursor!=input.size())throw std::runtime_error(
             "bounded UTC scheduling skipped or repeated logical source samples: ppm="+std::to_string(error*1e6)+
             " first="+std::to_string(first)+" expected="+std::to_string(expected_start)+" cursor="+std::to_string(cursor));
         const auto source_start=slewing?expected_start:first;
-        const auto fraction=static_cast<double>((origin+jitter+(source_start-calibration_frames)*(1+error)/rate-epoch)*rate);
+        auto fraction=static_cast<double>((origin+jitter+(source_start-calibration_frames)*(1+error)/rate-presentation_epoch)*rate);
+        if(fraction<0 && fraction>=-ulps)fraction=0;
         a::Resampler reference(rate,rate,true);reference.initialize_timing(fraction,reference_rate);
         std::vector<float> expected(input.size()+100);
         const auto converted=reference.process(input,expected,true);
@@ -1027,7 +1034,7 @@ void bounded_clock_provider() {
             check(maximum_difference>2,"default-slew fixture did not exercise feedback beyond exact-affine quantization");
             for(const auto n:{std::size_t{0},produced}) {
                 const auto actual=origin+(source_start-calibration_frames+n)*(1+error)/rate;
-                const auto nominal=epoch+(fraction+n*(1+reference_rate))/rate;
+                const auto nominal=presentation_epoch+(fraction+n*(1+reference_rate))/rate;
                 check(std::abs(actual-nominal)+.01/rate<options.estimated_timing->maximum_utc_error_seconds,
                     "default-slew adapter exceeded the synthetic device UTC allowance");
             }
@@ -1467,6 +1474,7 @@ void audio_options() {
           "shared capture did not keep its own route after exclusive access was busy");
 }
 int main(int argc,char** argv){try{
+    if(argc==2 && std::string(argv[1])=="--lag") {bounded_clock_provider();std::cout<<"One-sided audio lag scheduling passed\n";return 0;}
     if(argc==2 && std::string(argv[1])=="--interleave") {
         protected_timing_playback();native_queued_dsss_playback(true);
         std::cout<<"Interleave queued UTC playback passed\n";return 0;

@@ -61,6 +61,10 @@ struct Options {
     // Zero is a valid requested hard bound, but native audio cannot establish
     // it. Visible pre-source fallback or strict failure retains actual error.
     double maximum_utc_error_seconds=.03;
+    // Optional fixed presentation offset from the immutable cryptographic epoch.
+    // GUI/CLI Audio error A uses offset=A/2 and maximum error=A/2, bounding
+    // actual lag to [0,A]. This never advances the logical source coordinate.
+    double presentation_lag_seconds=0;
     double maximum_timing_slew_per_second=1e-5;
     // Zero requests timestamped scheduling only. A nonzero domain bounds BOTH
     // software correction and the independently admitted stationary device
@@ -91,6 +95,10 @@ struct Options {
     // First output sample's UTC coordinate after capture rate conversion.
     std::function<void(const TimePrediction&)> capture_timing={};
     PlaybackDiscontinuity playback_discontinuity={};
+    // Final-rate amplitude safety mask. Logical source seconds include the
+    // actual resampler clock correction; timestamp/source coordinates are not
+    // reset at blocks or source stop. Used for FHSS zeros after FIR ringing.
+    std::function<double(long double)> playback_output_gain={};
     // Anticipated loss of UTC headroom, while protection still fits. Called
     // once before further source generation; abrupt discontinuities still abort.
     std::function<void(const std::string&)> timing_protected_stop={};
@@ -107,6 +115,8 @@ void schedule_output(double epoch_seconds,std::stop_token stop={});
 inline void validate_options(const Options& options) {
     if(options.allow_timing_fallback && !options.timing_status)
         throw Error("audio timing fallback requires a visible status observer");
+    if(!std::isfinite(options.presentation_lag_seconds)||options.presentation_lag_seconds<0||
+       options.presentation_lag_seconds>30)throw Error("invalid audio presentation lag");
     if(!std::isfinite(options.maximum_utc_error_seconds) || options.maximum_utc_error_seconds<0 ||
        options.maximum_utc_error_seconds>60)
         throw Error("Audio error must be nonnegative and at most 60 seconds");

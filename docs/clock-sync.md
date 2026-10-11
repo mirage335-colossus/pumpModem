@@ -30,8 +30,9 @@ Zero Audio error is a strict requested allowance: ordinary native device uncerta
 then forces the visible ordinary-playback/full-search fallback, not fictitious exact timing.
 
 The adjacent editable **Audio error** dropdown has a **Default** entry, resolving
-to **50 ms per station**, interpreted as the assumed maximum residual
-audio/radio timing error after compensating the driver-reported queue. It is
+to **0 through +50 ms of audio lag per station**, after compensating the
+driver-reported queue. It is neither ±50 ms nor an extra allowance on top of
+provider error. GPS accuracy keeps its original ± bound. It is
 saved/exported as `--audio-error 50ms`; fractional ns/us/ms/s values from
 zero and up to 60 seconds are accepted. Live's finite epoch-radius limit can
 reject a larger combined window. Choosing Default in any of the four timing
@@ -44,9 +45,17 @@ does not change the audio buffer used to prevent underruns. The first custom clo
 selection uses 50 ms unless an explicit numeric audio allowance is already set.
 With clock sync at Default, the audio allowance does not widen or narrow the
 ordinary search, add oscillator hypotheses or change its modeled CPU cost. With
-custom timing it contributes at both stations (100 ms added to the half-width
-for the 50 ms default), in addition to GPS and propagation. A capture bound
-exceeding the selected allowance still forces the full-search fallback.
+custom timing, playback targets the midpoint +25 ms while retaining the immutable
+cryptographic epoch and source coordinates. Its full predicted event interval
+must fit between zero and +50 ms lag: provider uncertainty is NEVER halved.
+Capture retains its physical-event timestamp center and full uncertainty U.
+Equivalently its upper timestamp edge has a causal lag from zero to 2U; 2U must
+fit the selected Audio error. The search map adds only the TX +25 ms center,
+with TX radius 25 ms plus capture U (conservatively the declared 25 ms), then
+unchanged GPS, propagation and rate allowances. Do not add the capture midpoint
+a second time. This representation covers both endpoints without treating lag
+as a symmetric offset. Insufficient evidence retains the visible full-search
+fallback. Default broad search remains unchanged.
 The default is a configurable assumption, not a loopback measurement or proof
 of a particular sound card's accuracy.
 
@@ -69,7 +78,8 @@ uncertainty also enter the rate-estimator endpoint errors; a fixed codec delay
 does not become rate precision by averaging or waiting. Period-sized pointer
 uncertainty is an engineering assumption, not a universal driver guarantee.
 The earlier 100 ms buffer-based floor and fixed 500 ms transmit guard are removed.
-Both transmit presentation checks use the selected Audio error allowance.
+Both transmit presentation checks use half the selected Audio error around its
+positive midpoint; the complete allowed physical lag remains [0, Audio error].
 Larger provider uncertainty is never clamped to that setting; insufficient
 allowance or rate evidence prevents UTC-following playback. GUI and CLI hardware
 transmission then visibly fall back to ordinary playback before private PCM or
@@ -172,13 +182,14 @@ a symbol, invent unobserved input, or change the six-second physical absence rul
 This internal map is not a new persisted user setting.
 
 Custom hardware mode combines both stations' selected GPS errors and propagation
-region with the selected peer TX Audio error and the larger of that per-station
-allowance and reported capture uncertainty. Thus a 30 ms selection adds at least
-60 ms of link audio half-width, separately from GPS and propagation. Inverse-slope corner
-bounds cover the complete initial phase interval. The GUI explicitly calls this
-an **estimated audio/radio model**, even when capture timestamps themselves are
-bounded. Capture uncertainty greater than the selected Audio error disables
-pruning and retains the full search. Both stations must satisfy the selected
+region with the peer TX lag [0,A] and the full capture uncertainty. A 30 ms
+selection places the TX midpoint at +15 ms and gives a conservative link audio
+half-width of 30 ms (15 ms TX plus 15 ms capture), separately from GPS and
+propagation. Inverse-slope corner bounds cover the complete initial phase
+interval. The GUI explicitly calls this an **estimated audio/radio model**, even
+when capture timestamps themselves are bounded. Capture uncertainty U with
+2U greater than the selected Audio error disables pruning and retains the full
+search. Both stations must satisfy the selected
 timing assumptions. A capture
 timestamp alone cannot establish the peer's timing behavior.
 
@@ -300,3 +311,43 @@ protected stop while feasible, otherwise abort visibly. Stationary-clock
 assumptions and physical-device qualification limits still apply; this does not
 promise indefinite tracking of arbitrary clock wander. See
 [transmitter cover](transmit-cover.md#playback-and-timing).
+
+## FHSS transmitter and arrival timing
+
+`--audio-error default` and `--audio-error Default` now resolve to50ms in GUI
+launch commands, parameter-list imports and the CLI. They retain an explicitly
+selected Clock sync policy; the GUI dropdown's reset-all action remains separate.
+Exports use the stable numeric50ms form. Unitless nonzero durations remain errors,
+now identifying Audio error. GUI `--self-check` validates the supplied launch
+settings before running, so the self-check shortcut cannot hide a bad launcher.
+
+FHSS uses the configured per-station GPS accuracy at BOTH endpoints (±10ms each
+by default), TX audio lag [0,A], total propagation region R and fixed offset O.
+Receiver RF hops must occur O later than TX hops using the original hop ordinal
+and key/epoch. Fixed offset cancels from the source guard; its interval is
+[N−A−2G−R/2,N+2G+R/2], plus the selected C2 ramp transitions.
+Capture audio uncertainty is downstream of RF tuning and does not add another
+transmit lag. See [FHSS power controls](spread-spectrum-controls.md#hop-power-transitions-local-manual-candidate).
+Fake mode shows the TX tuning and a separate delayed arrival preview; it does not
+retune an actual transmitter or receiver. Neither preview nor pre-arrival state
+changes receive admission, progress or physical completion. Impossible LOCAL
+guards block production transmission. When the selected full remote guard spans
+the dwell, Fake can illustrate local-safe ramps, explicitly without a remote
+overlap guarantee; the full uncertainty is not discarded from the configuration.
+Smooth-envelope RX shares original templates and treats the ramps as fading.
+Qualified arrival timing retains complete physical phase cells for each exact
+cipher representative. A qualified prior is intersected with the existing bank's
+original domain; it need not be wholly contained there. This does not enlarge
+that domain or promise coverage outside it. An unavailable/disjoint model retains
+the broad fallback. Default retains its broad search. Physical absence still
+requires complete failed-symbol observations, never just the quiet interval.
+
+
+For automatically deferred FHSS bits, both peers additionally share the immutable
+UTC slot calendar and its timing allowances. The qualified arrival prior covers
+canonical slot starts rather than pretending that logical bits remain contiguous.
+Default still retains its broad six-second acquisition policy. Hop guard defaults
+remain ±10ms at EACH endpoint and audio lag0..50ms. The slot calendar is not a
+clock-tracking algorithm, and scheduled holes cannot supply observed absence.
+See [deferred whole symbols](spread-spectrum-controls.md#deferred-whole-symbols-local-manual-candidate)
+for the exact rounding, fit limits, work/airtime and interoperability requirements.

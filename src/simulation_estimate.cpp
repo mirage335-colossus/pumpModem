@@ -150,7 +150,19 @@ double interval_probability(double admitted,double bit_error,FecMode fec) {
     return std::clamp(static_cast<double>(std::accumulate(current.begin(),current.end(),0.L)),0.,1.);
 }
 bool same_profile(const modem::Config& a,const modem::Config& b) {
-    return a.sample_rate==b.sample_rate && a.carrier_hz==b.carrier_hz && a.bandwidth_hz==b.bandwidth_hz && a.dsss_factor==b.dsss_factor &&
+    const auto hopping_equal=[&] {
+        if(bool(a.fake_hopping)!=bool(b.fake_hopping))return false;
+        if(!a.fake_hopping)return true;
+        const auto& x=*a.fake_hopping;const auto& y=*b.fake_hopping;
+        return x.channels==y.channels&&x.shifts==y.shifts&&x.dwell_seconds==y.dwell_seconds&&
+            x.power_ramps==y.power_ramps&&x.defer_symbols==y.defer_symbols&&
+            x.matched_gaps==y.matched_gaps&&x.mandatory_ramps==y.mandatory_ramps&&
+            x.smooth_ramps==y.smooth_ramps&&x.remote_guard_covered==y.remote_guard_covered&&x.ramp_seconds==y.ramp_seconds&&
+            x.clock_error_seconds==y.clock_error_seconds&&x.peer_clock_error_seconds==y.peer_clock_error_seconds&&
+            x.audio_error_seconds==y.audio_error_seconds&&x.region_seconds==y.region_seconds&&
+            (!x.defer_symbols||(a.stream_epoch%2==b.stream_epoch%2&&a.stream_phase_samples==b.stream_phase_samples));
+    };
+    return hopping_equal()&& a.sample_rate==b.sample_rate && a.carrier_hz==b.carrier_hz && a.bandwidth_hz==b.bandwidth_hz && a.dsss_factor==b.dsss_factor &&
         (a.dsss_factor<=1||a.outer_dsss_version==b.outer_dsss_version) &&
         a.spreading_mode==b.spreading_mode && a.scramble==b.scramble && a.dsss==b.dsss &&
         a.pulse_shaping==b.pulse_shaping &&
@@ -242,7 +254,7 @@ struct RollingFftWork {
 RollingFftWork rolling_fft_work(long double samples,std::uint32_t sample_rate,
         long double bin,long double length,long double hop,long double initial_batch,
         long double symbol_seconds,long double prefix_seconds,unsigned epoch_radius,
-        long double default_rate_uncertainty,const ReceiverTimingModel& timing_model,bool early_readiness=false) {
+        long double default_rate_uncertainty,const ReceiverTimingModel& timing_model,bool early_readiness=false,long double extra_start_samples=0) {
     RollingFftWork result;
     if(!(samples>0))return result;
     const auto seconds=samples/sample_rate;
@@ -265,7 +277,7 @@ RollingFftWork rolling_fft_work(long double samples,std::uint32_t sample_rate,
     const auto first_pass=early_readiness?length*bin/sample_rate:first_full;
     // New epochs enter no later than epoch-radius. The ORIGINAL legacy hint
     // ends at epoch+radius+1, independently of a qualified arrival prior.
-    const auto last_start=(2.L*epoch_radius+1)*sample_rate/bin;
+    const auto last_start=((2.L*epoch_radius+1)*sample_rate+extra_start_samples)/bin;
     const auto passes=last_start<initial_batch?1.L:2+outward_floor((last_start-initial_batch)/hop);
     const auto sampled_search_end=first_full+(passes-1)*hop_seconds;
     const auto retirement=(prefix_seconds+symbol_seconds+2.L*epoch_radius+1)/minimum_utc_rate;
@@ -356,22 +368,30 @@ struct FftPricing {
 };
 // Identical canonical address groups to PatternReceiver::phase_groups. The
 // phase lattice and stream index remain original; only work is intersected.
-std::array<std::pair<std::uint64_t,std::uint64_t>,3> fft_phase_groups(
+struct FftPhaseGroups {
+    std::array<std::pair<std::uint64_t,std::uint64_t>,3> small{};
+    std::uint64_t step=0;
+    auto operator[](std::size_t i) const {return step?std::pair<std::uint64_t,std::uint64_t>{i*step,i*step}:small.at(i);}
+};
+FftPhaseGroups fft_phase_groups(
         const modem::Config& config,std::uint64_t index,std::uint64_t upper,
         std::uint64_t step,std::size_t& count) {
-    std::array<std::pair<std::uint64_t,std::uint64_t>,3> groups{};count=0;
+    FftPhaseGroups groups;count=0;
+    if(config.fake_hopping&&config.fake_hopping->matched_gaps) {
+        groups.step=step;count=upper/step+1;return groups;
+    }
     auto lower=std::uint64_t{0};const auto symbol=modem::symbol_sample_count(config);
     while(lower<=upper) {
-        const auto address=modem::symbol_stream_address(0,lower,index,symbol,config.sample_rate);
+        const auto address=modem::symbol_stream_address(config,config.stream_epoch,lower,index);
         auto low=std::uint64_t{0},high=(upper-lower)/step;
         while(low<high) {
             const auto mid=low+(high-low+1)/2;
-            const auto next=modem::symbol_stream_address(0,lower+mid*step,index,symbol,config.sample_rate);
+            const auto next=modem::symbol_stream_address(config,config.stream_epoch,lower+mid*step,index);
             if(next.epoch==address.epoch&&next.ordinal==address.ordinal)low=mid;else high=mid-1;
         }
         const auto end=lower+low*step;
-        if(count==groups.size())throw Error("FFT planning phase groups exceed the finite symbol interval");
-        groups[count++]={lower,end};if(end==upper)break;lower=end+step;
+        if(count==groups.small.size())throw Error("FFT planning phase groups exceed the finite symbol interval");
+        groups.small[count++]={lower,end};if(end==upper)break;lower=end+step;
     }
     return groups;
 }
@@ -419,32 +439,41 @@ std::optional<FftWindowWork> fft_window_work(const modem::Config& config,std::si
     FftWindowWork result;
     auto active_pricing=pricing; // Exact numerical fallback is sticky per receiver bank.
     const auto symbol=modem::symbol_sample_count(config);
-    const auto step=std::gcd(symbol,static_cast<std::uint64_t>(config.sample_rate));
+    const auto step=modem::canonical_phase_step(config);
     const auto upper=(std::min(symbol,static_cast<std::uint64_t>(config.sample_rate))-1)/step*step;
     const auto radius=std::max<std::uint64_t>(1,symbol/2);
     const auto candidate_limit=modem::PatternSearch{}.candidate_limit;
     modem::detail::FftSearchGeometry geometry;geometry.sample_fit=sample_fit;
     geometry.drift_sections=1;geometry.differential_window_samples=0;
+    const auto initial=modem::deferred_initial_symbols(config);
+    if(initial>4096)return std::nullopt; // bounded planner scratch; keep broad upper work
     for(std::size_t b=0;b<batches;++b) {
         estimate_detail::check(stop);
         const auto first=b?initial_batch+(static_cast<std::uint64_t>(b)-1)*hop:0;
         const auto starts=b?hop:initial_batch;
-        std::array<modem::detail::PatternFftStartSelection,12> selections{};
+        const auto groups_per_symbol=config.fake_hopping&&config.fake_hopping->matched_gaps?upper/step+1:3;
+        if(groups_per_symbol>4096/initial)return std::nullopt; // retain conservative broad work, bounded planner scratch
+        std::vector<modem::detail::PatternFftStartSelection> selections(groups_per_symbol*initial);
         std::size_t selection_count=0,ready_end=0;
         bool input_fft=false,selector_uncertain=false;
         modem::detail::PatternFftComponents components;
-        for(std::uint64_t index=0;index<4;++index) {
+        for(std::uint64_t index=0;index<initial;++index) {
             std::size_t count=0;const auto groups=fft_phase_groups(config,index,upper,step,count);
             for(std::size_t g=0;g<count;++g) {
                 if(++checks>1000000)return std::nullopt;
-                const auto [lower,last]=groups[g];
-                auto selected=modem::detail::pattern_fft_select_starts(prior,symbol,index,
-                    lower,last,step,first,starts,bin,minimum_rate,maximum_rate);
+                auto [lower,last]=groups[g];auto span=symbol,position=index;
+                if(modem::deferred_symbols(config)) {
+                    const auto first=modem::scheduled_symbol_offset(config,config.stream_epoch,lower,0);
+                    const auto delta=modem::scheduled_symbol_offset(config,config.stream_epoch,lower,index)-first;
+                    lower+=first;last=lower;span=std::max<std::uint64_t>(1,delta);position=delta?1:0;
+                } else last=modem::canonical_phase_cell_upper(config,last);
+                auto selected=modem::detail::pattern_fft_select_starts(prior,span,position,
+                    lower,last,1,first,starts,bin,minimum_rate,maximum_rate);
                 // Widening the anchor can merge >64 narrow phase ranges. A
                 // narrower runtime map could then overflow the selector and
                 // keep its full job, rather than remain a selected subset.
                 // Retain full work for that uncertain group in cohort pricing.
-                if(minimum_readiness&&(last-lower)/step>=64) {
+                if(minimum_readiness&&config.fake_hopping&&config.fake_hopping->matched_gaps&&(last-lower)/step>=64) {
                     selected={};selected.selected_count=starts;selector_uncertain=true;
                 }
                 selections[selection_count++]=selected;
@@ -491,9 +520,9 @@ std::optional<FftWindowWork> fft_window_work(const modem::Config& config,std::si
             if(separated)++executed_components;
             const auto segment_begin=separated&&c?components.ranges[c-1].first+components.ranges[c-1].count:0;
             const auto segment_count=end-segment_begin;
-            std::array<modem::detail::PatternFftStartSelection,12> local{};
-            std::array<std::optional<modem::detail::partitioned_paired::Requirements>,12> plans{};
-            std::array<std::optional<long double>,12> envelope_numeric{};
+            std::vector<modem::detail::PatternFftStartSelection> local(selection_count);
+            std::vector<std::optional<modem::detail::partitioned_paired::Requirements>> plans(selection_count);
+            std::vector<std::optional<long double>> envelope_numeric(selection_count);
             bool paired=generated&&!sample_fit,direct_member=false;
             for(std::size_t j=0;j<selection_count;++j) {
                 if(++checks>1000000)return std::nullopt;
@@ -645,11 +674,11 @@ std::optional<modem::PatternStartWindow> fft_anchor_window(const transfer::Optio
     constexpr auto epoch=1800000000.L;
     std::optional<modem::PatternStartWindow> result;
     for(const auto sign:{-1,1}) {
-        const auto map=clock_sync::arrival_map(*options.clock_sync,epoch,
+        const auto map=clock_sync::audio_lag_arrival_map(*options.clock_sync,epoch,
             epoch+options.clock_sync->offset_seconds-origin_seconds+sign*anchor_half_width,
             0,config.sample_rate,timing.capture_seconds_per_frame.value_or(1./config.sample_rate),
             timing.capture_rate_uncertainty_fraction.value_or(static_cast<double>(rate_uncertainty)),
-            std::max(options.audio_timing_error_seconds,timing.capture_error_seconds.value_or(options.audio_timing_error_seconds)),
+            std::max(clock_sync::audio_lag_radius(options.audio_timing_error_seconds),timing.capture_error_seconds.value_or(clock_sync::audio_lag_radius(options.audio_timing_error_seconds))),
             phase_upper,options.audio_timing_error_seconds);
         if(!map)return std::nullopt;
         const modem::PatternStartWindow next{map->origin_samples,map->phase_scale,map->half_width_samples};
@@ -737,7 +766,7 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         64*1024.L+8.L*std::floor(static_cast<long double>(symbol)/chip):0.L;
     // Expanded coupled banks require the FFT path. A compact private hint or
     // insufficient memory cannot silently substitute a different search path.
-    const bool correlator=!coupled &&
+    const bool correlator=!modem::deferred_symbols(config) && !coupled &&
         ((private_pattern && symbol>=60.L*config.sample_rate) || fft_core_bytes+outer_map_bytes>allowance);
     // Live banks stream expanded template rows when several profiles, keys or
     // epochs share the budget, so early banks cannot consume it with caches.
@@ -756,7 +785,12 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         }
         starts=lanes/frequencies;
     }
-    const auto phase_groups=private_pattern&&symbol%config.sample_rate!=0?(symbol>=config.sample_rate?2.L:3.L):1.L;
+    const auto phase_groups=config.fake_hopping&&config.fake_hopping->matched_gaps?
+        static_cast<long double>((std::min(symbol,static_cast<std::uint64_t>(config.sample_rate))-1)/
+            modem::canonical_phase_step(config)+1):modem::deferred_symbols(config)?
+        (modem::scheduled_symbol_offset(config,config.stream_epoch,0,0)<
+            std::min(symbol,static_cast<std::uint64_t>(config.sample_rate))-1?2.L:1.L):
+        private_pattern&&symbol%config.sample_rate!=0?(symbol>=config.sample_rate?2.L:3.L):1.L;
     Work result;
     result.epoch_hypotheses=epochs;
     result.timing_hypotheses=starts*frequencies;result.phase_groups=static_cast<std::size_t>(phase_groups);
@@ -773,27 +807,34 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         (!correlator&&!coupled&&symbol<16.L*config.sample_rate))&&
        work_mode==ReceiverWorkMode::hardware_timing_model&&options.clock_sync&&
        (!timing_model.capture_error_seconds||
-        *timing_model.capture_error_seconds<=options.audio_timing_error_seconds)&&
+        *timing_model.capture_error_seconds<=clock_sync::audio_lag_radius(options.audio_timing_error_seconds))&&
        private_pattern&&config.spreading_mode==modem::SpreadingMode::pattern&&config.oscillator_search&&
        !(config.oscillator_search->reference==modem::OscillatorReference::shared_radio&&
          config.oscillator_search->rf_shift_hz!=0)) {
-        const auto phase_step=std::gcd(symbol,static_cast<std::uint64_t>(config.sample_rate));
+        const auto phase_step=modem::canonical_phase_step(config);
         const auto phase_upper=(std::min(symbol,static_cast<std::uint64_t>(config.sample_rate))-1)/phase_step*phase_step;
+        auto minimum_phase=std::uint64_t{0},maximum_phase=modem::canonical_phase_cell_upper(config,phase_upper);
+        if(modem::deferred_symbols(config)) {
+            minimum_phase=modem::scheduled_symbol_offset(config,config.stream_epoch,0,0);
+            maximum_phase+=modem::scheduled_symbol_offset(config,config.stream_epoch,phase_upper,0);
+        }
         const auto radius=options.search_seconds+1.L;
         constexpr auto epoch=1800000000.L;
-        const auto capture_error=std::max(options.audio_timing_error_seconds,
-            timing_model.capture_error_seconds.value_or(options.audio_timing_error_seconds));
-        const auto map=clock_sync::arrival_map(*options.clock_sync,epoch,
+        const auto capture_error=std::max(clock_sync::audio_lag_radius(options.audio_timing_error_seconds),
+            timing_model.capture_error_seconds.value_or(clock_sync::audio_lag_radius(options.audio_timing_error_seconds)));
+        const auto map=clock_sync::audio_lag_arrival_map(*options.clock_sync,epoch,
             epoch+options.clock_sync->offset_seconds-radius,0,config.sample_rate,
             timing_model.capture_seconds_per_frame.value_or(1./config.sample_rate),
             timing_model.capture_rate_uncertainty_fraction.value_or(static_cast<double>(maximum_clock_ratio)),capture_error,
-            phase_upper,options.audio_timing_error_seconds);
-        if(map&&map->origin_samples-map->half_width_samples>=0&&
-           map->origin_samples+map->phase_scale*phase_upper+map->half_width_samples<=2*radius*config.sample_rate) {
+            maximum_phase,options.audio_timing_error_seconds);
+        // Match Live: intersect a qualified prior with the original bank; do
+        // not require its edge cells to be wholly contained in that bank.
+        if(map&&map->origin_samples+map->phase_scale*maximum_phase+map->half_width_samples>=0&&
+           map->origin_samples+map->phase_scale*minimum_phase-map->half_width_samples<=2*radius*config.sample_rate) {
             const modem::PatternStartWindow prior{map->origin_samples,map->phase_scale,map->half_width_samples};
             result.geometry.arrival_window_available=true;
             result.geometry.combined_arrival_half_width_seconds=static_cast<double>(map->half_width_samples/config.sample_rate);
-            if(!correlator) {fft_prior=prior;fft_phase_upper=phase_upper;}
+            if(!correlator) {fft_prior=prior;fft_phase_upper=maximum_phase;}
             else {
             std::map<double,std::optional<std::size_t>> count_by_rate;
             long double retained=0;std::size_t intersections=0;bool bounded=true;
@@ -803,7 +844,7 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
                 if(fresh) {
                     const auto rate=1+static_cast<long double>(hypothesis.clock_error_ppm)*1e-6L;
                     modem::detail::PatternStartLattice lattice(0,2*radius*config.sample_rate,
-                        chip/(2*rate),0,phase_upper,phase_step,prior);
+                        chip/(2*rate),0,maximum_phase,1,prior);
                     const auto range=lattice.retained_index_range();
                     const auto checks=range.second-range.first;
                     // Graph sweeps must not enumerate an unbounded fine-chip
@@ -880,17 +921,20 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     result.geometry.fine_chip_seconds=static_cast<double>(chip)/config.sample_rate;
     result.geometry.inner_chip_seconds=static_cast<double>(result.geometry.inner_chip_samples)/config.sample_rate;
     result.geometry.symbol_seconds=static_cast<double>(symbol)/config.sample_rate;
-    result.geometry.canonical_phase_step_seconds=static_cast<double>(std::gcd(symbol,
-        static_cast<std::uint64_t>(config.sample_rate)))/config.sample_rate;
+    const auto canonical_step=modem::canonical_phase_step(config);
+    result.geometry.canonical_phase_step_seconds=static_cast<double>(canonical_step)/config.sample_rate;
     result.geometry.canonical_phases=static_cast<std::size_t>((std::min(symbol,
-        static_cast<std::uint64_t>(config.sample_rate))-1)/std::gcd(symbol,
-        static_cast<std::uint64_t>(config.sample_rate))+1);
+        static_cast<std::uint64_t>(config.sample_rate))-1)/canonical_step+1);
     result.geometry.timing_grid_seconds=correlator?
         static_cast<double>((config.oscillator_search?chip/(2.L*bank.maximum_rate):
             std::max(1.L,std::floor(chip/(2.L*bank.maximum_rate))))/config.sample_rate):
         static_cast<double>(bin)/config.sample_rate;
     result.geometry.backend=correlator?"Compact direct correlation":"FFT acquisition";
     result.geometry.scope="Source-derived geometry; representative epoch/key work counts, not executed counters";
+    if(config.fake_hopping && config.fake_hopping->matched_gaps)result.geometry.scope+=
+        "; UTC gate-phase counts included; added gate-construction cost is not separately calibrated";
+    if(modem::deferred_symbols(config))result.geometry.scope+=
+        "; calendar slots and waits included; conservative work before optional bounded exact template/score reuse";
     if(fft_prior) {
         result.geometry.arrival_window_available=true;
         result.geometry.combined_arrival_half_width_seconds=static_cast<double>(fft_prior->half_width_samples/config.sample_rate);
@@ -930,7 +974,7 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     // Only the FFT path searches four initial private stream templates.
     // Compact lanes follow their absolute stream address and charge each
     // completed phase group once, using the correlator's own alpha spending.
-    const auto initial_symbols=private_pattern&&!correlator?4.L:1.L;
+    const auto initial_symbols=private_pattern&&!correlator?static_cast<long double>(modem::deferred_initial_symbols(config)):1.L;
     const auto acquisition_trials=(correlator?search_starts:initial_batch)*frequencies*phase_groups*initial_symbols;
     result.acquisition_threshold=static_cast<double>(-std::log(1e-10L)+
         (correlator?std::log(acquisition_trials)+std::log(acquisition_trials+1)+std::log(2.L):
@@ -1229,7 +1273,9 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
             // The runtime uses the tighter per-group predicate. This changes
             // acquisition only; ingestion, tracks and all trial charges remain.
             const auto lower=fft_prior->epoch_origin_samples-fft_prior->half_width_samples;
-            const auto offset=3.L*symbol/.99L;
+            const auto offset=modem::deferred_symbols(config)?
+                static_cast<long double>(modem::scheduled_symbol_offset(config,config.stream_epoch,0,
+                    modem::deferred_initial_symbols(config)-1))/.99L:3.L*symbol/.99L;
             const auto upper=fft_prior->epoch_origin_samples+
                 fft_prior->phase_scale*fft_phase_upper+fft_prior->half_width_samples+offset;
             const auto magnitude=std::max({1.L,std::abs(lower),std::abs(upper),samples,
@@ -1247,12 +1293,24 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         if(private_pattern && !options.timestamp && work_mode!=ReceiverWorkMode::sampled_simulation) {
             const auto prefix=static_cast<long double>(modem::training_sample_count(config)+
                 modem::pattern_pulse_padding_samples(config))/config.sample_rate;
+            long double calendar_extension=0;
+            if(modem::deferred_symbols(config)) {
+                const auto phase=std::min<std::uint64_t>(symbol,config.sample_rate)-1;
+                // A 2/5-second calendar repeats at two UTC seconds. Bound both
+                // epoch parities, including every retained initial slot.
+                for(unsigned parity=0;parity<2;++parity) {
+                    auto representative=config;representative.stream_epoch=parity;
+                    calendar_extension=std::max(calendar_extension,phase+
+                        static_cast<long double>(modem::scheduled_symbol_offset(representative,parity,phase,
+                            modem::deferred_initial_symbols(representative)-1))/bank.minimum_rate);
+                }
+            }
             const auto fresh_full=rolling_fft_work(samples,config.sample_rate,bin,length,hop,initial_batch,
                 static_cast<long double>(symbol)/config.sample_rate,prefix,options.search_seconds,
-                maximum_clock_ratio,timing_model);
+                maximum_clock_ratio,timing_model,false,calendar_extension);
             const auto fresh=early_readiness?rolling_fft_work(samples,config.sample_rate,bin,length,hop,initial_batch,
                 static_cast<long double>(symbol)/config.sample_rate,prefix,options.search_seconds,
-                maximum_clock_ratio,timing_model,true):fresh_full;
+                maximum_clock_ratio,timing_model,true,calendar_extension):fresh_full;
             result.new_epoch_admissions=fresh.admissions;
             result.new_epoch_full_fft_batches=fresh_full.full_batches;
             result.new_epoch_qualified_ready_batch_slots=fresh.full_batches;
@@ -1277,10 +1335,10 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
                 } else {
                     // Unsupported fresh-cohort geometry keeps all its original
                     // work, rather than multiplying a representative discount.
-                    const auto jobs=frequencies*phase_groups*4;
+                    const auto jobs=frequencies*phase_groups*initial_symbols;
                     const auto before=*filtered_operations;
                     if(early_readiness)*filtered_operations+=keys*maximum_component_dispatches*
-                        (fresh.full_batches*(8.L*transform+4*phase_groups*full_group_allowance)+
+                        (fresh.full_batches*(8.L*transform+initial_symbols*phase_groups*full_group_allowance)+
                         jobs*40*(fresh.first_batches*initial_batch+(fresh.full_batches-fresh.first_batches)*hop));
                     else *filtered_operations+=keys*(fresh.full_batches*(5*transform*fft_log*(1+4*jobs)+
                         jobs*(12*transform+template_pair_work*length))+
@@ -1346,7 +1404,7 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
                 jobs*40*scored_starts)*banks;
             if(filtered_operations)result.parallel=*filtered_operations;
             else if(early_readiness)result.parallel=maximum_component_dispatches*
-                (blocks*(8.L*transform+4*phase_groups*full_group_allowance)+jobs*40*scored_starts);
+                (blocks*(8.L*transform+initial_symbols*phase_groups*full_group_allowance)+jobs*40*scored_starts);
         }
         if(differential_window) {
             const auto direct_limit=std::max(4.L,static_cast<long double>(differential_windows)*fft_log);
@@ -1467,10 +1525,20 @@ bool interleaved_statistics(const transfer::Options& options,const Work& work,
     auto configured=config;
     if(options.timestamp)configured.stream_epoch=options.timestamp;
     if(options.key)configured=transfer::seeded_config(options,configured.stream_epoch);
-    const modem::detail::FftPatternParameters identity{configured.stream_epoch,modem::pattern_chip_samples(config),
+    modem::detail::FftPatternParameters identity{configured.stream_epoch,modem::pattern_chip_samples(config),
         modem::pattern_chips_per_symbol(config),total,config.sample_rate,static_cast<std::uint32_t>(config.spreading_mode),
         1U,config.scramble?1U:0U,config.dsss?1U:0U,configured.spreading_seed,configured.dsss_seed,
         config.dsss_factor,static_cast<std::uint32_t>(config.outer_dsss_version)};
+    if(configured.fake_hopping && configured.fake_hopping->power_ramps) {
+        const auto& plan=*configured.fake_hopping;
+        identity.fhss_matched_gaps=plan.smooth_ramps?(plan.remote_guard_covered?2U:3U):(plan.matched_gaps?1U:0U);
+        identity.fhss_ramp=plan.ramp_seconds;
+        identity.fhss_dwell=plan.dwell_seconds;identity.fhss_clock=plan.clock_error_seconds;
+        identity.fhss_peer_clock=plan.peer_clock_error_seconds;
+        identity.fhss_audio=plan.audio_error_seconds;identity.fhss_region=plan.region_seconds;
+    }
+    const auto payload_begin=modem::symbol_schedule_detail::add(modem::pattern_pulse_padding_samples(configured),
+        modem::scheduled_symbol_offset(configured,configured.stream_epoch,configured.stream_phase_samples,0));
     struct Statistics {
         std::array<double,4> weights{},other{};
         std::array<std::complex<double>,4> correlations{};
@@ -1479,19 +1547,18 @@ bool interleaved_statistics(const transfer::Options& options,const Work& work,
         bool noncircular=false;
         double simulation_power=0,hardware_projection=0;
     };
-    struct Entry {modem::detail::FftPatternParameters identity;std::uint64_t phase,bin;double carrier;unsigned bit;Statistics value;};
+    struct Entry {modem::detail::FftPatternParameters identity;std::uint64_t phase,bin,origin;double carrier;unsigned bit;Statistics value;};
     // No PCM or rows are retained. Exact waveform/seed/epoch/phase/source-bit
     // identity prevents sharing a private pattern with another candidate.
     thread_local std::vector<Entry> cache;
     Statistics statistics;bool found=false;
     for(const auto& entry:cache)if(entry.identity==identity&&entry.phase==configured.stream_phase_samples&&
-        entry.bin==bin&&entry.carrier==config.carrier_hz&&entry.bit==source_bit){statistics=entry.value;found=true;break;}
+        entry.bin==bin&&entry.origin==payload_begin&&entry.carrier==config.carrier_hz&&entry.bit==source_bit){statistics=entry.value;found=true;break;}
     if(!found) {
         modem::PatternCode code(configured,configured.stream_epoch);
         code.prepare_symbol(0,stop);
         modem::PatternTransmitter source(Bytes{static_cast<std::uint8_t>(source_bit)},configured,
             configured.stream_epoch,0,false);
-        const auto padding=modem::pattern_pulse_padding_samples(configured);
         const auto amplitude=std::sqrt(2*modem::nominal_signal_power);
         std::array<std::complex<double>,4096> pcm{};
         std::array<std::complex<double>,4> cross{},pseudo_a{},pseudo_b{},pseudo_cross{};
@@ -1507,7 +1574,7 @@ bool interleaved_statistics(const transfer::Options& options,const Work& work,
             auto rotation=std::polar(1.,-omega*static_cast<double>(emitted));
             const auto step=std::polar(1.,-omega);
             for(std::size_t i=0;i<count;++i,++emitted,rotation*=step) {
-                if(emitted<padding||emitted>=padding+total)continue;
+                if(emitted<payload_begin||emitted-payload_begin>=total)continue;
                 const auto real=pcm[i].real()/amplitude;
                 physical+=2*real*real;
                 // Match real PCM input, including its conjugate carrier image.
@@ -1525,7 +1592,7 @@ bool interleaved_statistics(const transfer::Options& options,const Work& work,
                 noise.variance={(1+image)/2,(1-image)/2};
                 // Principal axes of the real-PCM boxcar covariance. Retain
                 // the signed carrier image and the actual source-padding phase.
-                auto axis=std::polar(1.,-omega*(static_cast<double>(padding)+position));
+                auto axis=std::polar(1.,-omega*(static_cast<double>(payload_begin)+position));
                 for(unsigned plane=0;plane<2;++plane,axis*=std::complex<double>{0,1}) {
                     const auto x=axis*std::conj(a),y=axis*std::conj(b),z=axis*std::conj(s);
                     const std::array<double,6> v{x.real(),x.imag(),y.real(),y.imag(),z.real(),z.imag()};
@@ -1568,7 +1635,7 @@ bool interleaved_statistics(const transfer::Options& options,const Work& work,
         statistics.hardware_projection=static_cast<double>(projected*bin/physical);
         estimate_detail::check(stop);
         if(cache.size()==8)cache.erase(cache.begin());
-        cache.push_back({identity,configured.stream_phase_samples,bin,config.carrier_hz,source_bit,statistics});
+        cache.push_back({identity,configured.stream_phase_samples,bin,payload_begin,config.carrier_hz,source_bit,statistics});
     }
     p.weights=statistics.weights;p.alternative_weights=statistics.other;
     p.correlations=statistics.correlations;p.section_signal_coefficients=statistics.means;
@@ -1817,7 +1884,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     const auto chip_seconds=static_cast<long double>(modem::pattern_chip_samples(config))/config.sample_rate;
     // The sampled transport adds this complete-symbol absence and lookahead
     // after the exact waveform, including its settling and suppression noise.
-    const auto tail=static_cast<long double>(modem::pattern_absence_samples(config))/config.sample_rate+1+
+    const auto tail=static_cast<long double>(modem::pattern_absence_capture_samples(config))/config.sample_rate+1+
         2.L*modem::pattern_pulse_padding_samples(config)/config.sample_rate;
     // Seeded startup is 50..300 ms plus a fractional sample. Its mean is
     // 175 ms; receiver-clock delay is not shortened by transmitter clock rate.
@@ -2057,7 +2124,22 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     if(!result.profile_matches || !result.carrier_in_search || !result.clock_in_search ||
        !result.receiver_workspace_supported || result.oscillator_search_limited)return result;
     if(!compute_probability)return result;
-    const bool interleaved_reference=config.dsss_factor>1&&config.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2;
+    // Actual-source Interleave statistics include the configured pulse gaps
+    // and the deferred payload origin. Other references remain diagnostic.
+    // A conditional symbol fit cannot qualify adaptive acquisition or the
+    // hop-dependent emitted-power distribution.
+    if(config.fake_hopping&&config.fake_hopping->power_ramps) {
+        result.probability_reference_only=true;
+        result.probability_model_limit=modem::deferred_symbols(config)?
+            "Full-symbol reference: deferred FHSS acquisition and cover transitions remain unqualified":
+            config.fake_hopping->smooth_ramps?
+            "FHSS smooth envelope: full-energy fading projection; full-bank sensitivity remains unqualified":
+            config.fake_hopping->matched_gaps?
+            "FHSS matched-gap templates: hop-dependent emitted energy and full acquisition sensitivity remain unqualified":
+            "Ungated diagnostic reference: FHSS power gaps and transition loss are not modeled";
+    }
+    const bool interleaved_reference=(config.dsss_factor>1&&config.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2)||
+        (config.fake_hopping&&config.fake_hopping->smooth_ramps);
     if(interleaved_reference&&(matching_work.compact||differential_window||
        (result.drift_sections>1&&!matching_work.drift_supported))) {
         result.probability_model_limit="Interleave actual-source reference is unavailable for compact, unsupported section allocation or differential geometry; full acquisition sensitivity remains unqualified";
@@ -2306,7 +2388,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
             result.probability_model_limit="Compact multi-bit timing ownership is not modeled; the first-bit estimate remains available";
         }
         if(interleaved_reference)result.probability_model_limit=
-            "Interleave isolated-symbol, fixed initial-phase actual-source reference: shaped and radially limited real PCM, projected signal energy and finite candidate overlap. Noncircular projection uses both real-noise principal planes, joint template/source covariance and dependent received energy; circular geometry retains its existing approximation. Orthogonal noise energy uses a bounded chi-square approximation. Hardware uses user-entered actual mean radio power; simulation uses nominal-power-referenced noise. Quarter phase/timing changes remain approximate: time-varying limiter weights, opposite carrier-image rotation and unmatched signal/noise cross terms are unresolved. Adjacent unknown symbols, complete acquisition-bank behavior, outer presence guard and sensitivity qualification are not modeled";
+            "Private isolated-symbol, fixed initial-phase actual-source reference: shaped and radially limited real PCM, selected source FHSS envelope, projected signal energy and finite candidate overlap. Noncircular projection uses both real-noise principal planes, joint template/source covariance and dependent received energy; circular geometry retains its existing approximation. Orthogonal noise energy uses a bounded chi-square approximation. Hardware uses user-entered actual mean radio power; simulation uses nominal-power-referenced noise. Quarter phase/timing changes remain approximate: time-varying limiter weights, opposite carrier-image rotation and unmatched signal/noise cross terms are unresolved. Adjacent unknown symbols, final device resampling/envelope, complete acquisition-bank behavior, outer presence guard and sensitivity qualification are not modeled";
         return probability_result();
     }
     const auto energy=static_cast<double>(std::pow(10.L,std::clamp(effective_db/10,-30.L,12.L)));

@@ -25,17 +25,17 @@ std::vector<Device> devices(){return {{"default","timed synthetic capture"}};}
 void capture(std::uint32_t rate,const std::string&,const CaptureCallback& callback,std::stop_token stop,
              StreamFormatCallback format,Options options) {
     ++capture_opens;
-    if(format)format({rate,rate,rate/2.,4096,TimingQuality::estimated,.0252});
+    if(format)format({rate,rate,rate/2.,4096,TimingQuality::estimated,.0242});
     std::vector<float> samples(std::max(1u,rate/50));std::uint32_t random=123;
     const auto origin=utc_now();std::uint64_t frames=0;auto next=std::chrono::steady_clock::now();
     while(!stop.stop_requested()) {
         const auto index=timing_observations.load();
         if(options.capture_timing&&timing_enabled) {
             const bool bad=outside_allowance.load();
-            if(options.timing_status)options.timing_status({!bad,options.maximum_utc_error_seconds,bad?.06:.0252,"synthetic timing fixture"});
+            if(options.timing_status)options.timing_status({!bad,options.maximum_utc_error_seconds,bad?.06:.0242,"synthetic timing fixture"});
             TimePrediction prediction;prediction.utc_seconds=origin+static_cast<long double>(frames)/rate;
             prediction.seconds_per_frame=(1+(index%2?1.1e-6:-1.1e-6))/rate;
-            prediction.uncertainty_seconds=bad?.06:(index%2?.02504:.02516);
+            prediction.uncertainty_seconds=bad?.06:(index%2?.02404:.02416);
             prediction.rate_uncertainty_fraction=index%2?2.01e-6:1.99e-6;
             prediction.quality=TimingQuality::estimated;
             options.capture_timing(prediction);++timing_observations;

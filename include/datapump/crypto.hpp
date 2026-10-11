@@ -14,7 +14,7 @@ enum class StreamDomain : std::uint8_t {
     Payload, Preamble, Suppression, PatternZeroV2, PatternOneV2,
     OuterDsss10V1, OuterDsss100V1, OuterDsss1000V1, FakeFhssV1,
     OuterDsss10RotationV2, OuterDsss100RotationV2, OuterDsss1000RotationV2,
-    OuterDsss10PermutationV2, OuterDsss100PermutationV2, OuterDsss1000PermutationV2, FhssCycleV2, CoverPreambleV1, CoverSuppressionV1
+    OuterDsss10PermutationV2, OuterDsss100PermutationV2, OuterDsss1000PermutationV2, FhssCycleV2, CoverPreambleV1, CoverSuppressionV1, FhssUtcV3, CoverWaitV1
 };
 
 // A 256-bit shared secret with independently derived stream and MAC keys.
@@ -37,9 +37,11 @@ public:
     // symbol permutation seeds use "dp2-0010"/"dp2-0100"/"dp2-1000".
     // These six domains require the separate DSSS purpose key.
     // FhssCycleV2 uses "fh-cyc02" and requires the separate FHSS purpose key;
+    // FhssUtcV3 uses "fh-utc03" under epoch zero for the canonical UTC calendar.
     // FakeFhssV1 is retained only for legacy diagnostic vectors.
     // CoverPreambleV1/ CoverSuppressionV1 use "cv-pre01"/"cv-sup01" to
-    // derive child cover secrets; no payload or FHSS byte range is reused.
+    // derive child cover secrets; CoverWaitV1 uses "cv-wai01" for calendar waits.
+    // No payload or FHSS byte range is reused.
     Bytes stream(StreamPurpose purpose, std::uint64_t timestamp,
                  std::uint64_t offset, std::size_t count,
                  StreamDomain domain = StreamDomain::Payload) const;

@@ -505,13 +505,13 @@ Bytes Crypto::stream(StreamPurpose purpose, std::uint64_t timestamp,
             domain == StreamDomain::OuterDsss1000RotationV2 || domain == StreamDomain::OuterDsss10PermutationV2 ||
             domain == StreamDomain::OuterDsss100PermutationV2 || domain == StreamDomain::OuterDsss1000PermutationV2 ||
             domain == StreamDomain::FhssCycleV2 || domain == StreamDomain::CoverPreambleV1 ||
-            domain == StreamDomain::CoverSuppressionV1,
+            domain == StreamDomain::CoverSuppressionV1 || domain == StreamDomain::FhssUtcV3 || domain == StreamDomain::CoverWaitV1,
             "invalid keystream domain");
     const bool outer_v2=domain==StreamDomain::OuterDsss10RotationV2 || domain==StreamDomain::OuterDsss100RotationV2 ||
         domain==StreamDomain::OuterDsss1000RotationV2 || domain==StreamDomain::OuterDsss10PermutationV2 ||
         domain==StreamDomain::OuterDsss100PermutationV2 || domain==StreamDomain::OuterDsss1000PermutationV2;
     require(!outer_v2 || purpose==StreamPurpose::Dsss,"outer spreading requires the dedicated DSSS purpose key");
-    require((domain!=StreamDomain::FhssCycleV2 && domain!=StreamDomain::FakeFhssV1) ||
+    require((domain!=StreamDomain::FhssCycleV2 && domain!=StreamDomain::FakeFhssV1 && domain!=StreamDomain::FhssUtcV3) ||
             purpose==StreamPurpose::Fhss,"hopping requires the dedicated FHSS purpose key");
     require(count == 0 || count - 1 <= std::numeric_limits<std::uint64_t>::max() - offset,
             "keystream byte offset would overflow");
@@ -547,12 +547,12 @@ Bytes Crypto::stream(StreamPurpose purpose, std::uint64_t timestamp,
         constexpr std::string_view pad="fh-fake1";
         std::copy(pad.begin(),pad.end(),counter.begin());
     }
-    if(domain == StreamDomain::FhssCycleV2) {
-        constexpr std::string_view pad="fh-cyc02";
+    if(domain == StreamDomain::FhssCycleV2 || domain == StreamDomain::FhssUtcV3) {
+        const std::string_view pad=domain == StreamDomain::FhssUtcV3?"fh-utc03":"fh-cyc02";
         std::copy(pad.begin(),pad.end(),counter.begin());
     }
-    if(domain == StreamDomain::CoverPreambleV1 || domain == StreamDomain::CoverSuppressionV1) {
-        const std::string_view pad=domain==StreamDomain::CoverPreambleV1?"cv-pre01":"cv-sup01";
+    if(domain == StreamDomain::CoverPreambleV1 || domain == StreamDomain::CoverSuppressionV1 || domain == StreamDomain::CoverWaitV1) {
+        const std::string_view pad=domain==StreamDomain::CoverPreambleV1?"cv-pre01":domain==StreamDomain::CoverWaitV1?"cv-wai01":"cv-sup01";
         std::copy(pad.begin(),pad.end(),counter.begin());
     }
     if(outer_v2) {

@@ -1,9 +1,12 @@
 #pragma once
 
 #include "datapump/types.hpp"
+#include "datapump/fhss_schedule.hpp"
+#include "datapump/pattern_pulse.hpp"
 
 #include <cstdint>
 #include <limits>
+#include <numeric>
 
 namespace datapump::modem {
 
@@ -49,6 +52,189 @@ inline SymbolStreamAddress symbol_stream_address(std::uint64_t epoch,
     seconds = add(seconds, fractional / sample_rate);
     const auto sample = static_cast<std::uint32_t>(fractional % sample_rate);
     return {add(epoch, seconds), sample / symbol_samples, sample};
+}
+
+// Versioned whole-symbol calendar. Current public profiles use exactly 2/5 s.
+// Reserve every boundary, even if two keyed channels happen to coincide. The
+// minimum dwell capacity covers all five fractional-sample boundary residues.
+// No previous bits, PCM buffering or iteration over elapsed hops is required.
+class FhssSymbolCalendar {
+public:
+    std::uint64_t rate=0, symbol=0, left=0, right=0, per_hop=0;
+    FhssSymbolCalendar(const FhssPlan& plan,std::uint32_t fs,std::uint64_t half_support,std::uint64_t samples):
+        rate(fs),symbol(samples) {
+        if(plan.dwell_seconds!=.4 || !fs || !samples || !half_support)
+            throw Error("deferred FHSS requires shaped symbols and a 0.4 s hop calendar");
+        const auto b=plan.power_clock_region_seconds();
+        if(!std::isfinite(b)||b<0||b>65536||!std::isfinite(plan.audio_error_seconds)||
+           plan.audio_error_seconds<0||plan.audio_error_seconds>60)throw Error("invalid FHSS calendar allowance");
+        const auto lag=static_cast<long double>(fs)*plan.audio_error_seconds/2;
+        const auto quiet=std::ceil(static_cast<long double>(fs)*(b+plan.audio_error_seconds/2));
+        const auto ramp=plan.smooth_ramps?static_cast<std::uint64_t>(std::ceil(fs*plan.ramp_seconds)):0;
+        // A post-shaper envelope can suppress the outside-symbol tails. Keep
+        // the entire scoring interval at unity; reserving the original long
+        // pulse support here would unnecessarily prohibit short bits. The
+        // diagnostic coefficient-omission construction still needs that drain.
+        const auto drain=plan.smooth_ramps?0:half_support;
+        left=static_cast<std::uint64_t>(std::ceil(quiet-lag))+drain+ramp;
+        right=static_cast<std::uint64_t>(std::ceil(quiet+lag))+drain+ramp;
+        auto shortest=2ULL*fs/5;
+        for(unsigned h=0;h<5;++h)shortest=std::min<std::uint64_t>(shortest,boundary(h+1)-boundary(h,true));
+        if(shortest<=left+right || (per_hop=(shortest-left-right)/symbol)==0)
+            throw Error("no complete shaped symbol fits between FHSS guards; change dwell, symbol duration or timing allowances");
+    }
+    std::uint64_t boundary(std::uint64_t hop,bool up=false) const {
+        using namespace symbol_schedule_detail;
+        // floor/ceil(2*fs*hop/5), avoiding a large intermediate product.
+        const auto whole=multiply(hop/5,2*rate);
+        const auto fraction=(hop%5)*2*rate;
+        return add(whole,(fraction+(up?4:0))/5);
+    }
+    std::uint64_t slot(std::uint64_t rank) const {
+        using namespace symbol_schedule_detail;
+        return add(add(boundary(rank/per_hop,true),left),multiply(rank%per_hop,symbol));
+    }
+    std::uint64_t first_rank(std::uint64_t epoch,std::uint64_t phase) const {
+        using namespace symbol_schedule_detail;
+        if(phase>=rate)throw Error("invalid FHSS source phase");
+        const auto tick=add(multiply(epoch,rate),phase);
+        // This integer-sample inverse can be one dwell low at a rounded edge;
+        // the following comparison deliberately advances to the next slot.
+        const auto hop=add(multiply(tick/(2*rate),5),(tick%(2*rate))*5/(2*rate));
+        const auto begin=add(boundary(hop,true),left);
+        const auto within=tick<=begin?0:1+(tick-begin-1)/symbol;
+        return add(multiply(hop,per_hop),std::min(within,per_hop));
+    }
+    std::uint64_t offset(std::uint64_t epoch,std::uint64_t phase,std::uint64_t index) const {
+        using namespace symbol_schedule_detail;
+        return slot(add(first_rank(epoch,phase),index))-add(multiply(epoch,rate),phase);
+    }
+    // First slot whose start is >= the supplied relative sample coordinate.
+    // Constant-time inverse; independent of elapsed airtime.
+    std::uint64_t lower_bound(std::uint64_t epoch,std::uint64_t phase,std::uint64_t sample) const {
+        using namespace symbol_schedule_detail;
+        const auto tick=add(add(multiply(epoch,rate),phase),sample);
+        const auto rank=first_rank(tick/rate,tick%rate),first=first_rank(epoch,phase);
+        return rank>first?rank-first:0;
+    }
+};
+
+inline bool deferred_symbols(const Config& config) {
+    return config.fake_hopping && config.fake_hopping->defer_symbols;
+}
+// UTC pulse omissions distinguish sample phases that previously shared the
+// same private epoch/ordinal. Arrival-window pruning may exclude phases; the
+// cipher-address gcd alone may not. The iterator does not allocate this grid.
+inline std::uint64_t canonical_phase_step(const Config& config) {
+    if(config.fake_hopping && (config.fake_hopping->defer_symbols||config.fake_hopping->matched_gaps))return 1;
+    return std::gcd(symbol_sample_count(config),static_cast<std::uint64_t>(config.sample_rate));
+}
+// A canonical cipher phase represents a CELL of physical source phases. A
+// qualified arrival prior must intersect that cell, not only its representative
+// point. This shares the exact templates without discarding fractional starts.
+inline std::uint64_t canonical_phase_cell_upper(const Config& config,std::uint64_t phase) {
+    const auto limit=std::min(symbol_sample_count(config),static_cast<std::uint64_t>(config.sample_rate))-1;
+    return phase+std::min(canonical_phase_step(config)-1,limit-std::min(phase,limit));
+}
+inline std::uint64_t scheduled_symbol_offset(const Config& config,std::uint64_t epoch,
+        std::uint64_t phase,std::uint64_t index) {
+    const auto samples=symbol_sample_count(config);
+    if(!deferred_symbols(config))return symbol_schedule_detail::multiply(index,samples);
+    return FhssSymbolCalendar(*config.fake_hopping,config.sample_rate,
+        pattern_pulse_padding_samples(config),samples).offset(epoch,phase,index);
+}
+inline SymbolStreamAddress symbol_stream_address(const Config& config,std::uint64_t epoch,
+        std::uint64_t phase,std::uint64_t index) {
+    if(!deferred_symbols(config))return symbol_stream_address(epoch,phase,index,
+        symbol_sample_count(config),config.sample_rate);
+    const auto offset=scheduled_symbol_offset(config,epoch,phase,index);
+    const auto total=symbol_schedule_detail::add(offset,phase);
+    const auto sample=static_cast<std::uint32_t>(total%config.sample_rate);
+    return {symbol_schedule_detail::add(epoch,total/config.sample_rate),sample/symbol_sample_count(config),sample};
+}
+
+// Re-resolve after a rate/target/profile change without substituting local
+// receive timestamp uncertainty for the agreed waveform guard parameters.
+inline std::shared_ptr<const FhssPlan> resolve_fhss_pulse_power(const FhssPlan& source,const Config& config) {
+    auto plan=std::make_shared<FhssPlan>(source);plan->validate();
+    plan->power_ramps=true;plan->mandatory_ramps=true;plan->defer_symbols=false;
+    plan->matched_gaps=false;plan->smooth_ramps=false;plan->remote_guard_covered=true;plan->ramp_seconds=0;plan->power_fallback_reason.clear();
+    try {
+        FhssPowerShape shape(*plan,config.sample_rate,pattern_pulse_padding_samples(config),symbol_sample_count(config));
+        plan->matched_gaps=true;
+    }
+    catch(const Error& error) {
+        try {
+            FhssSymbolCalendar calendar(*plan,config.sample_rate,pattern_pulse_padding_samples(config),symbol_sample_count(config));
+            plan->defer_symbols=true;
+            FhssPowerShape shape(*plan,config.sample_rate,pattern_pulse_padding_samples(config),symbol_sample_count(config));
+        } catch(const Error&) {
+            plan->defer_symbols=false;plan->matched_gaps=true;
+            try {
+                const FhssPowerShape shape(*plan,config.sample_rate,pattern_pulse_padding_samples(config),symbol_sample_count(config));
+                const auto chip=pattern_chip_samples(config);
+                // Keep a full statistical cover interval and at least one
+                // retained coefficient for every symbol phase. This bound is
+                // conservative; it is not a sensitivity certificate.
+                if(shape.period-2*shape.coefficient_radius()<=chip ||
+                   symbol_sample_count(config)<=2*shape.coefficient_radius()+2*chip)
+                    throw Error("FHSS guard can erase every pulse of a symbol; reduce uncertainty or change symbol/dwell geometry");
+            } catch(const Error& gap_error) {
+                plan->matched_gaps=false;plan->power_ramps=false;
+                plan->power_fallback_reason=std::string(gap_error.what())+"; transmission requires safe nonzero pulse support between hops";
+            }
+        }
+    }
+    return plan;
+}
+// Production envelope V1. A bounded smooth gate keeps local hop silence even
+// when the original finite pulse is seconds long. It broadens very narrow
+// spectra; 200 Hz is the user-selected ramp bandwidth allowance, not a legal
+// mask or a promise that all sidebands stop at 200 Hz. No crypto coordinate or
+// receiver hypothesis changes. Legacy exact pulse gaps remain diagnostic above.
+inline std::shared_ptr<const FhssPlan> resolve_fhss_power(const FhssPlan& source,const Config& config) {
+    auto plan=std::make_shared<FhssPlan>(source);plan->validate();
+    plan->power_ramps=plan->mandatory_ramps=plan->smooth_ramps=true;
+    plan->defer_symbols=plan->matched_gaps=false;plan->remote_guard_covered=true;
+    plan->power_fallback_reason.clear();
+    const auto bandwidth=config.bandwidth_hz*std::max(1U,config.dsss_factor);
+    plan->ramp_seconds=2/std::max(200.,bandwidth);
+    const auto fs=config.sample_rate;const auto symbol=symbol_sample_count(config);
+    const auto support=pattern_pulse_padding_samples(config);
+    try {
+        // A propagation region can exceed an entire dwell (EME). It cannot
+        // justify emitting through the LOCAL hop or prohibit otherwise safe
+        // Fake audio. Keep local lag/clock silence; explicitly report that a
+        // future single-channel tuner has no guaranteed remote overlap.
+        if(2*std::ceil(static_cast<long double>(fs)*(plan->relative_clock_region_seconds()+plan->audio_error_seconds/2))+
+           2*std::ceil(static_cast<long double>(fs)*plan->ramp_seconds)>=fs*plan->dwell_seconds)
+            plan->remote_guard_covered=false;
+        FhssPowerShape shape(*plan,fs,support,symbol);
+        // Reserve complete short bits where inexpensive; long bits retain their
+        // source clock and span gaps. No whole-bit PCM buffer or repeated bits.
+        if(symbol<shape.period) {
+            try {FhssSymbolCalendar calendar(*plan,fs,support,symbol);plan->defer_symbols=true;}
+            catch(const Error&) {
+                // Deferral cannot create a longer slot than a dwell contains.
+                // Never admit a mostly-muted short scoring interval. This is a
+                // flat-power geometry screen; arbitrary keyed energy is not
+                // claimed to have a deterministic lower bound.
+                if(shape.minimum_flat_power_fraction(symbol)<.5)
+                    throw Error("FHSS cannot retain half a short symbol's usable interval; reduce clock/audio/region uncertainty");
+            }
+        }
+        if(!plan->remote_guard_covered)plan->power_fallback_reason=
+            "Local hop protected; remote timing uncertainty spans the dwell (future radio overlap not guaranteed)";
+    } catch(const Error& e) {
+        plan->power_ramps=false;plan->power_fallback_reason=e.what();
+    }
+    return plan;
+}
+inline std::uint64_t deferred_initial_symbols(const Config& config) {
+    if(!deferred_symbols(config))return 4;
+    const FhssSymbolCalendar calendar(*config.fake_hopping,config.sample_rate,
+        pattern_pulse_padding_samples(config),symbol_sample_count(config));
+    return std::max<std::uint64_t>(4,calendar.lower_bound(config.stream_epoch,0,config.sample_rate));
 }
 
 inline std::uint64_t symbol_stream_chip(const SymbolStreamAddress& address,

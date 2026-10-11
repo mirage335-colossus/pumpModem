@@ -490,7 +490,9 @@ after private generation never unlock/replay the generated epoch.
 The editable **Clock accuracy**, **Clock region** and **Clock offset** controls
 describe PC synchronization and propagation independently of oscillator selection.
 The adjacent editable **Audio error** starts at **Default**, resolving to 50 ms
-per station after known queue-delay compensation. It is independent of GPS/propagation and oscillator
+of nonnegative lag per station (0 to +50 ms), after known queue-delay compensation.
+GPS accuracy remains a ± bound. Playback uses a separate positive midpoint target;
+full provider uncertainty must fit within the lag interval. It is independent of GPS/propagation and oscillator
 models and persists through the same parameter-list/command path. Its duration presets and
 custom values do not alter the underrun-prevention buffer or establish measured
 hardware accuracy.

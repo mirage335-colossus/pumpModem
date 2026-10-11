@@ -4,6 +4,153 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Smooth FHSS ramps and restored receiver sharing — local manual checkpoint, 11 October 2026
+
+Production now selects a C2 post-shaper envelope, with approximately 10 ms ramps
+for narrow signals under the accepted 200 Hz engineering allowance. It retains
+the optimized receiver's original templates and treats the envelope as fading.
+The preceding per-source-phase masked bank remains diagnostic. Short symbols
+reserve a full-gain scoring slot and defer with fresh addresses; longer symbols
+span gaps. Default quiet time covers both ±10 ms endpoint clocks and 0..50 ms
+audio lag (90 ms total). Selected region/clock/audio allowances enter the guard;
+offset delays receive-hop presentation. Unfit remote uncertainty retains explicitly
+labeled local protection only, with no real-radio remote-overlap guarantee. An
+impossible local guard still blocks. There is no ungated production fallback.
+
+Three isolated paired runs recover broad short DSSS10 total CPU from about
+10.03 s in the mandatory-mask candidate to 0.0416 s, versus 0.0381 s in the
+preceding optimized candidate. RX alone is 0.992–1.084 times that optimized
+baseline; retained receiver memory differs by two bytes in this fixture. These
+are single-key/epoch full-capture measurements, not full Live ceiling qualification.
+Application-selected Rate360/DSSS10 (14400 samples/s, three frequency/clock pairs)
+measures total median 0.5436→0.5974 s and paired RX ratios 1.049–1.066. Rate1200
+(48000 samples/s, five pairs) measures 1.3937→1.1181 s and RX ratios 1.008–1.025.
+Eight-bit reception, per-poll publication coordinates and physical completion
+match. Extra cover airtime is real work. Source and receive setup/generation are
+included; device output and rolling epoch/key banks are separate scope.
+An additional identical-PCM replay against the optimized original-template
+receiver retained every publication/completion coordinate and workspace byte.
+Three paired runs measure RX ratios 1.049–1.121 for 0.5 s DSSS10 symbols and
+1.020–1.041 for minute DSSS1000 symbols. These observed ranges are not confidence
+intervals; the residual overhead is not described as a new speedup over baseline.
+
+The final-output envelope prevents FIR reconstruction from filling hop zeros.
+An isolated adjustable-resampler probe adds 0.0177–0.0410 CPU seconds per 20 s
+of 48 kHz output (0.09–0.21% of one core). No PCM history is added. Reported
+filter workspace stays 100464 bytes, plus the small constant callback state.
+A periodic-tone envelope calculation gives −39.30 dBc outside ±100 Hz and
+−62.53 dBc outside ±200 Hz for default guards/10 ms ramps; final same-rate
+double gating gives −35.25/−58.68 dBc. These are not RF-mask measurements.
+
+Known-alignment I/Q trials on finite shaped/limited Off/10/100/1000 waveforms
+measure about 1.13–1.17 dB extra required C/N0 at 90% detection at equal received
+power. Four keys and 512 paired conditional draws provide the reported sampled
+uncertainty; this is not a full-bank bound. A separate nine-frequency/clock-lane,
+unknown-canonical-phase DSSS10 bank, with its true start-time center supplied,
+measures +1.713 dB at 90% exact eight-bit reception: paired bootstrap 95% interval
+1.267–2.479 dB, conditional on four keys, 32 channel draws/level and upper-curve
+interpolation. The nonmonotonic lower curve is retained. All exact streams
+physically completed without another stream. This does not establish full-bank
+99% sensitivity, broad-start acquisition or rare false-acceptance rates.
+Muted energy costs about another 1.15 dB in the conditional fixtures at unchanged
+downstream gain. It is a separate power debit, not detector loss. Flat-power
+worst-phase bounds are displayed; arbitrary private energy concentration has
+no universal nonzero retained-energy guarantee. Deferred scored intervals have
+unity gain. Finite-key weighted scans observe worst losses near 25%.
+
+The investigation also repaired qualified UTC selection of complete physical
+phase cells represented by each exact cipher template, and qualification where
+a prior intersects the original bank edge. No bank is enlarged. Fixed known
+phases, all frequency/clock alternatives, threshold charges, next-poll progress
+and fully scored six-second absence remain. Raw/projected scores and their
+derived display support use the existing numerical tolerance; discrete identity
+and completion comparisons remain exact.
+
+Final local test/build evidence and exact source identities are recorded in
+`.agent-work/artifacts/receiver-opt-20261008/fhss-efficient-final/manifest.json`;
+manual launcher `manual-fhss-efficient.sh`, report `MANUAL-FHSS-EFFICIENT.md`.
+The complete GUI group passed **38/38 in 177.71 s** through `./build.sh test gui`.
+The complete affected runtime selection passed **24/25 in 271.85 s**; its sole
+failure is the retained legacy ALSA clipping assertion (peak 1.00944, 63 clipped
+samples, energy fraction 2.47619e-08). All new failures from the first combined
+run were investigated and repaired without removing identity, coverage or
+physical-completion assertions. The final application is rebuilt with `./build.sh`.
+The complete CLI suite passed in 33.19 s.
+Earlier optimized/raw references and other agents' changes are preserved.
+This is a **manual-test checkpoint**, not overall qualification. The legacy
+fractional-DSSS ALSA clipping failure, earlier unsupported diagnostic-cover
+admissions and strong echo duplicates remain recorded. Full rolling-bank CPU,
+full-bank threshold/BER/99%/rare-event sensitivity, output-DAC/tuner/loopback
+timing/spectrum, extremely narrow whole receptions, ARM/Windows/sanitizer/native
+graphical/SDK/packaging/calibration coverage remain outstanding. No push,
+publication or hosted CI is performed.
+
+## FHSS deferred whole symbols — local manual checkpoint, 11 October 2026
+
+Historical preceding-candidate results; the smooth-envelope checkpoint above
+supersedes its production fallback and receiver-cost conclusions.
+
+When the existing punctured-symbol gate is ineligible, supported configurations
+now defer whole shaped bits into slots between fixed 0.4-second UTC hop guards.
+The receiver follows the same calendar for all canonical acquisition alternatives,
+Data/private addressing, continuation and fully scored absence. Waits contain
+independently keyed full-DSSS cover; they do not count as lost bits or observed
+absence. Payload bits, framing and admission thresholds remain unchanged.
+Calendar scheduling changes actual UTC addresses and waveforms, so peers require
+matching new implementations and geometry/guard settings. Fake remains audio-
+frequency/radio-tuning fixed, with amplitude ramps and display-only hops.
+
+Rate 1200 / DSSS 10 / target 40 at 9 kHz baseband fits two 106.667 ms symbols per dwell
+under Default clock/audio guards (5 bit/s steady state). Rate 360 / DSSS 10 at the
+same target has a 355.556 ms symbol that cannot fit; it keeps an explicit ungated
+Fake fallback. Region 400 ms cannot fit a 400 ms dwell. Compact reception is unsupported
+for deferred scheduling; adequate FFT workspace is required. See
+[the calendar and its limits](spread-spectrum-controls.md#deferred-whole-symbols-local-manual-candidate).
+
+Focused Off/10 fixtures passed calendar/inverse rounding, Data addresses,
+block splits, later-epoch acquisition, cancellation, open-ended noise and physical
+completion. Exact-cache on/off tests use identical PCM and compare every poll's
+events, identity, bits, end positions and trial/threshold charges. A cache-eviction
+regression preserves streamed fallback and the reduced workspace bound. No search
+hypotheses are removed. The final complete affected run was **59/60 in 432.89s**:
+**38/38 GUI** and **21/22 runtime/native** passed. The retained legacy ALSA clipping
+assertion failed (peak 1.00944, 63 clipped samples, energy fraction 2.47619e-08).
+The complete CLI suite passed in 35.36s and `./build.sh` rebuilt the Release
+FLTK GUI; physical graphical display tests and sanitizers were disabled.
+
+Three isolated alternating paired seeds with eight-bit complete receptions
+measured more total CPU than the preceding ungated candidate. Fixed-phase medians
+were 33.5→61.9 ms (Off) and 429.4→690.0 ms (10); all-canonical-phase medians were
+37.6→106.2 ms and 797.1→1283.8 ms. Paired total ratios were 1.737–1.849,
+1.551–1.629,2.788–3.162 and1.517–1.611 respectively. These are observed ranges,
+not confidence intervals. Exact bounded template/score reuse reduced avoidable
+prototype cost; extra airtime and canonical slots remain real work. Work-model
+estimates include slots/waits/rolling lifetime but conservatively omit optional
+cache savings. Source memory rose 8282/57890 bytes; all-phase receiver retained
+peaks were 530355/2281853 bytes. Each optional allocation is capped at 8 MiB and
+combined capacities remain within the configured workspace. The original 16 KiB
+long-symbol source assertion remains intact and passes.
+
+These are changed-waveform comparisons at unchanged input rates, not sensitivity
+evidence. Burst durations rose 5.531→7.185 s and 5.503→6.743 s; completion coordinates
+rose 8.58→12.50 s and 8.59→12.44 s because hop holes cannot count as absent symbols.
+Every accepted bit still publishes on the next poll. Final simulated GUI graceful
+stops took 4.334 s (FCC), 3.443 s (delayed EU); second Cancel took
+5.11 ms. Whole-burst finite-spectrum probes showed no general spectral
+improvement; no new C/N0 loss or uncertainty bound is claimed.
+
+Frozen baseline GUI SHA256 is
+`13a5533cae54178275c329044477e3771b73113264c2efae013ebd3349effced`.
+Exact new source/build/GUI identity is recorded under
+`.agent-work/artifacts/receiver-opt-20261008/fhss-symbol-final/manifest.json`;
+launcher `manual-fhss-symbols.sh`, report `MANUAL-FHSS-SYMBOLS.md`. Prior optimized
+and raw references and other agents' changes remain preserved. This is a local
+**manual-test checkpoint**, not overall qualification. Deferred DSSS100/1000,
+full-bank threshold/BER/false-acceptance behavior, clock/frequency/phase boundaries,
+multiple keys, strong echo masking through hop gaps, physical audio/radio timing,
+legacy clipping/diagnostic-cover issues and broader platform/SDK/sanitizer/
+packaging checks remain unqualified. This task made no push or hosted CI dispatch.
+
 ## Continuous transmitter timing and protected echo cover — manual checkpoint, 11 October 2026
 
 Encrypted messages and tuning noise now share one immutable profile and one
@@ -9466,3 +9613,191 @@ display tests are disabled in this reused build. Manual hardware feedback,
 broader native/platform/sanitizer/ARM/SDK/packaging qualification and prior
 receiver/full-bank sensitivity qualification remain outstanding. No push,
 publication, hosted CI or hours-long qualification was performed.
+
+
+## 2026-10-11 — FHSS power transitions and causal Audio lag, local checkpoint
+
+Audio error is now universally the total causal lag [0,+A], including hidden
+Default50ms. GPS ±accuracy and total propagation-region width are unchanged.
+Playback keeps the immutable source origin/epoch and targets +A/2; full provider
+uncertainty must fit A/2. Capture retains its physical-event center and full
+uncertainty. Default broad acquisition is unchanged. Insufficient timing evidence
+retains the visible ordinary-playback/full-search fallback.
+
+Fake FHSS applies coefficient-level power transitions through the existing final
+shaper at actual keyed channel changes. It does not tune hardware or change the
+audio carrier. Default source silence spans60ms before to10ms after the nominal
+boundary, plus finite-pulse transitions outside. Unsupported geometry visibly
+keeps ungated audio; it cannot be used as a future hardware-tuning fallback.
+Cover reserves three useful seconds outside gaps, not uninterrupted echo masking.
+See [spread-spectrum controls](spread-spectrum-controls.md#hop-power-transitions-local-manual-candidate)
+for the conservative75% per-symbol support guard and exact shaping rule.
+
+Complete affected tests: **59/60 passed**,415.29s; GUI38/38 and runtime/native21/22.
+The sole failure is the retained legacy ALSA fractional-DSSS clipping assertion
+(peak1.00944,63clipped samples, energy fraction2.47619e-08), also present in the
+frozen preceding candidate. Interleave playback and the new one-sided timestamp
+fixture pass. No assertion was removed or loosened. Boundary tests cover Off/10/
+100/1000, fractional/block timing, supported clean reception, cancellation,
+cover duration and visible power fallback. Final help-only GUI checks **4/4 passed** (37.47s);
+DSP/timing evidence is reused without repeating the suite.
+
+Optional paired echo diagnostics at the same supported geometry fail identically
+with ramps Off/On: a3s,0.2-amplitude echo in the DSSS-Off case leaves a duplicate
+pending1001 stream beside completed1001. All streams were inspected. This
+retains an unqualified echo case; later cases after that first failure are
+unmeasured. A wider-gap geometry previously lost a clean final bit and is now
+covered by the explicit unsupported-geometry regression, not a weaker detector.
+
+Three isolated source-generation pairs per DSSS factor used identical synthetic
+keys,12ksample/s geometry and power settings, with changed waveforms. CPU overhead
+was8–79% relative, but source cost remained at most1.3% of one core per generated
+second; charged storage rose168B. Conservative cover airtime rose0.96833s in the
+measured cases. Payload average power fell0.953–1.001dB at unchanged downstream
+gain; equal-energy projection loss was about1dB. Neither establishes required
+C/N0 or a sensitivity confidence interval. Finite-capture out-of-band/in-band
+power changed−0.05..+0.16dB versus ungated PCM; direct chopping was2.9dB worse for
+Off and11.3–13.3dB worse for DSSS. No source clipping occurred in those captures.
+
+Local source/build/evidence identity: HEADba116b511757c8e2654e7802e439ab64ce61c252
+plus `fhss-power-final/manifest.json` and its exact patch/snapshot under
+`.agent-work/artifacts/receiver-opt-20261008/`. GCC14.2 Release FLTK, native
+graphical display and sanitizers OFF. Frozen preceding GUI SHA256
+39b62a49a5ccd39c53202ff84fe4708c7e7a06d7075ed52c8398c931a96f1ae2. New launcher:
+`manual-fhss-power.sh`; detailed limitations in `MANUAL-FHSS-POWER.md`.
+
+This is a **manual checkpoint, not overall qualification**. Output-ASRC/physical
+quiet intervals, sound-card/IC-7100 timing and loopback, strong echoes, threshold
+sensitivity/full-bank false-acceptance and previous receiver qualification
+remain open. RX/observer probabilities remain ungated references. The generic
+simulation source-CPU allowance is not recalibrated for ramp construction.
+Broader native, graphical, sanitizer, ARM/Windows, SDK and packaging qualification
+are deferred. No push, publication, hosted CI or hours-long qualification.
+
+
+## 2026-10-11 — FHSS arrival allowances and launcher repair, local checkpoint
+
+The preceding `manual-fhss-power.sh` supplied `--audio-error default`, but the
+GUI/CLI duration parser rejected that token. The failure is reproduced against
+the preserved GUI. The shared parser now resolves Default/default to50ms while
+preserving a separately selected clock policy. Unitless numeric durations remain
+invalid. GUI self-check parses the full command before running its checks, and
+regressions exercise the actual launcher argument list and CLI aliases.
+
+Production FHSS now freezes both stations' selected GPS accuracy (Default±10ms
+each), causal Audio lag [0,A], total propagation RegionR and OffsetO. At TX hopN,
+the source quiet interval is `[N-A-2G-R/2,N+2G+R/2]`, plus the ordinary finite
+pulse transitions. Thus Default is90ms quiet time, replacing the preceding70ms
+single-local-clock illustration. Region400ms cannot fit dwell400ms. The existing
+conservative75% per-symbol support guard remains; unsupported Fake geometry
+reports ungated fallback instead of silently reducing timing coverage. These
+are engineering geometry checks, not sensitivity certificates.
+
+Offset delays nominal receiving RF hop toN+O with the original keyed TX ordinal,
+so it neither delays TX nor widens the guard. Fractional/cycle-crossing tests
+verify original key/epoch selection and exact offset-independent PCM and duration.
+The GUI keeps TX Carrier/Shift unchanged and separately previews delayed arrival
+while transmitting. This generation-relative display is not an actual RF receiver
+or a post-TX wall-clock animation. Default's six-second acquisition search is not
+a propagation certificate. See [spread-spectrum controls](spread-spectrum-controls.md)
+and [clock sync](clock-sync.md) for the model and hardware limitations.
+
+Focused clock/cover/launch/import: **4/4 passed**,9.77s. Actual launcher self-check
+and FCC/EU/List display tests pass, including2564ms delayed arrival and restoration.
+Complete affected GUI/runtime: **59/60 passed**,419.03s; all38 GUI cases pass.
+The sole failure remains the preceding legacy ALSA fractional-DSSS clipping
+assertion (peak1.00944,63clipped samples, energy fraction2.47619e-08). The current
+Interleave playback case passes. Complete CLI: **1/1 passed**,41.54s, retaining
+all prior assertions and adding default/Default/50ms coverage. No receiver,
+framing, threshold or physical-completion requirement changed.
+
+Measured object growth is24bytes per FhssPlan and40bytes per TransmitTrace;
+FhssSchedule stays1064bytes. No PCM history/buffer or receiver work is added.
+Previous ramp performance/spectrum/power evidence applies only to its exact
+single-local-clock diagnostic geometry, not the larger production guard. Full-bank
+sensitivity, C/N0 confidence intervals, strong-echo behavior with the new gaps,
+physical converter/tuner/loopback timing and earlier known failures remain open.
+
+Exact source/build at HEADba116b511757c8e2654e7802e439ab64ce61c252 plus local changes
+is preserved under `.agent-work/artifacts/receiver-opt-20261008/fhss-arrival-final/`.
+The preceding executable/source snapshot is unchanged. New manual launcher:
+`manual-fhss-arrival.sh`; report `MANUAL-FHSS-ARRIVAL.md`. GCC14.2 Release FLTK,
+native graphical display and sanitizers OFF. This is a **manual checkpoint**, not
+full timing/receiver/security/platform qualification. Broader native graphics,
+sanitizer, ARM/Windows, SDK/packaging and calibration remain deferred. No push,
+publication, hosted CI or hours-long qualification was performed.
+
+
+## 2026-10-11 — Mandatory FHSS gaps across long symbols, local checkpoint
+
+Production no longer falls back to ungated Fake audio. Every supported hop has
+coefficient-level suppression through the existing final pulse shaper. Whole
+symbols still defer where they fit; supported longer symbols span matched gaps.
+Impossible pulse support/dwell/uncertainty blocks both message and tuning noise.
+Both stations' GPS bounds, causal audio lag, Region and arrival Offset retain the
+preceding definitions. Long symbol duration alone is no longer a rejection.
+Payload bits, framing, key domains and thresholds are retained; peer waveform
+configuration must match. Fake still does not tune physical RF or audio frequency.
+
+RX templates include the exact omitted pulses, full I/Q Grams and physical noise
+observations. UTC gate phase identity requires the full sample grid, including
+non-gcd phases; no required hypotheses are dropped. Large compact phase banks
+bypass a narrow affine-cache count without enlarging every hypothesis or breaking
+64KiB budgets. Planner work counts the extra phases but gate-construction cost
+is not calibrated. Interleave conditional-source statistics now include guard
+identity in their bounded cache and sample the actual deferred payload interval.
+
+A retained nine-hypothesis wrong-key stress initially admitted five weak bits in
+DSSS10 gapped cover; preceding/current ungated receivers rejected that fixture.
+The coherent matched-gap FFT path now reuses the compact chip-subspace score for
+unestablished weak-chain confirmation. Raw standalone thresholds, ranking and
+established-stream publication remain. All16 final stress cases pass (Off/10/100/
+1000, fractional starts, both clock/frequency extremes, phase diffusion, wrong
+keys and noise). Drift/differential structured-null qualification remains open.
+No small noise fixture is presented as a rare false-acceptance measurement.
+
+Thirty alternating single-core runs with three synthetic seeds compare complete
+single-bank short messages against the frozen preceding optimized receiver.
+Original sample rates match; waveforms differ because the old candidate emitted
+ungated audio. New/old total TX+RX CPU is1.61–1.79(short Off),1.44–1.55(short10),
+0.991–1.143(60s10),1.273–1.300(60s100),1.203–1.293(60s1000). No speedup is claimed.
+Extra retained TX state is63bytes; RX grows130 or256bytes in those fixed-phase
+fixtures. Source stopping tails are5.056/6.812s, without waiting60s for a symbol;
+actual device buffering is unmeasured. Broad phase banks can be much slower.
+A verified±0.2sample short timing prior reduced RX10.032s to0.324s in one paired
+capture; the long broad run was stopped at25s and remains incomplete.
+
+Conditional512trial/four-key coherent I/Q comparisons show1.57–1.59dB less payload
+energy at unchanged gain. Equal-received-power90% required-C/N0 deltas span
+−0.041 to+0.097dB across factors; paired95% intervals extend roughly−0.234 to+0.265dB.
+The99% intervals are wider (up to−1.741,+0.818dB across cases). This does **not**
+establish negligible full-bank sensitivity loss.96additional bit-identical-PCM
+near-threshold receiver pairs have one differing complete-message outcome,
+favoring the new safeguard, but cannot bound its C/N0 penalty. Matched power
+constraints and per-factor results are recorded in the detailed report.
+
+Analytic PCM in regression quiet intervals is below1e−12; independent fractional
+receiver templates agree below1e−10. Whole-burst nominal-band leakage changes by
+at most0.27dB in the retained Interleave fixtures, with no full-scale samples.
+This is not a hardware emission mask or guarantee of quiet DAC/ASRC/tuner output.
+The protected tail supplies three useful cover seconds excluding gaps; it cannot
+mask echoes within a quiet gap.
+
+Complete affected suite: **62/63 passed**,435.25s; all38GUI cases pass. The sole
+failure is the unchanged legacy ALSA fractional-DSSS clipping assertion
+(peak1.00944,63clipped samples, energy fraction2.47619e-08); current Interleave
+playback passes. Complete CLI: **1/1 passed**,34.09s. Assertions are retained.
+GUI SHA256: `d0fa9486cf1a59abe9108578f85f784ed2fcf184be6551533afd4c7ab213a34a`.
+Exact source/build identity is frozen in `fhss-mandatory-final/manifest.json`.
+
+The preceding runnable candidate remains unchanged. Artifacts, failed diagnostics,
+measurement tools and exact source/build snapshot are under
+`.agent-work/artifacts/receiver-opt-20261008/`; launcher `manual-fhss-mandatory.sh`,
+report `MANUAL-FHSS-MANDATORY.md`. GCC14.2 Release FLTK at HEADba116b5 plus local
+changes. This is a **manual checkpoint**, not full sensitivity, timing, receiver,
+security or platform qualification. Physical loopback/converters/tuner spectrum,
+full rolling key/epoch acquisition, higher-confidence threshold/BER curves,
+strong echoes/reverberation and enhanced detector nulls remain outstanding, along
+with earlier legacy ALSA clipping, unsupported diagnostic cover false admission
+and strong-echo duplicate evidence. Native graphics, sanitizer, ARM/Windows,
+SDK/packaging and broader qualification are deferred. No publication or hosted CI.

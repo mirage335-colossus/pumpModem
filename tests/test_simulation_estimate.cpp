@@ -91,21 +91,23 @@ void search_arithmetic_model_identity() {
     check(default_cost.gpu_seconds>.1*default_cost.cpu_seconds,
           "hypothetical GPU must retain private construction, plan, frontend and tracking host costs");
 
-    // 500 canonical phases: a499-phase group exceeds the selector range cap,
-    // while a singleton is eligible for direct matching. The mixed component
-    // must rebuild original FP64 templates, independent of requested precision.
-    measured.modem.integration_seconds=std::nextafter(520080./40000.,0.);
+    // Complete physical phase cells: the first hop combines a full index0
+    // job with four direct index1 positions. The wide qualified prior is
+    // intersected with the original bank. Mixed cohorts must rebuild original
+    // FP64 templates regardless of requested precision.
+    measured.modem.integration_seconds=std::nextafter(32767./40000.,0.);
+    measured.search_seconds=1;
     measured.modem.oscillator_search->lf={.000001,0};
     measured.modem.oscillator_search->rf={0,0};
     measured.modem.oscillator_search->rf_shift_hz=0;
-    measured.clock_sync=clock_sync::Policy{0,0,0};measured.audio_timing_error_seconds=0;
+    measured.clock_sync=clock_sync::Policy{0,4.,0};measured.audio_timing_error_seconds=0;
     auto mixed_draft=wire(1,measured.modem);mixed_draft.total_seconds=45;
     const auto mixed_price=[&] {return simulation::estimate(mixed_draft,measured,true,clean_channel(),{},1,false,
         100,256,simulation::ReceiverWorkMode::hardware_timing_model,{0,0,1./40000});};
     measured.modem.search_arithmetic=modem::SearchArithmetic::default_mode;const auto mixed=mixed_price();
     measured.modem.search_arithmetic=modem::SearchArithmetic::fp64;const auto mixed_exact=mixed_price();
     const auto& m=mixed.receiver_geometry;const auto& e=mixed_exact.receiver_geometry;
-    check(modem::symbol_sample_count(measured.modem)==520080&&mixed.receiver_workspace_supported&&
+    check(modem::symbol_sample_count(measured.modem)==32767&&mixed.receiver_workspace_supported&&
           m.paired_fallback_components>0&&m.direct_template_jobs>0&&m.input_fft_transforms>0&&
           m.paired_direct_template_jobs==0,
           "mixed selector fixture must actually combine full and direct jobs before pricing fallback");
@@ -1240,7 +1242,9 @@ void clock_dsss_reference() {
 }
 void restricted_fft_direct_and_bounded_fallback() {
     transfer::Options options;options.modem.sample_rate=1024;options.modem.carrier_hz=128;
-    options.modem.bandwidth_hz=256;options.modem.integration_seconds=1;
+    // Coarse projection bins keep the COMPLETE one-second physical phase cell
+    // within the tiny-K selector; a gcd representative is not a known start.
+    options.modem.bandwidth_hz=16;options.modem.integration_seconds=4;
     options.modem.scramble=true;options.key.emplace(Bytes(32,0x32));options.search_seconds=6;
     options.dsp_workspace_bytes=std::size_t{1024}*1024*1024;
     modem::OscillatorSearchConfig oscillator;oscillator.lf={.000001,0};oscillator.rf={0,0};
@@ -1365,6 +1369,94 @@ void versioned_outer_work_and_probability_scope() {
     check(off.profile_matches&&off.receiver_geometry.outer_dsss_version==modem::OuterDsssVersion::legacy_v1,
           "DSSS off must ignore inactive wire-version state");
 }
+void deferred_fhss_workload() {
+    transfer::Options options;options.key.emplace(Bytes(32,0x65));
+    auto& c=options.modem;c.sample_rate=4096;c.carrier_hz=1024;c.bandwidth_hz=2048;
+    c.integration_seconds=.0625;c.scramble=true;
+    modem::OscillatorSearchConfig oscillator;oscillator.lf={.0001,.5};oscillator.rf={.0001,.005};
+    oscillator.margin=3;c.oscillator_search=oscillator;options.dsp_workspace_bytes=128*1024*1024;
+    modem::FhssPlan hopping;hopping.channels=3;hopping.dwell_seconds=.4;
+    hopping.shifts[0]=10;hopping.shifts[1]=20;hopping.shifts[2]=30;
+    c.fake_hopping=transfer::transmit_hopping(hopping,options);
+    check(c.fake_hopping->defer_symbols,"FHSS model fixture failed to select deferred bits");
+    options.clock_sync=clock_sync::Policy{.001,.001,0};
+    const simulation::ReceiverTimingModel metadata{.005,0,1./c.sample_rate};
+    auto draft=wire(8,c);draft.total_seconds=30;
+    const auto evaluate=[&](const transfer::Options& o,std::span<const modem::Config> profiles={}) {
+        return simulation::estimate(draft,o,true,clean_channel(),profiles,1,false,100,4096,
+            simulation::ReceiverWorkMode::hardware_timing_model,metadata);
+    };
+    const auto plan=evaluate(options);
+    check(plan.receiver_workspace_supported&&plan.timing_window_modeled&&plan.profile_matches,
+        "deferred FHSS lost qualified timing or workspace model");
+    near(plan.receiver_geometry.canonical_phase_step_seconds,1./c.sample_rate,"deferred arrival phase grid retained the old gcd");
+    check(plan.receiver_geometry.canonical_phases==modem::symbol_sample_count(c)&&
+          plan.new_epoch_admissions>0&&plan.new_epoch_frontend_seconds>0,
+        "deferred work omitted canonical phases or rolling bank exposure");
+    auto ordinary=options;ordinary.modem.fake_hopping.reset();
+    const auto reference=evaluate(ordinary);
+    check(plan.new_epoch_full_fft_batches>=reference.new_epoch_full_fft_batches&&
+          plan.new_epoch_frontend_seconds>=reference.new_epoch_frontend_seconds,
+        "deferred bank retirement understated newly admitted epoch lifetime");
+    const std::array mismatch{ordinary.modem};
+    check(!evaluate(options,mismatch).profile_matches,"deferred and contiguous calendars shared waveform identity");
+    auto other=c;auto changed=std::make_shared<modem::FhssPlan>(*c.fake_hopping);changed->audio_error_seconds=.051;
+    other.fake_hopping=changed;const std::array guards{other};
+    check(!evaluate(options,guards).profile_matches,"different FHSS guard calendars shared waveform identity");
+}
+
+void matched_fhss_workload() {
+    transfer::Options o;o.key.emplace(Bytes(32,0x65));auto& c=o.modem;
+    c.sample_rate=1440;c.carrier_hz=360;c.bandwidth_hz=72;c.integration_seconds=512./1440.;
+    c.scramble=true;c.dsss_factor=10;c.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;
+    modem::FhssPlan p;p.channels=3;p.dwell_seconds=.4;p.shifts[0]=10;p.shifts[1]=20;p.shifts[2]=30;
+    c.fake_hopping=transfer::transmit_hopping(p,o);o.dsp_workspace_bytes=128*1024*1024;
+    c.fake_hopping=modem::resolve_fhss_pulse_power(*c.fake_hopping,c);
+    check(c.fake_hopping->matched_gaps,"matched planner fixture did not resolve");
+    const auto estimate=[&](std::span<const modem::Config> profiles={}) {
+        return simulation::estimate(wire(4,c),o,true,clean_channel(),profiles,1,false);
+    };
+    const auto plan=estimate();
+    near(plan.receiver_geometry.canonical_phase_step_seconds,1./c.sample_rate,"gated phase spacing hid UTC alternatives");
+    check(plan.receiver_geometry.canonical_phases==modem::symbol_sample_count(c),"gated planner omitted distinct UTC pulse phases");
+    auto unmasked=c;unmasked.fake_hopping.reset();const std::array reference{unmasked};
+    check(!estimate(reference).profile_matches,"gated and ungated templates shared profile identity");
+}
+
+void fhss_probability_cache_identity() {
+    transfer::Options o;o.timestamp=1800000321;o.key.emplace(Bytes(32,0x65));
+    auto& c=o.modem;c.sample_rate=2048;c.carrier_hz=512;c.bandwidth_hz=102.4;
+    c.integration_seconds=.5;c.stream_phase_samples=313;c.scramble=c.dsss=true;
+    c.dsss_factor=10;c.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;
+    o.dsp_workspace_bytes=128*1024*1024;
+    modem::FhssPlan p;p.channels=3;p.dwell_seconds=.4;p.shifts[0]=10;p.shifts[1]=20;p.shifts[2]=30;
+    const auto evaluate=[](const transfer::Options& v) {
+        return simulation::estimate(wire(4,v.modem),v,true,clean_channel(),{},1,true,100,256);
+    };
+    for(unsigned mode=0;mode<4;++mode) {
+        if(mode==0||mode==3)c.fake_hopping.reset();
+        else {p.audio_error_seconds=mode==1?.05:.01;p.region_seconds=mode==1?0:.003;
+            c.fake_hopping=modem::resolve_fhss_power(p,c);}
+        const auto warm=evaluate(o);simulation::Estimate cold;std::exception_ptr failure;
+        std::thread isolated([&]{try{cold=evaluate(o);}catch(...){failure=std::current_exception();}});
+        isolated.join();if(failure)std::rethrow_exception(failure);
+        check(warm.reference_probability_available&&cold.reference_probability_available,
+            "FHSS conditional reference fixture became unavailable");
+        near(warm.modeled_symbol_snr_db,cold.modeled_symbol_snr_db,"FHSS guard reused another source energy");
+        near(warm.one_bit_success_probability,cold.one_bit_success_probability,"FHSS guard reused another source/template covariance");
+        near(warm.success_probability,cold.success_probability,"FHSS conditional reference depends on cache history");
+    }
+    // Odd epoch + 0.2 s is a hop boundary, independently of how many short
+    // full-gain slots fit in the preceding dwell.
+    c.integration_seconds=.0625;c.stream_phase_samples=409;p.audio_error_seconds=.05;p.region_seconds=0;
+    c.fake_hopping=modem::resolve_fhss_power(p,c);
+    check(c.fake_hopping->defer_symbols&&modem::scheduled_symbol_offset(c,o.timestamp,c.stream_phase_samples,0)>0,
+        "conditional source fixture must wait for its first FHSS slot");
+    const auto deferred=evaluate(o);
+    check(deferred.reference_probability_available&&std::isfinite(deferred.modeled_symbol_snr_db),
+        "deferred conditional source did not score the actual payload interval");
+}
+
 void rolling_fft_epoch_workload() {
     transfer::Options options;
     options.modem=tuning::resolve(10,40,tuning::PatternMode::auto_keystream,true,7500,1000).config;
@@ -1436,9 +1528,9 @@ void rolling_fft_epoch_workload() {
     near(g.timing_grid_seconds,.0001,"FFT grid is the actual projection-bin cadence");
     near(g.first_fft_seconds,26.2144,"prior pruning must not invent earlier acquisition FFT cadence");
     near(g.fft_hop_seconds,13.4144,"later FFT cadence must preserve original hop");
-    check(g.combined_arrival_half_width_seconds>.1025&&g.combined_arrival_half_width_seconds<.1026&&
-          narrower.receiver_geometry.combined_arrival_half_width_seconds>.0225&&
-          narrower.receiver_geometry.combined_arrival_half_width_seconds<.0226,
+    check(g.combined_arrival_half_width_seconds>.0525&&g.combined_arrival_half_width_seconds<.0526&&
+          narrower.receiver_geometry.combined_arrival_half_width_seconds>.0125&&
+          narrower.receiver_geometry.combined_arrival_half_width_seconds<.0126,
           "combined admitted arrival width omitted GPS, region, both audio bounds or numerical margins");
     auto over_budget=metadata;over_budget.capture_error_seconds=.02;
     const auto unsupported=estimate(options,draft,simulation::ReceiverWorkMode::hardware_timing_model,over_budget);
@@ -1986,9 +2078,11 @@ int main(int argc,char** argv) {
         if(argc==2&&std::string_view(argv[1])=="--spread-only") {spread_example_reference();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--sub9-only") {sub9_probability_model_limits();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--arithmetic-only") {
-            search_arithmetic_model_identity();std::cout<<"search arithmetic model tests passed\n";return 0;
+            if(argc==2&&std::string_view(argv[1])=="--fhss-deferred-only") {fhss_probability_cache_identity();matched_fhss_workload();deferred_fhss_workload();return 0;}
+        fhss_probability_cache_identity();matched_fhss_workload();deferred_fhss_workload();search_arithmetic_model_identity();std::cout<<"search arithmetic model tests passed\n";return 0;
         }
-        search_arithmetic_model_identity();
+        if(argc==2&&std::string_view(argv[1])=="--fhss-deferred-only") {fhss_probability_cache_identity();matched_fhss_workload();deferred_fhss_workload();return 0;}
+        fhss_probability_cache_identity();matched_fhss_workload();deferred_fhss_workload();search_arithmetic_model_identity();
         if(argc==2&&std::string_view(argv[1])=="restricted-fft-work") {
             clock_dsss_reference();restricted_fft_direct_and_bounded_fallback();guarded_component_workload();versioned_outer_work_and_probability_scope();rolling_fft_epoch_workload();
             std::cout<<"Restricted FFT and versioned outer work diagnostics passed\n";return 0;

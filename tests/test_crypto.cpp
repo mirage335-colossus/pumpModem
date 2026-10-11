@@ -83,7 +83,7 @@ void test_cover_domains() {
     std::vector<Bytes> all;
     for(const auto domain:{StreamDomain::Payload,StreamDomain::Preamble,StreamDomain::Suppression,
         StreamDomain::PatternZeroV2,StreamDomain::PatternOneV2,
-        StreamDomain::CoverPreambleV1,StreamDomain::CoverSuppressionV1})
+        StreamDomain::CoverPreambleV1,StreamDomain::CoverSuppressionV1,StreamDomain::CoverWaitV1})
         for(const auto purpose:{StreamPurpose::Data,StreamPurpose::Scrambler,StreamPurpose::Dsss,StreamPurpose::Fhss}) {
             const auto bytes=key.stream(purpose,1800000321,0,1024,domain);
             check(std::find(all.begin(),all.end(),bytes)==all.end(),"cover domain or purpose reused old stream bytes");
@@ -91,6 +91,17 @@ void test_cover_domains() {
             check(std::equal(part.begin(),part.end(),bytes.begin()+509),"cover stream restarted across a cache/block boundary");
             all.push_back(bytes);
         }
+}
+
+void test_utc_hopping_domain() {
+    const Crypto key(Bytes(32,0x6a));
+    const auto bytes=key.stream(StreamPurpose::Fhss,0,0,2048,StreamDomain::FhssUtcV3);
+    for(const auto old:{StreamDomain::Payload,StreamDomain::FakeFhssV1,StreamDomain::FhssCycleV2})
+        check(bytes!=key.stream(StreamPurpose::Fhss,0,0,2048,old),"UTC hopping reused an earlier stream domain");
+    const auto part=key.stream(StreamPurpose::Fhss,0,1019,513,StreamDomain::FhssUtcV3);
+    check(std::equal(part.begin(),part.end(),bytes.begin()+1019),"UTC hopping stream restarted at a block boundary");
+    for(const auto purpose:{StreamPurpose::Data,StreamPurpose::Scrambler,StreamPurpose::Dsss})
+        rejects([&]{key.stream(purpose,0,0,1,StreamDomain::FhssUtcV3);},"UTC hopping accepted another stream purpose");
 }
 
 void test_preamble_domain() {
@@ -390,7 +401,7 @@ void test_production_keyfile() {
 
 int main() {
     try {
-        test_streams();test_cover_domains();
+        test_streams();test_cover_domains();test_utc_hopping_domain();
         test_preamble_domain();
         test_suppression_domain();
         test_private_pattern_domains();

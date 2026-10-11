@@ -74,8 +74,11 @@ class PlaybackSource {
     std::size_t position_=0, count_=0;
     bool eof_=false;
 public:
-    PlaybackSource(std::uint32_t logical,std::uint32_t hardware,const PlaybackCallback& next,std::stop_token stop,bool timed=false)
-        :next_(next),stop_(stop),converter_(logical,hardware,timed),input_(std::min<std::size_t>(4096,logical/20)){}
+    PlaybackSource(std::uint32_t logical,std::uint32_t hardware,const PlaybackCallback& next,std::stop_token stop,bool timed=false,
+            std::function<double(long double)> gain={})
+        :next_(next),stop_(stop),converter_(logical,hardware,timed),input_(std::min<std::size_t>(4096,logical/20)) {
+        converter_.set_output_gain(std::move(gain));
+    }
     Resampler& converter() {return converter_;}
     std::size_t workspace_bytes() const {return sizeof(*this)+converter_.workspace_bytes()+input_.capacity()*sizeof(float);}
     std::size_t read(std::span<float> output) {
@@ -507,7 +510,7 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
         if(options->estimated_timing && floor+options->estimated_timing->variable_timestamp_error_seconds>=limit)
             throw TimingPreflightUnavailable(floor,"estimated UTC model has no remaining error budget; ordinary playback retains full search");
     }
-    PlaybackSource source(rate,stream.hardware_rate,next_samples,stop,timed);
+    PlaybackSource source(rate,stream.hardware_rate,next_samples,stop,timed,options?options->playback_output_gain:std::function<double(long double)>{});
     const auto chunk_limit=std::min<std::size_t>(4096,stream.hardware_rate/20);
     std::vector<std::int16_t> block(chunk_limit*stream.channels);
     std::vector<float> samples(chunk_limit);
@@ -607,7 +610,7 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
             }
         }
         if(timed && detail::utc_playback_epoch && !source_started && std::chrono::duration<long double>(
-                std::chrono::system_clock::now().time_since_epoch()).count()>*detail::utc_playback_epoch+timing->allowance())
+                std::chrono::system_clock::now().time_since_epoch()).count()>*detail::utc_playback_epoch+options->presentation_lag_seconds+timing->allowance())
             throw Error("UTC audio preroll missed the scheduled epoch");
         std::size_t count=0;
         if(!timed)count=source.read(samples);
@@ -615,7 +618,7 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
             std::fill(samples.begin(),samples.end(),0);count=samples.size();
         } else {
             const auto predicted=timing->timeline().predict(accepted);
-            const auto epoch=*detail::utc_playback_epoch;
+            const auto epoch=*detail::utc_playback_epoch+options->presentation_lag_seconds;
             std::size_t leading=0;
             if(!source_started) {
                 auto remaining=(epoch-predicted.utc_seconds)/predicted.seconds_per_frame;
@@ -989,7 +992,7 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
     if(options && options->follow_system_clock)throw TimingPreflightUnavailable(std::numeric_limits<double>::infinity(),"Windows audio provider has no UTC presentation timestamps");
     if(!next_samples)throw Error("playback callback is required");
     WaveSession session(false,rate,device);
-    PlaybackSource source(rate,session.hardware_rate,next_samples,stop);
+    PlaybackSource source(rate,session.hardware_rate,next_samples,stop,false,options?options->playback_output_gain:std::function<double(long double)>{});
     session.prepare();
     mm_check(waveOutPause(session.output),"waveOut pause failed");
     std::vector<float> samples(std::min<std::size_t>(WaveSession::block_frames,session.hardware_rate/20));

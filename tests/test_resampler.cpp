@@ -1,4 +1,5 @@
 #include "datapump/resampler.hpp"
+#include "datapump/fhss_schedule.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -66,6 +67,30 @@ std::vector<float> adjusted(std::span<const float> input,std::uint32_t from,std:
 }
 }
 int main(){try {
+    // The final-stage mask must remain exact even when FIR interpolation fills
+    // a source-side zero. Include multistage conversion and adjustable clocks.
+    for(auto rates:{std::pair{64U,48000U},std::pair{1024U,48000U},std::pair{48000U,48000U},std::pair{48000U,1024U}})
+    for(bool adjustable:{false,true}) {
+        Resampler converter(rates.first,rates.second,adjustable);
+        datapump::modem::FhssPlan plan;plan.channels=2;plan.shifts[1]=1;plan.dwell_seconds=.4;
+        plan.power_ramps=plan.smooth_ramps=true;plan.ramp_seconds=.01;
+        const datapump::modem::FhssPowerShape shape(plan,48000,1,48000);
+        std::vector<double> gains;
+        converter.set_output_gain([&](long double seconds) {const auto g=shape.gain(1800000321,seconds*48000,48000);gains.push_back(g);return g;});
+        if(adjustable){converter.initialize_timing(.375,.0001);converter.set_rate_correction(-.0001,.00001);}
+        auto input=sine(rates.first,12,rates.first*2);std::array<float,113> output{};std::size_t at=0,produced=0,quiet=0;
+        const auto memory=converter.workspace_bytes();
+        while(!converter.finished()) {
+            const auto count=std::min<std::size_t>(17,input.size()-at);
+            const auto progress=converter.process(std::span(input).subspan(at,count),output,at+count==input.size());at+=progress.consumed;
+            require(gains.size()==produced+progress.produced,"output envelope not evaluated exactly once per final frame");
+            for(std::size_t i=0;i<progress.produced;++i)if(gains[produced+i]==0){++quiet;require(output[i]==0,"final interpolation refilled a protected FHSS zero");}
+            produced+=progress.produced;require(converter.workspace_bytes()==memory,"output gain changed converter workspace");
+        }
+        require(quiet>50,"final output guard was not exercised");
+        rejects([&]{converter.set_output_gain({});});
+    }
+
     {
         Resampler slow(48000,48000,true);
         slow.initialize_timing(0,.001);slow.set_rate_correction(0,1e-16);

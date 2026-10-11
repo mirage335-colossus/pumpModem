@@ -602,7 +602,8 @@ void fhss_profiles() {
     for(const auto pref:{P::fcc,P::eu}) {
         const auto p=fhss::resolve(pref,config);contains(p);
         check(p.experimental&&p.channels==200&&p.spacing_hz<10000,"experimental FHSS retained wide spacing floor");
-        near(p.spacing_hz,1.25*std::max(p.occupied_hz,modem::waveform_bandwidth_hz(config)),"experimental filter margin incorrect");
+        near(p.spacing_hz,1.25*std::max(p.occupied_hz,modem::waveform_bandwidth_hz(config))+200,
+            "experimental waveform and smooth-ramp filter margin incorrect");
         const auto limited=fhss::resolve(pref,config,fhss::Band{30e6,30.03e6});contains(limited);
         check(limited.channels<200,"narrow operating band failed to bound channel count");
         check(!fhss::resolve(pref,config,fhss::Band{30e6,30e6+10}).available,"impossible experimental band admitted");
@@ -639,7 +640,9 @@ void fhss_profiles() {
     rf(433e6);const auto narrow=fhss::resolve(P::fcc,config);
     config.bandwidth_hz=.01;config.spreading_factor=64;config.dsss_factor=1;
     const auto tiny=fhss::resolve(P::fcc,config);contains(tiny);
-    check(tiny.spacing_hz<1&&tiny.span_hz<narrow.span_hz/1000,"very narrow waveform kept fixed floor");
+    check(tiny.spacing_hz-200<1&&
+          tiny.span_hz-200*(tiny.channels-1)<(narrow.span_hz-200*(narrow.channels-1))/1000,
+          "very narrow waveform kept a fixed floor beyond the explicit 200 Hz ramp allowance");
     Controller controller({false,true});
     load_synthetic_key(controller);
     const auto& choices=controller.field(F::fhss).options;

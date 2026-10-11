@@ -403,7 +403,13 @@ void qualified_clock_window() {
             const auto events=projected.take_bursts(),reference=raw.take_bursts();
             check(events.size()==reference.size(),"qualified projection delayed an accepted bit");
             for(std::size_t i=0;i<events.size();++i) {
-                auto x=events[i],y=reference[i];x.score=y.score;
+                auto x=events[i],y=reference[i];
+                // Presentation-only support is min(count,score*chip_samples).
+                // Unsaturated matches expose the same summation roundoff as
+                // score; all discrete identity/completion fields remain exact.
+                check(std::abs(x.support_samples-y.support_samples)<2e-6*std::max(1.,y.support_samples),
+                    "qualified projection changed score-derived statistical support");
+                x.score=y.score;x.support_samples=y.support_samples;
                 check(same_burst(x,y),"qualified projection changed pending identity or physical completion");
                 accepted+=x.bits.size();
             }

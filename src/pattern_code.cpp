@@ -231,6 +231,8 @@ struct PatternCode::Impl {
         }
     };
     std::unique_ptr<TraceStorage> trace;
+    struct AddressCache {SymbolStreamAddress value{};std::uint64_t index=0,phase=0;bool valid=false;FhssPowerShape gate;};
+    std::unique_ptr<AddressCache> address_cache;
     Impl(Config value, std::uint64_t start_epoch): config(value), epoch(start_epoch),
         private_patterns(config.spreading_mode == SpreadingMode::pattern && (config.scramble || config.dsss)),
         pattern(config.scramble ? std::span<const std::uint8_t>(config.spreading_seed) :
@@ -246,9 +248,15 @@ struct PatternCode::Impl {
         chips = symbol / chip + (symbol % chip != 0);
         const bool version2=config.dsss_factor>1 && config.outer_dsss_version==OuterDsssVersion::interleaved_v2;
         const auto complete=static_cast<std::size_t>(symbol/chip);
-        const auto fixed=sizeof(Impl)+sizeof(PatternCode)+(config.dsss_factor>1?sizeof(StreamCache):0)+
+        const auto fixed=sizeof(Impl)+sizeof(PatternCode)+((deferred_symbols(config)||(config.fake_hopping&&config.fake_hopping->matched_gaps))?sizeof(AddressCache):0)+(config.dsss_factor>1?sizeof(StreamCache):0)+
             (version2?sizeof(Interleaved)+Interleaved::setup_bytes+2*complete*sizeof(std::uint32_t):0);
         require(fixed<=config.memory_limit,"pattern code exceeds memory limit");
+        if(deferred_symbols(config)||(config.fake_hopping&&config.fake_hopping->matched_gaps)) {
+            address_cache=std::make_unique<AddressCache>();
+            if(config.fake_hopping->matched_gaps)
+                address_cache->gate=FhssPowerShape(*config.fake_hopping,config.sample_rate,
+                    pattern_pulse_padding_samples(config),symbol);
+        }
         if(config.dsss_factor>1) {
             const auto domain=version2 ?
                 (config.dsss_factor==10?StreamDomain::OuterDsss10RotationV2:
@@ -260,7 +268,7 @@ struct PatternCode::Impl {
                 const auto permutation=config.dsss_factor==10?StreamDomain::OuterDsss10PermutationV2:
                     config.dsss_factor==100?StreamDomain::OuterDsss100PermutationV2:StreamDomain::OuterDsss1000PermutationV2;
                 interleaved=std::make_unique<Interleaved>(complete,outer->key,domain,permutation);
-                require(sizeof(Impl)+sizeof(PatternCode)+sizeof(StreamCache)+interleaved->working_bytes()<=config.memory_limit,
+                require(sizeof(Impl)+sizeof(PatternCode)+(address_cache?sizeof(AddressCache):0)+sizeof(StreamCache)+interleaved->working_bytes()<=config.memory_limit,
                         "pattern code exceeds memory limit");
             }
         }
@@ -277,16 +285,34 @@ struct PatternCode::Impl {
         OPENSSL_cleanse(config.spreading_seed.data(),config.spreading_seed.size());
         OPENSSL_cleanse(config.dsss_seed.data(),config.dsss_seed.size());
     }
+    SymbolStreamAddress stream_address(std::uint64_t index) {
+        if(!address_cache)return symbol_stream_address(epoch,config.stream_phase_samples,index,symbol,config.sample_rate);
+        auto& cache=*address_cache;
+        if(!cache.valid || index!=cache.index || cache.phase!=config.stream_phase_samples) {
+            cache.value=symbol_stream_address(config,epoch,config.stream_phase_samples,index);
+            cache.index=index;cache.phase=config.stream_phase_samples;cache.valid=true;
+        }
+        return cache.value;
+    }
     std::complex<double> value(std::uint64_t absolute_chip, unsigned bit, double fraction) {
         require(bit <= 1, "pattern symbol must be a zero or one bit");
         require(std::isfinite(fraction) && fraction >= 0 && fraction < 1,
                 "pattern chip fraction must be within [0,1)");
         auto position = absolute_chip % chips;
+        double pulse_gain=1.;
+        if(address_cache && address_cache->gate.enabled) {
+            const auto address=stream_address(absolute_chip/chips);
+            const auto offset=position*chip;
+            const auto center=static_cast<long double>(address.sample_in_second)+offset+
+                .5L*std::min(chip,symbol-offset);
+            const auto& gate=address_cache->gate;
+            pulse_gain=fhss_utc_quiet(address.epoch,center,config.sample_rate,
+                gate.coefficient_radius(),gate.lag_center)?0.:1.;
+        }
         std::complex<double> outer_value{1,0};
         Interleaved::SymbolState* symbol_state=nullptr;
         if (config.scramble || config.dsss) {
-            const auto address = symbol_stream_address(epoch, config.stream_phase_samples,
-                absolute_chip / chips, symbol, config.sample_rate);
+            const auto address = stream_address(absolute_chip / chips);
             if(outer) {
                 auto* rotations=outer.get();
                 if(interleaved) {
@@ -350,13 +376,13 @@ struct PatternCode::Impl {
                 row.noise(position,layer,nullptr,nullptr,captured);
             if(outer)inner={row.epoch,position,result,true};
             if (bit && !private_patterns) result *= bit_mask[static_cast<std::size_t>((absolute_chip % chips) % bit_mask.size())];
-            return result*outer_value;
+            return result*outer_value*pulse_gain;
         }
         const auto angle = (bit ? 1. : -1.) * std::numbers::pi / 2 *
                            (static_cast<double>(absolute_chip % 4) + fraction);
         auto result = std::polar(1., angle);
         if (config.dsss) result *= static_cast<double>(dsss.sign(position));
-        return result;
+        return result*pulse_gain;
     }
     std::array<std::complex<double>,2> values(std::uint64_t absolute,double fraction) {
         if(config.spreading_mode!=SpreadingMode::pattern)return {value(absolute,0,fraction),value(absolute,1,fraction)};
@@ -423,8 +449,7 @@ void PatternCode::prepare_symbol(std::uint64_t first_chip,std::stop_token stop) 
     cancelled(stop);
     require(first_chip%impl_->chips==0,"pattern setup requires a symbol-aligned chip address");
     if(impl_->interleaved) {
-        const auto address=symbol_stream_address(impl_->epoch,impl_->config.stream_phase_samples,
-            first_chip/impl_->chips,impl_->symbol,impl_->config.sample_rate);
+        const auto address=impl_->stream_address(first_chip/impl_->chips);
         (void)impl_->interleaved->select(address,impl_->outer->key,stop);
     }
 }
@@ -447,7 +472,7 @@ std::uint64_t PatternCode::chip_samples() const { return impl_->chip; }
 std::uint64_t PatternCode::chips_per_symbol() const { return impl_->chips; }
 std::uint64_t PatternCode::symbol_samples() const { return impl_->symbol; }
 std::size_t PatternCode::working_bytes() const {
-    return sizeof(PatternCode) + sizeof(Impl)+(impl_->trace?sizeof(Impl::TraceStorage):0)+
+    return sizeof(PatternCode) + sizeof(Impl)+(impl_->address_cache?sizeof(Impl::AddressCache):0)+(impl_->trace?sizeof(Impl::TraceStorage):0)+
         (impl_->outer?sizeof(StreamCache):0)+(impl_->interleaved?impl_->interleaved->working_bytes():0);
 }
 void PatternCode::enable_transmit_trace(std::uint64_t first_chip) {
@@ -571,6 +596,7 @@ struct PatternTransmitter::Impl {
     Bytes bits;
     Config config;
     std::unique_ptr<FhssSchedule> hopping;
+    FhssPowerShape hop_power;
     PatternCode code;
     std::unique_ptr<VirtualCover> cover;
     bool cover_is_tail=false,private_cover=false,protected_cover=false;
@@ -585,6 +611,9 @@ struct PatternTransmitter::Impl {
     std::unique_ptr<StreamCache> generated_data;
     std::unique_ptr<StreamCache> settling, settling_data, settling_pattern, settling_dsss;
     std::unique_ptr<StreamCache> suppression, suppression_data, suppression_pattern, suppression_dsss;
+    std::unique_ptr<FhssSymbolCalendar> calendar;
+    std::unique_ptr<VirtualCover> waiting_cover;
+    std::uint64_t calendar_rank=0,calendar_tick=0;
     std::uint64_t bit_count=0, source_epoch=0, start = 0, position = 0, total = 0, training = 0, padding = 0, content_end = 0, suppression_samples = 0;
     struct SettlingChip {
         std::uint64_t address=0;
@@ -611,13 +640,25 @@ struct PatternTransmitter::Impl {
                 "pattern input elements must be zero or one");
         require(start % code.chips_per_symbol() == 0,
                 "complete pattern transmission must start at a symbol-aligned chip address");
+        require(!config.fake_hopping || !config.fake_hopping->matched_gaps || start==0,
+                "UTC gated transmission must rebase epoch/phase rather than use a nonzero diagnostic first_chip");
         require(bit_count <= std::numeric_limits<std::uint64_t>::max() / code.symbol_samples(),
                 "pattern transmission duration would overflow");
-        total = bit_count * code.symbol_samples();
+        if(deferred_symbols(config)) {
+            calendar=std::make_unique<FhssSymbolCalendar>(*config.fake_hopping,config.sample_rate,pattern_pulse_padding_samples(config),code.symbol_samples());
+            calendar_rank=calendar->first_rank(epoch,config.stream_phase_samples);
+            calendar_tick=symbol_schedule_detail::add(symbol_schedule_detail::multiply(epoch,config.sample_rate),config.stream_phase_samples);
+        }
+        total = symbol_schedule_detail::add(payload_offset(bit_count-1),code.symbol_samples());
         training=surrounding_noise?training_sample_count(config):0;
         require(training<=std::numeric_limits<std::uint64_t>::max()-total,"pattern transmission duration would overflow");
         total+=training;
         padding=pattern_pulse_padding_samples(config);
+        if(hopping) {
+            hop_power=FhssPowerShape(*hopping->plan,config.sample_rate,padding,code.symbol_samples());
+            hopping->source_origin_samples=static_cast<long double>(config.stream_phase_samples)-training-padding;
+            hopping->source_rate=config.sample_rate;
+        }
         require(padding<=(std::numeric_limits<std::uint64_t>::max()-total)/2,"pattern transmission duration would overflow");
         total+=2*padding;
         content_end=total;
@@ -633,6 +674,7 @@ struct PatternTransmitter::Impl {
         // fixture or change RX thresholds. Encrypted GUI/message and tuning
         // paths retain full cover; broader false-accept calibration is pending.
         private_cover=private_cover_enabled(config);
+        require(!hop_power.enabled||private_cover,"FHSS power ramps require private shaped patterns");
         protected_cover=private_cover && surrounding_noise;
         cover_start=content_end-padding;
         // Retain the role-local virtual stream origin. Bring the same cover
@@ -644,6 +686,7 @@ struct PatternTransmitter::Impl {
         // worst-case map plus derivation scratch even before its lazy allocation.
         if(private_cover && (training || suppression_samples))
             cover_bytes=sizeof(VirtualCover)+code.working_bytes()+sizeof(Config)+2*sizeof(Crypto)+64;
+        if(calendar)cover_bytes+=sizeof(FhssSymbolCalendar)+sizeof(VirtualCover)+code.working_bytes()+sizeof(Config)+2*sizeof(Crypto)+64;
         const bool retain_prefix=protected_cover && training && padding;
         if(retain_prefix)cover_bytes+=sizeof(PrefixSnapshot);
         require(bit_count <= std::numeric_limits<std::uint64_t>::max() / code.chips_per_symbol(),
@@ -658,7 +701,7 @@ struct PatternTransmitter::Impl {
             (1U+static_cast<unsigned>(config.data_key.has_value())+
              static_cast<unsigned>(config.scramble)+static_cast<unsigned>(config.dsss));
         const auto fixed = sizeof(Impl) + sizeof(PatternTransmitter) + code.working_bytes()+cover_bytes+
-            (hopping?sizeof(FhssSchedule)+sizeof(FhssPlan)+FhssSchedule::cycle_bytes+sizeof(std::array<unsigned,FhssPlan::capacity>):0)+
+            (hopping?sizeof(FhssSchedule)+sizeof(FhssPlan)+hopping->plan->power_fallback_reason.capacity()+1+FhssSchedule::cycle_bytes+sizeof(std::array<unsigned,FhssPlan::capacity>):0)+
             (caches+static_cast<unsigned>(generated_data!=nullptr))*sizeof(StreamCache);
         require(fixed <= config.memory_limit && bits.capacity() <= config.memory_limit - fixed,
                 "pattern transmitter exceeds memory limit");
@@ -698,10 +741,50 @@ struct PatternTransmitter::Impl {
         OPENSSL_cleanse(config.spreading_seed.data(),config.spreading_seed.size());
         OPENSSL_cleanse(config.dsss_seed.data(),config.dsss_seed.size());
     }
+    std::uint64_t payload_offset(std::uint64_t symbol) const {
+        return calendar?calendar->slot(symbol_schedule_detail::add(calendar_rank,symbol))-calendar_tick:
+            symbol_schedule_detail::multiply(symbol,code.symbol_samples());
+    }
+    std::uint64_t payload_lower_bound(long double position) const {
+        if(position<=0)return 0;
+        if(!calendar)return static_cast<std::uint64_t>(std::ceil(position/code.symbol_samples()));
+        return calendar->lower_bound(source_epoch,config.stream_phase_samples,static_cast<std::uint64_t>(std::ceil(position)));
+    }
+    // Cover is independent of every valid candidate. Its virtual symbols keep
+    // full DSSS permutations; only not-yet-emitted coefficients are selected.
+    std::complex<double> wait_sample(std::uint64_t cursor,std::stop_token stop) {
+        if(!calendar || cursor+padding<training+padding || cursor>=content_end)return {};
+        const auto relative=static_cast<long double>(cursor)-padding-training;
+        const auto previous=payload_lower_bound(relative+padding+1);
+        if(previous && previous<=bit_count && relative-padding>=payload_offset(previous-1) &&
+           relative+padding<payload_offset(previous-1)+code.symbol_samples())return {};
+        if(!waiting_cover) {
+            auto child=cover_config(config,source_epoch,StreamDomain::CoverWaitV1);
+            waiting_cover=std::make_unique<VirtualCover>(child,source_epoch);
+            OPENSSL_cleanse(child.spreading_seed.data(),child.spreading_seed.size());
+            OPENSSL_cleanse(child.dsss_seed.data(),child.dsss_seed.size());
+        }
+        return waiting_cover->sample(relative,[&](long double center) {
+            const auto absolute=center+padding+training;
+            if(center<0 || absolute>=content_end-padding || !keep_center(absolute))return 0.;
+            const auto next=payload_lower_bound(center+1);
+            if(next && next<=bit_count && center>=payload_offset(next-1) && center<payload_offset(next-1)+code.symbol_samples())return 0.;
+            return hop_gain(absolute);
+        },stop);
+    }
     unsigned bit(std::uint64_t symbol) {
         if(!generated_data)return bits[static_cast<std::size_t>(symbol)];
-        const auto address=symbol_stream_address(source_epoch,config.stream_phase_samples,
-            symbol,code.symbol_samples(),config.sample_rate);
+        // Open-ended noise visits this for every pulse sample. Reuse the
+        // immutable calendar already validated for this transmitter instead of
+        // reconstructing waveform geometry for each generated Data bit.
+        SymbolStreamAddress address;
+        if(calendar) {
+            const auto total=symbol_schedule_detail::add(payload_offset(symbol),config.stream_phase_samples);
+            const auto sample=static_cast<std::uint32_t>(total%config.sample_rate);
+            address={symbol_schedule_detail::add(source_epoch,total/config.sample_rate),
+                sample/code.symbol_samples(),sample};
+        } else address=symbol_stream_address(source_epoch,config.stream_phase_samples,symbol,
+            code.symbol_samples(),config.sample_rate);
         generated_data->select_epoch(address.epoch);
         return (generated_data->byte(address.ordinal/8)>>(7-address.ordinal%8))&1U;
     }
@@ -718,16 +801,20 @@ struct PatternTransmitter::Impl {
     bool keep_center(long double center) const {
         return !stop_at || center<static_cast<long double>(*stop_at)+padding;
     }
+    double hop_gain(long double center) {
+        return hop_power.enabled&&!hop_power.smooth&&hopping->near_change(center,hop_power.coefficient_radius(),hop_power)?0.:1.;
+    }
     std::complex<double> payload_symbol(std::uint64_t symbol,double within,std::stop_token stop) {
         const auto first=start+symbol*code.chips_per_symbol();
-        const auto origin=static_cast<long double>(padding)+training+symbol*code.symbol_samples();
+        const auto origin=static_cast<long double>(padding)+training+payload_offset(symbol);
         if(!keep_center(origin+.5L*std::min(code.chip_samples(),code.symbol_samples())))return {};
         code.prepare_symbol(first,stop);
-        if(!stop_at)return code.shaped_value(first,bit(symbol),within);
+        if(!stop_at&&(!hop_power.enabled||hop_power.smooth))return code.shaped_value(first,bit(symbol),within);
         return pattern_pulse_sum(within,code.symbol_samples(),code.chip_samples(),[&](std::uint64_t local) {
             const auto offset=local*code.chip_samples();
             const auto length=std::min(code.chip_samples(),code.symbol_samples()-offset);
             if(!keep_center(origin+offset+.5L*length))return std::complex<double>{};
+            if(hop_gain(origin+offset+.5L*length)==0)return std::complex<double>{};
             const auto absolute=first+local;
             auto& entry=settling_chips[absolute%settling_chips.size()];
             if(!entry.valid || !entry.payload || entry.address!=absolute) {
@@ -774,7 +861,7 @@ struct PatternTransmitter::Impl {
                 }
                 cover.reset();
             }
-            const auto useful=static_cast<std::uint64_t>(config.sample_rate)*3;
+            const auto useful=protected_cover_span_samples(config);
             const auto ramp=std::max<std::uint64_t>(1,config.sample_rate/100);
             cover_end=cover_start+2*padding+useful;
             total=cover_end+(padding?padding+1:ramp);
@@ -797,7 +884,7 @@ struct PatternTransmitter::Impl {
         if(static_cast<long double>(cursor)+padding<cover_start)return {};
         return virtual_cover(true).sample(static_cast<long double>(cursor)-cover_origin,[&](long double center) {
             const auto absolute=center+cover_origin;
-            return absolute>=cover_start && (absolute<cover_end || !padding)?1.:0.;
+            return absolute>=cover_start && (absolute<cover_end || !padding)?hop_gain(absolute):0.;
         },stop);
     }
     std::complex<double> suppression_sample(std::uint64_t offset,std::stop_token stop) {
@@ -830,11 +917,11 @@ struct PatternTransmitter::Impl {
             if(stop_at && cursor>=*stop_at && retained_prefix_count) {
                 for(std::size_t i=0;i<retained_prefix_count;++i) {
                     const auto& p=(*retained_prefix)[i];
-                    result+=p.value*p.scale*pattern_pulse(static_cast<double>((static_cast<long double>(cursor)-p.center)/code.chip_samples()));
+                    result+=hop_gain(p.center)*p.value*p.scale*pattern_pulse(static_cast<double>((static_cast<long double>(cursor)-p.center)/code.chip_samples()));
                 }
             } else if(!stop_at || cursor<*stop_at || !protected_cover) {
                 result+=virtual_cover(false).sample(relative,[&](long double center) {
-                    return center<training && keep_center(static_cast<long double>(padding)+center)?1.:0.;
+                    return center<training && keep_center(static_cast<long double>(padding)+center)?hop_gain(padding+center):0.;
                 },stop);
             }
         } else if(training && !private_cover) {
@@ -854,11 +941,11 @@ struct PatternTransmitter::Impl {
         const auto payload=relative-training;
         const auto support=static_cast<long double>(padding);
         const auto duration=static_cast<long double>(code.symbol_samples());
-        const auto begin=std::max(0.L,std::floor((payload-support)/duration));
-        const auto end=std::min(static_cast<long double>(bit_count),std::floor((payload+support)/duration)+1);
+        const auto begin=payload_lower_bound(payload-support-duration);
+        const auto end=std::min(bit_count,payload_lower_bound(payload+support+1));
         for(auto symbol=static_cast<std::uint64_t>(begin);symbol<static_cast<std::uint64_t>(std::max(begin,end));++symbol) {
-            const auto within=static_cast<double>(payload-symbol*duration);
-            if(!stop_at) {
+            const auto within=static_cast<double>(payload-payload_offset(symbol));
+            if(!stop_at&&(!hop_power.enabled||hop_power.smooth||!hopping->near_change(cursor,hop_power.affected_radius(),hop_power))) {
                 // Ordinary transmission keeps the existing hot path; stopping
                 // must not add coefficient gates to every payload sample.
                 if(config.dsss_factor>1 && config.outer_dsss_version==OuterDsssVersion::interleaved_v2)
@@ -885,13 +972,18 @@ struct PatternTransmitter::Impl {
         if(padding) {
             for(std::size_t i=0;i<count;++i,++cursor) {
                 if((i&4095U)==0)cancelled(stop);
-                const auto baseband=protected_cover?shaped_sample(cursor,stop)+protected_sample(cursor,stop):
-                    (cursor<content_end?shaped_sample(cursor,stop):suppression_sample(cursor-content_end,stop));
-                output[i]=convert(oscillator*pattern_limit_pcm(amplitude*baseband));
+                const auto baseband=protected_cover?shaped_sample(cursor,stop)+wait_sample(cursor,stop)+protected_sample(cursor,stop):
+                    (cursor<content_end?shaped_sample(cursor,stop)+wait_sample(cursor,stop):suppression_sample(cursor-content_end,stop));
+                const auto gain=hop_power.smooth?hop_power.gain(source_epoch,
+                    hopping->source_origin_samples+cursor,config.sample_rate):1.;
+                output[i]=convert(gain*oscillator*pattern_limit_pcm(amplitude*baseband));
                 if(observer && cursor>=padding+training && cursor<content_end-padding) {
                     const auto payload=cursor-padding-training;
-                    const auto symbol=payload/code.symbol_samples();
-                    const auto within=payload%code.symbol_samples();
+                    const auto next=payload_lower_bound(payload+1);
+                    const auto symbol=next?next-1:0;
+                    if(!next || symbol>=bit_count || payload<payload_offset(symbol) ||
+                       payload>=payload_offset(symbol)+code.symbol_samples()) {oscillator*=step;continue;}
+                    const auto within=payload-payload_offset(symbol);
                     if(within%code.chip_samples()==0 && keep_center(static_cast<long double>(cursor)+
                         .5L*std::min(code.chip_samples(),code.symbol_samples()-within)))
                         observer(amplitude*code.value(start+symbol*code.chips_per_symbol()+within/code.chip_samples(),
@@ -978,10 +1070,13 @@ std::uint64_t PatternTransmitter::original_total_samples() const { return impl_-
 bool PatternTransmitter::finished() const { return impl_->position == impl_->total; }
 std::uint64_t PatternTransmitter::total_samples() const { return impl_->total; }
 std::uint64_t PatternTransmitter::samples_emitted() const { return impl_->position; }
-double PatternTransmitter::bit_rate() const { return static_cast<double>(impl_->config.sample_rate) / static_cast<double>(impl_->code.symbol_samples()); }
+double PatternTransmitter::bit_rate() const {
+    if(impl_->calendar)return static_cast<double>(impl_->calendar->per_hop)/impl_->config.fake_hopping->dwell_seconds;
+    return static_cast<double>(impl_->config.sample_rate) / static_cast<double>(impl_->code.symbol_samples());
+}
 std::size_t PatternTransmitter::working_bytes() const {
     return sizeof(PatternTransmitter) + sizeof(Impl) + impl_->code.working_bytes() + impl_->cover_bytes + impl_->bits.capacity()+
-        (impl_->hopping?sizeof(FhssSchedule)+sizeof(FhssPlan)+FhssSchedule::cycle_bytes+sizeof(std::array<unsigned,FhssPlan::capacity>):0)+
+        (impl_->hopping?sizeof(FhssSchedule)+sizeof(FhssPlan)+impl_->hopping->plan->power_fallback_reason.capacity()+1+FhssSchedule::cycle_bytes+sizeof(std::array<unsigned,FhssPlan::capacity>):0)+
         ((impl_->generated_data?1U:0U)+(impl_->settling?1U:0U)+(impl_->settling_data?1U:0U)+(impl_->settling_pattern?1U:0U)+
          (impl_->settling_dsss?1U:0U)+(impl_->suppression?1U:0U)+(impl_->suppression_data?1U:0U)+
          (impl_->suppression_pattern?1U:0U)+(impl_->suppression_dsss?1U:0U))*sizeof(StreamCache);
@@ -989,15 +1084,23 @@ std::size_t PatternTransmitter::working_bytes() const {
 void PatternTransmitter::copy_transmit_trace(TransmitTrace& result,std::uint64_t begun_chips) const {
     impl_->code.copy_transmit_trace(result,begun_chips);
     if(const auto& hopping=impl_->hopping) {
-        result.fhss=true;result.fhss_available=impl_->position>0;
-        result.fhss_epoch=hopping->epoch;result.fhss_channels=hopping->plan->channels;
+        result.fhss=true;result.fhss_available=impl_->position>0;result.fhss_utc_calendar=hopping->plan->utc_schedule();
+        result.fhss_epoch=hopping->plan->utc_schedule()?0:hopping->epoch;result.fhss_channels=hopping->plan->channels;
         result.fhss_dwell_seconds=hopping->plan->dwell_seconds;
+        result.fhss_arrival_offset_seconds=hopping->plan->offset_seconds;
+        result.fhss_arrival_available=false;
         if(result.fhss_available) {
             result.fhss_hop=hopping->ordinal(impl_->position-1,impl_->config.sample_rate);
             result.fhss_channel=hopping->channel(result.fhss_hop);
             result.fhss_cycle=hopping->cycle;result.fhss_byte_offset=hopping->byte_offset;
             result.fhss_key.assign(hopping->prefix.begin(),hopping->prefix.begin()+hopping->prefix_size);
             result.fhss_shift_hz=hopping->plan->shifts[result.fhss_channel];
+            if(const auto arrival=hopping->arrival_ordinal(impl_->position-1,impl_->config.sample_rate)) {
+                result.fhss_arrival_available=true;result.fhss_arrival_hop=*arrival;
+                result.fhss_arrival_channel=hopping->channel(*arrival);
+                result.fhss_arrival_shift_hz=hopping->plan->shifts[result.fhss_arrival_channel];
+                (void)hopping->channel(result.fhss_hop); // retain the TX cache/trace identity
+            }
         }
     }
 }
@@ -1009,6 +1112,9 @@ struct NoiseTransmitter::Impl {
 };
 
 NoiseTransmitter::NoiseTransmitter(Config config,std::uint64_t symbols) {
+    if(config.fake_hopping && (!config.fake_hopping->mandatory_ramps ||
+       (config.fake_hopping->power_ramps && !config.fake_hopping->utc_schedule())))
+        config.fake_hopping=resolve_fhss_power(*config.fake_hopping,config);
     // Replace every selected secret before constructing the ordinary modem.
     // The roots below match transfer::seeded_config: PatternCode then derives
     // each symbol's normal epoch and position under the purpose-separated key.
@@ -1035,7 +1141,11 @@ NoiseTransmitter::NoiseTransmitter(Config config,std::uint64_t symbols) {
     const auto overhead=training_sample_count(config)+2*pattern_pulse_padding_samples(config)+suppression_sample_count(config);
     require(overhead<sample_target && symbol<=sample_target-overhead,
             "noise symbol duration exceeds the stream safety limit");
-    const auto maximum=(sample_target-overhead)/symbol;
+    auto maximum=(sample_target-overhead)/symbol;
+    if(deferred_symbols(config)) {
+        const FhssSymbolCalendar calendar(*config.fake_hopping,config.sample_rate,pattern_pulse_padding_samples(config),symbol);
+        maximum=calendar.lower_bound(config.stream_epoch,config.stream_phase_samples,sample_target-overhead-symbol+1);
+    }
     require(symbols<=maximum,"finite noise duration exceeds the stream safety limit");
     const auto count=symbols?symbols:maximum;
     require(sizeof(NoiseTransmitter)+sizeof(Impl)<=config.memory_limit,

@@ -582,16 +582,16 @@ void gui_self_check() {
     std::cout<<"Data Pump shared GUI self-check passed; no display required.\n";
 }
 int gui_main(int argc,char** argv,const char* backend,const std::function<int(Launch)>& run,const char* program_name) {
-    bool smoke_requested=false;
+    bool smoke_requested=false,self_check_requested=false;
     try {
         Launch launch;
         const auto frontend_label=std::string_view(program_name)=="datapump-gui"?"GUI backend: ":"Frontend: ";
         std::vector<std::string> settings_arguments;
         for(int i=1;i<argc;++i) {
             const std::string arg=argv[i];
-            if(arg=="--help") {std::cout<<"Data Pump continuous console\n"<<frontend_label<<backend<<" (selected at build time)\nUsage: "<<program_name<<" [--color|--monochrome] [--simulation] [--self-check] [--smoke-test]\nLink settings: --tx-dbm DBM --path-loss-db DB --noise-dbm-hz DBM/Hz\n  --oscillator ID --rf-oscillator ID --shift HZ (default 0) --search-margin N (default 3)\n  --clock-sync default|GPS_1ms-400ms_region-2564ms_offset\n  --audio-error TIME (default 50ms per station)\n  --keyfile PATH --tx-key named|none --key-name NAME (all loaded entries remain RX keys)\n  --dsss-mode off|interleave --dsss-factor 1|10|100|1000 --dsss-version interleave|legacy (both peers must match)\n  --search-arithmetic default|fp32-min|fp64-force (experimental CPU policy; legacy IDs accepted)\n  --fhss off|fake-fcc|fake-eu|fake-list (legacy fake-0.4s-200 maps to fake-fcc)\n  --fhss-list '30MHz,30.006MHz' or --fhss-list-file PATH (2-200 Shift frequencies)\n  --live-duplex yes|no (default no; simultaneous hardware input/output)\n  --reference independent|shared-radio --lf-reference 0 (shared-radio shorthand)\n  --doppler VELOCITY (c, knots, mph, kph or %; default 0.000000c)\n  --carrier HZ is configured absolute; stream is Doppler-adjusted Carrier minus Shift (>0)\n  --target-snr DB-Hz --rate HZ --carrier HZ --dsp-workspace 25%|50%|75%\n  --auto-pattern or --pattern MODE; --bw is an alias for --rate\n  --target-snr sets preview, short and long targets; --short-target-snr / --long-target-snr override them\nSmoke options: --smoke-dir PATH --smoke-hold SECONDS --smoke-timeout SECONDS --smoke-view NAME --smoke-scroll 0..1\n";return 0;}
+            if(arg=="--help") {std::cout<<"Data Pump continuous console\n"<<frontend_label<<backend<<" (selected at build time)\nUsage: "<<program_name<<" [--color|--monochrome] [--simulation] [--self-check] [--smoke-test]\nLink settings: --tx-dbm DBM --path-loss-db DB --noise-dbm-hz DBM/Hz\n  --oscillator ID --rf-oscillator ID --shift HZ (default 0) --search-margin N (default 3)\n  --clock-sync default|GPS_1ms-400ms_region-2564ms_offset\n  --audio-error default|TIME (total lag 0..+50ms per station by default)\n  --keyfile PATH --tx-key named|none --key-name NAME (all loaded entries remain RX keys)\n  --dsss-mode off|interleave --dsss-factor 1|10|100|1000 --dsss-version interleave|legacy (both peers must match)\n  --search-arithmetic default|fp32-min|fp64-force (experimental CPU policy; legacy IDs accepted)\n  --fhss off|fake-fcc|fake-eu|fake-list (legacy fake-0.4s-200 maps to fake-fcc)\n  --fhss-list '30MHz,30.006MHz' or --fhss-list-file PATH (2-200 Shift frequencies)\n  --live-duplex yes|no (default no; simultaneous hardware input/output)\n  --reference independent|shared-radio --lf-reference 0 (shared-radio shorthand)\n  --doppler VELOCITY (c, knots, mph, kph or %; default 0.000000c)\n  --carrier HZ is configured absolute; stream is Doppler-adjusted Carrier minus Shift (>0)\n  --target-snr DB-Hz --rate HZ --carrier HZ --dsp-workspace 25%|50%|75%\n  --auto-pattern or --pattern MODE; --bw is an alias for --rate\n  --target-snr sets preview, short and long targets; --short-target-snr / --long-target-snr override them\nSmoke options: --smoke-dir PATH --smoke-hold SECONDS --smoke-timeout SECONDS --smoke-view NAME --smoke-scroll 0..1\n";return 0;}
             if(arg=="--version") {std::cout<<"Data Pump "<<DATAPUMP_VERSION<<' '<<frontend_label<<backend<<'\n';return 0;}
-            if(arg=="--self-check") {gui_self_check();return 0;}
+            if(arg=="--self-check") {self_check_requested=true;continue;}
             if(arg=="--color")launch.color=true;
             else if(arg=="--monochrome")launch.color=false;
             else if(arg=="--simulation")launch.simulation=true;
@@ -617,6 +617,7 @@ int gui_main(int argc,char** argv,const char* backend,const std::function<int(La
             }
         }
         if(!settings_arguments.empty())launch.settings=launch_command::parse_arguments(settings_arguments);
+        if(self_check_requested) {gui_self_check();return 0;}
         smoke_requested=launch.smoke;
         return run(launch);
     }catch(const SmokeBudgetExhausted& error) {

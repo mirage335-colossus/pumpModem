@@ -67,6 +67,12 @@ void parsing_and_formatting() {
             "unsupported or unimplemented search arithmetic accepted");
     launch_command::Patch unsupported;unsupported.search_arithmetic="matrix4";
     rejects([&]{launch_command::format(unsupported);},"programmatic export silently enabled unimplemented 4-bit arithmetic");
+    for(const auto* value:{"default","Default","50ms"}) {
+        const auto p=launch_command::parse(std::string("--clock-sync GPS_1ms-1ms_region-0ms_offset --audio-error ")+value);
+        check(p.audio_timing_error_seconds==.05&&p.clock_sync=="GPS_1ms-1ms_region-0ms_offset"&&
+            launch_command::parse(launch_command::format(p))==p,
+            "Audio Default must resolve50ms without losing explicit clock policy or saved round trip");
+    }
     const auto clock=launch_command::parse("--clock-sync GPS_0.1ms-400ms_region-2564ms_offset --audio-error 30ms --dsss-factor 1000 --fhss fake-0.4s-200 --live-duplex yes");
     check(clock.fhss=="fake-fcc"&&launch_command::format(clock).find("--fhss fake-fcc")!=std::string::npos,
         "legacy Fake FHSS must migrate to the persistent FCC preference");
@@ -234,6 +240,22 @@ void startup() {
         for(auto& argument:arguments)argv.push_back(argument.data());
         return gui_main(static_cast<int>(argv.size()),argv.data(),"test",run);
     };
+    // Actual manual launcher settings, reaching the backend callback. --help
+    // used to bypass parsing and therefore missed --audio-error default.
+    bool manual_started=false;
+    check(invoke({"--pattern","auto-keystream","--tx-dbm","36.020599913279625",
+        "--path-loss-db","60","--noise-dbm-hz","-164","--oscillator","crystal",
+        "--rf-oscillator","gpsdo-xo","--shift","3e7","--search-margin","3",
+        "--reference","independent","--target-snr","40","--rate","360",
+        "--carrier","30001500","--doppler","0.000000c","--dsp-workspace","50%",
+        "--clock-sync","default","--audio-error","default","--dsss-mode","interleave",
+        "--dsss-factor","10","--dsss-version","interleave","--search-arithmetic","default",
+        "--live-duplex","yes","--fhss","fake-fcc","--keyfile=/synthetic/not-opened",
+        "--key-name=Default","--tx-key","named"},[&](Launch launch) {
+            manual_started=true;check(launch.settings&&launch.settings->audio_timing_error_seconds==.05&&
+                launch.settings->clock_sync=="default"&&launch.settings->fhss=="fake-fcc",
+                "manual launcher did not resolve its actual options");return 73;
+        })==73&&manual_started,"manual launcher failed before GUI startup");
     unsigned called=0;
     check(invoke({"--monochrome","--simulation","--auto-pattern","--target-snr=-8","--rate","3.6kHz",
                   "--carrier","1500","--dsp-workspace","75%","--keyfile","private keys/key's file",
@@ -248,7 +270,7 @@ void startup() {
     std::ostringstream errors;
     {
         struct Restore {std::streambuf* previous;~Restore(){std::cerr.rdbuf(previous);}} restore{std::cerr.rdbuf(errors.rdbuf())};
-        for(const auto& arguments:std::vector<std::vector<std::string>>{{"--unknown"},{"--tx-dbm"},
+        for(const auto& arguments:std::vector<std::vector<std::string>>{{"--unknown"},{"--tx-dbm"},{"--self-check","--audio-error","50"},
                 {"--rate","nan"},{"--target-snr","201"},{"stray"},{"--rate","--simulation"},
                 {"--smoke-timeout","9"},{"--smoke-timeout","1200.000001"},{"--smoke-timeout","1201"},
                 {"--smoke-timeout","nan"},{"--smoke-timeout","inf"}})

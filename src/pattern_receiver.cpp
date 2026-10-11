@@ -51,6 +51,9 @@ struct PatternReceiver::Impl {
             (native_double_plan?native_double_plan->working_bytes()+sizeof(*native_double_plan):0);
     }
     PatternCode code;
+    // Immutable geometry: never rebuild pulse validation/calendar guards in
+    // the phase-bank binary searches or per-track address comparisons.
+    std::optional<FhssSymbolCalendar> symbol_calendar;
     std::unique_ptr<PatternCorrelator> fallback;
     std::size_t budget=0,fixed_reservation=0,arithmetic_reservation=0,configured_bit_limit=0,bin_samples=0,length=0,transform=0,hop=0;
     std::vector<Complex> ring,work,spectrum,product,reference;
@@ -102,7 +105,7 @@ struct PatternReceiver::Impl {
     std::size_t tracking_reference_frequency=0;
     bool tracking_reference_valid=false;
     std::uint64_t prepared_template_index=0;
-    bool templates_valid=false,streamed_templates=false,local_search_fallback=false;
+    bool templates_valid=false,streamed_templates=false,local_search_fallback=false,cached_from_streamed=false;
     bool long_symbol=false,required_tracking_reference=false,variable_clock=false;
     std::uint64_t active_stream_phase=0,phase_step=1,phase_upper=0;
     // Compact receivers do not retain an unused FFT telemetry record.
@@ -140,6 +143,8 @@ struct PatternReceiver::Impl {
     Impl(Config c,std::size_t bytes,PatternSearch options)
         :config(c),search(std::move(options)),code(c,c.stream_epoch),budget(bytes) {
         validate(c);
+        if(deferred_symbols(c))symbol_calendar.emplace(*c.fake_hopping,c.sample_rate,
+            pattern_pulse_padding_samples(c),code.symbol_samples());
         shaped=pattern_pulse_enabled(c);
         drift_sections=detail::drift_section_count(c,search.drift_tolerant);
         if(!std::isfinite(search.differential_window_seconds) || search.differential_window_seconds<0)
@@ -231,7 +236,11 @@ struct PatternReceiver::Impl {
         }
         configured_bit_limit=search.bit_limit;
         if(!c.scramble&&!c.dsss)search.initial_stream_symbols=1;
-        if(search.compact_clock_search && !search.couple_clock_to_carrier) {
+        if(deferred_symbols(c) && search.search_stream_phases) {
+            search.initial_stream_symbols=std::max<std::size_t>(search.initial_stream_symbols,
+                symbol_calendar->lower_bound(c.stream_epoch,0,c.sample_rate));
+        }
+        if(search.compact_clock_search && !search.couple_clock_to_carrier && !deferred_symbols(c)) {
             const auto wrapper=wrapper_bytes();
             if(wrapper>=bytes)throw Error("pattern workspace cannot retain correlator control state");
             fallback=std::make_unique<PatternCorrelator>(config,search,bytes-wrapper);
@@ -242,7 +251,7 @@ struct PatternReceiver::Impl {
         const auto symbols=code.symbol_samples();
         long_symbol=symbols>=16ULL*c.sample_rate;
         active_stream_phase=c.stream_phase_samples;
-        phase_step=std::gcd(symbols,static_cast<std::uint64_t>(c.sample_rate));
+        phase_step=canonical_phase_step(c);
         phase_upper=search.search_stream_phases?
             (std::min(symbols,static_cast<std::uint64_t>(c.sample_rate))-1)/phase_step*phase_step:c.stream_phase_samples;
         if(search.qualified_start_window) {
@@ -410,29 +419,48 @@ struct PatternReceiver::Impl {
         // bank every hop. Cache its exact transforms only in spare workspace;
         // payload capacity and search coverage retain their original limits.
         const auto frequencies=search.frequency_offsets_hz.size();
-        const long double cache_bytes=static_cast<long double>(search.initial_stream_symbols)*
+        const auto cache_count=search.initial_stream_symbols+(symbol_calendar&&search.search_stream_phases?1:0);
+        const long double cache_bytes=static_cast<long double>(cache_count)*
             (sizeof(CachedTemplates)+static_cast<long double>(frequencies)*
              (sizeof(decltype(templates)::value_type)+sizeof(decltype(template_energy)::value_type)+
               sizeof(decltype(template_square)::value_type)+2*static_cast<long double>(transform)*sizeof(Complex)))+
             static_cast<long double>(length)*sizeof(decltype(tracking_reference)::value_type);
-        bool initial_phases_equivalent=true;
+        bool initial_phases_equivalent=!(config.fake_hopping&&config.fake_hopping->matched_gaps&&phase_upper);
         if(search.search_stream_phases && phase_upper)for(std::size_t index=0;index<search.initial_stream_symbols;++index) {
-            const auto first=symbol_stream_address(c.stream_epoch,0,index,symbols,c.sample_rate);
-            const auto last=symbol_stream_address(c.stream_epoch,phase_upper,index,symbols,c.sample_rate);
+            const auto first=stream_address(index,0);
+            const auto last=stream_address(index,phase_upper);
             if(first.epoch!=last.epoch || first.ordinal!=last.ordinal){initial_phases_equivalent=false;break;}
         }
         // Distinct sample phases often share every initial template address.
         // Cache those transforms even while later symbols must resolve phase;
         // changing phase cannot change an address proven equal over its range.
-        if(!streamed_templates && initial_phases_equivalent && symbols<=256 &&
+        // Do not displace the separately measured native FP32 execution path
+        // with a persistent FP64 transform cache merely because it fits.
+        const bool deferred_cache=symbol_calendar && search.reuse_deferred_templates && cache_bytes<=8*1024*1024 &&
+            acquisition_arithmetic()!=SearchArithmetic::fp32;
+        if((deferred_cache || (!streamed_templates && initial_phases_equivalent && symbols<=256)) &&
            search.initial_stream_symbols>1 && cache_bytes<=bytes-fixed_reservation) {
+            // Deferred canonical rows recur across FFT hops even when the
+            // source phase changes. A bounded exact cache can replace streamed
+            // construction; its full capacities remain in cache_reservation.
+            cached_from_streamed=streamed_templates;streamed_templates=false;
             cache_reservation=static_cast<std::size_t>(std::ceil(cache_bytes));
-            cached_templates.resize(search.initial_stream_symbols);
+            cached_templates.resize(cache_count);
             for(auto& bank:cached_templates) {
                 bank.rows.resize(frequencies);bank.energy.resize(frequencies);bank.square.resize(frequencies);
                 for(auto& row:bank.rows)for(auto& values:row)values.resize(transform);
             }
             tracking_reference.resize(length);
+            cache_reservation=cached_templates.capacity()*sizeof(CachedTemplates)+
+                tracking_reference.capacity()*sizeof(decltype(tracking_reference)::value_type);
+            for(const auto& bank:cached_templates) {
+                cache_reservation+=bank.rows.capacity()*sizeof(decltype(templates)::value_type)+
+                    bank.energy.capacity()*sizeof(decltype(template_energy)::value_type)+
+                    bank.square.capacity()*sizeof(decltype(template_square)::value_type);
+                for(const auto& row:bank.rows)for(const auto& values:row)
+                    cache_reservation+=values.capacity()*sizeof(Complex);
+            }
+            if((deferred_cache && cache_reservation>8*1024*1024) || !cache_fits(bytes,0))drop_template_cache();
         }
         stream_phase(search.search_stream_phases?0:c.stream_phase_samples);prepare_templates(0,{});
     }
@@ -442,26 +470,81 @@ struct PatternReceiver::Impl {
         templates_valid=false;tracking_reference_valid=false;
     }
     struct PhaseGroup {std::uint64_t lower=0,upper=0;};
-    std::array<PhaseGroup,3> phase_groups(std::uint64_t index,std::uint64_t lower,std::uint64_t upper,
+    struct PhaseGroups {
+        std::array<PhaseGroup,3> small{};
+        std::uint64_t first=0,step=0;
+        PhaseGroup operator[](std::size_t index) const {
+            if(step){const auto phase=first+index*step;return {phase,phase};}
+            return small.at(index);
+        }
+    };
+    PhaseGroups phase_groups(std::uint64_t index,std::uint64_t lower,std::uint64_t upper,
                                         std::size_t& count)const {
-        std::array<PhaseGroup,3> groups{};count=0;
+        PhaseGroups groups;count=0;
+        if(config.fake_hopping && config.fake_hopping->matched_gaps && lower<=upper) {
+            // Same cipher address need not mean the same UTC pulse omission.
+            // Retain each already-admitted phase point without a large array.
+            groups.first=lower;groups.step=phase_step;count=(upper-lower)/phase_step+1;
+            return groups;
+        }
+        if(symbol_calendar && lower<=upper) {
+            // Each range spans less than one symbol, and canonical slots are
+            // at least one symbol apart. Equality retains the earlier slot.
+            const auto cut=symbol_schedule_detail::add(lower,source_start(0,lower));
+            groups.small[count++]={lower,std::min(upper,cut)};
+            if(cut<upper)groups.small[count++]={cut+1,upper};
+            return groups;
+        }
         while(lower<=upper) {
-            const auto address=symbol_stream_address(config.stream_epoch,lower,index,code.symbol_samples(),config.sample_rate);
+            const auto address=stream_address(index,lower);
             auto low=std::uint64_t{0},high=(upper-lower)/phase_step;
             while(low<high) {
                 const auto mid=low+(high-low+1)/2;
-                const auto candidate=symbol_stream_address(config.stream_epoch,lower+mid*phase_step,index,
-                    code.symbol_samples(),config.sample_rate);
+                const auto candidate=stream_address(index,lower+mid*phase_step);
                 if(candidate.epoch==address.epoch && candidate.ordinal==address.ordinal)low=mid;
                 else high=mid-1;
             }
             const auto end=lower+low*phase_step;
-            if(count==groups.size())throw Error("pattern phase groups exceed finite symbol interval");
-            groups[count++]={lower,end};
+            if(count==groups.small.size())throw Error("pattern phase groups exceed finite symbol interval");
+            groups.small[count++]={lower,end};
             if(end==upper)break;
             lower=end+phase_step;
         }
         return groups;
+    }
+    std::uint64_t source_start(std::uint64_t index,std::uint64_t phase)const {
+        return symbol_calendar?symbol_calendar->offset(config.stream_epoch,phase,index):
+            symbol_schedule_detail::multiply(index,code.symbol_samples());
+    }
+    SymbolStreamAddress stream_address(std::uint64_t index,std::uint64_t phase)const {
+        if(!symbol_calendar)return symbol_stream_address(config.stream_epoch,phase,index,
+            code.symbol_samples(),config.sample_rate);
+        const auto total=symbol_schedule_detail::add(source_start(index,phase),phase);
+        const auto sample=static_cast<std::uint32_t>(total%config.sample_rate);
+        return {symbol_schedule_detail::add(config.stream_epoch,total/config.sample_rate),
+            sample/code.symbol_samples(),sample};
+    }
+    CachedTemplates& template_bank(std::uint64_t index) {
+        const auto slot=index+(symbol_calendar&&search.search_stream_phases?
+            symbol_calendar->first_rank(config.stream_epoch,active_stream_phase)-
+            symbol_calendar->first_rank(config.stream_epoch,0):0);
+        return cached_templates.at(static_cast<std::size_t>(slot));
+    }
+    std::uint64_t advance_bins(std::uint64_t index,std::uint64_t phase,std::size_t frequency)const {
+        if(!deferred_symbols(config))return symbol_bins(frequency);
+        const auto delta=source_start(index+1,phase)-source_start(index,phase);
+        return static_cast<std::uint64_t>(std::llround(static_cast<long double>(delta)/clock_ratio(frequency)/bin_samples));
+    }
+    struct WindowGeometry {std::uint64_t samples,index,lower,upper,step;};
+    WindowGeometry window_geometry(std::uint64_t index,PhaseGroup group)const {
+        if(!deferred_symbols(config))return {code.symbol_samples(),index,group.lower,
+            search.search_stream_phases?canonical_phase_cell_upper(config,group.upper):group.upper,
+            search.search_stream_phases?1U:phase_step};
+        // Same actual symbol address implies the same canonical slot rank and
+        // hence the same preceding/future schedule. No gap is scored as data.
+        const auto first=source_start(0,group.lower),delta=source_start(index,group.lower)-first;
+        const auto phase=first+group.lower;
+        return {std::max<std::uint64_t>(1,delta),delta?1U:0U,phase,phase,1};
     }
     SearchArithmetic acquisition_arithmetic()const {
         if(fp32_exact_fallback)return SearchArithmetic::fp64;
@@ -501,12 +584,12 @@ struct PatternReceiver::Impl {
         if(index>std::numeric_limits<std::uint64_t>::max()/code.chips_per_symbol())throw Error("pattern stream coordinate overflow");
         if(streamed_templates) {code.prepare_symbol(index*code.chips_per_symbol(),stop);return;}
         const auto cached=!cached_templates.empty();
-        if(cached?cached_templates[index].valid:(templates_valid&&prepared_template_index==index))return;
+        if(cached?template_bank(index).valid:(templates_valid&&prepared_template_index==index))return;
         code.prepare_symbol(index*code.chips_per_symbol(),stop);
         templates_valid=false;
-        auto& rows=cached?cached_templates[index].rows:templates;
-        auto& energies=cached?cached_templates[index].energy:template_energy;
-        auto& squares=cached?cached_templates[index].square:template_square;
+        auto& rows=cached?template_bank(index).rows:templates;
+        auto& energies=cached?template_bank(index).energy:template_energy;
+        auto& squares=cached?template_bank(index).square:template_square;
         for(std::size_t f=0;f<templates.size();++f)for(unsigned bit=0;bit<2;++bit) {
             auto& row=rows[f][bit];row.resize(transform);
             std::fill(row.begin(),row.end(),Complex{});
@@ -520,12 +603,18 @@ struct PatternReceiver::Impl {
             pattern_fft(row,false,stop,acquisition_arithmetic());
         }
         prepared_template_index=index;templates_valid=true;
-        if(cached)cached_templates[index].valid=true;
+        if(cached)template_bank(index).valid=true;
     }
     void drop_template_cache() {
         std::vector<CachedTemplates>().swap(cached_templates);
         if(!required_tracking_reference)std::vector<std::array<Complex,2>>().swap(tracking_reference);
         templates_valid=false;tracking_reference_valid=false;cache_reservation=0;
+        if(cached_from_streamed) {
+            // Fixed reservation deliberately omitted ordinary per-lane rows.
+            // Eviction must restore that original bounded execution policy,
+            // not materialize unreserved rows on the next PCM push.
+            streamed_templates=true;cached_from_streamed=false;drop_scoring();
+        }
     }
     detail::FftSearchGeometry scoring_geometry()const {
         detail::FftSearchGeometry geometry;
@@ -534,6 +623,12 @@ struct PatternReceiver::Impl {
             shaped?1U:0U,config.scramble?1U:0U,config.dsss?1U:0U,
             config.spreading_seed,config.dsss_seed,config.dsss_factor,
             static_cast<std::uint32_t>(config.outer_dsss_version)};
+        if(config.fake_hopping && config.fake_hopping->matched_gaps) {
+            const auto& plan=*config.fake_hopping;
+            geometry.pattern.fhss_matched_gaps=1;geometry.pattern.fhss_dwell=plan.dwell_seconds;
+            geometry.pattern.fhss_clock=plan.clock_error_seconds;geometry.pattern.fhss_peer_clock=plan.peer_clock_error_seconds;
+            geometry.pattern.fhss_audio=plan.audio_error_seconds;geometry.pattern.fhss_region=plan.region_seconds;
+        }
         geometry.bins_per_symbol=length;geometry.bin_samples=bin_samples;
         geometry.carrier_hz=config.carrier_hz;geometry.evidence_count=evidence_count(length);
         geometry.noise_condition=noise_condition;geometry.real_rank=real_rank;geometry.sample_fit=sample_fit;
@@ -570,6 +665,7 @@ struct PatternReceiver::Impl {
         const auto uncached_workers=std::min({workers,jobs,spare/(worker_bytes+job_bytes)});
         bool cache_nominal=false;
         if(long_symbol && streamed_templates && !config.scramble && !config.dsss &&
+           !(config.fake_hopping&&config.fake_hopping->matched_gaps) &&
            config.spreading_mode==SpreadingMode::pattern && uncached_workers>=2) {
             std::size_t nominal_jobs=0;
             for(std::size_t f=0;f<templates.size();++f)if(clock_ratio(f)==1)++nominal_jobs;
@@ -915,7 +1011,9 @@ struct PatternReceiver::Impl {
         for(unsigned bit=0;bit<2;++bit)result[bit]=differential.combine(result[bit],bit);
         return result;
     }
-    bool outer_presence_check(PatternEvidence& evidence,std::uint64_t observed_before,std::stop_token stop) {
+    bool outer_presence_check(PatternEvidence& evidence,std::uint64_t observed_before,std::stop_token stop,
+            double* chain_score=nullptr) {
+        if(chain_score)*chain_score=evidence.score;
         if(!search.outer_presence_guard || config.dsss_factor<=1 || drift_sections>1 || differential_window ||
             evidence.score<search.retain_score)return true;
         const auto start=evidence.first_sample/bin_samples,index=evidence.stream_symbol;
@@ -979,6 +1077,14 @@ struct PatternReceiver::Impl {
             }
         }
         outer.finish(coefficients);
+        // Match the compact receiver's weak-chain null. The shared hop gaps
+        // make independently keyed cover strongly nonstationary: raw PCM-count
+        // AWGN scores cannot safely accumulate until a stream is established.
+        // Per-chip projections preserve a coherent correct signal, include both
+        // real quadratures and use their actual rank, including zero pulse cells.
+        // Standalone admission and reported raw scores remain unchanged.
+        if(chain_score && config.fake_hopping && (config.fake_hopping->matched_gaps||config.fake_hopping->smooth_ramps))
+            *chain_score=std::min(evidence.score,chips[evidence.bit].score(full[evidence.bit]));
         evidence.outer_presence_score=outer.score(evidence.bit);
         // Section/differential phase evidence needs its own independent-code
         // statistic; do not silently substitute a canceled coherent dot.
@@ -1010,7 +1116,9 @@ struct PatternReceiver::Impl {
             event.bits.assign(track.burst.bits.begin(),track.burst.bits.begin()+static_cast<std::ptrdiff_t>(count));
             event.complete=complete && count==track.confirmed;
             event.end_sample=count==track.confirmed?track.confirmed_end:
-                event.first_sample+count*(search.hypotheses.empty()?code.symbol_samples():symbol_bins(track.frequency)*bin_samples);
+                !deferred_symbols(config)?event.first_sample+count*(search.hypotheses.empty()?code.symbol_samples():symbol_bins(track.frequency)*bin_samples):
+                event.first_sample+static_cast<std::uint64_t>(std::llround((static_cast<long double>(source_start(event.first_stream_symbol+count-1,track.phase_lower))-
+                    source_start(event.first_stream_symbol,track.phase_lower)+code.symbol_samples())/clock_ratio(track.frequency)));
             event.score=track.confirmed_score;
             event.support_samples=track.confirmed_support;
             room_for_bits(3*event.bits.capacity());latest=event;
@@ -1021,6 +1129,11 @@ struct PatternReceiver::Impl {
             bursts.push_back(std::move(event));
             track.burst.bits.erase(track.burst.bits.begin(),track.burst.bits.begin()+static_cast<std::ptrdiff_t>(count));
             track.burst.first_stream_symbol+=count;track.burst.first_sample=bursts.back().end_sample;
+            if(count && deferred_symbols(config)) {
+                const auto next=track.burst.first_stream_symbol;
+                const auto gap=source_start(next,track.phase_lower)-source_start(next-1,track.phase_lower)-code.symbol_samples();
+                track.burst.first_sample+=static_cast<std::uint64_t>(std::llround(static_cast<long double>(gap)/clock_ratio(track.frequency)));
+            }
             track.confirmed-=count;
             if(!track.confirmed)break;
         } while(complete || flush || track.confirmed>=chunk);
@@ -1145,7 +1258,8 @@ struct PatternReceiver::Impl {
                     });
                     if(duplicate){ended=true;break;}
                 }
-                const auto presence=outer_presence_check(best,track.burst.end_sample/bin_samples,stop);
+                double chain_score=best.score;
+                const auto presence=outer_presence_check(best,track.burst.end_sample/bin_samples,stop,&chain_score);
                 remember(best);
                 const auto observed_begin=std::max(best.first_sample,track.burst.end_sample);
                 const auto symbol_support=pattern_symbol_support(
@@ -1171,7 +1285,7 @@ struct PatternReceiver::Impl {
                         track.pending_gap=true;track.total_score=track.confirmed_score;
                         track.total_support=track.confirmed_support;
                         track.pending_score=track.penalty=0;
-                        ++track.index;track.next+=symbol_bins(track.frequency);
+                        track.next+=advance_bins(track.index,track.phase_lower,track.frequency);++track.index;
                         continue;
                     }
                     publish(track,gap_expired,true);
@@ -1183,7 +1297,7 @@ struct PatternReceiver::Impl {
                     track.admitted=false;track.confirmed=0;track.pending_gap=false;track.gap_slots=0;
                     track.total_score=track.pending_score=track.confirmed_score=track.penalty=0;
                     track.total_support=track.confirmed_support=0;
-                    ++track.index;track.next+=symbol_bins(track.frequency);
+                    track.next+=advance_bins(track.index,track.phase_lower,track.frequency);++track.index;
                     continue;
                 }
                 if(standalone && !track.pending_gap && track.confirmed<track.burst.bits.size()) {
@@ -1229,10 +1343,10 @@ struct PatternReceiver::Impl {
                     track.gap_slots=track.burst.bits.size()-track.confirmed+1;track.burst.bits.resize(track.confirmed);
                     track.pending_gap=true;track.pending_score=track.penalty=0;track.total_score=track.confirmed_score;
                     track.total_support=track.confirmed_support;
-                    ++track.index;track.next+=symbol_bins(track.frequency);continue;
+                    track.next+=advance_bins(track.index,track.phase_lower,track.frequency);++track.index;continue;
                 }
                 append_bit(track.burst.bits,static_cast<std::uint8_t>(best.bit));track.burst.end_sample=best.end_sample;
-                track.total_score+=best.score;track.pending_score+=best.score;track.penalty+=continuation_penalty();
+                track.total_score+=best.score;track.pending_score+=track.established?best.score:chain_score;track.penalty+=continuation_penalty();
                 track.total_support+=symbol_support;
                 const auto count=static_cast<double>(track.burst.bits.size()-track.confirmed);
                 // Chernoff bound for the sum of independent Exp(1) null scores,
@@ -1253,8 +1367,8 @@ struct PatternReceiver::Impl {
                     track.confirmed_score=track.total_score;track.pending_score=0;track.penalty=0;
                     track.confirmed_support=track.total_support;
                 }
+                track.next=chosen+advance_bins(track.index,track.phase_lower,track.frequency);
                 ++track.index;
-                track.next=chosen+symbol_bins(track.frequency);
                 publish(track,false);
                 if(gap_expired && track.unconfirmed_symbols){publish(track,true,true);ended=true;break;}
             }
@@ -1262,7 +1376,7 @@ struct PatternReceiver::Impl {
             if(ended)it=tracks.erase(it);else ++it;
         }
     }
-    void admit(const PatternEvidence& item,std::size_t f) {
+    void admit(const PatternEvidence& item,std::size_t f,double chain_score) {
         if(item.score<search.retain_score || item.score-item.alternative_score<1)return;
         remember(item);
         if(search.search_stream_phases && item.score<threshold()) {
@@ -1308,6 +1422,15 @@ struct PatternReceiver::Impl {
                         (next<item.first_sample && slots<=std::numeric_limits<std::uint64_t>::max()-track.index &&
                          item.stream_symbol==track.index+slots);
                     follows_gap=same_clock && same_index;
+                    if(deferred_symbols(config)) {
+                        const auto predicted=static_cast<long double>(next)+
+                            (static_cast<long double>(source_start(item.stream_symbol,track.phase_lower))-
+                             source_start(track.index,track.phase_lower))/clock_ratio(track.frequency);
+                        const auto expected=stream_address(item.stream_symbol,track.phase_lower);
+                        const auto actual=stream_address(item.stream_symbol,item.stream_phase_samples);
+                        follows_gap=expected.epoch==actual.epoch && expected.ordinal==actual.ordinal &&
+                            std::abs(predicted-item.first_sample)<=margin;
+                    }
                 }
                 if(track.admitted && !follows_gap && (track.pending_gap || track.confirmed<track.burst.bits.size()) &&
                    item.first_sample>=track.confirmed_end && item.score>=threshold()) {
@@ -1343,13 +1466,13 @@ struct PatternReceiver::Impl {
             }
         }
         track.burst.stream_phase_samples=track.phase_lower;
-        track.next=item.first_sample/bin_samples+symbol_bins(f);track.frequency=f;track.total_score=item.score;track.penalty=std::log(2.);
+        track.next=item.first_sample/bin_samples+advance_bins(item.stream_symbol,track.phase_lower,f);track.frequency=f;track.total_score=item.score;track.penalty=std::log(2.);
         track.total_support=pattern_symbol_support(static_cast<double>(item.end_sample-item.first_sample),item.score,code.chip_samples());
         track.frequency_scores[f]=item.score;
         track.admitted=track.established=item.score>=threshold();
         if(track.admitted){track.confirmed=1;track.confirmed_end=item.end_sample;track.confirmed_score=item.score;track.penalty=0;
             track.confirmed_support=track.total_support;}
-        else track.pending_score=item.score;
+        else track.pending_score=chain_score;
         tracks.push_back(std::move(track));publish(tracks.back(),false);
     }
     void collect_score(double a,double b,std::size_t j,std::uint64_t index,std::uint64_t phase,std::size_t f) {
@@ -1382,8 +1505,9 @@ struct PatternReceiver::Impl {
     }
     detail::PatternFftStartSelection select_starts(std::uint64_t index,PhaseGroup group,std::size_t count)const {
         if(!fft_workload->restricted_timing_active)return {{},0,count,true};
-        auto selected=detail::pattern_fft_select_starts(*search.qualified_start_window,code.symbol_samples(),index,
-            group.lower,group.upper,phase_step,component_hop?logical_hop_begin:next_start,
+        const auto geometry=window_geometry(index,group);
+        auto selected=detail::pattern_fft_select_starts(*search.qualified_start_window,geometry.samples,geometry.index,
+            geometry.lower,geometry.upper,geometry.step,component_hop?logical_hop_begin:next_start,
             component_hop?hop:count,bin_samples,timing_minimum_rate,timing_maximum_rate);
         if(!component_hop)return selected;
         // Select on the immutable original hop, then intersect and rebase.
@@ -1426,8 +1550,11 @@ struct PatternReceiver::Impl {
             for(std::size_t g=0;g<group_count;++g) {
                 if(fft_workload->restricted_timing_active) {
                     if(select_starts(index,groups[g],count).selected_count)return true;
-                } else if(detail::pattern_fft_batch_may_intersect(*search.qualified_start_window,code.symbol_samples(),index,
-                    groups[g].lower,groups[g].upper,next_start,count,bin_samples))return true;
+                } else {
+                    const auto geometry=window_geometry(index,groups[g]);
+                    if(detail::pattern_fft_batch_may_intersect(*search.qualified_start_window,geometry.samples,geometry.index,
+                        geometry.lower,geometry.upper,next_start,count,bin_samples))return true;
+                }
             }
         }
         return false;
@@ -1476,6 +1603,21 @@ struct PatternReceiver::Impl {
         struct ActiveScope {std::size_t& value;~ActiveScope(){value=0;}} active{native_active_bytes};
         if(native_active_bytes>buffer_bytes || !cache_fits(budget,native_active_bytes))
             throw Error("native FFT storage exceeds reservation");
+        // Adjacent deferred phase groups can name the exact same UTC symbol.
+        // Reuse scores only within this immutable broad-input batch; keep all
+        // original collections, trial charges, phase identities and ordering.
+        // One cohort, capped at 8 MiB and spare workspace, never a shifted-PCM
+        // matrix. Restricted priors keep their original independent ranges.
+        std::vector<Complex> repeated_scores;
+        SymbolStreamAddress repeated_address{};bool repeated_valid=false;
+        const auto repeated_count=static_cast<long double>(count)*templates.size();
+        const auto repeated_bytes=repeated_count*sizeof(Complex);
+        if(symbol_calendar && search.reuse_deferred_templates && search.search_stream_phases && !fft_workload->restricted_timing_active &&
+           repeated_bytes<=8*1024*1024 && cache_fits(budget,native_active_bytes+static_cast<std::size_t>(repeated_bytes))) {
+            repeated_scores.resize(static_cast<std::size_t>(repeated_count));
+            native_active_bytes+=repeated_scores.capacity()*sizeof(Complex);
+            if(!cache_fits(budget,native_active_bytes))throw Error("exact score cache exceeds reservation");
+        }
         fft_workload->native_scratch_peak_bytes=std::max(fft_workload->native_scratch_peak_bytes,
             native_active_bytes+native_plan_bytes());
         const auto transform_row=[&](std::span<Value> values,bool inverse) {
@@ -1498,16 +1640,27 @@ struct PatternReceiver::Impl {
                         fft_workload->skipped_template_jobs+=templates.size();}
                     continue;
                 }
-                stream_phase(groups[g].lower);prepare_templates(index,stop);
-                auto private_cache=private_acquisition_template(index,groups[g].lower,native_active_bytes,stop);
+                stream_phase(groups[g].lower);
+                const auto address=stream_address(index,groups[g].lower);
+                const bool repeated=!repeated_scores.empty() && repeated_valid &&
+                    address.epoch==repeated_address.epoch && address.ordinal==repeated_address.ordinal;
+                if(!repeated)prepare_templates(index,stop);
+                auto private_cache=repeated?nullptr:private_acquisition_template(index,groups[g].lower,native_active_bytes,stop);
                 const auto before_cache=native_active_bytes;
                 if(private_cache)native_active_bytes+=private_cache->working_bytes();
                 struct CacheReservation {std::size_t& bytes;std::size_t before;
                     ~CacheReservation(){bytes=before;}} private_cache_scope{native_active_bytes,before_cache};
                 for(std::size_t f=0;f<templates.size();++f) {
                     if(private_cache)++fft_workload->private_template_lane_jobs;
-                    ++fft_workload->template_jobs;++fft_workload->fft_jobs;
+                    ++fft_workload->template_jobs;
                     fft_workload->retained_start_trials+=selected.selected_count;
+                    if(repeated) {
+                        ++fft_workload->exact_reused_template_jobs;
+                        fft_workload->scored_start_trials+=selected.selected_count;
+                        collect_selected(selected,count,index,groups[g].lower,f,[&](std::size_t j){return repeated_scores[f*count+j];});
+                        continue;
+                    }
+                    ++fft_workload->fft_jobs;
                     for(unsigned b=0;b<2;++b) {
                         std::fill(row.begin(),row.end(),Value{});double norm=0;bool safe=true;
                         const auto limit=detail::search_fft::float_component_limit(transform);
@@ -1554,8 +1707,10 @@ struct PatternReceiver::Impl {
                         });
                     }
                     fft_workload->scored_start_trials+=selected.selected_count;
+                    if(!repeated_scores.empty())std::copy_n(reference.begin(),count,repeated_scores.begin()+f*count);
                     collect_selected(selected,count,index,groups[g].lower,f,[&](std::size_t j){return reference[j];});
                 }
+                repeated_address=address;repeated_valid=true;
             }
         }
         return true;
@@ -1720,20 +1875,54 @@ struct PatternReceiver::Impl {
             if(!queued)return;
             batch.prepared=std::span<const detail::FftPreparedTemplate>(scoring_templates).first(queued);
             fft_workload->template_jobs+=queued;
-            detail::execute_fft_search_cpu(batch,std::span<const detail::FftSearchJob>(scoring_jobs).first(queued),
-                std::span(scoring_outputs).first(queued*hop),scoring_workspaces,stop);
+            std::vector<detail::FftSearchJob> unique_jobs;
+            std::vector<std::size_t> output_job,canonical_jobs;
+            const auto previous_reservation=arithmetic_reservation;
+            struct DuplicateReservation {std::size_t& bytes;std::size_t before;
+                ~DuplicateReservation(){bytes=before;}} duplicate_reservation{arithmetic_reservation,previous_reservation};
+            const auto slots=(static_cast<long double>(search.initial_stream_symbols)+1)*templates.size();
+            const auto extra=static_cast<long double>(queued)*(sizeof(detail::FftSearchJob)+sizeof(std::size_t))+
+                static_cast<long double>(slots)*sizeof(std::size_t);
+            if(symbol_calendar && search.reuse_deferred_templates && search.search_stream_phases && !fft_workload->restricted_timing_active &&
+               extra<=8*1024*1024 && cache_fits(budget,arithmetic_reservation+static_cast<std::size_t>(extra))) {
+                unique_jobs.reserve(queued);output_job.resize(queued);
+                canonical_jobs.assign(static_cast<std::size_t>(slots),std::numeric_limits<std::size_t>::max());
+                const auto first=symbol_calendar->first_rank(config.stream_epoch,0);
+                for(std::size_t j=0;j<queued;++j) {
+                    const auto& descriptor=scoring_jobs[j];
+                    const auto rank=symbol_calendar->first_rank(config.stream_epoch,descriptor.phase)-first+descriptor.symbol;
+                    auto& destination=canonical_jobs.at(static_cast<std::size_t>(rank)*templates.size()+descriptor.frequency_index);
+                    if(destination==std::numeric_limits<std::size_t>::max()) {
+                        destination=unique_jobs.size();unique_jobs.push_back(descriptor);
+                    }
+                    output_job[j]=destination;
+                }
+                arithmetic_reservation+=unique_jobs.capacity()*sizeof(detail::FftSearchJob)+
+                    (output_job.capacity()+canonical_jobs.capacity())*sizeof(std::size_t);
+                if(!cache_fits(budget,arithmetic_reservation))throw Error("parallel exact reuse exceeds reservation");
+                fft_workload->exact_reused_template_jobs+=queued-unique_jobs.size();
+            }
+            const auto jobs=unique_jobs.empty()?std::span<const detail::FftSearchJob>(scoring_jobs).first(queued):
+                std::span<const detail::FftSearchJob>(unique_jobs);
+            detail::execute_fft_search_cpu(batch,jobs,
+                std::span(scoring_outputs).first(jobs.size()*hop),scoring_workspaces,stop);
             // Trials, tie-breaking and peak replacement use the original
             // stream/phase/frequency/start order regardless of backend order.
+            std::size_t collected_unique=0;
             for(std::size_t job=0;job<queued;++job) {
                 const auto& descriptor=scoring_jobs[job];
+                const auto output=output_job.empty()?job:output_job[job];
                 const auto direct=detail::pattern_fft_direct_eligible(batch.geometry,
                     descriptor.prepared_template==std::numeric_limits<std::uint64_t>::max(),
                     selected.selected_count,!batch.observations.empty());
-                if(direct)++fft_workload->direct_jobs;else ++fft_workload->fft_jobs;
+                if(output==collected_unique) {
+                    ++collected_unique;
+                    if(direct)++fft_workload->direct_jobs;else ++fft_workload->fft_jobs;
+                }
                 fft_workload->scored_start_trials+=selected.selected_count;
                 collect_selected(selected,count,descriptor.symbol,descriptor.phase,
                         static_cast<std::size_t>(descriptor.frequency_index),[&](std::size_t start) {
-                    const auto& score=scoring_outputs[job*hop+start];
+                    const auto& score=scoring_outputs[output*hop+start];
                     return Complex{score.zero,score.one};
                 });
             }
@@ -1766,9 +1955,9 @@ struct PatternReceiver::Impl {
                     if(!selected.full)job.range_count=selected.range_count;
                     fft_workload->retained_start_trials+=selected.selected_count;
                     if(!cached_templates.empty() || reuse_templates) {
-                        const auto& rows=cached_templates.empty()?templates:cached_templates[index].rows;
-                        const auto& energies=cached_templates.empty()?template_energy:cached_templates[index].energy;
-                        const auto& squares=cached_templates.empty()?template_square:cached_templates[index].square;
+                        const auto& rows=cached_templates.empty()?templates:template_bank(index).rows;
+                        const auto& energies=cached_templates.empty()?template_energy:template_bank(index).energy;
+                        const auto& squares=cached_templates.empty()?template_square:template_bank(index).square;
                         scoring_templates[queued]={{rows[f][0],rows[f][1]},energies[f],squares[f]};
                         job.prepared_template=queued;
                     }
@@ -1813,8 +2002,9 @@ struct PatternReceiver::Impl {
         if(continuation_schedule!=next_start) {
             continuation_schedule=next_start;earliest_unscored_start=next_start;
             const auto& window=*search.qualified_start_window;
-            const auto offset=static_cast<long double>(search.initial_stream_symbols-1)*code.symbol_samples()/timing_minimum_rate;
-            const auto upper=window.epoch_origin_samples+window.phase_scale*phase_upper+window.half_width_samples+offset;
+            const auto offset=static_cast<long double>(source_start(search.initial_stream_symbols-1,phase_upper))/timing_minimum_rate;
+            const auto physical_upper=search.search_stream_phases?canonical_phase_cell_upper(config,phase_upper):phase_upper;
+            const auto upper=window.epoch_origin_samples+window.phase_scale*physical_upper+window.half_width_samples+offset;
             const auto magnitude=std::max({1.L,std::abs(window.epoch_origin_samples),
                 window.phase_scale*phase_upper,std::abs(upper),std::abs(offset),
                 static_cast<long double>(next_start)*bin_samples});
@@ -1889,8 +2079,9 @@ struct PatternReceiver::Impl {
             const auto phases=phase_groups(index,search.search_stream_phases?0:config.stream_phase_samples,
                 phase_upper,groups);
             for(std::size_t g=0;g<groups;++g) {
-                const auto selected=detail::pattern_fft_select_starts(*search.qualified_start_window,code.symbol_samples(),index,
-                    phases[g].lower,phases[g].upper,phase_step,logical_hop_begin,hop,bin_samples,
+                const auto geometry=window_geometry(index,phases[g]);
+                const auto selected=detail::pattern_fft_select_starts(*search.qualified_start_window,geometry.samples,geometry.index,
+                    geometry.lower,geometry.upper,geometry.step,logical_hop_begin,hop,bin_samples,
                     timing_minimum_rate,timing_maximum_rate);
                 retained+=static_cast<std::uint64_t>(selected.selected_count)*templates.size();
                 if(!selected.selected_count)fft_workload->skipped_template_jobs+=templates.size();
@@ -2083,9 +2274,9 @@ struct PatternReceiver::Impl {
             }
             stream_phase(groups[g].lower);
             prepare_templates(stream_index,stop);
-            const auto& rows=cached_templates.empty()?templates:cached_templates[stream_index].rows;
-            const auto& energies=cached_templates.empty()?template_energy:cached_templates[stream_index].energy;
-            const auto& squares=cached_templates.empty()?template_square:cached_templates[stream_index].square;
+            const auto& rows=cached_templates.empty()?templates:template_bank(stream_index).rows;
+            const auto& energies=cached_templates.empty()?template_energy:template_bank(stream_index).energy;
+            const auto& squares=cached_templates.empty()?template_square:template_bank(stream_index).square;
             for(std::size_t f=0;f<templates.size();++f) {
                 ++fft_workload->template_jobs;
                 fft_workload->retained_start_trials+=selected.selected_count;
@@ -2138,7 +2329,8 @@ struct PatternReceiver::Impl {
                 continue_tracks(stop,false,start>std::numeric_limits<std::uint64_t>::max()-2?
                     std::numeric_limits<std::uint64_t>::max():start+2);
                 auto checked=peak;
-                if(outer_presence_check(checked,0,stop))admit(checked,checked.frequency_hypothesis);
+                double chain_score=checked.score;
+                if(outer_presence_check(checked,0,stop,&chain_score))admit(checked,checked.frequency_hypothesis,chain_score);
                 else remember(checked);
             }
             advance_acquisition(count,stop);
@@ -2233,6 +2425,19 @@ std::uint64_t pattern_absence_samples(const Config& config) {
     if(count>std::numeric_limits<std::uint64_t>::max()/symbol)throw Error("pattern absence duration overflow");
     return count*symbol;
 }
+std::uint64_t pattern_absence_capture_samples(const Config& config) {
+    const auto eligible=pattern_absence_samples(config);
+    if(deferred_symbols(config)) {
+        const auto count=eligible/symbol_sample_count(config),symbol=symbol_sample_count(config);
+        const FhssSymbolCalendar calendar(*config.fake_hopping,config.sample_rate,pattern_pulse_padding_samples(config),symbol);
+        // Worst phase: wait one hop, then score all required eligible symbols.
+        // This only sizes physical capture tails; the scorer still requires
+        // ceil(6/T) fully observed failed symbols, excluding every planned gap.
+        const auto hops=1+count/calendar.per_hop+(count%calendar.per_hop!=0);
+        return calendar.boundary(hops,true);
+    }
+    return eligible;
+}
 PatternReceiver::PatternReceiver(Config c,std::size_t bytes,PatternSearch search):impl_(std::make_unique<Impl>(c,bytes,std::move(search))){}
 PatternReceiver::~PatternReceiver()=default;
 PatternReceiver::PatternReceiver(PatternReceiver&&) noexcept=default;
@@ -2314,8 +2519,12 @@ bool PatternReceiver::initial_search_complete()const {
     const auto& s=*impl_;
     if(s.fallback)return s.fallback->initial_search_complete();
     if(!s.search.start_offset_seconds)return false;
-    const auto upper=(static_cast<long double>(*s.search.start_offset_seconds)+
+    auto upper=(static_cast<long double>(*s.search.start_offset_seconds)+
         s.search.start_uncertainty_seconds)*s.config.sample_rate;
+    if(deferred_symbols(s.config)) {
+        const auto phase=s.phase_upper;
+        upper+=phase+static_cast<long double>(s.source_start(s.search.initial_stream_symbols-1,phase))/s.timing_minimum_rate;
+    }
     // next_start advances only after a complete FFT acquisition batch. It
     // includes the actual stretched integration and batching lookahead;
     // merely consuming a nominal symbol's PCM is not sufficient.

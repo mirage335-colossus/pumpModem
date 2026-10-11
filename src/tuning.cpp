@@ -1,5 +1,6 @@
 #include "datapump/tuning.hpp"
 #include "datapump/pattern_code.hpp"
+#include "datapump/symbol_schedule.hpp"
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -322,6 +323,7 @@ Plan resolve_config(modem::Config config,double target_snr_db_hz,PatternMode mod
     if(mode==PatternMode::auto_keystream && !encryption)explanation<<"Without a key, auto-pattern is used. ";
     explanation<<"The 18 dB integration target is an initial model, not calibrated detection sensitivity or a false-alarm guarantee. Acquisition uses received pattern evidence. Both endpoints derive the profile from matching rate, carrier, C/N0 and pattern settings.";
     plan.explanation=explanation.str();
+    if(base.fake_hopping)base.fake_hopping=encryption?modem::resolve_fhss_power(*base.fake_hopping,base):nullptr;
     return plan;
 }
 }

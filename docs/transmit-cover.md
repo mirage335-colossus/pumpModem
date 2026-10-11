@@ -1,10 +1,11 @@
 # Robust transmitter cover waveform
 
-This local candidate makes **Transmit noise** use the ordinary private-pattern
+The cover implementation makes **Transmit noise** use the ordinary private-pattern
 transmitter, and extends its surrounding cover to the selected complete outer
 DSSS construction. It is a transmitter change. Receiver algorithms, hypotheses,
 thresholds, framing, meaningful bits and payload cryptographic addresses are
-unchanged. The manual checkpoint is not full receiver/security/platform
+unchanged by the cover implementation itself. The later deferred FHSS calendar
+adds explicit shared TX/RX timing as described below. The manual checkpoint is not full receiver/security/platform
 qualification.
 
 ## Common engine and separated secrets
@@ -54,7 +55,12 @@ state but never advances addresses or publishes cover chips as payload.
 
 The enclosing transmitter owns the one dedicated keyed FHSS schedule, including
 while cover is generated. Noise uses its fresh temporary FHSS purpose. Fake FHSS
-continues to change presentation only: physical audio and radio tuning are fixed.
+keeps physical audio frequency and radio tuning fixed. Its optional production
+power ramps apply the same smooth envelope after the common shaper/limiter to
+payload and cover, and again after native resampling for exact hop silence; see
+[hop transitions](spread-spectrum-controls.md#hop-power-transitions-local-manual-candidate).
+The three useful seconds then exclude hop gaps/transitions, with a longer tail.
+They no longer imply uninterrupted masking. FHSS Off retains the behavior below.
 
 ## Edges, short sections and stop latency
 
@@ -411,3 +417,38 @@ are retained under `.agent-work/artifacts/receiver-opt-20261008/` (`cover-*`,
 `manual-transmit-cover.sh`. Broader qualification remains outstanding: full acquisition-bank sensitivity and rare-event calibration,
 multiple keys/rolling epochs, broad impairments/interference, native physical
 audio timing/stop spectra, ARM/Windows/Web/SDK and packaging/release coverage.
+
+
+## Cover during deferred FHSS waits
+
+The [deferred calendar](spread-spectrum-controls.md#deferred-whole-symbols-local-manual-candidate)
+retains complete payload symbols in safe dwell slots and fills other admitted
+coefficient positions with full-DSSS virtual cover. The dedicated `cv-wai01`
+child-secret role is independent of payload, prefix and suppression. One bounded
+additional virtual code/map cache is charged to the transmitter workspace; no
+whole-symbol PCM buffer or replay is introduced. Role origin remains fixed.
+Cancellation retains every already-contributing wait/payload coefficient, then
+uses the existing protected suppression and final-shaper shutdown. Hop gaps still
+interrupt echo masking, and the three useful seconds exclude those gaps.
+Airtime includes initial wait, interslot waits and the extended suppression tail.
+The new calendar changes physical symbol positions and therefore actual UTC
+payload addresses; both peers must run matching calendar geometry. Bits, framing,
+private stream separation and full observed-absence completion remain unchanged.
+
+
+## Smooth FHSS gaps and cover
+
+Production uses the common C2 envelope on payload, prefix, waits, temporary-key
+noise and protected suppression. Short bits use full-gain slots; long bits span
+gaps and the receiver uses its original full-energy templates, with measured
+fading mismatch. The previous exact pulse-omission diagnostic and failure evidence
+remain available. See [FHSS controls](spread-spectrum-controls.md#hop-power-transitions-local-manual-candidate)
+for full/local timing guards, 200 Hz allowance, cache rules and measured limits.
+
+The useful cover tail excludes quiet intervals AND both ramps. It still does not
+provide continuous echo masking through hop silence. Normal completion and first
+Cancel preserve the common graceful-stop state machine and contributed source
+pulses; their output is multiplied by the same mandatory hop envelope. Abort now
+remains prompt and forfeits protection. The last native resampler stage restores
+exact software-output silence, but DAC reconstruction/radio settling still need
+hardware validation. No gap, EOF, cover generator or drain completes reception.

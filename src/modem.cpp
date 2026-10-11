@@ -1,4 +1,6 @@
 #include "datapump/modem.hpp"
+#include "datapump/fhss_schedule.hpp"
+#include "datapump/symbol_schedule.hpp"
 #include "datapump/streaming_modem.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
@@ -192,8 +194,13 @@ bool private_cover_enabled(const Config& c) {
     // Scrambler-or-inner-DSSS path. A factor alone does not enable that path.
     return c.spreading_mode==SpreadingMode::pattern && (c.scramble || (c.dsss && c.data_key));
 }
-std::uint64_t suppression_sample_count(const Config& c) {
+std::uint64_t protected_cover_span_samples(const Config& c) {
     const auto useful=static_cast<std::uint64_t>(c.sample_rate)*3;
+    if(!c.fake_hopping)return useful;
+    return FhssPowerShape(*c.fake_hopping,c.sample_rate,pattern_pulse_padding_samples(c),symbol_sample_count(c)).protected_span(useful);
+}
+std::uint64_t suppression_sample_count(const Config& c) {
+    const auto useful=protected_cover_span_samples(c);
     if(!private_cover_enabled(c))return useful;
     const auto support=pattern_pulse_padding_samples(c);
     const auto extra=support?2*support+1:std::max<std::uint64_t>(1,c.sample_rate/100);
@@ -208,7 +215,13 @@ std::uint64_t transmit_stop_sample_count(const Config& c) {
     return pending+tail;
 }
 double symbol_seconds(const Config& c) { validate(c); return c.integration_seconds>0?c.integration_seconds:2.*c.spreading_factor/c.bandwidth_hz; }
-double bit_rate(const Config& c) { return c.constellation_bits/symbol_seconds(c); }
+double bit_rate(const Config& c) {
+    if(deferred_symbols(c)) {
+        const FhssSymbolCalendar slots(*c.fake_hopping,c.sample_rate,pattern_pulse_padding_samples(c),symbol_sample_count(c));
+        return c.constellation_bits*static_cast<double>(slots.per_hop)/c.fake_hopping->dwell_seconds;
+    }
+    return c.constellation_bits/symbol_seconds(c);
+}
 std::size_t payload_symbol_count(std::size_t payload_bytes,const Config& c) {
     validate(c);
     return product(payload_bytes,8,std::numeric_limits<std::size_t>::max());
@@ -219,7 +232,7 @@ std::size_t waveform_sample_count(std::size_t wire_bytes,const Config& c) {
     const auto count=payload_symbol_count(wire_bytes,c);
     const auto duration=symbol_sample_count(c);
     check(duration<=std::numeric_limits<std::size_t>::max(),"symbol duration exceeds platform sample counter");
-    const auto payload=product(count,static_cast<std::size_t>(duration),std::numeric_limits<std::size_t>::max());
+    const auto payload=symbol_schedule_detail::add(scheduled_symbol_offset(c,c.stream_epoch,c.stream_phase_samples,count-1),duration);
     const auto padding=pattern_pulse_padding_samples(c);
     const auto training=training_sample_count(c);
     check(payload<=std::numeric_limits<std::size_t>::max()-training,"modem sample count overflow");

@@ -400,9 +400,13 @@ struct Controller::Impl {
         return std::max(snapshot.transmit_separation_seconds,
             gate.remaining(settings.simulation,encrypted()).count()/1000.);
     }
+    bool transmit_hop_ready() const {
+        const auto& plan=transmit_config().fake_hopping;
+        return !plan || (plan->mandatory_ramps && plan->power_ramps);
+    }
     bool transmit_ready() const {
         return !empty_draft()&&!transmit_requested&&!snapshot.transmitting&&!key_loading&&!key_failed&&
-            !file_loading&&settings_valid&&(attachment||draft_error.empty())&&estimate&&estimated_revision==revision&&estimate->memory_supported;
+            !file_loading&&settings_valid&&transmit_hop_ready()&&(attachment||draft_error.empty())&&estimate&&estimated_revision==revision&&estimate->memory_supported;
     }
     const modem::Config& transmit_config() const {
         return !short_draft() && settings.long_message_modem ? *settings.long_message_modem : settings.transfer.modem;
@@ -645,6 +649,8 @@ struct Controller::Impl {
         input.fake_hopping=private_hopping(fhss::parse(preference),input.options.modem,
             input.options.key.has_value(),proposed_list?*proposed_list:fhss_list);
         input.observer_hopping=input.fake_hopping.observer();
+        input.options.modem.fake_hopping=make_fake_plan(input.fake_hopping,input.options,
+            proposed_list?*proposed_list:fhss_list);
         if(!input.fake_hopping.available||!input.options.modem.oscillator_search)return;
         auto& config=input.options.modem;
         const auto& id=f(UiField::rf_oscillator).selected;
@@ -659,14 +665,18 @@ struct Controller::Impl {
         input.channel.frequency_offset_hz=effects.frequency_offset_hz;
         input.channel.phase_noise_degrees_per_sqrt_second=effects.phase_noise_degrees_per_sqrt_second;
     }
-    std::shared_ptr<const modem::FhssPlan> fake_plan(const modem::Config& config) const {
-        const auto profile=fake_profile(config);
+    static std::shared_ptr<const modem::FhssPlan> make_fake_plan(const fhss::Profile& profile,
+            const transfer::Options& options,std::span<const double> list) {
         if(!profile.available)return {};
-        auto plan=std::make_shared<modem::FhssPlan>();
-        plan->channels=profile.channels;plan->dwell_seconds=profile.dwell_seconds;
-        for(unsigned i=0;i<plan->channels;++i)plan->shifts[i]=profile.preference==fhss::Preference::list?
-            fhss_list[i]:profile.center(i)-config.carrier_hz;
-        plan->validate();return plan;
+        modem::FhssPlan plan;
+        plan.channels=profile.channels;plan.dwell_seconds=profile.dwell_seconds;
+        for(unsigned i=0;i<plan.channels;++i)plan.shifts[i]=profile.preference==fhss::Preference::list?
+            list[i]:profile.center(i)-options.modem.carrier_hz;
+        return transfer::transmit_hopping(plan,options);
+    }
+    std::shared_ptr<const modem::FhssPlan> fake_plan(const modem::Config& config) const {
+        auto options=settings.transfer;options.modem=config;
+        return make_fake_plan(fake_profile(config),options,fhss_list);
     }
     std::string fake_hop_label;
     void fake_display(const live::Snapshot& next) {
@@ -678,7 +688,13 @@ struct Controller::Impl {
         carrier.disabled_text=frequency_text(frequency(carrier.text,"Carrier")+delta);
         shift.disabled_text=frequency_text(trace.fhss_shift_hz);
         fake_hop_label="Fake: hop "+std::to_string(trace.fhss_channel+1)+" / "+std::to_string(trace.fhss_channels)+", "+
-            seconds_text(trace.fhss_dwell_seconds)+", display only";
+            seconds_text(trace.fhss_dwell_seconds)+", tuning display only";
+        if(trace.fhss_arrival_offset_seconds>0) {
+            fake_hop_label+=" · arrival +"+seconds_text(trace.fhss_arrival_offset_seconds)+": ";
+            fake_hop_label+=trace.fhss_arrival_available?
+                "hop "+std::to_string(trace.fhss_arrival_channel+1)+", Shift "+frequency_text(trace.fhss_arrival_shift_hz):
+                "not yet";
+        }
     }
     void configure(bool match_receive_target=false,bool match_carrier=false,
                    std::optional<UiField> align_target=std::nullopt,
@@ -886,6 +902,11 @@ struct Controller::Impl {
             if(align_receive&&!match_receive_target&&!load&&!targets.reset&&!receive_adjustment)
                 receive_adjustment=ReceiveTargetEdit{f(UiField::receive_snr).text,targets.canonical,false};
             next.transfer.modem=plan.config;next.long_message_modem=longer_plan.config;
+            next.transfer.modem.fake_hopping=make_fake_plan(private_hopping(fhss::parse(fhss),plan.config,
+                next_encrypted,next_fhss_list),next.transfer,next_fhss_list);
+            auto long_options=next.transfer;long_options.modem=longer_plan.config;
+            next.long_message_modem->fake_hopping=make_fake_plan(private_hopping(fhss::parse(fhss),longer_plan.config,
+                next_encrypted,next_fhss_list),long_options,next_fhss_list);
             const auto effects=modem::oscillator_effects(next.transfer.modem);
             next.simulation_clock_error_ppm=effects.clock_error_ppm;
             next.simulation_frequency_offset_hz=effects.frequency_offset_hz;
@@ -1316,7 +1337,7 @@ struct Controller::Impl {
             !f(UiField::short_bits).text.empty()&&enabled(Command::transmit);
         case Command::transmit: return transmit_ready()&&key_lock_seconds()<=0&&separation_seconds()<=0;
         case Command::force_transmit: return transmit_ready()&&(key_lock_seconds()>0||separation_seconds()>0);
-        case Command::transmit_noise: return !busy && !key_loading && settings_valid;
+        case Command::transmit_noise: return !busy && !key_loading && settings_valid && transmit_hop_ready();
         case Command::cancel: return busy||snapshot.simulation_replay;
         case Command::open_keyfile: case Command::generate_keyfile: return !busy&&!key_loading;
         case Command::show_key_folder: return !busy&&!key_loading&&!key_path.empty();
@@ -1392,13 +1413,35 @@ struct Controller::Impl {
         const auto hopping=fake_profile(settings.transfer.modem);
         f(UiField::fhss_list).enabled=f(UiField::fhss_list).enabled&&developer_mode;
         f(UiField::fhss_list_status).text=!fhss_list_error.empty()?fhss_list_error:
-            "Shift frequencies · 2–200 distinct centers · 0.4 s dwell · display only\n"+
+            "Shift frequencies · 2–200 distinct centers · 0.4 s dwell · power ramps; tuning display only\n"+
             (fhss_list.empty()?std::string("Enter frequencies, then Apply list."):
                 std::to_string(fhss_list.size())+" applied frequencies. Select Fake: List to use them.");
         f(UiField::fhss).display_text=!encrypted()?"Off · encryption key required":fhss::parse(f(UiField::fhss).selected)==fhss::Preference::off?"":
             !fake_hop_label.empty()?fake_hop_label:!hopping.available?"Fake: "+hopping.reason:
             std::string("Fake: ")+(hopping.preference==fhss::Preference::fcc?"FCC":hopping.preference==fhss::Preference::eu?"EU":"List")+
-                (hopping.experimental?" · experimental":"")+" · "+std::to_string(hopping.channels)+" ch, display only";
+                (hopping.experimental?" · experimental":"")+" · "+std::to_string(hopping.channels)+" ch; tuning display only";
+        if(!settings_valid && settings_error.find("FHSS")!=std::string::npos) {
+            f(UiField::fhss).display_text+=" · TX blocked: "+settings_error;
+        } else if(hopping.available) {
+            const auto plan=fake_plan(transmit_config());
+            if(plan&&plan->power_ramps) {
+                f(UiField::fhss).display_text+=plan->defer_symbols?" · deferred bits + airtime":plan->matched_gaps?" · matched pulse gaps":" · smooth ramps";
+                if(plan->smooth_ramps) {
+                    const auto c=transmit_config();const modem::FhssPowerShape shape(*plan,c.sample_rate,
+                        modem::pattern_pulse_padding_samples(c),modem::symbol_sample_count(c));
+                    const auto ramp_seconds=shape.support/c.sample_rate;
+                    std::ostringstream detail;detail<<std::setprecision(3)<<" · "<<1000*ramp_seconds
+                        <<" ms / "<<2/ramp_seconds<<" Hz ramp scale / ~"<<std::setprecision(2)
+                        <<-10*std::log10(shape.mean_power())<<" dB stationary power cost";
+                    if(plan->defer_symbols)detail<<" / payload slots at full gain";
+                    if(!plan->defer_symbols)detail<<" / "<<std::setprecision(3)
+                        <<100*(1-shape.minimum_flat_power_fraction(modem::symbol_sample_count(c)))<<"% worst flat-power loss";
+                    if(!plan->remote_guard_covered)detail<<" · local guard only; remote overlap unguaranteed";
+                    f(UiField::fhss).display_text+=detail.str();
+                }
+            }
+            else if(plan)f(UiField::fhss).display_text+=" · TX blocked: "+plan->power_fallback_reason;
+        }
         for(auto id:{UiField::link_power,UiField::link_loss,UiField::link_noise})f(id).visible=true;
         f(UiField::simulation_cpu_time).visible=f(UiField::simulation_gpu_time).visible=simulation;
         f(UiField::simulation_confidence).visible=true;
@@ -1475,6 +1518,7 @@ struct Controller::Impl {
             request.message=message(); request.options=settings.transfer;
             request.options.modem=transmit_config();
             request.observer_hopping=fake_profile(request.options.modem).observer();
+            request.options.modem.fake_hopping=fake_plan(request.options.modem);
             if(empty_draft())request.binary=Bytes{};
             else if(!attachment&&composer.raw_bits()) request.binary=*composer.raw_bits();
             request.requested_pattern=f(UiField::pattern).selected; request.target_snr=short_draft()?short_target:long_target; request.simulation=settings.simulation; request.device=settings.device;
@@ -1658,7 +1702,7 @@ struct Controller::Impl {
         const auto observation=!settings.simulation&&next.clock_window_modeled&&!next.clock_timing_fallback?
             next.receiver_timing:std::nullopt;
         if(timing_advice.observe(observation,settings.transfer.modem.sample_rate,
-                                 settings.transfer.audio_timing_error_seconds,Clock::now())) {
+                                 clock_sync::audio_lag_radius(settings.transfer.audio_timing_error_seconds),Clock::now())) {
             // Only a changed conservative work envelope invalidates advice.
             // Capture's original timing model and admission remain untouched.
             ++advice_revision;planner_model.reset();
@@ -1719,7 +1763,7 @@ struct Controller::Impl {
         if(settings.transfer.clock_sync && !next.simulation) {
             if(next.clock_timing_fallback)diagnostics<<" | UTC fallback; ordinary playback/full search";
             else if(next.transmit_clock_following)diagnostics<<" | UTC transmit timing qualified";
-            diagnostics<<" | Audio error +/-"<<1000*settings.transfer.audio_timing_error_seconds<<" ms per station (assumed)";
+            diagnostics<<" | Audio lag 0..+"<<1000*settings.transfer.audio_timing_error_seconds<<" ms per station (assumed)";
             if(next.clock_window_modeled)
                 diagnostics<<" | UTC arrival window modeled; see Link planner retained positions/backend; audio timing estimated, not hardware calibrated";
             else if(next.clock_timing_quality==audio::TimingQuality::estimated)

@@ -408,6 +408,7 @@ std::uint64_t add_samples(std::uint64_t first,std::uint64_t second) {
 transfer::Estimate one_bit_estimate(const modem::Config& config) {
     const auto symbol=modem::symbol_sample_count(config);
     auto count=add_samples(modem::training_sample_count(config),symbol);
+    count=add_samples(count,modem::scheduled_symbol_offset(config,config.stream_epoch,config.stream_phase_samples,0));
     count=add_samples(count,modem::pattern_pulse_padding_samples(config));
     count=add_samples(count,modem::pattern_pulse_padding_samples(config));
     count=add_samples(count,modem::suppression_sample_count(config));
@@ -435,6 +436,16 @@ auto curve_key(const transfer::Options& options,const modem::ChannelConfig& chan
         options.clock_sync.value_or(clock_sync::Policy{}).region_seconds,
         options.clock_sync.value_or(clock_sync::Policy{}).offset_seconds,channel.snr_db,channel.frequency_offset_hz,
         channel.delay_samples,channel.clock_error_ppm,channel.phase_noise_degrees_per_sqrt_second,
+        c.fake_hopping?c.fake_hopping->power_ramps:false,modem::deferred_symbols(c),
+        c.fake_hopping?c.fake_hopping->matched_gaps:false,c.fake_hopping?c.fake_hopping->mandatory_ramps:false,
+        c.fake_hopping?c.fake_hopping->smooth_ramps:false,c.fake_hopping?c.fake_hopping->remote_guard_covered:false,
+        c.fake_hopping?c.fake_hopping->ramp_seconds:0.,
+        c.fake_hopping?c.fake_hopping->dwell_seconds:0.,
+        c.fake_hopping?c.fake_hopping->clock_error_seconds:0.,
+        c.fake_hopping?c.fake_hopping->audio_error_seconds:0.,
+        c.fake_hopping?c.fake_hopping->peer_clock_error_seconds:0.,
+        c.fake_hopping?c.fake_hopping->region_seconds:0.,
+        c.fake_hopping?c.fake_hopping->offset_seconds:0.,
         c.oscillator_search.has_value(),oscillator.lf.accuracy_ppm,oscillator.lf.phase_noise_degrees_per_sqrt_second,
         oscillator.rf.accuracy_ppm,oscillator.rf.phase_noise_degrees_per_sqrt_second,
         oscillator.rf_shift_hz,oscillator.margin,oscillator.reference,oscillator.sideband,work_mode,
@@ -650,10 +661,12 @@ TargetSteps preview_steps(const Inputs& inputs) {
         const auto transmission=transfer::estimate_binary(one_bit,options);
         const auto symbol=modem::symbol_sample_count(options.modem);
         if(!transmission.waveform_samples||transmission.waveform_samples<symbol)return result;
-        const auto overhead=static_cast<std::uint64_t>(transmission.waveform_samples)-symbol;
+        const auto overhead=static_cast<std::uint64_t>(transmission.waveform_samples)-symbol-
+            modem::scheduled_symbol_offset(options.modem,options.timestamp,options.modem.stream_phase_samples,0);
         if(inputs.wire_bits>(std::numeric_limits<std::uint64_t>::max()-overhead)/symbol)return result;
-        (void)add_samples(add_samples(static_cast<std::uint64_t>(inputs.wire_bits)*symbol,overhead),
-            modem::pattern_absence_samples(options.modem));
+        (void)add_samples(add_samples(add_samples(modem::scheduled_symbol_offset(options.modem,options.timestamp,
+            options.modem.stream_phase_samples,inputs.wire_bits-1),symbol),overhead),
+            modem::pattern_absence_capture_samples(options.modem));
         const auto maximum_seconds=static_cast<long double>(std::numeric_limits<std::uint64_t>::max())/
             (4.L*options.modem.sample_rate);
         const auto minimum=std::max(-200.,tuning::pattern_target_symbol_snr_db-
@@ -697,12 +710,13 @@ Model build(const Inputs& inputs,Cache& cache,std::stop_token stop,const std::fu
         const auto single_transmission=transmission;
         if(!transmission.waveform_samples || transmission.waveform_samples<symbol)
             throw Error("planned duration exceeds the platform sample counter");
-        const auto overhead=static_cast<std::uint64_t>(transmission.waveform_samples)-symbol;
+        const auto overhead=static_cast<std::uint64_t>(transmission.waveform_samples)-symbol-
+            modem::scheduled_symbol_offset(options.modem,options.timestamp,options.modem.stream_phase_samples,0);
         if(inputs.wire_bits>(std::numeric_limits<std::uint64_t>::max()-overhead)/symbol)
             throw Error("planned duration exceeds the modem sample counter");
-        const auto payload=static_cast<std::uint64_t>(inputs.wire_bits)*symbol;
+        const auto payload=add_samples(modem::scheduled_symbol_offset(config,options.timestamp,config.stream_phase_samples,inputs.wire_bits-1),symbol);
         const auto waveform=add_samples(payload,overhead);
-        const auto finish=add_samples(waveform,modem::pattern_absence_samples(config));
+        const auto finish=add_samples(waveform,modem::pattern_absence_capture_samples(config));
         result.send_seconds=static_cast<double>(waveform)/config.sample_rate;
         result.finish_seconds=static_cast<double>(finish)/config.sample_rate;
         transmission.wire_bits=inputs.wire_bits;

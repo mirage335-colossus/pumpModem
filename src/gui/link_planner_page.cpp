@@ -634,7 +634,19 @@ void details(Node& root,const planner::Model& model) {
                 number(hop.spacing_hz,8)+(hop.preference==fhss::Preference::list?" Hz minimum spacing · ":" Hz spacing · ")+planner::duration(hop.dwell_seconds)+" residence · "+
                 number(hop.span_hz,8)+" Hz center span.",11,Tone::text,false,4);
             paragraph(n,"Illustrated RF centers "+number(hop.first_hz,12)+"–"+number(hop.last_hz,12)+
-                " Hz; guarded channel width "+number(hop.guarded_hz,8)+" Hz. Highest RF feeds oscillator/search estimates. Physical audio and radio tuning stay fixed.",11,Tone::muted,false,4);
+                " Hz; guarded channel width "+number(hop.guarded_hz,8)+" Hz. Highest RF feeds oscillator/search estimates. Supported timing geometries ramp audio power at hops; physical audio frequency and radio tuning stay fixed.",11,Tone::muted,false,4);
+            if(const auto& plan=model.inputs.options.modem.fake_hopping;plan)
+                paragraph(n,"Requested hop timing: audio lag 0..+"+number(1000*plan->audio_error_seconds,6)+
+                    " ms, clock +/-"+number(1000*plan->clock_error_seconds,6)+
+                    " ms TX and +/-"+number(1000*plan->peer_clock_error_seconds,6)+
+                    " ms RX; region total "+number(1000*plan->region_seconds,6)+
+                    " ms. Finite-pulse transitions add support. RX probability and observer estimates are ungated references. Hop gaps interrupt echo masking.",11,Tone::muted,false,4);
+            if(const auto& plan=model.inputs.options.modem.fake_hopping;plan)
+                paragraph(n,"Arrival hop schedule follows TX by "+number(1000*plan->offset_seconds,8)+
+                    " ms fixed propagation delay, using the same keyed hop index. Offset does not widen the power gap or shift the transmitted frequency. This is a nominal preview, not receiver retuning.",11,Tone::muted,false,4);
+            if(const auto& plan=model.inputs.options.modem.fake_hopping;plan&&!plan->power_ramps)
+                paragraph(n,"Power ramps unavailable: "+plan->power_fallback_reason+
+                    ". Fake tuning display continues with the original waveform.",11,Tone::negative,false,4);
             paragraph(n,hop.assumptions+" This illustration does not establish compliance. Observer captures every channel simultaneously; no automatic channel-count gain.",11,Tone::muted,false,4);
         }
     }

@@ -16,11 +16,16 @@ inline std::uint64_t exposed_transmit_epoch(const modem::Config& config,
     const auto overhead=training+2*padding+modem::suppression_sample_count(config);
     const auto symbol=modem::symbol_sample_count(config);
     if(total_samples<=overhead || emitted<=training)return epoch;
-    const auto symbols=(total_samples-overhead)/symbol;
+    std::optional<modem::FhssSymbolCalendar> calendar;
+    if(modem::deferred_symbols(config))calendar.emplace(*config.fake_hopping,config.sample_rate,padding,symbol);
+    const auto symbols=calendar?calendar->lower_bound(epoch,config.stream_phase_samples,total_samples-overhead):
+        (total_samples-overhead)/symbol;
     if(!symbols)return epoch;
-    const auto last=std::min(symbols-1,(emitted-training-1)/symbol);
-    return modem::symbol_stream_address(epoch,config.stream_phase_samples,last,
-        symbol,config.sample_rate).epoch;
+    const auto exposed=calendar?calendar->lower_bound(epoch,config.stream_phase_samples,emitted-training):
+        1+(emitted-training-1)/symbol;
+    if(!exposed)return epoch;
+    const auto last=std::min(symbols-1,exposed-1);
+    return modem::symbol_stream_address(config,epoch,config.stream_phase_samples,last).epoch;
 }
 
 // An automatic payload starts on a whole second after its prefix. Waiting

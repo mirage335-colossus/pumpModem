@@ -39,6 +39,9 @@ void check_cancelled(std::stop_token stop) {
 }
 
 void validate(const Options& options) {
+    if(options.modem.fake_hopping && (!options.modem.fake_hopping->mandatory_ramps ||
+       (options.modem.fake_hopping->power_ramps && !options.modem.fake_hopping->utc_schedule())))
+        throw Error("production FHSS requires a resolved mandatory power plan");
     modem::validate(options.modem);
     if(options.clock_sync)clock_sync::validate(*options.clock_sync);
     clock_sync::validate_audio_error(options.audio_timing_error_seconds);
@@ -71,8 +74,7 @@ Options binary_options(std::span<const std::uint8_t> bits,const Options& options
 IntervalOptions interval_options(const Options& options,std::uint64_t first_symbol) {
     IntervalOptions result;result.fec=options.fec;
     if(options.key) {
-        const auto address=modem::symbol_stream_address(options.timestamp,options.modem.stream_phase_samples,
-            first_symbol,modem::symbol_sample_count(options.modem),options.modem.sample_rate);
+        const auto address=modem::symbol_stream_address(options.modem,options.timestamp,options.modem.stream_phase_samples,first_symbol);
         Bytes domain{'D','P','-','I','N','T','E','R','V','A','L',2,
             static_cast<std::uint8_t>(options.fec),static_cast<std::uint8_t>(options.compression)};
         for(auto value:{address.epoch,address.ordinal})
@@ -270,7 +272,8 @@ Estimate estimate_binary(std::span<const std::uint8_t> bits,const Options& input
     const auto symbol_samples=modem::symbol_sample_count(value.modem);
     if(symbols>std::numeric_limits<std::uint64_t>::max()/symbol_samples)
         throw Error("transmission duration exceeds 64-bit sample counter");
-    const auto content_samples=static_cast<std::uint64_t>(symbols)*symbol_samples;
+    const auto content_samples=modem::symbol_schedule_detail::add(modem::scheduled_symbol_offset(
+        value.modem,value.timestamp,value.modem.stream_phase_samples,symbols-1),symbol_samples);
     const auto hardware_samples=modem::training_sample_count(value.modem);
     if(hardware_samples>std::numeric_limits<std::uint64_t>::max()-content_samples)
         throw Error("transmission duration exceeds 64-bit sample counter");
@@ -372,7 +375,8 @@ std::unique_ptr<modem::StreamingTransmitter> message_transmitter(const Message& 
     auto context=options;context.content_limit=std::max(context.content_limit,bits.size());
     mask_binary_bits(bits,context,0,&trace);
     if(message.kind==MessageKind::text && message.repeatable && message.data.size()>options.repeat_policy.minimum_payload_bytes &&
-       static_cast<double>(bits.size())*modem::symbol_seconds(options.modem)>options.repeat_policy.maximum_seconds)
+       (static_cast<long double>(modem::scheduled_symbol_offset(options.modem,options.timestamp,options.modem.stream_phase_samples,bits.size()-1))+
+        modem::symbol_sample_count(options.modem))/options.modem.sample_rate>options.repeat_policy.maximum_seconds)
         throw Error("repeatable content exceeds airtime limit");
     return std::make_unique<modem::StreamingTransmitter>(modem::RawBits{std::move(bits)},
         production,options.dsp_workspace_bytes/4,std::move(trace));
@@ -399,11 +403,9 @@ void mask_binary_bits(std::span<std::uint8_t> bits,const Options& input_options,
         Bytes mask;
         std::uint64_t cached_epoch=0,cached_begin=0;
         bool cached=false;
-        const auto samples=modem::symbol_sample_count(value.modem);
         std::size_t offset=0;
         while(offset<bits.size()) {
-            const auto address=modem::symbol_stream_address(value.timestamp,value.modem.stream_phase_samples,
-                bit_offset+offset,samples,value.modem.sample_rate);
+            const auto address=modem::symbol_stream_address(value.modem,value.timestamp,value.modem.stream_phase_samples,bit_offset+offset);
             const auto byte=address.ordinal/8,begin=byte-byte%cache_size;
             if(!cached || address.epoch!=cached_epoch || begin!=cached_begin) {
                 mask=value.key->stream(StreamPurpose::Data,address.epoch,begin,cache_size);
@@ -837,7 +839,7 @@ Received simulate(const Message& message, const Options& input_options, const mo
             }
         };
         while(const auto count=impairments.read(*source,samples,stop)){preview_count=count;decoder.push(std::span(samples).first(count),stop);harvest();}
-        auto trailing=modem::pattern_absence_samples(profile)+profile.sample_rate+2*modem::pattern_pulse_padding_samples(profile);
+        auto trailing=modem::pattern_absence_capture_samples(profile)+profile.sample_rate+2*modem::pattern_pulse_padding_samples(profile);
         while(trailing) {
             const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(trailing,samples.size()));
             auto tail=std::span(samples).first(count);impairments.read_noise(tail,stop);preview_count=count;decoder.push(tail,stop);trailing-=count;harvest();

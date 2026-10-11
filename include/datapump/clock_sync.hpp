@@ -10,7 +10,8 @@
 #include <string_view>
 
 namespace datapump::clock_sync {
-// Configured per-station residual allowance, not measured device accuracy.
+// Configured total causal audio lag [0,A] at each station, not +/-A.
+// Native event timestamps retain their FULL reported uncertainty.
 // It constrains UTC timing only when a clock-sync policy is active; the
 // ordinary broad search and underrun-prevention buffers are unchanged.
 inline constexpr double default_audio_error_seconds=.05;
@@ -39,7 +40,7 @@ struct ArrivalMap {
 inline std::optional<ArrivalMap> arrival_map(const Policy& policy,long double epoch,
         long double capture_utc,long double capture_sample,std::uint32_t sample_rate,
         double seconds_per_sample,double rate_uncertainty_fraction,double capture_error_seconds,
-        std::uint64_t maximum_phase_samples,double transmit_error_seconds=default_audio_error_seconds) {
+        std::uint64_t maximum_phase_samples,double transmit_error_seconds=default_audio_error_seconds/2) {
     if(!std::isfinite(policy.accuracy_seconds) || policy.accuracy_seconds<0 ||
        !std::isfinite(policy.region_seconds) || policy.region_seconds<0 ||
        !std::isfinite(policy.offset_seconds) || policy.offset_seconds<0 ||
@@ -68,6 +69,20 @@ inline std::optional<ArrivalMap> arrival_map(const Policy& policy,long double ep
         return std::nullopt;
     result.half_width_samples=std::nextafter(result.half_width_samples,std::numeric_limits<long double>::infinity());
     return result;
+}
+// A is the complete allowed lag interval, including provider uncertainty. TX
+// aims at E+A/2 and qualifies its full interval within [E,E+A]. Capture stamps
+// remain physical-event centers with unmodified radius U; equivalently their
+// upper edge has causal lag [0,2U]. Never add a second center shift to capture.
+inline double audio_lag_radius(double lag) {validate_audio_error(lag);return lag/2;}
+inline std::optional<ArrivalMap> audio_lag_arrival_map(const Policy& policy,long double epoch,
+        long double capture_utc,long double capture_sample,std::uint32_t sample_rate,
+        double seconds_per_sample,double rate_uncertainty_fraction,double capture_error_seconds,
+        std::uint64_t maximum_phase_samples,double audio_lag_seconds=default_audio_error_seconds) {
+    const auto radius=audio_lag_radius(audio_lag_seconds);
+    if(capture_error_seconds>radius)return std::nullopt;
+    return arrival_map(policy,epoch+radius,capture_utc,capture_sample,sample_rate,
+        seconds_per_sample,rate_uncertainty_fraction,capture_error_seconds,maximum_phase_samples,radius);
 }
 inline double duration(std::string_view text) {
     while(!text.empty() && text.front()==' ')text.remove_prefix(1);
@@ -100,6 +115,14 @@ inline void validate(const Policy& policy) {
     if(!std::isfinite(policy.half_window_seconds()))throw Error("Clock window overflow");
 }
 inline bool is_default(std::string_view text) {return text=="default"||text=="Default";}
+// CLI/parameter-list Default resolves the Audio allowance only. The GUI editor
+// reset action separately restores all four controls; numeric exports stay stable.
+inline double parse_audio_error(std::string_view text) {
+    try {
+        const auto value=is_default(text)?default_audio_error_seconds:duration(text);
+        validate_audio_error(value);return value;
+    } catch(const Error& error) {throw Error(std::string("Audio error: ")+error.what());}
+}
 inline std::optional<Policy> parse(std::string_view text) {
     if(is_default(text))return std::nullopt;
     if(!text.starts_with("GPS_"))throw Error("Clock sync needs default or GPS_ACCURACY-REGION_region-OFFSET_offset");

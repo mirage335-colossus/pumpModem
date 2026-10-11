@@ -102,7 +102,10 @@ inline Profile resolve(Preference preference,const modem::Config& config,
     // symbol boundary. Nominal width bounds the sampled shaped width and the
     // rectangular alternative, so the hop set stays valid across that sweep.
     // This conservative envelope is still proportional to signal bandwidth.
-    p.guarded_hz=1.25*std::max(p.occupied_hz,modem::waveform_bandwidth_hz(config));
+    // Fake power gates add smooth modulation skirts. Reserve the accepted
+    // 200 Hz full-band allowance in illustrated channel spacing/band edges.
+    // This engineering margin is not a measured emission mask.
+    p.guarded_hz=1.25*std::max(p.occupied_hz,modem::waveform_bandwidth_hz(config))+200.;
     const auto fail=[&](std::string reason){p.reason=std::move(reason);return p;};
     if(!std::isfinite(p.configured_rf_hz)||!std::isfinite(p.guarded_hz)||p.guarded_hz<=0)
         return fail("Invalid RF or waveform bandwidth");

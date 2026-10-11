@@ -90,7 +90,8 @@ struct Config {
     // Same selected key used to encrypt payload data. Preamble bytes use its
     // Data stream with the fixed preamble CTR pad, even without spreading.
     std::optional<Crypto> data_key;
-    // TX-only illustrated tuning schedule. Never changes sampled PCM or RX.
+    // Illustrative tuning, with shared TX/RX symbol deferral when selected.
+    // Never retunes physical audio/RF; complete private templates stay intact.
     std::shared_ptr<const FhssPlan> fake_hopping;
     std::size_t memory_limit = default_memory_limit;
 };
@@ -150,6 +151,9 @@ std::uint64_t training_sample_count(const Config& config);
 // Production private patterns use full, independently keyed cover. Low-level
 // public/DSSS-only diagnostic waveforms retain their historical reference tail.
 bool private_cover_enabled(const Config& config);
+// At least three seconds outside FHSS gaps/transitions, conservatively bounded
+// without an observation-sized buffer. With FHSS Off this is exactly three seconds.
+std::uint64_t protected_cover_span_samples(const Config& config);
 // Additional samples after payload ring-out: three useful seconds PLUS the
 // support needed to establish and shut down ordinary statistical cover power.
 std::uint64_t suppression_sample_count(const Config& config);

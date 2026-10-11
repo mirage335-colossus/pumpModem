@@ -55,7 +55,7 @@ class StreamCLI(unittest.TestCase):
                 self.assertNotIn('packet_bytes',value)
     def test_audio_timing_allowance(self):
         baseline=self.run_pump('estimate','--text','e',*AUDIO).stdout
-        for allowance in ('0ms','1us','30ms','1.25s'):
+        for allowance in ('default','Default','50ms','0ms','1us','30ms','1.25s'):
             # Independent of default-clock waveform/framing/airtime estimates.
             self.assertEqual(self.run_pump('estimate','--text','e','--audio-error',allowance,*AUDIO).stdout,baseline)
         for allowance in ('-1ms','NaNms','61s','30'):

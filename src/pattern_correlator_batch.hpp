@@ -91,10 +91,16 @@ struct CorrelationChipEvidence {
         const auto dot=std::cos(angle)*fit.xc+std::sin(angle)*fit.xs;
         return {std::clamp(dot*dot/lambda,0.,fit.energy),1};
     }
+    static bool zero_basis(const CorrelationFit& value) {
+        return value.cc==0 && value.ss==0 && value.cs==0 && value.xc==0 && value.xs==0;
+    }
     void retain(const CorrelationFit& value) {
         const auto [energy,rank]=projection(value);
         projected_energy+=energy;projected_rank+=rank;
-        nested=nested && rank>=std::min<std::uint64_t>(2,value.count);
+        // A deliberately absent pulse spans a valid zero-dimensional subspace.
+        // It still contributes physical noise samples to total.count/energy.
+        // Near-singular nonzero cells retain the conservative fallback.
+        nested=nested && (zero_basis(value) || rank>=std::min<std::uint64_t>(2,value.count));
     }
     void add(const CorrelationProjection& p,std::complex<double> phase,std::size_t n,
              std::uint64_t index=std::numeric_limits<std::uint64_t>::max()) {
@@ -111,7 +117,7 @@ struct CorrelationChipEvidence {
         const auto [last_energy,last_rank]=projection(cell);
         const auto rank=projected_rank+last_rank;
         const auto [explained,coherent_rank]=projection(total);
-        if(!nested || last_rank<std::min<std::uint64_t>(2,cell.count) ||
+        if(!nested || (!zero_basis(cell) && last_rank<std::min<std::uint64_t>(2,cell.count)) ||
             rank<=coherent_rank || rank>=total.count || total.energy<=1e-30)return false;
         const auto projected=std::clamp(projected_energy+last_energy,0.,total.energy);
         const auto lack_of_fit=std::max(0.,projected-explained);

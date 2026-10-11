@@ -1,6 +1,7 @@
 #pragma once
 #include "datapump/types.hpp"
 #include <memory>
+#include <functional>
 #include <span>
 
 namespace datapump::audio {
@@ -22,6 +23,10 @@ public:
     // Before the first process call only: align the first output to a fractional
     // input sample, and apply a rate measured during silent device preroll.
     void initialize_timing(double fractional_sample, double correction=0);
+    // Optional final-output safety envelope, evaluated at the exact continuous
+    // source coordinate AFTER interpolation. It never changes sample timing.
+    // Applied only by the final stage; no callback for capture unless requested.
+    void set_output_gain(std::function<double(long double)> gain);
     long double source_seconds() const noexcept;
     double rate_correction() const noexcept;
     // Original affine reference and actual generated-frame extrema. The map is
@@ -44,6 +49,7 @@ private:
     std::size_t radius_=0, taps_=0, head_=0, size_=0;
     std::uint64_t first_=0, received_=0, source_=0, produced_=0;
     std::uint32_t remainder_=0;
+    std::function<double(long double)> output_gain_;
     bool ending_=false;
     bool adjustable_=false, started_=false;
     double fraction_=0, correction_=0, target_correction_=0, correction_step_=0;

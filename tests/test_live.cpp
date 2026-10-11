@@ -444,9 +444,14 @@ void transmit_capture_tracks_generation_and_replay() {
     });
     auto value=settings();
     value.transfer.modem.sample_rate=512;value.transfer.modem.carrier_hz=128;
-    value.transfer.modem.bandwidth_hz=128;value.transfer.modem.pulse_shaping=false;
+    // Production FHSS now requires finite shaped pulses. Keep every trace
+    // assertion, using a safe dwell calendar instead of ungated square pulses.
+    value.transfer.modem.bandwidth_hz=256;value.transfer.modem.pulse_shaping=true;
     value.transfer.modem.scramble=value.transfer.modem.dsss=true;
     value.transfer.key.emplace(Bytes(32,0x67));
+    auto hopping=std::make_shared<modem::FhssPlan>();hopping->channels=3;hopping->dwell_seconds=.4;
+    hopping->shifts[0]=1e6;hopping->shifts[1]=1.01e6;hopping->shifts[2]=1.033e6;
+    value.transfer.modem.fake_hopping=transfer::transmit_hopping(*hopping,value.transfer);
     Message sent;
     const std::string text="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     sent.data.assign(text.begin(),text.end());
@@ -457,9 +462,8 @@ void transmit_capture_tracks_generation_and_replay() {
     // cover the fixed marker, followed by the actual authenticated/FEC stream.
     Bytes key(Trace::bit_limit),plain(Trace::bit_limit);
     for(std::size_t i=0;i<key.size();++i) {
-        const auto address=modem::symbol_stream_address(value.transfer.timestamp,
-            value.transfer.modem.stream_phase_samples,i,modem::symbol_sample_count(value.transfer.modem),
-            value.transfer.modem.sample_rate);
+        const auto address=modem::symbol_stream_address(value.transfer.modem,value.transfer.timestamp,
+            value.transfer.modem.stream_phase_samples,i);
         const auto byte=value.transfer.key->stream(StreamPurpose::Data,address.epoch,address.ordinal/8,1).front();
         key[i]=static_cast<std::uint8_t>((byte>>(7-address.ordinal%8))&1);
         plain[i]=static_cast<std::uint8_t>(wire[i]^key[i]);
@@ -467,7 +471,7 @@ void transmit_capture_tracks_generation_and_replay() {
     const auto check_prefix=[&](const Trace& trace) {
         const auto count=std::min(Trace::bit_limit,trace.generated_bits);
         if(trace.generated_bits)check(trace.fhss_available&&trace.fhss_key==value.transfer.key->stream(
-            StreamPurpose::Fhss,value.transfer.timestamp,trace.fhss_byte_offset,8,StreamDomain::FhssCycleV2),
+            StreamPurpose::Fhss,0,trace.fhss_byte_offset,8,StreamDomain::FhssUtcV3),
             "replay lost the actual transmitter-owned FHSS prefix or epoch");
         check(trace.generated_bits<=trace.total_wire_bits && trace.total_wire_bits==wire.size(),
               "capture payload count differs from the actual transmission");
@@ -480,8 +484,6 @@ void transmit_capture_tracks_generation_and_replay() {
               trace.data_key_bits==Bytes(key.begin(),key.begin()+static_cast<std::ptrdiff_t>(count)),
               "live capture omitted or shifted actual encrypted marker and coded payload bits");
     };
-    auto hopping=std::make_shared<modem::FhssPlan>();hopping->channels=3;hopping->dwell_seconds=.4;
-    hopping->shifts[0]=1e6;hopping->shifts[1]=1.01e6;hopping->shifts[2]=1.033e6;
     session.start(value);session.transmit(sent,false,hopping);
     const auto first=wait_for_sampled(session,"initial transmission trace replay",[&](const auto& snapshot) {
         check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,"capture replay exceeded live workspace");
@@ -530,6 +532,7 @@ void transmit_capture_tracks_generation_and_replay() {
     // The source worker may be in flight when cancel returns, so later polls
     // must not restore its retired serial or mutate the frozen capture.
     value.transfer.modem.integration_seconds=4*60*60;
+    value.transfer.modem.fake_hopping.reset();value.transfer.modem.pulse_shaping=false;value.transfer.modem.bandwidth_hz=128;
     value.transfer.modem.scramble=value.transfer.modem.dsss=false;value.transfer.key.reset();
     session.configure(value);session.transmit_bits(Bytes{0,0,1});
     wait_for(session,"cancellable transmission trace prefix",[](const auto& snapshot) {return snapshot.transmit_trace.generated_bits>0;});
@@ -625,6 +628,7 @@ void continuous_noise_lifecycle() {
 int main(int argc,char** argv) {
     try {
         cpu_work_budget_boundaries();
+        if(argc>1&&std::string_view(argv[1])=="--transmit-capture") {transmit_capture_tracks_generation_and_replay();return 0;}
         if(argc>1&&std::string_view(argv[1])=="--workload-budget") {
             std::cout<<"CPU workload budget boundaries passed\n";return 0;
         }

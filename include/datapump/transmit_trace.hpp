@@ -28,10 +28,15 @@ struct TransmitTrace {
     std::uint64_t outer_dsss_epoch=0,outer_dsss_byte_offset=0,dsss_permutation_byte_offset=0;
     unsigned outer_dsss_first_pair=0;
     // Actual TX-owned schedule; the GUI uses this channel, never a second PRNG.
-    bool fhss=false,fhss_available=false,temporary_key=false;
+    bool fhss=false,fhss_available=false,temporary_key=false,fhss_utc_calendar=false;
     std::uint64_t fhss_epoch=0,fhss_hop=0,fhss_cycle=0,fhss_byte_offset=0;
     unsigned fhss_channel=0,fhss_channels=0;
     double fhss_shift_hz=0,fhss_dwell_seconds=0;
+    // Nominal delayed arrival preview, not live receive acquisition or retuning.
+    bool fhss_arrival_available=false;
+    std::uint64_t fhss_arrival_hop=0;
+    unsigned fhss_arrival_channel=0;
+    double fhss_arrival_shift_hz=0,fhss_arrival_offset_seconds=0;
     // active is message generation only; temporary_key enables noise diagnostics
     // without inventing a message, source bytes or a finite wire endpoint.
     bool active=false, raw=false, short_text=false;

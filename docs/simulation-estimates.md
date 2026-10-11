@@ -39,7 +39,7 @@ recalculation. GUI advice retains a conservative slope interval centred on the
 nominal sample period. Its fractional radius contains the measured centre error
 plus the timestamp model's nominal-normalized rate uncertainty, rounded outward
 to a power of two, without a fixed ppm floor. Admitted capture errors use the
-selected Audio error bound (already the work estimator's effective minimum).
+half the selected total Audio lag (A/2), the work estimator's conservative capture radius. Playback contributes its positive A/2 midpoint and A/2 radius; full reported capture uncertainty must fit A/2 and is never clamped.
 Widening or loss of qualified timing takes effect immediately; a fourfold smaller
 bound must persist for two seconds before tightening. This is advice caching,
 not a change to live admission or the receiver's timing map.
@@ -1136,3 +1136,31 @@ union. Phase diffusion remains the existing quarter approximation: it does not
 resolve time-varying limiter weights or opposite carrier-image phase rotation.
 Compact/differential, unsupported allocation and oversized source cases still
 return a model limit, not an invented probability.
+
+## Smooth FHSS follow-up
+
+The production smooth-envelope path uses the original private-template work model
+and exact cipher phase groups, with the same full clock/frequency bank and rolling
+epoch accounting. The diagnostic pulse-mask path retains its separately expanded
+phase counts. Qualified timing estimates intersect full physical phase cells,
+matching the repaired FFT/compact/live selectors. This can increase a formerly
+understated narrow-prior number: the old point-only selector omitted legal starts.
+No coefficient-only reduction is used to claim a receiver speedup.
+
+For eligible coherent source references, both DSSS-Off and Interleave now generate
+the actual shaped/limited source with its selected smooth gate, and project it on
+the original templates. Cache identity includes ramp duration, full/local guard,
+clock/audio/region, source phase and deferred payload origin. Noise energy and
+covariance are retained. These remain conditional isolated-symbol references;
+full acquisition/outer-presence selection, arbitrary adjacent symbols, final
+hardware resampling/safety gate and full-bank sensitivity are unqualified.
+The final playback gate slightly increases physical power loss. Entered hardware
+mean power means actual mean RF power, not a promise to restore lost energy at
+unchanged hardware peak limit. Simulation remains nominal-gain referenced.
+
+The GUI's worst flat-power figure is an integrated envelope geometry bound over
+all hop phases; it is not a deterministic private-template energy guarantee.
+Deferred payload scoring slots stay at unity gain, but source cover/tails and
+wall-time throughput still pay for the gaps. A full remote uncertainty wider than
+the dwell is explicitly unguaranteed, never reported as a small guaranteed loss
+using only the local guard. Fake does not implement RF hopping or compliance.

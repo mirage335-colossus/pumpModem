@@ -817,7 +817,7 @@ struct Session::Impl {
             std::uint64_t epoch,const Bank& bank,const Settings& value,std::uint64_t origin) {
         if(!value.transfer.clock_sync || value.simulation || !bank.timing ||
            bank.timing->quality==audio::TimingQuality::unavailable ||
-           bank.timing->uncertainty_seconds>value.transfer.audio_timing_error_seconds || !search.start_offset_seconds ||
+           bank.timing->uncertainty_seconds>clock_sync::audio_lag_radius(value.transfer.audio_timing_error_seconds) || !search.start_offset_seconds ||
            !(search.compact_clock_search ||
              (modem::symbol_sample_count(config)<16ULL*config.sample_rate && (config.scramble||config.dsss) &&
               config.spreading_mode==modem::SpreadingMode::pattern && !search.hypotheses.empty() &&
@@ -828,19 +828,27 @@ struct Session::Impl {
         const auto symbol=modem::symbol_sample_count(config);
         auto minimum_phase=config.stream_phase_samples,maximum_phase=config.stream_phase_samples;
         if(search.search_stream_phases && (config.scramble || config.dsss)) {
-            const auto step=std::gcd(symbol,static_cast<std::uint64_t>(config.sample_rate));
+            const auto step=modem::canonical_phase_step(config);
             minimum_phase=0;
-            maximum_phase=(std::min<std::uint64_t>(symbol,config.sample_rate)-1)/step*step;
+            maximum_phase=modem::canonical_phase_cell_upper(config,
+                (std::min<std::uint64_t>(symbol,config.sample_rate)-1)/step*step);
         }
-        const auto map=clock_sync::arrival_map(*value.transfer.clock_sync,epoch,stamp.utc_seconds,
+        if(modem::deferred_symbols(config)) {
+            minimum_phase+=modem::scheduled_symbol_offset(config,epoch,minimum_phase,0);
+            maximum_phase+=modem::scheduled_symbol_offset(config,epoch,maximum_phase,0);
+        }
+        const auto map=clock_sync::audio_lag_arrival_map(*value.transfer.clock_sync,epoch,stamp.utc_seconds,
             static_cast<long double>(bank.observed_sample)-origin,config.sample_rate,stamp.seconds_per_frame,
-            stamp.rate_uncertainty_fraction,std::max(stamp.uncertainty_seconds,value.transfer.audio_timing_error_seconds),
+            stamp.rate_uncertainty_fraction,std::max(stamp.uncertainty_seconds,clock_sync::audio_lag_radius(value.transfer.audio_timing_error_seconds)),
             maximum_phase,value.transfer.audio_timing_error_seconds);
         if(!map)return false;
         const auto lower=(*search.start_offset_seconds-search.start_uncertainty_seconds)*config.sample_rate;
         const auto upper=(*search.start_offset_seconds+search.start_uncertainty_seconds)*config.sample_rate;
-        if(map->origin_samples+map->phase_scale*minimum_phase-map->half_width_samples<lower ||
-           map->origin_samples+map->phase_scale*maximum_phase+map->half_width_samples>upper)return false;
+        // Qualify the intersection with the existing bank, not containment of
+        // the entire prior. Edge cells may extend past this bank's original
+        // domain; the acquisition selectors retain the original bounds/cells.
+        if(map->origin_samples+map->phase_scale*maximum_phase+map->half_width_samples<lower ||
+           map->origin_samples+map->phase_scale*minimum_phase-map->half_width_samples>upper)return false;
         search.qualified_start_window=modem::PatternStartWindow{map->origin_samples,map->phase_scale,map->half_width_samples};
         return true;
     }
@@ -904,6 +912,8 @@ struct Session::Impl {
                 receiver.sample_origin=bank.samples;receiver.family=family;
                 receiver.prefer_streamed_templates=keys.size()>1 || profiles.size()>1 || epochs.size()>1;
                 receiver.options = value.transfer; receiver.options.modem=profile;receiver.options.key = key; receiver.epoch = epoch;
+                if(value.transfer.modem.fake_hopping && key)
+                    receiver.options.modem.fake_hopping=transfer::transmit_hopping(*value.transfer.modem.fake_hopping,receiver.options);
                 receiver.admitted_at=now;
                 receiver.key_tag = tag;
                 const auto config = transfer::seeded_config(receiver.options, epoch);
@@ -1198,7 +1208,7 @@ struct Session::Impl {
         candidate.frequency=burst.frequency_hz;
         candidate.frequency_tolerance=static_cast<double>(receiver.options.modem.sample_rate)/
             static_cast<double>(modem::symbol_sample_count(receiver.options.modem));
-        candidate.absence_samples=modem::pattern_absence_samples(receiver.options.modem);
+        candidate.absence_samples=modem::pattern_absence_capture_samples(receiver.options.modem);
         candidate.symbol_samples=modem::symbol_sample_count(receiver.options.modem);
         candidate.timing_tolerance=modem::pattern_chip_samples(receiver.options.modem);
         candidate.score=burst.support_samples;
@@ -1516,7 +1526,7 @@ struct Session::Impl {
                 [](const auto& receiver){return receiver.clock_window_modeled;});
             if(current.clock_window_modeled && bank.timing &&
                bank.timing->quality!=audio::TimingQuality::unavailable &&
-               bank.timing->uncertainty_seconds<=value.transfer.audio_timing_error_seconds &&
+               bank.timing->uncertainty_seconds<=clock_sync::audio_lag_radius(value.transfer.audio_timing_error_seconds) &&
                !capture_timing_fallback)current.receiver_timing=bank.timing;
             else current.receiver_timing.reset();
             receive_pending=std::any_of(bank.receivers.begin(),bank.receivers.end(),[](const auto& receiver) {
@@ -1580,7 +1590,7 @@ struct Session::Impl {
         // backend delay to the GUI's existing cancellation separation.
         if(wave.hardware && !wave.noise && !wave.graceful && !finish_requested && wave.transmitter && wave.transmitter->samples_emitted())
             next_hardware_send=std::max(next_hardware_send,Clock::now()+std::chrono::duration_cast<Clock::duration>(
-                std::chrono::duration<double>(static_cast<double>(modem::pattern_absence_samples(wave.modem))/wave.modem.sample_rate+1.)));
+                std::chrono::duration<double>(static_cast<double>(modem::pattern_absence_capture_samples(wave.modem))/wave.modem.sample_rate+1.)));
         finish_simulation_elapsed();
         if (wave.transmitter) current.transmit_trace = wave.transmitter->transmit_trace();
         tx_busy = false; current.transmitting = settings.simulation ? false : !queued.empty();
@@ -1759,7 +1769,7 @@ struct Session::Impl {
                                     complete_tx(*wave);wave.reset();continue;
                                 }
                                 wave->tail_started = true;
-                                wave->tail_remaining = modem::pattern_absence_samples(transmit_modem)+transmit_modem.sample_rate+2*modem::pattern_pulse_padding_samples(transmit_modem);
+                                wave->tail_remaining = modem::pattern_absence_capture_samples(transmit_modem)+transmit_modem.sample_rate+2*modem::pattern_pulse_padding_samples(transmit_modem);
                             }
                         }
                         if (wave->tail_started && wave->tail_remaining) {
@@ -1812,8 +1822,19 @@ struct Session::Impl {
                     audio::Options output_options;
                     channels=wave->output_channels;
                     output_options={wave->output_gain,value.exclusive};
-                    output_options.maximum_utc_error_seconds=value.transfer.audio_timing_error_seconds;
+                    output_options.maximum_utc_error_seconds=clock_sync::audio_lag_radius(value.transfer.audio_timing_error_seconds);
+                    output_options.presentation_lag_seconds=clock_sync::audio_lag_radius(value.transfer.audio_timing_error_seconds);
                     output_options.timing_stop_duration_seconds=wave->timing_stop_seconds;
+                    if(transmit_modem.fake_hopping && transmit_modem.fake_hopping->smooth_ramps) {
+                        const modem::FhssPowerShape shape(*transmit_modem.fake_hopping,transmit_modem.sample_rate,
+                            modem::pattern_pulse_padding_samples(transmit_modem),modem::symbol_sample_count(transmit_modem));
+                        output_options.playback_output_gain=[&,shape](long double seconds) {
+                            const auto& c=wave->modem;
+                            const auto origin=static_cast<long double>(c.stream_phase_samples)-
+                                modem::training_sample_count(c)-modem::pattern_pulse_padding_samples(c);
+                            return shape.gain(c.stream_epoch,origin+seconds*c.sample_rate,c.sample_rate);
+                        };
+                    }
                     output_options.follow_system_clock=value.transfer.clock_sync &&
                         audio::utc_follow_supported() && (!transmit_modem.oscillator_search ||
                         transmit_modem.oscillator_search->reference==modem::OscillatorReference::independent_audio);
@@ -1822,7 +1843,7 @@ struct Session::Impl {
                     if(output_options.follow_system_clock && wave->timing_rate_fraction>0) {
                         output_options.maximum_timing_rate_correction=wave->timing_rate_fraction;
                         output_options.estimated_timing=audio::EstimatedDeviceTiming{};
-                        output_options.estimated_timing->maximum_utc_error_seconds=value.transfer.audio_timing_error_seconds;
+                        output_options.estimated_timing->maximum_utc_error_seconds=clock_sync::audio_lag_radius(value.transfer.audio_timing_error_seconds);
                     }
                     output_options.allow_timing_fallback=output_options.follow_system_clock;
                     output_options.playback_discontinuity=[](const std::string& reason) {
@@ -1839,7 +1860,7 @@ struct Session::Impl {
                     };
                     output_options.timing_protected_stop=[&,version](const std::string& reason) {
                         wave->transmitter->request_finish();wave->graceful=true;
-                        timing_status({true,value.transfer.audio_timing_error_seconds,0,reason},version,false);
+                        timing_status({true,clock_sync::audio_lag_radius(value.transfer.audio_timing_error_seconds),0,reason},version,false);
                     };
                     if(!value.full_duplex)discontinuity();
                     audio::playback(transmit_modem.sample_rate, value.device, [&](std::span<float> output) {
@@ -1922,7 +1943,7 @@ struct Session::Impl {
                 std::optional<double> raw_end_epoch,logical_origin;
                 std::optional<audio::TimePrediction> timed_chunk;
                 audio::Options capture_options{1.0,value.exclusive};
-                capture_options.maximum_utc_error_seconds=value.transfer.audio_timing_error_seconds;
+                capture_options.maximum_utc_error_seconds=clock_sync::audio_lag_radius(value.transfer.audio_timing_error_seconds);
                 capture_options.follow_system_clock=value.transfer.clock_sync && audio::utc_follow_supported() &&
                     (!value.transfer.modem.oscillator_search ||
                      value.transfer.modem.oscillator_search->reference==modem::OscillatorReference::independent_audio);
@@ -2052,6 +2073,8 @@ struct Session::Impl {
                     value.transfer.modem.spreading_mode=modem::SpreadingMode::pattern;
                     value.transfer.modem.scramble=true;
                 }
+                if(value.transfer.modem.fake_hopping)
+                    value.transfer.modem.fake_hopping=transfer::transmit_hopping(*value.transfer.modem.fake_hopping,value.transfer);
                 // Simulation has its own deterministic sample timeline and
                 // never consumes the hardware key-use history.
                 if(value.simulation && !value.transfer.timestamp)
@@ -2105,7 +2128,7 @@ struct Session::Impl {
                         if(options.clock_sync && options.timestamp)
                             throw Error("UTC hardware transmission requires a freshly scheduled epoch");
                         const auto make=[&](std::uint64_t epoch) {
-                            options.timestamp=epoch;
+                            options.timestamp=epoch;wave.modem.stream_epoch=epoch;
                             if(wave.noise) {
                                 auto config=options.modem;config.stream_epoch=epoch;
                                 return std::make_unique<modem::StreamingTransmitter>(modem::Noise{},config,value.dsp_workspace_bytes/4);

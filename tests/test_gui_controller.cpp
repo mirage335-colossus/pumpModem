@@ -1003,25 +1003,57 @@ void fake_hop_display() {
     controller.edit(F::fhss_list,"1MHz\n1.01MHz\n1.033MHz");controller.activate(C::fhss_apply);
     controller.select(F::fhss,preference);
     const bool short_list=std::string_view(preference)=="fake-list";
-    if(short_list)controller.edit(F::bandwidth,"0.1 Hz");
+    const bool delayed_arrival=std::string_view(preference)=="fake-eu";
+    if(delayed_arrival) {
+        controller.edit(F::clock_accuracy,"1ms");controller.edit(F::clock_region,"1ms");
+        controller.edit(F::clock_offset,"2564ms");controller.edit(F::audio_error,"10ms");
+    }
+    if(short_list) {
+        controller.edit(F::bandwidth,"0.1 Hz");
+        check(controller.enabled(C::transmit_noise)&&
+              controller.field(F::fhss).display_text.find("smooth ramps")!=std::string::npos,
+              "narrow waveform failed to select mandatory smooth FHSS ramps");
+        // Long finite pulse support is now supported; an impossible LOCAL
+        // audio lag must still block instead of substituting ungated output.
+        controller.edit(F::audio_error,"500ms");
+        check(!controller.enabled(C::transmit_noise) &&
+              controller.field(F::fhss).display_text.find("TX blocked:")!=std::string::npos,
+              "impossible FHSS shaping silently allowed ungated noise");
+        controller.activate(C::transmit_noise);
+        check(!controller.snapshot().transmitting,"blocked FHSS started physical audio");
+        check(controller.field(F::fhss).selected=="fake-list","blocked shaping discarded selected hop preference");
+        controller.edit(F::audio_error,"default");
+        controller.edit(F::bandwidth,"3600 Hz");
+    }
     controller.select(F::transmit_scope_format,"hex");
     const auto carrier=controller.field(F::carrier).text,shift=controller.field(F::rf_shift).text;
     const auto base=controller.settings().transfer.modem.carrier_hz;
     check(controller.enabled(C::transmit_noise),"Fake hopping fixture has invalid transmit geometry");
     controller.start();controller.activate(C::transmit_noise);
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
-    std::string first;bool changed=false,cycle_without_chip=false;
+    std::string first;bool changed=false,cycle_seen=false,arrival_seen=false;
     std::optional<modem::TransmitTrace> previous_trace;
-    while(std::chrono::steady_clock::now()<deadline&&(!changed||(short_list&&!cycle_without_chip))) {
+    while(std::chrono::steady_clock::now()<deadline&&(!changed||(short_list&&!cycle_seen)||(delayed_arrival&&!arrival_seen))) {
         controller.poll();
         const auto& cf=controller.field(F::carrier);const auto& sf=controller.field(F::rf_shift);
         if(!sf.disabled_text.empty()) {
             const auto& trace=controller.snapshot().transmit_trace;
             check(controller.field(F::transmit_scope).records==transmit_scope_records(trace,false),
                   "FHSS current-cycle scope prefix remained stale between chip revisions");
-            if(previous_trace&&trace.fhss_cycle!=previous_trace->fhss_cycle&&trace.revision==previous_trace->revision)
-                cycle_without_chip=true;
+            if(previous_trace&&trace.fhss_cycle!=previous_trace->fhss_cycle)
+                cycle_seen=true;
             previous_trace=trace;
+            if(delayed_arrival) {
+                const auto& label=controller.field(F::fhss).display_text;
+                check(trace.fhss_arrival_offset_seconds==2.564&&label.find("arrival +")!=std::string::npos,
+                    "EME offset missing from separate delayed arrival preview");
+                if(trace.fhss_arrival_available) {
+                    arrival_seen=true;
+                    check(label.find("hop "+std::to_string(trace.fhss_arrival_channel+1)+", Shift ")!=std::string::npos&&
+                        trace.fhss_arrival_hop<trace.fhss_hop,
+                        "arrival preview did not delay the original keyed schedule");
+                } else check(label.find("not yet")!=std::string::npos,"pre-arrival preview falsely showed a hop");
+            }
             check(trace.fhss_available&&!trace.fhss_key.empty()&&trace.temporary_key,
                   "Fake noise display did not consume the actual temporary-key TX schedule");
             check(!cf.enabled&&!sf.enabled&&cf.text==carrier&&sf.text==shift&&
@@ -1044,7 +1076,13 @@ void fake_hop_display() {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     if(!changed)throw Error(std::string("Fake FHSS displayed no changing hop: ")+preference+", status="+controller.field(F::status).text+", mode="+controller.field(F::mode).text+", fhss="+controller.field(F::fhss).display_text+", snapshot="+controller.snapshot().status+", error="+controller.snapshot().error);
-    check(!short_list||cycle_without_chip,"FHSS fixture must cross a cycle while its long chip is unchanged");
+    const auto& stop_config=controller.settings().transfer.modem;
+    std::cout<<"FHSS stop geometry "<<preference<<": Fs="<<stop_config.sample_rate
+        <<" symbol="<<modem::symbol_sample_count(stop_config)<<" H="<<modem::pattern_pulse_padding_samples(stop_config)
+        <<" stop_seconds="<<double(modem::transmit_stop_sample_count(stop_config))/stop_config.sample_rate
+        <<" deferred="<<(stop_config.fake_hopping&&stop_config.fake_hopping->defer_symbols)<<'\n';
+    check(!short_list||cycle_seen,"FHSS list fixture must cross a fresh keyed hop cycle");
+    check(!delayed_arrival||arrival_seen,"delayed FHSS preview never reached its first arrival");
     controller.activate(C::cancel);
     if(short_list && controller.snapshot().transmission_stopping) {
         check(controller.command_label(C::cancel)=="Abort now","long pulse stop lost its immediate-abort action");
@@ -1053,6 +1091,12 @@ void fake_hop_display() {
     const auto stop=std::chrono::steady_clock::now()+std::chrono::seconds(5);
     do {controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));}
     while(controller.snapshot().transmitting&&std::chrono::steady_clock::now()<stop);
+    std::cout<<"FHSS stop result "<<preference<<": transmitting="<<controller.snapshot().transmitting
+        <<" stopping="<<controller.snapshot().transmission_stopping<<" source_seconds="<<controller.snapshot().transmission_seconds
+        <<" stop_wall_seconds="<<std::chrono::duration<double>(std::chrono::steady_clock::now()-stop+std::chrono::seconds(5)).count()
+        <<" carrier="<<controller.field(F::carrier).text<<" disabled="<<controller.field(F::carrier).disabled_text
+        <<" shift="<<controller.field(F::rf_shift).text<<" disabled="<<controller.field(F::rf_shift).disabled_text
+        <<" label="<<controller.field(F::fhss).display_text<<" error="<<controller.snapshot().error<<'\n';
     check(!controller.snapshot().transmitting&&controller.field(F::carrier).disabled_text.empty()&&
           controller.field(F::rf_shift).disabled_text.empty()&&controller.field(F::carrier).text==carrier&&
           controller.field(F::rf_shift).text==shift&&controller.field(F::fhss).display_text.find("Fake: hop ")==std::string::npos,

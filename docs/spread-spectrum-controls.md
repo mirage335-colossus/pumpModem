@@ -215,8 +215,9 @@ Every list entry gets the existing 0.4-second residence. The dedicated keyed
 permutation indexes the entered order. The list specifies Shift, not Carrier.
 Each illustrated RF center equals its
 listed Shift plus the unchanged Doppler-adjusted audio carrier. Carrier and Shift
-receive equal display deltas, so Carrier minus Shift stays fixed. Physical audio,
-radio tuning, framing and keystream addressing are unchanged.
+receive equal display deltas, so Carrier minus Shift stays fixed. Audio frequency,
+radio tuning, framing and keystream addressing are unchanged. Hop power ramps
+change audio amplitude as described below.
 
 The planner uses the exact count, minimum adjacent spacing, min/max RF and
 center span. It adds the unchanged audio carrier to the highest listed Shift for
@@ -238,7 +239,7 @@ Scrambler, private-pattern or DSSS stream is borrowed. An active transmit
 encryption key is required; there is no unkeyed sequential fallback.
 Every illustrated channel receives equal residence in each complete cycle.
 Carrier and Shift display the same hop delta during TX, retaining their baseband
-difference. Their configured values, launch exports, physical transmitted PCM
+difference. Their configured values, launch exports, audio frequency
 and radio tuning stay fixed; the configured displays return after completion
 or cancellation. No access protocol or actual RF hopping is implemented.
 
@@ -416,3 +417,379 @@ DSSS, including the selected permutation/rotation construction. The enclosing
 TX retains one continuous dedicated-key Fake-FHSS schedule. See
 [transmitter cover](transmit-cover.md) for domains, workspace, controlled stopping,
 fixed-duration narrowband limitations and the manual qualification checkpoint.
+
+### Hop power transitions (local manual candidate)
+
+The current production path uses **smooth envelope V1**, replacing the costly
+per-source-phase pulse-mask template banks described in the historical diagnostic
+section below. Fake still changes amplitude and the illustrated tuning only;
+physical audio frequency and radio tuning remain fixed. The independently keyed
+FHSS schedule, private candidates, Data/DSSS domains and payload bits are unchanged.
+
+After the ordinary full-DSSS finite shaper and limiter, amplitude follows the C2
+polynomial `g(t)=t^3*(10-15t+6t^2)` on each transition. Its first two derivatives
+vanish at both ends. Ramp duration is `2/max(200, fine_bandwidth_Hz)` seconds,
+rounded UP to source samples. The accepted 200 Hz is an engineering spectral
+allowance, not a brick-wall mask or a compliance claim. The illustrated profile
+spacing includes an additional 200 Hz full-band margin. Narrow waveforms therefore
+use about 10 ms ramps instead of seconds of original pulse support. No filtered
+PCM is spliced, no oscillator phase resets, and no whole-symbol PCM buffer is
+introduced. Native playback applies the same envelope after resampling so FIR
+interpolation cannot refill the quiet interval; this slightly deepens the ramps
+and adds a small power cost. Its source coordinate follows the same timing map.
+
+For TX boundary N, endpoint errors ±Gtx and ±Grx, total region R and lag [0,A],
+let B=Gtx+Grx+R/2. Quiet is `[N-A-B,N+B]`, plus a ramp on either side. Default is
+90 ms quiet (±10 ms each endpoint and 0..50 ms audio). GPS1ms/Region1ms/Audio10ms
+is 15 ms. Fixed offset O delays the nominal receive-hop schedule without widening
+TX silence. All selected allowances are retained. If full remote uncertainty
+occupies the dwell, Fake uses a LOCAL guard with B=Gtx and explicitly reports
+**remote overlap not guaranteed**. The worst real single-channel overlap can be
+zero in this case; it is not an RF-hardware implementation or a timing guarantee.
+There is never an ungated production fallback. Impossible local guards block TX.
+
+Short symbols are deferred into complete full-gain scoring slots when they fit.
+Every sample of their scored interval has g=1, irrespective of private amplitude;
+outside-symbol pulse tails may be attenuated. Original pulse support is still
+reserved for the legacy coefficient-omission diagnostic. Deferral changes airtime
+and actual UTC addresses, never bit order, duplicates or framing. If no complete
+slot fits, a short continuous interval must retain at least half its flat-power
+integral in the worst hop phase or TX is blocked. Long symbols span hops normally.
+
+For a stationary envelope, `mean(g^2)=(D-W-2r+2r*181/462)/D`, where W is quiet
+width and r is one ramp. `minimum_flat_power_fraction(S)` integrates this envelope
+at the worst phase of ANY length-S interval, including fractional boundaries.
+The GUI reports that explicitly as a **flat-power** bound. It is not a universal
+bound on arbitrary keyed amplitude concentration: without more assumptions that
+worst-case bound is 100% loss. Actual finite-key weighted-energy scans and
+sensitivity measurements are recorded separately. No lost power is silently
+restored, and no observer channel-count multiplier is applied.
+
+RX retains the original full-energy I/Q templates, covariance, physical sample
+counts and noise energy. It treats g as amplitude fading, instead of making a new
+bank for each gate phase. The coherent unestablished-chain guard retains the
+chip-subspace clamp from the pulse-gap investigation. This is an APPROXIMATE
+receiver with a measured sensitivity cost, not exact mask matching. Same-template
+noise-only statistics and thresholds remain; structured cover is separately tested.
+Neither hop gaps nor EOF/drain manufacture observed absence. Long symbols must
+still be fully observed; deferred schedules score six seconds of failed eligible
+symbols. Accepted bits remain visible on the next poll.
+
+Exact private-template cache identity stays key/epoch/bit/address/clock/frequency
+and arithmetic specific; smooth gates do not enter those ungated templates.
+Actual-source estimator caches additionally include all envelope parameters,
+calendar origin and local/full guard policy. Changes invalidate the appropriate
+cache. Qualified UTC filtering intersects complete physical phase cells sharing
+each cipher address, rather than only their gcd representative points. These
+cells share exact templates; they do not create a per-sample template bank.
+
+This is a local manual-test checkpoint, not full sensitivity, security, hardware
+or platform qualification. See the latest [validation record](validation.md).
+
+### Diagnostic pulse-omission path (preceding candidate)
+
+The following records the retained `resolve_fhss_pulse_power` diagnostic and its
+prior measurements. It is no longer the automatically selected production path;
+its stricter finite-support limits and multiplied phase bank do not describe
+smooth envelope V1. Its failure fixtures and assertions remain intact.
+
+
+Production Fake modes now apply audio power transitions at the SAME dedicated
+keyed schedule boundaries. They still do not tune physical RF. The low-level
+`FhssPlan::power_ramps=false` diagnostic preserves the original ungated PCM;
+Production requires a resolved mandatory ramp plan; impossible geometry blocks
+message and tuning-noise transmission. The diagnostic ungated path remains
+low-level only. Matched gaps and the deferred calendar reserve EVERY UTC
+boundary, including adjacent equal channel selections. No cryptographic address is rewound or reused.
+Deferral selects each bit's address from its actual scheduled UTC start.
+
+For nominal TX boundary N, per-station clock error ±G, TX audio lag [0,A],
+propagation offset O and total region R, the receiving RF schedule follows the
+same keyed hop at **N+O**. The conservative source quiet interval is
+**[N−A−2G−R/2, N+2G+R/2]**. Production resolves both endpoint clocks from the
+selected accuracy, or ±10 ms each at Default; Audio error is always the selected
+causal lag (Default 0..50 ms). A custom clock policy contributes its full region
+and offset. Default has no modeled propagation region/offset; its six-second
+acquisition bank is not a physical delay bound or a hopping timing certificate.
+
+Default therefore requests a90 ms source quiet interval (70 ms before N through
+20 ms after), before pulse support. GPS1ms/Region1ms/Audio50ms requests55ms
+(52.5ms before through2.5ms after). Offset does not widen that interval: it shifts
+the receiver's nominal hop timeline, not TX hop order, crypto epoch or emitted
+carrier. The arrival preview uses the original keyed ordinal at elapsed−O and
+preserves fractional offsets. Before O it reports no nominal arrival yet; this
+NEVER discards receive samples or changes acquisition/absence semantics.
+
+Capture audio lag occurs after RF channel selection and is not added as another
+transmit lag. A future tuner adapter must account for radio-control latency and
+output-filter/device uncertainty. None is established by the Fake preview.
+With Region400ms and Dwell400ms, the guard necessarily cannot fit, even before
+clock/audio/pulse margins; transmission is explicitly blocked. A large fixed
+EME offset alone (for example2.564s) does not create seconds of silence. TX
+Carrier/Shift continue to show the transmitter; the FHSS label separately shows
+the delayed nominal arrival hop and Shift during generation.
+
+Let H be the existing finite RRC pulse half-support (eight fine chips). Suppress
+only coefficients whose pulse support could touch that quiet interval; retain
+all other coefficients and run the ordinary final shaper/limiter. Each transition
+adds at most 2H outside the interval. There is no post-filter PCM splice or fixed
+10 ms fade. Pulse overlap, full DSSS Interleave, carrier continuity and shared
+message/noise/cover construction remain intact. Fractional dwell boundaries are
+resolved in original sample coordinates. No whole-symbol PCM buffer is added.
+The original punctured-symbol path requires at least 75% unaffected ordinary statistical support
+in EVERY symbol phase, counting quiet gaps and transitions conservatively. For
+symbol length S, dwell D and affected gap W, the maximum exclusion is
+`floor(S/D)*W + min(W, S modulo D)`. W must also fit inside D. This is an
+engineering admission bound, not a sensitivity certificate. A wider tested
+DSSS10 geometry lost a clean final bit; its failing evidence is retained.
+
+Unsupported geometries show **TX blocked**. There is no production ungated
+fallback. `transfer` rejects unresolved low-level plans; tuning noise resolves
+its immutable plan before generating fresh private coefficients. Neither path
+shortens the final shaper to force an impossible dwell fit.
+
+Production now includes each UTC pulse omission in the receiver's private
+zero/one templates. The old 25% exclusion rule is only the first selection test:
+if it fails, try whole-symbol deferral below; if a complete symbol cannot fit,
+use **matched partial-symbol gaps** when the finite support leaves a nonzero
+statistical-cover interval in every dwell and at least one surviving coefficient
+in every symbol phase. In samples, with coefficient radius Q=q+H and fine chip C,
+require `D>2*(q+2H)`, `D-2Q>C`, and `S>2Q+2C`. The latter two bounds apply to the
+partial-gap fallback. Minutes-long symbols can span many hops; their duration
+alone no longer disqualifies them. Tiny occupied bandwidth can still make H too
+large for a 400ms dwell. A different dwell or wider waveform is then required;
+waiting cannot fix this geometry.
+
+The gate is applied to pre-permutation fine-chip centers, including a shortened
+last chip. Original independent private coefficients, DSSS permutation/rotations
+and stream addresses are preserved. The receiver retains both quadratures and
+recomputes template norms, overlap terms and noise covariance from these gated
+coefficients. Omitted pulses contribute zero template rank, but their physical
+PCM noise energy and sample counts remain. The structured-code guard permits an
+exact zero-dimensional cell; a nonzero near-singular cell retains its conservative
+fallback. No thresholds, trials or required observations are removed.
+
+A retained nine-hypothesis fractional/clock/frequency fixture exposed a weak
+wrong-key chain in the new gapped cover: five individually unconfirmed decisions
+accumulated the FFT receiver's raw PCM-count scores. The matched-gap coherent FFT
+branch now uses the compact receiver's chip-subspace score to confirm an
+unestablished chain, reusing its existing I/Q fits and actual projected rank.
+Raw ranking, standalone thresholds, established-stream continuation and next-poll
+publication remain unchanged. This rejects the retained fixture; it is not a
+universal structured-interference bound. Drift/differential branches do not have
+this coherent independent-code calculation and remain outside that validation.
+
+UTC gate masks distinguish phases that used to share a cipher epoch/ordinal.
+The admitted canonical grid is therefore every integer source sample, with
+fractional timing cells and clock-rate alternatives retained separately. Qualified
+arrival priors may prune this grid. Default broad searches can become materially
+more expensive; cipher-address equivalence is no longer a valid reason to merge
+their masks. Groups are enumerated without a phase table, compact fits remain
+workspace charged. Compact affine continuation caches its group count only when
+it fits the compact field; larger banks bypass that shortcut and score every
+group using the full-width loop count.
+The packed correlator's three-group ABI is bypassed for matched gaps; scalar,
+pulse-statistic and FFT paths retain coverage. The planner counts the expanded
+phase bank but uses preceding template-construction calibration: extra UTC-gate
+work is not yet separately calibrated. Its matched-gap CPU total is an engineering
+estimate. Compact rolling/resident-bank and additional-track limits still apply. Source/build measurements and
+remaining performance limits are recorded at the manual checkpoint.
+
+Exact cache identity includes epoch, private symbol/bit, source phase, clock and
+frequency geometry and the immutable hop guard. Changing phase invalidates shaped
+coefficient caches; FFT configuration identity includes guard parameters. Absolute
+timing and epoch arithmetic remain high precision. Supported receiver-only reuse
+rules otherwise remain unchanged. Nonzero diagnostic `first_chip` is rejected for
+matched-gap transmission unless the caller rebases its epoch/phase; silently
+applying a second, shifted gate would be incorrect.
+
+Gaps reduce emitted energy and interrupt echo masking. The tail retains at least
+three useful seconds OUTSIDE gaps/transitions, not three uninterrupted seconds.
+No guarantee is made for echoes arriving in a gap. The planner reports the
+matched gate-phase geometry and work. The bounded Interleave actual-source
+reference includes its configured pulse gaps and actual deferred payload origin;
+other probability branches remain diagnostic references. Source-statistics cache
+identity includes all guard parameters and payload origin. These conditional
+values do not qualify the distribution across hop alignments, emitted power or
+full acquisition sensitivity. No observer channel-count gain or automatic restoration
+of lost power is applied. Different waveforms require matched channel/noise and
+explicit equal-energy versus unchanged-hardware-gain comparisons.
+
+### Deferred whole symbols (local manual candidate)
+
+Production tries a shared TX/RX **whole-symbol calendar** for symbols shorter
+than a dwell. Smooth mode keeps each complete scoring interval outside the quiet
+interval and ramps; the legacy diagnostic also reserves finite pulse support.
+It adds waiting airtime, not payload bits, erasures, markers or altered thresholds.
+If no complete slot fits, the smooth-path usable-power screen above applies.
+Deferring a symbol cannot make an empty safe dwell longer.
+
+For the current 0.4 s profiles, UTC hop h is exactly `2*h/5` seconds. In original
+sample coordinates let S be a symbol and H the pulse half-support. With
+`q=ceil(Fs*(2G+R/2+A/2))` and `a=Fs*A/2`, reserve
+`L=ceil(q-a)+J` after each hop and `U=ceil(q+a)+J` before the next,
+where J is the rounded smooth-ramp length in production, or H for the legacy
+coefficient-omission diagnostic.
+The minimum dwell capacity over all five fractional-sample residues determines
+`M=floor((min(floor(N[h+1])-ceil(N[h]))-L-U)/S)` slots. Slot j starts at
+`ceil(N[floor(j/M)])+L+(j mod M)*S`. The first slot at or after the requested
+source epoch/phase is used. Integer quotient/remainder calculations support
+constant-time seeking and midstream entry; elapsed hops and PCM symbols are not
+buffered. Checked exhaustion raises an error instead of wrapping counters.
+
+All peers must agree on sample geometry and the immutable clock/audio/region
+allowances; they now affect the deferred waveform calendar. Runtime audio
+uncertainty still controls qualification of the arrival search window, not a
+silent change of that calendar. Fixed propagation offset moves the receiving
+hop preview by O and does not alter transmitted slots. The existing continuous
+UTC controller and sample-clock hypotheses remain in force.
+
+The unchanged Data/private-pattern address format uses each slot's actual UTC
+second and `floor(sample_in_second/S)`. Starts are at least S apart, so those
+addresses do not collide. The new UTC hop schedule uses dedicated FHSS domain
+`FhssUtcV3` (`fh-utc03`), epoch zero, and successive disjoint 1024-byte cycle
+regions; it is independent of transmission start. Original `FhssCycleV2` remains
+for the original path. Waiting cover uses separate child-secret context
+`CoverWaitV1` (`cv-wai01`), full virtual DSSS symbols and the common finite shaper.
+Its stream origin never resets at waits or output blocks. Cover does not use
+payload candidates. Key, role, epoch, phase and geometry bound all private caches.
+
+The calendar-aware FFT receiver retains all frequency/clock lanes and initial
+canonical slot alternatives. Tracks advance to the next eligible slot. Deferred
+holes neither become missing bits nor count toward the six seconds of absence:
+completion still needs `ceil(6/(S/Fs))` fully scored failed eligible symbols.
+Capture tails, airtime, initial/rolling acquisition lifetime and work-model
+identity include the calendar. Each accepted bit is published at the next poll.
+The compact low-memory correlator does **not** support this calendar; insufficient
+FFT workspace produces an explicit error, not a silently contiguous search.
+
+Receiver and transmitter schedule helpers cache validated calendar geometry;
+private-pattern address-cache misses still reconstruct it. Deferred phase groups
+have an exact constant-time split at the next canonical slot. Eligible
+FFT receivers retain up to 8 MiB of exact canonical template transforms, energies
+and covariance terms in spare workspace. The key is canonical slot identity
+under the immutable key/epoch, frequency/clock bank, arithmetic and geometry.
+Phase aliases share entries; indices alone do not identify entries. Arithmetic
+fallback and workspace pressure invalidate/evict them. If a cache replaced
+streamed construction, eviction restores streaming and discards incompatible
+scratch; it cannot allocate unreserved per-lane rows. Native FP32 selections
+retain their existing algorithm/precision choice. Native and parallel broad
+FFT batches can additionally share scores for duplicate canonical jobs within
+the same immutable PCM batch. Every original phase/frequency job is still
+collected in its original order with unchanged trial charges and thresholds.
+Restricted arrival ranges keep separate score execution. Score reuse never crosses PCM
+batches, keys or frequency/clock lanes. The parallel alias map and native score
+cache each also have an 8 MiB cap; combined capacities must fit the same
+workspace, including the exact template cache and original scratch. The internal
+`PatternSearch::reuse_deferred_templates=false` diagnostic disables the new exact
+reuse; paired tests compare every next-poll event, identity and trial count.
+The planner includes calendar slots, waits and rolling lifetime but currently
+prices work conservatively before these optional cache savings; it labels that
+limitation instead of claiming newly calibrated CPU accuracy.
+
+Examples at target40, DSSS10, Default clocks/audio:
+
+| Rate / baseband carrier | Symbol | Selected behavior |
+| --- | ---: | --- |
+| 1200 Hz / 9000 Hz | 106.667 ms | Two complete slots per400ms:5bit/s steady state, plus settling/suppression |
+| 360 Hz / 1500 Hz | 355.556 ms | No full slot fits; smooth partial-symbol ramps pass the worst flat-power screen and retain the ordinary receiver |
+
+A total Region400ms cannot guarantee remote overlap within a400ms dwell even
+with zero symbol duration. Production Fake now keeps the local smooth guard and
+reports that missing guarantee; it does not claim useful worst-case overlap for
+a future single-channel radio. Fake is still not radio control or compliance.
+
+The following measurements describe the earlier finite-pulse calendar candidate,
+before smooth ramps restored the shared receiver paths. They are retained as
+baseline evidence; current results are in [validation](validation.md).
+
+Three isolated paired synthetic-key runs per factor compared the frozen preceding
+candidate with this calendar, at unchanged Fs and eight identical source bits.
+Waveforms differ because slots, source addresses and cover durations differ.
+This is complete single-bank reception at zero frequency error, with all bits
+and scored physical completion checked, not a full Live-bank sensitivity result.
+
+| DSSS / Fs | Total source+RX CPU before → after | TX / RX CPU after | Burst before → after | TX working memory increase |
+| --- | ---: | ---: | ---: | ---: |
+| Off /4096 |33.5→61.9ms|48.8/13.1ms|5.531→7.185s|8282bytes|
+| 10 /40960 |429.4→690.0ms|420.7/269.2ms|5.503→6.743s|57890bytes|
+
+These first rows fix the initial stream phase. Paired total-CPU ratios were
+1.737–1.849 and1.551–1.629 respectively. Wall time closely matched CPU. Peak
+process RSS was about12–16MiB (includes fixture PCM).
+Physical completion moved8.58→12.50s and8.59→12.44s, as expected from counting
+eligible observations rather than quiet holes. Per-bit publication was checked;
+FFT acceptance can still occur in batches, as it did in the baseline.
+
+The separate full-phase, single-epoch/key acquisition comparison is essential:
+
+| DSSS | Total CPU before → after | RX CPU before → after | RX retained peak before → after | Paired total ratio range |
+| --- | ---: | ---: | ---: | ---: |
+| Off |37.6→106.2ms|17.3→56.0ms|480040→530355bytes|2.788–3.162|
+| 10 |797.1→1283.8ms|625.4→808.0ms|1059373→2281853bytes|1.517–1.611|
+
+These medians/ranges contain three paired runs, not a confidence interval. This
+is added work and airtime relative to the preceding ungated candidate, **not a
+receiver speedup**. Deferred acquisition includes all canonical slots within a
+UTC second instead of the original four initial contiguous symbols. The first
+deferred prototype took595–608ms (Off) and2881–2895ms (10) on the same full-phase
+fixtures; bounded exact reuse removed much of that avoidable regression. It does
+not remove the remaining slots, wait-cover generation or longer eligible-absence
+observation. No full multi-key/rolling Live-bank throughput result is implied.
+GUI Simulation checks retain the original five-second graceful-stop deadline;
+both FCC and delayed-arrival EU fixtures pass after reuse. Final controller
+measurements were4.329s(FCC),3.425s(EU), and5.1ms for second-Cancel abort. The narrow long-list
+fixture keeps its explicit second-Cancel immediate abort.
+
+One whole-burst Hann spectral diagnostic per factor gave out-of-band/in-band
+power−34.70→−34.38dBc (Off) and−45.08→−45.16dBc (10), outside the nominal finite-RRC
+band. Off reached the existing0.992 limiter; DSSS10's peak was below0.75.
+Different burst lengths/addresses and only one finite capture prevent a general
+spectral-improvement or indistinguishability claim. No downstream gain restoration
+was assumed. Full-bank threshold-region sensitivity, BER/false acceptance,
+DSSS100/1000 deferred reception, strong echoes during waits, ASRC/tuner/physical
+loopback timing and cross-platform coverage remain unqualified. No additional
+C/N0 loss or confidence interval has been measured for the new calendar.
+
+### Earlier FHSS power-ramp measurements (preceding candidates)
+
+The preceding local-clock-only diagnostic measurements below remain evidence for
+that exact geometry, not a measurement of the enlarged production guard.
+Three isolated paired source runs per factor used identical synthetic keys and
+unchanged 12 ksample/s input geometry, 0.4 s dwell, 0..50 ms audio lag and
+±10 ms clock allowance. The nominal finite-RRC occupied width was 1500 Hz.
+This is source construction timing, not full receiver or physical radio timing.
+
+| DSSS | Baseline / new CPU (s) | New / old CPU | Charged memory increase | Payload average-power reduction |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 0.0618 / 0.1032 | 1.670× (paired range 1.653–1.700) | 168 B | 1.000 dB |
+| 10 | 0.0591 / 0.1057 | 1.788× (paired range 1.765–1.813) | 168 B | 0.953 dB |
+| 100 | 0.0694 / 0.1155 | 1.663× (paired range 1.644–1.692) | 168 B | 0.985 dB |
+| 1000 | 0.2527 / 0.2730 | 1.080× (paired range 1.072–1.089) | 168 B | 1.001 dB |
+
+The longest measured four-bit waveform was 54.227 s before and 55.195 s
+after; the shorter cases added the same 0.968 s of conservative cover reserve.
+New source cost was at most 1.3% of one core per second of generated audio in
+these examples. Peak process RSS was about 33 MiB under the Python/taskset
+harness; that includes its inherited measurement overhead. Source allocation
+accounting above is the more useful incremental RAM measure.
+
+In one matched finite capture per factor, shaped out-of-band power relative to
+in-band power changed by −0.05 to +0.16 dB. Direct PCM chopping of the same
+quiet intervals was 2.9 dB worse for Off and 11.3–13.3 dB worse for DSSS.
+No source clipping occurred in these captures. This is a finite-waveform
+comparison, not an RF mask certificate or a thermal-noise resemblance claim.
+
+Ramps removed about 1 dB of average signal power at unchanged downstream gain.
+Projection onto the original template at equal waveform energy also lost about
+1 dB in these captures. That projection is not a detection-threshold experiment:
+no additional required C/N0 or full-bank sensitivity interval is established.
+Receiver and observer estimates with active ramps remain ungated references;
+hardware cannot be assumed to restore average power without peak clipping.
+
+Exact source-PCM quiet intervals precede the nominal tuner boundary as above.
+A future physical tuner must include the selected output converter/filter
+support, device latency and actual radio settling in its timing contract; the
+Fake presentation does not qualify those hardware margins. Qualification after
+ASRC, physical loopback, strong multipath and threshold-region sensitivity is
+still outstanding.

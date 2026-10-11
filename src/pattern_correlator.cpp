@@ -115,7 +115,7 @@ struct PatternCorrelator::Impl {
         // legacy pairs); compact storage leaves more workspace for evidence.
         std::uint32_t frequency=0,rate_index=0,tone_bank_base=0;
         bool admitted=false,pending_gaps=false;
-        std::uint8_t affine_groups=0; // Uses the existing trailing alignment padding.
+        std::uint8_t affine_groups=0; // Keep ordinary compact-workspace layout.
     };
     std::vector<Hypothesis> hypotheses;
     struct Emission {
@@ -231,14 +231,16 @@ struct PatternCorrelator::Impl {
             block_samples=32;
         }
         const std::size_t point_capacity=search.compact_clock_search?64:2048;
-        phase_step=std::gcd(code.symbol_samples(),static_cast<std::uint64_t>(c.sample_rate));
+        phase_step=canonical_phase_step(c);
         const auto phase_upper=search.search_stream_phases && (c.scramble || c.dsss)?
             (std::min(code.symbol_samples(),static_cast<std::uint64_t>(c.sample_rate))-1)/phase_step*phase_step:
             c.stream_phase_samples;
         const auto phase_lower=search.search_stream_phases && (c.scramble || c.dsss)?0:c.stream_phase_samples;
-        if(phase_lower<phase_upper)alternate_groups=code.symbol_samples()>=c.sample_rate?1:2;
+        if(phase_lower<phase_upper)alternate_groups=c.fake_hopping&&c.fake_hopping->matched_gaps?
+            (phase_upper-phase_lower)/phase_step:(code.symbol_samples()>=c.sample_rate?1:2);
         shaped=pattern_pulse_enabled(c);
         require(c.pattern_symbols,"streaming pattern correlator requires binary pattern transport");
+        require(!deferred_symbols(c),"deferred FHSS requires the calendar-aware FFT receiver workspace");
         require(search.start_offset_seconds && std::isfinite(*search.start_offset_seconds) &&
                 std::isfinite(search.start_uncertainty_seconds) && search.start_uncertainty_seconds>=0,
                 "long pattern correlation requires a finite system-clock start window");
@@ -466,6 +468,11 @@ struct PatternCorrelator::Impl {
                             std::abs(qualified->epoch_origin_samples),qualified->half_width_samples});
                     auto lo=(cell_lower-qualified->epoch_origin_samples-qualified->half_width_samples-pad)/qualified->phase_scale;
                     auto hi=(cell_upper-qualified->epoch_origin_samples+qualified->half_width_samples+pad)/qualified->phase_scale;
+                    // Intersect every physical phase represented by the exact
+                    // cipher cell; do not instantiate a template per sample.
+                    const auto cell_width=search.search_stream_phases?
+                        canonical_phase_cell_upper(config,phase_upper)-phase_upper:0;
+                    lo-=cell_width;
                     if(lo>phase_upper || hi<phase_lower)continue;
                     lo=std::clamp(lo,static_cast<long double>(phase_lower),static_cast<long double>(phase_upper));
                     hi=std::clamp(hi,static_cast<long double>(phase_lower),static_cast<long double>(phase_upper));
@@ -700,8 +707,20 @@ struct PatternCorrelator::Impl {
         history.push_back(evidence);
     }
     struct PhaseGroup {std::uint64_t lower=0,upper=0;};
-    std::array<PhaseGroup,3> phase_groups(const Hypothesis& h,std::size_t& count)const {
-        std::array<PhaseGroup,3> groups{};count=0;
+    struct PhaseGroups {
+        std::array<PhaseGroup,3> small{};
+        std::uint64_t first=0,step=0;
+        PhaseGroup operator[](std::size_t index) const {
+            if(step){const auto phase=first+index*step;return {phase,phase};}
+            return small.at(index);
+        }
+    };
+    PhaseGroups phase_groups(const Hypothesis& h,std::size_t& count)const {
+        PhaseGroups groups;count=0;
+        if(config.fake_hopping && config.fake_hopping->matched_gaps && h.phase_lower<=h.phase_upper) {
+            groups.first=h.phase_lower;groups.step=phase_step;
+            count=(h.phase_upper-h.phase_lower)/phase_step+1;return groups;
+        }
         auto lower=h.phase_lower;
         while(lower<=h.phase_upper) {
             const auto address=symbol_stream_address(config.stream_epoch,lower,h.index,code.symbol_samples(),config.sample_rate);
@@ -714,8 +733,8 @@ struct PatternCorrelator::Impl {
                 else high=mid-1;
             }
             const auto end=lower+low*phase_step;
-            require(count<groups.size(),"pattern phase groups exceed finite symbol interval");
-            groups[count++]={lower,end};
+            require(count<groups.small.size(),"pattern phase groups exceed finite symbol interval");
+            groups.small[count++]={lower,end};
             if(end==h.phase_upper)break;
             lower=end+phase_step;
         }
@@ -1192,7 +1211,11 @@ struct PatternCorrelator::Impl {
         const auto segment_end=static_cast<std::uint64_t>(std::min(static_cast<long double>(end),std::ceil(symbol_end)));
         std::size_t group_count=0;
         const auto groups=phase_groups(h,group_count);
-        h.affine_groups=static_cast<std::uint8_t>(group_count);
+        // Only the shortcut count is narrow. The full loop below always visits
+        // every phase. A large bank bypasses continuation without truncation
+        // or enlarging every ordinary hypothesis in tiny workspaces.
+        h.affine_groups=group_count<=std::numeric_limits<std::uint8_t>::max()?
+            static_cast<std::uint8_t>(group_count):0;
         if(!h.fits[0].count)h.observed_start=cursor;
         for(std::size_t group=0;group<group_count;++group) {
             if(affine_coefficients.empty()) {
@@ -1529,6 +1552,10 @@ struct PatternCorrelator::Impl {
         // Preserve the scalar path as a reference, and never collect samples
         // across a caller's progress poll. Small/tight-workspace pushes retain
         // the original one-block path. No completion is allowed in this batch.
+        // The compact lane ABI has three phase fits; UTC gated coefficients
+        // can distinguish every original phase point. Scalar/pulse execution
+        // retains those points with workspace-charged fit arrays.
+        if(config.fake_hopping&&config.fake_hopping->matched_gaps)return 0;
         if(!pulse_lattices.empty() || !search.hypotheses.empty() || worker_codes.size()<2 || input.size()<=block_samples)return 0;
         constexpr std::size_t max_blocks=64,max_lanes=65536;
         using Lane=detail::CorrelationLane;

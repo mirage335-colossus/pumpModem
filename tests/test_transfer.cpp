@@ -306,9 +306,13 @@ void spreading_generation_trace() {
     auto value=options(true);value.modem.scramble=true;
     auto plan=std::make_shared<modem::FhssPlan>();plan->channels=3;plan->dwell_seconds=.001;
     plan->shifts[0]=1000000;plan->shifts[1]=1010000;plan->shifts[2]=1033000;
-    value.modem.fake_hopping=plan;
-    const auto config=transfer::seeded_config(value,value.timestamp);
-    auto tx=transfer::binary_transmitter(Bytes{1,0},value);
+    // Preserve the ungated1ms diagnostic vector through its explicit low-level
+    // entry. Production may no longer silently select this waveform.
+    auto config=transfer::seeded_config(value,value.timestamp);config.fake_hopping=plan;
+    auto production=value;production.modem.fake_hopping=plan;
+    rejects([&]{transfer::binary_transmitter(Bytes{1,0},production);},"unresolved diagnostic hopping entered production");
+    const auto diagnostic_bits=[&]{Bytes bits{1,0};transfer::xor_binary_bits(bits,value);return bits;};
+    auto tx=std::make_unique<modem::StreamingTransmitter>(modem::RawBits{diagnostic_bits()},config);
     const auto expected=value.key->stream(StreamPurpose::Fhss,value.timestamp,0,8,StreamDomain::FhssCycleV2);
     check(tx->transmit_trace().fhss_key.empty(),"FHSS published before actual generation");
     auto plain=config;plain.fake_hopping.reset();
@@ -331,12 +335,14 @@ void spreading_generation_trace() {
     }
     auto blocked=plain;blocked.data_key.reset();blocked.fake_hopping=plan;
     rejects([&]{modem::StreamingTransmitter unkeyed(modem::RawBits{Bytes{1}},blocked);},"unkeyed FHSS fallback must not exist");
-    modem::StreamingTransmitter noise(modem::Noise{},config),other_noise(modem::Noise{},config);
+    auto noise_config=config;noise_config.pulse_shaping=true;auto safe=std::make_shared<modem::FhssPlan>(*plan);safe->dwell_seconds=.4;
+    noise_config.fake_hopping=modem::resolve_fhss_power(*safe,noise_config);
+    modem::StreamingTransmitter noise(modem::Noise{},noise_config),other_noise(modem::Noise{},noise_config);
     advance(noise,1);advance(other_noise,1);
     const auto n=noise.transmit_trace(),other=other_noise.transmit_trace();
     check(n.temporary_key&&n.fhss_key.size()==8&&n.fhss_key!=expected&&n.fhss_key!=other.fhss_key,
           "noise FHSS must use its actual fresh temporary key, never the selected message key");
-    auto second=transfer::binary_transmitter(Bytes{1,0},value);advance(*second,80);
+    auto second=std::make_unique<modem::StreamingTransmitter>(modem::RawBits{diagnostic_bits()},config);advance(*second,80);
     check(second->transmit_trace().fhss_key==tx->transmit_trace().fhss_key&&second->transmit_trace().fhss_hop==tx->transmit_trace().fhss_hop,
           "FHSS schedule changed with PCM block size");
 }

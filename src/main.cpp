@@ -103,7 +103,7 @@ Modem:
                         Default selects demonstrated supported paths; FP64 fallbacks remain
                         Legacy integer IDs migrate to Default; no GPU receiver is implemented
   --clock-sync SPEC     default or GPS_1ms-400ms_region-2564ms_offset
-  --audio-error TIME    Per-station residual audio timing allowance; default50ms
+  --audio-error TIME    Per-station audio lag 0..+TIME; default or duration (50ms)
   --fec 20|60|off        Reed-Solomon parity overhead, default60
   --no-compression      Diagnostic override; both peers must select the same source codec
   --memory-mb N         Legacy batch PCM workspace budget, default256 MiB
@@ -390,10 +390,21 @@ void play_transmission(const Args& a, transfer::Options& options, Factory make) 
     std::unique_ptr<modem::StreamingTransmitter> source;
     bool protected_stop=false;
     audio::Options output;
-    output.maximum_utc_error_seconds=options.audio_timing_error_seconds;
+    output.maximum_utc_error_seconds=clock_sync::audio_lag_radius(options.audio_timing_error_seconds);
+    output.presentation_lag_seconds=clock_sync::audio_lag_radius(options.audio_timing_error_seconds);
     auto timing_config=options.modem;
     if(options.key)timing_config.scramble=true;
     output.timing_stop_duration_seconds=static_cast<double>(modem::transmit_stop_sample_count(timing_config))/timing_config.sample_rate;
+    if(timing_config.fake_hopping && timing_config.fake_hopping->smooth_ramps) {
+        const modem::FhssPowerShape shape(*timing_config.fake_hopping,timing_config.sample_rate,
+            modem::pattern_pulse_padding_samples(timing_config),modem::symbol_sample_count(timing_config));
+        output.playback_output_gain=[&,shape](long double seconds) {
+            const auto& c=options.modem;
+            const auto origin=static_cast<long double>(c.stream_phase_samples)-
+                modem::training_sample_count(c)-modem::pattern_pulse_padding_samples(c);
+            return shape.gain(options.timestamp,origin+seconds*c.sample_rate,c.sample_rate);
+        };
+    }
     output.follow_system_clock=options.clock_sync && audio::utc_follow_supported() &&
         (!options.modem.oscillator_search || options.modem.oscillator_search->reference==modem::OscillatorReference::independent_audio);
     output.allow_timing_fallback=options.clock_sync.has_value();
@@ -408,7 +419,7 @@ void play_transmission(const Args& a, transfer::Options& options, Factory make) 
         if(output.maximum_timing_rate_correction>0) {
             options.modem.stream_phase_samples=0;
             output.estimated_timing=audio::EstimatedDeviceTiming{};
-            output.estimated_timing->maximum_utc_error_seconds=options.audio_timing_error_seconds;
+            output.estimated_timing->maximum_utc_error_seconds=clock_sync::audio_lag_radius(options.audio_timing_error_seconds);
             output.maximum_timing_slew_per_second=audio::conservative_timing_slew(options.modem.sample_rate,
                 static_cast<double>(modem::symbol_sample_count(options.modem))/options.modem.sample_rate);
         }
@@ -454,7 +465,7 @@ transfer::Options transfer_options(const Args& a,const modem::Config& c,const st
     if(window>32768) throw Error("clock drift search exceeds32768 seconds");
     options.search_seconds=static_cast<unsigned>(window);
     if(a.has("clock-sync"))options.clock_sync=clock_sync::parse(a.get("clock-sync"));
-    if(a.has("audio-error"))options.audio_timing_error_seconds=clock_sync::duration(a.get("audio-error"));
+    if(a.has("audio-error"))options.audio_timing_error_seconds=clock_sync::parse_audio_error(a.get("audio-error"));
     clock_sync::validate_audio_error(options.audio_timing_error_seconds);
     const auto recovery_seconds=a.integer("recovery-seconds",300);
     const auto recovery_threads=a.integer("recovery-threads",0);
@@ -523,12 +534,12 @@ double hardware_delay(const Args& a,const modem::Config& c) {
     const auto requested=a.number("tx-delay",6);
     if(!std::isfinite(requested) || requested<6 || requested>3600)
         throw Error("tx-delay must be 6..3600 seconds");
-    return std::max(requested,static_cast<double>(modem::pattern_absence_samples(c))/c.sample_rate+1.);
+    return std::max(requested,static_cast<double>(modem::pattern_absence_capture_samples(c))/c.sample_rate+1.);
 }
 void output_wave(const Args& a,std::vector<float> samples,const modem::Config& c,bool add_tail=true) {
     // A generated capture includes actual quiet samples for the receiver's
     // sole end rule. Reading a truncated external WAV never invents this tail.
-    const auto tail=add_tail?modem::pattern_absence_samples(c)+c.sample_rate:0;
+    const auto tail=add_tail?modem::pattern_absence_capture_samples(c)+c.sample_rate:0;
     if(tail>c.memory_limit/sizeof(float) || samples.size()>c.memory_limit/sizeof(float)-tail)
         throw Error("WAV including receive separation exceeds memory limit");
     samples.resize(samples.size()+tail,0);
@@ -1156,7 +1167,7 @@ int main(int argc,char** argv) {
                 noisy.insert(noisy.end(),block.begin(),block.begin()+static_cast<std::ptrdiff_t>(count));
             };
             while(const auto count=impairments.read(*source,block))append(count);
-            auto tail=modem::pattern_absence_samples(c)+c.sample_rate;
+            auto tail=modem::pattern_absence_capture_samples(c)+c.sample_rate;
             while(tail) {
                 const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(tail,block.size()));
                 impairments.read_noise(std::span(block).first(count));append(count);tail-=count;

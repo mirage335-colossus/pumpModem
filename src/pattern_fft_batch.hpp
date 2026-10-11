@@ -39,6 +39,9 @@ struct FftPatternParameters {
     std::array<std::uint8_t,32> spreading_seed{}, dsss_seed{};
     unsigned dsss_factor=1;
     std::uint32_t outer_dsss_version=static_cast<std::uint32_t>(OuterDsssVersion::legacy_v1);
+    std::uint32_t fhss_matched_gaps=0;
+    double fhss_ramp=0;
+    double fhss_dwell=0,fhss_clock=0,fhss_peer_clock=0,fhss_audio=0,fhss_region=0;
     bool operator==(const FftPatternParameters&) const = default;
 };
 enum class PrivateTemplateReuse : std::uint32_t { exact_only, bounded_interpolation };

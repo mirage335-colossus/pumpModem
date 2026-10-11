@@ -868,3 +868,39 @@ unchanged Shift is subtracted. Frequency/clock uncertainty follows that adjusted
 carrier and the resolved illustrative hopping plan. It does not reduce unknown
 residual oscillator/Doppler uncertainty or the admitted timing set. See the
 [calculator definition](modem.md#manual-doppler-calculator).
+
+## Smooth FHSS envelope and exact phase cells (local checkpoint)
+
+Smooth FHSS retains the pre-hop private templates and treats the transmit envelope
+as amplitude fading. It does not instantiate the diagnostic pulse-mask bank for
+every integer source phase. FFT, pulse-statistic, FP32/minimum/FP64 selection and
+exact/eligible approximate reuse remain as before. The full-template energies,
+I/Q covariance and physical noise observations remain; no threshold is reduced
+for the mute duty cycle. The coherent weak-chain guard uses the retained
+chip-subspace clamp. This trades measured sensitivity for practical CPU cost;
+it is not an exact masked-template equivalence claim.
+
+Three-seed, isolated single-core complete-capture probes at unchanged source rates
+compare the frozen optimized, mandatory-mask and smooth libraries. Broad 0.5 s
+DSSS10 moves from about10s total CPU with mandatory mask banks back to about42ms,
+versus38ms before the regression. RX alone is within0.99–1.08x the optimized
+baseline in those final paired short runs. Minute-symbol DSSS10/100/1000 fixtures
+retain compact shared statistics; waveform generation and longer suppression
+can still add total work. These are complete short messages in one epoch/key
+bank, not proof of the live multi-key/rolling-bank ceiling. The local manual
+report contains exact repetitions, latency, memory and broader limits.
+
+An associated qualified-prior bug was exposed: `gcd(symbol_samples,Fs)` template
+representatives stand for physical phase CELLS, not isolated points. For every
+integer delta below that gcd, epoch and symbol ordinal remain identical at every
+bit, so templates are exactly reusable. Prior intersections now include each
+cell's full physical endpoint; compact pruning, FFT scheduling, live timestamp
+qualification and planner counts agree. Fixed known phases and literal low-level
+phase lattices retain their prior behavior. This repairs omitted noncanonical
+physical starts without a per-sample template bank. An unknown physical start
+phase can still admit up to approximately one second even with millisecond GPS
+uncertainty; that admitted extent is distinct from avoidable whole-FFT scheduling.
+Qualification permits a prior overlapping the original bank edge and intersects
+it with that bank; it does not expand the original acquisition domain. Pulse/raw
+equivalence includes score-derived presentation support at the score's numerical
+tolerance, while bits, addresses, frequency, timing and completion remain exact.

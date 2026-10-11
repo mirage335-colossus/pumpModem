@@ -101,6 +101,9 @@ struct PatternSearch {
     // Application policy: retain all expanded hypotheses while generating
     // their transformed rows in bounded scratch, leaving RAM for peer banks.
     bool prefer_streamed_templates = false;
+    // Internal A/B diagnostic: original deferred jobs and trial charges stay
+    // present; only exact canonical template/score reuse is disabled.
+    bool reuse_deferred_templates = true;
     // Application-only opt-in for an automatic expanded request. If its FFT
     // core cannot fit, retain the original five nominal-clock hypotheses and
     // the full configured start window. Explicit banks remain strict.
@@ -183,12 +186,15 @@ struct PatternSearch {
 // Whole-symbol sampled absence needed by the fixed six-second policy.
 // Callers add their finite acquisition/lookahead margin when generating tails.
 std::uint64_t pattern_absence_samples(const Config&);
+// Conservative wall duration containing that eligible absence, including FHSS waits.
+std::uint64_t pattern_absence_capture_samples(const Config&);
 enum class PatternFftWindowStatus { not_requested, active, unsupported_geometry, invalid_numerics, correlator_fallback };
 struct PatternFftWork {
     // Acquisition only: one input transform and one pair-of-bits job per
     // executed stream-index/phase/frequency alternative (a cancelled job may
     // have started). These are execution counters, not timing measurements.
     std::uint64_t input_transforms=0,template_jobs=0;
+    std::uint64_t exact_reused_template_jobs=0;
     std::uint64_t skipped_batches=0,skipped_start_trials=0,threshold_trials=0;
     // Acquisition start cells only; threshold_trials additionally includes
     // unchanged tracked timing/frequency refinements. A successful dispatch

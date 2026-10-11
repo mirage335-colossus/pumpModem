@@ -105,6 +105,11 @@ void shaped_timing_error(datapump::modem::Config config) {
 }
 }
 int main() {try {
+    require(datapump::clock_sync::parse_audio_error("default")==.05&&
+        datapump::clock_sync::parse_audio_error("Default")==.05&&
+        datapump::clock_sync::parse_audio_error("50ms")==.05,
+        "CLI Audio Default no longer resolves to50ms total lag");
+    rejects([]{datapump::clock_sync::parse_audio_error("50");});
     continuous_guard();
     using namespace datapump::audio;
     constexpr long double epoch=1800000000.L;
@@ -151,11 +156,19 @@ int main() {try {
     const auto wide=datapump::clock_sync::arrival_map({},epoch,epoch,0,48000,1./48000,0,.03,0,.08);
     require(narrow && wide && std::abs((wide->half_width_samples-narrow->half_width_samples)/48000-.05)<1e-12,
         "editable audio error did not propagate exactly into arrival coverage");
-    const auto default_audio=datapump::clock_sync::arrival_map({},epoch,epoch,0,48000,1./48000,0,.05,0);
+    const auto default_audio=datapump::clock_sync::arrival_map({},epoch,epoch,0,48000,1./48000,0,.025,0);
     const auto zero_audio=datapump::clock_sync::arrival_map({},epoch,epoch,0,48000,1./48000,0,0,0,0);
     require(default_audio && zero_audio &&
-        std::abs((default_audio->half_width_samples-zero_audio->half_width_samples)/48000-.1)<1e-12,
-        "default arrival map must account for 50 ms at each station, separately from GPS and propagation");
+        std::abs((default_audio->half_width_samples-zero_audio->half_width_samples)/48000-.05)<1e-12,
+        "50 ms total per-station audio interval incorrectly used as a radius");
+    const auto positive=datapump::clock_sync::audio_lag_arrival_map({0,0,0},epoch,epoch,0,1000,1./1000,0,.01,0,.05);
+    require(positive && std::abs(positive->origin_samples-25)<1e-6 &&
+        positive->half_width_samples>=35 && positive->half_width_samples<35.02,
+        "positive playback lag lost its center or halved provider uncertainty");
+    require(!datapump::clock_sync::audio_lag_arrival_map({},epoch,epoch,0,1000,1./1000,0,.026,0,.05),
+        "26 ms timestamp radius qualified inside a 50 ms total lag interval");
+    require(datapump::clock_sync::audio_lag_arrival_map({},epoch,epoch,0,1000,1./1000,0,.024,0,.05).has_value(),
+        "24 ms timestamp radius rejected a 50 ms total lag interval");
     TimePrediction boundary{1.015L,.014,1./48000,TimingQuality::bounded,0};
     require(presentation_correction(boundary,1,48000,.03).uncertainty_seconds==.014,
         "valid 30 ms presentation allowance rejected");
