@@ -180,6 +180,53 @@ the whole observation. Fixed timestamps and known sampled simulation do not
 acquire these extra automatic hardware cohorts. Automatic compact rolling
 admissions remain **unmodeled**; the diagnostic says so explicitly.
 
+### Sustained listening versus a finite draft
+
+The hardware CPU indicator and CPU curve use the larger of the finite one-bit
+observation average and a separate **sustained rolling acquisition allowance**
+for supported coherent FFT banks. Each fresh cohort is charged through its
+complete acquisition/retirement lifetime at the UTC admission cadence, including
+constructor/private-template setup, repeated input processing, numerical search,
+plans and outer-code guards. One desired stream's continuation allowance remains.
+The initial epoch count is not multiplied into every new cohort. This avoids
+advertising near-zero listening cost merely because a short draft ends before
+the first complete FFT window. Finite CPU/GPU simulation times, observation
+duration, probabilities and detector trial counts retain their existing meaning.
+
+The selected CPU value, fallback value and curve share this policy. Cohort
+lifetime, approximate resident instance count and the finite observation average
+are under **Model limits and references**. Resident instances are an engineering
+allowance, not measured RAM or a deadline guarantee. Competing tracks, irregular
+refresh, platform differences and uncalibrated template families can add cost.
+Compact and section/differential sustained acquisition are not covered by this
+new allowance. Bounded qualified-cohort enumeration may use the conservative
+full-job fallback if the finite estimator's shared enumeration budget is exhausted;
+the exact retained-cohort result is draft-independent while that budget suffices.
+
+The October 11 Rate360/target8/DSSS10 reproduction resolves to 14400 samples/s,
+8-sample fine chips, 11.3778-second symbols, 17 frequency/clock pairs and 13 initial
+epochs. Its one-bit observation ends at 28.0710 seconds, before the unqualified
+receiver's first full FFT at 36.4089 seconds. The previous GUI figure was
+**0.029436 CPU seconds per audio second**. The sustained fallback allowance is
+**2.9912**, with a 38.4089-second conservative cohort lifetime; the supplied
+qualified timing model gives **4.4824**. Neither represents measured utilization.
+
+A bounded synthetic-noise run through the actual automatic Live capture/rolling
+bank used 165.11 CPU seconds for 60 audio seconds in fallback. Its final two
+10-second intervals cost 4.49 and 4.10 CPU seconds per audio second. Qualified
+capture timing cost 143.85 CPU seconds through the last complete 60-second
+checkpoint; its final three intervals cost 3.63, 3.63 and 3.90. That longer
+requested run reached its 180-second experiment cap and is **partial**, not a
+completed 90-second run. The fallback estimate still understates late-window
+cost by approximately 27–33%; qualified pricing overstates these intervals by
+15–24%. Both correctly reject real-time feasibility. No arbitrary throughput
+multiplier was fitted to these two runs. They use one synthetic key, one receive
+target, Ryzen 5 PRO 5650U CPU-0 affinity and Release GCC14.2. Input was paced to
+drain all work, not to demonstrate real-time queue behavior. Device resampling,
+hardware loopback, reception latency and population timing uncertainty were not
+measured. Full evidence: the local `MANUAL-FHSS-PLANNER.md` and paired probe logs
+under `.agent-work/artifacts/receiver-opt-20261008/`.
+
 In the rate 10 Hz, target 40 dB-Hz, DSSS 1000×, 7500 Hz stream-carrier example,
 resolution gives 40000 samples/s, 8 samples/fine chip, 512000 samples/symbol
 (12.8 seconds), and a 262144-bin FFT with a 13.4144-second acquisition hop.

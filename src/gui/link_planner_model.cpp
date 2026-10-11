@@ -492,7 +492,9 @@ ReceivePoint receive_point(double target,const simulation::Estimate& estimate,bo
     result.probability_trials=estimate.probability_trials;return result;
 }
 CpuPoint cpu_point(double target,const simulation::Estimate& estimate) {
-    const auto ratio=estimate.simulated_seconds>0?estimate.receiver_cpu_seconds/estimate.simulated_seconds:0;
+    const auto finite=estimate.simulated_seconds>0?estimate.receiver_cpu_seconds/estimate.simulated_seconds:0;
+    const auto ratio=std::max(finite,estimate.hardware_sustained_modeled?
+        estimate.hardware_sustained_realtime_ratio:0.);
     return {target,ratio,estimate.receiver_work_supported&&search_supported(estimate)&&estimate.receiver_workspace_supported&&
         std::isfinite(ratio)&&ratio>0};
 }
@@ -787,11 +789,18 @@ Model build(const Inputs& inputs,Cache& cache,std::stop_token stop,const std::fu
         result.one_bit_cpu_seconds=single_receiver.cpu_seconds;
         result.receiver_cpu_seconds=single_receiver.receiver_cpu_seconds;
         result.kernel_rebuild_upper_bound=single_receiver.kernel_rebuild_upper_bound;
-        result.cpu_realtime_ratio=single_receiver.simulated_seconds>0?
+        result.finite_cpu_realtime_ratio=single_receiver.simulated_seconds>0?
             single_receiver.receiver_cpu_seconds/single_receiver.simulated_seconds:0;
+        result.hardware_sustained_modeled=single_receiver.hardware_sustained_modeled;
+        result.hardware_sustained_realtime_ratio=single_receiver.hardware_sustained_realtime_ratio;
+        result.hardware_cohort_lifetime_seconds=single_receiver.hardware_cohort_lifetime_seconds;
+        result.hardware_sustained_receiver_instances=single_receiver.hardware_sustained_receiver_instances;
+        result.cpu_realtime_ratio=std::max(result.finite_cpu_realtime_ratio,
+            result.hardware_sustained_modeled?result.hardware_sustained_realtime_ratio:0.);
         result.cpu_realtime_upper_ratio=single_receiver.simulated_seconds>0?
             (single_receiver.receiver_cpu_seconds+std::max(0.,single_receiver.receiver_kernel_rebuild_upper_seconds-
                 single_receiver.receiver_kernel_rebuild_seconds))/single_receiver.simulated_seconds:0;
+        result.cpu_realtime_upper_ratio=std::max(result.cpu_realtime_upper_ratio,result.cpu_realtime_ratio);
         result.cpu_per_bit_ratio=single_receiver.cpu_seconds/result.bit_seconds;
         result.receiver_geometry=single_receiver.receiver_geometry;
         result.frequency_rate_hypotheses=single_receiver.frequency_rate_hypotheses;
@@ -808,6 +817,8 @@ Model build(const Inputs& inputs,Cache& cache,std::stop_token stop,const std::fu
         result.receiver_work_assumptions=single_receiver.receiver_work_assumptions;
         result.fallback_cpu_realtime_ratio=single_receiver.simulated_seconds>0?
             single_receiver.fallback_receiver_cpu_seconds/single_receiver.simulated_seconds:0;
+        if(single_receiver.hardware_sustained_modeled)result.fallback_cpu_realtime_ratio=std::max(
+            result.fallback_cpu_realtime_ratio,single_receiver.fallback_hardware_sustained_realtime_ratio);
         result.fallback_timing_hypotheses=single_receiver.fallback_timing_hypotheses;
         result.one_bit_cpu_available=single_receiver.receiver_work_supported&&single_receiver.receiver_workspace_supported&&
             std::isfinite(result.one_bit_cpu_seconds)&&std::isfinite(result.receiver_cpu_seconds)&&

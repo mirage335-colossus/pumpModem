@@ -904,3 +904,24 @@ Qualification permits a prior overlapping the original bank edge and intersects
 it with that bank; it does not expand the original acquisition domain. Pulse/raw
 equivalence includes score-derived presentation support at the score's numerical
 tolerance, while bits, addresses, frequency, timing and completion remain exact.
+
+### Idle hardware cost after acquisition startup
+
+The October 11 Rate360/target8/DSSS10 report exposed an estimation error separate
+from template sharing: the planner's 28.071-second one-bit observation ended
+before its fallback FFT's 36.409-second first window. Averaging that startup
+prefix produced 0.0294 CPU seconds per audio second, even though continuous Live
+would subsequently run every complete rolling epoch bank. The hardware CPU
+indicator/curve now take the larger finite-observation and complete-cohort
+sustained allowances. Simulation CPU/GPU totals remain finite-draft estimates.
+
+On the local Ryzen 5650U, actual 60-second synthetic idle capture consumed
+165.11 CPU seconds, including bank setup and Live processing; its final intervals
+required 4.10–4.49 CPU seconds per second of audio. The corrected fallback model
+is 2.99, so substantial calibration error remains, but it no longer advertises
+real-time headroom. Qualified timing measured 3.63–3.90 in late intervals versus
+the 4.48 allowance. These bounded runs are not repeated statistical benchmarks
+or acquisition/sensitivity qualification. The receiver itself is unchanged by
+this estimator repair; it does not restore real-time execution for this case.
+See [sustained listening](simulation-estimates.md#sustained-listening-versus-a-finite-draft)
+for scope, accounting, partial-run status and evidence references.

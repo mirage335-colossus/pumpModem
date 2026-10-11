@@ -1633,6 +1633,38 @@ void estimate_warning_thresholds() {
           contains_text(detailed,"Tone modes still transmit tones"),
           "Hidden details must explain both thresholds and the limits of the listening guideline");
 }
+void sustained_listening_plan_document() {
+    auto inputs=example();inputs.target_db_hz=8;inputs.mode=tuning::PatternMode::auto_keystream;
+    inputs.channel.clock_error_ppm=0;inputs.channel.phase_noise_degrees_per_sqrt_second=0;
+    inputs.options.modem=tuning::resolve(360,8,inputs.mode,true,1500,10,
+        modem::OuterDsssVersion::interleaved_v2).config;
+    inputs.options.key.emplace(Bytes(32,0x59));inputs.options.search_seconds=6;
+    inputs.options.dsp_workspace_bytes=std::size_t{1024}*1024*1024;
+    modem::OscillatorSearchConfig oscillator;
+    oscillator.lf=tuning::oscillator_model(tuning::parse_oscillator_preset("gpsdo-xo"));
+    oscillator.rf=oscillator.lf;oscillator.rf_shift_hz=30935300;oscillator.margin=3;
+    oscillator.reference=modem::OscillatorReference::independent_audio;
+    inputs.options.modem.oscillator_search=oscillator;
+    inputs.options.clock_sync=clock_sync::Policy{.01,.01,0};inputs.options.audio_timing_error_seconds=.05;
+    modem::FhssPlan hops;hops.channels=200;hops.dwell_seconds=.4;
+    for(unsigned i=0;i<200;++i)hops.shifts[i]=3e7+4700*i;
+    inputs.options.modem.fake_hopping=transfer::transmit_hopping(hops,inputs.options);
+    inputs.receiver_work_mode=simulation::ReceiverWorkMode::hardware_fallback;
+    planner::Cache cache;std::stop_source stop;std::optional<planner::Model> selected;
+    try {planner::build(inputs,cache,stop.get_token(),[&](const auto& current) {
+        selected=current;stop.request_stop();
+    });}catch(const estimate_detail::Cancelled&){}
+    check(selected&&selected->available&&selected->hardware_sustained_modeled&&
+          selected->finite_cpu_realtime_ratio<.1&&selected->cpu_realtime_ratio>1,
+          "one-bit startup before the first FFT must not advertise sustained realtime headroom");
+    near(selected->cpu_realtime_ratio,selected->hardware_sustained_realtime_ratio,
+         "visible hardware CPU ratio lost the sustained rolling allowance");
+    check(selected->cpu_realtime_upper_ratio>=selected->cpu_realtime_ratio,
+          "CPU upper allowance must include the sustained floor");
+    check(!contains_text(planner_page::build(*selected,900,false,false),"Sustained rolling acquisition allowance")&&
+          contains_text(planner_page::build(*selected,900,true,false),"Sustained rolling acquisition allowance"),
+          "sustained geometry explanation belongs under Model limits and references");
+}
 void rolling_epoch_selected_plan_document() {
     auto inputs=example();inputs.target_db_hz=40;inputs.mode=tuning::PatternMode::auto_keystream;
     inputs.channel.clock_error_ppm=0;inputs.channel.phase_noise_degrees_per_sqrt_second=0;
@@ -1969,6 +2001,7 @@ void document_semantics_layout_and_plots() {
 int main(int argc,char** argv) {
     try {
         cancelled_planner_and_inspection();
+        if(argc==2&&std::string_view(argv[1])=="--sustained-only") {sustained_listening_plan_document();std::cout<<"Sustained listening planner passed\n";return 0;}
         if(argc==2&&std::string_view(argv[1])=="--search-arithmetic") {search_arithmetic_document_and_cache();std::cout<<"Search arithmetic document/cache passed\n";return 0;}
         if(argc==2&&std::string_view(argv[1])=="--progressive-only") {selected_plan_progress_and_support_equivalence();std::cout<<"Progressive planner and support invariants passed\n";return 0;}
         if(argc==2&&std::string_view(argv[1])=="--cancellation-only") {std::cout<<"Planner and inspection cancellation passed\n";return 0;}
@@ -1980,6 +2013,7 @@ int main(int argc,char** argv) {
             std::cout<<"Conditional RX reference and timing work document passed\n";return 0;
         }
         selected_plan_progress_and_support_equivalence();
+        sustained_listening_plan_document();
         independent_reference_values();exact_geometry_and_physical_finish();timing_milestones();
         clock_and_ram_milestones();sampled_clock_ram_islands();checked_clock_ram_navigation();
         nearest_usable_targets();bounded_navigation_preview();nearest_target_shares_receiver_budget();

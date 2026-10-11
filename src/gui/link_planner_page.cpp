@@ -621,6 +621,12 @@ void geometry_details(Node& n,const planner::Model& model) {
         paragraph(n,"Full-window fallback: "+number(model.fallback_cpu_realtime_ratio,3)+
             " s processing per 1 s audio; "+number(model.fallback_timing_hypotheses,6)+
             " timing origins. The timing reduction depends on the admitted capture bounds.",11,Tone::muted,false,0);
+    if(model.hardware_sustained_modeled)
+        paragraph(n,"Sustained rolling acquisition allowance: "+number(model.hardware_sustained_realtime_ratio,3)+
+            " s processing per 1 s audio; complete cohort lifetime "+planner::duration(model.hardware_cohort_lifetime_seconds)+
+            ", approximately "+number(model.hardware_sustained_receiver_instances,4)+
+            " resident receiver instances. Finite one-bit observation average: "+number(model.finite_cpu_realtime_ratio,3)+
+            ". The CPU indicator uses the larger allowance. Competing admitted tracks, Live bookkeeping and peak dispatch latency are not bounded by this model.",11,Tone::muted,false,0);
 }
 void details(Node& root,const planner::Model& model) {
     oscillator_details(root,model);
@@ -706,7 +712,7 @@ void details(Node& root,const planner::Model& model) {
     if(model.one_bit_cpu_available)
         paragraph(n,"CPU. Reference: Ryzen 5 PRO 5650U local acquisition calibration; other work uses engineering allowances. A one-bit simulation takes about "+
             planner::duration(model.one_bit_cpu_seconds)+" of processing for "+planner::duration(model.bit_seconds)+
-            " per bit. The CPU indicator counts receiver work and ordinary payload processing, including CPU-mitigation overhead, averaged over incoming audio including the final silence check. Additional recovery searches are excluded. Green: below 0.5× real time; yellow: 0.5–1×; red: 1× or more. Search bursts, extra receive targets and slower computers can need more headroom. This is an estimate, not a measurement of this computer.");
+            " per bit. The finite observation average includes receiver work and ordinary payload processing through the final silence check. Supported hardware FFT searches also include a separate sustained rolling-cohort allowance; the CPU indicator uses the larger value so startup before the first FFT cannot imply headroom. Simulation times remain finite-draft estimates. Additional recovery searches are excluded. Green: below 0.5× real time; yellow: 0.5–1×; red: 1× or more. Search bursts, extra receive targets and slower computers can need more headroom. This is an estimate, not a measurement of this computer.");
     if(model.kernel_rebuild_upper_bound)
         paragraph(n,"CPU cost estimates reuse between nearby clock candidates. Rebuilding every cached kernel would raise receiver work to about "+
             number(model.cpu_realtime_upper_ratio,3)+"× real time. That conservative fallback bound is separate from the displayed estimate.");

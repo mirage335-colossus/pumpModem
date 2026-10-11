@@ -97,6 +97,16 @@ struct Estimate {
     // Divide by simulated_seconds for a rough real-time workload,
     // not a measured CPU utilization or a guarantee about per-bit latency.
     double receiver_cpu_seconds = 0;
+    // Separate continuous hardware workload: one complete fresh UTC cohort
+    // per admission cadence, through its acquisition/retirement lifetime.
+    // A short draft can end before the first FFT and must not imply an idle
+    // listening cost of zero. These allowances do not change finite simulation
+    // times/probabilities, and are not measured utilization or peak deadlines.
+    bool hardware_sustained_modeled = false;
+    double hardware_sustained_realtime_ratio = 0;
+    double fallback_hardware_sustained_realtime_ratio = 0;
+    double hardware_cohort_lifetime_seconds = 0;
+    double hardware_sustained_receiver_instances = 0;
     // False when additional implemented work lacks a defensible engineering
     // allowance. Geometry/resource diagnostics remain useful in that case.
     bool receiver_work_supported = true;

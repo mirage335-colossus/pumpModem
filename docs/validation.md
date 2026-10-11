@@ -4,6 +4,41 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Sustained hardware CPU estimate — local manual checkpoint, 11 October 2026
+
+The Rate360/target8/DSSS10/FakeFCC report exactly reproduced the GUI's
+0.029436 CPU/audio ratio. Its 28.071-second one-bit observation ends before the
+fallback receiver's first full FFT at 36.409 seconds. Continuous hardware
+listening now has a separate complete rolling-cohort cost; the indicator and
+curve use the larger finite and sustained allowances. Receiver code, hypotheses,
+waveforms, thresholds and physical completion are unchanged. Six frozen/current
+finite-estimator comparisons retain identical CPU/GPU time, observation duration,
+probability and bank counts. No receiver speedup or sensitivity result is claimed.
+
+The corrected fallback allowance is 2.9912 CPU seconds per audio second;
+qualified capture timing gives 4.4824. Actual CPU-0 synthetic idle Live execution
+at 14400 samples/s with one key and 17 clock/frequency pairs uses 165.11 CPU seconds
+for 60 audio seconds in fallback. Its final two intervals measure 4.49 and 4.10.
+Qualified timing uses 143.85 CPU seconds through the last complete 60-second
+checkpoint, with late intervals 3.63–3.90; its requested 90-second run reached the
+180-second experimental cap and remains partial. Input release waited for all
+processing, so this is workload evidence, not hardware real-time performance.
+Model error remains substantial and is documented; both estimates now correctly
+warn that processing exceeds real time. Peak dispatch latency, physical audio,
+multi-key/target and sustained compact/section/differential models are unqualified.
+
+Focused regressions pass; complete **GUI 38/38** (177.34 s), complete
+**simulation_estimate 1/1** (22.28 s) and rebuilt launcher self-check pass.
+Assertions are unchanged apart from adding estimator coverage. Release FLTK,
+GCC14.2, HEAD `5203473f01726f73230dbd680ef37804c78fc452` plus local estimator
+changes. GUI SHA256:
+`0f8fc761c1d8de0e4c656c7baef59b38386e46e7d1bce65819382a8efcba591c`.
+Exact patch/build/evidence hashes: local `fhss-planner-final/manifest.json`;
+report `MANUAL-FHSS-PLANNER.md`, launcher `manual-fhss-planner.sh`, all under
+`.agent-work/artifacts/receiver-opt-20261008/`. Previous runnable baselines remain.
+Broader qualification and earlier known legacy clipping, cover/echo and full-bank
+sensitivity limitations remain outstanding. No push, publication or hosted CI.
+
 ## Smooth FHSS ramps and restored receiver sharing — local manual checkpoint, 11 October 2026
 
 Production now selects a C2 post-shaper envelope, with approximately 10 ms ramps

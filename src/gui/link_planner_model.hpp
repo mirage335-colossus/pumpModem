@@ -113,6 +113,10 @@ struct Model {
     bool kernel_rebuild_upper_bound=false;
     double cpu_realtime_ratio=0;
     double cpu_realtime_upper_ratio=0;
+    double finite_cpu_realtime_ratio=0;
+    bool hardware_sustained_modeled=false;
+    double hardware_sustained_realtime_ratio=0,hardware_cohort_lifetime_seconds=0;
+    double hardware_sustained_receiver_instances=0;
     double cpu_per_bit_ratio=0;
     simulation::ReceiverSearchDiagnostics receiver_geometry;
     std::size_t frequency_rate_hypotheses=0,epoch_hypotheses=0;

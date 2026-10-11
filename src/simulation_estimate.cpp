@@ -242,10 +242,14 @@ struct Work {
     long double fft_host_operations=0,fft_gpu_operations=0;
     long double fft_setup_host_operations=0,fft_setup_gpu_operations=0;
     bool fft_cost_split=false;
+    bool sustained_modeled=false;
+    long double sustained_serial=0,sustained_parallel=0,sustained_tracking=0;
+    long double cohort_lifetime=0,sustained_instances=0;
     ReceiverSearchDiagnostics geometry;
 };
 struct RollingFftWork {
     long double admissions=0,first_batches=0,full_batches=0,input_samples=0,maximum_batches=0;
+    long double cadence=0,lifetime=0;
 };
 // Automatic Live refresh adds one fresh epoch at each observed UTC second.
 // This prices the new acquisition cohorts, separately from the initial bank.
@@ -284,6 +288,7 @@ RollingFftWork rolling_fft_work(long double samples,std::uint32_t sample_rate,
     // Two UTC intervals conservatively cover strict retirement and integer
     // refresh boundaries. Hardware feeds are shorter than one UTC interval.
     const auto lifetime=std::max(sampled_search_end,retirement)+2/minimum_utc_rate;
+    result.cadence=cadence;result.lifetime=lifetime;
     const auto lifetime_batches=1+outward_floor((lifetime-first_pass)/hop_seconds);
     result.maximum_batches=lifetime_batches;
     result.first_batches=std::clamp(outward_floor((seconds-first_pass)/cadence)+1,0.L,result.admissions);
@@ -1316,6 +1321,7 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
             result.new_epoch_qualified_ready_batch_slots=fresh.full_batches;
             result.new_epoch_retained_fft_batches=fft_prior?
                 std::min(fresh.full_batches,fresh.first_batches*blocks):fresh.full_batches;
+            std::optional<FftWindowWork> sustained_cohort;
             if(filtered_operations) {
                 const auto prior=fft_anchor_window(options,config,timing_model,maximum_clock_ratio,
                     static_cast<long double>(options.search_seconds)-.5L,.5L,fft_phase_upper);
@@ -1327,6 +1333,7 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
                         bank.minimum_rate,bank.maximum_rate,pricing,filtered_checks,stop,
                         std::numeric_limits<long double>::infinity(),true,early_readiness):std::nullopt;
                 if(cohort) {
+                    sustained_cohort=cohort;
                     result.new_epoch_retained_fft_batches=std::min(fresh.full_batches,fresh.first_batches*cohort->batches);
                     *filtered_operations+=keys*std::min(fresh.full_batches*cohort->max_operations,
                         fresh.first_batches*cohort->operations);
@@ -1365,6 +1372,54 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
             result.fft_setup_host_operations+=fresh.admissions*constructor_templates*keys;
             result.fft_setup_gpu_operations+=fresh.admissions*constructor_numeric*keys;
             result.serial+=result.new_epoch_frontend_operations+result.new_epoch_setup_operations;
+
+            // Listening outlives a one-bit simulation. Price each newly
+            // admitted cohort through its COMPLETE lifetime, independently of
+            // how many windows fit inside this draft's observation. Do not
+            // differentiate the finite estimate: its initial cohorts retain a
+            // conservative full-observation allowance even after Live retires
+            // them. This calculation introduces no extra search enumeration.
+            const auto cohort_batches=fresh.maximum_batches;
+            const auto cohort_starts=initial_batch+(cohort_batches-1)*hop;
+            const auto cohort_jobs=frequencies*phase_groups*initial_symbols;
+            const bool generated=private_pattern||streamed_templates;
+            long double cohort_scoring=0;
+            auto guard_batches=cohort_batches;
+            if(sustained_cohort) {
+                cohort_scoring=sustained_cohort->operations;
+                guard_batches=sustained_cohort->batches;
+            } else if(early_readiness) {
+                // Preserve the existing full-job/component fallback allowance
+                // when a bounded union cannot be priced exactly.
+                cohort_scoring=maximum_component_dispatches*(cohort_batches*
+                    (8.L*transform+initial_symbols*phase_groups*full_group_allowance)+
+                    cohort_jobs*40*cohort_starts);
+            } else if(drift_sections==1&&!differential_window) {
+                const auto generation=generated?cohort_batches*phase_groups*initial_symbols*
+                    pricing.templates(bank.hypotheses.size(),length,false):0.L;
+                const auto numeric=cohort_batches*(5*transform*fft_log*
+                    (1+2*cohort_jobs*(generated?2:1))+cohort_jobs*12*transform)+
+                    cohort_jobs*40*cohort_starts;
+                cohort_scoring=generation+pricing.numeric(numeric,static_cast<std::size_t>(transform));
+            }
+            // Section/differential and compact sustained costs need their own
+            // complete-cohort model; retain their existing explicit limits.
+            if(drift_sections==1&&!differential_window&&fresh.cadence>0) {
+                result.sustained_modeled=true;
+                result.cohort_lifetime=fresh.lifetime;
+                result.sustained_instances=keys*fresh.lifetime/fresh.cadence;
+                result.sustained_serial=keys/fresh.cadence*(constructor_setup+
+                    fresh.lifetime*config.sample_rate*projection_operations_per_sample);
+                result.sustained_parallel=keys/fresh.cadence*(constructor_scoring+
+                    cohort_scoring+pricing.plan(static_cast<std::size_t>(transform)));
+                if(result.outer_presence) {
+                    const auto peaks=std::min(static_cast<long double>(modem::PatternSearch{}.candidate_limit),
+                        (1+std::ceil(2*hop*bin/symbol))*frequencies);
+                    const auto pass=length*(template_pair_work+outer_operations_per_sample)+
+                        std::ceil(static_cast<long double>(symbol)/chip)*outer_operations_per_chip;
+                    result.sustained_serial+=keys/fresh.cadence*guard_batches*peaks*pass;
+                }
+            }
         }
         const auto jobs=frequencies*phase_groups*(private_pattern?4:1);
         if(result.outer_presence) {
@@ -1467,6 +1522,8 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         }
     }
     const auto setup_scoring=result.initial_epoch_setup_scoring_operations+result.new_epoch_setup_scoring_operations;
+    if(result.sustained_modeled&&result.tracking_windows>0)
+        result.sustained_tracking=result.tracking_serial/result.tracking_windows*config.sample_rate/symbol;
     result.parallel+=setup_scoring;
     if(result.fft_cost_split) {
         // Template generation remains host work; a hypothetical device can
@@ -1920,6 +1977,8 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     };
     std::size_t matching_bank=0;
     bool matching_supported=false,all_work_supported=true;
+    bool all_sustained_modeled=true;
+    long double sustained_cpu=0,fallback_sustained_cpu=0;
     const auto frequency=channel.frequency_offset_hz+static_cast<long double>(config.carrier_hz)*channel.clock_error_ppm*1e-6L;
     for(const auto& profile:profiles) {
         estimate_detail::check(stop);
@@ -1947,6 +2006,14 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
                 matches?transmission.wire_bits:0,local_window_seconds,ReceiverWorkMode::hardware_fallback,timing_model,stop):work;
         fallback_serial+=fallback_work.serial;fallback_parallel+=fallback_work.parallel;
         fallback_tracking+=fallback_work.tracking_serial;
+        all_sustained_modeled&=work.sustained_modeled&&fallback_work.sustained_modeled;
+        sustained_cpu+=(work.sustained_serial+work.sustained_tracking)/serial_operations_per_second+
+            work.sustained_parallel/cpu_scoring_operations_per_second;
+        fallback_sustained_cpu+=(fallback_work.sustained_serial+fallback_work.sustained_tracking)/serial_operations_per_second+
+            fallback_work.sustained_parallel/cpu_scoring_operations_per_second;
+        result.hardware_cohort_lifetime_seconds=std::max(result.hardware_cohort_lifetime_seconds,
+            finite_seconds(work.cohort_lifetime));
+        result.hardware_sustained_receiver_instances+=finite_seconds(work.sustained_instances);
         receiver_frontend+=work.serial-work.kernel_serial-work.search_serial;kernel_serial+=work.kernel_serial;
         kernel_upper_serial+=work.kernel_upper_serial;
         search_serial+=work.search_serial;
@@ -1966,6 +2033,11 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     }
     result.receiver_workspace_supported=matching_profile&&matching_work.workspace_supported;
     result.receiver_work_supported=matching_profile&&all_work_supported;
+    result.hardware_sustained_modeled=matching_profile&&all_sustained_modeled;
+    if(result.hardware_sustained_modeled) {
+        result.hardware_sustained_realtime_ratio=finite_seconds(sustained_cpu);
+        result.fallback_hardware_sustained_realtime_ratio=finite_seconds(fallback_sustained_cpu);
+    }
     result.receiver_frontend_seconds=finite_seconds(receiver_frontend/serial_operations_per_second);
     result.receiver_search_seconds=finite_seconds(search_serial/serial_operations_per_second+parallel/cpu_scoring_operations_per_second);
     result.receiver_kernel_rebuild_seconds=finite_seconds(kernel_serial/serial_operations_per_second);

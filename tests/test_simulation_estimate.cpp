@@ -36,6 +36,53 @@ modem::ChannelConfig clean_channel() {
     modem::ChannelConfig value;value.clock_error_ppm=0;value.phase_noise_degrees_per_sqrt_second=0;
     return value;
 }
+void sustained_hardware_acquisition() {
+    transfer::Options o;
+    o.modem=tuning::resolve(360,8,tuning::PatternMode::auto_keystream,true,1500,10,
+        modem::OuterDsssVersion::interleaved_v2).config;
+    o.key.emplace(Bytes(32,0x59));o.search_seconds=6;o.dsp_workspace_bytes=1024ULL*1024*1024;
+    o.clock_sync=clock_sync::Policy{.01,.01,0};o.audio_timing_error_seconds=.05;
+    modem::OscillatorSearchConfig oscillator;
+    oscillator.lf=tuning::oscillator_model(tuning::parse_oscillator_preset("gpsdo-xo"));
+    oscillator.rf=oscillator.lf;oscillator.rf_shift_hz=30935300;oscillator.margin=3;
+    oscillator.reference=modem::OscillatorReference::independent_audio;o.modem.oscillator_search=oscillator;
+    modem::FhssPlan plan;plan.channels=200;plan.dwell_seconds=.4;
+    for(unsigned i=0;i<200;++i)plan.shifts[i]=3e7+4700*i;
+    o.modem.fake_hopping=transfer::transmit_hopping(plan,o);
+    const auto probe=[&](unsigned bits,simulation::ReceiverWorkMode mode,std::size_t keys=1) {
+        return simulation::estimate(transfer::estimate_binary(Bytes(bits,0),o),o,true,clean_channel(),{},keys,
+            false,100,128,mode,{.025,2e-6,1./o.modem.sample_rate});
+    };
+    const auto short_run=probe(1,simulation::ReceiverWorkMode::hardware_fallback);
+    const auto long_run=probe(10,simulation::ReceiverWorkMode::hardware_fallback);
+    check(short_run.simulated_seconds<short_run.receiver_geometry.first_fft_seconds&&
+        short_run.fft_acquisition_batches==0&&short_run.hardware_sustained_modeled&&
+        short_run.hardware_sustained_realtime_ratio>1,
+        "hardware listening cannot claim headroom because its one-bit horizon precedes the first FFT");
+    near(short_run.hardware_sustained_realtime_ratio,long_run.hardware_sustained_realtime_ratio,
+        "sustained listening workload must not depend on draft length");
+    near(short_run.hardware_cohort_lifetime_seconds,long_run.hardware_cohort_lifetime_seconds,
+        "draft length changed unconfirmed cohort lifetime");
+    check(long_run.receiver_cpu_seconds>short_run.receiver_cpu_seconds&&
+        short_run.hardware_sustained_receiver_instances>short_run.epoch_hypotheses,
+        "finite work and accumulated rolling banks must remain separate");
+    const auto qualified=probe(1,simulation::ReceiverWorkMode::hardware_timing_model);
+    const auto qualified_long=probe(10,simulation::ReceiverWorkMode::hardware_timing_model);
+    check(qualified.timing_window_modeled&&qualified.hardware_sustained_modeled&&
+        qualified.frequency_rate_hypotheses==short_run.frequency_rate_hypotheses,
+        "qualified steady allowance must preserve the oscillator bank");
+    near(qualified.hardware_sustained_realtime_ratio,qualified_long.hardware_sustained_realtime_ratio,
+        "qualified steady workload depended on finite draft observations");
+    const auto dual=probe(1,simulation::ReceiverWorkMode::hardware_fallback,2);
+    check(dual.hardware_sustained_realtime_ratio>short_run.hardware_sustained_realtime_ratio,
+        "additional receive key lost sustained bank work");
+    near(dual.hardware_sustained_receiver_instances,2*short_run.hardware_sustained_receiver_instances,
+        "sustained instance count must retain every key");
+    const auto simulated=probe(1,simulation::ReceiverWorkMode::sampled_simulation);
+    check(!simulated.hardware_sustained_modeled&&simulated.hardware_sustained_realtime_ratio==0&&
+        simulated.cpu_seconds>0&&simulated.gpu_seconds>0,
+        "hardware steady allowance must not replace finite simulation estimates");
+}
 void search_arithmetic_model_identity() {
     transfer::Options options;
     const auto draft=wire(1,options.modem);
@@ -2075,6 +2122,7 @@ void projected_pattern_workload() {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc==2&&std::string_view(argv[1])=="--sustained-only") {sustained_hardware_acquisition();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--spread-only") {spread_example_reference();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--sub9-only") {sub9_probability_model_limits();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--arithmetic-only") {
@@ -2102,6 +2150,7 @@ int main(int argc,char** argv) {
         if(argc==2&&std::string(argv[1])=="--partial-only") {
             partial_compact_probability();std::cout<<"partial simulation estimate tests passed\n";return 0;
         }
+        sustained_hardware_acquisition();
         utc_bank_estimate();clock_dsss_reference();restricted_fft_direct_and_bounded_fallback();guarded_component_workload();versioned_outer_work_and_probability_scope();rolling_fft_epoch_workload();compact_clock_prior_workload();probability_and_framing();workload_and_impairments();receiver_cpu_budget();received_processing_budget();whole_symbol_phase_coherence();partial_compact_probability();spread_example_reference();sub9_probability_model_limits();differential_model_limits();drift_receiver_estimate();receiver_statistic_controls();raw_sample_probability_geometry();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
         coupled_and_independent_clock_estimates();streamed_template_workload();target_and_channel_are_independent();oscillator_policy_geometry();nearby_shift_workload();equivalent_receive_profiles();affine_coefficient_workload();projected_pattern_workload();
         std::cout<<"simulation estimate tests passed\n";return 0;}
